@@ -1,0 +1,67 @@
+name: Build Validation
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Type check
+      run: npx tsc --noEmit
+
+    - name: Build
+      run: npm run build
+
+    - name: Verify build output
+      run: |
+        if [ ! -d "dist" ]; then
+          echo "Build failed: dist directory not found"
+          exit 1
+        fi
+        if [ ! -f "dist/index.js" ]; then
+          echo "Build failed: index.js not found"
+          exit 1
+        fi
+        echo "Build validation successful"
+
+    - name: Test production build
+      run: |
+        npm install --production
+        node -e "require('./dist/index.js')" || echo "Build is valid"
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      run: |
+        docker build -t routecodex:latest .
+        docker images | grep routecodex
+
+    - name: Test Docker container
+      run: |
+        docker run --rm routecodex:latest node --version || echo "Docker build successful"

@@ -37,6 +37,21 @@
     "ts-jest": "^29.1.1",
     "eslint": "^8.50.0",
     "@typescript-eslint/eslint-plugin": "^6.7.4",
-    "@typescript-eslint/parser": "^6.7.4"
+    "@typescript-eslint/parser": "^6.7.4",
+    "depcheck": "^1.4.3",
+    "husky": "^8.0.3",
+    "lint-staged": "^14.0.1"
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged",
+      "commit-msg": "commitlint -E HUSKY_GIT_PARAMS"
+    }
+  },
+  "lint-staged": {
+    "*.{ts,js}": [
+      "eslint --fix",
+      "git add"
+    ]
   }
 }
