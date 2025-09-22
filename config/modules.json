@@ -39,6 +39,116 @@
         "enableFile": true,
         "filePath": "~/.routecodex/logs/debug-center.log"
       }
+    },
+    "httpserver": {
+      "enabled": true,
+      "config": {
+        "moduleType": "http-server",
+        "port": 5506,
+        "host": "localhost",
+        "cors": {
+          "origin": "*",
+          "credentials": true
+        },
+        "timeout": 30000,
+        "bodyLimit": "10mb",
+        "enableMetrics": true,
+        "enableHealthChecks": true
+      }
+    },
+    "configmanager": {
+      "enabled": true,
+      "config": {
+        "moduleType": "config-manager",
+        "configPath": "./routecodex.json",
+        "watchMode": true,
+        "validation": {
+          "strict": true,
+          "allowUnknown": false
+        }
+      }
+    },
+    "providermanager": {
+      "enabled": true,
+      "config": {
+        "moduleType": "provider-manager",
+        "healthCheckInterval": 30000,
+        "maxRetries": 3,
+        "retryDelay": 1000,
+        "loadBalancing": {
+          "strategy": "round-robin",
+          "stickySessions": false
+        }
+      }
+    },
+    "requesthandler": {
+      "enabled": true,
+      "config": {
+        "moduleType": "request-handler",
+        "maxRequestSize": 10485760,
+        "enableStreaming": true,
+        "rateLimitEnabled": false,
+        "authEnabled": false,
+        "validateRequests": true
+      }
+    },
+    "responsehandler": {
+      "enabled": true,
+      "config": {
+        "moduleType": "response-handler",
+        "enableCompression": true,
+        "enableCaching": false,
+        "cacheTTL": 300
+      }
+    },
+    "openairouter": {
+      "enabled": true,
+      "config": {
+        "moduleType": "openai-router",
+        "basePath": "/v1/openai",
+        "enableStreaming": true,
+        "rateLimit": {
+          "enabled": false,
+          "requestsPerMinute": 60
+        }
+      }
+    },
+    "unimplementedmodule": {
+      "enabled": true,
+      "config": {
+        "moduleType": "unimplemented-module",
+        "maxCallerHistory": 100,
+        "enableStats": true,
+        "notificationThreshold": 10
+      }
+    },
+    "usermanager": {
+      "enabled": true,
+      "config": {
+        "moduleType": "user-manager",
+        "configPath": "./config/users.json",
+        "authMethod": "jwt",
+        "sessionTimeout": 3600000,
+        "enableUserRegistration": false,
+        "requireEmailVerification": false,
+        "defaultUserQuotas": {
+          "maxRequestsPerDay": 1000,
+          "maxTokensPerRequest": 4096,
+          "maxConcurrentRequests": 5,
+          "maxProviders": 3,
+          "maxFiles": 100,
+          "maxStorageMB": 1024
+        },
+        "maxUsers": 100,
+        "enablePasswordPolicy": true,
+        "passwordPolicy": {
+          "minLength": 8,
+          "requireUppercase": true,
+          "requireLowercase": true,
+          "requireNumbers": true,
+          "requireSpecialChars": false
+        }
+      }
     }
   }
 }

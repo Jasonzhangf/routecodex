@@ -50,7 +50,7 @@ chmod +x ./my-project/run-tests.sh
 
 ## 🚨 关键规则
 
-**所有未完成功能必须使用UnderConstruction模块显式声明，严禁使用mock占位符或TODO注释。** 完整规则请参考 `./.claude/rules/` 目录。
+**所有未完成功能必须使用unimplemented-module系统显式声明，严禁使用mock占位符或TODO注释。** 完整规则请参考 `./src/modules/README.md` 文档。
 
 ## Project Overview
 
@@ -341,37 +341,103 @@ class ModuleLifecycleManager {
 
 ### UnderConstruction Module Usage
 
-**CRITICAL**: 使用UnderConstruction模块替代所有mock占位符和TODO注释
+**CRITICAL**: 使用unimplemented-module系统替代所有mock占位符和TODO注释
 
-#### 必须使用UnderConstruction的场景：
+#### 必须使用unimplemented-module的场景：
 1. **未实现功能** - 业务逻辑尚未开发完成
-2. **API未集成** - 第三方服务接口未对接
+2. **API未集成** - 第三方服务接口未对接  
 3. **算法未优化** - 当前使用简单实现等待优化
 4. **配置未确定** - 等待产品确认具体需求
+5. **新功能开发** - 任何新开发的功能模块
 
 #### 禁止使用的传统占位符：
 - ❌ `// TODO: 实现此功能`
 - ❌ `throw new Error('Not implemented')`
 - ❌ 空的函数实现
 - ❌ 返回硬编码的临时值
+- ❌ `UnderConstruction` 模块（已废弃）
 
 #### 标准使用模式：
 ```typescript
-import { underConstruction } from './utils/underConstructionIntegration';
+import { RCCUnimplementedModule } from './modules/unimplemented-module.js';
+import { UnimplementedModuleFactory } from './modules/unimplemented-module-factory.js';
+
+// 创建未实现模块实例
+const unimplementedModule = new RCCUnimplementedModule({
+  moduleId: 'user-authentication',
+  moduleName: 'User Authentication Module',
+  description: '用户登录认证功能',
+  customMessage: '用户认证功能正在开发中，敬请期待'
+});
 
 class UserService {
-  authenticateUser(username: string, password: string): string {
-    // 显式声明调用了未完成功能
-    underConstruction.callUnderConstructionFeature('user-authentication', {
-      caller: 'UserService.authenticateUser',
-      parameters: { username, password },
-      purpose: '用户登录认证'
+  async authenticateUser(username: string, password: string): Promise<string> {
+    // 使用标准化的未完成响应
+    const response = await unimplementedModule.handleUnimplementedCall('authenticateUser', {
+      callerId: 'UserService.authenticateUser',
+      context: { username, timestamp: Date.now() }
     });
 
-    return 'temp-token'; // 临时返回值
+    console.log(`未实现功能被调用: ${response.error}`);
+    return 'temp-token'; // 临时返回值，同时记录使用统计
+  }
+}
+
+// 或者使用工厂模式进行集中管理
+class ModuleRegistry {
+  private factory = UnimplementedModuleFactory.getInstance();
+  
+  async getUnimplementedModule(moduleId: string) {
+    return await this.factory.createModule({
+      moduleId,
+      moduleName: `${moduleId}-module`
+    });
   }
 }
 ```
+
+#### 在Provider中的使用：
+```typescript
+import { UnimplementedProvider } from './providers/unimplemented-provider.js';
+import { EnhancedProviderManager } from './core/enhanced-provider-manager.js';
+
+// 自动为不支持的provider类型创建未完成实现
+const manager = new EnhancedProviderManager(config, {
+  enableUnimplementedProviders: true,
+  autoCreateUnimplemented: true
+});
+
+// 系统会自动为不支持的provider类型创建UnimplementedProvider实例
+```
+
+#### 使用统计和优先级分析：
+```typescript
+import { UnimplementedModuleAnalytics } from './modules/unimplemented-module-analytics.js';
+
+// 创建分析实例
+const analytics = new UnimplementedModuleAnalytics(factory, {
+  enabled: true,
+  enableTrendAnalysis: true,
+  enableCallerAnalysis: true
+});
+
+// 获取实现优先级建议
+const recommendations = analytics.getImplementationRecommendations();
+recommendations.forEach(rec => {
+  console.log(`优先级 ${rec.priority}: ${rec.moduleId} - ${rec.reasoning}`);
+});
+
+// 导出使用统计报告
+const report = analytics.exportAnalytics('report');
+console.log(report);
+```
+
+#### 重要规则：
+1. **必须使用标准化未完成模块** - 禁止使用任何其他形式的未完成占位符
+2. **必须记录调用统计** - 所有未完成功能的调用都必须被记录和分析
+3. **必须提供有意义的错误消息** - 不要简单的"未实现"，要说明原因和预期
+4. **必须跟踪调用者信息** - 记录谁在什么时候调用了未完成功能
+5. **必须定期审查使用统计** - 基于数据决定实现优先级
 
 ## 🚨 ESM构建要求（CRITICAL）
 
