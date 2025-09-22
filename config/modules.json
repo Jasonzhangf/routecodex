@@ -1,0 +1,44 @@
+{
+  "modules": {
+    "basemodule": {
+      "enabled": true,
+      "config": {
+        "moduleType": "base",
+        "debugMode": true,
+        "recording": {
+          "enabled": false,
+          "maxCycles": 1000,
+          "maxErrors": 100
+        }
+      }
+    },
+    "errorhandling": {
+      "enabled": true,
+      "config": {
+        "moduleType": "error-handling",
+        "maxErrors": 1000,
+        "errorCategories": {
+          "low": "log",
+          "medium": "log_and_notify",
+          "high": "log_and_alert",
+          "critical": "log_and_immediate"
+        },
+        "autoCleanup": {
+          "enabled": true,
+          "maxAgeHours": 24
+        }
+      }
+    },
+    "debugcenter": {
+      "enabled": true,
+      "config": {
+        "moduleType": "debug-center",
+        "eventQueueSize": 1000,
+        "logLevels": ["debug", "info", "warn", "error"],
+        "enableConsole": true,
+        "enableFile": true,
+        "filePath": "~/.routecodex/logs/debug-center.log"
+      }
+    }
+  }
+}

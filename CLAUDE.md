@@ -610,36 +610,26 @@ Break complex work into 3-5 stages. Document in `IMPLEMENTATION_PLAN.md`:
 
 ### Core Components
 
-1. **HTTP Server** (`src/server/`)
-   - HTTP服务器实现
-   - OpenAI API路由处理
-   - 请求/响应类型定义
+1. **Server Module** (`src/server/`)
+   - RouteCodexServer类，继承自BaseModule
+   - HTTP服务器实现和OpenAI API路由处理
+   - 集成ErrorHandlingCenter和DebugEventBus
+   - Express中间件和错误处理
 
-2. **Core Logic** (`src/core/`)
-   - 配置管理
-   - Provider管理
-   - 请求/响应处理
+2. **CLI Interface** (`src/cli.js`)
+   - Common.js风格的命令行界面
+   - 服务器启动、配置管理、状态检查
+   - 使用commander.js构建
 
-3. **Provider System** (`src/providers/`)
-   - Provider基类
-   - OpenAI兼容Provider
-   - Provider工厂
+3. **RCC Integration**
+   - **BaseModule**: 提供模块化基础架构
+   - **ErrorHandlingCenter**: 统一错误处理
+   - **DebugEventBus**: 事件驱动的调试系统
 
-4. **Configuration** (`src/config/`)
-   - 配置文件管理
-   - 类型定义
-   - 配置验证
-
-5. **Utilities** (`src/utils/`)
-   - 日志工具
-   - 错误处理
-   - 负载均衡
-   - 故障转移
-
-6. **Patches** (`src/patches/`)
-   - Provider补丁管理
-   - OpenAI兼容性补丁
-   - 响应格式转换
+4. **Configuration** (`config/`)
+   - 系统配置文件（本地）
+   - 用户配置文件（~/.routecodex/）
+   - JSON格式的配置管理
 
 ### ESM Build Pipeline
 
