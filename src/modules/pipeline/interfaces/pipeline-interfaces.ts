@@ -351,6 +351,7 @@ export interface ModuleDependencies {
   errorHandlingCenter: ErrorHandlingCenter;
   debugCenter: DebugCenter;
   logger: PipelineDebugLogger;
+  dispatchCenter?: any; // Optional dispatch center for notifications
 }
 
 /**
