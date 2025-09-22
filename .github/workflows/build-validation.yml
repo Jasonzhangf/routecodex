@@ -29,6 +29,10 @@ jobs:
     - name: Build
       run: npm run build
 
+    - name: Verify ESM build
+      run: |
+        node --input-type=module --eval="import('./dist/index.js').then(m => console.log('ESM build successful')).catch(e => { console.error('ESM build failed:', e); process.exit(1); })"
+
     - name: Verify build output
       run: |
         if [ ! -d "dist" ]; then

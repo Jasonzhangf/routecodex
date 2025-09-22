@@ -56,3 +56,6 @@ jobs:
 
     - name: Check for any TypeScript errors
       run: npx tsc --noEmit --noUnusedLocals --noUnusedParameters
+
+    - name: Verify ESM compatibility
+      run: npm run build && node --input-type=module --eval="import('./dist/index.js').then(m => console.log('ESM compatibility verified'))"
