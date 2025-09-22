@@ -35,9 +35,9 @@
     "express": "^4.18.2",
     "helmet": "^7.0.0",
     "ora": "^9.0.0",
-    "rcc-basemodule": "^0.2.6",
-    "rcc-debugcenter": ">=0.1.2",
-    "rcc-errorhandling": ">=1.0.9"
+    "rcc-basemodule": "^0.2.7",
+    "rcc-debugcenter": "^0.1.4",
+    "rcc-errorhandling": "^1.0.10"
   },
   "devDependencies": {
     "@types/cors": "^2.8.13",
