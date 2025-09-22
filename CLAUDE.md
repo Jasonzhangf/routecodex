@@ -77,6 +77,7 @@ RouteCodex是一个多Provider OpenAI代理服务器，支持动态路由、负�
 - **Learning from existing code** - 实现前先学习和理解现有代码
 - **Pragmatic over dogmatic** - 适应项目实际情况
 - **Clear intent over clever code** - 代码要清晰易懂
+- **API-based communication** - 模块间必须通过API通信，禁止直接调用
 
 ### Simplicity Means
 
@@ -84,6 +85,7 @@ RouteCodex是一个多Provider OpenAI代理服务器，支持动态路由、负�
 - 避免过早抽象
 - 不要使用巧妙技巧，选择最简单的解决方案
 - 如果需要解释说明，那就太复杂了
+- 模块边界清晰，依赖关系简单
 
 ## Global Coding Standards
 
@@ -93,6 +95,229 @@ RouteCodex是一个多Provider OpenAI代理服务器，支持动态路由、负�
 - **Interfaces over singletons** - 支持测试和灵活性
 - **Explicit over implicit** - 清晰的数据流和依赖关系
 - **Test-driven when possible** - 不要禁用测试，要修复它们
+
+### Module Communication Rules
+
+#### 🚨 强制API通信机制
+**所有模块间通信必须通过API调用，禁止直接接口调用**
+
+#### 通信架构要求
+1. **MessageCenter Only**: 模块间通信仅通过RCC MessageCenter进行
+2. **No Direct Imports**: 禁止直接导入其他模块的类或函数
+3. **API Boundaries**: 每个模块必须定义明确的API边界
+4. **Message Contracts**: 通信必须使用预定义的消息格式
+
+#### 实现规范
+```typescript
+// ✅ 正确：通过MessageCenter通信
+class ServerModule extends RoutecodexModule {
+  async startHttpServer(): Promise<void> {
+    const response = await this.messageCenter.sendMessage('config-manager', {
+      action: 'get-config',
+      module: 'server'
+    });
+
+    const config = response.content;
+    // 使用配置启动服务器
+  }
+}
+
+// ❌ 错误：直接导入其他模块
+class ServerModule extends RoutecodexModule {
+  async startHttpServer(): Promise<void> {
+    const configManager = new ConfigManager();  // 禁止直接导入
+    const config = await configManager.getConfig();  // 禁止直接调用
+  }
+}
+```
+
+#### 消息格式标准
+```typescript
+interface ModuleMessage {
+  targetModule: string;           // 目标模块ID
+  action: string;                 // 操作类型
+  payload: any;                   // 请求数据
+  metadata?: {
+    requestId?: string;           // 请求ID
+    timestamp?: number;           // 时间戳
+    sourceModule?: string;        // 源模块ID
+  };
+}
+
+interface ModuleResponse {
+  success: boolean;               // 操作是否成功
+  data?: any;                     // 响应数据
+  error?: string;                 // 错误信息
+  metadata?: {
+    requestId?: string;           // 关联请求ID
+    processingTime?: number;      // 处理时间
+  };
+}
+```
+
+#### 模块API设计
+```typescript
+class ConfigManagerModule extends RoutecodexModule {
+  protected async registerMessageHandlers(): Promise<void> {
+    this.messageCenter.registerHandler('config-manager', async (message) => {
+      switch (message.action) {
+        case 'get-config':
+          return this.handleGetConfig(message);
+        case 'set-config':
+          return this.handleSetConfig(message);
+        case 'reload-config':
+          return this.handleReloadConfig(message);
+        default:
+          throw new Error(`Unknown action: ${message.action}`);
+      }
+    });
+  }
+
+  private async handleGetConfig(message: ModuleMessage): Promise<ModuleResponse> {
+    try {
+      const config = await this.configManager.loadConfig(message.payload.module);
+      return {
+        success: true,
+        data: config,
+        metadata: {
+          requestId: message.metadata?.requestId,
+          processingTime: Date.now() - (message.metadata?.timestamp || Date.now())
+        }
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message,
+        metadata: {
+          requestId: message.metadata?.requestId
+        }
+      };
+    }
+  }
+}
+```
+
+#### 通信流程图
+```
+┌─────────────────┐    Message      ┌─────────────────┐
+│   ServerModule  │ ─────────────> │ ConfigManager   │
+│                 │                │     Module      │
+│                 │                │                 │
+│                 │    Response    │                 │
+│                 │ <──────────── │                 │
+└─────────────────┘                └─────────────────┘
+```
+
+#### 模块注册和发现
+```typescript
+class ModuleRegistry {
+  private modules: Map<string, RoutecodexModule> = new Map();
+
+  registerModule(module: RoutecodexModule): void {
+    this.modules.set(module.moduleId, module);
+  }
+
+  async sendMessage(targetModule: string, message: ModuleMessage): Promise<ModuleResponse> {
+    const module = this.modules.get(targetModule);
+    if (!module) {
+      throw new Error(`Module not found: ${targetModule}`);
+    }
+
+    return await module.handleMessage(message);
+  }
+}
+```
+
+#### 错误处理和重试
+```typescript
+class ResilientMessageClient {
+  async sendMessageWithRetry(
+    targetModule: string,
+    message: ModuleMessage,
+    maxRetries: number = 3
+  ): Promise<ModuleResponse> {
+    let lastError: Error;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await this.messageCenter.sendMessage(targetModule, message);
+        return response;
+      } catch (error) {
+        lastError = error;
+
+        if (attempt < maxRetries) {
+          await this.delay(1000 * attempt); // 指数退避
+        }
+      }
+    }
+
+    throw lastError;
+  }
+}
+```
+
+#### 性能监控和日志
+```typescript
+class MonitoringMessageCenter extends MessageCenter {
+  async sendMessage(targetModule: string, message: ModuleMessage): Promise<ModuleResponse> {
+    const startTime = Date.now();
+
+    try {
+      const response = await super.sendMessage(targetModule, message);
+
+      await this.debugCenter.log('module-communication', {
+        direction: 'outgoing',
+        targetModule,
+        action: message.action,
+        success: true,
+        processingTime: Date.now() - startTime,
+        requestId: message.metadata?.requestId
+      });
+
+      return response;
+    } catch (error) {
+      await this.debugCenter.log('module-communication', {
+        direction: 'outgoing',
+        targetModule,
+        action: message.action,
+        success: false,
+        error: error.message,
+        processingTime: Date.now() - startTime,
+        requestId: message.metadata?.requestId
+      });
+
+      throw error;
+    }
+  }
+}
+```
+
+#### 模块生命周期管理
+```typescript
+class ModuleLifecycleManager {
+  async startModule(module: RoutecodexModule): Promise<void> {
+    await this.sendMessageWithRetry(module.moduleId, {
+      action: 'start',
+      payload: {},
+      metadata: {
+        timestamp: Date.now(),
+        sourceModule: 'lifecycle-manager'
+      }
+    });
+  }
+
+  async stopModule(module: RoutecodexModule): Promise<void> {
+    await this.sendMessageWithRetry(module.moduleId, {
+      action: 'stop',
+      payload: {},
+      metadata: {
+        timestamp: Date.now(),
+        sourceModule: 'lifecycle-manager'
+      }
+    });
+  }
+}
+```
 
 ### Code Quality Standards
 
@@ -433,9 +658,20 @@ Type Checking → ESM Validation → Testing → CI/CD
 - [ ] No linter/formatter warnings
 - [ ] README documentation updated
 - [ ] ESM compatibility verified
+- [ ] Module communication follows API-only rules
+- [ ] No direct module imports or interface calls
+- [ ] All inter-module communication uses MessageCenter
 - [ ] Commit messages are clear
 - [ ] Implementation matches plan
 - [ ] No TODOs without issue numbers
+
+### Module Communication Validation
+
+- [ ] No `import` statements between modules
+- [ ] All module interactions go through `messageCenter.sendMessage()`
+- [ ] Message contracts are properly defined
+- [ ] Module boundaries are respected
+- [ ] No circular dependencies between modules
 
 ### Decision Framework
 
@@ -482,6 +718,9 @@ npm run build && node --input-type=module --eval="import('./dist/index.js').then
 - **ALWAYS** commit working code incrementally
 - **ALWAYS** learn from existing implementations first
 - **ALWAYS** verify ESM compatibility before committing
+- **NEVER** import other modules directly - always use MessageCenter
+- **NEVER** expose module interfaces - only communicate via APIs
+- **ALWAYS** validate module communication follows API-only rules
 
 ## Version History
 

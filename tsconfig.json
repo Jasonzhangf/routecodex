@@ -14,7 +14,7 @@
     "sourceMap": true,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
-    "allowImportingTsExtensions": true,
+    "allowImportingTsExtensions": false,
     "noEmit": false,
     "resolveJsonModule": true,
     "isolatedModules": true,
