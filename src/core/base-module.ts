@@ -65,7 +65,7 @@ export abstract class BaseModule extends EventEmitter {
   /**
    * 初始化模块 - 子类必须实现
    */
-  abstract initialize(config: any): Promise<void>;
+  abstract initialize(config?: any): Promise<void>;
 
   /**
    * 启动模块

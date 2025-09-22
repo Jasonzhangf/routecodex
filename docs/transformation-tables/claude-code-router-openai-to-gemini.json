@@ -1,0 +1,208 @@
+{
+  "sourceProvider": "OpenAI",
+  "targetProvider": "Gemini",
+  "description": "Reference transformation table extracted from claude-code-router agent-based system",
+  "version": "1.0",
+  "architecture": "agent-based",
+  "notes": "Based on analysis of GeminiTransformer in claude-code-router",
+  "requestMappings": {
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "directMapping",
+      "notes": "Model names passed through directly"
+    },
+    "contents": {
+      "sourcePath": "messages",
+      "targetPath": "contents",
+      "transform": "messageToContentsConversion",
+      "conversionRules": {
+        "system": {
+          "targetRole": "user",
+          "transformation": "System messages converted to user messages with prefix"
+        },
+        "user": {
+          "targetRole": "user",
+          "transformation": "Direct mapping"
+        },
+        "assistant": {
+          "targetRole": "model",
+          "transformation": "Direct mapping"
+        },
+        "tool": {
+          "targetRole": "function",
+          "transformation": "Tool messages converted to function responses"
+        }
+      }
+    },
+    "generationConfig": {
+      "sourcePath": "various",
+      "targetPath": "generationConfig",
+      "transform": "parameterMapping",
+      "mapping": {
+        "temperature": "temperature",
+        "max_tokens": "maxOutputTokens",
+        "top_p": "topP",
+        "top_k": "topK",
+        "stop": "stopSequences"
+      }
+    },
+    "tools": {
+      "sourcePath": "tools",
+      "targetPath": "tools",
+      "transform": "toolConversion",
+      "conversionRules": {
+        "function": "functionDeclarations",
+        "name": "name",
+        "description": "description",
+        "parameters": "parameters"
+      }
+    },
+    "toolConfig": {
+      "sourcePath": "tool_choice",
+      "targetPath": "toolConfig",
+      "transform": "toolChoiceConversion",
+      "mapping": {
+        "none": "mode: NONE",
+        "auto": "mode: AUTO",
+        "required": "mode: ANY"
+      }
+    },
+    "stream": {
+      "sourcePath": "stream",
+      "targetPath": "stream",
+      "transform": "directMapping"
+    }
+  },
+  "responseMappings": {
+    "candidates": {
+      "sourcePath": "choices",
+      "targetPath": "candidates",
+      "transform": "choiceToCandidateConversion",
+      "conversionRules": {
+        "index": "index",
+        "content": "content.parts",
+        "finishReason": "finishReason",
+        "logprobs": "logprobsResult"
+      }
+    },
+    "usageMetadata": {
+      "sourcePath": "usage",
+      "targetPath": "usageMetadata",
+      "transform": "usageConversion",
+      "mapping": {
+        "prompt_tokens": "promptTokenCount",
+        "completion_tokens": "candidatesTokenCount",
+        "total_tokens": "totalTokenCount"
+      }
+    },
+    "modelVersion": {
+      "sourcePath": "model",
+      "targetPath": "modelVersion",
+      "transform": "directMapping"
+    }
+  },
+  "contentStructureMappings": {
+    "textPart": {
+      "sourceFormat": {
+        "role": "string",
+        "content": "string"
+      },
+      "targetFormat": {
+        "role": "string",
+        "parts": [
+          {
+            "text": "string"
+          }
+        ]
+      }
+    },
+    "functionCallPart": {
+      "sourceFormat": {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "string",
+            "type": "function",
+            "function": {
+              "name": "string",
+              "arguments": "string"
+            }
+          }
+        ]
+      },
+      "targetFormat": {
+        "role": "model",
+        "parts": [
+          {
+            "functionCall": {
+              "name": "string",
+              "args": "object"
+            }
+          }
+        ]
+      }
+    },
+    "functionResponsePart": {
+      "sourceFormat": {
+        "role": "tool",
+        "tool_call_id": "string",
+        "content": "string"
+      },
+      "targetFormat": {
+        "role": "function",
+        "parts": [
+          {
+            "functionResponse": {
+              "name": "string",
+              "response": {
+                "name": "string",
+                "content": "object"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "finishReasonMappings": {
+    "stop": "STOP",
+    "length": "MAX_TOKENS",
+    "tool_calls": "STOP",
+    "content_filter": "SAFETY",
+    "recitation": "RECITATION"
+  },
+  "safetySettings": {
+    "description": "Gemini-specific safety filtering",
+    "categories": [
+      "HARM_CATEGORY_HARASSMENT",
+      "HARM_CATEGORY_HATE_SPEECH", 
+      "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+      "HARM_CATEGORY_DANGEROUS_CONTENT"
+    ],
+    "thresholds": [
+      "BLOCK_NONE",
+      "BLOCK_ONLY_HIGH",
+      "BLOCK_MEDIUM_AND_ABOVE",
+      "BLOCK_LOW_AND_ABOVE"
+    ]
+  },
+  "specialFeatures": {
+    "streaming": {
+      "description": "Real-time response streaming",
+      "implementation": "SSE-based with chunked responses"
+    },
+    "functionCalling": {
+      "description": "Tool/function calling support",
+      "implementation": "Agent-based function call processing"
+    },
+    "multiModal": {
+      "description": "Support for text, images, and other media",
+      "implementation": "Parts-based content structure"
+    },
+    "safetyFiltering": {
+      "description": "Content safety filtering",
+      "implementation": "Configurable safety thresholds"
+    }
+  }
+}

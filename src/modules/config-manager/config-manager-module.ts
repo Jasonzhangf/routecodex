@@ -43,7 +43,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * 初始化模块
    */
-  async initialize(config: any): Promise<void> {
+  async initialize(config?: any): Promise<void> {
     console.log('🔄 Initializing Config Manager Module...');
 
     try {

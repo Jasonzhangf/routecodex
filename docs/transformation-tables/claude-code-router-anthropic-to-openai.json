@@ -1,0 +1,208 @@
+{
+  "sourceProvider": "Anthropic",
+  "targetProvider": "OpenAI",
+  "description": "Reference transformation table extracted from claude-code-router agent-based system",
+  "version": "1.0",
+  "architecture": "agent-based",
+  "notes": "Based on analysis of AnthropicTransformer in claude-code-router",
+  "requestMappings": {
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "modelMapping",
+      "mapping": {
+        "claude-3-5-sonnet-20241022": "gpt-4o",
+        "claude-3-5-haiku-20241022": "gpt-4o-mini",
+        "claude-3-opus-20240229": "gpt-4-turbo",
+        "claude-3-sonnet-20240229": "gpt-4-turbo",
+        "claude-3-haiku-20240307": "gpt-4-turbo"
+      }
+    },
+    "messages": {
+      "sourcePath": "messages",
+      "targetPath": "messages",
+      "transform": "messageStructureConversion",
+      "conversionRules": {
+        "system": {
+          "targetRole": "system",
+          "contentPath": "content"
+        },
+        "user": {
+          "targetRole": "user",
+          "contentPath": "content"
+        },
+        "assistant": {
+          "targetRole": "assistant",
+          "contentPath": "content"
+        }
+      }
+    },
+    "maxTokens": {
+      "sourcePath": "max_tokens",
+      "targetPath": "max_tokens",
+      "transform": "directMapping"
+    },
+    "temperature": {
+      "sourcePath": "temperature",
+      "targetPath": "temperature",
+      "transform": "directMapping"
+    },
+    "stopSequences": {
+      "sourcePath": "stop_sequences",
+      "targetPath": "stop",
+      "transform": "arrayMapping"
+    },
+    "topP": {
+      "sourcePath": "top_p",
+      "targetPath": "top_p",
+      "transform": "directMapping"
+    },
+    "stream": {
+      "sourcePath": "stream",
+      "targetPath": "stream",
+      "transform": "directMapping"
+    },
+    "tools": {
+      "sourcePath": "tools",
+      "targetPath": "tools",
+      "transform": "toolDefinitionConversion",
+      "conversionRules": {
+        "name": "function.name",
+        "description": "function.description",
+        "input_schema": "function.parameters"
+      }
+    }
+  },
+  "responseMappings": {
+    "id": {
+      "sourcePath": "id",
+      "targetPath": "id",
+      "transform": "directMapping"
+    },
+    "type": {
+      "sourcePath": "type",
+      "targetPath": "object",
+      "transform": "staticValue",
+      "value": "chat.completion"
+    },
+    "created": {
+      "sourcePath": "created",
+      "targetPath": "created",
+      "transform": "directMapping"
+    },
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "directMapping"
+    },
+    "content": {
+      "sourcePath": "content",
+      "targetPath": "choices",
+      "transform": "contentToChoiceConversion",
+      "conversionRules": {
+        "text": "choices[0].message.content",
+        "tool_calls": "choices[0].message.tool_calls"
+      }
+    },
+    "stopReason": {
+      "sourcePath": "stop_reason",
+      "targetPath": "choices[0].finish_reason",
+      "transform": "finishReasonMapping",
+      "mapping": {
+        "end_turn": "stop",
+        "stop_sequence": "stop",
+        "tool_use": "tool_calls",
+        "max_tokens": "length"
+      }
+    },
+    "usage": {
+      "sourcePath": "usage",
+      "targetPath": "usage",
+      "transform": "usageMapping",
+      "mapping": {
+        "input_tokens": "prompt_tokens",
+        "output_tokens": "completion_tokens"
+      }
+    }
+  },
+  "toolMappings": {
+    "toolUseBlock": {
+      "sourceFormat": {
+        "type": "tool_use",
+        "id": "string",
+        "name": "string",
+        "input": "object"
+      },
+      "targetFormat": {
+        "type": "function",
+        "id": "string",
+        "function": {
+          "name": "string",
+          "arguments": "string"
+        }
+      }
+    },
+    "toolResultBlock": {
+      "sourceFormat": {
+        "type": "tool_result",
+        "tool_use_id": "string",
+        "content": "string"
+      },
+      "targetFormat": {
+        "role": "tool",
+        "tool_call_id": "string",
+        "content": "string"
+      }
+    }
+  },
+  "streamMappings": {
+    "contentBlockStart": {
+      "sourceEvent": "content_block_start",
+      "targetEvent": "tool_calls_start",
+      "transform": "toolUseStartConversion"
+    },
+    "contentBlockDelta": {
+      "sourceEvent": "content_block_delta",
+      "targetEvent": "tool_calls_delta",
+      "transform": "toolUseDeltaConversion"
+    },
+    "contentBlockStop": {
+      "sourceEvent": "content_block_stop",
+      "targetEvent": "tool_calls_stop",
+      "transform": "toolUseStopConversion"
+    },
+    "messageDelta": {
+      "sourceEvent": "message_delta",
+      "targetEvent": "finish_reason",
+      "transform": "finishReasonConversion"
+    }
+  },
+  "imageProcessing": {
+    "strategy": "agent-based",
+    "description": "Images are converted to text placeholders and processed by imageAgent",
+    "conversion": {
+      "image_url": {
+        "format": "[Image: {url}]",
+        "processing": "Agent extracts image content and converts to text description"
+      },
+      "base64": {
+        "format": "[Image: base64_encoded]",
+        "processing": "Agent decodes and analyzes image content"
+      }
+    }
+  },
+  "specialFeatures": {
+    "streamingToolCalls": {
+      "description": "Real-time tool call interception and processing",
+      "implementation": "SSE-based streaming with agent processing"
+    },
+    "caching": {
+      "description": "Image and usage data caching for performance",
+      "implementation": "In-memory cache with TTL"
+    },
+    "errorHandling": {
+      "description": "Graceful fallback and recovery mechanisms",
+      "implementation": "Try-catch blocks with alternative processing paths"
+    }
+  }
+}

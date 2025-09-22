@@ -58,6 +58,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
   private _isRunning: boolean = false;
   private healthStatus: HealthStatus;
   private startupTime: number;
+  private config: any;
 
   constructor(modulesConfigPath: string = './config/modules.json') {
     const moduleInfo: ModuleInfo = {
@@ -159,6 +160,26 @@ export class HttpServer extends BaseModule implements IHttpServer {
         retryAttempts: 3
       }
     };
+  }
+
+  /**
+   * Initialize the HTTP server with merged configuration
+   */
+  public async initializeWithMergedConfig(mergedConfig: any): Promise<void> {
+    try {
+      console.log('🔄 Initializing HTTP server with merged configuration...');
+
+      // Set up the server with merged configuration
+      this.config = mergedConfig.modules?.httpserver?.config || this.getDefaultServerConfig();
+
+      // Continue with normal initialization
+      await this.initialize();
+
+      console.log('✅ HTTP server initialized with merged configuration successfully');
+    } catch (error) {
+      console.error('❌ Failed to initialize HTTP server with merged configuration:', error);
+      throw error;
+    }
   }
 
   /**

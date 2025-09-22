@@ -1,0 +1,227 @@
+{
+  "version": "1.0.0",
+  "description": "OpenAI to iFlow compatibility mapping table based on Claude Code Router architecture",
+  "formats": {
+    "source": "openai",
+    "target": "iflow"
+  },
+  "metadata": {
+    "created": "2024-01-01T00:00:00Z",
+    "updated": "2024-01-01T00:00:00Z",
+    "author": "RCC System",
+    "architecture": "agent-based",
+    "basedOn": "claude-code-router"
+  },
+  "fieldMappings": {
+    "id": {
+      "targetField": "taskId",
+      "transform": "directMapping",
+      "required": true,
+      "description": "Map OpenAI request ID to iFlow task ID"
+    },
+    "model": {
+      "targetField": "agentId",
+      "transform": "mapModelToAgent",
+      "required": true,
+      "description": "Map OpenAI model to iFlow agent ID"
+    },
+    "messages": {
+      "targetField": "messages",
+      "transform": "messageFormatConversion",
+      "required": true,
+      "description": "Convert OpenAI message format to iFlow message format"
+    },
+    "tools": {
+      "targetField": "tools",
+      "transform": "toolFormatConversion",
+      "description": "Convert OpenAI tool format to iFlow tool format"
+    },
+    "tool_choice": {
+      "targetField": "tool_choice",
+      "transform": "toolChoiceConversion",
+      "defaultValue": "auto",
+      "description": "Tool choice strategy"
+    },
+    "temperature": {
+      "targetField": "temperature",
+      "transform": "directMapping",
+      "defaultValue": 0.7,
+      "description": "Temperature parameter for response randomness"
+    },
+    "max_tokens": {
+      "targetField": "maxTokens",
+      "transform": "directMapping",
+      "description": "Maximum number of tokens to generate"
+    },
+    "top_p": {
+      "targetField": "parameters.top_p",
+      "transform": "directMapping",
+      "defaultValue": 1.0,
+      "description": "Nucleus sampling parameter"
+    },
+    "frequency_penalty": {
+      "targetField": "parameters.frequency_penalty",
+      "transform": "directMapping",
+      "defaultValue": 0.0,
+      "description": "Frequency penalty for token repetition"
+    },
+    "presence_penalty": {
+      "targetField": "parameters.presence_penalty",
+      "transform": "directMapping",
+      "defaultValue": 0.0,
+      "description": "Presence penalty for new topics"
+    },
+    "stop": {
+      "targetField": "parameters.stop",
+      "transform": "arrayMapping",
+      "description": "Stop sequences for generation"
+    },
+    "stream": {
+      "targetField": "streaming",
+      "transform": "directMapping",
+      "defaultValue": false,
+      "description": "Enable streaming response"
+    },
+    "user": {
+      "targetField": "userId",
+      "transform": "mapUserId",
+      "description": "User identifier"
+    },
+    "metadata": {
+      "targetField": "metadata",
+      "transform": "extractMetadata",
+      "description": "Extract and map metadata fields"
+    }
+  },
+  "validationRules": {
+    "required": ["id", "model", "messages"],
+    "types": {
+      "id": "string",
+      "model": "string",
+      "messages": "array",
+      "temperature": "number",
+      "max_tokens": "number",
+      "top_p": "number",
+      "frequency_penalty": "number",
+      "presence_penalty": "number",
+      "stream": "boolean",
+      "user": "string",
+      "tools": "array",
+      "tool_choice": "string",
+      "streaming": "boolean",
+      "maxTokens": "number",
+      "userId": "string",
+      "taskId": "string",
+      "agentId": "string"
+    },
+    "constraints": {
+      "id": {
+        "pattern": "^[a-zA-Z0-9-_]+$",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "model": {
+        "pattern": "^[a-zA-Z0-9-_]+$",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "messages": {
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "max_tokens": {
+        "min": 1,
+        "max": 200000
+      },
+      "temperature": {
+        "min": 0.0,
+        "max": 2.0
+      },
+      "top_p": {
+        "min": 0.0,
+        "max": 1.0
+      },
+      "frequency_penalty": {
+        "min": -2.0,
+        "max": 2.0
+      },
+      "presence_penalty": {
+        "min": -2.0,
+        "max": 2.0
+      }
+    }
+  },
+  "transformFunctions": {
+    "mapModelToAgent": {
+      "type": "mapping",
+      "description": "Map OpenAI models to iFlow agent IDs",
+      "mappings": {
+        "gpt-4o": "multimodal-agent",
+        "gpt-4o-mini": "text-agent",
+        "gpt-4-turbo": "reasoning-agent",
+        "gpt-4": "analysis-agent",
+        "gpt-3.5-turbo": "chat-agent",
+        "gpt-4-vision-preview": "image-agent",
+        "claude-3-5-sonnet-20241022": "reasoning-agent",
+        "claude-3-5-haiku-20241022": "text-agent"
+      },
+      "defaultValue": "text-agent"
+    },
+    "messageFormatConversion": {
+      "type": "object_transform",
+      "description": "Convert OpenAI message format to iFlow format",
+      "roleMapping": {
+        "system": "system",
+        "user": "user", 
+        "assistant": "assistant",
+        "tool": "tool"
+      },
+      "contentProcessing": {
+        "preserveStructure": true,
+        "handleMultimodal": true,
+        "agentContentHandling": true
+      }
+    },
+    "toolFormatConversion": {
+      "type": "array_transform",
+      "description": "Convert OpenAI tool format to iFlow tool format",
+      "elementTransform": {
+        "type": "object_transform",
+        "fields": {
+          "type": "type",
+          "function": "function"
+        },
+        "preserveStructure": true,
+        "agentToolSchema": true
+      }
+    },
+    "toolChoiceConversion": {
+      "type": "mapping",
+      "description": "Convert OpenAI tool choice to iFlow tool choice",
+      "mappings": {
+        "auto": "auto",
+        "none": "none",
+        "required": "required"
+      }
+    },
+    "mapUserId": {
+      "type": "transform",
+      "description": "Format OpenAI user ID to iFlow format",
+      "transformFunction": "formatUserId"
+    },
+    "extractMetadata": {
+      "type": "object_transform",
+      "description": "Extract metadata from OpenAI request",
+      "extractFields": ["session_info", "timeout", "priority", "context"]
+    },
+    "directMapping": {
+      "type": "direct",
+      "description": "No transformation needed - pass through as-is"
+    },
+    "arrayMapping": {
+      "type": "array_transform",
+      "description": "Convert array format for iFlow compatibility",
+      "preserveElements": true
+    }
+  }
+}

@@ -104,7 +104,7 @@ export abstract class BaseProvider extends BaseModule {
   /**
    * Initialize the provider
    */
-  public async initialize(): Promise<void> {
+  public async initialize(config?: any): Promise<void> {
     try {
       await this.errorHandling.initialize();
       await this.validateConfiguration();

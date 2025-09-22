@@ -1,0 +1,283 @@
+{
+  "sourceProvider": "Anthropic",
+  "targetProvider": "Gemini",
+  "description": "Transformation table for converting Anthropic API format to Google Gemini API format",
+  "version": "1.0",
+  "requestMappings": {
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "modelMapping",
+      "mapping": {
+        "claude-3-5-sonnet-20241022": "gemini-1.5-pro",
+        "claude-3-5-haiku-20241022": "gemini-1.5-flash",
+        "claude-3-opus-20240229": "gemini-1.0-pro",
+        "claude-3-sonnet-20240229": "gemini-1.0-pro",
+        "claude-3-haiku-20240307": "gemini-1.0-pro"
+      }
+    },
+    "messages": {
+      "sourcePath": "messages",
+      "targetPath": "contents",
+      "transform": "messageToContentsConversion",
+      "conversionRules": {
+        "system": {
+          "targetType": "system_instruction",
+          "parts": [
+            {
+              "text": "string"
+            }
+          ]
+        },
+        "user": {
+          "targetType": "user",
+          "parts": [
+            {
+              "text": "string"
+            }
+          ]
+        },
+        "assistant": {
+          "targetType": "model",
+          "parts": [
+            {
+              "text": "string"
+            }
+          ]
+        }
+      }
+    },
+    "maxTokens": {
+      "sourcePath": "max_tokens",
+      "targetPath": "generationConfig.maxOutputTokens",
+      "transform": "directMapping"
+    },
+    "temperature": {
+      "sourcePath": "temperature",
+      "targetPath": "generationConfig.temperature",
+      "transform": "directMapping"
+    },
+    "topP": {
+      "sourcePath": "top_p",
+      "targetPath": "generationConfig.topP",
+      "transform": "directMapping"
+    },
+    "topK": {
+      "sourcePath": "top_k",
+      "targetPath": "generationConfig.topK",
+      "transform": "directMapping"
+    },
+    "stopSequences": {
+      "sourcePath": "stop_sequences",
+      "targetPath": "generationConfig.stopSequences",
+      "transform": "arrayMapping"
+    }
+  },
+  "responseMappings": {
+    "candidates": {
+      "sourcePath": "content",
+      "targetPath": "candidates",
+      "transform": "contentToCandidatesConversion"
+    },
+    "usageMetadata": {
+      "sourcePath": "usage",
+      "targetPath": "usageMetadata",
+      "transform": "usageToUsageMetadataConversion"
+    },
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "modelVersion",
+      "transform": "reverseModelMapping"
+    }
+  },
+  "contentStructureMappings": {
+    "textContent": {
+      "sourceFormat": {
+        "type": "text",
+        "text": "string"
+      },
+      "targetFormat": {
+        "role": "string",
+        "parts": [
+          {
+            "text": "string"
+          }
+        ]
+      }
+    },
+    "imageContent": {
+      "sourceFormat": {
+        "type": "image",
+        "source": "object"
+      },
+      "targetFormat": {
+        "role": "user",
+        "parts": [
+          {
+            "inline_data": {
+              "mime_type": "string",
+              "data": "string"
+            }
+          }
+        ]
+      }
+    },
+    "toolUseContent": {
+      "sourceFormat": {
+        "type": "tool_use",
+        "id": "string",
+        "name": "string",
+        "input": "object"
+      },
+      "targetFormat": {
+        "role": "model",
+        "parts": [
+          {
+            "functionCall": {
+              "name": "string",
+              "args": "object"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "generationConfigMappings": {
+    "candidateCount": {
+      "sourcePath": "candidate_count",
+      "targetPath": "candidateCount",
+      "transform": "directMapping"
+    },
+    "maxOutputTokens": {
+      "sourcePath": "max_tokens",
+      "targetPath": "maxOutputTokens",
+      "transform": "directMapping"
+    },
+    "temperature": {
+      "sourcePath": "temperature",
+      "targetPath": "temperature",
+      "transform": "directMapping"
+    },
+    "topP": {
+      "sourcePath": "top_p",
+      "targetPath": "topP",
+      "transform": "directMapping"
+    },
+    "topK": {
+      "sourcePath": "top_k",
+      "targetPath": "topK",
+      "transform": "directMapping"
+    },
+    "stopSequences": {
+      "sourcePath": "stop_sequences",
+      "targetPath": "stopSequences",
+      "transform": "arrayMapping"
+    },
+    "responseMimeType": {
+      "sourcePath": "response_mime_type",
+      "targetPath": "responseMimeType",
+      "transform": "directMapping"
+    },
+    "responseSchema": {
+      "sourcePath": "response_schema",
+      "targetPath": "responseSchema",
+      "transform": "directMapping"
+    }
+  },
+  "safetySettings": {
+    "category": {
+      "sourcePath": "safety_settings.category",
+      "targetPath": "category",
+      "transform": "directMapping"
+    },
+    "threshold": {
+      "sourcePath": "safety_settings.threshold",
+      "targetPath": "threshold",
+      "transform": "directMapping"
+    }
+  },
+  "toolMappings": {
+    "toolDefinition": {
+      "sourceFormat": {
+        "name": "string",
+        "description": "string",
+        "input_schema": "object"
+      },
+      "targetFormat": {
+        "functionDeclarations": [
+          {
+            "name": "string",
+            "description": "string",
+            "parameters": "object"
+          }
+        ]
+      }
+    },
+    "toolResult": {
+      "sourceFormat": {
+        "type": "tool_result",
+        "tool_use_id": "string",
+        "content": "string"
+      },
+      "targetFormat": {
+        "role": "user",
+        "parts": [
+          {
+            "functionResponse": {
+              "name": "string",
+              "response": "object"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "functionResponseMappings": {
+    "functionCall": {
+      "sourceFormat": {
+        "type": "tool_use",
+        "id": "string",
+        "name": "string",
+        "input": "object"
+      },
+      "targetFormat": {
+        "functionCall": {
+          "name": "string",
+          "args": "object"
+        }
+      }
+    },
+    "functionResponse": {
+      "sourceFormat": {
+        "type": "tool_result",
+        "tool_use_id": "string",
+        "content": "string"
+      },
+      "targetFormat": {
+        "functionResponse": {
+          "name": "string",
+          "response": "object"
+        }
+      }
+    }
+  },
+  "errorMappings": {
+    "errorType": {
+      "sourceFormat": {
+        "type": "error",
+        "error": {
+          "type": "string",
+          "message": "string"
+        }
+      },
+      "targetFormat": {
+        "error": {
+          "code": "number",
+          "message": "string",
+          "status": "string",
+          "details": "array"
+        }
+      }
+    }
+  }
+}

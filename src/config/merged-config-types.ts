@@ -16,6 +16,18 @@ export interface RouteTarget {
 }
 
 /**
+ * 路由信息接口
+ */
+export interface RoutingInfo {
+  route: string;
+  providerId: string;
+  modelId: string;
+  keyId: string;
+  selectedTarget?: RouteTarget;
+  selectionTime?: number;
+}
+
+/**
  * 路由目标池
  */
 export interface RouteTargetPool {
@@ -33,6 +45,7 @@ export interface PipelineConfig {
   model: {
     maxContext: number;
     maxTokens: number;
+    actualModelId?: string;
   };
   keyConfig: {
     keyId: string;

@@ -45,7 +45,7 @@ export class PassThroughProvider extends BaseProvider {
       id: 'pass-through-provider',
       type: 'pass-through' as const,
       enabled: true,
-      targetUrl: config.targetUrl,
+      baseUrl: config.targetUrl,
       models: {
         'gpt-3.5-turbo': {
           id: 'gpt-3.5-turbo',

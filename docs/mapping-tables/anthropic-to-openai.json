@@ -1,0 +1,290 @@
+{
+  "sourceProvider": "Anthropic",
+  "targetProvider": "OpenAI",
+  "description": "LLMSwitch Module - Anthropic to OpenAI protocol transformation table",
+  "version": "1.0",
+  "architecture": "transformer-based",
+  "notes": "Based on existing transformation tables with enhanced tool execution support",
+  "requestMappings": {
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "directMapping",
+      "description": "Model identifier mapping"
+    },
+    "maxTokens": {
+      "sourcePath": "max_tokens",
+      "targetPath": "max_tokens",
+      "transform": "directMapping",
+      "description": "Maximum tokens to generate"
+    },
+    "temperature": {
+      "sourcePath": "temperature",
+      "targetPath": "temperature",
+      "transform": "directMapping",
+      "description": "Temperature parameter for response randomness"
+    },
+    "messages": {
+      "sourcePath": "messages",
+      "targetPath": "messages",
+      "transform": "messageStructureConversion",
+      "description": "Convert Anthropic message format to OpenAI format",
+      "conversionRules": {
+        "system": {
+          "targetRole": "system",
+          "contentPath": "content"
+        },
+        "user": {
+          "targetRole": "user",
+          "contentPath": "content"
+        },
+        "assistant": {
+          "targetRole": "assistant",
+          "contentPath": "content"
+        }
+      }
+    },
+    "tools": {
+      "sourcePath": "tools",
+      "targetPath": "tools",
+      "transform": "toolDefinitionConversion",
+      "description": "Convert Anthropic tool format to OpenAI format",
+      "conversionRules": {
+        "name": "function.name",
+        "description": "function.description",
+        "input_schema": "function.parameters"
+      }
+    },
+    "toolChoice": {
+      "sourcePath": "tool_choice",
+      "targetPath": "tool_choice",
+      "transform": "toolChoiceConversion",
+      "description": "Tool choice strategy conversion"
+    },
+    "stopSequences": {
+      "sourcePath": "stop_sequences",
+      "targetPath": "stop",
+      "transform": "arrayMapping",
+      "description": "Stop sequences mapping"
+    },
+    "stream": {
+      "sourcePath": "stream",
+      "targetPath": "stream",
+      "transform": "directMapping",
+      "description": "Streaming response setting"
+    }
+  },
+  "responseMappings": {
+    "id": {
+      "sourcePath": "id",
+      "targetPath": "id",
+      "transform": "directMapping",
+      "description": "Response identifier"
+    },
+    "type": {
+      "sourcePath": "type",
+      "targetPath": "object",
+      "transform": "staticValue",
+      "value": "chat.completion",
+      "description": "OpenAI response object type"
+    },
+    "created": {
+      "sourcePath": "created",
+      "targetPath": "created",
+      "transform": "directMapping",
+      "description": "Response creation timestamp"
+    },
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "directMapping",
+      "description": "Model used for response"
+    },
+    "content": {
+      "sourcePath": "content",
+      "targetPath": "choices",
+      "transform": "contentToChoiceConversion",
+      "description": "Convert Anthropic content to OpenAI choices format"
+    },
+    "stopReason": {
+      "sourcePath": "stop_reason",
+      "targetPath": "choices[0].finish_reason",
+      "transform": "finishReasonMapping",
+      "description": "Map Anthropic stop reason to OpenAI finish reason"
+    },
+    "usage": {
+      "sourcePath": "usage",
+      "targetPath": "usage",
+      "transform": "usageMapping",
+      "description": "Convert usage statistics format"
+    }
+  },
+  "finishReasonMappings": {
+    "anthropicToOpenai": {
+      "end_turn": {
+        "source": "end_turn",
+        "target": "stop",
+        "description": "正常结束，模型完成响应"
+      },
+      "stop_sequence": {
+        "source": "stop_sequence",
+        "target": "stop",
+        "description": "遇到停止序列"
+      },
+      "max_tokens": {
+        "source": "max_tokens",
+        "target": "length",
+        "description": "达到最大token限制"
+      },
+      "tool_use": {
+        "source": "tool_use",
+        "target": "tool_calls",
+        "description": "需要调用工具"
+      }
+    },
+    "openaiToAnthropic": {
+      "stop": {
+        "source": "stop",
+        "target": "end_turn",
+        "description": "正常结束"
+      },
+      "length": {
+        "source": "length",
+        "target": "max_tokens",
+        "description": "达到最大token限制"
+      },
+      "tool_calls": {
+        "source": "tool_calls",
+        "target": "tool_use",
+        "description": "需要调用工具"
+      },
+      "content_filter": {
+        "source": "content_filter",
+        "target": "end_turn",
+        "description": "内容过滤，Anthropic无直接对应"
+      }
+    }
+  },
+  "toolMappings": {
+    "toolUseBlock": {
+      "sourceFormat": {
+        "type": "tool_use",
+        "id": "string",
+        "name": "string",
+        "input": "object"
+      },
+      "targetFormat": {
+        "type": "function",
+        "id": "string",
+        "function": {
+          "name": "string",
+          "arguments": "string"
+        }
+      }
+    },
+    "toolResultBlock": {
+      "sourceFormat": {
+        "type": "tool_result",
+        "tool_use_id": "string",
+        "content": "string"
+      },
+      "targetFormat": {
+        "role": "tool",
+        "tool_call_id": "string",
+        "content": "string"
+      }
+    }
+  },
+  "toolExecutionLifecycle": {
+    "detection": {
+      "anthropic": {
+        "condition": "LLM decides to use tool",
+        "response": {
+          "type": "tool_use",
+          "id": "string",
+          "name": "string",
+          "input": "object"
+        }
+      },
+      "openai": {
+        "condition": "LLM decides to use tool",
+        "response": {
+          "tool_calls": [
+            {
+              "id": "string",
+              "type": "function",
+              "function": {
+                "name": "string",
+                "arguments": "string"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "execution": {
+      "clientAction": "客户端执行工具",
+      "resultFormat": {
+        "anthropic": {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "string",
+              "content": "工具执行结果"
+            }
+          ]
+        },
+        "openai": {
+          "role": "tool",
+          "tool_call_id": "string",
+          "content": "工具执行结果"
+        }
+      }
+    }
+  },
+  "errorHandling": {
+    "toolExecutionError": {
+      "anthropic": {
+        "type": "tool_result",
+        "tool_use_id": "string",
+        "content": "错误信息",
+        "is_error": true
+      },
+      "openai": {
+        "role": "tool",
+        "tool_call_id": "string",
+        "content": "错误信息",
+        "is_error": true
+      }
+    },
+    "toolTimeout": {
+      "anthropic": {
+        "type": "tool_result",
+        "tool_use_id": "string",
+        "content": "工具执行超时",
+        "is_error": true
+      },
+      "openai": {
+        "role": "tool",
+        "tool_call_id": "string",
+        "content": "工具执行超时",
+        "is_error": true
+      }
+    }
+  },
+  "specialFeatures": {
+    "streamingToolCalls": {
+      "description": "Real-time tool call interception and processing",
+      "implementation": "SSE-based streaming with transformer processing"
+    },
+    "caching": {
+      "description": "Image and usage data caching for performance",
+      "implementation": "In-memory cache with TTL"
+    },
+    "errorHandling": {
+      "description": "Graceful fallback and recovery mechanisms",
+      "implementation": "Try-catch blocks with alternative processing paths"
+    }
+  }
+}

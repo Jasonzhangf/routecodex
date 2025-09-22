@@ -100,7 +100,7 @@ export class ProviderManager extends BaseModule {
   /**
    * Initialize the provider manager
    */
-  public async initialize(): Promise<void> {
+  public async initialize(config?: any): Promise<void> {
     try {
       await ErrorHandlingUtils.initialize();
       await this.errorHandling.initialize();

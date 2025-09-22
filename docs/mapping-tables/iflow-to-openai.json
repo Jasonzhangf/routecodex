@@ -1,0 +1,215 @@
+{
+  "version": "1.0.0",
+  "description": "iFlow to OpenAI compatibility mapping table based on Claude Code Router architecture",
+  "formats": {
+    "source": "iflow",
+    "target": "openai"
+  },
+  "metadata": {
+    "created": "2024-01-01T00:00:00Z",
+    "updated": "2024-01-01T00:00:00Z",
+    "author": "RCC System",
+    "architecture": "agent-based",
+    "basedOn": "claude-code-router"
+  },
+  "fieldMappings": {
+    "taskId": {
+      "targetField": "id",
+      "transform": "directMapping",
+      "required": true,
+      "description": "Task identifier"
+    },
+    "agentId": {
+      "targetField": "model",
+      "transform": "mapAgentToModel",
+      "required": true,
+      "description": "Map iFlow agent ID to OpenAI model"
+    },
+    "sessionInfo": {
+      "targetField": "metadata.session_info",
+      "transform": "nestedMapping",
+      "description": "Session information"
+    },
+    "messages": {
+      "targetField": "messages",
+      "transform": "reverseMessageFormatConversion",
+      "required": true,
+      "description": "Convert iFlow message format back to OpenAI format"
+    },
+    "tools": {
+      "targetField": "tools",
+      "transform": "reverseToolFormatConversion",
+      "description": "Convert iFlow tool format back to OpenAI format"
+    },
+    "parameters": {
+      "targetField": "metadata.parameters",
+      "transform": "flattenParameters",
+      "description": "Agent parameters"
+    },
+    "agentConfig": {
+      "targetField": "metadata.agent_config",
+      "transform": "directMapping",
+      "description": "Agent configuration"
+    },
+    "maxTokens": {
+      "targetField": "max_tokens",
+      "transform": "directMapping",
+      "description": "Maximum tokens to generate"
+    },
+    "temperature": {
+      "targetField": "temperature",
+      "transform": "directMapping",
+      "description": "Temperature parameter"
+    },
+    "timeout": {
+      "targetField": "metadata.timeout",
+      "transform": "directMapping",
+      "description": "Request timeout"
+    },
+    "priority": {
+      "targetField": "metadata.priority",
+      "transform": "directMapping",
+      "description": "Request priority"
+    },
+    "streaming": {
+      "targetField": "stream",
+      "transform": "directMapping",
+      "description": "Streaming response flag"
+    },
+    "context": {
+      "targetField": "metadata.context",
+      "transform": "directMapping",
+      "description": "Request context"
+    },
+    "userId": {
+      "targetField": "user",
+      "transform": "mapUserId",
+      "description": "User identifier"
+    }
+  },
+  "validationRules": {
+    "required": ["taskId", "agentId", "messages"],
+    "types": {
+      "taskId": "string",
+      "agentId": "string",
+      "messages": "array",
+      "temperature": "number",
+      "max_tokens": "number",
+      "top_p": "number",
+      "frequency_penalty": "number",
+      "presence_penalty": "number",
+      "stream": "boolean",
+      "user": "string",
+      "tools": "array",
+      "tool_choice": "string",
+      "sessionInfo": "object",
+      "parameters": "object",
+      "agentConfig": "object",
+      "timeout": "number",
+      "priority": "string",
+      "context": "object"
+    },
+    "constraints": {
+      "taskId": {
+        "pattern": "^[a-zA-Z0-9-_]+$",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "agentId": {
+        "pattern": "^[a-zA-Z0-9-_]+$",
+        "minLength": 1,
+        "maxLength": 50,
+        "allowedValues": ["text-agent", "code-agent", "image-agent", "analysis-agent", "reasoning-agent", "chat-agent", "tool-agent", "multimodal-agent", "research-agent"]
+      },
+      "messages": {
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "max_tokens": {
+        "min": 1,
+        "max": 200000
+      },
+      "temperature": {
+        "min": 0.0,
+        "max": 2.0
+      },
+      "top_p": {
+        "min": 0.0,
+        "max": 1.0
+      },
+      "priority": {
+        "allowedValues": ["low", "normal", "high", "urgent"]
+      }
+    }
+  },
+  "transformFunctions": {
+    "mapAgentToModel": {
+      "type": "mapping",
+      "description": "Map iFlow agent IDs to OpenAI models",
+      "mappings": {
+        "text-agent": "gpt-3.5-turbo",
+        "code-agent": "gpt-4",
+        "image-agent": "gpt-4-vision-preview",
+        "analysis-agent": "gpt-4",
+        "reasoning-agent": "gpt-4",
+        "chat-agent": "gpt-3.5-turbo",
+        "tool-agent": "gpt-4",
+        "multimodal-agent": "gpt-4-vision-preview",
+        "research-agent": "gpt-4"
+      },
+      "defaultValue": "gpt-3.5-turbo"
+    },
+    "reverseMessageFormatConversion": {
+      "type": "object_transform",
+      "description": "Convert iFlow message format back to OpenAI format",
+      "roleMapping": {
+        "system": "system",
+        "user": "user", 
+        "assistant": "assistant",
+        "tool": "tool"
+      },
+      "contentProcessing": {
+        "preserveStructure": true,
+        "restoreMultimodal": true,
+        "agentContentHandling": true
+      }
+    },
+    "reverseToolFormatConversion": {
+      "type": "array_transform",
+      "description": "Convert iFlow tool format back to OpenAI format",
+      "elementTransform": {
+        "type": "object_transform",
+        "fields": {
+          "type": "type",
+          "function": "function"
+        },
+        "preserveStructure": true,
+        "agentToolSchema": true
+      }
+    },
+    "nestedMapping": {
+      "type": "object_transform",
+      "description": "Map nested object structures",
+      "preserveStructure": true
+    },
+    "flattenParameters": {
+      "type": "object_transform",
+      "description": "Flatten parameter object to metadata",
+      "flattenTo": "metadata"
+    },
+    "mapUserId": {
+      "type": "transform",
+      "description": "Format user ID for OpenAI",
+      "transformFunction": "formatUserId"
+    },
+    "directMapping": {
+      "type": "direct",
+      "description": "No transformation needed - pass through as-is"
+    },
+    "reverseArrayMapping": {
+      "type": "array_transform",
+      "description": "Convert array format back to OpenAI format",
+      "preserveElements": true
+    }
+  }
+}

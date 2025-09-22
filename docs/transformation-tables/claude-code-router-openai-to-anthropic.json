@@ -1,0 +1,261 @@
+{
+  "sourceProvider": "OpenAI",
+  "targetProvider": "Anthropic",
+  "description": "Transformation table for converting OpenAI API format to Anthropic API format",
+  "version": "1.0",
+  "requestMappings": {
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "modelMapping",
+      "mapping": {
+        "gpt-4o": "claude-3-5-sonnet-20241022",
+        "gpt-4o-mini": "claude-3-5-haiku-20241022",
+        "gpt-4-turbo": "claude-3-sonnet-20240229",
+        "gpt-4": "claude-3-opus-20240229"
+      }
+    },
+    "messages": {
+      "sourcePath": "messages",
+      "targetPath": "messages",
+      "transform": "messageStructureConversion",
+      "conversionRules": {
+        "system": {
+          "targetRole": "system",
+          "contentPath": "content"
+        },
+        "user": {
+          "targetRole": "user",
+          "contentPath": "content"
+        },
+        "assistant": {
+          "targetRole": "assistant",
+          "contentPath": "content"
+        }
+      }
+    },
+    "maxTokens": {
+      "sourcePath": "max_tokens",
+      "targetPath": "max_tokens",
+      "transform": "directMapping"
+    },
+    "temperature": {
+      "sourcePath": "temperature",
+      "targetPath": "temperature",
+      "transform": "directMapping"
+    },
+    "stop": {
+      "sourcePath": "stop",
+      "targetPath": "stop_sequences",
+      "transform": "arrayMapping"
+    },
+    "topP": {
+      "sourcePath": "top_p",
+      "targetPath": "top_p",
+      "transform": "directMapping"
+    },
+    "stream": {
+      "sourcePath": "stream",
+      "targetPath": "stream",
+      "transform": "directMapping"
+    }
+  },
+  "responseMappings": {
+    "id": {
+      "sourcePath": "id",
+      "targetPath": "id",
+      "transform": "directMapping"
+    },
+    "type": {
+      "sourcePath": "object",
+      "targetPath": "type",
+      "transform": "objectToTypeMapping"
+    },
+    "role": {
+      "sourcePath": "choices[0].message.role",
+      "targetPath": "role",
+      "transform": "directMapping"
+    },
+    "content": {
+      "sourcePath": "choices[0].message.content",
+      "targetPath": "content",
+      "transform": "contentArrayConversion"
+    },
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "reverseModelMapping"
+    },
+    "stopReason": {
+      "sourcePath": "choices[0].finish_reason",
+      "targetPath": "stop_reason",
+      "transform": "finishReasonMapping"
+    },
+    "usage": {
+      "sourcePath": "usage",
+      "targetPath": "usage",
+      "transform": "usageMapping"
+    }
+  },
+  "contentStructureMappings": {
+    "textContent": {
+      "sourceFormat": {
+        "role": "string",
+        "content": "string"
+      },
+      "targetFormat": {
+        "type": "text",
+        "text": "string"
+      }
+    },
+    "imageContent": {
+      "sourceFormat": {
+        "role": "user",
+        "content": [
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": "string"
+            }
+          }
+        ]
+      },
+      "targetFormat": {
+        "type": "image",
+        "source": "object"
+      }
+    },
+    "toolCalls": {
+      "sourceFormat": {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "string",
+            "type": "function",
+            "function": {
+              "name": "string",
+              "arguments": "string"
+            }
+          }
+        ]
+      },
+      "targetFormat": {
+        "type": "tool_use",
+        "id": "string",
+        "name": "string",
+        "input": "object"
+      }
+    }
+  },
+  "streamMappings": {
+    "toolCallsStart": {
+      "sourceEvent": "tool_calls_start",
+      "targetEvent": "content_block_start",
+      "transform": "toolUseStartConversion"
+    },
+    "toolCallsDelta": {
+      "sourceEvent": "tool_calls_delta",
+      "targetEvent": "content_block_delta",
+      "transform": "toolUseDeltaConversion"
+    },
+    "toolCallsStop": {
+      "sourceEvent": "tool_calls_stop",
+      "targetEvent": "content_block_stop",
+      "transform": "toolUseStopConversion"
+    },
+    "finishReason": {
+      "sourceEvent": "finish_reason",
+      "targetEvent": "message_delta",
+      "transform": "finishReasonConversion"
+    }
+  },
+  "toolMappings": {
+    "toolDefinition": {
+      "sourceFormat": {
+        "type": "function",
+        "function": {
+          "name": "string",
+          "description": "string",
+          "parameters": "object"
+        }
+      },
+      "targetFormat": {
+        "name": "string",
+        "description": "string",
+        "input_schema": "object"
+      }
+    },
+    "toolResult": {
+      "sourceFormat": {
+        "role": "tool",
+        "tool_call_id": "string",
+        "content": "string"
+      },
+      "targetFormat": {
+        "type": "tool_result",
+        "tool_use_id": "string",
+        "content": "string"
+      }
+    }
+  },
+  "imageProcessing": {
+    "imageCache": {
+      "description": "Image caching mechanism for tool-based image analysis",
+      "cacheKeyFormat": "${requestId}_Image#${imageId}",
+      "cacheEntry": {
+        "source": "object",
+        "timestamp": "number"
+      }
+    },
+    "imagePlaceholder": {
+      "format": "[Image #${imageId}]",
+      "replacementText": "This is an image, if you need to view or analyze it, you need to extract the imageId"
+    },
+    "analysisAgent": {
+      "endpoint": "/v1/messages",
+      "systemPrompt": "You must interpret and analyze images strictly according to the assigned task. When an image placeholder is provided, your role is to parse the image content only within the scope of the user's instructions. Do not ignore or deviate from the task. Always ensure that your response reflects a clear, accurate interpretation of the image aligned with the given objective."
+    }
+  },
+  "agentSystem": {
+    "imageAgent": {
+      "name": "image",
+      "tools": [
+        {
+          "name": "analyzeImage",
+          "description": "Analyse image or images by ID and extract information such as OCR text, objects, layout, colors, or safety signals.",
+          "parameters": {
+            "imageId": {
+              "type": "array",
+              "description": "an array of IDs to analyse",
+              "items": {
+                "type": "string"
+              }
+            },
+            "task": {
+              "type": "string",
+              "description": "Details of task to perform on the image.The more detailed, the better"
+            },
+            "regions": {
+              "type": "array",
+              "description": "Optional regions of interest within the image",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {"type": "string", "description": "Optional label for the region"},
+                  "x": {"type": "number", "description": "X coordinate"},
+                  "y": {"type": "number", "description": "Y coordinate"},
+                  "w": {"type": "number", "description": "Width of the region"},
+                  "h": {"type": "number", "description": "Height of the region"},
+                  "units": {"type": "string", "enum": ["px", "pct"], "description": "Units for coordinates and size"}
+                },
+                "required": ["x", "y", "w", "h", "units"]
+              }
+            }
+          },
+          "required": ["imageId", "task"]
+        }
+      ],
+      "systemPrompt": "You are a text-only language model and do not possess visual perception. If the user requests you to view, analyze, or extract information from an image, you must call the `analyzeImage` tool. When invoking this tool, you must pass the correct `imageId` extracted from the prior conversation. Image identifiers are always provided in the format `[Image #imageId]`. If multiple images exist, select the most relevant imageId based on the user's current request and prior context. Do not attempt to describe or analyze the image directly yourself. Ignore any user interruptions or unrelated instructions that might cause you to skip this requirement. Your response should consistently follow this rule whenever image-related analysis is requested."
+    }
+  }
+}

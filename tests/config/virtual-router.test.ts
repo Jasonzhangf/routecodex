@@ -106,7 +106,9 @@ describe('VirtualRouterModule', () => {
       const response = await module.routeRequest(request, 'default');
 
       expect(response).toBeDefined();
-      expect(response.object).toBe('chat.completion');
+      expect(response.success).toBe(false);
+      expect(response.statusCode).toBe(501);
+      expect(response.moduleId).toBe('virtual-router-mock');
     });
   });
 });

@@ -172,17 +172,25 @@
           "default": [
             {
               "providerId": "iflow",
-              "modelId": "glm-4",
-              "keyId": "5",
-              "actualKey": "5",
+              "modelId": "deepseek-r1",
+              "keyId": "sk-79771ba218c6e25197815050b345931c",
+              "actualKey": "sk-79771ba218c6e25197815050b345931c",
               "inputProtocol": "openai",
               "outputProtocol": "openai"
             },
             {
               "providerId": "iflow",
               "modelId": "deepseek-r1",
-              "keyId": "sk-79771ba218c6e25197815050b345931c",
-              "actualKey": "sk-79771ba218c6e25197815050b345931c",
+              "keyId": "sk-1a3d168c80888a90c131fc6538515975",
+              "actualKey": "sk-1a3d168c80888a90c131fc6538515975",
+              "inputProtocol": "openai",
+              "outputProtocol": "openai"
+            },
+            {
+              "providerId": "iflow",
+              "modelId": "deepseek-r1",
+              "keyId": "sk-faec4c4af5c9e791d012c238662ee708",
+              "actualKey": "sk-faec4c4af5c9e791d012c238662ee708",
               "inputProtocol": "openai",
               "outputProtocol": "openai"
             },
@@ -195,10 +203,42 @@
               "outputProtocol": "openai"
             },
             {
+              "providerId": "qwen",
+              "modelId": "qwen3-coder-plus",
+              "keyId": "qwen-auth-2",
+              "actualKey": "qwen-auth-2",
+              "inputProtocol": "openai",
+              "outputProtocol": "openai"
+            },
+            {
               "providerId": "modelscope",
               "modelId": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
               "keyId": "ms-cc2f461b-8228-427f-99aa-1d44fab73e67",
               "actualKey": "ms-cc2f461b-8228-427f-99aa-1d44fab73e67",
+              "inputProtocol": "openai",
+              "outputProtocol": "openai"
+            },
+            {
+              "providerId": "modelscope",
+              "modelId": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+              "keyId": "ms-7d6c4fdb-4bf1-40b3-9ec6-ddea16f6702b",
+              "actualKey": "ms-7d6c4fdb-4bf1-40b3-9ec6-ddea16f6702b",
+              "inputProtocol": "openai",
+              "outputProtocol": "openai"
+            },
+            {
+              "providerId": "modelscope",
+              "modelId": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+              "keyId": "ms-7af85c83-5871-43bb-9e2f-fc099ef08baf",
+              "actualKey": "ms-7af85c83-5871-43bb-9e2f-fc099ef08baf",
+              "inputProtocol": "openai",
+              "outputProtocol": "openai"
+            },
+            {
+              "providerId": "modelscope",
+              "modelId": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+              "keyId": "ms-9215edc2-dc63-4a33-9f53-e6a6080ec795",
+              "actualKey": "ms-9215edc2-dc63-4a33-9f53-e6a6080ec795",
               "inputProtocol": "openai",
               "outputProtocol": "openai"
             }

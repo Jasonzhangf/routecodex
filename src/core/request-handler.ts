@@ -99,7 +99,7 @@ export class RequestHandler extends BaseModule {
   /**
    * Initialize the request handler
    */
-  public async initialize(): Promise<void> {
+  public async initialize(config?: any): Promise<void> {
     try {
       await ErrorHandlingUtils.initialize();
       await this.errorHandling.initialize();

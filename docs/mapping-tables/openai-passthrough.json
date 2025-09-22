@@ -1,0 +1,190 @@
+{
+  "sourceProvider": "OpenAI",
+  "targetProvider": "OpenAI",
+  "description": "LLMSwitch Module - OpenAI passthrough transformation table",
+  "version": "1.0",
+  "architecture": "passthrough",
+  "notes": "Direct passthrough for OpenAI requests without transformation",
+  "requestMappings": {
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "directMapping",
+      "description": "Model identifier passthrough"
+    },
+    "messages": {
+      "sourcePath": "messages",
+      "targetPath": "messages",
+      "transform": "directMapping",
+      "description": "Messages array passthrough"
+    },
+    "temperature": {
+      "sourcePath": "temperature",
+      "targetPath": "temperature",
+      "transform": "directMapping",
+      "description": "Temperature parameter passthrough"
+    },
+    "maxTokens": {
+      "sourcePath": "max_tokens",
+      "targetPath": "max_tokens",
+      "transform": "directMapping",
+      "description": "Maximum tokens passthrough"
+    },
+    "tools": {
+      "sourcePath": "tools",
+      "targetPath": "tools",
+      "transform": "directMapping",
+      "description": "Tools array passthrough"
+    },
+    "toolChoice": {
+      "sourcePath": "tool_choice",
+      "targetPath": "tool_choice",
+      "transform": "directMapping",
+      "description": "Tool choice passthrough"
+    },
+    "stop": {
+      "sourcePath": "stop",
+      "targetPath": "stop",
+      "transform": "directMapping",
+      "description": "Stop sequences passthrough"
+    },
+    "stream": {
+      "sourcePath": "stream",
+      "targetPath": "stream",
+      "transform": "directMapping",
+      "description": "Streaming setting passthrough"
+    },
+    "topP": {
+      "sourcePath": "top_p",
+      "targetPath": "top_p",
+      "transform": "directMapping",
+      "description": "Top P parameter passthrough"
+    },
+    "frequencyPenalty": {
+      "sourcePath": "frequency_penalty",
+      "targetPath": "frequency_penalty",
+      "transform": "directMapping",
+      "description": "Frequency penalty passthrough"
+    },
+    "presencePenalty": {
+      "sourcePath": "presence_penalty",
+      "targetPath": "presence_penalty",
+      "transform": "directMapping",
+      "description": "Presence penalty passthrough"
+    },
+    "user": {
+      "sourcePath": "user",
+      "targetPath": "user",
+      "transform": "directMapping",
+      "description": "User identifier passthrough"
+    }
+  },
+  "responseMappings": {
+    "id": {
+      "sourcePath": "id",
+      "targetPath": "id",
+      "transform": "directMapping",
+      "description": "Response identifier passthrough"
+    },
+    "object": {
+      "sourcePath": "object",
+      "targetPath": "object",
+      "transform": "directMapping",
+      "description": "Response object type passthrough"
+    },
+    "created": {
+      "sourcePath": "created",
+      "targetPath": "created",
+      "transform": "directMapping",
+      "description": "Creation timestamp passthrough"
+    },
+    "model": {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "transform": "directMapping",
+      "description": "Model identifier passthrough"
+    },
+    "choices": {
+      "sourcePath": "choices",
+      "targetPath": "choices",
+      "transform": "directMapping",
+      "description": "Response choices passthrough"
+    },
+    "usage": {
+      "sourcePath": "usage",
+      "targetPath": "usage",
+      "transform": "directMapping",
+      "description": "Usage statistics passthrough"
+    }
+  },
+  "finishReasonMappings": {
+    "openaiToOpenai": {
+      "stop": {
+        "source": "stop",
+        "target": "stop",
+        "description": "正常结束"
+      },
+      "length": {
+        "source": "length",
+        "target": "length",
+        "description": "达到最大token限制"
+      },
+      "tool_calls": {
+        "source": "tool_calls",
+        "target": "tool_calls",
+        "description": "需要调用工具"
+      },
+      "content_filter": {
+        "source": "content_filter",
+        "target": "content_filter",
+        "description": "内容过滤"
+      }
+    }
+  },
+  "toolMappings": {
+    "toolCalls": {
+      "sourceFormat": {
+        "id": "string",
+        "type": "function",
+        "function": {
+          "name": "string",
+          "arguments": "string"
+        }
+      },
+      "targetFormat": {
+        "id": "string",
+        "type": "function",
+        "function": {
+          "name": "string",
+          "arguments": "string"
+        }
+      }
+    },
+    "toolResults": {
+      "sourceFormat": {
+        "role": "tool",
+        "tool_call_id": "string",
+        "content": "string"
+      },
+      "targetFormat": {
+        "role": "tool",
+        "tool_call_id": "string",
+        "content": "string"
+      }
+    }
+  },
+  "specialFeatures": {
+    "passthroughMode": {
+      "description": "No transformation applied - direct passthrough",
+      "implementation": "Identity mapping"
+    },
+    "validationOnly": {
+      "description": "Validate OpenAI request format without transformation",
+      "implementation": "Schema validation"
+    },
+    "logging": {
+      "description": "Log all passthrough requests and responses",
+      "implementation": "Comprehensive audit trail"
+    }
+  }
+}

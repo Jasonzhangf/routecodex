@@ -1,0 +1,125 @@
+{
+  "pipelines": [
+    {
+      "id": "lmstudio.llama2-7b-chat",
+      "provider": {
+        "type": "lmstudio",
+        "baseUrl": "http://localhost:1234",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "${LM_STUDIO_API_KEY}"
+        },
+        "models": {
+          "llama2-7b-chat": {
+            "maxTokens": 4096,
+            "temperature": 0.7,
+            "supportsStreaming": true,
+            "supportsTools": true
+          },
+          "mistral-7b-instruct": {
+            "maxTokens": 4096,
+            "temperature": 0.7,
+            "supportsStreaming": true,
+            "supportsTools": true
+          }
+        },
+        "compatibility": {
+          "enabled": true,
+          "toolsApi": true,
+          "modelMapping": {
+            "gpt-4": "llama2-7b-chat",
+            "gpt-3.5-turbo": "llama2-7b-chat",
+            "gpt-4-turbo": "mistral-7b-instruct"
+          },
+          "toolTransformations": [
+            {
+              "id": "openai-to-lmstudio-tools",
+              "transform": "structure",
+              "sourcePath": "tools",
+              "targetPath": "tools",
+              "structure": {
+                "type": "array",
+                "itemMapping": {
+                  "function.name": "name",
+                  "function.description": "description",
+                  "function.parameters": "parameters"
+                },
+                "addFields": {
+                  "type": "function"
+                }
+              }
+            }
+          ],
+          "responseTransformations": [
+            {
+              "id": "lmstudio-to-openai-response",
+              "transform": "mapping",
+              "sourcePath": "choices.*.message.tool_calls",
+              "targetPath": "choices.*.message.tool_calls"
+            }
+          ]
+        }
+      },
+      "modules": {
+        "llmSwitch": {
+          "type": "openai-passthrough",
+          "config": {
+            "protocol": "openai",
+            "targetFormat": "lmstudio"
+          }
+        },
+        "workflow": {
+          "type": "streaming-control",
+          "config": {
+            "enableStreaming": true,
+            "convertToNonStreaming": false
+          }
+        },
+        "compatibility": {
+          "type": "lmstudio-compatibility",
+          "config": {
+            "toolsEnabled": true,
+            "customRules": [
+              {
+                "id": "message-format-adaptation",
+                "transform": "rename",
+                "sourcePath": "messages",
+                "targetPath": "messages"
+              },
+              {
+                "id": "temperature-mapping",
+                "transform": "mapping",
+                "sourcePath": "temperature",
+                "targetPath": "temperature",
+                "mapping": {
+                  "0.0": "0.0",
+                  "0.5": "0.5",
+                  "1.0": "1.0"
+                }
+              },
+              {
+                "id": "tool-choice-adaptation",
+                "transform": "mapping",
+                "sourcePath": "tool_choice",
+                "targetPath": "tool_choice"
+              }
+            ]
+          }
+        },
+        "provider": {
+          "type": "lmstudio-http",
+          "config": {
+            "timeout": 30000,
+            "retryAttempts": 3,
+            "healthCheckInterval": 60000
+          }
+        }
+      }
+    }
+  ],
+  "settings": {
+    "defaultTimeout": 30000,
+    "maxRetries": 3,
+    "debugLevel": "detailed"
+  }
+}
