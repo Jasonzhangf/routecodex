@@ -45,7 +45,7 @@
     "eslint": "^8.50.0",
     "@typescript-eslint/eslint-plugin": "^6.7.4",
     "@typescript-eslint/parser": "^6.7.4",
-    "@typescript-eslint/typescript-estree": "^6.7.4",
+    "@typescript-eslint/typescript-estree": "^8.44.0",
     "depcheck": "^1.4.3",
     "husky": "^9.0.0",
     "lint-staged": "^15.0.0"
