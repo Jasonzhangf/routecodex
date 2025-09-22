@@ -81,26 +81,15 @@ export class LMStudioProvider implements ProviderModule {
         hasTools: !!request.tools
       });
 
-      // Prepare request for LM Studio
-      const lmStudioRequest = this.prepareRequest(request);
-
-      // Handle tool calls if present
-      if (request.tools) {
-        return await this.handleToolCall(lmStudioRequest, request.tools);
-      }
-
-      // Send chat request
-      const response = await this.sendChatRequest(lmStudioRequest);
-
-      // Process response
-      const processedResponse = this.processResponse(response);
+      // Compatibility模块已经处理了所有转换，直接发送请求
+      const response = await this.sendChatRequest(request);
 
       this.logger.logProviderRequest(this.id, 'request-success', {
         responseTime: response.metadata?.processingTime,
         status: response.status
       });
 
-      return processedResponse;
+      return response;
 
     } catch (error) {
       await this.handleProviderError(error, request);
@@ -325,160 +314,9 @@ export class LMStudioProvider implements ProviderModule {
     }
   }
 
-  /**
-   * Prepare request for LM Studio API
-   */
-  private prepareRequest(request: any): any {
-    const providerConfig = this.config.config as ProviderConfig;
-
-    // Extract and map request parameters
-    const lmStudioRequest = {
-      model: this.mapModel(request.model),
-      messages: request.messages || [],
-      temperature: request.temperature ?? 0.7,
-      max_tokens: request.max_tokens ?? 2048,
-      stream: request.stream ?? false,
-      stop: request.stop,
-      presence_penalty: request.presence_penalty,
-      frequency_penalty: request.frequency_penalty
-    };
-
-    // Add model-specific parameters
-    if (providerConfig.models?.[request.model]) {
-      const modelConfig = providerConfig.models[request.model];
-      if (modelConfig.parameters) {
-        Object.assign(lmStudioRequest, modelConfig.parameters);
-      }
-    }
-
-    this.logger.logModule(this.id, 'request-prepared', {
-      model: lmStudioRequest.model,
-      messageCount: lmStudioRequest.messages.length,
-      hasStreaming: lmStudioRequest.stream
-    });
-
-    return lmStudioRequest;
-  }
-
-  /**
-   * Map OpenAI model to LM Studio model
-   */
-  private mapModel(openaiModel: string): string {
-    const providerConfig = this.config.config as ProviderConfig;
-
-    // Check compatibility mapping
-    if (providerConfig.compatibility?.modelMapping) {
-      const mapping = providerConfig.compatibility.modelMapping;
-      if (mapping[openaiModel]) {
-        return mapping[openaiModel];
-      }
-    }
-
-    // Default model mapping - include actual LM Studio models
-    const defaultMapping: Record<string, string> = {
-      'gpt-4': 'llama2-7b-chat',
-      'gpt-3.5-turbo': 'llama2-7b-chat',
-      'gpt-4-turbo': 'llama2-13b-chat',
-      'qwen3-4b-thinking-2507-mlx': 'qwen3-4b-thinking-2507-mlx',
-      'gpt-oss-20b-mlx': 'gpt-oss-20b-mlx'
-    };
-
-    // If no mapping found, return the original model name
-    return defaultMapping[openaiModel] || openaiModel;
-  }
-
-  /**
-   * Handle tool call execution
-   */
-  private async handleToolCall(request: any, tools: any[]): Promise<any> {
-    try {
-      this.logger.logModule(this.id, 'tool-call-start', {
-        toolCount: tools.length
-      });
-
-      // Use transformation engine to convert tools
-      const { TransformationEngine } = await import('../../utils/transformation-engine.js');
-      const transformationEngine = new TransformationEngine();
-
-      // Convert OpenAI tools to LM Studio format using configured rules
-      const lmStudioTools = await transformationEngine.transform(
-        { tools },
-        this.getToolTransformationRules()
-      );
-
-      // Send initial request with tools
-      const response = await this.sendChatRequest({
-        ...request,
-        tools: lmStudioTools.tools
-      });
-
-      // Check if model wants to call tools
-      if (response.tool_calls) {
-        // Execute tool calls
-        const toolResults = await this.executeToolCalls(response.tool_calls);
-
-        // Send follow-up request with tool results
-        const followUpResponse = await this.sendChatRequest({
-          ...request,
-          tool_results: toolResults
-        });
-
-        return followUpResponse;
-      }
-
-      return response;
-
-    } catch (error) {
-      this.logger.logModule(this.id, 'tool-call-error', { error });
-      throw error;
-    }
-  }
-
-  /**
-   * Get tool transformation rules from configuration
-   */
-  private getToolTransformationRules(): any[] {
-    const providerConfig = this.config.config as ProviderConfig;
-
-    // Get tool transformation rules from provider configuration
-    if (providerConfig.compatibility?.toolTransformations) {
-      return providerConfig.compatibility.toolTransformations;
-    }
-
-    // Default tool transformation rules - LM Studio expects OpenAI format directly
-    return [
-      {
-        id: 'openai-to-lmstudio-tools',
-        transform: 'mapping',
-        sourcePath: 'tools',
-        targetPath: 'tools',
-        mapping: {
-          'type': 'type',
-          'function': 'function'
-        }
-      }
-    ];
-  }
-
-  /**
-   * Execute tool calls
-   * Note: LM Studio automatically handles tool execution, so we just log the calls
-   */
-  private async executeToolCalls(toolCalls: any[]): Promise<any[]> {
-    // LM Studio automatically executes tool calls and includes results in the response
-    // We just need to log the calls for debugging
-    for (const toolCall of toolCalls) {
-      this.logger.logModule(this.id, 'tool-call-executed', {
-        toolName: toolCall.function?.name || 'unknown',
-        arguments: toolCall.function?.arguments || {},
-        toolCallId: toolCall.id
-      });
-    }
-
-    // Return empty array - LM Studio handles the actual execution
-    return [];
-  }
-
+  
+  
+  
   
   /**
    * Send chat request to LM Studio
@@ -534,43 +372,7 @@ export class LMStudioProvider implements ProviderModule {
     }
   }
 
-  /**
-   * Process provider response
-   */
-  private processResponse(response: ProviderResponse): any {
-    const processedResponse = {
-      ...response.data,
-      _providerMetadata: {
-        provider: 'lmstudio',
-        processingTime: response.metadata?.processingTime,
-        tokensUsed: response.metadata?.tokensUsed,
-        timestamp: Date.now()
-      }
-    };
-
-    // Map LM Studio response format to OpenAI format if needed
-    if (this.config.config?.compatibility?.enabled) {
-      return this.mapResponseToOpenAIFormat(processedResponse);
-    }
-
-    return processedResponse;
-  }
-
-  /**
-   * Map LM Studio response to OpenAI format
-   */
-  private mapResponseToOpenAIFormat(response: any): any {
-    return {
-      id: response.id || `chat-${Date.now()}`,
-      object: 'chat.completion',
-      created: Math.floor(Date.now() / 1000),
-      model: response.model,
-      choices: response.choices || [],
-      usage: response.usage,
-      _originalResponse: response
-    };
-  }
-
+  
   /**
    * Get API endpoint
    */
