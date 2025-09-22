@@ -5,6 +5,9 @@
   "main": "dist/index.js",
   "module": "dist/index.js",
   "type": "module",
+  "bin": {
+    "routecodex": "./dist/cli.js"
+  },
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -32,9 +35,9 @@
     "express": "^4.18.2",
     "helmet": "^7.0.0",
     "ora": "^9.0.0",
-    "rcc-basemodule": "^0.2.2",
-    "rcc-debugcenter": "^0.1.0",
-    "rcc-errorhandling": "^1.0.5"
+    "rcc-basemodule": "^0.2.5",
+    "rcc-debugcenter": ">=0.1.2",
+    "rcc-errorhandling": ">=1.0.7"
   },
   "devDependencies": {
     "@types/cors": "^2.8.13",
