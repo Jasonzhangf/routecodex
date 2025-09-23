@@ -4,7 +4,6 @@
   "description": "Multi-provider OpenAI proxy server",
   "main": "dist/index.js",
   "module": "dist/index.js",
-  "type": "module",
   "bin": {
     "routecodex": "./dist/cli.js"
   },
@@ -25,7 +24,10 @@
     "lint:fix": "eslint src --ext .ts --fix",
     "clean": "rm -rf dist",
     "prebuild": "echo 'Skipping lint for now'",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "install:global": "./scripts/simple-install.sh",
+    "install:quick": "./scripts/simple-install.sh",
+    "install:skip-tests": "./scripts/simple-install.sh"
   },
   "dependencies": {
     "chalk": "^5.6.2",

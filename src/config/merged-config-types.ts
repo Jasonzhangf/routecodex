@@ -50,6 +50,7 @@ export interface PipelineConfig {
   keyConfig: {
     keyId: string;
     actualKey: string;
+    keyType: 'apiKey' | 'authFile';
   };
   protocols: {
     input: 'openai' | 'anthropic';
@@ -71,6 +72,7 @@ export interface VirtualRouterConfig {
   moduleType: 'virtual-router';
   routeTargets: RouteTargetPool;
   pipelineConfigs: PipelineConfigs;
+  authMappings: Record<string, string>;
   inputProtocol: 'openai' | 'anthropic';
   outputProtocol: 'openai' | 'anthropic';
   timeout: number;
@@ -152,6 +154,7 @@ export interface UserConfig {
       type: string;
       baseURL: string;
       apiKey: string[];
+      auth?: Record<string, string>;
       models: Record<string, {
         maxContext?: number;
         maxTokens?: number;

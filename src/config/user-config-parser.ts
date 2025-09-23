@@ -12,23 +12,33 @@ import type {
 } from './merged-config-types.js';
 
 export class UserConfigParser {
+  private keyToAuthMapping: Record<string, string> = {};
+  private authMappings: Record<string, string> = {};
+
   /**
    * 解析用户配置
    */
   parseUserConfig(userConfig: UserConfig): {
     routeTargets: RouteTargetPool;
     pipelineConfigs: PipelineConfigs;
+    authMappings: Record<string, string>;
     moduleConfigs: ModuleConfigs;
   } {
+    this.authMappings = this.parseAuthMappings(userConfig.virtualrouter);
     const routeTargets = this.parseRouteTargets(userConfig.virtualrouter.routing);
     const pipelineConfigs = this.parsePipelineConfigs(userConfig.virtualrouter);
     const moduleConfigs = this.parseModuleConfigs(userConfig);
 
-    return {
+    const result = {
       routeTargets,
       pipelineConfigs,
+      authMappings: this.authMappings,
       moduleConfigs
     };
+
+    // Clear the mapping for next parsing
+    this.keyToAuthMapping = {};
+    return result;
   }
 
   /**
@@ -87,7 +97,8 @@ export class UserConfigParser {
             },
             keyConfig: {
               keyId,
-              actualKey: this.resolveActualKey(keyId)
+              actualKey: this.resolveActualKey(keyId),
+              keyType: this.keyToAuthMapping[keyId] ? 'authFile' : 'apiKey'
             },
             protocols: {
               input: virtualRouterConfig.inputProtocol as 'openai' | 'anthropic',
@@ -131,13 +142,60 @@ export class UserConfigParser {
   }
 
   /**
+   * 解析Auth映射
+   */
+  private parseAuthMappings(virtualRouterConfig: {
+    providers: Record<string, {
+      type: string;
+      baseURL: string;
+      apiKey: string[];
+      auth?: Record<string, string>;
+      models: Record<string, {
+        maxContext?: number;
+        maxTokens?: number;
+      }>;
+    }>;
+  }): Record<string, string> {
+    const authMappings: Record<string, string> = {};
+
+    for (const [providerId, providerConfig] of Object.entries(virtualRouterConfig.providers)) {
+      if (providerConfig.auth) {
+        for (const [authName, authPath] of Object.entries(providerConfig.auth)) {
+          // 生成唯一的auth id: auth-<name> 或 auth-<name>-<index>处理重名
+          let authId = `auth-${authName}`;
+          let counter = 1;
+
+          while (authMappings[authId]) {
+            authId = `auth-${authName}-${counter}`;
+            counter++;
+          }
+
+          authMappings[authId] = authPath;
+
+          // 建立key name到auth id的映射
+          this.keyToAuthMapping[authName] = authId;
+        }
+      }
+    }
+
+    return authMappings;
+  }
+
+  /**
    * 解析实际密钥
    */
   private resolveActualKey(keyId: string): string {
-    if (keyId.startsWith('authfile-')) {
-      // TODO: 实现AuthFile解析
+    // auth ids直接返回，运行时通过auth映射解析
+    if (keyId.startsWith('auth-')) {
       return keyId;
     }
+
+    // 检查是否在keyToAuthMapping中
+    const authId = this.keyToAuthMapping[keyId];
+    if (authId) {
+      return authId;
+    }
+
     return keyId;
   }
 }

@@ -4,6 +4,7 @@
  */
 
 import fs from 'fs/promises';
+import { homedir } from 'os';
 import { BaseModule } from '../../core/base-module.js';
 import { UserConfigParser } from '../../config/user-config-parser.js';
 import { ConfigMerger } from '../../config/config-merger.js';
@@ -134,7 +135,12 @@ export class ConfigManagerModule extends BaseModule {
    */
   private async loadUserConfig(): Promise<any> {
     try {
-      const configContent = await fs.readFile(this.configPath, 'utf-8');
+      // 展开路径中的 ~ 符号
+      const expandedPath = this.configPath.startsWith('~')
+        ? this.configPath.replace('~', homedir())
+        : this.configPath;
+
+      const configContent = await fs.readFile(expandedPath, 'utf-8');
       return JSON.parse(configContent);
     } catch (error) {
       console.error(`Failed to load user config from ${this.configPath}:`, error);
@@ -147,11 +153,16 @@ export class ConfigManagerModule extends BaseModule {
    */
   private async saveMergedConfig(mergedConfig: any): Promise<void> {
     try {
-      const configDir = this.mergedConfigPath.split('/').slice(0, -1).join('/');
+      // 展开路径中的 ~ 符号
+      const expandedPath = this.mergedConfigPath.startsWith('~')
+        ? this.mergedConfigPath.replace('~', homedir())
+        : this.mergedConfigPath;
+
+      const configDir = expandedPath.split('/').slice(0, -1).join('/');
       await fs.mkdir(configDir, { recursive: true });
 
       const configContent = JSON.stringify(mergedConfig, null, 2);
-      await fs.writeFile(this.mergedConfigPath, configContent, 'utf-8');
+      await fs.writeFile(expandedPath, configContent, 'utf-8');
 
       console.log(`💾 Merged configuration saved to ${this.mergedConfigPath}`);
     } catch (error) {

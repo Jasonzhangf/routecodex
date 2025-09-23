@@ -26,7 +26,8 @@ export class ConfigMerger {
       mergedModules.virtualrouter.config = {
         ...mergedModules.virtualrouter.config,
         routeTargets: parsedUserConfig.routeTargets,
-        pipelineConfigs: parsedUserConfig.pipelineConfigs
+        pipelineConfigs: parsedUserConfig.pipelineConfigs,
+        authMappings: parsedUserConfig.authMappings || {}
       };
     }
 

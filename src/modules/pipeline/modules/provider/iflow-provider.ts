@@ -8,6 +8,7 @@
 import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../types/provider-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
+import { AuthResolver } from '../../utils/auth-resolver.js';
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
@@ -77,6 +78,7 @@ export class iFlowProvider implements ProviderModule {
   private successCount = 0;
   private errorCount = 0;
   private totalResponseTime = 0;
+  private authResolver: AuthResolver;
 
   // OAuth configuration
   private oauthConfig: iFlowOAuthConfig = {
@@ -112,6 +114,10 @@ export class iFlowProvider implements ProviderModule {
     this.id = `provider-${Date.now()}`;
     this.config = config;
     this.logger = dependencies.logger as any;
+
+    // 初始化AuthResolver
+    const providerConfig = config.config as any;
+    this.authResolver = new AuthResolver(providerConfig.authMappings || {});
   }
 
   /**
@@ -150,7 +156,7 @@ export class iFlowProvider implements ProviderModule {
       throw new Error('iFlow Provider is not initialized');
     }
 
-    if (!this.authContext || !this.tokenData) {
+    if (!this.authContext) {
       throw new Error('iFlow Provider is not authenticated');
     }
 
@@ -165,8 +171,13 @@ export class iFlowProvider implements ProviderModule {
         hasTools: !!request.tools
       });
 
-      // Compatibility模块已经处理了所有转换，直接发送请求
-      const response = await this.sendChatRequest(request);
+      // 根据认证类型选择请求方式
+      let response;
+      if (this.authContext.type === 'apikey') {
+        response = await this.sendApiKeyRequest(request);
+      } else {
+        response = await this.sendChatRequest(request);
+      }
 
       // Update metrics
       const responseTime = Date.now() - startTime;
@@ -209,7 +220,16 @@ export class iFlowProvider implements ProviderModule {
       const startTime = Date.now();
 
       // Check authentication status
-      const isAuthValid = await this.validateToken();
+      let isAuthValid = false;
+      if (this.authContext) {
+        if (this.authContext.type === 'apikey') {
+          // For API key auth, just check if token exists
+          isAuthValid = !!this.authContext.token;
+        } else {
+          // For OAuth, validate token
+          isAuthValid = await this.validateToken();
+        }
+      }
 
       const responseTime = Date.now() - startTime;
       this.healthStatus = {
@@ -218,6 +238,7 @@ export class iFlowProvider implements ProviderModule {
         responseTime,
         details: {
           authentication: isAuthValid ? 'valid' : 'invalid',
+          authType: this.authContext?.type || 'unknown',
           tokenExpiry: this.tokenData ? new Date(Date.now() + (this.tokenData.expires_in * 1000)).toISOString() : 'unknown'
         }
       };
@@ -331,9 +352,17 @@ export class iFlowProvider implements ProviderModule {
       throw new Error('Provider base URL is required');
     }
 
-    // Override OAuth config if provided in provider config
-    if (providerConfig.auth && providerConfig.auth.oauth) {
-      Object.assign(this.oauthConfig, providerConfig.auth.oauth);
+    // Check if using auth file resolution or OAuth
+    if (providerConfig.auth && providerConfig.auth.type === 'apikey') {
+      // Using auth file resolution - validate auth configuration
+      if (!providerConfig.auth.apiKey) {
+        throw new Error('Auth API key configuration is required');
+      }
+    } else {
+      // Using OAuth - Override OAuth config if provided in provider config
+      if (providerConfig.auth && providerConfig.auth.oauth) {
+        Object.assign(this.oauthConfig, providerConfig.auth.oauth);
+      }
     }
 
     this.logger.logModule(this.id, 'config-validation-success', {
@@ -348,57 +377,105 @@ export class iFlowProvider implements ProviderModule {
    */
   private async initializeAuthentication(): Promise<void> {
     try {
-      // Try to load existing token and credentials
-      await this.loadCredentials();
-      await this.loadToken();
+      const providerConfig = this.config.config as ProviderConfig;
 
-      if (this.tokenData) {
-        // Validate and refresh if needed
-        const isValid = await this.validateToken();
-        if (!isValid) {
-          await this.refreshToken();
-        }
+      // Check if using auth file resolution or OAuth
+      if (providerConfig.auth && providerConfig.auth.type === 'apikey') {
+        // Using auth file resolution
+        await this.initializeAuthFileResolution();
       } else {
-        // Start OAuth device flow with PKCE
-        await this.startOAuthFlow();
+        // Using OAuth flow
+        await this.initializeOAuthFlow();
       }
 
-      // Setup automatic token refresh
-      this.setupTokenRefresh();
-
-      // Create auth context
-      this.authContext = {
-        type: 'oauth',
-        token: this.tokenData!.access_token,
-        credentials: {
-          accessToken: this.tokenData!.access_token,
-          refreshToken: this.tokenData!.refresh_token,
-          tokenType: this.tokenData!.token_type,
-          expiresAt: Date.now() + (this.tokenData!.expires_in * 1000)
-        },
-        metadata: {
-          provider: 'iflow',
-          clientId: this.oauthConfig.clientId,
-          scopes: this.oauthConfig.scopes,
-          initialized: Date.now()
-        }
-      };
-
-      // Notify调度中心认证成功
-      await this.notifyAuthStatus('authenticated', {
-        provider: 'iflow',
-        tokenExpiry: new Date(Date.now() + (this.tokenData!.expires_in * 1000)).toISOString()
-      });
-
       this.logger.logModule(this.id, 'auth-initialized', {
-        hasToken: !!this.tokenData,
-        tokenExpiry: this.tokenData ? new Date(Date.now() + (this.tokenData.expires_in * 1000)).toISOString() : 'unknown'
+        hasToken: !!this.authContext?.token,
+        authType: this.authContext?.type
       });
 
     } catch (error) {
       this.logger.logModule(this.id, 'auth-initialization-error', { error });
       throw error;
     }
+  }
+
+  /**
+   * Initialize auth file resolution
+   */
+  private async initializeAuthFileResolution(): Promise<void> {
+    const providerConfig = this.config.config as ProviderConfig;
+    const authConfig = providerConfig.auth;
+
+    // 使用AuthResolver解析token
+    const actualApiKey = await this.authResolver.resolveToken(authConfig!.apiKey);
+
+    this.authContext = {
+      type: authConfig!.type,
+      token: actualApiKey,
+      credentials: {
+        apiKey: actualApiKey,
+        headerName: authConfig!.headerName || 'Authorization',
+        prefix: authConfig!.prefix || 'Bearer '
+      },
+      metadata: {
+        provider: 'iflow',
+        initialized: Date.now(),
+        authKeyId: authConfig!.apiKey?.startsWith('auth-') ? authConfig!.apiKey : undefined
+      }
+    };
+
+    this.logger.logModule(this.id, 'auth-file-resolution-initialized', {
+      type: authConfig!.type,
+      hasToken: !!this.authContext.token,
+      authKeyId: this.authContext.metadata?.authKeyId
+    });
+  }
+
+  /**
+   * Initialize OAuth flow
+   */
+  private async initializeOAuthFlow(): Promise<void> {
+    // Try to load existing token and credentials
+    await this.loadCredentials();
+    await this.loadToken();
+
+    if (this.tokenData) {
+      // Validate and refresh if needed
+      const isValid = await this.validateToken();
+      if (!isValid) {
+        await this.refreshToken();
+      }
+    } else {
+      // Start OAuth device flow with PKCE
+      await this.startOAuthFlow();
+    }
+
+    // Setup automatic token refresh
+    this.setupTokenRefresh();
+
+    // Create auth context
+    this.authContext = {
+      type: 'oauth',
+      token: this.tokenData!.access_token,
+      credentials: {
+        accessToken: this.tokenData!.access_token,
+        refreshToken: this.tokenData!.refresh_token,
+        tokenType: this.tokenData!.token_type,
+        expiresAt: Date.now() + (this.tokenData!.expires_in * 1000)
+      },
+      metadata: {
+        provider: 'iflow',
+        clientId: this.oauthConfig.clientId,
+        scopes: this.oauthConfig.scopes,
+        initialized: Date.now()
+      }
+    };
+
+    // Notify调度中心认证成功
+    await this.notifyAuthStatus('authenticated', {
+      provider: 'iflow',
+      tokenExpiry: new Date(Date.now() + (this.tokenData!.expires_in * 1000)).toISOString()
+    });
   }
 
   /**
@@ -797,6 +874,55 @@ export class iFlowProvider implements ProviderModule {
     this.logger.logModule(this.id, 'token-refresh-setup', {
       refreshInterval
     });
+  }
+
+  /**
+   * Send API key request to iFlow (using auth file resolution)
+   */
+  private async sendApiKeyRequest(request: any): Promise<ProviderResponse> {
+    const startTime = Date.now();
+    const endpoint = `${this.apiEndpoint}/chat/completions`;
+
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'User-Agent': 'RouteCodex/1.0.0'
+      };
+
+      // Add authentication header
+      const authHeader = this.authContext!.credentials.headerName || 'Authorization';
+      const authPrefix = this.authContext!.credentials.prefix || 'Bearer ';
+      headers[authHeader] = authPrefix + this.authContext!.token;
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(request)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`iFlow API error: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+
+      const data = await response.json();
+      const processingTime = Date.now() - startTime;
+
+      return {
+        data,
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        metadata: {
+          requestId: `req-${Date.now()}`,
+          processingTime,
+          tokensUsed: data.usage?.total_tokens,
+          model: request.model
+        }
+      };
+
+    } catch (error) {
+      throw this.createProviderError(error, 'network');
+    }
   }
 
   /**

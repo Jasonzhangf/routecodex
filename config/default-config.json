@@ -1,0 +1,40 @@
+{
+  "server": {
+    "port": 5506,
+    "host": "localhost"
+  },
+  "logging": {
+    "level": "info",
+    "format": "json"
+  },
+  "providers": {
+    "openai": {
+      "type": "openai",
+      "apiKey": "${OPENAI_API_KEY}",
+      "baseUrl": "https://api.openai.com/v1",
+      "models": {
+        "gpt-4": {
+          "maxTokens": 8192,
+          "temperature": 0.7
+        },
+        "gpt-3.5-turbo": {
+          "maxTokens": 4096,
+          "temperature": 0.7
+        }
+      }
+    }
+  },
+  "routing": {
+    "default": "openai"
+  },
+  "features": {
+    "tools": {
+      "enabled": true,
+      "maxTools": 10
+    },
+    "streaming": {
+      "enabled": true,
+      "chunkSize": 1024
+    }
+  }
+}

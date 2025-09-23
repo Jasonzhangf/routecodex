@@ -27,7 +27,7 @@ const program = new Command();
 program
   .name('routecodex')
   .description('Multi-provider OpenAI proxy server')
-  .version('0.0.1');
+  .version('0.2.7');
 
 // Start command
 program
@@ -41,8 +41,8 @@ program
     const spinner = ora('Starting RouteCodex server...').start();
 
     try {
-      // Import ESM modules dynamically
-      const { RouteCodexServer } = await import('./server/RouteCodexServer.js');
+      // Import main application
+      const { main } = await import('./index.js');
 
       // Resolve config path
       let configPath = options.config;
@@ -95,29 +95,15 @@ program
         logger.success(`Default configuration created: ${configPath}`);
       }
 
-      // Load configuration
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-
-      // Override with command line options
-      if (options.port) config.server.port = parseInt(options.port);
-      if (options.host) config.server.host = options.host;
-      if (options.logLevel) config.logging.level = options.logLevel;
-
-      // Create and start server
-      const server = new RouteCodexServer(config);
-      await server.initialize();
-      await server.start();
+      // Set modules config path in process.argv and start the main application
+      process.argv[2] = './config/modules.json';
+      await main();
 
       spinner.succeed(`RouteCodex server started on ${options.host}:${options.port}`);
       logger.info(`Configuration loaded from: ${configPath}`);
       logger.info('Press Ctrl+C to stop the server');
 
-      // Handle graceful shutdown
-      process.on('SIGINT', async () => {
-        logger.info('Shutting down server...');
-        await server.stop();
-        process.exit(0);
-      });
+      // Note: Graceful shutdown is handled by the main application
 
     } catch (error) {
       spinner.fail('Failed to start server');
@@ -130,13 +116,19 @@ program
 program
   .command('config')
   .description('Configuration management')
-  .argument('<action>', 'Action to perform (show, edit, validate)')
+  .argument('<action>', 'Action to perform (show, edit, validate, init)')
   .option('-c, --config <config>', 'Configuration file path')
+  .option('-t, --template <template>', 'Configuration template (default, lmstudio, oauth)')
+  .option('-f, --force', 'Force overwrite existing configuration')
   .action(async (action, options) => {
     try {
       const configPath = options.config || path.join(homedir(), '.routecodex', 'config.json');
 
       switch (action) {
+        case 'init':
+          await initializeConfig(configPath, options.template, options.force);
+          break;
+
         case 'show':
           if (fs.existsSync(configPath)) {
             const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -166,12 +158,233 @@ program
           break;
 
         default:
-          logger.error('Unknown action. Use: show, edit, validate');
+          logger.error('Unknown action. Use: show, edit, validate, init');
       }
     } catch (error) {
       logger.error('Config command failed: ' + (error instanceof Error ? error.message : String(error)));
     }
   });
+
+// Initialize configuration helper function
+async function initializeConfig(configPath: string, template?: string, force: boolean = false) {
+  const spinner = ora('Initializing configuration...').start();
+
+  try {
+    // Create config directory if it doesn't exist
+    const configDir = path.dirname(configPath);
+    if (!fs.existsSync(configDir)) {
+      fs.mkdirSync(configDir, { recursive: true });
+    }
+
+    // Check if config already exists
+    if (fs.existsSync(configPath) && !force) {
+      spinner.warn('Configuration file already exists');
+      spinner.info('Use --force flag to overwrite or choose a different path');
+      return;
+    }
+
+    // Load template
+    let templateConfig: any;
+
+    switch (template) {
+      case 'lmstudio':
+        templateConfig = {
+          server: {
+            port: 5506,
+            host: "localhost"
+          },
+          logging: {
+            level: "info",
+            format: "json"
+          },
+          providers: {
+            lmstudio: {
+              type: "lmstudio",
+              baseUrl: "http://localhost:1234",
+              apiKey: "${LM_STUDIO_API_KEY:-}",
+              models: {
+                "llama3-8b-instruct": {
+                  maxTokens: 8192,
+                  temperature: 0.7,
+                  supportsStreaming: true,
+                  supportsTools: true
+                },
+                "llama3-70b-instruct": {
+                  maxTokens: 8192,
+                  temperature: 0.7,
+                  supportsStreaming: true,
+                  supportsTools: true
+                },
+                "qwen2.5-7b-instruct": {
+                  maxTokens: 32768,
+                  temperature: 0.7,
+                  supportsStreaming: true,
+                  supportsTools: true
+                }
+              },
+              timeout: 60000,
+              retryAttempts: 3
+            }
+          },
+          routing: {
+            default: "lmstudio",
+            models: {
+              "gpt-4": "llama3-70b-instruct",
+              "gpt-4-turbo": "llama3-70b-instruct",
+              "gpt-3.5-turbo": "llama3-8b-instruct",
+              "claude-3-haiku": "qwen2.5-7b-instruct",
+              "claude-3-sonnet": "llama3-70b-instruct"
+            }
+          },
+          features: {
+            tools: {
+              enabled: true,
+              maxTools: 10
+            },
+            streaming: {
+              enabled: true,
+              chunkSize: 1024
+            },
+            oauth: {
+              enabled: true,
+              providers: ["qwen", "iflow"]
+            }
+          }
+        };
+        break;
+
+      case 'oauth':
+        templateConfig = {
+          server: {
+            port: 5506,
+            host: "localhost"
+          },
+          logging: {
+            level: "info",
+            format: "json"
+          },
+          providers: {
+            qwen: {
+              type: "qwen-http",
+              baseUrl: "https://chat.qwen.ai",
+              oauth: {
+                clientId: "f0304373b74a44d2b584a3fb70ca9e56",
+                deviceCodeUrl: "https://chat.qwen.ai/api/v1/oauth2/device/code",
+                tokenUrl: "https://chat.qwen.ai/api/v1/oauth2/token",
+                scopes: ["openid", "profile", "email", "model.completion"]
+              },
+              models: {
+                "qwen3-coder-plus": {
+                  maxTokens: 32768,
+                  temperature: 0.7,
+                  supportsStreaming: true,
+                  supportsTools: true
+                }
+              }
+            },
+            iflow: {
+              type: "iflow-http",
+              baseUrl: "https://api.iflow.cn/v1",
+              oauth: {
+                clientId: "10009311001",
+                clientSecret: "4Z3YjXycVsQvyGF1etiNlIBB4RsqSDtW",
+                authUrl: "https://iflow.cn/oauth",
+                tokenUrl: "https://iflow.cn/oauth/token",
+                deviceCodeUrl: "https://iflow.cn/oauth/device/code",
+                scopes: ["openid", "profile", "api"]
+              },
+              models: {
+                "iflow-pro": {
+                  maxTokens: 32768,
+                  temperature: 0.7,
+                  supportsStreaming: true,
+                  supportsTools: true
+                }
+              }
+            }
+          },
+          routing: {
+            default: "qwen",
+            models: {
+              "gpt-4": "qwen3-coder-plus",
+              "gpt-3.5-turbo": "qwen3-coder-plus",
+              "claude-3-haiku": "qwen3-coder-plus",
+              "claude-3-sonnet": "iflow-pro"
+            }
+          },
+          features: {
+            tools: {
+              enabled: true,
+              maxTools: 10
+            },
+            streaming: {
+              enabled: true,
+              chunkSize: 1024
+            },
+            oauth: {
+              enabled: true,
+              autoRefresh: true,
+              sharedCredentials: true
+            }
+          }
+        };
+        break;
+
+      default:
+        templateConfig = {
+          server: {
+            port: 5506,
+            host: "localhost"
+          },
+          logging: {
+            level: "info",
+            format: "json"
+          },
+          providers: {
+            openai: {
+              type: "openai",
+              apiKey: "${OPENAI_API_KEY}",
+              baseUrl: "https://api.openai.com/v1",
+              models: {
+                "gpt-4": {
+                  maxTokens: 8192,
+                  temperature: 0.7
+                },
+                "gpt-3.5-turbo": {
+                  maxTokens: 4096,
+                  temperature: 0.7
+                }
+              }
+            }
+          },
+          routing: {
+            default: "openai"
+          },
+          features: {
+            tools: {
+              enabled: true,
+              maxTools: 10
+            },
+            streaming: {
+              enabled: true,
+              chunkSize: 1024
+            }
+          }
+        };
+    }
+
+    // Write configuration file
+    fs.writeFileSync(configPath, JSON.stringify(templateConfig, null, 2));
+
+    spinner.succeed(`Configuration initialized: ${configPath}`);
+    logger.info(`Template used: ${template || 'default'}`);
+    logger.info('You can now start the server with: routecodex start');
+
+  } catch (error) {
+    spinner.fail('Failed to initialize configuration');
+    logger.error('Initialization failed: ' + (error instanceof Error ? error.message : String(error)));
+  }
+}
 
 // Status command
 program
@@ -239,6 +452,65 @@ program
     } catch (error) {
       logger.error('Status check failed: ' + (error instanceof Error ? error.message : String(error)));
     }
+  });
+
+// Examples command
+program
+  .command('examples')
+  .description('Show usage examples')
+  .action(() => {
+    console.log(chalk.cyan('RouteCodex Usage Examples'));
+    console.log('='.repeat(40));
+    console.log('');
+
+    console.log(chalk.yellow('1. Initialize Configuration:'));
+    console.log('  # Create default configuration');
+    console.log('  routecodex config init');
+    console.log('');
+    console.log('  # Create LMStudio configuration');
+    console.log('  routecodex config init --template lmstudio');
+    console.log('');
+    console.log('  # Create OAuth configuration');
+    console.log('  routecodex config init --template oauth');
+    console.log('');
+
+    console.log(chalk.yellow('2. Start Server:'));
+    console.log('  # Start with default config');
+    console.log('  routecodex start');
+    console.log('');
+    console.log('  # Start with custom config');
+    console.log('  routecodex start --config ./config/lmstudio-config.json');
+    console.log('');
+    console.log('  # Start with custom port');
+    console.log('  routecodex start --port 8080');
+    console.log('');
+
+    console.log(chalk.yellow('3. Configuration Management:'));
+    console.log('  # Show current configuration');
+    console.log('  routecodex config show');
+    console.log('');
+    console.log('  # Edit configuration');
+    console.log('  routecodex config edit');
+    console.log('');
+    console.log('  # Validate configuration');
+    console.log('  routecodex config validate');
+    console.log('');
+
+    console.log(chalk.yellow('4. Environment Variables:'));
+    console.log('  # Set LM Studio API Key');
+    console.log('  export LM_STUDIO_API_KEY="your-api-key"');
+    console.log('');
+    console.log('  # Set OpenAI API Key');
+    console.log('  export OPENAI_API_KEY="your-api-key"');
+    console.log('');
+
+    console.log(chalk.yellow('5. Testing:'));
+    console.log('  # Test with curl');
+    console.log('  curl -X POST http://localhost:5506/v1/chat/completions \\');
+    console.log('    -H "Content-Type: application/json" \\');
+    console.log('    -H "Authorization: Bearer test-key" \\');
+    console.log('    -d \'{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello!"}]}\'');
+    console.log('');
   });
 
 // Parse command line arguments

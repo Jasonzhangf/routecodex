@@ -1,0 +1,80 @@
+{
+  "server": {
+    "port": 5506,
+    "host": "localhost"
+  },
+  "logging": {
+    "level": "info",
+    "format": "json"
+  },
+  "providers": {
+    "lmstudio": {
+      "type": "lmstudio",
+      "baseUrl": "http://localhost:1234",
+      "apiKey": "${LM_STUDIO_API_KEY:-}",
+      "models": {
+        "llama3-8b-instruct": {
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "supportsStreaming": true,
+          "supportsTools": true
+        },
+        "llama3-70b-instruct": {
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "supportsStreaming": true,
+          "supportsTools": true
+        },
+        "qwen2.5-7b-instruct": {
+          "maxTokens": 32768,
+          "temperature": 0.7,
+          "supportsStreaming": true,
+          "supportsTools": true
+        },
+        "mistral-7b-instruct": {
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "supportsStreaming": true,
+          "supportsTools": true
+        }
+      },
+      "timeout": 60000,
+      "retryAttempts": 3
+    }
+  },
+  "routing": {
+    "default": "lmstudio",
+    "models": {
+      "gpt-4": "llama3-70b-instruct",
+      "gpt-4-turbo": "llama3-70b-instruct",
+      "gpt-3.5-turbo": "llama3-8b-instruct",
+      "claude-3-haiku": "qwen2.5-7b-instruct",
+      "claude-3-sonnet": "llama3-70b-instruct"
+    }
+  },
+  "features": {
+    "tools": {
+      "enabled": true,
+      "maxTools": 10
+    },
+    "streaming": {
+      "enabled": true,
+      "chunkSize": 1024
+    },
+    "oauth": {
+      "enabled": true,
+      "providers": ["qwen", "iflow"]
+    }
+  },
+  "security": {
+    "cors": {
+      "enabled": true,
+      "origins": ["http://localhost:3000", "http://localhost:8080"]
+    },
+    "rateLimit": {
+      "enabled": true,
+      "requests": 100,
+      "windowMs": 60000
+    }
+  }
+}

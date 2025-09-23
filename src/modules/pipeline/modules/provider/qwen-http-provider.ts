@@ -8,6 +8,7 @@
 import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../types/provider-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
+import { AuthResolver } from '../../utils/auth-resolver.js';
 
 /**
  * Qwen HTTP Provider Module
@@ -23,11 +24,16 @@ export class QwenHTTPProvider implements ProviderModule {
   private authContext: AuthContext | null = null;
   private httpClient: any; // Would be HTTP client instance
   private healthStatus: any = null;
+  private authResolver: AuthResolver;
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
     this.id = `provider-${Date.now()}`;
     this.config = config;
     this.logger = dependencies.logger as any;
+
+    // 初始化AuthResolver
+    const providerConfig = config.config as any;
+    this.authResolver = new AuthResolver(providerConfig.authMappings || {});
   }
 
   /**
@@ -249,26 +255,32 @@ export class QwenHTTPProvider implements ProviderModule {
     const providerConfig = this.config.config as ProviderConfig;
     const authConfig = providerConfig.auth;
 
+    // 使用AuthResolver解析token
+    const actualApiKey = await this.authResolver.resolveToken(authConfig.apiKey);
+
     this.authContext = {
       type: authConfig.type,
-      token: authConfig.apiKey,
+      token: actualApiKey,
       credentials: {
-        apiKey: authConfig.apiKey,
+        apiKey: actualApiKey,
         headerName: authConfig.headerName || 'Authorization',
         prefix: authConfig.prefix || 'Bearer '
       },
       metadata: {
         provider: 'qwen',
-        initialized: Date.now()
+        initialized: Date.now(),
+        authKeyId: authConfig.apiKey?.startsWith('auth-') ? authConfig.apiKey : undefined
       }
     };
 
     this.logger.logModule(this.id, 'auth-initialized', {
       type: authConfig.type,
-      hasToken: !!this.authContext.token
+      hasToken: !!this.authContext.token,
+      authKeyId: this.authContext.metadata?.authKeyId
     });
   }
 
+  
   /**
    * Initialize HTTP client
    */
