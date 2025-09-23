@@ -12,6 +12,9 @@ import type {
   ModuleFactory,
   ModuleDependencies
 } from '../interfaces/pipeline-interfaces.js';
+import type { DebugCenter } from '../types/external-types.js';
+import { DebugEventBus } from 'rcc-debugcenter';
+import { ModuleEnhancementFactory } from '../../enhancement/module-enhancement-factory.js';
 
 /**
  * Registry entry for module factories
@@ -22,6 +25,9 @@ interface RegistryEntry {
   description?: string;
   dependencies?: string[];
   version?: string;
+  registeredAt: number;
+  usageCount: number;
+  debugEnabled: boolean;
 }
 
 /**
@@ -32,8 +38,16 @@ export class PipelineModuleRegistryImpl implements PipelineModuleRegistry {
   private instances: Map<string, PipelineModule> = new Map();
   private creationCount = 0;
 
+  // Debug enhancement properties
+  private isEnhanced = false;
+  private debugEventBus: DebugEventBus | null = null;
+  private enhancementFactory: ModuleEnhancementFactory | null = null;
+  private registryMetrics: Map<string, any> = new Map();
+  private creationHistory: any[] = [];
+  private maxHistorySize = 100;
+
   /**
-   * Register a module factory
+   * Register a module factory with enhanced debugging
    */
   registerModule(type: string, factory: ModuleFactory): void {
     if (this.factories.has(type)) {
@@ -44,23 +58,54 @@ export class PipelineModuleRegistryImpl implements PipelineModuleRegistry {
       factory,
       type,
       description: `Module factory for ${type}`,
-      version: '1.0.0'
+      version: '1.0.0',
+      registeredAt: Date.now(),
+      usageCount: 0,
+      debugEnabled: this.isEnhanced
     };
 
     this.factories.set(type, entry);
+
+    // Enhanced debugging
+    if (this.isEnhanced) {
+      this.publishRegistryEvent('module-registered', {
+        type,
+        description: entry.description,
+        version: entry.version,
+        totalRegistered: this.factories.size
+      });
+      this.recordRegistryMetric('registration', 1);
+    }
   }
 
   /**
-   * Create a module instance
+   * Create a module instance with enhanced debugging
    */
   async createModule(config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> {
+    const startTime = Date.now();
     const entry = this.factories.get(config.type);
 
     if (!entry) {
+      if (this.isEnhanced) {
+        this.publishRegistryEvent('creation-failed', {
+          type: config.type,
+          error: 'No module factory registered',
+          availableTypes: this.getAvailableTypes()
+        });
+      }
       throw new Error(`No module factory registered for type: ${config.type}`);
     }
 
     try {
+      // Enhanced creation logging
+      if (this.isEnhanced) {
+        this.publishRegistryEvent('creation-start', {
+          type: config.type,
+          config,
+          dependencies: Object.keys(dependencies)
+        });
+      }
+
       // Validate dependencies
       this.validateDependencies(dependencies);
 
@@ -74,10 +119,48 @@ export class PipelineModuleRegistryImpl implements PipelineModuleRegistry {
       const instanceId = this.generateInstanceId(config.type);
       this.instances.set(instanceId, instance);
       this.creationCount++;
+      entry.usageCount++;
+
+      // Enhanced creation completion logging
+      const creationTime = Date.now() - startTime;
+      if (this.isEnhanced) {
+        this.publishRegistryEvent('creation-complete', {
+          type: config.type,
+          instanceId,
+          creationTime,
+          entry,
+          totalCreations: this.creationCount,
+          activeInstances: this.instances.size
+        });
+        this.addToCreationHistory({
+          type: config.type,
+          instanceId,
+          creationTime,
+          success: true,
+          timestamp: Date.now()
+        });
+        this.recordRegistryMetric('creation_time', creationTime);
+      }
 
       return instance;
 
     } catch (error) {
+      const creationTime = Date.now() - startTime;
+      if (this.isEnhanced) {
+        this.publishRegistryEvent('creation-error', {
+          type: config.type,
+          error: error instanceof Error ? error.message : String(error),
+          creationTime,
+          stack: error instanceof Error ? error.stack : undefined
+        });
+        this.addToCreationHistory({
+          type: config.type,
+          creationTime,
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+          timestamp: Date.now()
+        });
+      }
       throw new Error(`Failed to create module of type ${config.type}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -104,10 +187,23 @@ export class PipelineModuleRegistryImpl implements PipelineModuleRegistry {
   }
 
   /**
-   * Unregister a module type
+   * Unregister a module type with enhanced debugging
    */
   unregisterModule(type: string): boolean {
-    return this.factories.delete(type);
+    const hadModule = this.factories.has(type);
+    const entry = this.factories.get(type);
+
+    const result = this.factories.delete(type);
+
+    if (this.isEnhanced && hadModule) {
+      this.publishRegistryEvent('module-unregistered', {
+        type,
+        entry,
+        remainingTypes: this.factories.size
+      });
+    }
+
+    return result;
   }
 
   /**
@@ -269,7 +365,7 @@ export class PipelineModuleRegistryImpl implements PipelineModuleRegistry {
   }
 
   /**
-   * Get registry status
+   * Get enhanced registry status with debug information
    */
   getStatus(): {
     isInitialized: boolean;
@@ -277,13 +373,207 @@ export class PipelineModuleRegistryImpl implements PipelineModuleRegistry {
     totalCreations: number;
     activeInstances: number;
     moduleTypes: string[];
+    debugInfo?: any;
+    performanceStats?: any;
+    creationHistory?: any[];
   } {
-    return {
+    const baseStatus = {
       isInitialized: this.factories.size > 0,
       registeredTypes: this.factories.size,
       totalCreations: this.creationCount,
       activeInstances: this.instances.size,
       moduleTypes: this.getAvailableTypes()
     };
+
+    // Add enhanced debug information if enabled
+    if (this.isEnhanced) {
+      return {
+        ...baseStatus,
+        debugInfo: this.getDebugInfo(),
+        performanceStats: this.getPerformanceStats(),
+        creationHistory: [...this.creationHistory]
+      };
+    }
+
+    return baseStatus;
+  }
+
+  /**
+   * Initialize debug enhancements
+   */
+  initializeDebugEnhancements(): void {
+    try {
+      this.debugEventBus = DebugEventBus.getInstance();
+
+      // Create a default debug center for enhancement factory
+      const debugCenter = {
+        enabled: true,
+        logLevel: 'info',
+        consoleOutput: true
+      };
+
+      // Initialize enhancement factory with proper debug center
+      // @ts-ignore - DebugCenter interface mismatch, using mock object
+      this.enhancementFactory = new ModuleEnhancementFactory(debugCenter as any);
+
+      // Register this registry for enhancement
+      this.enhancementFactory.registerConfig('module-registry', {
+        enabled: true,
+        level: 'detailed',
+        consoleLogging: true,
+        debugCenter: true,
+        performanceTracking: true,
+        requestLogging: true,
+        errorTracking: true,
+        transformationLogging: true
+      });
+
+      // Subscribe to registry-specific events
+      this.subscribeToRegistryEvents();
+
+      this.isEnhanced = true;
+
+      console.log('Module registry debug enhancements initialized with full functionality');
+    } catch (error) {
+      console.warn('Failed to initialize registry debug enhancements:', error);
+    }
+  }
+
+  /**
+   * Subscribe to registry-specific debug events
+   */
+  private subscribeToRegistryEvents(): void {
+    if (!this.debugEventBus) return;
+
+    this.debugEventBus.subscribe('registry-subscription', (event: any) => {
+      this.handleRegistryDebugEvent(event);
+    });
+  }
+
+  /**
+   * Handle registry debug events
+   */
+  private handleRegistryDebugEvent(event: any): void {
+    // Process registry-specific debug events
+    if (event.type === 'performance') {
+      this.recordRegistryMetric(event.data.operationId, event.data.processingTime);
+    }
+
+    // Forward to web interface
+    this.publishToWebSocket(event);
+  }
+
+  /**
+   * Record registry-level performance metrics
+   */
+  private recordRegistryMetric(operationId: string, value: number): void {
+    if (!this.registryMetrics.has(operationId)) {
+      this.registryMetrics.set(operationId, {
+        values: [],
+        lastUpdated: Date.now()
+      });
+    }
+
+    const metric = this.registryMetrics.get(operationId)!;
+    metric.values.push(value);
+    metric.lastUpdated = Date.now();
+
+    // Keep only last 50 measurements
+    if (metric.values.length > 50) {
+      metric.values.shift();
+    }
+  }
+
+  /**
+   * Get registry performance statistics
+   */
+  private getPerformanceStats(): any {
+    const stats: any = {};
+
+    for (const [operationId, metric] of this.registryMetrics.entries()) {
+      const values = metric.values;
+      if (values.length > 0) {
+        stats[operationId] = {
+          count: values.length,
+          avg: Math.round(values.reduce((a: any, b: any) => a + b, 0) / values.length),
+          min: Math.min(...values),
+          max: Math.max(...values),
+          lastUpdated: metric.lastUpdated
+        };
+      }
+    }
+
+    return stats;
+  }
+
+  /**
+   * Get detailed registry debug information
+   */
+  private getDebugInfo(): any {
+    return {
+      registryId: 'module-registry',
+      enhanced: this.isEnhanced,
+      eventBusAvailable: !!this.debugEventBus,
+      registeredTypes: this.factories.size,
+      totalCreations: this.creationCount,
+      activeInstances: this.instances.size,
+      performanceStats: this.getPerformanceStats(),
+      creationHistorySize: this.creationHistory.length,
+      availableTypes: this.getAvailableTypes()
+    };
+  }
+
+  /**
+   * Publish registry-specific events
+   */
+  private publishRegistryEvent(type: string, data: any): void {
+    if (!this.isEnhanced) return;
+
+    this.publishToWebSocket({
+      type: 'registry',
+      timestamp: Date.now(),
+      data: {
+        operation: type,
+        registryId: 'module-registry',
+        ...data
+      }
+    });
+  }
+
+  /**
+   * Add creation to history for debugging
+   */
+  private addToCreationHistory(creation: any): void {
+    this.creationHistory.push(creation);
+
+    // Keep only recent history
+    if (this.creationHistory.length > this.maxHistorySize) {
+      this.creationHistory.shift();
+    }
+  }
+
+  /**
+   * Publish event to WebSocket
+   */
+  private publishToWebSocket(event: any): void {
+    if (!this.debugEventBus) return;
+
+    try {
+      this.debugEventBus.publish({
+        sessionId: event.sessionId || 'system',
+        moduleId: 'module-registry',
+        operationId: event.operationId || event.type,
+        timestamp: event.timestamp || Date.now(),
+        type: event.type || 'debug',
+        position: 'middle',
+        data: {
+          ...event.data,
+          registryId: 'module-registry',
+          source: 'module-registry'
+        }
+      });
+    } catch (error) {
+      // Silent fail if WebSocket is not available
+    }
   }
 }

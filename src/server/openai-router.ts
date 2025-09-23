@@ -23,6 +23,7 @@ import {
   type ServerConfig
 } from './types.js';
 import { PassThroughProvider } from '../providers/pass-through-provider.js';
+import { ConfigRequestClassifier } from '../modules/virtual-router/classifiers/config-request-classifier.js';
 
 /**
  * OpenAI Router configuration interface
@@ -35,6 +36,13 @@ export interface OpenAIRouterConfig {
   authEnabled?: boolean;
   targetUrl?: string;
   timeout?: number;
+  // Feature flag: enable modular pipeline path inside router (optional)
+  enablePipeline?: boolean;
+  // Pipeline provider configuration
+  pipelineProvider?: {
+    defaultProvider: string;
+    modelMapping: Record<string, string>;
+  };
 }
 
 /**
@@ -50,6 +58,13 @@ export class OpenAIRouter extends BaseModule {
   private config: OpenAIRouterConfig;
   private passThroughProvider: PassThroughProvider;
   private _isInitialized: boolean = false;
+  // Optional pipeline manager hook (attached later by server if needed)
+  private pipelineManager: any | null = null;
+  // Static route pools and RR index for round-robin scheduling per category
+  private routePools: Record<string, string[]> | null = null;
+  private rrIndex: Map<string, number> = new Map();
+  private classifier: ConfigRequestClassifier | null = null;
+  private classifierConfig: any | null = null;
 
   constructor(
     requestHandler: RequestHandler,
@@ -82,6 +97,7 @@ export class OpenAIRouter extends BaseModule {
       rateLimitEnabled: false,
       authEnabled: false,
       timeout: 30000,
+      enablePipeline: false,
       ...config
     };
 
@@ -90,6 +106,63 @@ export class OpenAIRouter extends BaseModule {
       targetUrl: this.config.targetUrl || 'https://api.openai.com/v1',
       timeout: this.config.timeout
     });
+  }
+
+  /**
+   * Optionally attach a pipeline manager to enable modular pipeline path
+   */
+  public attachPipelineManager(pipelineManager: any) {
+    this.pipelineManager = pipelineManager;
+  }
+
+  /** Attach static route pools (routeName -> [pipelineIds]) */
+  public attachRoutePools(routePools: Record<string, string[]>): void {
+    this.routePools = routePools;
+    this.rrIndex.clear();
+  }
+
+  /** Attach classification config (from merged-config) */
+  public attachRoutingClassifierConfig(classifierConfig: any): void {
+    try {
+      if (classifierConfig) {
+        this.classifierConfig = classifierConfig;
+        this.classifier = new ConfigRequestClassifier(classifierConfig);
+      }
+    } catch (err) {
+      console.warn('Failed to initialize ConfigRequestClassifier:', err instanceof Error ? err.message : String(err));
+      this.classifier = null;
+    }
+  }
+
+  /**
+   * Whether to use pipeline path for this request
+   */
+  private shouldUsePipeline(): boolean {
+    return !!(this.config.enablePipeline && this.pipelineManager);
+  }
+
+  /**
+   * Get provider ID for pipeline routing
+   */
+  private getPipelineProviderId(model?: string): string {
+    if (this.config.pipelineProvider?.defaultProvider) {
+      return this.config.pipelineProvider.defaultProvider;
+    }
+    // Fallback to lmstudio for backward compatibility
+    return 'lmstudio';
+  }
+
+  /**
+   * Get model ID for pipeline routing
+   */
+  private getPipelineModelId(model?: string): string {
+    if (!model) return 'unknown';
+
+    if (this.config.pipelineProvider?.modelMapping && model in this.config.pipelineProvider.modelMapping) {
+      return this.config.pipelineProvider.modelMapping[model];
+    }
+
+    return model;
   }
 
   /**
@@ -235,10 +308,37 @@ export class OpenAIRouter extends BaseModule {
 
       let response;
 
-      if (req.body.stream && this.config.enableStreaming) {
-        // Handle streaming response
-        await this.handleStreamingChatCompletion(req.body, context, res);
-        return; // Streaming handles the response directly
+      // Pipeline path (streaming unified to non-streaming by workflow). Use RR within category.
+      if (this.shouldUsePipeline() && this.routePools) {
+        const routeName = await this.decideRouteCategoryAsync(req);
+        const pipelineId = this.pickPipelineId(routeName);
+        const { providerId, modelId } = this.parsePipelineId(pipelineId);
+        const pipelineRequest = {
+          data: req.body,
+          route: {
+            providerId,
+            modelId,
+            requestId,
+            timestamp: Date.now()
+          },
+          metadata: {
+            method: req.method,
+            url: req.url,
+            headers: this.sanitizeHeaders(req.headers)
+          },
+          debug: {
+            enabled: this.config.enableMetrics ?? true,
+            stages: {
+              llmSwitch: true,
+              workflow: true,
+              compatibility: true,
+              provider: true
+            }
+          }
+        };
+
+        const pipelineResponse = await this.pipelineManager.processRequest(pipelineRequest);
+        response = pipelineResponse?.data ?? pipelineResponse;
       } else {
         // Handle regular response with pass-through
         response = await this.passThroughProvider.processChatCompletion(req.body, {
@@ -345,11 +445,44 @@ export class OpenAIRouter extends BaseModule {
         }
       }
 
-      // Process with pass-through provider
-      const response = await this.passThroughProvider.processCompletion(req.body, {
-        timeout: this.config.timeout,
-        retryAttempts: 3
-      });
+      // Pipeline path first (no streaming for legacy completions)
+      let response;
+      if (this.shouldUsePipeline() && this.routePools) {
+        const routeName = await this.decideRouteCategoryAsync(req);
+        const pipelineId = this.pickPipelineId(routeName);
+        const { providerId, modelId } = this.parsePipelineId(pipelineId);
+        const pipelineRequest = {
+          data: req.body,
+          route: {
+            providerId,
+            modelId,
+            requestId,
+            timestamp: Date.now()
+          },
+          metadata: {
+            method: req.method,
+            url: req.url,
+            headers: this.sanitizeHeaders(req.headers)
+          },
+          debug: {
+            enabled: this.config.enableMetrics ?? true,
+            stages: {
+              llmSwitch: true,
+              workflow: true,
+              compatibility: true,
+              provider: true
+            }
+          }
+        };
+        const pipelineResponse = await this.pipelineManager.processRequest(pipelineRequest);
+        response = pipelineResponse?.data ?? pipelineResponse;
+      } else {
+        // Process with pass-through provider
+        response = await this.passThroughProvider.processCompletion(req.body, {
+          timeout: this.config.timeout,
+          retryAttempts: 3
+        });
+      }
 
       const duration = Date.now() - startTime;
 
@@ -399,6 +532,57 @@ export class OpenAIRouter extends BaseModule {
         }
       });
     }
+  }
+
+  /**
+   * Decide route category for a request. For now, default to 'default' if available, else first key.
+   * (Hook: can integrate ConfigRequestClassifier here.)
+   */
+  private decideRouteCategory(req: Request): string {
+    if (!this.routePools) return 'default';
+    const categories = Object.keys(this.routePools);
+    if (categories.includes('default')) return 'default';
+    return categories[0] || 'default';
+  }
+
+  private async decideRouteCategoryAsync(req: Request): Promise<string> {
+    const fallback = () => {
+      if (!this.routePools) return 'default';
+      const categories = Object.keys(this.routePools);
+      if (categories.includes('default')) return 'default';
+      return categories[0] || 'default';
+    };
+    try {
+      if (!this.classifier) return fallback();
+      const input = {
+        request: req.body,
+        endpoint: req.url || '/v1/openai/chat/completions',
+        protocol: 'openai'
+      };
+      const res = await this.classifier.classify(input);
+      const route = res?.route;
+      if (route && this.routePools && this.routePools[route]) return route;
+      return fallback();
+    } catch {
+      return fallback();
+    }
+  }
+
+  /** Round-robin pick within a category */
+  private pickPipelineId(routeName: string): string {
+    const pool = (this.routePools && this.routePools[routeName]) || [];
+    if (pool.length === 0) throw new Error(`No pipelines available for route ${routeName}`);
+    const idx = this.rrIndex.get(routeName) ?? 0;
+    const chosen = pool[idx % pool.length];
+    this.rrIndex.set(routeName, (idx + 1) % pool.length);
+    return chosen;
+  }
+
+  /** Parse providerId and modelId from pipelineId '<providerComposite>.<modelId>' */
+  private parsePipelineId(pipelineId: string): { providerId: string; modelId: string } {
+    const dot = pipelineId.lastIndexOf('.');
+    if (dot === -1) return { providerId: pipelineId, modelId: 'unknown' };
+    return { providerId: pipelineId.slice(0, dot), modelId: pipelineId.slice(dot + 1) };
   }
 
   /**
@@ -567,6 +751,7 @@ export class OpenAIRouter extends BaseModule {
         ip: req.ip
       };
 
+      // Pipeline path not yet implemented for embeddings; fall back to pass-through
       const response = await this.passThroughProvider.processEmbeddings(req.body, context);
       const duration = Date.now() - startTime;
 
@@ -606,6 +791,7 @@ export class OpenAIRouter extends BaseModule {
         ip: req.ip
       };
 
+      // Pipeline path not yet implemented for moderations; fall back to pass-through
       const response = await this.passThroughProvider.processModerations(req.body, context);
       const duration = Date.now() - startTime;
 
@@ -645,6 +831,7 @@ export class OpenAIRouter extends BaseModule {
         ip: req.ip
       };
 
+      // Pipeline path not yet implemented for images; fall back to pass-through
       const response = await this.passThroughProvider.processImageGenerations(req.body, context);
       const duration = Date.now() - startTime;
 
@@ -684,6 +871,7 @@ export class OpenAIRouter extends BaseModule {
         ip: req.ip
       };
 
+      // Pipeline path not yet implemented for audio transcriptions; fall back to pass-through
       const response = await this.passThroughProvider.processAudioTranscriptions(req.body, context);
       const duration = Date.now() - startTime;
 
@@ -723,6 +911,7 @@ export class OpenAIRouter extends BaseModule {
         ip: req.ip
       };
 
+      // Pipeline path not yet implemented for audio translations; fall back to pass-through
       const response = await this.passThroughProvider.processAudioTranslations(req.body, context);
       const duration = Date.now() - startTime;
 

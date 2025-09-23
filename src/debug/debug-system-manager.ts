@@ -7,7 +7,7 @@
 
 import { DebugEventBus } from 'rcc-debugcenter';
 import { ErrorHandlerRegistry } from '../utils/error-handler-registry.js';
-import { DebugUtils } from '../utils/debug-utils.js';
+import { DebugUtilsStatic, DebugUtilsImpl } from '../utils/debug-utils.js';
 import { BaseDebugAdapter } from './base-debug-adapter.js';
 import { ModuleDebugAdapterImpl } from './module-debug-adapter.js';
 import { HttpServerDebugAdapterImpl } from './http-server-debug-adapter.js';
@@ -29,14 +29,14 @@ import type {
 export class DebugSystemManager {
   private debugEventBus: DebugEventBus;
   private errorRegistry: ErrorHandlerRegistry;
-  private debugUtils: DebugUtils;
-  private config: DebugConfiguration;
+  private debugUtils: DebugUtilsImpl;
   private adapters: Map<string, DebugAdapter> = new Map();
   private apiExtension?: DebugAPIExtensionImpl;
   private wsServer?: WebSocketDebugServerImpl;
+  private config: DebugConfiguration;
+  private options: DebugSystemOptions;
   private initialized = false;
   private startTime: number;
-  private options: DebugSystemOptions;
 
   /**
    * Constructor
@@ -62,7 +62,7 @@ export class DebugSystemManager {
 
     this.debugEventBus = DebugEventBus.getInstance();
     this.errorRegistry = ErrorHandlerRegistry.getInstance();
-    this.debugUtils = DebugUtils.getInstance();
+    this.debugUtils = DebugUtilsStatic.getInstance();
     this.startTime = Date.now();
 
     // Initialize configuration
@@ -298,7 +298,7 @@ export class DebugSystemManager {
         activeSessions: this.calculateActiveSessions(),
         totalEvents: this.calculateTotalEvents(),
         totalErrors: this.calculateTotalErrors(),
-        memoryUsage: DebugUtils.getMemoryUsage()
+        memoryUsage: DebugUtilsStatic.getMemoryUsage()
       }
     };
   }
@@ -307,7 +307,7 @@ export class DebugSystemManager {
    * Get system configuration
    */
   getConfiguration(): DebugConfiguration {
-    return this.debugUtils.deepClone(this.config);
+    return DebugUtilsStatic.deepClone(this.config);
   }
 
   /**

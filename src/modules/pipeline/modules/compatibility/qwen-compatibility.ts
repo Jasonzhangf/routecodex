@@ -72,11 +72,15 @@ export class QwenCompatibility implements CompatibilityModule {
         this.rules
       );
 
+      const converted = this.convertToQwenRequest(transformed.data || transformed);
+
       this.logger.logModule(this.id, 'transform-request-success', {
-        transformationCount: transformed.transformationCount || 0
+        transformationCount: transformed.transformationCount || 0,
+        hasInput: Array.isArray(converted.input),
+        parameterKeys: Object.keys(converted.parameters || {})
       });
 
-      return transformed.data || transformed;
+      return converted;
 
     } catch (error) {
       this.logger.logModule(this.id, 'transformation-error', { error });
@@ -183,8 +187,9 @@ export class QwenCompatibility implements CompatibilityModule {
         targetPath: 'model',
         mapping: {
           'gpt-3.5-turbo': 'qwen-turbo',
-          'gpt-4': 'qwen-max',
-          'gpt-4-turbo': 'qwen-turbo-latest'
+          'gpt-4': 'qwen3-coder-plus',
+          'gpt-4-turbo': 'qwen3-coder-plus',
+          'gpt-4o': 'qwen3-coder-plus'
         }
       },
       // Tools format conversion
@@ -209,22 +214,7 @@ export class QwenCompatibility implements CompatibilityModule {
           'false': false
         }
       },
-      // Temperature mapping
-      {
-        id: 'map-temperature',
-        transform: 'value',
-        sourcePath: 'temperature',
-        targetPath: 'temperature',
-        defaultValue: 0.7
-      },
-      // Max tokens mapping
-      {
-        id: 'map-max-tokens',
-        transform: 'value',
-        sourcePath: 'max_tokens',
-        targetPath: 'max_tokens',
-        defaultValue: 2048
-      }
+      // Temperature and max_tokens pass-through are optional; defaults handled by provider
     ];
 
     // Add custom rules from configuration
@@ -323,5 +313,133 @@ export class QwenCompatibility implements CompatibilityModule {
     };
 
     return reasonMap[finishReason] || finishReason || 'stop';
+  }
+
+  /**
+   * Convert OpenAI-style request into Qwen API payload
+   */
+  private convertToQwenRequest(request: any): any {
+    if (!request || typeof request !== 'object') {
+      return request;
+    }
+
+    // If request already has Qwen input structure, assume it is correct.
+    if (Array.isArray(request.input)) {
+      return request;
+    }
+
+    const qwenRequest: any = {};
+
+    // Model mapping already handled by transformation rules, but ensure fallback
+    qwenRequest.model = request.model;
+
+    // Convert messages -> input structure expected by Qwen portal API, but retain original messages field
+    if (Array.isArray(request.messages)) {
+      qwenRequest.messages = request.messages;
+      qwenRequest.input = request.messages.map((message: any) => {
+        const normalizedContent = this.normalizeMessageContent(message?.content);
+        return {
+          role: message?.role || 'user',
+          content: normalizedContent
+        };
+      });
+    }
+
+    // Parameters block
+    const parameters: Record<string, any> = {};
+    if (typeof request.temperature === 'number') {
+      parameters.temperature = request.temperature;
+    }
+    if (typeof request.top_p === 'number') {
+      parameters.top_p = request.top_p;
+    }
+    if (typeof request.frequency_penalty === 'number') {
+      parameters.frequency_penalty = request.frequency_penalty;
+    }
+    if (typeof request.presence_penalty === 'number') {
+      parameters.presence_penalty = request.presence_penalty;
+    }
+    if (typeof request.max_tokens === 'number') {
+      parameters.max_output_tokens = request.max_tokens;
+    }
+    if (request.stop !== undefined) {
+      const stops = Array.isArray(request.stop) ? request.stop : [request.stop];
+      parameters.stop_sequences = stops.filter(Boolean);
+    }
+    if (typeof request.stream === 'boolean') {
+      qwenRequest.stream = request.stream;
+    }
+    if (typeof request.debug === 'boolean') {
+      parameters.debug = request.debug;
+    }
+
+    if (Object.keys(parameters).length > 0) {
+      qwenRequest.parameters = parameters;
+    }
+
+    // Optional OpenAI fields that Qwen API also supports
+    if (typeof request.stream === 'boolean') {
+      qwenRequest.stream = request.stream;
+    }
+    if (request.response_format) {
+      qwenRequest.response_format = request.response_format;
+    }
+    if (typeof request.user === 'string') {
+      qwenRequest.user = request.user;
+    }
+
+    // Copy tool definitions if present (Qwen expects array under tools?)
+    if (Array.isArray(request.tools)) {
+      qwenRequest.tools = request.tools;
+    }
+
+    // Attach metadata passthrough if present
+    if (request.metadata && typeof request.metadata === 'object') {
+      qwenRequest.metadata = request.metadata;
+    }
+
+    return qwenRequest;
+  }
+
+  /**
+   * Normalize message content into Qwen's expected format
+   */
+  private normalizeMessageContent(content: any): any[] {
+    if (content === undefined || content === null) {
+      return [{ text: '' }];
+    }
+
+    if (Array.isArray(content)) {
+      return content.map(item => {
+        if (typeof item === 'string') {
+          return { text: item };
+        }
+        if (item && typeof item === 'object') {
+          if ('text' in item) {
+            return { text: String((item as any).text) };
+          }
+          if ('type' in item && item.type === 'input_text' && 'text' in item) {
+            return { text: String((item as any).text) };
+          }
+          return item;
+        }
+        return { text: String(item) };
+      });
+    }
+
+    if (typeof content === 'string') {
+      return [{ text: content }];
+    }
+
+    if (typeof content === 'object' && content !== null) {
+      if ('text' in content) {
+        return [{ text: String(content.text) }];
+      }
+      if ('type' in content && content.type === 'input_text' && 'text' in content) {
+        return [{ text: String(content.text) }];
+      }
+    }
+
+    return [{ text: String(content) }];
   }
 }

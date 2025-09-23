@@ -335,6 +335,7 @@ export class TransformationEngine {
         case 'rename':
           result = await this.applyRenameRule(data, rule, context);
           break;
+        // 'value' not supported in current schema; use mapping/rename/conditional instead
         case 'extract':
           result = await this.applyExtractRule(data, rule, context);
           break;
@@ -412,6 +413,25 @@ export class TransformationEngine {
       }
     }
 
+    return data;
+  }
+
+  /**
+   * Apply value transformation rule
+   */
+  private async applyValueRule(
+    data: any,
+    rule: TransformationRule & { defaultValue?: any },
+    context: TransformationContext
+  ): Promise<any> {
+    const sourceValue = rule.sourcePath ? JSONPathUtils.getValue(data, rule.sourcePath) : undefined;
+    const valueToSet = sourceValue !== undefined ? sourceValue : (rule as any).defaultValue;
+    if (rule.targetPath) {
+      JSONPathUtils.setValue(data, rule.targetPath, valueToSet);
+      if (rule.removeSource && rule.sourcePath) {
+        JSONPathUtils.deleteValue(data, rule.sourcePath);
+      }
+    }
     return data;
   }
 

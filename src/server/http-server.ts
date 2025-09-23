@@ -14,6 +14,7 @@ import { ModuleConfigReader } from '../utils/module-config-reader.js';
 import { OpenAIRouter } from './openai-router.js';
 import { RequestHandler } from '../core/request-handler.js';
 import { ProviderManager } from '../core/provider-manager.js';
+import { PipelineManager } from '../modules/pipeline/core/pipeline-manager.js';
 import {
   type ServerConfig,
   type HealthStatus,
@@ -59,6 +60,19 @@ export class HttpServer extends BaseModule implements IHttpServer {
   private healthStatus: HealthStatus;
   private startupTime: number;
   private config: any;
+  private mergedConfig: any | null = null;
+  private pipelineManager: PipelineManager | null = null;
+  private routePools: Record<string, string[]> | null = null;
+
+  /** Generate a session id that embeds the current port for DebugCenter port-level separation */
+  private async sessionId(tag: string): Promise<string> {
+    try {
+      const cfg = await this.getServerConfig();
+      return `p${cfg.server.port}_${tag}_${Date.now()}`;
+    } catch {
+      return `p_unknown_${tag}_${Date.now()}`;
+    }
+  }
 
   constructor(modulesConfigPath: string = './config/modules.json') {
     const moduleInfo: ModuleInfo = {
@@ -139,6 +153,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
       return this.getDefaultServerConfig();
     }
 
+    const loggingConfig = httpServerConfig.logging || {};
+
     return {
       server: {
         port: httpServerConfig.port || 5506,
@@ -148,10 +164,11 @@ export class HttpServer extends BaseModule implements IHttpServer {
         bodyLimit: httpServerConfig.bodyLimit || '10mb'
       },
       logging: {
-        level: 'info',
-        enableConsole: true,
-        enableFile: false,
-        categories: ['server', 'api', 'request', 'config', 'error', 'message']
+        level: loggingConfig.level || 'info',
+        enableConsole: loggingConfig.enableConsole !== false,
+        enableFile: loggingConfig.enableFile === true,
+        filePath: loggingConfig.filePath,
+        categories: loggingConfig.categories || ['server', 'api', 'request', 'config', 'error', 'message']
       },
       providers: {},
       routing: {
@@ -170,6 +187,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       console.log('🔄 Initializing HTTP server with merged configuration...');
 
       // Set up the server with merged configuration
+      this.mergedConfig = mergedConfig;
       this.config = mergedConfig.modules?.httpserver?.config || this.getDefaultServerConfig();
 
       // Continue with normal initialization
@@ -200,7 +218,14 @@ export class HttpServer extends BaseModule implements IHttpServer {
       const serverConfig = await this.getServerConfig();
       this.providerManager = new ProviderManager(serverConfig);
       this.requestHandler = new RequestHandler(this.providerManager, serverConfig);
-      this.openaiRouter = new OpenAIRouter(this.requestHandler, this.providerManager, this.moduleConfigReader);
+      // Load router config from modules.json if available
+      const openaiRouterModule = this.moduleConfigReader.getModuleConfigValue<any>('openairouter', {});
+      this.openaiRouter = new OpenAIRouter(
+        this.requestHandler,
+        this.providerManager,
+        this.moduleConfigReader,
+        (openaiRouterModule || {}) as any
+      );
 
       // Initialize request handler
       await this.requestHandler.initialize();
@@ -210,6 +235,9 @@ export class HttpServer extends BaseModule implements IHttpServer {
 
       // Initialize OpenAI router
       await this.openaiRouter.initialize();
+
+      // Optionally initialize PipelineManager (LM Studio pipeline)
+      await this.initializePipelineIfConfigured();
 
       // Setup Express middleware
       await this.setupMiddleware();
@@ -293,7 +321,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       this._isInitialized = true;
 
       this.debugEventBus.publish({
-        sessionId: `session_${Date.now()}`,
+        sessionId: await this.sessionId('http_server_initialized'),
         moduleId: 'http-server',
         operationId: 'http_server_initialized',
         timestamp: Date.now(),
@@ -311,6 +339,54 @@ export class HttpServer extends BaseModule implements IHttpServer {
       throw error;
     }
   }
+
+  /**
+   * Backward-compatible no-op: pipeline initialization is externally assembled now.
+   * Kept to satisfy older call sites without breaking the server lifecycle.
+   */
+  private async initializePipelineIfConfigured(): Promise<void> {
+    // Intentionally left blank. Pipeline assembly happens via merged-config assembler.
+    return;
+  }
+
+  /**
+   * Attach a pipeline manager to the OpenAI router (enables HTTP → Router → Pipeline layering)
+   */
+  public attachPipelineManager(pipelineManager: any): void {
+    try {
+      if (this.openaiRouter && (this.openaiRouter as any).attachPipelineManager) {
+        (this.openaiRouter as any).attachPipelineManager(pipelineManager);
+      }
+    } catch (error) {
+      // Do not break server if attachment fails
+      console.error('Failed to attach pipeline manager to OpenAI router:', error);
+    }
+  }
+
+  /** Attach static route pools for round-robin dispatch */
+  public attachRoutePools(routePools: Record<string, string[]>): void {
+    this.routePools = routePools;
+    try {
+      if (this.openaiRouter && (this.openaiRouter as any).attachRoutePools) {
+        (this.openaiRouter as any).attachRoutePools(routePools);
+      }
+    } catch (error) {
+      console.error('Failed to attach route pools to OpenAI router:', error);
+    }
+  }
+
+  /** Attach classification config to router */
+  public attachRoutingClassifierConfig(classifierConfig: any): void {
+    try {
+      if (this.openaiRouter && (this.openaiRouter as any).attachRoutingClassifierConfig) {
+        (this.openaiRouter as any).attachRoutingClassifierConfig(classifierConfig);
+      }
+    } catch (error) {
+      console.error('Failed to attach routing classifier config to OpenAI router:', error);
+    }
+  }
+
+  // Pipeline assembly removed: handled externally via merged-config assembler.
 
   /**
    * Start the HTTP server
@@ -331,7 +407,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
           this.startupTime = Date.now();
 
           this.debugEventBus.publish({
-            sessionId: `session_${Date.now()}`,
+            sessionId: `p${config.server.port}_http_server_started_${Date.now()}`,
             moduleId: 'http-server',
             operationId: 'http_server_started',
             timestamp: Date.now(),
@@ -534,6 +610,19 @@ export class HttpServer extends BaseModule implements IHttpServer {
     // Configuration endpoint
     this.app.get('/config', async (req, res) => this.handleConfig(req, res));
 
+    // Merged configuration endpoint (raw merged-config for current instance)
+    this.app.get('/merged-config', async (_req: Request, res: Response) => {
+      try {
+        const merged = this.mergedConfig || null;
+        res.status(200).json({
+          mergedConfig: merged,
+          note: 'This is the in-memory merged configuration for this server instance.'
+        });
+      } catch (err) {
+        res.status(500).json({ error: { message: err instanceof Error ? err.message : 'Failed to read merged config' } });
+      }
+    });
+
     // Debug endpoint
     this.app.get('/debug', this.handleDebug.bind(this));
 
@@ -575,6 +664,18 @@ export class HttpServer extends BaseModule implements IHttpServer {
    */
   private setupErrorHandling(): void {
     this.app.use(async (error: any, req: Request, res: Response, next: NextFunction) => {
+      // Friendly JSON parse error mapping
+      if (error?.type === 'entity.parse.failed') {
+        res.status(400).json({
+          error: {
+            message: 'Invalid JSON body: ' + (error?.message || 'parse failed'),
+            type: 'bad_request',
+            code: 'invalid_json'
+          }
+        });
+        return;
+      }
+
       await this.handleError(error, 'request_handler');
 
       const status = error.status || 500;

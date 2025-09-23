@@ -73,25 +73,32 @@ export class ConfigMerger {
    * 深度合并对象
    */
   private deepMerge(target: any, source: any): any {
-    if (typeof target !== 'object' || target === null) {
-      return source;
-    }
+    if (target === null || target === undefined) return source;
+    if (source === null || source === undefined) return target;
 
-    if (typeof source !== 'object' || source === null) {
-      return target;
-    }
-
-    const result = { ...target };
-
-    for (const [key, value] of Object.entries(source)) {
-      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        result[key] = this.deepMerge(target[key], value);
-      } else {
-        result[key] = value;
+    // 数组合并：做去重并维持顺序
+    if (Array.isArray(target) && Array.isArray(source)) {
+      const merged = [...target, ...source];
+      const seen = new Set<string>();
+      const out: any[] = [];
+      for (const item of merged) {
+        const key = typeof item === 'object' ? JSON.stringify(item) : String(item);
+        if (!seen.has(key)) { seen.add(key); out.push(item); }
       }
+      return out;
     }
 
-    return result;
+    // 对象：递归合并
+    if (typeof target === 'object' && typeof source === 'object') {
+      const result: any = { ...target };
+      for (const [key, value] of Object.entries(source)) {
+        result[key] = key in target ? this.deepMerge((target as any)[key], value) : value;
+      }
+      return result;
+    }
+
+    // 标量：以 source 覆盖
+    return source;
   }
 
   /**

@@ -90,7 +90,8 @@ const payload = {
   console.log('\n>>> HTTP Status:', resp.status);
   console.log('>>> Response JSON:', JSON.stringify(data, null, 2));
 
-  const choice = data?.choices?.[0];
+  const payload = data?.data ?? data;
+  const choice = payload?.choices?.[0];
   const toolCalls = choice?.message?.tool_calls;
   const finishReason = choice?.finish_reason;
 
@@ -107,4 +108,3 @@ const payload = {
     console.log('finish_reason:', finishReason);
   }
 })();
-

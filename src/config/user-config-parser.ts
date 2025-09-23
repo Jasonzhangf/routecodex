@@ -17,6 +17,7 @@ export class UserConfigParser {
   private providerKeyToAuth: Record<string, Record<string, string>> = {};
   private globalKeyToAuth: Record<string, string> = {};
   private authMappings: Record<string, string> = {};
+  private oauthAuthConfigs: Record<string, any> = {};
 
   /**
    * 解析用户配置
@@ -29,6 +30,7 @@ export class UserConfigParser {
   } {
     this.providerKeyToAuth = {};
     this.globalKeyToAuth = {};
+    this.oauthAuthConfigs = {};
     this.authMappings = this.parseAuthMappings(userConfig.virtualrouter);
     const routeTargets = this.parseRouteTargets(userConfig.virtualrouter.routing);
     const pipelineConfigs = this.parsePipelineConfigs(userConfig.virtualrouter);
@@ -302,6 +304,7 @@ export class UserConfigParser {
           const tokenPath = this.resolveOAuthTokenPath(providerId, oauthName, oauthConfig);
 
           authMappings[oauthAuthId] = tokenPath;
+          this.oauthAuthConfigs[oauthAuthId] = this.normalizeOAuthConfig(oauthConfig);
 
           if (!this.providerKeyToAuth[providerId]) {
             this.providerKeyToAuth[providerId] = {};
@@ -358,7 +361,7 @@ export class UserConfigParser {
    */
   isOAuthConfig(providerId: string, keyId: string): boolean {
     const authId = this.resolveActualKey(providerId, keyId);
-    return authId.startsWith('auth-qwen-') || authId.startsWith('auth-iflow-');
+    return Boolean(this.oauthAuthConfigs[authId]);
   }
 
   /**
@@ -375,12 +378,7 @@ export class UserConfigParser {
       return null;
     }
 
-    try {
-      const parsed = JSON.parse(authMapping);
-      return parsed.type === 'oauth' ? parsed.config : null;
-    } catch {
-      return null;
-    }
+    return this.oauthAuthConfigs[authId] || null;
   }
 
   /**
@@ -401,7 +399,11 @@ export class UserConfigParser {
    */
   private resolveOAuthTokenPath(providerId: string, oauthName: string, oauthConfig: any): string {
     if (oauthConfig && typeof oauthConfig.tokenFile === 'string' && oauthConfig.tokenFile.trim()) {
-      return oauthConfig.tokenFile.trim();
+      const rawPath = oauthConfig.tokenFile.trim();
+      if (rawPath.startsWith('~')) {
+        return path.join(homedir(), rawPath.slice(1));
+      }
+      return rawPath;
     }
 
     if (oauthConfig && Array.isArray(oauthConfig.tokens) && oauthConfig.tokens.length > 0) {
@@ -423,5 +425,17 @@ export class UserConfigParser {
 
     // Generic fallback under .routecodex/tokens
     return path.join(home, '.routecodex', 'tokens', `${providerId}-${oauthName}.json`);
+  }
+
+  private normalizeOAuthConfig(oauthConfig: unknown): any {
+    if (!oauthConfig || typeof oauthConfig !== 'object') {
+      return { value: oauthConfig };
+    }
+
+    try {
+      return JSON.parse(JSON.stringify(oauthConfig));
+    } catch {
+      return { ...oauthConfig };
+    }
   }
 }

@@ -4,8 +4,7 @@
  * Provides standardized error handling across all modules
  */
 
-import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
-import { DebugEventBus } from 'rcc-debugcenter';
+import { ErrorHandlingCenter, type ErrorContext, DebugEventBus } from './external-mocks.js';
 
 /**
  * Error handler function type
@@ -162,11 +161,11 @@ export class ErrorHandlerRegistry {
 
       // Create error context
       const errorContext: ErrorContext = {
-        error: error.message,
+        error: error,
         source: `${moduleId}.${context}`,
         severity: template.severity,
         timestamp: Date.now(),
-        moduleId,
+        module: moduleId,
         context: {
           ...additionalContext,
           stack: error.stack,

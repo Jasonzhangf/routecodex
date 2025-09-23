@@ -80,13 +80,76 @@ describe('UserConfigParser', () => {
         },
         keyConfig: {
           keyId: 'sk-xxx',
-          actualKey: 'sk-xxx'
+          actualKey: 'sk-xxx',
+          keyType: 'apiKey'
         },
         protocols: {
           input: 'openai',
           output: 'openai'
+        },
+        compatibility: {
+          type: 'field-mapping',
+          config: {}
+        },
+        llmSwitch: {
+          type: 'openai-passthrough',
+          config: {}
+        },
+        workflow: {
+          type: 'streaming-control',
+          enabled: true,
+          config: {}
         }
       });
+    });
+  });
+
+  describe('auth mapping collisions', () => {
+    it('keeps provider-specific auth mappings distinct when key names overlap', () => {
+      const userConfig: any = {
+        virtualrouter: {
+          inputProtocol: 'openai',
+          outputProtocol: 'openai',
+          routing: {
+            default: [
+              'qwen.qwen3-coder-plus.key1',
+              'iflow.iflow-pro.key1'
+            ]
+          },
+          providers: {
+            qwen: {
+              type: 'qwen-provider',
+              baseURL: 'https://chat.qwen.ai',
+              apiKey: ['key1'],
+              auth: {
+                key1: '~/.qwen/token.json'
+              },
+              models: {
+                'qwen3-coder-plus': {}
+              }
+            },
+            iflow: {
+              type: 'iflow-http',
+              baseURL: 'https://api.iflow.cn/v1',
+              apiKey: ['key1'],
+              auth: {
+                key1: '~/.iflow/token.json'
+              },
+              models: {
+                'iflow-pro': {}
+              }
+            }
+          }
+        }
+      };
+
+      const result = parser.parseUserConfig(userConfig);
+      const [qwenTarget, iflowTarget] = result.routeTargets.default;
+
+      expect(qwenTarget.actualKey).toBe('auth-key1');
+      expect(iflowTarget.actualKey).toBe('auth-key1-1');
+      expect(result.authMappings['auth-key1']).toBe('~/.qwen/token.json');
+      expect(result.authMappings['auth-key1-1']).toBe('~/.iflow/token.json');
     });
   });
 });

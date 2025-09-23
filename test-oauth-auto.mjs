@@ -1,0 +1,238 @@
+#!/usr/bin/env node
+
+/**
+ * Automated OAuth Device Flow Test
+ * Automatically handles the complete OAuth flow including polling
+ */
+
+import crypto from 'crypto';
+
+// Generate PKCE code verifier
+function generateCodeVerifier() {
+  return crypto.randomBytes(32).toString('base64url');
+}
+
+// Generate PKCE code challenge from verifier
+function generateCodeChallenge(verifier) {
+  return crypto.createHash('sha256').update(verifier).digest('base64url');
+}
+
+async function makeFormRequest(url, options = {}) {
+  const { method = 'POST', headers = {}, body } = options;
+
+  try {
+    const formData = new URLSearchParams();
+    if (body) {
+      for (const [key, value] of Object.entries(body)) {
+        formData.append(key, value);
+      }
+    }
+
+    const response = await fetch(url, {
+      method,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ...headers
+      },
+      body: formData.toString()
+    });
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      data: response.ok ? await response.json() : null,
+      error: response.ok ? null : await response.text()
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      statusText: 'Network Error',
+      data: null,
+      error: error.message
+    };
+  }
+}
+
+async function testOAuthAutoFlow() {
+  console.log('🔧 Testing Automated OAuth Device Flow...\n');
+
+  const clientId = 'f0304373b74a44d2b584a3fb70ca9e56';
+  const scope = 'openid profile email model.completion';
+
+  try {
+    // Step 1: Generate PKCE pair
+    console.log('🔐 Step 1: Generate PKCE pair');
+    const codeVerifier = generateCodeVerifier();
+    const codeChallenge = generateCodeChallenge(codeVerifier);
+    console.log('  - Code Verifier:', codeVerifier.substring(0, 20) + '...');
+    console.log('  - Code Challenge:', codeChallenge.substring(0, 20) + '...');
+    console.log('');
+
+    // Step 2: Request device code
+    console.log('📱 Step 2: Request device code');
+    const deviceResult = await makeFormRequest('https://chat.qwen.ai/api/v1/oauth2/device/code', {
+      method: 'POST',
+      body: {
+        client_id: clientId,
+        scope: scope,
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256'
+      }
+    });
+
+    if (!deviceResult.ok) {
+      console.log('❌ Device code request failed');
+      console.log('  - Error:', deviceResult.error);
+      return;
+    }
+
+    console.log('✅ Device code obtained');
+    console.log('  - Device Code:', deviceResult.data.device_code.substring(0, 20) + '...');
+    console.log('  - User Code:', deviceResult.data.user_code);
+    console.log('  - Verification URI:', deviceResult.data.verification_uri);
+    console.log('  - Expires In:', deviceResult.data.expires_in, 'seconds');
+    console.log('  - Interval:', deviceResult.data.interval, 'seconds');
+    console.log('');
+
+    const deviceCode = deviceResult.data.device_code;
+    const userCode = deviceResult.data.user_code;
+    const verificationUriComplete = deviceResult.data.verification_uri_complete;
+
+    // Step 3: Display authentication instructions
+    console.log('🌐 Step 3: Authentication Required');
+    console.log('⚠️  MANUAL STEP:');
+    console.log('');
+    console.log('1. Open this URL in your browser:');
+    console.log('   ', verificationUriComplete);
+    console.log('');
+    console.log('2. Enter this code when prompted:');
+    console.log('   ', userCode);
+    console.log('');
+    console.log('3. Complete the authentication process');
+    console.log('');
+    console.log('4. I will automatically poll for the token...');
+    console.log('');
+
+    // Step 4: Auto poll for token
+    console.log('⏳ Step 4: Auto polling for access token...');
+    const maxAttempts = 60; // 5 minutes max
+    const pollInterval = (deviceResult.data.interval || 5) * 1000;
+
+    console.log(`  Will poll for ${maxAttempts} attempts with ${pollInterval/1000}s interval...`);
+    console.log('  Please complete authentication in your browser now...');
+    console.log('');
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      console.log(`  Attempt ${attempt}/${maxAttempts}...`);
+
+      const tokenResult = await makeFormRequest('https://chat.qwen.ai/api/v1/oauth2/token', {
+        method: 'POST',
+        body: {
+          grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+          client_id: clientId,
+          device_code: deviceCode,
+          code_verifier: codeVerifier
+        }
+      });
+
+      if (tokenResult.ok) {
+        console.log('');
+        console.log('✅ Access token obtained!');
+        console.log('  - Access Token:', tokenResult.data.access_token.substring(0, 20) + '...');
+        console.log('  - Refresh Token:', tokenResult.data.refresh_token ? 'Present' : 'Missing');
+        console.log('  - Token Type:', tokenResult.data.token_type);
+        console.log('  - Expires In:', tokenResult.data.expires_in, 'seconds');
+        console.log('  - Scope:', tokenResult.data.scope);
+        console.log('');
+
+        // Step 5: Test the token immediately
+        console.log('🧪 Step 5: Testing the new token...');
+        const testResult = await fetch('https://chat.qwen.ai/api/v1/models', {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${tokenResult.data.access_token}`
+          }
+        });
+
+        if (testResult.ok) {
+          const testData = await testResult.json();
+          console.log('✅ Token test successful!');
+          console.log('  - Available Models:', testData.data?.length || 0);
+          if (testData.data && testData.data.length > 0) {
+            console.log('  - First Model:', testData.data[0].id);
+          }
+        } else {
+          console.log('❌ Token test failed:', testResult.status, testResult.statusText);
+        }
+
+        // Step 6: Test with RouteCodex
+        console.log('');
+        console.log('🔗 Step 6: Testing with RouteCodex...');
+        const rcResult = await fetch('http://localhost:5506/v1/openai/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer rcc4-proxy-key',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'qwen-turbo',
+            messages: [{ role: 'user', content: 'OAuth authentication test successful!' }],
+            max_tokens: 50
+          })
+        });
+
+        if (rcResult.ok) {
+          const rcData = await rcResult.json();
+          console.log('✅ RouteCodex test successful!');
+          const content = rcData.choices?.[0]?.message?.content || 'No content';
+          console.log('  - Response:', content);
+        } else {
+          const errorText = await rcResult.text();
+          console.log('❌ RouteCodex test failed:', errorText);
+        }
+
+        console.log('');
+        console.log('🎉 OAuth Device Flow Test Complete!');
+        return;
+      } else {
+        const errorData = JSON.parse(tokenResult.error);
+        const errorType = errorData.error;
+
+        if (errorType === 'authorization_pending') {
+          console.log('  ⏳ Authorization pending...');
+        } else if (errorType === 'slow_down') {
+          console.log('  🐌 Slow down requested...');
+          // Increase interval slightly
+          await new Promise(resolve => setTimeout(resolve, pollInterval * 1.5));
+          continue;
+        } else if (errorType === 'expired_token') {
+          console.log('  ⏰ Device code expired');
+          console.log('❌ Please restart the authentication process');
+          return;
+        } else if (errorType === 'access_denied') {
+          console.log('  🚫 Access denied by user');
+          console.log('❌ Please restart the authentication process');
+          return;
+        } else {
+          console.log('  ❌ Unexpected error:', errorType, errorData.error_description);
+          return;
+        }
+      }
+
+      // Wait before next attempt
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+    }
+
+    console.log('❌ Token polling timeout');
+    console.log('Please restart the authentication process');
+
+  } catch (error) {
+    console.error('❌ Test failed with error:', error);
+    console.error('Stack:', error.stack);
+  }
+}
+
+// Run the test
+testOAuthAutoFlow();

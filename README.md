@@ -184,7 +184,7 @@ const compatibility = new QwenCompatibility({
 }, { errorHandlingCenter, debugCenter, logger });
 
 const provider = new QwenProvider({
-  type: 'qwen-http',
+  type: 'qwen-provider',
   config: {
     type: 'qwen',
     baseUrl: 'https://chat.qwen.ai',

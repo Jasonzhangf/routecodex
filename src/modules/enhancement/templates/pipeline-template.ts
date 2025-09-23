@@ -5,7 +5,7 @@
  * already integrated using the enhancement system.
  */
 
-import type { RCCBaseModule, ErrorHandlingCenter, DebugCenter } from '../types/external-types.js';
+import type { RCCBaseModule, ErrorHandlingCenter, DebugCenter } from '../../pipeline/types/external-types.js';
 import type {
   PipelineRequest,
   PipelineResponse,
@@ -14,7 +14,7 @@ import type {
   ModuleFactory,
   ModuleDependencies,
   BasePipeline
-} from '../interfaces/pipeline-interfaces.js';
+} from '../../pipeline/interfaces/pipeline-interfaces.js';
 import { EnhancementConfigManager } from '../enhancement-config-manager.js';
 import type { EnhancedModule } from '../module-enhancement-factory.js';
 
@@ -50,7 +50,7 @@ export class EnhancedPipelineManager implements RCCBaseModule {
     // Initialize enhancement configuration manager
     this.configManager = new EnhancementConfigManager(
       debugCenter,
-      config.config?.enhancementConfigPath
+      (config as any).enhancementConfigPath
     );
   }
 
@@ -64,7 +64,7 @@ export class EnhancedPipelineManager implements RCCBaseModule {
         this,
         this.id,
         'pipeline',
-        this.config.config?.enhancement
+        (this.config as any).enhancement
       );
 
       this.logInfo('initialization-start', {
@@ -272,7 +272,7 @@ export class EnhancedPipelineManager implements RCCBaseModule {
 
     // Return status of all pipelines
     const statuses: any = {};
-    for (const [id, pipeline] of this.pipelines.entries()) {
+    for (const [id, pipeline] of Array.from(this.pipelines.entries())) {
       statuses[id] = pipeline.getStatus();
     }
     return statuses;
@@ -474,7 +474,7 @@ export class EnhancedPipelineManager implements RCCBaseModule {
    */
   private async createPipeline(config: PipelineConfig): Promise<BasePipeline> {
     // Import BasePipeline dynamically to avoid circular dependencies
-    const { BasePipeline } = await import('../core/base-pipeline.js');
+    const { BasePipeline } = await import('../../pipeline/core/base-pipeline');
 
     // Create module factory function
     const moduleFactory: ModuleFactory = async (moduleConfig, dependencies) => {
@@ -483,6 +483,7 @@ export class EnhancedPipelineManager implements RCCBaseModule {
       return {
         id: `module-${Date.now()}`,
         type: 'generic',
+        config: moduleConfig,
         initialize: async () => {},
         processIncoming: async (request: any) => request,
         processOutgoing: async (response: any) => response,

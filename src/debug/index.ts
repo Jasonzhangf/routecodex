@@ -61,6 +61,13 @@ export { DebugUtilsStatic as DebugUtils, DebugUtilsImpl } from '../utils/debug-u
 export type { DebugEvent } from 'rcc-debugcenter';
 export type { ErrorContext } from 'rcc-errorhandling';
 
+// Import needed types for internal use
+import type { DebugAdapterConfig as DebugAdapterConfigType } from '../types/debug-types.js';
+import { DebugSystemManager } from './debug-system-manager.js';
+import { HttpServerDebugIntegration, createHttpServerDebugIntegration } from './http-server-integration.js';
+import { ModuleDebugAdapterImpl } from './module-debug-adapter.js';
+import { DebugUtilsStatic } from '../utils/debug-utils.js';
+
 /**
  * Quick setup function for the debug system
  */
@@ -69,7 +76,7 @@ export async function setupDebugSystem(options?: {
   enableWebSocket?: boolean;
   restPort?: number;
   wsPort?: number;
-  adapters?: DebugAdapterConfig[];
+  adapters?: DebugAdapterConfigType[];
 }): Promise<DebugSystemManager> {
   const debugManager = DebugSystemManager.getInstance({
     enableRestApi: options?.enableRestApi ?? false,
@@ -122,11 +129,10 @@ export async function setupModuleDebug(
 // Default export
 export default {
   DebugSystemManager,
-  debugSystemManager,
   setupDebugSystem,
   setupHttpServerDebug,
   setupModuleDebug,
   HttpServerDebugIntegration,
   createHttpServerDebugIntegration,
-  DebugUtils
+  DebugUtils: DebugUtilsStatic
 };

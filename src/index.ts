@@ -37,6 +37,7 @@ class RouteCodexApp {
   private configManager: ConfigManagerModule;
   private modulesConfigPath: string;
   private _isRunning: boolean = false;
+  private mergedConfigPath: string = path.join(process.cwd(), 'config', 'merged-config.json');
 
   constructor(modulesConfigPath?: string) {
     this.modulesConfigPath = modulesConfigPath || getDefaultModulesConfigPath();
@@ -53,9 +54,12 @@ class RouteCodexApp {
       console.log(`📁 Modules configuration file: ${this.modulesConfigPath}`);
 
       // 1. 初始化配置管理器
+      const port = await this.detectServerPort(this.modulesConfigPath);
+      this.mergedConfigPath = path.join(process.cwd(), 'config', `merged-config.${port}.json`);
       const configManagerConfig = {
-        configPath: '~/.routecodex/config.json',
-        mergedConfigPath: '~/.routecodex/merged-config.json',
+        configPath: './config/config.json',
+        mergedConfigPath: this.mergedConfigPath,
+        systemModulesPath: this.modulesConfigPath,
         autoReload: true,
         watchInterval: 5000
       };
@@ -72,19 +76,36 @@ class RouteCodexApp {
       // 4. 使用合并后的配置初始化服务器
       await this.httpServer.initializeWithMergedConfig(mergedConfig);
 
-      // 5. 启动服务器
+      // 5. 按 merged-config 组装流水线并注入（完全配置驱动，无硬编码）
+      try {
+        const { PipelineAssembler } = await import('./modules/pipeline/config/pipeline-assembler.js');
+        const { manager, routePools } = await PipelineAssembler.assemble(mergedConfig);
+        this.httpServer.attachPipelineManager(manager);
+        this.httpServer.attachRoutePools(routePools);
+        // Attach classifier config if present
+        const classifierConfig = mergedConfig?.modules?.virtualrouter?.config?.classificationConfig;
+        if (classifierConfig) {
+          this.httpServer.attachRoutingClassifierConfig(classifierConfig);
+        }
+        console.log('🧩 Pipeline assembled from merged-config and attached to server.');
+      } catch (e) {
+        console.warn('⚠️ Failed to assemble pipeline from merged-config. Router will use pass-through until assembly is provided.', e);
+      }
+
+      // 6. 启动服务器
       await this.httpServer.start();
       this._isRunning = true;
 
-      // 6. 获取服务器状态
+      // 7. 获取服务器状态
       const status = this.httpServer.getStatus();
       const serverConfig = {
         host: 'localhost',
-        port: mergedConfig.modules.httpserver?.config?.port || 5506
+        port
       };
 
       console.log(`✅ RouteCodex server started successfully!`);
       console.log(`🌐 Server URL: http://${serverConfig.host}:${serverConfig.port}`);
+      console.log(`🗂️ Merged config: ${this.mergedConfigPath}`);
       console.log(`📊 Health check: http://${serverConfig.host}:${serverConfig.port}/health`);
       console.log(`🔧 Configuration: http://${serverConfig.host}:${serverConfig.port}/config`);
       console.log(`📖 OpenAI API: http://${serverConfig.host}:${serverConfig.port}/v1/openai`);
@@ -135,13 +156,34 @@ class RouteCodexApp {
    */
   private async loadMergedConfig(): Promise<any> {
     try {
-      const configPath = path.join(homedir(), '.routecodex', 'merged-config.json');
-      const configContent = await fs.readFile(configPath, 'utf-8');
+      const configContent = await fs.readFile(this.mergedConfigPath, 'utf-8');
       return JSON.parse(configContent);
     } catch (error) {
       console.error('Failed to load merged configuration:', error);
       throw error;
     }
+  }
+
+  /**
+   * Detect server port from modules config, ENV, or default
+   */
+  private async detectServerPort(modulesConfigPath: string): Promise<number> {
+    // Priority: ENV ROUTECODEX_PORT/PORT -> modulesConfig.httpserver.config.port -> 5506
+    const envPort = Number(process.env.ROUTECODEX_PORT || process.env.PORT);
+    if (!Number.isNaN(envPort) && envPort > 0) return envPort;
+
+    try {
+      const p = path.isAbsolute(modulesConfigPath)
+        ? modulesConfigPath
+        : path.join(process.cwd(), modulesConfigPath);
+      const raw = await fs.readFile(p, 'utf-8');
+      const json = JSON.parse(raw);
+      const port = json?.modules?.httpserver?.config?.port;
+      if (typeof port === 'number' && port > 0) return port;
+    } catch (e) {
+      // ignore and fall back
+    }
+    return 5506;
   }
 }
 

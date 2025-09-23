@@ -5,8 +5,8 @@
  * already integrated using the enhancement system.
  */
 
-import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
-import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../types/provider-types.js';
+import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../pipeline/interfaces/pipeline-interfaces.js';
+import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../pipeline/types/provider-types.js';
 import { EnhancementConfigManager } from '../enhancement-config-manager.js';
 import type { EnhancedModule } from '../module-enhancement-factory.js';
 

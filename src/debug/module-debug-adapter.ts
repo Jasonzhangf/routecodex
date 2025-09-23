@@ -6,7 +6,7 @@
  */
 
 import { BaseDebugAdapter } from './base-debug-adapter.js';
-import { DebugEventBus } from 'rcc-debugcenter';
+import { DebugEventBus } from '../utils/external-mocks.js';
 import type {
   ModuleDebugAdapter,
   DebugContext,
@@ -17,6 +17,7 @@ import type {
   DebugAdapterConfig,
   DebugUtils
 } from '../types/debug-types.js';
+import { DebugSystemEvent } from '../types/debug-types.js';
 
 /**
  * Module Debug Adapter implementation
@@ -24,7 +25,7 @@ import type {
 export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDebugAdapter {
   private methodHooks: Map<string, MethodHookOptions> = new Map();
   private hookData: Map<string, MethodHookData[]> = new Map();
-  private moduleInfo: {
+  readonly moduleInfo: {
     id: string;
     name: string;
     version: string;
@@ -51,30 +52,19 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
   }
 
   /**
-   * Get module information
-   */
-  get moduleInfo(): {
-    id: string;
-    name: string;
-    version: string;
-    type: string;
-  } {
-    return { ...this.moduleInfo };
-  }
-
-  /**
    * Initialize adapter-specific logic
    */
   protected async doInitialize(options?: Record<string, any>): Promise<void> {
     // Initialize module-specific debugging
     await this.initializeModuleDebugging(options);
 
-    // Publish module-specific initialization event
-    this.publishEvent('module_debug_adapter_initialized', {
-      moduleId: this.moduleInfo.id,
-      moduleInfo: this.moduleInfo,
-      options
-    });
+    // Publish initialization event
+      this.publishEvent(DebugSystemEvent.MODULE_DEBUG_ADAPTER_INITIALIZED, {
+        adapterId: this.id,
+        moduleInfo: this.moduleInfo,
+        options,
+        timestamp: Date.now()
+      });
   }
 
   /**
@@ -87,12 +77,13 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
     // Capture initial module state
     await this.captureModuleState(context);
 
-    // Publish context-specific debugging start event
-    this.publishEvent('module_debugging_started', {
-      moduleId: this.moduleInfo.id,
-      context,
-      activeHooks: Array.from(this.methodHooks.keys())
-    });
+    // Publish session started event
+      this.publishEvent(DebugSystemEvent.MODULE_DEBUGGING_STARTED, {
+        adapterId: this.id,
+        context,
+        moduleInfo: this.moduleInfo,
+        timestamp: Date.now()
+      });
   }
 
   /**
@@ -105,11 +96,13 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
     // Cleanup context-specific data
     this.cleanupContextData(context);
 
-    // Publish context-specific debugging stop event
-    this.publishEvent('module_debugging_stopped', {
-      moduleId: this.moduleInfo.id,
-      context
-    });
+    // Publish session ended event
+      this.publishEvent(DebugSystemEvent.MODULE_DEBUGGING_STOPPED, {
+        adapterId: this.id,
+        context,
+        moduleInfo: this.moduleInfo,
+        timestamp: Date.now()
+      });
   }
 
   /**
@@ -165,10 +158,11 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
     // Restore original methods
     await this.restoreOriginalMethods();
 
-    // Publish cleanup event
+    // Publish destroy event
     this.publishEvent('module_debug_adapter_destroyed', {
-      moduleId: this.moduleInfo.id,
-      hooksRemoved: this.originalMethods.size
+      adapterId: this.id,
+      moduleInfo: this.moduleInfo,
+      timestamp: Date.now()
     });
   }
 
@@ -176,7 +170,7 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
    * Hook into module method execution
    */
   async hookMethod(methodName: string, options: MethodHookOptions): Promise<void> {
-    if (!this.initialized) {
+    if (!this.isInitialized) {
       throw new Error('Adapter is not initialized');
     }
 
@@ -194,11 +188,12 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
       // Apply method hook
       await this.applyMethodHook(methodName);
 
-      // Publish hook registration event
+      // Publish hook registered event
       this.publishEvent('method_hook_registered', {
-        moduleId: this.moduleInfo.id,
+        adapterId: this.id,
         methodName,
-        options
+        options,
+        timestamp: Date.now()
       });
 
     } catch (error) {
@@ -222,10 +217,11 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
       // Clean up hook data
       this.hookData.delete(methodName);
 
-      // Publish hook removal event
+      // Publish hook removed event
       this.publishEvent('method_hook_removed', {
-        moduleId: this.moduleInfo.id,
-        methodName
+        adapterId: this.id,
+        methodName,
+        timestamp: Date.now()
       });
 
     } catch (error) {
@@ -264,19 +260,18 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
       id: this.debugUtils.generateId(`module_debug_${this.moduleInfo.id}`),
       context,
       type: 'custom',
+      timestamp: Date.now(),
+      moduleInfo: this.moduleInfo,
+      methodHooks: allHookData,
+      state,
+      events,
+      errors,
       content: {
         moduleInfo: this.moduleInfo,
         methodHooks: allHookData,
         state,
         events,
         errors
-      },
-      timestamp: Date.now(),
-      metadata: {
-        moduleId: this.moduleInfo.id,
-        adapterType: 'module',
-        hookCount: this.methodHooks.size,
-        totalHookCalls: allHookData.length
       }
     };
   }
@@ -363,7 +358,7 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
     // This should be implemented by subclasses to capture module-specific state
     return {
       timestamp: Date.now(),
-      initialized: this.initialized,
+      initialized: this.isInitialized,
       activeSessions: this.sessions.size,
       health: this.getHealth(),
       stats: this.getStats()
@@ -453,13 +448,16 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
    */
   private filterDataForContext(data: ModuleDebugData, context: DebugContext): any {
     // Filter hook data for the specific context
-    const filteredHookData = data.content.methodHooks.filter(hook =>
+    const filteredHookData = data.methodHooks.filter(hook =>
       !hook.metadata?.contextId || hook.metadata.contextId === context.id
     );
 
     return {
-      ...data.content,
-      methodHooks: filteredHookData
+      moduleInfo: data.moduleInfo,
+      methodHooks: filteredHookData,
+      state: data.state,
+      events: data.events,
+      errors: data.errors
     };
   }
 
@@ -514,7 +512,8 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
       try {
         // Capture parameters if enabled
         if (options.enableParams) {
-          hookData.params = this.sanitizeParameters(args, options.captureDepth);
+          const captureDepth = options.captureDepth || 3;
+          hookData.params = this.sanitizeParameters(args, captureDepth);
         }
 
         // Execute original method
@@ -522,7 +521,8 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
 
         // Capture result if enabled
         if (options.enableResult) {
-          hookData.result = this.sanitizeResult(result, options.captureDepth);
+          const captureDepth = options.captureDepth || 3;
+          hookData.result = this.sanitizeResult(result, captureDepth);
         }
 
         // Calculate execution time
@@ -554,8 +554,9 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
    * Sanitize parameters for logging
    */
   private sanitizeParameters(params: any[], depth: number): any[] {
+    const actualDepth = depth || 3;
     return this.debugUtils.sanitizeData(params, {
-      maxDepth: depth,
+      maxDepth: actualDepth,
       maxArrayLength: 10,
       maxStringLength: 100
     });
@@ -565,8 +566,9 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
    * Sanitize result for logging
    */
   private sanitizeResult(result: any, depth: number): any {
+    const actualDepth = depth || 3;
     return this.debugUtils.sanitizeData(result, {
-      maxDepth: depth,
+      maxDepth: actualDepth,
       maxArrayLength: 10,
       maxStringLength: 100
     });

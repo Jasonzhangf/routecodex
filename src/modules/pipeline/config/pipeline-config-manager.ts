@@ -516,7 +516,7 @@ export class PipelineConfigManager {
           'openai-passthrough',
           'streaming-control',
           'field-mapping',
-          'qwen-http',
+          'qwen-provider',
           'generic-http'
         ];
 

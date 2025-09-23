@@ -7,7 +7,7 @@
 
 import { DebugSystemManager } from './debug-system-manager.js';
 import { HttpServerDebugAdapterImpl } from './http-server-debug-adapter.js';
-import { DebugUtils } from '../utils/debug-utils.js';
+import { DebugUtilsStatic as DebugUtils } from '../utils/debug-utils.js';
 import type {
   DebugHttpRequest,
   DebugHttpResponse,
@@ -302,6 +302,7 @@ export class HttpServerDebugIntegration {
     let bodyChunks: Buffer[] = [];
     let originalWrite = response.write;
     let originalEnd = response.end;
+    const self = this;
 
     // Override write method to capture response body
     response.write = function(chunk: any, encoding?: any) {
@@ -331,8 +332,8 @@ export class HttpServerDebugIntegration {
       const debugResponse: DebugHttpResponse = {
         requestId,
         status: response.statusCode || 200,
-        headers: this.sanitizeHeaders(response._headers || response.headers || {}),
-        body: this.sanitizeBody(body),
+        headers: self.sanitizeHeaders(response._headers || response.headers || {}),
+        body: self.sanitizeBody(body),
         responseTime: Date.now() - startTime,
         timestamp: Date.now(),
         metadata: {
@@ -342,11 +343,11 @@ export class HttpServerDebugIntegration {
       };
 
       // Capture response asynchronously
-      this.httpAdapter!.captureResponse(debugResponse).catch(console.warn);
+      self.httpAdapter!.captureResponse(debugResponse).catch(console.warn);
 
       // Call original end method
       return originalEnd.call(this, chunk, encoding);
-    }.bind(this);
+    };
   }
 
   /**

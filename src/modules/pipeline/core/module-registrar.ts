@@ -10,8 +10,9 @@ import { OpenAIPassthroughLLMSwitch } from '../modules/llmswitch/openai-passthro
 import { StreamingControlWorkflow } from '../modules/workflow/streaming-control.js';
 import { FieldMappingCompatibility } from '../modules/compatibility/field-mapping.js';
 import { LMStudioCompatibility } from '../modules/compatibility/lmstudio-compatibility.js';
-import { QwenHTTPProvider } from '../modules/provider/qwen-http-provider.js';
-import { LMStudioProvider } from '../modules/provider/lmstudio-provider.js';
+import { QwenCompatibility } from '../modules/compatibility/qwen-compatibility.js';
+
+import { LMStudioProviderSimple } from '../modules/provider/lmstudio-provider-simple.js';
 import { GenericHTTPProvider } from '../modules/provider/generic-http-provider.js';
 
 /**
@@ -71,21 +72,27 @@ export class PipelineModuleRegistrar {
       const module = new LMStudioCompatibility(config, dependencies);
       return module;
     });
+
+    // Register Qwen Compatibility module
+    this.registry.registerModule('qwen-compatibility', async (config, dependencies) => {
+      const module = new QwenCompatibility(config, dependencies);
+      return module;
+    });
   }
 
   /**
    * Register Provider modules
    */
   private registerProviderModules(): void {
-    // Register Qwen HTTP Provider
-    this.registry.registerModule('qwen-http', async (config, dependencies) => {
-      const module = new QwenHTTPProvider(config, dependencies);
-      return module;
+    // Register Qwen Provider (full OAuth-aware implementation)
+    this.registry.registerModule('qwen-provider', async (config, dependencies) => {
+      const { QwenProvider } = await import('../modules/provider/qwen-provider.js');
+      return new QwenProvider(config, dependencies);
     });
 
-    // Register LM Studio Provider
+    // Register LM Studio HTTP Provider (simple HTTP client to LM Studio REST)
     this.registry.registerModule('lmstudio-http', async (config, dependencies) => {
-      const module = new LMStudioProvider(config, dependencies);
+      const module = new LMStudioProviderSimple(config, dependencies);
       return module;
     });
 

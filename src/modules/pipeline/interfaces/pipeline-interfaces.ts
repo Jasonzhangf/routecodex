@@ -334,6 +334,11 @@ export interface PipelineModuleRegistry {
   };
 
   /**
+   * Initialize debug enhancements
+   */
+  initializeDebugEnhancements(): void;
+
+  /**
    * Clean up resources
    */
   cleanup(): Promise<void>;

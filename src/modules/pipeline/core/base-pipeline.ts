@@ -6,6 +6,7 @@
  */
 
 import type { RCCBaseModule, ErrorHandlingCenter, DebugCenter } from '../types/external-types.js';
+import { EnhancementRegistry } from '../../enhancement/module-enhancement-factory.js';
 import type {
   PipelineRequest,
   PipelineResponse,
@@ -23,6 +24,8 @@ import type {
 } from '../interfaces/pipeline-interfaces.js';
 import { PipelineErrorIntegration } from '../utils/error-integration.js';
 import { PipelineDebugLogger } from '../utils/debug-logger.js';
+import { DebugEventBus } from 'rcc-debugcenter';
+import { ModuleEnhancementFactory } from '../../enhancement/module-enhancement-factory.js';
 
 /**
  * Base pipeline implementation that orchestrates all modules
@@ -35,6 +38,12 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   readonly version: string;
   readonly moduleName = 'BasePipeline';
   readonly moduleVersion = '1.0.0';
+
+  // Debug enhancement properties
+  private enhancementFactory!: ModuleEnhancementFactory;
+  private isEnhanced = false;
+  private debugEventBus!: DebugEventBus;
+  private performanceMetrics: Map<string, number[]> = new Map();
 
   private modules: {
     llmSwitch: LLMSwitchModule | null;
@@ -83,6 +92,9 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     // Initialize utilities
     this.errorIntegration = new PipelineErrorIntegration(errorHandlingCenter);
     this.debugLogger = new PipelineDebugLogger(debugCenter);
+
+    // Initialize debug enhancements
+    this.initializeDebugEnhancements();
   }
 
   /**
@@ -114,7 +126,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   }
 
   /**
-   * Process a pipeline request
+   * Process a pipeline request with enhanced debug support
    */
   async processRequest(request: PipelineRequest): Promise<PipelineResponse> {
     if (!this.isInitialized) {
@@ -122,13 +134,30 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     }
 
     const startTime = Date.now();
-    const requestId = request.route?.requestId || 'unknown';
+    const requestId = request.route?.requestId || `req-${Date.now()}-${this.pipelineId}`;
     const debugStages: string[] = [];
     const transformationLogs: any[] = [];
     const timings: Record<string, number> = {};
 
     try {
-      this.debugLogger.logRequest(requestId, 'pipeline-start', request);
+      this.debugLogger.logRequest(requestId, 'pipeline-start', {
+        ...request,
+        enhanced: this.isEnhanced,
+        debugInfo: this.getDebugInfo()
+      });
+
+      // Publish pipeline start event
+      this.publishToWebSocket({
+        type: 'pipeline',
+        timestamp: startTime,
+        data: {
+          operation: 'start',
+          pipelineId: this.pipelineId,
+          requestId,
+          request: this.sanitizeRequest(request),
+          enhanced: this.isEnhanced
+        }
+      });
 
       // Update request count
       this.requestCount++;
@@ -256,6 +285,217 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
       this.debugLogger.logPipeline(this.pipelineId, 'cleanup-error', { error });
       throw error;
     }
+  }
+
+  /**
+   * Initialize debug enhancements
+   */
+  private initializeDebugEnhancements(): void {
+    try {
+      this.debugEventBus = DebugEventBus.getInstance();
+
+      // Initialize enhancement factory with proper debug center
+      this.enhancementFactory = new ModuleEnhancementFactory(this.debugCenter);
+
+      // Register this pipeline for enhancement
+      EnhancementRegistry.getInstance().registerConfig(this.pipelineId, {
+        enabled: true,
+        level: 'detailed',
+        consoleLogging: true,
+        debugCenter: true,
+        performanceTracking: true,
+        requestLogging: true,
+        errorTracking: true,
+        transformationLogging: true
+      });
+
+      this.isEnhanced = true;
+
+      this.debugLogger.logPipeline(this.pipelineId, 'debug-enhancements-initialized', {
+        enhanced: true,
+        eventBusAvailable: !!this.debugEventBus,
+        enhancementFactoryAvailable: !!this.enhancementFactory
+      });
+    } catch (error) {
+      this.debugLogger.logPipeline(this.pipelineId, 'debug-enhancements-error', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  /**
+   * Subscribe to debug events
+   */
+  private subscribeToDebugEvents(): void {
+    if (!this.debugEventBus) return;
+
+    // Subscribe to pipeline-specific events
+    this.debugEventBus.subscribe('pipeline-subscription', (event: any) => {
+      this.handleDebugEvent(event);
+    });
+  }
+
+  /**
+   * Handle debug events
+   */
+  private handleDebugEvent(event: any): void {
+    // Process debug events for real-time monitoring
+    if (event.type === 'performance') {
+      this.recordPerformanceMetric(event.data.operationId, event.data.processingTime);
+    }
+
+    // Forward to web interface if available
+    this.publishToWebSocket(event);
+  }
+
+  /**
+   * Record performance metrics
+   */
+  private recordPerformanceMetric(operationId: string, processingTime: number): void {
+    if (!this.performanceMetrics.has(operationId)) {
+      this.performanceMetrics.set(operationId, []);
+    }
+
+    const metrics = this.performanceMetrics.get(operationId)!;
+    metrics.push(processingTime);
+
+    // Keep only last 100 measurements
+    if (metrics.length > 100) {
+      metrics.shift();
+    }
+  }
+
+  /**
+   * Get performance statistics
+   */
+  getPerformanceStats(operationId?: string): any {
+    if (operationId) {
+      const metrics = this.performanceMetrics.get(operationId) || [];
+      return this.calculateStats(metrics);
+    }
+
+    // Return stats for all operations
+    const allStats: any = {};
+    for (const [opId, metrics] of Array.from(this.performanceMetrics.entries())) {
+      allStats[opId] = this.calculateStats(metrics);
+    }
+    return allStats;
+  }
+
+  /**
+   * Calculate statistics from metrics array
+   */
+  private calculateStats(metrics: number[]): any {
+    if (metrics.length === 0) {
+      return { count: 0, avg: 0, min: 0, max: 0 };
+    }
+
+    const sum = metrics.reduce((a, b) => a + b, 0);
+    const avg = sum / metrics.length;
+    const min = Math.min(...metrics);
+    const max = Math.max(...metrics);
+
+    return {
+      count: metrics.length,
+      avg: Math.round(avg),
+      min,
+      max,
+      sum: Math.round(sum)
+    };
+  }
+
+  /**
+   * Publish event to WebSocket for real-time monitoring
+   */
+  private publishToWebSocket(event: any): void {
+    // This will be connected to the WebSocket debug server
+    try {
+      // Event will be published through the debug center to WebSocket
+      this.debugCenter.processDebugEvent({
+        sessionId: event.sessionId || 'system',
+        moduleId: this.pipelineId,
+        operationId: event.operationId || event.type,
+        timestamp: event.timestamp || Date.now(),
+        type: (event.type || 'debug') as 'start' | 'end' | 'error',
+        position: 'middle' as 'start' | 'middle' | 'end',
+        data: {
+          ...event.data,
+          pipelineId: this.pipelineId,
+          source: 'base-pipeline'
+        }
+      });
+    } catch (error) {
+      // Silent fail if WebSocket is not available
+    }
+  }
+
+  /**
+   * Get detailed debug information
+   */
+  getDebugInfo(): any {
+    return {
+      pipelineId: this.pipelineId,
+      enhanced: this.isEnhanced,
+      eventBusAvailable: !!this.debugEventBus,
+      performanceMetrics: this.getPerformanceStats(),
+      status: this.getStatus(),
+      moduleCount: Object.values(this.modules).filter(m => m !== null).length,
+      uptime: Date.now() - (this._status.modules['llm-switch']?.lastActivity || Date.now())
+    };
+  }
+
+  /**
+   * Enhanced error handling with debug context
+   */
+  private async handleEnhancedError(error: unknown, context: any): Promise<void> {
+    const errorContext = {
+      ...context,
+      pipelineId: this.pipelineId,
+      enhanced: this.isEnhanced,
+      performanceMetrics: this.getPerformanceStats(),
+      moduleStatus: this._status.modules
+    };
+
+    // Publish enhanced error event
+    this.publishToWebSocket({
+      type: 'error',
+      timestamp: Date.now(),
+      data: {
+        error: error instanceof Error ? error.message : String(error),
+        context: errorContext,
+        stack: error instanceof Error ? error.stack : undefined
+      }
+    });
+
+    // Use existing error integration
+    await this.errorIntegration.handleModuleError(error, context);
+  }
+
+  /**
+   * Sanitize request for WebSocket publishing (remove sensitive data)
+   */
+  private sanitizeRequest(request: PipelineRequest): any {
+    const sanitized = {
+      route: request.route,
+      metadata: request.metadata,
+      debug: request.debug
+    };
+
+    // Copy safe data fields
+    if ((request as any).data) {
+      (sanitized as any).data = {
+        model: (request as any).data.model,
+        messages: (request as any).data.messages?.map((msg: any) => ({
+          role: msg.role,
+          content: typeof msg.content === 'string' ? '[CONTENT]' : '[MULTIMODAL_CONTENT]'
+        })),
+        max_tokens: (request as any).data.max_tokens,
+        temperature: (request as any).data.temperature,
+        stream: (request as any).data.stream
+      };
+    }
+
+    return sanitized;
   }
 
   /**

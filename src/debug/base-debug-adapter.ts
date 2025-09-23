@@ -6,7 +6,7 @@
  * and resource management.
  */
 
-import { DebugEventBus } from 'rcc-debugcenter';
+import { DebugEventBus } from '../utils/external-mocks.js';
 import { ErrorHandlerRegistry } from '../utils/error-handler-registry.js';
 import type {
   DebugAdapter,
@@ -16,9 +16,9 @@ import type {
   DebugAdapterHealth,
   DebugAdapterStats,
   DebugHealthIssue,
-  DebugSystemEvent,
   DebugUtils
 } from '../types/debug-types.js';
+import { DebugSystemEvent } from '../types/debug-types.js';
 
 /**
  * Abstract base class for all debug adapters
@@ -552,7 +552,7 @@ export abstract class BaseDebugAdapter implements DebugAdapter {
    * Publish event to DebugEventBus
    */
   protected publishEvent(
-    eventType: DebugSystemEvent,
+    eventType: DebugSystemEvent | string,
     data: any,
     position: 'start' | 'middle' | 'end' = 'middle'
   ): void {

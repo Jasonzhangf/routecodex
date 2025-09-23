@@ -214,9 +214,10 @@ export class ErrorHandlingUtils {
       return;
     }
 
+      // @ts-ignore - Type mismatch between ErrorContext definitions
     ErrorHandlingUtils.registry.registerErrorHandler({
       errorCode,
-      handler,
+      handler: handler as any,
       priority,
       description
     });

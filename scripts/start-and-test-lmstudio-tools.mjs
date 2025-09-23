@@ -33,7 +33,7 @@ function readEnv(name, fallback) {
 }
 
 const SERVER_URL = readEnv('SERVER_URL', 'http://localhost:5506');
-const BASE_URL = readEnv('LMSTUDIO_BASE_URL', 'ws://127.0.0.1:1234');
+const BASE_URL = readEnv('LMSTUDIO_BASE_URL', 'http://127.0.0.1:1234');
 const MODEL = readEnv('LMSTUDIO_MODEL', 'gpt-oss-20b-mlx');
 const TOOL_NAME = readEnv('TOOL_NAME', 'add');
 let TOOL_ARGS;
@@ -132,7 +132,8 @@ function resolveTsxBin() {
     console.log('>>> HTTP Status:', status);
     console.log('>>> Response JSON:', JSON.stringify(data, null, 2));
 
-    const choice = data?.choices?.[0];
+    const payload = data?.data ?? data;
+    const choice = payload?.choices?.[0];
     const toolCalls = choice?.message?.tool_calls;
     const finishReason = choice?.finish_reason;
     if (Array.isArray(toolCalls) && toolCalls.length > 0) {
@@ -155,4 +156,3 @@ function resolveTsxBin() {
     await new Promise(r => setTimeout(r, 1000));
   }
 })();
-

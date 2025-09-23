@@ -45,8 +45,8 @@ coverage/
 ehthumbs.db
 Thumbs.db
 
-# Debug (temporary enabled for commit)
-# debug/
+# Debug
+debug/
 
 # Cache
 .cache/

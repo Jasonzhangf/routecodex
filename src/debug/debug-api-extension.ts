@@ -5,9 +5,9 @@
  * endpoints for debugging and monitoring the RouteCodex system.
  */
 
-import { DebugEventBus } from 'rcc-debugcenter';
+import { DebugEventBus } from '../utils/external-mocks.js';
 import { ErrorHandlerRegistry } from '../utils/error-handler-registry.js';
-import { DebugUtils } from '../utils/debug-utils.js';
+import { DebugUtilsStatic as DebugUtils } from '../utils/debug-utils.js';
 import type {
   DebugAPIExtension,
   DebugAPIRequest,
@@ -398,6 +398,16 @@ export class DebugAPIExtensionImpl implements DebugAPIExtension {
    */
   private async handleGetAdapter(request: DebugAPIRequest): Promise<DebugAPIResponse> {
     const adapterId = request.params?.id;
+    if (!adapterId) {
+      return {
+        requestId: request.id,
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+        body: { error: 'Adapter ID is required' },
+        processingTime: Date.now() - request.timestamp,
+        timestamp: Date.now()
+      };
+    }
     const adapter = this.adapters.get(adapterId);
 
     if (!adapter) {
@@ -405,7 +415,7 @@ export class DebugAPIExtensionImpl implements DebugAPIExtension {
         requestId: request.id,
         status: 404,
         headers: { 'content-type': 'application/json' },
-        body: { error: 'Adapter not found', adapterId },
+        body: { error: 'Adapter not found', adapterId: adapterId || 'unknown' },
         processingTime: Date.now() - request.timestamp,
         timestamp: Date.now()
       };
@@ -454,7 +464,7 @@ export class DebugAPIExtensionImpl implements DebugAPIExtension {
         requestId: request.id,
         status: 404,
         headers: { 'content-type': 'application/json' },
-        body: { error: 'Adapter not found', adapterId },
+        body: { error: 'Adapter not found', adapterId: adapterId || 'unknown' },
         processingTime: Date.now() - request.timestamp,
         timestamp: Date.now()
       };
@@ -462,7 +472,7 @@ export class DebugAPIExtensionImpl implements DebugAPIExtension {
 
     try {
       const debugContext: DebugContext = {
-        id: context.id || DebugUtils.generateId('session'),
+        id: context.id ? String(context.id) : DebugUtils.generateId('session'),
         type: context.type || 'session',
         ...context
       };
@@ -518,7 +528,7 @@ export class DebugAPIExtensionImpl implements DebugAPIExtension {
         requestId: request.id,
         status: 404,
         headers: { 'content-type': 'application/json' },
-        body: { error: 'Adapter not found', adapterId },
+        body: { error: 'Adapter not found', adapterId: adapterId || 'unknown' },
         processingTime: Date.now() - request.timestamp,
         timestamp: Date.now()
       };
@@ -526,7 +536,7 @@ export class DebugAPIExtensionImpl implements DebugAPIExtension {
 
     try {
       const context: DebugContext = {
-        id: sessionId,
+        id: sessionId || DebugUtils.generateId('session'),
         type: 'session',
         timestamp: Date.now()
       };
@@ -581,7 +591,7 @@ export class DebugAPIExtensionImpl implements DebugAPIExtension {
         requestId: request.id,
         status: 404,
         headers: { 'content-type': 'application/json' },
-        body: { error: 'Adapter not found', adapterId },
+        body: { error: 'Adapter not found', adapterId: adapterId || 'unknown' },
         processingTime: Date.now() - request.timestamp,
         timestamp: Date.now()
       };
@@ -697,6 +707,7 @@ export class DebugAPIExtensionImpl implements DebugAPIExtension {
     return {
       status: 'unknown',
       lastCheck: 0,
+      score: 0,
       activeConnections: 0,
       totalRequests: 0,
       errorRate: 0,

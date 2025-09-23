@@ -53,7 +53,14 @@
         "timeout": 30000,
         "bodyLimit": "10mb",
         "enableMetrics": true,
-        "enableHealthChecks": true
+        "enableHealthChecks": true,
+        "logging": {
+          "level": "info",
+          "enableConsole": true,
+          "enableFile": true,
+          "filePath": "~/.routecodex/logs/server/http-server.log",
+          "categories": ["server", "api", "request", "config", "error", "message"]
+        }
       }
     },
     "configmanager": {
@@ -107,6 +114,7 @@
         "moduleType": "openai-router",
         "basePath": "/v1/openai",
         "enableStreaming": true,
+        "enablePipeline": true,
         "rateLimit": {
           "enabled": false,
           "requestsPerMinute": 60
@@ -147,6 +155,121 @@
           "requireLowercase": true,
           "requireNumbers": true,
           "requireSpecialChars": false
+        }
+      }
+    },
+    "virtualrouter": {
+      "enabled": true,
+      "config": {
+        "moduleType": "virtual-router",
+        "enableClassification": true,
+        "classificationConfig": {
+                    "confidenceThreshold": 60,
+          "enableSmartRouting": true,
+          "protocolMapping": {
+            "openai": {
+              "endpoints": ["/v1/chat/completions", "/v1/completions"],
+              "messageField": "messages",
+              "modelField": "model",
+              "toolsField": "tools",
+              "maxTokensField": "max_tokens"
+            },
+            "anthropic": {
+              "endpoints": ["/v1/messages"],
+              "messageField": "messages",
+              "modelField": "model",
+              "toolsField": "tools",
+              "maxTokensField": "max_tokens"
+            }
+          },
+          "modelTiers": {
+            "basic": {
+              "description": "Basic models for simple tasks",
+              "models": ["gpt-3.5-turbo", "claude-3-haiku", "qwen-turbo"],
+              "maxTokens": 16384,
+              "supportedFeatures": ["text_generation", "conversation"]
+            },
+            "advanced": {
+              "description": "Advanced models for complex tasks",
+              "models": ["gpt-4", "claude-3-opus", "claude-3-sonnet", "deepseek-coder", "qwen-max"],
+              "maxTokens": 262144,
+              "supportedFeatures": ["text_generation", "reasoning", "coding", "tool_use"]
+            }
+          },
+          "routingDecisions": {
+            "default": {
+              "description": "Default routing for general requests",
+              "modelTier": "basic",
+              "tokenThreshold": 8000,
+              "toolTypes": [],
+              "priority": 1
+            },
+            "longContext": {
+              "description": "Routing for long context requests",
+              "modelTier": "advanced",
+              "tokenThreshold": 32000,
+              "toolTypes": [],
+              "priority": 90
+            },
+            "thinking": {
+              "description": "Routing for complex reasoning requests",
+              "modelTier": "advanced",
+              "tokenThreshold": 16000,
+              "toolTypes": ["dataAnalysis", "complex_reasoning"],
+              "priority": 85
+            },
+            "coding": {
+              "description": "Routing for code generation requests",
+              "modelTier": "advanced",
+              "tokenThreshold": 24000,
+              "toolTypes": ["codeExecution", "fileSearch"],
+              "priority": 80
+            },
+            "webSearch": {
+              "description": "Routing for web search requests",
+              "modelTier": "advanced",
+              "tokenThreshold": 12000,
+              "toolTypes": ["webSearch"],
+              "priority": 95
+            }
+          },
+          "protocolHandlers": {
+            "openai": {
+              "tokenCalculator": {
+                "type": "openai",
+                "tokenRatio": 0.25,
+                "toolOverhead": 50,
+                "messageOverhead": 10,
+                "imageTokenDefault": 255
+              },
+              "toolDetector": {
+                "type": "pattern",
+                "patterns": {
+                  "webSearch": ["web_search", "search", "browse", "internet"],
+                  "codeExecution": ["code", "execute", "bash", "python", "javascript"],
+                  "fileSearch": ["file", "read", "write", "document", "pdf"],
+                  "dataAnalysis": ["data", "analysis", "chart", "graph", "statistics"]
+                }
+              }
+            },
+            "anthropic": {
+              "tokenCalculator": {
+                "type": "anthropic",
+                "tokenRatio": 0.25,
+                "toolOverhead": 50,
+                "messageOverhead": 10
+              },
+              "toolDetector": {
+                "type": "pattern",
+                "patterns": {
+                  "webSearch": ["web_search", "search", "browse"],
+                  "codeExecution": ["code", "execute", "bash", "python"],
+                  "fileSearch": ["file", "read", "write"],
+                  "dataAnalysis": ["data", "analysis", "chart"]
+                }
+              }
+            }
+          }
         }
       }
     }

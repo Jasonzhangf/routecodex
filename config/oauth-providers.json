@@ -34,10 +34,10 @@
       }
     },
     "provider": {
-      "type": "qwen-http",
+      "type": "qwen-provider",
       "config": {
         "type": "qwen",
-        "baseUrl": "https://chat.qwen.ai",
+        "baseUrl": "https://portal.qwen.ai/v1",
         "auth": {
           "oauth": {
             "clientId": "f0304373b74a44d2b584a3fb70ca9e56",
@@ -54,9 +54,9 @@
   },
   "providers": {
     "qwen": {
-      "type": "qwen-http",
+      "type": "qwen-provider",
       "enabled": true,
-      "baseUrl": "https://chat.qwen.ai",
+      "baseUrl": "https://portal.qwen.ai/v1",
       "auth": {
         "oauth": {
           "clientId": "f0304373b74a44d2b584a3fb70ca9e56",

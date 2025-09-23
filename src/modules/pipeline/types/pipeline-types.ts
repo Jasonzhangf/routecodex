@@ -27,7 +27,7 @@ export interface ModuleTypeMapping {
   'openai-passthrough': import('../modules/llmswitch/openai-passthrough.js').OpenAIPassthroughLLMSwitch;
   'streaming-control': import('../modules/workflow/streaming-control.js').StreamingControlWorkflow;
   'field-mapping': import('../modules/compatibility/field-mapping.js').FieldMappingCompatibility;
-  'qwen-http': import('../modules/provider/qwen-http-provider.js').QwenHTTPProvider;
+  'qwen-provider': import('../modules/provider/qwen-provider.js').QwenProvider;
   'generic-http': import('../modules/provider/generic-http-provider.js').GenericHTTPProvider;
 }
 
@@ -38,7 +38,7 @@ export type PipelineModuleConfig =
   | { type: 'openai-passthrough'; config: Record<string, any> }
   | { type: 'streaming-control'; config: Record<string, any> }
   | { type: 'field-mapping'; config: { rules: TransformationRule[] } }
-  | { type: 'qwen-http'; config: Record<string, any> }
+  | { type: 'qwen-provider'; config: Record<string, any> }
   | { type: 'generic-http'; config: Record<string, any> };
 
 /**

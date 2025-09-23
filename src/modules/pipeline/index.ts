@@ -122,13 +122,7 @@ export * from './types/pipeline-types.js';
 export const PIPELINE_MODULE_VERSION = '1.0.0';
 export const PIPELINE_API_VERSION = '1.0.0';
 
-// Legacy exports (for backward compatibility)
-// Note: These will be deprecated in future versions
-// export {
-//   // Keep these for existing code that uses them
-//   BasePipeline as LegacyBasePipeline,
-//   PipelineManager as LegacyPipelineManager
-// } from './core/legacy-exports.js';
+
 
 // Export everything from core interfaces for full access
 export * from './interfaces/pipeline-interfaces.js';

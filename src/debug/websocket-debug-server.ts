@@ -5,9 +5,9 @@
  * real-time debugging and monitoring of the RouteCodex system.
  */
 
-import { DebugEventBus } from 'rcc-debugcenter';
+import { DebugEventBus } from '../utils/external-mocks.js';
 import { ErrorHandlerRegistry } from '../utils/error-handler-registry.js';
-import { DebugUtils } from '../utils/debug-utils.js';
+import { DebugUtilsStatic } from '../utils/debug-utils.js';
 import type {
   WebSocketDebugServer,
   WebSocketServerStats,
@@ -31,7 +31,7 @@ export class WebSocketDebugServerImpl implements WebSocketDebugServer {
 
   private debugEventBus: DebugEventBus;
   private errorRegistry: ErrorHandlerRegistry;
-  private debugUtils: DebugUtils;
+  private debugUtils: any; // DebugUtils instance
   private server: any; // WebSocket server instance
   private clients: Map<string, any> = new Map(); // Connected clients
   private subscriptions: Map<string, Set<string>> = new Map(); // Client subscriptions
@@ -66,7 +66,7 @@ export class WebSocketDebugServerImpl implements WebSocketDebugServer {
     this.config = config;
     this.debugEventBus = DebugEventBus.getInstance();
     this.errorRegistry = ErrorHandlerRegistry.getInstance();
-    this.debugUtils = DebugUtils.getInstance();
+    this.debugUtils = DebugUtilsStatic;
     this.startTime = Date.now();
 
     // Initialize statistics
@@ -308,7 +308,7 @@ export class WebSocketDebugServerImpl implements WebSocketDebugServer {
       });
 
     } catch (error) {
-      await this.handleError('handle_connection', error as Error);
+      void this.handleError('handle_connection', error as Error);
     }
   }
 

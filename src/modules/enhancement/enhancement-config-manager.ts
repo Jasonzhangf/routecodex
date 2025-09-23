@@ -7,8 +7,8 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import type { DebugCenter } from '../modules/pipeline/types/external-types.js';
-import { ModuleEnhancementFactory, EnhancementConfig, EnhancementRegistry } from './module-enhancement-factory.js';
+import type { DebugCenter } from '../pipeline/types/external-types.js';
+import { ModuleEnhancementFactory, type EnhancementConfig, EnhancementRegistry, type EnhancedModule } from './module-enhancement-factory';
 
 /**
  * Global enhancement configuration
@@ -46,14 +46,14 @@ export interface GlobalEnhancementConfig {
 /**
  * Module-specific enhancement configuration
  */
-export interface ModuleEnhancementConfig extends EnhancementConfig {
+export interface ModuleEnhancementConfig extends Omit<EnhancementConfig, 'enabled'> {
   /** Module identifier */
   moduleId: string;
   /** Module type (provider, pipeline, compatibility, etc.) */
   moduleType: string;
   /** File path for auto-detection */
   filePath?: string;
-  /** Enable/disable for this specific module */
+  /** Enable/disable for this specific module - overrides global setting */
   enabled?: boolean;
   /** Priority for enhancement order */
   priority?: number;
@@ -241,8 +241,12 @@ export class EnhancementConfigManager {
       });
     }
 
-    // Create enhanced module
-    return this.factory.createEnhancedModule(module, moduleId, moduleType, moduleConfig);
+    // Create enhanced module - ensure proper type conversion
+    const enhancementConfig: EnhancementConfig = {
+      ...moduleConfig,
+      enabled: moduleConfig.enabled ?? this.getGlobalConfig().defaults.enabled
+    };
+    return this.factory.createEnhancedModule(module, moduleId, moduleType, enhancementConfig);
   }
 
   /**
@@ -444,8 +448,8 @@ export class EnhancementConfigManager {
    * Scan for modules in specified pattern
    */
   private async scanModules(pattern: string): Promise<ModuleEnhancementConfig[]> {
-    const glob = await import('glob');
-    const files = await glob.glob(pattern, {
+    const { glob } = await import('glob');
+    const files = await glob(pattern, {
       ignore: this.getGlobalConfig().autoDetection.excludeDirs
     });
 

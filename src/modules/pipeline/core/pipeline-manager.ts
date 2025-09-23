@@ -21,6 +21,8 @@ import type {
 import { BasePipeline } from './base-pipeline.js';
 import { PipelineModuleRegistryImpl } from '../core/pipeline-registry.js';
 import { PipelineDebugLogger } from '../utils/debug-logger.js';
+import { DebugEventBus } from 'rcc-debugcenter';
+import { ModuleEnhancementFactory } from '../../enhancement/module-enhancement-factory.js';
 
 /**
  * Pipeline Manager
@@ -38,6 +40,14 @@ export class PipelineManager implements RCCBaseModule {
   private logger: PipelineDebugLogger;
   private isInitialized = false;
 
+  // Debug enhancement properties
+  private enhancementFactory!: ModuleEnhancementFactory;
+  private isEnhanced = false;
+  private debugEventBus!: DebugEventBus;
+  private managerMetrics: Map<string, any> = new Map();
+  private requestHistory: any[] = [];
+  private maxHistorySize = 100;
+
   constructor(
     config: PipelineManagerConfig,
     private errorHandlingCenter: ErrorHandlingCenter,
@@ -50,6 +60,10 @@ export class PipelineManager implements RCCBaseModule {
     this.logger = new PipelineDebugLogger(debugCenter);
     this.registry = new PipelineModuleRegistryImpl();
     this.initializeModuleRegistry();
+    this.initializeDebugEnhancements();
+
+    // Initialize registry debug enhancements (no debugCenter parameter needed)
+    this.registry.initializeDebugEnhancements();
   }
 
   /**
@@ -99,8 +113,20 @@ export class PipelineManager implements RCCBaseModule {
       pipelineId,
       providerId: routeRequest.providerId,
       modelId: routeRequest.modelId,
-      requestId: routeRequest.requestId
+      requestId: routeRequest.requestId,
+      managerEnhanced: this.isEnhanced
     });
+
+    // Publish selection event with enhanced debug info
+    if (this.isEnhanced) {
+      this.publishManagerEvent('pipeline-selected', {
+        pipelineId,
+        providerId: routeRequest.providerId,
+        modelId: routeRequest.modelId,
+        requestId: routeRequest.requestId,
+        pipelineStatus: pipeline.getDebugInfo()
+      });
+    }
 
     return pipeline;
   }
@@ -113,7 +139,23 @@ export class PipelineManager implements RCCBaseModule {
       throw new Error('PipelineManager is not initialized');
     }
 
+    const startTime = Date.now();
+    const requestId = request.route.requestId;
+    const requestContext = {
+      requestId,
+      providerId: request.route.providerId,
+      modelId: request.route.modelId,
+      startTime,
+      managerEnhanced: this.isEnhanced
+    };
+
     try {
+      // Enhanced request logging
+      if (this.isEnhanced) {
+        this.publishManagerEvent('request-start', requestContext);
+        this.recordManagerMetric('request_start', startTime);
+      }
+
       // Select pipeline based on route information
       const pipeline = this.selectPipeline({
         providerId: request.route.providerId,
@@ -124,19 +166,56 @@ export class PipelineManager implements RCCBaseModule {
       // Process request through pipeline
       const response = await pipeline.processRequest(request);
 
+      // Enhanced response logging
+      const processingTime = Date.now() - startTime;
+      if (this.isEnhanced) {
+        this.publishManagerEvent('request-complete', {
+          ...requestContext,
+          processingTime,
+          pipelineDebugInfo: pipeline.getDebugInfo(),
+          responseMetadata: response.metadata
+        });
+        this.recordManagerMetric('request_complete', processingTime);
+        this.addToRequestHistory({
+          ...requestContext,
+          processingTime,
+          success: true,
+          pipelineId: pipeline.pipelineId
+        });
+      }
+
       this.logger.logPipeline('manager', 'request-processed', {
         pipelineId: pipeline.pipelineId,
         processingTime: response.metadata.processingTime,
-        requestId: request.route.requestId
+        requestId: request.route.requestId,
+        enhanced: this.isEnhanced
       });
 
       return response;
 
     } catch (error) {
+      const processingTime = Date.now() - startTime;
+      if (this.isEnhanced) {
+        this.publishManagerEvent('request-error', {
+          ...requestContext,
+          processingTime,
+          error: error instanceof Error ? error.message : String(error),
+          errorStack: error instanceof Error ? error.stack : undefined
+        });
+        this.addToRequestHistory({
+          ...requestContext,
+          processingTime,
+          success: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+
       this.logger.logPipeline('manager', 'request-processing-error', {
         error: error instanceof Error ? error.message : String(error),
-        requestId: request.route.requestId
+        requestId: request.route.requestId,
+        enhanced: this.isEnhanced
       });
+
       throw error;
     }
   }
@@ -159,7 +238,7 @@ export class PipelineManager implements RCCBaseModule {
   }
 
   /**
-   * Get manager status
+   * Get enhanced manager status with debug information
    */
   getStatus(): {
     isInitialized: boolean;
@@ -167,14 +246,29 @@ export class PipelineManager implements RCCBaseModule {
     pipelines: any;
     registry: any;
     statistics: any;
+    debugInfo?: any;
+    performanceStats?: any;
+    requestHistory?: any[];
   } {
-    return {
+    const baseStatus = {
       isInitialized: this.isInitialized,
       pipelineCount: this.pipelines.size,
       pipelines: this.getPipelineStatus(),
       registry: this.registry.getStatus(),
       statistics: this.logger.getStatistics()
     };
+
+    // Add enhanced debug information if enabled
+    if (this.isEnhanced) {
+      return {
+        ...baseStatus,
+        debugInfo: this.getDebugInfo(),
+        performanceStats: this.getPerformanceStats(),
+        requestHistory: [...this.requestHistory]
+      };
+    }
+
+    return baseStatus;
   }
 
   /**
@@ -212,9 +306,19 @@ export class PipelineManager implements RCCBaseModule {
         pipelines: [...this.config.pipelines, config]
       };
 
+      // Enhanced logging
+      if (this.isEnhanced) {
+        this.publishManagerEvent('pipeline-added', {
+          pipelineId,
+          config,
+          totalPipelines: this.pipelines.size
+        });
+      }
+
       this.logger.logPipeline('manager', 'pipeline-added', {
         pipelineId,
-        totalPipelines: this.pipelines.size
+        totalPipelines: this.pipelines.size,
+        enhanced: this.isEnhanced
       });
 
     } catch (error) {
@@ -248,9 +352,18 @@ export class PipelineManager implements RCCBaseModule {
         pipelines: this.config.pipelines.filter(p => p.id !== pipelineId)
       };
 
+      // Enhanced logging
+      if (this.isEnhanced) {
+        this.publishManagerEvent('pipeline-removed', {
+          pipelineId,
+          remainingPipelines: this.pipelines.size
+        });
+      }
+
       this.logger.logPipeline('manager', 'pipeline-removed', {
         pipelineId,
-        remainingPipelines: this.pipelines.size
+        remainingPipelines: this.pipelines.size,
+        enhanced: this.isEnhanced
       });
 
     } catch (error) {
@@ -287,9 +400,19 @@ export class PipelineManager implements RCCBaseModule {
       // Add updated pipeline
       await this.addPipeline(this.config.pipelines[configIndex]);
 
+      // Enhanced logging
+      if (this.isEnhanced) {
+        this.publishManagerEvent('pipeline-updated', {
+          pipelineId,
+          updatedFields: Object.keys(newConfig),
+          newConfig
+        });
+      }
+
       this.logger.logPipeline('manager', 'pipeline-updated', {
         pipelineId,
-        updatedFields: Object.keys(newConfig)
+        updatedFields: Object.keys(newConfig),
+        enhanced: this.isEnhanced
       });
 
     } catch (error) {
@@ -439,17 +562,194 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('streaming-control', this.createStreamingControlModule);
     this.registry.registerModule('field-mapping', this.createFieldMappingModule);
     this.registry.registerModule('qwen-compatibility', this.createQwenCompatibilityModule);
-    this.registry.registerModule('qwen-http', this.createQwenHTTPModule);
+    this.registry.registerModule('qwen-provider', this.createQwenProviderModule);
     this.registry.registerModule('generic-http', this.createGenericHTTPModule);
     this.registry.registerModule('lmstudio-http', this.createLMStudioHTTPModule);
 
     // Register LM Studio module factories
     this.registry.registerModule('lmstudio-compatibility', this.createLMStudioCompatibilityModule);
-    this.registry.registerModule('lmstudio-sdk', this.createLMStudioSDKModule);
+    
 
     this.logger.logPipeline('manager', 'module-registry-initialized', {
-      moduleTypes: this.registry.getAvailableTypes()
+      moduleTypes: this.registry.getAvailableTypes(),
+      enhanced: this.isEnhanced
     });
+  }
+
+  /**
+   * Initialize debug enhancements
+   */
+  private initializeDebugEnhancements(): void {
+    try {
+      this.debugEventBus = DebugEventBus.getInstance();
+
+      // Initialize enhancement factory with proper debug center
+      this.enhancementFactory = new ModuleEnhancementFactory(this.debugCenter);
+
+      // Register this manager for enhancement
+      this.enhancementFactory.registerConfig('pipeline-manager', {
+        enabled: true,
+        level: 'detailed',
+        consoleLogging: true,
+        debugCenter: true,
+        performanceTracking: true,
+        requestLogging: true,
+        errorTracking: true,
+        transformationLogging: true
+      });
+
+      // Subscribe to manager-specific events
+      this.subscribeToManagerEvents();
+
+      this.isEnhanced = true;
+
+      this.logger.logPipeline('manager', 'debug-enhancements-initialized', {
+        enhanced: true,
+        eventBusAvailable: !!this.debugEventBus,
+        enhancementFactoryAvailable: !!this.enhancementFactory
+      });
+    } catch (error) {
+      this.logger.logPipeline('manager', 'debug-enhancements-error', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  /**
+   * Subscribe to manager-specific debug events
+   */
+  private subscribeToManagerEvents(): void {
+    if (!this.debugEventBus) return;
+
+    this.debugEventBus.subscribe('manager-subscription', (event: any) => {
+      this.handleManagerDebugEvent(event);
+    });
+  }
+
+  /**
+   * Handle manager debug events
+   */
+  private handleManagerDebugEvent(event: any): void {
+    // Process manager-specific debug events
+    if (event.type === 'performance') {
+      this.recordManagerMetric(event.data.operationId, event.data.processingTime);
+    }
+
+    // Forward to web interface
+    this.publishToWebSocket(event);
+  }
+
+  /**
+   * Record manager-level performance metrics
+   */
+  private recordManagerMetric(operationId: string, value: number): void {
+    if (!this.managerMetrics.has(operationId)) {
+      this.managerMetrics.set(operationId, {
+        values: [],
+        lastUpdated: Date.now()
+      });
+    }
+
+    const metric = this.managerMetrics.get(operationId)!;
+    metric.values.push(value);
+    metric.lastUpdated = Date.now();
+
+    // Keep only last 50 measurements
+    if (metric.values.length > 50) {
+      metric.values.shift();
+    }
+  }
+
+  /**
+   * Get manager performance statistics
+   */
+  private getPerformanceStats(): any {
+    const stats: any = {};
+
+    for (const [operationId, metric] of this.managerMetrics.entries()) {
+      const values = metric.values;
+      if (values.length > 0) {
+        stats[operationId] = {
+          count: values.length,
+          avg: Math.round(values.reduce((a: any, b: any) => a + b, 0) / values.length),
+          min: Math.min(...values),
+          max: Math.max(...values),
+          lastUpdated: metric.lastUpdated
+        };
+      }
+    }
+
+    return stats;
+  }
+
+  /**
+   * Get detailed manager debug information
+   */
+  private getDebugInfo(): any {
+    return {
+      managerId: this.id,
+      enhanced: this.isEnhanced,
+      eventBusAvailable: !!this.debugEventBus,
+      pipelineCount: this.pipelines.size,
+      performanceStats: this.getPerformanceStats(),
+      requestHistorySize: this.requestHistory.length,
+      registryStatus: this.registry.getStatus()
+    };
+  }
+
+  /**
+   * Publish manager-specific events
+   */
+  private publishManagerEvent(type: string, data: any): void {
+    if (!this.isEnhanced) return;
+
+    this.publishToWebSocket({
+      type: 'manager',
+      timestamp: Date.now(),
+      data: {
+        operation: type,
+        managerId: this.id,
+        ...data
+      }
+    });
+  }
+
+  /**
+   * Add request to history for debugging
+   */
+  private addToRequestHistory(request: any): void {
+    this.requestHistory.push({
+      ...request,
+      timestamp: Date.now()
+    });
+
+    // Keep only recent history
+    if (this.requestHistory.length > this.maxHistorySize) {
+      this.requestHistory.shift();
+    }
+  }
+
+  /**
+   * Publish event to WebSocket
+   */
+  private publishToWebSocket(event: any): void {
+    try {
+      this.debugCenter.processDebugEvent({
+        sessionId: event.sessionId || 'system',
+        moduleId: 'pipeline-manager',
+        operationId: event.operationId || event.type,
+        timestamp: event.timestamp || Date.now(),
+        type: (event.type || 'debug') as 'start' | 'end' | 'error',
+        position: 'middle' as 'start' | 'middle' | 'end',
+        data: {
+          ...event.data,
+          managerId: this.id,
+          source: 'pipeline-manager'
+        }
+      });
+    } catch (error) {
+      // Silent fail if WebSocket is not available
+    }
   }
 
   /**
@@ -480,9 +780,9 @@ export class PipelineManager implements RCCBaseModule {
     return new QwenCompatibility(config, dependencies);
   };
 
-  private createQwenHTTPModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { QwenHTTPProvider } = await import('../modules/provider/qwen-http-provider.js');
-    return new QwenHTTPProvider(config, dependencies);
+  private createQwenProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { QwenProvider } = await import('../modules/provider/qwen-provider.js');
+    return new QwenProvider(config, dependencies);
   };
 
   private createGenericHTTPModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
@@ -497,11 +797,6 @@ export class PipelineManager implements RCCBaseModule {
   private createLMStudioCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { LMStudioCompatibility } = await import('../modules/compatibility/lmstudio-compatibility.js');
     return new LMStudioCompatibility(config, dependencies);
-  };
-
-  private createLMStudioSDKModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { LMStudioSDKProvider } = await import('../modules/provider/lmstudio-sdk-provider.js');
-    return new LMStudioSDKProvider(config, dependencies);
   };
 
   /**

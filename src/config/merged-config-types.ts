@@ -56,6 +56,10 @@ export interface PipelineConfig {
     input: 'openai' | 'anthropic';
     output: 'openai' | 'anthropic';
   };
+  // Optional module declarations for pipeline assembly
+  compatibility?: { type: string; config?: Record<string, any> };
+  llmSwitch?: { type: string; config?: Record<string, any> };
+  workflow?: { type: string; config?: Record<string, any>; enabled?: boolean };
 }
 
 /**

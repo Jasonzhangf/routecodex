@@ -265,7 +265,7 @@ async function initializeConfig(configPath: string, template?: string, force: bo
           },
           providers: {
             qwen: {
-              type: "qwen-http",
+              type: "qwen-provider",
               baseUrl: "https://chat.qwen.ai",
               oauth: {
                 clientId: "f0304373b74a44d2b584a3fb70ca9e56",

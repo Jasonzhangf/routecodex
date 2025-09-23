@@ -1,0 +1,83 @@
+{
+  "virtualrouter": {
+    "inputProtocol": "openai",
+    "outputProtocol": "openai",
+    "providers": {
+      "lmstudio": {
+        "type": "lmstudio",
+        "baseURL": "http://192.168.99.149:1234",
+        "apiKey": ["default"],
+        "models": {
+          "gpt-oss-20b-mlx": {
+            "maxContext": 131072,
+            "maxTokens": 8192
+          },
+          "gpt-oss-mini": {
+            "maxContext": 65536,
+            "maxTokens": 4096
+          }
+        }
+      },
+      "qwen": {
+        "type": "qwen",
+        "baseURL": "https://portal.qwen.ai/v1",
+        "apiKey": ["oauth-default"],
+        "oauth": {
+          "default": {
+            "clientId": "f0304373b74a44d2b584a3fb70ca9e56",
+            "deviceCodeUrl": "https://chat.qwen.ai/api/v1/oauth2/device/code",
+            "tokenUrl": "https://chat.qwen.ai/api/v1/oauth2/token",
+            "scopes": ["openid", "profile", "email", "model.completion"],
+            "tokenFile": "~/.qwen/oauth_creds.json"
+          }
+        },
+        "models": {
+          "qwen3-coder-plus": {
+            "maxContext": 32768,
+            "maxTokens": 32768
+          },
+          "qwen-turbo": {
+            "maxContext": 32768,
+            "maxTokens": 32768
+          }
+        }
+      },
+      "iflow": {
+        "type": "iflow-http",
+        "baseURL": "https://api.iflow.cn/v1",
+        "apiKey": ["oauth-default"],
+        "oauth": {
+          "default": {
+            "clientId": "iflow-desktop-client",
+            "deviceCodeUrl": "https://api.iflow.cn/oauth/device_code",
+            "tokenUrl": "https://api.iflow.cn/oauth/token",
+            "scopes": ["openid", "profile", "email", "model.completion"],
+            "tokenFile": "~/.iflow/oauth_creds.json"
+          }
+        },
+        "models": {
+          "iflow-pro": {
+            "maxContext": 32768,
+            "maxTokens": 32768
+          }
+        }
+      }
+    },
+    "routing": {
+      "default": [
+        "lmstudio.gpt-oss-20b-mlx.default",
+        "qwen.qwen3-coder-plus.oauth-default"
+      ],
+      "coding": [
+        "qwen.qwen3-coder-plus.oauth-default"
+      ],
+      "longcontext": [
+        "lmstudio.gpt-oss-20b-mlx.default"
+      ],
+      "tools": [
+        "lmstudio.gpt-oss-20b-mlx.default",
+        "qwen.qwen-turbo.oauth-default"
+      ]
+    }
+  }
+}
