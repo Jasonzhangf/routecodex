@@ -238,6 +238,48 @@ export class PipelineManager implements RCCBaseModule {
   }
 
   /**
+   * Get debug status with enhanced information
+   */
+  getDebugStatus(): any {
+    const baseStatus = {
+      managerId: this.id,
+      isInitialized: this.isInitialized,
+      type: this.type,
+      version: this.version,
+      isEnhanced: this.isEnhanced
+    };
+
+    if (!this.isEnhanced) {
+      return baseStatus;
+    }
+
+    return {
+      ...baseStatus,
+      debugInfo: this.getDebugInfo(),
+      performanceStats: this.getPerformanceStats(),
+      requestHistory: [...this.requestHistory.slice(-10)], // Last 10 requests
+      managerMetrics: this.getManagerMetrics()
+    };
+  }
+
+  /**
+   * Get manager metrics
+   */
+  private getManagerMetrics(): any {
+    const metrics: any = {};
+
+    for (const [operation, metric] of this.managerMetrics.entries()) {
+      metrics[operation] = {
+        count: metric.values.length,
+        lastUpdated: metric.lastUpdated,
+        recentValues: metric.values.slice(-5) // Last 5 values
+      };
+    }
+
+    return metrics;
+  }
+
+  /**
    * Get enhanced manager status with debug information
    */
   getStatus(): {
