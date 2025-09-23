@@ -7,6 +7,7 @@
 
 import type { CompatibilityModule, ModuleConfig, ModuleDependencies, TransformationRule } from '../../interfaces/pipeline-interfaces.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
+import { DebugEventBus } from '../../../../utils/external-mocks.js';
 
 /**
  * Qwen Compatibility Module
@@ -21,17 +22,186 @@ export class QwenCompatibility implements CompatibilityModule {
   private logger: PipelineDebugLogger;
   private transformationEngine: any; // TransformationEngine instance
 
+  // Debug enhancement properties
+  private debugEventBus: DebugEventBus | null = null;
+  private isDebugEnhanced = false;
+  private compatibilityMetrics: Map<string, any> = new Map();
+  private transformationHistory: any[] = [];
+  private errorHistory: any[] = [];
+  private maxHistorySize = 50;
+
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
     this.logger = dependencies.logger as any;
     this.id = `compatibility-${Date.now()}`;
     this.config = config;
     this.rules = this.initializeTransformationRules();
+
+    // Initialize debug enhancements
+    this.initializeDebugEnhancements();
+  }
+
+  /**
+   * Initialize debug enhancements
+   */
+  private initializeDebugEnhancements(): void {
+    try {
+      this.debugEventBus = DebugEventBus.getInstance();
+      this.isDebugEnhanced = true;
+      console.log('Qwen Compatibility debug enhancements initialized');
+    } catch (error) {
+      console.warn('Failed to initialize Qwen Compatibility debug enhancements:', error);
+      this.isDebugEnhanced = false;
+    }
+  }
+
+  /**
+   * Record compatibility metric
+   */
+  private recordCompatibilityMetric(operation: string, data: any): void {
+    if (!this.compatibilityMetrics.has(operation)) {
+      this.compatibilityMetrics.set(operation, {
+        values: [],
+        lastUpdated: Date.now()
+      });
+    }
+
+    const metric = this.compatibilityMetrics.get(operation)!;
+    metric.values.push(data);
+    metric.lastUpdated = Date.now();
+
+    // Keep only last 50 measurements
+    if (metric.values.length > 50) {
+      metric.values.shift();
+    }
+  }
+
+  /**
+   * Add to transformation history
+   */
+  private addToTransformationHistory(transformation: any): void {
+    this.transformationHistory.push(transformation);
+
+    // Keep only recent history
+    if (this.transformationHistory.length > this.maxHistorySize) {
+      this.transformationHistory.shift();
+    }
+  }
+
+  /**
+   * Add to error history
+   */
+  private addToErrorHistory(error: any): void {
+    this.errorHistory.push(error);
+
+    // Keep only recent history
+    if (this.errorHistory.length > this.maxHistorySize) {
+      this.errorHistory.shift();
+    }
+  }
+
+  /**
+   * Publish debug event
+   */
+  private publishDebugEvent(type: string, data: any): void {
+    if (!this.isDebugEnhanced || !this.debugEventBus) return;
+
+    try {
+      this.debugEventBus.publish({
+        sessionId: `session_${Date.now()}`,
+        moduleId: 'qwen-compatibility',
+        operationId: type,
+        timestamp: Date.now(),
+        type: 'debug',
+        position: 'middle',
+        data: {
+          ...data,
+          compatibilityId: this.id,
+          source: 'qwen-compatibility'
+        }
+      });
+    } catch (error) {
+      // Silent fail if debug event bus is not available
+    }
+  }
+
+  /**
+   * Get debug status with enhanced information
+   */
+  getDebugStatus(): any {
+    const baseStatus = {
+      compatibilityId: this.id,
+      isInitialized: this.isInitialized,
+      type: this.type,
+      isEnhanced: this.isDebugEnhanced
+    };
+
+    if (!this.isDebugEnhanced) {
+      return baseStatus;
+    }
+
+    return {
+      ...baseStatus,
+      debugInfo: this.getDebugInfo(),
+      compatibilityMetrics: this.getCompatibilityMetrics(),
+      transformationHistory: [...this.transformationHistory.slice(-10)], // Last 10 transformations
+      errorHistory: [...this.errorHistory.slice(-10)] // Last 10 errors
+    };
+  }
+
+  /**
+   * Get detailed debug information
+   */
+  private getDebugInfo(): any {
+    return {
+      compatibilityId: this.id,
+      compatibilityType: this.type,
+      enhanced: this.isDebugEnhanced,
+      eventBusAvailable: !!this.debugEventBus,
+      transformationHistorySize: this.transformationHistory.length,
+      errorHistorySize: this.errorHistory.length,
+      rulesCount: this.rules.length,
+      hasTransformationEngine: !!this.transformationEngine
+    };
+  }
+
+  /**
+   * Get compatibility metrics
+   */
+  private getCompatibilityMetrics(): any {
+    const metrics: any = {};
+
+    for (const [operation, metric] of this.compatibilityMetrics.entries()) {
+      metrics[operation] = {
+        count: metric.values.length,
+        lastUpdated: metric.lastUpdated,
+        recentValues: metric.values.slice(-5) // Last 5 values
+      };
+    }
+
+    return metrics;
   }
 
   /**
    * Initialize the compatibility module
    */
   async initialize(): Promise<void> {
+    const startTime = Date.now();
+    const initId = `init_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Debug: Record initialization start
+    if (this.isDebugEnhanced) {
+      this.recordCompatibilityMetric('initialization_start', {
+        initId,
+        rulesCount: this.rules.length,
+        timestamp: startTime
+      });
+      this.publishDebugEvent('initialization_start', {
+        initId,
+        rulesCount: this.rules.length,
+        timestamp: startTime
+      });
+    }
+
     try {
       this.logger.logModule(this.id, 'initializing', {
         config: this.config,
@@ -45,7 +215,49 @@ export class QwenCompatibility implements CompatibilityModule {
       this.isInitialized = true;
       this.logger.logModule(this.id, 'initialized');
 
+      const totalTime = Date.now() - startTime;
+
+      // Debug: Record initialization completion
+      if (this.isDebugEnhanced) {
+        this.recordCompatibilityMetric('initialization_complete', {
+          initId,
+          success: true,
+          totalTime,
+          hasTransformationEngine: !!this.transformationEngine
+        });
+        this.publishDebugEvent('initialization_complete', {
+          initId,
+          success: true,
+          totalTime,
+          hasTransformationEngine: !!this.transformationEngine
+        });
+      }
+
     } catch (error) {
+      const totalTime = Date.now() - startTime;
+
+      // Debug: Record initialization failure
+      if (this.isDebugEnhanced) {
+        this.recordCompatibilityMetric('initialization_failed', {
+          initId,
+          error: error instanceof Error ? error.message : String(error),
+          totalTime
+        });
+        this.addToErrorHistory({
+          initId,
+          error,
+          startTime,
+          endTime: Date.now(),
+          totalTime,
+          operation: 'initialize'
+        });
+        this.publishDebugEvent('initialization_failed', {
+          initId,
+          error: error instanceof Error ? error.message : String(error),
+          totalTime
+        });
+      }
+
       this.logger.logModule(this.id, 'initialization-error', { error });
       throw error;
     }
@@ -55,8 +267,29 @@ export class QwenCompatibility implements CompatibilityModule {
    * Process incoming request - Transform OpenAI format to Qwen format
    */
   async processIncoming(request: any): Promise<any> {
+    const startTime = Date.now();
+    const transformId = `transform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
     if (!this.isInitialized) {
       throw new Error('Qwen Compatibility module is not initialized');
+    }
+
+    // Debug: Record transformation start
+    if (this.isDebugEnhanced) {
+      this.recordCompatibilityMetric('transformation_start', {
+        transformId,
+        originalFormat: 'openai',
+        targetFormat: 'qwen',
+        hasTools: !!request.tools,
+        model: request.model,
+        messageCount: request.messages?.length || 0,
+        timestamp: startTime
+      });
+      this.publishDebugEvent('transformation_start', {
+        transformId,
+        request,
+        timestamp: startTime
+      });
     }
 
     try {
@@ -74,6 +307,39 @@ export class QwenCompatibility implements CompatibilityModule {
 
       const converted = this.convertToQwenRequest(transformed.data || transformed);
 
+      const totalTime = Date.now() - startTime;
+
+      // Debug: Record transformation completion
+      if (this.isDebugEnhanced) {
+        this.recordCompatibilityMetric('transformation_complete', {
+          transformId,
+          success: true,
+          totalTime,
+          transformationCount: transformed.transformationCount || 0,
+          hasInput: Array.isArray(converted.input),
+          parameterKeys: Object.keys(converted.parameters || {}),
+          model: converted.model,
+          rulesApplied: this.rules.length
+        });
+        this.addToTransformationHistory({
+          transformId,
+          request,
+          result: converted,
+          startTime,
+          endTime: Date.now(),
+          totalTime,
+          success: true,
+          transformationCount: transformed.transformationCount || 0
+        });
+        this.publishDebugEvent('transformation_complete', {
+          transformId,
+          success: true,
+          totalTime,
+          transformed,
+          converted
+        });
+      }
+
       this.logger.logModule(this.id, 'transform-request-success', {
         transformationCount: transformed.transformationCount || 0,
         hasInput: Array.isArray(converted.input),
@@ -83,6 +349,31 @@ export class QwenCompatibility implements CompatibilityModule {
       return converted;
 
     } catch (error) {
+      const totalTime = Date.now() - startTime;
+
+      // Debug: Record transformation failure
+      if (this.isDebugEnhanced) {
+        this.recordCompatibilityMetric('transformation_failed', {
+          transformId,
+          error: error instanceof Error ? error.message : String(error),
+          totalTime
+        });
+        this.addToErrorHistory({
+          transformId,
+          error,
+          request,
+          startTime,
+          endTime: Date.now(),
+          totalTime,
+          operation: 'processIncoming'
+        });
+        this.publishDebugEvent('transformation_failed', {
+          transformId,
+          error: error instanceof Error ? error.message : String(error),
+          totalTime
+        });
+      }
+
       this.logger.logModule(this.id, 'transformation-error', { error });
       throw error;
     }
@@ -92,8 +383,28 @@ export class QwenCompatibility implements CompatibilityModule {
    * Process outgoing response - Transform Qwen format to OpenAI format
    */
   async processOutgoing(response: any): Promise<any> {
+    const startTime = Date.now();
+    const responseId = `response_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
     if (!this.isInitialized) {
       throw new Error('Qwen Compatibility module is not initialized');
+    }
+
+    // Debug: Record response transformation start
+    if (this.isDebugEnhanced) {
+      this.recordCompatibilityMetric('response_transform_start', {
+        responseId,
+        originalFormat: 'qwen',
+        targetFormat: 'openai',
+        hasData: !!response.data,
+        hasChoices: !!(response.data?.choices || response.choices),
+        timestamp: startTime
+      });
+      this.publishDebugEvent('response_transform_start', {
+        responseId,
+        response,
+        timestamp: startTime
+      });
     }
 
     try {
@@ -105,6 +416,37 @@ export class QwenCompatibility implements CompatibilityModule {
       // Transform response back to OpenAI format
       const transformed = this.transformQwenResponseToOpenAI(response);
 
+      const totalTime = Date.now() - startTime;
+
+      // Debug: Record response transformation completion
+      if (this.isDebugEnhanced) {
+        this.recordCompatibilityMetric('response_transform_complete', {
+          responseId,
+          success: true,
+          totalTime,
+          transformedResponseId: transformed.id,
+          hasChoices: Array.isArray(transformed.choices),
+          choiceCount: transformed.choices?.length || 0,
+          hasToolCalls: transformed.choices?.some((c: any) => c.message?.tool_calls?.length > 0)
+        });
+        this.addToTransformationHistory({
+          responseId,
+          request: response,
+          result: transformed,
+          startTime,
+          endTime: Date.now(),
+          totalTime,
+          success: true,
+          operation: 'processOutgoing'
+        });
+        this.publishDebugEvent('response_transform_complete', {
+          responseId,
+          success: true,
+          totalTime,
+          transformed
+        });
+      }
+
       this.logger.logModule(this.id, 'transform-response-success', {
         responseId: transformed.id
       });
@@ -112,6 +454,31 @@ export class QwenCompatibility implements CompatibilityModule {
       return transformed;
 
     } catch (error) {
+      const totalTime = Date.now() - startTime;
+
+      // Debug: Record response transformation failure
+      if (this.isDebugEnhanced) {
+        this.recordCompatibilityMetric('response_transform_failed', {
+          responseId,
+          error: error instanceof Error ? error.message : String(error),
+          totalTime
+        });
+        this.addToErrorHistory({
+          responseId,
+          error,
+          request: response,
+          startTime,
+          endTime: Date.now(),
+          totalTime,
+          operation: 'processOutgoing'
+        });
+        this.publishDebugEvent('response_transform_failed', {
+          responseId,
+          error: error instanceof Error ? error.message : String(error),
+          totalTime
+        });
+      }
+
       this.logger.logModule(this.id, 'response-transformation-error', { error });
       throw error;
     }
@@ -121,11 +488,79 @@ export class QwenCompatibility implements CompatibilityModule {
    * Clean up resources
    */
   async cleanup(): Promise<void> {
+    const startTime = Date.now();
+    const cleanupId = `cleanup_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Debug: Record cleanup start
+    if (this.isDebugEnhanced) {
+      this.recordCompatibilityMetric('cleanup_start', {
+        cleanupId,
+        isInitialized: this.isInitialized,
+        transformationHistorySize: this.transformationHistory.length,
+        errorHistorySize: this.errorHistory.length,
+        metricsCount: this.compatibilityMetrics.size,
+        timestamp: startTime
+      });
+      this.publishDebugEvent('cleanup_start', {
+        cleanupId,
+        isInitialized: this.isInitialized,
+        timestamp: startTime
+      });
+    }
+
     try {
       this.logger.logModule(this.id, 'cleanup-start');
+
+      const wasInitialized = this.isInitialized;
       this.isInitialized = false;
+
+      const totalTime = Date.now() - startTime;
+
+      // Debug: Record cleanup completion
+      if (this.isDebugEnhanced) {
+        this.recordCompatibilityMetric('cleanup_complete', {
+          cleanupId,
+          success: true,
+          totalTime,
+          wasInitialized,
+          finalTransformationHistorySize: this.transformationHistory.length,
+          finalErrorHistorySize: this.errorHistory.length,
+          finalMetricsCount: this.compatibilityMetrics.size
+        });
+        this.publishDebugEvent('cleanup_complete', {
+          cleanupId,
+          success: true,
+          totalTime,
+          wasInitialized
+        });
+      }
+
       this.logger.logModule(this.id, 'cleanup-complete');
     } catch (error) {
+      const totalTime = Date.now() - startTime;
+
+      // Debug: Record cleanup failure
+      if (this.isDebugEnhanced) {
+        this.recordCompatibilityMetric('cleanup_failed', {
+          cleanupId,
+          error: error instanceof Error ? error.message : String(error),
+          totalTime
+        });
+        this.addToErrorHistory({
+          cleanupId,
+          error,
+          startTime,
+          endTime: Date.now(),
+          totalTime,
+          operation: 'cleanup'
+        });
+        this.publishDebugEvent('cleanup_failed', {
+          cleanupId,
+          error: error instanceof Error ? error.message : String(error),
+          totalTime
+        });
+      }
+
       this.logger.logModule(this.id, 'cleanup-error', { error });
       throw error;
     }
@@ -168,7 +603,85 @@ export class QwenCompatibility implements CompatibilityModule {
    * Apply compatibility transformations
    */
   async applyTransformations(data: any, rules: TransformationRule[]): Promise<any> {
-    return await this.transformationEngine.transform(data, rules);
+    const startTime = Date.now();
+    const transformId = `custom_transform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Debug: Record custom transformation start
+    if (this.isDebugEnhanced) {
+      this.recordCompatibilityMetric('custom_transformation_start', {
+        transformId,
+        rulesCount: rules.length,
+        dataType: typeof data,
+        timestamp: startTime
+      });
+      this.publishDebugEvent('custom_transformation_start', {
+        transformId,
+        data,
+        rules,
+        timestamp: startTime
+      });
+    }
+
+    try {
+      const result = await this.transformationEngine.transform(data, rules);
+      const totalTime = Date.now() - startTime;
+
+      // Debug: Record custom transformation completion
+      if (this.isDebugEnhanced) {
+        this.recordCompatibilityMetric('custom_transformation_complete', {
+          transformId,
+          success: true,
+          totalTime,
+          transformationCount: result.transformationCount || 0,
+          hasData: !!result.data
+        });
+        this.addToTransformationHistory({
+          transformId,
+          request: { data, rules },
+          result: result.data || result,
+          startTime,
+          endTime: Date.now(),
+          totalTime,
+          success: true,
+          operation: 'applyTransformations'
+        });
+        this.publishDebugEvent('custom_transformation_complete', {
+          transformId,
+          success: true,
+          totalTime,
+          result
+        });
+      }
+
+      return result;
+    } catch (error) {
+      const totalTime = Date.now() - startTime;
+
+      // Debug: Record custom transformation failure
+      if (this.isDebugEnhanced) {
+        this.recordCompatibilityMetric('custom_transformation_failed', {
+          transformId,
+          error: error instanceof Error ? error.message : String(error),
+          totalTime
+        });
+        this.addToErrorHistory({
+          transformId,
+          error,
+          request: { data, rules },
+          startTime,
+          endTime: Date.now(),
+          totalTime,
+          operation: 'applyTransformations'
+        });
+        this.publishDebugEvent('custom_transformation_failed', {
+          transformId,
+          error: error instanceof Error ? error.message : String(error),
+          totalTime
+        });
+      }
+
+      throw error;
+    }
   }
 
   /**
