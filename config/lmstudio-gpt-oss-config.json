@@ -1,0 +1,78 @@
+{
+  "server": {
+    "port": 5506,
+    "host": "localhost"
+  },
+  "logging": {
+    "level": "info",
+    "format": "json"
+  },
+  "providers": {
+    "lmstudio": {
+      "type": "lmstudio",
+      "baseUrl": "http://localhost:1234",
+      "apiKey": "${LM_STUDIO_API_KEY:-}",
+      "models": {
+        "gpt-oss-20b-mlx": {
+          "maxTokens": 32768,
+          "temperature": 0.7,
+          "supportsStreaming": true,
+          "supportsTools": true
+        }
+      },
+      "timeout": 60000,
+      "retryAttempts": 3
+    }
+  },
+  "routing": {
+    "default": "lmstudio",
+    "models": {
+      "gpt-4": "gpt-oss-20b-mlx",
+      "gpt-4-turbo": "gpt-oss-20b-mlx",
+      "gpt-3.5-turbo": "gpt-oss-20b-mlx",
+      "claude-3-haiku": "gpt-oss-20b-mlx",
+      "claude-3-sonnet": "gpt-oss-20b-mlx",
+      "gpt-oss-20b-mlx": "gpt-oss-20b-mlx"
+    }
+  },
+  "features": {
+    "tools": {
+      "enabled": true,
+      "maxTools": 10
+    },
+    "streaming": {
+      "enabled": true,
+      "chunkSize": 1024
+    },
+    "oauth": {
+      "enabled": true,
+      "providers": ["qwen", "iflow"]
+    }
+  },
+  "security": {
+    "cors": {
+      "enabled": true,
+      "origins": ["http://localhost:3000", "http://localhost:8080"]
+    },
+    "rateLimit": {
+      "enabled": true,
+      "requests": 100,
+      "windowMs": 60000
+    }
+  },
+  "modules": {
+    "openairouter": {
+      "enablePipeline": true,
+      "pipelineProvider": {
+        "defaultProvider": "lmstudio",
+        "modelMapping": {
+          "gpt-4": "gpt-oss-20b-mlx",
+          "gpt-4-turbo": "gpt-oss-20b-mlx",
+          "gpt-3.5-turbo": "gpt-oss-20b-mlx",
+          "claude-3-haiku": "gpt-oss-20b-mlx",
+          "claude-3-sonnet": "gpt-oss-20b-mlx"
+        }
+      }
+    }
+  }
+}

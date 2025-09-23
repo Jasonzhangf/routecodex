@@ -408,19 +408,24 @@ export class PipelineManager implements RCCBaseModule {
           modules: Object.keys(config.modules)
         });
 
+        return { ok: true, id: config.id } as const;
       } catch (error) {
         this.logger.logPipeline('manager', 'pipeline-creation-error', {
           pipelineId: config.id,
           error: error instanceof Error ? error.message : String(error)
         });
-        throw error;
+        return { ok: false, id: config.id, error: error instanceof Error ? error.message : String(error) } as const;
       }
     });
 
-    await Promise.all(creationPromises);
+    const results = await Promise.allSettled(creationPromises);
+    const created = results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
+    const failed = results.length - created;
 
     this.logger.logPipeline('manager', 'all-pipelines-created', {
-      count: this.pipelines.size
+      count: this.pipelines.size,
+      created,
+      failed
     });
   }
 
@@ -430,14 +435,17 @@ export class PipelineManager implements RCCBaseModule {
   private initializeModuleRegistry(): void {
     // Register default module factories
     this.registry.registerModule('openai-passthrough', this.createOpenAIPassthroughModule);
+    this.registry.registerModule('anthropic-openai-converter', this.createAnthropicOpenAIConverterModule);
     this.registry.registerModule('streaming-control', this.createStreamingControlModule);
     this.registry.registerModule('field-mapping', this.createFieldMappingModule);
+    this.registry.registerModule('qwen-compatibility', this.createQwenCompatibilityModule);
     this.registry.registerModule('qwen-http', this.createQwenHTTPModule);
     this.registry.registerModule('generic-http', this.createGenericHTTPModule);
+    this.registry.registerModule('lmstudio-http', this.createLMStudioHTTPModule);
 
     // Register LM Studio module factories
     this.registry.registerModule('lmstudio-compatibility', this.createLMStudioCompatibilityModule);
-    this.registry.registerModule('lmstudio-http', this.createLMStudioProviderModule);
+    this.registry.registerModule('lmstudio-sdk', this.createLMStudioSDKModule);
 
     this.logger.logPipeline('manager', 'module-registry-initialized', {
       moduleTypes: this.registry.getAvailableTypes()
@@ -452,6 +460,11 @@ export class PipelineManager implements RCCBaseModule {
     return new OpenAIPassthroughLLMSwitch(config, dependencies);
   };
 
+  private createAnthropicOpenAIConverterModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { AnthropicOpenAIConverter } = await import('../modules/llmswitch/anthropic-openai-converter.js');
+    return new AnthropicOpenAIConverter(config, dependencies);
+  };
+
   private createStreamingControlModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { StreamingControlWorkflow } = await import('../modules/workflow/streaming-control.js');
     return new StreamingControlWorkflow(config, dependencies);
@@ -460,6 +473,11 @@ export class PipelineManager implements RCCBaseModule {
   private createFieldMappingModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { FieldMappingCompatibility } = await import('../modules/compatibility/field-mapping.js');
     return new FieldMappingCompatibility(config, dependencies);
+  };
+
+  private createQwenCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { QwenCompatibility } = await import('../modules/compatibility/qwen-compatibility.js');
+    return new QwenCompatibility(config, dependencies);
   };
 
   private createQwenHTTPModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
@@ -472,21 +490,30 @@ export class PipelineManager implements RCCBaseModule {
     return new GenericHTTPProvider(config, dependencies);
   };
 
+  private createLMStudioHTTPModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { LMStudioProviderSimple } = await import('../modules/provider/lmstudio-provider-simple.js');
+    return new LMStudioProviderSimple(config, dependencies);
+  };
   private createLMStudioCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { LMStudioCompatibility } = await import('../modules/compatibility/lmstudio-compatibility.js');
     return new LMStudioCompatibility(config, dependencies);
   };
 
-  private createLMStudioProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { LMStudioProvider } = await import('../modules/provider/lmstudio-provider.js');
-    return new LMStudioProvider(config, dependencies);
+  private createLMStudioSDKModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { LMStudioSDKProvider } = await import('../modules/provider/lmstudio-sdk-provider.js');
+    return new LMStudioSDKProvider(config, dependencies);
   };
 
   /**
    * Generate pipeline ID from provider and model
+   * Note: providerId here is the routing target (e.g., 'default'), not the actual provider type
    */
   private generatePipelineId(providerId: string, modelId: string): string {
+    // For 'default' routing target, use the providerId and modelId directly
+    // This allows proper routing to different providers based on configuration
+    if (providerId === 'default') {
+      return `${modelId}`;
+    }
     return `${providerId}.${modelId}`;
   }
 }
-

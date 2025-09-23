@@ -122,7 +122,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     }
 
     const startTime = Date.now();
-    const requestId = request.route.requestId;
+    const requestId = request.route?.requestId || 'unknown';
     const debugStages: string[] = [];
     const transformationLogs: any[] = [];
     const timings: Record<string, number> = {};
@@ -300,18 +300,25 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
    */
   private async processLLMSwitch(request: PipelineRequest): Promise<any> {
     if (!this.modules.llmSwitch) {
-      return request.data;
+      return request;
     }
 
     try {
       const transformed = await this.modules.llmSwitch.processIncoming(request.data);
-      this.debugLogger.logTransformation(request.route.requestId, 'llm-switch-request', request.data, transformed);
-      return transformed;
+      // Maintain the complete request structure with route information
+      const result = {
+        ...transformed,
+        route: request.route || transformed.route, // Fallback to transformed.route
+        metadata: request.metadata || transformed.metadata, // Fallback to transformed.metadata
+        debug: request.debug || transformed.debug // Fallback to transformed.debug
+      };
+      this.debugLogger.logTransformation(request.route?.requestId || transformed.route?.requestId || 'unknown', 'llm-switch-request', request.data, transformed);
+      return result;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {
         stage: 'llm-switch',
         pipelineId: this.pipelineId,
-        requestId: request.route.requestId
+        requestId: request.route?.requestId || 'unknown'
       });
       throw error;
     }
@@ -327,13 +334,20 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
 
     try {
       const processed = await this.modules.workflow.processIncoming(request);
-      this.debugLogger.logTransformation(request.route.requestId, 'workflow-request', request, processed);
-      return processed;
+      // Maintain the complete request structure with route information
+      const result = {
+        ...processed,
+        route: request.route || processed.route, // Fallback to processed.route
+        metadata: request.metadata || processed.metadata, // Fallback to processed.metadata
+        debug: request.debug || processed.debug // Fallback to processed.debug
+      };
+      this.debugLogger.logTransformation(request.route?.requestId || processed.route?.requestId || 'unknown', 'workflow-request', request, processed);
+      return result;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {
         stage: 'workflow',
         pipelineId: this.pipelineId,
-        requestId: request.route.requestId
+        requestId: request.route?.requestId || 'unknown'
       });
       throw error;
     }
@@ -349,13 +363,20 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
 
     try {
       const transformed = await this.modules.compatibility.processIncoming(request);
-      this.debugLogger.logTransformation(request.route.requestId, 'compatibility-request', request, transformed);
-      return transformed;
+      // Maintain the complete request structure with route information
+      const result = {
+        ...transformed,
+        route: request.route || transformed.route, // Fallback to transformed.route
+        metadata: request.metadata || transformed.metadata, // Fallback to transformed.metadata
+        debug: request.debug || transformed.debug // Fallback to transformed.debug
+      };
+      this.debugLogger.logTransformation(request.route?.requestId || transformed.route?.requestId || 'unknown', 'compatibility-request', request, transformed);
+      return result;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {
         stage: 'compatibility',
         pipelineId: this.pipelineId,
-        requestId: request.route.requestId
+        requestId: request.route?.requestId || 'unknown'
       });
       throw error;
     }
@@ -377,7 +398,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
       await this.errorIntegration.handleModuleError(error, {
         stage: 'provider',
         pipelineId: this.pipelineId,
-        requestId: request.route.requestId
+        requestId: request.route?.requestId || 'unknown'
       });
       throw error;
     }
@@ -536,15 +557,19 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
       timestamp: Date.now()
     };
 
+    // Defensive coding for undefined route
+    const requestId = request.route?.requestId || 'unknown';
+    const route = request.route || { providerId: 'unknown', modelId: 'unknown', requestId, timestamp: Date.now() };
+
     await this.errorIntegration.handleModuleError(error, {
       stage: pipelineError.stage,
       pipelineId: this.pipelineId,
-      requestId: request.route.requestId,
+      requestId: requestId,
       error: pipelineError
     });
 
     this.debugLogger.logError(pipelineError, {
-      requestId: request.route.requestId,
+      requestId: requestId,
       stage: 'pipeline-error',
       stages
     });

@@ -127,10 +127,12 @@ export interface APIKeyAuthConfig {
 export interface OAuthAuthConfig {
   type: 'oauth';
   clientId: string;
-  clientSecret: string;
+  clientSecret?: string;
   tokenUrl: string;
+  deviceCodeUrl?: string;
   scopes?: string[];
   redirectUri?: string;
+  tokenFile?: string;
   refreshBuffer?: number; // milliseconds before token expires
 }
 

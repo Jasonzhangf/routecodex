@@ -151,3 +151,29 @@ export interface Logger {
    */
   debug(message: string, data?: any): void;
 }
+
+/**
+ * Dispatch center interface
+ */
+export interface DispatchCenter {
+  /**
+   * Send notification to dispatch center
+   */
+  notify(notification: DispatchNotification): Promise<void>;
+}
+
+/**
+ * Dispatch notification interface
+ */
+export interface DispatchNotification {
+  /** Notification type */
+  type: string;
+  /** Provider identifier */
+  provider?: string;
+  /** Notification status */
+  status?: string;
+  /** Notification details */
+  details?: any;
+  /** Notification timestamp */
+  timestamp?: number;
+}

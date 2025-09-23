@@ -3,7 +3,7 @@
  *
  * Handles streaming/non-streaming request conversion and response processing.
  * Converts streaming requests to non-streaming for provider compatibility,
- * then converts non-streaming responses back to streaming format.
+ * then leaves responses as non-streaming (no mock streaming back).
  */
 
 import type { WorkflowModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
@@ -87,21 +87,11 @@ export class StreamingControlWorkflow implements WorkflowModule {
     }
 
     try {
-      // Check if original request was streaming
-      const originalStream = response.originalStream;
-      let transformedResponse = { ...response };
-
-      // If original request was streaming, convert response back to streaming
-      if (originalStream === true) {
-        transformedResponse = this.convertNonStreamingToStreaming(response);
-        this.logger.logTransformation(this.id, 'non-streaming-to-streaming', response, transformedResponse);
-      } else {
-        this.logger.logModule(this.id, 'non-streaming-response', {
-          hasOriginalStream: originalStream
-        });
-      }
-
-      return transformedResponse;
+      // Always return non-streaming response. No mock streaming conversion.
+      this.logger.logModule(this.id, 'return-non-streaming-response', {
+        note: 'Streaming responses are not implemented; unified to non-streaming.'
+      });
+      return response;
 
     } catch (error) {
       this.logger.logModule(this.id, 'response-process-error', { error, response });
@@ -187,47 +177,8 @@ export class StreamingControlWorkflow implements WorkflowModule {
   /**
    * Convert non-streaming response to streaming
    */
-  private convertNonStreamingToStreaming(response: any): any {
-    // Create streaming format response
-    const streamingResponse = {
-      ...response,
-      stream: true, // Set back to true
-      originalStream: true, // Preserve original flag
-      _streamingMetadata: {
-        ...response._streamingMetadata,
-        responseConverted: true,
-        convertedAt: Date.now(),
-        workflowId: this.id
-      }
-    };
-
-    // Convert regular response to streaming format
-    if (response.choices && response.choices.length > 0) {
-      streamingResponse.choices = response.choices.map((choice: any, index: number) => ({
-        index,
-        delta: {
-          content: choice.message?.content || '',
-          role: choice.message?.role || 'assistant'
-        },
-        finish_reason: choice.finish_reason,
-        logprobs: choice.logprobs
-      }));
-    }
-
-    // Handle usage information in streaming context
-    if (response.usage) {
-      streamingResponse._usage = response.usage;
-      delete streamingResponse.usage; // Remove from main response for streaming format
-    }
-
-    // Restore original stream options if they existed
-    if (response._originalStreamOptions) {
-      streamingResponse.stream_options = response._originalStreamOptions;
-      delete streamingResponse._originalStreamOptions;
-    }
-
-    return streamingResponse;
-  }
+  // No conversion back to streaming. Left intentionally unimplemented.
+  // private convertNonStreamingToStreaming(...) { throw new Error('Not implemented'); }
 
   /**
    * Validate module configuration
@@ -271,53 +222,7 @@ export class StreamingControlWorkflow implements WorkflowModule {
   /**
    * Create streaming chunk from regular response
    */
-  private createStreamingChunk(content: string, isFinal: boolean = false): any {
-    return {
-      id: `chunk-${Date.now()}`,
-      object: 'chat.completion.chunk',
-      created: Math.floor(Date.now() / 1000),
-      model: 'unknown', // Will be filled in by actual response
-      choices: [
-        {
-          index: 0,
-          delta: {
-            content: content
-          },
-          finish_reason: isFinal ? 'stop' : null
-        }
-      ]
-    };
-  }
-
-  /**
-   * Simulate streaming response from complete response
-   */
-  private simulateStreamingResponse(response: any): any {
-    const content = response.choices?.[0]?.message?.content || '';
-    const chunks = this.splitContentIntoChunks(content);
-
-    return {
-      ...response,
-      stream: true,
-      _simulatedStreaming: true,
-      _chunks: chunks,
-      _currentChunk: 0
-    };
-  }
-
-  /**
-   * Split content into streaming chunks
-   */
-  private splitContentIntoChunks(content: string): string[] {
-    const chunks: string[] = [];
-    const chunkSize = 50; // characters per chunk
-
-    for (let i = 0; i < content.length; i += chunkSize) {
-      chunks.push(content.slice(i, i + chunkSize));
-    }
-
-    return chunks;
-  }
+  // Mock streaming has been removed per design; unified to non-streaming.
 
   /**
    * Handle streaming-specific errors

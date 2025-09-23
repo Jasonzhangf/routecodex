@@ -232,19 +232,6 @@ export class LMStudioCompatibility implements CompatibilityModule {
    */
   private getDefaultTransformationRules(): TransformationRule[] {
     return [
-      // Model mapping rule
-      {
-        id: 'model-mapping',
-        transform: 'mapping',
-        sourcePath: 'model',
-        targetPath: 'model',
-        mapping: {
-          'gpt-4': 'llama2-7b-chat',
-          'gpt-3.5-turbo': 'llama2-7b-chat',
-          'gpt-4-turbo': 'llama2-13b-chat'
-        }
-      },
-
       // Tools API conversion rule
       {
         id: 'tools-conversion',

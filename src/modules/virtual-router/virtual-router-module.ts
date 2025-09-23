@@ -6,6 +6,8 @@
 import { BaseModule } from '../../core/base-module.js';
 import { ModelFieldConverter } from '../../utils/model-field-converter/index.js';
 import { RCCUnimplementedModule } from '../../modules/unimplemented-module.js';
+import { ConfigRequestClassifier } from './classifiers/config-request-classifier.js';
+import type { ModelCategoryConfig } from './classifiers/model-category-resolver.js';
 import type {
   RouteTargetPool,
   PipelineConfigs,
@@ -21,6 +23,7 @@ export class VirtualRouterModule extends BaseModule {
   private loadBalancer: LoadBalancer;
   private fieldConverter: ModelFieldConverter;
   private unimplementedModule: RCCUnimplementedModule;
+  private configRequestClassifier: ConfigRequestClassifier | null = null;
 
   constructor() {
     super({
@@ -52,6 +55,9 @@ export class VirtualRouterModule extends BaseModule {
 
       // 设置流水线配置
       this.pipelineConfigs = config.pipelineConfigs;
+
+      // 初始化配置驱动的请求分类器
+      await this.initializeConfigRequestClassifier();
 
       // 从配置中提取默认值
       const defaultConfig = this.extractDefaultConfig();
@@ -87,15 +93,175 @@ export class VirtualRouterModule extends BaseModule {
   }
 
   /**
-   * 路由请求 - 简化版本直接路由到default
+   * 初始化配置驱动的请求分类器
+   */
+  private async initializeConfigRequestClassifier(): Promise<void> {
+    try {
+      // 加载分类配置
+      const classificationConfig = await this.loadClassificationConfig();
+
+      // 创建配置驱动的请求分类器
+      this.configRequestClassifier = ConfigRequestClassifier.fromModuleConfig(classificationConfig);
+
+      console.log('✅ Config-driven Request Classifier initialized successfully');
+    } catch (error) {
+      console.warn('⚠️ Failed to initialize Config-driven Request Classifier:', error);
+      console.log('🔄 Falling back to default routing behavior');
+      this.configRequestClassifier = null;
+    }
+  }
+
+  /**
+   * 加载分类配置
+   */
+  private async loadClassificationConfig(): Promise<any> {
+    try {
+      // 这里可以从模块配置中加载，现在使用默认配置
+      const defaultConfig = {
+        protocolMapping: {
+          openai: {
+            endpoints: ['/v1/chat/completions', '/v1/completions'],
+            messageField: 'messages',
+            modelField: 'model',
+            toolsField: 'tools',
+            maxTokensField: 'max_tokens'
+          },
+          anthropic: {
+            endpoints: ['/v1/messages'],
+            messageField: 'messages',
+            modelField: 'model',
+            toolsField: 'tools',
+            maxTokensField: 'max_tokens'
+          }
+        },
+        protocolHandlers: {
+          openai: {
+            tokenCalculator: {
+              type: 'openai',
+              tokenRatio: 0.25,
+              toolOverhead: 50,
+              messageOverhead: 10,
+              imageTokenDefault: 255
+            },
+            toolDetector: {
+              type: 'pattern',
+              patterns: {
+                webSearch: ['web_search', 'search', 'browse', 'internet'],
+                codeExecution: ['code', 'execute', 'bash', 'python', 'javascript'],
+                fileSearch: ['file', 'read', 'write', 'document', 'pdf'],
+                dataAnalysis: ['data', 'analysis', 'chart', 'graph', 'statistics']
+              }
+            }
+          },
+          anthropic: {
+            tokenCalculator: {
+              type: 'anthropic',
+              tokenRatio: 0.25,
+              toolOverhead: 50,
+              messageOverhead: 10
+            },
+            toolDetector: {
+              type: 'pattern',
+              patterns: {
+                webSearch: ['web_search', 'search', 'browse'],
+                codeExecution: ['code', 'execute', 'bash', 'python'],
+                fileSearch: ['file', 'read', 'write'],
+                dataAnalysis: ['data', 'analysis', 'chart']
+              }
+            }
+          }
+        },
+        modelTiers: {
+          basic: {
+            description: 'Basic models for simple tasks',
+            models: ['gpt-3.5-turbo', 'claude-3-haiku', 'qwen-turbo'],
+            maxTokens: 16384,
+            supportedFeatures: ['text_generation', 'conversation']
+          },
+          advanced: {
+            description: 'Advanced models for complex tasks',
+            models: ['gpt-4', 'claude-3-opus', 'claude-3-sonnet', 'deepseek-coder', 'qwen-max'],
+            maxTokens: 262144,
+            supportedFeatures: ['text_generation', 'reasoning', 'coding', 'tool_use']
+          }
+        },
+        routingDecisions: {
+          default: {
+            description: 'Default routing for general requests',
+            modelTier: 'basic',
+            tokenThreshold: 8000,
+            toolTypes: [],
+            priority: 1
+          },
+          longContext: {
+            description: 'Routing for long context requests',
+            modelTier: 'advanced',
+            tokenThreshold: 32000,
+            toolTypes: [],
+            priority: 90
+          },
+          thinking: {
+            description: 'Routing for complex reasoning requests',
+            modelTier: 'advanced',
+            tokenThreshold: 16000,
+            toolTypes: ['dataAnalysis', 'complex_reasoning'],
+            priority: 85
+          },
+          coding: {
+            description: 'Routing for code generation requests',
+            modelTier: 'advanced',
+            tokenThreshold: 24000,
+            toolTypes: ['codeExecution', 'fileSearch'],
+            priority: 80
+          },
+          webSearch: {
+            description: 'Routing for web search requests',
+            modelTier: 'advanced',
+            tokenThreshold: 12000,
+            toolTypes: ['webSearch'],
+            priority: 95
+          }
+        },
+        confidenceThreshold: 60
+      };
+
+      return defaultConfig;
+    } catch (error) {
+      console.error('Failed to load classification config:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 智能路由请求 - 使用分类器动态决定路由
    */
   async routeRequest(request: any, routeName: string = 'default'): Promise<any> {
     try {
-      console.log('🔄 Starting request routing...');
-      console.log('📝 Original request:', { model: request.model, routeName });
+      console.log('🔄 Starting smart request routing...');
+      console.log('📝 Original request:', { model: request.model, initialRoute: routeName });
 
-      // 固定路由到default类别
-      routeName = 'default';
+      // 使用配置驱动的分类器进行智能路由
+      if (this.configRequestClassifier) {
+        const classificationResult = await this.classifyRequestWithConfig(request);
+        routeName = classificationResult.route;
+
+        console.log('🎯 Config-driven classification result:', {
+          route: classificationResult.route,
+          modelTier: classificationResult.modelTier,
+          confidence: classificationResult.confidence,
+          reasoning: classificationResult.reasoning,
+          configBased: classificationResult.configBased
+        });
+
+        // 验证路由是否可用
+        if (!this.routeTargets[routeName]) {
+          console.warn(`⚠️ Route '${routeName}' not available, falling back to default`);
+          routeName = 'default';
+        }
+      } else {
+        console.log('🔄 No config-driven classifier available, using default routing');
+        routeName = 'default';
+      }
 
       // 获取可用目标
       const targets = this.routeTargets[routeName];
@@ -294,6 +460,85 @@ export class VirtualRouterModule extends BaseModule {
       loadBalancer: this.loadBalancer.getStatus()
     };
   }
+  /**
+   * 使用配置驱动的分类器执行分类
+   */
+  private async classifyRequestWithConfig(request: any): Promise<any> {
+    if (!this.configRequestClassifier) {
+      return {
+        route: 'default',
+        modelTier: 'basic',
+        confidence: 50,
+        reasoning: 'No config-driven classifier available',
+        configBased: false
+      };
+    }
+
+    try {
+      // 准备分类输入
+      const classificationInput = {
+        request: request,
+        endpoint: request.endpoint || '/v1/chat/completions',
+        protocol: request.protocol || 'openai',
+        userPreferences: request.userPreferences
+      };
+
+      // 执行分类
+      const classificationResult = await this.configRequestClassifier.classify(classificationInput);
+
+      console.log('🧠 Config-driven classification completed:', {
+        route: classificationResult.route,
+        modelTier: classificationResult.modelTier,
+        confidence: classificationResult.confidence,
+        factors: classificationResult.factors,
+        recommendations: classificationResult.recommendations,
+        performance: classificationResult.performance
+      });
+
+      return classificationResult;
+
+    } catch (error) {
+      console.error('❌ Config-driven classification failed:', error);
+      return {
+        route: 'default',
+        modelTier: 'basic',
+        confidence: 30,
+        reasoning: `Config-driven classification failed: ${error instanceof Error ? error.message : String(error)}`,
+        configBased: false
+      };
+    }
+  }
+
+  /**
+   * 获取配置驱动的分类器状态
+   */
+  getConfigClassifierStatus(): {
+    enabled: boolean;
+    configBased: boolean;
+    status: any;
+    protocols: string[];
+    validation: any;
+  } {
+    if (!this.configRequestClassifier) {
+      return {
+        enabled: false,
+        configBased: false,
+        status: null,
+        protocols: [],
+        validation: null
+      };
+    }
+
+    const status = this.configRequestClassifier.getStatus();
+
+    return {
+      enabled: true,
+      configBased: true,
+      status,
+      protocols: status.protocols,
+      validation: status.configValidation
+    };
+  }
 }
 
 // 协议管理器
@@ -409,7 +654,7 @@ class LoadBalancer {
 
     // 第二步：目标池轮询 - 选择 provider.model 组合
     const poolKey = `${routeName}`;
-    let currentPoolIndex = this.poolIndex.get(poolKey) || 0;
+    const currentPoolIndex = this.poolIndex.get(poolKey) || 0;
     const selectedProviderModel = providerModels[currentPoolIndex];
 
     console.log(`🔄 Pool轮询 for "${routeName}": selected ${selectedProviderModel} (index ${currentPoolIndex})`);
@@ -418,7 +663,7 @@ class LoadBalancer {
     const keyPoolKey = `${routeName}.${selectedProviderModel}`;
     const availableKeys = providerModelGroups[selectedProviderModel];
 
-    let currentKeyIndex = this.keyIndex.get(keyPoolKey) || 0;
+    const currentKeyIndex = this.keyIndex.get(keyPoolKey) || 0;
     const selectedTarget = availableKeys[currentKeyIndex];
 
     console.log(`🔑 Key轮询 for "${selectedProviderModel}": selected key ${currentKeyIndex + 1}/${availableKeys.length} (${selectedTarget.keyId})`);
@@ -536,4 +781,5 @@ class LoadBalancer {
 
     return stats;
   }
-}
+
+  }

@@ -6,6 +6,7 @@
  */
 
 import type { DebugCenter } from '../types/external-types.js';
+import { DebugEventBus } from 'rcc-debugcenter';
 
 /**
  * Log entry interface
@@ -88,6 +89,7 @@ export class PipelineDebugLogger {
   private transformationLogs: TransformationLogEntry[] = [];
   private providerLogs: ProviderRequestLogEntry[] = [];
   private maxLogEntries = 1000;
+  private eventBus?: DebugEventBus;
 
   constructor(
     private debugCenter: DebugCenter,
@@ -106,6 +108,13 @@ export class PipelineDebugLogger {
       ...options
     };
     this.maxLogEntries = this.options.maxLogEntries!;
+    // Ensure events also flow into the global DebugEventBus so external DebugCenter listeners can capture session IO
+    try {
+      this.eventBus = DebugEventBus.getInstance();
+    } catch {
+      // ignore if bus not available at runtime
+      this.eventBus = undefined as any;
+    }
   }
 
   /**
@@ -250,6 +259,22 @@ export class PipelineDebugLogger {
       processingTime: entry.metadata.processingTime,
       dataSize: entry.metadata.dataSize
     });
+
+    // Publish detailed IO to DebugEventBus (if available)
+    if (this.eventBus) {
+      this.eventBus.publish({
+        sessionId: requestId,
+        moduleId: pipelineId,
+        operationId: `transformation:${action}`,
+        timestamp: entry.timestamp,
+        type: 'start',
+        position: 'middle',
+        data: {
+          input: this.sanitizeData(data),
+          output: this.sanitizeData(result)
+        }
+      });
+    }
   }
 
   /**
@@ -285,6 +310,22 @@ export class PipelineDebugLogger {
 
     // Log as debug entry
     this.log('debug', pipelineId, 'provider', action, data);
+
+    // Publish detailed IO to DebugEventBus (if available)
+    if (this.eventBus) {
+      this.eventBus.publish({
+        sessionId: requestId,
+        moduleId: pipelineId,
+        operationId: `provider:${action}`,
+        timestamp: entry.timestamp,
+        type: action === 'request-error' ? 'error' : 'start',
+        position: 'middle',
+        data: {
+          input: this.sanitizeData(request),
+          output: this.sanitizeData(response)
+        }
+      });
+    }
   }
 
   /**
@@ -535,6 +576,18 @@ export class PipelineDebugLogger {
           stage: entry.stage
         }
       });
+      // Also publish to DebugEventBus for file-based session capture by external DebugCenter
+      if (this.eventBus) {
+        this.eventBus.publish({
+          sessionId: entry.requestId || 'unknown',
+          moduleId: entry.pipelineId || 'pipeline',
+          operationId: `pipeline-${entry.category}`,
+          timestamp: entry.timestamp,
+          type: entry.level === 'error' ? 'error' : 'start',
+          position: 'middle',
+          data: entry.data
+        });
+      }
     } catch (error) {
       // Fallback to console if DebugCenter fails
       console.warn('Failed to log to DebugCenter:', error instanceof Error ? error.message : String(error));
