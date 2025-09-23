@@ -445,6 +445,66 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   }
 
   /**
+   * Get debug status with enhanced information
+   */
+  getDebugStatus(): any {
+    const baseStatus = {
+      pipelineId: this.pipelineId,
+      id: this.id,
+      type: this.type,
+      version: this.version,
+      isInitialized: this.isInitialized,
+      isEnhanced: this.isEnhanced
+    };
+
+    if (!this.isEnhanced) {
+      return baseStatus;
+    }
+
+    return {
+      ...baseStatus,
+      debugInfo: this.getDebugInfo(),
+      performanceMetrics: this.getPerformanceStats(),
+      status: this.getStatus(),
+      modules: this.getModuleDebugInfo(),
+      requestStats: {
+        totalRequests: this.requestCount,
+        errorCount: this.errorCount,
+        successRate: this.requestCount > 0 ? ((this.requestCount - this.errorCount) / this.requestCount * 100).toFixed(2) + '%' : '0%'
+      }
+    };
+  }
+
+  /**
+   * Get module debug information
+   */
+  private getModuleDebugInfo(): any {
+    const moduleInfo: any = {};
+
+    for (const [moduleName, module] of Object.entries(this.modules)) {
+      if (module) {
+        moduleInfo[moduleName] = {
+          isInitialized: this.isModuleInitialized(module),
+          type: module.type,
+          hasDebugStatus: typeof (module as any).getDebugStatus === 'function',
+          status: this._status.modules[moduleName] || null
+        };
+      } else {
+        moduleInfo[moduleName] = null;
+      }
+    }
+
+    return moduleInfo;
+  }
+
+  /**
+   * Check if module is initialized
+   */
+  private isModuleInitialized(module: any): boolean {
+    return module && typeof module.isInitialized === 'boolean' ? module.isInitialized : false;
+  }
+
+  /**
    * Enhanced error handling with debug context
    */
   private async handleEnhancedError(error: unknown, context: any): Promise<void> {
