@@ -418,7 +418,7 @@ export class UserConfigParser {
     }
 
     if (providerId.toLowerCase().includes('iflow')) {
-      return path.join(home, '.iflow', 'token.json');
+      return path.join(home, '.iflow', 'oauth_creds.json');
     }
 
     // Generic fallback under .routecodex/tokens
