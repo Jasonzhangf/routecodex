@@ -24,7 +24,7 @@ const TEST_MODEL = getenv('IFLOW_TEST_MODEL', 'iflow-pro');
 const OPEN_BROWSER = getenv('IFLOW_OPEN_BROWSER', 'true') !== 'false';
 
 async function main() {
-  const { iFlowProvider } = await import('../../dist/modules/pipeline/modules/provider/iflow-provider.js');
+  const { IFlowProvider } = await import('../../dist/modules/pipeline/modules/provider/iflow-provider.js');
   const { PipelineDebugLogger } = await import('../../dist/modules/pipeline/utils/debug-logger.js');
 
   const debugCenter = { logDebug:()=>{}, logError:()=>{}, logModule:()=>{}, processDebugEvent:()=>{}, getLogs:()=>[] };
@@ -50,7 +50,7 @@ async function main() {
     }
   };
 
-  const provider = new iFlowProvider(providerConfig, dependencies);
+  const provider = new IFlowProvider(providerConfig, dependencies);
   provider.setTestMode(!OPEN_BROWSER);
 
   console.log('[iFlow] Using token file:', TOKEN_FILE);

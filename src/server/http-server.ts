@@ -25,6 +25,7 @@ import {
 import fs from 'fs';
 import path from 'path';
 import { homedir } from 'os';
+import { DebugFileLogger } from '../debug/debug-file-logger.js';
 
 /**
  * HTTP Server configuration interface
@@ -189,6 +190,15 @@ export class HttpServer extends BaseModule implements IHttpServer {
       // Set up the server with merged configuration
       this.mergedConfig = mergedConfig;
       this.config = mergedConfig.modules?.httpserver?.config || this.getDefaultServerConfig();
+
+      // Initialize DebugCenter file logging if configured
+      const debugCenterConfig = mergedConfig.modules?.debugcenter?.config;
+      if (debugCenterConfig?.enableFile && debugCenterConfig.filePath) {
+        DebugFileLogger.initialize({
+          filePath: debugCenterConfig.filePath,
+          enabled: true
+        });
+      }
 
       // Continue with normal initialization
       await this.initialize();

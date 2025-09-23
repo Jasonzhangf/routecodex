@@ -65,8 +65,8 @@
     },
     "routing": {
       "default": [
-        "lmstudio.gpt-oss-20b-mlx.default",
-        "qwen.qwen3-coder-plus.oauth-default"
+        "qwen.qwen3-coder-plus.oauth-default",
+        "lmstudio.gpt-oss-20b-mlx.default"
       ],
       "coding": [
         "qwen.qwen3-coder-plus.oauth-default"

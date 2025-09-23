@@ -142,7 +142,7 @@ The Qwen HTTP Provider and iFlow Provider have been updated to automatically use
 ```typescript
 // Provider automatically detects OAuth configuration
 const qwenProvider = new QwenHTTPProvider(config, dependencies);
-const iflowProvider = new iFlowProvider(config, dependencies);
+const iflowProvider = new IFlowProvider(config, dependencies);
 
 // Authentication is handled automatically
 const response = await qwenProvider.processIncoming(request);

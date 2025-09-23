@@ -332,7 +332,7 @@ export class VirtualRouterModule extends BaseModule {
       console.log('🎯 Available targets:', targets.length);
 
       // 选择目标（使用负载均衡）
-      const target = await this.loadBalancer.selectTarget(targets, routeName);
+      const target = await this.loadBalancer.selectTarget(targets, routeName, request);
       if (!target) {
         throw new Error('No available targets for routing');
       }
@@ -955,13 +955,23 @@ class LoadBalancer {
   /**
    * 选择目标 - 两层轮询：目标池轮询 + Key轮询
    */
-  async selectTarget(targets: RouteTarget[], routeName: string = 'default'): Promise<RouteTarget | null> {
+  async selectTarget(targets: RouteTarget[], routeName: string = 'default', request?: any): Promise<RouteTarget | null> {
     if (targets.length === 0) {
       return null;
     }
 
     if (targets.length === 1) {
       return targets[0];
+    }
+
+    // Prefer direct model match when the request specifies a model
+    if (request?.model) {
+      const normalizedModel = String(request.model).toLowerCase();
+      const directMatch = targets.find(target => target.modelId?.toLowerCase?.() === normalizedModel);
+      if (directMatch) {
+        this.advanceIndexesForMatch(routeName, directMatch);
+        return directMatch;
+      }
     }
 
     // 第一步：按 provider.model 分组
@@ -1001,6 +1011,27 @@ class LoadBalancer {
     console.log(`✅ Final target: ${selectedTarget.providerId}.${selectedTarget.modelId}.${selectedTarget.keyId}`);
 
     return selectedTarget;
+  }
+
+  private advanceIndexesForMatch(routeName: string, target: RouteTarget): void {
+    const providerModelGroups = this.groupByProviderModel(this.routeTargets[routeName] || []);
+    const providerModels = Object.keys(providerModelGroups);
+    const selectedKey = `${target.providerId}.${target.modelId}`;
+
+    if (providerModels.length > 0) {
+      const poolIndex = providerModels.indexOf(selectedKey);
+      if (poolIndex >= 0) {
+        const nextPoolIndex = (poolIndex + 1) % providerModels.length;
+        this.poolIndex.set(`${routeName}`, nextPoolIndex);
+      }
+    }
+
+    const keyPoolKey = `${routeName}.${selectedKey}`;
+    const availableKeys = providerModelGroups[selectedKey] || [];
+    if (availableKeys.length > 0) {
+      const nextKeyIndex = (availableKeys.findIndex(k => k.keyId === target.keyId) + 1) % availableKeys.length;
+      this.keyIndex.set(keyPoolKey, nextKeyIndex);
+    }
   }
 
   /**
