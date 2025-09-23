@@ -15,6 +15,7 @@ import type {
   RouteTarget,
   PipelineConfig
 } from '../../config/merged-config-types.js';
+import { DebugEventBus } from '../../utils/external-mocks.js';
 
 export class VirtualRouterModule extends BaseModule {
   private routeTargets: RouteTargetPool = {};
@@ -24,6 +25,15 @@ export class VirtualRouterModule extends BaseModule {
   private fieldConverter: ModelFieldConverter;
   private unimplementedModule: RCCUnimplementedModule;
   private configRequestClassifier: ConfigRequestClassifier | null = null;
+
+  // Debug enhancement properties
+  private debugEventBus: DebugEventBus | null = null;
+  private isDebugEnhanced = false;
+  private routingMetrics: Map<string, any> = new Map();
+  private performanceMetrics: Map<string, any> = new Map();
+  private requestHistory: any[] = [];
+  private maxHistorySize = 100;
+  private classificationStats: Map<string, any> = new Map();
 
   constructor() {
     super({
@@ -41,6 +51,23 @@ export class VirtualRouterModule extends BaseModule {
       moduleName: 'Virtual Router Mock Handler',
       description: 'Handles unimplemented model requests with detailed debugging'
     });
+
+    // Initialize debug enhancements
+    this.initializeDebugEnhancements();
+  }
+
+  /**
+   * Initialize debug enhancements
+   */
+  private initializeDebugEnhancements(): void {
+    try {
+      this.debugEventBus = DebugEventBus.getInstance();
+      this.isDebugEnhanced = true;
+      console.log('Virtual Router debug enhancements initialized');
+    } catch (error) {
+      console.warn('Failed to initialize Virtual Router debug enhancements:', error);
+      this.isDebugEnhanced = false;
+    }
   }
 
   /**
@@ -236,9 +263,27 @@ export class VirtualRouterModule extends BaseModule {
    * 智能路由请求 - 使用分类器动态决定路由
    */
   async routeRequest(request: any, routeName: string = 'default'): Promise<any> {
+    const startTime = Date.now();
+    const requestId = `route_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
     try {
       console.log('🔄 Starting smart request routing...');
       console.log('📝 Original request:', { model: request.model, initialRoute: routeName });
+
+      // Debug: Record request start
+      if (this.isDebugEnhanced) {
+        this.recordRoutingMetric('request_start', {
+          requestId,
+          routeName,
+          model: request.model,
+          timestamp: startTime
+        });
+        this.publishDebugEvent('routing_start', {
+          requestId,
+          originalRequest: { model: request.model, initialRoute: routeName },
+          routeName
+        });
+      }
 
       // 使用配置驱动的分类器进行智能路由
       if (this.configRequestClassifier) {
@@ -252,6 +297,21 @@ export class VirtualRouterModule extends BaseModule {
           reasoning: classificationResult.reasoning,
           configBased: classificationResult.configBased
         });
+
+        // Debug: Record classification metrics
+        if (this.isDebugEnhanced) {
+          this.recordClassificationMetric(classificationResult.route, {
+            confidence: classificationResult.confidence,
+            modelTier: classificationResult.modelTier,
+            configBased: classificationResult.configBased,
+            reasoning: classificationResult.reasoning
+          });
+          this.publishDebugEvent('classification_complete', {
+            requestId,
+            classificationResult,
+            processingTime: Date.now() - startTime
+          });
+        }
 
         // 验证路由是否可用
         if (!this.routeTargets[routeName]) {
@@ -282,6 +342,26 @@ export class VirtualRouterModule extends BaseModule {
         modelId: target.modelId,
         keyId: target.keyId
       });
+
+      // Debug: Record target selection
+      if (this.isDebugEnhanced) {
+        this.recordRoutingMetric('target_selected', {
+          requestId,
+          target: {
+            providerId: target.providerId,
+            modelId: target.modelId,
+            keyId: target.keyId
+          },
+          routeName,
+          selectionTime: Date.now() - startTime
+        });
+        this.publishDebugEvent('target_selected', {
+          requestId,
+          target,
+          routeName,
+          processingTime: Date.now() - startTime
+        });
+      }
 
       // 获取流水线配置
       const pipelineConfigKey = `${target.providerId}.${target.modelId}.${target.keyId}`;
@@ -322,6 +402,21 @@ export class VirtualRouterModule extends BaseModule {
         originalModel: conversionResult.debugInfo.originalRequest.model
       });
 
+      // Debug: Record conversion completion
+      if (this.isDebugEnhanced) {
+        this.recordRoutingMetric('conversion_complete', {
+          requestId,
+          conversionSuccess: conversionResult.success,
+          conversionTime: Date.now() - startTime,
+          debugInfo: conversionResult.debugInfo
+        });
+        this.publishDebugEvent('conversion_complete', {
+          requestId,
+          conversionResult,
+          processingTime: Date.now() - startTime
+        });
+      }
+
       // 使用unimplemented模块处理mock响应
       console.log('🎭 Using unimplemented module for mock response...');
 
@@ -349,10 +444,64 @@ export class VirtualRouterModule extends BaseModule {
       };
 
       console.log('✅ Mock response generated successfully');
+
+      // Debug: Record request completion
+      if (this.isDebugEnhanced) {
+        const totalTime = Date.now() - startTime;
+        this.recordRoutingMetric('request_complete', {
+          requestId,
+          routeName,
+          success: true,
+          totalTime,
+          routingInfo
+        });
+        this.addToRequestHistory({
+          requestId,
+          routeName,
+          target: routingInfo.selectedTarget,
+          startTime,
+          endTime: Date.now(),
+          totalTime,
+          success: true
+        });
+        this.publishDebugEvent('routing_complete', {
+          requestId,
+          responseWithRouting,
+          totalTime,
+          success: true
+        });
+      }
+
       return responseWithRouting;
 
     } catch (error) {
       console.error(`❌ Request routing failed for route ${routeName}:`, error);
+
+      // Debug: Record error
+      if (this.isDebugEnhanced) {
+        const totalTime = Date.now() - startTime;
+        this.recordRoutingMetric('request_error', {
+          requestId,
+          routeName,
+          error: error instanceof Error ? error.message : String(error),
+          totalTime
+        });
+        this.addToRequestHistory({
+          requestId,
+          routeName,
+          startTime,
+          endTime: Date.now(),
+          totalTime,
+          success: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        this.publishDebugEvent('routing_error', {
+          requestId,
+          error: error instanceof Error ? error.message : String(error),
+          routeName,
+          totalTime
+        });
+      }
 
       // 即使出错也返回unimplemented响应以保持一致性
       try {
@@ -538,6 +687,178 @@ export class VirtualRouterModule extends BaseModule {
       protocols: status.protocols,
       validation: status.configValidation
     };
+  }
+
+  /**
+   * Record routing metric
+   */
+  private recordRoutingMetric(operation: string, data: any): void {
+    if (!this.routingMetrics.has(operation)) {
+      this.routingMetrics.set(operation, {
+        values: [],
+        lastUpdated: Date.now()
+      });
+    }
+
+    const metric = this.routingMetrics.get(operation)!;
+    metric.values.push(data);
+    metric.lastUpdated = Date.now();
+
+    // Keep only last 50 measurements
+    if (metric.values.length > 50) {
+      metric.values.shift();
+    }
+  }
+
+  /**
+   * Record classification metric
+   */
+  private recordClassificationMetric(route: string, data: any): void {
+    if (!this.classificationStats.has(route)) {
+      this.classificationStats.set(route, {
+        count: 0,
+        totalConfidence: 0,
+        routes: []
+      });
+    }
+
+    const stats = this.classificationStats.get(route)!;
+    stats.count++;
+    stats.totalConfidence += data.confidence;
+    stats.routes.push(data);
+
+    // Keep only last 100 classifications
+    if (stats.routes.length > 100) {
+      stats.routes.shift();
+    }
+  }
+
+  /**
+   * Add request to history
+   */
+  private addToRequestHistory(request: any): void {
+    this.requestHistory.push(request);
+
+    // Keep only recent history
+    if (this.requestHistory.length > this.maxHistorySize) {
+      this.requestHistory.shift();
+    }
+  }
+
+  /**
+   * Publish debug event
+   */
+  private publishDebugEvent(type: string, data: any): void {
+    if (!this.isDebugEnhanced || !this.debugEventBus) return;
+
+    try {
+      this.debugEventBus.publish({
+        sessionId: `session_${Date.now()}`,
+        moduleId: 'virtual-router',
+        operationId: type,
+        timestamp: Date.now(),
+        type: 'debug',
+        position: 'middle',
+        data: {
+          ...data,
+          routerId: 'virtual-router',
+          source: 'virtual-router'
+        }
+      });
+    } catch (error) {
+      // Silent fail if debug event bus is not available
+    }
+  }
+
+  /**
+   * Get debug status with enhanced information
+   */
+  getDebugStatus(): any {
+    const baseStatus = this.getStatus();
+
+    if (!this.isDebugEnhanced) {
+      return baseStatus;
+    }
+
+    return {
+      ...baseStatus,
+      debugInfo: this.getDebugInfo(),
+      performanceStats: this.getPerformanceStats(),
+      routingMetrics: this.getRoutingMetrics(),
+      classificationStats: this.getClassificationStats(),
+      requestHistory: [...this.requestHistory.slice(-10)] // Last 10 requests
+    };
+  }
+
+  /**
+   * Get detailed debug information
+   */
+  private getDebugInfo(): any {
+    return {
+      routerId: 'virtual-router',
+      enhanced: this.isDebugEnhanced,
+      eventBusAvailable: !!this.debugEventBus,
+      routeTargetsCount: Object.keys(this.routeTargets).length,
+      pipelineConfigsCount: Object.keys(this.pipelineConfigs).length,
+      requestHistorySize: this.requestHistory.length,
+      classificationEnabled: !!this.configRequestClassifier
+    };
+  }
+
+  /**
+   * Get performance statistics
+   */
+  private getPerformanceStats(): any {
+    const stats: any = {};
+
+    for (const [operation, metric] of this.routingMetrics.entries()) {
+      const values = metric.values;
+      if (values.length > 0) {
+        stats[operation] = {
+          count: values.length,
+          avgTime: Math.round(values.reduce((sum: any, v: any) => sum + (v.totalTime || v.selectionTime || 0), 0) / values.length),
+          minTime: Math.min(...values.map((v: any) => v.totalTime || v.selectionTime || 0)),
+          maxTime: Math.max(...values.map((v: any) => v.totalTime || v.selectionTime || 0)),
+          lastUpdated: metric.lastUpdated
+        };
+      }
+    }
+
+    return stats;
+  }
+
+  /**
+   * Get routing metrics
+   */
+  private getRoutingMetrics(): any {
+    const metrics: any = {};
+
+    for (const [operation, metric] of this.routingMetrics.entries()) {
+      metrics[operation] = {
+        count: metric.values.length,
+        lastUpdated: metric.lastUpdated,
+        recentValues: metric.values.slice(-5) // Last 5 values
+      };
+    }
+
+    return metrics;
+  }
+
+  /**
+   * Get classification statistics
+   */
+  private getClassificationStats(): any {
+    const stats: any = {};
+
+    for (const [route, data] of this.classificationStats.entries()) {
+      stats[route] = {
+        count: data.count,
+        avgConfidence: Math.round(data.totalConfidence / data.count),
+        recentClassifications: data.routes.slice(-5) // Last 5 classifications
+      };
+    }
+
+    return stats;
   }
 }
 
