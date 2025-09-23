@@ -6,7 +6,7 @@
  */
 
 import { BaseDebugAdapter } from './base-debug-adapter.js';
-import { DebugEventBus } from 'rcc-debugcenter';
+import { DebugEventBus } from '../utils/external-mocks.js';
 import type {
   HttpServerDebugAdapter,
   DebugContext,
@@ -17,12 +17,13 @@ import type {
   DebugAdapterConfig,
   DebugUtils
 } from '../types/debug-types.js';
+import { DebugSystemEvent } from '../types/debug-types.js';
 
 /**
  * HTTP Server Debug Adapter implementation
  */
 export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements HttpServerDebugAdapter {
-  private serverInfo: {
+  readonly serverInfo: {
     host: string;
     port: number;
     protocol: string;
@@ -33,6 +34,12 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
     startTime: number;
     events: any[];
   }> = new Map();
+
+  // Debug enhancement properties
+  private performanceMetrics: Map<string, number[]> = new Map();
+  private serverMetrics: Map<string, any> = new Map();
+  private requestHistory: any[] = [];
+  private maxHistorySize = 100;
 
   /**
    * Constructor
@@ -51,17 +58,6 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   }
 
   /**
-   * Get server information
-   */
-  get serverInfo(): {
-    host: string;
-    port: number;
-    protocol: string;
-  } {
-    return { ...this.serverInfo };
-  }
-
-  /**
    * Initialize adapter-specific logic
    */
   protected async doInitialize(options?: Record<string, any>): Promise<void> {
@@ -69,7 +65,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
     await this.initializeServerDebugging(options);
 
     // Publish server-specific initialization event
-    this.publishEvent('http_server_debug_adapter_initialized', {
+    this.publishEvent(DebugSystemEvent.HTTP_SERVER_DEBUG_ADAPTER_INITIALIZED, {
       serverInfo: this.serverInfo,
       options
     });
@@ -85,11 +81,13 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
     // Capture server state
     await this.captureServerState(context);
 
-    // Publish context-specific debugging start event
-    this.publishEvent('http_server_debugging_started', {
-      serverInfo: this.serverInfo,
-      context
-    });
+    // Publish debugging started event
+      this.publishEvent(DebugSystemEvent.HTTP_SERVER_DEBUGGING_STARTED, {
+        adapterId: this.id,
+        context,
+        serverInfo: this.serverInfo,
+        timestamp: Date.now()
+      });
   }
 
   /**
@@ -102,11 +100,13 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
     // Cleanup context-specific data
     this.cleanupContextData(context);
 
-    // Publish context-specific debugging stop event
-    this.publishEvent('http_server_debugging_stopped', {
-      serverInfo: this.serverInfo,
-      context
-    });
+    // Publish debugging stopped event
+      this.publishEvent(DebugSystemEvent.HTTP_SERVER_DEBUGGING_STOPPED, {
+        adapterId: this.id,
+        context,
+        serverInfo: this.serverInfo,
+        timestamp: Date.now()
+      });
   }
 
   /**
@@ -170,7 +170,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
     this.requestMetrics.clear();
 
     // Publish cleanup event
-    this.publishEvent('http_server_debug_adapter_destroyed', {
+    this.publishEvent(DebugSystemEvent.HTTP_SERVER_DEBUG_ADAPTER_DESTROYED, {
       serverInfo: this.serverInfo,
       requestsCleared: this.requestData.size,
       responsesCleared: this.responseData.size
@@ -181,7 +181,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
    * Capture HTTP request
    */
   async captureRequest(request: DebugHttpRequest): Promise<void> {
-    if (!this.initialized) {
+    if (!this.isInitialized) {
       return;
     }
 
@@ -202,12 +202,12 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
       this.stats.totalEvents++;
 
       // Publish request captured event
-      this.publishEvent('http_request_captured', {
-        serverInfo: this.serverInfo,
+      this.publishEvent(DebugSystemEvent.HTTP_REQUEST_CAPTURED, {
+        adapterId: this.id,
         requestId: request.id,
         method: request.method,
         url: request.url,
-        timestamp: request.timestamp
+        timestamp: Date.now()
       });
 
     } catch (error) {
@@ -219,7 +219,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
    * Capture HTTP response
    */
   async captureResponse(response: DebugHttpResponse): Promise<void> {
-    if (!this.initialized) {
+    if (!this.isInitialized) {
       return;
     }
 
@@ -248,12 +248,12 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
       this.stats.totalEvents++;
 
       // Publish response captured event
-      this.publishEvent('http_response_captured', {
-        serverInfo: this.serverInfo,
+      this.publishEvent(DebugSystemEvent.HTTP_RESPONSE_CAPTURED, {
+        adapterId: this.id,
         requestId: response.requestId,
         status: response.status,
         responseTime: response.responseTime,
-        timestamp: response.timestamp
+        timestamp: Date.now()
       });
 
     } catch (error) {
@@ -289,17 +289,16 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
       id: this.debugUtils.generateId(`http_debug_${requestId}`),
       context,
       type: 'metrics',
+      request,
+      response,
+      events: metrics?.events || [],
+      performance,
+      timestamp: Date.now(),
       content: {
         request,
         response,
         events: metrics?.events || [],
         performance
-      },
-      timestamp: Date.now(),
-      metadata: {
-        serverInfo: this.serverInfo,
-        adapterType: 'http_server',
-        hasResponse: !!response
       }
     };
   }
@@ -346,7 +345,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
     try {
       const state = await this.getCurrentServerState();
 
-      this.publishEvent('http_server_state_captured', {
+      this.publishEvent(DebugSystemEvent.HTTP_SERVER_STATE_CAPTURED, {
         serverInfo: this.serverInfo,
         context,
         state
@@ -372,17 +371,35 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
     // Calculate aggregate performance metrics
     const aggregateMetrics = this.calculateAggregateMetrics(recentRequests, recentResponses);
 
+    const sampleRequest = recentRequests[recentRequests.length - 1] || {
+      id: 'sample',
+      method: 'GET',
+      url: '/sample',
+      headers: {},
+      timestamp: Date.now()
+    };
+
     return {
-      request: recentRequests[recentRequests.length - 1] || {
-        id: 'sample',
-        method: 'GET',
-        url: '/sample',
-        headers: {},
-        timestamp: Date.now()
+      id: this.debugUtils.generateId(`http_debug_${context.id}`),
+      context,
+      type: 'metrics',
+      timestamp: Date.now(),
+      metadata: {
+        serverInfo: this.serverInfo,
+        adapterType: 'http_server',
+        hasResponse: !!recentResponses[recentResponses.length - 1]
       },
+      // HttpDebugData requires direct properties
+      request: sampleRequest,
       response: recentResponses[recentResponses.length - 1],
       events: [],
-      performance: aggregateMetrics
+      performance: aggregateMetrics,
+      content: {
+        request: sampleRequest,
+        response: recentResponses[recentResponses.length - 1],
+        events: [],
+        performance: aggregateMetrics
+      }
     };
   }
 
@@ -392,7 +409,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   private async updateServerConfig(config: Record<string, any>): Promise<void> {
     // This would typically update the server configuration
     // For now, we'll just log the config change
-    this.publishEvent('http_server_config_updated', {
+    this.publishEvent(DebugSystemEvent.HTTP_SERVER_CONFIG_UPDATED, {
       serverInfo: this.serverInfo,
       config
     });
@@ -404,7 +421,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   private async getCurrentServerState(): Promise<Record<string, any>> {
     return {
       timestamp: Date.now(),
-      initialized: this.initialized,
+      initialized: this.isInitialized,
       activeRequests: this.requestData.size - this.responseData.size,
       totalRequests: this.requestData.size,
       totalResponses: this.responseData.size,
@@ -510,7 +527,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
     request: DebugHttpRequest,
     response?: DebugHttpResponse,
     metrics?: { startTime: number; events: any[] }
-  ): HttpDebugData['content']['performance'] {
+  ): HttpDebugData['performance'] {
     if (!response || !metrics) {
       return {
         totalProcessingTime: 0,
@@ -538,7 +555,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   private calculateAggregateMetrics(
     requests: DebugHttpRequest[],
     responses: DebugHttpResponse[]
-  ): HttpDebugData['content']['performance'] {
+  ): HttpDebugData['performance'] {
     if (responses.length === 0) {
       return {
         totalProcessingTime: 0,
@@ -605,5 +622,191 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
         this.requestMetrics.delete(id);
       }
     }
+  }
+
+  /**
+   * Initialize debug enhancements
+   */
+  initializeDebugEnhancements(): void {
+    try {
+      this.debugEventBus = DebugEventBus.getInstance();
+
+      // Subscribe to debug events
+      this.subscribeToDebugEvents();
+
+      console.log('HTTP Server debug adapter enhancements initialized');
+    } catch (error) {
+      console.warn('Failed to initialize HTTP Server debug enhancements:', error);
+    }
+  }
+
+  /**
+   * Subscribe to debug events
+   */
+  private subscribeToDebugEvents(): void {
+    if (!this.debugEventBus) return;
+
+    this.debugEventBus.subscribe('http-server-debug', (event: any) => {
+      this.handleDebugEvent(event);
+    });
+  }
+
+  /**
+   * Handle debug events
+   */
+  private handleDebugEvent(event: any): void {
+    // Process HTTP server specific debug events
+    if (event.type === 'request') {
+      this.recordRequestMetric(event.data);
+    } else if (event.type === 'response') {
+      this.recordResponseMetric(event.data);
+    }
+
+    // Forward to WebSocket
+    this.publishToWebSocket(event);
+  }
+
+  /**
+   * Record request metric
+   */
+  private recordRequestMetric(data: any): void {
+    const processingTime = data.processingTime || 0;
+    this.recordPerformanceMetric('request_processing', processingTime);
+
+    // Add to request history
+    this.addToRequestHistory({
+      type: 'request',
+      timestamp: Date.now(),
+      data
+    });
+  }
+
+  /**
+   * Record response metric
+   */
+  private recordResponseMetric(data: any): void {
+    const processingTime = data.processingTime || 0;
+    this.recordPerformanceMetric('response_processing', processingTime);
+
+    // Add to request history
+    this.addToRequestHistory({
+      type: 'response',
+      timestamp: Date.now(),
+      data
+    });
+  }
+
+  /**
+   * Record performance metric
+   */
+  private recordPerformanceMetric(operationId: string, value: number): void {
+    if (!this.performanceMetrics.has(operationId)) {
+      this.performanceMetrics.set(operationId, []);
+    }
+
+    const metrics = this.performanceMetrics.get(operationId)!;
+    metrics.push(value);
+
+    // Keep only last 50 measurements
+    if (metrics.length > 50) {
+      metrics.shift();
+    }
+  }
+
+  /**
+   * Get performance statistics
+   */
+  getPerformanceStats(): any {
+    const stats: any = {};
+
+    for (const [operationId, metrics] of this.performanceMetrics.entries()) {
+      if (metrics.length > 0) {
+        stats[operationId] = {
+          count: metrics.length,
+          avg: Math.round(metrics.reduce((a, b) => a + b, 0) / metrics.length),
+          min: Math.min(...metrics),
+          max: Math.max(...metrics),
+          lastUpdated: Date.now()
+        };
+      }
+    }
+
+    return stats;
+  }
+
+  /**
+   * Add to request history
+   */
+  private addToRequestHistory(entry: any): void {
+    this.requestHistory.push(entry);
+
+    // Keep only recent history
+    if (this.requestHistory.length > this.maxHistorySize) {
+      this.requestHistory.shift();
+    }
+  }
+
+  /**
+   * Get debug information
+   */
+  getDebugInfo(): any {
+    return {
+      adapterId: this.id,
+      adapterType: 'http-server',
+      serverInfo: this.serverInfo,
+      enhanced: !!this.debugEventBus,
+      eventBusAvailable: !!this.debugEventBus,
+      performanceStats: this.getPerformanceStats(),
+      requestHistorySize: this.requestHistory.length,
+      totalRequests: this.requestData.size,
+      totalResponses: this.responseData.size,
+      activeRequests: this.requestData.size - this.responseData.size
+    };
+  }
+
+  /**
+   * Publish event to WebSocket
+   */
+  private publishToWebSocket(event: any): void {
+    if (!this.debugEventBus) return;
+
+    try {
+      this.debugEventBus.publish({
+        sessionId: event.sessionId || 'http-server',
+        moduleId: 'http-server-debug-adapter',
+        operationId: event.operationId || event.type,
+        timestamp: event.timestamp || Date.now(),
+        type: event.type || 'debug',
+        position: 'middle',
+        data: {
+          ...event.data,
+          adapterId: this.id,
+          serverInfo: this.serverInfo,
+          source: 'http-server-debug-adapter'
+        }
+      });
+    } catch (error) {
+      // Silent fail if WebSocket is not available
+    }
+  }
+
+  /**
+   * Handle enhanced errors
+   */
+  private handleEnhancedError(error: Error, context: string): void {
+    // Record error metric
+    this.recordPerformanceMetric('error_count', 1);
+
+    // Publish error event
+    this.publishToWebSocket({
+      type: 'error',
+      timestamp: Date.now(),
+      data: {
+        error: error.message,
+        context,
+        stack: error.stack,
+        adapterId: this.id
+      }
+    });
   }
 }
