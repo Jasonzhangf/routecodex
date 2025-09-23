@@ -57,6 +57,7 @@ export class OpenAIRouter extends BaseModule {
   private debugEventBus: DebugEventBus;
   private config: OpenAIRouterConfig;
   private passThroughProvider: PassThroughProvider;
+  private moduleInfo: ModuleInfo;
   private _isInitialized: boolean = false;
   // Optional pipeline manager hook (attached later by server if needed)
   private pipelineManager: any | null = null;
@@ -65,6 +66,13 @@ export class OpenAIRouter extends BaseModule {
   private rrIndex: Map<string, number> = new Map();
   private classifier: ConfigRequestClassifier | null = null;
   private classifierConfig: any | null = null;
+
+  // Debug enhancement properties
+  private isDebugEnhanced = false;
+  private routerMetrics: Map<string, any> = new Map();
+  private requestHistory: any[] = [];
+  private errorHistory: any[] = [];
+  private maxHistorySize = 100;
 
   constructor(
     requestHandler: RequestHandler,
@@ -81,6 +89,9 @@ export class OpenAIRouter extends BaseModule {
     };
 
     super(moduleInfo);
+
+    // Store module info for debug access
+    this.moduleInfo = moduleInfo;
 
     this.requestHandler = requestHandler;
     this.providerManager = providerManager;
@@ -106,6 +117,150 @@ export class OpenAIRouter extends BaseModule {
       targetUrl: this.config.targetUrl || 'https://api.openai.com/v1',
       timeout: this.config.timeout
     });
+
+    // Initialize debug enhancements
+    this.initializeDebugEnhancements();
+  }
+
+  /**
+   * Initialize debug enhancements
+   */
+  private initializeDebugEnhancements(): void {
+    try {
+      this.isDebugEnhanced = true;
+      console.log('OpenAI Router debug enhancements initialized');
+    } catch (error) {
+      console.warn('Failed to initialize OpenAI Router debug enhancements:', error);
+      this.isDebugEnhanced = false;
+    }
+  }
+
+  /**
+   * Record router metric
+   */
+  private recordRouterMetric(operation: string, data: any): void {
+    if (!this.routerMetrics.has(operation)) {
+      this.routerMetrics.set(operation, {
+        values: [],
+        lastUpdated: Date.now()
+      });
+    }
+
+    const metric = this.routerMetrics.get(operation)!;
+    metric.values.push(data);
+    metric.lastUpdated = Date.now();
+
+    // Keep only last 50 measurements
+    if (metric.values.length > 50) {
+      metric.values.shift();
+    }
+  }
+
+  /**
+   * Add to request history
+   */
+  private addToRequestHistory(request: any): void {
+    this.requestHistory.push(request);
+
+    // Keep only recent history
+    if (this.requestHistory.length > this.maxHistorySize) {
+      this.requestHistory.shift();
+    }
+  }
+
+  /**
+   * Add to error history
+   */
+  private addToErrorHistory(error: any): void {
+    this.errorHistory.push(error);
+
+    // Keep only recent history
+    if (this.errorHistory.length > this.maxHistorySize) {
+      this.errorHistory.shift();
+    }
+  }
+
+  /**
+   * Publish debug event
+   */
+  private publishDebugEvent(type: string, data: any): void {
+    if (!this.isDebugEnhanced) return;
+
+    try {
+      this.debugEventBus.publish({
+        sessionId: `session_${Date.now()}`,
+        moduleId: 'openai-router',
+        operationId: type,
+        timestamp: Date.now(),
+        type: 'start',
+        position: 'middle',
+        data: {
+          ...data,
+          routerId: this.moduleInfo.id,
+          source: 'openai-router'
+        }
+      });
+    } catch (error) {
+      // Silent fail if debug event bus is not available
+    }
+  }
+
+  /**
+   * Get debug status with enhanced information
+   */
+  getDebugStatus(): any {
+    const baseStatus = {
+      routerId: this.moduleInfo.id,
+      isInitialized: this._isInitialized,
+      type: this.moduleInfo.type,
+      isEnhanced: this.isDebugEnhanced
+    };
+
+    if (!this.isDebugEnhanced) {
+      return baseStatus;
+    }
+
+    return {
+      ...baseStatus,
+      debugInfo: this.getDebugInfo(),
+      routerMetrics: this.getRouterMetrics(),
+      requestHistory: [...this.requestHistory.slice(-10)], // Last 10 requests
+      errorHistory: [...this.errorHistory.slice(-10)] // Last 10 errors
+    };
+  }
+
+  /**
+   * Get detailed debug information
+   */
+  private getDebugInfo(): any {
+    return {
+      routerId: this.moduleInfo.id,
+      routerType: this.moduleInfo.type,
+      enhanced: this.isDebugEnhanced,
+      eventBusAvailable: !!this.debugEventBus,
+      requestHistorySize: this.requestHistory.length,
+      errorHistorySize: this.errorHistory.length,
+      hasPipelineManager: !!this.pipelineManager,
+      hasRoutePools: !!this.routePools,
+      hasClassifier: !!this.classifier
+    };
+  }
+
+  /**
+   * Get router metrics
+   */
+  private getRouterMetrics(): any {
+    const metrics: any = {};
+
+    for (const [operation, metric] of this.routerMetrics.entries()) {
+      metrics[operation] = {
+        count: metric.values.length,
+        lastUpdated: metric.lastUpdated,
+        recentValues: metric.values.slice(-5) // Last 5 values
+      };
+    }
+
+    return metrics;
   }
 
   /**
@@ -169,6 +324,25 @@ export class OpenAIRouter extends BaseModule {
    * Initialize the OpenAI router
    */
   public async initialize(): Promise<void> {
+    const startTime = Date.now();
+    const initId = `init_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Debug: Record initialization start
+    if (this.isDebugEnhanced) {
+      this.recordRouterMetric('initialization_start', {
+        initId,
+        config: this.config,
+        targetUrl: this.config.targetUrl,
+        timestamp: startTime
+      });
+      this.publishDebugEvent('initialization_start', {
+        initId,
+        config: this.config,
+        targetUrl: this.config.targetUrl,
+        timestamp: startTime
+      });
+    }
+
     try {
       await this.errorHandling.initialize();
       await this.passThroughProvider.initialize();
@@ -177,6 +351,26 @@ export class OpenAIRouter extends BaseModule {
       this.setupRoutes();
 
       this._isInitialized = true;
+
+      const totalTime = Date.now() - startTime;
+
+      // Debug: Record initialization completion
+      if (this.isDebugEnhanced) {
+        this.recordRouterMetric('initialization_complete', {
+          initId,
+          success: true,
+          totalTime,
+          hasRoutePools: !!this.routePools,
+          hasClassifier: !!this.classifier
+        });
+        this.publishDebugEvent('initialization_complete', {
+          initId,
+          success: true,
+          totalTime,
+          hasRoutePools: !!this.routePools,
+          hasClassifier: !!this.classifier
+        });
+      }
 
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
@@ -192,6 +386,30 @@ export class OpenAIRouter extends BaseModule {
       });
 
     } catch (error) {
+      const totalTime = Date.now() - startTime;
+
+      // Debug: Record initialization failure
+      if (this.isDebugEnhanced) {
+        this.recordRouterMetric('initialization_failed', {
+          initId,
+          error: error instanceof Error ? error.message : String(error),
+          totalTime
+        });
+        this.addToErrorHistory({
+          initId,
+          error,
+          startTime,
+          endTime: Date.now(),
+          totalTime,
+          operation: 'initialize'
+        });
+        this.publishDebugEvent('initialization_failed', {
+          initId,
+          error: error instanceof Error ? error.message : String(error),
+          totalTime
+        });
+      }
+
       await this.handleError(error as Error, 'initialization');
       throw error;
     }
@@ -265,6 +483,34 @@ export class OpenAIRouter extends BaseModule {
   private async handleChatCompletions(req: Request, res: Response): Promise<void> {
     const startTime = Date.now();
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Debug: Record request start
+    if (this.isDebugEnhanced) {
+      this.recordRouterMetric('chat_completions_start', {
+        requestId,
+        model: req.body.model,
+        messageCount: req.body.messages?.length || 0,
+        streaming: req.body.stream || false,
+        hasTools: !!req.body.tools,
+        timestamp: startTime
+      });
+      this.addToRequestHistory({
+        requestId,
+        endpoint: '/chat/completions',
+        method: req.method,
+        model: req.body.model,
+        messageCount: req.body.messages?.length || 0,
+        timestamp: startTime
+      });
+      this.publishDebugEvent('chat_completions_start', {
+        requestId,
+        model: req.body.model,
+        messageCount: req.body.messages?.length || 0,
+        streaming: req.body.stream || false,
+        hasTools: !!req.body.tools,
+        timestamp: startTime
+      });
+    }
 
     try {
       this.debugEventBus.publish({
@@ -349,6 +595,28 @@ export class OpenAIRouter extends BaseModule {
 
       const duration = Date.now() - startTime;
 
+      // Debug: Record request completion
+      if (this.isDebugEnhanced) {
+        this.recordRouterMetric('chat_completions_complete', {
+          requestId,
+          success: true,
+          duration,
+          status: 200,
+          model: req.body.model,
+          streaming: req.body.stream || false,
+          usedPipeline: this.shouldUsePipeline() && !!this.routePools
+        });
+        this.publishDebugEvent('chat_completions_complete', {
+          requestId,
+          success: true,
+          duration,
+          status: 200,
+          model: req.body.model,
+          streaming: req.body.stream || false,
+          usedPipeline: this.shouldUsePipeline() && !!this.routePools
+        });
+      }
+
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'openai-router',
@@ -370,6 +638,32 @@ export class OpenAIRouter extends BaseModule {
 
     } catch (error) {
       const duration = Date.now() - startTime;
+
+      // Debug: Record request error
+      if (this.isDebugEnhanced) {
+        this.recordRouterMetric('chat_completions_error', {
+          requestId,
+          error: error instanceof Error ? error.message : String(error),
+          duration,
+          errorType: error instanceof RouteCodexError ? error.code : 'unknown'
+        });
+        this.addToErrorHistory({
+          requestId,
+          error,
+          request: req.body,
+          startTime,
+          endTime: Date.now(),
+          duration,
+          operation: 'handleChatCompletions'
+        });
+        this.publishDebugEvent('chat_completions_error', {
+          requestId,
+          error: error instanceof Error ? error.message : String(error),
+          duration,
+          errorType: error instanceof RouteCodexError ? error.code : 'unknown'
+        });
+      }
+
       await this.handleError(error as Error, 'chat_completions_handler');
 
       this.debugEventBus.publish({
