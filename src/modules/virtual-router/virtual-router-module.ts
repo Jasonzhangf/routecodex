@@ -757,7 +757,19 @@ export class VirtualRouterModule extends BaseModule {
    * Get debug status with enhanced information
    */
   getDebugStatus(): any {
-    const baseStatus = this.getStatus();
+    const baseStatus = {
+      routerId: this.getInfo().id,
+      name: this.getInfo().name,
+      version: this.getInfo().version,
+      isInitialized: this.getStatus() !== 'stopped',
+      isRunning: this.isModuleRunning(),
+      status: this.getStatus(),
+      routeTargets: Object.keys(this.routeTargets),
+      pipelineConfigs: Object.keys(this.pipelineConfigs),
+      protocolManager: this.protocolManager.getStatus(),
+      loadBalancer: this.loadBalancer.getStatus(),
+      isEnhanced: true
+    };
 
     if (!this.isDebugEnhanced) {
       return baseStatus;
