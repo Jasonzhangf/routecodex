@@ -120,27 +120,29 @@ export class UserConfigParser {
           const keyAliases = this.getProviderKeyAliases(providerId);
           
           // 为每个key生成顺序别名目标
-          return keyAliases.map(keyAlias => ({
-            providerId,
-            modelId,
-            keyId: keyAlias, // 使用顺序别名（key1, key2...）
-            actualKey: this.resolveActualKey(providerId, this.resolveKeyByAlias(providerId, keyAlias)),
-            inputProtocol: 'openai',
-            outputProtocol: 'openai'
-          }));
+          keyAliases.forEach(keyAlias => {
+            routeTargets[routeName].push({
+              providerId,
+              modelId,
+              keyId: keyAlias, // 使用顺序别名（key1, key2...）
+              actualKey: this.resolveActualKey(providerId, this.resolveKeyByAlias(providerId, keyAlias)),
+              inputProtocol: 'openai',
+              outputProtocol: 'openai'
+            });
+          });
         } else {
           // provider.model.key1/key2格式：使用指定顺序别名
           // 验证顺序别名是否有效
           const realKey = this.resolveKeyByAlias(providerId, keyAlias);
           
-          return [{
+          routeTargets[routeName].push({
             providerId,
             modelId,
             keyId: keyAlias, // 使用顺序别名
             actualKey: this.resolveActualKey(providerId, realKey),
             inputProtocol: 'openai',
             outputProtocol: 'openai'
-          }];
+          });
         }
       });
     }
@@ -295,123 +297,6 @@ export class UserConfigParser {
             llmSwitch,
             workflow
             };
-        }
-        
-        // 如果provider有多个key，为通配符 '*' 创建特殊配置
-        if (providerConfig.apiKey.length > 1) {
-          const wildcardConfigKey = `${providerId}.${modelId}.*`;
-          // 通配符配置使用第一个key作为模板，但实际运行时会根据负载均衡选择key
-          const firstKeyId = providerConfig.apiKey[0];
-          const resolvedKey = this.resolveActualKey(providerId, firstKeyId);
-          const hasAuthMapping = this.hasAuthMapping(providerId, firstKeyId);
-          
-          // 使用与具体key配置相同的模块配置
-          const modelCompat = (modelConfig as any)?.compatibility;
-          const providerCompat = (providerConfig as any)?.compatibility;
-          let compatibility = modelCompat?.type
-            ? { type: modelCompat.type, config: modelCompat.config || {} }
-            : providerCompat?.type
-              ? { type: providerCompat.type, config: providerCompat.config || {} }
-              : undefined;
-
-          const modelLlmSwitch = (modelConfig as any)?.llmSwitch;
-          const providerLlmSwitch = (providerConfig as any)?.llmSwitch;
-          let llmSwitch = modelLlmSwitch?.type
-            ? { type: modelLlmSwitch.type, config: modelLlmSwitch.config || {} }
-            : providerLlmSwitch?.type
-              ? { type: providerLlmSwitch.type, config: providerLlmSwitch.config || {} }
-              : undefined;
-
-          const modelWorkflow = (modelConfig as any)?.workflow;
-          const providerWorkflow = (providerConfig as any)?.workflow;
-          let workflow = modelWorkflow?.type
-            ? { type: modelWorkflow.type, config: modelWorkflow.config || {}, enabled: modelWorkflow.enabled }
-            : providerWorkflow?.type
-              ? { type: providerWorkflow.type, config: providerWorkflow.config || {}, enabled: providerWorkflow.enabled }
-              : undefined;
-
-          // Defaults
-          if (!llmSwitch) {
-            llmSwitch = { type: 'openai-passthrough', config: {} };
-          }
-          if (!workflow) {
-            workflow = { type: 'streaming-control', enabled: true, config: {} } as any;
-          }
-          if (!compatibility) {
-            const pType = (providerConfig as any)?.type?.toLowerCase?.() || '';
-            if (pType.includes('lmstudio')) {
-              compatibility = { type: 'lmstudio-compatibility', config: {} };
-            } else if (pType.includes('qwen')) {
-              compatibility = { type: 'qwen-compatibility', config: {} } as any;
-            } else {
-              compatibility = { type: 'field-mapping', config: {} } as any;
-            }
-          }
-          
-          const rawProviderType = (providerConfig.type || '').toLowerCase();
-          const normalizedProviderType = rawProviderType === 'lmstudio' ? 'lmstudio-http'
-            : rawProviderType === 'qwen' ? 'qwen-provider'
-            : rawProviderType === 'iflow' || rawProviderType === 'iflow-http' ? 'generic-http'
-            : providerConfig.type;
-
-          let baseURL = providerConfig.baseURL;
-          if (normalizedProviderType === 'lmstudio-http') {
-            const envBase = process.env.LMSTUDIO_BASE_URL || process.env.LM_STUDIO_BASE_URL;
-            if (envBase && typeof envBase === 'string' && envBase.trim()) {
-              baseURL = envBase.trim();
-            }
-          }
-
-          let providerAuth: any = undefined;
-          if (normalizedProviderType === 'lmstudio-http') {
-            providerAuth = { type: 'apikey' };
-          }
-          if (normalizedProviderType === 'qwen-provider') {
-            const oauthCfg = (providerConfig as any).oauth || (providerConfig as any).auth?.oauth;
-            if (oauthCfg && typeof oauthCfg === 'object') {
-              const oc = (oauthCfg as any).default || oauthCfg;
-              providerAuth = {
-                type: 'oauth',
-                oauth: {
-                  clientId: oc.clientId,
-                  deviceCodeUrl: oc.deviceCodeUrl,
-                  tokenUrl: oc.tokenUrl,
-                  scopes: oc.scopes,
-                  tokenFile: oc.tokenFile
-                }
-              };
-            }
-          }
-
-          const auth = normalizedProviderType === 'lmstudio-http'
-            ? ({ type: 'apikey', ...(hasAuthMapping ? { apiKey: resolvedKey } : {}) })
-            : undefined;
-
-          // 创建通配符配置
-          pipelineConfigs[wildcardConfigKey] = {
-            provider: {
-              type: normalizedProviderType,
-              baseURL,
-              ...(providerAuth ? { auth: providerAuth } : {}),
-              ...(auth ? { auth } : {})
-            },
-            model: {
-              maxContext: modelConfig.maxContext || 128000,
-              maxTokens: modelConfig.maxTokens || 32000
-            },
-            keyConfig: {
-              keyId: '*',
-              actualKey: '*',
-              keyType: 'apiKey' // 通配符类型
-            },
-            protocols: {
-              input: virtualRouterConfig.inputProtocol as 'openai' | 'anthropic',
-              output: virtualRouterConfig.outputProtocol as 'openai' | 'anthropic'
-            },
-            compatibility,
-            llmSwitch,
-            workflow
-          };
         }
       }
     }

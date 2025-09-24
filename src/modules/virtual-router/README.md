@@ -3,6 +3,38 @@
 ## 功能概述
 虚拟路由模块是RouteCodex的核心组件，负责智能请求路由、负载均衡和协议转换。它支持多个AI服务提供商的动态路由，并提供了高效的请求分发机制。
 
+## 🆕 顺序索引别名系统支持 (Key Alias System) - v2.1 新增
+
+### 核心改进
+虚拟路由模块现在完全支持新的**顺序索引别名系统**，解决了key字段中特殊字符（如"."）导致的解析错误：
+
+1. **接收别名目标**: 从配置模块接收 `key1`、`key2` 等别名格式的路由目标
+2. **负载均衡**: 在 `key1`、`key2`、`key3` 等别名间进行轮询
+3. **配置查找**: 使用别名格式 `provider.model.key1` 查找流水线配置
+4. **向后兼容**: 完全兼容单key和多key场景
+
+### 工作流示例
+```
+配置输入: openai.gpt-4 (3个key)
+↓ 配置模块解析
+路由目标: [
+  {providerId: "openai", modelId: "gpt-4", keyId: "key1"},
+  {providerId: "openai", modelId: "gpt-4", keyId: "key2"},
+  {providerId: "openai", modelId: "gpt-4", keyId: "key3"}
+]
+↓ 虚拟路由模块处理
+负载均衡: 在key1、key2、key3间轮询
+配置查找: 使用 openai.gpt-4.key1、openai.gpt-4.key2 等格式
+```
+
+### 兼容性保证
+- ✅ **单key场景**: 自动映射为 `key1`，无需修改
+- ✅ **多key场景**: 自动展开为 `key1`、`key2`、`key3` 等别名
+- ✅ **特殊key名**: `default`、`oauth-default` 等继续支持
+- ✅ **路由格式**: `provider.model` 自动展开，`provider.model.key1` 精确指定
+
+## 核心特性
+
 ## 核心特性
 
 ### 🎯 智能路由

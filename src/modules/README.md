@@ -3,11 +3,95 @@
 ## 功能概述
 RouteCodex采用模块化架构，将系统功能分解为独立的、可配置的模块。每个模块都继承自基础模块类，具有统一的生命周期管理。
 
+## 🆕 顺序索引别名系统 (Key Alias System) - v2.1 重大更新
+
+### 系统级改进
+整个模块系统现已全面支持新的**顺序索引别名系统**，这是为了解决配置中key字段特殊字符解析错误而设计的核心架构升级：
+
+### 影响范围
+- **配置模块**: 解析用户配置时自动生成key别名
+- **虚拟路由模块**: 接收别名格式的路由目标，进行负载均衡
+- **流水线模块**: 使用别名格式查找配置
+- **负载均衡器**: 在key别名间进行轮询
+
+### 核心优势
+1. **彻底解决解析错误**: key中不再出现特殊字符
+2. **统一抽象层**: 所有模块都通过别名系统工作
+3. **向后兼容**: 单key自动适配，多key自动展开
+4. **安全性提升**: 配置中只出现别名，不出现真实key
+
+### 模块间协作
+```
+用户配置 → 配置模块(生成别名) → 虚拟路由模块(负载均衡) → 流水线模块(配置查找)
+```
+
+## 模块结构
+
 ## 模块结构
 
 ### 核心模块 (v2.0 新增)
 
-#### 1. 虚拟路由模块 (Virtual Router)
+#### 1. 统一调试增强管理器 (Debug Enhancement Manager)
+**路径**: `src/modules/debug/debug-enhancement-manager.ts`
+
+**功能**:
+- 集中化调试增强管理，消除代码重复
+- 统一度量收集和监控
+- 跨模块调试功能标准化
+- 性能监控和历史追踪
+
+**关键特性**:
+- **单例模式**: 全局统一的调试增强管理
+- **模块注册**: 支持多个模块独立注册调试增强
+- **度量收集**: 自动化的性能指标和调用统计
+- **历史管理**: 可配置的请求和错误历史记录
+- **事件集成**: 与DebugEventBus无缝集成
+
+**文件结构**:
+- `debug-enhancement-manager.ts`: 核心管理器实现
+- 接口支持: `DebugEnhancement`, `DebugEnhancementConfig`, `DebugCenter`
+
+#### 2. 共享资源池管理器 (Resource Manager)
+**路径**: `src/modules/resource/resource-manager.ts`
+
+**功能**:
+- 统一资源池管理和连接复用
+- 共享服务实例管理
+- 连接池自动管理和健康检查
+- 资源使用统计和监控
+
+**关键特性**:
+- **连接池**: HTTP连接、数据库连接等统一管理
+- **服务共享**: TTL基础的服务实例共享和引用计数
+- **健康检查**: 自动化的连接健康检查和故障恢复
+- **性能优化**: 连接复用和资源生命周期管理
+- **监控统计**: 详细的资源使用情况统计
+
+**文件结构**:
+- `resource-manager.ts`: 核心资源管理器实现
+- 接口支持: `ConnectionPool`, `ServiceInstance`, `ResourceMetrics`
+
+#### 3. 异步并行初始化器 (Parallel Initializer)
+**路径**: `src/modules/initialization/parallel-initializer.ts`
+
+**功能**:
+- 异步并行模块初始化，支持依赖关系解析
+- 智能任务分组和拓扑排序
+- 重试机制和健康检查
+- 性能监控和统计
+
+**关键特性**:
+- **依赖解析**: 自动检测循环依赖和拓扑排序
+- **并行执行**: 基于依赖关系的智能并行初始化
+- **重试机制**: 指数退避和错误恢复策略
+- **健康检查**: 初始化后自动健康验证
+- **性能追踪**: 详细的初始化性能统计
+
+**文件结构**:
+- `parallel-initializer.ts`: 核心并行初始化器实现
+- 接口支持: `InitializationTask`, `InitializationResult`, `DependencyGraph`
+
+#### 4. 虚拟路由模块 (Virtual Router)
 **路径**: `src/modules/virtual-router/`
 
 **功能**:
@@ -288,6 +372,165 @@ const csvData = analytics.exportAnalytics('csv');
 const report = analytics.exportAnalytics('report');
 ```
 
+### Unified Components Usage
+
+#### Debug Enhancement Manager Usage
+
+```typescript
+import { DebugEnhancementManager } from './modules/debug/debug-enhancement-manager.js';
+import { DebugCenter } from './utils/external-mocks.js';
+
+// Initialize debug enhancement manager
+const debugCenter = DebugCenter.getInstance();
+const debugManager = DebugEnhancementManager.getInstance(debugCenter);
+await debugManager.initialize();
+
+// Register enhancement for a module
+const enhancement = debugManager.registerEnhancement('my-module', {
+  enabled: true,
+  consoleLogging: true,
+  debugCenter: true,
+  performanceTracking: true,
+  requestLogging: true,
+  errorTracking: true,
+  maxHistorySize: 100
+});
+
+// Record metrics
+enhancement.recordMetric('operation_name', 150, {
+  operationType: 'api_call',
+  result: 'success'
+});
+
+// Add to history
+enhancement.addRequestToHistory({
+  requestId: 'req-123',
+  endpoint: '/api/chat',
+  timestamp: Date.now()
+});
+
+// Get metrics statistics
+const stats = enhancement.getMetricsStats();
+console.log(`Operation count: ${stats.get('operation_name')?.count}`);
+
+// Get system-wide debug status
+const systemStatus = debugManager.getSystemDebugStatus();
+```
+
+#### Resource Manager Usage
+
+```typescript
+import { ResourceManager } from './modules/resource/resource-manager.js';
+
+// Get resource manager instance
+const resourceManager = ResourceManager.getInstance();
+
+// Create a connection pool
+const pool = await resourceManager.createConnectionPool({
+  name: 'http-connections',
+  factory: () => new HttpClient(),
+  maxConnections: 10,
+  minConnections: 2,
+  healthCheck: (client) => client.ping(),
+  retryConfig: {
+    maxRetries: 3,
+    baseDelayMs: 1000,
+    maxDelayMs: 30000
+  }
+});
+
+// Get connection from pool
+const connection = await pool.getConnection();
+try {
+  // Use connection
+  const result = await connection.request('/api/data');
+} finally {
+  // Return connection to pool
+  await pool.releaseConnection(connection);
+}
+
+// Get shared service instance with TTL
+const service = await resourceManager.getSharedService(
+  'cache-service',
+  async () => new CacheService(),
+  { ttl: 300000 } // 5 minutes TTL
+);
+
+// Get resource usage statistics
+const stats = resourceManager.getResourceStatistics();
+console.log(`Active connections: ${stats.connectionPools.get('http-connections')?.activeConnections}`);
+```
+
+#### Parallel Initializer Usage
+
+```typescript
+import { ParallelInitializer } from './modules/initialization/parallel-initializer.js';
+
+// Create parallel initializer
+const initializer = new ParallelInitializer({
+  maxConcurrentTasks: 4,
+  maxRetries: 3,
+  baseDelayMs: 1000,
+  maxDelayMs: 30000,
+  enablePerformanceTracking: true,
+  enableHealthChecks: true
+});
+
+// Define initialization tasks with dependencies
+initializer.addTask({
+  id: 'database',
+  name: 'Database Connection',
+  dependencies: [],
+  initialize: async () => {
+    const db = new Database();
+    await db.connect();
+    return { db };
+  },
+  healthCheck: async () => {
+    // Check database connectivity
+    return await checkDatabaseHealth();
+  }
+});
+
+initializer.addTask({
+  id: 'cache',
+  name: 'Cache Service',
+  dependencies: ['database'], // Depends on database
+  initialize: async () => {
+    const cache = new CacheService();
+    await cache.initialize();
+    return { cache };
+  }
+});
+
+initializer.addTask({
+  id: 'api-server',
+  name: 'API Server',
+  dependencies: ['database', 'cache'], // Depends on both
+  initialize: async () => {
+    const server = new APIServer();
+    await server.start();
+    return { server };
+  }
+});
+
+// Execute parallel initialization
+const results = await initializer.initializeAll();
+
+// Check initialization results
+for (const [taskId, result] of results.entries()) {
+  if (result.success) {
+    console.log(`${taskId}: Initialized successfully in ${result.duration}ms`);
+  } else {
+    console.error(`${taskId}: Failed - ${result.error}`);
+  }
+}
+
+// Get initialization statistics
+const stats = initializer.getInitializationStatistics();
+console.log(`Total tasks: ${stats.totalTasks}, Successful: ${stats.successfulTasks}, Failed: ${stats.failedTasks}`);
+```
+
 ## Configuration
 
 ### Module Configuration
@@ -405,6 +648,9 @@ The system integrates with RouteCodex's configuration system:
 
 | Module | Status | Purpose | Last Updated |
 |--------|--------|---------|--------------|
+| `debug-enhancement-manager.ts` | ✅ Complete | Unified debug enhancement management | Current |
+| `resource-manager.ts` | ✅ Complete | Shared resource pool and connection management | Current |
+| `parallel-initializer.ts` | ✅ Complete | Async parallel initialization with dependencies | Current |
 | `unimplemented-module.ts` | ✅ Complete | Core unimplemented module implementation | Current |
 | `unimplemented-module-factory.ts` | ✅ Complete | Factory pattern for module management | Current |
 | `unimplemented-module-analytics.ts` | ✅ Complete | Analytics and reporting system | Current |

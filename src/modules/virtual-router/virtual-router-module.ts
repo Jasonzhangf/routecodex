@@ -16,6 +16,16 @@ import type {
   PipelineConfig
 } from '../../config/merged-config-types.js';
 import { DebugEventBus } from '../../utils/external-mocks.js';
+import type {
+  DryRunConfig,
+  DryRunResponse,
+  RoutingDecision,
+  FieldConversionInfo,
+  ProtocolProcessingInfo,
+  PerformanceEstimate,
+  ConfigValidationResult,
+  DryRunStats
+} from '../dry-run/dry-run-interface.js';
 
 export class VirtualRouterModule extends BaseModule {
   private routeTargets: RouteTargetPool = {};
@@ -32,6 +42,28 @@ export class VirtualRouterModule extends BaseModule {
   private requestHistory: any[] = [];
   // maxHistorySize is now inherited from BaseModule
   private classificationStats: Map<string, any> = new Map();
+
+  // Dry-run mode properties
+  private dryRunConfig: DryRunConfig = {
+    enabled: false,
+    verbosity: 'normal',
+    includePerformanceEstimate: true,
+    includeConfigValidation: true,
+    maxOutputDepth: 10,
+    sensitiveFields: ['apiKey', 'token', 'secret', 'password']
+  };
+  private dryRunStats: DryRunStats = {
+    totalRuns: 0,
+    successfulRuns: 0,
+    averageTimeMs: 0,
+    topRoutes: [],
+    topTargets: [],
+    configErrors: {
+      routing: 0,
+      pipeline: 0,
+      target: 0
+    }
+  };
 
   constructor() {
     super({
@@ -242,12 +274,471 @@ export class VirtualRouterModule extends BaseModule {
     }
   }
 
+  // ========== Dry-Run Mode Methods ==========
+
+  /**
+   * 启用或禁用dry-run模式
+   */
+  setDryRunMode(enabled: boolean, config?: Partial<DryRunConfig>): void {
+    this.dryRunConfig.enabled = enabled;
+    if (config) {
+      this.dryRunConfig = { ...this.dryRunConfig, ...config };
+    }
+    console.log(`🔍 Dry-run mode ${enabled ? 'enabled' : 'disabled'}`);
+  }
+
+  /**
+   * 获取dry-run配置
+   */
+  getDryRunConfig(): DryRunConfig {
+    return { ...this.dryRunConfig };
+  }
+
+  /**
+   * 获取dry-run统计信息
+   */
+  getDryRunStats(): DryRunStats {
+    return { ...this.dryRunStats };
+  }
+
+  /**
+   * 重置dry-run统计信息
+   */
+  resetDryRunStats(): void {
+    this.dryRunStats = {
+      totalRuns: 0,
+      successfulRuns: 0,
+      averageTimeMs: 0,
+      topRoutes: [],
+      topTargets: [],
+      configErrors: {
+        routing: 0,
+        pipeline: 0,
+        target: 0
+      }
+    };
+  }
+
+  /**
+   * 执行dry-run路由分析
+   */
+  async executeDryRun(request: any, routeName: string = 'default'): Promise<DryRunResponse> {
+    const startTime = Date.now();
+    const requestId = `dryrun_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    console.log('🔍 Starting dry-run analysis...');
+
+    try {
+      // 初始化响应结构
+      const response: DryRunResponse = {
+        mode: 'dry-run',
+        requestSummary: {
+          id: requestId,
+          type: 'routing-analysis',
+          timestamp: new Date().toISOString(),
+          route: routeName
+        },
+        routingDecision: await this.simulateRoutingDecision(request, routeName, requestId),
+        fieldConversion: await this.simulateFieldConversion(request),
+        protocolProcessing: await this.simulateProtocolProcessing(request),
+        executionPlan: this.generateExecutionPlan(request, routeName),
+        totalDryRunTimeMs: 0
+      };
+
+      // 添加性能估算（如果启用）
+      if (this.dryRunConfig.includePerformanceEstimate) {
+        response.performanceEstimate = await this.estimatePerformance(request, response);
+      }
+
+      // 添加配置验证（如果启用）
+      if (this.dryRunConfig.includeConfigValidation) {
+        response.configValidation = await this.validateConfiguration(request, routeName);
+      }
+
+      // 添加调试信息（如果详细级别足够）
+      if (this.dryRunConfig.verbosity === 'debug' || this.dryRunConfig.verbosity === 'detailed') {
+        response.debugInfo = {
+          logEntries: this.generateDebugLogEntries(request, response),
+          metrics: this.generateDebugMetrics(request, response)
+        };
+      }
+
+      // 更新统计信息
+      this.updateDryRunStats(response, Date.now() - startTime);
+
+      response.totalDryRunTimeMs = Date.now() - startTime;
+
+      console.log(`✅ Dry-run analysis completed in ${response.totalDryRunTimeMs}ms`);
+      return response;
+
+    } catch (error) {
+      console.error('❌ Dry-run analysis failed:', error);
+
+      // 更新错误统计
+      this.dryRunStats.totalRuns++;
+
+      throw error;
+    }
+  }
+
+  /**
+   * 模拟路由决策
+   */
+  private async simulateRoutingDecision(request: any, routeName: string, requestId: string): Promise<RoutingDecision> {
+    const startTime = Date.now();
+
+    // 使用配置驱动的分类器进行智能路由
+    let finalRouteName = routeName;
+    if (this.configRequestClassifier) {
+      const classificationResult = await this.classifyRequestWithConfig(request);
+      finalRouteName = classificationResult.route;
+    }
+
+    // 获取可用目标
+    const targets = this.routeTargets[finalRouteName];
+    if (!targets || targets.length === 0) {
+      throw new Error(`No targets found for route: ${finalRouteName}`);
+    }
+
+    // 模拟负载均衡决策
+    const availableTargets = targets.map(target => ({
+      providerId: target.providerId,
+      modelId: target.modelId,
+      keyId: target.keyId,
+      health: 'healthy' as const
+    }));
+
+    // 选择目标（简化版负载均衡）
+    const selectedTarget = availableTargets[0]; // 简化：选择第一个目标
+    const loadBalancerDecision = {
+      algorithm: 'round-robin',
+      weights: availableTargets.reduce((acc, target, index) => {
+        acc[`${target.providerId}.${target.modelId}`] = 1;
+        return acc;
+      }, {} as Record<string, number>),
+      selectedWeight: 1,
+      reasoning: 'Target selected based on availability and round-robin algorithm'
+    };
+
+    return {
+      requestId,
+      routeName: finalRouteName,
+      selectedTarget: {
+        providerId: selectedTarget.providerId,
+        modelId: selectedTarget.modelId,
+        keyId: selectedTarget.keyId,
+        actualKey: 'hidden-for-security'
+      },
+      availableTargets,
+      loadBalancerDecision,
+      timestamp: new Date().toISOString(),
+      decisionTimeMs: Date.now() - startTime
+    };
+  }
+
+  /**
+   * 模拟字段转换
+   */
+  private async simulateFieldConversion(request: any): Promise<FieldConversionInfo> {
+    const startTime = Date.now();
+
+    try {
+      // 模拟字段转换过程
+      const originalFields = Object.keys(request);
+      const convertedFields = [...originalFields]; // 简化：假设字段名不变
+
+      const fieldMappings = originalFields.map(field => ({
+        from: field,
+        to: field,
+        transformation: 'passthrough'
+      }));
+
+      return {
+        originalFields,
+        convertedFields,
+        fieldMappings,
+        conversionTimeMs: Date.now() - startTime,
+        success: true
+      };
+    } catch (error) {
+      return {
+        originalFields: Object.keys(request),
+        convertedFields: [],
+        fieldMappings: [],
+        conversionTimeMs: Date.now() - startTime,
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
+
+  /**
+   * 模拟协议处理
+   */
+  private async simulateProtocolProcessing(request: any): Promise<ProtocolProcessingInfo> {
+    const startTime = Date.now();
+
+    // 简化的协议处理模拟
+    const inputProtocol = 'openai';
+    const outputProtocol = 'openai';
+    const requiresConversion = inputProtocol !== outputProtocol;
+
+    const conversionSteps = requiresConversion ? [
+      {
+        step: 'protocol_conversion',
+        from: inputProtocol,
+        to: outputProtocol,
+        description: 'Convert request format between protocols'
+      }
+    ] : [];
+
+    return {
+      inputProtocol,
+      outputProtocol,
+      conversionSteps,
+      processingTimeMs: Date.now() - startTime,
+      requiresConversion
+    };
+  }
+
+  /**
+   * 生成执行计划
+   */
+  private generateExecutionPlan(request: any, routeName: string): Array<{
+    step: string;
+    module: string;
+    description: string;
+    estimatedTimeMs: number;
+  }> {
+    return [
+      {
+        step: 'request_classification',
+        module: 'virtual-router',
+        description: 'Classify request and determine optimal route',
+        estimatedTimeMs: 5
+      },
+      {
+        step: 'target_selection',
+        module: 'load-balancer',
+        description: 'Select optimal target based on load balancing',
+        estimatedTimeMs: 2
+      },
+      {
+        step: 'field_conversion',
+        module: 'field-converter',
+        description: 'Convert request fields to target format',
+        estimatedTimeMs: 10
+      },
+      {
+        step: 'protocol_processing',
+        module: 'protocol-manager',
+        description: 'Process protocol conversion if needed',
+        estimatedTimeMs: 3
+      },
+      {
+        step: 'pipeline_execution',
+        module: 'pipeline-system',
+        description: 'Execute request through selected pipeline',
+        estimatedTimeMs: 1000
+      }
+    ];
+  }
+
+  /**
+   * 估算性能
+   */
+  private async estimatePerformance(request: any, response: DryRunResponse): Promise<PerformanceEstimate> {
+    // 基于历史数据的简化性能估算
+    const baseTime = 1000; // 基础执行时间
+    const complexity = Object.keys(request).length * 10; // 复杂度因子
+
+    const breakdown = {
+      routing: response.routingDecision.decisionTimeMs,
+      conversion: response.fieldConversion.conversionTimeMs,
+      protocol: response.protocolProcessing.processingTimeMs,
+      execution: baseTime + complexity,
+      response: 50 // 响应处理时间
+    };
+
+    return {
+      estimatedTotalTimeMs: Object.values(breakdown).reduce((sum, time) => sum + time, 0),
+      breakdown,
+      confidence: 0.75, // 75% 置信度
+      baselineSource: 'heuristic' as const
+    };
+  }
+
+  /**
+   * 验证配置
+   */
+  private async validateConfiguration(request: any, routeName: string): Promise<ConfigValidationResult> {
+    const routingConfig = {
+      valid: true,
+      errors: [] as string[],
+      warnings: [] as string[]
+    };
+
+    const pipelineConfig = {
+      valid: true,
+      errors: [] as string[],
+      warnings: [] as string[]
+    };
+
+    const targetConfig = {
+      valid: true,
+      errors: [] as string[],
+      warnings: [] as string[]
+    };
+
+    // 检查路由配置
+    if (!this.routeTargets[routeName]) {
+      routingConfig.valid = false;
+      routingConfig.errors.push(`Route '${routeName}' not found in configuration`);
+    }
+
+    // 检查目标配置
+    const targets = this.routeTargets[routeName];
+    if (targets && targets.length === 0) {
+      targetConfig.valid = false;
+      targetConfig.errors.push(`No targets configured for route '${routeName}'`);
+    }
+
+    // 检查流水线配置
+    if (Object.keys(this.pipelineConfigs).length === 0) {
+      pipelineConfig.warnings.push('No pipeline configurations available');
+    }
+
+    return {
+      routingConfig,
+      pipelineConfig,
+      targetConfig
+    };
+  }
+
+  /**
+   * 生成调试日志条目
+   */
+  private generateDebugLogEntries(request: any, response: DryRunResponse): Array<{
+    level: 'debug' | 'info' | 'warn' | 'error';
+    message: string;
+    timestamp: string;
+    data?: any;
+  }> {
+    return [
+      {
+        level: 'info' as const,
+        message: 'Dry-run analysis started',
+        timestamp: new Date().toISOString(),
+        data: { requestId: response.requestSummary.id }
+      },
+      {
+        level: 'debug' as const,
+        message: 'Routing decision completed',
+        timestamp: new Date().toISOString(),
+        data: { route: response.routingDecision.routeName }
+      },
+      {
+        level: 'debug' as const,
+        message: 'Field conversion completed',
+        timestamp: new Date().toISOString(),
+        data: { success: response.fieldConversion.success }
+      },
+      {
+        level: 'info' as const,
+        message: 'Dry-run analysis completed',
+        timestamp: new Date().toISOString(),
+        data: { totalTimeMs: response.totalDryRunTimeMs }
+      }
+    ];
+  }
+
+  /**
+   * 生成调试指标
+   */
+  private generateDebugMetrics(request: any, response: DryRunResponse): Record<string, any> {
+    return {
+      requestSize: JSON.stringify(request).length,
+      routeName: response.routingDecision.routeName,
+      targetCount: response.routingDecision.availableTargets.length,
+      fieldCount: response.fieldConversion.originalFields.length,
+      requiresProtocolConversion: response.protocolProcessing.requiresConversion,
+      estimatedExecutionTime: response.performanceEstimate?.estimatedTotalTimeMs,
+      configValidationPassed: response.configValidation?.routingConfig.valid &&
+                             response.configValidation?.pipelineConfig.valid &&
+                             response.configValidation?.targetConfig.valid
+    };
+  }
+
+  /**
+   * 更新dry-run统计信息
+   */
+  private updateDryRunStats(response: DryRunResponse, executionTimeMs: number): void {
+    this.dryRunStats.totalRuns++;
+    this.dryRunStats.successfulRuns++;
+
+    // 更新平均时间
+    this.dryRunStats.averageTimeMs =
+      (this.dryRunStats.averageTimeMs * (this.dryRunStats.totalRuns - 1) + executionTimeMs) /
+      this.dryRunStats.totalRuns;
+
+    // 更新最常用路由
+    const routeName = response.routingDecision.routeName;
+    const routeStat = this.dryRunStats.topRoutes.find(r => r.route === routeName);
+    if (routeStat) {
+      routeStat.count++;
+    } else {
+      this.dryRunStats.topRoutes.push({ route: routeName, count: 1 });
+    }
+    this.dryRunStats.topRoutes.sort((a, b) => b.count - a.count);
+
+    // 更新最常用目标
+    const targetKey = `${response.routingDecision.selectedTarget.providerId}.${response.routingDecision.selectedTarget.modelId}`;
+    const targetStat = this.dryRunStats.topTargets.find(t => t.target === targetKey);
+    if (targetStat) {
+      targetStat.count++;
+    } else {
+      this.dryRunStats.topTargets.push({ target: targetKey, count: 1 });
+    }
+    this.dryRunStats.topTargets.sort((a, b) => b.count - a.count);
+
+    // 更新配置错误统计
+    if (response.configValidation) {
+      if (!response.configValidation.routingConfig.valid) {
+        this.dryRunStats.configErrors.routing++;
+      }
+      if (!response.configValidation.pipelineConfig.valid) {
+        this.dryRunStats.configErrors.pipeline++;
+      }
+      if (!response.configValidation.targetConfig.valid) {
+        this.dryRunStats.configErrors.target++;
+      }
+    }
+  }
+
+  /**
+   * 检查请求是否支持dry-run
+   */
+  supportsDryRun(request: any): boolean {
+    return this.dryRunConfig.enabled &&
+           typeof request === 'object' &&
+           request !== null &&
+           (request.model || request.messages || request.prompt);
+  }
+
+  // ========== End Dry-Run Methods ==========
+
   /**
    * 智能路由请求 - 使用分类器动态决定路由
    */
   async routeRequest(request: any, routeName: string = 'default'): Promise<any> {
     const startTime = Date.now();
     const requestId = `route_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // 检查是否启用dry-run模式
+    if (this.dryRunConfig.enabled && this.supportsDryRun(request)) {
+      console.log('🔍 Dry-run mode enabled, executing analysis instead of actual routing...');
+      return await this.executeDryRun(request, routeName);
+    }
 
     try {
       console.log('🔄 Starting smart request routing...');
