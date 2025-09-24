@@ -63,6 +63,12 @@ export class RequestHandler extends BaseModule {
   private errorUtils: ReturnType<typeof ErrorHandlingUtils.createModuleErrorHandler>;
   private options: RequestHandlerOptions;
 
+  // Debug enhancement properties
+  private handlerMetrics: Map<string, any> = new Map();
+  private requestHistory: any[] = [];
+  private errorHistory: any[] = [];
+  private maxHistorySize = 50;
+
   constructor(
     providerManager: ProviderManager,
     config: ServerConfig,
@@ -94,6 +100,9 @@ export class RequestHandler extends BaseModule {
       validateRequests: true,
       ...options
     };
+
+    // Initialize debug enhancements
+    this.initializeDebugEnhancements();
   }
 
   /**
@@ -903,5 +912,122 @@ export class RequestHandler extends BaseModule {
    */
   public async stop(): Promise<void> {
     await this.errorHandling.destroy();
+  }
+
+  /**
+   * Initialize debug enhancements
+   */
+  private initializeDebugEnhancements(): void {
+    try {
+      console.log('RequestHandler debug enhancements initialized');
+    } catch (error) {
+      console.warn('Failed to initialize RequestHandler debug enhancements:', error);
+    }
+  }
+
+  /**
+   * Record handler metric
+   */
+  private recordHandlerMetric(operation: string, data: any): void {
+    if (!this.handlerMetrics.has(operation)) {
+      this.handlerMetrics.set(operation, {
+        values: [],
+        lastUpdated: Date.now()
+      });
+    }
+
+    const metric = this.handlerMetrics.get(operation)!;
+    metric.values.push(data);
+    metric.lastUpdated = Date.now();
+
+    // Keep only last 50 measurements
+    if (metric.values.length > 50) {
+      metric.values.shift();
+    }
+  }
+
+  /**
+   * Add to request history
+   */
+  private addToRequestHistory(operation: any): void {
+    this.requestHistory.push(operation);
+
+    // Keep only recent history
+    if (this.requestHistory.length > this.maxHistorySize) {
+      this.requestHistory.shift();
+    }
+  }
+
+  /**
+   * Add to error history
+   */
+  private addToErrorHistory(operation: any): void {
+    this.errorHistory.push(operation);
+
+    // Keep only recent history
+    if (this.errorHistory.length > this.maxHistorySize) {
+      this.errorHistory.shift();
+    }
+  }
+
+  /**
+   * Get debug status with enhanced information
+   */
+  getDebugStatus(): any {
+    const baseStatus = {
+      handlerId: this.getModuleInfo().id,
+      name: this.getModuleInfo().name,
+      version: this.getModuleInfo().version,
+      isInitialized: this.isInitialized(),
+      isRunning: this.isRunning(),
+      options: this.options,
+      isEnhanced: true
+    };
+
+    return {
+      ...baseStatus,
+      debugInfo: this.getDebugInfo(),
+      handlerMetrics: this.getHandlerMetrics(),
+      requestHistory: [...this.requestHistory.slice(-10)],
+      errorHistory: [...this.errorHistory.slice(-10)]
+    };
+  }
+
+  /**
+   * Get detailed debug information
+   */
+  private getDebugInfo(): any {
+    return {
+      handlerId: this.getModuleInfo().id,
+      name: this.getModuleInfo().name,
+      version: this.getModuleInfo().version,
+      enhanced: true,
+      requestHistorySize: this.requestHistory.length,
+      errorHistorySize: this.errorHistory.length,
+      handlerMetricsSize: this.handlerMetrics.size,
+      maxHistorySize: this.maxHistorySize,
+      providerCount: this.providerManager.getActiveProviders().length,
+      timeout: this.options.timeout,
+      maxRequestSize: this.options.maxRequestSize,
+      streamingEnabled: this.options.enableStreaming,
+      validationEnabled: this.options.validateRequests
+    };
+  }
+
+  /**
+   * Get handler metrics
+   */
+  private getHandlerMetrics(): any {
+    const metrics: any = {};
+
+    for (const [operation, metric] of this.handlerMetrics.entries()) {
+      metrics[operation] = {
+        count: metric.values.length,
+        lastUpdated: metric.lastUpdated,
+        recentValues: metric.values.slice(-5)
+      };
+    }
+
+    return metrics;
   }
 }
