@@ -46,13 +46,9 @@ const TEST_LOG_ENTRIES = [
   }
 ];
 
-/**
- * 测试JSONL解析器
- */
-async function testJsonlParser() {
-  console.log('=== 测试JSONL解析器 ===');
+describe('统一解析机制测试', () => {
   
-  try {
+  test('JSONL解析器测试', async () => {
     const { JsonlLogParser } = await import('../parser/JsonlParser.js');
     
     const parser = new JsonlLogParser({
@@ -67,30 +63,16 @@ async function testJsonlParser() {
     // 测试内容解析
     const entries = await parser.parseContent(testContent);
     
-    console.log(`✓ 解析条目数: ${entries.length}`);
-    console.log(`✓ 第一个条目级别: ${entries[0]?.level}`);
-    console.log(`✓ 第一个条目消息: ${entries[0]?.message}`);
+    expect(entries.length).toBe(3);
+    expect(entries[0].level).toBe(LogLevel.INFO);
+    expect(entries[0].message).toBe('测试信息消息');
     
     // 测试验证功能
     const isValid = parser.validate(entries[0]);
-    console.log(`✓ 验证结果: ${isValid}`);
-    
-    console.log('✓ JSONL解析器测试通过\n');
-    return true;
-    
-  } catch (error) {
-    console.error('❌ JSONL解析器测试失败:', error);
-    return false;
-  }
-}
+    expect(isValid).toBe(true);
+  });
 
-/**
- * 测试时间序列索引
- */
-async function testTimeSeriesIndexer() {
-  console.log('=== 测试时间序列索引 ===');
-  
-  try {
+  test('时间序列索引测试', async () => {
     const { TimeSeriesIndexEngine } = await import('../indexer/TimeSeriesIndexer.js');
     
     const indexer = new TimeSeriesIndexEngine({
@@ -101,11 +83,14 @@ async function testTimeSeriesIndexer() {
     // 构建索引
     await indexer.index(TEST_LOG_ENTRIES as any);
     
+    // 等待索引优化完成
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
     // 获取索引状态
     const status = indexer.getIndexStatus();
-    console.log(`✓ 索引名称: ${status.name}`);
-    console.log(`✓ 文档数量: ${status.documentCount}`);
-    console.log(`✓ 索引状态: ${status.status}`);
+    expect(status.name).toBe('test-index');
+    expect(status.documentCount).toBe(3);
+    expect(['active', 'optimizing']).toContain(status.status);
     
     // 查询测试
     const queryResult = await indexer.query({
@@ -113,29 +98,16 @@ async function testTimeSeriesIndexer() {
       limit: 10
     });
     
-    console.log(`✓ 查询结果数量: ${queryResult.logs.length}`);
-    console.log(`✓ 查询耗时: ${queryResult.queryTime}ms`);
+    expect(queryResult.logs.length).toBeGreaterThan(0);
+    expect(queryResult.queryTime).toBeGreaterThanOrEqual(0);
     
     // 获取元数据
     const metadata = indexer.getMetadata();
-    console.log(`✓ 时间范围: ${new Date(metadata.timeRange.start).toISOString()} - ${new Date(metadata.timeRange.end).toISOString()}`);
-    
-    console.log('✓ 时间序列索引测试通过\n');
-    return true;
-    
-  } catch (error) {
-    console.error('❌ 时间序列索引测试失败:', error);
-    return false;
-  }
-}
+    expect(metadata.timeRange.start).toBeDefined();
+    expect(metadata.timeRange.end).toBeDefined();
+  });
 
-/**
- * 测试数据验证器
- */
-async function testDataValidator() {
-  console.log('=== 测试数据验证器 ===');
-  
-  try {
+  test('数据验证器测试', async () => {
     const { DataValidatorAndCleaner } = await import('../validator/DataValidator.js');
     
     const validator = new DataValidatorAndCleaner({
@@ -146,9 +118,8 @@ async function testDataValidator() {
     // 测试有效条目
     const validEntry = TEST_LOG_ENTRIES[0];
     const validResult = validator.validateEntry(validEntry);
-    console.log(`✓ 有效条目验证: ${validResult.isValid}`);
-    console.log(`✓ 错误数: ${validResult.errors.length}`);
-    console.log(`✓ 警告数: ${validResult.warnings.length}`);
+    expect(validResult.isValid).toBe(true);
+    expect(validResult.errors.length).toBe(0);
     
     // 测试无效条目
     const invalidEntry = {
@@ -161,61 +132,54 @@ async function testDataValidator() {
     };
     
     const invalidResult = validator.validateEntry(invalidEntry);
-    console.log(`✓ 无效条目验证: ${invalidResult.isValid}`);
-    console.log(`✓ 错误数: ${invalidResult.errors.length}`);
+    expect(invalidResult.isValid).toBe(false);
+    expect(invalidResult.errors.length).toBeGreaterThan(0);
     
-    // 测试清洗功能
+    // 测试清洗功能 - 使用需要修复的数据
     const dirtyEntries = [
       {
         timestamp: Date.now(),
-        level: 'INFO', // 大写
-        moduleId: 'Test-Module_123', // 混合大小写和特殊字符
+        level: 'INFO', // 大写，需要标准化
+        moduleId: 'Test-Module_123', // 混合大小写和特殊字符，需要标准化
         moduleType: 'TestModule',
-        message: '  需要修剪的消息  ',
-        data: { empty: '', null: null, valid: 'data' },
-        tags: [],
+        message: '  需要修剪的消息  ', // 前后空格，需要修剪
+        data: { empty: '', null: null, valid: 'data' }, // 空值需要移除
+        tags: ['Test', 'CLEANING'], // 大写标签
         version: '0.0.1'
       }
     ];
     
     const cleanResult = validator.cleanEntries(dirtyEntries as any);
-    console.log(`✓ 清洗后条目数: ${cleanResult.cleanedEntries.length}`);
-    console.log(`✓ 修复条目数: ${cleanResult.stats.fixedEntries}`);
+    expect(cleanResult.cleanedEntries.length).toBe(1);
+    expect(cleanResult.stats.normalizedOperations).toBeGreaterThan(0); // 检查标准化操作数量
     
-    console.log('✓ 数据验证器测试通过\n');
-    return true;
-    
-  } catch (error) {
-    console.error('❌ 数据验证器测试失败:', error);
-    return false;
-  }
-}
+    // 验证清洗效果
+    const cleanedEntry = cleanResult.cleanedEntries[0];
+    expect(cleanedEntry.level).toBe('info'); // 应该被标准化为小写
+    expect(cleanedEntry.message).toBe('需要修剪的消息'); // 应该去除前后空格
+    expect(cleanedEntry.moduleId).toBe('test-module_123'); // 应该标准化为小写
+  });
 
-/**
- * 测试性能
- */
-async function testPerformance() {
-  console.log('=== 测试解析性能 ===');
-  
-  // 生成大量测试数据
-  const largeEntries = [];
-  for (let i = 0; i < 1000; i++) {
-    largeEntries.push({
-      timestamp: Date.now() - i * 1000,
-      level: [LogLevel.DEBUG, LogLevel.INFO, LogLevel.WARN, LogLevel.ERROR][i % 4],
-      moduleId: `perf-module-${i % 10}`,
-      moduleType: 'PerformanceTestModule',
-      message: `性能测试消息 ${i}`,
-      data: { index: i, value: Math.random() },
-      tags: ['performance', 'test'],
-      version: '0.0.1'
-    });
-  }
-  
-  const testContent = largeEntries.map(entry => JSON.stringify(entry)).join('\n');
-  
-  try {
+  test('解析性能测试', async () => {
     const { JsonlLogParser } = await import('../parser/JsonlParser.js');
+    
+    // 生成大量测试数据
+    const largeEntries = [];
+    for (let i = 0; i < 1000; i++) {
+      largeEntries.push({
+        timestamp: Date.now() - i * 1000,
+        level: [LogLevel.DEBUG, LogLevel.INFO, LogLevel.WARN, LogLevel.ERROR][i % 4],
+        moduleId: `perf-module-${i % 10}`,
+        moduleType: 'PerformanceTestModule',
+        message: `性能测试消息 ${i}`,
+        data: { index: i, value: Math.random() },
+        tags: ['performance', 'test'],
+        version: '0.0.1'
+      });
+    }
+    
+    const testContent = largeEntries.map(entry => JSON.stringify(entry)).join('\n');
+    
     const parser = new JsonlLogParser({
       batchSize: 500,
       errorHandling: 'skip'
@@ -228,63 +192,8 @@ async function testPerformance() {
     const duration = endTime - startTime;
     const entriesPerSecond = (entries.length / duration) * 1000;
     
-    console.log(`✓ 解析条目数: ${entries.length}`);
-    console.log(`✓ 解析耗时: ${duration}ms`);
-    console.log(`✓ 解析速度: ${entriesPerSecond.toFixed(0)} 条/秒`);
-    
-    console.log('✓ 性能测试通过\n');
-    return true;
-    
-  } catch (error) {
-    console.error('❌ 性能测试失败:', error);
-    return false;
-  }
-}
-
-/**
- * 运行所有测试
- */
-async function runAllTests() {
-  console.log('🚀 开始统一解析机制测试\n');
-  
-  const results = [];
-  
-  try {
-    // 基础组件测试
-    results.push(await testJsonlParser());
-    results.push(await testTimeSeriesIndexer());
-    results.push(await testDataValidator());
-    
-    // 性能测试
-    results.push(await testPerformance());
-    
-    const passed = results.filter(Boolean).length;
-    const total = results.length;
-    
-    console.log(`🎉 测试完成！通过: ${passed}/${total}\n`);
-    
-    if (passed === total) {
-      console.log('✅ 所有测试通过！统一解析机制工作正常。');
-    } else {
-      console.log('⚠️  部分测试失败，请检查错误信息。');
-    }
-    
-    return passed === total;
-    
-  } catch (error) {
-    console.error('❌ 测试失败:', error);
-    return false;
-  }
-}
-
-// 如果直接运行此文件，则执行测试
-if (import.meta.url === `file://${process.argv[1]}`) {
-  runAllTests().then(success => {
-    process.exit(success ? 0 : 1);
-  }).catch(error => {
-    console.error('测试执行失败:', error);
-    process.exit(1);
+    expect(entries.length).toBe(1000);
+    expect(duration).toBeLessThan(5000); // 5秒内完成
+    expect(entriesPerSecond).toBeGreaterThan(500); // 每秒至少500条
   });
-}
-
-export { runAllTests };
+});

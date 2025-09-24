@@ -1,9 +1,0 @@
-{
-  "model": "qwen3-4b-thinking-2507-mlx",
-  "messages": [
-    {
-      "role": "user",
-      "content": "Hello, this is a test message"
-    }
-  ]
-}

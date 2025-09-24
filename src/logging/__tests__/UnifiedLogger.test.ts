@@ -4,321 +4,325 @@
  * 验证UnifiedLogger和LoggerFactory的核心功能
  */
 
-import { LogLevel, UnifiedModuleLogger, LoggerFactoryImpl, createLogger, getLogger, CompatibilityLogger } from '../index.js';
+import { LogLevel, UnifiedModuleLogger } from '../index.js';
 
-/**
- * 基础功能测试
- */
-function testBasicLogging() {
-  console.log('=== 测试基础日志功能 ===');
+describe('统一日志系统测试', () => {
   
-  // 创建Logger实例
-  const logger = new UnifiedModuleLogger({
-    moduleId: 'test-module',
-    moduleType: 'TestModule',
-    logLevel: LogLevel.DEBUG,
-    enableConsole: true,
-    enableFile: false, // 测试中不写入文件
-    maxHistory: 100
-  });
-
-  // 测试各级别日志
-  logger.debug('这是一个调试消息', { userId: 123, action: 'login' });
-  logger.info('这是一个信息消息', { status: 'success', duration: 150 });
-  logger.warn('这是一个警告消息', { threshold: 80, current: 85 });
-  logger.error('这是一个错误消息', new Error('测试错误'), { code: 'TEST_ERROR' });
-
-  // 验证历史记录
-  const history = logger.getHistory();
-  console.log(`✓ 历史记录数量: ${history.length}`);
-  
-  // 验证统计信息
-  const stats = logger.getStats();
-  console.log(`✓ 总日志数: ${stats.totalLogs}`);
-  console.log(`✓ 错误数: ${stats.errorCount}`);
-  console.log(`✓ 各级别统计:`, stats.levelCounts);
-
-  console.log('✓ 基础功能测试通过\n');
-  return logger;
-}
-
-/**
- * 上下文功能测试
- */
-function testContextManagement() {
-  console.log('=== 测试上下文管理功能 ===');
-  
-  const logger = new UnifiedModuleLogger({
-    moduleId: 'context-test',
-    moduleType: 'ContextTestModule',
-    logLevel: LogLevel.INFO
-  });
-
-  // 设置上下文
-  logger.setContext({
-    requestId: 'req-123',
-    pipelineId: 'pipeline-456',
-    userId: 'user-789'
-  });
-
-  logger.info('带上下文的消息');
-
-  // 更新上下文
-  logger.updateContext({ sessionId: 'session-abc' });
-  logger.info('更新后的上下文消息');
-
-  // 验证上下文
-  const context = logger.getContext();
-  console.log(`✓ 当前上下文:`, context);
-
-  // 清除上下文
-  logger.clearContext();
-  logger.info('清除上下文后的消息');
-
-  console.log('✓ 上下文功能测试通过\n');
-}
-
-/**
- * 查询和过滤功能测试
- */
-async function testQueryAndFilter() {
-  console.log('=== 测试查询和过滤功能 ===');
-  
-  const logger = new UnifiedModuleLogger({
-    moduleId: 'query-test',
-    moduleType: 'QueryTestModule'
-  });
-
-  // 生成测试数据
-  for (let i = 0; i < 10; i++) {
-    const level = i % 4 === 0 ? LogLevel.ERROR : 
-                  i % 3 === 0 ? LogLevel.WARN : 
-                  i % 2 === 0 ? LogLevel.INFO : LogLevel.DEBUG;
-    
-    if (level === LogLevel.DEBUG) {
-      logger.debug(`测试消息 ${i}`, { index: i, type: `type-${i % 3}` });
-    } else if (level === LogLevel.INFO) {
-      logger.info(`测试消息 ${i}`, { index: i, type: `type-${i % 3}` });
-    } else if (level === LogLevel.WARN) {
-      logger.warn(`测试消息 ${i}`, { index: i, type: `type-${i % 3}` });
-    } else if (level === LogLevel.ERROR) {
-      logger.error(`测试消息 ${i}`, new Error(`测试错误${i}`), { index: i, type: `type-${i % 3}` });
-    }
-  }
-
-  // 测试级别过滤
-  const levelResult = await logger.queryLogs({
-    levels: [LogLevel.ERROR, LogLevel.WARN]
-  });
-  console.log(`✓ 级别过滤结果: ${levelResult.logs.length} 条日志`);
-
-  // 测试关键词搜索
-  const keywordResult = await logger.queryLogs({
-    keyword: '测试'
-  });
-  console.log(`✓ 关键词搜索结果: ${keywordResult.logs.length} 条日志`);
-
-  // 测试分页
-  const pageResult = await logger.queryLogs({
-    limit: 3,
-    offset: 2
-  });
-  console.log(`✓ 分页结果: ${pageResult.logs.length} 条日志 (偏移: 2)`);
-
-  console.log('✓ 查询和过滤功能测试通过\n');
-}
-
-/**
- * 导出功能测试
- */
-async function testExportFunctionality() {
-  console.log('=== 测试导出功能 ===');
-  
-  const logger = new UnifiedModuleLogger({
-    moduleId: 'export-test',
-    moduleType: 'ExportTestModule'
-  });
-
-  // 生成测试数据
-  logger.info('导出测试消息1', { data: 'test1' });
-  logger.warn('导出测试消息2', { data: 'test2' });
-  logger.error('导出测试消息3', new Error('测试错误'));
-
-  // 测试JSON导出
-  const jsonExport = await logger.exportLogs({
-    format: 'json'
-  });
-  console.log(`✓ JSON导出长度: ${jsonExport.length} 字符`);
-
-  // 测试JSONL导出
-  const jsonlExport = await logger.exportLogs({
-    format: 'jsonl'
-  });
-  console.log(`✓ JSONL导出长度: ${jsonlExport.length} 字符`);
-
-  // 测试CSV导出
-  const csvExport = await logger.exportLogs({
-    format: 'csv',
-    fields: ['timestamp', 'level', 'message']
-  });
-  console.log(`✓ CSV导出长度: ${csvExport.length} 字符`);
-  console.log('CSV内容预览:');
-  console.log(csvExport.substring(0, 200) + '...');
-
-  console.log('✓ 导出功能测试通过\n');
-}
-
-/**
- * LoggerFactory功能测试
- */
-function testLoggerFactory() {
-  console.log('=== 测试LoggerFactory功能 ===');
-  
-  const factory = new LoggerFactoryImpl();
-
-  // 创建多个Logger
-  const logger1 = factory.createLogger({
-    moduleId: 'factory-test-1',
-    moduleType: 'FactoryTestModule1'
-  });
-
-  const logger2 = factory.createLogger({
-    moduleId: 'factory-test-2',
-    moduleType: 'FactoryTestModule2'
-  });
-
-  // 测试获取Logger
-  const retrievedLogger1 = factory.getLogger('factory-test-1');
-  const retrievedLogger2 = factory.getLogger('factory-test-2');
-  
-  console.log(`✓ Logger1获取成功: ${retrievedLogger1 !== undefined}`);
-  console.log(`✓ Logger2获取成功: ${retrievedLogger2 !== undefined}`);
-
-  // 测试工厂状态
-  const status = factory.getFactoryStatus();
-  console.log(`✓ 工厂状态:`, status);
-
-  // 测试全局函数
-  const globalLogger = createLogger({
-    moduleId: 'global-test',
-    moduleType: 'GlobalTestModule'
-  });
-  
-  const retrievedGlobalLogger = getLogger('global-test');
-  console.log(`✓ 全局Logger获取成功: ${retrievedGlobalLogger !== undefined}`);
-
-  console.log('✓ LoggerFactory功能测试通过\n');
-}
-
-/**
- * 兼容性测试
- */
-function testCompatibility() {
-  console.log('=== 测试向后兼容性 ===');
-  
-  // 使用导入而不是require
-  import('../index.js').then(module => {
-    const { CompatibilityLogger } = module;
-    
-    const compatLogger = new CompatibilityLogger('compat-test', 'CompatTestModule');
-
-    // 测试兼容的console方法
-    compatLogger.log('兼容性日志消息');
-    compatLogger.info('兼容性信息消息');
-    compatLogger.warn('兼容性警告消息');
-    compatLogger.error('兼容性错误消息', new Error('兼容性测试错误'));
-    compatLogger.debug('兼容性调试消息');
-
-    console.log('✓ 向后兼容性测试通过\n');
-  }).catch(error => {
-    console.error('兼容性测试失败:', error);
-  });
-}
-
-/**
- * 性能测试
- */
-function testPerformance() {
-  console.log('=== 测试性能 ===');
-  
-  const logger = new UnifiedModuleLogger({
-    moduleId: 'performance-test',
-    moduleType: 'PerformanceTestModule',
-    enableConsole: false, // 关闭控制台输出以提高性能
-    maxHistory: 1000
-  });
-
-  const startTime = Date.now();
-  const logCount = 1000;
-
-  // 批量写入日志
-  for (let i = 0; i < logCount; i++) {
-    logger.info(`性能测试消息 ${i}`, { 
-      index: i, 
-      data: `test-data-${i}`,
-      nested: { value: i * 2 }
+  test('基础日志功能', () => {
+    // 创建Logger实例
+    const logger = new UnifiedModuleLogger({
+      moduleId: 'test-module',
+      moduleType: 'TestModule',
+      logLevel: LogLevel.DEBUG,
+      enableConsole: true,
+      enableFile: false, // 测试中不写入文件
+      maxHistory: 100
     });
-  }
 
-  const endTime = Date.now();
-  const duration = endTime - startTime;
-  const logsPerSecond = (logCount / duration) * 1000;
+    // 测试各级别日志
+    logger.debug('这是一个调试消息', { userId: 123, action: 'login' });
+    logger.info('这是一个信息消息', { status: 'success', duration: 150 });
+    logger.warn('这是一个警告消息', { threshold: 80, current: 85 });
+    logger.error('这是一个错误消息', new Error('测试错误'), { code: 'TEST_ERROR' });
 
-  console.log(`✓ 写入 ${logCount} 条日志耗时: ${duration}ms`);
-  console.log(`✓ 每秒日志处理能力: ${logsPerSecond.toFixed(0)} 条/秒`);
-
-  // 验证历史记录
-  const history = logger.getHistory();
-  console.log(`✓ 历史记录验证: ${history.length} 条`);
-
-  console.log('✓ 性能测试通过\n');
-}
-
-/**
- * 运行所有测试
- */
-async function runAllTests() {
-  console.log('🚀 开始统一日志系统测试\n');
-  
-  try {
-    // 基础功能测试
-    const logger = testBasicLogging();
+    // 验证历史记录
+    const history = logger.getHistory();
+    expect(history.length).toBeGreaterThan(0);
     
-    // 上下文管理测试
-    testContextManagement();
-    
-    // 查询和过滤测试
-    await testQueryAndFilter();
-    
-    // 导出功能测试
-    await testExportFunctionality();
-    
-    // LoggerFactory测试
-    testLoggerFactory();
-    
-    // 跳过兼容性测试（ES模块限制）
-    console.log('⚠️  跳过兼容性测试（ES模块限制）\n');
-    
-    // 性能测试
-    testPerformance();
-    
-    // 清理测试Logger
-    await logger.cleanup();
-    
-    console.log('🎉 所有测试通过！统一日志系统工作正常。\n');
-    
-  } catch (error) {
-    console.error('❌ 测试失败:', error);
-    process.exit(1);
-  }
-}
-
-// 如果直接运行此文件，则执行测试
-if (import.meta.url === `file://${process.argv[1]}`) {
-  runAllTests().catch(error => {
-    console.error('测试执行失败:', error);
-    process.exit(1);
+    // 验证统计信息
+    const stats = logger.getStats();
+    expect(stats.totalLogs).toBeGreaterThan(0);
+    expect(stats.levelCounts[LogLevel.DEBUG]).toBeGreaterThan(0);
+    expect(stats.levelCounts[LogLevel.INFO]).toBeGreaterThan(0);
+    expect(stats.levelCounts[LogLevel.WARN]).toBeGreaterThan(0);
+    expect(stats.levelCounts[LogLevel.ERROR]).toBeGreaterThan(0);
   });
-}
 
-export { runAllTests };
+  test('上下文管理功能', () => {
+    const logger = new UnifiedModuleLogger({
+      moduleId: 'context-test',
+      moduleType: 'ContextTestModule',
+      logLevel: LogLevel.INFO,
+      enableConsole: false,
+      enableFile: false,
+      maxHistory: 50
+    });
+
+    // 设置初始上下文
+    logger.setContext({
+      pipelineId: 'pipeline-123',
+      requestId: 'req-456',
+      sessionId: 'session-789'
+    });
+
+    // 记录日志，应该包含上下文信息
+    logger.info('带上下文的消息');
+
+    // 更新上下文
+    logger.updateContext({
+      userId: 'user-001',
+      action: 'test-action'
+    });
+
+    // 再次记录日志
+    logger.info('更新上下文后的消息');
+
+    // 验证上下文
+    const context = logger.getContext();
+    expect(context.pipelineId).toBe('pipeline-123');
+    expect(context.requestId).toBe('req-456');
+    expect(context.userId).toBe('user-001');
+
+    // 清除上下文
+    logger.clearContext();
+    const emptyContext = logger.getContext();
+    expect(Object.keys(emptyContext).length).toBe(0);
+  });
+
+  test('日志级别过滤', () => {
+    const logger = new UnifiedModuleLogger({
+      moduleId: 'level-test',
+      moduleType: 'LevelTestModule',
+      logLevel: LogLevel.WARN, // 只记录WARN及以上级别
+      enableConsole: false,
+      enableFile: false,
+      maxHistory: 100
+    });
+
+    // 记录不同级别的日志
+    logger.debug('调试消息 - 应该被过滤');
+    logger.info('信息消息 - 应该被过滤');
+    logger.warn('警告消息 - 应该被记录');
+    logger.error('错误消息 - 应该被记录');
+
+    const history = logger.getHistory();
+    const stats = logger.getStats();
+
+    // 验证只有WARN和ERROR级别的日志被记录
+    expect(stats.levelCounts[LogLevel.WARN]).toBeGreaterThan(0);
+    expect(stats.levelCounts[LogLevel.ERROR]).toBeGreaterThan(0);
+    expect(stats.totalLogs).toBe(stats.levelCounts[LogLevel.WARN] + stats.levelCounts[LogLevel.ERROR]);
+  });
+
+  test('历史记录管理', () => {
+    const logger = new UnifiedModuleLogger({
+      moduleId: 'history-test',
+      moduleType: 'HistoryTestModule',
+      logLevel: LogLevel.INFO,
+      enableConsole: false,
+      enableFile: false,
+      maxHistory: 5 // 限制历史记录数量
+    });
+
+    // 记录超过限制的日志
+    for (let i = 0; i < 10; i++) {
+      logger.info(`测试消息 ${i}`);
+    }
+
+    const history = logger.getHistory();
+    expect(history.length).toBe(5); // 应该只保留最新的5条
+
+    // 验证历史记录的内容
+    expect(history[0].message).toBe('测试消息 5');
+    expect(history[4].message).toBe('测试消息 9');
+  });
+
+  test('错误处理', () => {
+    const logger = new UnifiedModuleLogger({
+      moduleId: 'error-test',
+      moduleType: 'ErrorTestModule',
+      logLevel: LogLevel.ERROR,
+      enableConsole: false,
+      enableFile: false,
+      maxHistory: 50
+    });
+
+    // 创建不同类型的错误
+    const networkError = new Error('网络连接失败');
+    networkError.name = 'NetworkError';
+    
+    const validationError = new Error('参数验证失败');
+    validationError.name = 'ValidationError';
+
+    // 记录错误日志
+    logger.error('网络错误', networkError, { url: 'https://api.example.com' });
+    logger.error('验证错误', validationError, { field: 'username', value: '' });
+
+    const history = logger.getHistory();
+    const errorEntries = history.filter(entry => entry.level === LogLevel.ERROR);
+
+    expect(errorEntries.length).toBe(2);
+    
+    // 验证错误信息
+    expect(errorEntries[0].error).toBeDefined();
+    expect(errorEntries[0].error?.name).toBe('NetworkError');
+    expect(errorEntries[0].error?.message).toBe('网络连接失败');
+    expect(errorEntries[0].data?.url).toBe('https://api.example.com');
+  });
+
+  test('性能测试', () => {
+    const logger = new UnifiedModuleLogger({
+      moduleId: 'performance-test',
+      moduleType: 'PerformanceTestModule',
+      logLevel: LogLevel.INFO,
+      enableConsole: false,
+      enableFile: false,
+      maxHistory: 1000
+    });
+
+    const startTime = Date.now();
+    
+    // 记录大量日志
+    for (let i = 0; i < 100; i++) {
+      logger.info(`性能测试消息 ${i}`, {
+        index: i,
+        timestamp: Date.now(),
+        randomValue: Math.random()
+      });
+    }
+    
+    const endTime = Date.now();
+    const duration = endTime - startTime;
+    
+    console.log(`记录100条日志耗时: ${duration}ms`);
+    
+    // 验证性能 - 应该在合理时间内完成
+    expect(duration).toBeLessThan(1000); // 1秒内完成
+    
+    const history = logger.getHistory();
+    expect(history.length).toBe(100);
+  });
+
+  test('内存管理', () => {
+    const logger = new UnifiedModuleLogger({
+      moduleId: 'memory-test',
+      moduleType: 'MemoryTestModule',
+      logLevel: LogLevel.INFO,
+      enableConsole: false,
+      enableFile: false,
+      maxHistory: 10
+    });
+
+    // 记录大量日志来测试内存管理
+    for (let i = 0; i < 1000; i++) {
+      logger.info(`内存测试消息 ${i}`, {
+        largeData: new Array(100).fill(`数据${i}`).join(','),
+        nested: {
+          level1: {
+            level2: {
+              level3: `深层数据${i}`
+            }
+          }
+        }
+      });
+    }
+
+    const history = logger.getHistory();
+    expect(history.length).toBe(10); // 应该只保留最新的10条
+    
+    // 验证内存使用的统计信息
+    const stats = logger.getStats();
+    expect(stats.totalLogs).toBe(1000); // 总记录数应该正确
+  });
+
+  test('日志查询功能', async () => {
+    const logger = new UnifiedModuleLogger({
+      moduleId: 'query-test',
+      moduleType: 'QueryTestModule',
+      logLevel: LogLevel.DEBUG,
+      enableConsole: false,
+      enableFile: false,
+      maxHistory: 100
+    });
+
+    // 记录不同类型的日志
+    logger.info('用户信息消息', { userId: 'user1', action: 'login' });
+    logger.warn('用户警告消息', { userId: 'user1', action: 'timeout' });
+    logger.error('用户错误消息', new Error('登录失败'), { userId: 'user1' });
+    
+    logger.info('系统信息消息', { system: 'auth', status: 'online' });
+    logger.debug('系统调试消息', { system: 'auth', debug: true });
+
+    // 查询特定用户的日志
+    const userLogs = await logger.queryLogs({
+      keyword: '用户',
+      levels: [LogLevel.INFO, LogLevel.WARN, LogLevel.ERROR]
+    });
+    
+    expect(userLogs.logs.length).toBeGreaterThan(0);
+    expect(userLogs.total).toBeGreaterThan(0);
+
+    // 查询错误日志
+    const errorLogs = await logger.queryLogs({
+      levels: [LogLevel.ERROR]
+    });
+    
+    expect(errorLogs.logs.length).toBe(1);
+    expect(errorLogs.logs[0].level).toBe(LogLevel.ERROR);
+  });
+
+  test('日志导出功能', async () => {
+    const logger = new UnifiedModuleLogger({
+      moduleId: 'export-test',
+      moduleType: 'ExportTestModule',
+      logLevel: LogLevel.INFO,
+      enableConsole: false,
+      enableFile: false,
+      maxHistory: 20
+    });
+
+    // 记录一些日志
+    for (let i = 0; i < 10; i++) {
+      logger.info(`导出测试消息 ${i}`, { index: i, timestamp: Date.now() });
+    }
+
+    // 导出为JSON格式
+    const jsonExport = await logger.exportLogs({
+      format: 'json',
+      includeHeader: true
+    });
+
+    expect(jsonExport).toBeTruthy();
+    expect(jsonExport.length).toBeGreaterThan(0);
+
+    // 验证导出的内容是有效的JSON
+    const parsed = JSON.parse(jsonExport);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed.length).toBe(10);
+  });
+
+  test('日志分析功能', async () => {
+    const logger = new UnifiedModuleLogger({
+      moduleId: 'analysis-test',
+      moduleType: 'AnalysisTestModule',
+      logLevel: LogLevel.INFO,
+      enableConsole: false,
+      enableFile: false,
+      maxHistory: 50
+    });
+
+    // 记录不同时间段的日志
+    const now = Date.now();
+    const oneHourAgo = now - 60 * 60 * 1000;
+    
+    // 一小时前的日志
+    logger.info('历史信息消息', { timestamp: oneHourAgo });
+    logger.warn('历史警告消息', { timestamp: oneHourAgo });
+    
+    // 当前的日志
+    logger.info('当前信息消息');
+    logger.error('当前错误消息', new Error('测试错误'));
+
+    // 分析日志
+    const analysis = await logger.analyzeLogs({
+      start: oneHourAgo - 1000,
+      end: now + 1000
+    });
+
+    expect(analysis.overallStats).toBeDefined();
+    expect(analysis.overallStats.totalLogs).toBeGreaterThan(0);
+    expect(analysis.overallStats.levelCounts).toBeDefined();
+    expect(analysis.errorAnalysis).toBeDefined();
+    // performanceAnalysis 可能是undefined，因为需要duration数据
+  });
+});
