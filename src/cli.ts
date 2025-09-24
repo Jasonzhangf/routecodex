@@ -454,6 +454,14 @@ program
     }
   });
 
+// Dry-run commands
+try {
+  const { createDryRunCommands } = await import('./commands/dry-run.js');
+  program.addCommand(createDryRunCommands());
+} catch (error) {
+  logger.warning('Dry-run commands not available. Run "npm run build" to enable.');
+}
+
 // Examples command
 program
   .command('examples')
@@ -496,7 +504,24 @@ program
     console.log('  routecodex config validate');
     console.log('');
 
-    console.log(chalk.yellow('4. Environment Variables:'));
+    console.log(chalk.yellow('4. Dry-Run Testing:'));
+    console.log('  # Execute request pipeline dry-run');
+    console.log('  routecodex dry-run request ./request.json --pipeline-id test --mode dry-run');
+    console.log('');
+    console.log('  # Execute response pipeline dry-run');
+    console.log('  routecodex dry-run response ./response.json --pipeline-id test');
+    console.log('');
+    console.log('  # Start response capture session');
+    console.log('  routecodex dry-run capture --start');
+    console.log('');
+    console.log('  # Process multiple files in batch');
+    console.log('  routecodex dry-run batch ./test-data --pattern *.json --output ./results');
+    console.log('');
+    console.log('  # Execute chain of pipelines');
+    console.log('  routecodex dry-run chain ./input.json --chain ./chain-config.json');
+    console.log('');
+
+    console.log(chalk.yellow('5. Environment Variables:'));
     console.log('  # Set LM Studio API Key');
     console.log('  export LM_STUDIO_API_KEY="your-api-key"');
     console.log('');
@@ -504,7 +529,7 @@ program
     console.log('  export OPENAI_API_KEY="your-api-key"');
     console.log('');
 
-    console.log(chalk.yellow('5. Testing:'));
+    console.log(chalk.yellow('6. Testing:'));
     console.log('  # Test with curl');
     console.log('  curl -X POST http://localhost:5506/v1/chat/completions \\');
     console.log('    -H "Content-Type: application/json" \\');

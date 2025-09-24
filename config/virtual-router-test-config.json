@@ -1,0 +1,273 @@
+{
+  "virtualRouter": {
+    "enabled": true,
+    "config": {
+      "moduleType": "virtual-router",
+      "enableClassification": true,
+      "dryRunMode": true,
+      "classificationConfig": {
+        "confidenceThreshold": 60,
+        "enableSmartRouting": true,
+        "supportedCategories": [
+          "default",
+          "longContext",
+          "thinking", 
+          "background",
+          "webSearch",
+          "vision",
+          "coding"
+        ],
+        "categoryRules": {
+          "default": {
+            "description": "默认路由，通用请求处理",
+            "triggers": {
+              "keywords": ["一般", "普通", "对话", "聊天"],
+              "models": ["gpt-3.5-turbo", "claude-3-haiku", "qwen-turbo"],
+              "maxTokens": 8000,
+              "priority": 1
+            },
+            "routeConfig": {
+              "providerId": "lmstudio",
+              "modelId": "gpt-3.5-turbo",
+              "keyId": "lmstudio-default-key"
+            }
+          },
+          "longContext": {
+            "description": "长文本处理请求",
+            "triggers": {
+              "keywords": ["长文本", "长文", "大量文本", "全文", "完整内容"],
+              "models": ["gpt-4-turbo", "claude-3-sonnet", "qwen-max"],
+              "minTokens": 32000,
+              "maxTokens": 128000,
+              "priority": 90
+            },
+            "routeConfig": {
+              "providerId": "qwen",
+              "modelId": "qwen-max",
+              "keyId": "qwen-long-key"
+            }
+          },
+          "thinking": {
+            "description": "复杂推理和分析请求",
+            "triggers": {
+              "keywords": ["分析", "推理", "思考", "复杂", "详细", "深入", "逻辑", "论证"],
+              "models": ["gpt-4", "claude-3-opus", "qwen-max"],
+              "reasoningIndicators": ["逐步分析", "详细解释", "推理过程", "逻辑步骤"],
+              "priority": 85
+            },
+            "routeConfig": {
+              "providerId": "qwen",
+              "modelId": "qwen-turbo",
+              "keyId": "qwen-thinking-key"
+            }
+          },
+          "background": {
+            "description": "后台处理和批量任务",
+            "triggers": {
+              "keywords": ["后台", "批量", "异步", "定时", "延迟", "队列", "处理"],
+              "batchIndicators": ["批量", "多个", "列表", "数组", "集合"],
+              "asyncIndicators": ["异步", "非阻塞", "延迟", "稍后"],
+              "priority": 70
+            },
+            "routeConfig": {
+              "providerId": "lmstudio",
+              "modelId": "gpt-3.5-turbo",
+              "keyId": "lmstudio-bg-key"
+            }
+          },
+          "webSearch": {
+            "description": "网络搜索和信息检索",
+            "triggers": {
+              "keywords": ["搜索", "查找", "查询", "最新", "实时", "当前", "今天"],
+              "tools": ["web_search", "search", "browse", "internet"],
+              "urlPatterns": ["http", "www", ".com", ".cn"],
+              "priority": 95
+            },
+            "routeConfig": {
+              "providerId": "qwen",
+              "modelId": "qwen-turbo",
+              "keyId": "qwen-search-key"
+            }
+          },
+          "vision": {
+            "description": "图像处理和分析",
+            "triggers": {
+              "keywords": ["图片", "图像", "照片", "视觉", "看图", "识别", "分析图像"],
+              "contentTypes": ["image", "vision", "picture", "photo"],
+              "imageUrlPatterns": ["data:image", "http.*\\.(jpg|png|gif|webp)", "base64"],
+              "priority": 80
+            },
+            "routeConfig": {
+              "providerId": "qwen",
+              "modelId": "qwen-vl-plus",
+              "keyId": "qwen-vision-key"
+            }
+          },
+          "coding": {
+            "description": "代码生成和编程任务",
+            "triggers": {
+              "keywords": ["代码", "编程", "函数", "算法", "实现", "编写", "开发", "调试"],
+              "languages": ["python", "javascript", "java", "go", "rust", "cpp", "csharp"],
+              "codePatterns": ["def ", "function", "class ", "import ", "include"],
+              "priority": 80
+            },
+            "routeConfig": {
+              "providerId": "qwen",
+              "modelId": "qwen3-coder",
+              "keyId": "qwen-coder-key"
+            }
+          }
+        },
+        "routeTargets": {
+          "default": [
+            {
+              "providerId": "lmstudio",
+              "modelId": "gpt-3.5-turbo",
+              "keyId": "lmstudio-default-key",
+              "actualKey": "test-key-default",
+              "inputProtocol": "openai",
+              "outputProtocol": "openai"
+            }
+          ],
+          "longContext": [
+            {
+              "providerId": "qwen",
+              "modelId": "qwen-max",
+              "keyId": "qwen-long-key",
+              "actualKey": "test-key-long",
+              "inputProtocol": "openai",
+              "outputProtocol": "openai"
+            }
+          ],
+          "thinking": [
+            {
+              "providerId": "qwen",
+              "modelId": "qwen-turbo",
+              "keyId": "qwen-thinking-key",
+              "actualKey": "test-key-thinking",
+              "inputProtocol": "openai",
+              "outputProtocol": "openai"
+            }
+          ],
+          "background": [
+            {
+              "providerId": "lmstudio",
+              "modelId": "gpt-3.5-turbo",
+              "keyId": "lmstudio-bg-key",
+              "actualKey": "test-key-bg",
+              "inputProtocol": "openai",
+              "outputProtocol": "openai"
+            }
+          ],
+          "webSearch": [
+            {
+              "providerId": "qwen",
+              "modelId": "qwen-turbo",
+              "keyId": "qwen-search-key",
+              "actualKey": "test-key-search",
+              "inputProtocol": "openai",
+              "outputProtocol": "openai"
+            }
+          ],
+          "vision": [
+            {
+              "providerId": "qwen",
+              "modelId": "qwen-vl-plus",
+              "keyId": "qwen-vision-key",
+              "actualKey": "test-key-vision",
+              "inputProtocol": "openai",
+              "outputProtocol": "openai"
+            }
+          ],
+          "coding": [
+            {
+              "providerId": "qwen",
+              "modelId": "qwen3-coder",
+              "keyId": "qwen-coder-key",
+              "actualKey": "test-key-coder",
+              "inputProtocol": "openai",
+              "outputProtocol": "openai"
+            }
+          ]
+        },
+        "pipelineConfigs": {
+          "lmstudio.gpt-3.5-turbo.lmstudio-default-key": {
+            "provider": { "type": "lmstudio", "baseURL": "http://localhost:1234" },
+            "model": { "maxContext": 16000, "maxTokens": 4096 },
+            "keyConfig": { "keyId": "lmstudio-default-key", "actualKey": "test-key-default" },
+            "protocols": { "input": "openai", "output": "openai" }
+          },
+          "qwen.qwen-max.qwen-long-key": {
+            "provider": { "type": "qwen", "baseURL": "https://chat.qwen.ai" },
+            "model": { "maxContext": 128000, "maxTokens": 32000 },
+            "keyConfig": { "keyId": "qwen-long-key", "actualKey": "test-key-long" },
+            "protocols": { "input": "openai", "output": "openai" }
+          },
+          "qwen.qwen-turbo.qwen-thinking-key": {
+            "provider": { "type": "qwen", "baseURL": "https://chat.qwen.ai" },
+            "model": { "maxContext": 32000, "maxTokens": 8000 },
+            "keyConfig": { "keyId": "qwen-thinking-key", "actualKey": "test-key-thinking" },
+            "protocols": { "input": "openai", "output": "openai" }
+          },
+          "lmstudio.gpt-3.5-turbo.lmstudio-bg-key": {
+            "provider": { "type": "lmstudio", "baseURL": "http://localhost:1234" },
+            "model": { "maxContext": 16000, "maxTokens": 4096 },
+            "keyConfig": { "keyId": "lmstudio-bg-key", "actualKey": "test-key-bg" },
+            "protocols": { "input": "openai", "output": "openai" }
+          },
+          "qwen.qwen-turbo.qwen-search-key": {
+            "provider": { "type": "qwen", "baseURL": "https://chat.qwen.ai" },
+            "model": { "maxContext": 32000, "maxTokens": 8000 },
+            "keyConfig": { "keyId": "qwen-search-key", "actualKey": "test-key-search" },
+            "protocols": { "input": "openai", "output": "openai" }
+          },
+          "qwen.qwen-vl-plus.qwen-vision-key": {
+            "provider": { "type": "qwen", "baseURL": "https://chat.qwen.ai" },
+            "model": { "maxContext": 16000, "maxTokens": 4000 },
+            "keyConfig": { "keyId": "qwen-vision-key", "actualKey": "test-key-vision" },
+            "protocols": { "input": "openai", "output": "openai" }
+          },
+          "qwen.qwen3-coder.qwen-coder-key": {
+            "provider": { "type": "qwen", "baseURL": "https://chat.qwen.ai" },
+            "model": { "maxContext": 32000, "maxTokens": 8000 },
+            "keyConfig": { "keyId": "qwen-coder-key", "actualKey": "test-key-coder" },
+            "protocols": { "input": "openai", "output": "openai" }
+          }
+        },
+        "inputProtocol": "openai",
+        "outputProtocol": "openai",
+        "defaultRoute": "default",
+        "routes": {
+          "default": {
+            "pipelineId": "default-pipeline",
+            "targets": [{ "providerId": "lmstudio", "modelId": "gpt-3.5-turbo", "keyId": "lmstudio-default-key" }]
+          },
+          "longContext": {
+            "pipelineId": "longcontext-pipeline", 
+            "targets": [{ "providerId": "qwen", "modelId": "qwen-max", "keyId": "qwen-long-key" }]
+          },
+          "thinking": {
+            "pipelineId": "thinking-pipeline",
+            "targets": [{ "providerId": "qwen", "modelId": "qwen-turbo", "keyId": "qwen-thinking-key" }]
+          },
+          "background": {
+            "pipelineId": "background-pipeline",
+            "targets": [{ "providerId": "lmstudio", "modelId": "gpt-3.5-turbo", "keyId": "lmstudio-bg-key" }]
+          },
+          "webSearch": {
+            "pipelineId": "websearch-pipeline",
+            "targets": [{ "providerId": "qwen", "modelId": "qwen-turbo", "keyId": "qwen-search-key" }]
+          },
+          "vision": {
+            "pipelineId": "vision-pipeline",
+            "targets": [{ "providerId": "qwen", "modelId": "qwen-vl-plus", "keyId": "qwen-vision-key" }]
+          },
+          "coding": {
+            "pipelineId": "coding-pipeline",
+            "targets": [{ "providerId": "qwen", "modelId": "qwen3-coder", "keyId": "qwen-coder-key" }]
+          }
+        }
+      }
+    }
+  }
+}

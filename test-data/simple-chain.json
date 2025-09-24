@@ -1,0 +1,16 @@
+{
+  "steps": [
+    {
+      "name": "request-processing",
+      "type": "request",
+      "pipelineId": "request-pipeline",
+      "mode": "dry-run"
+    },
+    {
+      "name": "response-processing",
+      "type": "response",
+      "pipelineId": "response-pipeline",
+      "mode": "dry-run"
+    }
+  ]
+}

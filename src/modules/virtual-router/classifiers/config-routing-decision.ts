@@ -150,17 +150,22 @@ export class ConfigRoutingDecision {
       complexityBased: false
     };
 
-    let confidence = 0.3; // 基础置信度
+    let confidence = 0.4; // 提高基础置信度
     let reasoning = '';
 
-    // 1. Token阈值评估
+    // 1. Token阈值评估 - 降低阈值要求，提高匹配度
     if (input.tokenCount >= routeConfig.tokenThreshold) {
       factors.tokenBased = true;
-      confidence += 0.4;
+      confidence += 0.35; // 降低token权重
       reasoning += `Token数量(${input.tokenCount})达到阈值(${routeConfig.tokenThreshold}); `;
+    } else if (routeName === 'longContext' && input.tokenCount >= 8000) {
+      // 长上下文路由的特殊处理 - 降低门槛
+      factors.tokenBased = true;
+      confidence += 0.25;
+      reasoning += `中等长度文本(${input.tokenCount} tokens); `;
     }
 
-    // 2. 工具类型评估
+    // 2. 工具类型评估 - 增强权重
     if (input.hasTools && routeConfig.toolTypes.length > 0) {
       const matchingToolTypes = input.toolTypes.filter(toolType =>
         routeConfig.toolTypes.includes(toolType)
@@ -168,7 +173,7 @@ export class ConfigRoutingDecision {
 
       if (matchingToolTypes.length > 0) {
         factors.toolBased = true;
-        confidence += 0.3;
+        confidence += 0.4; // 提高工具匹配权重
         reasoning += `匹配工具类型(${matchingToolTypes.join(', ')}); `;
       }
     }
@@ -177,54 +182,62 @@ export class ConfigRoutingDecision {
     const modelTier = this.getModelTier(input.model);
     if (modelTier === routeConfig.modelTier) {
       factors.modelBased = true;
-      confidence += 0.2;
+      confidence += 0.25; // 提高模型匹配权重
       reasoning += `模型层级匹配(${modelTier}); `;
     }
 
-    // 4. 复杂度评估
-    if (input.complexity > 15 && routeConfig.priority >= 80) {
+    // 4. 复杂度评估 - 降低复杂度阈值
+    if (input.complexity > 10 && routeConfig.priority >= 70) {
       factors.complexityBased = true;
-      confidence += 0.1;
+      confidence += 0.15; // 提高复杂度权重
       reasoning += `高复杂度匹配高优先级路由; `;
     }
 
-    // 5. 优先级调整 - 对于default路由，使用更高的基础权重
-    if (routeName === 'default') {
-      confidence = Math.max(confidence, 0.7); // default路由最小置信度
-    } else {
-      confidence = Math.max(confidence * (routeConfig.priority / 100), 0.4);
-    }
-
-    // 6. 特殊路由的额外评估
+    // 5. 特殊路由的额外评估 - 增强特定场景识别
     if (routeName === 'webSearch' && input.toolTypes.includes('webSearch')) {
-      confidence = Math.min(confidence + 0.2, 0.95);
+      confidence = Math.min(confidence + 0.3, 0.95); // 提高webSearch优先级
       reasoning += '网络搜索工具高优先级; ';
     }
 
     if (routeName === 'longContext') {
       // 长上下文路由的特殊处理
-      if (input.tokenCount > 50000) {
-        confidence = Math.min(confidence + 0.3, 0.95);
+      if (input.tokenCount > 30000) {
+        confidence = Math.min(confidence + 0.4, 0.95); // 超长文本强制路由
         reasoning += '超长上下文强制路由; ';
-      } else if (input.tokenCount >= 12000) {
-        confidence = Math.min(confidence + 0.25, 0.9);
+      } else if (input.tokenCount >= 8000) {
+        confidence = Math.min(confidence + 0.3, 0.9); // 中等长度文本优先路由
         reasoning += '长上下文优先路由; ';
       }
     }
 
-    // 7. 优先级修正 - 确保长上下文在高token数量时获得足够高的置信度
-    if (routeName === 'longContext' && input.tokenCount >= 12000) {
-      confidence = Math.max(confidence, 0.85);
-    }
-
-    if (routeName === 'coding' && input.toolTypes.includes('codeExecution')) {
-      confidence = Math.min(confidence + 0.25, 0.85);
+    if (routeName === 'coding' && (input.toolTypes.includes('codeExecution') || input.model.toLowerCase().includes('code'))) {
+      confidence = Math.min(confidence + 0.3, 0.85); // 代码模型或工具强制路由
       reasoning += '代码执行工具强制路由; ';
     }
 
-    if (routeName === 'thinking' && input.toolTypes.includes('dataAnalysis')) {
-      confidence = Math.min(confidence + 0.2, 0.8);
+    if (routeName === 'thinking' && (input.toolTypes.includes('dataAnalysis') || input.model.toLowerCase().includes('thinking'))) {
+      confidence = Math.min(confidence + 0.25, 0.8); // 思考模型或数据分析工具强制路由
       reasoning += '数据分析工具强制路由; ';
+    }
+
+    if (routeName === 'vision' && (input.model.toLowerCase().includes('vision') || input.model.toLowerCase().includes('vl'))) {
+      confidence = Math.min(confidence + 0.35, 0.9); // 视觉模型强制路由
+      reasoning += '视觉模型强制路由; ';
+    }
+
+    if (routeName === 'background' && input.complexity < 20) {
+      confidence = Math.min(confidence + 0.2, 0.7); // 低复杂度后台任务
+      reasoning += '低复杂度后台任务; ';
+    }
+
+    // 6. 优先级调整 - 确保各类路由都能获得足够高的置信度
+    if (routeName !== 'default') {
+      confidence = Math.max(confidence * (routeConfig.priority / 80), 0.5); // 降低优先级影响，确保非default路由有基础置信度
+    }
+
+    // 7. 确保长上下文在高token数量时获得足够高的置信度
+    if (routeName === 'longContext' && input.tokenCount >= 8000) {
+      confidence = Math.max(confidence, 0.75); // 降低强制阈值
     }
 
     return {

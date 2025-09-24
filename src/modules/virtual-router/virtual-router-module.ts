@@ -238,33 +238,47 @@ export class VirtualRouterModule extends BaseModule {
           longContext: {
             description: 'Routing for long context requests',
             modelTier: 'advanced',
-            tokenThreshold: 32000,
+            tokenThreshold: 12000,
             toolTypes: [],
             priority: 90
           },
           thinking: {
             description: 'Routing for complex reasoning requests',
             modelTier: 'advanced',
-            tokenThreshold: 16000,
+            tokenThreshold: 8000,
             toolTypes: ['dataAnalysis', 'complex_reasoning'],
             priority: 85
           },
-          coding: {
-            description: 'Routing for code generation requests',
-            modelTier: 'advanced',
-            tokenThreshold: 24000,
-            toolTypes: ['codeExecution', 'fileSearch'],
-            priority: 80
+          background: {
+            description: 'Routing for background processing requests',
+            modelTier: 'basic',
+            tokenThreshold: 4000,
+            toolTypes: [],
+            priority: 60
           },
           webSearch: {
             description: 'Routing for web search requests',
             modelTier: 'advanced',
-            tokenThreshold: 12000,
+            tokenThreshold: 6000,
             toolTypes: ['webSearch'],
             priority: 95
+          },
+          vision: {
+            description: 'Routing for vision and image processing requests',
+            modelTier: 'advanced',
+            tokenThreshold: 8000,
+            toolTypes: [],
+            priority: 80
+          },
+          coding: {
+            description: 'Routing for code generation requests',
+            modelTier: 'advanced',
+            tokenThreshold: 8000,
+            toolTypes: ['codeExecution', 'fileSearch'],
+            priority: 80
           }
         },
-        confidenceThreshold: 60
+        confidenceThreshold: 35
       };
 
       return defaultConfig;
