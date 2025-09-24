@@ -18,6 +18,7 @@ export class UserConfigParser {
   private globalKeyToAuth: Record<string, string> = {};
   private authMappings: Record<string, string> = {};
   private oauthAuthConfigs: Record<string, any> = {};
+  private providerConfigs: Record<string, any> = {};
 
   /**
    * 解析用户配置
@@ -31,6 +32,7 @@ export class UserConfigParser {
     this.providerKeyToAuth = {};
     this.globalKeyToAuth = {};
     this.oauthAuthConfigs = {};
+    this.providerConfigs = userConfig.virtualrouter?.providers || {};
     this.authMappings = this.parseAuthMappings(userConfig.virtualrouter);
     const routeTargets = this.parseRouteTargets(userConfig.virtualrouter.routing);
     const pipelineConfigs = this.parsePipelineConfigs(userConfig.virtualrouter);
@@ -59,20 +61,40 @@ export class UserConfigParser {
       routeTargets[routeName] = targets.map((target: string) => {
         const parts = target.split('.');
         
-        // 支持两种格式：provider.model.key 或 provider.model（默认使用default key）
+        // 支持两种格式：
+        // 1. provider.model → 根据key数量决定行为
+        //    - 只有一个key：使用那个key（不指定key）
+        //    - 多个key：使用所有key（通配符）
+        // 2. provider.model.key → 只使用指定key
         if (parts.length === 2) {
-          // 新格式：provider.model，使用default作为key
+          // provider.model格式：根据key数量决定行为
           const [providerId, modelId] = parts;
-          return {
-            providerId,
-            modelId,
-            keyId: 'default',
-            actualKey: this.resolveActualKey(providerId, 'default'),
-            inputProtocol: 'openai',
-            outputProtocol: 'openai'
-          };
+          const providerKeys = this.getProviderKeys(providerId);
+          
+          if (providerKeys.length === 1) {
+            // 只有一个key：使用那个key，不指定key字段
+            const keyId = providerKeys[0];
+            return {
+              providerId,
+              modelId,
+              keyId, // 使用具体的key
+              actualKey: this.resolveActualKey(providerId, keyId),
+              inputProtocol: 'openai',
+              outputProtocol: 'openai'
+            };
+          } else {
+            // 多个key：使用通配符表示所有key
+            return {
+              providerId,
+              modelId,
+              keyId: '*', // 通配符表示使用所有key
+              actualKey: '*', // 通配符表示使用所有key
+              inputProtocol: 'openai',
+              outputProtocol: 'openai'
+            };
+          }
         } else if (parts.length === 3) {
-          // 旧格式：provider.model.key
+          // provider.model.key格式：只使用指定key
           const [providerId, modelId, keyId] = parts;
           return {
             providerId,
@@ -83,7 +105,7 @@ export class UserConfigParser {
             outputProtocol: 'openai'
           };
         } else {
-          throw new Error(`Invalid route target format: ${target}. Expected format: provider.model or provider.model.key`);
+          throw new Error(`Invalid route target format: ${target}`);
         }
       });
     }
@@ -117,6 +139,7 @@ export class UserConfigParser {
 
     for (const [providerId, providerConfig] of Object.entries(virtualRouterConfig.providers)) {
       for (const [modelId, modelConfig] of Object.entries(providerConfig.models)) {
+        // 为每个具体的key创建配置
         for (const keyId of providerConfig.apiKey) {
           const configKey = `${providerId}.${modelId}.${keyId}`;
           const resolvedKey = this.resolveActualKey(providerId, keyId);
@@ -235,6 +258,123 @@ export class UserConfigParser {
             llmSwitch,
             workflow
             };
+        }
+        
+        // 如果provider有多个key，为通配符 '*' 创建特殊配置
+        if (providerConfig.apiKey.length > 1) {
+          const wildcardConfigKey = `${providerId}.${modelId}.*`;
+          // 通配符配置使用第一个key作为模板，但实际运行时会根据负载均衡选择key
+          const firstKeyId = providerConfig.apiKey[0];
+          const resolvedKey = this.resolveActualKey(providerId, firstKeyId);
+          const hasAuthMapping = this.hasAuthMapping(providerId, firstKeyId);
+          
+          // 使用与具体key配置相同的模块配置
+          const modelCompat = (modelConfig as any)?.compatibility;
+          const providerCompat = (providerConfig as any)?.compatibility;
+          let compatibility = modelCompat?.type
+            ? { type: modelCompat.type, config: modelCompat.config || {} }
+            : providerCompat?.type
+              ? { type: providerCompat.type, config: providerCompat.config || {} }
+              : undefined;
+
+          const modelLlmSwitch = (modelConfig as any)?.llmSwitch;
+          const providerLlmSwitch = (providerConfig as any)?.llmSwitch;
+          let llmSwitch = modelLlmSwitch?.type
+            ? { type: modelLlmSwitch.type, config: modelLlmSwitch.config || {} }
+            : providerLlmSwitch?.type
+              ? { type: providerLlmSwitch.type, config: providerLlmSwitch.config || {} }
+              : undefined;
+
+          const modelWorkflow = (modelConfig as any)?.workflow;
+          const providerWorkflow = (providerConfig as any)?.workflow;
+          let workflow = modelWorkflow?.type
+            ? { type: modelWorkflow.type, config: modelWorkflow.config || {}, enabled: modelWorkflow.enabled }
+            : providerWorkflow?.type
+              ? { type: providerWorkflow.type, config: providerWorkflow.config || {}, enabled: providerWorkflow.enabled }
+              : undefined;
+
+          // Defaults
+          if (!llmSwitch) {
+            llmSwitch = { type: 'openai-passthrough', config: {} };
+          }
+          if (!workflow) {
+            workflow = { type: 'streaming-control', enabled: true, config: {} } as any;
+          }
+          if (!compatibility) {
+            const pType = (providerConfig as any)?.type?.toLowerCase?.() || '';
+            if (pType.includes('lmstudio')) {
+              compatibility = { type: 'lmstudio-compatibility', config: {} };
+            } else if (pType.includes('qwen')) {
+              compatibility = { type: 'qwen-compatibility', config: {} } as any;
+            } else {
+              compatibility = { type: 'field-mapping', config: {} } as any;
+            }
+          }
+          
+          const rawProviderType = (providerConfig.type || '').toLowerCase();
+          const normalizedProviderType = rawProviderType === 'lmstudio' ? 'lmstudio-http'
+            : rawProviderType === 'qwen' ? 'qwen-provider'
+            : rawProviderType === 'iflow' || rawProviderType === 'iflow-http' ? 'generic-http'
+            : providerConfig.type;
+
+          let baseURL = providerConfig.baseURL;
+          if (normalizedProviderType === 'lmstudio-http') {
+            const envBase = process.env.LMSTUDIO_BASE_URL || process.env.LM_STUDIO_BASE_URL;
+            if (envBase && typeof envBase === 'string' && envBase.trim()) {
+              baseURL = envBase.trim();
+            }
+          }
+
+          let providerAuth: any = undefined;
+          if (normalizedProviderType === 'lmstudio-http') {
+            providerAuth = { type: 'apikey' };
+          }
+          if (normalizedProviderType === 'qwen-provider') {
+            const oauthCfg = (providerConfig as any).oauth || (providerConfig as any).auth?.oauth;
+            if (oauthCfg && typeof oauthCfg === 'object') {
+              const oc = (oauthCfg as any).default || oauthCfg;
+              providerAuth = {
+                type: 'oauth',
+                oauth: {
+                  clientId: oc.clientId,
+                  deviceCodeUrl: oc.deviceCodeUrl,
+                  tokenUrl: oc.tokenUrl,
+                  scopes: oc.scopes,
+                  tokenFile: oc.tokenFile
+                }
+              };
+            }
+          }
+
+          const auth = normalizedProviderType === 'lmstudio-http'
+            ? ({ type: 'apikey', ...(hasAuthMapping ? { apiKey: resolvedKey } : {}) })
+            : undefined;
+
+          // 创建通配符配置
+          pipelineConfigs[wildcardConfigKey] = {
+            provider: {
+              type: normalizedProviderType,
+              baseURL,
+              ...(providerAuth ? { auth: providerAuth } : {}),
+              ...(auth ? { auth } : {})
+            },
+            model: {
+              maxContext: modelConfig.maxContext || 128000,
+              maxTokens: modelConfig.maxTokens || 32000
+            },
+            keyConfig: {
+              keyId: '*',
+              actualKey: '*',
+              keyType: 'apiKey' // 通配符类型
+            },
+            protocols: {
+              input: virtualRouterConfig.inputProtocol as 'openai' | 'anthropic',
+              output: virtualRouterConfig.outputProtocol as 'openai' | 'anthropic'
+            },
+            compatibility,
+            llmSwitch,
+            workflow
+          };
         }
       }
     }
@@ -456,5 +596,16 @@ export class UserConfigParser {
     } catch {
       return { ...oauthConfig };
     }
+  }
+
+  /**
+   * 获取provider的所有key
+   */
+  private getProviderKeys(providerId: string): string[] {
+    const providerConfig = this.providerConfigs[providerId];
+    if (!providerConfig || !providerConfig.apiKey) {
+      return ['default']; // 默认fallback
+    }
+    return providerConfig.apiKey;
   }
 }

@@ -346,23 +346,23 @@ export class UserConfigParser {
     for (const [routeName, targets] of Object.entries(routingConfig)) {
       routeTargets[routeName] = targets.map((target: string) => {
         const parts = target.split('.');
-
-        // 支持两种格式：provider.model.key 或 provider.model（默认使用default key）
+        
+        // 支持两种格式：
+        // 1. provider.model → 使用provider的所有key（负载均衡）
+        // 2. provider.model.key → 只使用指定key
         if (parts.length === 2) {
-          // 新格式：provider.model，使用default作为key
+          // provider.model格式：使用provider的所有key
           const [providerId, modelId] = parts;
           return {
             providerId,
             modelId,
-            keyId: 'default',
-            actualKey: this.resolveActualKey('default'),
+            keyId: '*', // 通配符表示使用所有key
+            actualKey: '*', // 通配符表示使用所有key
             inputProtocol: 'openai',
             outputProtocol: 'openai'
           };
-        }
-
-        if (parts.length === 3) {
-          // 旧格式：provider.model.key
+        } else if (parts.length === 3) {
+          // provider.model.key格式：只使用指定key
           const [providerId, modelId, keyId] = parts;
           return {
             providerId,
@@ -372,14 +372,13 @@ export class UserConfigParser {
             inputProtocol: 'openai',
             outputProtocol: 'openai'
           };
+        } else {
+          throw new Error('Invalid route target format: ' + target);
         }
-
-        throw new Error('Invalid route target format: ' + target + '. Expected format: provider.model or provider.model.key');
       });
     }
 
     return routeTargets;
-  }
 
   /**
    * 解析流水线配置

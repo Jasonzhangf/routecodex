@@ -45,8 +45,9 @@ coverage/
 ehthumbs.db
 Thumbs.db
 
-# Debug
+# Debug - but allow src/modules/debug
 debug/
+!src/modules/debug/
 
 # Cache
 .cache/
