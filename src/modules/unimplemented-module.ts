@@ -60,6 +60,13 @@ export class RCCUnimplementedModule extends BaseModule {
   private stats: UnimplementedModuleStats;
   private static readonly MAX_CALLER_HISTORY = 100;
 
+  // Debug enhancement properties
+  private isDebugEnhanced = false;
+  private debugMetrics: Map<string, any> = new Map();
+  private callHistory: any[] = [];
+  private errorHistory: any[] = [];
+  private maxHistorySize = 50;
+
   constructor(config: UnimplementedModuleConfig) {
     const moduleInfo: ModuleInfo = {
       id: config.moduleId,
@@ -90,6 +97,9 @@ export class RCCUnimplementedModule extends BaseModule {
 
     // Log module initialization
     this.logModuleInitialization();
+
+    // Initialize debug enhancements
+    this.initializeDebugEnhancements();
   }
 
   /**
@@ -133,6 +143,23 @@ export class RCCUnimplementedModule extends BaseModule {
     // Update statistics
     this.updateStats(methodName, callerInfo);
 
+    // Add to call history for debug tracking
+    this.addToCallHistory({
+      methodName,
+      callerInfo: callerInfo?.callerId,
+      requestId,
+      timestamp,
+      context: callerInfo?.context
+    });
+
+    // Record debug metric
+    this.recordDebugMetric('unimplemented_call', {
+      methodName,
+      callerId: callerInfo?.callerId,
+      requestId,
+      totalCalls: this.stats.totalCalls
+    });
+
     // Log the unimplemented call
     this.logUnimplementedCall(methodName, callerInfo, requestId);
 
@@ -159,7 +186,9 @@ export class RCCUnimplementedModule extends BaseModule {
         methodName,
         moduleId: this.config.moduleId,
         requestId,
-        callerInfo: callerInfo?.callerId
+        callerInfo: callerInfo?.callerId,
+        totalCalls: this.stats.totalCalls,
+        isDebugEnhanced: this.isDebugEnhanced
       }
     });
 
@@ -388,7 +417,7 @@ export class RCCUnimplementedModule extends BaseModule {
   public async destroy(): Promise<void> {
     try {
       await this.errorHandling.destroy();
-      
+
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: this.config.moduleId,
@@ -406,5 +435,235 @@ export class RCCUnimplementedModule extends BaseModule {
       await this.handleError(error as Error, 'destroy');
       throw error;
     }
+  }
+
+  /**
+   * Initialize debug enhancements
+   */
+  private initializeDebugEnhancements(): void {
+    this.isDebugEnhanced = true;
+
+    // Initialize debug metrics
+    this.debugMetrics.set('initialization', {
+      timestamp: Date.now(),
+      moduleId: this.config.moduleId,
+      moduleName: this.config.moduleName
+    });
+
+    this.debugEventBus.publish({
+      sessionId: `session_${Date.now()}`,
+      moduleId: this.config.moduleId,
+      operationId: 'debug_enhancements_initialized',
+      timestamp: Date.now(),
+      type: 'start',
+      position: 'middle',
+      data: {
+        moduleId: this.config.moduleId,
+        isDebugEnhanced: this.isDebugEnhanced
+      }
+    });
+  }
+
+  /**
+   * Add to call history
+   */
+  private addToCallHistory(call: any): void {
+    this.callHistory.push({
+      ...call,
+      timestamp: Date.now()
+    });
+
+    // Keep only recent history
+    if (this.callHistory.length > this.maxHistorySize) {
+      this.callHistory.shift();
+    }
+  }
+
+  /**
+   * Add to error history
+   */
+  private addToErrorHistory(error: any): void {
+    this.errorHistory.push({
+      ...error,
+      timestamp: Date.now()
+    });
+
+    // Keep only recent history
+    if (this.errorHistory.length > this.maxHistorySize) {
+      this.errorHistory.shift();
+    }
+  }
+
+  /**
+   * Record debug metric
+   */
+  private recordDebugMetric(operation: string, data: any): void {
+    if (!this.debugMetrics.has(operation)) {
+      this.debugMetrics.set(operation, {
+        values: [],
+        lastUpdated: Date.now()
+      });
+    }
+
+    const metric = this.debugMetrics.get(operation)!;
+    metric.values.push({
+      ...data,
+      timestamp: Date.now()
+    });
+    metric.lastUpdated = Date.now();
+
+    // Keep only last 20 measurements
+    if (metric.values.length > 20) {
+      metric.values.shift();
+    }
+  }
+
+  /**
+   * Get debug status with enhanced information
+   */
+  getDebugStatus(): any {
+    const baseStatus = {
+      unimplementedModuleId: this.config.moduleId,
+      name: this.config.moduleName,
+      version: '0.0.1',
+      isInitialized: true,
+      type: 'unimplemented',
+      isEnhanced: true
+    };
+
+    if (!this.isDebugEnhanced) {
+      return baseStatus;
+    }
+
+    return {
+      ...baseStatus,
+      debugInfo: this.getDebugInfo(),
+      moduleMetrics: this.getModuleMetrics(),
+      callStats: this.getCallStats(),
+      callHistory: [...this.callHistory.slice(-10)],
+      errorHistory: [...this.errorHistory.slice(-5)]
+    };
+  }
+
+  /**
+   * Get module metrics
+   */
+  private getModuleMetrics(): any {
+    const metrics: any = {};
+
+    for (const [operation, metric] of this.debugMetrics.entries()) {
+      metrics[operation] = {
+        count: metric.values.length,
+        lastUpdated: metric.lastUpdated,
+        recentValues: metric.values.slice(-5) // Last 5 values
+      };
+    }
+
+    return metrics;
+  }
+
+  /**
+   * Get call statistics
+   */
+  private getCallStats(): any {
+    return {
+      totalCalls: this.stats.totalCalls,
+      uniqueCallers: new Set(this.stats.callerInfo.map(c => c.callerId)).size,
+      uniqueMethods: new Set(this.stats.callerInfo.map(c => c.method)).size,
+      firstCallTime: this.stats.firstCallTime,
+      lastCallTime: this.stats.lastCallTime,
+      averageCallsPerHour: this.calculateAverageCallsPerHour(),
+      topCallers: this.getTopCallers(),
+      topMethods: this.getTopMethods(),
+      callHistorySize: this.callHistory.length,
+      errorHistorySize: this.errorHistory.length
+    };
+  }
+
+  /**
+   * Calculate average calls per hour
+   */
+  private calculateAverageCallsPerHour(): number {
+    if (!this.stats.firstCallTime || this.stats.totalCalls === 0) {
+      return 0;
+    }
+
+    const startTime = new Date(this.stats.firstCallTime).getTime();
+    const now = Date.now();
+    const hoursDiff = (now - startTime) / (1000 * 60 * 60);
+
+    return hoursDiff > 0 ? Math.round(this.stats.totalCalls / hoursDiff * 100) / 100 : 0;
+  }
+
+  /**
+   * Get top callers by call count
+   */
+  private getTopCallers(): Array<{ callerId: string; count: number }> {
+    const callerCounts = new Map<string, number>();
+
+    this.stats.callerInfo.forEach(call => {
+      const count = callerCounts.get(call.callerId) || 0;
+      callerCounts.set(call.callerId, count + 1);
+    });
+
+    return Array.from(callerCounts.entries())
+      .map(([callerId, count]) => ({ callerId, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+  }
+
+  /**
+   * Get top methods by call count
+   */
+  private getTopMethods(): Array<{ method: string; count: number }> {
+    const methodCounts = new Map<string, number>();
+
+    this.stats.callerInfo.forEach(call => {
+      const count = methodCounts.get(call.method) || 0;
+      methodCounts.set(call.method, count + 1);
+    });
+
+    return Array.from(methodCounts.entries())
+      .map(([method, count]) => ({ method, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+  }
+
+  /**
+   * Get detailed debug information
+   */
+  public getDebugInfo(): any {
+    const stats = this.getStats();
+    let uptime = 0;
+
+    if (stats.firstCallTime && stats.totalCalls > 0) {
+      const firstCallTime = new Date(stats.firstCallTime).getTime();
+      uptime = Date.now() - firstCallTime;
+    }
+
+    return {
+      moduleId: this.config.moduleId,
+      moduleName: this.config.moduleName,
+      enhanced: this.isDebugEnhanced,
+      debugEventBusAvailable: !!this.debugEventBus,
+      errorHandlingAvailable: !!this.errorHandling,
+      totalCalls: this.stats.totalCalls,
+      config: this.config,
+      maxHistorySize: this.maxHistorySize,
+      uptime
+    };
+  }
+
+  /**
+   * Get enhanced statistics including debug information
+   */
+  public getEnhancedStats(): any {
+    return {
+      ...this.getStats(),
+      debugMetrics: this.getModuleMetrics(),
+      callHistory: this.callHistory,
+      errorHistory: this.errorHistory,
+      callStats: this.getCallStats()
+    };
   }
 }
