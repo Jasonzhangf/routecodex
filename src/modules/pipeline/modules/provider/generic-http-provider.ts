@@ -8,6 +8,7 @@
 import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../types/provider-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
+import { DebugEventBus } from '../../../../utils/external-mocks.js';
 
 /**
  * Generic HTTP Provider Module
@@ -24,11 +25,22 @@ export class GenericHTTPProvider implements ProviderModule {
   private httpClient: any = null;
   private healthStatus: any = null;
 
+  // Debug enhancement properties
+  private debugEventBus: DebugEventBus | null = null;
+  private isDebugEnhanced = false;
+  private providerMetrics: Map<string, any> = new Map();
+  private requestHistory: any[] = [];
+  private errorHistory: any[] = [];
+  private maxHistorySize = 50;
+
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
     this.id = `provider-${Date.now()}`;
     this.config = config;
     this.providerType = (config.config as ProviderConfig).type;
     this.logger = dependencies.logger as any;
+
+    // Initialize debug enhancements
+    this.initializeDebugEnhancements();
   }
 
   /**
@@ -632,5 +644,161 @@ export class GenericHTTPProvider implements ProviderModule {
    */
   private async closeHttpClient(): Promise<void> {
     this.httpClient = null;
+  }
+
+  /**
+   * Initialize debug enhancements
+   */
+  private initializeDebugEnhancements(): void {
+    try {
+      this.debugEventBus = DebugEventBus.getInstance();
+      this.isDebugEnhanced = true;
+      console.log('Generic HTTP Provider debug enhancements initialized');
+    } catch (error) {
+      console.warn('Failed to initialize Generic HTTP Provider debug enhancements:', error);
+      this.isDebugEnhanced = false;
+    }
+  }
+
+  /**
+   * Record provider metric
+   */
+  private recordProviderMetric(operation: string, data: any): void {
+    if (!this.providerMetrics.has(operation)) {
+      this.providerMetrics.set(operation, {
+        values: [],
+        lastUpdated: Date.now()
+      });
+    }
+
+    const metric = this.providerMetrics.get(operation)!;
+    metric.values.push(data);
+    metric.lastUpdated = Date.now();
+
+    // Keep only last 50 measurements
+    if (metric.values.length > 50) {
+      metric.values.shift();
+    }
+  }
+
+  /**
+   * Add to request history
+   */
+  private addToRequestHistory(request: any): void {
+    this.requestHistory.push(request);
+
+    // Keep only recent history
+    if (this.requestHistory.length > this.maxHistorySize) {
+      this.requestHistory.shift();
+    }
+  }
+
+  /**
+   * Add to error history
+   */
+  private addToErrorHistory(error: any): void {
+    this.errorHistory.push(error);
+
+    // Keep only recent history
+    if (this.errorHistory.length > this.maxHistorySize) {
+      this.errorHistory.shift();
+    }
+  }
+
+  /**
+   * Publish debug event
+   */
+  private publishDebugEvent(type: string, data: any): void {
+    if (!this.isDebugEnhanced || !this.debugEventBus) return;
+
+    try {
+      this.debugEventBus.publish({
+        sessionId: `session_${Date.now()}`,
+        moduleId: this.id,
+        operationId: type,
+        timestamp: Date.now(),
+        type: 'debug',
+        position: 'middle',
+        data: {
+          ...data,
+          providerId: this.id,
+          source: 'generic-http-provider'
+        }
+      });
+    } catch (error) {
+      // Silent fail if debug event bus is not available
+    }
+  }
+
+  /**
+   * Get debug status with enhanced information
+   */
+  getDebugStatus(): any {
+    const baseStatus = {
+      providerId: this.id,
+      type: this.type,
+      providerType: this.providerType,
+      isInitialized: this.isInitialized,
+      isEnhanced: this.isDebugEnhanced
+    };
+
+    if (!this.isDebugEnhanced) {
+      return baseStatus;
+    }
+
+    return {
+      ...baseStatus,
+      debugInfo: this.getDebugInfo(),
+      providerMetrics: this.getProviderMetrics(),
+      requestHistory: [...this.requestHistory.slice(-10)], // Last 10 requests
+      errorHistory: [...this.errorHistory.slice(-10)] // Last 10 errors
+    };
+  }
+
+  /**
+   * Get detailed debug information
+   */
+  private getDebugInfo(): any {
+    return {
+      providerId: this.id,
+      providerType: this.providerType,
+      enhanced: this.isDebugEnhanced,
+      eventBusAvailable: !!this.debugEventBus,
+      requestHistorySize: this.requestHistory.length,
+      errorHistorySize: this.errorHistory.length,
+      hasAuth: !!this.authContext,
+      hasHttpClient: !!this.httpClient
+    };
+  }
+
+  /**
+   * Get provider metrics
+   */
+  private getProviderMetrics(): any {
+    const metrics: any = {};
+
+    for (const [operation, metric] of this.providerMetrics.entries()) {
+      metrics[operation] = {
+        count: metric.values.length,
+        lastUpdated: metric.lastUpdated,
+        recentValues: metric.values.slice(-5) // Last 5 values
+      };
+    }
+
+    return metrics;
+  }
+
+  /**
+   * Get module debug info - helper method for consistency
+   */
+  getModuleDebugInfo(): any {
+    return this.getDebugInfo();
+  }
+
+  /**
+   * Check if module is initialized - helper method for consistency
+   */
+  isModuleInitialized(): boolean {
+    return this.isInitialized;
   }
 }
