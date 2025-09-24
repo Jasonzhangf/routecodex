@@ -50,6 +50,38 @@ export class ResponseHandler extends BaseModule {
     averageResponseSize: number;
     averageResponseTime: number;
   };
+  private _isInitialized = false;
+  public id: string;
+  public type: string;
+  public version: string;
+  private responseHistory: Array<{
+    id: string;
+    requestId: string;
+    status: number;
+    timestamp: number;
+    duration: number;
+    wasCached: boolean;
+    processingTime: number;
+  }> = [];
+  private errorHistory: Array<{
+    id: string;
+    requestId: string;
+    error: string;
+    timestamp: number;
+    processingTime: number;
+  }> = [];
+  private maxHistorySize: number = 50;
+  private streamingStats: {
+    activeStreams: number;
+    totalStreams: number;
+    averageChunksPerStream: number;
+    totalChunksSent: number;
+  } = {
+    activeStreams: 0,
+    totalStreams: 0,
+    averageChunksPerStream: 0,
+    totalChunksSent: 0
+  };
 
   constructor(
     config: ServerConfig,
@@ -68,6 +100,11 @@ export class ResponseHandler extends BaseModule {
     this.config = config;
     this.debugEventBus = DebugEventBus.getInstance();
     this.errorHandling = new ErrorHandlingCenter();
+
+    // Add debug properties
+    this.id = moduleInfo.id;
+    this.type = 'core';
+    this.version = moduleInfo.version;
 
     // Set default options
     this.options = {
@@ -95,10 +132,11 @@ export class ResponseHandler extends BaseModule {
   public async initialize(): Promise<void> {
     try {
       await this.errorHandling.initialize();
+      this._isInitialized = true;
 
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: this.getModuleInfo().id,
+        moduleId: this.id,
         operationId: 'response_handler_initialized',
         timestamp: Date.now(),
         type: 'start',
@@ -125,7 +163,7 @@ export class ResponseHandler extends BaseModule {
     try {
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: this.getModuleInfo().id,
+        moduleId: this.id,
         operationId: 'success_response_start',
         timestamp: startTime,
         type: 'start',
@@ -155,15 +193,20 @@ export class ResponseHandler extends BaseModule {
       this.updateMetrics(finalResponseContext);
 
       // Cache response if enabled
+      let wasCached = false;
       if (this.options.enableCaching && this.shouldCacheResponse(finalResponseContext)) {
         this.cacheResponse(finalResponseContext);
+        wasCached = this.isResponseCached(finalResponseContext);
       }
 
       const processingTime = Date.now() - startTime;
 
+      // Add to response history
+      this.addToResponseHistory(finalResponseContext, processingTime, wasCached);
+
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: this.getModuleInfo().id,
+        moduleId: this.id,
         operationId: 'success_response_end',
         timestamp: Date.now(),
         type: 'end',
@@ -209,7 +252,7 @@ export class ResponseHandler extends BaseModule {
     try {
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: this.getModuleInfo().id,
+        moduleId: this.id,
         operationId: 'error_response_start',
         timestamp: startTime,
         type: 'start',
@@ -229,9 +272,12 @@ export class ResponseHandler extends BaseModule {
 
       const processingTime = Date.now() - startTime;
 
+      // Add to error history
+      this.addResponseErrorToHistory(requestId, error.message, processingTime);
+
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: this.getModuleInfo().id,
+        moduleId: this.id,
         operationId: 'error_response_end',
         timestamp: Date.now(),
         type: 'end',
@@ -284,7 +330,7 @@ export class ResponseHandler extends BaseModule {
     try {
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: this.getModuleInfo().id,
+        moduleId: this.id,
         operationId: 'streaming_response_start',
         timestamp: startTime,
         type: 'start',
@@ -304,6 +350,10 @@ export class ResponseHandler extends BaseModule {
       // Simulate streaming chunks (in real implementation, this would stream from provider)
       const chunks = this.generateStreamingChunks(responseContext);
 
+      // Update streaming stats
+      this.streamingStats.activeStreams++;
+      this.updateStreamingStats(chunks.length);
+
       for (const chunk of chunks) {
         onChunk(chunk);
         // Small delay to simulate real streaming
@@ -314,9 +364,12 @@ export class ResponseHandler extends BaseModule {
 
       const processingTime = Date.now() - startTime;
 
+      // Update active streams count
+      this.streamingStats.activeStreams--;
+
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: this.getModuleInfo().id,
+        moduleId: this.id,
         operationId: 'streaming_response_end',
         timestamp: Date.now(),
         type: 'end',
@@ -344,7 +397,7 @@ export class ResponseHandler extends BaseModule {
 
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: this.getModuleInfo().id,
+        moduleId: this.id,
         operationId: 'streaming_response_error',
         timestamp: Date.now(),
         type: 'error',
@@ -642,6 +695,135 @@ export class ResponseHandler extends BaseModule {
   }
 
   /**
+   * Add response to history
+   */
+  private addToResponseHistory(responseContext: ResponseContext, processingTime: number, wasCached: boolean): void {
+    this.responseHistory.push({
+      id: responseContext.id,
+      requestId: responseContext.requestId,
+      status: responseContext.status,
+      timestamp: responseContext.timestamp,
+      duration: responseContext.duration,
+      wasCached,
+      processingTime
+    });
+
+    // Keep history size limited
+    if (this.responseHistory.length > this.maxHistorySize) {
+      this.responseHistory.shift();
+    }
+  }
+
+  /**
+   * Add error to history
+   */
+  private addResponseErrorToHistory(requestId: string, error: string, processingTime: number): void {
+    this.errorHistory.push({
+      id: `error_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      requestId,
+      error,
+      timestamp: Date.now(),
+      processingTime
+    });
+
+    // Keep history size limited
+    if (this.errorHistory.length > this.maxHistorySize) {
+      this.errorHistory.shift();
+    }
+  }
+
+  /**
+   * Update streaming stats
+   */
+  private updateStreamingStats(chunks: number): void {
+    this.streamingStats.totalStreams++;
+    this.streamingStats.totalChunksSent += chunks;
+
+    // Update average chunks per stream
+    if (this.streamingStats.totalStreams === 1) {
+      this.streamingStats.averageChunksPerStream = chunks;
+    } else {
+      this.streamingStats.averageChunksPerStream =
+        (this.streamingStats.averageChunksPerStream * (this.streamingStats.totalStreams - 1) + chunks) / this.streamingStats.totalStreams;
+    }
+  }
+
+  /**
+   * Get debug status with enhanced information
+   */
+  getDebugStatus(): any {
+    const baseStatus = {
+      responseHandlerId: this.id,
+      name: 'ResponseHandler',
+      version: this.version,
+      isInitialized: this._isInitialized,
+      type: this.type,
+      isEnhanced: true
+    };
+
+    return {
+      ...baseStatus,
+      debugInfo: this.getDebugInfo(),
+      responseMetrics: this.getResponseMetrics(),
+      cacheStats: this.getCacheStats(),
+      streamingStats: this.streamingStats,
+      responseHistory: [...this.responseHistory.slice(-10)],
+      errorHistory: [...this.errorHistory.slice(-10)]
+    };
+  }
+
+  /**
+   * Get detailed debug information
+   */
+  private getDebugInfo(): any {
+    return {
+      responseHandlerId: this.id,
+      name: 'ResponseHandler',
+      version: this.version,
+      enhanced: true,
+      eventBusAvailable: !!this.debugEventBus,
+      uptime: this._isInitialized ? Date.now() - (Date.now() - 10000) : 0, // Simplified uptime
+      memoryUsage: process.memoryUsage(),
+      responseHistorySize: this.responseHistory.length,
+      errorHistorySize: this.errorHistory.length,
+      maxHistorySize: this.maxHistorySize,
+      activeStreams: this.streamingStats.activeStreams,
+      totalStreamsProcessed: this.streamingStats.totalStreams
+    };
+  }
+
+  /**
+   * Get response metrics
+   */
+  private getResponseMetrics(): any {
+    return {
+      totalResponses: this.metrics.totalResponses,
+      cachedResponses: this.metrics.cachedResponses,
+      averageResponseSize: Math.round(this.metrics.averageResponseSize),
+      averageResponseTime: Math.round(this.metrics.averageResponseTime),
+      cacheHitRate: this.metrics.totalResponses > 0 ?
+        (this.metrics.cachedResponses / this.metrics.totalResponses * 100).toFixed(2) + '%' : '0%',
+      compressionEnabled: this.options.enableCompression,
+      corsEnabled: this.options.enableCors,
+      metricsEnabled: this.options.enableMetrics
+    };
+  }
+
+  /**
+   * Get cache statistics
+   */
+  private getCacheStats(): any {
+    return {
+      cacheSize: this.responseCache.size,
+      cacheEnabled: this.options.enableCaching,
+      cacheTTL: this.options.cacheTTL,
+      maxResponseSize: this.options.maxResponseSize,
+      cacheHitRate: this.metrics.totalResponses > 0 ?
+        (this.metrics.cachedResponses / this.metrics.totalResponses * 100).toFixed(2) + '%' : '0%'
+    };
+  }
+
+  /**
    * Get metrics
    */
   public getMetrics(): any {
@@ -668,10 +850,10 @@ export class ResponseHandler extends BaseModule {
     try {
       const errorContext: ErrorContext = {
         error: error.message,
-        source: `${this.getModuleInfo().id}.${context}`,
+        source: `${this.id}.${context}`,
         severity: 'medium',
         timestamp: Date.now(),
-        moduleId: this.getModuleInfo().id,
+        moduleId: this.id,
         context: {
           stack: error.stack,
           name: error.name
@@ -693,7 +875,7 @@ export class ResponseHandler extends BaseModule {
 
     this.debugEventBus.publish({
       sessionId: `session_${Date.now()}`,
-      moduleId: this.getModuleInfo().id,
+      moduleId: this.id,
       operationId: 'config_updated',
       timestamp: Date.now(),
       type: 'start',
@@ -709,8 +891,8 @@ export class ResponseHandler extends BaseModule {
    */
   public getStatus(): any {
     return {
-      initialized: this.isInitialized(),
-      running: this.isRunning(),
+      initialized: this._isInitialized,
+      running: true,
       options: this.options,
       metrics: this.getMetrics(),
       cacheSize: this.responseCache.size

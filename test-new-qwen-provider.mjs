@@ -8,6 +8,8 @@
 import { QwenProvider } from './dist/modules/pipeline/modules/provider/qwen-provider.js';
 import { PipelineDebugLogger } from './dist/modules/pipeline/utils/debug-logger.js';
 import fs from 'fs/promises';
+import path from 'path';
+import { homedir } from 'os';
 
 // 创建测试依赖
 const logger = new PipelineDebugLogger('new-qwen-provider-test');
@@ -28,7 +30,7 @@ const dependencies = {
 // 加载有效的token
 async function loadValidToken() {
   try {
-    const tokenContent = await fs.readFile('/Users/fanzhang/.qwen/oauth_creds.json', 'utf8');
+    const tokenContent = await fs.readFile(path.join(homedir(), '.qwen', 'oauth_creds.json'), 'utf8');
     const tokenData = JSON.parse(tokenContent);
 
     console.log('📋 Loaded valid token from ~/.qwen/oauth_creds.json:');
@@ -55,7 +57,7 @@ function createProviderConfig(tokenData) {
           deviceCodeUrl: 'https://chat.qwen.ai/api/v1/oauth2/device/code',
           tokenUrl: 'https://chat.qwen.ai/api/v1/oauth2/token',
           scopes: ['openid', 'profile', 'email', 'model.completion'],
-          tokenFile: '/Users/fanzhang/.qwen/oauth_creds.json'
+          tokenFile: path.join(homedir(), '.qwen', 'oauth_creds.json')
         }
       },
       models: {

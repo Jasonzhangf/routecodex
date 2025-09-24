@@ -65,18 +65,18 @@
     },
     "routing": {
       "default": [
-        "qwen.qwen3-coder-plus.oauth-default",
-        "lmstudio.gpt-oss-20b-mlx.default"
+        "qwen.qwen3-coder-plus",
+        "lmstudio.gpt-oss-20b-mlx"
       ],
       "coding": [
-        "qwen.qwen3-coder-plus.oauth-default"
+        "qwen.qwen3-coder-plus"
       ],
       "longcontext": [
-        "lmstudio.gpt-oss-20b-mlx.default"
+        "lmstudio.gpt-oss-20b-mlx"
       ],
       "tools": [
-        "lmstudio.gpt-oss-20b-mlx.default",
-        "qwen.qwen-turbo.oauth-default"
+        "lmstudio.gpt-oss-20b-mlx",
+        "qwen.qwen-turbo"
       ]
     }
   }

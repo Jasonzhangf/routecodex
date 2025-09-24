@@ -1036,7 +1036,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
           status: this.getStatus()
         },
         requestHandler: this.requestHandler.getModuleInfo(),
-        providerManager: this.providerManager.getModuleInfo(),
+        providerManager: this.providerManager.getInfo(),
         openaiRouter: this.openaiRouter.getModuleInfo()
       },
       environment: {

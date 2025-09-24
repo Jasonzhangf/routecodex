@@ -836,7 +836,7 @@ export enum DebugSystemEvent {
   /** Health issue detected */
   HEALTH_ISSUE_DETECTED = 'debug_health_issue_detected',
   /** System error occurred */
-  SYSTEM_ERROR = 'debug_system_error',
+  SYSTEM_ERROR = 'debug_system_error_occurred',
   /** HTTP server debug adapter initialized */
   HTTP_SERVER_DEBUG_ADAPTER_INITIALIZED = 'http_server_debug_adapter_initialized',
   /** HTTP server debugging started */

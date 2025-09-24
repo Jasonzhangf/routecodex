@@ -57,15 +57,34 @@ export class UserConfigParser {
 
     for (const [routeName, targets] of Object.entries(routingConfig)) {
       routeTargets[routeName] = targets.map((target: string) => {
-        const [providerId, modelId, keyId] = target.split('.');
-        return {
-          providerId,
-          modelId,
-          keyId,
-          actualKey: this.resolveActualKey(providerId, keyId),
-          inputProtocol: 'openai', // 从配置中获取
-          outputProtocol: 'openai' // 从配置中获取
-        };
+        const parts = target.split('.');
+        
+        // 支持两种格式：provider.model.key 或 provider.model（默认使用default key）
+        if (parts.length === 2) {
+          // 新格式：provider.model，使用default作为key
+          const [providerId, modelId] = parts;
+          return {
+            providerId,
+            modelId,
+            keyId: 'default',
+            actualKey: this.resolveActualKey(providerId, 'default'),
+            inputProtocol: 'openai',
+            outputProtocol: 'openai'
+          };
+        } else if (parts.length === 3) {
+          // 旧格式：provider.model.key
+          const [providerId, modelId, keyId] = parts;
+          return {
+            providerId,
+            modelId,
+            keyId,
+            actualKey: this.resolveActualKey(providerId, keyId),
+            inputProtocol: 'openai',
+            outputProtocol: 'openai'
+          };
+        } else {
+          throw new Error(`Invalid route target format: ${target}. Expected format: provider.model or provider.model.key`);
+        }
       });
     }
 

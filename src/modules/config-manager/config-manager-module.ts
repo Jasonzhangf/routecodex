@@ -4,6 +4,7 @@
  */
 
 import fs from 'fs/promises';
+import path from 'path';
 import { homedir } from 'os';
 import { BaseModule } from '../../core/base-module.js';
 import { UserConfigParser } from '../../config/user-config-parser.js';
@@ -40,8 +41,8 @@ export class ConfigManagerModule extends BaseModule {
       description: 'Manages configuration files and reloading'
     });
 
-    // Default to project config directory; keep modules.json alongside
-    this.configPath = configPath || './config/config.json';
+    // Default to user home directory config
+    this.configPath = configPath || path.join(homedir(), '.routecodex', 'config.json');
     this.systemConfigPath = './config/modules.json';
     this.mergedConfigPath = './config/merged-config.json';
 

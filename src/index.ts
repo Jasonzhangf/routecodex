@@ -57,12 +57,12 @@ class RouteCodexApp {
       const port = await this.detectServerPort(this.modulesConfigPath);
       this.mergedConfigPath = path.join(process.cwd(), 'config', `merged-config.${port}.json`);
       const configManagerConfig = {
-        configPath: './config/config.json',
-        mergedConfigPath: this.mergedConfigPath,
-        systemModulesPath: this.modulesConfigPath,
-        autoReload: true,
-        watchInterval: 5000
-      };
+      configPath: path.join(homedir(), '.routecodex', 'config.json'),
+      mergedConfigPath: this.mergedConfigPath,
+      systemModulesPath: this.modulesConfigPath,
+      autoReload: true,
+      watchInterval: 5000
+    };
 
       await this.configManager.initialize(configManagerConfig);
 

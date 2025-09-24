@@ -11,20 +11,33 @@ export class RouteTargetParser {
    */
   parseRouteString(routeString: string): RouteTarget {
     const parts = routeString.split('.');
-    if (parts.length !== 3) {
-      throw new Error(`Invalid route string format: ${routeString}`);
+    
+    // 支持两种格式：provider.model.key 或 provider.model（默认使用default key）
+    if (parts.length === 2) {
+      // 新格式：provider.model，使用default作为key
+      const [providerId, modelId] = parts;
+      return {
+        providerId,
+        modelId,
+        keyId: 'default',
+        actualKey: 'default', // 将由AuthFileResolver解析
+        inputProtocol: 'openai',
+        outputProtocol: 'openai'
+      };
+    } else if (parts.length === 3) {
+      // 旧格式：provider.model.key
+      const [providerId, modelId, keyId] = parts;
+      return {
+        providerId,
+        modelId,
+        keyId,
+        actualKey: keyId, // 将由AuthFileResolver解析
+        inputProtocol: 'openai',
+        outputProtocol: 'openai'
+      };
+    } else {
+      throw new Error(`Invalid route string format: ${routeString}. Expected format: provider.model or provider.model.key`);
     }
-
-    const [providerId, modelId, keyId] = parts;
-
-    return {
-      providerId,
-      modelId,
-      keyId,
-      actualKey: keyId, // 将由AuthFileResolver解析
-      inputProtocol: 'openai', // 默认值
-      outputProtocol: 'openai' // 默认值
-    };
   }
 
   /**
@@ -49,7 +62,7 @@ export class RouteTargetParser {
     return (
       target.providerId.length > 0 &&
       target.modelId.length > 0 &&
-      target.keyId.length > 0 &&
+      target.keyId.length > 0 && // keyId现在总是存在，因为两段式格式会设置default
       target.inputProtocol.length > 0 &&
       target.outputProtocol.length > 0
     );

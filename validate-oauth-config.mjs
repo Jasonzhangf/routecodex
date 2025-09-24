@@ -10,8 +10,7 @@ import path from 'path';
 
 const CONFIG_FILES = [
   'config/oauth-providers.json',
-  'config/merged-config.5506.json',
-  'config/merged-config.5507.json'
+  'config/merged-config.json'
 ];
 
 const REQUIRED_OAUTH_FIELDS = {
