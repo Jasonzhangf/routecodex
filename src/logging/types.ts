@@ -253,6 +253,24 @@ export interface LogAnalysisResult {
 }
 
 /**
+ * 索引状态
+ */
+export interface IndexStatus {
+  /** 索引名称 */
+  name: string;
+  /** 文档数量 */
+  documentCount: number;
+  /** 索引大小 */
+  size: number;
+  /** 最后检查时间 */
+  lastCheck: number;
+  /** 最后更新时间 */
+  lastUpdate: number;
+  /** 索引状态 */
+  status: 'active' | 'optimizing' | 'error';
+}
+
+/**
  * 常量定义
  */
 export const LOGGING_CONSTANTS = {

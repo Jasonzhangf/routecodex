@@ -13,7 +13,7 @@ import type {
   LogQueryResult, 
   LogExportOptions, 
   LogStats,
-  LogAnalysisResult 
+  LogAnalysisResult
 } from './types.js';
 
 /**
