@@ -4,7 +4,8 @@
  */
 
 import { EventEmitter } from 'events';
-import { DebugEventBus } from '../utils/external-mocks.js';
+import { DebugEventBus, DebugCenter } from '../utils/external-mocks.js';
+import { DebugEnhancementManager } from '../modules/debug/debug-enhancement-manager.js';
 
 /**
  * 模块基本信息接口
@@ -37,7 +38,11 @@ export abstract class BaseModule extends EventEmitter {
   protected status: ModuleStatus = ModuleStatus.STOPPED;
   protected isRunning: boolean = false;
 
-  // Debug enhancement properties
+  // Debug enhancement properties - unified approach
+  private debugEnhancementManager: DebugEnhancementManager | null = null;
+  private debugEnhancement: any = null;
+
+  // Legacy debug properties for backward compatibility
   public debugEventBus: DebugEventBus | null = null;
   public isDebugEnhanced = false;
   public moduleMetrics: Map<string, any> = new Map();
@@ -49,7 +54,10 @@ export abstract class BaseModule extends EventEmitter {
     super();
     this.info = info;
 
-    // Initialize debug enhancements
+    // Initialize unified debug enhancements
+    this.initializeUnifiedDebugEnhancements();
+
+    // Initialize legacy debug enhancements for backward compatibility
     this.initializeDebugEnhancements();
   }
 
@@ -193,6 +201,32 @@ export abstract class BaseModule extends EventEmitter {
   }
 
   /**
+   * Initialize unified debug enhancements
+   */
+  private initializeUnifiedDebugEnhancements(): void {
+    try {
+      const debugCenter = DebugCenter.getInstance();
+      this.debugEnhancementManager = DebugEnhancementManager.getInstance(debugCenter);
+
+      // Register enhancement for this module
+      this.debugEnhancement = this.debugEnhancementManager.registerEnhancement(this.info.id, {
+        enabled: true,
+        consoleLogging: true,
+        debugCenter: true,
+        performanceTracking: true,
+        requestLogging: true,
+        errorTracking: true,
+        maxHistorySize: this.maxHistorySize
+      });
+
+      console.log(`BaseModule unified debug enhancements initialized for ${this.info.id}`);
+    } catch (error) {
+      console.warn(`Failed to initialize BaseModule unified debug enhancements for ${this.info.id}:`, error);
+      this.debugEnhancementManager = null;
+    }
+  }
+
+  /**
    * Initialize debug enhancements
    */
   public initializeDebugEnhancements(): void {
@@ -207,9 +241,18 @@ export abstract class BaseModule extends EventEmitter {
   }
 
   /**
-   * Record module metric
+   * Record module metric - unified approach
    */
   public recordModuleMetric(operation: string, data: any): void {
+    // Use unified debug enhancement if available
+    if (this.debugEnhancement && this.debugEnhancement.recordMetric) {
+      this.debugEnhancement.recordMetric(operation, Date.now(), {
+        moduleId: this.info.id,
+        operation
+      });
+    }
+
+    // Fallback to legacy implementation
     if (!this.moduleMetrics.has(operation)) {
       this.moduleMetrics.set(operation, {
         values: [],
@@ -228,9 +271,19 @@ export abstract class BaseModule extends EventEmitter {
   }
 
   /**
-   * Add to operation history
+   * Add to operation history - unified approach
    */
   public addToOperationHistory(operation: any): void {
+    // Use unified debug enhancement if available
+    if (this.debugEnhancement && this.debugEnhancement.addRequestToHistory) {
+      this.debugEnhancement.addRequestToHistory({
+        ...operation,
+        moduleId: this.info.id,
+        type: 'operation'
+      });
+    }
+
+    // Fallback to legacy implementation
     this.operationHistory.push(operation);
 
     // Keep only recent history
@@ -240,9 +293,19 @@ export abstract class BaseModule extends EventEmitter {
   }
 
   /**
-   * Add to error history
+   * Add to error history - unified approach
    */
   public addToErrorHistory(error: any): void {
+    // Use unified debug enhancement if available
+    if (this.debugEnhancement && this.debugEnhancement.addErrorToHistory) {
+      this.debugEnhancement.addErrorToHistory({
+        ...error,
+        moduleId: this.info.id,
+        timestamp: Date.now()
+      });
+    }
+
+    // Fallback to legacy implementation
     this.errorHistory.push(error);
 
     // Keep only recent history
@@ -277,7 +340,7 @@ export abstract class BaseModule extends EventEmitter {
   }
 
   /**
-   * Get debug status with enhanced information
+   * Get debug status with enhanced information - unified approach
    */
   getDebugStatus(): any {
     const baseStatus = {
@@ -289,6 +352,21 @@ export abstract class BaseModule extends EventEmitter {
       isEnhanced: this.isDebugEnhanced
     };
 
+    // Add unified debug information if available
+    if (this.debugEnhancementManager) {
+      return {
+        ...baseStatus,
+        unifiedDebugInfo: this.debugEnhancementManager.getSystemDebugStatus(),
+        enhancementInfo: this.debugEnhancement ? {
+          isActive: this.debugEnhancement.isActive,
+          metricsCount: this.debugEnhancement.metrics.size,
+          requestHistoryCount: this.debugEnhancement.requestHistory.length,
+          errorHistoryCount: this.debugEnhancement.errorHistory.length
+        } : null
+      };
+    }
+
+    // Fallback to legacy implementation
     if (!this.isDebugEnhanced) {
       return baseStatus;
     }

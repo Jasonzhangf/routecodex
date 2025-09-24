@@ -6,7 +6,8 @@
 import type { PipelineConfig, ModuleConfig } from '../interfaces/pipeline-interfaces.js';
 import { SmartRequestFormatDetector, LLMSwitchSelector } from '../modules/llmswitch/request-format-detector.js';
 import { detectRequestFormat } from '../modules/llmswitch/anthropic-openai-config.js';
-import { DebugEventBus } from '../../../utils/external-mocks.js';
+import { DebugEventBus, DebugCenter } from '../../../utils/external-mocks.js';
+import { DebugEnhancementManager } from '../../debug/debug-enhancement-manager.js';
 
 /**
  * 智能流水线配置
@@ -272,7 +273,11 @@ export class SmartPipelineFactory {
 export class DynamicPipelineManager {
   private pipelineConfigs: Map<string, SmartPipelineConfig> = new Map();
 
-  // Debug enhancement properties
+  // Debug enhancement properties - unified approach
+  private debugEnhancementManager: DebugEnhancementManager | null = null;
+  private debugEnhancement: any = null;
+
+  // Legacy debug properties for backward compatibility
   private debugEventBus: DebugEventBus | null = null;
   private isDebugEnhanced = false;
   private managerMetrics: Map<string, any> = new Map();
@@ -280,7 +285,37 @@ export class DynamicPipelineManager {
   private maxHistorySize = 50;
 
   constructor() {
+    // Initialize unified debug enhancements
+    this.initializeUnifiedDebugEnhancements();
+
+    // Initialize legacy debug enhancements for backward compatibility
     this.initializeDebugEnhancements();
+  }
+
+  /**
+   * Initialize unified debug enhancements
+   */
+  private initializeUnifiedDebugEnhancements(): void {
+    try {
+      const debugCenter = DebugCenter.getInstance();
+      this.debugEnhancementManager = DebugEnhancementManager.getInstance(debugCenter);
+
+      // Register enhancement for this manager
+      this.debugEnhancement = this.debugEnhancementManager.registerEnhancement('dynamic-pipeline-manager', {
+        enabled: true,
+        consoleLogging: true,
+        debugCenter: true,
+        performanceTracking: true,
+        requestLogging: true,
+        errorTracking: true,
+        maxHistorySize: this.maxHistorySize
+      });
+
+      console.log('Dynamic Pipeline Manager unified debug enhancements initialized');
+    } catch (error) {
+      console.warn('Failed to initialize Dynamic Pipeline Manager unified debug enhancements:', error);
+      this.debugEnhancementManager = null;
+    }
   }
 
   /**
@@ -303,7 +338,16 @@ export class DynamicPipelineManager {
   registerPipelineConfig(config: SmartPipelineConfig): void {
     const startTime = Date.now();
 
-    // Debug: Record config registration
+    // Debug: Record config registration - unified approach
+    if (this.debugEnhancement && this.debugEnhancement.recordMetric) {
+      this.debugEnhancement.recordMetric('config_registration', Date.now() - startTime, {
+        configId: config.id,
+        endpointType: config.endpointType,
+        action: 'register_pipeline_config'
+      });
+    }
+
+    // Fallback to legacy implementation
     if (this.isDebugEnhanced) {
       this.recordManagerMetric('config_registration', {
         configId: config.id,
@@ -319,7 +363,17 @@ export class DynamicPipelineManager {
 
     this.pipelineConfigs.set(config.id, config);
 
-    // Debug: Record registration completion
+    // Debug: Record registration completion - unified approach
+    if (this.debugEnhancement && this.debugEnhancement.recordMetric) {
+      const totalTime = Date.now() - startTime;
+      this.debugEnhancement.recordMetric('config_registration_complete', totalTime, {
+        configId: config.id,
+        success: true,
+        action: 'register_pipeline_config_complete'
+      });
+    }
+
+    // Fallback to legacy implementation
     if (this.isDebugEnhanced) {
       const totalTime = Date.now() - startTime;
       this.recordManagerMetric('config_registration_complete', {

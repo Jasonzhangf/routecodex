@@ -52,60 +52,95 @@ export class UserConfigParser {
   }
 
   /**
-   * 解析路由目标池
+   * 解析路由目标池 - 全别名化版本
+   * 所有key都使用别名，不再使用真实key
    */
   private parseRouteTargets(routingConfig: Record<string, string[]>): RouteTargetPool {
     const routeTargets: RouteTargetPool = {};
 
     for (const [routeName, targets] of Object.entries(routingConfig)) {
-      routeTargets[routeName] = targets.map((target: string) => {
-        const parts = target.split('.');
+      routeTargets[routeName] = [];
+      
+      targets.forEach((target: string) => {
+        // 更智能的解析：先找到provider，然后找到model，剩下的就是key别名
+        const firstDotIndex = target.indexOf('.');
+        if (firstDotIndex === -1) {
+          throw new Error(`Invalid route target format: ${target}`);
+        }
+        
+        const providerId = target.substring(0, firstDotIndex);
+        const remaining = target.substring(firstDotIndex + 1);
+        
+        // 检查是否有provider配置
+        const providerConfig = this.providerConfigs[providerId];
+        if (!providerConfig) {
+          throw new Error(`Unknown provider: ${providerId}`);
+        }
+        
+        // 在剩余的字符串中找到model部分
+        let modelId = '';
+        let keyAlias = '';
+        
+        // 尝试匹配已知的model名称
+        const knownModels = Object.keys(providerConfig.models || {});
+        let foundModel = null;
+        
+        for (const model of knownModels) {
+          if (remaining.startsWith(model + '.') || remaining === model) {
+            foundModel = model;
+            break;
+          }
+        }
+        
+        if (foundModel) {
+          modelId = foundModel;
+          const afterModel = remaining.substring(modelId.length);
+          if (afterModel.startsWith('.')) {
+            keyAlias = afterModel.substring(1); // 去掉前面的点
+          }
+        } else {
+          // 如果没有找到已知model，使用简单的启发式方法
+          // 假设最后一个点后面的是key，前面的是model
+          const lastDotIndex = remaining.lastIndexOf('.');
+          if (lastDotIndex === -1) {
+            // 没有key部分，整个剩余的都是model
+            modelId = remaining;
+            keyAlias = '';
+          } else {
+            modelId = remaining.substring(0, lastDotIndex);
+            keyAlias = remaining.substring(lastDotIndex + 1);
+          }
+        }
         
         // 支持两种格式：
-        // 1. provider.model → 根据key数量决定行为
-        //    - 只有一个key：使用那个key（不指定key）
-        //    - 多个key：使用所有key（通配符）
-        // 2. provider.model.key → 只使用指定key
-        if (parts.length === 2) {
-          // provider.model格式：根据key数量决定行为
-          const [providerId, modelId] = parts;
-          const providerKeys = this.getProviderKeys(providerId);
+        // 1. provider.model → 展开为所有key（使用顺序别名：key1, key2...）
+        // 2. provider.model.key1/key2 → 使用指定顺序别名
+        if (!keyAlias) {
+          // provider.model格式：展开为所有key（使用顺序别名）
+          const keyAliases = this.getProviderKeyAliases(providerId);
           
-          if (providerKeys.length === 1) {
-            // 只有一个key：使用那个key，不指定key字段
-            const keyId = providerKeys[0];
-            return {
-              providerId,
-              modelId,
-              keyId, // 使用具体的key
-              actualKey: this.resolveActualKey(providerId, keyId),
-              inputProtocol: 'openai',
-              outputProtocol: 'openai'
-            };
-          } else {
-            // 多个key：使用通配符表示所有key
-            return {
-              providerId,
-              modelId,
-              keyId: '*', // 通配符表示使用所有key
-              actualKey: '*', // 通配符表示使用所有key
-              inputProtocol: 'openai',
-              outputProtocol: 'openai'
-            };
-          }
-        } else if (parts.length === 3) {
-          // provider.model.key格式：只使用指定key
-          const [providerId, modelId, keyId] = parts;
-          return {
+          // 为每个key生成顺序别名目标
+          return keyAliases.map(keyAlias => ({
             providerId,
             modelId,
-            keyId,
-            actualKey: this.resolveActualKey(providerId, keyId),
+            keyId: keyAlias, // 使用顺序别名（key1, key2...）
+            actualKey: this.resolveActualKey(providerId, this.resolveKeyByAlias(providerId, keyAlias)),
             inputProtocol: 'openai',
             outputProtocol: 'openai'
-          };
+          }));
         } else {
-          throw new Error(`Invalid route target format: ${target}`);
+          // provider.model.key1/key2格式：使用指定顺序别名
+          // 验证顺序别名是否有效
+          const realKey = this.resolveKeyByAlias(providerId, keyAlias);
+          
+          return [{
+            providerId,
+            modelId,
+            keyId: keyAlias, // 使用顺序别名
+            actualKey: this.resolveActualKey(providerId, realKey),
+            inputProtocol: 'openai',
+            outputProtocol: 'openai'
+          }];
         }
       });
     }
@@ -139,11 +174,13 @@ export class UserConfigParser {
 
     for (const [providerId, providerConfig] of Object.entries(virtualRouterConfig.providers)) {
       for (const [modelId, modelConfig] of Object.entries(providerConfig.models)) {
-        // 为每个具体的key创建配置
-        for (const keyId of providerConfig.apiKey) {
-          const configKey = `${providerId}.${modelId}.${keyId}`;
-          const resolvedKey = this.resolveActualKey(providerId, keyId);
-          const hasAuthMapping = this.hasAuthMapping(providerId, keyId);
+        // 为每个key别名创建配置（使用顺序别名：key1, key2...）
+        const keyAliases = this.getProviderKeyAliases(providerId);
+        for (const keyAlias of keyAliases) {
+          const configKey = `${providerId}.${modelId}.${keyAlias}`; // 使用key别名作为配置键
+          const realKey = this.resolveKeyByAlias(providerId, keyAlias); // 解析真实key
+          const resolvedKey = this.resolveActualKey(providerId, realKey);
+          const hasAuthMapping = this.hasAuthMapping(providerId, realKey);
           // compatibility selection: model-level overrides provider-level
           const modelCompat = (modelConfig as any)?.compatibility;
           const providerCompat = (providerConfig as any)?.compatibility;
@@ -246,7 +283,7 @@ export class UserConfigParser {
                 maxTokens: modelConfig.maxTokens || 32000
               },
               keyConfig: {
-                keyId,
+                keyId: keyAlias, // 使用key别名
                 actualKey: resolvedKey,
                 keyType: hasAuthMapping ? 'authFile' : 'apiKey'
               },
@@ -599,13 +636,46 @@ export class UserConfigParser {
   }
 
   /**
-   * 获取provider的所有key
+   * 获取provider的key别名映射
+   * 自动生成顺序别名：key1, key2, key3... 映射到真实key
+   * 同时支持用户自定义别名
    */
-  private getProviderKeys(providerId: string): string[] {
+  private getKeyAliasMapping(providerId: string): Record<string, string> {
     const providerConfig = this.providerConfigs[providerId];
     if (!providerConfig || !providerConfig.apiKey) {
-      return ['default']; // 默认fallback
+      return { 'key1': 'default' }; // 默认fallback
     }
-    return providerConfig.apiKey;
+    
+    const mapping: Record<string, string> = {};
+    
+    // 为每个真实key生成顺序别名：key1, key2, key3...
+    providerConfig.apiKey.forEach((realKey: string, index: number) => {
+      const alias = `key${index + 1}`;
+      mapping[alias] = realKey;
+    });
+    
+    return mapping;
+  }
+
+  /**
+   * 获取provider的所有key别名（顺序别名）
+   */
+  private getProviderKeyAliases(providerId: string): string[] {
+    const mapping = this.getKeyAliasMapping(providerId);
+    return Object.keys(mapping);
+  }
+
+  /**
+   * 通过别名解析真实key
+   */
+  private resolveKeyByAlias(providerId: string, keyAlias: string): string {
+    const mapping = this.getKeyAliasMapping(providerId);
+    const realKey = mapping[keyAlias];
+    
+    if (!realKey) {
+      throw new Error(`Key alias '${keyAlias}' not found for provider '${providerId}'. Available aliases: ${Object.keys(mapping).join(', ')}`);
+    }
+    
+    return realKey;
   }
 }

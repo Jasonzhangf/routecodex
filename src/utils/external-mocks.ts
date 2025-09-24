@@ -104,6 +104,77 @@ export class ErrorHandlerRegistry {
   }
 }
 
+/**
+ * Mock DebugCenter implementation
+ */
+export class DebugCenter {
+  private static instance: DebugCenter;
+  private debugLogs: any[] = [];
+
+  static getInstance(): DebugCenter {
+    if (!DebugCenter.instance) {
+      DebugCenter.instance = new DebugCenter();
+    }
+    return DebugCenter.instance;
+  }
+
+  logDebug(module: string, message: string, data?: any): void {
+    const logEntry = {
+      timestamp: Date.now(),
+      module,
+      message,
+      data,
+      level: 'debug'
+    };
+    this.debugLogs.push(logEntry);
+    console.log(`[DebugCenter] ${module}: ${message}`, data || '');
+  }
+
+  logError(module: string, error: any, context?: any): void {
+    const logEntry = {
+      timestamp: Date.now(),
+      module,
+      error: error.message || String(error),
+      context,
+      level: 'error'
+    };
+    this.debugLogs.push(logEntry);
+    console.error(`[DebugCenter] ${module}:`, error, context || '');
+  }
+
+  logModule(module: string, action: string, data?: any): void {
+    const logEntry = {
+      timestamp: Date.now(),
+      module,
+      action,
+      data,
+      level: 'module'
+    };
+    this.debugLogs.push(logEntry);
+    console.log(`[DebugCenter] ${module}:${action}`, data || '');
+  }
+
+  processDebugEvent(event: any): void {
+    this.debugLogs.push({
+      timestamp: Date.now(),
+      event,
+      level: 'event'
+    });
+    console.log('[DebugCenter] Event:', event);
+  }
+
+  getLogs(module?: string): any[] {
+    if (module) {
+      return this.debugLogs.filter(log => log.module === module);
+    }
+    return [...this.debugLogs];
+  }
+
+  clearLogs(): void {
+    this.debugLogs.length = 0;
+  }
+}
+
 // Mock type definitions for compatibility
 export interface ErrorContext {
   module?: string;
