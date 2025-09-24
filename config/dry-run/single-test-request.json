@@ -1,0 +1,30 @@
+{
+  "data": {
+    "model": "gpt-4",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Test load balancer with single provider request"
+      }
+    ],
+    "temperature": 0.7,
+    "max_tokens": 500
+  },
+  "route": {
+    "providerId": "lmstudio",
+    "modelId": "llama3-8b-instruct",
+    "requestId": "single-provider-test-001",
+    "timestamp": 1642684800000
+  },
+  "metadata": {
+    "source": "load-balancer-test",
+    "transformations": [],
+    "processingTime": 0
+  },
+  "debug": {
+    "enabled": true,
+    "stages": {
+      "load-balancer": true
+    }
+  }
+}

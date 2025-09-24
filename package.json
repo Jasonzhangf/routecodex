@@ -1,7 +1,7 @@
 {
   "name": "routecodex",
   "version": "0.2.7",
-  "description": "Multi-provider OpenAI proxy server",
+  "description": "Multi-provider OpenAI proxy server with native dry-run capabilities",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -12,8 +12,20 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./adv-base-module": {
+      "import": "./sharedmodule/rcc-basemodule-adv/adv-base-module.js",
+      "types": "./sharedmodule/rcc-basemodule-adv/types.js"
     }
   },
+  "files": [
+    "dist/",
+    "sharedmodule/rcc-basemodule-adv/",
+    "config/",
+    "scripts/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "npm run clean && tsc",
     "build:watch": "tsc --watch",
@@ -21,11 +33,14 @@
     "dev": "tsx watch src/index.ts",
     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
     "test:watch": "NODE_OPTIONS=\"--experimental-vm-modules\" jest --watch",
+    "test:adv-module": "NODE_OPTIONS=\"--experimental-vm-modules\" jest tests/adv-base-module-*.test.js",
+    "test:dry-run": "npm run test:adv-module && node tests/basic-dry-run.mjs",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
     "clean": "rm -rf dist",
     "prebuild": "echo 'Skipping lint for now'",
     "prepare": "npm run build",
+    "prepublishOnly": "npm run build && npm test",
     "install:global": "./scripts/simple-install.sh",
     "install:quick": "./scripts/simple-install.sh",
     "install:skip-tests": "./scripts/simple-install.sh",
@@ -49,6 +64,14 @@
     "rcc-debugcenter": "^0.1.4",
     "rcc-errorhandling": "^1.0.10",
     "socket.io": "^4.8.1"
+  },
+  "peerDependencies": {
+    "@jest/globals": "^30.1.2"
+  },
+  "peerDependenciesMeta": {
+    "@jest/globals": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@jest/globals": "^30.1.2",

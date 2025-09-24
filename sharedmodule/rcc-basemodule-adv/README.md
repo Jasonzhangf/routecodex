@@ -1,52 +1,77 @@
-# RCC BaseModule Advanced (with native Dry-Run)
+# RCC4 Advanced BaseModule (AdvBaseModule)
 
-This shared module provides a drop-in, migration-friendly advanced base class that extends the project’s existing BaseModule and adds native dry-run capabilities. It is designed to be adopted module-by-module without breaking the current code.
+An advanced base module that extends the standard BaseModule with native dry-run capabilities for the RCC4 pipeline architecture.
 
-Goals
-- Native dry-run support at the base-class level, without changing the upstream rcc-basemodule package.
-- Minimal, safe integration: existing modules can gradually migrate by extending AdvBaseModule instead of BaseModule.
-- RCC4-aligned: Provider layer keeps zero transformation; dry-run only wraps execution and recording.
+## Features
 
-Key Features
-- Module-level dry-run config (enable/disable, verbosity, sensitive fields)
-- Operation wrapper `runWithDryRun` for request/response/internal phases
-- Breakpoint behaviors: continue | pause | terminate | no-propagation
-- Hooks for children to override:
-  - `executeNodeDryRun` | `validateOutput` | `estimatePerformance` | `simulateError` | `generateExpectedOutput`
-- Debug/Recording integration hooks (publish events, write logs, redact sensitive data)
+- 🔄 **Native Dry-Run Support**: Built-in dry-run functionality without external dependencies
+- 🔒 **Backward Compatible**: Drop-in replacement for existing BaseModule
+- ⚙️ **Highly Configurable**: Multiple execution modes and breakpoint behaviors
+- 📊 **Performance Metrics**: Built-in performance estimation and validation
+- 🚨 **Error Simulation**: Test error scenarios safely
+- 🛡️ **Security**: Automatic sensitive data redaction
+- 🧪 **Testing Ready**: Comprehensive test utilities and validation
 
-Usage
-1) Import and extend:
-```ts
-import { AdvBaseModule } from '../../sharedmodule/rcc-basemodule-adv/index.js';
+## Installation
 
-export class MyModule extends AdvBaseModule {
-  async initialize() {
-    await super.initialize();
-    this.setDryRunMode(true, { verbosity: 'normal' });
-  }
+```bash
+npm install rcc-basemodule-adv
+```
 
-  async processIncoming(request: any) {
-    return this.runWithDryRun({
-      opName: 'processIncoming',
-      phase: 'process',
-      direction: 'incoming'
-    }, request, async () => {
-      // Existing logic here
-      return { ok: true };
-    });
+## Quick Start
+
+```typescript
+import { AdvBaseModule } from 'rcc-basemodule-adv';
+
+class MyModule extends AdvBaseModule {
+  async processIncoming(request: any): Promise<any> {
+    return this.runWithDryRun(
+      { opName: 'processIncoming', phase: 'request', direction: 'incoming' },
+      request,
+      async () => {
+        // Your processing logic
+        return this.transformRequest(request);
+      },
+      { nodeId: this.id, nodeType: this.type }
+    );
   }
 }
 ```
 
-2) Optional: override hooks to provide richer dry-run outputs
-```ts
-protected async executeNodeDryRun(input: any, ctx: DryRunContext) {
-  const expected = await this.generateExpectedOutput(input, this.getModuleType());
-  const perf = await this.estimatePerformance(input);
-  return this.createNodeDryRunResult(ctx, input, expected, 'success', [], perf);
-}
+## Configuration
+
+```typescript
+const module = new MyModule();
+
+// Enable dry-run
+module.setDryRunMode(true);
+
+// Configure node behavior
+module.setNodeDryRunConfig('my-module', {
+  enabled: true,
+  mode: 'full-analysis',
+  breakpointBehavior: 'continue',
+  verbosity: 'normal'
+});
 ```
 
-3) Migrate module-by-module to replace BaseModule inheritance with AdvBaseModule.
+## Dry-Run Modes
 
+- **output-validation**: Validates expected output against rules
+- **full-analysis**: Complete dry-run with performance estimation
+- **error-simulation**: Simulates error conditions for testing
+
+## Breakpoint Behaviors
+
+- **continue**: Execute dry-run, then continue with real operation
+- **no-propagation**: Only execute dry-run, skip real operation
+- **pause**: Pause execution for inspection
+- **terminate**: Stop execution chain after dry-run
+
+## API Reference
+
+See the main routecodex documentation for detailed API reference and migration guide.
+
+## License
+
+MIT

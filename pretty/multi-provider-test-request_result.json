@@ -1,12 +1,12 @@
 {
-  "input": "/Users/fanzhang/Documents/github/routecodex/test-data/sample-request.json",
+  "input": "/Users/fanzhang/Documents/github/routecodex/config/dry-run/multi-provider-test-request.json",
   "result": {
     "mode": "dry-run",
     "requestSummary": {
-      "id": "test-request-001",
+      "id": "lb-test-request-001",
       "type": "pipeline-node-dry-run",
-      "timestamp": "2025-09-24T07:04:19.656Z",
-      "pipelineId": "batch-pipeline",
+      "timestamp": "2025-09-24T07:29:07.966Z",
+      "pipelineId": "load-balancer-dry-run",
       "dryRunNodeCount": 0
     },
     "extendedSummary": {
@@ -14,8 +14,8 @@
       "hasSimulatedContext": true
     },
     "routingDecision": {
-      "requestId": "test-request-001",
-      "routeName": "batch-pipeline",
+      "requestId": "lb-test-request-001",
+      "routeName": "load-balancer-dry-run",
       "selectedTarget": {
         "providerId": "unknown",
         "modelId": "unknown",
@@ -29,7 +29,7 @@
         "selectedWeight": 0,
         "reasoning": "All nodes dry-run execution with simulated input"
       },
-      "timestamp": "2025-09-24T07:04:19.657Z",
+      "timestamp": "2025-09-24T07:29:07.966Z",
       "decisionTimeMs": 0
     },
     "fieldConversion": {
@@ -49,8 +49,8 @@
       "simulationUsed": true
     },
     "executionPlan": {
-      "planId": "plan_batch-pipeline_1758697459656",
-      "pipelineId": "batch-pipeline",
+      "planId": "plan_load-balancer-dry-run_1758698947965",
+      "pipelineId": "load-balancer-dry-run",
       "dryRunNodes": [],
       "executionOrder": [],
       "breakpoints": [],
@@ -94,5 +94,5 @@
       "contextPropagation": true
     }
   },
-  "timestamp": "2025-09-24T07:04:19.657Z"
+  "timestamp": "2025-09-24T07:29:07.966Z"
 }

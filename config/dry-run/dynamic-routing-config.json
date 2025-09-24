@@ -1,0 +1,177 @@
+{
+  "pipelineId": "dynamic-routing-dry-run",
+  "description": "Dynamic routing classification and dispatching system dry run test",
+  "mode": "dry-run",
+  "dynamicRouting": {
+    "enabled": true,
+    "classificationMode": "auto",
+    "routingCategories": {
+      "default": {
+        "description": "Standard general purpose requests",
+        "targetProviders": ["lmstudio", "qwen"],
+        "models": ["llama3-8b-instruct", "qwen3-coder-plus"],
+        "priority": 1,
+        "maxTokens": 8192
+      },
+      "longcontext": {
+        "description": "Long text processing requests",
+        "targetProviders": ["qwen"],
+        "models": ["qwen3-coder-plus"],
+        "priority": 2,
+        "maxTokens": 32768,
+        "threshold": {
+          "tokenCount": 16000,
+          "charCount": 64000
+        }
+      },
+      "thinking": {
+        "description": "Complex reasoning and problem solving",
+        "targetProviders": ["lmstudio", "qwen"],
+        "models": ["llama3-70b-instruct", "qwen3-coder-plus"],
+        "priority": 3,
+        "indicators": [
+          "analyze", "reason", "solve", "explain", "compare", "evaluate",
+          "complex", "difficult", "challenging", "detailed", "comprehensive"
+        ]
+      },
+      "background": {
+        "description": "Background processing and automation",
+        "targetProviders": ["lmstudio"],
+        "models": ["llama3-8b-instruct"],
+        "priority": 4,
+        "timeout": 60000
+      },
+      "websearch": {
+        "description": "Web search and real-time information",
+        "targetProviders": ["qwen"],
+        "models": ["qwen3-coder-plus"],
+        "priority": 5,
+        "indicators": [
+          "search", "find", "latest", "current", "recent", "news", "information",
+          "weather", "price", "stock", "today", "now"
+        ]
+      },
+      "vision": {
+        "description": "Image and visual processing",
+        "targetProviders": ["lmstudio"],
+        "models": ["llama3-8b-instruct"],
+        "priority": 6,
+        "indicators": [
+          "image", "picture", "photo", "visual", "see", "look", "describe",
+          "analyze image", "what do you see", "screenshot", "diagram"
+        ]
+      },
+      "coding": {
+        "description": "Code generation and programming",
+        "targetProviders": ["lmstudio", "qwen"],
+        "models": ["llama3-8b-instruct", "qwen3-coder-plus"],
+        "priority": 7,
+        "indicators": [
+          "code", "function", "program", "algorithm", "debug", "implement",
+          "javascript", "python", "typescript", "java", "cpp", "sql"
+        ]
+      }
+    }
+  },
+  "providers": {
+    "lmstudio": {
+      "type": "lmstudio",
+      "baseUrl": "http://localhost:1234",
+      "enabled": true,
+      "health": "healthy",
+      "models": {
+        "llama3-8b-instruct": {
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "weight": 0.6,
+          "specialties": ["coding", "vision", "background"],
+          "performance": {
+            "avgResponseTime": 150,
+            "errorRate": 0.02,
+            "successRate": 0.98
+          }
+        },
+        "llama3-70b-instruct": {
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "weight": 0.4,
+          "specialties": ["thinking", "longcontext"],
+          "performance": {
+            "avgResponseTime": 300,
+            "errorRate": 0.05,
+            "successRate": 0.95
+          }
+        }
+      }
+    },
+    "qwen": {
+      "type": "qwen-provider",
+      "baseUrl": "https://chat.qwen.ai",
+      "enabled": true,
+      "health": "healthy",
+      "models": {
+        "qwen3-coder-plus": {
+          "maxTokens": 32768,
+          "temperature": 0.7,
+          "weight": 0.8,
+          "specialties": ["coding", "longcontext", "websearch", "thinking"],
+          "performance": {
+            "avgResponseTime": 200,
+            "errorRate": 0.01,
+            "successRate": 0.99
+          }
+        }
+      }
+    }
+  },
+  "loadBalancer": {
+    "strategy": "weighted",
+    "healthCheck": {
+      "enabled": true,
+      "interval": 30000,
+      "timeout": 5000,
+      "retries": 3
+    },
+    "failover": {
+      "enabled": true,
+      "maxRetries": 3,
+      "backoffMultiplier": 2
+    },
+    "circuitBreaker": {
+      "enabled": true,
+      "failureThreshold": 5,
+      "recoveryTimeout": 60000
+    }
+  },
+  "dryRun": {
+    "simulationMode": "full",
+    "nodeConfigs": {
+      "llm-switch": {
+        "enabled": true,
+        "mode": "dry-run",
+        "simulateRouting": true,
+        "simulateClassification": true,
+        "classifyRequests": true
+      },
+      "compatibility": {
+        "enabled": true,
+        "mode": "dry-run",
+        "simulateTransformation": true
+      },
+      "provider": {
+        "enabled": true,
+        "mode": "dry-run",
+        "simulateHttpRequest": true,
+        "simulateResponse": true
+      }
+    },
+    "metrics": {
+      "enabled": true,
+      "trackPerformance": true,
+      "trackRouting": true,
+      "trackClassification": true,
+      "trackLoadBalancing": true,
+      "trackErrors": true
+    }
+  }
+}

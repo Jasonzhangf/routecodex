@@ -1,0 +1,50 @@
+{
+  "name": "rcc-basemodule-adv",
+  "version": "0.0.1",
+  "description": "Advanced BaseModule with native dry-run capabilities for RCC4",
+  "type": "module",
+  "main": "adv-base-module.js",
+  "module": "adv-base-module.js",
+  "exports": {
+    ".": {
+      "import": "./adv-base-module.js",
+      "types": "./types.js"
+    },
+    "./types": {
+      "import": "./types.js",
+      "types": "./types.js"
+    }
+  },
+  "files": [
+    "adv-base-module.js",
+    "types.js",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "echo \"Error: run tests from root directory\" && exit 1"
+  },
+  "keywords": [
+    "rcc4",
+    "basemodule",
+    "dry-run",
+    "testing",
+    "debugging",
+    "pipeline",
+    "ai",
+    "proxy"
+  ],
+  "author": "RouteCodex Team",
+  "license": "MIT",
+  "peerDependencies": {
+    "rcc-basemodule": "^0.2.7"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jasonzhangf/routecodex.git",
+    "directory": "sharedmodule/rcc-basemodule-adv"
+  },
+  "bugs": {
+    "url": "https://github.com/Jasonzhangf/routecodex/issues"
+  },
+  "homepage": "https://github.com/Jasonzhangf/routecodex#readme"
+}

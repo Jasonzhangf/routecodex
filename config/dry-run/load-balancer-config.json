@@ -1,0 +1,96 @@
+{
+  "pipelineId": "load-balancer-dry-run",
+  "description": "Load balancer dry run configuration for testing multiple providers",
+  "mode": "dry-run",
+  "providers": {
+    "lmstudio": {
+      "type": "lmstudio",
+      "baseUrl": "http://localhost:1234",
+      "models": {
+        "llama3-8b-instruct": {
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "weight": 0.4,
+          "enabled": true
+        },
+        "llama3-70b-instruct": {
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "weight": 0.3,
+          "enabled": true
+        }
+      }
+    },
+    "qwen": {
+      "type": "qwen-provider",
+      "baseUrl": "https://chat.qwen.ai",
+      "models": {
+        "qwen3-coder-plus": {
+          "maxTokens": 32768,
+          "temperature": 0.7,
+          "weight": 0.2,
+          "enabled": true
+        }
+      }
+    },
+    "openai": {
+      "type": "openai",
+      "baseUrl": "https://api.openai.com/v1",
+      "models": {
+        "gpt-4": {
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "weight": 0.1,
+          "enabled": true
+        }
+      }
+    }
+  },
+  "loadBalancer": {
+    "strategy": "weighted",
+    "healthCheck": {
+      "enabled": true,
+      "interval": 30000,
+      "timeout": 5000,
+      "retries": 3
+    },
+    "failover": {
+      "enabled": true,
+      "maxRetries": 3,
+      "backoffMultiplier": 2
+    },
+    "circuitBreaker": {
+      "enabled": true,
+      "failureThreshold": 5,
+      "recoveryTimeout": 60000
+    }
+  },
+  "dryRun": {
+    "simulationMode": "full",
+    "nodeConfigs": {
+      "llm-switch": {
+        "enabled": true,
+        "mode": "dry-run",
+        "simulateRouting": true,
+        "simulateLoadBalancer": true
+      },
+      "compatibility": {
+        "enabled": true,
+        "mode": "dry-run",
+        "simulateTransformation": true
+      },
+      "provider": {
+        "enabled": true,
+        "mode": "dry-run",
+        "simulateHttpRequest": true,
+        "simulateResponse": true
+      }
+    },
+    "metrics": {
+      "enabled": true,
+      "trackPerformance": true,
+      "trackRouting": true,
+      "trackErrors": true
+    }
+  }
+}
