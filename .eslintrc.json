@@ -14,9 +14,44 @@
     "es2022": true
   },
   "rules": {
-    "@typescript-eslint/no-unused-vars": "error",
+    "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
     "@typescript-eslint/no-explicit-any": "warn",
-    "prefer-const": "error",
-    "no-var": "error"
-  }
+    "@typescript-eslint/ban-types": ["error", {
+      "types": {
+        "Function": false,
+        "Object": false,
+        "String": false,
+        "Number": false,
+        "Boolean": false
+      }
+    }],
+    "@typescript-eslint/no-duplicate-enum-values": "error",
+    "@typescript-eslint/ban-ts-comment": "warn",
+    "no-prototype-builtins": "error",
+    "no-useless-catch": "error",
+    "prefer-const": "warn",
+    "no-var": "error",
+    "no-case-declarations": "warn",
+    "@typescript-eslint/no-this-alias": ["error", { "allowDestructuring": true }],
+    "@typescript-eslint/no-var-requires": "warn",
+    "no-constant-condition": ["warn", { "checkLoops": false }],
+    "eqeqeq": "warn",
+    "curly": "warn",
+    "no-eval": "error",
+    "no-implied-eval": "error",
+    "no-new-func": "error",
+    "no-throw-literal": "error",
+    "no-unneeded-ternary": "warn",
+    "prefer-arrow-callback": "warn",
+    "prefer-template": "warn",
+    "yoda": "warn"
+  },
+  "ignorePatterns": [
+    "**/*.bak/**",
+    "**/*.bak",
+    "node_modules/**",
+    "dist/**",
+    "coverage/**",
+    "web-interface/node_modules/**"
+  ]
 }
