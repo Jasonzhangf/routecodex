@@ -4,6 +4,7 @@
  */
 
 import { EventEmitter } from 'events';
+import { DebugEventBus } from '../utils/external-mocks.js';
 
 /**
  * 模块基本信息接口
@@ -36,9 +37,20 @@ export abstract class BaseModule extends EventEmitter {
   protected status: ModuleStatus = ModuleStatus.STOPPED;
   protected isRunning: boolean = false;
 
+  // Debug enhancement properties
+  public debugEventBus: DebugEventBus | null = null;
+  public isDebugEnhanced = false;
+  public moduleMetrics: Map<string, any> = new Map();
+  public operationHistory: any[] = [];
+  public errorHistory: any[] = [];
+  public maxHistorySize = 50;
+
   constructor(info: ModuleInfo) {
     super();
     this.info = info;
+
+    // Initialize debug enhancements
+    this.initializeDebugEnhancements();
   }
 
   /**
@@ -178,5 +190,164 @@ export abstract class BaseModule extends EventEmitter {
       context,
       timestamp: new Date().toISOString()
     });
+  }
+
+  /**
+   * Initialize debug enhancements
+   */
+  public initializeDebugEnhancements(): void {
+    try {
+      this.debugEventBus = DebugEventBus.getInstance();
+      this.isDebugEnhanced = true;
+      console.log('BaseModule debug enhancements initialized');
+    } catch (error) {
+      console.warn('Failed to initialize BaseModule debug enhancements:', error);
+      this.isDebugEnhanced = false;
+    }
+  }
+
+  /**
+   * Record module metric
+   */
+  public recordModuleMetric(operation: string, data: any): void {
+    if (!this.moduleMetrics.has(operation)) {
+      this.moduleMetrics.set(operation, {
+        values: [],
+        lastUpdated: Date.now()
+      });
+    }
+
+    const metric = this.moduleMetrics.get(operation)!;
+    metric.values.push(data);
+    metric.lastUpdated = Date.now();
+
+    // Keep only last 50 measurements
+    if (metric.values.length > 50) {
+      metric.values.shift();
+    }
+  }
+
+  /**
+   * Add to operation history
+   */
+  public addToOperationHistory(operation: any): void {
+    this.operationHistory.push(operation);
+
+    // Keep only recent history
+    if (this.operationHistory.length > this.maxHistorySize) {
+      this.operationHistory.shift();
+    }
+  }
+
+  /**
+   * Add to error history
+   */
+  public addToErrorHistory(error: any): void {
+    this.errorHistory.push(error);
+
+    // Keep only recent history
+    if (this.errorHistory.length > this.maxHistorySize) {
+      this.errorHistory.shift();
+    }
+  }
+
+  /**
+   * Publish debug event
+   */
+  public publishDebugEvent(type: string, data: any): void {
+    if (!this.isDebugEnhanced || !this.debugEventBus) return;
+
+    try {
+      this.debugEventBus.publish({
+        sessionId: `session_${Date.now()}`,
+        moduleId: this.info.id,
+        operationId: type,
+        timestamp: Date.now(),
+        type: 'debug',
+        position: 'middle',
+        data: {
+          ...data,
+          moduleId: this.info.id,
+          source: 'base-module'
+        }
+      });
+    } catch (error) {
+      // Silent fail if debug event bus is not available
+    }
+  }
+
+  /**
+   * Get debug status with enhanced information
+   */
+  getDebugStatus(): any {
+    const baseStatus = {
+      moduleId: this.info.id,
+      name: this.info.name,
+      version: this.info.version,
+      status: this.status,
+      isRunning: this.isRunning,
+      isEnhanced: this.isDebugEnhanced
+    };
+
+    if (!this.isDebugEnhanced) {
+      return baseStatus;
+    }
+
+    return {
+      ...baseStatus,
+      debugInfo: this.getDebugInfo(),
+      moduleMetrics: this.getModuleMetrics(),
+      operationHistory: [...this.operationHistory.slice(-10)], // Last 10 operations
+      errorHistory: [...this.errorHistory.slice(-10)] // Last 10 errors
+    };
+  }
+
+  /**
+   * Get detailed debug information
+   */
+  public getDebugInfo(): any {
+    return {
+      moduleId: this.info.id,
+      name: this.info.name,
+      version: this.info.version,
+      enhanced: this.isDebugEnhanced,
+      eventBusAvailable: !!this.debugEventBus,
+      operationHistorySize: this.operationHistory.length,
+      errorHistorySize: this.errorHistory.length,
+      status: this.status,
+      isRunning: this.isRunning,
+      uptime: this.isRunning ? Date.now() - this.getStartTime() : 0
+    };
+  }
+
+  /**
+   * Get module metrics
+   */
+  public getModuleMetrics(): any {
+    const metrics: any = {};
+
+    for (const [operation, metric] of this.moduleMetrics.entries()) {
+      metrics[operation] = {
+        count: metric.values.length,
+        lastUpdated: metric.lastUpdated,
+        recentValues: metric.values.slice(-5) // Last 5 values
+      };
+    }
+
+    return metrics;
+  }
+
+  /**
+   * Get module debug info - helper method for consistency
+   */
+  getModuleDebugInfo(): any {
+    return this.getDebugInfo();
+  }
+
+  /**
+   * Check if module is initialized - helper method for consistency
+   */
+  isModuleInitialized(): boolean {
+    return this.isRunning;
   }
 }

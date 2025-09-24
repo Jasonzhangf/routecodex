@@ -26,13 +26,11 @@ export class VirtualRouterModule extends BaseModule {
   private unimplementedModule: RCCUnimplementedModule;
   private configRequestClassifier: ConfigRequestClassifier | null = null;
 
-  // Debug enhancement properties
-  private debugEventBus: DebugEventBus | null = null;
-  private isDebugEnhanced = false;
+  // Debug enhancement properties - now inherited from BaseModule
   private routingMetrics: Map<string, any> = new Map();
   private performanceMetrics: Map<string, any> = new Map();
   private requestHistory: any[] = [];
-  private maxHistorySize = 100;
+  // maxHistorySize is now inherited from BaseModule
   private classificationStats: Map<string, any> = new Map();
 
   constructor() {
@@ -52,22 +50,7 @@ export class VirtualRouterModule extends BaseModule {
       description: 'Handles unimplemented model requests with detailed debugging'
     });
 
-    // Initialize debug enhancements
-    this.initializeDebugEnhancements();
-  }
-
-  /**
-   * Initialize debug enhancements
-   */
-  private initializeDebugEnhancements(): void {
-    try {
-      this.debugEventBus = DebugEventBus.getInstance();
-      this.isDebugEnhanced = true;
-      console.log('Virtual Router debug enhancements initialized');
-    } catch (error) {
-      console.warn('Failed to initialize Virtual Router debug enhancements:', error);
-      this.isDebugEnhanced = false;
-    }
+    // Debug enhancements are now initialized in BaseModule constructor
   }
 
   /**
@@ -692,7 +675,7 @@ export class VirtualRouterModule extends BaseModule {
   /**
    * Record routing metric
    */
-  private recordRoutingMetric(operation: string, data: any): void {
+  public recordRoutingMetric(operation: string, data: any): void {
     if (!this.routingMetrics.has(operation)) {
       this.routingMetrics.set(operation, {
         values: [],
@@ -736,7 +719,7 @@ export class VirtualRouterModule extends BaseModule {
   /**
    * Add request to history
    */
-  private addToRequestHistory(request: any): void {
+  public addToRequestHistory(request: any): void {
     this.requestHistory.push(request);
 
     // Keep only recent history
@@ -748,7 +731,7 @@ export class VirtualRouterModule extends BaseModule {
   /**
    * Publish debug event
    */
-  private publishDebugEvent(type: string, data: any): void {
+  public publishDebugEvent(type: string, data: any): void {
     if (!this.isDebugEnhanced || !this.debugEventBus) return;
 
     try {
@@ -793,7 +776,7 @@ export class VirtualRouterModule extends BaseModule {
   /**
    * Get detailed debug information
    */
-  private getDebugInfo(): any {
+  public getDebugInfo(): any {
     return {
       routerId: 'virtual-router',
       enhanced: this.isDebugEnhanced,
@@ -830,7 +813,7 @@ export class VirtualRouterModule extends BaseModule {
   /**
    * Get routing metrics
    */
-  private getRoutingMetrics(): any {
+  public getRoutingMetrics(): any {
     const metrics: any = {};
 
     for (const [operation, metric] of this.routingMetrics.entries()) {

@@ -25,14 +25,12 @@ export class ConfigManagerModule extends BaseModule {
   private authFileResolver: AuthFileResolver;
   private configWatcher: any;
 
-  // Debug enhancement properties
-  private debugEventBus: DebugEventBus | null = null;
-  private isDebugEnhanced = false;
+  // Debug enhancement properties - now inherited from BaseModule
   private configMetrics: Map<string, any> = new Map();
   private loadingHistory: any[] = [];
   private mergeHistory: any[] = [];
   private validationHistory: any[] = [];
-  private maxHistorySize = 50;
+  // maxHistorySize is now inherited from BaseModule
 
   constructor(configPath?: string) {
     super({
@@ -52,27 +50,13 @@ export class ConfigManagerModule extends BaseModule {
     this.authFileResolver = new AuthFileResolver();
 
     // Initialize debug enhancements
-    this.initializeDebugEnhancements();
-  }
-
-  /**
-   * Initialize debug enhancements
-   */
-  private initializeDebugEnhancements(): void {
-    try {
-      this.debugEventBus = DebugEventBus.getInstance();
-      this.isDebugEnhanced = true;
-      console.log('Config Manager debug enhancements initialized');
-    } catch (error) {
-      console.warn('Failed to initialize Config Manager debug enhancements:', error);
-      this.isDebugEnhanced = false;
-    }
+    // Debug enhancements are now initialized in BaseModule constructor
   }
 
   /**
    * Record config metric
    */
-  private recordConfigMetric(operation: string, data: any): void {
+  public recordConfigMetric(operation: string, data: any): void {
     if (!this.configMetrics.has(operation)) {
       this.configMetrics.set(operation, {
         values: [],
@@ -93,7 +77,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * Add to loading history
    */
-  private addToLoadingHistory(operation: any): void {
+  public addToLoadingHistory(operation: any): void {
     this.loadingHistory.push(operation);
 
     // Keep only recent history
@@ -105,7 +89,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * Add to merge history
    */
-  private addToMergeHistory(operation: any): void {
+  public addToMergeHistory(operation: any): void {
     this.mergeHistory.push(operation);
 
     // Keep only recent history
@@ -117,7 +101,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * Add to validation history
    */
-  private addToValidationHistory(operation: any): void {
+  public addToValidationHistory(operation: any): void {
     this.validationHistory.push(operation);
 
     // Keep only recent history
@@ -129,7 +113,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * Publish debug event
    */
-  private publishDebugEvent(type: string, data: any): void {
+  public publishDebugEvent(type: string, data: any): void {
     if (!this.isDebugEnhanced || !this.debugEventBus) return;
 
     try {
@@ -182,7 +166,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * Get detailed debug information
    */
-  private getDebugInfo(): any {
+  public getDebugInfo(): any {
     return {
       managerId: 'config-manager',
       enhanced: this.isDebugEnhanced,
@@ -198,7 +182,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * Get config metrics
    */
-  private getConfigMetrics(): any {
+  public getConfigMetrics(): any {
     const metrics: any = {};
 
     for (const [operation, metric] of this.configMetrics.entries()) {
