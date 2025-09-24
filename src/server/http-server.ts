@@ -472,7 +472,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
    * Publish debug event
    */
   private publishDebugEvent(type: string, data: any): void {
-    if (!this.isDebugEnhanced) return;
+    if (!this.isDebugEnhanced) {return;}
 
     try {
       this.debugEventBus.publish({
@@ -838,7 +838,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       if (error?.type === 'entity.parse.failed') {
         res.status(400).json({
           error: {
-            message: 'Invalid JSON body: ' + (error?.message || 'parse failed'),
+            message: `Invalid JSON body: ${  error?.message || 'parse failed'}`,
             type: 'bad_request',
             code: 'invalid_json'
           }
@@ -1113,9 +1113,9 @@ export class HttpServer extends BaseModule implements IHttpServer {
     const highContexts = ['configuration', 'provider_health', 'memory'];
     const mediumContexts = ['request_handler', 'middleware', 'route'];
 
-    if (criticalContexts.some(c => context.includes(c))) return 'critical';
-    if (highContexts.some(c => context.includes(c))) return 'high';
-    if (mediumContexts.some(c => context.includes(c))) return 'medium';
+    if (criticalContexts.some(c => context.includes(c))) {return 'critical';}
+    if (highContexts.some(c => context.includes(c))) {return 'high';}
+    if (mediumContexts.some(c => context.includes(c))) {return 'medium';}
     return 'low';
   }
 
@@ -1138,7 +1138,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
     };
 
     for (const [key, category] of Object.entries(categories)) {
-      if (context.includes(key)) return category;
+      if (context.includes(key)) {return category;}
     }
     return 'general';
   }

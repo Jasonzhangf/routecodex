@@ -184,7 +184,7 @@ export class OpenAIRouter extends BaseModule {
    * Publish debug event
    */
   private publishDebugEvent(type: string, data: any): void {
-    if (!this.isDebugEnhanced) return;
+    if (!this.isDebugEnhanced) {return;}
 
     try {
       this.debugEventBus.publish({
@@ -311,7 +311,7 @@ export class OpenAIRouter extends BaseModule {
    * Get model ID for pipeline routing
    */
   private getPipelineModelId(model?: string): string {
-    if (!model) return 'unknown';
+    if (!model) {return 'unknown';}
 
     if (this.config.pipelineProvider?.modelMapping && model in this.config.pipelineProvider.modelMapping) {
       return this.config.pipelineProvider.modelMapping[model];
@@ -833,21 +833,21 @@ export class OpenAIRouter extends BaseModule {
    * (Hook: can integrate ConfigRequestClassifier here.)
    */
   private decideRouteCategory(req: Request): string {
-    if (!this.routePools) return 'default';
+    if (!this.routePools) {return 'default';}
     const categories = Object.keys(this.routePools);
-    if (categories.includes('default')) return 'default';
+    if (categories.includes('default')) {return 'default';}
     return categories[0] || 'default';
   }
 
   private async decideRouteCategoryAsync(req: Request): Promise<string> {
     const fallback = () => {
-      if (!this.routePools) return 'default';
+      if (!this.routePools) {return 'default';}
       const categories = Object.keys(this.routePools);
-      if (categories.includes('default')) return 'default';
+      if (categories.includes('default')) {return 'default';}
       return categories[0] || 'default';
     };
     try {
-      if (!this.classifier) return fallback();
+      if (!this.classifier) {return fallback();}
       const input = {
         request: req.body,
         endpoint: req.url || '/v1/openai/chat/completions',
@@ -855,7 +855,7 @@ export class OpenAIRouter extends BaseModule {
       };
       const res = await this.classifier.classify(input);
       const route = res?.route;
-      if (route && this.routePools && this.routePools[route]) return route;
+      if (route && this.routePools && this.routePools[route]) {return route;}
       return fallback();
     } catch {
       return fallback();
@@ -865,7 +865,7 @@ export class OpenAIRouter extends BaseModule {
   /** Round-robin pick within a category */
   private pickPipelineId(routeName: string): string {
     const pool = (this.routePools && this.routePools[routeName]) || [];
-    if (pool.length === 0) throw new Error(`No pipelines available for route ${routeName}`);
+    if (pool.length === 0) {throw new Error(`No pipelines available for route ${routeName}`);}
     const idx = this.rrIndex.get(routeName) ?? 0;
     const chosen = pool[idx % pool.length];
     this.rrIndex.set(routeName, (idx + 1) % pool.length);
@@ -875,7 +875,7 @@ export class OpenAIRouter extends BaseModule {
   /** Parse providerId and modelId from pipelineId '<providerComposite>.<modelId>' */
   private parsePipelineId(pipelineId: string): { providerId: string; modelId: string } {
     const dot = pipelineId.lastIndexOf('.');
-    if (dot === -1) return { providerId: pipelineId, modelId: 'unknown' };
+    if (dot === -1) {return { providerId: pipelineId, modelId: 'unknown' };}
     return { providerId: pipelineId.slice(0, dot), modelId: pipelineId.slice(dot + 1) };
   }
 

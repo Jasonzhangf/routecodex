@@ -395,7 +395,7 @@ export class InputSimulator {
         }
       },
       'provider': {
-        id: 'chatcmpl-' + Math.random().toString(36).substr(2, 9),
+        id: `chatcmpl-${  Math.random().toString(36).substr(2, 9)}`,
         object: 'chat.completion',
         choices: [{
           index: 0,
@@ -490,8 +490,8 @@ export class InputSimulator {
    * 获取数据类型
    */
   private getDataType(data: any): string {
-    if (Array.isArray(data)) return 'array';
-    if (typeof data === 'object' && data !== null) return 'object';
+    if (Array.isArray(data)) {return 'array';}
+    if (typeof data === 'object' && data !== null) {return 'object';}
     return typeof data;
   }
 

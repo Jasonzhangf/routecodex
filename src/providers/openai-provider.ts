@@ -608,7 +608,7 @@ export class OpenAIProvider extends BaseProvider {
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {break;}
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
@@ -618,14 +618,14 @@ export class OpenAIProvider extends BaseProvider {
           if (line.startsWith('data: ')) {
             const data = line.slice(6);
             if (data === '[DONE]') {
-              if (options.onComplete) options.onComplete();
+              if (options.onComplete) {options.onComplete();}
               return { chunks, complete: true };
             }
 
             try {
               const parsed = JSON.parse(data);
               chunks.push(data);
-              if (options.onChunk) options.onChunk(data);
+              if (options.onChunk) {options.onChunk(data);}
             } catch (error) {
               // Ignore parse errors for incomplete chunks
             }

@@ -128,7 +128,7 @@ export class UnimplementedModuleAnalytics {
         firstCallTime: moduleStats.firstCallTime,
         averageCallsPerDay: Math.round(averageCallsPerDay * 100) / 100,
         uniqueCallers: new Set(moduleStats.callerInfo.map(call => call.callerId)).size,
-        isImplemented: calledModule ? false : true,
+        isImplemented: !calledModule,
         implementationPriority: this.calculateModulePriority(moduleStats, calledModule)
       });
     }
@@ -404,7 +404,7 @@ export class UnimplementedModuleAnalytics {
    * Calculate days since date
    */
   private calculateDaysSince(dateString?: string): number {
-    if (!dateString) return 0;
+    if (!dateString) {return 0;}
     const date = new Date(dateString);
     const now = new Date();
     const diffTime = Math.abs(now.getTime() - date.getTime());

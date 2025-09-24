@@ -113,7 +113,7 @@ export class PipelineConfigManager {
       execute: async (request: any) => {
         // 模拟流水线执行
         return {
-          id: 'pipeline-response-' + Date.now(),
+          id: `pipeline-response-${  Date.now()}`,
           success: true
         };
       }

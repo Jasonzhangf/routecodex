@@ -161,12 +161,12 @@ export class PipelineErrorIntegration {
 
     // Categorize based on error message patterns
     const message = error.message?.toLowerCase() || '';
-    if (message.includes('timeout')) return 'TIMEOUT';
-    if (message.includes('network')) return 'NETWORK_ERROR';
-    if (message.includes('auth')) return 'AUTHENTICATION_ERROR';
-    if (message.includes('permission')) return 'PERMISSION_ERROR';
-    if (message.includes('not found')) return 'NOT_FOUND';
-    if (message.includes('validation')) return 'VALIDATION_ERROR';
+    if (message.includes('timeout')) {return 'TIMEOUT';}
+    if (message.includes('network')) {return 'NETWORK_ERROR';}
+    if (message.includes('auth')) {return 'AUTHENTICATION_ERROR';}
+    if (message.includes('permission')) {return 'PERMISSION_ERROR';}
+    if (message.includes('not found')) {return 'NOT_FOUND';}
+    if (message.includes('validation')) {return 'VALIDATION_ERROR';}
 
     return 'UNKNOWN_ERROR';
   }

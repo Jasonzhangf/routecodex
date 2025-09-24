@@ -1086,7 +1086,7 @@ export class ProviderManager extends BaseModule {
     };
 
     for (const [key, category] of Object.entries(categories)) {
-      if (context.includes(key)) return category;
+      if (context.includes(key)) {return category;}
     }
     return 'general';
   }

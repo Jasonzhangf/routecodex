@@ -358,7 +358,7 @@ export class LogFileScanner {
       
       stream.on('data', (chunk) => {
         for (let i = 0; i < chunk.length; i++) {
-          if (chunk[i] === 10) count++; // 
+          if (chunk[i] === 10) {count++;} // 
 
         }
       });

@@ -115,6 +115,12 @@ export class PipelineModuleRegistrar {
       const module = new OpenAIProvider(config, dependencies);
       return module;
     });
+
+    // Alias: allow simple 'openai' type to map to OpenAI provider
+    this.registry.registerModule('openai', async (config, dependencies) => {
+      const module = new OpenAIProvider(config, dependencies);
+      return module;
+    });
   }
 
   /**

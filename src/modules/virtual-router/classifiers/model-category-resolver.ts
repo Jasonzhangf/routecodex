@@ -339,7 +339,7 @@ export class ModelCategoryResolver {
    * 基于上下文推断
    */
   private inferFromContext(context: any): { category: string; priority: number; reasoning: string } | null {
-    if (!context) return null;
+    if (!context) {return null;}
 
     // 基于Token数量推断
     if (context.tokenCount > 50000) {

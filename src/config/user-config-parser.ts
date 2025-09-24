@@ -89,7 +89,7 @@ export class UserConfigParser {
         const sortedModels = knownModels.sort((a, b) => b.length - a.length);
 
         for (const model of sortedModels) {
-          if (remaining.startsWith(model + '.') || remaining === model) {
+          if (remaining.startsWith(`${model  }.`) || remaining === model) {
             foundModel = model;
             break;
           }
@@ -257,6 +257,7 @@ export class UserConfigParser {
             const rawProviderType = (providerConfig.type || '').toLowerCase();
             const normalizedProviderType = rawProviderType === 'lmstudio' ? 'lmstudio-http'
               : rawProviderType === 'qwen' ? 'qwen-provider'
+              : rawProviderType === 'openai' ? 'openai-provider'
               : rawProviderType === 'iflow' || rawProviderType === 'iflow-http' ? 'generic-http'
               : providerConfig.type;
 

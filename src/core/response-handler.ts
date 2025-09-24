@@ -542,7 +542,7 @@ export class ResponseHandler extends BaseModule {
 
       let currentChunk = '';
       for (const word of words) {
-        currentChunk += word + ' ';
+        currentChunk += `${word  } `;
 
         // Create chunk every few words
         if (currentChunk.length > 20 || word === words[words.length - 1]) {
@@ -802,7 +802,7 @@ export class ResponseHandler extends BaseModule {
       averageResponseSize: Math.round(this.metrics.averageResponseSize),
       averageResponseTime: Math.round(this.metrics.averageResponseTime),
       cacheHitRate: this.metrics.totalResponses > 0 ?
-        (this.metrics.cachedResponses / this.metrics.totalResponses * 100).toFixed(2) + '%' : '0%',
+        `${(this.metrics.cachedResponses / this.metrics.totalResponses * 100).toFixed(2)  }%` : '0%',
       compressionEnabled: this.options.enableCompression,
       corsEnabled: this.options.enableCors,
       metricsEnabled: this.options.enableMetrics
@@ -819,7 +819,7 @@ export class ResponseHandler extends BaseModule {
       cacheTTL: this.options.cacheTTL,
       maxResponseSize: this.options.maxResponseSize,
       cacheHitRate: this.metrics.totalResponses > 0 ?
-        (this.metrics.cachedResponses / this.metrics.totalResponses * 100).toFixed(2) + '%' : '0%'
+        `${(this.metrics.cachedResponses / this.metrics.totalResponses * 100).toFixed(2)  }%` : '0%'
     };
   }
 

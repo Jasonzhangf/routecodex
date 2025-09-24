@@ -299,9 +299,9 @@ export class HttpServerDebugIntegration {
    * Setup response capture for raw HTTP responses
    */
   private setupResponseCapture(response: any, requestId: string, startTime: number): void {
-    let bodyChunks: Buffer[] = [];
-    let originalWrite = response.write;
-    let originalEnd = response.end;
+    const bodyChunks: Buffer[] = [];
+    const originalWrite = response.write;
+    const originalEnd = response.end;
     const self = this;
 
     // Override write method to capture response body
@@ -395,7 +395,7 @@ export class HttpServerDebugIntegration {
         });
       } catch {
         // Return as string, truncated if too long
-        return body.length > 1000 ? body.substring(0, 1000) + '...[TRUNCATED]' : body;
+        return body.length > 1000 ? `${body.substring(0, 1000)  }...[TRUNCATED]` : body;
       }
     }
 

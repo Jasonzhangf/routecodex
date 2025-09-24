@@ -112,7 +112,7 @@ export class IFlowOAuth {
    * Save token to disk
    */
   async saveToken(): Promise<void> {
-    if (!this.tokenStorage) return;
+    if (!this.tokenStorage) {return;}
     const dir = path.dirname(this.tokenFile);
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(this.tokenFile, JSON.stringify(this.tokenStorage.toJSON(), null, 2));
@@ -205,7 +205,7 @@ export class IFlowOAuth {
   }
 
   getAuthorizationHeader(): string {
-    if (!this.tokenStorage) return '';
+    if (!this.tokenStorage) {return '';}
     return this.tokenStorage.getAuthorizationHeader();
   }
 

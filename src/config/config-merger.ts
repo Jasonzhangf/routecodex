@@ -73,8 +73,8 @@ export class ConfigMerger {
    * 深度合并对象
    */
   private deepMerge(target: any, source: any): any {
-    if (target === null || target === undefined) return source;
-    if (source === null || source === undefined) return target;
+    if (target === null || target === undefined) {return source;}
+    if (source === null || source === undefined) {return target;}
 
     // 数组合并：做去重并维持顺序
     if (Array.isArray(target) && Array.isArray(source)) {

@@ -14,19 +14,17 @@ import ora from 'ora';
 import fs from 'fs';
 import path from 'path';
 import { homedir } from 'os';
-import { UnifiedModuleLogger } from '../logging/UnifiedLogger.js';
 import { JsonlLogParser } from '../logging/parser/JsonlParser.js';
 import { LogFileScanner } from '../logging/parser/LogFileScanner.js';
-import { DebugFileLogger } from '../debug/debug-file-logger.js';
 import { TimeSeriesIndexEngine } from '../logging/indexer/TimeSeriesIndexer.js';
 
 // Logger for consistent output
 const logger = {
-  info: (msg: string) => console.log(chalk.blue('ℹ') + ' ' + msg),
-  success: (msg: string) => console.log(chalk.green('✓') + ' ' + msg),
-  warning: (msg: string) => console.log(chalk.yellow('⚠') + ' ' + msg),
-  error: (msg: string) => console.log(chalk.red('✗') + ' ' + msg),
-  debug: (msg: string) => console.log(chalk.gray('◉') + ' ' + msg)
+  info: (msg: string) => console.log(`${chalk.blue('ℹ')} ${msg}`),
+  success: (msg: string) => console.log(`${chalk.green('✓')} ${msg}`),
+  warning: (msg: string) => console.log(`${chalk.yellow('⚠')} ${msg}`),
+  error: (msg: string) => console.log(`${chalk.red('✗')} ${msg}`),
+  debug: (msg: string) => console.log(`${chalk.gray('◉')} ${msg}`)
 };
 
 // File format utilities
@@ -249,11 +247,11 @@ Examples:
         
         const moduleConfig = config.modules[options.name];
         
-        if (options.enable) moduleConfig.enabled = true;
-        if (options.disable) moduleConfig.enabled = false;
-        if (options.level) moduleConfig.logLevel = options.level as any;
-        if (options.performance) moduleConfig.includePerformance = true;
-        if (options.stackTraces) moduleConfig.includeStackTraces = true;
+        if (options.enable) {moduleConfig.enabled = true;}
+        if (options.disable) {moduleConfig.enabled = false;}
+        if (options.level) {moduleConfig.logLevel = options.level as any;}
+        if (options.performance) {moduleConfig.includePerformance = true;}
+        if (options.stackTraces) {moduleConfig.includeStackTraces = true;}
         if (options.sensitive) {
           moduleConfig.sensitiveFields = options.sensitive.split(',').map((s: string) => s.trim());
         }
@@ -294,9 +292,9 @@ Examples:
       try {
         const config = loadConfig();
         
-        if (options.enable) config.pipeline.enabled = true;
-        if (options.disable) config.pipeline.enabled = false;
-        if (options.level) config.pipeline.logLevel = options.level as any;
+        if (options.enable) {config.pipeline.enabled = true;}
+        if (options.disable) {config.pipeline.enabled = false;}
+        if (options.level) {config.pipeline.logLevel = options.level as any;}
         
         // Handle capture options
         if (options.captureRequests !== undefined) {
@@ -547,7 +545,7 @@ Examples:
         }
         
       } catch (error) {
-        logger.error('Failed to list configuration: ' + (error instanceof Error ? error.message : String(error)));
+        logger.error(`Failed to list configuration: ${  error instanceof Error ? error.message : String(error)}`);
         process.exit(1);
       }
     });
@@ -566,7 +564,7 @@ Examples:
         console.log(chalk.cyan('Current Configuration:'));
         console.log(JSON.stringify(config, null, 2));
       } catch (error) {
-        logger.error('Failed to show configuration: ' + (error instanceof Error ? error.message : String(error)));
+        logger.error(`Failed to show configuration: ${  error instanceof Error ? error.message : String(error)}`);
         process.exit(1);
       }
     });
@@ -590,8 +588,25 @@ Examples:
   return offlineLog;
 }
 
+// Type definitions
+interface LogAnalysisResult {
+  totalEntries: number;
+  moduleStats: Record<string, { count: number; errors: number; avgDuration: number; durations: number[] }>;
+  errorStats: { total: number; byType: Record<string, number> };
+  levelStats: Record<string, number>;
+  timeRange: { start: number; end: number };
+}
+
+interface UnifiedLogEntry {
+  timestamp: number;
+  level: string;
+  moduleId?: string;
+  message: string;
+  data?: any;
+}
+
 // Helper functions
-function analyzeLogEntries(entries: any[], options: any) {
+function analyzeLogEntries(entries: any[], _options: any) {
   const moduleStats: Record<string, { count: number; errors: number; avgDuration: number; durations: number[] }> = {};
   const errorStats = { total: 0, byType: {} as Record<string, number> };
   const levelStats = {} as Record<string, number>;
@@ -643,7 +658,7 @@ function analyzeLogEntries(entries: any[], options: any) {
   };
 }
 
-async function generateHTMLReport(analysis: any, outputFile: string): Promise<void> {
+async function generateHTMLReport(analysis: LogAnalysisResult, outputFile: string): Promise<void> {
   const html = `
 <!DOCTYPE html>
 <html>
@@ -781,7 +796,7 @@ async function generateHTMLReport(analysis: any, outputFile: string): Promise<vo
   fs.writeFileSync(outputFile, html);
 }
 
-async function generateCSVReport(analysis: any, outputFile: string): Promise<void> {
+async function generateCSVReport(analysis: LogAnalysisResult, outputFile: string): Promise<void> {
   const csv = [
     'Module,Total Entries,Errors,Error Rate,Avg Duration (ms)',
     ...Object.entries(analysis.moduleStats).map(([module, stats]: [string, any]) =>
@@ -792,7 +807,7 @@ async function generateCSVReport(analysis: any, outputFile: string): Promise<voi
   fs.writeFileSync(outputFile, csv);
 }
 
-function generateTimeSeriesData(results: any[], bucketSize: number): any[] {
+function generateTimeSeriesData(results: UnifiedLogEntry[], bucketSize: number): any[] {
   const timeBuckets: Record<number, { timestamp: number; count: number; errors: number; avgDuration: number; durations: number[] }> = {};
   
   results.forEach(result => {

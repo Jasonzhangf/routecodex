@@ -327,7 +327,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
    * Subscribe to debug events
    */
   private subscribeToDebugEvents(): void {
-    if (!this.debugEventBus) return;
+    if (!this.debugEventBus) {return;}
 
     // Subscribe to pipeline-specific events
     this.debugEventBus.subscribe('pipeline-subscription', (event: any) => {
@@ -470,7 +470,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
       requestStats: {
         totalRequests: this.requestCount,
         errorCount: this.errorCount,
-        successRate: this.requestCount > 0 ? ((this.requestCount - this.errorCount) / this.requestCount * 100).toFixed(2) + '%' : '0%'
+        successRate: this.requestCount > 0 ? `${((this.requestCount - this.errorCount) / this.requestCount * 100).toFixed(2)  }%` : '0%'
       }
     };
   }

@@ -103,7 +103,7 @@ export class QwenCompatibility implements CompatibilityModule {
    * Publish debug event
    */
   private publishDebugEvent(type: string, data: any): void {
-    if (!this.isDebugEnhanced || !this.debugEventBus) return;
+    if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
 
     try {
       this.debugEventBus.publish({

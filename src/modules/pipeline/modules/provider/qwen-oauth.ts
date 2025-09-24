@@ -77,7 +77,7 @@ export class QwenTokenStorage {
   }
 
   isExpired() {
-    if (!this.expired) return true;
+    if (!this.expired) {return true;}
     return new Date(this.expired) <= new Date();
   }
 

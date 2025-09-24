@@ -254,10 +254,10 @@ export class ToolDetector {
     }
 
     // 基于工具类型的复杂度
-    if (categories.webSearch) complexityScore += 5;
-    if (categories.codeExecution) complexityScore += 8;
-    if (categories.dataAnalysis) complexityScore += 6;
-    if (categories.fileSearch) complexityScore += 4;
+    if (categories.webSearch) {complexityScore += 5;}
+    if (categories.codeExecution) {complexityScore += 8;}
+    if (categories.dataAnalysis) {complexityScore += 6;}
+    if (categories.fileSearch) {complexityScore += 4;}
 
     // 计算不同级别的复杂度
     return {
@@ -380,11 +380,11 @@ export class ToolDetector {
   }
 
   private getPrimaryCategory(categories: any): string {
-    if (categories.webSearch) return 'webSearch';
-    if (categories.codeExecution) return 'codeExecution';
-    if (categories.dataAnalysis) return 'dataAnalysis';
-    if (categories.fileSearch) return 'fileSearch';
-    if (categories.general) return 'general';
+    if (categories.webSearch) {return 'webSearch';}
+    if (categories.codeExecution) {return 'codeExecution';}
+    if (categories.dataAnalysis) {return 'dataAnalysis';}
+    if (categories.fileSearch) {return 'fileSearch';}
+    if (categories.general) {return 'general';}
     return 'none';
   }
 
@@ -399,8 +399,8 @@ export class ToolDetector {
   }
 
   private assessComplexity(score: number): 'simple' | 'moderate' | 'complex' {
-    if (score < 10) return 'simple';
-    if (score < 25) return 'moderate';
+    if (score < 10) {return 'simple';}
+    if (score < 25) {return 'moderate';}
     return 'complex';
   }
 
@@ -408,9 +408,9 @@ export class ToolDetector {
     const hasDefinitions = tools && tools.length > 0;
     const hasUsages = messages?.some(msg => msg.role === 'assistant' && msg.tool_calls);
 
-    if (!hasDefinitions && !hasUsages) return 'none';
-    if (hasDefinitions && !hasUsages) return 'definition_only';
-    if (!hasDefinitions && hasUsages) return 'usage_only';
+    if (!hasDefinitions && !hasUsages) {return 'none';}
+    if (hasDefinitions && !hasUsages) {return 'definition_only';}
+    if (!hasDefinitions && hasUsages) {return 'usage_only';}
     return 'full';
   }
 

@@ -170,7 +170,7 @@ class RouteCodexApp {
   private async detectServerPort(modulesConfigPath: string): Promise<number> {
     // Priority: ENV ROUTECODEX_PORT/PORT -> modulesConfig.httpserver.config.port -> 5506
     const envPort = Number(process.env.ROUTECODEX_PORT || process.env.PORT);
-    if (!Number.isNaN(envPort) && envPort > 0) return envPort;
+    if (!Number.isNaN(envPort) && envPort > 0) {return envPort;}
 
     try {
       const p = path.isAbsolute(modulesConfigPath)
@@ -179,7 +179,7 @@ class RouteCodexApp {
       const raw = await fs.readFile(p, 'utf-8');
       const json = JSON.parse(raw);
       const port = json?.modules?.httpserver?.config?.port;
-      if (typeof port === 'number' && port > 0) return port;
+      if (typeof port === 'number' && port > 0) {return port;}
     } catch (e) {
       // ignore and fall back
     }

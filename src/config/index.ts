@@ -125,7 +125,7 @@ export class ConfigUtils {
     const checkRequired = (obj: any, path: string, required: string[]) => {
       for (const field of required) {
         if (!(field in obj)) {
-          errors.push(`Missing required field: ${path ? path + '.' + field : field}`);
+          errors.push(`Missing required field: ${path ? `${path  }.${  field}` : field}`);
         }
       }
     };
@@ -141,7 +141,7 @@ export class ConfigUtils {
     const diff: any = {};
 
     const compare = (oldVal: any, newVal: any, path: string) => {
-      if (oldVal === newVal) return;
+      if (oldVal === newVal) {return;}
 
       if (typeof oldVal !== typeof newVal) {
         diff[path] = { old: oldVal, new: newVal };

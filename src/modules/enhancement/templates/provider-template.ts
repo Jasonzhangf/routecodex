@@ -398,7 +398,7 @@ export class EnhancedProviderModule implements ProviderModule {
    * Check if error is retryable
    */
   private isRetryableError(error: any): boolean {
-    if (!error.statusCode) return false;
+    if (!error.statusCode) {return false;}
 
     // Retry on 5xx errors, 429 (rate limit), and network errors
     return error.statusCode >= 500 ||

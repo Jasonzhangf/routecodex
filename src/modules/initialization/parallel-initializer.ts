@@ -551,7 +551,7 @@ export class ParallelInitializer {
       const currentGroup: InitializationTask[] = [];
 
       for (const taskId of topologicalOrder) {
-        if (processed.has(taskId)) continue;
+        if (processed.has(taskId)) {continue;}
 
         const task = this.tasks.get(taskId)!;
         const dependencies = task.dependencies || [];

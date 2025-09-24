@@ -436,7 +436,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   private sanitizeRequest(request: DebugHttpRequest): DebugHttpRequest {
     const adapterConfig = this.getAdapterConfig();
 
-    let sanitized = { ...request };
+    const sanitized = { ...request };
 
     // Sanitize headers if enabled
     if (adapterConfig.captureHeaders) {
@@ -461,7 +461,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   private sanitizeResponse(response: DebugHttpResponse): DebugHttpResponse {
     const adapterConfig = this.getAdapterConfig();
 
-    let sanitized = { ...response };
+    const sanitized = { ...response };
 
     // Sanitize headers if enabled
     if (adapterConfig.captureHeaders) {
@@ -644,7 +644,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
    * Subscribe to debug events
    */
   private subscribeToDebugEvents(): void {
-    if (!this.debugEventBus) return;
+    if (!this.debugEventBus) {return;}
 
     this.debugEventBus.subscribe('http-server-debug', (event: any) => {
       this.handleDebugEvent(event);
@@ -768,7 +768,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
    * Publish event to WebSocket
    */
   private publishToWebSocket(event: any): void {
-    if (!this.debugEventBus) return;
+    if (!this.debugEventBus) {return;}
 
     try {
       this.debugEventBus.publish({

@@ -853,7 +853,7 @@ export class RequestHandler extends BaseModule {
     };
 
     for (const [key, category] of Object.entries(categories)) {
-      if (context.includes(key)) return category;
+      if (context.includes(key)) {return category;}
     }
     return 'general';
   }
@@ -870,9 +870,9 @@ export class RequestHandler extends BaseModule {
    * Get operation type from context
    */
   private getOperationType(context: string): string {
-    if (context.includes('chat_completion')) return 'chat_completion';
-    if (context.includes('completion')) return 'completion';
-    if (context.includes('models')) return 'models_list';
+    if (context.includes('chat_completion')) {return 'chat_completion';}
+    if (context.includes('completion')) {return 'completion';}
+    if (context.includes('models')) {return 'models_list';}
     return 'unknown';
   }
 

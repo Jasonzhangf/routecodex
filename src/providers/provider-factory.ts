@@ -355,8 +355,8 @@ export class ProviderFactory {
       const currentStats = current.provider.getStats();
 
       // Compare average response time (prefer providers with actual stats)
-      if (fastestStats.totalRequests === 0) return current;
-      if (currentStats.totalRequests === 0) return fastest;
+      if (fastestStats.totalRequests === 0) {return current;}
+      if (currentStats.totalRequests === 0) {return fastest;}
 
       return fastestStats.averageResponseTime < currentStats.averageResponseTime ? fastest : current;
     });

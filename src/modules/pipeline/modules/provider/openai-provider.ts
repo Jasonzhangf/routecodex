@@ -410,7 +410,7 @@ export class OpenAIProvider implements ProviderModule {
    * Record provider metric
    */
   private recordProviderMetric(operationId: string, value: number): void {
-    if (!this.isDebugEnhanced) return;
+    if (!this.isDebugEnhanced) {return;}
 
     if (!this.providerMetrics.has(operationId)) {
       this.providerMetrics.set(operationId, {
@@ -433,7 +433,7 @@ export class OpenAIProvider implements ProviderModule {
    * Add request to history
    */
   private addToRequestHistory(request: any): void {
-    if (!this.isDebugEnhanced) return;
+    if (!this.isDebugEnhanced) {return;}
 
     this.requestHistory.push(request);
 
@@ -447,7 +447,7 @@ export class OpenAIProvider implements ProviderModule {
    * Add error to history
    */
   private addToErrorHistory(error: any): void {
-    if (!this.isDebugEnhanced) return;
+    if (!this.isDebugEnhanced) {return;}
 
     this.errorHistory.push(error);
 
@@ -461,7 +461,7 @@ export class OpenAIProvider implements ProviderModule {
    * Publish provider event
    */
   private publishProviderEvent(type: string, data: any): void {
-    if (!this.isDebugEnhanced || !this.debugEventBus) return;
+    if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
 
     try {
       this.debugEventBus.publish({

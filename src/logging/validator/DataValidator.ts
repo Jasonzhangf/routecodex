@@ -647,7 +647,7 @@ export class DataValidatorAndCleaner {
     for (const entry of uniqueEntries) {
       let cleanedEntry = { ...entry };
       let wasFixed = false;
-      let isValid = true;
+      const isValid = true;
 
       // 标准化时间戳
       if (this.cleaningOptions.normalizeTimestamps) {
@@ -858,7 +858,7 @@ export class DataValidatorAndCleaner {
       // 限制消息长度
       const maxLength = this.validationOptions.maxMessageLength;
       if (message.length > maxLength) {
-        message = message.substring(0, maxLength) + '...';
+        message = `${message.substring(0, maxLength)  }...`;
         fixed = true;
       }
     }
@@ -936,7 +936,7 @@ export class DataValidatorAndCleaner {
    * 修复常见错误
    */
   private fixCommonErrors(entry: UnifiedLogEntry): { entry: UnifiedLogEntry; fixed: boolean } {
-    let cleanedEntry = { ...entry };
+    const cleanedEntry = { ...entry };
     let fixed = false;
 
     // 修复undefined值
@@ -955,8 +955,8 @@ export class DataValidatorAndCleaner {
 
     // 修复错误对象格式
     if (cleanedEntry.error && typeof cleanedEntry.error === 'object') {
-      if (!cleanedEntry.error.name) cleanedEntry.error.name = 'Error';
-      if (!cleanedEntry.error.message) cleanedEntry.error.message = 'Unknown error';
+      if (!cleanedEntry.error.name) {cleanedEntry.error.name = 'Error';}
+      if (!cleanedEntry.error.message) {cleanedEntry.error.message = 'Unknown error';}
       fixed = true;
     }
 

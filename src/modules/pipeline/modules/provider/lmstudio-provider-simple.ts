@@ -104,7 +104,7 @@ export class LMStudioProviderSimple implements ProviderModule {
    * Publish debug event
    */
   private publishDebugEvent(type: string, data: any): void {
-    if (!this.isDebugEnhanced || !this.debugEventBus) return;
+    if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
 
     try {
       this.debugEventBus.publish({
@@ -681,7 +681,7 @@ export class LMStudioProviderSimple implements ProviderModule {
    * Check if error is retryable
    */
   private isRetryableError(error: any): boolean {
-    if (!error.statusCode) return false;
+    if (!error.statusCode) {return false;}
 
     // Retry on 5xx errors, 429 (rate limit), and network errors
     return error.statusCode >= 500 ||

@@ -79,7 +79,7 @@ export class DebugFileLogger {
         timestamp: new Date().toISOString(),
         ...event
       });
-      this.stream.write(payload + '\n');
+      this.stream.write(`${payload  }\n`);
     } catch (error) {
       console.error('[DebugFileLogger] failed to serialize event:', error);
     }

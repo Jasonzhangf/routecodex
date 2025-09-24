@@ -426,8 +426,8 @@ export class UserConfigManager extends EventEmitter implements IUserConfigManage
               bValue = b.username;
           }
 
-          if (aValue < bValue) return options.sortOrder === 'asc' ? -1 : 1;
-          if (aValue > bValue) return options.sortOrder === 'asc' ? 1 : -1;
+          if (aValue < bValue) {return options.sortOrder === 'asc' ? -1 : 1;}
+          if (aValue > bValue) {return options.sortOrder === 'asc' ? 1 : -1;}
           return 0;
         });
       }

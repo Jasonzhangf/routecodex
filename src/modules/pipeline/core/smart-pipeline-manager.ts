@@ -517,7 +517,7 @@ export class DynamicPipelineManager {
    * Publish debug event
    */
   private publishDebugEvent(type: string, data: any): void {
-    if (!this.isDebugEnhanced || !this.debugEventBus) return;
+    if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
 
     try {
       this.debugEventBus.publish({
@@ -645,7 +645,7 @@ export class DynamicPipelineManager {
 };
 
 (SmartPipelineFactory as any).publishDebugEvent = function(type: string, data: any): void {
-  if (!SmartPipelineFactory.isDebugEnhanced || !SmartPipelineFactory.debugEventBus) return;
+  if (!SmartPipelineFactory.isDebugEnhanced || !SmartPipelineFactory.debugEventBus) {return;}
 
   try {
     SmartPipelineFactory.debugEventBus.publish({

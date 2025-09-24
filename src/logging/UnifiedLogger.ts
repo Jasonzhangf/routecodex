@@ -292,7 +292,7 @@ export class UnifiedModuleLogger extends EventEmitter implements UnifiedLogger {
   }
 
   private sanitizeData(data: any): any {
-    if (!data) return data;
+    if (!data) {return data;}
     
     try {
       const sanitized = JSON.parse(JSON.stringify(data));
@@ -391,8 +391,8 @@ export class UnifiedModuleLogger extends EventEmitter implements UnifiedLogger {
     for (const log of logs) {
       const row = headers.map(field => {
         const value = (log as any)[field];
-        if (value === undefined || value === null) return '';
-        if (typeof value === 'object') return JSON.stringify(value);
+        if (value === undefined || value === null) {return '';}
+        if (typeof value === 'object') {return JSON.stringify(value);}
         return String(value);
       });
       rows.push(row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(','));

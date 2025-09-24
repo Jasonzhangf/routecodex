@@ -264,9 +264,9 @@ export class RequestClassifier {
    * Token数量分类
    */
   private categorizeTokenCount(tokenCount: number): 'short' | 'medium' | 'long' | 'very_long' {
-    if (tokenCount < 1000) return 'short';
-    if (tokenCount < 8000) return 'medium';
-    if (tokenCount < 32000) return 'long';
+    if (tokenCount < 1000) {return 'short';}
+    if (tokenCount < 8000) {return 'medium';}
+    if (tokenCount < 32000) {return 'long';}
     return 'very_long';
   }
 
@@ -282,9 +282,9 @@ export class RequestClassifier {
     let complexity = 0;
 
     // Token复杂度
-    if (tokenCount > 32000) complexity += 40;
-    else if (tokenCount > 8000) complexity += 20;
-    else if (tokenCount > 1000) complexity += 10;
+    if (tokenCount > 32000) {complexity += 40;}
+    else if (tokenCount > 8000) {complexity += 20;}
+    else if (tokenCount > 1000) {complexity += 10;}
 
     // 工具复杂度
     if (hasTools) {
@@ -293,8 +293,8 @@ export class RequestClassifier {
     }
 
     // 消息复杂度
-    if (messageCount > 10) complexity += 10;
-    else if (messageCount > 5) complexity += 5;
+    if (messageCount > 10) {complexity += 10;}
+    else if (messageCount > 5) {complexity += 5;}
 
     return Math.min(100, complexity);
   }
@@ -410,9 +410,9 @@ export class RequestClassifier {
   private getTokenConfidence(tokenAnalysis: any): number {
     const { estimates, recommendations } = tokenAnalysis;
 
-    if (recommendations.category === 'very_long') return 90;
-    if (recommendations.category === 'long') return 80;
-    if (recommendations.category === 'medium') return 70;
+    if (recommendations.category === 'very_long') {return 90;}
+    if (recommendations.category === 'long') {return 80;}
+    if (recommendations.category === 'medium') {return 70;}
     return 60;
   }
 
@@ -422,10 +422,10 @@ export class RequestClassifier {
   private getToolConfidence(toolAnalysis: any): number {
     const { detection } = toolAnalysis;
 
-    if (!detection.hasTools) return 50;
+    if (!detection.hasTools) {return 50;}
 
-    if (detection.recommendations.confidence > 0.8) return 90;
-    if (detection.recommendations.confidence > 0.6) return 70;
+    if (detection.recommendations.confidence > 0.8) {return 90;}
+    if (detection.recommendations.confidence > 0.6) {return 70;}
     return 60;
   }
 

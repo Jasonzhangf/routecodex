@@ -318,7 +318,7 @@ export abstract class BaseModule extends EventEmitter {
    * Publish debug event
    */
   public publishDebugEvent(type: string, data: any): void {
-    if (!this.isDebugEnhanced || !this.debugEventBus) return;
+    if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
 
     try {
       this.debugEventBus.publish({

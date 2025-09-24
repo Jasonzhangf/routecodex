@@ -14,11 +14,11 @@ import { homedir } from 'os';
 
 // Simple logger
 const logger = {
-  info: (msg: string) => console.log(chalk.blue('ℹ') + ' ' + msg),
-  success: (msg: string) => console.log(chalk.green('✓') + ' ' + msg),
-  warning: (msg: string) => console.log(chalk.yellow('⚠') + ' ' + msg),
-  error: (msg: string) => console.log(chalk.red('✗') + ' ' + msg),
-  debug: (msg: string) => console.log(chalk.gray('◉') + ' ' + msg)
+  info: (msg: string) => console.log(`${chalk.blue('ℹ')  } ${  msg}`),
+  success: (msg: string) => console.log(`${chalk.green('✓')  } ${  msg}`),
+  warning: (msg: string) => console.log(`${chalk.yellow('⚠')  } ${  msg}`),
+  error: (msg: string) => console.log(`${chalk.red('✗')  } ${  msg}`),
+  debug: (msg: string) => console.log(`${chalk.gray('◉')  } ${  msg}`)
 };
 
 // CLI program setup
@@ -150,7 +150,7 @@ program
               JSON.parse(fs.readFileSync(configPath, 'utf8'));
               logger.success('Configuration is valid');
             } catch (error) {
-              logger.error('Configuration is invalid: ' + (error instanceof Error ? error.message : String(error)));
+              logger.error(`Configuration is invalid: ${  error instanceof Error ? error.message : String(error)}`);
             }
           } else {
             logger.error('Configuration file not found');
@@ -161,7 +161,7 @@ program
           logger.error('Unknown action. Use: show, edit, validate, init');
       }
     } catch (error) {
-      logger.error('Config command failed: ' + (error instanceof Error ? error.message : String(error)));
+      logger.error(`Config command failed: ${  error instanceof Error ? error.message : String(error)}`);
     }
   });
 
@@ -382,7 +382,7 @@ async function initializeConfig(configPath: string, template?: string, force: bo
 
   } catch (error) {
     spinner.fail('Failed to initialize configuration');
-    logger.error('Initialization failed: ' + (error instanceof Error ? error.message : String(error)));
+    logger.error(`Initialization failed: ${  error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -450,7 +450,7 @@ program
         }
       }
     } catch (error) {
-      logger.error('Status check failed: ' + (error instanceof Error ? error.message : String(error)));
+      logger.error(`Status check failed: ${  error instanceof Error ? error.message : String(error)}`);
     }
   });
 

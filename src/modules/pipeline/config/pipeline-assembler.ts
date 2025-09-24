@@ -92,10 +92,10 @@ export class PipelineAssembler {
         const compatibility: ModuleConfig = { type: compatType, config: compatCfg };
 
         const providerConfigObj: Record<string, any> = {};
-        if (providerBaseUrl) providerConfigObj.baseUrl = providerBaseUrl;
-        if (actualModelId) providerConfigObj.model = actualModelId;
-        if (typeof maxTokens === 'number') providerConfigObj.maxTokens = maxTokens;
-        if (typeof maxContext === 'number') providerConfigObj.context = maxContext;
+        if (providerBaseUrl) {providerConfigObj.baseUrl = providerBaseUrl;}
+        if (actualModelId) {providerConfigObj.model = actualModelId;}
+        if (typeof maxTokens === 'number') {providerConfigObj.maxTokens = maxTokens;}
+        if (typeof maxContext === 'number') {providerConfigObj.context = maxContext;}
         // Carry auth from pipelineConfigs if present
         if (pc?.provider && (pc.provider as any).auth) {
           providerConfigObj.auth = (pc.provider as any).auth;

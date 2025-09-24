@@ -148,7 +148,7 @@ export class TimeSeriesIndexEngine extends EventEmitter implements LogQueryEngin
    * 添加日志到索引
    */
   async index(logs: UnifiedLogEntry[]): Promise<void> {
-    if (logs.length === 0) return;
+    if (logs.length === 0) {return;}
 
     const startTime = Date.now();
     
@@ -253,7 +253,7 @@ export class TimeSeriesIndexEngine extends EventEmitter implements LogQueryEngin
    * 优化索引
    */
   async optimize(): Promise<void> {
-    if (this.isOptimizing) return;
+    if (this.isOptimizing) {return;}
     
     this.isOptimizing = true;
     this.emit('optimization_started');
@@ -353,7 +353,7 @@ export class TimeSeriesIndexEngine extends EventEmitter implements LogQueryEngin
    * 压缩分片
    */
   private async compressShard(shard: TimeShard): Promise<void> {
-    if (shard.isCompressed) return;
+    if (shard.isCompressed) {return;}
     
     try {
       // 简化的压缩：移除重复和不必要的数据
@@ -456,7 +456,7 @@ export class TimeSeriesIndexEngine extends EventEmitter implements LogQueryEngin
     
     for (const shardId of optimizer.shards) {
       const shard = this.shards.get(shardId);
-      if (!shard) continue;
+      if (!shard) {continue;}
       
       // 更新最后访问时间
       shard.lastAccess = Date.now();
@@ -546,7 +546,7 @@ export class TimeSeriesIndexEngine extends EventEmitter implements LogQueryEngin
    * 解压缩分片
    */
   private async decompressShard(shard: TimeShard): Promise<void> {
-    if (!shard.isCompressed) return;
+    if (!shard.isCompressed) {return;}
     
     // 简化解压缩：这里只是标记为未压缩
     // 在实际实现中，这里需要真正的解压缩逻辑
@@ -565,7 +565,7 @@ export class TimeSeriesIndexEngine extends EventEmitter implements LogQueryEngin
       }
     }
     
-    if (smallShards.length < 2) return;
+    if (smallShards.length < 2) {return;}
     
     // 按时间排序
     smallShards.sort((a, b) => a.startTime - b.startTime);

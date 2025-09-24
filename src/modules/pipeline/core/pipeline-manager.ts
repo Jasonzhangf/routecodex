@@ -661,7 +661,7 @@ export class PipelineManager implements RCCBaseModule {
    * Subscribe to manager-specific debug events
    */
   private subscribeToManagerEvents(): void {
-    if (!this.debugEventBus) return;
+    if (!this.debugEventBus) {return;}
 
     this.debugEventBus.subscribe('manager-subscription', (event: any) => {
       this.handleManagerDebugEvent(event);
@@ -743,7 +743,7 @@ export class PipelineManager implements RCCBaseModule {
    * Publish manager-specific events
    */
   private publishManagerEvent(type: string, data: any): void {
-    if (!this.isEnhanced) return;
+    if (!this.isEnhanced) {return;}
 
     this.publishToWebSocket({
       type: 'manager',

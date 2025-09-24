@@ -20,11 +20,11 @@ import type { RunRequestOptions, RunResponseOptions, RunBidirectionalOptions } f
 
 // Logger for consistent output
 const logger = {
-  info: (msg: string) => console.log(chalk.blue('ℹ') + ' ' + msg),
-  success: (msg: string) => console.log(chalk.green('✓') + ' ' + msg),
-  warning: (msg: string) => console.log(chalk.yellow('⚠') + ' ' + msg),
-  error: (msg: string) => console.log(chalk.red('✗') + ' ' + msg),
-  debug: (msg: string) => console.log(chalk.gray('◉') + ' ' + msg)
+  info: (msg: string) => console.log(`${chalk.blue('ℹ')  } ${  msg}`),
+  success: (msg: string) => console.log(`${chalk.green('✓')  } ${  msg}`),
+  warning: (msg: string) => console.log(`${chalk.yellow('⚠')  } ${  msg}`),
+  error: (msg: string) => console.log(`${chalk.red('✗')  } ${  msg}`),
+  debug: (msg: string) => console.log(`${chalk.gray('◉')  } ${  msg}`)
 };
 
 // File format detection utilities
@@ -323,7 +323,7 @@ export function createDryRunCommands(): Command {
           logger.info('Use --start, --list, or --session <id> to manage capture sessions');
         }
       } catch (error) {
-        logger.error('Capture command failed: ' + (error instanceof Error ? error.message : String(error)));
+        logger.error(`Capture command failed: ${  error instanceof Error ? error.message : String(error)}`);
         process.exit(1);
       }
     });

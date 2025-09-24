@@ -443,7 +443,7 @@ export class PipelineModuleRegistryImpl implements PipelineModuleRegistry {
    * Subscribe to registry-specific debug events
    */
   private subscribeToRegistryEvents(): void {
-    if (!this.debugEventBus) return;
+    if (!this.debugEventBus) {return;}
 
     this.debugEventBus.subscribe('registry-subscription', (event: any) => {
       this.handleRegistryDebugEvent(event);
@@ -527,7 +527,7 @@ export class PipelineModuleRegistryImpl implements PipelineModuleRegistry {
    * Publish registry-specific events
    */
   private publishRegistryEvent(type: string, data: any): void {
-    if (!this.isEnhanced) return;
+    if (!this.isEnhanced) {return;}
 
     this.publishToWebSocket({
       type: 'registry',
@@ -556,7 +556,7 @@ export class PipelineModuleRegistryImpl implements PipelineModuleRegistry {
    * Publish event to WebSocket
    */
   private publishToWebSocket(event: any): void {
-    if (!this.debugEventBus) return;
+    if (!this.debugEventBus) {return;}
 
     try {
       this.debugEventBus.publish({

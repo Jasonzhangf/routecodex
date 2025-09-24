@@ -88,7 +88,7 @@ export class IFlowProvider implements ProviderModule {
   }
 
   private publishDebugEvent(type: string, data: any): void {
-    if (!this.isDebugEnhanced || !this.debugEventBus) return;
+    if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
     try {
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
@@ -406,7 +406,7 @@ export class IFlowProvider implements ProviderModule {
   }
 
   private recordTokenRefreshFailure(error: unknown): void {
-    if (!this.isDebugEnhanced) return;
+    if (!this.isDebugEnhanced) {return;}
     this.recordProviderMetric('token_refresh_failed', {
       error: error instanceof Error ? error.message : String(error),
       timestamp: Date.now()
@@ -559,7 +559,7 @@ export class IFlowProvider implements ProviderModule {
 
   private isRetryableError(error: any): boolean {
     const status = error?.status || error?.statusCode;
-    if (!status) return false;
+    if (!status) {return false;}
     return status >= 500 || status === 429;
   }
 }

@@ -115,7 +115,7 @@ export class ConfigManagerModule extends BaseModule {
    * Publish debug event
    */
   public publishDebugEvent(type: string, data: any): void {
-    if (!this.isDebugEnhanced || !this.debugEventBus) return;
+    if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
 
     try {
       this.debugEventBus.publish({
@@ -542,8 +542,8 @@ export class ConfigManagerModule extends BaseModule {
       const homeDir = expandHome('~/.routecodex/config');
 
       const deepMergeWithArrayUnion = (target: any, source: any): any => {
-        if (target === null || target === undefined) return source;
-        if (source === null || source === undefined) return target;
+        if (target === null || target === undefined) {return source;}
+        if (source === null || source === undefined) {return target;}
         if (Array.isArray(target) && Array.isArray(source)) {
           // 数组合并去重（按原始值相等判断）
           const merged = [...target, ...source];
@@ -606,7 +606,7 @@ export class ConfigManagerModule extends BaseModule {
 
       // 若最终为空，抛错提示
       if (!combined || Object.keys(combined).length === 0) {
-        throw new Error(`No usable user config found. Checked: ${[primaryPath, homeMain, homeDir + '/*.json'].join(', ')}`);
+        throw new Error(`No usable user config found. Checked: ${[primaryPath, homeMain, `${homeDir  }/*.json`].join(', ')}`);
       }
 
       const totalTime = Date.now() - startTime;

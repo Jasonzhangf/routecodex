@@ -559,9 +559,9 @@ export class LoadBalancer {
     const healthyCount = targets.filter(t => t.health === 'healthy').length;
     const healthRatio = healthyCount / targets.length;
 
-    if (healthRatio >= 0.9) return 'excellent';
-    if (healthRatio >= 0.7) return 'good';
-    if (healthRatio >= 0.5) return 'fair';
+    if (healthRatio >= 0.9) {return 'excellent';}
+    if (healthRatio >= 0.7) {return 'good';}
+    if (healthRatio >= 0.5) {return 'fair';}
     return 'poor';
   }
 

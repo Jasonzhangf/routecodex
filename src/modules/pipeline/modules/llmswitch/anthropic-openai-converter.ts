@@ -245,9 +245,9 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     }
 
     // 复制其他字段
-    if (response.id) transformed.id = response.id;
-    if (response.model) transformed.model = response.model;
-    if (response.created) transformed.created = response.created;
+    if (response.id) {transformed.id = response.id;}
+    if (response.model) {transformed.model = response.model;}
+    if (response.created) {transformed.created = response.created;}
 
     return transformed;
   }
@@ -256,7 +256,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
    * Anthropic 工具定义 → OpenAI 函数定义
    */
   private convertAnthropicToolsToOpenAI(tools: any[]): any[] {
-    if (!tools) return [];
+    if (!tools) {return [];}
     
     return tools.map(tool => ({
       type: 'function',
@@ -272,7 +272,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
    * OpenAI 工具调用 → Anthropic 工具使用
    */
   private convertOpenAIToolCallsToAnthropic(toolCalls: any[]): any[] {
-    if (!toolCalls) return [];
+    if (!toolCalls) {return [];}
     
     return toolCalls.map(call => ({
       type: 'tool_use',
