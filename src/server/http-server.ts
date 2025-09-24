@@ -65,6 +65,13 @@ export class HttpServer extends BaseModule implements IHttpServer {
   private pipelineManager: PipelineManager | null = null;
   private routePools: Record<string, string[]> | null = null;
 
+  // Debug enhancement properties
+  private isDebugEnhanced = false;
+  private serverMetrics: Map<string, any> = new Map();
+  private requestHistory: any[] = [];
+  private errorHistory: any[] = [];
+  private maxHistorySize = 100;
+
   /** Generate a session id that embeds the current port for DebugCenter port-level separation */
   private async sessionId(tag: string): Promise<string> {
     try {
@@ -85,6 +92,10 @@ export class HttpServer extends BaseModule implements IHttpServer {
     };
 
     super(moduleInfo);
+
+    // Store module info for debug access
+    const moduleInfoForDebug = moduleInfo;
+    (this as any).moduleInfo = moduleInfoForDebug;
 
     this.moduleConfigReader = new ModuleConfigReader(modulesConfigPath);
     this.errorHandling = new ErrorHandlingCenter();
@@ -113,6 +124,9 @@ export class HttpServer extends BaseModule implements IHttpServer {
       this.providerManager,
       this.moduleConfigReader
     );
+
+    // Initialize debug enhancements
+    this.initializeDebugEnhancements();
   }
 
   /**
@@ -394,6 +408,152 @@ export class HttpServer extends BaseModule implements IHttpServer {
     } catch (error) {
       console.error('Failed to attach routing classifier config to OpenAI router:', error);
     }
+  }
+
+  /**
+   * Initialize debug enhancements
+   */
+  private initializeDebugEnhancements(): void {
+    try {
+      this.isDebugEnhanced = true;
+      console.log('HTTP Server debug enhancements initialized');
+    } catch (error) {
+      console.warn('Failed to initialize HTTP Server debug enhancements:', error);
+      this.isDebugEnhanced = false;
+    }
+  }
+
+  /**
+   * Record server metric
+   */
+  private recordServerMetric(operation: string, data: any): void {
+    if (!this.serverMetrics.has(operation)) {
+      this.serverMetrics.set(operation, {
+        values: [],
+        lastUpdated: Date.now()
+      });
+    }
+
+    const metric = this.serverMetrics.get(operation)!;
+    metric.values.push(data);
+    metric.lastUpdated = Date.now();
+
+    // Keep only last 50 measurements
+    if (metric.values.length > 50) {
+      metric.values.shift();
+    }
+  }
+
+  /**
+   * Add to request history
+   */
+  private addToRequestHistory(request: any): void {
+    this.requestHistory.push(request);
+
+    // Keep only recent history
+    if (this.requestHistory.length > this.maxHistorySize) {
+      this.requestHistory.shift();
+    }
+  }
+
+  /**
+   * Add to error history
+   */
+  private addToErrorHistory(error: any): void {
+    this.errorHistory.push(error);
+
+    // Keep only recent history
+    if (this.errorHistory.length > this.maxHistorySize) {
+      this.errorHistory.shift();
+    }
+  }
+
+  /**
+   * Publish debug event
+   */
+  private publishDebugEvent(type: string, data: any): void {
+    if (!this.isDebugEnhanced) return;
+
+    try {
+      this.debugEventBus.publish({
+        sessionId: `session_${Date.now()}`,
+        moduleId: 'http-server',
+        operationId: type,
+        timestamp: Date.now(),
+        type: 'start',
+        position: 'middle',
+        data: {
+          ...data,
+          serverId: (this as any).moduleInfo.id,
+          source: 'http-server'
+        }
+      });
+    } catch (error) {
+      // Silent fail if debug event bus is not available
+    }
+  }
+
+  /**
+   * Get debug status with enhanced information
+   */
+  getDebugStatus(): any {
+    const moduleInfo = (this as any).moduleInfo;
+    const baseStatus = {
+      serverId: moduleInfo.id,
+      isInitialized: this._isInitialized,
+      isRunning: this._isRunning,
+      type: moduleInfo.type,
+      isEnhanced: this.isDebugEnhanced
+    };
+
+    if (!this.isDebugEnhanced) {
+      return baseStatus;
+    }
+
+    return {
+      ...baseStatus,
+      debugInfo: this.getDebugInfo(),
+      serverMetrics: this.getServerMetrics(),
+      healthStatus: this.healthStatus,
+      requestHistory: [...this.requestHistory.slice(-10)], // Last 10 requests
+      errorHistory: [...this.errorHistory.slice(-10)] // Last 10 errors
+    };
+  }
+
+  /**
+   * Get detailed debug information
+   */
+  private getDebugInfo(): any {
+    const moduleInfo = (this as any).moduleInfo;
+    return {
+      serverId: moduleInfo.id,
+      serverType: moduleInfo.type,
+      enhanced: this.isDebugEnhanced,
+      eventBusAvailable: !!this.debugEventBus,
+      requestHistorySize: this.requestHistory.length,
+      errorHistorySize: this.errorHistory.length,
+      uptime: Date.now() - this.startupTime,
+      hasPipelineManager: !!this.pipelineManager,
+      hasRoutePools: !!this.routePools,
+      serverConfig: this.config?.server || null
+    };
+  }
+
+  /**
+   * Get server metrics
+   */
+  private getServerMetrics(): any {
+    const metrics: any = {};
+
+    for (const [operation, metric] of this.serverMetrics.entries()) {
+      metrics[operation] = {
+        count: metric.values.length,
+        lastUpdated: metric.lastUpdated,
+        recentValues: metric.values.slice(-5) // Last 5 values
+      };
+    }
+
+    return metrics;
   }
 
   // Pipeline assembly removed: handled externally via merged-config assembler.
