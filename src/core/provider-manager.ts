@@ -3,8 +3,8 @@
  * Manages provider lifecycle, health monitoring, and failover
  */
 
-import { BaseModule, type ModuleInfo } from 'rcc-basemodule';
-import { DebugEventBus } from 'rcc-debugcenter';
+import { BaseModule, type ModuleInfo } from './base-module.js';
+import { DebugEventBus } from '../utils/external-mocks.js';
 import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
 import { ErrorHandlingUtils } from '../utils/error-handling-utils.js';
 import { BaseProvider } from '../providers/base-provider.js';
@@ -46,7 +46,6 @@ interface ProviderInstance {
  */
 export class ProviderManager extends BaseModule {
   private config: ServerConfig;
-  private debugEventBus: DebugEventBus;
   private errorHandling: ErrorHandlingCenter;
   private errorUtils: ReturnType<typeof ErrorHandlingUtils.createModuleErrorHandler>;
   private options: ProviderManagerOptions;
@@ -67,8 +66,7 @@ export class ProviderManager extends BaseModule {
       id: 'provider-manager',
       name: 'ProviderManager',
       version: '0.0.1',
-      description: 'Manages provider lifecycle, health monitoring, and failover',
-      type: 'core'
+      description: 'Manages provider lifecycle, health monitoring, and failover'
     };
 
     super(moduleInfo);
@@ -169,7 +167,7 @@ export class ProviderManager extends BaseModule {
       // Start health monitoring
       this.startHealthMonitoring();
 
-      this.debugEventBus.publish({
+      this.debugEventBus?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'provider-manager',
         operationId: 'provider_manager_initialized',
@@ -181,6 +179,14 @@ export class ProviderManager extends BaseModule {
           healthCheckInterval: this.options.healthCheckInterval,
           autoRecoveryEnabled: this.options.autoRecoveryEnabled
         }
+      });
+
+      // Record initialization metric
+      this.recordModuleMetric('initialization', {
+        providerCount: this.providers.size,
+        healthCheckInterval: this.options.healthCheckInterval,
+        autoRecoveryEnabled: this.options.autoRecoveryEnabled,
+        maxConsecutiveFailures: this.options.maxConsecutiveFailures
       });
 
     } catch (error) {
@@ -245,7 +251,7 @@ export class ProviderManager extends BaseModule {
 
       this.providers.set(providerId, providerInstance);
 
-      this.debugEventBus.publish({
+      this.debugEventBus?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'provider-manager',
         operationId: 'provider_added',
@@ -257,6 +263,14 @@ export class ProviderManager extends BaseModule {
           providerType: config.type,
           modelCount: Object.keys(config.models).length
         }
+      });
+
+      // Record provider addition metric
+      this.recordModuleMetric('provider_added', {
+        providerId,
+        providerType: config.type,
+        modelCount: Object.keys(config.models).length,
+        totalProviders: this.providers.size
       });
 
     } catch (error) {
@@ -278,7 +292,7 @@ export class ProviderManager extends BaseModule {
       await providerInstance.provider.destroy();
       this.providers.delete(providerId);
 
-      this.debugEventBus.publish({
+      this.debugEventBus?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'provider-manager',
         operationId: 'provider_removed',
@@ -384,7 +398,7 @@ export class ProviderManager extends BaseModule {
             await this.handleProviderFailure(providerId, providerInstance, health);
           }
 
-          this.debugEventBus.publish({
+          this.debugEventBus?.publish({
             sessionId: `session_${Date.now()}`,
             moduleId: 'provider-manager',
             operationId: 'provider_health_check',
@@ -429,7 +443,7 @@ export class ProviderManager extends BaseModule {
     if (providerInstance.consecutiveFailures >= maxFailures) {
       providerInstance.isActive = false;
 
-      this.debugEventBus.publish({
+      this.debugEventBus?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'provider-manager',
         operationId: 'provider_deactivated',
@@ -464,7 +478,7 @@ export class ProviderManager extends BaseModule {
         (this.metrics.averageRecoveryTime * (this.metrics.totalHealthChecks - 1) + recoveryTime) / this.metrics.totalHealthChecks;
     }
 
-    this.debugEventBus.publish({
+    this.debugEventBus?.publish({
       sessionId: `session_${Date.now()}`,
       moduleId: 'provider-manager',
       operationId: 'provider_recovered',
@@ -502,7 +516,7 @@ export class ProviderManager extends BaseModule {
     if (selectedProvider !== currentProviderId) {
       this.metrics.providerSwitches++;
 
-      this.debugEventBus.publish({
+      this.debugEventBus?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'provider-manager',
         operationId: 'provider_switch',
@@ -533,7 +547,7 @@ export class ProviderManager extends BaseModule {
       await providerInstance.provider.updateConfig(newConfig);
       providerInstance.config = { ...providerInstance.config, ...newConfig };
 
-      this.debugEventBus.publish({
+      this.debugEventBus?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'provider-manager',
         operationId: 'provider_config_updated',
@@ -677,7 +691,7 @@ export class ProviderManager extends BaseModule {
         lastError = error as Error;
 
         // Log the attempt failure
-        this.debugEventBus.publish({
+        this.debugEventBus?.publish({
           sessionId: `session_${Date.now()}`,
           moduleId: 'provider-manager',
           operationId: 'provider_request_failed',
@@ -788,7 +802,7 @@ export class ProviderManager extends BaseModule {
         health = await provider.healthCheck();
       }
 
-      this.debugEventBus.publish({
+      this.debugEventBus?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'provider-manager',
         operationId: 'dynamic_provider_added',
@@ -836,12 +850,135 @@ export class ProviderManager extends BaseModule {
   }
 
   /**
+   * Get debug status with enhanced information
+   */
+  getDebugStatus(): any {
+    const baseStatus = {
+      providerManagerId: this.getInfo().id,
+      name: this.getInfo().name,
+      version: this.getInfo().version,
+      isInitialized: this.getStatus() !== 'stopped',
+      isRunning: this.isModuleRunning(),
+      status: this.getStatus(),
+      providerCount: this.providers.size,
+      activeProviderCount: this.getActiveProviders().length,
+      healthCheckInterval: this.options.healthCheckInterval,
+      autoRecoveryEnabled: this.options.autoRecoveryEnabled,
+      healthMonitoringActive: this.healthCheckInterval !== null,
+      isEnhanced: true
+    };
+
+    if (!this.isDebugEnhanced) {
+      return baseStatus;
+    }
+
+    return {
+      ...baseStatus,
+      debugInfo: this.getDebugInfo(),
+      providerMetrics: this.getProviderMetrics(),
+      healthStats: this.getHealthStats(),
+      managerMetrics: this.getManagerMetrics()
+    };
+  }
+
+  /**
+   * Get provider metrics
+   */
+  private getProviderMetrics(): any {
+    const metrics: any = {};
+
+    for (const [operation, metric] of this.moduleMetrics.entries()) {
+      metrics[operation] = {
+        count: metric.values.length,
+        lastUpdated: metric.lastUpdated,
+        recentValues: metric.values.slice(-5) // Last 5 values
+      };
+    }
+
+    return metrics;
+  }
+
+  /**
+   * Get health monitoring statistics
+   */
+  private getHealthStats(): any {
+    const healthChecks = this.metrics.totalHealthChecks;
+    const failedChecks = this.metrics.failedHealthChecks;
+    const successRate = healthChecks > 0 ? ((healthChecks - failedChecks) / healthChecks * 100).toFixed(2) : 0;
+
+    return {
+      totalHealthChecks: healthChecks,
+      failedHealthChecks: failedChecks,
+      successRate: `${successRate}%`,
+      averageRecoveryTime: this.metrics.averageRecoveryTime.toFixed(2),
+      providerSwitches: this.metrics.providerSwitches,
+      providersByHealth: this.getProvidersByHealthStatus()
+    };
+  }
+
+  /**
+   * Get manager metrics
+   */
+  private getManagerMetrics(): any {
+    return {
+      ...this.metrics,
+      providerCount: this.providers.size,
+      activeProviderCount: this.getActiveProviders().length,
+      healthCheckInterval: this.options.healthCheckInterval,
+      autoRecoveryEnabled: this.options.autoRecoveryEnabled,
+      maxConsecutiveFailures: this.options.maxConsecutiveFailures,
+      providerTimeout: this.options.providerTimeout,
+      enableMetrics: this.options.enableMetrics
+    };
+  }
+
+  /**
+   * Get providers grouped by health status
+   */
+  private getProvidersByHealthStatus(): any {
+    const status = {
+      healthy: 0,
+      unhealthy: 0,
+      unknown: 0
+    };
+
+    for (const [providerId, providerInstance] of this.providers.entries()) {
+      const health = providerInstance.provider.getHealth();
+      status[health.status]++;
+    }
+
+    return status;
+  }
+
+  /**
+   * Get detailed debug information
+   */
+  public getDebugInfo(): any {
+    return {
+      providerManagerId: this.getInfo().id,
+      name: this.getInfo().name,
+      version: this.getInfo().version,
+      enhanced: this.isDebugEnhanced,
+      eventBusAvailable: !!this.debugEventBus,
+      providerCount: this.providers.size,
+      activeProviderCount: this.getActiveProviders().length,
+      healthMonitoringActive: this.healthCheckInterval !== null,
+      healthCheckInterval: this.options.healthCheckInterval,
+      autoRecoveryEnabled: this.options.autoRecoveryEnabled,
+      maxConsecutiveFailures: this.options.maxConsecutiveFailures,
+      providerTimeout: this.options.providerTimeout,
+      enableMetrics: this.options.enableMetrics,
+      uptime: this.isModuleRunning() ? Date.now() - (this.getStats().uptime || Date.now()) : 0
+    };
+  }
+
+  /**
    * Get manager status
    */
   public getStatus(): any {
     return {
-      initialized: this.isInitialized(),
-      running: this.isRunning(),
+      initialized: this.isModuleRunning(),
+      running: this.isModuleRunning(),
       providers: this.getAllProvidersHealth(),
       metrics: this.getMetrics()
     };
@@ -861,7 +998,7 @@ export class ProviderManager extends BaseModule {
       providerInstance.isActive = true;
       providerInstance.consecutiveFailures = 0;
 
-      this.debugEventBus.publish({
+      this.debugEventBus?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'provider-manager',
         operationId: 'provider_reset',
@@ -882,7 +1019,7 @@ export class ProviderManager extends BaseModule {
   /**
    * Handle error with enhanced error handling system
    */
-  private async handleError(error: Error, context: string): Promise<void> {
+  protected async handleError(error: Error, context: string): Promise<void> {
     try {
       // Use enhanced error handling utilities
       await this.errorUtils.handle(error, context, {
