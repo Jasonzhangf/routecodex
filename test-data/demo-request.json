@@ -1,0 +1,28 @@
+{
+  "data": {
+    "model": "gpt-4",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is the weather like today?"
+      }
+    ],
+    "temperature": 0.7,
+    "max_tokens": 1000
+  },
+  "route": {
+    "providerId": "openai",
+    "modelId": "gpt-4",
+    "requestId": "demo-request-001",
+    "timestamp": 1642684800000
+  },
+  "metadata": {
+    "source": "demo",
+    "transformations": [],
+    "processingTime": 0
+  },
+  "debug": {
+    "enabled": false,
+    "stages": {}
+  }
+}

@@ -318,7 +318,7 @@ export class ConfigRequestClassifier {
         protocol,
         endpoint,
         model,
-        tokenCount: tokenAnalysis?.totalTokens || 0,
+        tokenCount: request[protocolConfig.maxTokensField] || tokenAnalysis?.totalTokens || 0,
         toolTypes: toolAnalysis?.toolTypes || [],
         hasTools: toolAnalysis?.hasTools || false,
         complexity: toolAnalysis?.complexity?.medium || 0,

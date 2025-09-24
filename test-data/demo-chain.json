@@ -1,0 +1,26 @@
+{
+  "name": "Demo Pipeline Chain",
+  "description": "A sample chain demonstrating request and response processing",
+  "steps": [
+    {
+      "name": "Request Processing",
+      "type": "request",
+      "pipelineId": "request-pipeline",
+      "mode": "dry-run",
+      "description": "Process the incoming request through the request pipeline"
+    },
+    {
+      "name": "Response Processing",
+      "type": "response",
+      "pipelineId": "response-pipeline",
+      "mode": "dry-run",
+      "description": "Process the response through the response pipeline"
+    },
+    {
+      "name": "Bidirectional Processing",
+      "type": "bidirectional",
+      "pipelineId": "bidirectional-pipeline",
+      "description": "Execute bidirectional pipeline processing"
+    }
+  ]
+}

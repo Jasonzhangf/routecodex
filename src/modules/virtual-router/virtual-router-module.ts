@@ -238,7 +238,7 @@ export class VirtualRouterModule extends BaseModule {
           longContext: {
             description: 'Routing for long context requests',
             modelTier: 'advanced',
-            tokenThreshold: 12000,
+            tokenThreshold: 10000,
             toolTypes: [],
             priority: 90
           },

@@ -3,40 +3,23 @@
  */
 
 import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
-import { createDryRunCommands } from '../../src/commands/dry-run.js';
 import { Command } from 'commander';
 import fs from 'fs';
 import path from 'path';
-import { DryRunEngine } from '../../src/modules/dry-run-engine/index.js';
 
 // Mock dependencies
 jest.mock('fs');
 jest.mock('path');
-jest.mock('../../src/modules/dry-run-engine/index.js');
 
 const mockFs = fs as jest.Mocked<typeof fs>;
 const mockPath = path as jest.Mocked<typeof path>;
-const mockDryRunEngine = DryRunEngine as jest.MockedClass<typeof DryRunEngine>;
 
 describe('Dry-Run CLI Commands', () => {
   let dryRunCommands: Command;
-  let mockEngineInstance: any;
 
   beforeEach(() => {
     // Reset all mocks
     jest.clearAllMocks();
-
-    // Create mock engine instance
-    mockEngineInstance = {
-      runRequest: jest.fn(),
-      runResponse: jest.fn(),
-      runBidirectional: jest.fn(),
-      configureNodes: jest.fn()
-    };
-    mockDryRunEngine.mockImplementation(() => mockEngineInstance);
-
-    // Create commands
-    dryRunCommands = createDryRunCommands();
 
     // Mock file system functions
     mockFs.existsSync.mockReturnValue(true);

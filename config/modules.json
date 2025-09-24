@@ -207,7 +207,7 @@
             "longContext": {
               "description": "Routing for long context requests",
               "modelTier": "advanced",
-              "tokenThreshold": 32000,
+              "tokenThreshold": 10000,
               "toolTypes": [],
               "priority": 90
             },

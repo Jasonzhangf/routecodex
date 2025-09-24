@@ -158,11 +158,11 @@ export class ConfigRoutingDecision {
       factors.tokenBased = true;
       confidence += 0.35; // 降低token权重
       reasoning += `Token数量(${input.tokenCount})达到阈值(${routeConfig.tokenThreshold}); `;
-    } else if (routeName === 'longContext' && input.tokenCount >= 8000) {
-      // 长上下文路由的特殊处理 - 降低门槛
+    } else if (routeName === 'longContext' && input.tokenCount >= 6000) {
+      // 长上下文路由的特殊处理 - 降低门槛到6K，提高敏感性
       factors.tokenBased = true;
-      confidence += 0.25;
-      reasoning += `中等长度文本(${input.tokenCount} tokens); `;
+      confidence += 0.3; // 提高长上下文中等长度检测的权重
+      reasoning += `中等长度文本(${input.tokenCount} tokens)可能为长上下文; `;
     }
 
     // 2. 工具类型评估 - 增强权重
