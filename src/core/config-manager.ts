@@ -3,8 +3,8 @@
  * Manages loading, validation, and runtime configuration updates
  */
 
-import { BaseModule, type ModuleInfo } from 'rcc-basemodule';
-import { DebugEventBus } from 'rcc-debugcenter';
+import { BaseModule, type ModuleInfo } from './base-module.js';
+import { DebugEventBus } from '../utils/external-mocks.js';
 import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
 import {
   type ServerConfig,
@@ -43,7 +43,6 @@ export class ConfigManager extends BaseModule {
   private _config: ServerConfig;
   private configPath: string;
   private errorHandling: ErrorHandlingCenter;
-  private debugEventBus: DebugEventBus;
   private watchers: fs.FSWatcher[] = [];
   private validationCache: Map<string, ConfigValidationResult> = new Map();
   private changeCallbacks: Set<(event: ConfigChangeEvent) => void> = new Set();
@@ -58,8 +57,7 @@ export class ConfigManager extends BaseModule {
       id: 'config-manager',
       name: 'ConfigManager',
       version: '0.0.1',
-      description: 'Configuration management for RouteCodex server',
-      type: 'core'
+      description: 'Configuration management for RouteCodex server'
     };
 
     super(moduleInfo);
@@ -90,7 +88,7 @@ export class ConfigManager extends BaseModule {
       this.startFileWatching();
 
       // Log initialization
-      this.debugEventBus.publish({
+      this.debugEventBus?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: this.getModuleInfo().id,
         operationId: 'config_initialized',
@@ -101,6 +99,14 @@ export class ConfigManager extends BaseModule {
           configPath: this.configPath,
           validation: validation
         }
+      });
+
+      // Record initialization metric
+      this.recordModuleMetric('initialization', {
+        configPath: this.configPath,
+        providersCount: Object.keys(this._config.providers).length,
+        validationErrors: validation.errors.length,
+        validationWarnings: validation.warnings.length
       });
 
     } catch (error) {
@@ -125,7 +131,7 @@ export class ConfigManager extends BaseModule {
       // Merge with existing configuration
       this._config = this.mergeWithDefaults(loadedConfig);
 
-      this.debugEventBus.publish({
+      this.debugEventBus?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: this.getModuleInfo().id,
         operationId: 'config_loaded',
@@ -137,6 +143,13 @@ export class ConfigManager extends BaseModule {
           providers: Object.keys(this._config.providers),
           server: this._config.server
         }
+      });
+
+      // Record config loading metric
+      this.recordModuleMetric('config_load', {
+        configPath: this.configPath,
+        providersCount: Object.keys(this._config.providers).length,
+        fileSize: fs.existsSync(this.configPath) ? fs.statSync(this.configPath).size : 0
       });
 
     } catch (error) {
@@ -185,7 +198,7 @@ export class ConfigManager extends BaseModule {
     fs.writeFileSync(this.configPath, JSON.stringify(defaultConfig, null, 2));
     this._config = defaultConfig;
 
-    this.debugEventBus.publish({
+    this.debugEventBus?.publish({
       sessionId: `session_${Date.now()}`,
       moduleId: this.getModuleInfo().id,
       operationId: 'default_config_created',
@@ -316,7 +329,7 @@ export class ConfigManager extends BaseModule {
 
       this.watchers.push(watcher);
 
-      this.debugEventBus.publish({
+      this.debugEventBus?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: this.getModuleInfo().id,
         operationId: 'file_watching_started',
@@ -329,7 +342,7 @@ export class ConfigManager extends BaseModule {
       });
 
     } catch (error) {
-      this.debugEventBus.publish({
+      this.debugEventBus?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: this.getModuleInfo().id,
         operationId: 'file_watching_failed',
@@ -362,7 +375,7 @@ export class ConfigManager extends BaseModule {
       // Notify listeners of changes
       this.notifyConfigChange('modified', '', oldConfig, this._config);
 
-      this.debugEventBus.publish({
+      this.debugEventBus?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: this.getModuleInfo().id,
         operationId: 'config_reloaded',
@@ -461,7 +474,7 @@ export class ConfigManager extends BaseModule {
       // Notify listeners
       this.notifyConfigChange('modified', '', oldConfig, this._config);
 
-      this.debugEventBus.publish({
+      this.debugEventBus?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: this.getModuleInfo().id,
         operationId: 'config_updated',
@@ -471,6 +484,14 @@ export class ConfigManager extends BaseModule {
         data: {
           validation: validation
         }
+      });
+
+      // Record config update metric
+      this.recordModuleMetric('config_update', {
+        configPath: this.configPath,
+        validationErrors: validation.errors.length,
+        validationWarnings: validation.warnings.length,
+        updateFields: Object.keys(updates).length
       });
 
     } catch (error) {
@@ -517,7 +538,7 @@ export class ConfigManager extends BaseModule {
   /**
    * Handle error
    */
-  private async handleError(error: Error, context: string): Promise<void> {
+  protected async handleError(error: Error, context: string): Promise<void> {
     try {
       const errorContext: ErrorContext = {
         error: error.message,
@@ -563,6 +584,93 @@ export class ConfigManager extends BaseModule {
   }
 
   /**
+   * Get debug status with enhanced information
+   */
+  getDebugStatus(): any {
+    const baseStatus = {
+      configManagerId: this.getInfo().id,
+      name: this.getInfo().name,
+      version: this.getInfo().version,
+      isInitialized: this.getStatus() !== 'stopped',
+      isRunning: this.isModuleRunning(),
+      status: this.getStatus(),
+      configPath: this.configPath,
+      providersCount: Object.keys(this._config.providers).length,
+      validationCacheSize: this.validationCache.size,
+      fileWatchersActive: this.watchers.length > 0,
+      isEnhanced: true
+    };
+
+    if (!this.isDebugEnhanced) {
+      return baseStatus;
+    }
+
+    return {
+      ...baseStatus,
+      debugInfo: this.getDebugInfo(),
+      configMetrics: this.getConfigMetrics(),
+      validationHistory: [...this.validationCache.entries()].slice(-5), // Last 5 validations
+      configStats: this.getConfigStats()
+    };
+  }
+
+  /**
+   * Get configuration metrics
+   */
+  private getConfigMetrics(): any {
+    const metrics: any = {};
+
+    for (const [operation, metric] of this.moduleMetrics.entries()) {
+      metrics[operation] = {
+        count: metric.values.length,
+        lastUpdated: metric.lastUpdated,
+        recentValues: metric.values.slice(-5) // Last 5 values
+      };
+    }
+
+    return metrics;
+  }
+
+  /**
+   * Get configuration statistics
+   */
+  private getConfigStats(): any {
+    const providers = Object.values(this._config.providers);
+    const enabledProviders = providers.filter(p => p.enabled !== false);
+    const totalModels = providers.reduce((sum, p) => sum + Object.keys(p.models || {}).length, 0);
+
+    return {
+      totalProviders: providers.length,
+      enabledProviders: enabledProviders.length,
+      totalModels: totalModels,
+      configFileSize: fs.existsSync(this.configPath) ? fs.statSync(this.configPath).size : 0,
+      lastValidation: this.validationCache.get(this.configPath),
+      watchersActive: this.watchers.length,
+      changeCallbacks: this.changeCallbacks.size
+    };
+  }
+
+  /**
+   * Get detailed debug information
+   */
+  public getDebugInfo(): any {
+    return {
+      configManagerId: this.getInfo().id,
+      name: this.getInfo().name,
+      version: this.getInfo().version,
+      enhanced: this.isDebugEnhanced,
+      eventBusAvailable: !!this.debugEventBus,
+      configPath: this.configPath,
+      configFileSize: fs.existsSync(this.configPath) ? fs.statSync(this.configPath).size : 0,
+      providersCount: Object.keys(this._config.providers).length,
+      validationCacheSize: this.validationCache.size,
+      fileWatchersActive: this.watchers.length > 0,
+      changeCallbacks: this.changeCallbacks.size,
+      uptime: this.isModuleRunning() ? Date.now() - (this.getStats().uptime || Date.now()) : 0
+    };
+  }
+
+  /**
    * Get module info
    */
   public getModuleInfo(): ModuleInfo {
@@ -570,8 +678,7 @@ export class ConfigManager extends BaseModule {
       id: 'config-manager',
       name: 'ConfigManager',
       version: '0.0.1',
-      description: 'Configuration management for RouteCodex server',
-      type: 'core'
+      description: 'Configuration management for RouteCodex server'
     };
   }
 }
