@@ -8,6 +8,7 @@
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
+import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
@@ -61,7 +62,18 @@ export class QwenTokenStorage {
   }
 
   static fromJSON(json: any) {
-    return new QwenTokenStorage(json);
+    // Be tolerant to field name differences from various tools
+    const normalized: any = { ...json };
+    // Some sources save `expire`, map it to `expired`
+    if (!normalized.expired && typeof normalized.expire === 'string') {
+      normalized.expired = normalized.expire;
+    }
+    // If only expires_in is present, derive absolute expiry from last_refresh or now
+    if (!normalized.expired && typeof normalized.expires_in === 'number') {
+      const base = normalized.last_refresh ? new Date(normalized.last_refresh) : new Date();
+      normalized.expired = new Date(base.getTime() + normalized.expires_in * 1000).toISOString();
+    }
+    return new QwenTokenStorage(normalized);
   }
 
   isExpired() {
@@ -84,8 +96,27 @@ export class QwenOAuth {
 
   constructor(config: any = {}) {
     this.tokenFile = config.tokenFile || path.join(process.env.HOME || '', '.qwen', 'oauth_creds.json');
+    // Normalize token file path: expand ~ and resolve relative paths
+    this.tokenFile = this.normalizePath(this.tokenFile);
     this.tokenStorage = null;
     this.httpClient = config.httpClient || fetch;
+  }
+
+  /** Normalize file path: expand ~ to home and resolve to absolute if possible */
+  private normalizePath(p: string): string {
+    try {
+      let out = p;
+      if (typeof out === 'string' && out.startsWith('~')) {
+        out = path.join(process.env.HOME || homedir(), out.slice(1));
+      }
+      // If still not absolute, resolve relative to current working directory
+      if (!path.isAbsolute(out)) {
+        out = path.resolve(process.cwd(), out);
+      }
+      return out;
+    } catch {
+      return p;
+    }
   }
 
   /**
@@ -382,7 +413,8 @@ export class QwenOAuth {
       throw new Error('No token storage to save');
     }
 
-    await fs.mkdir(path.dirname(this.tokenFile), { recursive: true });
+    const dir = path.dirname(this.tokenFile);
+    await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(this.tokenFile, JSON.stringify(this.tokenStorage.toJSON(), null, 2));
   }
 

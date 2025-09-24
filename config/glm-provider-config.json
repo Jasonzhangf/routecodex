@@ -1,0 +1,148 @@
+{
+  "providers": {
+    "glm-provider": {
+      "type": "openai",
+      "enabled": true,
+      "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+      "auth": {
+        "type": "apikey",
+        "apiKey": "${GLM_API_KEY}"
+      },
+      "models": {
+        "glm-4": {
+          "enabled": true,
+          "maxTokens": 8192,
+          "weight": 1.0,
+          "performance": {
+            "avgResponseTime": 1500,
+            "errorRate": 0.01
+          }
+        },
+        "glm-4-air": {
+          "enabled": true,
+          "maxTokens": 8192,
+          "weight": 0.8,
+          "performance": {
+            "avgResponseTime": 800,
+            "errorRate": 0.02
+          }
+        },
+        "glm-4-airx": {
+          "enabled": true,
+          "maxTokens": 8192,
+          "weight": 0.9,
+          "performance": {
+            "avgResponseTime": 1000,
+            "errorRate": 0.015
+          }
+        }
+      },
+      "health": "healthy"
+    }
+  },
+  "pipelines": [
+    {
+      "id": "glm-default-pipeline",
+      "name": "GLM Default Pipeline",
+      "description": "Default pipeline for GLM provider using OpenAI compatibility",
+      "enabled": true,
+      "stages": [
+        {
+          "id": "glm-switch",
+          "type": "llm-switch",
+          "config": {
+            "type": "openai-passthrough",
+            "protocol": "openai",
+            "targetFormat": "openai"
+          }
+        },
+        {
+          "id": "glm-compatibility",
+          "type": "compatibility",
+          "config": {
+            "type": "passthrough-compatibility",
+            "toolsEnabled": true
+          }
+        },
+        {
+          "id": "glm-provider",
+          "type": "provider",
+          "config": {
+            "type": "openai-provider",
+            "providerId": "glm-provider",
+            "defaultModel": "glm-4"
+          }
+        }
+      ],
+      "routing": {
+        "default": "glm-default-pipeline",
+        "rules": [
+          {
+            "condition": "true",
+            "target": "glm-default-pipeline"
+          }
+        ]
+      }
+    }
+  ],
+  "dynamicRouting": {
+    "enabled": true,
+    "defaultCategory": "default",
+    "routingCategories": {
+      "default": {
+        "name": "Default Routing",
+        "description": "Default routing for all requests",
+        "targetProviders": ["glm-provider"],
+        "models": ["glm-4", "glm-4-air", "glm-4-airx"],
+        "strategy": "weighted",
+        "fallbackEnabled": true
+      }
+    },
+    "classification": {
+      "enabled": true,
+      "confidenceThreshold": 0.7,
+      "useAdvancedClassification": false
+    }
+  },
+  "loadBalancer": {
+    "enabled": true,
+    "strategy": "weighted",
+    "healthCheck": {
+      "enabled": true,
+      "interval": 30000,
+      "timeout": 5000
+    },
+    "circuitBreaker": {
+      "enabled": true,
+      "failureThreshold": 5,
+      "recoveryTimeout": 60000
+    }
+  },
+  "system": {
+    "name": "GLM Provider System",
+    "version": "1.0.0",
+    "debug": {
+      "enabled": true,
+      "level": "info"
+    },
+    "metrics": {
+      "enabled": true,
+      "collectionInterval": 10000
+    },
+    "logging": {
+      "enabled": true,
+      "level": "info"
+    }
+  },
+  "features": {
+    "streaming": {
+      "enabled": true
+    },
+    "tools": {
+      "enabled": true
+    },
+    "caching": {
+      "enabled": false
+    }
+  }
+}

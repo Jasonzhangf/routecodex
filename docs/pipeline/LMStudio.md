@@ -2,7 +2,7 @@
 
 This document describes the standardized LM Studio pipeline implementation in RouteCodex using the HTTP provider, its layering, configuration, logging, and end‑to‑end usage including tool calling.
 
-## Layers (RCC4)
+## Layers (RouteCodex)
 
 - LLM Switch (openai-passthrough)
   - No opinionated logic; forwards OpenAI‑style requests

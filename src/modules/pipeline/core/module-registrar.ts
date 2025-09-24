@@ -11,9 +11,11 @@ import { StreamingControlWorkflow } from '../modules/workflow/streaming-control.
 import { FieldMappingCompatibility } from '../modules/compatibility/field-mapping.js';
 import { LMStudioCompatibility } from '../modules/compatibility/lmstudio-compatibility.js';
 import { QwenCompatibility } from '../modules/compatibility/qwen-compatibility.js';
+import { PassthroughCompatibility } from '../modules/compatibility/passthrough-compatibility.js';
 
 import { LMStudioProviderSimple } from '../modules/provider/lmstudio-provider-simple.js';
 import { GenericHTTPProvider } from '../modules/provider/generic-http-provider.js';
+import { OpenAIProvider } from '../modules/provider/openai-provider.js';
 
 /**
  * Module registrar for pipeline components
@@ -78,6 +80,12 @@ export class PipelineModuleRegistrar {
       const module = new QwenCompatibility(config, dependencies);
       return module;
     });
+
+    // Register Passthrough Compatibility module
+    this.registry.registerModule('passthrough-compatibility', async (config, dependencies) => {
+      const module = new PassthroughCompatibility(config, dependencies);
+      return module;
+    });
   }
 
   /**
@@ -99,6 +107,12 @@ export class PipelineModuleRegistrar {
     // Register Generic HTTP Provider
     this.registry.registerModule('generic-http', async (config, dependencies) => {
       const module = new GenericHTTPProvider(config, dependencies);
+      return module;
+    });
+
+    // Register OpenAI Provider
+    this.registry.registerModule('openai-provider', async (config, dependencies) => {
+      const module = new OpenAIProvider(config, dependencies);
       return module;
     });
   }

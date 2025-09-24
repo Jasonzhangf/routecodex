@@ -1,4 +1,4 @@
-# RCC4 - RouteCodex Claude Code Router
+# RouteCodex - RouteCodex Claude Code Router
 
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
@@ -8,7 +8,7 @@ A sophisticated AI service routing and transformation system that provides seaml
 
 ## 🏗️ 4-Layer Architecture
 
-RCC4 implements a sophisticated 4-layer pipeline architecture that provides clean separation of concerns and flexible protocol handling:
+RouteCodex implements a sophisticated 4-layer pipeline architecture that provides clean separation of concerns and flexible protocol handling:
 
 ```
 HTTP Request → LLM Switch → Workflow → Compatibility → Provider → AI Service
@@ -552,6 +552,12 @@ This release enables full operational capability for three major AI providers:
 - **iFlow**: Fixed authentication endpoints and API configuration, Kimi model integration
 - **Unified Auth Framework**: EnhancedAuthResolver supporting multiple authentication types
 - **Build System**: Resolved TypeScript compilation issues
+- **🔧 Offline Logging CLI**: New comprehensive CLI for offline log capture and analysis
+  - Module-level and pipeline-level offline logging configuration
+  - Automatic log file management with rotation and compression
+  - Built-in log analysis with HTML visualization reports
+  - Time series analysis for performance monitoring
+  - Zero-dependency offline operation
 
 ### 🔐 OAuth Authentication Details
 

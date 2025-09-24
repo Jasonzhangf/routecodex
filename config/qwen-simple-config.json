@@ -1,0 +1,37 @@
+{
+  "virtualrouter": {
+    "inputProtocol": "openai",
+    "outputProtocol": "openai",
+    "providers": {
+      "qwen": {
+        "type": "qwen",
+        "baseURL": "https://portal.qwen.ai/v1",
+        "apiKey": [
+          "qwen-oauth-api-key-1234567890abcdef"
+        ],
+        "models": {
+          "qwen3-coder-plus": {
+            "maxContext": 262144,
+            "maxTokens": 262144
+          },
+          "qwen-turbo": {
+            "maxContext": 262144,
+            "maxTokens": 262144
+          }
+        }
+      }
+    },
+    "routing": {
+      "default": [
+        "qwen.qwen3-coder-plus"
+      ],
+      "coding": [
+        "qwen.qwen3-coder-plus"
+      ]
+    }
+  },
+  "server": {
+    "port": 8080,
+    "host": "127.0.0.1"
+  }
+}

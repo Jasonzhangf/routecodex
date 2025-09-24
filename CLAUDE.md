@@ -1,8 +1,8 @@
-# RCC4 4-Layer Pipeline Architecture Documentation
+# RouteCodex 4-Layer Pipeline Architecture Documentation
 
 ## Overview
 
-The RCC4 system implements a sophisticated 4-layer pipeline architecture that provides clean separation of concerns, modular design, and flexible protocol handling. This architecture enables seamless integration with multiple AI providers while maintaining consistent interfaces and proper workflow management.
+The RouteCodex system implements a sophisticated 4-layer pipeline architecture that provides clean separation of concerns, modular design, and flexible protocol handling. This architecture enables seamless integration with multiple AI providers while maintaining consistent interfaces and proper workflow management.
 
 ## Architecture Diagram
 

@@ -162,7 +162,7 @@ node test-qwen-oauth-fixes.mjs
 npm start
 
 # 测试工具调用
-ANTHROPIC_BASE_URL=http://localhost:5506 ANTHROPIC_API_KEY=rcc4-proxy-key claude --print "列出本目录中所有文件夹"
+ANTHROPIC_BASE_URL=http://localhost:5506 ANTHROPIC_API_KEY=routecodex-proxy-key claude --print "列出本目录中所有文件夹"
 ```
 
 **预期结果：**
@@ -273,7 +273,7 @@ node test-qwen-oauth-fixes.mjs
 npm start
 
 # 4. 测试工具调用（在另一个终端）
-ANTHROPIC_BASE_URL=http://localhost:5506 ANTHROPIC_API_KEY=rcc4-proxy-key claude --print "列出本目录中所有文件夹"
+ANTHROPIC_BASE_URL=http://localhost:5506 ANTHROPIC_API_KEY=routecodex-proxy-key claude --print "列出本目录中所有文件夹"
 ```
 
 如果所有测试都通过，说明Qwen OAuth认证问题已成功修复！

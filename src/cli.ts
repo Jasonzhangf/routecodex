@@ -454,13 +454,13 @@ program
     }
   });
 
-// Dry-run commands
-try {
-  const { createDryRunCommands } = await import('./commands/dry-run.js');
-  program.addCommand(createDryRunCommands());
-} catch (error) {
-  logger.warning('Dry-run commands not available. Run "npm run build" to enable.');
-}
+// Import commands at top level
+import { createDryRunCommands } from './commands/dry-run.js';
+import { createOfflineLogCommand } from './commands/offline-log.js';
+
+// Add commands
+program.addCommand(createDryRunCommands());
+program.addCommand(createOfflineLogCommand());
 
 // Examples command
 program

@@ -1,8 +1,8 @@
-# AdvBaseModule - Native Dry-Run Support for RCC4
+# AdvBaseModule - Native Dry-Run Support for RouteCodex
 
 ## Overview
 
-AdvBaseModule is an advanced base module that extends the standard BaseModule with native dry-run capabilities. It provides seamless integration with the existing RCC4 pipeline architecture while adding powerful testing and debugging features.
+AdvBaseModule is an advanced base module that extends the standard BaseModule with native dry-run capabilities. It provides seamless integration with the existing RouteCodex pipeline architecture while adding powerful testing and debugging features.
 
 ## Features
 

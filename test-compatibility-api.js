@@ -9,7 +9,7 @@ import https from 'https';
 
 // Test configuration
 const SERVER_URL = 'http://localhost:5506';
-const API_KEY = 'rcc4-proxy-key';
+const API_KEY = 'routecodex-proxy-key';
 
 // Test requests
 const testRequests = [

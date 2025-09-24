@@ -1,6 +1,6 @@
-# RCC4 Advanced BaseModule (AdvBaseModule)
+# RouteCodex Advanced BaseModule (AdvBaseModule)
 
-An advanced base module that extends the standard BaseModule with native dry-run capabilities for the RCC4 pipeline architecture.
+An advanced base module that extends the standard BaseModule with native dry-run capabilities for the RouteCodex pipeline architecture.
 
 ## Features
 

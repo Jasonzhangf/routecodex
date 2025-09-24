@@ -81,22 +81,37 @@ export class UserConfigParser {
         let modelId = '';
         let keyAlias = '';
         
-        // 尝试匹配已知的model名称
+        // 尝试匹配已知的model名称 - 按长度降序排序，优先匹配更长的model名称
         const knownModels = Object.keys(providerConfig.models || {});
         let foundModel = null;
-        
-        for (const model of knownModels) {
+
+        // 按长度降序排序，确保"glm-4.5"在"glm-4"之前被检查
+        const sortedModels = knownModels.sort((a, b) => b.length - a.length);
+
+        for (const model of sortedModels) {
           if (remaining.startsWith(model + '.') || remaining === model) {
             foundModel = model;
             break;
           }
         }
+
+        // 调试输出
+        if (providerId === 'glm') {
+          console.log(`[DEBUG] GLM parsing - remaining: "${remaining}", knownModels:`, knownModels);
+          console.log(`[DEBUG] GLM parsing - foundModel: "${foundModel}"`);
+        }
         
         if (foundModel) {
           modelId = foundModel;
           const afterModel = remaining.substring(modelId.length);
-          if (afterModel.startsWith('.')) {
-            keyAlias = afterModel.substring(1); // 去掉前面的点
+          // 只有当剩余部分以点开头且后面还有内容时才提取key alias
+          if (afterModel.startsWith('.') && afterModel.length > 1) {
+            const possibleKeyAlias = afterModel.substring(1);
+            // 检查是否是有效的key alias格式（key1, key2等）
+            if (possibleKeyAlias.match(/^key\d+$/)) {
+              keyAlias = possibleKeyAlias;
+            }
+            // 否则忽略，认为是模型名称的一部分
           }
         } else {
           // 如果没有找到已知model，使用简单的启发式方法

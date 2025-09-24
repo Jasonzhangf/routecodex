@@ -58,9 +58,10 @@
     "helmet": "^7.0.0",
     "lmstudio": "^0.0.32",
     "node-fetch": "^3.3.2",
-    "openai": "^5.22.1",
+    "openai": "^5.23.0",
     "ora": "^9.0.0",
     "rcc-basemodule": "^0.2.7",
+    "rcc-basemodule-adv": "^0.0.1",
     "rcc-debugcenter": "^0.1.4",
     "rcc-errorhandling": "^1.0.10",
     "socket.io": "^4.8.1"

@@ -1,0 +1,42 @@
+{
+  "timestamp": "2025-09-24T07:53:10.268Z",
+  "totalRequests": 3,
+  "successfulTests": 3,
+  "failedTests": 0,
+  "successRate": 100,
+  "results": [
+    {
+      "requestId": "test-001",
+      "description": "简单问候测试",
+      "route": "default",
+      "modelTier": "basic",
+      "confidence": 0.2,
+      "selectedProvider": "lmstudio",
+      "selectedModel": "gpt-oss-20b-mlx",
+      "responseTime": 250,
+      "success": true
+    },
+    {
+      "requestId": "test-002",
+      "description": "代码生成测试",
+      "route": "default",
+      "modelTier": "basic",
+      "confidence": 0.2,
+      "selectedProvider": "lmstudio",
+      "selectedModel": "gpt-oss-20b-mlx",
+      "responseTime": 250,
+      "success": true
+    },
+    {
+      "requestId": "test-003",
+      "description": "长文本处理测试",
+      "route": "default",
+      "modelTier": "basic",
+      "confidence": 0.2,
+      "selectedProvider": "lmstudio",
+      "selectedModel": "gpt-oss-20b-mlx",
+      "responseTime": 250,
+      "success": true
+    }
+  ]
+}
