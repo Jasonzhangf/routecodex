@@ -32,6 +32,151 @@ HTTP Request → LLM Switch → Workflow → Compatibility → Provider → AI S
 - **Format Adaptation**: Transforms request/response formats between providers
 - **Tool Integration**: Handles tool calling format conversion and execution
 - **Configuration-Driven**: Uses JSON configuration for transformation rules
+- **Simple String Format**: Supports easy compatibility specification (e.g., `"compatibility": "passthrough"`)
+- **Auto-Inference**: Automatically determines compatibility mode based on provider type when not specified
+
+## 🔧 Compatibility Field Configuration
+
+The compatibility field supports both simple string format and complex object format, providing flexible configuration options for different use cases.
+
+### Simple String Format
+
+For basic usage, you can specify compatibility as a simple string:
+
+```json
+{
+  "compatibility": "passthrough"
+}
+```
+
+#### Supported String Values:
+- `"passthrough"` - Direct pass-through without transformation (default)
+- `"lmstudio"` - LM Studio compatibility mode
+- `"qwen"` - Qwen compatibility mode
+- `"iflow"` - iFlow compatibility mode
+- Multiple providers: `"lmstudio/qwen"` - Will use first available provider
+
+### Complex Object Format
+
+For advanced configuration, use the complex object format:
+
+```json
+{
+  "compatibility": {
+    "type": "lmstudio-compatibility",
+    "config": {
+      "toolsEnabled": true,
+      "customRules": [
+        {
+          "id": "ensure-standard-tools-format",
+          "transform": "mapping",
+          "sourcePath": "tools",
+          "targetPath": "tools",
+          "mapping": {
+            "type": "type",
+            "function": "function"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+### Priority Hierarchy
+
+The system follows this priority order when determining compatibility:
+
+1. **User Config Compatibility** (highest priority)
+2. **Model-Level Compatibility**
+3. **Provider-Level Compatibility**
+4. **Auto-Inference** (fallback based on provider type)
+
+### Auto-Inference Logic
+
+When compatibility is not specified, the system automatically determines the appropriate mode:
+
+```json
+// Auto-inference examples
+{
+  "providers": {
+    "lmstudio": {
+      "type": "lmstudio"
+      // compatibility not specified -> auto-inferred as "lmstudio-compatibility"
+    },
+    "qwen": {
+      "type": "qwen"
+      // compatibility not specified -> auto-inferred as "qwen-compatibility"
+    }
+  }
+}
+```
+
+### Configuration Examples
+
+#### Basic Passthrough Configuration
+```json
+{
+  "server": {
+    "port": 5506
+  },
+  "providers": {
+    "lmstudio": {
+      "type": "lmstudio",
+      "baseUrl": "http://localhost:1234",
+      "apiKey": "your-api-key"
+    }
+  },
+  "compatibility": "passthrough"
+}
+```
+
+#### Multi-Provider Compatibility
+```json
+{
+  "providers": {
+    "lmstudio": {
+      "type": "lmstudio",
+      "baseUrl": "http://localhost:1234"
+    },
+    "qwen": {
+      "type": "qwen",
+      "baseUrl": "https://chat.qwen.ai"
+    }
+  },
+  "compatibility": "lmstudio/qwen"
+}
+```
+
+#### Advanced Configuration with Custom Rules
+```json
+{
+  "providers": {
+    "lmstudio": {
+      "type": "lmstudio",
+      "baseUrl": "http://localhost:1234"
+    }
+  },
+  "compatibility": {
+    "type": "lmstudio-compatibility",
+    "config": {
+      "toolsEnabled": true,
+      "customRules": [
+        {
+          "id": "tool-format-conversion",
+          "transform": "mapping",
+          "sourcePath": "tools",
+          "targetPath": "tools",
+          "mapping": {
+            "type": "type",
+            "function": "function"
+          }
+        }
+      ]
+    }
+  }
+}
+```
 
 ### Layer 4: Provider (Standard HTTP Server)
 - **HTTP Communication**: Manages all HTTP communications with AI services
@@ -69,6 +214,13 @@ HTTP Request → LLM Switch → Workflow → Compatibility → Provider → AI S
 - 7 specialized routing categories
 - Performance-optimized pipeline selection
 - Custom routing rules support
+
+### 🧪 Advanced Dry-Run System
+- **Comprehensive Pipeline Debugging**: Node-level dry-run execution with "pipeline break" debugging
+- **Input Simulation**: Intelligent mock data generation for all-nodes dry-run scenarios
+- **Bidirectional Pipeline**: Request and response pipeline dry-run with real server response integration
+- **Memory Management**: Intelligent resource cleanup and memory leak prevention
+- **Error Boundaries**: Multi-level error handling with automatic recovery mechanisms
 
 ## 🚀 Quick Start
 
@@ -268,10 +420,46 @@ console.log('Tool calls:', response.choices[0].message.tool_calls);
 - [Configuration Guide](./docs/CONFIG_ARCHITECTURE.md) - Configuration options and examples
 - [Pipeline Architecture](./docs/pipeline/ARCHITECTURE.md) - Pipeline system details
 - [LM Studio Integration](./docs/lmstudio-tool-calling.md) - LM Studio specific setup
+- [Dry-Run System](./docs/dry-run/README.md) - Comprehensive dry-run debugging framework
+- [Bidirectional Pipeline](./docs/dry-run/bidirectional-pipeline.md) - Advanced bidirectional pipeline features
 
 ## 🔧 Configuration
 
 ### Basic Configuration
+
+```json
+{
+  "server": {
+    "port": 5506,
+    "host": "localhost"
+  },
+  "providers": {
+    "lmstudio": {
+      "type": "lmstudio",
+      "baseUrl": "http://localhost:1234",
+      "apiKey": "your-api-key"
+    }
+  },
+  "routing": {
+    "default": "lmstudio"
+  },
+  "compatibility": "passthrough",
+  "features": {
+    "tools": {
+      "enabled": true,
+      "maxTools": 10
+    },
+    "streaming": {
+      "enabled": true,
+      "chunkSize": 1024
+    }
+  }
+}
+```
+
+### Advanced Pipeline Configuration
+
+For detailed pipeline configuration, you can specify individual modules:
 
 ```json
 {
@@ -337,18 +525,33 @@ npm test -- --testNamePattern="tool calling"
 # Run integration test with LM Studio
 node test-llmswitch-workflow-integration.mjs
 
+# Run dry-run system tests
+node test-all-nodes-dry-run.mjs
+
+# Run bidirectional pipeline tests
+node test-bidirectional-pipeline-dry-run.mjs
+
 # Run build
 npm run build
 ```
 
 ## 🎯 Supported Providers
 
-### ✅ Currently Supported
-- **LM Studio**: Local AI model hosting with full tool support
+### ✅ Currently Supported (Fully Operational)
+- **LM Studio**: Local AI model hosting with full tool support and comprehensive dry-run analysis
+- **Qwen**: Alibaba's language models with OAuth 2.0 authentication and API key fallback
+- **iFlow**: AI service provider with OAuth 2.0 + PKCE authentication, Kimi model support
 - **OpenAI**: GPT models with function calling
-- **Qwen**: Alibaba's language models with OAuth 2.0 authentication
-- **iFlow**: AI service provider with OAuth 2.0 + PKCE authentication
 - **Anthropic**: Claude model family
+
+### 🔧 Latest Updates (v0.2.7)
+This release enables full operational capability for three major AI providers:
+
+- **LM Studio**: Complete tool calling implementation with dry-run testing framework
+- **Qwen**: Working OAuth authentication with automatic token refresh and caching
+- **iFlow**: Fixed authentication endpoints and API configuration, Kimi model integration
+- **Unified Auth Framework**: EnhancedAuthResolver supporting multiple authentication types
+- **Build System**: Resolved TypeScript compilation issues
 
 ### 🔐 OAuth Authentication Details
 

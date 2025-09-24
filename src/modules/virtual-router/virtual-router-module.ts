@@ -466,8 +466,7 @@ export class VirtualRouterModule extends BaseModule {
         convertedFields: [],
         fieldMappings: [],
         conversionTimeMs: Date.now() - startTime,
-        success: false,
-        error: error instanceof Error ? error.message : String(error)
+        success: false
       };
     }
   }

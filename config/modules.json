@@ -273,5 +273,41 @@
         }
       }
     }
+    ,
+    "dryrunengine": {
+      "enabled": true,
+      "config": {
+        "moduleType": "dry-run-engine",
+        "requestPipeline": {
+          "dryRunMode": "partial",
+          "nodeConfigs": {
+            "llm-switch": { "enabled": true, "mode": "output-validation", "breakpointBehavior": "continue", "verbosity": "normal" },
+            "compatibility": { "enabled": false, "mode": "output-validation", "breakpointBehavior": "continue", "verbosity": "minimal" },
+            "provider": { "enabled": false, "mode": "output-validation", "breakpointBehavior": "continue", "verbosity": "minimal" }
+          },
+          "inputSimulation": {
+            "enabled": true,
+            "primaryStrategy": "historical-data",
+            "fallbackStrategies": ["schema-inference", "rule-based", "ai-generation", "request-propagation"],
+            "qualityRequirement": "medium",
+            "useHistoricalData": true,
+            "enableSmartInference": true
+          }
+        },
+        "responsePipeline": {
+          "dryRunMode": "partial",
+          "responseDryRun": {
+            "enabled": true,
+            "inputSource": "real-response",
+            "performanceAnalysis": true,
+            "caching": { "enabled": true, "maxSize": 100, "ttlMs": 300000, "keyStrategy": "request-id" }
+          },
+          "nodeConfigs": {
+            "response-processor": { "enabled": true, "mode": "output-validation", "breakpointBehavior": "continue", "verbosity": "normal" }
+          }
+        },
+        "driverFeedback": { "enabled": true, "feedbackDelayMs": 100, "analysisLevel": "detailed" }
+      }
+    }
   }
 }

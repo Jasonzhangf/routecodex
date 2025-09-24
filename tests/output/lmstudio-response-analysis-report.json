@@ -1,0 +1,72 @@
+{
+  "executionSummary": {
+    "timestamp": "2025-09-24T05:08:10.313Z",
+    "responseSource": "file",
+    "totalAnalysisTime": 0,
+    "nodesAnalyzed": 2,
+    "analysisDepth": "detailed"
+  },
+  "originalResponse": {
+    "id": "chatcmpl-123456789",
+    "model": "gpt-oss-20b-mlx",
+    "object": "chat.completion",
+    "choices": 1,
+    "toolCalls": 1,
+    "usage": {
+      "prompt_tokens": 85,
+      "completion_tokens": 35,
+      "total_tokens": 120
+    }
+  },
+  "compatibilityAnalysis": {
+    "steps": [],
+    "inputAnalysis": null,
+    "outputAnalysis": null,
+    "performance": {},
+    "errors": []
+  },
+  "llmSwitchAnalysis": {
+    "steps": [],
+    "inputAnalysis": null,
+    "outputAnalysis": null,
+    "performance": {},
+    "errors": []
+  },
+  "transformationChain": [
+    {
+      "from": "Raw Provider Response",
+      "to": "Compatibility Processed",
+      "analysis": {
+        "transformationSteps": [],
+        "inputAnalysis": null,
+        "outputAnalysis": null,
+        "performanceMetrics": {},
+        "errors": []
+      }
+    },
+    {
+      "from": "Compatibility Processed",
+      "to": "LLM Switch Final",
+      "analysis": {
+        "transformationSteps": [],
+        "inputAnalysis": null,
+        "outputAnalysis": null,
+        "performanceMetrics": {},
+        "errors": []
+      }
+    }
+  ],
+  "insights": {
+    "totalTransformationTime": 0,
+    "efficiency": {
+      "compatibility": 0,
+      "llmSwitch": 0,
+      "overall": 0
+    },
+    "errorCount": 0,
+    "sizeChanges": {
+      "compatibility": 0,
+      "llmSwitch": 0
+    }
+  }
+}

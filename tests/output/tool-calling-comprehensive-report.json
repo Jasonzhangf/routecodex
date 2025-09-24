@@ -1,0 +1,89 @@
+{
+  "executionSummary": {
+    "timestamp": "2025-09-24T05:14:58.421Z",
+    "totalExecutionTime": 0,
+    "modulesAnalyzed": 2,
+    "originalRequest": {
+      "model": "gpt-oss-20b-mlx",
+      "userMessage": "请列出本目录中所有文件夹",
+      "toolCount": 1
+    },
+    "realResponse": {
+      "toolCalls": 0,
+      "choices": 0
+    }
+  },
+  "moduleAnalysis": {
+    "compatibility": {
+      "executionTime": 0,
+      "status": "unknown",
+      "transformations": [],
+      "inputAnalysis": null,
+      "outputAnalysis": null,
+      "performance": {},
+      "errors": [],
+      "moduleSpecific": {}
+    },
+    "llmSwitch": {
+      "executionTime": 0,
+      "status": "unknown",
+      "transformations": [],
+      "inputAnalysis": null,
+      "outputAnalysis": null,
+      "performance": {},
+      "errors": [],
+      "moduleSpecific": {}
+    }
+  },
+  "transformationChain": [
+    {
+      "from": "Raw Provider Response",
+      "to": "Compatibility Processed",
+      "module": "compatibility",
+      "analysis": {
+        "transformationSteps": [],
+        "inputAnalysis": null,
+        "outputAnalysis": null,
+        "performance": {},
+        "errors": [],
+        "moduleSpecific": {}
+      }
+    },
+    {
+      "from": "Compatibility Processed",
+      "to": "LLM Switch Final",
+      "module": "llm-switch",
+      "analysis": {
+        "transformationSteps": [],
+        "inputAnalysis": null,
+        "outputAnalysis": null,
+        "performance": {},
+        "errors": [],
+        "moduleSpecific": {}
+      }
+    }
+  ],
+  "overallInsights": {
+    "totalTransformationTime": 0,
+    "efficiency": {
+      "compatibility": 0,
+      "llmSwitch": 0,
+      "overall": 0
+    },
+    "errorCount": 0,
+    "totalTransformations": 0,
+    "toolCallPreservation": {
+      "input": 0,
+      "compatibility": 0,
+      "llmSwitch": 0,
+      "preserved": true
+    }
+  },
+  "recommendations": {
+    "performance": [],
+    "stability": [],
+    "optimization": [
+      "Consider optimizing transformation efficiency"
+    ]
+  }
+}

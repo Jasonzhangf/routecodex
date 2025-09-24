@@ -28,7 +28,9 @@
     "prepare": "npm run build",
     "install:global": "./scripts/simple-install.sh",
     "install:quick": "./scripts/simple-install.sh",
-    "install:skip-tests": "./scripts/simple-install.sh"
+    "install:skip-tests": "./scripts/simple-install.sh",
+    "dry-run": "node scripts/dry-run-cli.mjs",
+    "test:lmstudio-dryrun": "node tests/lmstudio-tools-bidir-dry-run.mjs"
   },
   "dependencies": {
     "@lmstudio/sdk": "^1.5.0",

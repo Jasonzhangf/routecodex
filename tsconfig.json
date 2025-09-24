@@ -22,5 +22,5 @@
     "typeRoots": ["./node_modules/@types", "./src/types"]
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "tests", "src/components/pipeline-visualizer.bak", "src/examples/pipeline-visualizer-example.tsx.bak", "src/components/EnhancedJsonViewer.tsx.bak", "src/components/EnhancedJsonViewer.css.bak", "src/examples/EnhancedJsonViewerExample.tsx.bak", "src/utils/message-truncator.ts.bak"]
+  "exclude": ["node_modules", "dist", "tests", "src/components/pipeline-visualizer.bak", "src/examples/pipeline-visualizer-example.tsx.bak", "src/components/EnhancedJsonViewer.tsx.bak", "src/components/EnhancedJsonViewer.css.bak", "src/examples/EnhancedJsonViewerExample.tsx.bak", "src/utils/message-truncator.ts.bak", "src/components/historical"]
 }

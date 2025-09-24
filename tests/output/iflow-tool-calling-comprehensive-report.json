@@ -1,0 +1,114 @@
+{
+  "executionSummary": {
+    "timestamp": "2025-09-24T06:06:26.966Z",
+    "totalExecutionTime": 0,
+    "modulesAnalyzed": 2,
+    "provider": "iFlow",
+    "originalRequest": {
+      "model": "kimi-k2-0905",
+      "userMessage": "What files are in this directory?",
+      "toolCount": 1
+    },
+    "realResponse": {
+      "id": "chat-",
+      "model": "kimi-k2-0905",
+      "toolCalls": 1,
+      "choices": 1,
+      "hasContent": true
+    }
+  },
+  "moduleAnalysis": {
+    "compatibility": {
+      "executionTime": 0,
+      "status": "unknown",
+      "transformations": [],
+      "inputAnalysis": null,
+      "outputAnalysis": null,
+      "performance": {},
+      "errors": [],
+      "moduleSpecific": {}
+    },
+    "llmSwitch": {
+      "executionTime": 0,
+      "status": "unknown",
+      "transformations": [],
+      "inputAnalysis": null,
+      "outputAnalysis": null,
+      "performance": {},
+      "errors": [],
+      "moduleSpecific": {}
+    }
+  },
+  "transformationChain": [
+    {
+      "from": "Raw Provider Response",
+      "to": "Compatibility Processed",
+      "module": "iflow-compatibility",
+      "analysis": {
+        "transformationSteps": [],
+        "inputAnalysis": null,
+        "outputAnalysis": null,
+        "performance": {},
+        "errors": [],
+        "moduleSpecific": {}
+      }
+    },
+    {
+      "from": "Compatibility Processed",
+      "to": "LLM Switch Final",
+      "module": "iflow-llm-switch",
+      "analysis": {
+        "transformationSteps": [],
+        "inputAnalysis": null,
+        "outputAnalysis": null,
+        "performance": {},
+        "errors": [],
+        "moduleSpecific": {}
+      }
+    }
+  ],
+  "overallInsights": {
+    "totalTransformationTime": 0,
+    "efficiency": {
+      "compatibility": 0,
+      "llmSwitch": 0,
+      "overall": 0
+    },
+    "errorCount": 0,
+    "totalTransformations": 0,
+    "toolCallPreservation": {
+      "input": 1,
+      "compatibility": 0,
+      "llmSwitch": 0,
+      "preserved": false
+    }
+  },
+  "iflowSpecific": {
+    "modelBehavior": {
+      "usedToolCalling": true,
+      "usedTextResponse": true,
+      "responseFormat": "tool_calls",
+      "finishReason": "tool_calls"
+    },
+    "performance": {
+      "responseTime": 7523,
+      "tokensUsed": 124,
+      "promptTokens": 101,
+      "completionTokens": 23
+    },
+    "authentication": {
+      "method": "API Key",
+      "apiKey": "sk-0cc2890a89714...",
+      "status": "success"
+    }
+  },
+  "recommendations": {
+    "performance": [
+      "iFlow response time is high - consider optimization"
+    ],
+    "stability": [],
+    "optimization": [
+      "Consider optimizing transformation efficiency"
+    ]
+  }
+}

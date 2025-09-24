@@ -1,0 +1,27 @@
+{
+  "model": "gpt-oss-20b-mlx",
+  "messages": [
+    { "role": "system", "content": "You are a helpful assistant that can use tools when needed." },
+    { "role": "user", "content": "What's the weather in San Francisco today?" }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Get current weather by city name",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "city": { "type": "string", "description": "City name" },
+            "unit": { "type": "string", "enum": ["celsius", "fahrenheit"], "description": "Temperature unit" }
+          },
+          "required": ["city"]
+        }
+      }
+    }
+  ],
+  "temperature": 0.2,
+  "max_tokens": 256
+}
+

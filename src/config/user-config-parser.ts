@@ -35,7 +35,7 @@ export class UserConfigParser {
     this.providerConfigs = userConfig.virtualrouter?.providers || {};
     this.authMappings = this.parseAuthMappings(userConfig.virtualrouter);
     const routeTargets = this.parseRouteTargets(userConfig.virtualrouter.routing);
-    const pipelineConfigs = this.parsePipelineConfigs(userConfig.virtualrouter);
+    const pipelineConfigs = this.parsePipelineConfigs(userConfig.virtualrouter, userConfig);
     const moduleConfigs = this.parseModuleConfigs(userConfig);
 
     const result = {
@@ -153,25 +153,28 @@ export class UserConfigParser {
   /**
    * 解析流水线配置
    */
-  private parsePipelineConfigs(virtualRouterConfig: {
-  providers: Record<string, {
-    type: string;
-    baseURL: string;
-    apiKey: string[];
-    compatibility?: { type: string; config?: Record<string, any> };
-    llmSwitch?: { type: string; config?: Record<string, any> };
-    workflow?: { type: string; config?: Record<string, any>; enabled?: boolean };
-    models: Record<string, {
-      maxContext?: number;
-      maxTokens?: number;
-      compatibility?: { type: string; config?: Record<string, any> };
-      llmSwitch?: { type: string; config?: Record<string, any> };
-      workflow?: { type: string; config?: Record<string, any>; enabled?: boolean };
-    }>;
-  }>;
-  inputProtocol: string;
-  outputProtocol: string;
-}): PipelineConfigs {
+  private parsePipelineConfigs(
+    virtualRouterConfig: {
+      providers: Record<string, {
+        type: string;
+        baseURL: string;
+        apiKey: string[];
+        compatibility?: { type: string; config?: Record<string, any> };
+        llmSwitch?: { type: string; config?: Record<string, any> };
+        workflow?: { type: string; config?: Record<string, any>; enabled?: boolean };
+        models: Record<string, {
+          maxContext?: number;
+          maxTokens?: number;
+          compatibility?: { type: string; config?: Record<string, any> };
+          llmSwitch?: { type: string; config?: Record<string, any> };
+          workflow?: { type: string; config?: Record<string, any>; enabled?: boolean };
+        }>;
+      }>;
+      inputProtocol: string;
+      outputProtocol: string;
+    },
+    userConfig: UserConfig
+  ): PipelineConfigs {
     const pipelineConfigs: PipelineConfigs = {};
 
     for (const [providerId, providerConfig] of Object.entries(virtualRouterConfig.providers)) {
@@ -183,14 +186,22 @@ export class UserConfigParser {
           const realKey = this.resolveKeyByAlias(providerId, keyAlias); // 解析真实key
           const resolvedKey = this.resolveActualKey(providerId, realKey);
           const hasAuthMapping = this.hasAuthMapping(providerId, realKey);
-          // compatibility selection: model-level overrides provider-level
+          // compatibility selection: user config > model-level > provider-level > auto-infer
           const modelCompat = (modelConfig as any)?.compatibility;
           const providerCompat = (providerConfig as any)?.compatibility;
-          let compatibility = modelCompat?.type
-            ? { type: modelCompat.type, config: modelCompat.config || {} }
-            : providerCompat?.type
-              ? { type: providerCompat.type, config: providerCompat.config || {} }
-              : undefined;
+          let compatibility = undefined;
+
+          // First check user config compatibility field (simple string format)
+          const userCompat = (userConfig as any)?.compatibility;
+          if (userCompat && typeof userCompat === 'string') {
+            compatibility = this.parseCompatibilityString(userCompat);
+          } else if (modelCompat?.type) {
+            // Then check model-level compatibility
+            compatibility = { type: modelCompat.type, config: modelCompat.config || {} };
+          } else if (providerCompat?.type) {
+            // Then check provider-level compatibility
+            compatibility = { type: providerCompat.type, config: providerCompat.config || {} };
+          }
 
           const modelLlmSwitch = (modelConfig as any)?.llmSwitch;
           const providerLlmSwitch = (providerConfig as any)?.llmSwitch;
@@ -331,6 +342,32 @@ export class UserConfigParser {
     }
 
     return moduleConfigs;
+  }
+
+  /**
+   * 解析简单字符串格式的compatibility字段
+   * 支持 "iflow/qwen/lmstudio" 或 "passthrough" 格式
+   */
+  private parseCompatibilityString(compatString: string): { type: string; config: Record<string, any> } {
+    if (!compatString || compatString.trim() === '' || compatString === 'passthrough') {
+      return { type: 'passthrough-compatibility', config: {} };
+    }
+
+    const types = compatString.split('/').map(t => t.trim().toLowerCase());
+    const primaryType = types[0];
+
+    const typeMap: Record<string, string> = {
+      'lmstudio': 'lmstudio-compatibility',
+      'qwen': 'qwen-compatibility',
+      'iflow': 'iflow-compatibility',
+      'passthrough': 'passthrough-compatibility',
+      'field-mapping': 'field-mapping'
+    };
+
+    return {
+      type: typeMap[primaryType] || 'passthrough-compatibility',
+      config: {}
+    };
   }
 
   /**

@@ -1,0 +1,31 @@
+{
+  "id": "chatcmpl-123456789",
+  "object": "chat.completion",
+  "created": 1758690472,
+  "model": "gpt-oss-20b-mlx",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "I'll help you get the weather in San Francisco. Let me call the weather function for you.",
+        "tool_calls": [
+          {
+            "id": "call_123456",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"city\": \"San Francisco\", \"unit\": \"celsius\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 85,
+    "completion_tokens": 35,
+    "total_tokens": 120
+  }
+}

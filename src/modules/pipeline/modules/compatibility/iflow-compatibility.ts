@@ -212,31 +212,27 @@ export class iFlowCompatibility implements CompatibilityModule {
       // Temperature mapping
       {
         id: 'map-temperature',
-        transform: 'value',
+        transform: 'rename',
         sourcePath: 'temperature',
-        targetPath: 'temperature',
-        defaultValue: 0.7
+        targetPath: 'temperature'
       },
       // Max tokens mapping
       {
         id: 'map-max-tokens',
-        transform: 'value',
+        transform: 'rename',
         sourcePath: 'max_tokens',
-        targetPath: 'max_tokens',
-        defaultValue: 2048
+        targetPath: 'max_tokens'
       },
       // Messages format conversion - iFlow specific
       {
         id: 'convert-messages-format',
-        transform: 'function',
+        transform: 'mapping',
         sourcePath: 'messages',
         targetPath: 'messages',
-        transformFunction: (messages: any[]) => {
-          return messages.map(msg => ({
-            role: msg.role,
-            content: msg.content,
-            name: msg.name // Preserve name for tool responses
-          }));
+        mapping: {
+          'role': 'role',
+          'content': 'content',
+          'name': 'name'
         }
       }
     ];
