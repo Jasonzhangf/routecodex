@@ -52,6 +52,12 @@ export class RouteCodexServer extends BaseModule {
   private _isInitialized: boolean = false;
   private _isRunning: boolean = false;
 
+  // Debug enhancement properties
+  private serverMetrics: Map<string, any> = new Map();
+  private requestHistory: any[] = [];
+  private errorHistory: any[] = [];
+  private maxHistorySize = 50;
+
   constructor(config: ServerConfig) {
     const moduleInfo: ModuleInfo = {
       id: 'routecodex-server',
@@ -67,6 +73,9 @@ export class RouteCodexServer extends BaseModule {
     this.app = express();
     this.errorHandling = new ErrorHandlingCenter();
     this.debugEventBus = DebugEventBus.getInstance();
+
+    // Initialize debug enhancements
+    this.initializeDebugEnhancements();
   }
 
   /**
@@ -616,5 +625,121 @@ export class RouteCodexServer extends BaseModule {
       description: 'Multi-provider OpenAI proxy server',
       type: 'server'
     };
+  }
+
+  /**
+   * Initialize debug enhancements
+   */
+  private initializeDebugEnhancements(): void {
+    try {
+      console.log('RouteCodexServer debug enhancements initialized');
+    } catch (error) {
+      console.warn('Failed to initialize RouteCodexServer debug enhancements:', error);
+    }
+  }
+
+  /**
+   * Record server metric
+   */
+  private recordServerMetric(operation: string, data: any): void {
+    if (!this.serverMetrics.has(operation)) {
+      this.serverMetrics.set(operation, {
+        values: [],
+        lastUpdated: Date.now()
+      });
+    }
+
+    const metric = this.serverMetrics.get(operation)!;
+    metric.values.push(data);
+    metric.lastUpdated = Date.now();
+
+    // Keep only last 50 measurements
+    if (metric.values.length > 50) {
+      metric.values.shift();
+    }
+  }
+
+  /**
+   * Add to request history
+   */
+  private addToRequestHistory(operation: any): void {
+    this.requestHistory.push(operation);
+
+    // Keep only recent history
+    if (this.requestHistory.length > this.maxHistorySize) {
+      this.requestHistory.shift();
+    }
+  }
+
+  /**
+   * Add to error history
+   */
+  private addToErrorHistory(operation: any): void {
+    this.errorHistory.push(operation);
+
+    // Keep only recent history
+    if (this.errorHistory.length > this.maxHistorySize) {
+      this.errorHistory.shift();
+    }
+  }
+
+  /**
+   * Get debug status with enhanced information
+   */
+  getDebugStatus(): any {
+    const baseStatus = {
+      serverId: this.getModuleInfo().id,
+      name: this.getModuleInfo().name,
+      version: this.getModuleInfo().version,
+      isInitialized: this._isInitialized,
+      isRunning: this._isRunning,
+      config: this.config.server,
+      isEnhanced: true
+    };
+
+    return {
+      ...baseStatus,
+      debugInfo: this.getDebugInfo(),
+      serverMetrics: this.getServerMetrics(),
+      requestHistory: [...this.requestHistory.slice(-10)],
+      errorHistory: [...this.errorHistory.slice(-10)]
+    };
+  }
+
+  /**
+   * Get detailed debug information
+   */
+  private getDebugInfo(): any {
+    return {
+      serverId: this.getModuleInfo().id,
+      name: this.getModuleInfo().name,
+      version: this.getModuleInfo().version,
+      enhanced: true,
+      uptime: this._isRunning ? process.uptime() : 0,
+      memory: process.memoryUsage(),
+      requestHistorySize: this.requestHistory.length,
+      errorHistorySize: this.errorHistory.length,
+      serverMetricsSize: this.serverMetrics.size,
+      maxHistorySize: this.maxHistorySize,
+      categoryLogStreams: this.categoryLogStreams.size,
+      hasLogFile: !!this.logFileStream
+    };
+  }
+
+  /**
+   * Get server metrics
+   */
+  private getServerMetrics(): any {
+    const metrics: any = {};
+
+    for (const [operation, metric] of this.serverMetrics.entries()) {
+      metrics[operation] = {
+        count: metric.values.length,
+        lastUpdated: metric.lastUpdated,
+        recentValues: metric.values.slice(-5)
+      };
+    }
+
+    return metrics;
   }
 }
