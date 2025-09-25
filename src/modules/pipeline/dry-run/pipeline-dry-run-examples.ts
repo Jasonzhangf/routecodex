@@ -188,7 +188,7 @@ export class PipelineDryRunExamples {
       },
       {
         id: 'provider',
-        type: 'provider',
+        type: "start",
         module: mockProviderModule,
         isDryRun: false // 正常执行
       }
@@ -488,7 +488,7 @@ const mockCompatibilityModule = {
 const mockProviderModule = {
   ...mockLLMSwitchModule,
   id: 'mock-provider',
-  type: 'provider'
+  type: "start"
 };
 
 // 导出使用示例

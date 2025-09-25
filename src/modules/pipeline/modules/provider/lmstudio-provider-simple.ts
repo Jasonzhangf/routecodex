@@ -5,7 +5,7 @@
 import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../types/provider-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
-import { DebugEventBus } from '../../../../utils/external-mocks.js';
+import { DebugEventBus } from "rcc-debugcenter";
 
 /**
  * 简化的LM Studio Provider - 标准HTTP服务器
@@ -112,7 +112,7 @@ export class LMStudioProviderSimple implements ProviderModule {
         moduleId: 'lmstudio-provider-simple',
         operationId: type,
         timestamp: Date.now(),
-        type: 'debug',
+        type: "start",
         position: 'middle',
         data: {
           ...data,

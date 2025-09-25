@@ -5,7 +5,7 @@
  * real-time debugging and monitoring of the RouteCodex system.
  */
 
-import { DebugEventBus } from '../utils/external-mocks.js';
+import { DebugEventBus } from "rcc-debugcenter";
 import { ErrorHandlerRegistry } from '../utils/error-handler-registry.js';
 import { DebugUtilsStatic } from '../utils/debug-utils.js';
 import type {
@@ -809,7 +809,7 @@ export class WebSocketDebugServerImpl implements WebSocketDebugServer {
     this.debugEventBus.subscribe('*', (event: any) => {
       const debugEvent: DebugWebSocketEvent = {
         id: this.debugUtils.generateId('debug_event'),
-        type: 'debug',
+        type: "start",
         data: event,
         timestamp: Date.now()
       };

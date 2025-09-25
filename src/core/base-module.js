@@ -3,7 +3,7 @@
  * 基础模块类 - 所有模块的基类
  */
 import { EventEmitter } from 'events';
-import { DebugEventBus, DebugCenter } from '../utils/external-mocks.js';
+import { DebugEventBus, DebugCenter } from "rcc-debugcenter"';
 import { DebugEnhancementManager } from '../modules/debug/debug-enhancement-manager.js';
 /**
  * 模块状态枚举

@@ -4,12 +4,14 @@
  * Provides standardized error handling across all modules
  */
 
-import { ErrorHandlingCenter, type ErrorContext, DebugEventBus } from './external-mocks.js';
+const debugcenter = require('rcc-debugcenter');
+const { ErrorHandlingCenter, DebugEventBus } = debugcenter;
+type ErrorContext = any; // Temporary workaround, proper types are available but not importing correctly
 
 /**
  * Error handler function type
  */
-export type ErrorHandlerFunction = (context: ErrorContext) => Promise<void>;
+export type ErrorHandlerFunction = (context: any) => Promise<void>;
 
 /**
  * Error message template interface

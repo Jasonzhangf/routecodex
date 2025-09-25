@@ -6,7 +6,7 @@
  * and resource management.
  */
 
-import { DebugEventBus } from '../utils/external-mocks.js';
+import { DebugEventBus } from "rcc-debugcenter";
 import { ErrorHandlerRegistry } from '../utils/error-handler-registry.js';
 import type {
   DebugAdapter,

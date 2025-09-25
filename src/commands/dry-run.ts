@@ -253,7 +253,7 @@ function registerDefaultDryRunNodes(): void {
   } as any;
 
   const providerModule = {
-    id: 'provider', type: 'provider', config: {},
+    id: 'provider', type: "start", config: {},
     async initialize() {}, async cleanup() {}, async processIncoming(req: any) { return req; }, async processOutgoing(x: any) { return x; },
     async executeNodeDryRun(input: any) {
       const response = {
@@ -275,7 +275,7 @@ function registerDefaultDryRunNodes(): void {
   dryRunPipelineExecutor.registerNodes([
     { id: 'llm-switch', type: 'llm-switch', module: llmSwitchModule, isDryRun: true, config: pipelineDryRunManager.getNodeConfig('llm-switch') },
     { id: 'compatibility', type: 'compatibility', module: compatibilityModule, isDryRun: true, config: pipelineDryRunManager.getNodeConfig('compatibility') },
-    { id: 'provider', type: 'provider', module: providerModule, isDryRun: true, config: pipelineDryRunManager.getNodeConfig('provider') }
+    { id: 'provider', type: "start", module: providerModule, isDryRun: true, config: pipelineDryRunManager.getNodeConfig('provider') }
   ]);
   dryRunPipelineExecutor.setExecutionOrder(['llm-switch', 'compatibility', 'provider']);
 }
@@ -356,6 +356,7 @@ export function createDryRunCommands(): Command {
     .argument('<input>', 'Input file path (JSON/YAML)')
     .option('-p, --pipeline-id <id>', 'Pipeline ID', 'request-pipeline')
     .option('-m, --mode <mode>', 'Execution mode (normal|dry-run|mixed)', 'dry-run')
+    .option('-s, --scope <scope>', 'Dry-run scope (routing-only|pipeline-only|full)', 'full')
     .option('-o, --output <format>', 'Output format (json|pretty)', 'json')
     .option('--save <path>', 'Save results to file')
     .option('--node-config <path>', 'Node configuration file')
@@ -375,11 +376,18 @@ export function createDryRunCommands(): Command {
           nodeConfigs = await loadFile(options.nodeConfig);
         }
 
-        // Execute pipeline
+        // Execute pipeline with scope-based dry-run
         const result = await dryRunEngine.runRequest(request, {
           pipelineId: options.pipelineId,
           mode: options.mode,
-          nodeConfigs
+          scope: options.scope, // 使用新的作用域参数
+          nodeConfigs,
+          virtualRouterConfig: {
+            includeLoadBalancerDetails: true,
+            includeHealthStatus: true,
+            includeWeightCalculation: true,
+            simulateProviderHealth: true
+          }
         });
 
         spinner.succeed('Request pipeline completed');

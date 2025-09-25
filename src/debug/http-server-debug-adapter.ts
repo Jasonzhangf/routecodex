@@ -6,7 +6,7 @@
  */
 
 import { BaseDebugAdapter } from './base-debug-adapter.js';
-import { DebugEventBus } from '../utils/external-mocks.js';
+import { DebugEventBus } from "rcc-debugcenter";
 import type {
   HttpServerDebugAdapter,
   DebugContext,

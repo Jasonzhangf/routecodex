@@ -5,7 +5,7 @@
  * endpoints for debugging and monitoring the RouteCodex system.
  */
 
-import { DebugEventBus } from '../utils/external-mocks.js';
+import { DebugEventBus } from "rcc-debugcenter";
 import { ErrorHandlerRegistry } from '../utils/error-handler-registry.js';
 import { DebugUtilsStatic as DebugUtils } from '../utils/debug-utils.js';
 import type {

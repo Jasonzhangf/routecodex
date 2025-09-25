@@ -4,7 +4,8 @@
  */
 
 import { EventEmitter } from 'events';
-import { DebugEventBus, DebugCenter } from '../utils/external-mocks.js';
+import { DebugEventBus } from "rcc-debugcenter"; 
+import { DebugCenter } from "rcc-debugcenter/dist/core/DebugCenter.js";
 import { DebugEnhancementManager } from '../modules/debug/debug-enhancement-manager.js';
 
 /**
@@ -205,7 +206,7 @@ export abstract class BaseModule extends EventEmitter {
    */
   private initializeUnifiedDebugEnhancements(): void {
     try {
-      const debugCenter = DebugCenter.getInstance();
+      const debugCenter = new DebugCenter();
       this.debugEnhancementManager = DebugEnhancementManager.getInstance(debugCenter);
 
       // Register enhancement for this module
@@ -326,7 +327,7 @@ export abstract class BaseModule extends EventEmitter {
         moduleId: this.info.id,
         operationId: type,
         timestamp: Date.now(),
-        type: 'debug',
+        type: "start",
         position: 'middle',
         data: {
           ...data,

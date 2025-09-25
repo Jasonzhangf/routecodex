@@ -10,7 +10,7 @@ import { BaseModule } from '../../core/base-module.js';
 import { UserConfigParser } from '../../config/user-config-parser.js';
 import { ConfigMerger } from '../../config/config-merger.js';
 import { AuthFileResolver } from '../../config/auth-file-resolver.js';
-import { DebugEventBus } from '../../utils/external-mocks.js';
+import { DebugEventBus } from 'rcc-debugcenter';
 import type {
   ModulesConfig,
   UserConfig,
@@ -123,7 +123,7 @@ export class ConfigManagerModule extends BaseModule {
         moduleId: 'config-manager',
         operationId: type,
         timestamp: Date.now(),
-        type: 'debug',
+        type: "start",
         position: 'middle',
         data: {
           ...data,
@@ -521,105 +521,19 @@ export class ConfigManagerModule extends BaseModule {
     }
 
     try {
-      // 检查是否为显式指定的用户配置文件
-      // 如果通过 ROUTECODEX_CONFIG 或 RCC4_CONFIG_PATH 显式指定，则只加载该文件，尊重用户配置优先原则
-      const isExplicitConfig = (process.env.ROUTECODEX_CONFIG && this.configPath === process.env.ROUTECODEX_CONFIG) ||
-                              (process.env.RCC4_CONFIG_PATH && this.configPath === process.env.RCC4_CONFIG_PATH);
-
-      const sources: Array<{ label: string; path: string }> = [];
-      const loadedSources: Array<{ label: string; path: string; success: boolean; size?: number; error?: string }> = [];
-
       const expandHome = (p: string) => (p.startsWith('~') ? p.replace('~', homedir()) : p);
-      const exists = async (p: string) => {
-        try { await fs.access(p); return true; } catch { return false; }
-      };
+      const configPath = expandHome(this.configPath);
 
-      const primaryPath = expandHome(this.configPath);
-      sources.push({ label: 'primary', path: primaryPath });
-
-      // 只有在非显式配置模式下才加载其他配置文件
-      let homeMain = '';
-      let homeDir = '';
-      if (!isExplicitConfig) {
-        homeMain = expandHome('~/.routecodex/config.json');
-        sources.push({ label: 'homeMain', path: homeMain });
-
-        homeDir = expandHome('~/.routecodex/config');
+      // 检查文件是否存在
+      try {
+        await fs.access(configPath);
+      } catch {
+        throw new Error(`Configuration file not found: ${configPath}`);
       }
 
-      const deepMergeWithArrayUnion = (target: any, source: any): any => {
-        if (target === null || target === undefined) {return source;}
-        if (source === null || source === undefined) {return target;}
-        if (Array.isArray(target) && Array.isArray(source)) {
-          // 数组合并去重（按原始值相等判断）
-          const merged = [...target, ...source];
-          // 简单去重：适用于字符串/数字；若为对象，按 JSON 序列化去重
-          const seen = new Set<string>();
-          const dedup: any[] = [];
-          for (const item of merged) {
-            const key = typeof item === 'object' ? JSON.stringify(item) : String(item);
-            if (!seen.has(key)) { seen.add(key); dedup.push(item); }
-          }
-          return dedup;
-        }
-        if (typeof target === 'object' && typeof source === 'object') {
-          const out: any = { ...target };
-          for (const k of Object.keys(source)) {
-            out[k] = k in target ? deepMergeWithArrayUnion((target as any)[k], (source as any)[k]) : (source as any)[k];
-          }
-          return out;
-        }
-        // 标量：以 source 覆盖
-        return source;
-      };
-
-      let combined: any = {};
-
-      const ingest = async (label: string, filePath: string) => {
-        if (!(await exists(filePath))) {
-          loadedSources.push({ label, path: filePath, success: false, error: 'File not found' });
-          return;
-        }
-        try {
-          const content = await fs.readFile(filePath, 'utf-8');
-          const json = JSON.parse(content);
-          combined = deepMergeWithArrayUnion(combined, json);
-          loadedSources.push({ label, path: filePath, success: true, size: Object.keys(json).length });
-        } catch (e) {
-          console.warn(`Skipping invalid config (${label}): ${filePath}`, e);
-          loadedSources.push({ label, path: filePath, success: false, error: e instanceof Error ? e.message : String(e) });
-        }
-      };
-
-      // 读入 primary 与 home main
-      for (const src of sources) {
-        await ingest(src.label, src.path);
-      }
-
-      // 只有在非显式配置模式下才读入分片目录 ~/.routecodex/config/*.json
-      if (!isExplicitConfig) {
-        try {
-          if (await exists(homeDir)) {
-            const entries = await fs.readdir(homeDir, { withFileTypes: true });
-            for (const ent of entries) {
-              if (ent.isFile() && ent.name.toLowerCase().endsWith('.json')) {
-                await ingest(`fragment:${ent.name}`, `${homeDir}/${ent.name}`);
-              }
-            }
-          }
-        } catch (e) {
-          console.warn('Failed to read ~/.routecodex/config fragments:', e);
-        }
-      }
-
-      // 若最终为空，抛错提示
-      if (!combined || Object.keys(combined).length === 0) {
-        const checkedFiles = [primaryPath];
-        if (!isExplicitConfig) {
-          checkedFiles.push(homeMain, `${homeDir}/*.json`);
-        }
-        throw new Error(`No usable user config found. Checked: ${checkedFiles.join(', ')}`);
-      }
+      // 读取配置文件
+      const configContent = await fs.readFile(configPath, 'utf-8');
+      const config = JSON.parse(configContent);
 
       const totalTime = Date.now() - startTime;
 
@@ -630,23 +544,18 @@ export class ConfigManagerModule extends BaseModule {
           type: 'user',
           configPath: this.configPath,
           success: true,
-          configSize: Object.keys(combined).length,
-          sourcesLoaded: loadedSources.filter(s => s.success).length,
-          sourcesTotal: loadedSources.length,
+          configSize: Object.keys(config).length,
           totalTime,
           timestamp: Date.now()
         });
         this.recordConfigMetric('user_config_load_success', {
           loadId,
-          configSize: Object.keys(combined).length,
-          sourcesLoaded: loadedSources.filter(s => s.success).length,
-          sourcesTotal: loadedSources.length,
-          totalTime,
-          loadedSources
+          configSize: Object.keys(config).length,
+          totalTime
         });
       }
 
-      return combined;
+      return config;
     } catch (error) {
       const totalTime = Date.now() - startTime;
 

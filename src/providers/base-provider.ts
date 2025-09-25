@@ -77,7 +77,7 @@ export abstract class BaseProvider extends BaseModule {
       name: `${config.type}-provider`,
       version: '0.0.1',
       description: `${config.type} AI provider`,
-      type: 'provider'
+      type: "start"
     };
 
     super(moduleInfo);
@@ -506,7 +506,7 @@ export abstract class BaseProvider extends BaseModule {
       name: `${this.config.type}-provider`,
       version: '0.0.1',
       description: `${this.config.type} AI provider`,
-      type: 'provider'
+      type: "start"
     };
   }
 

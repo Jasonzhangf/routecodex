@@ -23,6 +23,8 @@ import { PipelineModuleRegistryImpl } from '../core/pipeline-registry.js';
 import { PipelineDebugLogger } from '../utils/debug-logger.js';
 import { DebugEventBus } from 'rcc-debugcenter';
 import { ModuleEnhancementFactory } from '../../enhancement/module-enhancement-factory.js';
+import { Key429Tracker, type Key429ErrorRecord } from '../../../utils/key-429-tracker.js';
+import { PipelineHealthManager } from '../../../utils/pipeline-health-manager.js';
 
 /**
  * Pipeline Manager
@@ -48,6 +50,12 @@ export class PipelineManager implements RCCBaseModule {
   private requestHistory: any[] = [];
   private maxHistorySize = 100;
 
+  // 429 error handling properties
+  private key429Tracker: Key429Tracker;
+  private pipelineHealthManager: PipelineHealthManager;
+  private retryAttempts: Map<string, number> = new Map();
+  private maxRetries = 3;
+
   constructor(
     config: PipelineManagerConfig,
     private errorHandlingCenter: ErrorHandlingCenter,
@@ -59,6 +67,11 @@ export class PipelineManager implements RCCBaseModule {
     this.config = config;
     this.logger = new PipelineDebugLogger(debugCenter);
     this.registry = new PipelineModuleRegistryImpl();
+
+    // Initialize 429 error handling components
+    this.key429Tracker = new Key429Tracker();
+    this.pipelineHealthManager = new PipelineHealthManager();
+
     this.initializeModuleRegistry();
     this.initializeDebugEnhancements();
 
@@ -132,7 +145,7 @@ export class PipelineManager implements RCCBaseModule {
   }
 
   /**
-   * Process request through selected pipeline
+   * Process request through selected pipeline with 429 error handling
    */
   async processRequest(request: PipelineRequest): Promise<PipelineResponse> {
     if (!this.isInitialized) {
@@ -141,6 +154,7 @@ export class PipelineManager implements RCCBaseModule {
 
     const startTime = Date.now();
     const requestId = request.route.requestId;
+    const retryKey = `retry_${requestId}_${Date.now()}`;
     const requestContext = {
       requestId,
       providerId: request.route.providerId,
@@ -163,8 +177,8 @@ export class PipelineManager implements RCCBaseModule {
         requestId: request.route.requestId
       });
 
-      // Process request through pipeline
-      const response = await pipeline.processRequest(request);
+      // Process request with 429 error handling
+      const response = await this.processRequestWithPipeline(pipeline, request, retryKey);
 
       // Enhanced response logging
       const processingTime = Date.now() - startTime;
@@ -215,6 +229,9 @@ export class PipelineManager implements RCCBaseModule {
         requestId: request.route.requestId,
         enhanced: this.isEnhanced
       });
+
+      // Cleanup retry attempts on final error
+      this.retryAttempts.delete(retryKey);
 
       throw error;
     }
@@ -291,13 +308,23 @@ export class PipelineManager implements RCCBaseModule {
     debugInfo?: any;
     performanceStats?: any;
     requestHistory?: any[];
+    errorHandling429?: {
+      keyTracker: any;
+      healthManager: any;
+      retryAttempts: number;
+    };
   } {
     const baseStatus = {
       isInitialized: this.isInitialized,
       pipelineCount: this.pipelines.size,
       pipelines: this.getPipelineStatus(),
       registry: this.registry.getStatus(),
-      statistics: this.logger.getStatistics()
+      statistics: this.logger.getStatistics(),
+      errorHandling429: {
+        keyTracker: this.key429Tracker.getDebugInfo(),
+        healthManager: this.pipelineHealthManager.getDebugInfo(),
+        retryAttempts: this.retryAttempts.size
+      }
     };
 
     // Add enhanced debug information if enabled
@@ -368,6 +395,167 @@ export class PipelineManager implements RCCBaseModule {
         error: error instanceof Error ? error.message : String(error),
         pipelineId: config.id
       });
+      throw error;
+    }
+  }
+
+  /**
+   * Handle 429 error with automatic retry
+   */
+  private async handle429Error(
+    error: any,
+    request: PipelineRequest,
+    attemptedPipelines: Set<string>,
+    retryKey: string
+  ): Promise<PipelineResponse> {
+    // Extract key from error or request
+    const key = this.extractKeyFromError(error) || 'unknown';
+    const pipelineIds = Array.from(attemptedPipelines);
+
+    // Record 429 error in tracker
+    const trackerResult = this.key429Tracker.record429Error(key, pipelineIds);
+
+    this.logger.logPipeline('manager', '429-error-recorded', {
+      key,
+      pipelineIds,
+      blacklisted: trackerResult.blacklisted,
+      shouldRetry: trackerResult.shouldRetry,
+      consecutiveCount: trackerResult.record.consecutiveCount
+    });
+
+    // If key is blacklisted, don't retry
+    if (trackerResult.blacklisted) {
+      // Mark affected pipelines as unhealthy
+      for (const pipelineId of pipelineIds) {
+        this.pipelineHealthManager.record429Error(pipelineId, key);
+      }
+
+      throw new Error(`Key ${key} is blacklisted due to too many 429 errors`);
+    }
+
+    // Get available pipelines excluding attempted ones
+    const availablePipelines = this.getAvailablePipelines(excludeIds => {
+      attemptedPipelines.forEach(id => excludeIds.add(id));
+      return excludeIds;
+    });
+
+    if (availablePipelines.length === 0) {
+      throw new Error('No available pipelines for retry after 429 error');
+    }
+
+    // Round-robin selection of next pipeline
+    const nextPipeline = this.selectNextPipelineRoundRobin(availablePipelines, retryKey);
+
+    this.logger.logPipeline('manager', '429-retry-attempt', {
+      retryKey,
+      originalError: error.message,
+      nextPipeline: nextPipeline.pipelineId,
+      attempt: this.retryAttempts.get(retryKey) || 1,
+      maxAttempts: this.maxRetries
+    });
+
+    // Process request with next pipeline
+    return await this.processRequestWithPipeline(nextPipeline, request, retryKey);
+  }
+
+  /**
+   * Extract key from error
+   */
+  private extractKeyFromError(error: any): string | null {
+    // Try to extract key from error details
+    if (error.details?.key) {
+      return error.details.key;
+    }
+
+    // Try to extract from error context
+    if (error.context?.key) {
+      return error.context.key;
+    }
+
+    // Try to extract from pipeline config
+    if (error.config?.auth?.apiKey) {
+      return error.config.auth.apiKey;
+    }
+
+    // Try to extract from headers or other common places
+    if (error.config?.headers?.['Authorization']) {
+      return error.config.headers['Authorization'];
+    }
+
+    return null;
+  }
+
+  /**
+   * Get available pipelines for retry
+   */
+  private getAvailablePipelines(
+    excludeFilter: (excludeIds: Set<string>) => Set<string>
+  ): BasePipeline[] {
+    const excludeIds = excludeFilter(new Set<string>());
+
+    return Array.from(this.pipelines.values()).filter(pipeline => {
+      // Skip pipelines that are explicitly excluded
+      if (excludeIds.has(pipeline.pipelineId)) {
+        return false;
+      }
+
+      // Skip unhealthy pipelines
+      return this.pipelineHealthManager.isPipelineAvailable(pipeline.pipelineId);
+    });
+  }
+
+  /**
+   * Select next pipeline using round-robin strategy
+   */
+  private selectNextPipelineRoundRobin(
+    availablePipelines: BasePipeline[],
+    retryKey: string
+  ): BasePipeline {
+    if (availablePipelines.length === 0) {
+      throw new Error('No available pipelines for round-robin selection');
+    }
+
+    // Simple round-robin based on retry count
+    const attempt = this.retryAttempts.get(retryKey) || 0;
+    const index = attempt % availablePipelines.length;
+
+    return availablePipelines[index];
+  }
+
+  /**
+   * Process request with specific pipeline and retry tracking
+   */
+  private async processRequestWithPipeline(
+    pipeline: BasePipeline,
+    request: PipelineRequest,
+    retryKey: string
+  ): Promise<PipelineResponse> {
+    try {
+      const response = await pipeline.processRequest(request);
+
+      // On success, record success and reset retry count
+      this.pipelineHealthManager.recordSuccess(pipeline.pipelineId);
+      this.retryAttempts.delete(retryKey);
+
+      return response;
+    } catch (error) {
+      // Check if it's a 429 error
+      const errorObj = error as any;
+      if (errorObj.statusCode === 429 || errorObj.code === 'HTTP_429') {
+        const currentAttempt = this.retryAttempts.get(retryKey) || 0;
+
+        if (currentAttempt < this.maxRetries) {
+          this.retryAttempts.set(retryKey, currentAttempt + 1);
+
+          // Handle 429 error with retry
+          const attemptedPipelines = new Set([pipeline.pipelineId]);
+          return await this.handle429Error(error, request, attemptedPipelines, retryKey);
+        }
+      }
+
+      // For other errors, just record the error
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.pipelineHealthManager.recordError(pipeline.pipelineId, errorMessage);
       throw error;
     }
   }

@@ -8,7 +8,7 @@
 import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../types/provider-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
-import { DebugEventBus } from '../../../../utils/external-mocks.js';
+import { DebugEventBus } from "rcc-debugcenter";
 
 /**
  * Generic HTTP Provider Module
@@ -717,7 +717,7 @@ export class GenericHTTPProvider implements ProviderModule {
         moduleId: this.id,
         operationId: type,
         timestamp: Date.now(),
-        type: 'debug',
+        type: "start",
         position: 'middle',
         data: {
           ...data,

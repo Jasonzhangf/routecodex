@@ -7,7 +7,7 @@
 
 import type { CompatibilityModule, ModuleConfig, ModuleDependencies, TransformationRule } from '../../interfaces/pipeline-interfaces.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
-import { DebugEventBus } from '../../../../utils/external-mocks.js';
+import { DebugEventBus } from "rcc-debugcenter";
 
 /**
  * Qwen Compatibility Module
@@ -111,7 +111,7 @@ export class QwenCompatibility implements CompatibilityModule {
         moduleId: 'qwen-compatibility',
         operationId: type,
         timestamp: Date.now(),
-        type: 'debug',
+        type: "start",
         position: 'middle',
         data: {
           ...data,

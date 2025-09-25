@@ -50,6 +50,7 @@
   "dependencies": {
     "@lmstudio/sdk": "^1.5.0",
     "@types/socket.io": "^3.0.1",
+    "axios": "^1.12.2",
     "chalk": "^5.6.2",
     "commander": "^14.0.1",
     "cors": "^2.8.5",
@@ -62,7 +63,7 @@
     "ora": "^9.0.0",
     "rcc-basemodule": "^0.2.7",
     "rcc-basemodule-adv": "^0.0.1",
-    "rcc-debugcenter": "^0.1.4",
+    "rcc-debugcenter": "^0.1.5",
     "rcc-errorhandling": "^1.0.10",
     "socket.io": "^4.8.1"
   },

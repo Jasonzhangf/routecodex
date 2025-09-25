@@ -4,7 +4,7 @@
  */
 
 import { BaseModule, type ModuleInfo } from './base-module.js';
-import { DebugEventBus } from '../utils/external-mocks.js';
+import { DebugEventBus } from "rcc-debugcenter";
 import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
 import {
   type ServerConfig,

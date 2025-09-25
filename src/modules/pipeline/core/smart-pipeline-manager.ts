@@ -6,7 +6,8 @@
 import type { PipelineConfig, ModuleConfig } from '../interfaces/pipeline-interfaces.js';
 import { SmartRequestFormatDetector, LLMSwitchSelector } from '../modules/llmswitch/request-format-detector.js';
 import { detectRequestFormat } from '../modules/llmswitch/anthropic-openai-config.js';
-import { DebugEventBus, DebugCenter } from '../../../utils/external-mocks.js';
+import { DebugEventBus } from "rcc-debugcenter";
+import { DebugCenter } from "rcc-debugcenter/dist/core/DebugCenter.js";
 import { DebugEnhancementManager } from '../../debug/debug-enhancement-manager.js';
 
 /**
@@ -297,7 +298,7 @@ export class DynamicPipelineManager {
    */
   private initializeUnifiedDebugEnhancements(): void {
     try {
-      const debugCenter = DebugCenter.getInstance();
+      const debugCenter = new DebugCenter();
       this.debugEnhancementManager = DebugEnhancementManager.getInstance(debugCenter);
 
       // Register enhancement for this manager
@@ -525,7 +526,7 @@ export class DynamicPipelineManager {
         moduleId: 'smart-pipeline-manager',
         operationId: type,
         timestamp: Date.now(),
-        type: 'debug',
+        type: "start",
         position: 'middle',
         data: {
           ...data,
@@ -653,7 +654,7 @@ export class DynamicPipelineManager {
       moduleId: 'smart-pipeline-factory',
       operationId: type,
       timestamp: Date.now(),
-      type: 'debug',
+      type: "start",
       position: 'middle',
       data: {
         ...data,

@@ -8,7 +8,7 @@
 import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../types/provider-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
-import { DebugEventBus } from '../../../../utils/external-mocks.js';
+import { DebugEventBus } from "rcc-debugcenter";
 import OpenAI from 'openai';
 
 /**
@@ -469,7 +469,7 @@ export class OpenAIProvider implements ProviderModule {
         moduleId: this.id,
         operationId: type,
         timestamp: Date.now(),
-        type: 'provider',
+        type: "start",
         position: 'middle',
         data: {
           providerType: 'openai',

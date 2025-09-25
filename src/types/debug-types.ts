@@ -5,7 +5,7 @@
  * including all interfaces, enums, and structures required for the debugging infrastructure.
  */
 
-import type { DebugEvent } from '../utils/external-mocks.js';
+import type { DebugEvent } from "rcc-debugcenter";
 
 /**
  * Debug system initialization options
@@ -579,7 +579,7 @@ export interface DebugWebSocketEvent {
   /** Event identifier */
   id: string;
   /** Event type */
-  type: 'debug' | 'log' | 'error' | 'performance' | 'system';
+  type: "start" | 'log' | 'error' | 'performance' | 'system';
   /** Event data */
   data: any;
   /** Timestamp */

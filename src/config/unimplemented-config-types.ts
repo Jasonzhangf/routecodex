@@ -36,7 +36,7 @@ export interface UnimplementedModuleConfiguration extends BaseModuleConfig {
  * Provider module configuration with unimplemented support
  */
 export interface ProviderModuleConfiguration extends BaseModuleConfig {
-  type: 'provider';
+  type: "start";
   providerConfig: ProviderConfig | UnimplementedProviderConfig;
   fallbackToUnimplemented?: boolean;
 }

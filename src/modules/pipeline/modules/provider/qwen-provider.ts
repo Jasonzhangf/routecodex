@@ -9,7 +9,7 @@ import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../int
 import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../types/provider-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { createQwenOAuth, QwenTokenStorage } from './qwen-oauth.js';
-import { DebugEventBus } from '../../../../utils/external-mocks.js';
+import { DebugEventBus } from "rcc-debugcenter";
 
 // API Endpoint - EXACT copy from CLIProxyAPI
 const QWEN_API_ENDPOINT = "https://portal.qwen.ai/v1";
@@ -137,7 +137,7 @@ export class QwenProvider implements ProviderModule {
         moduleId: 'qwen-provider',
         operationId: type,
         timestamp: Date.now(),
-        type: 'debug',
+        type: "start",
         position: 'middle',
         data: {
           ...data,

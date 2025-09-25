@@ -248,6 +248,12 @@ export class PipelineErrorIntegration {
 
     // Check error category
     const errorCode = this.extractErrorCode(error);
+
+    // 429 errors are retryable and will be handled by the 429 error handling system
+    if (errorCode === 'HTTP_429' || error.statusCode === 429) {
+      return true;
+    }
+
     const nonRetryableCodes = [
       'AUTHENTICATION_ERROR',
       'PERMISSION_ERROR',
@@ -311,6 +317,12 @@ export class PipelineErrorIntegration {
    * Execute recovery strategy
    */
   private async executeRecoveryStrategy(error: PipelineError, context: ErrorContext): Promise<void> {
+    // Special handling for 429 errors
+    if (error.code === 'HTTP_429' || error.details?.httpStatus === 429) {
+      await this.execute429Strategy(error, context);
+      return;
+    }
+
     switch (this.options.recoveryStrategy) {
       case 'retry':
         // Retry logic is handled in handleRetry
@@ -365,6 +377,33 @@ export class PipelineErrorIntegration {
 
     // Would implement actual degrade logic here
     // For example: disable non-essential features, use simpler processing, etc.
+  }
+
+  /**
+   * Execute 429 error strategy
+   */
+  private async execute429Strategy(error: PipelineError, context: ErrorContext): Promise<void> {
+    // Extract key information from error context
+    const key = error.details?.key || context.key || 'unknown';
+    const pipelineIds = error.details?.pipelineIds || [context.pipelineId];
+
+    // Log 429 error to ErrorHandlingCenter
+    await this.errorHandlingCenter.handleError({
+      type: '429-error-executed',
+      timestamp: Date.now(),
+      pipelineId: context.pipelineId,
+      requestId: context.requestId,
+      stage: context.stage,
+      finalError: error.code,
+      action: '429_rate_limit_handling',
+      key,
+      pipelineIds,
+      retryable: true
+    });
+
+    // The actual retry logic will be handled by the PipelineManager's retry scheduler
+    // This method is responsible for logging and preparing the error for retry
+    throw new Error(`429 Rate Limit Error in ${context.stage}: ${error.message} (key: ${key})`);
   }
 
   /**

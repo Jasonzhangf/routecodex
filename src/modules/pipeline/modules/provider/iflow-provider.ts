@@ -8,7 +8,7 @@ import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../int
 import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../types/provider-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { createIFlowOAuth, IFlowTokenStorage } from './iflow-oauth.js';
-import { DebugEventBus } from '../../../../utils/external-mocks.js';
+import { DebugEventBus } from "rcc-debugcenter";
 
 const IFLOW_API_ENDPOINT = 'https://api.iflow.cn/v1';
 
@@ -95,7 +95,7 @@ export class IFlowProvider implements ProviderModule {
         moduleId: 'iflow-provider',
         operationId: type,
         timestamp: Date.now(),
-        type: 'debug',
+        type: "start",
         position: 'middle',
         data: {
           ...data,
