@@ -521,10 +521,11 @@ export class ConfigManagerModule extends BaseModule {
     }
 
     try {
-      // 合并多来源用户配置：
-      // 1) 项目本地 configPath (例如 ./config/config.json)
-      // 2) 全局 ~/.routecodex/config.json
-      // 3) 目录 ~/.routecodex/config/*.json （分片配置，如 qwen.json、lmstudio.json 等）
+      // 检查是否为显式指定的用户配置文件
+      // 如果通过 ROUTECODEX_CONFIG 或 RCC4_CONFIG_PATH 显式指定，则只加载该文件，尊重用户配置优先原则
+      const isExplicitConfig = (process.env.ROUTECODEX_CONFIG && this.configPath === process.env.ROUTECODEX_CONFIG) ||
+                              (process.env.RCC4_CONFIG_PATH && this.configPath === process.env.RCC4_CONFIG_PATH);
+
       const sources: Array<{ label: string; path: string }> = [];
       const loadedSources: Array<{ label: string; path: string; success: boolean; size?: number; error?: string }> = [];
 
@@ -536,10 +537,15 @@ export class ConfigManagerModule extends BaseModule {
       const primaryPath = expandHome(this.configPath);
       sources.push({ label: 'primary', path: primaryPath });
 
-      const homeMain = expandHome('~/.routecodex/config.json');
-      sources.push({ label: 'homeMain', path: homeMain });
+      // 只有在非显式配置模式下才加载其他配置文件
+      let homeMain = '';
+      let homeDir = '';
+      if (!isExplicitConfig) {
+        homeMain = expandHome('~/.routecodex/config.json');
+        sources.push({ label: 'homeMain', path: homeMain });
 
-      const homeDir = expandHome('~/.routecodex/config');
+        homeDir = expandHome('~/.routecodex/config');
+      }
 
       const deepMergeWithArrayUnion = (target: any, source: any): any => {
         if (target === null || target === undefined) {return source;}
@@ -590,23 +596,29 @@ export class ConfigManagerModule extends BaseModule {
         await ingest(src.label, src.path);
       }
 
-      // 读入分片目录 ~/.routecodex/config/*.json
-      try {
-        if (await exists(homeDir)) {
-          const entries = await fs.readdir(homeDir, { withFileTypes: true });
-          for (const ent of entries) {
-            if (ent.isFile() && ent.name.toLowerCase().endsWith('.json')) {
-              await ingest(`fragment:${ent.name}`, `${homeDir}/${ent.name}`);
+      // 只有在非显式配置模式下才读入分片目录 ~/.routecodex/config/*.json
+      if (!isExplicitConfig) {
+        try {
+          if (await exists(homeDir)) {
+            const entries = await fs.readdir(homeDir, { withFileTypes: true });
+            for (const ent of entries) {
+              if (ent.isFile() && ent.name.toLowerCase().endsWith('.json')) {
+                await ingest(`fragment:${ent.name}`, `${homeDir}/${ent.name}`);
+              }
             }
           }
+        } catch (e) {
+          console.warn('Failed to read ~/.routecodex/config fragments:', e);
         }
-      } catch (e) {
-        console.warn('Failed to read ~/.routecodex/config fragments:', e);
       }
 
       // 若最终为空，抛错提示
       if (!combined || Object.keys(combined).length === 0) {
-        throw new Error(`No usable user config found. Checked: ${[primaryPath, homeMain, `${homeDir  }/*.json`].join(', ')}`);
+        const checkedFiles = [primaryPath];
+        if (!isExplicitConfig) {
+          checkedFiles.push(homeMain, `${homeDir}/*.json`);
+        }
+        throw new Error(`No usable user config found. Checked: ${checkedFiles.join(', ')}`);
       }
 
       const totalTime = Date.now() - startTime;

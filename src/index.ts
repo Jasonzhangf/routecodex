@@ -57,7 +57,7 @@ class RouteCodexApp {
       const port = await this.detectServerPort(this.modulesConfigPath);
       this.mergedConfigPath = path.join(process.cwd(), 'config', `merged-config.${port}.json`);
       const configManagerConfig = {
-      configPath: path.join(homedir(), '.routecodex', 'config.json'),
+      configPath: process.env.ROUTECODEX_CONFIG || process.env.RCC4_CONFIG_PATH || path.join(homedir(), '.routecodex', 'config.json'),
       mergedConfigPath: this.mergedConfigPath,
       systemModulesPath: this.modulesConfigPath,
       autoReload: true,
@@ -183,6 +183,17 @@ class RouteCodexApp {
     } catch (e) {
       // ignore and fall back
     }
+
+    // Try user config for httpserver.port if provided
+    try {
+      const userCfgPath = process.env.ROUTECODEX_CONFIG || path.join(homedir(), '.routecodex', 'config.json');
+      if (fsSync.existsSync(userCfgPath)) {
+        const raw = await fs.readFile(userCfgPath, 'utf-8');
+        const json = JSON.parse(raw);
+        const port = json?.httpserver?.port || json?.modules?.httpserver?.config?.port;
+        if (typeof port === 'number' && port > 0) {return port;}
+      }
+    } catch {}
     return 5506;
   }
 }
