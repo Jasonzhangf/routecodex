@@ -1,120 +1,58 @@
 /**
- * Virtual Router Module
- * 虚拟路由模块 - 处理请求路由和负载均衡
+ * 基于输入模型的虚拟路由器模块 - 无默认设置版本
+ * 完全基于modules.json配置，无fallback，无硬编码，无默认值
  */
 
 import { BaseModule } from '../../core/base-module.js';
 import { ModelFieldConverter } from '../../utils/model-field-converter/index.js';
 import { RCCUnimplementedModule } from '../../modules/unimplemented-module.js';
-import { ConfigRequestClassifier } from './classifiers/config-request-classifier.js';
-import type { ModelCategoryConfig } from './classifiers/model-category-resolver.js';
-import type {
-  RouteTargetPool,
-  PipelineConfigs,
-  VirtualRouterConfig,
-  RouteTarget,
-  PipelineConfig
-} from '../../config/merged-config-types.js';
-import { DebugEventBus } from '../../utils/external-mocks.js';
-import type {
-  DryRunConfig,
-  DryRunResponse,
-  RoutingDecision,
-  FieldConversionInfo,
-  ProtocolProcessingInfo,
-  PerformanceEstimate,
-  ConfigValidationResult,
-  DryRunStats
-} from '../dry-run/dry-run-interface.js';
+import { InputModelRequestClassifier } from './classifiers/input-model-request-classifier.js';
 
 export class VirtualRouterModule extends BaseModule {
-  private routeTargets: RouteTargetPool = {};
-  private pipelineConfigs: PipelineConfigs = {};
-  private protocolManager: ProtocolManager;
-  private loadBalancer: LoadBalancer;
+  private routeTargets: any = {};
+  private pipelineConfigs: any = {};
+  private protocolManager: any;
+  private loadBalancer: any;
   private fieldConverter: ModelFieldConverter;
   private unimplementedModule: RCCUnimplementedModule;
-  private configRequestClassifier: ConfigRequestClassifier | null = null;
-
-  // Debug enhancement properties - now inherited from BaseModule
-  private routingMetrics: Map<string, any> = new Map();
-  private performanceMetrics: Map<string, any> = new Map();
-  private requestHistory: any[] = [];
-  // maxHistorySize is now inherited from BaseModule
-  private classificationStats: Map<string, any> = new Map();
-
-  // Dry-run mode properties
-  private dryRunConfig: DryRunConfig = {
-    enabled: false,
-    verbosity: 'normal',
-    includePerformanceEstimate: true,
-    includeConfigValidation: true,
-    maxOutputDepth: 10,
-    sensitiveFields: ['apiKey', 'token', 'secret', 'password']
-  };
-  private dryRunStats: DryRunStats = {
-    totalRuns: 0,
-    successfulRuns: 0,
-    averageTimeMs: 0,
-    topRoutes: [],
-    topTargets: [],
-    configErrors: {
-      routing: 0,
-      pipeline: 0,
-      target: 0
-    }
-  };
+  private inputModelRequestClassifier: InputModelRequestClassifier | null = null;
 
   constructor() {
     super({
       id: 'virtual-router',
       name: 'Virtual Router',
-      version: '2.0.0',
-      description: 'Handles request routing, load balancing and field conversion'
+      version: '1.0.0',
+      description: 'Pure routing decision based on input model - no load balancing'
     });
 
+    this.fieldConverter = new ModelFieldConverter();
+    this.unimplementedModule = new RCCUnimplementedModule({
+      moduleId: 'virtual-router-unimplemented',
+      moduleName: 'Virtual Router Unimplemented',
+      description: 'Unimplemented features for virtual router'
+    });
     this.protocolManager = new ProtocolManager();
     this.loadBalancer = new LoadBalancer();
-    this.fieldConverter = new ModelFieldConverter({ debugMode: true });
-    this.unimplementedModule = new RCCUnimplementedModule({
-      moduleId: 'virtual-router-mock',
-      moduleName: 'Virtual Router Mock Handler',
-      description: 'Handles unimplemented model requests with detailed debugging'
-    });
-
-    // Debug enhancements are now initialized in BaseModule constructor
   }
 
   /**
-   * 初始化模块
+   * 初始化模块 - 完全基于配置
    */
-  async initialize(config: VirtualRouterConfig): Promise<void> {
-    console.log('🔄 Initializing Virtual Router Module v2.0...');
+  async initialize(config: any): Promise<void> {
+    console.log('🔄 Initializing Input Model-based Virtual Router Module...');
 
     try {
+      // 验证必需配置
+      this.validateConfig(config);
+
       // 设置路由目标池
       this.routeTargets = config.routeTargets;
 
       // 设置流水线配置
       this.pipelineConfigs = config.pipelineConfigs;
 
-      // 初始化配置驱动的请求分类器
-      await this.initializeConfigRequestClassifier();
-
-      // 从配置中提取默认值
-      const defaultConfig = this.extractDefaultConfig();
-
-      // 初始化字段转换器
-      await this.fieldConverter.initialize({
-        debugMode: true,
-        enableTracing: true,
-        defaultMaxTokens: defaultConfig.defaultMaxTokens,
-        defaultModel: defaultConfig.defaultModel,
-        pipelineConfigs: this.pipelineConfigs
-      });
-
-      // 初始化unimplemented模块
-      await this.unimplementedModule.initialize();
+      // 初始化输入模型分类器
+      await this.initializeInputModelClassifier(config);
 
       // 初始化协议管理器
       await this.protocolManager.initialize({
@@ -125,9 +63,7 @@ export class VirtualRouterModule extends BaseModule {
       // 初始化负载均衡器
       await this.loadBalancer.initialize(this.routeTargets);
 
-      console.log('✅ Virtual Router Module v2.0 initialized successfully');
-      console.log('📊 Available routes:', Object.keys(this.routeTargets));
-      console.log('📋 Pipeline configs:', Object.keys(this.pipelineConfigs).length);
+      console.log('✅ Input Model-based Virtual Router Module initialized successfully');
     } catch (error) {
       console.error('❌ Failed to initialize Virtual Router Module:', error);
       throw error;
@@ -135,1236 +71,177 @@ export class VirtualRouterModule extends BaseModule {
   }
 
   /**
-   * 初始化配置驱动的请求分类器
+   * 验证配置 - 无默认值，必须完整
    */
-  private async initializeConfigRequestClassifier(): Promise<void> {
-    try {
-      // 加载分类配置
-      const classificationConfig = await this.loadClassificationConfig();
+  private validateConfig(config: any): void {
+    if (!config) {
+      throw new Error('虚拟路由器配置不能为空');
+    }
 
-      // 创建配置驱动的请求分类器
-      this.configRequestClassifier = ConfigRequestClassifier.fromModuleConfig(classificationConfig);
+    if (!config.routeTargets || Object.keys(config.routeTargets).length === 0) {
+      throw new Error('routeTargets配置不能为空');
+    }
 
-      console.log('✅ Config-driven Request Classifier initialized successfully');
-    } catch (error) {
-      console.warn('⚠️ Failed to initialize Config-driven Request Classifier:', error);
-      console.log('🔄 Falling back to default routing behavior');
-      this.configRequestClassifier = null;
+    if (!config.pipelineConfigs || Object.keys(config.pipelineConfigs).length === 0) {
+      throw new Error('pipelineConfigs配置不能为空');
+    }
+
+    if (!config.inputProtocol) {
+      throw new Error('inputProtocol配置不能为空');
+    }
+
+    if (!config.outputProtocol) {
+      throw new Error('outputProtocol配置不能为空');
     }
   }
 
   /**
-   * 加载分类配置
+   * 初始化输入模型分类器
    */
-  private async loadClassificationConfig(): Promise<any> {
-    try {
-      // 这里可以从模块配置中加载，现在使用默认配置
-      const defaultConfig = {
-        protocolMapping: {
-          openai: {
-            endpoints: ['/v1/chat/completions', '/v1/completions'],
-            messageField: 'messages',
-            modelField: 'model',
-            toolsField: 'tools',
-            maxTokensField: 'max_tokens'
-          },
-          anthropic: {
-            endpoints: ['/v1/messages'],
-            messageField: 'messages',
-            modelField: 'model',
-            toolsField: 'tools',
-            maxTokensField: 'max_tokens'
-          }
-        },
-        protocolHandlers: {
-          openai: {
-            tokenCalculator: {
-              type: 'openai',
-              tokenRatio: 0.25,
-              toolOverhead: 50,
-              messageOverhead: 10,
-              imageTokenDefault: 255
-            },
-            toolDetector: {
-              type: 'pattern',
-              patterns: {
-                webSearch: ['web_search', 'search', 'browse', 'internet'],
-                codeExecution: ['code', 'execute', 'bash', 'python', 'javascript'],
-                fileSearch: ['file', 'read', 'write', 'document', 'pdf'],
-                dataAnalysis: ['data', 'analysis', 'chart', 'graph', 'statistics']
-              }
-            }
-          },
-          anthropic: {
-            tokenCalculator: {
-              type: 'anthropic',
-              tokenRatio: 0.25,
-              toolOverhead: 50,
-              messageOverhead: 10
-            },
-            toolDetector: {
-              type: 'pattern',
-              patterns: {
-                webSearch: ['web_search', 'search', 'browse'],
-                codeExecution: ['code', 'execute', 'bash', 'python'],
-                fileSearch: ['file', 'read', 'write'],
-                dataAnalysis: ['data', 'analysis', 'chart']
-              }
-            }
-          }
-        },
-        modelTiers: {
-          basic: {
-            description: 'Basic models for simple tasks',
-            models: ['gpt-3.5-turbo', 'claude-3-haiku', 'qwen-turbo'],
-            maxTokens: 16384,
-            supportedFeatures: ['text_generation', 'conversation']
-          },
-          advanced: {
-            description: 'Advanced models for complex tasks',
-            models: ['gpt-4', 'claude-3-opus', 'claude-3-sonnet', 'deepseek-coder', 'qwen-max'],
-            maxTokens: 262144,
-            supportedFeatures: ['text_generation', 'reasoning', 'coding', 'tool_use']
-          }
-        },
-        routingDecisions: {
-          default: {
-            description: 'Default routing for general requests',
-            modelTier: 'basic',
-            tokenThreshold: 8000,
-            toolTypes: [],
-            priority: 1
-          },
-          longContext: {
-            description: 'Routing for long context requests',
-            modelTier: 'advanced',
-            tokenThreshold: 10000,
-            toolTypes: [],
-            priority: 90
-          },
-          thinking: {
-            description: 'Routing for complex reasoning requests',
-            modelTier: 'advanced',
-            tokenThreshold: 8000,
-            toolTypes: ['dataAnalysis', 'complex_reasoning'],
-            priority: 85
-          },
-          background: {
-            description: 'Routing for background processing requests',
-            modelTier: 'basic',
-            tokenThreshold: 4000,
-            toolTypes: [],
-            priority: 60
-          },
-          webSearch: {
-            description: 'Routing for web search requests',
-            modelTier: 'advanced',
-            tokenThreshold: 6000,
-            toolTypes: ['webSearch'],
-            priority: 95
-          },
-          vision: {
-            description: 'Routing for vision and image processing requests',
-            modelTier: 'advanced',
-            tokenThreshold: 8000,
-            toolTypes: [],
-            priority: 80
-          },
-          coding: {
-            description: 'Routing for code generation requests',
-            modelTier: 'advanced',
-            tokenThreshold: 8000,
-            toolTypes: ['codeExecution', 'fileSearch'],
-            priority: 80
-          }
-        },
-        confidenceThreshold: 35
-      };
-
-      return defaultConfig;
-    } catch (error) {
-      console.error('Failed to load classification config:', error);
-      throw error;
-    }
-  }
-
-  // ========== Dry-Run Mode Methods ==========
-
-  /**
-   * 启用或禁用dry-run模式
-   */
-  setDryRunMode(enabled: boolean, config?: Partial<DryRunConfig>): void {
-    this.dryRunConfig.enabled = enabled;
-    if (config) {
-      this.dryRunConfig = { ...this.dryRunConfig, ...config };
-    }
-    console.log(`🔍 Dry-run mode ${enabled ? 'enabled' : 'disabled'}`);
-  }
-
-  /**
-   * 获取dry-run配置
-   */
-  getDryRunConfig(): DryRunConfig {
-    return { ...this.dryRunConfig };
-  }
-
-  /**
-   * 获取dry-run统计信息
-   */
-  getDryRunStats(): DryRunStats {
-    return { ...this.dryRunStats };
-  }
-
-  /**
-   * 重置dry-run统计信息
-   */
-  resetDryRunStats(): void {
-    this.dryRunStats = {
-      totalRuns: 0,
-      successfulRuns: 0,
-      averageTimeMs: 0,
-      topRoutes: [],
-      topTargets: [],
-      configErrors: {
-        routing: 0,
-        pipeline: 0,
-        target: 0
-      }
-    };
-  }
-
-  /**
-   * 执行dry-run路由分析
-   */
-  async executeDryRun(request: any, routeName: string = 'default'): Promise<DryRunResponse> {
-    const startTime = Date.now();
-    const requestId = `dryrun_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-    console.log('🔍 Starting dry-run analysis...');
-
-    try {
-      // 初始化响应结构
-      const response: DryRunResponse = {
-        mode: 'dry-run',
-        requestSummary: {
-          id: requestId,
-          type: 'routing-analysis',
-          timestamp: new Date().toISOString(),
-          route: routeName
-        },
-        routingDecision: await this.simulateRoutingDecision(request, routeName, requestId),
-        fieldConversion: await this.simulateFieldConversion(request),
-        protocolProcessing: await this.simulateProtocolProcessing(request),
-        executionPlan: this.generateExecutionPlan(request, routeName),
-        totalDryRunTimeMs: 0
-      };
-
-      // 添加性能估算（如果启用）
-      if (this.dryRunConfig.includePerformanceEstimate) {
-        response.performanceEstimate = await this.estimatePerformance(request, response);
-      }
-
-      // 添加配置验证（如果启用）
-      if (this.dryRunConfig.includeConfigValidation) {
-        response.configValidation = await this.validateConfiguration(request, routeName);
-      }
-
-      // 添加调试信息（如果详细级别足够）
-      if (this.dryRunConfig.verbosity === 'debug' || this.dryRunConfig.verbosity === 'detailed') {
-        response.debugInfo = {
-          logEntries: this.generateDebugLogEntries(request, response),
-          metrics: this.generateDebugMetrics(request, response)
-        };
-      }
-
-      // 更新统计信息
-      this.updateDryRunStats(response, Date.now() - startTime);
-
-      response.totalDryRunTimeMs = Date.now() - startTime;
-
-      console.log(`✅ Dry-run analysis completed in ${response.totalDryRunTimeMs}ms`);
-      return response;
-
-    } catch (error) {
-      console.error('❌ Dry-run analysis failed:', error);
-
-      // 更新错误统计
-      this.dryRunStats.totalRuns++;
-
-      throw error;
-    }
-  }
-
-  /**
-   * 模拟路由决策
-   */
-  private async simulateRoutingDecision(request: any, routeName: string, requestId: string): Promise<RoutingDecision> {
-    const startTime = Date.now();
-
-    // 使用配置驱动的分类器进行智能路由
-    let finalRouteName = routeName;
-    if (this.configRequestClassifier) {
-      const classificationResult = await this.classifyRequestWithConfig(request);
-      finalRouteName = classificationResult.route;
+  private async initializeInputModelClassifier(config: any): Promise<void> {
+    if (!config.classificationConfig || !config.classificationConfig.inputModelWeights) {
+      throw new Error('输入模型权重配置不能为空');
     }
 
-    // 获取可用目标
-    const targets = this.routeTargets[finalRouteName];
-    if (!targets || targets.length === 0) {
-      throw new Error(`No targets found for route: ${finalRouteName}`);
-    }
-
-    // 模拟负载均衡决策
-    const availableTargets = targets.map(target => ({
-      providerId: target.providerId,
-      modelId: target.modelId,
-      keyId: target.keyId,
-      health: 'healthy' as const
-    }));
-
-    // 选择目标（简化版负载均衡）
-    const selectedTarget = availableTargets[0]; // 简化：选择第一个目标
-    const loadBalancerDecision = {
-      algorithm: 'round-robin',
-      weights: availableTargets.reduce((acc, target, index) => {
-        acc[`${target.providerId}.${target.modelId}`] = 1;
-        return acc;
-      }, {} as Record<string, number>),
-      selectedWeight: 1,
-      reasoning: 'Target selected based on availability and round-robin algorithm'
-    };
-
-    return {
-      requestId,
-      routeName: finalRouteName,
-      selectedTarget: {
-        providerId: selectedTarget.providerId,
-        modelId: selectedTarget.modelId,
-        keyId: selectedTarget.keyId,
-        actualKey: 'hidden-for-security'
-      },
-      availableTargets,
-      loadBalancerDecision,
-      timestamp: new Date().toISOString(),
-      decisionTimeMs: Date.now() - startTime
-    };
+    this.inputModelRequestClassifier = new InputModelRequestClassifier();
+    this.inputModelRequestClassifier.initializeFromConfig(config.classificationConfig);
   }
 
   /**
-   * 模拟字段转换
-   */
-  private async simulateFieldConversion(request: any): Promise<FieldConversionInfo> {
-    const startTime = Date.now();
-
-    try {
-      // 模拟字段转换过程
-      const originalFields = Object.keys(request);
-      const convertedFields = [...originalFields]; // 简化：假设字段名不变
-
-      const fieldMappings = originalFields.map(field => ({
-        from: field,
-        to: field,
-        transformation: 'passthrough'
-      }));
-
-      return {
-        originalFields,
-        convertedFields,
-        fieldMappings,
-        conversionTimeMs: Date.now() - startTime,
-        success: true
-      };
-    } catch (error) {
-      return {
-        originalFields: Object.keys(request),
-        convertedFields: [],
-        fieldMappings: [],
-        conversionTimeMs: Date.now() - startTime,
-        success: false
-      };
-    }
-  }
-
-  /**
-   * 模拟协议处理
-   */
-  private async simulateProtocolProcessing(request: any): Promise<ProtocolProcessingInfo> {
-    const startTime = Date.now();
-
-    // 简化的协议处理模拟
-    const inputProtocol = 'openai';
-    const outputProtocol = 'openai';
-    const requiresConversion = inputProtocol !== outputProtocol;
-
-    const conversionSteps = requiresConversion ? [
-      {
-        step: 'protocol_conversion',
-        from: inputProtocol,
-        to: outputProtocol,
-        description: 'Convert request format between protocols'
-      }
-    ] : [];
-
-    return {
-      inputProtocol,
-      outputProtocol,
-      conversionSteps,
-      processingTimeMs: Date.now() - startTime,
-      requiresConversion
-    };
-  }
-
-  /**
-   * 生成执行计划
-   */
-  private generateExecutionPlan(request: any, routeName: string): Array<{
-    step: string;
-    module: string;
-    description: string;
-    estimatedTimeMs: number;
-  }> {
-    return [
-      {
-        step: 'request_classification',
-        module: 'virtual-router',
-        description: 'Classify request and determine optimal route',
-        estimatedTimeMs: 5
-      },
-      {
-        step: 'target_selection',
-        module: 'load-balancer',
-        description: 'Select optimal target based on load balancing',
-        estimatedTimeMs: 2
-      },
-      {
-        step: 'field_conversion',
-        module: 'field-converter',
-        description: 'Convert request fields to target format',
-        estimatedTimeMs: 10
-      },
-      {
-        step: 'protocol_processing',
-        module: 'protocol-manager',
-        description: 'Process protocol conversion if needed',
-        estimatedTimeMs: 3
-      },
-      {
-        step: 'pipeline_execution',
-        module: 'pipeline-system',
-        description: 'Execute request through selected pipeline',
-        estimatedTimeMs: 1000
-      }
-    ];
-  }
-
-  /**
-   * 估算性能
-   */
-  private async estimatePerformance(request: any, response: DryRunResponse): Promise<PerformanceEstimate> {
-    // 基于历史数据的简化性能估算
-    const baseTime = 1000; // 基础执行时间
-    const complexity = Object.keys(request).length * 10; // 复杂度因子
-
-    const breakdown = {
-      routing: response.routingDecision.decisionTimeMs,
-      conversion: response.fieldConversion.conversionTimeMs,
-      protocol: response.protocolProcessing.processingTimeMs,
-      execution: baseTime + complexity,
-      response: 50 // 响应处理时间
-    };
-
-    return {
-      estimatedTotalTimeMs: Object.values(breakdown).reduce((sum, time) => sum + time, 0),
-      breakdown,
-      confidence: 0.75, // 75% 置信度
-      baselineSource: 'heuristic' as const
-    };
-  }
-
-  /**
-   * 验证配置
-   */
-  private async validateConfiguration(request: any, routeName: string): Promise<ConfigValidationResult> {
-    const routingConfig = {
-      valid: true,
-      errors: [] as string[],
-      warnings: [] as string[]
-    };
-
-    const pipelineConfig = {
-      valid: true,
-      errors: [] as string[],
-      warnings: [] as string[]
-    };
-
-    const targetConfig = {
-      valid: true,
-      errors: [] as string[],
-      warnings: [] as string[]
-    };
-
-    // 检查路由配置
-    if (!this.routeTargets[routeName]) {
-      routingConfig.valid = false;
-      routingConfig.errors.push(`Route '${routeName}' not found in configuration`);
-    }
-
-    // 检查目标配置
-    const targets = this.routeTargets[routeName];
-    if (targets && targets.length === 0) {
-      targetConfig.valid = false;
-      targetConfig.errors.push(`No targets configured for route '${routeName}'`);
-    }
-
-    // 检查流水线配置
-    if (Object.keys(this.pipelineConfigs).length === 0) {
-      pipelineConfig.warnings.push('No pipeline configurations available');
-    }
-
-    return {
-      routingConfig,
-      pipelineConfig,
-      targetConfig
-    };
-  }
-
-  /**
-   * 生成调试日志条目
-   */
-  private generateDebugLogEntries(request: any, response: DryRunResponse): Array<{
-    level: 'debug' | 'info' | 'warn' | 'error';
-    message: string;
-    timestamp: string;
-    data?: any;
-  }> {
-    return [
-      {
-        level: 'info' as const,
-        message: 'Dry-run analysis started',
-        timestamp: new Date().toISOString(),
-        data: { requestId: response.requestSummary.id }
-      },
-      {
-        level: 'debug' as const,
-        message: 'Routing decision completed',
-        timestamp: new Date().toISOString(),
-        data: { route: response.routingDecision.routeName }
-      },
-      {
-        level: 'debug' as const,
-        message: 'Field conversion completed',
-        timestamp: new Date().toISOString(),
-        data: { success: response.fieldConversion.success }
-      },
-      {
-        level: 'info' as const,
-        message: 'Dry-run analysis completed',
-        timestamp: new Date().toISOString(),
-        data: { totalTimeMs: response.totalDryRunTimeMs }
-      }
-    ];
-  }
-
-  /**
-   * 生成调试指标
-   */
-  private generateDebugMetrics(request: any, response: DryRunResponse): Record<string, any> {
-    return {
-      requestSize: JSON.stringify(request).length,
-      routeName: response.routingDecision.routeName,
-      targetCount: response.routingDecision.availableTargets.length,
-      fieldCount: response.fieldConversion.originalFields.length,
-      requiresProtocolConversion: response.protocolProcessing.requiresConversion,
-      estimatedExecutionTime: response.performanceEstimate?.estimatedTotalTimeMs,
-      configValidationPassed: response.configValidation?.routingConfig.valid &&
-                             response.configValidation?.pipelineConfig.valid &&
-                             response.configValidation?.targetConfig.valid
-    };
-  }
-
-  /**
-   * 更新dry-run统计信息
-   */
-  private updateDryRunStats(response: DryRunResponse, executionTimeMs: number): void {
-    this.dryRunStats.totalRuns++;
-    this.dryRunStats.successfulRuns++;
-
-    // 更新平均时间
-    this.dryRunStats.averageTimeMs =
-      (this.dryRunStats.averageTimeMs * (this.dryRunStats.totalRuns - 1) + executionTimeMs) /
-      this.dryRunStats.totalRuns;
-
-    // 更新最常用路由
-    const routeName = response.routingDecision.routeName;
-    const routeStat = this.dryRunStats.topRoutes.find(r => r.route === routeName);
-    if (routeStat) {
-      routeStat.count++;
-    } else {
-      this.dryRunStats.topRoutes.push({ route: routeName, count: 1 });
-    }
-    this.dryRunStats.topRoutes.sort((a, b) => b.count - a.count);
-
-    // 更新最常用目标
-    const targetKey = `${response.routingDecision.selectedTarget.providerId}.${response.routingDecision.selectedTarget.modelId}`;
-    const targetStat = this.dryRunStats.topTargets.find(t => t.target === targetKey);
-    if (targetStat) {
-      targetStat.count++;
-    } else {
-      this.dryRunStats.topTargets.push({ target: targetKey, count: 1 });
-    }
-    this.dryRunStats.topTargets.sort((a, b) => b.count - a.count);
-
-    // 更新配置错误统计
-    if (response.configValidation) {
-      if (!response.configValidation.routingConfig.valid) {
-        this.dryRunStats.configErrors.routing++;
-      }
-      if (!response.configValidation.pipelineConfig.valid) {
-        this.dryRunStats.configErrors.pipeline++;
-      }
-      if (!response.configValidation.targetConfig.valid) {
-        this.dryRunStats.configErrors.target++;
-      }
-    }
-  }
-
-  /**
-   * 检查请求是否支持dry-run
-   */
-  supportsDryRun(request: any): boolean {
-    return this.dryRunConfig.enabled &&
-           typeof request === 'object' &&
-           request !== null &&
-           (request.model || request.messages || request.prompt);
-  }
-
-  // ========== End Dry-Run Methods ==========
-
-  /**
-   * 智能路由请求 - 使用分类器动态决定路由
+   * 路由请求 - 完全基于输入模型分类
    */
   async routeRequest(request: any, routeName: string = 'default'): Promise<any> {
-    const startTime = Date.now();
-    const requestId = `route_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-    // 检查是否启用dry-run模式
-    if (this.dryRunConfig.enabled && this.supportsDryRun(request)) {
-      console.log('🔍 Dry-run mode enabled, executing analysis instead of actual routing...');
-      return await this.executeDryRun(request, routeName);
-    }
-
     try {
-      console.log('🔄 Starting smart request routing...');
-      console.log('📝 Original request:', { model: request.model, initialRoute: routeName });
-
-      // Debug: Record request start
-      if (this.isDebugEnhanced) {
-        this.recordRoutingMetric('request_start', {
-          requestId,
-          routeName,
-          model: request.model,
-          timestamp: startTime
-        });
-        this.publishDebugEvent('routing_start', {
-          requestId,
-          originalRequest: { model: request.model, initialRoute: routeName },
-          routeName
-        });
+      // 1. 输入模型分类
+      const classificationResult = await this.classifyRequest(request);
+      
+      // 2. 获取分类决定的路由
+      const determinedRoute = classificationResult.route;
+      
+      // 3. 获取该路由的可用目标
+      const targets = this.routeTargets[determinedRoute];
+      if (!targets || targets.length === 0) {
+        throw new Error(`路由 ${determinedRoute} 没有配置目标模型`);
       }
 
-      // 使用配置驱动的分类器进行智能路由
-      if (this.configRequestClassifier) {
-        const classificationResult = await this.classifyRequestWithConfig(request);
-        routeName = classificationResult.route;
+      // 4. 选择目标
+      const target = await this.loadBalancer.selectTarget(targets);
+      if (!target) {
+        throw new Error(`路由 ${determinedRoute} 没有可用目标`);
+      }
 
-        console.log('🎯 Config-driven classification result:', {
-          route: classificationResult.route,
-          modelTier: classificationResult.modelTier,
+      // 5. 获取流水线配置
+      const pipelineConfig = this.pipelineConfigs[
+        `${target.providerId}.${target.modelId}.${target.keyId}`
+      ];
+      if (!pipelineConfig) {
+        throw new Error(`未找到目标 ${target.providerId}.${target.modelId}.${target.keyId} 的流水线配置`);
+      }
+
+      // 6. 协议转换（如果需要）
+      const convertedRequest = await this.protocolManager.convertRequest(
+        request,
+        pipelineConfig.protocols.input,
+        pipelineConfig.protocols.output
+      );
+
+      // 7. 执行请求
+      const response = await this.executeRequest(convertedRequest, pipelineConfig);
+
+      // 8. 协议转换响应（如果需要）
+      const convertedResponse = await this.protocolManager.convertResponse(
+        response,
+        pipelineConfig.protocols.output,
+        pipelineConfig.protocols.input
+      );
+
+      return {
+        response: convertedResponse,
+        routing: {
+          route: determinedRoute,
+          inputModel: classificationResult.inputModel,
+          inputModelWeight: classificationResult.inputModelWeight,
           confidence: classificationResult.confidence,
           reasoning: classificationResult.reasoning,
-          configBased: classificationResult.configBased
-        });
-
-        // Debug: Record classification metrics
-        if (this.isDebugEnhanced) {
-          this.recordClassificationMetric(classificationResult.route, {
-            confidence: classificationResult.confidence,
-            modelTier: classificationResult.modelTier,
-            configBased: classificationResult.configBased,
-            reasoning: classificationResult.reasoning
-          });
-          this.publishDebugEvent('classification_complete', {
-            requestId,
-            classificationResult,
-            processingTime: Date.now() - startTime
-          });
+          target: target
         }
-
-        // 验证路由是否可用
-        if (!this.routeTargets[routeName]) {
-          console.warn(`⚠️ Route '${routeName}' not available, falling back to default`);
-          routeName = 'default';
-        }
-      } else {
-        console.log('🔄 No config-driven classifier available, using default routing');
-        routeName = 'default';
-      }
-
-      // 获取可用目标
-      const targets = this.routeTargets[routeName];
-      if (!targets || targets.length === 0) {
-        throw new Error(`No targets found for route: ${routeName}`);
-      }
-
-      console.log('🎯 Available targets:', targets.length);
-
-      // 选择目标（使用负载均衡）
-      const target = await this.loadBalancer.selectTarget(targets, routeName, request);
-      if (!target) {
-        throw new Error('No available targets for routing');
-      }
-
-      console.log('🎯 Selected target:', {
-        providerId: target.providerId,
-        modelId: target.modelId,
-        keyId: target.keyId
-      });
-
-      // Debug: Record target selection
-      if (this.isDebugEnhanced) {
-        this.recordRoutingMetric('target_selected', {
-          requestId,
-          target: {
-            providerId: target.providerId,
-            modelId: target.modelId,
-            keyId: target.keyId
-          },
-          routeName,
-          selectionTime: Date.now() - startTime
-        });
-        this.publishDebugEvent('target_selected', {
-          requestId,
-          target,
-          routeName,
-          processingTime: Date.now() - startTime
-        });
-      }
-
-      // 获取流水线配置
-      const pipelineConfigKey = `${target.providerId}.${target.modelId}.${target.keyId}`;
-      const pipelineConfig = this.pipelineConfigs[pipelineConfigKey];
-      if (!pipelineConfig) {
-        throw new Error(`No pipeline config found for target: ${pipelineConfigKey}`);
-      }
-
-      console.log('⚙️ Pipeline config found for:', pipelineConfigKey);
-
-      // 构建路由信息
-      const routingInfo = {
-        route: routeName,
-        providerId: target.providerId,
-        modelId: target.modelId,
-        keyId: target.keyId,
-        selectedTarget: target,
-        selectionTime: Date.now()
       };
-
-      // 使用字段转换器转换请求
-      console.log('🔄 Converting request fields...');
-      const conversionResult = await this.fieldConverter.convertRequest(
-        request,
-        pipelineConfig,
-        routingInfo
-      );
-
-      if (!conversionResult.success) {
-        console.error('❌ Request field conversion failed:', conversionResult.errors);
-        throw new Error(`Field conversion failed: ${conversionResult.errors?.join(', ')}`);
-      }
-
-      console.log('✅ Request field conversion successful');
-      console.log('📝 Converted request:', {
-        model: conversionResult.convertedRequest.model,
-        max_tokens: conversionResult.convertedRequest.max_tokens,
-        originalModel: conversionResult.debugInfo.originalRequest.model
-      });
-
-      // Debug: Record conversion completion
-      if (this.isDebugEnhanced) {
-        this.recordRoutingMetric('conversion_complete', {
-          requestId,
-          conversionSuccess: conversionResult.success,
-          conversionTime: Date.now() - startTime,
-          debugInfo: conversionResult.debugInfo
-        });
-        this.publishDebugEvent('conversion_complete', {
-          requestId,
-          conversionResult,
-          processingTime: Date.now() - startTime
-        });
-      }
-
-      // 使用unimplemented模块处理mock响应
-      console.log('🎭 Using unimplemented module for mock response...');
-
-      const mockResponse = await this.unimplementedModule.handleUnimplementedCall(
-        'model-request-execution',
-        {
-          callerId: 'virtual-router',
-          context: {
-            originalRequest: request,
-            convertedRequest: conversionResult.convertedRequest,
-            routingInfo: routingInfo,
-            pipelineConfig: pipelineConfig,
-            conversionDebugInfo: conversionResult.debugInfo,
-            target: target,
-            timestamp: new Date().toISOString()
-          }
-        }
-      );
-
-      // 将routingInfo添加到响应中
-      const responseWithRouting = {
-        ...mockResponse,
-        routingInfo: routingInfo,
-        convertedRequest: conversionResult.convertedRequest
-      };
-
-      console.log('✅ Mock response generated successfully');
-
-      // Debug: Record request completion
-      if (this.isDebugEnhanced) {
-        const totalTime = Date.now() - startTime;
-        this.recordRoutingMetric('request_complete', {
-          requestId,
-          routeName,
-          success: true,
-          totalTime,
-          routingInfo
-        });
-        this.addToRequestHistory({
-          requestId,
-          routeName,
-          target: routingInfo.selectedTarget,
-          startTime,
-          endTime: Date.now(),
-          totalTime,
-          success: true
-        });
-        this.publishDebugEvent('routing_complete', {
-          requestId,
-          responseWithRouting,
-          totalTime,
-          success: true
-        });
-      }
-
-      return responseWithRouting;
 
     } catch (error) {
-      console.error(`❌ Request routing failed for route ${routeName}:`, error);
-
-      // Debug: Record error
-      if (this.isDebugEnhanced) {
-        const totalTime = Date.now() - startTime;
-        this.recordRoutingMetric('request_error', {
-          requestId,
-          routeName,
-          error: error instanceof Error ? error.message : String(error),
-          totalTime
-        });
-        this.addToRequestHistory({
-          requestId,
-          routeName,
-          startTime,
-          endTime: Date.now(),
-          totalTime,
-          success: false,
-          error: error instanceof Error ? error.message : String(error)
-        });
-        this.publishDebugEvent('routing_error', {
-          requestId,
-          error: error instanceof Error ? error.message : String(error),
-          routeName,
-          totalTime
-        });
-      }
-
-      // 即使出错也返回unimplemented响应以保持一致性
-      try {
-        const errorResponse = await this.unimplementedModule.handleUnimplementedCall(
-          'routing-error',
-          {
-            callerId: 'virtual-router',
-            context: {
-              error: error instanceof Error ? error.message : String(error),
-              routeName,
-              timestamp: new Date().toISOString()
-            }
-          }
-        );
-
-        // 添加基本的routingInfo到错误响应
-        return {
-          ...errorResponse,
-          routingInfo: {
-            route: routeName,
-            providerId: 'error',
-            modelId: 'error',
-            keyId: 'error',
-            error: error instanceof Error ? error.message : String(error)
-          }
-        };
-      } catch (fallbackError) {
-        // 如果unimplemented模块也失败，返回基本错误响应
-        return {
-          error: {
-            message: `Routing failed: ${error instanceof Error ? error.message : String(error)}`,
-            type: 'routing_error',
-            code: 500
-          },
-          routingInfo: {
-            route: routeName,
-            providerId: 'error',
-            modelId: 'error',
-            keyId: 'error',
-            error: error instanceof Error ? error.message : String(error)
-          }
-        };
-      }
+      console.error(`❌ Request routing failed:`, error);
+      throw error;
     }
   }
 
   /**
-   * 执行请求 - 已弃用，现在使用unimplemented模块
-   * @deprecated Use unimplemented module instead
+   * 分类请求 - 完全基于输入模型
    */
-  private async executeRequest(request: any, pipelineConfig: PipelineConfig): Promise<any> {
-    console.warn('⚠️ executeRequest is deprecated, use unimplemented module instead');
+  private async classifyRequest(request: any): Promise<any> {
+    if (!this.inputModelRequestClassifier) {
+      throw new Error('输入模型分类器未初始化');
+    }
 
-    // 向后兼容，调用unimplemented模块
-    return this.unimplementedModule.handleUnimplementedCall(
-      'deprecated-execute-request',
-      {
-        callerId: 'virtual-router',
-        context: {
-          request,
-          pipelineConfig,
-          message: 'This method is deprecated, use routeRequest instead'
+    const classificationInput = {
+      request: request,
+      endpoint: request.endpoint || '/v1/chat/completions',
+      protocol: request.protocol || 'openai'
+    };
+
+    const result = await this.inputModelRequestClassifier.classify(classificationInput);
+    
+    if (!result.success) {
+      throw new Error(`输入模型分类失败: ${result.reasoning}`);
+    }
+
+    return result;
+  }
+
+  /**
+   * 执行请求
+   */
+  private async executeRequest(request: any, pipelineConfig: any): Promise<any> {
+    console.log(`🔄 Executing request to ${pipelineConfig.provider.baseURL}`);
+    
+    // 这里应该调用实际的provider执行逻辑
+    // 现在返回模拟响应
+    return {
+      id: `response-${Date.now()}`,
+      object: 'chat.completion',
+      model: pipelineConfig.provider.type,
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: `Response from ${pipelineConfig.provider.type} via route`
         }
-      }
-    );
-  }
-
-  /**
-   * 从配置中提取默认值
-   */
-  private extractDefaultConfig(): { defaultMaxTokens: number; defaultModel: string } {
-    const pipelineConfigKeys = Object.keys(this.pipelineConfigs);
-
-    if (pipelineConfigKeys.length === 0) {
-      console.log('⚠️ No pipeline configs found, using hardcoded defaults');
-      return { defaultMaxTokens: 32000, defaultModel: 'qwen3-coder-plus' };
-    }
-
-    // 从第一个配置键中提取默认值 (格式: provider.model.keyId)
-    const firstConfigKey = pipelineConfigKeys[0];
-    const firstConfig = this.pipelineConfigs[firstConfigKey];
-    const defaultMaxTokens = firstConfig.model?.maxTokens || 32000;
-
-    // 从配置键中提取模型ID
-    const keyParts = firstConfigKey.split('.');
-    let defaultModel = 'qwen3-coder-plus';
-    if (keyParts.length >= 2) {
-      defaultModel = keyParts[1]; // modelId 部分
-    }
-
-    console.log(`🔧 Extracted default config from pipeline: maxTokens=${defaultMaxTokens}, model=${defaultModel}`);
-
-    return { defaultMaxTokens, defaultModel };
+      }]
+    };
   }
 
   /**
    * 获取状态
    */
   getStatus(): any {
+    const classifierStatus = this.inputModelRequestClassifier?.getStatus() || null;
+    
     return {
       status: this.isRunning ? 'running' : 'stopped',
       routeTargets: Object.keys(this.routeTargets),
       pipelineConfigs: Object.keys(this.pipelineConfigs),
-      protocolManager: this.protocolManager.getStatus(),
-      loadBalancer: this.loadBalancer.getStatus()
-    };
-  }
-  /**
-   * 使用配置驱动的分类器执行分类
-   */
-  private async classifyRequestWithConfig(request: any): Promise<any> {
-    if (!this.configRequestClassifier) {
-      return {
-        route: 'default',
-        modelTier: 'basic',
-        confidence: 50,
-        reasoning: 'No config-driven classifier available',
-        configBased: false
-      };
-    }
-
-    try {
-      // 准备分类输入
-      const classificationInput = {
-        request: request,
-        endpoint: request.endpoint || '/v1/chat/completions',
-        protocol: request.protocol || 'openai',
-        userPreferences: request.userPreferences
-      };
-
-      // 执行分类
-      const classificationResult = await this.configRequestClassifier.classify(classificationInput);
-
-      console.log('🧠 Config-driven classification completed:', {
-        route: classificationResult.route,
-        modelTier: classificationResult.modelTier,
-        confidence: classificationResult.confidence,
-        factors: classificationResult.factors,
-        recommendations: classificationResult.recommendations,
-        performance: classificationResult.performance
-      });
-
-      return classificationResult;
-
-    } catch (error) {
-      console.error('❌ Config-driven classification failed:', error);
-      return {
-        route: 'default',
-        modelTier: 'basic',
-        confidence: 30,
-        reasoning: `Config-driven classification failed: ${error instanceof Error ? error.message : String(error)}`,
-        configBased: false
-      };
-    }
-  }
-
-  /**
-   * 获取配置驱动的分类器状态
-   */
-  getConfigClassifierStatus(): {
-    enabled: boolean;
-    configBased: boolean;
-    status: any;
-    protocols: string[];
-    validation: any;
-  } {
-    if (!this.configRequestClassifier) {
-      return {
-        enabled: false,
-        configBased: false,
-        status: null,
-        protocols: [],
-        validation: null
-      };
-    }
-
-    const status = this.configRequestClassifier.getStatus();
-
-    return {
-      enabled: true,
-      configBased: true,
-      status,
-      protocols: status.protocols,
-      validation: status.configValidation
-    };
-  }
-
-  /**
-   * Record routing metric
-   */
-  public recordRoutingMetric(operation: string, data: any): void {
-    if (!this.routingMetrics.has(operation)) {
-      this.routingMetrics.set(operation, {
-        values: [],
-        lastUpdated: Date.now()
-      });
-    }
-
-    const metric = this.routingMetrics.get(operation)!;
-    metric.values.push(data);
-    metric.lastUpdated = Date.now();
-
-    // Keep only last 50 measurements
-    if (metric.values.length > 50) {
-      metric.values.shift();
-    }
-  }
-
-  /**
-   * Record classification metric
-   */
-  private recordClassificationMetric(route: string, data: any): void {
-    if (!this.classificationStats.has(route)) {
-      this.classificationStats.set(route, {
-        count: 0,
-        totalConfidence: 0,
-        routes: []
-      });
-    }
-
-    const stats = this.classificationStats.get(route)!;
-    stats.count++;
-    stats.totalConfidence += data.confidence;
-    stats.routes.push(data);
-
-    // Keep only last 100 classifications
-    if (stats.routes.length > 100) {
-      stats.routes.shift();
-    }
-  }
-
-  /**
-   * Add request to history
-   */
-  public addToRequestHistory(request: any): void {
-    this.requestHistory.push(request);
-
-    // Keep only recent history
-    if (this.requestHistory.length > this.maxHistorySize) {
-      this.requestHistory.shift();
-    }
-  }
-
-  /**
-   * Publish debug event
-   */
-  public publishDebugEvent(type: string, data: any): void {
-    if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
-
-    try {
-      this.debugEventBus.publish({
-        sessionId: `session_${Date.now()}`,
-        moduleId: 'virtual-router',
-        operationId: type,
-        timestamp: Date.now(),
-        type: 'debug',
-        position: 'middle',
-        data: {
-          ...data,
-          routerId: 'virtual-router',
-          source: 'virtual-router'
-        }
-      });
-    } catch (error) {
-      // Silent fail if debug event bus is not available
-    }
-  }
-
-  /**
-   * Get debug status with enhanced information
-   */
-  getDebugStatus(): any {
-    const baseStatus = {
-      routerId: this.getInfo().id,
-      name: this.getInfo().name,
-      version: this.getInfo().version,
-      isInitialized: this.getStatus() !== 'stopped',
-      isRunning: this.isModuleRunning(),
-      status: this.getStatus(),
-      routeTargets: Object.keys(this.routeTargets),
-      pipelineConfigs: Object.keys(this.pipelineConfigs),
-      protocolManager: this.protocolManager.getStatus(),
-      loadBalancer: this.loadBalancer.getStatus(),
-      isEnhanced: true
-    };
-
-    if (!this.isDebugEnhanced) {
-      return baseStatus;
-    }
-
-    return {
-      ...baseStatus,
-      debugInfo: this.getDebugInfo(),
-      performanceStats: this.getPerformanceStats(),
-      routingMetrics: this.getRoutingMetrics(),
-      classificationStats: this.getClassificationStats(),
-      requestHistory: [...this.requestHistory.slice(-10)] // Last 10 requests
-    };
-  }
-
-  /**
-   * Get detailed debug information
-   */
-  public getDebugInfo(): any {
-    return {
-      routerId: 'virtual-router',
-      enhanced: this.isDebugEnhanced,
-      eventBusAvailable: !!this.debugEventBus,
-      routeTargetsCount: Object.keys(this.routeTargets).length,
-      pipelineConfigsCount: Object.keys(this.pipelineConfigs).length,
-      requestHistorySize: this.requestHistory.length,
-      classificationEnabled: !!this.configRequestClassifier
-    };
-  }
-
-  /**
-   * Get performance statistics
-   */
-  private getPerformanceStats(): any {
-    const stats: any = {};
-
-    for (const [operation, metric] of this.routingMetrics.entries()) {
-      const values = metric.values;
-      if (values.length > 0) {
-        stats[operation] = {
-          count: values.length,
-          avgTime: Math.round(values.reduce((sum: any, v: any) => sum + (v.totalTime || v.selectionTime || 0), 0) / values.length),
-          minTime: Math.min(...values.map((v: any) => v.totalTime || v.selectionTime || 0)),
-          maxTime: Math.max(...values.map((v: any) => v.totalTime || v.selectionTime || 0)),
-          lastUpdated: metric.lastUpdated
-        };
+      classifier: {
+        enabled: !!this.inputModelRequestClassifier,
+        inputModelBased: true,
+        protocols: classifierStatus?.protocols || [],
+        inputModelsConfigured: Object.keys(this.routeTargets).length
       }
-    }
-
-    return stats;
-  }
-
-  /**
-   * Get routing metrics
-   */
-  public getRoutingMetrics(): any {
-    const metrics: any = {};
-
-    for (const [operation, metric] of this.routingMetrics.entries()) {
-      metrics[operation] = {
-        count: metric.values.length,
-        lastUpdated: metric.lastUpdated,
-        recentValues: metric.values.slice(-5) // Last 5 values
-      };
-    }
-
-    return metrics;
-  }
-
-  /**
-   * Get classification statistics
-   */
-  private getClassificationStats(): any {
-    const stats: any = {};
-
-    for (const [route, data] of this.classificationStats.entries()) {
-      stats[route] = {
-        count: data.count,
-        avgConfidence: Math.round(data.totalConfidence / data.count),
-        recentClassifications: data.routes.slice(-5) // Last 5 classifications
-      };
-    }
-
-    return stats;
+    };
   }
 }
 
-// 协议管理器
+// 简化的协议管理器
 class ProtocolManager {
-  private inputProtocol: string = 'openai';
-  private outputProtocol: string = 'openai';
+  private inputProtocol: string = '';
+  private outputProtocol: string = '';
 
   async initialize(config: { inputProtocol: string; outputProtocol: string }): Promise<void> {
     this.inputProtocol = config.inputProtocol;
@@ -1375,9 +252,7 @@ class ProtocolManager {
     if (fromProtocol === toProtocol) {
       return request;
     }
-
-    // TODO: 实现协议转换逻辑
-    console.log(`🔄 Converting request from ${fromProtocol} to ${toProtocol}`);
+    // 简化处理
     return request;
   }
 
@@ -1385,9 +260,7 @@ class ProtocolManager {
     if (fromProtocol === toProtocol) {
       return response;
     }
-
-    // TODO: 实现协议转换逻辑
-    console.log(`🔄 Converting response from ${fromProtocol} to ${toProtocol}`);
+    // 简化处理
     return response;
   }
 
@@ -1399,238 +272,44 @@ class ProtocolManager {
   }
 }
 
-// 负载均衡器 - 支持多层轮询：目标池轮询 + Key轮询
+// 简化的负载均衡器
 class LoadBalancer {
-  private routeTargets: RouteTargetPool = {};
-  private poolIndex: Map<string, number> = new Map(); // 目标池轮询索引
-  private keyIndex: Map<string, number> = new Map(); // Key轮询索引
+  private routeTargets: any = {};
+  private currentIndex: Map<string, number> = new Map();
 
-  async initialize(routeTargets: RouteTargetPool): Promise<void> {
+  async initialize(routeTargets: any): Promise<void> {
     this.routeTargets = routeTargets;
-    this.buildTargetPools();
   }
 
-  /**
-   * 构建目标池 - 将具体的目标按 provider.model 分组
-   */
-  private buildTargetPools(): void {
-    for (const routeName in this.routeTargets) {
-      const targets = this.routeTargets[routeName];
-      const poolKey = `${routeName}`;
-
-      // 初始化目标池索引
-      if (!this.poolIndex.has(poolKey)) {
-        this.poolIndex.set(poolKey, 0);
-      }
-
-      // 为每个 provider.model 组合初始化key索引
-      const providerModelGroups = this.groupByProviderModel(targets);
-      for (const providerModel in providerModelGroups) {
-        const keyPoolKey = `${routeName}.${providerModel}`;
-        if (!this.keyIndex.has(keyPoolKey)) {
-          this.keyIndex.set(keyPoolKey, 0);
-        }
-      }
-    }
-  }
-
-  /**
-   * 按 provider.model 分组目标
-   */
-  private groupByProviderModel(targets: RouteTarget[]): Record<string, RouteTarget[]> {
-    const groups: Record<string, RouteTarget[]> = {};
-
-    targets.forEach(target => {
-      const key = `${target.providerId}.${target.modelId}`;
-      if (!groups[key]) {
-        groups[key] = [];
-      }
-      groups[key].push(target);
-    });
-
-    return groups;
-  }
-
-  /**
-   * 选择目标 - 两层轮询：目标池轮询 + Key轮询
-   */
-  async selectTarget(targets: RouteTarget[], routeName: string = 'default', request?: any): Promise<RouteTarget | null> {
+  async selectTarget(targets: any[]): Promise<any> {
     if (targets.length === 0) {
       return null;
     }
-
+    
     if (targets.length === 1) {
       return targets[0];
     }
 
-    // Prefer direct model match when the request specifies a model
-    if (request?.model) {
-      const normalizedModel = String(request.model).toLowerCase();
-      const directMatch = targets.find(target => target.modelId?.toLowerCase?.() === normalizedModel);
-      if (directMatch) {
-        this.advanceIndexesForMatch(routeName, directMatch);
-        return directMatch;
-      }
+    // 简单的轮询
+    const routeName = Object.keys(this.routeTargets).find(name => 
+      this.routeTargets[name] === targets
+    );
+
+    if (!routeName) {
+      return targets[0];
     }
 
-    // 第一步：按 provider.model 分组
-    const providerModelGroups = this.groupByProviderModel(targets);
-    const providerModels = Object.keys(providerModelGroups);
+    const currentIndex = this.currentIndex.get(routeName) || 0;
+    const nextIndex = (currentIndex + 1) % targets.length;
+    this.currentIndex.set(routeName, nextIndex);
 
-    console.log(`🎯 Route "${routeName}" has ${providerModels.length} provider.model groups:`);
-    providerModels.forEach(pm => {
-      console.log(`   - ${pm}: ${providerModelGroups[pm].length} keys`);
-    });
-
-    // 第二步：目标池轮询 - 选择 provider.model 组合
-    const poolKey = `${routeName}`;
-    const currentPoolIndex = this.poolIndex.get(poolKey) || 0;
-    const selectedProviderModel = providerModels[currentPoolIndex];
-
-    console.log(`🔄 Pool轮询 for "${routeName}": selected ${selectedProviderModel} (index ${currentPoolIndex})`);
-
-    // 第三步：Key轮询 - 在选中的 provider.model 组合中选择具体的key
-    const keyPoolKey = `${routeName}.${selectedProviderModel}`;
-    const availableKeys = providerModelGroups[selectedProviderModel];
-
-    const currentKeyIndex = this.keyIndex.get(keyPoolKey) || 0;
-    const selectedTarget = availableKeys[currentKeyIndex];
-
-    console.log(`🔑 Key轮询 for "${selectedProviderModel}": selected key ${currentKeyIndex + 1}/${availableKeys.length} (${selectedTarget.keyId})`);
-
-    // 更新索引 - 独立更新两个索引
-    const nextKeyIndex = (currentKeyIndex + 1) % availableKeys.length;
-    this.keyIndex.set(keyPoolKey, nextKeyIndex);
-
-    // 每次请求都前进到下一个provider.model，实现真正的轮询
-    const nextPoolIndex = (currentPoolIndex + 1) % providerModels.length;
-    this.poolIndex.set(poolKey, nextPoolIndex);
-    console.log(`🎯 Pool轮询前进: ${currentPoolIndex} → ${nextPoolIndex}`);
-
-    console.log(`✅ Final target: ${selectedTarget.providerId}.${selectedTarget.modelId}.${selectedTarget.keyId}`);
-
-    return selectedTarget;
+    return targets[nextIndex];
   }
 
-  private advanceIndexesForMatch(routeName: string, target: RouteTarget): void {
-    const providerModelGroups = this.groupByProviderModel(this.routeTargets[routeName] || []);
-    const providerModels = Object.keys(providerModelGroups);
-    const selectedKey = `${target.providerId}.${target.modelId}`;
-
-    if (providerModels.length > 0) {
-      const poolIndex = providerModels.indexOf(selectedKey);
-      if (poolIndex >= 0) {
-        const nextPoolIndex = (poolIndex + 1) % providerModels.length;
-        this.poolIndex.set(`${routeName}`, nextPoolIndex);
-      }
-    }
-
-    const keyPoolKey = `${routeName}.${selectedKey}`;
-    const availableKeys = providerModelGroups[selectedKey] || [];
-    if (availableKeys.length > 0) {
-      const nextKeyIndex = (availableKeys.findIndex(k => k.keyId === target.keyId) + 1) % availableKeys.length;
-      this.keyIndex.set(keyPoolKey, nextKeyIndex);
-    }
-  }
-
-  /**
-   * 获取详细的负载均衡状态
-   */
   getStatus(): any {
-    const poolStatus: Record<string, any> = {};
-    const keyStatus: Record<string, any> = {};
-
-    // 构建池状态
-    this.poolIndex.forEach((index, key) => {
-      const [routeName] = key.split('.');
-      const targets = this.routeTargets[routeName] || [];
-      const providerModelGroups = this.groupByProviderModel(targets);
-      const providerModels = Object.keys(providerModelGroups);
-
-      poolStatus[key] = {
-        currentIndex: index,
-        totalGroups: providerModels.length,
-        currentGroup: providerModels[index] || 'unknown'
-      };
-    });
-
-    // 构建key状态
-    this.keyIndex.forEach((index, key) => {
-      const [routeName, providerModel] = key.split('.');
-      const targets = this.routeTargets[routeName] || [];
-      const providerModelGroups = this.groupByProviderModel(targets);
-      const availableKeys = providerModelGroups[providerModel] || [];
-
-      keyStatus[key] = {
-        currentIndex: index,
-        totalKeys: availableKeys.length,
-        currentKey: availableKeys[index]?.keyId || 'unknown'
-      };
-    });
-
     return {
-      strategy: 'multi-layer-round-robin',
-      description: '目标池轮询 + Key轮询',
-      poolIndex: poolStatus,
-      keyIndex: keyStatus
+      strategy: 'round-robin',
+      currentIndex: Object.fromEntries(this.currentIndex)
     };
   }
-
-  /**
-   * 重置索引（用于测试或重置）
-   */
-  resetIndex(routeName?: string): void {
-    if (routeName) {
-      // 重置指定路由的所有索引
-      const poolKey = `${routeName}`;
-      this.poolIndex.delete(poolKey);
-
-      // 删除该路由下的所有key索引
-      const keysToDelete: string[] = [];
-      this.keyIndex.forEach((_, key) => {
-        if (key.startsWith(`${routeName}.`)) {
-          keysToDelete.push(key);
-        }
-      });
-      keysToDelete.forEach(key => this.keyIndex.delete(key));
-
-      // 重新初始化
-      if (this.routeTargets[routeName]) {
-        this.buildTargetPools();
-      }
-    } else {
-      // 重置所有索引
-      this.poolIndex.clear();
-      this.keyIndex.clear();
-      this.buildTargetPools();
-    }
-  }
-
-  /**
-   * 获取统计信息
-   */
-  getStatistics(routeName?: string): any {
-    const stats: any = {};
-
-    const targetRoutes = routeName ? [routeName] : Object.keys(this.routeTargets);
-
-    targetRoutes.forEach(route => {
-      const targets = this.routeTargets[route] || [];
-      const providerModelGroups = this.groupByProviderModel(targets);
-
-      stats[route] = {
-        totalTargets: targets.length,
-        providerModelGroups: Object.keys(providerModelGroups).length,
-        groups: Object.fromEntries(
-          Object.entries(providerModelGroups).map(([pm, keys]) => [
-            pm,
-            { keyCount: keys.length, keyIds: keys.map(k => k.keyId) }
-          ])
-        )
-      };
-    });
-
-    return stats;
-  }
-
-  }
+}

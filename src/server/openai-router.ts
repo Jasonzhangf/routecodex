@@ -587,9 +587,20 @@ export class OpenAIRouter extends BaseModule {
         response = pipelineResponse?.data ?? pipelineResponse;
       } else {
         // Handle regular response with pass-through
+        // Extract API key from Authorization header
+        const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+        let apiKey = undefined;
+        if (authHeader && typeof authHeader === 'string') {
+          const match = authHeader.match(/Bearer\s+(.+)/i);
+          if (match) {
+            apiKey = match[1];
+          }
+        }
+
         response = await this.passThroughProvider.processChatCompletion(req.body, {
           timeout: this.config.timeout,
-          retryAttempts: 3
+          retryAttempts: 3,
+          apiKey
         });
       }
 

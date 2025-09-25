@@ -1,21 +1,26 @@
 {
-  "model": "gpt-4",
+  "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
   "messages": [
     {
       "role": "user",
-      "content": "Hello, please respond with a simple greeting"
+      "content": "列出本目录中所有文件夹"
     }
   ],
   "tools": [
     {
       "type": "function",
       "function": {
-        "name": "get_current_time",
-        "description": "Get the current time",
+        "name": "execute_python",
+        "description": "Execute Python code and return the output",
         "parameters": {
           "type": "object",
-          "properties": {},
-          "required": []
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "Python code to execute"
+            }
+          },
+          "required": ["code"]
         }
       }
     }

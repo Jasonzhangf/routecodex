@@ -1,4 +1,0 @@
-{"timestamp":1758708062896,"level":"info","moduleId":"processor","message":"Test log entry 1","data":{"duration":150,"requestId":"req-1"}}
-{"timestamp":1758709862896,"level":"error","moduleId":"processor","message":"Test error entry","data":{"errorType":"timeout","requestId":"req-2"}}
-{"timestamp":1758710762896,"level":"info","moduleId":"transformer","message":"Test log entry 2","data":{"duration":200,"requestId":"req-3"}}
-{"timestamp":1758711662896,"level":"warn","moduleId":"transformer","message":"Test warning entry","data":{"threshold":100,"actual":150,"requestId":"req-4"}}

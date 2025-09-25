@@ -163,6 +163,33 @@ export class HttpServer extends BaseModule implements IHttpServer {
    * Get server configuration from modules config
    */
   private async getServerConfig(): Promise<ServerConfig> {
+    // Prefer merged configuration injected via initializeWithMergedConfig
+    if (this.config && (this.config as any).port) {
+      const cfg: any = this.config as any;
+      const logging = cfg.logging || {};
+      return {
+        server: {
+          port: cfg.port || 5506,
+          host: cfg.host || 'localhost',
+          cors: cfg.cors || { origin: '*', credentials: true },
+          timeout: cfg.timeout || 30000,
+          bodyLimit: cfg.bodyLimit || '10mb'
+        },
+        logging: {
+          level: logging.level || 'info',
+          enableConsole: logging.enableConsole !== false,
+          enableFile: logging.enableFile === true,
+          filePath: logging.filePath,
+          categories: logging.categories || ['server', 'api', 'request', 'config', 'error', 'message']
+        },
+        providers: {},
+        routing: {
+          strategy: 'round-robin',
+          timeout: 30000,
+          retryAttempts: 3
+        }
+      };
+    }
     const httpServerConfig = this.moduleConfigReader.getModuleConfigValue<any>('httpserver');
     if (!httpServerConfig) {
       return this.getDefaultServerConfig();

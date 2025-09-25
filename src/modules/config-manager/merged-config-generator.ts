@@ -50,12 +50,26 @@ export class MergedConfigGenerator {
       }
     }
 
-    // 为虚拟路由模块添加特殊配置
+    // 为虚拟路由模块添加特殊配置 - 用户配置完全替换系统配置
     if (moduleConfigs.virtualrouter && parsedUserConfig.routeTargets) {
+      const baseConfig = moduleConfigs.virtualrouter.config;
+
+      // 保留基础设置，但routeTargets和pipelineConfigs完全使用用户配置
       moduleConfigs.virtualrouter.config = {
-        ...moduleConfigs.virtualrouter.config,
+        // 只保留系统配置中的基础设置（moduleType等）
+        moduleType: baseConfig.moduleType,
+        timeout: baseConfig.timeout,
+        retryAttempts: baseConfig.retryAttempts,
+        debugMode: baseConfig.debugMode,
+
+        // 用户配置完全覆盖
         routeTargets: parsedUserConfig.routeTargets,
-        pipelineConfigs: parsedUserConfig.pipelineConfigs
+        pipelineConfigs: parsedUserConfig.pipelineConfigs,
+        authMappings: parsedUserConfig.authMappings || {},
+
+        // 保留其他系统配置中不在用户配置中的设置
+        inputProtocol: baseConfig.inputProtocol || 'openai',
+        outputProtocol: baseConfig.outputProtocol || 'openai'
       };
     }
 

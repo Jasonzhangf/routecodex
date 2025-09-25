@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "mergedAt": "2025-09-24T11:33:40.405Z",
+  "mergedAt": "2025-09-25T10:30:35.551Z",
   "modules": {
     "basemodule": {
       "enabled": true,
@@ -51,30 +51,8 @@
       "enabled": true,
       "config": {
         "moduleType": "http-server",
-        "port": 4004,
-        "host": "localhost",
-        "cors": {
-          "origin": "*",
-          "credentials": true
-        },
-        "timeout": 30000,
-        "bodyLimit": "10mb",
-        "enableMetrics": true,
-        "enableHealthChecks": true,
-        "logging": {
-          "level": "info",
-          "enableConsole": true,
-          "enableFile": true,
-          "filePath": "~/.routecodex/logs/server/http-server.log",
-          "categories": [
-            "server",
-            "api",
-            "request",
-            "config",
-            "error",
-            "message"
-          ]
-        }
+        "port": 4005,
+        "host": "localhost"
       }
     },
     "configmanager": {
@@ -176,381 +154,46 @@
       "enabled": true,
       "config": {
         "moduleType": "virtual-router",
-        "enableClassification": true,
-        "classificationConfig": {
-          "confidenceThreshold": 60,
-          "enableSmartRouting": true,
-          "protocolMapping": {
-            "openai": {
-              "endpoints": [
-                "/v1/chat/completions",
-                "/v1/completions"
-              ],
-              "messageField": "messages",
-              "modelField": "model",
-              "toolsField": "tools",
-              "maxTokensField": "max_tokens"
-            },
-            "anthropic": {
-              "endpoints": [
-                "/v1/messages"
-              ],
-              "messageField": "messages",
-              "modelField": "model",
-              "toolsField": "tools",
-              "maxTokensField": "max_tokens"
-            }
-          },
-          "modelTiers": {
-            "basic": {
-              "description": "Basic models for simple tasks",
-              "models": [
-                "gpt-3.5-turbo",
-                "claude-3-haiku",
-                "qwen-turbo"
-              ],
-              "maxTokens": 16384,
-              "supportedFeatures": [
-                "text_generation",
-                "conversation"
-              ]
-            },
-            "advanced": {
-              "description": "Advanced models for complex tasks",
-              "models": [
-                "gpt-4",
-                "claude-3-opus",
-                "claude-3-sonnet",
-                "deepseek-coder",
-                "qwen-max"
-              ],
-              "maxTokens": 262144,
-              "supportedFeatures": [
-                "text_generation",
-                "reasoning",
-                "coding",
-                "tool_use"
-              ]
-            }
-          },
-          "routingDecisions": {
-            "default": {
-              "description": "Default routing for general requests",
-              "modelTier": "basic",
-              "tokenThreshold": 8000,
-              "toolTypes": [],
-              "priority": 1
-            },
-            "longContext": {
-              "description": "Routing for long context requests",
-              "modelTier": "advanced",
-              "tokenThreshold": 10000,
-              "toolTypes": [],
-              "priority": 90
-            },
-            "thinking": {
-              "description": "Routing for complex reasoning requests",
-              "modelTier": "advanced",
-              "tokenThreshold": 16000,
-              "toolTypes": [
-                "dataAnalysis",
-                "complex_reasoning"
-              ],
-              "priority": 85
-            },
-            "coding": {
-              "description": "Routing for code generation requests",
-              "modelTier": "advanced",
-              "tokenThreshold": 24000,
-              "toolTypes": [
-                "codeExecution",
-                "fileSearch"
-              ],
-              "priority": 80
-            },
-            "webSearch": {
-              "description": "Routing for web search requests",
-              "modelTier": "advanced",
-              "tokenThreshold": 12000,
-              "toolTypes": [
-                "webSearch"
-              ],
-              "priority": 95
-            }
-          },
-          "protocolHandlers": {
-            "openai": {
-              "tokenCalculator": {
-                "type": "openai",
-                "tokenRatio": 0.25,
-                "toolOverhead": 50,
-                "messageOverhead": 10,
-                "imageTokenDefault": 255
-              },
-              "toolDetector": {
-                "type": "pattern",
-                "patterns": {
-                  "webSearch": [
-                    "web_search",
-                    "search",
-                    "browse",
-                    "internet"
-                  ],
-                  "codeExecution": [
-                    "code",
-                    "execute",
-                    "bash",
-                    "python",
-                    "javascript"
-                  ],
-                  "fileSearch": [
-                    "file",
-                    "read",
-                    "write",
-                    "document",
-                    "pdf"
-                  ],
-                  "dataAnalysis": [
-                    "data",
-                    "analysis",
-                    "chart",
-                    "graph",
-                    "statistics"
-                  ]
-                }
-              }
-            },
-            "anthropic": {
-              "tokenCalculator": {
-                "type": "anthropic",
-                "tokenRatio": 0.25,
-                "toolOverhead": 50,
-                "messageOverhead": 10
-              },
-              "toolDetector": {
-                "type": "pattern",
-                "patterns": {
-                  "webSearch": [
-                    "web_search",
-                    "search",
-                    "browse"
-                  ],
-                  "codeExecution": [
-                    "code",
-                    "execute",
-                    "bash",
-                    "python"
-                  ],
-                  "fileSearch": [
-                    "file",
-                    "read",
-                    "write"
-                  ],
-                  "dataAnalysis": [
-                    "data",
-                    "analysis",
-                    "chart"
-                  ]
-                }
-              }
-            }
-          }
-        },
-        "inputProtocol": "openai",
-        "outputProtocol": "openai",
         "routeTargets": {
           "default": [
             {
-              "providerId": "qwen",
-              "modelId": "qwen3-coder-plus",
+              "providerId": "modelscope",
+              "modelId": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
               "keyId": "key1",
-              "actualKey": "qwen-oauth-api-key-1234567890abcdef",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "lmstudio",
-              "modelId": "gpt-oss-20b-mlx",
-              "keyId": "key1",
-              "actualKey": "lm-studio-api-key-1234567890abcdef",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "glm",
-              "modelId": "glm-4",
-              "keyId": "key1",
-              "actualKey": "your-glm-api-key-here",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "glm",
-              "modelId": "glm-4",
-              "keyId": "key2",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "glm",
-              "modelId": "glm-4.5",
-              "keyId": "key1",
-              "actualKey": "your-glm-api-key-here",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "glm",
-              "modelId": "glm-4.5",
-              "keyId": "key2",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
+              "actualKey": "ms-7d6c4fdb-4bf1-40b3-9ec6-ddea16f6702b",
               "inputProtocol": "openai",
               "outputProtocol": "openai"
             }
           ],
           "coding": [
             {
-              "providerId": "qwen",
-              "modelId": "qwen3-coder-plus",
+              "providerId": "modelscope",
+              "modelId": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
               "keyId": "key1",
-              "actualKey": "qwen-oauth-api-key-1234567890abcdef",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "glm",
-              "modelId": "glm-4",
-              "keyId": "key1",
-              "actualKey": "your-glm-api-key-here",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "glm",
-              "modelId": "glm-4",
-              "keyId": "key2",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "glm",
-              "modelId": "glm-4.5",
-              "keyId": "key1",
-              "actualKey": "your-glm-api-key-here",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "glm",
-              "modelId": "glm-4.5",
-              "keyId": "key2",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
+              "actualKey": "ms-7d6c4fdb-4bf1-40b3-9ec6-ddea16f6702b",
               "inputProtocol": "openai",
               "outputProtocol": "openai"
             }
           ],
           "longcontext": [
             {
-              "providerId": "lmstudio",
-              "modelId": "gpt-oss-20b-mlx",
+              "providerId": "modelscope",
+              "modelId": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
               "keyId": "key1",
-              "actualKey": "lm-studio-api-key-1234567890abcdef",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "glm",
-              "modelId": "glm-4",
-              "keyId": "key1",
-              "actualKey": "your-glm-api-key-here",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "glm",
-              "modelId": "glm-4",
-              "keyId": "key2",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "glm",
-              "modelId": "glm-4.5",
-              "keyId": "key1",
-              "actualKey": "your-glm-api-key-here",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "glm",
-              "modelId": "glm-4.5",
-              "keyId": "key2",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            }
-          ],
-          "tools": [
-            {
-              "providerId": "lmstudio",
-              "modelId": "gpt-oss-20b-mlx",
-              "keyId": "key1",
-              "actualKey": "lm-studio-api-key-1234567890abcdef",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "qwen",
-              "modelId": "qwen-turbo",
-              "keyId": "key1",
-              "actualKey": "qwen-oauth-api-key-1234567890abcdef",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "glm",
-              "modelId": "glm-4",
-              "keyId": "key1",
-              "actualKey": "your-glm-api-key-here",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "glm",
-              "modelId": "glm-4",
-              "keyId": "key2",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "glm",
-              "modelId": "glm-4.5",
-              "keyId": "key1",
-              "actualKey": "your-glm-api-key-here",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            },
-            {
-              "providerId": "glm",
-              "modelId": "glm-4.5",
-              "keyId": "key2",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
+              "actualKey": "ms-7d6c4fdb-4bf1-40b3-9ec6-ddea16f6702b",
               "inputProtocol": "openai",
               "outputProtocol": "openai"
             }
           ]
         },
         "pipelineConfigs": {
-          "lmstudio.qwen3-4b-thinking-2507-mlx.key1": {
+          "modelscope.Qwen/Qwen3-Coder-480B-A35B-Instruct.key1": {
             "provider": {
-              "type": "lmstudio-http",
-              "baseURL": "http://192.168.99.149:1234",
+              "type": "openai-provider",
+              "baseURL": "https://api-inference.modelscope.cn/v1",
               "auth": {
-                "type": "apikey"
+                "type": "apikey",
+                "apiKey": "ms-7d6c4fdb-4bf1-40b3-9ec6-ddea16f6702b"
               }
             },
             "model": {
@@ -559,329 +202,22 @@
             },
             "keyConfig": {
               "keyId": "key1",
-              "actualKey": "lm-studio-api-key-1234567890abcdef",
+              "actualKey": "ms-7d6c4fdb-4bf1-40b3-9ec6-ddea16f6702b",
               "keyType": "apiKey"
             },
             "protocols": {
               "input": "openai",
               "output": "openai"
-            },
-            "compatibility": {
-              "type": "qwen-compatibility",
-              "config": {}
-            },
-            "llmSwitch": {
-              "type": "openai-passthrough",
-              "config": {}
-            },
-            "workflow": {
-              "type": "streaming-control",
-              "enabled": true,
-              "config": {}
             }
           },
-          "lmstudio.gpt-oss-20b-mlx.key1": {
+          "modelscope.Qwen/Qwen3-Coder-480B-A35B-Instruct.key2": {
             "provider": {
-              "type": "lmstudio-http",
-              "baseURL": "http://192.168.99.149:1234",
+              "type": "openai-provider",
+              "baseURL": "https://api-inference.modelscope.cn/v1",
               "auth": {
-                "type": "apikey"
+                "type": "apikey",
+                "apiKey": "ms-0cf692c6-608d-42da-a2b4-e203150bb435"
               }
-            },
-            "model": {
-              "maxContext": 262144,
-              "maxTokens": 262144
-            },
-            "keyConfig": {
-              "keyId": "key1",
-              "actualKey": "lm-studio-api-key-1234567890abcdef",
-              "keyType": "apiKey"
-            },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
-            },
-            "compatibility": {
-              "type": "qwen-compatibility",
-              "config": {}
-            },
-            "llmSwitch": {
-              "type": "openai-passthrough",
-              "config": {}
-            },
-            "workflow": {
-              "type": "streaming-control",
-              "enabled": true,
-              "config": {}
-            }
-          },
-          "lmstudio.qwen3-30b-a3b-instruct-2507-mlx.key1": {
-            "provider": {
-              "type": "lmstudio-http",
-              "baseURL": "http://192.168.99.149:1234",
-              "auth": {
-                "type": "apikey"
-              }
-            },
-            "model": {
-              "maxContext": 262144,
-              "maxTokens": 262144
-            },
-            "keyConfig": {
-              "keyId": "key1",
-              "actualKey": "lm-studio-api-key-1234567890abcdef",
-              "keyType": "apiKey"
-            },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
-            },
-            "compatibility": {
-              "type": "qwen-compatibility",
-              "config": {}
-            },
-            "llmSwitch": {
-              "type": "openai-passthrough",
-              "config": {}
-            },
-            "workflow": {
-              "type": "streaming-control",
-              "enabled": true,
-              "config": {}
-            }
-          },
-          "lmstudio.qwen3-coder-480b-a35b-instruct-mlx.key1": {
-            "provider": {
-              "type": "lmstudio-http",
-              "baseURL": "http://192.168.99.149:1234",
-              "auth": {
-                "type": "apikey"
-              }
-            },
-            "model": {
-              "maxContext": 262144,
-              "maxTokens": 262144
-            },
-            "keyConfig": {
-              "keyId": "key1",
-              "actualKey": "lm-studio-api-key-1234567890abcdef",
-              "keyType": "apiKey"
-            },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
-            },
-            "compatibility": {
-              "type": "qwen-compatibility",
-              "config": {}
-            },
-            "llmSwitch": {
-              "type": "openai-passthrough",
-              "config": {}
-            },
-            "workflow": {
-              "type": "streaming-control",
-              "enabled": true,
-              "config": {}
-            }
-          },
-          "lmstudio.seed-oss-36b-instruct.key1": {
-            "provider": {
-              "type": "lmstudio-http",
-              "baseURL": "http://192.168.99.149:1234",
-              "auth": {
-                "type": "apikey"
-              }
-            },
-            "model": {
-              "maxContext": 262144,
-              "maxTokens": 262144
-            },
-            "keyConfig": {
-              "keyId": "key1",
-              "actualKey": "lm-studio-api-key-1234567890abcdef",
-              "keyType": "apiKey"
-            },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
-            },
-            "compatibility": {
-              "type": "qwen-compatibility",
-              "config": {}
-            },
-            "llmSwitch": {
-              "type": "openai-passthrough",
-              "config": {}
-            },
-            "workflow": {
-              "type": "streaming-control",
-              "enabled": true,
-              "config": {}
-            }
-          },
-          "qwen.qwen3-coder-plus.key1": {
-            "provider": {
-              "type": "qwen-provider",
-              "baseURL": "https://portal.qwen.ai/v1",
-              "auth": {
-                "type": "oauth",
-                "oauth": {
-                  "clientId": "f0304373b74a44d2b584a3fb70ca9e56",
-                  "deviceCodeUrl": "https://chat.qwen.ai/api/v1/oauth2/device/code",
-                  "tokenUrl": "https://chat.qwen.ai/api/v1/oauth2/token",
-                  "scopes": [
-                    "openid",
-                    "profile",
-                    "email",
-                    "model.completion"
-                  ],
-                  "tokenFile": "~/.qwen/oauth_creds.json"
-                }
-              }
-            },
-            "model": {
-              "maxContext": 262144,
-              "maxTokens": 262144
-            },
-            "keyConfig": {
-              "keyId": "key1",
-              "actualKey": "qwen-oauth-api-key-1234567890abcdef",
-              "keyType": "apiKey"
-            },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
-            },
-            "compatibility": {
-              "type": "qwen-compatibility",
-              "config": {}
-            },
-            "llmSwitch": {
-              "type": "openai-passthrough",
-              "config": {}
-            },
-            "workflow": {
-              "type": "streaming-control",
-              "enabled": true,
-              "config": {}
-            }
-          },
-          "qwen.qwen-turbo.key1": {
-            "provider": {
-              "type": "qwen-provider",
-              "baseURL": "https://portal.qwen.ai/v1",
-              "auth": {
-                "type": "oauth",
-                "oauth": {
-                  "clientId": "f0304373b74a44d2b584a3fb70ca9e56",
-                  "deviceCodeUrl": "https://chat.qwen.ai/api/v1/oauth2/device/code",
-                  "tokenUrl": "https://chat.qwen.ai/api/v1/oauth2/token",
-                  "scopes": [
-                    "openid",
-                    "profile",
-                    "email",
-                    "model.completion"
-                  ],
-                  "tokenFile": "~/.qwen/oauth_creds.json"
-                }
-              }
-            },
-            "model": {
-              "maxContext": 262144,
-              "maxTokens": 262144
-            },
-            "keyConfig": {
-              "keyId": "key1",
-              "actualKey": "qwen-oauth-api-key-1234567890abcdef",
-              "keyType": "apiKey"
-            },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
-            },
-            "compatibility": {
-              "type": "qwen-compatibility",
-              "config": {}
-            },
-            "llmSwitch": {
-              "type": "openai-passthrough",
-              "config": {}
-            },
-            "workflow": {
-              "type": "streaming-control",
-              "enabled": true,
-              "config": {}
-            }
-          },
-          "iflow.iflow-pro.key1": {
-            "provider": {
-              "type": "generic-http",
-              "baseURL": "https://apis.iflow.cn/v1"
-            },
-            "model": {
-              "maxContext": 262144,
-              "maxTokens": 262144
-            },
-            "keyConfig": {
-              "keyId": "key1",
-              "actualKey": "qwen-oauth-api-key-1234567890abcdef",
-              "keyType": "apiKey"
-            },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
-            },
-            "compatibility": {
-              "type": "qwen-compatibility",
-              "config": {}
-            },
-            "llmSwitch": {
-              "type": "openai-passthrough",
-              "config": {}
-            },
-            "workflow": {
-              "type": "streaming-control",
-              "enabled": true,
-              "config": {}
-            }
-          },
-          "glm.glm-4.key1": {
-            "provider": {
-              "type": "openai",
-              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4"
-            },
-            "model": {
-              "maxContext": 262144,
-              "maxTokens": 262144
-            },
-            "keyConfig": {
-              "keyId": "key1",
-              "actualKey": "your-glm-api-key-here",
-              "keyType": "apiKey"
-            },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
-            },
-            "compatibility": {
-              "type": "qwen-compatibility",
-              "config": {}
-            },
-            "llmSwitch": {
-              "type": "openai-passthrough",
-              "config": {}
-            },
-            "workflow": {
-              "type": "streaming-control",
-              "enabled": true,
-              "config": {}
-            }
-          },
-          "glm.glm-4.key2": {
-            "provider": {
-              "type": "openai",
-              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4"
             },
             "model": {
               "maxContext": 262144,
@@ -889,224 +225,64 @@
             },
             "keyConfig": {
               "keyId": "key2",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
+              "actualKey": "ms-0cf692c6-608d-42da-a2b4-e203150bb435",
               "keyType": "apiKey"
             },
             "protocols": {
               "input": "openai",
               "output": "openai"
-            },
-            "compatibility": {
-              "type": "qwen-compatibility",
-              "config": {}
-            },
-            "llmSwitch": {
-              "type": "openai-passthrough",
-              "config": {}
-            },
-            "workflow": {
-              "type": "streaming-control",
-              "enabled": true,
-              "config": {}
             }
           },
-          "glm.glm-4-air.key1": {
+          "modelscope.Qwen/Qwen3-Coder-480B-A35B-Instruct.key3": {
             "provider": {
-              "type": "openai",
-              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4"
+              "type": "openai-provider",
+              "baseURL": "https://api-inference.modelscope.cn/v1",
+              "auth": {
+                "type": "apikey",
+                "apiKey": "ms-9215edc2-dc63-4a33-9f53-e6a6080ec795"
+              }
             },
             "model": {
               "maxContext": 262144,
               "maxTokens": 262144
             },
             "keyConfig": {
-              "keyId": "key1",
-              "actualKey": "your-glm-api-key-here",
+              "keyId": "key3",
+              "actualKey": "ms-9215edc2-dc63-4a33-9f53-e6a6080ec795",
               "keyType": "apiKey"
             },
             "protocols": {
               "input": "openai",
               "output": "openai"
-            },
-            "compatibility": {
-              "type": "qwen-compatibility",
-              "config": {}
-            },
-            "llmSwitch": {
-              "type": "openai-passthrough",
-              "config": {}
-            },
-            "workflow": {
-              "type": "streaming-control",
-              "enabled": true,
-              "config": {}
             }
           },
-          "glm.glm-4-air.key2": {
+          "modelscope.Qwen/Qwen3-Coder-480B-A35B-Instruct.key4": {
             "provider": {
-              "type": "openai",
-              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4"
+              "type": "openai-provider",
+              "baseURL": "https://api-inference.modelscope.cn/v1",
+              "auth": {
+                "type": "apikey",
+                "apiKey": "ms-cc2f461b-8228-427f-99aa-1d44fab73e67"
+              }
             },
             "model": {
               "maxContext": 262144,
               "maxTokens": 262144
             },
             "keyConfig": {
-              "keyId": "key2",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
+              "keyId": "key4",
+              "actualKey": "ms-cc2f461b-8228-427f-99aa-1d44fab73e67",
               "keyType": "apiKey"
             },
             "protocols": {
               "input": "openai",
               "output": "openai"
-            },
-            "compatibility": {
-              "type": "qwen-compatibility",
-              "config": {}
-            },
-            "llmSwitch": {
-              "type": "openai-passthrough",
-              "config": {}
-            },
-            "workflow": {
-              "type": "streaming-control",
-              "enabled": true,
-              "config": {}
-            }
-          },
-          "glm.glm-4-airx.key1": {
-            "provider": {
-              "type": "openai",
-              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4"
-            },
-            "model": {
-              "maxContext": 262144,
-              "maxTokens": 262144
-            },
-            "keyConfig": {
-              "keyId": "key1",
-              "actualKey": "your-glm-api-key-here",
-              "keyType": "apiKey"
-            },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
-            },
-            "compatibility": {
-              "type": "qwen-compatibility",
-              "config": {}
-            },
-            "llmSwitch": {
-              "type": "openai-passthrough",
-              "config": {}
-            },
-            "workflow": {
-              "type": "streaming-control",
-              "enabled": true,
-              "config": {}
-            }
-          },
-          "glm.glm-4-airx.key2": {
-            "provider": {
-              "type": "openai",
-              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4"
-            },
-            "model": {
-              "maxContext": 262144,
-              "maxTokens": 262144
-            },
-            "keyConfig": {
-              "keyId": "key2",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
-              "keyType": "apiKey"
-            },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
-            },
-            "compatibility": {
-              "type": "qwen-compatibility",
-              "config": {}
-            },
-            "llmSwitch": {
-              "type": "openai-passthrough",
-              "config": {}
-            },
-            "workflow": {
-              "type": "streaming-control",
-              "enabled": true,
-              "config": {}
-            }
-          },
-          "glm.glm-4.5.key1": {
-            "provider": {
-              "type": "openai",
-              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4"
-            },
-            "model": {
-              "maxContext": 262144,
-              "maxTokens": 262144
-            },
-            "keyConfig": {
-              "keyId": "key1",
-              "actualKey": "your-glm-api-key-here",
-              "keyType": "apiKey"
-            },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
-            },
-            "compatibility": {
-              "type": "qwen-compatibility",
-              "config": {}
-            },
-            "llmSwitch": {
-              "type": "openai-passthrough",
-              "config": {}
-            },
-            "workflow": {
-              "type": "streaming-control",
-              "enabled": true,
-              "config": {}
-            }
-          },
-          "glm.glm-4.5.key2": {
-            "provider": {
-              "type": "openai",
-              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4"
-            },
-            "model": {
-              "maxContext": 262144,
-              "maxTokens": 262144
-            },
-            "keyConfig": {
-              "keyId": "key2",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
-              "keyType": "apiKey"
-            },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
-            },
-            "compatibility": {
-              "type": "qwen-compatibility",
-              "config": {}
-            },
-            "llmSwitch": {
-              "type": "openai-passthrough",
-              "config": {}
-            },
-            "workflow": {
-              "type": "streaming-control",
-              "enabled": true,
-              "config": {}
             }
           }
         },
-        "authMappings": {
-          "auth-qwen-default": "/Users/fanzhang/.qwen/oauth_creds.json",
-          "auth-iflow-default": "/Users/fanzhang/.iflow/oauth_creds.json"
-        }
+        "authMappings": {},
+        "inputProtocol": "openai",
+        "outputProtocol": "openai"
       }
     },
     "dryrunengine": {
@@ -1175,290 +351,6 @@
           "enabled": true,
           "feedbackDelayMs": 100,
           "analysisLevel": "detailed"
-        }
-      }
-    },
-    "server": {
-      "enabled": true,
-      "config": {
-        "port": 5506,
-        "host": "localhost"
-      }
-    },
-    "logging": {
-      "enabled": true,
-      "config": {
-        "level": "info",
-        "format": "json"
-      }
-    },
-    "providers": {
-      "enabled": true,
-      "config": {
-        "iflow": {
-          "type": "iflow",
-          "baseUrl": "https://iflow.cn",
-          "auth": {
-            "oauth": {
-              "clientId": "10009311001",
-              "clientSecret": "4Z3YjXycVsQvyGF1etiNlIBB4RsqSDtW",
-              "authUrl": "https://iflow.cn/oauth",
-              "tokenUrl": "https://iflow.cn/oauth/token",
-              "deviceCodeUrl": "https://iflow.cn/oauth/device/code",
-              "scopes": [
-                "openid",
-                "profile",
-                "api"
-              ],
-              "tokenFile": "./iflow-token.json",
-              "credentialsFile": "./iflow-credentials.json"
-            },
-            "type": "oauth",
-            "tokens": [
-              "~/.routecodex/tokens/iflow-token-1.json"
-            ]
-          },
-          "models": {
-            "iflow-turbo": {
-              "maxTokens": 32768,
-              "temperature": 0.7,
-              "supportsStreaming": true,
-              "supportsTools": true
-            },
-            "iflow-pro": {
-              "maxTokens": 65536,
-              "temperature": 0.7,
-              "supportsStreaming": true,
-              "supportsTools": true
-            },
-            "iflow-turbo-latest": {
-              "maxTokens": 131072,
-              "temperature": 0.7,
-              "supportsStreaming": true,
-              "supportsTools": true
-            }
-          },
-          "timeout": 60000,
-          "retryAttempts": 3
-        },
-        "lmstudio": {
-          "type": "lmstudio",
-          "baseUrl": "http://localhost:1234",
-          "apiKey": "lm-studio-api-key-1234567890abcdef",
-          "models": {
-            "qwen3-4b-thinking-2507-mlx": {
-              "maxTokens": 262144,
-              "temperature": 0.7,
-              "supportsStreaming": true,
-              "supportsTools": true
-            },
-            "gpt-oss-20b-mlx": {
-              "maxTokens": 262144,
-              "temperature": 0.7,
-              "supportsStreaming": true,
-              "supportsTools": true
-            },
-            "qwen3-30b-a3b-instruct-2507-mlx": {
-              "maxTokens": 262144,
-              "temperature": 0.7,
-              "supportsStreaming": true,
-              "supportsTools": true
-            },
-            "qwen3-coder-480b-a35b-instruct-mlx": {
-              "maxTokens": 262144,
-              "temperature": 0.7,
-              "supportsStreaming": true,
-              "supportsTools": true
-            },
-            "seed-oss-36b-instruct": {
-              "maxTokens": 262144,
-              "temperature": 0.7,
-              "supportsStreaming": true,
-              "supportsTools": true
-            }
-          },
-          "timeout": 60000,
-          "retryAttempts": 3
-        },
-        "qwen": {
-          "type": "qwen",
-          "baseUrl": "https://chat.qwen.ai",
-          "auth": {
-            "type": "oauth",
-            "tokens": [
-              "~/.routecodex/tokens/qwen-token-1.json",
-              "~/.routecodex/tokens/qwen-token-2.json"
-            ]
-          },
-          "models": {
-            "qwen3-coder-plus": {
-              "maxTokens": 131072,
-              "temperature": 0.7,
-              "supportsStreaming": true,
-              "supportsTools": true
-            },
-            "qwen-turbo": {
-              "maxTokens": 32768,
-              "temperature": 0.7,
-              "supportsStreaming": true,
-              "supportsTools": true
-            }
-          },
-          "timeout": 60000,
-          "retryAttempts": 3
-        },
-        "qwen-provider": {
-          "type": "qwen-http",
-          "baseUrl": "https://portal.qwen.ai/v1",
-          "auth": {
-            "oauth": {
-              "clientId": "f0304373b74a44d2b584a3fb70ca9e56",
-              "deviceCodeUrl": "https://chat.qwen.ai/api/v1/oauth2/device/code",
-              "tokenUrl": "https://chat.qwen.ai/api/v1/oauth2/token",
-              "scopes": [
-                "openid",
-                "profile",
-                "email",
-                "model.completion"
-              ],
-              "tokenFile": "/Users/fanzhang/.qwen/oauth_creds.json"
-            }
-          },
-          "models": {
-            "qwen3-coder-plus": {
-              "maxTokens": 262144,
-              "temperature": 0.7,
-              "supportsStreaming": true,
-              "supportsTools": true
-            },
-            "qwen3-4b-thinking-2507-mlx": {
-              "maxTokens": 262144,
-              "temperature": 0.7,
-              "supportsStreaming": true,
-              "supportsTools": true
-            },
-            "qwen3-30b-a3b-instruct-2507-mlx": {
-              "maxTokens": 262144,
-              "temperature": 0.7,
-              "supportsStreaming": true,
-              "supportsTools": true
-            },
-            "qwen3-coder-480b-a35b-instruct-mlx": {
-              "maxTokens": 262144,
-              "temperature": 0.7,
-              "supportsStreaming": true,
-              "supportsTools": true
-            }
-          },
-          "timeout": 60000,
-          "retryAttempts": 3
-        }
-      }
-    },
-    "routing": {
-      "enabled": true,
-      "config": {
-        "default": "qwen-provider",
-        "models": {
-          "gpt-4": "qwen3-coder-plus",
-          "gpt-4-turbo": "qwen-turbo",
-          "gpt-3.5-turbo": "qwen-turbo",
-          "claude-3-haiku": "qwen-turbo",
-          "claude-3-sonnet": "qwen3-coder-plus",
-          "claude-3-opus": "qwen3-coder-480b-a35b-instruct-mlx",
-          "qwen3-4b-thinking-2507-mlx": "qwen3-4b-thinking-2507-mlx",
-          "qwen3-30b-a3b-instruct-2507-mlx": "qwen3-30b-a3b-instruct-2507-mlx",
-          "qwen3-coder-480b-a35b-instruct-mlx": "qwen3-coder-480b-a35b-instruct-mlx",
-          "seed-oss-36b-instruct": "seed-oss-36b-instruct",
-          "gpt-oss-20b-mlx": "gpt-oss-20b-mlx"
-        },
-        "dynamicRouting": {
-          "longcontext": {
-            "targets": [
-              {
-                "providerId": "qwen-provider",
-                "modelId": "qwen3-coder-plus"
-              }
-            ]
-          },
-          "thinking": {
-            "targets": [
-              {
-                "providerId": "qwen-provider",
-                "modelId": "qwen3-coder-plus"
-              }
-            ]
-          },
-          "coding": {
-            "targets": [
-              {
-                "providerId": "qwen-provider",
-                "modelId": "qwen3-coder-plus"
-              }
-            ]
-          },
-          "vision": {
-            "targets": [
-              {
-                "providerId": "qwen-provider",
-                "modelId": "qwen3-coder-plus"
-              }
-            ]
-          },
-          "websearch": {
-            "targets": [
-              {
-                "providerId": "qwen-provider",
-                "modelId": "qwen3-coder-plus"
-              }
-            ]
-          },
-          "background": {
-            "targets": [
-              {
-                "providerId": "qwen-provider",
-                "modelId": "qwen3-coder-plus"
-              }
-            ]
-          }
-        }
-      }
-    },
-    "features": {
-      "enabled": true,
-      "config": {
-        "tools": {
-          "enabled": true,
-          "maxTools": 10
-        },
-        "streaming": {
-          "enabled": true,
-          "chunkSize": 1024
-        },
-        "oauth": {
-          "enabled": true,
-          "providers": [
-            "iflow",
-            "qwen",
-            "qwen-provider",
-            "iflow-provider"
-          ]
-        }
-      }
-    },
-    "security": {
-      "enabled": true,
-      "config": {
-        "cors": {
-          "enabled": true,
-          "origins": [
-            "*"
-          ]
-        },
-        "rateLimit": {
-          "enabled": true,
-          "requests": 100,
-          "windowMs": 60000
         }
       }
     }

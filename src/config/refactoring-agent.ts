@@ -725,12 +725,20 @@ export class ConfigMerger {
   ): MergedConfig {
     const mergedModules = this.mergeModules(systemConfig.modules, parsedUserConfig.moduleConfigs);
 
-    // 为虚拟路由模块添加解析后的配置
+    // 为虚拟路由模块添加解析后的配置 - 清除默认routeTargets，只保留用户配置
     if (mergedModules.virtualrouter && parsedUserConfig.routeTargets) {
       mergedModules.virtualrouter.config = {
         ...mergedModules.virtualrouter.config,
+        // 只保留用户配置的routeTargets，完全清除系统默认的routeTargets
         routeTargets: parsedUserConfig.routeTargets,
         pipelineConfigs: parsedUserConfig.pipelineConfigs
+      };
+    } else if (mergedModules.virtualrouter) {
+      // 如果用户没有提供routeTargets，清除系统默认的routeTargets
+      mergedModules.virtualrouter.config = {
+        ...mergedModules.virtualrouter.config,
+        routeTargets: {},
+        pipelineConfigs: {}
       };
     }
 
@@ -1770,7 +1778,8 @@ export class MergedConfigGenerator {
   }
 
   /**
-   * 生成模块配置
+   * 生成模块配置 - 用户配置完全覆盖原则
+   * 修复：用户配置应该完全覆盖系统配置，而不是合并
    */
   private generateModuleConfigs(
     systemConfig: any,
@@ -1779,32 +1788,50 @@ export class MergedConfigGenerator {
   ): any {
     const moduleConfigs: any = {};
 
-    // 复制系统模块配置
+    // 首先复制系统模块的基础配置（不包含具体的路由/模型配置）
     for (const [moduleName, systemModule] of Object.entries(systemConfig.modules)) {
-      moduleConfigs[moduleName] = { ...systemModule };
-    }
-
-    // 合并用户模块配置
-    for (const [moduleName, userModule] of Object.entries(parsedUserConfig.moduleConfigs)) {
-      if (moduleConfigs[moduleName]) {
-        // 深度合并
-        moduleConfigs[moduleName] = this.deepMerge(
-          moduleConfigs[moduleName],
-          userModule
-        );
+      if (moduleName === 'virtualrouter') {
+        // 虚拟路由器特殊处理：只保留基础配置框架
+        moduleConfigs[moduleName] = {
+          ...systemModule,
+          config: this.extractSystemBaseConfig(systemModule.config)
+        };
       } else {
-        // 添加新模块
-        moduleConfigs[moduleName] = userModule;
+        // 其他模块：保留基础配置
+        moduleConfigs[moduleName] = { ...systemModule };
       }
     }
 
-    // 为虚拟路由模块添加特殊配置
-    if (moduleConfigs.virtualrouter && parsedUserConfig.routeTargets) {
-      moduleConfigs.virtualrouter.config = {
-        ...moduleConfigs.virtualrouter.config,
-        routeTargets: parsedUserConfig.routeTargets,
-        pipelineConfigs: parsedUserConfig.pipelineConfigs
-      };
+    // 用户配置完全覆盖系统配置
+    for (const [moduleName, userModule] of Object.entries(parsedUserConfig.moduleConfigs)) {
+      if (moduleName === 'virtualrouter') {
+        // 虚拟路由器：用户配置完全覆盖，包括所有路由和模型配置
+        moduleConfigs[moduleName] = {
+          ...moduleConfigs[moduleName],
+          ...userModule,
+          config: {
+            // 保留系统基础配置
+            ...moduleConfigs[moduleName].config,
+            // 用户配置完全覆盖
+            ...userModule.config,
+            // 确保用户的路由目标完全覆盖
+            routeTargets: userModule.config?.routeTargets || {},
+            pipelineConfigs: userModule.config?.pipelineConfigs || {}
+          }
+        };
+      } else {
+        // 其他模块（如httpserver）：保留关键系统配置，用户配置补充
+        moduleConfigs[moduleName] = {
+          ...moduleConfigs[moduleName],
+          ...userModule,
+          config: {
+            // 保留系统关键配置（端口、主机等）
+            ...this.extractSystemCriticalConfig(moduleConfigs[moduleName].config),
+            // 用户配置补充（不覆盖关键配置）
+            ...this.extractUserSupplementalConfig(userModule.config)
+          }
+        };
+      }
     }
 
     return moduleConfigs;
@@ -1833,6 +1860,92 @@ export class MergedConfigGenerator {
     }
 
     return result;
+  }
+
+  /**
+   * 提取系统基础配置（不包含具体的路由/模型配置）
+   */
+  private extractSystemBaseConfig(systemConfig: any): any {
+    const baseConfig: any = {};
+    
+    // 只保留基础框架配置，不包含具体的路由目标、模型列表等
+    if (systemConfig.moduleType !== undefined) {
+      baseConfig.moduleType = systemConfig.moduleType;
+    }
+    if (systemConfig.enableClassification !== undefined) {
+      baseConfig.enableClassification = systemConfig.enableClassification;
+    }
+    if (systemConfig.classificationConfig !== undefined) {
+      // 只保留分类配置框架，不包含具体的模型列表
+      baseConfig.classificationConfig = {
+        confidenceThreshold: systemConfig.classificationConfig?.confidenceThreshold,
+        enableSmartRouting: systemConfig.classificationConfig?.enableSmartRouting,
+        protocolMapping: systemConfig.classificationConfig?.protocolMapping
+        // 注意：不包含modelTiers和routingDecisions，这些应该由用户配置决定
+      };
+    }
+    if (systemConfig.protocolHandlers !== undefined) {
+      baseConfig.protocolHandlers = systemConfig.protocolHandlers;
+    }
+    
+    return baseConfig;
+  }
+
+  /**
+   * 提取系统关键配置（端口、主机等不应被用户配置覆盖的设置）
+   */
+  private extractSystemCriticalConfig(systemConfig: any): any {
+    const criticalConfig: any = {};
+    
+    // 保留关键的系统配置，不应被用户配置覆盖
+    if (systemConfig.port !== undefined) {
+      criticalConfig.port = systemConfig.port;
+    }
+    if (systemConfig.host !== undefined) {
+      criticalConfig.host = systemConfig.host;
+    }
+    if (systemConfig.cors !== undefined) {
+      criticalConfig.cors = systemConfig.cors;
+    }
+    if (systemConfig.timeout !== undefined) {
+      criticalConfig.timeout = systemConfig.timeout;
+    }
+    if (systemConfig.bodyLimit !== undefined) {
+      criticalConfig.bodyLimit = systemConfig.bodyLimit;
+    }
+    if (systemConfig.enableMetrics !== undefined) {
+      criticalConfig.enableMetrics = systemConfig.enableMetrics;
+    }
+    if (systemConfig.enableHealthChecks !== undefined) {
+      criticalConfig.enableHealthChecks = systemConfig.enableHealthChecks;
+    }
+    if (systemConfig.logging !== undefined) {
+      criticalConfig.logging = systemConfig.logging;
+    }
+    // 保留模块类型等基础设置
+    if (systemConfig.moduleType !== undefined) {
+      criticalConfig.moduleType = systemConfig.moduleType;
+    }
+    
+    return criticalConfig;
+  }
+
+  /**
+   * 提取用户补充配置（不包含会覆盖系统关键配置的设置）
+   */
+  private extractUserSupplementalConfig(userConfig: any): any {
+    const supplementalConfig: any = {};
+    
+    // 只添加用户的补充配置，不覆盖系统关键配置
+    for (const [key, value] of Object.entries(userConfig)) {
+      // 跳过可能覆盖系统关键配置的键
+      if (['port', 'host', 'cors', 'timeout', 'bodyLimit', 'enableMetrics', 'enableHealthChecks', 'logging', 'moduleType'].includes(key)) {
+        continue;
+      }
+      supplementalConfig[key] = value;
+    }
+    
+    return supplementalConfig;
   }
 
   /**

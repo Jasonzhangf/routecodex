@@ -65,32 +65,23 @@
       "recoveryTimeout": 60000
     }
   },
-  "dryRun": {
-    "simulationMode": "full",
-    "nodeConfigs": {
-      "llm-switch": {
-        "enabled": true,
-        "mode": "dry-run",
-        "simulateRouting": true,
-        "simulateLoadBalancer": true
-      },
-      "compatibility": {
-        "enabled": true,
-        "mode": "dry-run",
-        "simulateTransformation": true
-      },
-      "provider": {
-        "enabled": true,
-        "mode": "dry-run",
-        "simulateHttpRequest": true,
-        "simulateResponse": true
-      }
-    },
-    "metrics": {
+  "loadBalancer": {
+    "strategy": "weighted",
+    "healthCheck": {
       "enabled": true,
-      "trackPerformance": true,
-      "trackRouting": true,
-      "trackErrors": true
+      "interval": 30000,
+      "timeout": 5000,
+      "retries": 3
+    },
+    "failover": {
+      "enabled": true,
+      "maxRetries": 3,
+      "backoffMultiplier": 2
+    },
+    "circuitBreaker": {
+      "enabled": true,
+      "failureThreshold": 5,
+      "recoveryTimeout": 60000
     }
   }
 }

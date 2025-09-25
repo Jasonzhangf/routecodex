@@ -185,13 +185,13 @@
           "modelTiers": {
             "basic": {
               "description": "Basic models for simple tasks",
-              "models": ["gpt-3.5-turbo", "claude-3-haiku", "qwen-turbo"],
+              "models": ["gpt-3.5-turbo", "claude-3-haiku"],
               "maxTokens": 16384,
               "supportedFeatures": ["text_generation", "conversation"]
             },
             "advanced": {
               "description": "Advanced models for complex tasks",
-              "models": ["gpt-4", "claude-3-opus", "claude-3-sonnet", "deepseek-coder", "qwen-max"],
+              "models": ["gpt-5", "claude-3-opus",  "qwen-max"],
               "maxTokens": 262144,
               "supportedFeatures": ["text_generation", "reasoning", "coding", "tool_use"]
             }
@@ -268,6 +268,107 @@
                   "dataAnalysis": ["data", "analysis", "chart"]
                 }
               }
+            }
+          },
+          "inputModelWeights": {
+            "qwen3-coder": {
+              "weight": 8.5,
+              "description": "Qwen3代码模型，高复杂度",
+              "routeMapping": {
+                "default": 0.4,
+                "longContext": 0.3,
+                "thinking": 0.7,
+                "coding": 0.9,
+                "webSearch": 0.2
+              }
+            },
+            "qwen3": {
+              "weight": 7.0,
+              "description": "Qwen3通用模型，中高复杂度",
+              "routeMapping": {
+                "default": 0.6,
+                "longContext": 0.7,
+                "thinking": 0.8,
+                "coding": 0.6,
+                "webSearch": 0.5
+              }
+            },
+            "qwen": {
+              "weight": 6.0,
+              "description": "Qwen模型，中等复杂度",
+              "routeMapping": {
+                "default": 0.8,
+                "longContext": 0.6,
+                "thinking": 0.5,
+                "coding": 0.4,
+                "webSearch": 0.6
+              }
+            },
+            "gpt-4": {
+              "weight": 9.0,
+              "description": "GPT-4模型，极高复杂度",
+              "routeMapping": {
+                "default": 0.3,
+                "longContext": 0.8,
+                "thinking": 0.9,
+                "coding": 0.8,
+                "webSearch": 0.7
+              }
+            },
+            "claude": {
+              "weight": 8.5,
+              "description": "Claude模型，高复杂度",
+              "routeMapping": {
+                "default": 0.4,
+                "longContext": 0.8,
+                "thinking": 0.9,
+                "coding": 0.7,
+                "webSearch": 0.6
+              }
+            },
+            "code": {
+              "weight": 7.5,
+              "description": "代码专用模型，高复杂度",
+              "routeMapping": {
+                "default": 0.5,
+                "longContext": 0.4,
+                "thinking": 0.6,
+                "coding": 0.95,
+                "webSearch": 0.3
+              }
+            },
+            "thinking": {
+              "weight": 8.0,
+              "description": "思考模型，高复杂度",
+              "routeMapping": {
+                "default": 0.4,
+                "longContext": 0.7,
+                "thinking": 0.95,
+                "coding": 0.6,
+                "webSearch": 0.5
+              }
+            }
+          },
+          "routeThresholds": {
+            "default": {
+              "minWeight": 0,
+              "description": "默认路由，适合简单任务"
+            },
+            "longContext": {
+              "minWeight": 6,
+              "description": "长上下文路由，需要模型支持长文本"
+            },
+            "thinking": {
+              "minWeight": 7,
+              "description": "复杂推理路由，需要模型有推理能力"
+            },
+            "coding": {
+              "minWeight": 7,
+              "description": "代码生成路由，需要模型有编程能力"
+            },
+            "webSearch": {
+              "minWeight": 6,
+              "description": "网络搜索路由，需要模型有搜索能力"
             }
           }
         }

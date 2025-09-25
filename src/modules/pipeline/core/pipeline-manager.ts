@@ -607,9 +607,11 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('qwen-provider', this.createQwenProviderModule);
     this.registry.registerModule('generic-http', this.createGenericHTTPModule);
     this.registry.registerModule('lmstudio-http', this.createLMStudioHTTPModule);
+    this.registry.registerModule('openai-provider', this.createOpenAIProviderModule);
 
     // Register LM Studio module factories
     this.registry.registerModule('lmstudio-compatibility', this.createLMStudioCompatibilityModule);
+    this.registry.registerModule('passthrough-compatibility', this.createPassthroughCompatibilityModule);
     
 
     this.logger.logPipeline('manager', 'module-registry-initialized', {
@@ -836,9 +838,20 @@ export class PipelineManager implements RCCBaseModule {
     const { LMStudioProviderSimple } = await import('../modules/provider/lmstudio-provider-simple.js');
     return new LMStudioProviderSimple(config, dependencies);
   };
+
+  private createOpenAIProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { OpenAIProvider } = await import('../modules/provider/openai-provider.js');
+    return new OpenAIProvider(config, dependencies);
+  };
+
   private createLMStudioCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { LMStudioCompatibility } = await import('../modules/compatibility/lmstudio-compatibility.js');
     return new LMStudioCompatibility(config, dependencies);
+  };
+
+  private createPassthroughCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { PassthroughCompatibility } = await import('../modules/compatibility/passthrough-compatibility.js');
+    return new PassthroughCompatibility(config, dependencies);
   };
 
   /**

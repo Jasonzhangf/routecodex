@@ -27,6 +27,7 @@ export interface PassThroughProviderConfig {
   targetUrl: string;
   timeout?: number;
   headers?: Record<string, string>;
+  apiKey?: string;
   retryAttempts?: number;
   enableHealthCheck?: boolean;
 }
@@ -121,7 +122,7 @@ export class PassThroughProvider extends BaseProvider {
    */
   public async processChatCompletion(
     request: OpenAIChatCompletionRequest,
-    options?: { timeout?: number; retryAttempts?: number }
+    options?: { timeout?: number; retryAttempts?: number; apiKey?: string }
   ): Promise<ProviderResponse> {
     const startTime = Date.now();
 
@@ -140,13 +141,16 @@ export class PassThroughProvider extends BaseProvider {
         }
       });
 
+      // Extract API key from options if available
+      const apiKey = options?.apiKey;
+
       // Create a minimal context for forwarding
       const context: RequestContext = {
         id: `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         timestamp: startTime,
         method: 'POST',
         url: '/chat/completions',
-        headers: {},
+        headers: apiKey ? { 'authorization': `Bearer ${apiKey}` } : {},
         body: request
       };
 
@@ -543,6 +547,11 @@ export class PassThroughProvider extends BaseProvider {
       const apiKey = context.headers['api-key'] || context.headers['x-api-key'];
       if (apiKey) {
         headers['api-key'] = apiKey;
+      }
+
+      // Add API key from provider config if available and no auth header found
+      if (!headers['Authorization'] && this.passThroughConfig.apiKey) {
+        headers['Authorization'] = `Bearer ${this.passThroughConfig.apiKey}`;
       }
 
       // Make the HTTP request

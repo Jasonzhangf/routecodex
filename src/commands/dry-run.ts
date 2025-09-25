@@ -17,6 +17,8 @@ import path from 'path';
 import { homedir } from 'os';
 import { DryRunEngine, dryRunEngine } from '../modules/dry-run-engine/index.js';
 import type { RunRequestOptions, RunResponseOptions, RunBidirectionalOptions } from '../modules/dry-run-engine/index.js';
+import { dryRunPipelineExecutor } from '../modules/pipeline/dry-run/dry-run-pipeline-executor.js';
+import { pipelineDryRunManager, type NodeDryRunConfig } from '../modules/pipeline/dry-run/pipeline-dry-run-framework.js';
 
 // Logger for consistent output
 const logger = {
@@ -70,14 +72,30 @@ async function loadFile(filePath: string): Promise<any> {
 
 // Output formatting utilities
 function formatOutput(data: any, format: 'json' | 'pretty'): void {
+  // Normalize Map fields for serialization
+  const clone = (() => {
+    try {
+      const out: any = { ...data };
+      const nr = (data as any)?.nodeResults;
+      if (nr && typeof nr.entries === 'function') {
+        const obj: any = {};
+        for (const [k, v] of nr.entries()) { obj[k] = v; }
+        out.nodeResults = obj;
+        // derive routing decision from llm-switch if present
+        const llm = obj['llm-switch']?.expectedOutput?.metadata?.routingDecision;
+        if (llm) { out.derivedRoutingDecision = llm; }
+      }
+      return out;
+    } catch { return data; }
+  })();
   switch (format) {
     case 'json':
-      console.log(JSON.stringify(data, null, 2));
+      console.log(JSON.stringify(clone, null, 2));
       break;
     case 'pretty':
       console.log(chalk.cyan('Dry-Run Results:'));
       console.log('=' .repeat(50));
-      console.log(JSON.stringify(data, null, 2));
+      console.log(JSON.stringify(clone, null, 2));
       break;
   }
 }
@@ -106,6 +124,160 @@ async function scanDirectory(dirPath: string, pattern: string = '*.json'): Promi
   }
 
   return files.sort();
+}
+
+// -------- Default Dry-Run Modules (simulate dynamic routing, load balancer, provider) --------
+type RouteTarget = { providerId: string; modelId: string; keyId?: string; actualKey?: string };
+type RoutePools = Record<string, string[]>;
+
+function findLatestMergedConfig(): any | null {
+  try {
+    const cfgDir = path.resolve(process.cwd(), 'config');
+    const files = fs.readdirSync(cfgDir)
+      .filter(f => /^merged-config\..*\.json$/.test(f))
+      .map(f => ({ name: f, mtime: fs.statSync(path.join(cfgDir, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+    if (files.length === 0) {return null;}
+    const content = fs.readFileSync(path.join(cfgDir, files[0].name), 'utf-8');
+    return JSON.parse(content);
+  } catch { return null; }
+}
+
+function chooseRouteAndTarget(input: any) {
+  const merged = findLatestMergedConfig();
+  const vr = merged?.modules?.virtualrouter?.config || {};
+  const routeTargets: Record<string, RouteTarget[]> = vr.routeTargets || {};
+  const inputModel: string = input?.data?.model || input?.model || 'unknown';
+
+  // 1) Direct mapping: model like 'provider.modelId.keyX' => pick exact target across all categories
+  if (typeof inputModel === 'string' && inputModel.includes('.') && inputModel.includes('.key')) {
+    try {
+      const firstDot = inputModel.indexOf('.');
+      const lastKey = inputModel.lastIndexOf('.key');
+      if (firstDot > 0 && lastKey > firstDot) {
+        const providerId = inputModel.slice(0, firstDot);
+        const modelId = inputModel.slice(firstDot + 1, lastKey);
+        const keyId = 'key' + inputModel.slice(lastKey + 4);
+        // search any category
+        const allTargets: RouteTarget[] = Object.values(routeTargets).flat();
+        const match = allTargets.find(t => t.providerId === providerId && t.modelId === modelId && (t.keyId === keyId || !t.keyId));
+        if (match) {
+          return {
+            route: 'direct',
+            selectedTarget: match,
+            selectedPipelineId: `${match.providerId}_${match.keyId || 'key1'}.${match.modelId}`,
+            availableTargets: allTargets.filter(t => t.providerId === providerId && t.modelId === modelId)
+          };
+        }
+      }
+    } catch {}
+  }
+
+  // Simple dynamic route: longcontext if max_tokens large; tools if tools present; coding if model name hints; else default
+  const hasTools = Array.isArray((input?.data || input).tools) && (input?.data || input).tools.length > 0;
+  const maxTokens = (input?.data || input)?.max_tokens || 0;
+  const lowerModel = String(inputModel).toLowerCase();
+  let route = 'default';
+  if (maxTokens >= 8000) route = 'longcontext';
+  else if (hasTools) route = 'tools';
+  else if (/(coder|code)/.test(lowerModel)) route = 'coding';
+
+  // load balancer: pick first available in routeTargets; else fallback to default
+  const targets = routeTargets[route] || routeTargets['default'] || [];
+  const selected = targets[0] || null;
+
+  const selectedStr = selected
+    ? `${selected.providerId}_${selected.keyId || 'key1'}.${selected.modelId}`
+    : 'unknown';
+
+  return {
+    route,
+    selectedTarget: selected,
+    selectedPipelineId: selectedStr,
+    availableTargets: targets
+  };
+}
+
+function registerDefaultDryRunNodes(): void {
+  // Configure all three nodes as full-analysis by default
+  const nodeCfg: Record<string, NodeDryRunConfig> = {
+    'llm-switch': { enabled: true, mode: 'full-analysis', breakpointBehavior: 'continue', verbosity: 'normal' },
+    'compatibility': { enabled: true, mode: 'full-analysis', breakpointBehavior: 'continue', verbosity: 'normal' },
+    'provider': { enabled: true, mode: 'full-analysis', breakpointBehavior: 'continue', verbosity: 'normal' }
+  };
+  // reset executor first, then set node configs
+  dryRunPipelineExecutor.cleanup();
+  pipelineDryRunManager.clear();
+  pipelineDryRunManager.configureNodesDryRun(nodeCfg);
+
+  // Create light-weight mock modules implementing DryRunPipelineModule
+  const llmSwitchModule = {
+    id: 'llm-switch', type: 'llm-switch', config: {},
+    async initialize() {}, async cleanup() {}, async processOutgoing(x: any) { return x; },
+    async processIncoming(req: any) { return req; },
+    async executeNodeDryRun(input: any) {
+      const decision = chooseRouteAndTarget({ data: input?.data || input });
+      const out = {
+        ...(input?.data ? input : { data: input }),
+        route: input?.route || {
+          providerId: decision.selectedTarget?.providerId || 'unknown',
+          modelId: decision.selectedTarget?.modelId || 'unknown',
+          requestId: input?.route?.requestId || `req_${Date.now()}`,
+          timestamp: Date.now()
+        },
+        metadata: { ...(input?.metadata || {}), routingDecision: decision }
+      };
+      return {
+        nodeId: 'llm-switch', nodeType: 'llm-switch', status: 'success',
+        inputData: input, expectedOutput: out, validationResults: [],
+        performanceMetrics: { estimatedTime: 3, estimatedMemory: 16, complexity: 1 }, executionLog: []
+      };
+    },
+    async validateOutput() { return []; }, async simulateError() { return null; },
+    async estimatePerformance() { return { time: 3, memory: 16, complexity: 1 }; }
+  } as any;
+
+  const compatibilityModule = {
+    id: 'compatibility', type: 'compatibility', config: {},
+    async initialize() {}, async cleanup() {}, async processIncoming(req: any) { return req; }, async processOutgoing(x: any) { return x; },
+    async executeNodeDryRun(input: any) {
+      const out = { ...(input || {}), metadata: { ...(input?.metadata || {}), compatibility: 'passthrough' } };
+      return {
+        nodeId: 'compatibility', nodeType: 'compatibility', status: 'success',
+        inputData: input, expectedOutput: out, validationResults: [],
+        performanceMetrics: { estimatedTime: 4, estimatedMemory: 20, complexity: 1 }, executionLog: []
+      };
+    },
+    async validateOutput() { return []; }, async simulateError() { return null; },
+    async estimatePerformance() { return { time: 4, memory: 20, complexity: 1 }; }
+  } as any;
+
+  const providerModule = {
+    id: 'provider', type: 'provider', config: {},
+    async initialize() {}, async cleanup() {}, async processIncoming(req: any) { return req; }, async processOutgoing(x: any) { return x; },
+    async executeNodeDryRun(input: any) {
+      const response = {
+        id: 'dryrun-response', object: 'chat.completion',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'Simulated provider output' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 128, completion_tokens: 256, total_tokens: 384 }
+      };
+      return {
+        nodeId: 'provider', nodeType: 'provider', status: 'success',
+        inputData: input, expectedOutput: response, validationResults: [],
+        performanceMetrics: { estimatedTime: 6, estimatedMemory: 32, complexity: 1 }, executionLog: []
+      };
+    },
+    async validateOutput() { return []; }, async simulateError() { return null; },
+    async estimatePerformance() { return { time: 6, memory: 32, complexity: 1 }; }
+  } as any;
+
+  // Register nodes and set order
+  dryRunPipelineExecutor.registerNodes([
+    { id: 'llm-switch', type: 'llm-switch', module: llmSwitchModule, isDryRun: true, config: pipelineDryRunManager.getNodeConfig('llm-switch') },
+    { id: 'compatibility', type: 'compatibility', module: compatibilityModule, isDryRun: true, config: pipelineDryRunManager.getNodeConfig('compatibility') },
+    { id: 'provider', type: 'provider', module: providerModule, isDryRun: true, config: pipelineDryRunManager.getNodeConfig('provider') }
+  ]);
+  dryRunPipelineExecutor.setExecutionOrder(['llm-switch', 'compatibility', 'provider']);
 }
 
 // Response capture functionality
@@ -191,8 +363,11 @@ export function createDryRunCommands(): Command {
       const spinner = ora('Running request pipeline...').start();
 
       try {
+        // Default: register dynamic routing + load balancer + three nodes
+        registerDefaultDryRunNodes();
         // Load request data
-        const request = await loadFile(input);
+        const raw = await loadFile(input);
+        const request = normalizeToPipelineRequest(raw);
 
         // Load node configuration if provided
         let nodeConfigs = undefined;
@@ -343,6 +518,7 @@ export function createDryRunCommands(): Command {
       const spinner = ora('Scanning directory...').start();
 
       try {
+        registerDefaultDryRunNodes();
         // Scan directory for files
         const files = await scanDirectory(directory, options.pattern);
 
@@ -553,4 +729,22 @@ export function createDryRunCommands(): Command {
     });
 
   return dryRun;
+}
+
+// Normalize any OpenAI-style input into PipelineRequest shape
+function normalizeToPipelineRequest(raw: any): any {
+  if (raw && raw.data && raw.route && raw.metadata && raw.debug) {return raw;}
+  const model = raw?.model || raw?.data?.model || 'unknown';
+  const now = Date.now();
+  return {
+    data: raw?.data || raw,
+    route: {
+      providerId: 'dynamic',
+      modelId: typeof model === 'string' ? String(model) : 'unknown',
+      requestId: `req_${now}_${Math.random().toString(36).slice(2, 8)}`,
+      timestamp: now
+    },
+    metadata: { source: 'dry-run-cli', transformations: [], processingTime: 0 },
+    debug: { enabled: true, stages: { 'llm-switch': true, compatibility: true, provider: true } }
+  };
 }

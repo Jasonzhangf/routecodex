@@ -574,8 +574,8 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
       await this.modules.llmSwitch.initialize();
     }
 
-    // Initialize Workflow module
-    if (this.config.modules.workflow.enabled !== false) {
+    // Initialize Workflow module (optional)
+    if (this.config.modules.workflow && this.config.modules.workflow.enabled !== false) {
       this.modules.workflow = await this.moduleFactory(this.config.modules.workflow, dependencies) as WorkflowModule;
       await this.modules.workflow.initialize();
     }

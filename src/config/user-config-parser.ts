@@ -4,6 +4,7 @@
  */
 
 import path from 'path';
+import fs from 'fs';
 import { homedir } from 'os';
 import type {
   UserConfig,
@@ -201,6 +202,7 @@ export class UserConfigParser {
           const realKey = this.resolveKeyByAlias(providerId, keyAlias); // 解析真实key
           const resolvedKey = this.resolveActualKey(providerId, realKey);
           const hasAuthMapping = this.hasAuthMapping(providerId, realKey);
+          const apiKeyValue = this.resolveApiKeyValue(providerId, realKey, resolvedKey, hasAuthMapping);
           // compatibility selection: user config > model-level > provider-level > auto-infer
           const modelCompat = (modelConfig as any)?.compatibility;
           const providerCompat = (providerConfig as any)?.compatibility;
@@ -220,7 +222,7 @@ export class UserConfigParser {
 
           const modelLlmSwitch = (modelConfig as any)?.llmSwitch;
           const providerLlmSwitch = (providerConfig as any)?.llmSwitch;
-          let llmSwitch = modelLlmSwitch?.type
+          const llmSwitch = modelLlmSwitch?.type
             ? { type: modelLlmSwitch.type, config: modelLlmSwitch.config || {} }
             : providerLlmSwitch?.type
               ? { type: providerLlmSwitch.type, config: providerLlmSwitch.config || {} }
@@ -228,34 +230,16 @@ export class UserConfigParser {
 
           const modelWorkflow = (modelConfig as any)?.workflow;
           const providerWorkflow = (providerConfig as any)?.workflow;
-          let workflow = modelWorkflow?.type
+          const workflow = modelWorkflow?.type
             ? { type: modelWorkflow.type, config: modelWorkflow.config || {}, enabled: modelWorkflow.enabled }
             : providerWorkflow?.type
               ? { type: providerWorkflow.type, config: providerWorkflow.config || {}, enabled: providerWorkflow.enabled }
               : undefined;
 
-          // Defaults: ensure assembler-required modules exist
-          if (!llmSwitch) {
-            llmSwitch = { type: 'openai-passthrough', config: {} };
-          }
-          if (!workflow) {
-            workflow = { type: 'streaming-control', enabled: true, config: {} } as any;
-          }
-          if (!compatibility) {
-            // Try to infer from provider type
-            const pType = (providerConfig as any)?.type?.toLowerCase?.() || '';
-            if (pType.includes('lmstudio')) {
-              compatibility = { type: 'lmstudio-compatibility', config: {} };
-            } else if (pType.includes('qwen')) {
-              compatibility = { type: 'qwen-compatibility', config: {} } as any;
-            } else {
-              // Fallback generic mapping
-              compatibility = { type: 'field-mapping', config: {} } as any;
-            }
-          }
-            // Normalize provider type to registered module types
-            const rawProviderType = (providerConfig.type || '').toLowerCase();
-            const normalizedProviderType = rawProviderType === 'lmstudio' ? 'lmstudio-http'
+          // 不再在解析层推断compatibility/llmSwitch/workflow默认值，交由装配阶段按规则决定
+          // Normalize provider type to registered module types
+          const rawProviderType = (providerConfig.type || '').toLowerCase();
+          const normalizedProviderType = rawProviderType === 'lmstudio' ? 'lmstudio-http'
               : rawProviderType === 'qwen' ? 'qwen-provider'
               : rawProviderType === 'openai' ? 'openai-provider'
               : rawProviderType === 'iflow' || rawProviderType === 'iflow-http' ? 'generic-http'
@@ -276,6 +260,10 @@ export class UserConfigParser {
             if (normalizedProviderType === 'lmstudio-http') {
               providerAuth = { type: 'apikey' };
             }
+            // OpenAI provider: uses bearer token auth
+            if (normalizedProviderType === 'openai-provider') {
+              providerAuth = { type: 'bearer' };
+            }
             // Qwen provider: prefers OAuth; read from provider-level oauth if present
             if (normalizedProviderType === 'qwen-provider') {
               const oauthCfg = (providerConfig as any).oauth || (providerConfig as any).auth?.oauth;
@@ -295,9 +283,9 @@ export class UserConfigParser {
             }
             // LM Studio HTTP provider expects http(s) baseURL to REST API (e.g., http://<host>:1234)
 
-            // Optional auth for LM Studio HTTP (may be keyless; presence required by provider)
-            const auth = normalizedProviderType === 'lmstudio-http'
-              ? ({ type: 'apikey', ...(hasAuthMapping ? { apiKey: resolvedKey } : {}) })
+            // Optional auth for providers that need API key
+            const auth = (normalizedProviderType === 'lmstudio-http' || normalizedProviderType === 'openai-provider')
+              ? ({ type: 'apikey', ...(apiKeyValue ? { apiKey: apiKeyValue } : {}) })
               : undefined;
 
             pipelineConfigs[configKey] = {
@@ -320,9 +308,10 @@ export class UserConfigParser {
                 input: virtualRouterConfig.inputProtocol as 'openai' | 'anthropic',
                 output: virtualRouterConfig.outputProtocol as 'openai' | 'anthropic'
               },
-            compatibility,
-            llmSwitch,
-            workflow
+            // 保留用户显式提供的模块配置；缺省值在装配阶段应用
+            ...(compatibility ? { compatibility } : {}),
+            ...(llmSwitch ? { llmSwitch } : {}),
+            ...(workflow ? { workflow } : {})
             };
         }
       }
@@ -470,6 +459,48 @@ export class UserConfigParser {
     }
 
     return Boolean(this.globalKeyToAuth[keyId]);
+  }
+
+  private resolveApiKeyValue(
+    providerId: string,
+    keyId: string,
+    resolvedKey: string,
+    hasAuthMapping: boolean
+  ): string | undefined {
+    if (!resolvedKey) {
+      return undefined;
+    }
+
+    if (!hasAuthMapping) {
+      return resolvedKey;
+    }
+
+    const authId = this.resolveActualKey(providerId, keyId);
+    if (!authId) {
+      return resolvedKey;
+    }
+
+    const authPath = this.authMappings[authId];
+    if (!authPath) {
+      return resolvedKey;
+    }
+
+    const normalizedPath = authPath.startsWith('~')
+      ? path.join(homedir(), authPath.slice(1))
+      : authPath;
+
+    try {
+      if (fs.existsSync(normalizedPath)) {
+        const fileContent = fs.readFileSync(normalizedPath, 'utf-8').trim();
+        if (fileContent) {
+          return fileContent;
+        }
+      }
+    } catch (error) {
+      console.warn(`Failed to read auth file ${normalizedPath}:`, error);
+    }
+
+    return resolvedKey;
   }
 
   private resolveActualKey(providerId: string, keyId: string): string {
