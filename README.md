@@ -17,9 +17,13 @@ HTTP Request → LLM Switch → Workflow → Compatibility → Provider → AI S
   Analysis     Routing    Control    Conversion   HTTP Server  Processing
 ```
 
-### Layer 1: LLM Switch (Dynamic Routing Classification)
+### Layer 1: LLM Switch (Dynamic Routing + Standardization)
 - **Request Analysis**: Analyzes incoming requests to determine optimal routing
 - **Protocol Routing**: Routes requests to appropriate processing pipelines
+- **OpenAI Standardization**: Enforces strict OpenAI Chat Completions shape before downstream modules
+  - `assistant.tool_calls[].function.arguments` must be a JSON string (objects are stringified)
+  - `assistant.content` must be a string (default "")
+  - `tool.content` must be a string
 - **Dynamic Classification**: Supports 7 routing categories (default, longcontext, thinking, background, websearch, vision, coding)
 
 ### Layer 2: Workflow (Flow Control)
@@ -27,13 +31,13 @@ HTTP Request → LLM Switch → Workflow → Compatibility → Provider → AI S
 - **Request Processing**: Manages request flow and processing state
 - **Response Handling**: Processes and transforms responses as needed
 
-### Layer 3: Compatibility (Format Transformation)
+### Layer 3: Compatibility (Format Transformation - Vendor Differences Only)
 - **Protocol Translation**: Converts between different AI service protocols
 - **Format Adaptation**: Transforms request/response formats between providers
 - **Tool Integration**: Handles tool calling format conversion and execution
 - **Configuration-Driven**: Uses JSON configuration for transformation rules
+- **Scope Rule**: Compatibility only handles vendor-specific differences. All “standard OpenAI” normalization lives in the LLM Switch.
 - **Simple String Format**: Supports easy compatibility specification (e.g., `"compatibility": "passthrough"`)
-- **Auto-Inference**: Automatically determines compatibility mode based on provider type when not specified
 
 ## 🔧 Compatibility Field Configuration
 
@@ -92,25 +96,7 @@ The system follows this priority order when determining compatibility:
 3. **Provider-Level Compatibility**
 4. **Auto-Inference** (fallback based on provider type)
 
-### Auto-Inference Logic
-
-When compatibility is not specified, the system automatically determines the appropriate mode:
-
-```json
-// Auto-inference examples
-{
-  "providers": {
-    "lmstudio": {
-      "type": "lmstudio"
-      // compatibility not specified -> auto-inferred as "lmstudio-compatibility"
-    },
-    "qwen": {
-      "type": "qwen"
-      // compatibility not specified -> auto-inferred as "qwen-compatibility"
-    }
-  }
-}
-```
+> Note on inference: To keep “configuration as the single source of truth”, prefer setting `compatibility` explicitly (default is `passthrough`). Inference may be removed in future revisions.
 
 ### Configuration Examples
 
@@ -374,33 +360,29 @@ const result = await provider.processIncoming(
 ### Configuration
 
 - Set config path via env var:
-  - `ROUTECODEX_CONFIG=~/.routecodex/config/modelscope.json npm start`
+  - `ROUTECODEX_CONFIG_PATH=~/.routecodex/config/modelscope.json npm start`
 - If not set, default path is `~/.routecodex/config.json`
-- HTTP port must come from user config (not modules.json):
-  - In `~/.routecodex/config.json`, set:
+- Single Source Of Truth (SSOT):
+  - HTTP port must come from user config only
+  - Compatibility must be set in user config (default `passthrough` is recommended first)
+  - LLM Switch can be set to `openai-normalizer` to enforce strict OpenAI request shape
+  - In `~/.routecodex/config.json`, set top-level `port` and optional host:
     ```json
     {
-      "httpserver": { "port": 5506, "host": "localhost" }
-    }
-    ```
-  - Alternatively under modules layout:
-    ```json
-    {
-      "modules": {
-        "httpserver": { "config": { "port": 5506, "host": "localhost" } }
-      }
+      "port": 5506,
+      "server": { "host": "localhost" }
     }
     ```
   - If no port is provided, the server will fail to start with an explicit error.
-- Merged config output: `config/merged-config.<port>.json`
+- Merged config output: `~/routecodex/config/merged-config.json`
 
 ### Helper Scripts
 
 - `test-config.sh`
-  - Starts server with `ROUTECODEX_CONFIG=~/.routecodex/config/modelscope.json`
+  - Starts server with `ROUTECODEX_CONFIG_PATH=~/.routecodex/config/modelscope.json`
   - Captures output to `server-output.log` and checks pipeline logs
 - `graceful-port-handler.sh <port> [timeout]`
-  - Frees port gracefully, then launches server with `ROUTECODEX_CONFIG` set to the config file path
+  - Frees port gracefully, then launches server with `ROUTECODEX_CONFIG_PATH` set to the config file path
   - Example: `./graceful-port-handler.sh 5506 10`
   - Note: The HTTP port is determined by your user config. The script argument is only for freeing the port.
 
@@ -434,7 +416,7 @@ routecodex simple-log off
 - **Automatic application**: Config automatically applied when server starts
 
 #### Configuration File
-Settings are stored in `~/.routecodex/simple-log-config.json` and automatically loaded on server startup.
+Settings are stored in `~/.routecodex/simple-log-config.json` and automatically loaded on server startup. Default log output directory is `~/routecodex/debug-logs` when file output is enabled.
 
 #### Benefits
 - **Reduced complexity**: 788-line complex indexer → 150-line simplified version
@@ -444,8 +426,9 @@ Settings are stored in `~/.routecodex/simple-log-config.json` and automatically 
 
 ### Pipeline Scope
 
-- Current pipeline is simplified to LLM Switch + Compatibility layers.
-- Pass-through mode has been removed; requests require a configured pipeline.
+- Pipeline uses LLM Switch + Compatibility + Provider.
+- LLM Switch `openai-normalizer` performs standard OpenAI normalization.
+- Compatibility handles vendor-specific differences; `passthrough` does no changes.
 
 ### Tool Calling Example
 
@@ -660,6 +643,293 @@ This release enables full operational capability for three major AI providers:
 - **Tool Calling**: Native provider optimization
 - **Streaming**: Real-time chunk processing
 - **Memory Usage**: Efficient module loading and caching
+
+## 🧪 标准OpenAI API测试方法
+
+RouteCodex提供完整的OpenAI兼容API测试，确保与各种AI客户端的完美集成。
+
+### 端到端测试流程
+
+#### 1. 启动服务器
+```bash
+# 使用ModelScope配置启动
+ROUTECODEX_CONFIG_PATH=~/.routecodex/config/modelscope.json npm start
+
+# 服务器将在配置的端口上启动 (默认5506)
+# 健康检查: curl http://localhost:5506/health
+```
+
+#### 2. 标准测试命令
+
+**基础对话测试**:
+```bash
+curl -X POST http://localhost:5506/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ms-7d6c4fdb-4bf1-40b3-9ec6-ddea16f6702b" \
+  -d '{
+    "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Hello, please respond briefly"
+      }
+    ]
+  }'
+```
+
+**工具调用测试**:
+```bash
+curl -X POST http://localhost:5506/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ms-7d6c4fdb-4bf1-40b3-9ec6-ddea16f6702b" \
+  -d '{
+    "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is 15 * 25? Use the calculator tool."
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "calculate",
+          "description": "Perform mathematical calculations",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "expression": {
+                "type": "string",
+                "description": "Mathematical expression to evaluate"
+              }
+            },
+            "required": ["expression"]
+          }
+        }
+      }
+    ]
+  }'
+```
+
+**流式响应测试**:
+```bash
+curl -X POST http://localhost:5506/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ms-7d6c4fdb-4bf1-40b3-9ec6-ddea16f6702b" \
+  -d '{
+    "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Count from 1 to 5 slowly"
+      }
+    ],
+    "stream": true
+  }'
+```
+
+#### 3. 验证端点
+
+**服务器状态**:
+```bash
+# 根端点 - 显示系统信息
+curl http://localhost:5506/
+
+# 健康检查
+curl http://localhost:5506/health
+
+# 配置信息
+curl http://localhost:5506/config
+```
+
+#### 4. 完整测试脚本
+
+创建测试脚本 `test-modelscope.sh`:
+```bash
+#!/bin/bash
+
+# ModelScope API测试脚本
+set -e
+
+BASE_URL="http://localhost:5506"
+API_KEY="ms-7d6c4fdb-4bf1-40b3-9ec6-ddea16f6702b"
+MODEL="Qwen/Qwen3-Coder-480B-A35B-Instruct"
+
+echo "🧪 RouteCodex ModelScope API测试开始..."
+echo "📡 测试地址: $BASE_URL"
+echo "🔑 使用模型: $MODEL"
+echo ""
+
+# 1. 健康检查
+echo "1️⃣ 健康检查..."
+curl -s "$BASE_URL/health" | jq .
+
+# 2. 基础对话测试
+echo ""
+echo "2️⃣ 基础对话测试..."
+curl -s -X POST "$BASE_URL/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $API_KEY" \
+  -d "{
+    \"model\": \"$MODEL\",
+    \"messages\": [
+      {
+        \"role\": \"user\",
+        \"content\": \"Hello! Please respond briefly.\"
+      }
+    ]
+  }" | jq .
+
+# 3. 代码生成测试
+echo ""
+echo "3️⃣ 代码生成测试..."
+curl -s -X POST "$BASE_URL/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $API_KEY" \
+  -d "{
+    \"model\": \"$MODEL\",
+    \"messages\": [
+      {
+        \"role\": \"user\",
+        \"content\": \"Write a simple Python function to calculate factorial.\"
+      }
+    ]
+  }" | jq .
+
+# 4. 工具调用测试
+echo ""
+echo "4️⃣ 工具调用测试..."
+curl -s -X POST "$BASE_URL/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $API_KEY" \
+  -d "{
+    \"model\": \"$MODEL\",
+    \"messages\": [
+      {
+        \"role\": \"user\",
+        \"content\": \"What is the square root of 144?\"
+      }
+    ],
+    \"tools\": [
+      {
+        \"type\": \"function\",
+        \"function\": {
+          \"name\": \"calculate\",
+          \"description\": \"Perform mathematical calculations\",
+          \"parameters\": {
+            \"type\": \"object\",
+            \"properties\": {
+              \"expression\": {
+                \"type\": \"string\",
+                \"description\": \"Mathematical expression to evaluate\"
+              }
+            },
+            \"required\": [\"expression\"]
+          }
+        }
+      }
+    ]
+  }" | jq .
+
+echo ""
+echo "✅ 所有测试完成!"
+```
+
+#### 5. 测试结果验证
+
+成功的测试响应应该包含:
+- **状态码**: 200 OK
+- **响应结构**: 标准OpenAI格式
+- **处理时间**: 通常 < 2秒
+- **Token使用**: 合理的token计数
+- **路由信息**: 包含 `_metadata` 字段
+
+#### 6. 配置文件示例
+
+`~/.routecodex/config/modelscope.json`:
+```json
+{
+  "port": 5506,
+  "virtualrouter": {
+    "inputProtocol": "openai",
+    "outputProtocol": "openai",
+    "providers": {
+      "modelscope": {
+        "type": "openai",
+        "baseURL": "https://api-inference.modelscope.cn/v1",
+        "apiKey": [
+          "ms-7d6c4fdb-4bf1-40b3-9ec6-ddea16f6702b",
+          "ms-0cf692c6-608d-42da-a2b4-e203150bb435",
+          "ms-9215edc2-dc63-4a33-9f53-e6a6080ec795",
+          "ms-cc2f461b-8228-427f-99aa-1d44fab73e67"
+        ],
+        "models": {
+          "Qwen/Qwen3-Coder-480B-A35B-Instruct": {
+            "maxContext": 262144,
+            "maxTokens": 262144
+          }
+        }
+      }
+    },
+    "routing": {
+      "default": [
+        "modelscope.Qwen/Qwen3-Coder-480B-A35B-Instruct"
+      ],
+      "coding": [
+        "modelscope.Qwen/Qwen3-Coder-480B-A35B-Instruct"
+      ],
+      "longcontext": [
+        "modelscope.Qwen/Qwen3-Coder-480B-A35B-Instruct"
+      ]
+    }
+  }
+}
+```
+
+#### 7. 常见问题排查
+
+**问题1: 404 Not Found**
+```bash
+# 检查端点是否正确
+curl http://localhost:5506/
+# 应该看到可用端点列表，OpenAI端点是 /v1/*
+```
+
+**问题2: 认证失败**
+```bash
+# 检查API密钥格式
+# 密钥应该是: ms-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+```
+
+**问题3: 模型错误**
+```bash
+# 检查模型名称是否在配置中存在
+# 使用配置文件中定义的确切模型名称
+```
+
+#### 8. 性能基准
+
+- **响应时间**: 800-1500ms (取决于网络和模型复杂度)
+- **Token处理**: 支持262K上下文长度
+- **并发能力**: 支持多请求并发处理
+- **错误处理**: 完整的错误恢复机制
+
+这套标准测试方法确保RouteCodex与任何OpenAI兼容客户端的完美集成。
+
+## ✅ ModelScope 独立验证通过
+
+- 日期: 2025-09-26
+- 配置: `~/.routecodex/config/modelscope.json`
+- 端口: 5507（示例环境）
+- 验证项:
+  - 非流式返回 OpenAI 标准结构（id/object/created/model/choices/usage）
+  - 流式（SSE）分片规范（object: chat.completion.chunk，delta.content，有 [DONE]）
+  - 严格 JSON 模式：`response_format: { "type": "json_object" }` 内容清洗为纯 JSON 字符串
+  - 429 调度：由 PipelineManager 统一处理，多 Key/Pipeline 轮询重试，全部枯竭才返回 429
+  - 统一响应头：`x-request-id`、`Cache-Control: no-store`、`Content-Type: application/json; charset=utf-8`
+
+详情见 docs/verification/modelscope-verify.md。
 
 ## 🤝 Contributing
 
