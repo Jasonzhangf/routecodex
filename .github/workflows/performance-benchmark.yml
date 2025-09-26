@@ -62,12 +62,12 @@ jobs:
       run: |
         echo "Testing application startup time..."
         START_TIME=$(date +%s%N)
-        timeout 30s node dist/index.js start --port 9999 &
+        timeout 30s npm start &
         SERVER_PID=$!
-        
+
         # 等待服务器启动
         for i in {1..30}; do
-          if curl -f http://localhost:9999/health 2>/dev/null; then
+          if curl -f http://localhost:5506/health 2>/dev/null || curl -f http://localhost:5506/ 2>/dev/null; then
             END_TIME=$(date +%s%N)
             STARTUP_TIME=$((($END_TIME - $START_TIME) / 1000000))
             echo "Startup time: ${STARTUP_TIME}ms"
@@ -76,94 +76,122 @@ jobs:
           fi
           sleep 1
         done
-        
+
         kill $SERVER_PID 2>/dev/null || true
         wait $SERVER_PID 2>/dev/null || true
 
     - name: Run memory usage benchmark
       run: |
         echo "Testing memory usage patterns..."
-        node --expose-gc dist/index.js start --port 9999 &
+        npm start &
         SERVER_PID=$!
         sleep 5
-        
-        # 强制垃圾回收
-        curl -X POST http://localhost:9999/debug/gc 2>/dev/null || true
-        sleep 2
-        
+
+        # 检查服务器是否正常运行
+        if ! curl -f http://localhost:5506/health 2>/dev/null; then
+          echo "❌ Server failed to start properly"
+          kill $SERVER_PID 2>/dev/null || true
+          wait $SERVER_PID 2>/dev/null || true
+          exit 1
+        fi
+
         # 获取内存使用
         MEMORY_USAGE=$(ps -p $SERVER_PID -o rss= | awk '{print $1}')
         MEMORY_MB=$((MEMORY_USAGE / 1024))
-        
+
         echo "Memory usage: ${MEMORY_MB}MB"
         echo "memory_usage=${MEMORY_MB}" >> $GITHUB_ENV
-        
+
         kill $SERVER_PID 2>/dev/null || true
         wait $SERVER_PID 2>/dev/null || true
 
     - name: Run API response time benchmark
       run: |
         echo "Testing API response times..."
-        node dist/index.js start --port 9999 &
+        npm start &
         SERVER_PID=$!
         sleep 5
-        
+
+        # 检查服务器是否正常运行
+        if ! curl -f http://localhost:5506/health 2>/dev/null; then
+          echo "❌ Server failed to start properly"
+          kill $SERVER_PID 2>/dev/null || true
+          wait $SERVER_PID 2>/dev/null || true
+          exit 1
+        fi
+
         # 测试基本端点响应时间
-        endpoints=("/health" "/metrics" "/v1/models")
-        
+        endpoints=("/health" "/")
+
         for endpoint in "${endpoints[@]}"; do
           echo "Testing $endpoint..."
-          RESPONSE_TIME=$(curl -w "%{time_total}" -o /dev/null -s http://localhost:9999$endpoint)
+          RESPONSE_TIME=$(curl -w "%{time_total}" -o /dev/null -s http://localhost:5506$endpoint)
           echo "${endpoint}_response_time=${RESPONSE_TIME}" >> $GITHUB_ENV
           echo "$endpoint response time: ${RESPONSE_TIME}s"
         done
-        
+
         kill $SERVER_PID 2>/dev/null || true
         wait $SERVER_PID 2>/dev/null || true
 
     - name: Run load test
       run: |
         echo "Running load test..."
-        node dist/index.js start --port 9999 &
+        npm start &
         SERVER_PID=$!
         sleep 5
-        
+
+        # 检查服务器是否正常运行
+        if ! curl -f http://localhost:5506/health 2>/dev/null; then
+          echo "❌ Server failed to start properly"
+          kill $SERVER_PID 2>/dev/null || true
+          wait $SERVER_PID 2>/dev/null || true
+          exit 1
+        fi
+
         # 使用autocannon进行负载测试
-        npx autocannon -c 10 -d 30 -p 10 http://localhost:9999/health
-        
+        npx autocannon -c 10 -d 30 -p 10 http://localhost:5506/health
+
         kill $SERVER_PID 2>/dev/null || true
         wait $SERVER_PID 2>/dev/null || true
 
     - name: Run memory leak detection
       run: |
         echo "Detecting memory leaks..."
-        node --inspect dist/index.js start --port 9999 &
+        npm start &
         SERVER_PID=$!
         sleep 5
-        
+
+        # 检查服务器是否正常运行
+        if ! curl -f http://localhost:5506/health 2>/dev/null; then
+          echo "❌ Server failed to start properly"
+          kill $SERVER_PID 2>/dev/null || true
+          wait $SERVER_PID 2>/dev/null || true
+          exit 1
+        fi
+
         # 模拟内存压力
         for i in {1..100}; do
-          curl -s http://localhost:9999/health > /dev/null
+          curl -s http://localhost:5506/health > /dev/null
           if [ $((i % 20)) -eq 0 ]; then
             echo "Iteration $i completed"
           fi
         done
-        
+
         # 检查内存增长
         INITIAL_MEMORY=$(ps -p $SERVER_PID -o rss= | awk '{print $1}')
         sleep 10
         FINAL_MEMORY=$(ps -p $SERVER_PID -o rss= | awk '{print $1}')
-        
+
         MEMORY_GROWTH=$((FINAL_MEMORY - INITIAL_MEMORY))
         MEMORY_GROWTH_MB=$((MEMORY_GROWTH / 1024))
-        
+
         echo "Memory growth: ${MEMORY_GROWTH_MB}MB"
         echo "memory_growth=${MEMORY_GROWTH_MB}" >> $GITHUB_ENV
-        
+
         if [ $MEMORY_GROWTH_MB -gt 50 ]; then
           echo "⚠️  Potential memory leak detected: ${MEMORY_GROWTH_MB}MB growth"
         fi
-        
+
         kill $SERVER_PID 2>/dev/null || true
         wait $SERVER_PID 2>/dev/null || true
 
@@ -310,21 +338,29 @@ jobs:
     - name: Run memory profiling
       run: |
         # 使用clinic进行内存分析
-        npx clinic heapprofiler -- node dist/index.js start --port 9999 &
+        npx clinic heapprofiler -- npm start &
         SERVER_PID=$!
         sleep 5
-        
+
+        # 检查服务器是否正常运行
+        if ! curl -f http://localhost:5506/health 2>/dev/null; then
+          echo "❌ Server failed to start properly"
+          kill $SERVER_PID 2>/dev/null || true
+          wait $SERVER_PID 2>/dev/null || true
+          exit 1
+        fi
+
         # 运行内存压力测试
         for i in {1..1000}; do
-          curl -s http://localhost:9999/health > /dev/null
+          curl -s http://localhost:5506/health > /dev/null
           if [ $((i % 100)) -eq 0 ]; then
             echo "Memory test iteration $i completed"
           fi
         done
-        
+
         kill $SERVER_PID 2>/dev/null || true
         wait $SERVER_PID 2>/dev/null || true
-        
+
         # 生成内存分析报告
         echo "Memory profiling completed"
 
@@ -352,17 +388,25 @@ jobs:
     - name: Run CPU profiling
       run: |
         # 使用0x进行CPU分析
-        npx 0x -- node dist/index.js start --port 9999 &
+        npx 0x -- npm start &
         SERVER_PID=$!
         sleep 5
-        
+
+        # 检查服务器是否正常运行
+        if ! curl -f http://localhost:5506/health 2>/dev/null; then
+          echo "❌ Server failed to start properly"
+          kill $SERVER_PID 2>/dev/null || true
+          wait $SERVER_PID 2>/dev/null || true
+          exit 1
+        fi
+
         # 运行CPU密集型测试
         for i in {1..500}; do
-          curl -s http://localhost:9999/health > /dev/null
-          curl -s http://localhost:9999/metrics > /dev/null
+          curl -s http://localhost:5506/health > /dev/null
+          curl -s http://localhost:5506/ > /dev/null
         done
-        
+
         kill $SERVER_PID 2>/dev/null || true
         wait $SERVER_PID 2>/dev/null || true
-        
+
         echo "CPU profiling completed"
