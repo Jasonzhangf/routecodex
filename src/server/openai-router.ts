@@ -10,6 +10,11 @@ import { DebugEventBus } from 'rcc-debugcenter';
 import { ModuleConfigReader } from '../utils/module-config-reader.js';
 import { RequestHandler } from '../core/request-handler.js';
 import { ProviderManager } from '../core/provider-manager.js';
+
+/**
+ * Helper function to safely extract error messages from various error object structures
+ */
+import { getErrorMessage } from '../utils/error-handling-utils.js';
 import {
   type RequestContext,
   type ResponseContext,
@@ -283,7 +288,7 @@ export class OpenAIRouter extends BaseModule {
     } catch (err) {
       console.warn(
         'Failed to initialize ConfigRequestClassifier:',
-        err instanceof Error ? err.message : String(err)
+        getErrorMessage(err)
       );
       this.classifier = null;
     }
@@ -396,7 +401,7 @@ export class OpenAIRouter extends BaseModule {
       if (this.isDebugEnhanced) {
         this.recordRouterMetric('initialization_failed', {
           initId,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
           totalTime,
         });
         this.addToErrorHistory({
@@ -409,7 +414,7 @@ export class OpenAIRouter extends BaseModule {
         });
         this.publishDebugEvent('initialization_failed', {
           initId,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
           totalTime,
         });
       }
@@ -598,6 +603,15 @@ export class OpenAIRouter extends BaseModule {
 
         const pipelineResponse = await this.pipelineManager.processRequest(pipelineRequest);
         response = pipelineResponse?.data ?? pipelineResponse;
+
+        // If client requests streaming, bridge pipeline stream to OpenAI SSE
+        if (req.body.stream) {
+          await this.streamFromPipeline(response, requestId, res, req.body.model);
+          return; // response already sent via SSE
+        }
+
+        // If client requests JSON object format, coerce content to strict JSON
+        response = this.ensureJsonContentIfRequested(response, req.body, 'chat');
       } else {
         throw new RouteCodexError(
           'OpenAI pipeline not initialized. Configure providers and pipelines in merged-config.',
@@ -646,8 +660,12 @@ export class OpenAIRouter extends BaseModule {
         },
       });
 
-      // Send response
-      res.status(200).json(response);
+      // Normalize response for OpenAI compatibility and set standard headers
+      const normalized = this.normalizeOpenAIResponse(response, 'chat');
+      res.setHeader('x-request-id', requestId);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.status(200).json(normalized);
     } catch (error) {
       const duration = Date.now() - startTime;
 
@@ -655,7 +673,7 @@ export class OpenAIRouter extends BaseModule {
       if (this.isDebugEnhanced) {
         this.recordRouterMetric('chat_completions_error', {
           requestId,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
           duration,
           errorType: error instanceof RouteCodexError ? error.code : 'unknown',
         });
@@ -670,7 +688,7 @@ export class OpenAIRouter extends BaseModule {
         });
         this.publishDebugEvent('chat_completions_error', {
           requestId,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
           duration,
           errorType: error instanceof RouteCodexError ? error.code : 'unknown',
         });
@@ -688,21 +706,46 @@ export class OpenAIRouter extends BaseModule {
         data: {
           requestId,
           duration,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         },
       });
 
-      // Send error response
-      const status = error instanceof RouteCodexError ? error.status : 500;
+      // Send error response (respect provider error status if present)
+      const status = (error && typeof error === 'object' && 'status' in (error as any) && typeof (error as any).status === 'number')
+        ? (error as any).status
+        : (error instanceof RouteCodexError ? error.status : 500);
+
+      // Flatten upstream message if present (avoid nested JSON string)
+      const eAny: any = error as any;
+      const upstreamMsg = eAny?.data?.error?.message || eAny?.data?.message || undefined;
+      const message = upstreamMsg ? String(upstreamMsg) : getErrorMessage(error);
+
+      // Map status to type/code
+      const mapType = (s: number) => {
+        if (s === 400) {return 'bad_request';}
+        if (s === 401) {return 'unauthorized';}
+        if (s === 403) {return 'forbidden';}
+        if (s === 404) {return 'not_found';}
+        if (s === 429) {return 'rate_limit_exceeded';}
+        return 'internal_error';
+      };
+      const typeCode = error instanceof RouteCodexError ? error.code : mapType(status);
+
+      // Attach request id and standard headers on error as well
+      res.setHeader('x-request-id', requestId);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
       res.status(status).json({
         error: {
-          message: error instanceof Error ? error.message : 'Internal Server Error',
-          type: error instanceof RouteCodexError ? error.code : 'internal_error',
-          code: error instanceof RouteCodexError ? error.code : 'internal_error',
+          message,
+          type: typeCode,
+          code: typeCode,
         },
       });
     }
   }
+
+  
 
   /**
    * Handle completions
@@ -784,6 +827,8 @@ export class OpenAIRouter extends BaseModule {
         };
         const pipelineResponse = await this.pipelineManager.processRequest(pipelineRequest);
         response = pipelineResponse?.data ?? pipelineResponse;
+        // If client requests JSON object format, coerce content to strict JSON
+        response = this.ensureJsonContentIfRequested(response, req.body, 'text');
       } else {
         throw new RouteCodexError(
           'OpenAI pipeline not initialized. Configure providers and pipelines in merged-config.',
@@ -809,8 +854,12 @@ export class OpenAIRouter extends BaseModule {
         },
       });
 
-      // Send response
-      res.status(200).json(response);
+      // Normalize response for OpenAI compatibility and set standard headers
+      const normalized = this.normalizeOpenAIResponse(response, 'text');
+      res.setHeader('x-request-id', requestId);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.status(200).json(normalized);
     } catch (error) {
       const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'completions_handler');
@@ -825,19 +874,319 @@ export class OpenAIRouter extends BaseModule {
         data: {
           requestId,
           duration,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         },
       });
 
       // Send error response
       const status = error instanceof RouteCodexError ? error.status : 500;
+      // Attach request id and standard headers on error as well
+      res.setHeader('x-request-id', requestId);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
       res.status(status).json({
         error: {
-          message: error instanceof Error ? error.message : 'Internal Server Error',
+          message: getErrorMessage(error),
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
           code: error instanceof RouteCodexError ? error.code : 'internal_error',
         },
       });
+    }
+  }
+
+  /**
+   * Normalize provider response to OpenAI-compatible shape.
+   * Adds missing standard fields while preserving existing data.
+   */
+  private normalizeOpenAIResponse(body: any, kind: 'chat' | 'text'): any {
+    try {
+      if (!body || typeof body !== 'object') {return body;}
+
+      // Unwrap common wrapper shape { data, status, headers, metadata }
+      if (
+        (body as any)?.data &&
+        typeof (body as any).data === 'object'
+      ) {
+        const inner = (body as any).data;
+        if (
+          inner &&
+          (Array.isArray(inner.choices) || typeof inner.id === 'string' || inner.usage)
+        ) {
+          body = inner;
+        }
+      }
+
+      const clone: any = { ...body };
+
+      // Ensure top-level id
+      if (!clone.id) {
+        const prefix = kind === 'chat' ? 'chatcmpl' : 'cmpl';
+        clone.id = `${prefix}-${Date.now().toString(36)}${Math.random()
+          .toString(36)
+          .slice(2, 8)}`;
+      }
+
+      // Ensure object field
+      if (!clone.object) {
+        clone.object = kind === 'chat' ? 'chat.completion' : 'text_completion';
+      }
+
+      // Ensure created timestamp
+      if (!clone.created || typeof clone.created !== 'number') {
+        clone.created = Math.floor(Date.now() / 1000);
+      }
+
+      // Ensure model field exists if we can infer it from choices
+      if (!clone.model && Array.isArray(clone.choices) && clone.choices.length > 0) {
+        // Best effort: keep existing model if present in nested metadata (no-op otherwise)
+        // Do not fabricate arbitrary model names here
+      }
+
+      // Ensure choices is an array
+      if (!Array.isArray(clone.choices)) {
+        clone.choices = [];
+      }
+
+      // Ensure finish_reason and role present on each choice
+      clone.choices = clone.choices.map((c: any, idx: number) => {
+        const choice = { index: idx, ...(c || {}) } as any;
+        if (!('finish_reason' in choice) && choice.finish_reason == null) {
+          choice.finish_reason = 'stop';
+        }
+        if (kind === 'chat' && choice.message && typeof choice.message === 'object') {
+          if (!choice.message.role) {
+            choice.message.role = 'assistant';
+          }
+        }
+        return choice;
+      });
+
+      return clone;
+    } catch {
+      return body;
+    }
+  }
+
+  /**
+   * Bridge pipeline streaming output to OpenAI-compatible Server-Sent Events (SSE).
+   */
+  private async streamFromPipeline(response: any, requestId: string, res: Response, model?: string) {
+    // Set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('x-request-id', requestId);
+
+    const makeInitial = () => ({
+      id: `chatcmpl-${Date.now()}`,
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model: model || 'unknown',
+      choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: undefined }],
+    });
+
+    try {
+      // Try to obtain async iterator from response
+      let iterator: AsyncIterator<any> | null = null;
+      const streamObj = response && (response.data ?? response);
+      if (streamObj && typeof streamObj[Symbol.asyncIterator] === 'function') {
+        iterator = streamObj[Symbol.asyncIterator]();
+      } else if (streamObj && typeof streamObj.iterator === 'function') {
+        iterator = (streamObj as any).iterator();
+      }
+
+      // Send initial role delta
+      res.write(`data: ${JSON.stringify(makeInitial())}\n\n`);
+
+      const normalizeChunk = (obj: any) => {
+        try {
+          if (!obj || typeof obj !== 'object') return obj;
+          if (!obj.object) obj.object = 'chat.completion.chunk';
+          if (Array.isArray(obj.choices)) {
+            obj.choices = obj.choices.map((ch: any) => {
+              const c = { ...(ch || {}) };
+              if (c && typeof c === 'object' && c.delta && typeof c.delta === 'object') {
+                const d = { ...c.delta } as any;
+                if (d.reasoning_content && !d.content) {
+                  d.content = d.reasoning_content;
+                }
+                if ('reasoning_content' in d) delete d.reasoning_content;
+                c.delta = d;
+              }
+              return c;
+            });
+          }
+          return obj;
+        } catch { return obj; }
+      };
+
+      if (iterator) {
+        // Relay chunks as-is; assume they are OpenAI chunk objects or strings
+        for await (const chunk of iterator as any) {
+          if (chunk == null) continue;
+          if (typeof chunk === 'string') {
+            if (chunk.trim() === '[DONE]') break;
+            // Try to parse JSON string; if fails, wrap into delta
+            try {
+              const obj = normalizeChunk(JSON.parse(chunk));
+              res.write(`data: ${JSON.stringify(obj)}\n\n`);
+            } catch {
+              const delta = {
+                id: `chatcmpl-${Date.now()}`,
+                object: 'chat.completion.chunk',
+                created: Math.floor(Date.now() / 1000),
+                model: model || 'unknown',
+                choices: [{ index: 0, delta: { content: String(chunk) }, finish_reason: undefined }],
+              };
+              res.write(`data: ${JSON.stringify(delta)}\n\n`);
+            }
+          } else {
+            // Object chunk; normalize and send
+            const obj = normalizeChunk(chunk);
+            res.write(`data: ${JSON.stringify(obj)}\n\n`);
+          }
+        }
+      } else {
+        // Fallback: pipeline returned a non-stream payload, emit it as a single streamed chunk
+        let payload = streamObj;
+        try {
+          // Unwrap common shape { data }
+          if (payload && typeof payload === 'object' && (payload as any).data) {
+            payload = (payload as any).data;
+          }
+          // Attempt to normalize to OpenAI chat completion
+          const normalized = this.normalizeOpenAIResponse(payload, 'chat');
+          // Extract content from normalized structure
+          let content = '';
+          if (normalized && Array.isArray(normalized.choices) && normalized.choices[0]) {
+            const c0 = normalized.choices[0] as any;
+            content = c0?.message?.content || c0?.text || '';
+          } else if (typeof normalized === 'string') {
+            content = normalized;
+          } else if (payload && typeof payload === 'object') {
+            // Last resort: stringify payload
+            content = JSON.stringify(payload);
+          }
+          // Coerce JSON if forced/asked
+          const fakeReq = { response_format: (process.env.ROUTECODEX_FORCE_JSON==='1') ? { type: 'json_object' } : undefined } as any;
+          const cleaned = this.ensureJsonContentIfRequested(
+            { choices: [{ index: 0, message: { role: 'assistant', content } }] },
+            fakeReq,
+            'chat'
+          );
+          const outContent = cleaned?.choices?.[0]?.message?.content ?? content;
+          const single = normalizeChunk({
+            id: `chatcmpl-${Date.now()}`,
+            object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000),
+            model: model || 'unknown',
+            choices: [{ index: 0, delta: { content: outContent }, finish_reason: undefined }],
+          });
+          res.write(`data: ${JSON.stringify(single)}\n\n`);
+        } catch {
+          // If anything goes wrong, at least close the stream properly
+        }
+      }
+
+      // Final termination chunk
+      const done = {
+        id: `chatcmpl-${Date.now()}`,
+        object: 'chat.completion.chunk',
+        created: Math.floor(Date.now() / 1000),
+        model: model || 'unknown',
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      };
+      res.write(`data: ${JSON.stringify(done)}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+    } catch (err) {
+      // On error, end stream with a final error message and DONE
+      const errorChunk = {
+        id: `chatcmpl-${Date.now()}`,
+        object: 'chat.completion.chunk',
+        created: Math.floor(Date.now() / 1000),
+        model: model || 'unknown',
+        choices: [{ index: 0, delta: { content: '' }, finish_reason: 'stop' }],
+      };
+      try { res.write(`data: ${JSON.stringify(errorChunk)}\n\n`); } catch {}
+      try { res.write('data: [DONE]\n\n'); } catch {}
+      try { res.end(); } catch {}
+    }
+  }
+
+  /**
+   * If response_format.type === 'json_object', try to coerce model output to strict JSON string.
+   * This helps clients that parse content as JSON and fail on code fences or extra prose.
+   */
+  private ensureJsonContentIfRequested(body: any, request: any, kind: 'chat' | 'text') {
+    try {
+      const expectJson =
+        request?.response_format?.type === 'json_object' ||
+        process.env.ROUTECODEX_FORCE_JSON === '1';
+      if (!expectJson || !body) return body;
+
+      const container = (body && typeof body === 'object' && (body as any).data) ? (body as any).data : body;
+      if (!container || typeof container !== 'object') return body;
+
+      const choices = Array.isArray(container.choices) ? container.choices : [];
+      const clean = (s: string): string => {
+        if (typeof s !== 'string') return s as unknown as string;
+        // Prefer fenced JSON block
+        const fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+        const candidate = fence ? fence[1] : s;
+        // Try parse as-is
+        try {
+          const obj = JSON.parse(candidate);
+          return JSON.stringify(obj);
+        } catch {}
+        // Try extract first JSON object/array substring
+        const matchObj = candidate.match(/\{[\s\S]*\}/);
+        if (matchObj) {
+          try {
+            const obj = JSON.parse(matchObj[0]);
+            return JSON.stringify(obj);
+          } catch {}
+        }
+        const matchArr = candidate.match(/\[[\s\S]*\]/);
+        if (matchArr) {
+          try {
+            const obj = JSON.parse(matchArr[0]);
+            return JSON.stringify(obj);
+          } catch {}
+        }
+        // Fallback: strip common wrappers/backticks
+        return candidate.replace(/^```(?:json)?/i, '').replace(/```$/,'').trim();
+      };
+
+      for (let i = 0; i < choices.length; i++) {
+        const c = choices[i] || {};
+        if (kind === 'chat') {
+          if (c.message && typeof c.message === 'object' && typeof c.message.content === 'string') {
+            c.message.content = clean(c.message.content);
+            if (!c.message.role) c.message.role = 'assistant';
+            // Remove verbose or non-standard fields that may confuse strict clients
+            if ('reasoning_content' in c.message) {
+              try { delete (c.message as any).reasoning_content; } catch {}
+            }
+          }
+        } else {
+          if (typeof c.text === 'string') {
+            c.text = clean(c.text);
+          }
+        }
+        choices[i] = c;
+      }
+
+      container.choices = choices;
+      if ((body as any).data) {
+        (body as any).data = container;
+      } else {
+        body = container;
+      }
+      return body;
+    } catch {
+      return body;
     }
   }
 
@@ -950,7 +1299,7 @@ export class OpenAIRouter extends BaseModule {
         data: {
           requestId,
           duration,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         },
       });
 
@@ -958,7 +1307,7 @@ export class OpenAIRouter extends BaseModule {
       const status = error instanceof RouteCodexError ? error.status : 500;
       res.status(status).json({
         error: {
-          message: error instanceof Error ? error.message : 'Internal Server Error',
+          message: getErrorMessage(error),
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
           code: error instanceof RouteCodexError ? error.code : 'internal_error',
         },
@@ -1011,7 +1360,7 @@ export class OpenAIRouter extends BaseModule {
           requestId,
           duration,
           modelId,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         },
       });
 
@@ -1019,7 +1368,7 @@ export class OpenAIRouter extends BaseModule {
       const status = error instanceof RouteCodexError ? error.status : 500;
       res.status(status).json({
         error: {
-          message: error instanceof Error ? error.message : 'Internal Server Error',
+          message: getErrorMessage(error),
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
           code: error instanceof RouteCodexError ? error.code : 'internal_error',
         },
@@ -1061,7 +1410,7 @@ export class OpenAIRouter extends BaseModule {
       const status = error instanceof RouteCodexError ? error.status : 500;
       res.status(status).json({
         error: {
-          message: error instanceof Error ? error.message : 'Internal Server Error',
+          message: getErrorMessage(error),
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
           code: error instanceof RouteCodexError ? error.code : 'internal_error',
         },
@@ -1103,7 +1452,7 @@ export class OpenAIRouter extends BaseModule {
       const status = error instanceof RouteCodexError ? error.status : 500;
       res.status(status).json({
         error: {
-          message: error instanceof Error ? error.message : 'Internal Server Error',
+          message: getErrorMessage(error),
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
           code: error instanceof RouteCodexError ? error.code : 'internal_error',
         },
@@ -1145,7 +1494,7 @@ export class OpenAIRouter extends BaseModule {
       const status = error instanceof RouteCodexError ? error.status : 500;
       res.status(status).json({
         error: {
-          message: error instanceof Error ? error.message : 'Internal Server Error',
+          message: getErrorMessage(error),
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
           code: error instanceof RouteCodexError ? error.code : 'internal_error',
         },
@@ -1187,7 +1536,7 @@ export class OpenAIRouter extends BaseModule {
       const status = error instanceof RouteCodexError ? error.status : 500;
       res.status(status).json({
         error: {
-          message: error instanceof Error ? error.message : 'Internal Server Error',
+          message: getErrorMessage(error),
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
           code: error instanceof RouteCodexError ? error.code : 'internal_error',
         },
@@ -1229,7 +1578,7 @@ export class OpenAIRouter extends BaseModule {
       const status = error instanceof RouteCodexError ? error.status : 500;
       res.status(status).json({
         error: {
-          message: error instanceof Error ? error.message : 'Internal Server Error',
+          message: getErrorMessage(error),
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
           code: error instanceof RouteCodexError ? error.code : 'internal_error',
         },
@@ -1627,7 +1976,7 @@ export class OpenAIRouter extends BaseModule {
   private async handleError(error: Error, context: string): Promise<void> {
     try {
       // Ensure the error has a proper message property
-      const errorMessage = error.message || String(error) || 'Unknown error';
+      const errorMessage = error.message || getErrorMessage(error) || 'Unknown error';
       const errorContext: ErrorContext = {
         error: errorMessage,
         source: `openai-router.${context}`,
