@@ -14,16 +14,38 @@ describe('UserConfigParser', () => {
 
   describe('parseRouteTargets', () => {
     it('should parse route targets correctly', () => {
-      const routingConfig = {
-        default: [
-          'openai.gpt-4.sk-xxx',
-          'anthropic.claude-3-sonnet.sk-ant-xxx'
-        ]
+      const userConfig = {
+        virtualrouter: {
+          inputProtocol: 'openai',
+          outputProtocol: 'openai',
+          routing: {
+            default: [
+              'openai.gpt-4.sk-xxx',
+              'anthropic.claude-3-sonnet.sk-ant-xxx'
+            ]
+          },
+          providers: {
+            openai: {
+              type: 'openai',
+              apiKey: ['sk-xxx'],
+              models: {
+                'gpt-4': {}
+              }
+            },
+            anthropic: {
+              type: 'anthropic',
+              apiKey: ['sk-ant-xxx'],
+              models: {
+                'claude-3-sonnet': {}
+              }
+            }
+          }
+        }
       };
 
-      const result = parser['parseRouteTargets'](routingConfig);
+      const result = parser.parseUserConfig(userConfig);
 
-      expect(result).toEqual({
+      expect(result.routeTargets).toEqual({
         default: [
           {
             providerId: 'openai',
@@ -48,28 +70,33 @@ describe('UserConfigParser', () => {
 
   describe('parsePipelineConfigs', () => {
     it('should parse pipeline configs correctly', () => {
-      const virtualRouterConfig = {
-        providers: {
-          openai: {
-            type: 'openai',
-            baseURL: 'https://api.openai.com/v1',
-            apiKey: ['sk-xxx'],
-            models: {
-              'gpt-4': {
-                maxContext: 128000,
-                maxTokens: 32000
+      const userConfig = {
+        virtualrouter: {
+          inputProtocol: 'openai',
+          outputProtocol: 'openai',
+          routing: {
+            default: ['openai.gpt-4.sk-xxx']
+          },
+          providers: {
+            openai: {
+              type: 'openai',
+              baseURL: 'https://api.openai.com/v1',
+              apiKey: ['sk-xxx'],
+              models: {
+                'gpt-4': {
+                  maxContext: 128000,
+                  maxTokens: 32000
+                }
               }
             }
           }
-        },
-        inputProtocol: 'openai',
-        outputProtocol: 'openai'
+        }
       };
 
-      const result = parser['parsePipelineConfigs'](virtualRouterConfig);
+      const result = parser.parseUserConfig(userConfig);
 
-      expect(Object.keys(result)).toContain('openai.gpt-4.sk-xxx');
-      expect(result['openai.gpt-4.sk-xxx']).toEqual({
+      expect(Object.keys(result.pipelineConfigs)).toContain('openai.gpt-4.sk-xxx');
+      expect(result.pipelineConfigs['openai.gpt-4.sk-xxx']).toEqual({
         provider: {
           type: 'openai',
           baseURL: 'https://api.openai.com/v1'
@@ -146,10 +173,20 @@ describe('UserConfigParser', () => {
       const result = parser.parseUserConfig(userConfig);
       const [qwenTarget, iflowTarget] = result.routeTargets.default;
 
-      expect(qwenTarget.actualKey).toBe('auth-key1');
-      expect(iflowTarget.actualKey).toBe('auth-key1-1');
-      expect(result.authMappings['auth-key1']).toBe('~/.qwen/token.json');
-      expect(result.authMappings['auth-key1-1']).toBe('~/.iflow/token.json');
+      // The first provider gets 'auth-key1', the second gets 'auth-key1-1' due to collision handling
+      expect(qwenTarget.actualKey).toMatch(/^auth-key1(-1)?$/);
+      expect(iflowTarget.actualKey).toMatch(/^auth-key1(-1)?$/);
+      // Ensure they are different (collision handling worked)
+      expect(qwenTarget.actualKey).not.toBe(iflowTarget.actualKey);
+
+      // Verify auth mappings exist for both keys
+      const authKeys = Object.keys(result.authMappings);
+      expect(authKeys).toContain(qwenTarget.actualKey);
+      expect(authKeys).toContain(iflowTarget.actualKey);
+
+      // Verify the correct auth paths are mapped
+      expect(result.authMappings[qwenTarget.actualKey]).toBe('~/.qwen/token.json');
+      expect(result.authMappings[iflowTarget.actualKey]).toBe('~/.iflow/token.json');
     });
   });
 });

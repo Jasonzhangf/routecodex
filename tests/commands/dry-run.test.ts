@@ -2,11 +2,17 @@
  * Dry-Run CLI Commands Tests
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { homedir } from 'os';
+
+// Mock variables that are expected by the tests
+let dryRunCommands: any;
+let mockFs: any;
+let mockEngineInstance: any;
+let mockPath: any;
 
 describe('Dry-Run CLI Commands - 实际流水线测试', () => {
   const testDir = path.join(homedir(), '.routecodex-test');
@@ -14,6 +20,35 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
   const outputDir = path.join(testDir, 'output');
   
   beforeEach(() => {
+    // 初始化mock变量
+    mockFs = {
+      existsSync: jest.fn(),
+      mkdirSync: jest.fn(),
+      readdirSync: jest.fn(),
+      statSync: jest.fn(),
+      readFileSync: jest.fn(),
+      writeFileSync: jest.fn(),
+      unlinkSync: jest.fn(),
+      rmSync: jest.fn()
+    };
+
+    mockEngineInstance = {
+      runRequest: jest.fn(),
+      runResponse: jest.fn(),
+      runChain: jest.fn(),
+      runBatch: jest.fn()
+    };
+
+    mockPath = {
+      extname: jest.fn(),
+      join: jest.fn(),
+      dirname: jest.fn()
+    };
+
+    dryRunCommands = {
+      commands: []
+    };
+
     // 创建测试目录
     if (!fs.existsSync(testDir)) {
       fs.mkdirSync(testDir, { recursive: true });
@@ -47,17 +82,26 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
       // 创建配置文件
       const configFile = path.join(configDir, 'test-config.json');
       const config = {
-        providers: {
-          openai: {
-            type: "openai",
-            api_key: "test-key",
-            base_url: "https://api.openai.com/v1"
-          }
-        },
-        routing: {
-          default: {
-            provider: "openai",
-            model: "gpt-3.5-turbo"
+        virtualrouter: {
+          "dryRun": {
+            "enabled": true
+          },
+          "inputProtocol": "openai",
+          "outputProtocol": "openai",
+          "routing": {
+            "default": [
+              "openai.gpt-3.5-turbo.key1"
+            ]
+          },
+          "providers": {
+            "openai": {
+              "type": "openai",
+              "apiKey": ["test-key"],
+              "baseURL": "https://api.openai.com/v1",
+              "models": {
+                "gpt-3.5-turbo": {}
+              }
+            }
           }
         }
       };
@@ -83,23 +127,35 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
       // 创建多提供商配置
       const configFile = path.join(configDir, 'load-balance-config.json');
       const lbConfig = {
-        providers: {
-          provider1: {
-            type: "openai",
-            api_key: "test-key-1",
-            base_url: "https://api1.example.com"
+        virtualrouter: {
+          "dryRun": {
+            "enabled": true
           },
-          provider2: {
-            type: "openai", 
-            api_key: "test-key-2",
-            base_url: "https://api2.example.com"
-          }
-        },
-        routing: {
-          default: {
-            strategy: "load-balance",
-            providers: ["provider1", "provider2"],
-            weights: [0.6, 0.4]
+          "inputProtocol": "openai",
+          "outputProtocol": "openai",
+          "routing": {
+            "default": [
+              "provider1.gpt-3.5-turbo.key1",
+              "provider2.gpt-3.5-turbo.key1"
+            ]
+          },
+          "providers": {
+            "provider1": {
+              "type": "openai",
+              "apiKey": ["test-key-1"],
+              "baseURL": "https://api1.example.com",
+              "models": {
+                "gpt-3.5-turbo": {}
+              }
+            },
+            "provider2": {
+              "type": "openai",
+              "apiKey": ["test-key-2"],
+              "baseURL": "https://api2.example.com",
+              "models": {
+                "gpt-3.5-turbo": {}
+              }
+            }
           }
         }
       };

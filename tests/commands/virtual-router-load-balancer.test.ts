@@ -23,56 +23,44 @@ describe('虚拟路由器负载均衡dry-run测试', () => {
     // 创建包含多个提供商的配置
     const configFile = path.join(testDir, 'virtual-router-config.json');
     const config = {
-      "virtualRouter": {
-        "routes": {
-          "default": {
-            "strategy": "load-balance",
-            "providers": ["openai", "anthropic", "gemini"],
-            "weights": [0.5, 0.3, 0.2],
-            "healthCheck": {
-              "enabled": true,
-              "interval": 30000
+      "virtualrouter": {
+        "dryRun": {
+          "enabled": true
+        },
+        "inputProtocol": "openai",
+        "outputProtocol": "openai",
+        "routing": {
+          "default": [
+            "openai.gpt-4.key1",
+            "anthropic.claude-3-sonnet.key1",
+            "gemini.gemini-pro.key1"
+          ]
+        },
+        "providers": {
+          "openai": {
+            "type": "openai",
+            "apiKey": ["test-openai-key"],
+            "baseURL": "https://api.openai.com/v1",
+            "models": {
+              "gpt-4": {},
+              "gpt-3.5-turbo": {}
             }
           },
-          "high-priority": {
-            "strategy": "failover", 
-            "primary": "openai",
-            "backup": "anthropic"
-          }
-        },
-        "loadBalancer": {
-          "algorithm": "weighted-round-robin",
-          "healthAware": true,
-          "circuitBreaker": {
-            "enabled": true,
-            "failureThreshold": 5
-          }
-        }
-      },
-      "providers": {
-        "openai": {
-          "type": "openai",
-          "api_key": "test-openai-key",
-          "base_url": "https://api.openai.com/v1",
-          "models": {
-            "gpt-4": { "enabled": true },
-            "gpt-3.5-turbo": { "enabled": true }
-          }
-        },
-        "anthropic": {
-          "type": "anthropic", 
-          "api_key": "test-anthropic-key",
-          "base_url": "https://api.anthropic.com",
-          "models": {
-            "claude-3-sonnet": { "enabled": true }
-          }
-        },
-        "gemini": {
-          "type": "gemini",
-          "api_key": "test-gemini-key",
-          "base_url": "https://generativelanguage.googleapis.com",
-          "models": {
-            "gemini-pro": { "enabled": true }
+          "anthropic": {
+            "type": "anthropic",
+            "apiKey": ["test-anthropic-key"],
+            "baseURL": "https://api.anthropic.com",
+            "models": {
+              "claude-3-sonnet": {}
+            }
+          },
+          "gemini": {
+            "type": "gemini",
+            "apiKey": ["test-gemini-key"],
+            "baseURL": "https://generativelanguage.googleapis.com",
+            "models": {
+              "gemini-pro": {}
+            }
           }
         }
       }
@@ -127,33 +115,41 @@ describe('虚拟路由器负载均衡dry-run测试', () => {
   it('应该能显示负载均衡的权重分配', () => {
     const configFile = path.join(testDir, 'weighted-config.json');
     const config = {
-      "virtualRouter": {
-        "routes": {
-          "default": {
-            "strategy": "load-balance",
-            "providers": {
-              "provider-a": { "weight": 0.7 },
-              "provider-b": { "weight": 0.2 },
-              "provider-c": { "weight": 0.1 }
+      "virtualrouter": {
+        "dryRun": {
+          "enabled": true
+        },
+        "inputProtocol": "openai",
+        "outputProtocol": "openai",
+        "routing": {
+          "default": [
+            "provider-a.gpt-4.key1",
+            "provider-b.claude-3.key1",
+            "provider-c.gemini-pro.key1"
+          ]
+        },
+        "providers": {
+          "provider-a": {
+            "type": "openai",
+            "apiKey": ["key-a"],
+            "models": {
+              "gpt-4": {}
+            }
+          },
+          "provider-b": {
+            "type": "anthropic",
+            "apiKey": ["key-b"],
+            "models": {
+              "claude-3": {}
+            }
+          },
+          "provider-c": {
+            "type": "gemini",
+            "apiKey": ["key-c"],
+            "models": {
+              "gemini-pro": {}
             }
           }
-        }
-      },
-      "providers": {
-        "provider-a": {
-          "type": "openai",
-          "api_key": "key-a",
-          "models": { "gpt-4": { "enabled": true } }
-        },
-        "provider-b": {
-          "type": "anthropic", 
-          "api_key": "key-b",
-          "models": { "claude-3": { "enabled": true } }
-        },
-        "provider-c": {
-          "type": "gemini",
-          "api_key": "key-c", 
-          "models": { "gemini-pro": { "enabled": true } }
         }
       }
     };

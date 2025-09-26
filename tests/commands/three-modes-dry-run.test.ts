@@ -23,51 +23,41 @@ describe('三种dry-run模式测试', () => {
   const createTestConfig = () => {
     const configFile = path.join(testDir, 'three-modes-config.json');
     const config = {
-      "classificationConfig": {
-        "protocolMapping": {
-          "openai": {
-            "endpoints": ["/v1/chat/completions"],
-            "messageField": "messages",
-            "modelField": "model",
-            "toolsField": "tools",
-            "maxTokensField": "max_tokens"
-          }
+      "virtualrouter": {
+        "dryRun": {
+          "enabled": true
         },
-        "protocolHandlers": {
-          "openai": {
-            "tokenCalculator": {},
-            "toolDetector": {}
-          }
+        "inputProtocol": "openai",
+        "outputProtocol": "openai",
+        "routing": {
+          "default": [
+            "provider-a.gpt-3.5-turbo.key1",
+            "provider-b.claude-3.key1",
+            "provider-c.gemini-pro.key1"
+          ]
         },
-        "modelTiers": {
-          "basic": { "maxTokens": 4096 }
-        },
-        "routingDecisions": {
-          "default": {
-            "criteria": { "modelTier": "basic" },
-            "targets": {
-              "provider-a": { "weight": 0.6 },
-              "provider-b": { "weight": 0.3 },
-              "provider-c": { "weight": 0.1 }
+        "providers": {
+          "provider-a": {
+            "type": "openai",
+            "apiKey": ["test-key-a"],
+            "models": {
+              "gpt-3.5-turbo": {}
+            }
+          },
+          "provider-b": {
+            "type": "anthropic",
+            "apiKey": ["test-key-b"],
+            "models": {
+              "claude-3": {}
+            }
+          },
+          "provider-c": {
+            "type": "gemini",
+            "apiKey": ["test-key-c"],
+            "models": {
+              "gemini-pro": {}
             }
           }
-        }
-      },
-      "providers": {
-        "provider-a": {
-          "type": "openai",
-          "api_key": "test-key-a",
-          "models": { "gpt-3.5-turbo": { "enabled": true } }
-        },
-        "provider-b": {
-          "type": "anthropic",
-          "api_key": "test-key-b",
-          "models": { "claude-3": { "enabled": true } }
-        },
-        "provider-c": {
-          "type": "gemini",
-          "api_key": "test-key-c",
-          "models": { "gemini-pro": { "enabled": true } }
         }
       }
     };

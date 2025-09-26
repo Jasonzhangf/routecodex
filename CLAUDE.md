@@ -384,6 +384,25 @@ RouteCodex系统严格区分**用户基础配置**和**系统扩展配置**，�
 
 RouteCodex includes a simplified logging system designed for users who need basic logging functionality without the complexity of the full debug system.
 
+### 🎯 **重要：用户配置基础功能**
+
+简化日志系统是**用户基础配置**的核心组件，完全独立于系统架构配置：
+
+#### **系统定位**
+- **类型**: 用户个人配置工具
+- **作用域**: 仅影响日志输出行为
+- **独立性**: 与4层管道架构零耦合
+- **目的**: 提供一键式日志管理，无需理解复杂架构
+
+#### **与系统配置的关系**
+```
+用户视角:  routecodex simple-log on --level debug
+              ↓ (完全独立)
+系统视角:  4层管道架构正常运行
+              ↓ (不受用户配置影响)
+部署流程:  高级部署策略照常执行
+```
+
 ### Architecture Overview
 
 The simplified logging system reduces complexity from 788 lines to 150 lines while maintaining essential functionality:
@@ -396,6 +415,13 @@ Original System (788 lines) → Simplified System (150 lines)
 ├── Memory History Management   → Removed
 └── Advanced Analytics          → Basic filtering
 ```
+
+### **独立性声明**
+简化日志系统的设计原则：**用户基础配置 ≠ 系统扩展配置**
+- ✅ **用户配置**: 控制个人日志偏好
+- ✅ **系统配置**: 控制4层管道架构  
+- ✅ **零重叠**: 两套配置控制不同功能域
+- ✅ **互补运行**: 同时启用，互不影响
 
 ### Key Components
 

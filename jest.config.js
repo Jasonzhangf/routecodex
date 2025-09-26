@@ -8,6 +8,7 @@ const config = {
       'ts-jest',
       {
         useESM: true,
+        isolatedModules: true,
         tsconfig: {
           esModuleInterop: true,
           allowSyntheticDefaultImports: true,
@@ -48,6 +49,6 @@ const config = {
     '^rcc-basemodule-adv$': '<rootDir>/node_modules/rcc-basemodule-adv/dist/index.esm.js',
     '^rcc-errorhandling$': '<rootDir>/node_modules/rcc-errorhandling/dist/index.esm.js',
   },
-};
+  };
 
 export default config;
