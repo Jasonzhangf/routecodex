@@ -54,7 +54,7 @@ export class FileWatcher extends EventEmitter {
       interval: options.interval || 1000,
       debounceMs: options.debounceMs || 100,
       persistent: options.persistent ?? true,
-      encoding: options.encoding || 'utf8'
+      encoding: options.encoding || 'utf8',
     };
     this.errorUtils = errorUtils;
   }
@@ -191,7 +191,7 @@ export class FileWatcher extends EventEmitter {
         path: this.path,
         eventType,
         stats,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       this.emit('change', event);
@@ -221,8 +221,8 @@ export class FileWatcher extends EventEmitter {
       await this.errorUtils.handle(error, operation, {
         additionalContext: {
           path: this.path,
-          operation: `file-watcher-${operation}`
-        }
+          operation: `file-watcher-${operation}`,
+        },
       });
     } else {
       this.emit('error', error);

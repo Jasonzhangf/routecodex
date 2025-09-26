@@ -44,7 +44,6 @@
       "enabled": true,
       "config": {
         "moduleType": "http-server",
-        "port": 4004,
         "host": "localhost",
         "cors": {
           "origin": "*",

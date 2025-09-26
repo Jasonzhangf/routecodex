@@ -302,11 +302,7 @@ export interface IRouter {
 /**
  * Middleware types
  */
-export type MiddlewareFunction = (
-  req: any,
-  res: any,
-  next: (err?: any) => void
-) => void;
+export type MiddlewareFunction = (req: any, res: any, next: (err?: any) => void) => void;
 
 export interface MiddlewareConfig {
   name: string;

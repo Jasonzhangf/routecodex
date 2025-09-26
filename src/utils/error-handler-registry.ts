@@ -4,9 +4,38 @@
  * Provides standardized error handling across all modules
  */
 
-const debugcenter = require('rcc-debugcenter');
-const { ErrorHandlingCenter, DebugEventBus } = debugcenter;
-type ErrorContext = any; // Temporary workaround, proper types are available but not importing correctly
+// Import error handling components with proper type handling
+import * as debugcenter from 'rcc-debugcenter';
+
+// Check if ErrorHandlingCenter exists, fallback to mock if not
+const ErrorHandlingCenter =
+  (debugcenter as any).ErrorHandlingCenter ||
+  class {
+    async initialize() {}
+    async handleError() {}
+    async destroy() {}
+  };
+
+// Check if DebugEventBus exists, fallback to mock if not
+const DebugEventBus =
+  (debugcenter as any).DebugEventBus ||
+  class {
+    static getInstance() {
+      return {
+        publish: () => {},
+      };
+    }
+  };
+
+// Define ErrorContext interface locally
+interface ErrorContext {
+  error: any;
+  source: string;
+  severity: string;
+  timestamp: number;
+  module?: string;
+  context: any;
+}
 
 /**
  * Error handler function type
@@ -41,8 +70,8 @@ export interface ErrorHandlerRegistration {
  */
 export class ErrorHandlerRegistry {
   private static instance: ErrorHandlerRegistry;
-  private errorHandlingCenter: ErrorHandlingCenter;
-  private debugEventBus: DebugEventBus;
+  private errorHandlingCenter: any;
+  private debugEventBus: any;
   private messageTemplates: Map<string, ErrorMessageTemplate> = new Map();
   private errorHandlers: Map<string, ErrorHandlerFunction[]> = new Map();
   private initialized: boolean = false;
@@ -86,10 +115,9 @@ export class ErrorHandlerRegistry {
         position: 'middle',
         data: {
           messageTemplateCount: this.messageTemplates.size,
-          handlerCount: this.errorHandlers.size
-        }
+          handlerCount: this.errorHandlers.size,
+        },
       });
-
     } catch (error) {
       console.error('Failed to initialize Error Handler Registry:', error);
       throw error;
@@ -112,8 +140,8 @@ export class ErrorHandlerRegistry {
       data: {
         errorCode: template.code,
         severity: template.severity,
-        category: template.category
-      }
+        category: template.category,
+      },
     });
   }
 
@@ -148,15 +176,20 @@ export class ErrorHandlerRegistry {
       data: {
         errorCode: registration.errorCode,
         priority: registration.priority,
-        description: registration.description
-      }
+        description: registration.description,
+      },
     });
   }
 
   /**
    * Handle error with registered handlers
    */
-  public async handleError(error: Error, context: string, moduleId: string, additionalContext?: Record<string, any>): Promise<void> {
+  public async handleError(
+    error: Error,
+    context: string,
+    moduleId: string,
+    additionalContext?: Record<string, any>
+  ): Promise<void> {
     try {
       // Get error message template
       const template = this.getErrorMessageTemplate(error, context);
@@ -175,8 +208,8 @@ export class ErrorHandlerRegistry {
           errorCode: template.code,
           errorCategory: template.category,
           errorDescription: template.description,
-          recovery: template.recovery
-        }
+          recovery: template.recovery,
+        },
       };
 
       // Use ErrorHandlingCenter for base error handling
@@ -184,7 +217,6 @@ export class ErrorHandlerRegistry {
 
       // Execute registered error handlers
       await this.executeErrorHandlers(template.code, errorContext);
-
     } catch (handlerError) {
       console.error('Failed to handle error:', handlerError);
       console.error('Original error:', error);
@@ -219,7 +251,7 @@ export class ErrorHandlerRegistry {
         severity: 'medium' as const,
         category: 'general',
         description: 'General error occurred',
-        recovery: 'Retry the operation or contact support'
+        recovery: 'Retry the operation or contact support',
       };
     }
 
@@ -263,7 +295,7 @@ export class ErrorHandlerRegistry {
         severity: 'medium',
         category: 'validation',
         description: 'The incoming request failed validation',
-        recovery: 'Check request parameters and format'
+        recovery: 'Check request parameters and format',
       },
       {
         code: 'authentication_error',
@@ -271,7 +303,7 @@ export class ErrorHandlerRegistry {
         severity: 'high',
         category: 'security',
         description: 'Authentication or authorization failed',
-        recovery: 'Check credentials and permissions'
+        recovery: 'Check credentials and permissions',
       },
       {
         code: 'provider_error',
@@ -279,7 +311,7 @@ export class ErrorHandlerRegistry {
         severity: 'medium',
         category: 'provider',
         description: 'AI provider returned an error',
-        recovery: 'Retry with different parameters or provider'
+        recovery: 'Retry with different parameters or provider',
       },
       {
         code: 'network_error',
@@ -287,7 +319,7 @@ export class ErrorHandlerRegistry {
         severity: 'medium',
         category: 'network',
         description: 'Failed to connect to external service',
-        recovery: 'Check network connection and retry'
+        recovery: 'Check network connection and retry',
       },
       {
         code: 'timeout_error',
@@ -295,7 +327,7 @@ export class ErrorHandlerRegistry {
         severity: 'medium',
         category: 'performance',
         description: 'Request exceeded time limit',
-        recovery: 'Increase timeout or optimize request'
+        recovery: 'Increase timeout or optimize request',
       },
       {
         code: 'rate_limit_error',
@@ -303,7 +335,7 @@ export class ErrorHandlerRegistry {
         severity: 'medium',
         category: 'performance',
         description: 'Too many requests in time period',
-        recovery: 'Wait and retry with lower frequency'
+        recovery: 'Wait and retry with lower frequency',
       },
       {
         code: 'configuration_error',
@@ -311,7 +343,7 @@ export class ErrorHandlerRegistry {
         severity: 'high',
         category: 'configuration',
         description: 'Invalid or missing configuration',
-        recovery: 'Check configuration files and environment'
+        recovery: 'Check configuration files and environment',
       },
       {
         code: 'initialization_error',
@@ -319,7 +351,7 @@ export class ErrorHandlerRegistry {
         severity: 'critical',
         category: 'system',
         description: 'Failed to initialize required service',
-        recovery: 'Check logs and restart service'
+        recovery: 'Check logs and restart service',
       },
       {
         code: 'not_implemented_error',
@@ -327,8 +359,8 @@ export class ErrorHandlerRegistry {
         severity: 'low',
         category: 'development',
         description: 'Requested feature is not yet implemented',
-        recovery: 'Use different approach or wait for implementation'
-      }
+        recovery: 'Use different approach or wait for implementation',
+      },
     ];
 
     for (const template of defaultTemplates) {
@@ -347,7 +379,7 @@ export class ErrorHandlerRegistry {
         console.warn(`Validation Error in ${context.source}: ${context.error}`);
       },
       priority: 1,
-      description: 'Log validation errors'
+      description: 'Log validation errors',
     });
 
     // Network error handler
@@ -358,7 +390,7 @@ export class ErrorHandlerRegistry {
         // Could implement automatic retry logic here
       },
       priority: 1,
-      description: 'Handle network connectivity errors'
+      description: 'Handle network connectivity errors',
     });
 
     // Provider error handler
@@ -369,7 +401,7 @@ export class ErrorHandlerRegistry {
         // Could implement provider failover logic here
       },
       priority: 2,
-      description: 'Handle AI provider errors'
+      description: 'Handle AI provider errors',
     });
 
     // Critical error handler
@@ -380,7 +412,7 @@ export class ErrorHandlerRegistry {
         // Could implement service restart logic here
       },
       priority: 0,
-      description: 'Handle critical system errors'
+      description: 'Handle critical system errors',
     });
   }
 
@@ -415,9 +447,8 @@ export class ErrorHandlerRegistry {
         timestamp: Date.now(),
         type: 'end',
         position: 'middle',
-        data: {}
+        data: {},
       });
-
     } catch (error) {
       console.error('Failed to destroy Error Handler Registry:', error);
     }

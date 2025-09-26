@@ -24,7 +24,7 @@ const logger = {
   success: (msg: string) => console.log(`${chalk.green('✓')} ${msg}`),
   warning: (msg: string) => console.log(`${chalk.yellow('⚠')} ${msg}`),
   error: (msg: string) => console.log(`${chalk.red('✗')} ${msg}`),
-  debug: (msg: string) => console.log(`${chalk.gray('◉')} ${msg}`)
+  debug: (msg: string) => console.log(`${chalk.gray('◉')} ${msg}`),
 };
 
 // File format utilities
@@ -84,8 +84,8 @@ const DEFAULT_OFFLINE_CONFIG: OfflineLogConfig = {
     captureRequests: true,
     captureResponses: true,
     captureErrors: true,
-    capturePerformance: true
-  }
+    capturePerformance: true,
+  },
 };
 
 function getConfigPath(): string {
@@ -116,7 +116,9 @@ export function createOfflineLogCommand(): Command {
   const offlineLog = new Command('offline-log')
     .alias('olog')
     .description('Configure and manage offline log capture for modules and pipeline')
-    .addHelpText('after', `
+    .addHelpText(
+      'after',
+      `
 Examples:
   # Enable offline logging for all modules
   routecodex offline-log enable --all-modules
@@ -141,7 +143,8 @@ Examples:
   
   # Reset to defaults
   routecodex offline-log config reset
-`);
+`
+    );
 
   // Enable/disable offline logging
   offlineLog
@@ -154,9 +157,9 @@ Examples:
     .option('--max-size <size>', 'Max file size in MB', '50')
     .option('--max-files <files>', 'Max number of log files', '10')
     .option('--compression', 'Enable compression')
-    .action(async (options) => {
+    .action(async options => {
       const spinner = ora('Enabling offline logging...').start();
-      
+
       try {
         const config = loadConfig();
         config.enabled = true;
@@ -165,31 +168,32 @@ Examples:
         config.maxFileSize = parseInt(options.maxSize) * 1024 * 1024;
         config.maxFiles = parseInt(options.maxFiles);
         config.enableCompression = options.compression || false;
-        
+
         if (options.allModules) {
-          config.modules = { '*': { 
-            enabled: true, 
-            logLevel: config.logLevel,
-            includePerformance: true,
-            includeStackTraces: false,
-            sensitiveFields: []
-          }};
+          config.modules = {
+            '*': {
+              enabled: true,
+              logLevel: config.logLevel,
+              includePerformance: true,
+              includeStackTraces: false,
+              sensitiveFields: [],
+            },
+          };
         }
-        
+
         if (options.pipeline) {
           config.pipeline.enabled = true;
           config.pipeline.logLevel = config.logLevel;
         }
-        
+
         ensureDirectoryExists(config.logDirectory);
         saveConfig(config);
-        
+
         spinner.succeed('Offline logging enabled successfully');
         logger.info(`Log directory: ${config.logDirectory}`);
         logger.info(`Log level: ${config.logLevel}`);
         logger.info(`Max file size: ${options.maxSize}MB`);
         logger.info(`Max files: ${options.maxFiles}`);
-        
       } catch (error) {
         spinner.fail('Failed to enable offline logging');
         logger.error(error instanceof Error ? error.message : String(error));
@@ -203,14 +207,13 @@ Examples:
     .description('Disable offline logging')
     .action(async () => {
       const spinner = ora('Disabling offline logging...').start();
-      
+
       try {
         const config = loadConfig();
         config.enabled = false;
         saveConfig(config);
-        
+
         spinner.succeed('Offline logging disabled successfully');
-        
       } catch (error) {
         spinner.fail('Failed to disable offline logging');
         logger.error(error instanceof Error ? error.message : String(error));
@@ -229,41 +232,50 @@ Examples:
     .option('--performance', 'Include performance metrics')
     .option('--stack-traces', 'Include stack traces')
     .option('--sensitive <fields>', 'Sensitive fields to redact (comma-separated)')
-    .action(async (options) => {
+    .action(async options => {
       const spinner = ora(`Configuring module ${options.name}...`).start();
-      
+
       try {
         const config = loadConfig();
-        
+
         if (!config.modules[options.name]) {
           config.modules[options.name] = {
             enabled: false,
             logLevel: 'normal',
             includePerformance: false,
             includeStackTraces: false,
-            sensitiveFields: []
+            sensitiveFields: [],
           };
         }
-        
+
         const moduleConfig = config.modules[options.name];
-        
-        if (options.enable) {moduleConfig.enabled = true;}
-        if (options.disable) {moduleConfig.enabled = false;}
-        if (options.level) {moduleConfig.logLevel = options.level as any;}
-        if (options.performance) {moduleConfig.includePerformance = true;}
-        if (options.stackTraces) {moduleConfig.includeStackTraces = true;}
+
+        if (options.enable) {
+          moduleConfig.enabled = true;
+        }
+        if (options.disable) {
+          moduleConfig.enabled = false;
+        }
+        if (options.level) {
+          moduleConfig.logLevel = options.level as any;
+        }
+        if (options.performance) {
+          moduleConfig.includePerformance = true;
+        }
+        if (options.stackTraces) {
+          moduleConfig.includeStackTraces = true;
+        }
         if (options.sensitive) {
           moduleConfig.sensitiveFields = options.sensitive.split(',').map((s: string) => s.trim());
         }
-        
+
         saveConfig(config);
-        
+
         spinner.succeed(`Module ${options.name} configured successfully`);
         logger.info(`Enabled: ${moduleConfig.enabled}`);
         logger.info(`Log level: ${moduleConfig.logLevel}`);
         logger.info(`Performance: ${moduleConfig.includePerformance}`);
         logger.info(`Stack traces: ${moduleConfig.includeStackTraces}`);
-        
       } catch (error) {
         spinner.fail(`Failed to configure module ${options.name}`);
         logger.error(error instanceof Error ? error.message : String(error));
@@ -286,16 +298,22 @@ Examples:
     .option('--no-capture-errors', 'Do not capture error data')
     .option('--capture-performance', 'Capture performance metrics')
     .option('--no-capture-performance', 'Do not capture performance metrics')
-    .action(async (options) => {
+    .action(async options => {
       const spinner = ora('Configuring pipeline logging...').start();
-      
+
       try {
         const config = loadConfig();
-        
-        if (options.enable) {config.pipeline.enabled = true;}
-        if (options.disable) {config.pipeline.enabled = false;}
-        if (options.level) {config.pipeline.logLevel = options.level as any;}
-        
+
+        if (options.enable) {
+          config.pipeline.enabled = true;
+        }
+        if (options.disable) {
+          config.pipeline.enabled = false;
+        }
+        if (options.level) {
+          config.pipeline.logLevel = options.level as any;
+        }
+
         // Handle capture options
         if (options.captureRequests !== undefined) {
           config.pipeline.captureRequests = options.captureRequests;
@@ -309,9 +327,9 @@ Examples:
         if (options.capturePerformance !== undefined) {
           config.pipeline.capturePerformance = options.capturePerformance;
         }
-        
+
         saveConfig(config);
-        
+
         spinner.succeed('Pipeline logging configured successfully');
         logger.info(`Enabled: ${config.pipeline.enabled}`);
         logger.info(`Log level: ${config.pipeline.logLevel}`);
@@ -319,7 +337,6 @@ Examples:
         logger.info(`Capture responses: ${config.pipeline.captureResponses}`);
         logger.info(`Capture errors: ${config.pipeline.captureErrors}`);
         logger.info(`Capture performance: ${config.pipeline.capturePerformance}`);
-        
       } catch (error) {
         spinner.fail('Failed to configure pipeline logging');
         logger.error(error instanceof Error ? error.message : String(error));
@@ -338,47 +355,52 @@ Examples:
     .option('--start <date>', 'Start date (ISO format)')
     .option('--end <date>', 'End date (ISO format)')
     .option('--level <level>', 'Minimum log level to include')
-    .action(async (options) => {
+    .action(async options => {
       const spinner = ora('Analyzing logs...').start();
-      
+
       try {
         const logDir = resolvePath(options.directory);
-        
+
         if (!fs.existsSync(logDir)) {
           throw new Error(`Log directory not found: ${logDir}`);
         }
-        
+
         // 扫描日志文件
         const scanner = new LogFileScanner({
           scanDirectory: logDir,
-          moduleIds: options.modules ? options.modules.split(',').map((s: string) => s.trim()) : undefined,
-          timeRange: options.start && options.end ? {
-            start: new Date(options.start).getTime(),
-            end: new Date(options.end).getTime()
-          } : undefined,
-          includeCompressed: true
+          moduleIds: options.modules
+            ? options.modules.split(',').map((s: string) => s.trim())
+            : undefined,
+          timeRange:
+            options.start && options.end
+              ? {
+                  start: new Date(options.start).getTime(),
+                  end: new Date(options.end).getTime(),
+                }
+              : undefined,
+          includeCompressed: true,
         });
         const scanResult = await scanner.scan();
-        
+
         spinner.text = `Found ${scanResult.totalFiles} log files, parsing...`;
-        
+
         // 解析日志文件
         const parser = new JsonlLogParser();
         const allEntries = [];
-        
+
         for (const fileInfo of scanResult.files) {
           const entries = await parser.parseFile(fileInfo.filePath);
           allEntries.push(...entries);
         }
-        
+
         spinner.text = `Parsed ${allEntries.length} entries, analyzing...`;
-        
+
         // 分析数据
         const analysis = analyzeLogEntries(allEntries, options);
-        
+
         // 输出结果
         const outputFile = options.output || `./analysis-${Date.now()}.${options.format}`;
-        
+
         switch (options.format) {
           case 'json':
             fs.writeFileSync(outputFile, JSON.stringify(analysis, null, 2));
@@ -390,12 +412,11 @@ Examples:
             await generateCSVReport(analysis, outputFile);
             break;
         }
-        
+
         spinner.succeed(`Analysis completed, results saved to: ${outputFile}`);
         logger.info(`Total entries analyzed: ${analysis.totalEntries}`);
         logger.info(`Module count: ${Object.keys(analysis.moduleStats).length}`);
         logger.info(`Error count: ${analysis.errorStats.total}`);
-        
       } catch (error) {
         spinner.fail('Failed to analyze logs');
         logger.error(error instanceof Error ? error.message : String(error));
@@ -413,32 +434,37 @@ Examples:
     .option('--end <date>', 'End date (ISO format)')
     .option('--bucket <size>', 'Time bucket size in minutes', '5')
     .option('--modules <modules>', 'Specific modules to analyze (comma-separated)')
-    .action(async (options) => {
+    .action(async options => {
       const spinner = ora('Performing time series analysis...').start();
-      
+
       try {
         const logDir = resolvePath(options.directory);
         const bucketSize = parseInt(options.bucket) * 60000; // Convert to milliseconds
-        
+
         // 扫描日志文件
         const scanner = new LogFileScanner({
           scanDirectory: logDir,
-          moduleIds: options.modules ? options.modules.split(',').map((s: string) => s.trim()) : undefined,
-          timeRange: options.start && options.end ? {
-            start: new Date(options.start).getTime(),
-            end: new Date(options.end).getTime()
-          } : undefined,
-          includeCompressed: true
+          moduleIds: options.modules
+            ? options.modules.split(',').map((s: string) => s.trim())
+            : undefined,
+          timeRange:
+            options.start && options.end
+              ? {
+                  start: new Date(options.start).getTime(),
+                  end: new Date(options.end).getTime(),
+                }
+              : undefined,
+          includeCompressed: true,
         });
         const scanResult = await scanner.scan();
-        
+
         // 创建时间序列索引
         const indexer = new TimeSeriesIndexEngine({
           name: 'offline-analysis',
           shardInterval: bucketSize,
-          enableCompression: true
+          enableCompression: true,
         });
-        
+
         spinner.text = 'Indexing log files...';
         // 读取日志文件并添加到索引
         const allLogs: any[] = [];
@@ -448,21 +474,26 @@ Examples:
           allLogs.push(...entries);
         }
         await indexer.index(allLogs);
-        
+
         // 查询数据
         const query = {
-          timeRange: options.start && options.end ? {
-            start: new Date(options.start).getTime(),
-            end: new Date(options.end).getTime()
-          } : undefined,
+          timeRange:
+            options.start && options.end
+              ? {
+                  start: new Date(options.start).getTime(),
+                  end: new Date(options.end).getTime(),
+                }
+              : undefined,
           filters: {
-            moduleIds: options.modules ? options.modules.split(',').map((s: string) => s.trim()) : undefined
-          }
+            moduleIds: options.modules
+              ? options.modules.split(',').map((s: string) => s.trim())
+              : undefined,
+          },
         };
-        
+
         spinner.text = 'Querying time series data...';
         const results = await indexer.query(query);
-        
+
         // 生成时间序列数据 - 适配不同的返回格式
         let logEntries: any[] = [];
         if (Array.isArray(results)) {
@@ -474,28 +505,29 @@ Examples:
           logEntries = Object.values(results).flat() as any[];
         }
         const timeSeriesData = generateTimeSeriesData(logEntries, bucketSize);
-        
+
         const analysis = {
           metadata: {
             startDate: options.start,
             endDate: options.end,
             bucketSize: parseInt(options.bucket),
             totalBuckets: timeSeriesData.length,
-            modules: options.modules ? options.modules.split(',') : 'all'
+            modules: options.modules ? options.modules.split(',') : 'all',
           },
           timeSeries: timeSeriesData,
-          summary: generateTimeSeriesSummary(timeSeriesData)
+          summary: generateTimeSeriesSummary(timeSeriesData),
         };
-        
+
         // 输出结果
         const outputFile = options.output || `./timeseries-${Date.now()}.json`;
         fs.writeFileSync(outputFile, JSON.stringify(analysis, null, 2));
-        
+
         spinner.succeed(`Time series analysis completed, results saved to: ${outputFile}`);
         logger.info(`Total time buckets: ${timeSeriesData.length}`);
-        logger.info(`Peak activity: ${analysis.summary.peakActivity.bucket} (${analysis.summary.peakActivity.count} events)`);
+        logger.info(
+          `Peak activity: ${analysis.summary.peakActivity.bucket} (${analysis.summary.peakActivity.count} events)`
+        );
         logger.info(`Average activity: ${analysis.summary.avgActivity.toFixed(2)} events/bucket`);
-        
       } catch (error) {
         spinner.fail('Failed to perform time series analysis');
         logger.error(error instanceof Error ? error.message : String(error));
@@ -510,16 +542,16 @@ Examples:
     .action(async () => {
       try {
         const config = loadConfig();
-        
+
         console.log(chalk.cyan('\nOffline Logging Configuration:'));
-        console.log('=' .repeat(50));
+        console.log('='.repeat(50));
         console.log(`Enabled: ${config.enabled ? chalk.green('Yes') : chalk.red('No')}`);
         console.log(`Log Directory: ${config.logDirectory}`);
         console.log(`Log Level: ${config.logLevel}`);
         console.log(`Max File Size: ${(config.maxFileSize / 1024 / 1024).toFixed(0)}MB`);
         console.log(`Max Files: ${config.maxFiles}`);
         console.log(`Compression: ${config.enableCompression ? 'Enabled' : 'Disabled'}`);
-        
+
         if (config.pipeline.enabled) {
           console.log(chalk.cyan('\nPipeline Logging:'));
           console.log(`  Enabled: ${chalk.green('Yes')}`);
@@ -527,14 +559,18 @@ Examples:
           console.log(`  Capture Requests: ${config.pipeline.captureRequests ? 'Yes' : 'No'}`);
           console.log(`  Capture Responses: ${config.pipeline.captureResponses ? 'Yes' : 'No'}`);
           console.log(`  Capture Errors: ${config.pipeline.captureErrors ? 'Yes' : 'No'}`);
-          console.log(`  Capture Performance: ${config.pipeline.capturePerformance ? 'Yes' : 'No'}`);
+          console.log(
+            `  Capture Performance: ${config.pipeline.capturePerformance ? 'Yes' : 'No'}`
+          );
         }
-        
+
         if (Object.keys(config.modules).length > 0) {
           console.log(chalk.cyan('\nModule Logging:'));
           for (const [moduleName, moduleConfig] of Object.entries(config.modules)) {
             console.log(`\n  ${moduleName}:`);
-            console.log(`    Enabled: ${moduleConfig.enabled ? chalk.green('Yes') : chalk.red('No')}`);
+            console.log(
+              `    Enabled: ${moduleConfig.enabled ? chalk.green('Yes') : chalk.red('No')}`
+            );
             console.log(`    Log Level: ${moduleConfig.logLevel}`);
             console.log(`    Performance: ${moduleConfig.includePerformance ? 'Yes' : 'No'}`);
             console.log(`    Stack Traces: ${moduleConfig.includeStackTraces ? 'Yes' : 'No'}`);
@@ -543,9 +579,10 @@ Examples:
             }
           }
         }
-        
       } catch (error) {
-        logger.error(`Failed to list configuration: ${  error instanceof Error ? error.message : String(error)}`);
+        logger.error(
+          `Failed to list configuration: ${error instanceof Error ? error.message : String(error)}`
+        );
         process.exit(1);
       }
     });
@@ -564,7 +601,9 @@ Examples:
         console.log(chalk.cyan('Current Configuration:'));
         console.log(JSON.stringify(config, null, 2));
       } catch (error) {
-        logger.error(`Failed to show configuration: ${  error instanceof Error ? error.message : String(error)}`);
+        logger.error(
+          `Failed to show configuration: ${error instanceof Error ? error.message : String(error)}`
+        );
         process.exit(1);
       }
     });
@@ -574,7 +613,7 @@ Examples:
     .description('Reset configuration to defaults')
     .action(async () => {
       const spinner = ora('Resetting configuration...').start();
-      
+
       try {
         saveConfig({ ...DEFAULT_OFFLINE_CONFIG });
         spinner.succeed('Configuration reset to defaults');
@@ -591,7 +630,10 @@ Examples:
 // Type definitions
 interface LogAnalysisResult {
   totalEntries: number;
-  moduleStats: Record<string, { count: number; errors: number; avgDuration: number; durations: number[] }>;
+  moduleStats: Record<
+    string,
+    { count: number; errors: number; avgDuration: number; durations: number[] }
+  >;
   errorStats: { total: number; byType: Record<string, number> };
   levelStats: Record<string, number>;
   timeRange: { start: number; end: number };
@@ -607,10 +649,13 @@ interface UnifiedLogEntry {
 
 // Helper functions
 function analyzeLogEntries(entries: any[], _options: any) {
-  const moduleStats: Record<string, { count: number; errors: number; avgDuration: number; durations: number[] }> = {};
+  const moduleStats: Record<
+    string,
+    { count: number; errors: number; avgDuration: number; durations: number[] }
+  > = {};
   const errorStats = { total: 0, byType: {} as Record<string, number> };
   const levelStats = {} as Record<string, number>;
-  
+
   entries.forEach((entry: any) => {
     // 模块统计
     const moduleId = entry.moduleId || entry.context?.moduleId || 'unknown';
@@ -618,34 +663,35 @@ function analyzeLogEntries(entries: any[], _options: any) {
       moduleStats[moduleId] = { count: 0, errors: 0, avgDuration: 0, durations: [] };
     }
     moduleStats[moduleId].count++;
-    
+
     // 级别统计
     const level = entry.level || entry.logLevel || 'info';
     levelStats[level] = (levelStats[level] || 0) + 1;
-    
+
     // 错误统计
     if (level === 'error' || entry.level === 'ERROR') {
       errorStats.total++;
       moduleStats[moduleId].errors++;
-      
+
       const errorType = entry.data?.errorType || entry.data?.type || 'unknown';
       errorStats.byType[errorType] = (errorStats.byType[errorType] || 0) + 1;
     }
-    
+
     // 性能统计
     const duration = entry.data?.duration || entry.data?.processingTime || entry.metrics?.duration;
     if (duration && typeof duration === 'number') {
       moduleStats[moduleId].durations.push(duration);
     }
   });
-  
+
   Object.values(moduleStats).forEach((stats: { durations: number[]; avgDuration: number }) => {
-      if (stats.durations.length > 0) {
-        stats.avgDuration = stats.durations.reduce((a: number, b: number) => a + b, 0) / stats.durations.length;
-        (stats as any).durations = undefined; // 清理临时数据
-      }
-    });
-  
+    if (stats.durations.length > 0) {
+      stats.avgDuration =
+        stats.durations.reduce((a: number, b: number) => a + b, 0) / stats.durations.length;
+      (stats as any).durations = undefined; // 清理临时数据
+    }
+  });
+
   return {
     totalEntries: entries.length,
     moduleStats,
@@ -653,8 +699,8 @@ function analyzeLogEntries(entries: any[], _options: any) {
     levelStats,
     timeRange: {
       start: Math.min(...entries.map((e: any) => e.timestamp || e.time || Date.now())),
-      end: Math.max(...entries.map((e: any) => e.timestamp || e.time || Date.now()))
-    }
+      end: Math.max(...entries.map((e: any) => e.timestamp || e.time || Date.now())),
+    },
   };
 }
 
@@ -718,7 +764,9 @@ async function generateHTMLReport(analysis: LogAnalysisResult, outputFile: strin
         
         <div class="module-list">
             <h3>Module Statistics</h3>
-            ${Object.entries(analysis.moduleStats).map(([module, stats]: [string, any]) => `
+            ${Object.entries(analysis.moduleStats)
+              .map(
+                ([module, stats]: [string, any]) => `
                 <div class="module-item">
                     <div>
                         <strong>${module}</strong>
@@ -731,7 +779,9 @@ async function generateHTMLReport(analysis: LogAnalysisResult, outputFile: strin
                         ${stats.errors > 0 ? '⚠️ Has Errors' : '✅ OK'}
                     </div>
                 </div>
-            `).join('')}
+            `
+              )
+              .join('')}
         </div>
     </div>
     
@@ -792,24 +842,28 @@ async function generateHTMLReport(analysis: LogAnalysisResult, outputFile: strin
     </script>
 </body>
 </html>`;
-  
+
   fs.writeFileSync(outputFile, html);
 }
 
 async function generateCSVReport(analysis: LogAnalysisResult, outputFile: string): Promise<void> {
   const csv = [
     'Module,Total Entries,Errors,Error Rate,Avg Duration (ms)',
-    ...Object.entries(analysis.moduleStats).map(([module, stats]: [string, any]) =>
-      `${module},${(stats as any).count},${(stats as any).errors},${(((stats as any).errors / (stats as any).count) * 100).toFixed(2)}%,${(stats as any).avgDuration.toFixed(2)}`
-    )
+    ...Object.entries(analysis.moduleStats).map(
+      ([module, stats]: [string, any]) =>
+        `${module},${(stats as any).count},${(stats as any).errors},${(((stats as any).errors / (stats as any).count) * 100).toFixed(2)}%,${(stats as any).avgDuration.toFixed(2)}`
+    ),
   ].join('\n');
-  
+
   fs.writeFileSync(outputFile, csv);
 }
 
 function generateTimeSeriesData(results: UnifiedLogEntry[], bucketSize: number): any[] {
-  const timeBuckets: Record<number, { timestamp: number; count: number; errors: number; avgDuration: number; durations: number[] }> = {};
-  
+  const timeBuckets: Record<
+    number,
+    { timestamp: number; count: number; errors: number; avgDuration: number; durations: number[] }
+  > = {};
+
   results.forEach(result => {
     const bucketTime = Math.floor(result.timestamp / bucketSize) * bucketSize;
     if (!timeBuckets[bucketTime]) {
@@ -818,29 +872,30 @@ function generateTimeSeriesData(results: UnifiedLogEntry[], bucketSize: number):
         count: 0,
         errors: 0,
         avgDuration: 0,
-        durations: []
+        durations: [],
       };
     }
-    
+
     timeBuckets[bucketTime].count++;
-    
+
     if (result.level === 'error') {
       timeBuckets[bucketTime].errors++;
     }
-    
+
     if (result.data?.duration) {
       timeBuckets[bucketTime].durations.push(result.data.duration);
     }
   });
-  
+
   // 计算平均持续时间
   Object.values(timeBuckets).forEach((bucket: any) => {
     if (bucket.durations.length > 0) {
-      bucket.avgDuration = bucket.durations.reduce((a: number, b: number) => a + b, 0) / bucket.durations.length;
+      bucket.avgDuration =
+        bucket.durations.reduce((a: number, b: number) => a + b, 0) / bucket.durations.length;
       (bucket as any).durations = undefined;
     }
   });
-  
+
   return Object.values(timeBuckets).sort((a, b) => a.timestamp - b.timestamp);
 }
 
@@ -848,15 +903,16 @@ function generateTimeSeriesSummary(timeSeriesData: any[]): any {
   if (timeSeriesData.length === 0) {
     return { peakActivity: { bucket: 0, count: 0 }, avgActivity: 0 };
   }
-  
-  const peakActivity = timeSeriesData.reduce((peak, current) => 
+
+  const peakActivity = timeSeriesData.reduce((peak, current) =>
     current.count > peak.count ? current : peak
   );
-  
-  const avgActivity = timeSeriesData.reduce((sum, current) => sum + current.count, 0) / timeSeriesData.length;
-  
+
+  const avgActivity =
+    timeSeriesData.reduce((sum, current) => sum + current.count, 0) / timeSeriesData.length;
+
   return {
     peakActivity: { bucket: peakActivity.timestamp, count: peakActivity.count },
-    avgActivity: avgActivity
+    avgActivity: avgActivity,
   };
 }

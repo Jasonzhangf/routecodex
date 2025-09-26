@@ -1,0 +1,15 @@
+{
+  "sessionId": "session_1758817056979",
+  "pipelineId": "unknown",
+  "startTime": 1758817056979,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "debug_enhancements_initialized",
+      "moduleId": "virtual-router-unimplemented",
+      "position": "middle",
+      "startTime": 1758817056979,
+      "status": "running"
+    }
+  ]
+}

@@ -371,6 +371,82 @@ const result = await provider.processIncoming(
 );
 ```
 
+### Configuration
+
+- Set config path via env var:
+  - `ROUTECODEX_CONFIG=~/.routecodex/config/modelscope.json npm start`
+- If not set, default path is `~/.routecodex/config.json`
+- HTTP port must come from user config (not modules.json):
+  - In `~/.routecodex/config.json`, set:
+    ```json
+    {
+      "httpserver": { "port": 5506, "host": "localhost" }
+    }
+    ```
+  - Alternatively under modules layout:
+    ```json
+    {
+      "modules": {
+        "httpserver": { "config": { "port": 5506, "host": "localhost" } }
+      }
+    }
+    ```
+  - If no port is provided, the server will fail to start with an explicit error.
+- Merged config output: `config/merged-config.<port>.json`
+
+### Helper Scripts
+
+- `test-config.sh`
+  - Starts server with `ROUTECODEX_CONFIG=~/.routecodex/config/modelscope.json`
+  - Captures output to `server-output.log` and checks pipeline logs
+- `graceful-port-handler.sh <port> [timeout]`
+  - Frees port gracefully, then launches server with `ROUTECODEX_CONFIG` set to the config file path
+  - Example: `./graceful-port-handler.sh 5506 10`
+  - Note: The HTTP port is determined by your user config. The script argument is only for freeing the port.
+
+### 🔧 Simplified Logging System
+
+RouteCodex now includes a simplified logging system that provides easy-to-use logging configuration without the complexity of the full debug system.
+
+#### Quick Start
+```bash
+# Enable simplified logging
+routecodex simple-log on --level debug --output console
+
+# Check current status
+routecodex simple-log status
+
+# Change log level
+routecodex simple-log level error
+
+# Set output to file
+routecodex simple-log output file
+
+# Disable simplified logging
+routecodex simple-log off
+```
+
+#### Features
+- **One-click enable/disable**: Simple commands to control logging
+- **Multiple log levels**: debug, info, warn, error
+- **Flexible output**: console, file, or both
+- **Persistent configuration**: Settings survive restarts
+- **Automatic application**: Config automatically applied when server starts
+
+#### Configuration File
+Settings are stored in `~/.routecodex/simple-log-config.json` and automatically loaded on server startup.
+
+#### Benefits
+- **Reduced complexity**: 788-line complex indexer → 150-line simplified version
+- **No memory overhead**: Removed history management and compression
+- **Always-on capability**: Once enabled, stays active until explicitly disabled
+- **Zero configuration**: Works out of the box with sensible defaults
+
+### Pipeline Scope
+
+- Current pipeline is simplified to LLM Switch + Compatibility layers.
+- Pass-through mode has been removed; requests require a configured pipeline.
+
 ### Tool Calling Example
 
 ```javascript

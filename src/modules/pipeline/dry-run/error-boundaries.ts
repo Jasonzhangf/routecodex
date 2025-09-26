@@ -704,11 +704,7 @@ export class ErrorBoundary {
       }
 
       if (fallback && this.config.enableGracefulDegradation) {
-        try {
-          return await fallback();
-        } catch (fallbackError) {
-          throw fallbackError;
-        }
+        return await fallback();
       }
 
       throw error;

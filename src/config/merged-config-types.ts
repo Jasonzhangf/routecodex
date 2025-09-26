@@ -154,16 +154,22 @@ export interface UserConfig {
   virtualrouter: {
     inputProtocol: 'openai' | 'anthropic';
     outputProtocol: 'openai' | 'anthropic';
-    providers: Record<string, {
-      type: string;
-      baseURL: string;
-      apiKey: string[];
-      auth?: Record<string, string>;
-      models: Record<string, {
-        maxContext?: number;
-        maxTokens?: number;
-      }>;
-    }>;
+    providers: Record<
+      string,
+      {
+        type: string;
+        baseURL: string;
+        apiKey: string[];
+        auth?: Record<string, string>;
+        models: Record<
+          string,
+          {
+            maxContext?: number;
+            maxTokens?: number;
+          }
+        >;
+      }
+    >;
     routing: Record<string, string[]>;
   };
   httpserver?: {

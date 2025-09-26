@@ -9,7 +9,7 @@ import type {
   DebugUtils,
   SanitizeOptions,
   FormatOptions,
-  PerformanceMarker
+  PerformanceMarker,
 } from '../types/debug-types.js';
 
 /**
@@ -28,7 +28,7 @@ export class DebugUtilsImpl implements DebugUtils {
     'authorization',
     'cookie',
     'session',
-    'jwt'
+    'jwt',
   ];
 
   /**
@@ -40,7 +40,7 @@ export class DebugUtilsImpl implements DebugUtils {
       maxDepth: 5,
       maxStringLength: 1000,
       maxArrayLength: 50,
-      ...options
+      ...options,
     };
 
     return this.doSanitizeData(data, opts, 0);
@@ -53,7 +53,7 @@ export class DebugUtilsImpl implements DebugUtils {
     const opts: FormatOptions = {
       format: 'json',
       indent: 2,
-      ...options
+      ...options,
     };
 
     switch (opts.format) {
@@ -209,7 +209,7 @@ export class DebugUtilsImpl implements DebugUtils {
       return {
         name: data.name,
         message: data.message,
-        stack: data.stack
+        stack: data.stack,
       };
     }
 
@@ -220,9 +220,9 @@ export class DebugUtilsImpl implements DebugUtils {
           type: 'array',
           length: data.length,
           truncated: true,
-          data: data.slice(0, options.maxArrayLength).map(item =>
-            this.doSanitizeData(item, options, depth + 1)
-          )
+          data: data
+            .slice(0, options.maxArrayLength)
+            .map(item => this.doSanitizeData(item, options, depth + 1)),
         };
       }
 
@@ -259,9 +259,7 @@ export class DebugUtilsImpl implements DebugUtils {
    */
   private isSensitiveField(fieldName: string, sensitiveFields: string[]): boolean {
     const normalizedName = fieldName.toLowerCase();
-    return sensitiveFields.some(field =>
-      normalizedName.includes(field.toLowerCase())
-    );
+    return sensitiveFields.some(field => normalizedName.includes(field.toLowerCase()));
   }
 
   /**
@@ -416,14 +414,14 @@ export class DebugUtilsStatic {
         message: error.message,
         stack: error.stack,
         name: error.name,
-        code: (error as any).code
+        code: (error as any).code,
       };
     }
 
     if (typeof error === 'string') {
       return {
         message: error,
-        name: 'StringError'
+        name: 'StringError',
       };
     }
 
@@ -432,13 +430,13 @@ export class DebugUtilsStatic {
         message: error.message || String(error),
         stack: error.stack,
         name: error.name || 'ObjectError',
-        code: error.code
+        code: error.code,
       };
     }
 
     return {
       message: String(error),
-      name: 'UnknownError'
+      name: 'UnknownError',
     };
   }
 
@@ -456,7 +454,9 @@ export class DebugUtilsStatic {
    * Format bytes to human readable format
    */
   static formatBytes(bytes: number, decimals: number = 2): string {
-    if (bytes === 0) {return '0 Bytes';}
+    if (bytes === 0) {
+      return '0 Bytes';
+    }
 
     const k = 1024;
     const dm = decimals < 0 ? 0 : decimals;
@@ -464,7 +464,7 @@ export class DebugUtilsStatic {
 
     const i = Math.floor(Math.log(bytes) / Math.log(k));
 
-    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))  } ${  sizes[i]}`;
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
   }
 
   /**
@@ -503,7 +503,7 @@ export class DebugUtilsStatic {
     return {
       used: usage.heapUsed,
       total: usage.heapTotal,
-      percentage
+      percentage,
     };
   }
 
@@ -557,7 +557,7 @@ export class DebugUtilsStatic {
       if (!inThrottle) {
         func(...args);
         inThrottle = true;
-        setTimeout(() => inThrottle = false, limit);
+        setTimeout(() => (inThrottle = false), limit);
       }
     };
   }
@@ -570,13 +570,13 @@ export class DebugUtilsStatic {
     maxRetries: number = 3,
     delay: number = 1000
   ): Promise<T> {
-    let lastError: Error;
+    let lastError: Error = new Error('Unknown error');
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         return await fn();
       } catch (error) {
-        lastError = error as Error;
+        lastError = error instanceof Error ? error : new Error(String(error));
 
         if (attempt === maxRetries) {
           throw lastError;
@@ -586,7 +586,7 @@ export class DebugUtilsStatic {
       }
     }
 
-    throw lastError!;
+    throw lastError;
   }
 
   /**

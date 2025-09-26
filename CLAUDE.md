@@ -233,7 +233,47 @@ export class LMStudioProviderSimple implements ProviderModule {
 
 ## Configuration Structure
 
-### Module Configuration
+### 🔧 **重要：用户配置 vs 系统配置区分**
+
+RouteCodex系统严格区分**用户基础配置**和**系统扩展配置**，确保两者不重合，避免配置冲突：
+
+#### **用户基础配置** (User Basic Configuration)
+- **作用域**: 用户个人设置，仅影响日志行为
+- **文件位置**: `~/.routecodex/simple-log-config.json`
+- **配置内容**: 仅包含简化日志相关设置
+- **优先级**: 基础级别，不与其他系统配置重叠
+
+#### **系统扩展配置** (System Extended Configuration) 
+- **作用域**: 系统级功能，影响整体架构行为
+- **文件位置**: 项目目录下的配置文件
+- **配置内容**: 管道、模块、部署等系统级设置
+- **优先级**: 高级别，扩展用户基础功能
+
+### **配置不重合原则**
+```
+用户基础配置 ← 独立运行 → 系统扩展配置
+     ↓                        ↓
+简化日志系统              4层管道架构
+(个人设置)                (系统架构)
+```
+
+---
+
+### 用户基础配置 (简化日志系统)
+```json
+{
+  "enabled": true,
+  "logLevel": "debug",
+  "output": "console",
+  "logDirectory": "/Users/fanzhang/.routecodex/logs",
+  "autoStart": true
+}
+```
+**注意**: 此配置**完全独立**于下面的系统架构配置，仅控制简化日志功能。
+
+---
+
+### 系统扩展配置 (4层管道架构)
 ```json
 {
   "pipeline": {
@@ -265,6 +305,13 @@ export class LMStudioProviderSimple implements ProviderModule {
   }
 }
 ```
+**注意**: 此配置**完全不涉及**简化日志设置，仅控制系统架构功能。
+
+### **配置交互规则**
+1. **独立性**: 用户配置修改不影响系统配置
+2. **无重叠**: 两套配置控制完全不同的功能域
+3. **互补性**: 简化日志 + 4层管道 = 完整功能
+4. **优先级**: 系统配置运行时自动检测用户配置状态
 
 ## Key Design Principles
 
@@ -332,5 +379,118 @@ export class LMStudioProviderSimple implements ProviderModule {
 - Tool execution validation
 - Error scenario testing
 - Load testing
+
+## 🔧 Simplified Logging System
+
+RouteCodex includes a simplified logging system designed for users who need basic logging functionality without the complexity of the full debug system.
+
+### Architecture Overview
+
+The simplified logging system reduces complexity from 788 lines to 150 lines while maintaining essential functionality:
+
+```
+Original System (788 lines) → Simplified System (150 lines)
+├── Time Series Indexing        → Basic log storage
+├── Real-time Compression       → Removed
+├── Complex Query Engine        → Removed  
+├── Memory History Management   → Removed
+└── Advanced Analytics          → Basic filtering
+```
+
+### Key Components
+
+#### 1. SimpleLogConfigManager
+- **Location**: `src/logging/simple-log-integration.ts`
+- **Purpose**: Manages configuration loading and monitoring
+- **Features**: 
+  - File-based configuration storage
+  - Automatic configuration reloading
+  - Environment variable integration
+
+#### 2. SimpleTimeSeriesIndexer
+- **Location**: `src/logging/indexer/SimpleTimeSeriesIndexer.ts`
+- **Purpose**: Basic log storage without complex indexing
+- **Features**:
+  - Simple file-based storage
+  - No compression or sharding
+  - Basic time-based organization
+
+#### 3. Simple Log CLI
+- **Location**: `src/commands/simple-log.ts`
+- **Purpose**: User-friendly CLI for log configuration
+- **Commands**:
+  ```bash
+  routecodex simple-log on [--level debug] [--output console]
+  routecodex simple-log off
+  routecodex simple-log status
+  routecodex simple-log level <level>
+  routecodex simple-log output <output>
+  ```
+
+### Configuration Integration
+
+The simplified logging system integrates seamlessly with the existing RouteCodex architecture:
+
+1. **CLI Detection**: `src/cli.ts` detects simple log configuration
+2. **Server Integration**: `src/server/http-server.ts` applies configuration during startup
+3. **Environment Variables**: Configuration applied via `SIMPLE_LOG_*` environment variables
+4. **Persistent Storage**: Settings stored in `~/.routecodex/simple-log-config.json`
+
+### Usage Flow
+
+```bash
+# User enables simplified logging
+routecodex simple-log on --level debug --output console
+
+# Configuration saved to ~/.routecodex/simple-log-config.json
+{
+  "enabled": true,
+  "logLevel": "debug",
+  "output": "console",
+  "autoStart": true
+}
+
+# Server startup detects and applies configuration
+routecodex start
+# Output: "检测到简单日志配置，正在应用..."
+# Output: "✨ 简单日志配置已应用到系统！"
+```
+
+### Benefits
+
+1. **Simplicity**: One-click configuration with sensible defaults
+2. **Persistence**: Configuration survives system restarts
+3. **Flexibility**: Support for multiple log levels and output modes
+4. **Performance**: Reduced memory footprint and faster startup
+5. **Compatibility**: Works alongside existing debug systems
+
+### Implementation Details
+
+#### Configuration Schema
+```typescript
+interface SimpleLogConfig {
+  enabled: boolean;
+  logLevel: 'debug' | 'info' | 'warn' | 'error';
+  output: 'console' | 'file' | 'both';
+  logDirectory?: string;
+  autoStart: boolean;
+}
+```
+
+#### Integration Points
+- **Startup**: Configuration loaded in `src/index.ts`
+- **Module Loading**: Applied during module initialization
+- **Runtime**: Configuration changes monitored and applied dynamically
+
+#### Log Level Filtering
+```typescript
+// Simplified logger respects log level settings
+const logger = createLoggerWithSimpleConfig(moduleId, moduleType);
+
+// Only logs at or above configured level are output
+if (levelPriority[level] >= levelPriority[config.logLevel]) {
+  console.log(`[${level}] [${moduleId}] ${message}`);
+}
+```
 
 This architecture provides a solid foundation for building scalable, maintainable AI service integrations with proper separation of concerns and flexible configuration options.

@@ -117,7 +117,7 @@ export class EnhancementConfigManager {
         this.loaded = true;
         console.log(`Default enhancement configuration created at ${targetPath}`);
       } else {
-        throw new Error(`Failed to load enhancement configuration: ${error}`);
+        throw new Error(`Failed to load enhancement configuration: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }
@@ -137,7 +137,7 @@ export class EnhancementConfigManager {
       await fs.writeFile(this.configPath, JSON.stringify(targetConfig, null, 2));
       console.log(`Enhancement configuration saved to ${this.configPath}`);
     } catch (error) {
-      throw new Error(`Failed to save enhancement configuration: ${error}`);
+      throw new Error(`Failed to save enhancement configuration: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

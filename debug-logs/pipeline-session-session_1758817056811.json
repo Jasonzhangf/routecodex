@@ -1,0 +1,15 @@
+{
+  "sessionId": "session_1758817056811",
+  "pipelineId": "unknown",
+  "startTime": 1758817056811,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "initialization_start",
+      "moduleId": "qwen-provider",
+      "position": "middle",
+      "startTime": 1758817056811,
+      "status": "running"
+    }
+  ]
+}

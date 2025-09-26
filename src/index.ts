@@ -8,6 +8,14 @@ import fsSync from 'fs';
 import path from 'path';
 import { homedir } from 'os';
 import { ConfigManagerModule } from './modules/config-manager/config-manager-module.js';
+import { 
+  applySimpleLogConfig, 
+  createLoggerWithSimpleConfig, 
+  isSimpleLogEnabled,
+  startSimpleLogConfigWatching,
+  stopSimpleLogConfigWatching,
+  onSimpleLogConfigChange
+} from './logging/simple-log-integration.js';
 
 /**
  * Default modules configuration path
@@ -53,16 +61,46 @@ class RouteCodexApp {
       console.log('🚀 Starting RouteCodex server...');
       console.log(`📁 Modules configuration file: ${this.modulesConfigPath}`);
 
+      // 0. 应用简化日志配置（在系统初始化之前）
+      applySimpleLogConfig();
+      
+      // 0.5 启动简单日志配置监控（热更新）
+      startSimpleLogConfigWatching();
+      
+      // 监听配置变化，动态更新日志级别
+      onSimpleLogConfigChange((config) => {
+        console.log('🔄 检测到简单日志配置变化，正在更新...');
+        console.log(`📊 新日志级别: ${config.logLevel}`);
+        console.log(`🎯 新输出方式: ${config.output}`);
+        
+        // 更新环境变量
+        process.env.SIMPLE_LOG_ENABLED = config.enabled ? 'true' : 'false';
+        process.env.SIMPLE_LOG_LEVEL = config.logLevel;
+        process.env.SIMPLE_LOG_OUTPUT = config.output;
+        
+        if (config.output === 'file' || config.output === 'both') {
+          process.env.SIMPLE_LOG_DIRECTORY = config.logDirectory || path.join(homedir(), '.routecodex', 'logs');
+        }
+        
+        console.log('✨ 简单日志配置已动态更新！');
+      });
+
       // 1. 初始化配置管理器
       const port = await this.detectServerPort(this.modulesConfigPath);
       this.mergedConfigPath = path.join(process.cwd(), 'config', `merged-config.${port}.json`);
+
+      // 确定用户配置文件路径，优先使用RCC4_CONFIG_PATH
+      const userConfigPath = process.env.RCC4_CONFIG_PATH ||
+                           process.env.ROUTECODEX_CONFIG ||
+                           path.join(homedir(), '.routecodex', 'config.json');
+
       const configManagerConfig = {
-      configPath: process.env.ROUTECODEX_CONFIG || process.env.RCC4_CONFIG_PATH || path.join(homedir(), '.routecodex', 'config.json'),
-      mergedConfigPath: this.mergedConfigPath,
-      systemModulesPath: this.modulesConfigPath,
-      autoReload: true,
-      watchInterval: 5000
-    };
+        configPath: userConfigPath,
+        mergedConfigPath: this.mergedConfigPath,
+        systemModulesPath: this.modulesConfigPath,
+        autoReload: true,
+        watchInterval: 5000
+      };
 
       await this.configManager.initialize(configManagerConfig);
 
@@ -89,7 +127,7 @@ class RouteCodexApp {
         }
         console.log('🧩 Pipeline assembled from merged-config and attached to server.');
       } catch (e) {
-        console.warn('⚠️ Failed to assemble pipeline from merged-config. Router will use pass-through until assembly is provided.', e);
+        console.warn('⚠️ Failed to assemble pipeline from merged-config. Router requires pipeline; requests will fail until assembly is provided.', e);
       }
 
       // 6. 启动服务器
@@ -124,6 +162,9 @@ class RouteCodexApp {
     try {
       if (this._isRunning) {
         console.log('🛑 Stopping RouteCodex server...');
+
+        // 停止简单日志配置监控
+        stopSimpleLogConfigWatching();
 
         if (this.httpServer) {
           await this.httpServer.stop();
@@ -165,36 +206,53 @@ class RouteCodexApp {
   }
 
   /**
-   * Detect server port from modules config, ENV, or default
+   * Detect server port from user configuration
    */
   private async detectServerPort(modulesConfigPath: string): Promise<number> {
-    // Priority: ENV ROUTECODEX_PORT/PORT -> modulesConfig.httpserver.config.port -> 5506
-    const envPort = Number(process.env.ROUTECODEX_PORT || process.env.PORT);
-    if (!Number.isNaN(envPort) && envPort > 0) {return envPort;}
-
     try {
-      const p = path.isAbsolute(modulesConfigPath)
-        ? modulesConfigPath
-        : path.join(process.cwd(), modulesConfigPath);
-      const raw = await fs.readFile(p, 'utf-8');
-      const json = JSON.parse(raw);
-      const port = json?.modules?.httpserver?.config?.port;
-      if (typeof port === 'number' && port > 0) {return port;}
-    } catch (e) {
-      // ignore and fall back
-    }
-
-    // Try user config for httpserver.port if provided
-    try {
-      const userCfgPath = process.env.ROUTECODEX_CONFIG || path.join(homedir(), '.routecodex', 'config.json');
-      if (fsSync.existsSync(userCfgPath)) {
-        const raw = await fs.readFile(userCfgPath, 'utf-8');
-        const json = JSON.parse(raw);
-        const port = json?.httpserver?.port || json?.modules?.httpserver?.config?.port;
-        if (typeof port === 'number' && port > 0) {return port;}
+      // 首先检查RCC4_CONFIG_PATH环境变量（当前使用的）
+      if (process.env.RCC4_CONFIG_PATH) {
+        const configPath = process.env.RCC4_CONFIG_PATH;
+        if (fsSync.existsSync(configPath)) {
+          const raw = await fs.readFile(configPath, 'utf-8');
+          const json = JSON.parse(raw);
+          const port = json?.port;
+          if (typeof port === 'number' && port > 0) {
+            console.log(`🔧 Using port ${port} from RCC4_CONFIG_PATH: ${configPath}`);
+            return port;
+          }
+        }
       }
-    } catch {}
-    return 5506;
+
+      // 然后检查ROUTECODEX_CONFIG环境变量
+      if (process.env.ROUTECODEX_CONFIG) {
+        const configPath = process.env.ROUTECODEX_CONFIG;
+        if (fsSync.existsSync(configPath)) {
+          const raw = await fs.readFile(configPath, 'utf-8');
+          const json = JSON.parse(raw);
+          const port = json?.port;
+          if (typeof port === 'number' && port > 0) {
+            console.log(`🔧 Using port ${port} from ROUTECODEX_CONFIG: ${configPath}`);
+            return port;
+          }
+        }
+      }
+
+      // 最后检查默认配置文件
+      const defaultConfigPath = path.join(homedir(), '.routecodex', 'config.json');
+      if (fsSync.existsSync(defaultConfigPath)) {
+        const raw = await fs.readFile(defaultConfigPath, 'utf-8');
+        const json = JSON.parse(raw);
+        const port = json?.port;
+        if (typeof port === 'number' && port > 0) {
+          console.log(`🔧 Using port ${port} from default config: ${defaultConfigPath}`);
+          return port;
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error detecting server port:', error);
+    }
+    throw new Error('HTTP server port not found. Please set "port" in your user configuration file.');
   }
 }
 

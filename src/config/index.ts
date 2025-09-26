@@ -6,10 +6,6 @@
 // Core types and interfaces
 export * from './config-types';
 
-// Configuration manager
-export { ConfigManager } from './config-manager';
-import { ConfigManager } from './config-manager';
-
 // Configuration loader
 export { ConfigLoader } from './config-loader';
 
@@ -60,7 +56,7 @@ export class ConfigUtils {
 
     const cloned = {} as T;
     for (const key in obj) {
-      if (obj.hasOwnProperty(key)) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
         cloned[key] = ConfigUtils.clone(obj[key]);
       }
     }
@@ -125,7 +121,7 @@ export class ConfigUtils {
     const checkRequired = (obj: any, path: string, required: string[]) => {
       for (const field of required) {
         if (!(field in obj)) {
-          errors.push(`Missing required field: ${path ? `${path  }.${  field}` : field}`);
+          errors.push(`Missing required field: ${path ? `${path}.${field}` : field}`);
         }
       }
     };
@@ -141,7 +137,9 @@ export class ConfigUtils {
     const diff: any = {};
 
     const compare = (oldVal: any, newVal: any, path: string) => {
-      if (oldVal === newVal) {return;}
+      if (oldVal === newVal) {
+        return;
+      }
 
       if (typeof oldVal !== typeof newVal) {
         diff[path] = { old: oldVal, new: newVal };
@@ -173,9 +171,9 @@ export const ConfigPresets = {
       enabled: true,
       logging: {
         level: 'debug' as const,
-        format: 'text' as const
-      }
-    }
+        format: 'text' as const,
+      },
+    },
   },
 
   production: {
@@ -186,9 +184,9 @@ export const ConfigPresets = {
       enabled: true,
       logging: {
         level: 'warn' as const,
-        format: 'json' as const
-      }
-    }
+        format: 'json' as const,
+      },
+    },
   },
 
   test: {
@@ -196,25 +194,13 @@ export const ConfigPresets = {
     debug: true,
     logLevel: 'error' as const,
     monitoring: {
-      enabled: false
-    }
-  }
+      enabled: false,
+    },
+  },
 };
 
 // Configuration factory
 export class ConfigFactory {
-  /**
-   * Create configuration manager with default providers
-   */
-  static createManager(configPath?: string): ConfigManager {
-    const manager = new ConfigManager(configPath);
-
-    // Register default providers
-    manager.registerProvider(new JsonConfigProvider());
-
-    return manager;
-  }
-
   /**
    * Create configuration from environment variables
    */
@@ -223,7 +209,7 @@ export class ConfigFactory {
       version: process.env.ROUTECODEX_VERSION || '1.0.0',
       environment: process.env.NODE_ENV || process.env.ROUTECODEX_ENV || 'development',
       debug: process.env.ROUTECODEX_DEBUG === 'true',
-      logLevel: process.env.ROUTECODEX_LOG_LEVEL || 'info'
+      logLevel: process.env.ROUTECODEX_LOG_LEVEL || 'info',
     };
 
     // Server configuration
@@ -236,8 +222,8 @@ export class ConfigFactory {
           origin: '*',
           credentials: true,
           methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-          allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-        }
+          allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+        },
       };
     }
 

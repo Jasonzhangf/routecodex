@@ -10,7 +10,7 @@ import {
   type ResponseContext,
   type OpenAICompletionResponse,
   type ServerConfig,
-  RouteCodexError
+  RouteCodexError,
 } from '../server/types.js';
 
 /**
@@ -80,19 +80,16 @@ export class ResponseHandler extends BaseModule {
     activeStreams: 0,
     totalStreams: 0,
     averageChunksPerStream: 0,
-    totalChunksSent: 0
+    totalChunksSent: 0,
   };
 
-  constructor(
-    config: ServerConfig,
-    options: ResponseHandlerOptions = {}
-  ) {
+  constructor(config: ServerConfig, options: ResponseHandlerOptions = {}) {
     const moduleInfo: ModuleInfo = {
       id: 'response-handler',
       name: 'ResponseHandler',
       version: '0.0.1',
       description: 'Handles HTTP responses and formats them for clients',
-      type: 'core'
+      type: 'core',
     };
 
     super(moduleInfo);
@@ -114,7 +111,7 @@ export class ResponseHandler extends BaseModule {
       enableCors: true,
       enableMetrics: true,
       maxResponseSize: 50 * 1024 * 1024, // 50MB
-      ...options
+      ...options,
     };
 
     // Initialize metrics
@@ -122,7 +119,7 @@ export class ResponseHandler extends BaseModule {
       totalResponses: 0,
       cachedResponses: 0,
       averageResponseSize: 0,
-      averageResponseTime: 0
+      averageResponseTime: 0,
     };
   }
 
@@ -144,10 +141,9 @@ export class ResponseHandler extends BaseModule {
         data: {
           options: this.options,
           cacheTTL: this.options.cacheTTL,
-          maxResponseSize: this.options.maxResponseSize
-        }
+          maxResponseSize: this.options.maxResponseSize,
+        },
       });
-
     } catch (error) {
       await this.handleError(error as Error, 'initialization');
       throw error;
@@ -172,8 +168,8 @@ export class ResponseHandler extends BaseModule {
           responseId: responseContext.id,
           requestId: responseContext.requestId,
           status: responseContext.status,
-          duration: responseContext.duration
-        }
+          duration: responseContext.duration,
+        },
       });
 
       // Format response headers
@@ -186,7 +182,7 @@ export class ResponseHandler extends BaseModule {
       const finalResponseContext: ResponseContext = {
         ...responseContext,
         headers,
-        body
+        body,
       };
 
       // Update metrics
@@ -216,12 +212,11 @@ export class ResponseHandler extends BaseModule {
           requestId: responseContext.requestId,
           processingTime,
           finalStatus: finalResponseContext.status,
-          wasCached: this.isResponseCached(finalResponseContext)
-        }
+          wasCached: this.isResponseCached(finalResponseContext),
+        },
       });
 
       return finalResponseContext;
-
     } catch (error) {
       const processingTime = Date.now() - startTime;
       await this.handleError(error as Error, 'success_response');
@@ -261,8 +256,8 @@ export class ResponseHandler extends BaseModule {
           requestId,
           error: error.message,
           errorType: error instanceof RouteCodexError ? error.code : 'unknown',
-          duration
-        }
+          duration,
+        },
       });
 
       const responseContext = this.createErrorResponse(requestId, error, duration);
@@ -286,12 +281,11 @@ export class ResponseHandler extends BaseModule {
           requestId,
           processingTime,
           errorStatus: responseContext.status,
-          errorType: responseContext.body.error.type
-        }
+          errorType: responseContext.body.error.type,
+        },
       });
 
       return responseContext;
-
     } catch (handlerError) {
       const processingTime = Date.now() - startTime;
       console.error('Error in error response handler:', handlerError);
@@ -303,16 +297,16 @@ export class ResponseHandler extends BaseModule {
         timestamp: Date.now(),
         status: 500,
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
         body: {
           error: {
             message: 'Internal server error',
             type: 'internal_error',
-            code: 'internal_error'
-          }
+            code: 'internal_error',
+          },
         },
-        duration: processingTime
+        duration: processingTime,
       };
     }
   }
@@ -337,8 +331,8 @@ export class ResponseHandler extends BaseModule {
         position: 'middle',
         data: {
           responseId: responseContext.id,
-          requestId: responseContext.requestId
-        }
+          requestId: responseContext.requestId,
+        },
       });
 
       // Format streaming headers
@@ -378,22 +372,23 @@ export class ResponseHandler extends BaseModule {
           responseId: responseContext.id,
           requestId: responseContext.requestId,
           processingTime,
-          chunkCount: chunks.length
-        }
+          chunkCount: chunks.length,
+        },
       });
-
     } catch (error) {
       const processingTime = Date.now() - startTime;
       await this.handleError(error as Error, 'streaming_response');
 
       // Send error chunk
-      onChunk(JSON.stringify({
-        error: {
-          message: error instanceof Error ? error.message : String(error),
-          type: 'streaming_error',
-          code: 'streaming_error'
-        }
-      }));
+      onChunk(
+        JSON.stringify({
+          error: {
+            message: error instanceof Error ? error.message : String(error),
+            type: 'streaming_error',
+            code: 'streaming_error',
+          },
+        })
+      );
 
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
@@ -406,8 +401,8 @@ export class ResponseHandler extends BaseModule {
           responseId: responseContext.id,
           requestId: responseContext.requestId,
           processingTime,
-          error: error instanceof Error ? error.message : String(error)
-        }
+          error: error instanceof Error ? error.message : String(error),
+        },
       });
     }
   }
@@ -421,7 +416,7 @@ export class ResponseHandler extends BaseModule {
       'X-Response-ID': responseContext.id,
       'X-Request-ID': responseContext.requestId,
       'X-Response-Time': responseContext.duration.toString(),
-      'X-Server': 'RouteCodex/0.0.1'
+      'X-Server': 'RouteCodex/0.0.1',
     };
 
     // Add CORS headers if enabled
@@ -451,11 +446,11 @@ export class ResponseHandler extends BaseModule {
     const headers: Record<string, string> = {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
+      Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
       'X-Response-ID': responseContext.id,
       'X-Request-ID': responseContext.requestId,
-      'X-Server': 'RouteCodex/0.0.1'
+      'X-Server': 'RouteCodex/0.0.1',
     };
 
     // Add CORS headers if enabled
@@ -484,8 +479,8 @@ export class ResponseHandler extends BaseModule {
             duration: responseContext.duration,
             provider: responseContext.providerId,
             model: responseContext.modelId,
-            timestamp: responseContext.timestamp
-          }
+            timestamp: responseContext.timestamp,
+          },
         };
       }
     }
@@ -515,16 +510,16 @@ export class ResponseHandler extends BaseModule {
         'X-Response-ID': `resp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         'X-Request-ID': requestId,
         'X-Response-Time': duration?.toString() || '0',
-        'X-Server': 'RouteCodex/0.0.1'
+        'X-Server': 'RouteCodex/0.0.1',
       },
       body: {
         error: {
           message: error.message,
           type: type,
-          code: code
-        }
+          code: code,
+        },
       },
-      duration: duration || 0
+      duration: duration || 0,
     };
   }
 
@@ -536,28 +531,37 @@ export class ResponseHandler extends BaseModule {
 
     // Generate some sample streaming chunks
     const sampleResponse = responseContext.body as OpenAICompletionResponse;
-    if (sampleResponse && sampleResponse.choices && Array.isArray(sampleResponse.choices) && sampleResponse.choices.length > 0) {
+    if (
+      sampleResponse &&
+      sampleResponse.choices &&
+      Array.isArray(sampleResponse.choices) &&
+      sampleResponse.choices.length > 0
+    ) {
       const content = sampleResponse.choices[0].message.content || '';
       const words = content.split(' ');
 
       let currentChunk = '';
       for (const word of words) {
-        currentChunk += `${word  } `;
+        currentChunk += `${word} `;
 
         // Create chunk every few words
         if (currentChunk.length > 20 || word === words[words.length - 1]) {
-          chunks.push(JSON.stringify({
-            id: sampleResponse.id,
-            object: 'chat.completion.chunk',
-            created: sampleResponse.created,
-            model: sampleResponse.model,
-            choices: [{
-              index: 0,
-              delta: {
-                content: currentChunk.trim()
-              }
-            }]
-          }));
+          chunks.push(
+            JSON.stringify({
+              id: sampleResponse.id,
+              object: 'chat.completion.chunk',
+              created: sampleResponse.created,
+              model: sampleResponse.model,
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    content: currentChunk.trim(),
+                  },
+                },
+              ],
+            })
+          );
           currentChunk = '';
         }
       }
@@ -601,7 +605,7 @@ export class ResponseHandler extends BaseModule {
       data: responseContext.body,
       headers: responseContext.headers,
       timestamp: Date.now(),
-      hits: 0
+      hits: 0,
     };
 
     this.responseCache.set(cacheKey, cachedResponse);
@@ -677,7 +681,8 @@ export class ResponseHandler extends BaseModule {
       this.metrics.averageResponseSize = responseSize;
     } else {
       this.metrics.averageResponseSize =
-        (this.metrics.averageResponseSize * (this.metrics.totalResponses - 1) + responseSize) / this.metrics.totalResponses;
+        (this.metrics.averageResponseSize * (this.metrics.totalResponses - 1) + responseSize) /
+        this.metrics.totalResponses;
     }
 
     // Update average response time
@@ -685,7 +690,9 @@ export class ResponseHandler extends BaseModule {
       this.metrics.averageResponseTime = responseContext.duration;
     } else {
       this.metrics.averageResponseTime =
-        (this.metrics.averageResponseTime * (this.metrics.totalResponses - 1) + responseContext.duration) / this.metrics.totalResponses;
+        (this.metrics.averageResponseTime * (this.metrics.totalResponses - 1) +
+          responseContext.duration) /
+        this.metrics.totalResponses;
     }
 
     // Check if response was cached
@@ -697,7 +704,11 @@ export class ResponseHandler extends BaseModule {
   /**
    * Add response to history
    */
-  private addToResponseHistory(responseContext: ResponseContext, processingTime: number, wasCached: boolean): void {
+  private addToResponseHistory(
+    responseContext: ResponseContext,
+    processingTime: number,
+    wasCached: boolean
+  ): void {
     this.responseHistory.push({
       id: responseContext.id,
       requestId: responseContext.requestId,
@@ -705,7 +716,7 @@ export class ResponseHandler extends BaseModule {
       timestamp: responseContext.timestamp,
       duration: responseContext.duration,
       wasCached,
-      processingTime
+      processingTime,
     });
 
     // Keep history size limited
@@ -717,13 +728,17 @@ export class ResponseHandler extends BaseModule {
   /**
    * Add error to history
    */
-  private addResponseErrorToHistory(requestId: string, error: string, processingTime: number): void {
+  private addResponseErrorToHistory(
+    requestId: string,
+    error: string,
+    processingTime: number
+  ): void {
     this.errorHistory.push({
       id: `error_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       requestId,
       error,
       timestamp: Date.now(),
-      processingTime
+      processingTime,
     });
 
     // Keep history size limited
@@ -744,7 +759,9 @@ export class ResponseHandler extends BaseModule {
       this.streamingStats.averageChunksPerStream = chunks;
     } else {
       this.streamingStats.averageChunksPerStream =
-        (this.streamingStats.averageChunksPerStream * (this.streamingStats.totalStreams - 1) + chunks) / this.streamingStats.totalStreams;
+        (this.streamingStats.averageChunksPerStream * (this.streamingStats.totalStreams - 1) +
+          chunks) /
+        this.streamingStats.totalStreams;
     }
   }
 
@@ -758,7 +775,7 @@ export class ResponseHandler extends BaseModule {
       version: this.version,
       isInitialized: this._isInitialized,
       type: this.type,
-      isEnhanced: true
+      isEnhanced: true,
     };
 
     return {
@@ -768,7 +785,7 @@ export class ResponseHandler extends BaseModule {
       cacheStats: this.getCacheStats(),
       streamingStats: this.streamingStats,
       responseHistory: [...this.responseHistory.slice(-10)],
-      errorHistory: [...this.errorHistory.slice(-10)]
+      errorHistory: [...this.errorHistory.slice(-10)],
     };
   }
 
@@ -788,7 +805,7 @@ export class ResponseHandler extends BaseModule {
       errorHistorySize: this.errorHistory.length,
       maxHistorySize: this.maxHistorySize,
       activeStreams: this.streamingStats.activeStreams,
-      totalStreamsProcessed: this.streamingStats.totalStreams
+      totalStreamsProcessed: this.streamingStats.totalStreams,
     };
   }
 
@@ -801,11 +818,13 @@ export class ResponseHandler extends BaseModule {
       cachedResponses: this.metrics.cachedResponses,
       averageResponseSize: Math.round(this.metrics.averageResponseSize),
       averageResponseTime: Math.round(this.metrics.averageResponseTime),
-      cacheHitRate: this.metrics.totalResponses > 0 ?
-        `${(this.metrics.cachedResponses / this.metrics.totalResponses * 100).toFixed(2)  }%` : '0%',
+      cacheHitRate:
+        this.metrics.totalResponses > 0
+          ? `${((this.metrics.cachedResponses / this.metrics.totalResponses) * 100).toFixed(2)}%`
+          : '0%',
       compressionEnabled: this.options.enableCompression,
       corsEnabled: this.options.enableCors,
-      metricsEnabled: this.options.enableMetrics
+      metricsEnabled: this.options.enableMetrics,
     };
   }
 
@@ -818,8 +837,10 @@ export class ResponseHandler extends BaseModule {
       cacheEnabled: this.options.enableCaching,
       cacheTTL: this.options.cacheTTL,
       maxResponseSize: this.options.maxResponseSize,
-      cacheHitRate: this.metrics.totalResponses > 0 ?
-        `${(this.metrics.cachedResponses / this.metrics.totalResponses * 100).toFixed(2)  }%` : '0%'
+      cacheHitRate:
+        this.metrics.totalResponses > 0
+          ? `${((this.metrics.cachedResponses / this.metrics.totalResponses) * 100).toFixed(2)}%`
+          : '0%',
     };
   }
 
@@ -832,7 +853,7 @@ export class ResponseHandler extends BaseModule {
       cacheSize: this.responseCache.size,
       cacheEnabled: this.options.enableCaching,
       compressionEnabled: this.options.enableCompression,
-      corsEnabled: this.options.enableCors
+      corsEnabled: this.options.enableCors,
     };
   }
 
@@ -856,8 +877,8 @@ export class ResponseHandler extends BaseModule {
         moduleId: this.id,
         context: {
           stack: error.stack,
-          name: error.name
-        }
+          name: error.name,
+        },
       };
 
       await this.errorHandling.handleError(errorContext);
@@ -881,8 +902,8 @@ export class ResponseHandler extends BaseModule {
       type: 'start',
       position: 'middle',
       data: {
-        changes: Object.keys(newConfig)
-      }
+        changes: Object.keys(newConfig),
+      },
     });
   }
 
@@ -895,7 +916,7 @@ export class ResponseHandler extends BaseModule {
       running: true,
       options: this.options,
       metrics: this.getMetrics(),
-      cacheSize: this.responseCache.size
+      cacheSize: this.responseCache.size,
     };
   }
 

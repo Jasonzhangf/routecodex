@@ -1,0 +1,15 @@
+{
+  "sessionId": "session_1758812060684",
+  "pipelineId": "unknown",
+  "startTime": 1758812060684,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "initialize",
+      "moduleId": "error-handling-center",
+      "position": "middle",
+      "startTime": 1758812060684,
+      "status": "running"
+    }
+  ]
+}

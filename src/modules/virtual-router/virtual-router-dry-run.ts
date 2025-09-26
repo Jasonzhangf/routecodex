@@ -65,7 +65,7 @@ export class VirtualRouterDryRunExecutor {
    * 初始化分类器和路由决策器
    */
   async initialize(moduleConfig: any): Promise<void> {
-    if (!this.config.enabled) return;
+    if (!this.config.enabled) {return;}
 
     try {
       // 创建分类器
@@ -76,7 +76,7 @@ export class VirtualRouterDryRunExecutor {
         this.routingDecision = ConfigRoutingDecision.fromModuleConfig(moduleConfig.classificationConfig);
       }
     } catch (error) {
-      throw new Error(`Failed to initialize virtual router dry-run: ${error}`);
+      throw new Error(`Failed to initialize virtual router dry-run: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -130,7 +130,7 @@ export class VirtualRouterDryRunExecutor {
       };
 
     } catch (error) {
-      throw new Error(`Virtual router dry-run execution failed: ${error}`);
+      throw new Error(`Virtual router dry-run execution failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -196,8 +196,8 @@ export class VirtualRouterDryRunExecutor {
     }, 0);
     
     const healthValue = Math.abs(hash) % 100;
-    if (healthValue < 70) return 'healthy';
-    if (healthValue < 90) return 'degraded';
+    if (healthValue < 70) {return 'healthy';}
+    if (healthValue < 90) {return 'degraded';}
     return 'unhealthy';
   }
 

@@ -7,7 +7,7 @@ import type {
   ModulesConfig,
   UserConfig,
   MergedConfig,
-  ModuleConfigs
+  ModuleConfigs,
 } from './merged-config-types.js';
 
 export class ConfigMerger {
@@ -43,14 +43,14 @@ export class ConfigMerger {
 
         // 保留其他系统配置中不在用户配置中的设置
         inputProtocol: baseConfig.inputProtocol || 'openai',
-        outputProtocol: baseConfig.outputProtocol || 'openai'
+        outputProtocol: baseConfig.outputProtocol || 'openai',
       };
     }
 
     return {
       version: '1.0.0',
       mergedAt: new Date().toISOString(),
-      modules: mergedModules
+      modules: mergedModules,
     };
   }
 
@@ -71,12 +71,26 @@ export class ConfigMerger {
         // 用户提供了该模块：完全采用用户配置，系统只保留moduleType占位（如需要）
         const userModule = userModules[moduleName];
         const baseModuleType = systemModule?.config?.moduleType;
-        mergedModules[moduleName] = {
-          enabled: userModule.enabled ?? systemModule.enabled,
-          config: baseModuleType
-            ? { moduleType: baseModuleType, ...(userModule.config || {}) }
-            : { ...(userModule.config || {}) }
-        };
+
+        // 特殊处理：对于httpserver模块，用户配置完全覆盖系统配置
+        if (moduleName === 'httpserver' && userModule.config) {
+          mergedModules[moduleName] = {
+            enabled: userModule.enabled ?? systemModule.enabled,
+            config: {
+              moduleType: baseModuleType || 'http-server',
+              // 用户配置完全覆盖，不保留系统配置的其他属性
+              ...userModule.config,
+            },
+          };
+        } else {
+          // 其他模块：保留moduleType，用户配置覆盖其他设置
+          mergedModules[moduleName] = {
+            enabled: userModule.enabled ?? systemModule.enabled,
+            config: baseModuleType
+              ? { moduleType: baseModuleType, ...(userModule.config || {}) }
+              : { ...(userModule.config || {}) },
+          };
+        }
       }
     }
 
@@ -100,7 +114,7 @@ export class ConfigMerger {
       enabled: userModule.enabled ?? systemModule.enabled,
       config: baseModuleType
         ? { moduleType: baseModuleType, ...(userModule.config || {}) }
-        : { ...(userModule.config || {}) }
+        : { ...(userModule.config || {}) },
     };
   }
 
@@ -109,7 +123,7 @@ export class ConfigMerger {
    */
   private extractSystemDefaults(systemConfig: any): any {
     const defaults: any = {};
-    
+
     // 保留基础设置
     if (systemConfig.moduleType !== undefined) {
       defaults.moduleType = systemConfig.moduleType;
@@ -123,7 +137,7 @@ export class ConfigMerger {
     if (systemConfig.debugMode !== undefined) {
       defaults.debugMode = systemConfig.debugMode;
     }
-    
+
     return defaults;
   }
 
@@ -131,8 +145,12 @@ export class ConfigMerger {
    * 修复：用户配置优先的深度合并
    */
   private deepMergeWithPriority(target: any, source: any): any {
-    if (target === null || target === undefined) return source;
-    if (source === null || source === undefined) return target;
+    if (target === null || target === undefined) {
+      return source;
+    }
+    if (source === null || source === undefined) {
+      return target;
+    }
 
     // 数组：用户配置完全覆盖
     if (Array.isArray(target) && Array.isArray(source)) {
@@ -183,5 +201,12 @@ export class ConfigMerger {
     }
 
     return { isValid: errors.length === 0, errors };
+  }
+
+  /**
+   * Public deep merge method for testing
+   */
+  deepMerge(target: any, source: any): any {
+    return this.deepMergeWithPriority(target, source);
   }
 }

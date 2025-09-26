@@ -11,7 +11,7 @@ import type {
   ModuleConfigs,
   RouteTargetPool,
   PipelineConfigs,
-  RouteTarget
+  RouteTarget,
 } from './merged-config-types.js';
 
 export class UserConfigParser {
@@ -43,7 +43,7 @@ export class UserConfigParser {
       routeTargets,
       pipelineConfigs,
       authMappings: this.authMappings,
-      moduleConfigs
+      moduleConfigs,
     };
 
     // Clear the mapping for next parsing
@@ -61,27 +61,27 @@ export class UserConfigParser {
 
     for (const [routeName, targets] of Object.entries(routingConfig)) {
       routeTargets[routeName] = [];
-      
+
       targets.forEach((target: string) => {
         // 更智能的解析：先找到provider，然后找到model，剩下的就是key别名
         const firstDotIndex = target.indexOf('.');
         if (firstDotIndex === -1) {
           throw new Error(`Invalid route target format: ${target}`);
         }
-        
+
         const providerId = target.substring(0, firstDotIndex);
         const remaining = target.substring(firstDotIndex + 1);
-        
+
         // 检查是否有provider配置
         const providerConfig = this.providerConfigs[providerId];
         if (!providerConfig) {
           throw new Error(`Unknown provider: ${providerId}`);
         }
-        
+
         // 在剩余的字符串中找到model部分
         let modelId = '';
         let keyAlias = '';
-        
+
         // 尝试匹配已知的model名称 - 按长度降序排序，优先匹配更长的model名称
         const knownModels = Object.keys(providerConfig.models || {});
         let foundModel = null;
@@ -90,7 +90,7 @@ export class UserConfigParser {
         const sortedModels = knownModels.sort((a, b) => b.length - a.length);
 
         for (const model of sortedModels) {
-          if (remaining.startsWith(`${model  }.`) || remaining === model) {
+          if (remaining.startsWith(`${model}.`) || remaining === model) {
             foundModel = model;
             break;
           }
@@ -101,7 +101,7 @@ export class UserConfigParser {
           console.log(`[DEBUG] GLM parsing - remaining: "${remaining}", knownModels:`, knownModels);
           console.log(`[DEBUG] GLM parsing - foundModel: "${foundModel}"`);
         }
-        
+
         if (foundModel) {
           modelId = foundModel;
           const afterModel = remaining.substring(modelId.length);
@@ -127,37 +127,40 @@ export class UserConfigParser {
             keyAlias = remaining.substring(lastDotIndex + 1);
           }
         }
-        
+
         // 支持两种格式：
         // 1. provider.model → 展开为所有key（使用顺序别名：key1, key2...）
         // 2. provider.model.key1/key2 → 使用指定顺序别名
         if (!keyAlias) {
           // provider.model格式：展开为所有key（使用顺序别名）
           const keyAliases = this.getProviderKeyAliases(providerId);
-          
+
           // 为每个key生成顺序别名目标
           keyAliases.forEach(keyAlias => {
             routeTargets[routeName].push({
               providerId,
               modelId,
               keyId: keyAlias, // 使用顺序别名（key1, key2...）
-              actualKey: this.resolveActualKey(providerId, this.resolveKeyByAlias(providerId, keyAlias)),
+              actualKey: this.resolveActualKey(
+                providerId,
+                this.resolveKeyByAlias(providerId, keyAlias)
+              ),
               inputProtocol: 'openai',
-              outputProtocol: 'openai'
+              outputProtocol: 'openai',
             });
           });
         } else {
           // provider.model.key1/key2格式：使用指定顺序别名
           // 验证顺序别名是否有效
           const realKey = this.resolveKeyByAlias(providerId, keyAlias);
-          
+
           routeTargets[routeName].push({
             providerId,
             modelId,
             keyId: keyAlias, // 使用顺序别名
             actualKey: this.resolveActualKey(providerId, realKey),
             inputProtocol: 'openai',
-            outputProtocol: 'openai'
+            outputProtocol: 'openai',
           });
         }
       });
@@ -171,21 +174,27 @@ export class UserConfigParser {
    */
   private parsePipelineConfigs(
     virtualRouterConfig: {
-      providers: Record<string, {
-        type: string;
-        baseURL: string;
-        apiKey: string[];
-        compatibility?: { type: string; config?: Record<string, any> };
-        llmSwitch?: { type: string; config?: Record<string, any> };
-        workflow?: { type: string; config?: Record<string, any>; enabled?: boolean };
-        models: Record<string, {
-          maxContext?: number;
-          maxTokens?: number;
+      providers: Record<
+        string,
+        {
+          type: string;
+          baseURL: string;
+          apiKey: string[];
           compatibility?: { type: string; config?: Record<string, any> };
           llmSwitch?: { type: string; config?: Record<string, any> };
           workflow?: { type: string; config?: Record<string, any>; enabled?: boolean };
-        }>;
-      }>;
+          models: Record<
+            string,
+            {
+              maxContext?: number;
+              maxTokens?: number;
+              compatibility?: { type: string; config?: Record<string, any> };
+              llmSwitch?: { type: string; config?: Record<string, any> };
+              workflow?: { type: string; config?: Record<string, any>; enabled?: boolean };
+            }
+          >;
+        }
+      >;
       inputProtocol: string;
       outputProtocol: string;
     },
@@ -202,7 +211,12 @@ export class UserConfigParser {
           const realKey = this.resolveKeyByAlias(providerId, keyAlias); // 解析真实key
           const resolvedKey = this.resolveActualKey(providerId, realKey);
           const hasAuthMapping = this.hasAuthMapping(providerId, realKey);
-          const apiKeyValue = this.resolveApiKeyValue(providerId, realKey, resolvedKey, hasAuthMapping);
+          const apiKeyValue = this.resolveApiKeyValue(
+            providerId,
+            realKey,
+            resolvedKey,
+            hasAuthMapping
+          );
           // compatibility selection: user config > model-level > provider-level > auto-infer
           const modelCompat = (modelConfig as any)?.compatibility;
           const providerCompat = (providerConfig as any)?.compatibility;
@@ -231,88 +245,103 @@ export class UserConfigParser {
           const modelWorkflow = (modelConfig as any)?.workflow;
           const providerWorkflow = (providerConfig as any)?.workflow;
           const workflow = modelWorkflow?.type
-            ? { type: modelWorkflow.type, config: modelWorkflow.config || {}, enabled: modelWorkflow.enabled }
+            ? {
+                type: modelWorkflow.type,
+                config: modelWorkflow.config || {},
+                enabled: modelWorkflow.enabled,
+              }
             : providerWorkflow?.type
-              ? { type: providerWorkflow.type, config: providerWorkflow.config || {}, enabled: providerWorkflow.enabled }
+              ? {
+                  type: providerWorkflow.type,
+                  config: providerWorkflow.config || {},
+                  enabled: providerWorkflow.enabled,
+                }
               : undefined;
 
           // 不再在解析层推断compatibility/llmSwitch/workflow默认值，交由装配阶段按规则决定
           // Normalize provider type to registered module types
           const rawProviderType = (providerConfig.type || '').toLowerCase();
-          const normalizedProviderType = rawProviderType === 'lmstudio' ? 'lmstudio-http'
-              : rawProviderType === 'qwen' ? 'qwen-provider'
-              : rawProviderType === 'openai' ? 'openai-provider'
-              : rawProviderType === 'iflow' || rawProviderType === 'iflow-http' ? 'generic-http'
-              : providerConfig.type;
+          const normalizedProviderType =
+            rawProviderType === 'lmstudio'
+              ? 'lmstudio-http'
+              : rawProviderType === 'qwen'
+                ? 'qwen-provider'
+                : rawProviderType === 'openai'
+                  ? 'openai-provider'
+                  : rawProviderType === 'iflow' || rawProviderType === 'iflow-http'
+                    ? 'generic-http'
+                    : providerConfig.type;
 
-            // Normalize baseURL for LM Studio: http(s) -> ws(s)
-            let baseURL = providerConfig.baseURL;
-            if (normalizedProviderType === 'lmstudio-http') {
-              const envBase = process.env.LMSTUDIO_BASE_URL || process.env.LM_STUDIO_BASE_URL;
-              if (envBase && typeof envBase === 'string' && envBase.trim()) {
-                baseURL = envBase.trim();
-              }
+          // Normalize baseURL for LM Studio: http(s) -> ws(s)
+          let baseURL = providerConfig.baseURL;
+          if (normalizedProviderType === 'lmstudio-http') {
+            const envBase = process.env.LMSTUDIO_BASE_URL || process.env.LM_STUDIO_BASE_URL;
+            if (envBase && typeof envBase === 'string' && envBase.trim()) {
+              baseURL = envBase.trim();
             }
+          }
 
-            // Build provider auth block per provider type (independent, configurable)
-            let providerAuth: any = undefined;
-            // LM Studio HTTP: optional apikey structure; may be keyless
-            if (normalizedProviderType === 'lmstudio-http') {
-              providerAuth = { type: 'apikey' };
+          // Build provider auth block per provider type (independent, configurable)
+          let providerAuth: any = undefined;
+          // LM Studio HTTP: optional apikey structure; may be keyless
+          if (normalizedProviderType === 'lmstudio-http') {
+            providerAuth = { type: 'apikey' };
+          }
+          // OpenAI provider: uses bearer token auth
+          if (normalizedProviderType === 'openai-provider') {
+            providerAuth = { type: 'bearer' };
+          }
+          // Qwen provider: prefers OAuth; read from provider-level oauth if present
+          if (normalizedProviderType === 'qwen-provider') {
+            const oauthCfg = (providerConfig as any).oauth || (providerConfig as any).auth?.oauth;
+            if (oauthCfg && typeof oauthCfg === 'object') {
+              const oc = (oauthCfg as any).default || oauthCfg;
+              providerAuth = {
+                type: 'oauth',
+                oauth: {
+                  clientId: oc.clientId,
+                  deviceCodeUrl: oc.deviceCodeUrl,
+                  tokenUrl: oc.tokenUrl,
+                  scopes: oc.scopes,
+                  tokenFile: oc.tokenFile,
+                },
+              };
             }
-            // OpenAI provider: uses bearer token auth
-            if (normalizedProviderType === 'openai-provider') {
-              providerAuth = { type: 'bearer' };
-            }
-            // Qwen provider: prefers OAuth; read from provider-level oauth if present
-            if (normalizedProviderType === 'qwen-provider') {
-              const oauthCfg = (providerConfig as any).oauth || (providerConfig as any).auth?.oauth;
-              if (oauthCfg && typeof oauthCfg === 'object') {
-                const oc = (oauthCfg as any).default || oauthCfg;
-                providerAuth = {
-                  type: 'oauth',
-                  oauth: {
-                    clientId: oc.clientId,
-                    deviceCodeUrl: oc.deviceCodeUrl,
-                    tokenUrl: oc.tokenUrl,
-                    scopes: oc.scopes,
-                    tokenFile: oc.tokenFile
-                  }
-                };
-              }
-            }
-            // LM Studio HTTP provider expects http(s) baseURL to REST API (e.g., http://<host>:1234)
+          }
+          // LM Studio HTTP provider expects http(s) baseURL to REST API (e.g., http://<host>:1234)
 
-            // Optional auth for providers that need API key
-            const auth = (normalizedProviderType === 'lmstudio-http' || normalizedProviderType === 'openai-provider')
-              ? ({ type: 'apikey', ...(apiKeyValue ? { apiKey: apiKeyValue } : {}) })
+          // Optional auth for providers that need API key
+          const auth =
+            normalizedProviderType === 'lmstudio-http' ||
+            normalizedProviderType === 'openai-provider'
+              ? { type: 'apikey', ...(apiKeyValue ? { apiKey: apiKeyValue } : {}) }
               : undefined;
 
-            pipelineConfigs[configKey] = {
-              provider: {
-                type: normalizedProviderType,
-                baseURL,
-                ...(providerAuth ? { auth: providerAuth } : {}),
-                ...(auth ? { auth } : {})
-              },
-              model: {
-                maxContext: modelConfig.maxContext || 128000,
-                maxTokens: modelConfig.maxTokens || 32000
-              },
-              keyConfig: {
-                keyId: keyAlias, // 使用key别名
-                actualKey: resolvedKey,
-                keyType: hasAuthMapping ? 'authFile' : 'apiKey'
-              },
-              protocols: {
-                input: virtualRouterConfig.inputProtocol as 'openai' | 'anthropic',
-                output: virtualRouterConfig.outputProtocol as 'openai' | 'anthropic'
-              },
+          pipelineConfigs[configKey] = {
+            provider: {
+              type: normalizedProviderType,
+              baseURL,
+              ...(providerAuth ? { auth: providerAuth } : {}),
+              ...(auth ? { auth } : {}),
+            },
+            model: {
+              maxContext: modelConfig.maxContext || 128000,
+              maxTokens: modelConfig.maxTokens || 32000,
+            },
+            keyConfig: {
+              keyId: keyAlias, // 使用key别名
+              actualKey: resolvedKey,
+              keyType: hasAuthMapping ? 'authFile' : 'apiKey',
+            },
+            protocols: {
+              input: virtualRouterConfig.inputProtocol as 'openai' | 'anthropic',
+              output: virtualRouterConfig.outputProtocol as 'openai' | 'anthropic',
+            },
             // 保留用户显式提供的模块配置；缺省值在装配阶段应用
             ...(compatibility ? { compatibility } : {}),
             ...(llmSwitch ? { llmSwitch } : {}),
-            ...(workflow ? { workflow } : {})
-            };
+            ...(workflow ? { workflow } : {}),
+          };
         }
       }
     }
@@ -332,16 +361,32 @@ export class UserConfigParser {
       config: {
         moduleType: 'virtual-router',
         inputProtocol: userConfig.virtualrouter.inputProtocol,
-        outputProtocol: userConfig.virtualrouter.outputProtocol
-      }
+        outputProtocol: userConfig.virtualrouter.outputProtocol,
+      },
     };
+
+    // HTTP服务器模块配置 - 处理简单端口配置
+    if (userConfig.port) {
+      moduleConfigs.httpserver = {
+        enabled: true,
+        config: {
+          port: userConfig.port,
+        },
+      };
+    }
 
     // 其他模块配置
     for (const [moduleName, moduleConfig] of Object.entries(userConfig)) {
-      if (moduleName !== 'virtualrouter' && moduleName !== 'user' && typeof moduleConfig === 'object') {
+      if (
+        moduleName !== 'virtualrouter' &&
+        moduleName !== 'httpserver' &&
+        moduleName !== 'port' &&
+        moduleName !== 'user' &&
+        typeof moduleConfig === 'object'
+      ) {
         moduleConfigs[moduleName] = {
           enabled: true,
-          config: moduleConfig
+          config: moduleConfig,
         };
       }
     }
@@ -353,7 +398,10 @@ export class UserConfigParser {
    * 解析简单字符串格式的compatibility字段
    * 支持 "iflow/qwen/lmstudio" 或 "passthrough" 格式
    */
-  private parseCompatibilityString(compatString: string): { type: string; config: Record<string, any> } {
+  private parseCompatibilityString(compatString: string): {
+    type: string;
+    config: Record<string, any>;
+  } {
     if (!compatString || compatString.trim() === '' || compatString === 'passthrough') {
       return { type: 'passthrough-compatibility', config: {} };
     }
@@ -362,16 +410,16 @@ export class UserConfigParser {
     const primaryType = types[0];
 
     const typeMap: Record<string, string> = {
-      'lmstudio': 'lmstudio-compatibility',
-      'qwen': 'qwen-compatibility',
-      'iflow': 'iflow-compatibility',
-      'passthrough': 'passthrough-compatibility',
-      'field-mapping': 'field-mapping'
+      lmstudio: 'lmstudio-compatibility',
+      qwen: 'qwen-compatibility',
+      iflow: 'iflow-compatibility',
+      passthrough: 'passthrough-compatibility',
+      'field-mapping': 'field-mapping',
     };
 
     return {
       type: typeMap[primaryType] || 'passthrough-compatibility',
-      config: {}
+      config: {},
     };
   }
 
@@ -380,17 +428,23 @@ export class UserConfigParser {
    * 支持静态auth文件和OAuth配置
    */
   private parseAuthMappings(virtualRouterConfig: {
-    providers: Record<string, {
-      type: string;
-      baseURL: string;
-      apiKey: string[];
-      auth?: Record<string, string>;
-      oauth?: Record<string, any>;
-      models: Record<string, {
-        maxContext?: number;
-        maxTokens?: number;
-      }>;
-    }>;
+    providers: Record<
+      string,
+      {
+        type: string;
+        baseURL: string;
+        apiKey: string[];
+        auth?: Record<string, string>;
+        oauth?: Record<string, any>;
+        models: Record<
+          string,
+          {
+            maxContext?: number;
+            maxTokens?: number;
+          }
+        >;
+      }
+    >;
   }): Record<string, string> {
     const authMappings: Record<string, string> = {};
 
@@ -572,7 +626,9 @@ export class UserConfigParser {
     }
 
     if (oauthConfig && Array.isArray(oauthConfig.tokens) && oauthConfig.tokens.length > 0) {
-      const tokenCandidate = oauthConfig.tokens.find((token: unknown) => typeof token === 'string' && token.trim());
+      const tokenCandidate = oauthConfig.tokens.find(
+        (token: unknown) => typeof token === 'string' && token.trim()
+      );
       if (typeof tokenCandidate === 'string') {
         return tokenCandidate.trim();
       }
@@ -612,17 +668,17 @@ export class UserConfigParser {
   private getKeyAliasMapping(providerId: string): Record<string, string> {
     const providerConfig = this.providerConfigs[providerId];
     if (!providerConfig || !providerConfig.apiKey) {
-      return { 'key1': 'default' }; // 默认fallback
+      return { key1: 'default' }; // 默认fallback
     }
-    
+
     const mapping: Record<string, string> = {};
-    
+
     // 为每个真实key生成顺序别名：key1, key2, key3...
     providerConfig.apiKey.forEach((realKey: string, index: number) => {
       const alias = `key${index + 1}`;
       mapping[alias] = realKey;
     });
-    
+
     return mapping;
   }
 
@@ -640,11 +696,13 @@ export class UserConfigParser {
   private resolveKeyByAlias(providerId: string, keyAlias: string): string {
     const mapping = this.getKeyAliasMapping(providerId);
     const realKey = mapping[keyAlias];
-    
+
     if (!realKey) {
-      throw new Error(`Key alias '${keyAlias}' not found for provider '${providerId}'. Available aliases: ${Object.keys(mapping).join(', ')}`);
+      throw new Error(
+        `Key alias '${keyAlias}' not found for provider '${providerId}'. Available aliases: ${Object.keys(mapping).join(', ')}`
+      );
     }
-    
+
     return realKey;
   }
 }

@@ -28,18 +28,14 @@ export {
   JsonlLogParser
 } from './JsonlParser.js';
 
-// 时间序列索引
+// 时间序列索引 - 使用简化版本
 export type {
-  TimeSeriesIndexConfig,
-  TimeShard,
-  IndexMetadata,
-  QueryOptimizer,
-  QueryPlan
-} from '../indexer/TimeSeriesIndexer.js';
+  SimpleTimeSeriesIndexConfig
+} from '../indexer/SimpleTimeSeriesIndexer.js';
 
 export { 
-  TimeSeriesIndexEngine
-} from '../indexer/TimeSeriesIndexer.js';
+  SimpleTimeSeriesIndexer as TimeSeriesIndexEngine
+} from '../indexer/SimpleTimeSeriesIndexer.js';
 
 // 数据验证和清洗
 export type {
@@ -72,7 +68,7 @@ export async function parseHistoricalLogs(options: {
   /** 清洗选项 */
   cleaningOptions?: import('../validator/DataValidator.js').DataCleaningOptions;
   /** 索引导入选项 */
-  indexOptions?: import('../indexer/TimeSeriesIndexer.js').TimeSeriesIndexConfig;
+  indexOptions?: import('../indexer/SimpleTimeSeriesIndexer.js').SimpleTimeSeriesIndexConfig;
 }) {
   console.log('🚀 开始完整的历史日志解析流程...');
   
@@ -129,8 +125,8 @@ export async function parseHistoricalLogs(options: {
     let index = null;
     
     if (options.indexOptions) {
-      const { TimeSeriesIndexEngine } = await import('../indexer/TimeSeriesIndexer.js');
-      index = new TimeSeriesIndexEngine(options.indexOptions);
+      const { SimpleTimeSeriesIndexer } = await import('../indexer/SimpleTimeSeriesIndexer.js');
+      index = new SimpleTimeSeriesIndexer(options.indexOptions);
       
       await index.index(cleanResult.cleanedEntries);
       console.log(`✅ 索引构建完成，共 ${cleanResult.cleanedEntries.length} 条日志`);

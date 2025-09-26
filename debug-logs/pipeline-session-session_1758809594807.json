@@ -1,0 +1,43 @@
+{
+  "sessionId": "session_1758809594807",
+  "pipelineId": "unknown",
+  "startTime": 1758809594807,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "error_handler_registered",
+      "moduleId": "error-handler-registry",
+      "position": "middle",
+      "startTime": 1758809594807,
+      "status": "running"
+    },
+    {
+      "operationId": "error_handler_registered",
+      "moduleId": "error-handler-registry",
+      "position": "middle",
+      "startTime": 1758809594807,
+      "status": "running"
+    },
+    {
+      "operationId": "provider_manager_initialized",
+      "moduleId": "provider-manager",
+      "position": "middle",
+      "startTime": 1758809594807,
+      "status": "running"
+    },
+    {
+      "operationId": "metric_initialization",
+      "moduleId": "provider-manager",
+      "position": "middle",
+      "startTime": 1758809594807,
+      "status": "running"
+    },
+    {
+      "operationId": "initialization_start",
+      "moduleId": "openai-router",
+      "position": "middle",
+      "startTime": 1758809594807,
+      "status": "running"
+    }
+  ]
+}

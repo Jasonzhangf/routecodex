@@ -1,0 +1,15 @@
+{
+  "sessionId": "session_1758803774559",
+  "pipelineId": "unknown",
+  "startTime": 1758803774559,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "debug_enhancements_initialized",
+      "moduleId": "streaming-handler",
+      "position": "middle",
+      "startTime": 1758803774559,
+      "status": "running"
+    }
+  ]
+}

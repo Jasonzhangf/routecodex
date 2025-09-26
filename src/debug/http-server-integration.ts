@@ -302,10 +302,8 @@ export class HttpServerDebugIntegration {
     const bodyChunks: Buffer[] = [];
     const originalWrite = response.write;
     const originalEnd = response.end;
-    const self = this;
-
     // Override write method to capture response body
-    response.write = function(chunk: any, encoding?: any) {
+    response.write = (chunk: any, encoding?: any) => {
       if (chunk) {
         if (Buffer.isBuffer(chunk)) {
           bodyChunks.push(chunk);
@@ -313,11 +311,11 @@ export class HttpServerDebugIntegration {
           bodyChunks.push(Buffer.from(chunk, encoding || 'utf8'));
         }
       }
-      return originalWrite.call(this, chunk, encoding);
+      return originalWrite.call(response, chunk, encoding);
     };
 
     // Override end method to capture final response
-    response.end = function(chunk?: any, encoding?: any) {
+    response.end = (chunk?: any, encoding?: any) => {
       if (chunk) {
         if (Buffer.isBuffer(chunk)) {
           bodyChunks.push(chunk);
@@ -332,8 +330,8 @@ export class HttpServerDebugIntegration {
       const debugResponse: DebugHttpResponse = {
         requestId,
         status: response.statusCode || 200,
-        headers: self.sanitizeHeaders(response._headers || response.headers || {}),
-        body: self.sanitizeBody(body),
+        headers: this.sanitizeHeaders(response._headers || response.headers || {}),
+        body: this.sanitizeBody(body),
         responseTime: Date.now() - startTime,
         timestamp: Date.now(),
         metadata: {
@@ -343,10 +341,10 @@ export class HttpServerDebugIntegration {
       };
 
       // Capture response asynchronously
-      self.httpAdapter!.captureResponse(debugResponse).catch(console.warn);
+      this.httpAdapter!.captureResponse(debugResponse).catch(console.warn);
 
       // Call original end method
-      return originalEnd.call(this, chunk, encoding);
+      return originalEnd.call(response, chunk, encoding);
     };
   }
 

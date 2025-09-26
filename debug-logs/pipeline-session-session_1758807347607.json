@@ -1,0 +1,29 @@
+{
+  "sessionId": "session_1758807347607",
+  "pipelineId": "unknown",
+  "startTime": 1758807347607,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "unimplemented_module_initialized",
+      "moduleId": "streaming-handler",
+      "position": "middle",
+      "startTime": 1758807347607,
+      "status": "running"
+    },
+    {
+      "operationId": "module_created",
+      "moduleId": "unimplemented-module-factory",
+      "position": "middle",
+      "startTime": 1758807347607,
+      "status": "running"
+    },
+    {
+      "operationId": "pass_through_provider_initialized",
+      "moduleId": "pass-through-provider",
+      "position": "middle",
+      "startTime": 1758807347607,
+      "status": "running"
+    }
+  ]
+}

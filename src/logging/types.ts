@@ -1,6 +1,6 @@
 /**
  * 统一日志系统类型定义
- * 
+ *
  * 为RouteCodex项目提供标准化的日志格式和接口定义
  */
 
@@ -11,7 +11,7 @@ export enum LogLevel {
   DEBUG = 'debug',
   INFO = 'info',
   WARN = 'warn',
-  ERROR = 'error'
+  ERROR = 'error',
 }
 
 /**
@@ -276,19 +276,19 @@ export interface IndexStatus {
 export const LOGGING_CONSTANTS = {
   /** 默认日志格式版本 */
   DEFAULT_VERSION: '0.0.1',
-  
+
   /** 默认日志级别 */
   DEFAULT_LOG_LEVEL: LogLevel.INFO,
-  
+
   /** 默认最大历史记录数 */
   DEFAULT_MAX_HISTORY: 10000,
-  
+
   /** 默认最大文件大小 (100MB) */
   DEFAULT_MAX_FILE_SIZE: 100 * 1024 * 1024,
-  
+
   /** 默认最大文件数量 */
   DEFAULT_MAX_FILES: 10,
-  
+
   /** 敏感字段默认列表 */
   DEFAULT_SENSITIVE_FIELDS: [
     'password',
@@ -299,12 +299,12 @@ export const LOGGING_CONSTANTS = {
     'auth',
     'authorization',
     'cookie',
-    'session'
+    'session',
   ],
-  
+
   /** 日志文件扩展名 */
   LOG_FILE_EXTENSION: '.jsonl',
-  
+
   /** 压缩文件扩展名 */
-  COMPRESSED_EXTENSION: '.gz'
+  COMPRESSED_EXTENSION: '.gz',
 } as const;

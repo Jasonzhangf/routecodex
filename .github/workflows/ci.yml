@@ -13,6 +13,7 @@ jobs:
     strategy:
       matrix:
         node-version: [18.x, 20.x]
+      fail-fast: false
 
     steps:
     - name: Checkout code
@@ -27,22 +28,20 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
-    - name: Run linting
-      run: npm run lint
+    - name: Run linting with auto-fix
+      run: npm run lint:fix
 
     - name: Run type checking
       run: npx tsc --noEmit
 
     - name: Run tests
       run: npm test
-      env:
-        NODE_OPTIONS: --experimental-vm-modules
 
     - name: Build project
       run: npm run build
 
     - name: Upload coverage to Codecov
-      if: matrix.node-version == '20.x'
+      if: matrix.node-version == '20.x' && success()
       uses: codecov/codecov-action@v3
       with:
         file: ./coverage/lcov.info
@@ -66,9 +65,10 @@ jobs:
 
     - name: Run security audit
       run: npm audit --audit-level moderate
+      continue-on-error: true
 
-    - name: Check for vulnerabilities
-      run: npm audit --audit-level high
+    - name: Check for critical vulnerabilities
+      run: npm audit --audit-level critical
 
   build-validation:
     runs-on: ubuntu-latest

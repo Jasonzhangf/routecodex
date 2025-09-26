@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Plato - src/core/base-module.js</title>
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="">
+  <meta name="author" content="">
+
+  <!--[if lt IE 9]>
+  <script src="http://html5shim.googlecode.com/svn/trunk/html5.js"></script>
+  <![endif]-->
+
+  <link href="../../assets/css/vendor/morris.css" rel="stylesheet">
+  <link href="../../assets/css/vendor/bootstrap.css" rel="stylesheet">
+  <link href="../../assets/css/vendor/font-awesome.css" rel="stylesheet">
+  <link href="../../assets/css/vendor/codemirror.css" rel="stylesheet">
+  <link href="../../assets/css/plato.css" rel="stylesheet">
+  <link href="../../assets/css/plato-file.css" rel="stylesheet">
+
+</head>
+
+<body>
+
+<div class="navbar navbar-fixed-top">
+  <div class="container">
+    <a class="navbar-brand" href="http://github.com/es-analysis/plato">Plato on Github</a>
+    <ul class="nav navbar-nav">
+      <li>
+        <a href="../../index.html">Report Home</a>
+      </li>
+    </ul>
+  </div>
+</div>
+
+<div class="jumbotron">
+  <div class="container">
+    <h1>src/core/base-module.js</h1>
+  </div>
+</div>
+
+<div class="container aggregate-stats">
+  <div class="row">
+    <div class="col-md-6">
+      <h2 class="header">Maintainability <a href="http://blogs.msdn.com/b/codeanalysis/archive/2007/11/20/maintainability-index-range-and-meaning.aspx"><i class="icon icon-info-sign" rel="popover" data-placement="top" data-trigger="hover" data-content="A value between 0 and 100 that represents the relative ease of maintaining the code. A high value means better maintainability." data-original-title="Maintainability Index"  data-container="body"></i></a></h2>
+      <p class="stat">65.86</p>
+    </div>
+    <div class="col-md-6">
+      <h2 class="header">Lines of code <i class="icon icon-info-sign" rel="popover" data-placement="top" data-trigger="hover" data-content="Source Lines of Code / Logical Lines of Code" data-original-title="SLOC/LSLOC" data-container="body"></i></h2>
+      <p class="stat">366</p>
+    </div>
+  </div>
+  <div class="row historical">
+    <div class="col-md-6">
+      <p id="chart_historical_maint" class="chart"></p>
+    </div>
+    <div class="col-md-6">
+      <p id="chart_historical_sloc" class="chart"></p>
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-md-6">
+      <h2 class="header">Difficulty  <a href="http://en.wikipedia.org/wiki/Halstead_complexity_measures"><i class="icon icon-info-sign" rel="popover" data-placement="top" data-trigger="hover" data-content="The difficulty measure is related to the difficulty of the program to write or understand." data-original-title="Difficulty" data-container="body"></i></a></h2>
+      <p class="stat">57.24</p>
+    </div>
+    <div class="col-md-6">
+      <h2 class="header">Estimated Errors  <a href="http://en.wikipedia.org/wiki/Halstead_complexity_measures"><i class="icon icon-info-sign" rel="popover" data-placement="top" data-trigger="hover" data-content="Halstead's delivered bugs is an estimate for the number of errors in the implementation." data-original-title="Delivered Bugs" data-container="body"></i></a></h2>
+      <p class="stat">2.81</p>
+    </div>
+  </div>
+</div>
+
+<div class="container charts">
+  <div class="row">
+    <h2 class="header">Function weight</h2>
+  </div>
+  <div class="row">
+    <div class="col-md-6">
+      <h3 class="chart-header">By Complexity <a href="http://en.wikipedia.org/wiki/Cyclomatic_complexity"><i class="icon icon-info-sign" rel="popover" data-placement="top" data-trigger="hover" data-content="This metric counts the number of distinct paths through a block of code. Lower values are better." data-original-title="Cyclomatic Complexity" data-container="body"></i></a></h3>
+      <div id="fn-by-complexity" class="stat"></div>
+    </div>
+    <div class="col-md-6">
+      <h3 class="chart-header">By SLOC  <i class="icon icon-info-sign" rel="popover" data-placement="top" data-trigger="hover" data-content="Source Lines of Code / Logical Lines of Code" data-original-title="SLOC/LSLOC" data-container="body"></i></h3>
+      <div id="fn-by-sloc" class="stat"></div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="row">
+    <textarea id="file-source" class="col-md-12">/**
+ * Base Module Class
+ * 基础模块类 - 所有模块的基类
+ */
+import { EventEmitter } from &#039;events&#039;;
+import { DebugEventBus, DebugCenter } from &#039;rcc-debugcenter&#039;;
+import { DebugEnhancementManager } from &#039;../modules/debug/debug-enhancement-manager.js&#039;;
+/**
+ * 模块状态枚举
+ */
+export var ModuleStatus;
+(function (ModuleStatus) {
+  ModuleStatus[&#039;STOPPED&#039;] = &#039;stopped&#039;;
+  ModuleStatus[&#039;STARTING&#039;] = &#039;starting&#039;;
+  ModuleStatus[&#039;RUNNING&#039;] = &#039;running&#039;;
+  ModuleStatus[&#039;STOPPING&#039;] = &#039;stopping&#039;;
+  ModuleStatus[&#039;ERROR&#039;] = &#039;error&#039;;
+})(ModuleStatus || (ModuleStatus = {}));
+/**
+ * 基础模块类
+ */
+export class BaseModule extends EventEmitter {
+  constructor(info) {
+    super();
+    this.status = ModuleStatus.STOPPED;
+    this.isRunning = false;
+    // Debug enhancement properties - unified approach
+    this.debugEnhancementManager = null;
+    this.debugEnhancement = null;
+    // Legacy debug properties for backward compatibility
+    this.debugEventBus = null;
+    this.isDebugEnhanced = false;
+    this.moduleMetrics = new Map();
+    this.operationHistory = [];
+    this.errorHistory = [];
+    this.maxHistorySize = 50;
+    this.info = info;
+    // Initialize unified debug enhancements
+    this.initializeUnifiedDebugEnhancements();
+    // Initialize legacy debug enhancements for backward compatibility
+    this.initializeDebugEnhancements();
+  }
+  /**
+   * 获取模块信息
+   */
+  getInfo() {
+    return { ...this.info };
+  }
+  /**
+   * 获取模块状态
+   */
+  getStatus() {
+    return this.status;
+  }
+  /**
+   * 检查模块是否运行中
+   */
+  isModuleRunning() {
+    return this.isRunning;
+  }
+  /**
+   * 启动模块
+   */
+  async start() {
+    if (this.isRunning) {
+      console.warn(`Module ${this.info.id} is already running`);
+      return;
+    }
+    try {
+      this.status = ModuleStatus.STARTING;
+      this.emit(&#039;starting&#039;, this.info);
+      // 子类可以重写此方法来实现启动逻辑
+      await this.doStart();
+      this.status = ModuleStatus.RUNNING;
+      this.isRunning = true;
+      this.emit(&#039;started&#039;, this.info);
+      console.log(`✅ Module ${this.info.id} started successfully`);
+    } catch (error) {
+      this.status = ModuleStatus.ERROR;
+      this.emit(&#039;error&#039;, { module: this.info, error });
+      throw error;
+    }
+  }
+  /**
+   * 停止模块
+   */
+  async stop() {
+    if (!this.isRunning) {
+      console.warn(`Module ${this.info.id} is not running`);
+      return;
+    }
+    try {
+      this.status = ModuleStatus.STOPPING;
+      this.emit(&#039;stopping&#039;, this.info);
+      // 子类可以重写此方法来实现停止逻辑
+      await this.doStop();
+      this.status = ModuleStatus.STOPPED;
+      this.isRunning = false;
+      this.emit(&#039;stopped&#039;, this.info);
+      console.log(`🛑 Module ${this.info.id} stopped successfully`);
+    } catch (error) {
+      this.status = ModuleStatus.ERROR;
+      this.emit(&#039;error&#039;, { module: this.info, error });
+      throw error;
+    }
+  }
+  /**
+   * 重启模块
+   */
+  async restart() {
+    await this.stop();
+    await this.start();
+  }
+  /**
+   * 获取模块统计信息
+   */
+  getStats() {
+    return {
+      id: this.info.id,
+      name: this.info.name,
+      version: this.info.version,
+      status: this.status,
+      isRunning: this.isRunning,
+      uptime: this.isRunning ? Date.now() - this.getStartTime() : 0,
+    };
+  }
+  /**
+   * 启动逻辑 - 子类可以重写
+   */
+  async doStart() {
+    // 默认实现：子类可以重写此方法
+  }
+  /**
+   * 停止逻辑 - 子类可以重写
+   */
+  async doStop() {
+    // 默认实现：子类可以重写此方法
+  }
+  /**
+   * 获取启动时间
+   */
+  getStartTime() {
+    // 这里可以存储实际的启动时间
+    // 为了简化，返回当前时间
+    return Date.now();
+  }
+  /**
+   * 处理模块错误
+   */
+  handleError(error, context) {
+    this.emit(&#039;error&#039;, {
+      module: this.info,
+      error,
+      context,
+      timestamp: new Date().toISOString(),
+    });
+  }
+  /**
+   * Initialize unified debug enhancements
+   */
+  initializeUnifiedDebugEnhancements() {
+    try {
+      const debugCenter = DebugCenter.getInstance();
+      this.debugEnhancementManager = DebugEnhancementManager.getInstance(debugCenter);
+      // Register enhancement for this module
+      this.debugEnhancement = this.debugEnhancementManager.registerEnhancement(this.info.id, {
+        enabled: true,
+        consoleLogging: true,
+        debugCenter: true,
+        performanceTracking: true,
+        requestLogging: true,
+        errorTracking: true,
+        maxHistorySize: this.maxHistorySize,
+      });
+      console.log(`BaseModule unified debug enhancements initialized for ${this.info.id}`);
+    } catch (error) {
+      console.warn(
+        `Failed to initialize BaseModule unified debug enhancements for ${this.info.id}:`,
+        error
+      );
+      this.debugEnhancementManager = null;
+    }
+  }
+  /**
+   * Initialize debug enhancements
+   */
+  initializeDebugEnhancements() {
+    try {
+      this.debugEventBus = DebugEventBus.getInstance();
+      this.isDebugEnhanced = true;
+      console.log(&#039;BaseModule debug enhancements initialized&#039;);
+    } catch (error) {
+      console.warn(&#039;Failed to initialize BaseModule debug enhancements:&#039;, error);
+      this.isDebugEnhanced = false;
+    }
+  }
+  /**
+   * Record module metric - unified approach
+   */
+  recordModuleMetric(operation, data) {
+    // Use unified debug enhancement if available
+    if (this.debugEnhancement &amp;&amp; this.debugEnhancement.recordMetric) {
+      this.debugEnhancement.recordMetric(operation, Date.now(), {
+        moduleId: this.info.id,
+        operation,
+      });
+    }
+    // Fallback to legacy implementation
+    if (!this.moduleMetrics.has(operation)) {
+      this.moduleMetrics.set(operation, {
+        values: [],
+        lastUpdated: Date.now(),
+      });
+    }
+    const metric = this.moduleMetrics.get(operation);
+    metric.values.push(data);
+    metric.lastUpdated = Date.now();
+    // Keep only last 50 measurements
+    if (metric.values.length &gt; 50) {
+      metric.values.shift();
+    }
+  }
+  /**
+   * Add to operation history - unified approach
+   */
+  addToOperationHistory(operation) {
+    // Use unified debug enhancement if available
+    if (this.debugEnhancement &amp;&amp; this.debugEnhancement.addRequestToHistory) {
+      this.debugEnhancement.addRequestToHistory({
+        ...operation,
+        moduleId: this.info.id,
+        type: &#039;operation&#039;,
+      });
+    }
+    // Fallback to legacy implementation
+    this.operationHistory.push(operation);
+    // Keep only recent history
+    if (this.operationHistory.length &gt; this.maxHistorySize) {
+      this.operationHistory.shift();
+    }
+  }
+  /**
+   * Add to error history - unified approach
+   */
+  addToErrorHistory(error) {
+    // Use unified debug enhancement if available
+    if (this.debugEnhancement &amp;&amp; this.debugEnhancement.addErrorToHistory) {
+      this.debugEnhancement.addErrorToHistory({
+        ...error,
+        moduleId: this.info.id,
+        timestamp: Date.now(),
+      });
+    }
+    // Fallback to legacy implementation
+    this.errorHistory.push(error);
+    // Keep only recent history
+    if (this.errorHistory.length &gt; this.maxHistorySize) {
+      this.errorHistory.shift();
+    }
+  }
+  /**
+   * Publish debug event
+   */
+  publishDebugEvent(type, data) {
+    if (!this.isDebugEnhanced || !this.debugEventBus) return;
+    try {
+      this.debugEventBus.publish({
+        sessionId: `session_${Date.now()}`,
+        moduleId: this.info.id,
+        operationId: type,
+        timestamp: Date.now(),
+        type: &#039;debug&#039;,
+        position: &#039;middle&#039;,
+        data: {
+          ...data,
+          moduleId: this.info.id,
+          source: &#039;base-module&#039;,
+        },
+      });
+    } catch (error) {
+      // Silent fail if debug event bus is not available
+    }
+  }
+  /**
+   * Get debug status with enhanced information - unified approach
+   */
+  getDebugStatus() {
+    const baseStatus = {
+      moduleId: this.info.id,
+      name: this.info.name,
+      version: this.info.version,
+      status: this.status,
+      isRunning: this.isRunning,
+      isEnhanced: this.isDebugEnhanced,
+    };
+    // Add unified debug information if available
+    if (this.debugEnhancementManager) {
+      return {
+        ...baseStatus,
+        unifiedDebugInfo: this.debugEnhancementManager.getSystemDebugStatus(),
+        enhancementInfo: this.debugEnhancement
+          ? {
+              isActive: this.debugEnhancement.isActive,
+              metricsCount: this.debugEnhancement.metrics.size,
+              requestHistoryCount: this.debugEnhancement.requestHistory.length,
+              errorHistoryCount: this.debugEnhancement.errorHistory.length,
+            }
+          : null,
+      };
+    }
+    // Fallback to legacy implementation
+    if (!this.isDebugEnhanced) {
+      return baseStatus;
+    }
+    return {
+      ...baseStatus,
+      debugInfo: this.getDebugInfo(),
+      moduleMetrics: this.getModuleMetrics(),
+      operationHistory: [...this.operationHistory.slice(-10)], // Last 10 operations
+      errorHistory: [...this.errorHistory.slice(-10)], // Last 10 errors
+    };
+  }
+  /**
+   * Get detailed debug information
+   */
+  getDebugInfo() {
+    return {
+      moduleId: this.info.id,
+      name: this.info.name,
+      version: this.info.version,
+      enhanced: this.isDebugEnhanced,
+      eventBusAvailable: !!this.debugEventBus,
+      operationHistorySize: this.operationHistory.length,
+      errorHistorySize: this.errorHistory.length,
+      status: this.status,
+      isRunning: this.isRunning,
+      uptime: this.isRunning ? Date.now() - this.getStartTime() : 0,
+    };
+  }
+  /**
+   * Get module metrics
+   */
+  getModuleMetrics() {
+    const metrics = {};
+    for (const [operation, metric] of this.moduleMetrics.entries()) {
+      metrics[operation] = {
+        count: metric.values.length,
+        lastUpdated: metric.lastUpdated,
+        recentValues: metric.values.slice(-5), // Last 5 values
+      };
+    }
+    return metrics;
+  }
+  /**
+   * Get module debug info - helper method for consistency
+   */
+  getModuleDebugInfo() {
+    return this.getDebugInfo();
+  }
+  /**
+   * Check if module is initialized - helper method for consistency
+   */
+  isModuleInitialized() {
+    return this.isRunning;
+  }
+}</textarea>
+  </div>
+</div>
+
+<footer class="footer">
+  <div class="container">
+    <p>.</p>
+  </div>
+</footer>
+
+<script type="text/html" id="complexity-popover-template">
+  <div class="complexity-notice">
+    Complexity : {{ cyclomatic }} <br>
+    Length : {{ halstead.length }} <br>
+    Difficulty : {{ halstead.difficulty.toFixed(2) }} <br>
+    Est # bugs : {{ halstead.bugs.toFixed(2) }}<br>
+  </div>
+</script>
+
+<script type="text/javascript" src="../../assets/scripts/bundles/core-bundle.js"></script>
+<script type="text/javascript" src="../../assets/scripts/bundles/codemirror.js"></script>
+<script type="text/javascript" src="../../assets/scripts/codemirror.markpopovertext.js"></script>
+<script type="text/javascript" src="report.js"></script>
+<script type="text/javascript" src="report.history.js"></script>
+<script type="text/javascript" src="../../assets/scripts/plato-file.js"></script>
+</body>
+</html>

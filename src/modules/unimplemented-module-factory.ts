@@ -62,7 +62,7 @@ export class UnimplementedModuleFactory {
   public async initialize(): Promise<void> {
     try {
       await this.errorHandling.initialize();
-      
+
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'unimplemented-module-factory',
@@ -71,10 +71,9 @@ export class UnimplementedModuleFactory {
         type: 'start',
         position: 'middle',
         data: {
-          totalModules: this.modules.size
-        }
+          totalModules: this.modules.size,
+        },
       });
-
     } catch (error) {
       await this.handleError(error as Error, 'initialization');
       throw error;
@@ -88,7 +87,7 @@ export class UnimplementedModuleFactory {
     try {
       // Check if module already exists
       let moduleInstance = this.modules.get(config.moduleId);
-      
+
       if (moduleInstance) {
         // Update last accessed time
         moduleInstance.lastAccessed = new Date().toISOString();
@@ -105,7 +104,7 @@ export class UnimplementedModuleFactory {
         module,
         config,
         createdAt: now,
-        lastAccessed: now
+        lastAccessed: now,
       };
 
       this.modules.set(config.moduleId, moduleInstance);
@@ -120,12 +119,11 @@ export class UnimplementedModuleFactory {
         data: {
           moduleId: config.moduleId,
           moduleName: config.moduleName,
-          totalModules: this.modules.size
-        }
+          totalModules: this.modules.size,
+        },
       });
 
       return module;
-
     } catch (error) {
       await this.handleError(error as Error, `create_module_${config.moduleId}`);
       throw error;
@@ -169,10 +167,9 @@ export class UnimplementedModuleFactory {
         position: 'middle',
         data: {
           moduleId,
-          totalModules: this.modules.size
-        }
+          totalModules: this.modules.size,
+        },
       });
-
     } catch (error) {
       await this.handleError(error as Error, `remove_module_${moduleId}`);
       throw error;
@@ -198,7 +195,7 @@ export class UnimplementedModuleFactory {
       totalModules: this.modules.size,
       totalCalls: 0,
       modulesByType: {},
-      mostCalledModules: []
+      mostCalledModules: [],
     };
 
     const moduleStats = [];
@@ -206,27 +203,25 @@ export class UnimplementedModuleFactory {
     for (const [moduleId, moduleInstance] of this.modules) {
       const moduleStatsData = moduleInstance.module.getStats();
       const moduleType = moduleInstance.config.moduleName.split('-')[0] || 'unknown';
-      
+
       // Update total calls
       stats.totalCalls += moduleStatsData.totalCalls;
-      
+
       // Update modules by type
       stats.modulesByType[moduleType] = (stats.modulesByType[moduleType] || 0) + 1;
-      
+
       // Collect data for most called modules
       if (moduleStatsData.totalCalls > 0) {
         moduleStats.push({
           moduleId,
           callCount: moduleStatsData.totalCalls,
-          lastCalled: moduleStatsData.lastCallTime || moduleInstance.lastAccessed
+          lastCalled: moduleStatsData.lastCallTime || moduleInstance.lastAccessed,
         });
       }
     }
 
     // Sort by call count and take top 10
-    stats.mostCalledModules = moduleStats
-      .sort((a, b) => b.callCount - a.callCount)
-      .slice(0, 10);
+    stats.mostCalledModules = moduleStats.sort((a, b) => b.callCount - a.callCount).slice(0, 10);
 
     return stats;
   }
@@ -249,7 +244,7 @@ export class UnimplementedModuleFactory {
           moduleId,
           moduleName: moduleInstance.config.moduleName,
           callCount: stats.totalCalls,
-          lastCalled: stats.lastCallTime || moduleInstance.lastAccessed
+          lastCalled: stats.lastCallTime || moduleInstance.lastAccessed,
         });
       }
     }
@@ -273,7 +268,7 @@ export class UnimplementedModuleFactory {
         unusedModules.push({
           moduleId,
           moduleName: moduleInstance.config.moduleName,
-          createdAt: moduleInstance.createdAt
+          createdAt: moduleInstance.createdAt,
         });
       }
     }
@@ -297,8 +292,8 @@ export class UnimplementedModuleFactory {
       type: 'start',
       position: 'middle',
       data: {
-        totalModules: this.modules.size
-      }
+        totalModules: this.modules.size,
+      },
     });
   }
 
@@ -335,8 +330,8 @@ export class UnimplementedModuleFactory {
       position: 'middle',
       data: {
         removedModules: modulesToRemove.length,
-        maxAgeHours
-      }
+        maxAgeHours,
+      },
     });
 
     return modulesToRemove.length;
@@ -355,8 +350,8 @@ export class UnimplementedModuleFactory {
         moduleId: 'unimplemented-module-factory',
         context: {
           stack: error.stack,
-          name: error.name
-        }
+          name: error.name,
+        },
       };
 
       await this.errorHandling.handleError(errorContext);
@@ -391,10 +386,9 @@ export class UnimplementedModuleFactory {
         type: 'start',
         position: 'middle',
         data: {
-          totalModules: this.modules.size
-        }
+          totalModules: this.modules.size,
+        },
       });
-
     } catch (error) {
       await this.handleError(error as Error, 'stop');
       throw error;

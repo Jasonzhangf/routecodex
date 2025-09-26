@@ -398,18 +398,7 @@ export class ResourceManager {
     let totalCreated = 0;
     let totalDestroyed = 0;
 
-    const self = this;
-
-    const pool: ConnectionPool = {
-      id: poolId,
-      config,
-      get currentSize() { return connections.length; },
-      get activeConnections() { return activeConnections.size; },
-      get availableConnections() { return availableConnections.length; },
-      get totalCreated() { return totalCreated; },
-      get totalDestroyed() { return totalDestroyed; },
-
-      async getConnection(): Promise<any> {
+    const getConnection = async (): Promise<any> => {
         // Try to get available connection
         if (availableConnections.length > 0) {
           const connection = availableConnections.pop()!;
@@ -419,7 +408,7 @@ export class ResourceManager {
 
         // Create new connection if under limit
         if (connections.length < config.maxPoolSize!) {
-          const connection = await self.createConnectionForPool(poolId);
+          const connection = await this.createConnectionForPool(poolId);
           connections.push(connection);
           totalCreated++;
           activeConnections.add(connection);
@@ -427,10 +416,10 @@ export class ResourceManager {
         }
 
         // Wait for available connection
-        return self.waitForAvailableConnectionForPool(poolId, availableConnections, activeConnections);
-      },
+        return this.waitForAvailableConnectionForPool(poolId, availableConnections, activeConnections);
+      };
 
-      async releaseConnection(connection: any): Promise<void> {
+      const releaseConnection = async (connection: any): Promise<void> => {
         if (activeConnections.has(connection)) {
           activeConnections.delete(connection);
 
@@ -438,7 +427,7 @@ export class ResourceManager {
             availableConnections.push(connection);
           } else {
             // Destroy excess connection
-            await self.destroyConnectionForPool(connection);
+            await this.destroyConnectionForPool(connection);
             const index = connections.indexOf(connection);
             if (index > -1) {
               connections.splice(index, 1);
@@ -446,9 +435,9 @@ export class ResourceManager {
             totalDestroyed++;
           }
         }
-      },
+      };
 
-      async destroyConnection(connection: any): Promise<void> {
+      const destroyConnection = async (connection: any): Promise<void> => {
         if (activeConnections.has(connection)) {
           activeConnections.delete(connection);
         }
@@ -463,11 +452,11 @@ export class ResourceManager {
           availableConnections.splice(availableIndex, 1);
         }
 
-        await self.destroyConnectionForPool(connection);
+        await this.destroyConnectionForPool(connection);
         totalDestroyed++;
-      },
+      };
 
-      getStatistics(): any {
+      const getStatistics = (): any => {
         return {
           currentSize: connections.length,
           activeConnections: activeConnections.size,
@@ -475,20 +464,34 @@ export class ResourceManager {
           totalCreated,
           totalDestroyed,
           utilizationRate: connections.length > 0 ? activeConnections.size / connections.length : 0,
-          averageWaitTime: self.calculateAverageWaitTimeForPool(poolId)
+          averageWaitTime: this.calculateAverageWaitTimeForPool(poolId)
         };
-      },
+      };
 
-      async close(): Promise<void> {
+      const close = async (): Promise<void> => {
         // Destroy all connections
         for (const connection of connections) {
-          await self.destroyConnectionForPool(connection);
+          await this.destroyConnectionForPool(connection);
         }
         connections.length = 0;
         availableConnections.length = 0;
         activeConnections.clear();
-      }
-    };
+      };
+
+      const pool: ConnectionPool = {
+        id: poolId,
+        config,
+        get currentSize() { return connections.length; },
+        get activeConnections() { return activeConnections.size; },
+        get availableConnections() { return availableConnections.length; },
+        get totalCreated() { return totalCreated; },
+        get totalDestroyed() { return totalDestroyed; },
+        getConnection,
+        releaseConnection,
+        destroyConnection,
+        getStatistics,
+        close
+      };
 
     // Initialize minimum connections
     (async () => {

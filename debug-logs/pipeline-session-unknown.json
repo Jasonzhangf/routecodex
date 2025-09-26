@@ -1,0 +1,358 @@
+{
+  "sessionId": "unknown",
+  "pipelineId": "unknown",
+  "startTime": 1758817056790,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "manager",
+      "position": "middle",
+      "startTime": 1758817056790,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "manager",
+      "position": "middle",
+      "startTime": 1758817056791,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "manager",
+      "position": "middle",
+      "startTime": 1758817056792,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "manager",
+      "position": "middle",
+      "startTime": 1758817056792,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "qwen_key1.qwen3-coder-plus",
+      "position": "middle",
+      "startTime": 1758817056792,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "qwen_key1.qwen3-coder-plus",
+      "position": "middle",
+      "startTime": 1758817056793,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "lmstudio_key1.gpt-oss-20b-mlx",
+      "position": "middle",
+      "startTime": 1758817056794,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "lmstudio_key1.gpt-oss-20b-mlx",
+      "position": "middle",
+      "startTime": 1758817056794,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "qwen_key1.qwen-turbo",
+      "position": "middle",
+      "startTime": 1758817056795,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "qwen_key1.qwen-turbo",
+      "position": "middle",
+      "startTime": 1758817056796,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "llmswitch",
+      "position": "middle",
+      "startTime": 1758817056797,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "llmswitch",
+      "position": "middle",
+      "startTime": 1758817056797,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "llmswitch",
+      "position": "middle",
+      "startTime": 1758817056798,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "llmswitch",
+      "position": "middle",
+      "startTime": 1758817056798,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "llmswitch",
+      "position": "middle",
+      "startTime": 1758817056799,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "llmswitch",
+      "position": "middle",
+      "startTime": 1758817056800,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "llmswitch",
+      "position": "middle",
+      "startTime": 1758817056800,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "llmswitch",
+      "position": "middle",
+      "startTime": 1758817056801,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "llmswitch",
+      "position": "middle",
+      "startTime": 1758817056801,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "compatibility",
+      "position": "middle",
+      "startTime": 1758817056803,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "compatibility",
+      "position": "middle",
+      "startTime": 1758817056803,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "compatibility",
+      "position": "middle",
+      "startTime": 1758817056804,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "compatibility",
+      "position": "middle",
+      "startTime": 1758817056804,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "compatibility",
+      "position": "middle",
+      "startTime": 1758817056805,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "compatibility",
+      "position": "middle",
+      "startTime": 1758817056805,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "compatibility",
+      "position": "middle",
+      "startTime": 1758817056806,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "compatibility",
+      "position": "middle",
+      "startTime": 1758817056806,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "compatibility",
+      "position": "middle",
+      "startTime": 1758817056807,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "provider",
+      "position": "middle",
+      "startTime": 1758817056811,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "provider",
+      "position": "middle",
+      "startTime": 1758817056812,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "provider",
+      "position": "middle",
+      "startTime": 1758817056813,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "provider",
+      "position": "middle",
+      "startTime": 1758817056814,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "provider",
+      "position": "middle",
+      "startTime": 1758817056816,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "provider",
+      "position": "middle",
+      "startTime": 1758817056816,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "provider",
+      "position": "middle",
+      "startTime": 1758817056817,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "provider",
+      "position": "middle",
+      "startTime": 1758817056817,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "lmstudio_key1.gpt-oss-20b-mlx",
+      "position": "middle",
+      "startTime": 1758817056818,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "manager",
+      "position": "middle",
+      "startTime": 1758817056819,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "provider",
+      "position": "middle",
+      "startTime": 1758817056822,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-provider",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758817056823,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "provider",
+      "position": "middle",
+      "startTime": 1758817056824,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "qwen_key1.qwen3-coder-plus",
+      "position": "middle",
+      "startTime": 1758817056825,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "manager",
+      "position": "middle",
+      "startTime": 1758817056825,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "provider",
+      "position": "middle",
+      "startTime": 1758817056825,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-provider",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758817056826,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-module",
+      "moduleId": "provider",
+      "position": "middle",
+      "startTime": 1758817056826,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "qwen_key1.qwen-turbo",
+      "position": "middle",
+      "startTime": 1758817056828,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "manager",
+      "position": "middle",
+      "startTime": 1758817056828,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "manager",
+      "position": "middle",
+      "startTime": 1758817056829,
+      "status": "running"
+    },
+    {
+      "operationId": "pipeline-pipeline-lifecycle",
+      "moduleId": "manager",
+      "position": "middle",
+      "startTime": 1758817056829,
+      "status": "running"
+    }
+  ]
+}

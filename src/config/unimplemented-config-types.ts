@@ -36,7 +36,7 @@ export interface UnimplementedModuleConfiguration extends BaseModuleConfig {
  * Provider module configuration with unimplemented support
  */
 export interface ProviderModuleConfiguration extends BaseModuleConfig {
-  type: "start";
+  type: 'provider';
   providerConfig: ProviderConfig | UnimplementedProviderConfig;
   fallbackToUnimplemented?: boolean;
 }
@@ -60,10 +60,10 @@ export interface CustomModuleConfiguration extends BaseModuleConfig {
 /**
  * Union type for all module configurations
  */
-export type ModuleConfiguration = 
-  | UnimplementedModuleConfiguration 
-  | ProviderModuleConfiguration 
-  | CoreModuleConfiguration 
+export type ModuleConfiguration =
+  | UnimplementedModuleConfiguration
+  | ProviderModuleConfiguration
+  | CoreModuleConfiguration
   | CustomModuleConfiguration;
 
 /**
@@ -194,7 +194,7 @@ export const DEFAULT_UNIMPLEMENTED_CONFIG: GlobalUnimplementedConfig = {
     defaultLogLevel: 'info',
     defaultMaxCallerHistory: 100,
     enableMetrics: true,
-    enableAutoCleanup: true
+    enableAutoCleanup: true,
   },
   providerManager: {
     enableUnimplementedProviders: true,
@@ -202,14 +202,14 @@ export const DEFAULT_UNIMPLEMENTED_CONFIG: GlobalUnimplementedConfig = {
     unimplementedProviderDefaults: {
       unimplementedMessage: 'This provider functionality is not yet implemented',
       logUnimplementedCalls: true,
-      trackCallerInfo: true
-    }
+      trackCallerInfo: true,
+    },
   },
   defaultModuleConfig: {
     logLevel: 'info',
     maxCallerHistory: 100,
-    customMessage: 'This functionality is not yet implemented'
-  }
+    customMessage: 'This functionality is not yet implemented',
+  },
 };
 
 /**
@@ -221,16 +221,16 @@ export const UNIMPLEMENTED_CONFIG_PRESETS: UnimplementedConfigPresets = {
     factory: {
       ...DEFAULT_UNIMPLEMENTED_CONFIG.factory!,
       defaultLogLevel: 'debug',
-      enableMetrics: true
-    }
+      enableMetrics: true,
+    },
   },
   staging: {
     ...DEFAULT_UNIMPLEMENTED_CONFIG,
     factory: {
       ...DEFAULT_UNIMPLEMENTED_CONFIG.factory!,
       defaultLogLevel: 'info',
-      cleanupInterval: 12 * 60 * 60 * 1000 // 12 hours
-    }
+      cleanupInterval: 12 * 60 * 60 * 1000, // 12 hours
+    },
   },
   production: {
     ...DEFAULT_UNIMPLEMENTED_CONFIG,
@@ -238,8 +238,8 @@ export const UNIMPLEMENTED_CONFIG_PRESETS: UnimplementedConfigPresets = {
       ...DEFAULT_UNIMPLEMENTED_CONFIG.factory!,
       defaultLogLevel: 'warn',
       enableAutoCleanup: true,
-      maxModuleAge: 3 * 24 * 60 * 60 * 1000 // 3 days
-    }
+      maxModuleAge: 3 * 24 * 60 * 60 * 1000, // 3 days
+    },
   },
   minimal: {
     enabled: true,
@@ -248,16 +248,16 @@ export const UNIMPLEMENTED_CONFIG_PRESETS: UnimplementedConfigPresets = {
       maxModules: 100,
       defaultLogLevel: 'error',
       enableMetrics: false,
-      enableAutoCleanup: false
+      enableAutoCleanup: false,
     },
     providerManager: {
       enableUnimplementedProviders: true,
       autoCreateUnimplemented: false,
       unimplementedProviderDefaults: {
         logUnimplementedCalls: false,
-        trackCallerInfo: false
-      }
-    }
+        trackCallerInfo: false,
+      },
+    },
   },
   comprehensive: {
     ...DEFAULT_UNIMPLEMENTED_CONFIG,
@@ -267,16 +267,17 @@ export const UNIMPLEMENTED_CONFIG_PRESETS: UnimplementedConfigPresets = {
       defaultLogLevel: 'info',
       enableMetrics: true,
       enableAutoCleanup: true,
-      cleanupInterval: 6 * 60 * 60 * 1000 // 6 hours
+      cleanupInterval: 6 * 60 * 60 * 1000, // 6 hours
     },
     providerManager: {
       enableUnimplementedProviders: true,
       autoCreateUnimplemented: true,
       unimplementedProviderDefaults: {
-        unimplementedMessage: 'This functionality is currently unavailable. Implementation priority has been logged.',
+        unimplementedMessage:
+          'This functionality is currently unavailable. Implementation priority has been logged.',
         logUnimplementedCalls: true,
-        trackCallerInfo: true
-      }
-    }
-  }
+        trackCallerInfo: true,
+      },
+    },
+  },
 };

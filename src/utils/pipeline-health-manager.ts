@@ -47,7 +47,7 @@ export class PipelineHealthManager {
       autoRecoveryEnabled: true,
       recoveryIntervalMs: 5 * 60 * 1000, // 5 分钟
       healthCheckTimeoutMs: 10 * 1000, // 10 秒
-      ...config
+      ...config,
     };
 
     this.startHealthCheckTimer();
@@ -109,7 +109,8 @@ export class PipelineHealthManager {
     status.errorCount++;
 
     // 429错误特殊处理，可能需要立即禁用相关流水线
-    if (status.consecutiveErrors >= 2) { // 429错误更严格
+    if (status.consecutiveErrors >= 2) {
+      // 429错误更严格
       this.disablePipeline(pipelineId, `429错误次数达到阈值: ${status.consecutiveErrors}`);
     }
 
@@ -132,7 +133,7 @@ export class PipelineHealthManager {
       consecutiveErrors: 0,
       errorCount: 0,
       successCount: 0,
-      disabled: false
+      disabled: false,
     };
   }
 
@@ -144,8 +145,10 @@ export class PipelineHealthManager {
       return false;
     }
 
-    return status.consecutiveErrors >= this.config.maxConsecutiveErrors ||
-           status.errorCount >= this.config.errorThreshold;
+    return (
+      status.consecutiveErrors >= this.config.maxConsecutiveErrors ||
+      status.errorCount >= this.config.errorThreshold
+    );
   }
 
   /**
@@ -318,8 +321,8 @@ export class PipelineHealthManager {
     const disabledCount = statuses.filter(s => s.disabled).length;
     const totalErrors = statuses.reduce((sum, s) => sum + s.errorCount, 0);
     const totalSuccesses = statuses.reduce((sum, s) => sum + s.successCount, 0);
-    const averageSuccessRate = totalSuccesses + totalErrors > 0 ?
-      totalSuccesses / (totalSuccesses + totalErrors) : 0;
+    const averageSuccessRate =
+      totalSuccesses + totalErrors > 0 ? totalSuccesses / (totalSuccesses + totalErrors) : 0;
 
     return {
       totalPipelines: statuses.length,
@@ -327,7 +330,7 @@ export class PipelineHealthManager {
       disabledPipelines: disabledCount,
       averageSuccessRate,
       totalErrors,
-      totalSuccesses
+      totalSuccesses,
     };
   }
 
@@ -342,7 +345,7 @@ export class PipelineHealthManager {
     return {
       config: this.config,
       stats: this.getStats(),
-      pipelineStatuses: Array.from(this.healthStatuses.values())
+      pipelineStatuses: Array.from(this.healthStatuses.values()),
     };
   }
 }

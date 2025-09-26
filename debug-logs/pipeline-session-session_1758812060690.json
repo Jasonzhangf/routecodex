@@ -1,0 +1,36 @@
+{
+  "sessionId": "session_1758812060690",
+  "pipelineId": "unknown",
+  "startTime": 1758812060690,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "error_handler_registered",
+      "moduleId": "error-handler-registry",
+      "position": "middle",
+      "startTime": 1758812060690,
+      "status": "running"
+    },
+    {
+      "operationId": "error_handler_registered",
+      "moduleId": "error-handler-registry",
+      "position": "middle",
+      "startTime": 1758812060690,
+      "status": "running"
+    },
+    {
+      "operationId": "provider_manager_initialized",
+      "moduleId": "provider-manager",
+      "position": "middle",
+      "startTime": 1758812060690,
+      "status": "running"
+    },
+    {
+      "operationId": "metric_initialization",
+      "moduleId": "provider-manager",
+      "position": "middle",
+      "startTime": 1758812060690,
+      "status": "running"
+    }
+  ]
+}

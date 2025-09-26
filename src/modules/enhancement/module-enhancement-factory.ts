@@ -358,33 +358,32 @@ export class ModuleEnhancementFactory {
     config: EnhancementConfig
   ): T {
     const enhanced = { ...module };
-    const factory = this;
 
     // Wrap key methods with debugging
     if ('processIncoming' in enhanced && typeof enhanced.processIncoming === 'function') {
       const originalProcessIncoming = enhanced.processIncoming;
-      enhanced.processIncoming = async function(request: any) {
+      enhanced.processIncoming = async (request: any) => {
         const startTime = Date.now();
         const requestId = request._metadata?.requestId || `req-${Date.now()}`;
 
         try {
           logger.logProviderRequest(requestId, 'request-start', {
             moduleId,
-            request: factory.sanitizeRequest(request)
+            request: this.sanitizeRequest(request)
           });
 
-          const result = await originalProcessIncoming.call(this, request);
+          const result = await originalProcessIncoming.call(module, request);
 
           const processingTime = Date.now() - startTime;
           logger.logProviderRequest(requestId, 'request-success', {
             moduleId,
             processingTime,
-            response: factory.sanitizeResponse(result)
+            response: this.sanitizeResponse(result)
           });
 
           // Performance tracking
           if (config.performanceTracking) {
-            factory.trackPerformance(moduleId, 'processIncoming', processingTime);
+            this.trackPerformance(moduleId, 'processIncoming', processingTime);
           }
 
           return result;
@@ -408,10 +407,10 @@ export class ModuleEnhancementFactory {
     // Wrap initialize method
     if ('initialize' in enhanced && typeof enhanced.initialize === 'function') {
       const originalInitialize = enhanced.initialize;
-      enhanced.initialize = async function() {
+      enhanced.initialize = async () => {
         try {
           logger.logModule(moduleId, 'initialization-start');
-          const result = await originalInitialize.call(this);
+          const result = await originalInitialize.call(module);
           logger.logModule(moduleId, 'initialization-success');
           return result;
         } catch (error) {
@@ -434,12 +433,11 @@ export class ModuleEnhancementFactory {
     config: EnhancementConfig
   ): T {
     const enhanced = { ...module };
-    const factory = this;
 
     // Wrap processRequest method
     if ('processRequest' in enhanced && typeof enhanced.processRequest === 'function') {
       const originalProcessRequest = enhanced.processRequest;
-      enhanced.processRequest = async function(request: any) {
+      enhanced.processRequest = async (request: any) => {
         const startTime = Date.now();
         const requestId = request.route?.requestId || `req-${Date.now()}`;
 
@@ -447,20 +445,20 @@ export class ModuleEnhancementFactory {
           logger.logRequest(requestId, 'pipeline-start', {
             moduleId,
             pipelineId: moduleId,
-            request: factory.sanitizeRequest(request)
+            request: this.sanitizeRequest(request)
           });
 
-          const result = await originalProcessRequest.call(this, request);
+          const result = await originalProcessRequest.call(module, request);
 
           const processingTime = Date.now() - startTime;
           logger.logRequest(requestId, 'pipeline-complete', {
             moduleId,
             processingTime,
-            response: factory.sanitizeResponse(result)
+            response: this.sanitizeResponse(result)
           });
 
           if (config.performanceTracking) {
-            factory.trackPerformance(moduleId, 'processRequest', processingTime);
+            this.trackPerformance(moduleId, 'processRequest', processingTime);
           }
 
           return result;
@@ -494,28 +492,27 @@ export class ModuleEnhancementFactory {
     config: EnhancementConfig
   ): T {
     const enhanced = { ...module };
-    const factory = this;
 
     // Wrap processIncoming method
     if ('processIncoming' in enhanced && typeof enhanced.processIncoming === 'function') {
       const originalProcessIncoming = enhanced.processIncoming;
-      enhanced.processIncoming = async function(request: any) {
+      enhanced.processIncoming = async (request: any) => {
         const startTime = Date.now();
         const requestId = request._metadata?.requestId || `req-${Date.now()}`;
 
         try {
           logger.logTransformation(requestId, 'compatibility-transform-start', {
             moduleId,
-            input: factory.sanitizeRequest(request)
+            input: this.sanitizeRequest(request)
           });
 
-          const result = await originalProcessIncoming.call(this, request);
+          const result = await originalProcessIncoming.call(module, request);
 
           const processingTime = Date.now() - startTime;
           logger.logTransformation(requestId, 'compatibility-transform-complete', {
             moduleId,
             processingTime,
-            output: factory.sanitizeResponse(result)
+            output: this.sanitizeResponse(result)
           });
 
           if (config.transformationLogging) {
@@ -553,32 +550,31 @@ export class ModuleEnhancementFactory {
     config: EnhancementConfig
   ): T {
     const enhanced = { ...module };
-    const factory = this;
 
     // Wrap execute method
     if ('execute' in enhanced && typeof enhanced.execute === 'function') {
       const originalExecute = enhanced.execute;
-      enhanced.execute = async function(context: any) {
+      enhanced.execute = async (context: any) => {
         const startTime = Date.now();
         const requestId = context.requestId || `req-${Date.now()}`;
 
         try {
           logger.logModule(moduleId, 'workflow-start', {
             moduleId,
-            context: factory.sanitizeRequest(context)
+            context: this.sanitizeRequest(context)
           });
 
-          const result = await originalExecute.call(this, context);
+          const result = await originalExecute.call(module, context);
 
           const processingTime = Date.now() - startTime;
           logger.logModule(moduleId, 'workflow-complete', {
             moduleId,
             processingTime,
-            result: factory.sanitizeResponse(result)
+            result: this.sanitizeResponse(result)
           });
 
           if (config.performanceTracking) {
-            factory.trackPerformance(moduleId, 'execute', processingTime);
+            this.trackPerformance(moduleId, 'execute', processingTime);
           }
 
           return result;
@@ -612,22 +608,21 @@ export class ModuleEnhancementFactory {
     config: EnhancementConfig
   ): T {
     const enhanced = { ...module };
-    const factory = this;
 
     // Wrap processIncoming method
     if ('processIncoming' in enhanced && typeof enhanced.processIncoming === 'function') {
       const originalProcessIncoming = enhanced.processIncoming;
-      enhanced.processIncoming = async function(request: any) {
+      enhanced.processIncoming = async (request: any) => {
         const startTime = Date.now();
         const requestId = request._metadata?.requestId || `req-${Date.now()}`;
 
         try {
           logger.logModule(moduleId, 'llm-switch-start', {
             moduleId,
-            request: factory.sanitizeRequest(request)
+            request: this.sanitizeRequest(request)
           });
 
-          const result = await originalProcessIncoming.call(this, request);
+          const result = await originalProcessIncoming.call(module, request);
 
           const processingTime = Date.now() - startTime;
           logger.logModule(moduleId, 'llm-switch-complete', {
@@ -637,7 +632,7 @@ export class ModuleEnhancementFactory {
           });
 
           if (config.performanceTracking) {
-            factory.trackPerformance(moduleId, 'processIncoming', processingTime);
+            this.trackPerformance(moduleId, 'processIncoming', processingTime);
           }
 
           return result;
@@ -671,12 +666,11 @@ export class ModuleEnhancementFactory {
     config: EnhancementConfig
   ): T {
     const enhanced = { ...module };
-    const factory = this;
 
     // Wrap handleRequest method
     if ('handleRequest' in enhanced && typeof enhanced.handleRequest === 'function') {
       const originalHandleRequest = enhanced.handleRequest;
-      enhanced.handleRequest = async function(request: any, response: any) {
+      enhanced.handleRequest = async (request: any, response: any) => {
         const startTime = Date.now();
         const requestId = request.headers?.['x-request-id'] || `req-${Date.now()}`;
 
@@ -688,7 +682,7 @@ export class ModuleEnhancementFactory {
             requestId
           });
 
-          const result = await originalHandleRequest.call(this, request, response);
+          const result = await originalHandleRequest.call(module, request, response);
 
           const processingTime = Date.now() - startTime;
           logger.logModule(moduleId, 'http-request-complete', {
@@ -698,7 +692,7 @@ export class ModuleEnhancementFactory {
           });
 
           if (config.performanceTracking) {
-            factory.trackPerformance(moduleId, 'handleRequest', processingTime);
+            this.trackPerformance(moduleId, 'handleRequest', processingTime);
           }
 
           return result;
@@ -732,7 +726,6 @@ export class ModuleEnhancementFactory {
     config: EnhancementConfig
   ): T {
     const enhanced = { ...module };
-    const factory = this;
 
     // Wrap all methods with debugging
     const methodNames = Object.getOwnPropertyNames(Object.getPrototypeOf(module))
@@ -741,7 +734,7 @@ export class ModuleEnhancementFactory {
     methodNames.forEach(methodName => {
       const originalMethod = enhanced[methodName as keyof T];
       if (typeof originalMethod === 'function') {
-        enhanced[methodName as keyof T] = async function(...args: any[]) {
+        (enhanced[methodName as keyof T] as any) = async (...args: any[]) => {
           const startTime = Date.now();
           const requestId = `req-${Date.now()}`;
 
@@ -749,7 +742,7 @@ export class ModuleEnhancementFactory {
             logger.logModule(moduleId, `method-start:${methodName}`, {
               moduleId,
               method: methodName,
-                            args: factory.sanitizeRequest(args)
+              args: this.sanitizeRequest(args)
             });
 
             const result = await originalMethod.apply(module, args);
@@ -759,11 +752,11 @@ export class ModuleEnhancementFactory {
               moduleId,
               method: methodName,
               processingTime,
-              result: factory.sanitizeResponse(result)
+              result: this.sanitizeResponse(result)
             });
 
             if (config.performanceTracking) {
-              factory.trackPerformance(moduleId, methodName, processingTime);
+              this.trackPerformance(moduleId, methodName, processingTime);
             }
 
             return result;
@@ -782,7 +775,7 @@ export class ModuleEnhancementFactory {
 
             throw error;
           }
-        } as any;
+        };
       }
     });
 

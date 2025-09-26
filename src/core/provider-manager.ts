@@ -4,18 +4,17 @@
  */
 
 import { BaseModule, type ModuleInfo } from './base-module.js';
-import { DebugEventBus } from "rcc-debugcenter";
+import { DebugEventBus } from 'rcc-debugcenter';
 import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
 import { ErrorHandlingUtils } from '../utils/error-handling-utils.js';
 import { BaseProvider } from '../providers/base-provider.js';
 import { OpenAIProvider } from '../providers/openai-provider.js';
-import { PassThroughProvider } from '../providers/pass-through-provider.js';
 import {
   type ProviderConfig,
   type ProviderHealth,
   type ProviderStats,
   type ServerConfig,
-  RouteCodexError
+  RouteCodexError,
 } from '../server/types.js';
 
 /**
@@ -58,15 +57,12 @@ export class ProviderManager extends BaseModule {
     averageRecoveryTime: number;
   };
 
-  constructor(
-    config: ServerConfig,
-    options: ProviderManagerOptions = {}
-  ) {
+  constructor(config: ServerConfig, options: ProviderManagerOptions = {}) {
     const moduleInfo: ModuleInfo = {
       id: 'provider-manager',
       name: 'ProviderManager',
       version: '0.0.1',
-      description: 'Manages provider lifecycle, health monitoring, and failover'
+      description: 'Manages provider lifecycle, health monitoring, and failover',
     };
 
     super(moduleInfo);
@@ -83,7 +79,7 @@ export class ProviderManager extends BaseModule {
       maxConsecutiveFailures: 3,
       providerTimeout: 30000,
       enableMetrics: true,
-      ...options
+      ...options,
     };
 
     // Initialize metrics
@@ -91,7 +87,7 @@ export class ProviderManager extends BaseModule {
       totalHealthChecks: 0,
       failedHealthChecks: 0,
       providerSwitches: 0,
-      averageRecoveryTime: 0
+      averageRecoveryTime: 0,
     };
   }
 
@@ -143,7 +139,7 @@ export class ProviderManager extends BaseModule {
       // Register error handlers for provider manager
       this.errorUtils.registerHandler(
         'provider_initialization_error',
-        async (context) => {
+        async context => {
           console.error(`Provider initialization error: ${context.error}`);
           // Could implement automatic provider retry or fallback
         },
@@ -153,7 +149,7 @@ export class ProviderManager extends BaseModule {
 
       this.errorUtils.registerHandler(
         'provider_health_check_error',
-        async (context) => {
+        async context => {
           console.warn(`Provider health check error: ${context.error}`);
           // Could implement automatic provider restart
         },
@@ -177,8 +173,8 @@ export class ProviderManager extends BaseModule {
         data: {
           providerCount: this.providers.size,
           healthCheckInterval: this.options.healthCheckInterval,
-          autoRecoveryEnabled: this.options.autoRecoveryEnabled
-        }
+          autoRecoveryEnabled: this.options.autoRecoveryEnabled,
+        },
       });
 
       // Record initialization metric
@@ -186,9 +182,8 @@ export class ProviderManager extends BaseModule {
         providerCount: this.providers.size,
         healthCheckInterval: this.options.healthCheckInterval,
         autoRecoveryEnabled: this.options.autoRecoveryEnabled,
-        maxConsecutiveFailures: this.options.maxConsecutiveFailures
+        maxConsecutiveFailures: this.options.maxConsecutiveFailures,
       });
-
     } catch (error) {
       await this.handleError(error as Error, 'initialization');
       throw error;
@@ -223,13 +218,7 @@ export class ProviderManager extends BaseModule {
         case 'openai':
           provider = new OpenAIProvider(config);
           break;
-        case 'pass-through':
-        case 'passthrough':
-          provider = new PassThroughProvider({
-            targetUrl: config.baseUrl || 'https://api.openai.com/v1',
-            timeout: config.timeout || 30000
-          });
-          break;
+        // pass-through provider removed; only supported providers remain
         default:
           throw new RouteCodexError(
             `Unsupported provider type: ${config.type}`,
@@ -246,7 +235,7 @@ export class ProviderManager extends BaseModule {
         lastHealthCheck: 0,
         isActive: true,
         consecutiveFailures: 0,
-        stats: provider.getStats()
+        stats: provider.getStats(),
       };
 
       this.providers.set(providerId, providerInstance);
@@ -261,8 +250,8 @@ export class ProviderManager extends BaseModule {
         data: {
           providerId,
           providerType: config.type,
-          modelCount: Object.keys(config.models).length
-        }
+          modelCount: Object.keys(config.models).length,
+        },
       });
 
       // Record provider addition metric
@@ -270,9 +259,8 @@ export class ProviderManager extends BaseModule {
         providerId,
         providerType: config.type,
         modelCount: Object.keys(config.models).length,
-        totalProviders: this.providers.size
+        totalProviders: this.providers.size,
       });
-
     } catch (error) {
       await this.handleError(error as Error, 'add_provider');
       throw error;
@@ -300,10 +288,9 @@ export class ProviderManager extends BaseModule {
         type: 'start',
         position: 'middle',
         data: {
-          providerId
-        }
+          providerId,
+        },
       });
-
     } catch (error) {
       await this.handleError(error as Error, 'remove_provider');
       throw error;
@@ -409,10 +396,9 @@ export class ProviderManager extends BaseModule {
               providerId,
               healthStatus: health.status,
               responseTime: health.responseTime,
-              duration
-            }
+              duration,
+            },
           });
-
         } catch (error) {
           this.metrics.failedHealthChecks++;
           await this.handleProviderFailure(providerId, providerInstance, {
@@ -420,7 +406,7 @@ export class ProviderManager extends BaseModule {
             error: error instanceof Error ? error.message : String(error),
             consecutiveFailures: 0,
             lastCheck: new Date().toISOString(),
-            responseTime: 0
+            responseTime: 0,
           });
         }
       }
@@ -453,8 +439,8 @@ export class ProviderManager extends BaseModule {
         data: {
           providerId,
           consecutiveFailures: providerInstance.consecutiveFailures,
-          reason: health.error || 'Unknown'
-        }
+          reason: health.error || 'Unknown',
+        },
       });
     }
   }
@@ -475,7 +461,8 @@ export class ProviderManager extends BaseModule {
       this.metrics.averageRecoveryTime = recoveryTime;
     } else {
       this.metrics.averageRecoveryTime =
-        (this.metrics.averageRecoveryTime * (this.metrics.totalHealthChecks - 1) + recoveryTime) / this.metrics.totalHealthChecks;
+        (this.metrics.averageRecoveryTime * (this.metrics.totalHealthChecks - 1) + recoveryTime) /
+        this.metrics.totalHealthChecks;
     }
 
     this.debugEventBus?.publish({
@@ -488,8 +475,8 @@ export class ProviderManager extends BaseModule {
       data: {
         providerId,
         recoveryTime,
-        consecutiveFailures: 0
-      }
+        consecutiveFailures: 0,
+      },
     });
   }
 
@@ -500,11 +487,7 @@ export class ProviderManager extends BaseModule {
     const availableProviders = this.getActiveProviders();
 
     if (availableProviders.length === 0) {
-      throw new RouteCodexError(
-        'No active providers available',
-        'no_active_providers',
-        503
-      );
+      throw new RouteCodexError('No active providers available', 'no_active_providers', 503);
     }
 
     // Simple round-robin selection for now
@@ -526,8 +509,8 @@ export class ProviderManager extends BaseModule {
         data: {
           fromProvider: currentProviderId,
           toProvider: selectedProvider,
-          availableProviders: availableProviders.length
-        }
+          availableProviders: availableProviders.length,
+        },
       });
     }
 
@@ -537,7 +520,10 @@ export class ProviderManager extends BaseModule {
   /**
    * Update provider configuration
    */
-  public async updateProviderConfig(providerId: string, newConfig: Partial<ProviderConfig>): Promise<void> {
+  public async updateProviderConfig(
+    providerId: string,
+    newConfig: Partial<ProviderConfig>
+  ): Promise<void> {
     try {
       const providerInstance = this.providers.get(providerId);
       if (!providerInstance) {
@@ -556,10 +542,9 @@ export class ProviderManager extends BaseModule {
         position: 'middle',
         data: {
           providerId,
-          changes: Object.keys(newConfig)
-        }
+          changes: Object.keys(newConfig),
+        },
       });
-
     } catch (error) {
       await this.handleError(error as Error, 'update_provider_config');
       throw error;
@@ -569,7 +554,10 @@ export class ProviderManager extends BaseModule {
   /**
    * Get best provider for request based on load and health
    */
-  public getBestProviderForRequest(modelId?: string, requestType: 'chat' | 'completion' | 'embedding' = 'chat'): BaseProvider | null {
+  public getBestProviderForRequest(
+    modelId?: string,
+    requestType: 'chat' | 'completion' | 'embedding' = 'chat'
+  ): BaseProvider | null {
     const activeProviders = this.getActiveProviders();
     if (activeProviders.length === 0) {
       return null;
@@ -638,14 +626,17 @@ export class ProviderManager extends BaseModule {
       const requestsPerMinute = providerStats.totalRequests; // This could be enhanced with time-based tracking
 
       // Calculate load based on recent requests and response time
-      const load = Math.min(100, (requestsPerMinute / 60) * (providerStats.averageResponseTime / 1000));
+      const load = Math.min(
+        100,
+        (requestsPerMinute / 60) * (providerStats.averageResponseTime / 1000)
+      );
 
       stats.push({
         providerId,
         load,
         health: health.status,
         requestsPerMinute,
-        averageResponseTime: providerStats.averageResponseTime
+        averageResponseTime: providerStats.averageResponseTime,
       });
     }
 
@@ -682,11 +673,10 @@ export class ProviderManager extends BaseModule {
           operation(provider),
           new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error('Provider request timeout')), timeout)
-          )
+          ),
         ]);
 
         return { result, providerId: provider.getModuleInfo().id, attempts };
-
       } catch (error) {
         lastError = error as Error;
 
@@ -703,8 +693,8 @@ export class ProviderManager extends BaseModule {
             maxRetries,
             modelId,
             requestType,
-            error: error instanceof Error ? error.message : String(error)
-          }
+            error: error instanceof Error ? error.message : String(error),
+          },
         });
 
         // If this isn't the last attempt, try to switch provider
@@ -741,7 +731,7 @@ export class ProviderManager extends BaseModule {
       if (this.providers.has(providerId)) {
         return {
           success: false,
-          message: `Provider ${providerId} already exists`
+          message: `Provider ${providerId} already exists`,
         };
       }
 
@@ -751,17 +741,11 @@ export class ProviderManager extends BaseModule {
         case 'openai':
           provider = new OpenAIProvider(config);
           break;
-        case 'pass-through':
-        case 'passthrough':
-          provider = new PassThroughProvider({
-            targetUrl: config.baseUrl || 'https://api.openai.com/v1',
-            timeout: config.timeout || 30000
-          });
-          break;
+        // pass-through provider removed; only supported providers remain
         default:
           return {
             success: false,
-            message: `Unsupported provider type: ${config.type}`
+            message: `Unsupported provider type: ${config.type}`,
           };
       }
 
@@ -773,12 +757,12 @@ export class ProviderManager extends BaseModule {
           await provider.destroy(); // Clean up after validation
           return {
             success: true,
-            message: `Provider ${providerId} configuration is valid`
+            message: `Provider ${providerId} configuration is valid`,
           };
         } catch (validationError) {
           return {
             success: false,
-            message: `Configuration validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}`
+            message: `Configuration validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}`,
           };
         }
       }
@@ -791,7 +775,7 @@ export class ProviderManager extends BaseModule {
         lastHealthCheck: 0,
         isActive: true,
         consecutiveFailures: 0,
-        stats: provider.getStats()
+        stats: provider.getStats(),
       };
 
       this.providers.set(providerId, providerInstance);
@@ -814,23 +798,22 @@ export class ProviderManager extends BaseModule {
           providerType: config.type,
           modelCount: Object.keys(config.models).length,
           healthCheck: !!healthCheck,
-          healthStatus: health?.status
-        }
+          healthStatus: health?.status,
+        },
       });
 
       return {
         success: true,
         message: `Provider ${providerId} added successfully`,
-        health
+        health,
       };
-
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       await this.handleError(new Error(errorMessage), 'add_dynamic_provider');
 
       return {
         success: false,
-        message: `Failed to add provider ${providerId}: ${errorMessage}`
+        message: `Failed to add provider ${providerId}: ${errorMessage}`,
       };
     }
   }
@@ -845,7 +828,7 @@ export class ProviderManager extends BaseModule {
       activeProviderCount: this.getActiveProviders().length,
       healthCheckInterval: this.options.healthCheckInterval,
       autoRecoveryEnabled: this.options.autoRecoveryEnabled,
-      providers: this.getAllProvidersHealth()
+      providers: this.getAllProvidersHealth(),
     };
   }
 
@@ -865,7 +848,7 @@ export class ProviderManager extends BaseModule {
       healthCheckInterval: this.options.healthCheckInterval,
       autoRecoveryEnabled: this.options.autoRecoveryEnabled,
       healthMonitoringActive: this.healthCheckInterval !== null,
-      isEnhanced: true
+      isEnhanced: true,
     };
 
     if (!this.isDebugEnhanced) {
@@ -877,7 +860,7 @@ export class ProviderManager extends BaseModule {
       debugInfo: this.getDebugInfo(),
       providerMetrics: this.getProviderMetrics(),
       healthStats: this.getHealthStats(),
-      managerMetrics: this.getManagerMetrics()
+      managerMetrics: this.getManagerMetrics(),
     };
   }
 
@@ -891,7 +874,7 @@ export class ProviderManager extends BaseModule {
       metrics[operation] = {
         count: metric.values.length,
         lastUpdated: metric.lastUpdated,
-        recentValues: metric.values.slice(-5) // Last 5 values
+        recentValues: metric.values.slice(-5), // Last 5 values
       };
     }
 
@@ -904,7 +887,8 @@ export class ProviderManager extends BaseModule {
   private getHealthStats(): any {
     const healthChecks = this.metrics.totalHealthChecks;
     const failedChecks = this.metrics.failedHealthChecks;
-    const successRate = healthChecks > 0 ? ((healthChecks - failedChecks) / healthChecks * 100).toFixed(2) : 0;
+    const successRate =
+      healthChecks > 0 ? (((healthChecks - failedChecks) / healthChecks) * 100).toFixed(2) : 0;
 
     return {
       totalHealthChecks: healthChecks,
@@ -912,7 +896,7 @@ export class ProviderManager extends BaseModule {
       successRate: `${successRate}%`,
       averageRecoveryTime: this.metrics.averageRecoveryTime.toFixed(2),
       providerSwitches: this.metrics.providerSwitches,
-      providersByHealth: this.getProvidersByHealthStatus()
+      providersByHealth: this.getProvidersByHealthStatus(),
     };
   }
 
@@ -928,7 +912,7 @@ export class ProviderManager extends BaseModule {
       autoRecoveryEnabled: this.options.autoRecoveryEnabled,
       maxConsecutiveFailures: this.options.maxConsecutiveFailures,
       providerTimeout: this.options.providerTimeout,
-      enableMetrics: this.options.enableMetrics
+      enableMetrics: this.options.enableMetrics,
     };
   }
 
@@ -939,7 +923,7 @@ export class ProviderManager extends BaseModule {
     const status = {
       healthy: 0,
       unhealthy: 0,
-      unknown: 0
+      unknown: 0,
     };
 
     for (const [providerId, providerInstance] of this.providers.entries()) {
@@ -968,7 +952,7 @@ export class ProviderManager extends BaseModule {
       maxConsecutiveFailures: this.options.maxConsecutiveFailures,
       providerTimeout: this.options.providerTimeout,
       enableMetrics: this.options.enableMetrics,
-      uptime: this.isModuleRunning() ? Date.now() - (this.getStats().uptime || Date.now()) : 0
+      uptime: this.isModuleRunning() ? Date.now() - (this.getStats().uptime || Date.now()) : 0,
     };
   }
 
@@ -980,7 +964,7 @@ export class ProviderManager extends BaseModule {
       initialized: this.isModuleRunning(),
       running: this.isModuleRunning(),
       providers: this.getAllProvidersHealth(),
-      metrics: this.getMetrics()
+      metrics: this.getMetrics(),
     };
   }
 
@@ -1006,10 +990,9 @@ export class ProviderManager extends BaseModule {
         type: 'start',
         position: 'middle',
         data: {
-          providerId
-        }
+          providerId,
+        },
       });
-
     } catch (error) {
       await this.handleError(error as Error, 'reset_provider');
       throw error;
@@ -1031,8 +1014,8 @@ export class ProviderManager extends BaseModule {
           providerCount: this.providers.size,
           activeProviderCount: this.getActiveProviders().length,
           healthCheckInterval: this.options.healthCheckInterval,
-          autoRecoveryEnabled: this.options.autoRecoveryEnabled
-        }
+          autoRecoveryEnabled: this.options.autoRecoveryEnabled,
+        },
       });
     } catch (handlerError) {
       console.error('Failed to handle error:', handlerError);
@@ -1047,24 +1030,30 @@ export class ProviderManager extends BaseModule {
     const errorName = error.constructor.name;
 
     // Critical errors
-    if (context.includes('initialization') ||
-        context.includes('critical_provider_failure') ||
-        (errorName === 'RouteCodexError' && (error as any).status >= 500)) {
+    if (
+      context.includes('initialization') ||
+      context.includes('critical_provider_failure') ||
+      (errorName === 'RouteCodexError' && (error as any).status >= 500)
+    ) {
       return 'critical';
     }
 
     // High severity errors
-    if (context.includes('config') ||
-        context.includes('provider_unavailable') ||
-        errorName === 'TypeError') {
+    if (
+      context.includes('config') ||
+      context.includes('provider_unavailable') ||
+      errorName === 'TypeError'
+    ) {
       return 'high';
     }
 
     // Medium severity errors
-    if (context.includes('health_check') ||
-        context.includes('provider_switch') ||
-        context.includes('timeout') ||
-        errorName === 'RouteCodexError') {
+    if (
+      context.includes('health_check') ||
+      context.includes('provider_switch') ||
+      context.includes('timeout') ||
+      errorName === 'RouteCodexError'
+    ) {
       return 'medium';
     }
 
@@ -1076,17 +1065,19 @@ export class ProviderManager extends BaseModule {
    */
   private getErrorCategory(context: string): string {
     const categories: Record<string, string> = {
-      'initialization': 'system',
-      'health_check': 'provider',
-      'provider_switch': 'provider',
-      'provider_unavailable': 'provider',
-      'config': 'configuration',
-      'timeout': 'performance',
-      'critical_provider_failure': 'provider'
+      initialization: 'system',
+      health_check: 'provider',
+      provider_switch: 'provider',
+      provider_unavailable: 'provider',
+      config: 'configuration',
+      timeout: 'performance',
+      critical_provider_failure: 'provider',
     };
 
     for (const [key, category] of Object.entries(categories)) {
-      if (context.includes(key)) {return category;}
+      if (context.includes(key)) {
+        return category;
+      }
     }
     return 'general';
   }
@@ -1101,15 +1092,13 @@ export class ProviderManager extends BaseModule {
     }
 
     // Destroy all providers
-    const destroyPromises = Array.from(this.providers.values()).map(
-      async (providerInstance) => {
-        try {
-          await providerInstance.provider.destroy();
-        } catch (error) {
-          console.error(`Error destroying provider:`, error);
-        }
+    const destroyPromises = Array.from(this.providers.values()).map(async providerInstance => {
+      try {
+        await providerInstance.provider.destroy();
+      } catch (error) {
+        console.error(`Error destroying provider:`, error);
       }
-    );
+    });
 
     await Promise.allSettled(destroyPromises);
     this.providers.clear();

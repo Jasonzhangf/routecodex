@@ -4,7 +4,10 @@
  */
 
 import { ProviderManager, type ProviderManagerOptions } from './provider-manager.js';
-import { UnimplementedProvider, type UnimplementedProviderConfig } from '../providers/unimplemented-provider.js';
+import {
+  UnimplementedProvider,
+  type UnimplementedProviderConfig,
+} from '../providers/unimplemented-provider.js';
 import { UnimplementedModuleFactory } from '../modules/unimplemented-module-factory.js';
 import { type ProviderConfig, type ServerConfig, RouteCodexError } from '../server/types.js';
 
@@ -26,10 +29,7 @@ export class EnhancedProviderManager extends ProviderManager {
   private enhancedOptions: EnhancedProviderManagerOptions;
   private unimplementedProviders: Map<string, UnimplementedProvider> = new Map();
 
-  constructor(
-    config: ServerConfig,
-    options: EnhancedProviderManagerOptions = {}
-  ) {
+  constructor(config: ServerConfig, options: EnhancedProviderManagerOptions = {}) {
     super(config, options);
 
     this.enhancedOptions = {
@@ -38,9 +38,9 @@ export class EnhancedProviderManager extends ProviderManager {
       unimplementedProviderDefaults: {
         unimplementedMessage: 'This provider functionality is not yet implemented',
         logUnimplementedCalls: true,
-        trackCallerInfo: true
+        trackCallerInfo: true,
       },
-      ...options
+      ...options,
     };
 
     this.unimplementedFactory = UnimplementedModuleFactory.getInstance();
@@ -58,7 +58,6 @@ export class EnhancedProviderManager extends ProviderManager {
       if (this.enhancedOptions.enableUnimplementedProviders) {
         await this.unimplementedFactory.initialize();
       }
-
     } catch (error) {
       throw new RouteCodexError(
         `Failed to initialize enhanced provider manager: ${error instanceof Error ? error.message : String(error)}`,
@@ -77,11 +76,12 @@ export class EnhancedProviderManager extends ProviderManager {
       await super.addProvider(providerId, config);
     } catch (error) {
       // If regular provider creation fails and unimplemented providers are enabled
-      if (this.enhancedOptions.enableUnimplementedProviders && 
-          this.enhancedOptions.autoCreateUnimplemented &&
-          error instanceof RouteCodexError && 
-          error.code === 'unsupported_provider_type') {
-        
+      if (
+        this.enhancedOptions.enableUnimplementedProviders &&
+        this.enhancedOptions.autoCreateUnimplemented &&
+        error instanceof RouteCodexError &&
+        error.code === 'unsupported_provider_type'
+      ) {
         // Create unimplemented provider instead
         await this.createUnimplementedProvider(providerId, config);
       } else {
@@ -94,13 +94,16 @@ export class EnhancedProviderManager extends ProviderManager {
   /**
    * Create an unimplemented provider for unsupported provider types
    */
-  private async createUnimplementedProvider(providerId: string, config: ProviderConfig): Promise<void> {
+  private async createUnimplementedProvider(
+    providerId: string,
+    config: ProviderConfig
+  ): Promise<void> {
     try {
       const unimplementedConfig: UnimplementedProviderConfig = {
         ...config,
         ...this.enhancedOptions.unimplementedProviderDefaults,
         id: providerId,
-        type: config.type || 'unimplemented'
+        type: config.type || 'unimplemented',
       };
 
       const unimplementedProvider = new UnimplementedProvider(unimplementedConfig);
@@ -110,7 +113,6 @@ export class EnhancedProviderManager extends ProviderManager {
 
       // Log the creation of unimplemented provider
       console.log(`Created unimplemented provider for '${providerId}' (type: ${config.type})`);
-
     } catch (error) {
       throw new RouteCodexError(
         `Failed to create unimplemented provider for '${providerId}': ${error instanceof Error ? error.message : String(error)}`,
@@ -207,14 +209,14 @@ export class EnhancedProviderManager extends ProviderManager {
         totalCalls: unimplementedStats.totalCalls,
         mostCalled: unimplementedStats.mostCalledModules.slice(0, 5),
         calledModules: this.unimplementedFactory.getCalledModules(),
-        unusedModules: this.unimplementedFactory.getUnusedModules()
+        unusedModules: this.unimplementedFactory.getUnusedModules(),
       },
       summary: {
         totalProviders: (this as any).providers.size + this.unimplementedProviders.size,
         regularProviders: (this as any).providers.size,
         unimplementedProviders: this.unimplementedProviders.size,
-        totalUnimplementedCalls: unimplementedStats.totalCalls
-      }
+        totalUnimplementedCalls: unimplementedStats.totalCalls,
+      },
     };
   }
 
@@ -270,13 +272,15 @@ export class EnhancedProviderManager extends ProviderManager {
         try {
           await this.removeProvider(providerId);
         } catch (error) {
-          console.error(`Error removing unimplemented provider ${providerId} during shutdown:`, error);
+          console.error(
+            `Error removing unimplemented provider ${providerId} during shutdown:`,
+            error
+          );
         }
       }
 
       // Stop base provider manager
       await super.stop();
-
     } catch (error) {
       throw new RouteCodexError(
         `Failed to stop enhanced provider manager: ${error instanceof Error ? error.message : String(error)}`,

@@ -1,0 +1,80 @@
+{
+  "sessionId": "req_1758809245725_6j7ldeh5u",
+  "pipelineId": "unknown",
+  "startTime": 1758809245726,
+  "endTime": 1758809249333,
+  "status": "failed",
+  "operations": [
+    {
+      "operationId": "pipeline-request",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758809245726,
+      "status": "running"
+    },
+    {
+      "operationId": "transformation:llm-switch-request",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758809245727,
+      "status": "running",
+      "input": {
+        "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hello, what is the answer to ?"
+          }
+        ]
+      }
+    },
+    {
+      "operationId": "transformation:compatibility-request",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758809245728,
+      "status": "running",
+      "input": {
+        "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hello, what is the answer to ?"
+          }
+        ],
+        "_metadata": {
+          "switchType": "openai-passthrough",
+          "timestamp": 1758809245726,
+          "originalProtocol": "openai",
+          "targetProtocol": "openai"
+        },
+        "route": {
+          "providerId": "modelscope_key4",
+          "modelId": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+          "requestId": "req_1758809245725_6j7ldeh5u",
+          "timestamp": 1758809245725
+        },
+        "metadata": {
+          "method": "POST",
+          "url": "/chat/completions",
+          "headers": {
+            "host": "localhost:4006",
+            "user-agent": "curl/8.7.1",
+            "accept": "*/*",
+            "content-type": "application/json",
+            "content-length": "125"
+          }
+        },
+        "debug": {
+          "enabled": true,
+          "stages": {
+            "llmSwitch": true,
+            "workflow": true,
+            "compatibility": true,
+            "provider": true
+          }
+        }
+      }
+    }
+  ]
+}

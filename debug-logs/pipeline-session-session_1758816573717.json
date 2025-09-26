@@ -1,0 +1,15 @@
+{
+  "sessionId": "session_1758816573717",
+  "pipelineId": "unknown",
+  "startTime": 1758816573717,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "openai_router_initialized",
+      "moduleId": "openai-router",
+      "position": "middle",
+      "startTime": 1758816573717,
+      "status": "running"
+    }
+  ]
+}

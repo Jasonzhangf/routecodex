@@ -16,7 +16,7 @@ import {
   type OpenAICompletionResponse,
   type OpenAIModel,
   type ServerConfig,
-  RouteCodexError
+  RouteCodexError,
 } from '../server/types.js';
 
 /**
@@ -35,7 +35,12 @@ export interface RequestHandlerOptions {
  * Type guards for request discrimination
  */
 function isChatCompletionRequest(request: any): request is OpenAIChatCompletionRequest {
-  return request && typeof request === 'object' && 'messages' in request && Array.isArray(request.messages);
+  return (
+    request &&
+    typeof request === 'object' &&
+    'messages' in request &&
+    Array.isArray(request.messages)
+  );
 }
 
 function isCompletionRequest(request: any): request is OpenAICompletionRequest {
@@ -79,7 +84,7 @@ export class RequestHandler extends BaseModule {
       name: 'RequestHandler',
       version: '0.0.1',
       description: 'Handles incoming HTTP requests and forwards to providers',
-      type: 'core'
+      type: 'core',
     };
 
     super(moduleInfo);
@@ -98,7 +103,7 @@ export class RequestHandler extends BaseModule {
       rateLimitEnabled: true,
       authEnabled: false,
       validateRequests: true,
-      ...options
+      ...options,
     };
 
     // Initialize debug enhancements
@@ -153,7 +158,7 @@ export class RequestHandler extends BaseModule {
       // Register error handlers for request handler
       this.errorUtils.registerHandler(
         'validation_error',
-        async (context) => {
+        async context => {
           console.warn(`Request validation error: ${context.error}`);
           // Could implement automatic request correction
         },
@@ -163,7 +168,7 @@ export class RequestHandler extends BaseModule {
 
       this.errorUtils.registerHandler(
         'provider_error',
-        async (context) => {
+        async context => {
           console.error(`Provider processing error: ${context.error}`);
           // Could implement provider failover logic
         },
@@ -181,10 +186,9 @@ export class RequestHandler extends BaseModule {
         data: {
           options: this.options,
           timeout: this.options.timeout,
-          maxRequestSize: this.options.maxRequestSize
-        }
+          maxRequestSize: this.options.maxRequestSize,
+        },
       });
-
     } catch (error) {
       await this.handleError(error as Error, 'initialization');
       throw error;
@@ -212,8 +216,8 @@ export class RequestHandler extends BaseModule {
           requestId: context.id,
           model: request.model,
           messageCount: request.messages?.length || 0,
-          streaming: request.stream || false
-        }
+          streaming: request.stream || false,
+        },
       });
 
       // Validate request
@@ -231,35 +235,36 @@ export class RequestHandler extends BaseModule {
 
       // Check if streaming is requested and enabled
       if (processedRequest.stream && !this.options.enableStreaming) {
-        throw new RouteCodexError(
-          'Streaming is not enabled',
-          'streaming_disabled',
-          400
-        );
+        throw new RouteCodexError('Streaming is not enabled', 'streaming_disabled', 400);
       }
 
       let response: any;
 
       if (processedRequest.stream && isChatCompletionRequest(processedRequest)) {
         // Handle streaming request
-        response = await this.handleStreamingChatCompletion(processedRequest as OpenAIChatCompletionRequest, context);
+        response = await this.handleStreamingChatCompletion(
+          processedRequest as OpenAIChatCompletionRequest,
+          context
+        );
       } else {
         // Handle regular request
         const provider = this.providerManager.getActiveProviders()[0]; // Use first available provider
         if (!provider) {
-          throw new RouteCodexError(
-            'No active providers available',
-            'no_active_providers',
-            503
-          );
+          throw new RouteCodexError('No active providers available', 'no_active_providers', 503);
         }
 
-        const providerResponse = await provider.processChatCompletion(processedRequest as OpenAIChatCompletionRequest, {
-          timeout: this.options.timeout,
-          retryAttempts: 3
-        });
+        const providerResponse = await provider.processChatCompletion(
+          processedRequest as OpenAIChatCompletionRequest,
+          {
+            timeout: this.options.timeout,
+            retryAttempts: 3,
+          }
+        );
 
-        response = this.formatChatCompletionResponse(processedRequest as OpenAIChatCompletionRequest, providerResponse);
+        response = this.formatChatCompletionResponse(
+          processedRequest as OpenAIChatCompletionRequest,
+          providerResponse
+        );
       }
 
       const duration = Date.now() - startTime;
@@ -272,13 +277,13 @@ export class RequestHandler extends BaseModule {
         status: 200,
         headers: {
           'Content-Type': 'application/json',
-          'X-Response-Time': duration.toString()
+          'X-Response-Time': duration.toString(),
         },
         body: response,
         duration,
         providerId: (response as any).providerId || 'unknown',
         modelId: (response as any).model || processedRequest.model,
-        usage: (response as any).usage
+        usage: (response as any).usage,
       };
 
       this.debugEventBus.publish({
@@ -293,12 +298,11 @@ export class RequestHandler extends BaseModule {
           duration,
           status: responseContext.status,
           providerId: responseContext.providerId,
-          usage: responseContext.usage
-        }
+          usage: responseContext.usage,
+        },
       });
 
       return responseContext;
-
     } catch (error) {
       const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'chat_completion');
@@ -309,16 +313,16 @@ export class RequestHandler extends BaseModule {
         timestamp: Date.now(),
         status: error instanceof RouteCodexError ? error.status : 500,
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
         body: {
           error: {
             message: error instanceof Error ? error.message : String(error),
             type: error instanceof RouteCodexError ? error.code : 'internal_error',
-            code: error instanceof RouteCodexError ? error.code : 'internal_error'
-          }
+            code: error instanceof RouteCodexError ? error.code : 'internal_error',
+          },
         },
-        duration
+        duration,
       };
 
       this.debugEventBus.publish({
@@ -332,8 +336,8 @@ export class RequestHandler extends BaseModule {
           requestId: context.id,
           duration,
           error: error instanceof Error ? error.message : String(error),
-          status: responseContext.status
-        }
+          status: responseContext.status,
+        },
       });
 
       return responseContext;
@@ -360,9 +364,11 @@ export class RequestHandler extends BaseModule {
         data: {
           requestId: context.id,
           model: request.model,
-          promptLength: Array.isArray(request.prompt) ? request.prompt.length : request.prompt?.length || 0,
-          streaming: request.stream || false
-        }
+          promptLength: Array.isArray(request.prompt)
+            ? request.prompt.length
+            : request.prompt?.length || 0,
+          streaming: request.stream || false,
+        },
       });
 
       // Validate request
@@ -381,19 +387,21 @@ export class RequestHandler extends BaseModule {
       // Process request through provider manager
       const provider = this.providerManager.getActiveProviders()[0]; // Use first available provider
       if (!provider) {
-        throw new RouteCodexError(
-          'No active providers available',
-          'no_active_providers',
-          503
-        );
+        throw new RouteCodexError('No active providers available', 'no_active_providers', 503);
       }
 
-      const providerResponse = await provider.processCompletion(processedRequest as OpenAICompletionRequest, {
-        timeout: this.options.timeout,
-        retryAttempts: 3
-      });
+      const providerResponse = await provider.processCompletion(
+        processedRequest as OpenAICompletionRequest,
+        {
+          timeout: this.options.timeout,
+          retryAttempts: 3,
+        }
+      );
 
-      const response = this.formatCompletionResponse(processedRequest as OpenAICompletionRequest, providerResponse);
+      const response = this.formatCompletionResponse(
+        processedRequest as OpenAICompletionRequest,
+        providerResponse
+      );
       const duration = Date.now() - startTime;
 
       // Create response context
@@ -404,13 +412,13 @@ export class RequestHandler extends BaseModule {
         status: 200,
         headers: {
           'Content-Type': 'application/json',
-          'X-Response-Time': duration.toString()
+          'X-Response-Time': duration.toString(),
         },
         body: response,
         duration,
         providerId: (response as any).providerId || 'unknown',
         modelId: (response as any).model || processedRequest.model,
-        usage: (response as any).usage
+        usage: (response as any).usage,
       };
 
       this.debugEventBus.publish({
@@ -425,12 +433,11 @@ export class RequestHandler extends BaseModule {
           duration,
           status: responseContext.status,
           providerId: responseContext.providerId,
-          usage: responseContext.usage
-        }
+          usage: responseContext.usage,
+        },
       });
 
       return responseContext;
-
     } catch (error) {
       const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'completion');
@@ -441,16 +448,16 @@ export class RequestHandler extends BaseModule {
         timestamp: Date.now(),
         status: error instanceof RouteCodexError ? error.status : 500,
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
         body: {
           error: {
             message: error instanceof Error ? error.message : String(error),
             type: error instanceof RouteCodexError ? error.code : 'internal_error',
-            code: error instanceof RouteCodexError ? error.code : 'internal_error'
-          }
+            code: error instanceof RouteCodexError ? error.code : 'internal_error',
+          },
         },
-        duration
+        duration,
       };
 
       this.debugEventBus.publish({
@@ -464,8 +471,8 @@ export class RequestHandler extends BaseModule {
           requestId: context.id,
           duration,
           error: error instanceof Error ? error.message : String(error),
-          status: responseContext.status
-        }
+          status: responseContext.status,
+        },
       });
 
       return responseContext;
@@ -491,16 +498,16 @@ export class RequestHandler extends BaseModule {
           index: 0,
           message: {
             role: 'assistant',
-            content: 'Streaming response would be handled here'
+            content: 'Streaming response would be handled here',
           },
-          finish_reason: 'stop'
-        }
+          finish_reason: 'stop',
+        },
       ],
       usage: {
         prompt_tokens: 0,
         completion_tokens: 0,
-        total_tokens: 0
-      }
+        total_tokens: 0,
+      },
     };
   }
 
@@ -519,8 +526,8 @@ export class RequestHandler extends BaseModule {
         type: 'start',
         position: 'middle',
         data: {
-          requestId: context.id
-        }
+          requestId: context.id,
+        },
       });
 
       // Get models from active providers
@@ -532,9 +539,18 @@ export class RequestHandler extends BaseModule {
           const providerModels = await provider.getModels();
           if (Array.isArray(providerModels)) {
             models.push(...providerModels);
-          } else if (providerModels && typeof providerModels === 'object' && 'data' in providerModels && Array.isArray((providerModels as any).data)) {
+          } else if (
+            providerModels &&
+            typeof providerModels === 'object' &&
+            'data' in providerModels &&
+            Array.isArray((providerModels as any).data)
+          ) {
             models.push(...(providerModels as any).data);
-          } else if (providerModels && typeof providerModels === 'object' && 'data' in providerModels) {
+          } else if (
+            providerModels &&
+            typeof providerModels === 'object' &&
+            'data' in providerModels
+          ) {
             // Handle case where data might not be an array
             models.push((providerModels as any).data);
           }
@@ -546,7 +562,7 @@ export class RequestHandler extends BaseModule {
 
       const response = {
         object: 'list',
-        data: models
+        data: models,
       };
 
       const duration = Date.now() - startTime;
@@ -559,10 +575,10 @@ export class RequestHandler extends BaseModule {
         status: 200,
         headers: {
           'Content-Type': 'application/json',
-          'X-Response-Time': duration.toString()
+          'X-Response-Time': duration.toString(),
         },
         body: response,
-        duration
+        duration,
       };
 
       this.debugEventBus.publish({
@@ -575,12 +591,11 @@ export class RequestHandler extends BaseModule {
         data: {
           requestId: context.id,
           duration,
-          modelCount: models.length
-        }
+          modelCount: models.length,
+        },
       });
 
       return responseContext;
-
     } catch (error) {
       const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'models');
@@ -591,16 +606,16 @@ export class RequestHandler extends BaseModule {
         timestamp: Date.now(),
         status: 500,
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
         body: {
           error: {
             message: error instanceof Error ? error.message : String(error),
             type: 'models_error',
-            code: 'models_error'
-          }
+            code: 'models_error',
+          },
         },
-        duration
+        duration,
       };
 
       this.debugEventBus.publish({
@@ -613,8 +628,8 @@ export class RequestHandler extends BaseModule {
         data: {
           requestId: context.id,
           duration,
-          error: error instanceof Error ? error.message : String(error)
-        }
+          error: error instanceof Error ? error.message : String(error),
+        },
       });
 
       return responseContext;
@@ -624,7 +639,9 @@ export class RequestHandler extends BaseModule {
   /**
    * Validate chat completion request
    */
-  private validateChatCompletionRequest(request: OpenAIChatCompletionRequest): RequestValidationResult {
+  private validateChatCompletionRequest(
+    request: OpenAIChatCompletionRequest
+  ): RequestValidationResult {
     const errors: string[] = [];
     const warnings: string[] = [];
     const normalizedRequest = { ...request };
@@ -653,15 +670,26 @@ export class RequestHandler extends BaseModule {
     }
 
     // Validate numeric fields
-    if (request.max_tokens !== undefined && (typeof request.max_tokens !== 'number' || request.max_tokens < 1)) {
+    if (
+      request.max_tokens !== undefined &&
+      (typeof request.max_tokens !== 'number' || request.max_tokens < 1)
+    ) {
       errors.push('max_tokens must be a positive number');
     }
 
-    if (request.temperature !== undefined && (typeof request.temperature !== 'number' || request.temperature < 0 || request.temperature > 2)) {
+    if (
+      request.temperature !== undefined &&
+      (typeof request.temperature !== 'number' ||
+        request.temperature < 0 ||
+        request.temperature > 2)
+    ) {
       errors.push('temperature must be a number between 0 and 2');
     }
 
-    if (request.top_p !== undefined && (typeof request.top_p !== 'number' || request.top_p < 0 || request.top_p > 1)) {
+    if (
+      request.top_p !== undefined &&
+      (typeof request.top_p !== 'number' || request.top_p < 0 || request.top_p > 1)
+    ) {
       errors.push('top_p must be a number between 0 and 1');
     }
 
@@ -678,7 +706,7 @@ export class RequestHandler extends BaseModule {
       isValid: errors.length === 0,
       errors,
       warnings,
-      normalizedRequest
+      normalizedRequest,
     };
   }
 
@@ -700,15 +728,26 @@ export class RequestHandler extends BaseModule {
     }
 
     // Validate numeric fields
-    if (request.max_tokens !== undefined && (typeof request.max_tokens !== 'number' || request.max_tokens < 1)) {
+    if (
+      request.max_tokens !== undefined &&
+      (typeof request.max_tokens !== 'number' || request.max_tokens < 1)
+    ) {
       errors.push('max_tokens must be a positive number');
     }
 
-    if (request.temperature !== undefined && (typeof request.temperature !== 'number' || request.temperature < 0 || request.temperature > 2)) {
+    if (
+      request.temperature !== undefined &&
+      (typeof request.temperature !== 'number' ||
+        request.temperature < 0 ||
+        request.temperature > 2)
+    ) {
       errors.push('temperature must be a number between 0 and 2');
     }
 
-    if (request.top_p !== undefined && (typeof request.top_p !== 'number' || request.top_p < 0 || request.top_p > 1)) {
+    if (
+      request.top_p !== undefined &&
+      (typeof request.top_p !== 'number' || request.top_p < 0 || request.top_p > 1)
+    ) {
       errors.push('top_p must be a number between 0 and 1');
     }
 
@@ -725,7 +764,7 @@ export class RequestHandler extends BaseModule {
       isValid: errors.length === 0,
       errors,
       warnings,
-      normalizedRequest
+      normalizedRequest,
     };
   }
 
@@ -743,7 +782,7 @@ export class RequestHandler extends BaseModule {
       created: Math.floor(Date.now() / 1000),
       model: request.model,
       choices: responseData.choices || [],
-      usage: responseData.usage || providerResponse.usage
+      usage: responseData.usage || providerResponse.usage,
     };
   }
 
@@ -761,7 +800,7 @@ export class RequestHandler extends BaseModule {
       created: Math.floor(Date.now() / 1000),
       model: request.model,
       choices: responseData.choices || [],
-      usage: responseData.usage || providerResponse.usage
+      usage: responseData.usage || providerResponse.usage,
     };
   }
 
@@ -799,8 +838,8 @@ export class RequestHandler extends BaseModule {
           stack: error.stack,
           name: error.name,
           requestId: this.extractRequestId(context),
-          operationType: this.getOperationType(context)
-        }
+          operationType: this.getOperationType(context),
+        },
       });
     } catch (handlerError) {
       console.error('Failed to handle error:', handlerError);
@@ -820,17 +859,21 @@ export class RequestHandler extends BaseModule {
     }
 
     // High severity errors
-    if (context.includes('initialization') ||
-        context.includes('provider_unavailable') ||
-        errorName === 'TypeError') {
+    if (
+      context.includes('initialization') ||
+      context.includes('provider_unavailable') ||
+      errorName === 'TypeError'
+    ) {
       return 'high';
     }
 
     // Medium severity errors
-    if (context.includes('validation') ||
-        context.includes('timeout') ||
-        context.includes('rate_limit') ||
-        errorName === 'RouteCodexError') {
+    if (
+      context.includes('validation') ||
+      context.includes('timeout') ||
+      context.includes('rate_limit') ||
+      errorName === 'RouteCodexError'
+    ) {
       return 'medium';
     }
 
@@ -842,18 +885,20 @@ export class RequestHandler extends BaseModule {
    */
   private getErrorCategory(context: string): string {
     const categories: Record<string, string> = {
-      'chat_completion': 'request',
-      'completion': 'request',
-      'models': 'request',
-      'validation': 'validation',
-      'provider': 'provider',
-      'timeout': 'performance',
-      'rate_limit': 'performance',
-      'initialization': 'system'
+      chat_completion: 'request',
+      completion: 'request',
+      models: 'request',
+      validation: 'validation',
+      provider: 'provider',
+      timeout: 'performance',
+      rate_limit: 'performance',
+      initialization: 'system',
     };
 
     for (const [key, category] of Object.entries(categories)) {
-      if (context.includes(key)) {return category;}
+      if (context.includes(key)) {
+        return category;
+      }
     }
     return 'general';
   }
@@ -870,9 +915,15 @@ export class RequestHandler extends BaseModule {
    * Get operation type from context
    */
   private getOperationType(context: string): string {
-    if (context.includes('chat_completion')) {return 'chat_completion';}
-    if (context.includes('completion')) {return 'completion';}
-    if (context.includes('models')) {return 'models_list';}
+    if (context.includes('chat_completion')) {
+      return 'chat_completion';
+    }
+    if (context.includes('completion')) {
+      return 'completion';
+    }
+    if (context.includes('models')) {
+      return 'models_list';
+    }
     return 'unknown';
   }
 
@@ -890,8 +941,8 @@ export class RequestHandler extends BaseModule {
       type: 'start',
       position: 'middle',
       data: {
-        changes: Object.keys(newConfig)
-      }
+        changes: Object.keys(newConfig),
+      },
     });
   }
 
@@ -903,7 +954,7 @@ export class RequestHandler extends BaseModule {
       initialized: this.isInitialized(),
       running: this.isRunning(),
       options: this.options,
-      providerHealth: this.providerManager.getAllProvidersHealth()
+      providerHealth: this.providerManager.getAllProvidersHealth(),
     };
   }
 
@@ -932,7 +983,7 @@ export class RequestHandler extends BaseModule {
     if (!this.handlerMetrics.has(operation)) {
       this.handlerMetrics.set(operation, {
         values: [],
-        lastUpdated: Date.now()
+        lastUpdated: Date.now(),
       });
     }
 
@@ -981,7 +1032,7 @@ export class RequestHandler extends BaseModule {
       isInitialized: this.isInitialized(),
       isRunning: this.isRunning(),
       options: this.options,
-      isEnhanced: true
+      isEnhanced: true,
     };
 
     return {
@@ -989,7 +1040,7 @@ export class RequestHandler extends BaseModule {
       debugInfo: this.getDebugInfo(),
       handlerMetrics: this.getHandlerMetrics(),
       requestHistory: [...this.requestHistory.slice(-10)],
-      errorHistory: [...this.errorHistory.slice(-10)]
+      errorHistory: [...this.errorHistory.slice(-10)],
     };
   }
 
@@ -1010,7 +1061,7 @@ export class RequestHandler extends BaseModule {
       timeout: this.options.timeout,
       maxRequestSize: this.options.maxRequestSize,
       streamingEnabled: this.options.enableStreaming,
-      validationEnabled: this.options.validateRequests
+      validationEnabled: this.options.validateRequests,
     };
   }
 
@@ -1024,7 +1075,7 @@ export class RequestHandler extends BaseModule {
       metrics[operation] = {
         count: metric.values.length,
         lastUpdated: metric.lastUpdated,
-        recentValues: metric.values.slice(-5)
+        recentValues: metric.values.slice(-5),
       };
     }
 

@@ -201,7 +201,7 @@ export class ConfigRequestClassifier {
 
     } catch (error) {
       console.error('Classification failed:', error);
-      return this.createErrorResult(`Classification error: ${error}`, steps);
+      return this.createErrorResult(`Classification error: ${error instanceof Error ? error.message : String(error)}`, steps);
     }
   }
 

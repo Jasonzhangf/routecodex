@@ -73,7 +73,7 @@ export class RCCUnimplementedModule extends BaseModule {
       name: config.moduleName,
       version: '0.0.1',
       description: config.description || `Unimplemented module: ${config.moduleName}`,
-      type: 'unimplemented'
+      type: 'unimplemented',
     };
 
     super(moduleInfo);
@@ -82,17 +82,17 @@ export class RCCUnimplementedModule extends BaseModule {
       logLevel: 'info',
       maxCallerHistory: RCCUnimplementedModule.MAX_CALLER_HISTORY,
       customMessage: 'This functionality is not yet implemented',
-      ...config
+      ...config,
     };
 
     this.debugEventBus = DebugEventBus.getInstance();
     this.errorHandling = new ErrorHandlingCenter();
     // this.logger = new Logger();
-    
+
     // Initialize statistics
     this.stats = {
       totalCalls: 0,
-      callerInfo: []
+      callerInfo: [],
     };
 
     // Log module initialization
@@ -108,7 +108,7 @@ export class RCCUnimplementedModule extends BaseModule {
   public async initialize(): Promise<void> {
     try {
       await this.errorHandling.initialize();
-      
+
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: this.config.moduleId,
@@ -119,10 +119,9 @@ export class RCCUnimplementedModule extends BaseModule {
         data: {
           moduleId: this.config.moduleId,
           moduleName: this.config.moduleName,
-          logLevel: this.config.logLevel
-        }
+          logLevel: this.config.logLevel,
+        },
       });
-
     } catch (error) {
       await this.handleError(error as Error, 'initialization');
       throw error;
@@ -149,7 +148,7 @@ export class RCCUnimplementedModule extends BaseModule {
       callerInfo: callerInfo?.callerId,
       requestId,
       timestamp,
-      context: callerInfo?.context
+      context: callerInfo?.context,
     });
 
     // Record debug metric
@@ -157,7 +156,7 @@ export class RCCUnimplementedModule extends BaseModule {
       methodName,
       callerId: callerInfo?.callerId,
       requestId,
-      totalCalls: this.stats.totalCalls
+      totalCalls: this.stats.totalCalls,
     });
 
     // Log the unimplemented call
@@ -171,7 +170,7 @@ export class RCCUnimplementedModule extends BaseModule {
       moduleId: this.config.moduleId,
       moduleName: this.config.moduleName,
       timestamp,
-      requestId
+      requestId,
     };
 
     // Publish debug event
@@ -188,8 +187,8 @@ export class RCCUnimplementedModule extends BaseModule {
         requestId,
         callerInfo: callerInfo?.callerId,
         totalCalls: this.stats.totalCalls,
-        isDebugEnhanced: this.isDebugEnhanced
-      }
+        isDebugEnhanced: this.isDebugEnhanced,
+      },
     });
 
     return response;
@@ -237,10 +236,9 @@ export class RCCUnimplementedModule extends BaseModule {
         position: 'middle',
         data: {
           moduleId: this.config.moduleId,
-          changes: Object.keys(newConfig)
-        }
+          changes: Object.keys(newConfig),
+        },
       });
-
     } catch (error) {
       // Revert to old config on error
       const oldConfigBackup = { ...this.config };
@@ -256,7 +254,7 @@ export class RCCUnimplementedModule extends BaseModule {
   public resetStats(): void {
     this.stats = {
       totalCalls: 0,
-      callerInfo: []
+      callerInfo: [],
     };
 
     this.debugEventBus.publish({
@@ -267,8 +265,8 @@ export class RCCUnimplementedModule extends BaseModule {
       type: 'start',
       position: 'middle',
       data: {
-        moduleId: this.config.moduleId
-      }
+        moduleId: this.config.moduleId,
+      },
     });
   }
 
@@ -296,7 +294,7 @@ export class RCCUnimplementedModule extends BaseModule {
    */
   private logModuleInitialization(): void {
     const logMessage = `Unimplemented module initialized: ${this.config.moduleId} (${this.config.moduleName})`;
-    
+
     switch (this.config.logLevel) {
       case 'debug':
         // this.logger.debug(logMessage);
@@ -311,7 +309,7 @@ export class RCCUnimplementedModule extends BaseModule {
         // this.logger.error(logMessage);
         break;
       default:
-        // this.logger.info(logMessage);
+      // this.logger.info(logMessage);
     }
   }
 
@@ -320,27 +318,27 @@ export class RCCUnimplementedModule extends BaseModule {
    */
   private updateStats(methodName: string, callerInfo?: { callerId?: string; context?: any }): void {
     const now = new Date().toISOString();
-    
+
     // Update total calls
     this.stats.totalCalls++;
-    
+
     // Update first call time
     if (!this.stats.firstCallTime) {
       this.stats.firstCallTime = now;
     }
-    
+
     // Update last call time
     this.stats.lastCallTime = now;
-    
+
     // Add caller info to history
     if (callerInfo?.callerId) {
       this.stats.callerInfo.push({
         timestamp: now,
         callerId: callerInfo.callerId,
         method: methodName,
-        context: callerInfo.context
+        context: callerInfo.context,
       });
-      
+
       // Maintain history size limit
       const maxHistory = this.config.maxCallerHistory || RCCUnimplementedModule.MAX_CALLER_HISTORY;
       if (this.stats.callerInfo.length > maxHistory) {
@@ -364,7 +362,7 @@ export class RCCUnimplementedModule extends BaseModule {
       moduleName: this.config.moduleName,
       requestId,
       callerId: callerInfo?.callerId,
-      totalCalls: this.stats.totalCalls
+      totalCalls: this.stats.totalCalls,
     };
 
     switch (this.config.logLevel) {
@@ -381,7 +379,7 @@ export class RCCUnimplementedModule extends BaseModule {
         // this.logger.error(logMessage, logData);
         break;
       default:
-        // this.logger.info(logMessage, logData);
+      // this.logger.info(logMessage, logData);
     }
   }
 
@@ -400,8 +398,8 @@ export class RCCUnimplementedModule extends BaseModule {
           stack: error.stack,
           name: error.name,
           moduleId: this.config.moduleId,
-          moduleName: this.config.moduleName
-        }
+          moduleName: this.config.moduleName,
+        },
       };
 
       await this.errorHandling.handleError(errorContext);
@@ -427,10 +425,9 @@ export class RCCUnimplementedModule extends BaseModule {
         position: 'middle',
         data: {
           moduleId: this.config.moduleId,
-          totalCalls: this.stats.totalCalls
-        }
+          totalCalls: this.stats.totalCalls,
+        },
       });
-
     } catch (error) {
       await this.handleError(error as Error, 'destroy');
       throw error;
@@ -447,7 +444,7 @@ export class RCCUnimplementedModule extends BaseModule {
     this.debugMetrics.set('initialization', {
       timestamp: Date.now(),
       moduleId: this.config.moduleId,
-      moduleName: this.config.moduleName
+      moduleName: this.config.moduleName,
     });
 
     this.debugEventBus.publish({
@@ -459,8 +456,8 @@ export class RCCUnimplementedModule extends BaseModule {
       position: 'middle',
       data: {
         moduleId: this.config.moduleId,
-        isDebugEnhanced: this.isDebugEnhanced
-      }
+        isDebugEnhanced: this.isDebugEnhanced,
+      },
     });
   }
 
@@ -470,7 +467,7 @@ export class RCCUnimplementedModule extends BaseModule {
   private addToCallHistory(call: any): void {
     this.callHistory.push({
       ...call,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
 
     // Keep only recent history
@@ -485,7 +482,7 @@ export class RCCUnimplementedModule extends BaseModule {
   private addToErrorHistory(error: any): void {
     this.errorHistory.push({
       ...error,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
 
     // Keep only recent history
@@ -501,14 +498,14 @@ export class RCCUnimplementedModule extends BaseModule {
     if (!this.debugMetrics.has(operation)) {
       this.debugMetrics.set(operation, {
         values: [],
-        lastUpdated: Date.now()
+        lastUpdated: Date.now(),
       });
     }
 
     const metric = this.debugMetrics.get(operation)!;
     metric.values.push({
       ...data,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
     metric.lastUpdated = Date.now();
 
@@ -528,7 +525,7 @@ export class RCCUnimplementedModule extends BaseModule {
       version: '0.0.1',
       isInitialized: true,
       type: 'unimplemented',
-      isEnhanced: true
+      isEnhanced: true,
     };
 
     if (!this.isDebugEnhanced) {
@@ -541,7 +538,7 @@ export class RCCUnimplementedModule extends BaseModule {
       moduleMetrics: this.getModuleMetrics(),
       callStats: this.getCallStats(),
       callHistory: [...this.callHistory.slice(-10)],
-      errorHistory: [...this.errorHistory.slice(-5)]
+      errorHistory: [...this.errorHistory.slice(-5)],
     };
   }
 
@@ -555,7 +552,7 @@ export class RCCUnimplementedModule extends BaseModule {
       metrics[operation] = {
         count: metric.values.length,
         lastUpdated: metric.lastUpdated,
-        recentValues: metric.values.slice(-5) // Last 5 values
+        recentValues: metric.values.slice(-5), // Last 5 values
       };
     }
 
@@ -576,7 +573,7 @@ export class RCCUnimplementedModule extends BaseModule {
       topCallers: this.getTopCallers(),
       topMethods: this.getTopMethods(),
       callHistorySize: this.callHistory.length,
-      errorHistorySize: this.errorHistory.length
+      errorHistorySize: this.errorHistory.length,
     };
   }
 
@@ -592,7 +589,7 @@ export class RCCUnimplementedModule extends BaseModule {
     const now = Date.now();
     const hoursDiff = (now - startTime) / (1000 * 60 * 60);
 
-    return hoursDiff > 0 ? Math.round(this.stats.totalCalls / hoursDiff * 100) / 100 : 0;
+    return hoursDiff > 0 ? Math.round((this.stats.totalCalls / hoursDiff) * 100) / 100 : 0;
   }
 
   /**
@@ -650,7 +647,7 @@ export class RCCUnimplementedModule extends BaseModule {
       totalCalls: this.stats.totalCalls,
       config: this.config,
       maxHistorySize: this.maxHistorySize,
-      uptime
+      uptime,
     };
   }
 
@@ -663,7 +660,7 @@ export class RCCUnimplementedModule extends BaseModule {
       debugMetrics: this.getModuleMetrics(),
       callHistory: this.callHistory,
       errorHistory: this.errorHistory,
-      callStats: this.getCallStats()
+      callStats: this.getCallStats(),
     };
   }
 }

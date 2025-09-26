@@ -99,43 +99,43 @@ export class ModuleConfigReader {
         httpserver: {
           enabled: true,
           config: {
-            moduleType: "http-server",
+            moduleType: 'http-server',
             port: 5506,
-            host: "localhost",
+            host: 'localhost',
             cors: {
-              origin: "*",
-              credentials: true
+              origin: '*',
+              credentials: true,
             },
             timeout: 30000,
-            bodyLimit: "10mb",
+            bodyLimit: '10mb',
             enableMetrics: true,
-            enableHealthChecks: true
-          }
+            enableHealthChecks: true,
+          },
         },
         configmanager: {
           enabled: true,
           config: {
-            moduleType: "config-manager",
-            configPath: "./routecodex.json",
-            watchMode: true
-          }
+            moduleType: 'config-manager',
+            configPath: './routecodex.json',
+            watchMode: true,
+          },
         },
         providermanager: {
           enabled: true,
           config: {
-            moduleType: "provider-manager",
+            moduleType: 'provider-manager',
             healthCheckInterval: 30000,
-            maxRetries: 3
-          }
+            maxRetries: 3,
+          },
         },
         errorhandling: {
           enabled: true,
           config: {
-            moduleType: "error-handling",
-            maxErrors: 1000
-          }
-        }
-      }
+            moduleType: 'error-handling',
+            maxErrors: 1000,
+          },
+        },
+      },
     };
   }
 }

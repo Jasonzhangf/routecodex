@@ -1,0 +1,22 @@
+{
+  "sessionId": "session_1758817056780",
+  "pipelineId": "unknown",
+  "startTime": 1758817056780,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "provider_manager_initialized",
+      "moduleId": "provider-manager",
+      "position": "middle",
+      "startTime": 1758817056780,
+      "status": "running"
+    },
+    {
+      "operationId": "metric_initialization",
+      "moduleId": "provider-manager",
+      "position": "middle",
+      "startTime": 1758817056780,
+      "status": "running"
+    }
+  ]
+}

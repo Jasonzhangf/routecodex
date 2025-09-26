@@ -89,28 +89,23 @@ export class ErrorHandlingUtils {
       }
 
       // Create contextual error if needed
-      const contextualError = error instanceof ContextualError
-        ? error
-        : new ContextualError(error.message, context, moduleId, options);
+      const contextualError =
+        error instanceof ContextualError
+          ? error
+          : new ContextualError(error.message, context, moduleId, options);
 
       // Handle error through registry
-      await ErrorHandlingUtils.registry!.handleError(
-        contextualError,
-        context,
-        moduleId,
-        {
-          ...options.additionalContext,
-          severity: contextualError.severity,
-          category: contextualError.category,
-          recovery: options.recovery
-        }
-      );
+      await ErrorHandlingUtils.registry!.handleError(contextualError, context, moduleId, {
+        ...options.additionalContext,
+        severity: contextualError.severity,
+        category: contextualError.category,
+        recovery: options.recovery,
+      });
 
       // Log error if not suppressed
       if (!options.suppressLogging) {
         this.logError(contextualError, context, moduleId, options);
       }
-
     } catch (handlerError) {
       console.error('Failed to handle error:', handlerError);
       console.error('Original error:', error);
@@ -196,7 +191,7 @@ export class ErrorHandlingUtils {
       severity,
       category,
       description,
-      recovery
+      recovery,
     });
   }
 
@@ -214,12 +209,12 @@ export class ErrorHandlingUtils {
       return;
     }
 
-      // @ts-ignore - Type mismatch between ErrorContext definitions
+    // @ts-ignore - Type mismatch between ErrorContext definitions
     ErrorHandlingUtils.registry.registerErrorHandler({
       errorCode,
       handler: handler as any,
       priority,
-      description
+      description,
     });
   }
 
@@ -331,7 +326,7 @@ export class ErrorHandlingUtils {
             throw error;
           }
         };
-      }
+      },
     };
   }
 
@@ -354,7 +349,7 @@ export class ErrorHandlingUtils {
       context,
       severity: options.severity,
       category: options.category,
-      additionalContext: options.additionalContext
+      additionalContext: options.additionalContext,
     };
 
     switch (logLevel) {
@@ -451,8 +446,8 @@ class ErrorContextBuilderImpl implements ErrorContextBuilder {
       context: {
         stack: this.error.stack,
         name: this.error.name,
-        ...this.options.additionalContext
-      }
+        ...this.options.additionalContext,
+      },
     };
   }
 }

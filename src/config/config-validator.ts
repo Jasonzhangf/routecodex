@@ -18,10 +18,13 @@ interface ValidationResult {
  * Configuration validator with custom validation logic
  */
 export class ConfigValidator {
-  private customValidators: Map<string, {
-    validate: (config: RouteCodexConfig) => boolean | Promise<boolean>;
-    message: string;
-  }> = new Map();
+  private customValidators: Map<
+    string,
+    {
+      validate: (config: RouteCodexConfig) => boolean | Promise<boolean>;
+      message: string;
+    }
+  > = new Map();
   private errorUtils: ReturnType<typeof ErrorHandlingUtils.createModuleErrorHandler>;
 
   constructor() {
@@ -97,18 +100,18 @@ export class ConfigValidator {
 
       return {
         valid: errors.length === 0,
-        errors
+        errors,
       };
     } catch (error) {
       await this.errorUtils.handle(error as Error, 'validate', {
         additionalContext: {
-          context: 'Configuration validation'
-        }
+          context: 'Configuration validation',
+        },
       });
 
       return {
         valid: false,
-        errors: [`Validation failed: ${error}`]
+        errors: [`Validation failed: ${error}`],
       };
     }
   }
@@ -260,7 +263,15 @@ export class ConfigValidator {
     }
 
     if (dynamicRouting.categories && typeof dynamicRouting.categories === 'object') {
-      const validCategories = ['default', 'longcontext', 'thinking', 'background', 'websearch', 'vision', 'coding'];
+      const validCategories = [
+        'default',
+        'longcontext',
+        'thinking',
+        'background',
+        'websearch',
+        'vision',
+        'coding',
+      ];
 
       for (const [category, config] of Object.entries(dynamicRouting.categories)) {
         if (!validCategories.includes(category)) {
@@ -277,7 +288,10 @@ export class ConfigValidator {
           if (typeof categoryConfig.enabled !== 'boolean') {
             errors.push(`Category ${category} enabled must be a boolean`);
           }
-          if (categoryConfig.enabled && (!categoryConfig.targets || !Array.isArray(categoryConfig.targets))) {
+          if (
+            categoryConfig.enabled &&
+            (!categoryConfig.targets || !Array.isArray(categoryConfig.targets))
+          ) {
             errors.push(`Enabled category ${category} must have targets array`);
           }
         }
@@ -332,7 +346,10 @@ export class ConfigValidator {
       errors.push('Metrics enabled must be a boolean');
     }
 
-    if (monitoring.logging && !['error', 'warn', 'info', 'debug'].includes(monitoring.logging.level)) {
+    if (
+      monitoring.logging &&
+      !['error', 'warn', 'info', 'debug'].includes(monitoring.logging.level)
+    ) {
       errors.push('Logging level must be one of: error, warn, info, debug');
     }
 
@@ -364,7 +381,10 @@ export class ConfigValidator {
   /**
    * Validate specific configuration section
    */
-  async validateSection(config: RouteCodexConfig, section: keyof RouteCodexConfig): Promise<{ valid: boolean; errors: string[] }> {
+  async validateSection(
+    config: RouteCodexConfig,
+    section: keyof RouteCodexConfig
+  ): Promise<{ valid: boolean; errors: string[] }> {
     const sectionConfig = config[section];
     const errors: string[] = [];
 
@@ -396,7 +416,7 @@ export class ConfigValidator {
 
     return {
       valid: errors.length === 0,
-      errors
+      errors,
     };
   }
 
@@ -433,9 +453,9 @@ export class ConfigValidator {
           type: 'object',
           properties: {
             host: { type: 'string', minLength: 1 },
-            port: { type: 'integer', minimum: 1, maximum: 65535 }
+            port: { type: 'integer', minimum: 1, maximum: 65535 },
           },
-          required: ['host', 'port']
+          required: ['host', 'port'],
         },
         providers: {
           type: 'object',
@@ -445,14 +465,14 @@ export class ConfigValidator {
               properties: {
                 id: { type: 'string', minLength: 1 },
                 type: { enum: ['openai', 'anthropic', 'custom', 'pass-through'] },
-                enabled: { type: 'boolean' }
+                enabled: { type: 'boolean' },
               },
-              required: ['id', 'type', 'enabled']
-            }
-          }
-        }
+              required: ['id', 'type', 'enabled'],
+            },
+          },
+        },
       },
-      required: ['version', 'environment', 'debug', 'logLevel', 'server']
+      required: ['version', 'environment', 'debug', 'logLevel', 'server'],
     };
   }
 }

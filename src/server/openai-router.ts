@@ -1,6 +1,6 @@
 /**
  * OpenAI Router Implementation
- * Implements OpenAI API v1 compatibility endpoints with pass-through functionality
+ * Implements OpenAI API v1 compatibility endpoints (pipeline-only)
  */
 
 import express, { type Router, type Request, type Response, type NextFunction } from 'express';
@@ -20,9 +20,8 @@ import {
   type StreamResponse,
   type StreamOptions,
   RouteCodexError,
-  type ServerConfig
+  type ServerConfig,
 } from './types.js';
-import { PassThroughProvider } from '../providers/pass-through-provider.js';
 import { ConfigRequestClassifier } from '../modules/virtual-router/classifiers/config-request-classifier.js';
 
 /**
@@ -56,7 +55,7 @@ export class OpenAIRouter extends BaseModule {
   private errorHandling: ErrorHandlingCenter;
   private debugEventBus: DebugEventBus;
   private config: OpenAIRouterConfig;
-  private passThroughProvider: PassThroughProvider;
+  // Removed pass-through provider; pipeline-only routing
   private moduleInfo: ModuleInfo;
   private _isInitialized: boolean = false;
   // Optional pipeline manager hook (attached later by server if needed)
@@ -84,8 +83,8 @@ export class OpenAIRouter extends BaseModule {
       id: 'openai-router',
       name: 'OpenAIRouter',
       version: '0.0.1',
-      description: 'OpenAI API v1 compatibility router with pass-through',
-      type: 'server'
+      description: 'OpenAI API v1 compatibility router (pipeline-only)',
+      type: 'server',
     };
 
     super(moduleInfo);
@@ -109,14 +108,10 @@ export class OpenAIRouter extends BaseModule {
       authEnabled: false,
       timeout: 30000,
       enablePipeline: false,
-      ...config
+      ...config,
     };
 
-    // Initialize pass-through provider
-    this.passThroughProvider = new PassThroughProvider({
-      targetUrl: this.config.targetUrl || 'https://api.openai.com/v1',
-      timeout: this.config.timeout
-    });
+    // Pass-through provider removed; rely on pipeline path only
 
     // Initialize debug enhancements
     this.initializeDebugEnhancements();
@@ -142,7 +137,7 @@ export class OpenAIRouter extends BaseModule {
     if (!this.routerMetrics.has(operation)) {
       this.routerMetrics.set(operation, {
         values: [],
-        lastUpdated: Date.now()
+        lastUpdated: Date.now(),
       });
     }
 
@@ -184,7 +179,9 @@ export class OpenAIRouter extends BaseModule {
    * Publish debug event
    */
   private publishDebugEvent(type: string, data: any): void {
-    if (!this.isDebugEnhanced) {return;}
+    if (!this.isDebugEnhanced) {
+      return;
+    }
 
     try {
       this.debugEventBus.publish({
@@ -197,8 +194,8 @@ export class OpenAIRouter extends BaseModule {
         data: {
           ...data,
           routerId: this.moduleInfo.id,
-          source: 'openai-router'
-        }
+          source: 'openai-router',
+        },
       });
     } catch (error) {
       // Silent fail if debug event bus is not available
@@ -213,7 +210,7 @@ export class OpenAIRouter extends BaseModule {
       routerId: this.moduleInfo.id,
       isInitialized: this._isInitialized,
       type: this.moduleInfo.type,
-      isEnhanced: this.isDebugEnhanced
+      isEnhanced: this.isDebugEnhanced,
     };
 
     if (!this.isDebugEnhanced) {
@@ -225,7 +222,7 @@ export class OpenAIRouter extends BaseModule {
       debugInfo: this.getDebugInfo(),
       routerMetrics: this.getRouterMetrics(),
       requestHistory: [...this.requestHistory.slice(-10)], // Last 10 requests
-      errorHistory: [...this.errorHistory.slice(-10)] // Last 10 errors
+      errorHistory: [...this.errorHistory.slice(-10)], // Last 10 errors
     };
   }
 
@@ -242,7 +239,7 @@ export class OpenAIRouter extends BaseModule {
       errorHistorySize: this.errorHistory.length,
       hasPipelineManager: !!this.pipelineManager,
       hasRoutePools: !!this.routePools,
-      hasClassifier: !!this.classifier
+      hasClassifier: !!this.classifier,
     };
   }
 
@@ -256,7 +253,7 @@ export class OpenAIRouter extends BaseModule {
       metrics[operation] = {
         count: metric.values.length,
         lastUpdated: metric.lastUpdated,
-        recentValues: metric.values.slice(-5) // Last 5 values
+        recentValues: metric.values.slice(-5), // Last 5 values
       };
     }
 
@@ -284,7 +281,10 @@ export class OpenAIRouter extends BaseModule {
         this.classifier = new ConfigRequestClassifier(classifierConfig);
       }
     } catch (err) {
-      console.warn('Failed to initialize ConfigRequestClassifier:', err instanceof Error ? err.message : String(err));
+      console.warn(
+        'Failed to initialize ConfigRequestClassifier:',
+        err instanceof Error ? err.message : String(err)
+      );
       this.classifier = null;
     }
   }
@@ -311,9 +311,14 @@ export class OpenAIRouter extends BaseModule {
    * Get model ID for pipeline routing
    */
   private getPipelineModelId(model?: string): string {
-    if (!model) {return 'unknown';}
+    if (!model) {
+      return 'unknown';
+    }
 
-    if (this.config.pipelineProvider?.modelMapping && model in this.config.pipelineProvider.modelMapping) {
+    if (
+      this.config.pipelineProvider?.modelMapping &&
+      model in this.config.pipelineProvider.modelMapping
+    ) {
       return this.config.pipelineProvider.modelMapping[model];
     }
 
@@ -333,19 +338,19 @@ export class OpenAIRouter extends BaseModule {
         initId,
         config: this.config,
         targetUrl: this.config.targetUrl,
-        timestamp: startTime
+        timestamp: startTime,
       });
       this.publishDebugEvent('initialization_start', {
         initId,
         config: this.config,
         targetUrl: this.config.targetUrl,
-        timestamp: startTime
+        timestamp: startTime,
       });
     }
 
     try {
       await this.errorHandling.initialize();
-      await this.passThroughProvider.initialize();
+      // No pass-through initialization
 
       // Setup routes
       this.setupRoutes();
@@ -361,14 +366,14 @@ export class OpenAIRouter extends BaseModule {
           success: true,
           totalTime,
           hasRoutePools: !!this.routePools,
-          hasClassifier: !!this.classifier
+          hasClassifier: !!this.classifier,
         });
         this.publishDebugEvent('initialization_complete', {
           initId,
           success: true,
           totalTime,
           hasRoutePools: !!this.routePools,
-          hasClassifier: !!this.classifier
+          hasClassifier: !!this.classifier,
         });
       }
 
@@ -381,10 +386,9 @@ export class OpenAIRouter extends BaseModule {
         position: 'middle',
         data: {
           config: this.config,
-          targetUrl: this.config.targetUrl
-        }
+          targetUrl: this.config.targetUrl,
+        },
       });
-
     } catch (error) {
       const totalTime = Date.now() - startTime;
 
@@ -393,7 +397,7 @@ export class OpenAIRouter extends BaseModule {
         this.recordRouterMetric('initialization_failed', {
           initId,
           error: error instanceof Error ? error.message : String(error),
-          totalTime
+          totalTime,
         });
         this.addToErrorHistory({
           initId,
@@ -401,12 +405,12 @@ export class OpenAIRouter extends BaseModule {
           startTime,
           endTime: Date.now(),
           totalTime,
-          operation: 'initialize'
+          operation: 'initialize',
         });
         this.publishDebugEvent('initialization_failed', {
           initId,
           error: error instanceof Error ? error.message : String(error),
-          totalTime
+          totalTime,
         });
       }
 
@@ -463,9 +467,18 @@ export class OpenAIRouter extends BaseModule {
     // Fine-tuning operations
     this.router.post('/fine_tuning/jobs', this.handleFineTuningCreate.bind(this));
     this.router.get('/fine_tuning/jobs', this.handleFineTuningList.bind(this));
-    this.router.get('/fine_tuning/jobs/:fine_tuning_job_id', this.handleFineTuningRetrieve.bind(this));
-    this.router.post('/fine_tuning/jobs/:fine_tuning_job_id/cancel', this.handleFineTuningCancel.bind(this));
-    this.router.get('/fine_tuning/jobs/:fine_tuning_job_id/events', this.handleFineTuningEvents.bind(this));
+    this.router.get(
+      '/fine_tuning/jobs/:fine_tuning_job_id',
+      this.handleFineTuningRetrieve.bind(this)
+    );
+    this.router.post(
+      '/fine_tuning/jobs/:fine_tuning_job_id/cancel',
+      this.handleFineTuningCancel.bind(this)
+    );
+    this.router.get(
+      '/fine_tuning/jobs/:fine_tuning_job_id/events',
+      this.handleFineTuningEvents.bind(this)
+    );
 
     // Batch operations
     this.router.post('/batches', this.handleBatchCreate.bind(this));
@@ -492,7 +505,7 @@ export class OpenAIRouter extends BaseModule {
         messageCount: req.body.messages?.length || 0,
         streaming: req.body.stream || false,
         hasTools: !!req.body.tools,
-        timestamp: startTime
+        timestamp: startTime,
       });
       this.addToRequestHistory({
         requestId,
@@ -500,7 +513,7 @@ export class OpenAIRouter extends BaseModule {
         method: req.method,
         model: req.body.model,
         messageCount: req.body.messages?.length || 0,
-        timestamp: startTime
+        timestamp: startTime,
       });
       this.publishDebugEvent('chat_completions_start', {
         requestId,
@@ -508,7 +521,7 @@ export class OpenAIRouter extends BaseModule {
         messageCount: req.body.messages?.length || 0,
         streaming: req.body.stream || false,
         hasTools: !!req.body.tools,
-        timestamp: startTime
+        timestamp: startTime,
       });
     }
 
@@ -524,8 +537,8 @@ export class OpenAIRouter extends BaseModule {
           requestId,
           model: req.body.model,
           messageCount: req.body.messages?.length || 0,
-          streaming: req.body.stream || false
-        }
+          streaming: req.body.stream || false,
+        },
       });
 
       // Create request context
@@ -537,7 +550,7 @@ export class OpenAIRouter extends BaseModule {
         headers: this.sanitizeHeaders(req.headers),
         body: req.body,
         userAgent: req.get('user-agent'),
-        ip: req.ip
+        ip: req.ip,
       };
 
       // Validate request
@@ -565,12 +578,12 @@ export class OpenAIRouter extends BaseModule {
             providerId,
             modelId,
             requestId,
-            timestamp: Date.now()
+            timestamp: Date.now(),
           },
           metadata: {
             method: req.method,
             url: req.url,
-            headers: this.sanitizeHeaders(req.headers)
+            headers: this.sanitizeHeaders(req.headers),
           },
           debug: {
             enabled: this.config.enableMetrics ?? true,
@@ -578,30 +591,19 @@ export class OpenAIRouter extends BaseModule {
               llmSwitch: true,
               workflow: true,
               compatibility: true,
-              provider: true
-            }
-          }
+              provider: true,
+            },
+          },
         };
 
         const pipelineResponse = await this.pipelineManager.processRequest(pipelineRequest);
         response = pipelineResponse?.data ?? pipelineResponse;
       } else {
-        // Handle regular response with pass-through
-        // Extract API key from Authorization header
-        const authHeader = req.headers['authorization'] || req.headers['Authorization'];
-        let apiKey = undefined;
-        if (authHeader && typeof authHeader === 'string') {
-          const match = authHeader.match(/Bearer\s+(.+)/i);
-          if (match) {
-            apiKey = match[1];
-          }
-        }
-
-        response = await this.passThroughProvider.processChatCompletion(req.body, {
-          timeout: this.config.timeout,
-          retryAttempts: 3,
-          apiKey
-        });
+        throw new RouteCodexError(
+          'OpenAI pipeline not initialized. Configure providers and pipelines in merged-config.',
+          'pipeline_not_ready',
+          503
+        );
       }
 
       const duration = Date.now() - startTime;
@@ -615,7 +617,7 @@ export class OpenAIRouter extends BaseModule {
           status: 200,
           model: req.body.model,
           streaming: req.body.stream || false,
-          usedPipeline: this.shouldUsePipeline() && !!this.routePools
+          usedPipeline: this.shouldUsePipeline() && !!this.routePools,
         });
         this.publishDebugEvent('chat_completions_complete', {
           requestId,
@@ -624,7 +626,7 @@ export class OpenAIRouter extends BaseModule {
           status: 200,
           model: req.body.model,
           streaming: req.body.stream || false,
-          usedPipeline: this.shouldUsePipeline() && !!this.routePools
+          usedPipeline: this.shouldUsePipeline() && !!this.routePools,
         });
       }
 
@@ -640,13 +642,12 @@ export class OpenAIRouter extends BaseModule {
           duration,
           status: 200,
           model: req.body.model,
-          streaming: req.body.stream || false
-        }
+          streaming: req.body.stream || false,
+        },
       });
 
       // Send response
       res.status(200).json(response);
-
     } catch (error) {
       const duration = Date.now() - startTime;
 
@@ -656,7 +657,7 @@ export class OpenAIRouter extends BaseModule {
           requestId,
           error: error instanceof Error ? error.message : String(error),
           duration,
-          errorType: error instanceof RouteCodexError ? error.code : 'unknown'
+          errorType: error instanceof RouteCodexError ? error.code : 'unknown',
         });
         this.addToErrorHistory({
           requestId,
@@ -665,13 +666,13 @@ export class OpenAIRouter extends BaseModule {
           startTime,
           endTime: Date.now(),
           duration,
-          operation: 'handleChatCompletions'
+          operation: 'handleChatCompletions',
         });
         this.publishDebugEvent('chat_completions_error', {
           requestId,
           error: error instanceof Error ? error.message : String(error),
           duration,
-          errorType: error instanceof RouteCodexError ? error.code : 'unknown'
+          errorType: error instanceof RouteCodexError ? error.code : 'unknown',
         });
       }
 
@@ -687,8 +688,8 @@ export class OpenAIRouter extends BaseModule {
         data: {
           requestId,
           duration,
-          error: error instanceof Error ? error.message : String(error)
-        }
+          error: error instanceof Error ? error.message : String(error),
+        },
       });
 
       // Send error response
@@ -697,8 +698,8 @@ export class OpenAIRouter extends BaseModule {
         error: {
           message: error instanceof Error ? error.message : 'Internal Server Error',
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
-          code: error instanceof RouteCodexError ? error.code : 'internal_error'
-        }
+          code: error instanceof RouteCodexError ? error.code : 'internal_error',
+        },
       });
     }
   }
@@ -721,9 +722,11 @@ export class OpenAIRouter extends BaseModule {
         data: {
           requestId,
           model: req.body.model,
-          promptLength: Array.isArray(req.body.prompt) ? req.body.prompt.length : req.body.prompt?.length || 0,
-          streaming: req.body.stream || false
-        }
+          promptLength: Array.isArray(req.body.prompt)
+            ? req.body.prompt.length
+            : req.body.prompt?.length || 0,
+          streaming: req.body.stream || false,
+        },
       });
 
       // Create request context
@@ -735,7 +738,7 @@ export class OpenAIRouter extends BaseModule {
         headers: this.sanitizeHeaders(req.headers),
         body: req.body,
         userAgent: req.get('user-agent'),
-        ip: req.ip
+        ip: req.ip,
       };
 
       // Validate request
@@ -762,12 +765,12 @@ export class OpenAIRouter extends BaseModule {
             providerId,
             modelId,
             requestId,
-            timestamp: Date.now()
+            timestamp: Date.now(),
           },
           metadata: {
             method: req.method,
             url: req.url,
-            headers: this.sanitizeHeaders(req.headers)
+            headers: this.sanitizeHeaders(req.headers),
           },
           debug: {
             enabled: this.config.enableMetrics ?? true,
@@ -775,18 +778,18 @@ export class OpenAIRouter extends BaseModule {
               llmSwitch: true,
               workflow: true,
               compatibility: true,
-              provider: true
-            }
-          }
+              provider: true,
+            },
+          },
         };
         const pipelineResponse = await this.pipelineManager.processRequest(pipelineRequest);
         response = pipelineResponse?.data ?? pipelineResponse;
       } else {
-        // Process with pass-through provider
-        response = await this.passThroughProvider.processCompletion(req.body, {
-          timeout: this.config.timeout,
-          retryAttempts: 3
-        });
+        throw new RouteCodexError(
+          'OpenAI pipeline not initialized. Configure providers and pipelines in merged-config.',
+          'pipeline_not_ready',
+          503
+        );
       }
 
       const duration = Date.now() - startTime;
@@ -802,13 +805,12 @@ export class OpenAIRouter extends BaseModule {
           requestId,
           duration,
           status: 200,
-          model: req.body.model
-        }
+          model: req.body.model,
+        },
       });
 
       // Send response
       res.status(200).json(response);
-
     } catch (error) {
       const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'completions_handler');
@@ -823,8 +825,8 @@ export class OpenAIRouter extends BaseModule {
         data: {
           requestId,
           duration,
-          error: error instanceof Error ? error.message : String(error)
-        }
+          error: error instanceof Error ? error.message : String(error),
+        },
       });
 
       // Send error response
@@ -833,8 +835,8 @@ export class OpenAIRouter extends BaseModule {
         error: {
           message: error instanceof Error ? error.message : 'Internal Server Error',
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
-          code: error instanceof RouteCodexError ? error.code : 'internal_error'
-        }
+          code: error instanceof RouteCodexError ? error.code : 'internal_error',
+        },
       });
     }
   }
@@ -844,29 +846,41 @@ export class OpenAIRouter extends BaseModule {
    * (Hook: can integrate ConfigRequestClassifier here.)
    */
   private decideRouteCategory(req: Request): string {
-    if (!this.routePools) {return 'default';}
+    if (!this.routePools) {
+      return 'default';
+    }
     const categories = Object.keys(this.routePools);
-    if (categories.includes('default')) {return 'default';}
+    if (categories.includes('default')) {
+      return 'default';
+    }
     return categories[0] || 'default';
   }
 
   private async decideRouteCategoryAsync(req: Request): Promise<string> {
     const fallback = () => {
-      if (!this.routePools) {return 'default';}
+      if (!this.routePools) {
+        return 'default';
+      }
       const categories = Object.keys(this.routePools);
-      if (categories.includes('default')) {return 'default';}
+      if (categories.includes('default')) {
+        return 'default';
+      }
       return categories[0] || 'default';
     };
     try {
-      if (!this.classifier) {return fallback();}
+      if (!this.classifier) {
+        return fallback();
+      }
       const input = {
         request: req.body,
         endpoint: req.url || '/v1/openai/chat/completions',
-        protocol: 'openai'
+        protocol: 'openai',
       };
       const res = await this.classifier.classify(input);
       const route = res?.route;
-      if (route && this.routePools && this.routePools[route]) {return route;}
+      if (route && this.routePools && this.routePools[route]) {
+        return route;
+      }
       return fallback();
     } catch {
       return fallback();
@@ -876,7 +890,9 @@ export class OpenAIRouter extends BaseModule {
   /** Round-robin pick within a category */
   private pickPipelineId(routeName: string): string {
     const pool = (this.routePools && this.routePools[routeName]) || [];
-    if (pool.length === 0) {throw new Error(`No pipelines available for route ${routeName}`);}
+    if (pool.length === 0) {
+      throw new Error(`No pipelines available for route ${routeName}`);
+    }
     const idx = this.rrIndex.get(routeName) ?? 0;
     const chosen = pool[idx % pool.length];
     this.rrIndex.set(routeName, (idx + 1) % pool.length);
@@ -886,7 +902,9 @@ export class OpenAIRouter extends BaseModule {
   /** Parse providerId and modelId from pipelineId '<providerComposite>.<modelId>' */
   private parsePipelineId(pipelineId: string): { providerId: string; modelId: string } {
     const dot = pipelineId.lastIndexOf('.');
-    if (dot === -1) {return { providerId: pipelineId, modelId: 'unknown' };}
+    if (dot === -1) {
+      return { providerId: pipelineId, modelId: 'unknown' };
+    }
     return { providerId: pipelineId.slice(0, dot), modelId: pipelineId.slice(dot + 1) };
   }
 
@@ -906,32 +924,18 @@ export class OpenAIRouter extends BaseModule {
         type: 'start',
         position: 'middle',
         data: {
-          requestId
-        }
-      });
-
-      // Get models from pass-through provider
-      const response = await this.passThroughProvider.getModels();
-
-      const duration = Date.now() - startTime;
-
-      this.debugEventBus.publish({
-        sessionId: `session_${Date.now()}`,
-        moduleId: 'openai-router',
-        operationId: 'models_request_end',
-        timestamp: Date.now(),
-        type: 'end',
-        position: 'middle',
-        data: {
           requestId,
-          duration,
-          modelCount: Array.isArray(response) ? response.length : (response && typeof response === 'object' && 'data' in response ? (response as any).data.length : 0)
-        }
+        },
       });
 
-      // Send response
-      res.status(200).json(response);
-
+      // Not implemented without pass-through
+      res.status(501).json({
+        error: {
+          message: 'Models endpoint not implemented. Configure pipeline.',
+          type: 'not_implemented',
+        },
+      });
+      const duration = Date.now() - startTime;
     } catch (error) {
       const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'models_handler');
@@ -946,8 +950,8 @@ export class OpenAIRouter extends BaseModule {
         data: {
           requestId,
           duration,
-          error: error instanceof Error ? error.message : String(error)
-        }
+          error: error instanceof Error ? error.message : String(error),
+        },
       });
 
       // Send error response
@@ -956,8 +960,8 @@ export class OpenAIRouter extends BaseModule {
         error: {
           message: error instanceof Error ? error.message : 'Internal Server Error',
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
-          code: error instanceof RouteCodexError ? error.code : 'internal_error'
-        }
+          code: error instanceof RouteCodexError ? error.code : 'internal_error',
+        },
       });
     }
   }
@@ -980,32 +984,18 @@ export class OpenAIRouter extends BaseModule {
         position: 'middle',
         data: {
           requestId,
-          modelId
-        }
+          modelId,
+        },
       });
 
-      // Get specific model from pass-through provider
-      const response = await this.passThroughProvider.getModel(modelId);
-
+      // Not implemented without pass-through
+      res.status(501).json({
+        error: {
+          message: 'Model endpoint not implemented. Configure pipeline.',
+          type: 'not_implemented',
+        },
+      });
       const duration = Date.now() - startTime;
-
-      this.debugEventBus.publish({
-        sessionId: `session_${Date.now()}`,
-        moduleId: 'openai-router',
-        operationId: 'model_request_end',
-        timestamp: Date.now(),
-        type: 'end',
-        position: 'middle',
-        data: {
-          requestId,
-          duration,
-          modelId
-        }
-      });
-
-      // Send response
-      res.status(200).json(response);
-
     } catch (error) {
       const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'model_handler');
@@ -1021,8 +1011,8 @@ export class OpenAIRouter extends BaseModule {
           requestId,
           duration,
           modelId,
-          error: error instanceof Error ? error.message : String(error)
-        }
+          error: error instanceof Error ? error.message : String(error),
+        },
       });
 
       // Send error response
@@ -1031,8 +1021,8 @@ export class OpenAIRouter extends BaseModule {
         error: {
           message: error instanceof Error ? error.message : 'Internal Server Error',
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
-          code: error instanceof RouteCodexError ? error.code : 'internal_error'
-        }
+          code: error instanceof RouteCodexError ? error.code : 'internal_error',
+        },
       });
     }
   }
@@ -1053,15 +1043,17 @@ export class OpenAIRouter extends BaseModule {
         headers: this.sanitizeHeaders(req.headers),
         body: req.body,
         userAgent: req.get('user-agent'),
-        ip: req.ip
+        ip: req.ip,
       };
 
-      // Pipeline path not yet implemented for embeddings; fall back to pass-through
-      const response = await this.passThroughProvider.processEmbeddings(req.body, context);
+      // Not implemented without pass-through
       const duration = Date.now() - startTime;
-
-      res.status(200).json(response);
-
+      res.status(501).json({
+        error: {
+          message: 'Embeddings not implemented. Configure pipeline.',
+          type: 'not_implemented',
+        },
+      });
     } catch (error) {
       const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'embeddings_handler');
@@ -1071,8 +1063,8 @@ export class OpenAIRouter extends BaseModule {
         error: {
           message: error instanceof Error ? error.message : 'Internal Server Error',
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
-          code: error instanceof RouteCodexError ? error.code : 'internal_error'
-        }
+          code: error instanceof RouteCodexError ? error.code : 'internal_error',
+        },
       });
     }
   }
@@ -1093,15 +1085,17 @@ export class OpenAIRouter extends BaseModule {
         headers: this.sanitizeHeaders(req.headers),
         body: req.body,
         userAgent: req.get('user-agent'),
-        ip: req.ip
+        ip: req.ip,
       };
 
-      // Pipeline path not yet implemented for moderations; fall back to pass-through
-      const response = await this.passThroughProvider.processModerations(req.body, context);
+      // Not implemented without pass-through
       const duration = Date.now() - startTime;
-
-      res.status(200).json(response);
-
+      res.status(501).json({
+        error: {
+          message: 'Moderations not implemented. Configure pipeline.',
+          type: 'not_implemented',
+        },
+      });
     } catch (error) {
       const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'moderations_handler');
@@ -1111,8 +1105,8 @@ export class OpenAIRouter extends BaseModule {
         error: {
           message: error instanceof Error ? error.message : 'Internal Server Error',
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
-          code: error instanceof RouteCodexError ? error.code : 'internal_error'
-        }
+          code: error instanceof RouteCodexError ? error.code : 'internal_error',
+        },
       });
     }
   }
@@ -1133,15 +1127,17 @@ export class OpenAIRouter extends BaseModule {
         headers: this.sanitizeHeaders(req.headers),
         body: req.body,
         userAgent: req.get('user-agent'),
-        ip: req.ip
+        ip: req.ip,
       };
 
-      // Pipeline path not yet implemented for images; fall back to pass-through
-      const response = await this.passThroughProvider.processImageGenerations(req.body, context);
+      // Not implemented without pass-through
       const duration = Date.now() - startTime;
-
-      res.status(200).json(response);
-
+      res.status(501).json({
+        error: {
+          message: 'Image generations not implemented. Configure pipeline.',
+          type: 'not_implemented',
+        },
+      });
     } catch (error) {
       const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'image_generations_handler');
@@ -1151,8 +1147,8 @@ export class OpenAIRouter extends BaseModule {
         error: {
           message: error instanceof Error ? error.message : 'Internal Server Error',
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
-          code: error instanceof RouteCodexError ? error.code : 'internal_error'
-        }
+          code: error instanceof RouteCodexError ? error.code : 'internal_error',
+        },
       });
     }
   }
@@ -1173,15 +1169,17 @@ export class OpenAIRouter extends BaseModule {
         headers: this.sanitizeHeaders(req.headers),
         body: req.body,
         userAgent: req.get('user-agent'),
-        ip: req.ip
+        ip: req.ip,
       };
 
-      // Pipeline path not yet implemented for audio transcriptions; fall back to pass-through
-      const response = await this.passThroughProvider.processAudioTranscriptions(req.body, context);
+      // Not implemented without pass-through
       const duration = Date.now() - startTime;
-
-      res.status(200).json(response);
-
+      res.status(501).json({
+        error: {
+          message: 'Audio transcriptions not implemented. Configure pipeline.',
+          type: 'not_implemented',
+        },
+      });
     } catch (error) {
       const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'audio_transcriptions_handler');
@@ -1191,8 +1189,8 @@ export class OpenAIRouter extends BaseModule {
         error: {
           message: error instanceof Error ? error.message : 'Internal Server Error',
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
-          code: error instanceof RouteCodexError ? error.code : 'internal_error'
-        }
+          code: error instanceof RouteCodexError ? error.code : 'internal_error',
+        },
       });
     }
   }
@@ -1213,15 +1211,17 @@ export class OpenAIRouter extends BaseModule {
         headers: this.sanitizeHeaders(req.headers),
         body: req.body,
         userAgent: req.get('user-agent'),
-        ip: req.ip
+        ip: req.ip,
       };
 
-      // Pipeline path not yet implemented for audio translations; fall back to pass-through
-      const response = await this.passThroughProvider.processAudioTranslations(req.body, context);
+      // Not implemented without pass-through
       const duration = Date.now() - startTime;
-
-      res.status(200).json(response);
-
+      res.status(501).json({
+        error: {
+          message: 'Audio translations not implemented. Configure pipeline.',
+          type: 'not_implemented',
+        },
+      });
     } catch (error) {
       const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'audio_translations_handler');
@@ -1231,73 +1231,148 @@ export class OpenAIRouter extends BaseModule {
         error: {
           message: error instanceof Error ? error.message : 'Internal Server Error',
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
-          code: error instanceof RouteCodexError ? error.code : 'internal_error'
-        }
+          code: error instanceof RouteCodexError ? error.code : 'internal_error',
+        },
       });
     }
   }
 
   // Placeholder handlers for file operations
   private async handleFilesList(req: Request, res: Response): Promise<void> {
-    res.status(501).json({ error: { message: 'Files API not implemented in pass-through mode', type: 'not_implemented' } });
+    res.status(501).json({
+      error: {
+        message: 'Files API not implemented in pass-through mode',
+        type: 'not_implemented',
+      },
+    });
   }
 
   private async handleFileUpload(req: Request, res: Response): Promise<void> {
-    res.status(501).json({ error: { message: 'Files API not implemented in pass-through mode', type: 'not_implemented' } });
+    res.status(501).json({
+      error: {
+        message: 'Files API not implemented in pass-through mode',
+        type: 'not_implemented',
+      },
+    });
   }
 
   private async handleFileDelete(req: Request, res: Response): Promise<void> {
-    res.status(501).json({ error: { message: 'Files API not implemented in pass-through mode', type: 'not_implemented' } });
+    res.status(501).json({
+      error: {
+        message: 'Files API not implemented in pass-through mode',
+        type: 'not_implemented',
+      },
+    });
   }
 
   private async handleFileRetrieve(req: Request, res: Response): Promise<void> {
-    res.status(501).json({ error: { message: 'Files API not implemented in pass-through mode', type: 'not_implemented' } });
+    res.status(501).json({
+      error: {
+        message: 'Files API not implemented in pass-through mode',
+        type: 'not_implemented',
+      },
+    });
   }
 
   private async handleFileContent(req: Request, res: Response): Promise<void> {
-    res.status(501).json({ error: { message: 'Files API not implemented in pass-through mode', type: 'not_implemented' } });
+    res.status(501).json({
+      error: {
+        message: 'Files API not implemented in pass-through mode',
+        type: 'not_implemented',
+      },
+    });
   }
 
   // Placeholder handlers for fine-tuning operations
   private async handleFineTuningCreate(req: Request, res: Response): Promise<void> {
-    res.status(501).json({ error: { message: 'Fine-tuning API not implemented in pass-through mode', type: 'not_implemented' } });
+    res.status(501).json({
+      error: {
+        message: 'Fine-tuning API not implemented in pass-through mode',
+        type: 'not_implemented',
+      },
+    });
   }
 
   private async handleFineTuningList(req: Request, res: Response): Promise<void> {
-    res.status(501).json({ error: { message: 'Fine-tuning API not implemented in pass-through mode', type: 'not_implemented' } });
+    res.status(501).json({
+      error: {
+        message: 'Fine-tuning API not implemented in pass-through mode',
+        type: 'not_implemented',
+      },
+    });
   }
 
   private async handleFineTuningRetrieve(req: Request, res: Response): Promise<void> {
-    res.status(501).json({ error: { message: 'Fine-tuning API not implemented in pass-through mode', type: 'not_implemented' } });
+    res.status(501).json({
+      error: {
+        message: 'Fine-tuning API not implemented in pass-through mode',
+        type: 'not_implemented',
+      },
+    });
   }
 
   private async handleFineTuningCancel(req: Request, res: Response): Promise<void> {
-    res.status(501).json({ error: { message: 'Fine-tuning API not implemented in pass-through mode', type: 'not_implemented' } });
+    res.status(501).json({
+      error: {
+        message: 'Fine-tuning API not implemented in pass-through mode',
+        type: 'not_implemented',
+      },
+    });
   }
 
   private async handleFineTuningEvents(req: Request, res: Response): Promise<void> {
-    res.status(501).json({ error: { message: 'Fine-tuning API not implemented in pass-through mode', type: 'not_implemented' } });
+    res.status(501).json({
+      error: {
+        message: 'Fine-tuning API not implemented in pass-through mode',
+        type: 'not_implemented',
+      },
+    });
   }
 
   // Placeholder handlers for batch operations
   private async handleBatchCreate(req: Request, res: Response): Promise<void> {
-    res.status(501).json({ error: { message: 'Batch API not implemented in pass-through mode', type: 'not_implemented' } });
+    res.status(501).json({
+      error: {
+        message: 'Batch API not implemented in pass-through mode',
+        type: 'not_implemented',
+      },
+    });
   }
 
   private async handleBatchRetrieve(req: Request, res: Response): Promise<void> {
-    res.status(501).json({ error: { message: 'Batch API not implemented in pass-through mode', type: 'not_implemented' } });
+    res.status(501).json({
+      error: {
+        message: 'Batch API not implemented in pass-through mode',
+        type: 'not_implemented',
+      },
+    });
   }
 
   private async handleBatchList(req: Request, res: Response): Promise<void> {
-    res.status(501).json({ error: { message: 'Batch API not implemented in pass-through mode', type: 'not_implemented' } });
+    res.status(501).json({
+      error: {
+        message: 'Batch API not implemented in pass-through mode',
+        type: 'not_implemented',
+      },
+    });
   }
 
   private async handleBatchCancel(req: Request, res: Response): Promise<void> {
-    res.status(501).json({ error: { message: 'Batch API not implemented in pass-through mode', type: 'not_implemented' } });
+    res.status(501).json({
+      error: {
+        message: 'Batch API not implemented in pass-through mode',
+        type: 'not_implemented',
+      },
+    });
   }
 
   private async handleAssistants(req: Request, res: Response): Promise<void> {
-    res.status(501).json({ error: { message: 'Assistants API not implemented in pass-through mode', type: 'not_implemented' } });
+    res.status(501).json({
+      error: {
+        message: 'Assistants API not implemented in pass-through mode',
+        type: 'not_implemented',
+      },
+    });
   }
 
   /**
@@ -1325,15 +1400,18 @@ export class OpenAIRouter extends BaseModule {
           {
             index: 0,
             delta: { role: 'assistant' },
-            finish_reason: undefined
-          }
-        ]
+            finish_reason: undefined,
+          },
+        ],
       };
 
       res.write(`data: ${JSON.stringify(initialResponse)}\n\n`);
 
       // Simulate streaming response (in real implementation, this would stream from the provider)
-      const contentChunks = this.splitIntoChunks('This is a simulated streaming response. In a real implementation, this would stream from the target provider.', 10);
+      const contentChunks = this.splitIntoChunks(
+        'This is a simulated streaming response. In a real implementation, this would stream from the target provider.',
+        10
+      );
 
       let chunkIndex = 0;
       const sendChunks = () => {
@@ -1347,9 +1425,9 @@ export class OpenAIRouter extends BaseModule {
               {
                 index: 0,
                 delta: { content: contentChunks[chunkIndex] },
-                finish_reason: undefined
-              }
-            ]
+                finish_reason: undefined,
+              },
+            ],
           };
 
           res.write(`data: ${JSON.stringify(chunkResponse)}\n\n`);
@@ -1366,9 +1444,9 @@ export class OpenAIRouter extends BaseModule {
               {
                 index: 0,
                 delta: {},
-                finish_reason: 'stop'
-              }
-            ]
+                finish_reason: 'stop',
+              },
+            ],
           };
 
           res.write(`data: ${JSON.stringify(finalResponse)}\n\n`);
@@ -1386,16 +1464,16 @@ export class OpenAIRouter extends BaseModule {
                 index: 0,
                 message: {
                   role: 'assistant',
-                  content: contentChunks.join('')
+                  content: contentChunks.join(''),
                 },
-                finish_reason: 'stop'
-              }
+                finish_reason: 'stop',
+              },
             ],
             usage: {
               prompt_tokens: 0,
               completion_tokens: 0,
-              total_tokens: 0
-            }
+              total_tokens: 0,
+            },
           });
         }
       };
@@ -1418,7 +1496,10 @@ export class OpenAIRouter extends BaseModule {
   /**
    * Validate chat completion request
    */
-  private validateChatCompletionRequest(request: OpenAIChatCompletionRequest): { isValid: boolean; errors: string[] } {
+  private validateChatCompletionRequest(request: OpenAIChatCompletionRequest): {
+    isValid: boolean;
+    errors: string[];
+  } {
     const errors: string[] = [];
 
     // Validate required fields
@@ -1445,28 +1526,42 @@ export class OpenAIRouter extends BaseModule {
     }
 
     // Validate numeric fields
-    if (request.max_tokens !== undefined && (typeof request.max_tokens !== 'number' || request.max_tokens < 1)) {
+    if (
+      request.max_tokens !== undefined &&
+      (typeof request.max_tokens !== 'number' || request.max_tokens < 1)
+    ) {
       errors.push('max_tokens must be a positive number');
     }
 
-    if (request.temperature !== undefined && (typeof request.temperature !== 'number' || request.temperature < 0 || request.temperature > 2)) {
+    if (
+      request.temperature !== undefined &&
+      (typeof request.temperature !== 'number' ||
+        request.temperature < 0 ||
+        request.temperature > 2)
+    ) {
       errors.push('temperature must be a number between 0 and 2');
     }
 
-    if (request.top_p !== undefined && (typeof request.top_p !== 'number' || request.top_p < 0 || request.top_p > 1)) {
+    if (
+      request.top_p !== undefined &&
+      (typeof request.top_p !== 'number' || request.top_p < 0 || request.top_p > 1)
+    ) {
       errors.push('top_p must be a number between 0 and 1');
     }
 
     return {
       isValid: errors.length === 0,
-      errors
+      errors,
     };
   }
 
   /**
    * Validate completion request
    */
-  private validateCompletionRequest(request: OpenAICompletionRequest): { isValid: boolean; errors: string[] } {
+  private validateCompletionRequest(request: OpenAICompletionRequest): {
+    isValid: boolean;
+    errors: string[];
+  } {
     const errors: string[] = [];
 
     // Validate required fields
@@ -1479,21 +1574,32 @@ export class OpenAIRouter extends BaseModule {
     }
 
     // Validate numeric fields
-    if (request.max_tokens !== undefined && (typeof request.max_tokens !== 'number' || request.max_tokens < 1)) {
+    if (
+      request.max_tokens !== undefined &&
+      (typeof request.max_tokens !== 'number' || request.max_tokens < 1)
+    ) {
       errors.push('max_tokens must be a positive number');
     }
 
-    if (request.temperature !== undefined && (typeof request.temperature !== 'number' || request.temperature < 0 || request.temperature > 2)) {
+    if (
+      request.temperature !== undefined &&
+      (typeof request.temperature !== 'number' ||
+        request.temperature < 0 ||
+        request.temperature > 2)
+    ) {
       errors.push('temperature must be a number between 0 and 2');
     }
 
-    if (request.top_p !== undefined && (typeof request.top_p !== 'number' || request.top_p < 0 || request.top_p > 1)) {
+    if (
+      request.top_p !== undefined &&
+      (typeof request.top_p !== 'number' || request.top_p < 0 || request.top_p > 1)
+    ) {
       errors.push('top_p must be a number between 0 and 1');
     }
 
     return {
       isValid: errors.length === 0,
-      errors
+      errors,
     };
   }
 
@@ -1520,16 +1626,18 @@ export class OpenAIRouter extends BaseModule {
    */
   private async handleError(error: Error, context: string): Promise<void> {
     try {
+      // Ensure the error has a proper message property
+      const errorMessage = error.message || String(error) || 'Unknown error';
       const errorContext: ErrorContext = {
-        error: error.message,
+        error: errorMessage,
         source: `openai-router.${context}`,
         severity: 'medium',
         timestamp: Date.now(),
         moduleId: 'openai-router',
         context: {
           stack: error.stack,
-          name: error.name
-        }
+          name: error.name || 'UnknownError',
+        },
       };
 
       await this.errorHandling.handleError(errorContext);
@@ -1544,9 +1652,7 @@ export class OpenAIRouter extends BaseModule {
    */
   public async stop(): Promise<void> {
     try {
-      if (this.passThroughProvider) {
-        await this.passThroughProvider.destroy();
-      }
+      // passThroughProvider was removed - pipeline-only routing
       await this.errorHandling.destroy();
     } catch (error) {
       console.error('Error stopping OpenAI router:', error);

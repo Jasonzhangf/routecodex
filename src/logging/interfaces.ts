@@ -1,19 +1,19 @@
 /**
  * 统一日志系统接口定义
- * 
+ *
  * 定义所有日志组件必须实现的接口契约
  */
 
-import type { 
-  LogLevel, 
-  LogContext, 
-  UnifiedLogEntry, 
-  LoggerConfig, 
-  LogFilter, 
-  LogQueryResult, 
-  LogExportOptions, 
+import type {
+  LogLevel,
+  LogContext,
+  UnifiedLogEntry,
+  LoggerConfig,
+  LogFilter,
+  LogQueryResult,
+  LogExportOptions,
   LogStats,
-  LogAnalysisResult
+  LogAnalysisResult,
 } from './types.js';
 
 /**
@@ -24,72 +24,72 @@ export interface UnifiedLogger {
    * 记录调试日志
    */
   debug(message: string, data?: any): void;
-  
+
   /**
    * 记录信息日志
    */
   info(message: string, data?: any): void;
-  
+
   /**
    * 记录警告日志
    */
   warn(message: string, data?: any): void;
-  
+
   /**
    * 记录错误日志
    */
   error(message: string, error?: Error, data?: any): void;
-  
+
   /**
    * 设置日志上下文
    */
   setContext(context: LogContext): void;
-  
+
   /**
    * 更新日志上下文
    */
   updateContext(updates: Partial<LogContext>): void;
-  
+
   /**
    * 清除日志上下文
    */
   clearContext(): void;
-  
+
   /**
    * 获取当前日志上下文
    */
   getContext(): LogContext;
-  
+
   /**
    * 获取日志历史记录
    */
   getHistory(limit?: number): UnifiedLogEntry[];
-  
+
   /**
    * 查询日志
    */
   queryLogs(filter: LogFilter): Promise<LogQueryResult>;
-  
+
   /**
    * 获取日志统计信息
    */
   getStats(): LogStats;
-  
+
   /**
    * 导出日志
    */
   exportLogs(options: LogExportOptions): Promise<string>;
-  
+
   /**
    * 分析日志
    */
   analyzeLogs(timeRange?: { start: number; end: number }): Promise<LogAnalysisResult>;
-  
+
   /**
    * 刷新日志（写入磁盘）
    */
   flush(): Promise<void>;
-  
+
   /**
    * 清理日志资源
    */
@@ -104,22 +104,22 @@ export interface LogWriter {
    * 写入日志条目
    */
   write(entry: UnifiedLogEntry): Promise<void>;
-  
+
   /**
    * 批量写入日志条目
    */
   writeBatch(entries: UnifiedLogEntry[]): Promise<void>;
-  
+
   /**
    * 刷新写入缓冲区
    */
   flush(): Promise<void>;
-  
+
   /**
    * 关闭写入器
    */
   close(): Promise<void>;
-  
+
   /**
    * 获取写入器状态
    */
@@ -152,17 +152,17 @@ export interface FileLogWriter extends LogWriter {
    * 获取当前日志文件路径
    */
   getCurrentFilePath(): string;
-  
+
   /**
    * 获取所有日志文件列表
    */
   getLogFiles(): Promise<string[]>;
-  
+
   /**
    * 轮转日志文件
    */
   rotate(): Promise<void>;
-  
+
   /**
    * 清理旧日志文件
    */
@@ -177,7 +177,7 @@ export interface ConsoleLogWriter extends LogWriter {
    * 设置控制台输出样式
    */
   setStyle(style: ConsoleLogStyle): void;
-  
+
   /**
    * 获取当前样式配置
    */
@@ -210,12 +210,12 @@ export interface DebugCenterLogWriter extends LogWriter {
    * 设置DebugCenter连接
    */
   setConnection(connection: any): void;
-  
+
   /**
    * 获取连接状态
    */
   getConnectionStatus(): 'connected' | 'disconnected' | 'error';
-  
+
   /**
    * 重新连接DebugCenter
    */
@@ -230,17 +230,17 @@ export interface LogParser {
    * 解析日志文件
    */
   parseFile(filePath: string): Promise<UnifiedLogEntry[]>;
-  
+
   /**
    * 解析日志内容
    */
   parseContent(content: string): Promise<UnifiedLogEntry[]>;
-  
+
   /**
    * 验证日志格式
    */
   validate(entry: any): entry is UnifiedLogEntry;
-  
+
   /**
    * 获取解析器支持的格式
    */
@@ -255,22 +255,22 @@ export interface LogQueryEngine {
    * 查询日志
    */
   query(filter: LogFilter): Promise<LogQueryResult>;
-  
+
   /**
    * 添加日志到索引
    */
   index(logs: UnifiedLogEntry[]): Promise<void>;
-  
+
   /**
    * 从索引中移除日志
    */
   remove(index: string): Promise<void>;
-  
+
   /**
    * 获取索引状态
    */
   getIndexStatus(): IndexStatus;
-  
+
   /**
    * 优化索引
    */
@@ -301,17 +301,17 @@ export interface LogAnalyzer {
    * 分析日志统计信息
    */
   analyzeStats(logs: UnifiedLogEntry[]): LogStats;
-  
+
   /**
    * 分析错误模式
    */
   analyzeErrors(logs: UnifiedLogEntry[]): ErrorAnalysisResult;
-  
+
   /**
    * 分析性能趋势
    */
   analyzePerformance(logs: UnifiedLogEntry[]): PerformanceAnalysisResult;
-  
+
   /**
    * 分析模块行为
    */
@@ -401,27 +401,27 @@ export interface LoggerFactory {
    * 创建Logger实例
    */
   createLogger(config: LoggerConfig): UnifiedLogger;
-  
+
   /**
    * 获取已创建的Logger
    */
   getLogger(moduleId: string): UnifiedLogger | undefined;
-  
+
   /**
    * 获取所有已创建的Logger
    */
   getAllLoggers(): UnifiedLogger[];
-  
+
   /**
    * 移除Logger
    */
   removeLogger(moduleId: string): void;
-  
+
   /**
    * 清理所有Logger
    */
   cleanup(): Promise<void>;
-  
+
   /**
    * 获取工厂状态
    */

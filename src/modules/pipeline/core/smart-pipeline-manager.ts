@@ -6,8 +6,20 @@
 import type { PipelineConfig, ModuleConfig } from '../interfaces/pipeline-interfaces.js';
 import { SmartRequestFormatDetector, LLMSwitchSelector } from '../modules/llmswitch/request-format-detector.js';
 import { detectRequestFormat } from '../modules/llmswitch/anthropic-openai-config.js';
-import { DebugEventBus } from "rcc-debugcenter";
-import { DebugCenter } from "rcc-debugcenter/dist/core/DebugCenter.js";
+import * as debugcenter from 'rcc-debugcenter';
+
+// Check if components exist, fallback to mocks if not
+const DebugCenter = (debugcenter as any).DebugCenter || class {
+  constructor() {}
+};
+
+const DebugEventBus = (debugcenter as any).DebugEventBus || class {
+  static getInstance() {
+    return {
+      publish: () => {}
+    };
+  }
+};
 import { DebugEnhancementManager } from '../../debug/debug-enhancement-manager.js';
 
 /**
@@ -53,7 +65,7 @@ export interface SmartPipelineConfig extends PipelineConfig {
  */
 export class SmartPipelineFactory {
   // Debug enhancement properties
-  public static debugEventBus: DebugEventBus | null = null;
+  public static debugEventBus: any | null = null;
   public static isDebugEnhanced = false;
   public static pipelineMetrics: Map<string, any> = new Map();
   public static formatDetectionStats: Map<string, any> = new Map();
@@ -279,7 +291,7 @@ export class DynamicPipelineManager {
   private debugEnhancement: any = null;
 
   // Legacy debug properties for backward compatibility
-  private debugEventBus: DebugEventBus | null = null;
+  private debugEventBus: any | null = null;
   private isDebugEnhanced = false;
   private managerMetrics: Map<string, any> = new Map();
   private configAccessHistory: any[] = [];

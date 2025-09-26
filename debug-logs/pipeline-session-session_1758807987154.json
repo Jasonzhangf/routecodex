@@ -1,0 +1,36 @@
+{
+  "sessionId": "session_1758807987154",
+  "pipelineId": "unknown",
+  "startTime": 1758807987154,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "provider_manager_initialized",
+      "moduleId": "provider-manager",
+      "position": "middle",
+      "startTime": 1758807987154,
+      "status": "running"
+    },
+    {
+      "operationId": "metric_initialization",
+      "moduleId": "provider-manager",
+      "position": "middle",
+      "startTime": 1758807987154,
+      "status": "running"
+    },
+    {
+      "operationId": "initialization_start",
+      "moduleId": "openai-router",
+      "position": "middle",
+      "startTime": 1758807987154,
+      "status": "running"
+    },
+    {
+      "operationId": "provider_initialized",
+      "moduleId": "pass-through-provider",
+      "position": "middle",
+      "startTime": 1758807987154,
+      "status": "running"
+    }
+  ]
+}

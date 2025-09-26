@@ -5,7 +5,7 @@
  * including all interfaces, enums, and structures required for the debugging infrastructure.
  */
 
-import type { DebugEvent } from "rcc-debugcenter";
+import type { DebugEvent } from 'rcc-debugcenter';
 
 /**
  * Debug system initialization options
@@ -579,7 +579,7 @@ export interface DebugWebSocketEvent {
   /** Event identifier */
   id: string;
   /** Event type */
-  type: "start" | 'log' | 'error' | 'performance' | 'system';
+  type: 'start' | 'log' | 'error' | 'performance' | 'system';
   /** Event data */
   data: any;
   /** Timestamp */
@@ -868,7 +868,7 @@ export enum DebugSystemEvent {
   /** Module state captured */
   MODULE_STATE_CAPTURED = 'module_state_captured',
   /** Method hook executed */
-  METHOD_HOOK_EXECUTED = 'method_hook_executed'
+  METHOD_HOOK_EXECUTED = 'method_hook_executed',
 }
 
 /**

@@ -4,7 +4,11 @@
  * Automatically creates unimplemented modules for missing providers
  */
 
-import { BaseProvider, type ProviderResponse, type ProviderHealth } from '../providers/base-provider.js';
+import {
+  BaseProvider,
+  type ProviderResponse,
+  type ProviderHealth,
+} from '../providers/base-provider.js';
 import { UnimplementedModuleFactory } from '../modules/unimplemented-module-factory.js';
 import { type UnimplementedModuleConfig } from '../modules/unimplemented-module.js';
 import {
@@ -13,7 +17,7 @@ import {
   type OpenAICompletionRequest,
   type OpenAICompletionResponse,
   type StreamOptions,
-  RouteCodexError
+  RouteCodexError,
 } from '../server/types.js';
 
 /**
@@ -36,12 +40,12 @@ export class UnimplementedProvider extends BaseProvider {
 
   constructor(config: UnimplementedProviderConfig) {
     super(config);
-    
+
     this.config = {
       unimplementedMessage: 'This provider functionality is not implemented',
       logUnimplementedCalls: true,
       trackCallerInfo: true,
-      ...config
+      ...config,
     };
 
     this.unimplementedFactory = UnimplementedModuleFactory.getInstance();
@@ -61,11 +65,10 @@ export class UnimplementedProvider extends BaseProvider {
         moduleName: `${this.config.type}-provider`,
         description: `Unimplemented provider: ${this.config.type}`,
         customMessage: this.config.unimplementedMessage,
-        logLevel: this.config.logUnimplementedCalls ? 'info' : 'error'
+        logLevel: this.config.logUnimplementedCalls ? 'info' : 'error',
       };
 
       this.unimplementedModule = await this.unimplementedFactory.createModule(moduleConfig);
-
     } catch (error) {
       throw new RouteCodexError(
         `Failed to initialize unimplemented provider: ${error instanceof Error ? error.message : String(error)}`,
@@ -82,10 +85,12 @@ export class UnimplementedProvider extends BaseProvider {
     request: OpenAIChatCompletionRequest,
     options?: { timeout?: number; retryAttempts?: number }
   ): Promise<ProviderResponse> {
-    const callerInfo = this.config.trackCallerInfo ? {
-      callerId: `chat-completion-${request.model}`,
-      context: { model: request.model, messages: request.messages?.length }
-    } : undefined;
+    const callerInfo = this.config.trackCallerInfo
+      ? {
+          callerId: `chat-completion-${request.model}`,
+          context: { model: request.model, messages: request.messages?.length },
+        }
+      : undefined;
 
     const unimplementedResponse = await this.unimplementedModule.handleUnimplementedCall(
       'processChatCompletion',
@@ -102,13 +107,20 @@ export class UnimplementedProvider extends BaseProvider {
     request: OpenAICompletionRequest,
     options?: { timeout?: number; retryAttempts?: number }
   ): Promise<ProviderResponse> {
-    const callerInfo = this.config.trackCallerInfo ? {
-      callerId: `completion-${request.model}`,
-      context: {
-        model: request.model,
-        prompt: typeof request.prompt === 'string' ? request.prompt.substring(0, 100) : Array.isArray(request.prompt) ? request.prompt.join(' ').substring(0, 100) : String(request.prompt).substring(0, 100)
-      }
-    } : undefined;
+    const callerInfo = this.config.trackCallerInfo
+      ? {
+          callerId: `completion-${request.model}`,
+          context: {
+            model: request.model,
+            prompt:
+              typeof request.prompt === 'string'
+                ? request.prompt.substring(0, 100)
+                : Array.isArray(request.prompt)
+                  ? request.prompt.join(' ').substring(0, 100)
+                  : String(request.prompt).substring(0, 100),
+          },
+        }
+      : undefined;
 
     const unimplementedResponse = await this.unimplementedModule.handleUnimplementedCall(
       'processCompletion',
@@ -125,10 +137,12 @@ export class UnimplementedProvider extends BaseProvider {
     request: OpenAIChatCompletionRequest,
     options: StreamOptions
   ): Promise<ProviderResponse> {
-    const callerInfo = this.config.trackCallerInfo ? {
-      callerId: `streaming-${request.model}`,
-      context: { model: request.model, streaming: true }
-    } : undefined;
+    const callerInfo = this.config.trackCallerInfo
+      ? {
+          callerId: `streaming-${request.model}`,
+          context: { model: request.model, streaming: true },
+        }
+      : undefined;
 
     const unimplementedResponse = await this.unimplementedModule.handleUnimplementedCall(
       'processStreamingChatCompletion',
@@ -142,13 +156,15 @@ export class UnimplementedProvider extends BaseProvider {
    * Get available models - returns empty list for unimplemented provider
    */
   public async getModels(): Promise<any[]> {
-    const callerInfo = this.config.trackCallerInfo ? {
-      callerId: 'get-models',
-      context: { action: 'getModels' }
-    } : undefined;
+    const callerInfo = this.config.trackCallerInfo
+      ? {
+          callerId: 'get-models',
+          context: { action: 'getModels' },
+        }
+      : undefined;
 
     await this.unimplementedModule.handleUnimplementedCall('getModels', callerInfo);
-    
+
     // Return empty models list
     return [];
   }
@@ -159,11 +175,13 @@ export class UnimplementedProvider extends BaseProvider {
   public isModelSupported(modelId: string): boolean {
     // Log the check but don't create full response for performance
     if (this.config.logUnimplementedCalls) {
-      this.unimplementedModule.handleUnimplementedCall('isModelSupported', {
-        callerId: `model-check-${modelId}`
-      }).catch(() => {}); // Silently handle logging errors
+      this.unimplementedModule
+        .handleUnimplementedCall('isModelSupported', {
+          callerId: `model-check-${modelId}`,
+        })
+        .catch(() => {}); // Silently handle logging errors
     }
-    
+
     return false;
   }
 
@@ -173,11 +191,13 @@ export class UnimplementedProvider extends BaseProvider {
   public getModelConfig(modelId: string): any {
     // Log the check but don't create full response for performance
     if (this.config.logUnimplementedCalls) {
-      this.unimplementedModule.handleUnimplementedCall('getModelConfig', {
-        callerId: `config-check-${modelId}`
-      }).catch(() => {}); // Silently handle logging errors
+      this.unimplementedModule
+        .handleUnimplementedCall('getModelConfig', {
+          callerId: `config-check-${modelId}`,
+        })
+        .catch(() => {}); // Silently handle logging errors
     }
-    
+
     return undefined;
   }
 
@@ -189,7 +209,7 @@ export class UnimplementedProvider extends BaseProvider {
       status: 'unhealthy',
       error: 'Provider is unimplemented',
       consecutiveFailures: 999,
-      lastCheck: new Date().toISOString()
+      lastCheck: new Date().toISOString(),
     };
   }
 
@@ -199,13 +219,13 @@ export class UnimplementedProvider extends BaseProvider {
   public getStats(): any {
     const baseStats = super.getStats();
     const unimplementedStats = this.unimplementedModule?.getStats() || {};
-    
+
     return {
       ...baseStats,
       unimplementedCalls: unimplementedStats.totalCalls || 0,
       lastUnimplementedCall: unimplementedStats.lastCallTime,
       firstUnimplementedCall: unimplementedStats.firstCallTime,
-      callerHistory: unimplementedStats.callerInfo || []
+      callerHistory: unimplementedStats.callerInfo || [],
     };
   }
 
@@ -222,7 +242,7 @@ export class UnimplementedProvider extends BaseProvider {
         'X-Module-Name': unimplementedResponse.moduleName,
         'X-Request-Id': unimplementedResponse.requestId,
         'X-Timestamp': unimplementedResponse.timestamp,
-        'X-Unimplemented': 'true'
+        'X-Unimplemented': 'true',
       },
       duration: 0,
       data: {
@@ -230,8 +250,8 @@ export class UnimplementedProvider extends BaseProvider {
         moduleName: unimplementedResponse.moduleName,
         requestId: unimplementedResponse.requestId,
         timestamp: unimplementedResponse.timestamp,
-        message: unimplementedResponse.error
-      }
+        message: unimplementedResponse.error,
+      },
     };
   }
 

@@ -11,6 +11,7 @@ import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
 import { DebugEventBus } from 'rcc-debugcenter';
 import { ErrorHandlingUtils } from '../utils/error-handling-utils.js';
 import { ModuleConfigReader } from '../utils/module-config-reader.js';
+import { isSimpleLogEnabled, getSimpleLogConfig } from '../logging/simple-log-integration.js';
 import { OpenAIRouter } from './openai-router.js';
 import { RequestHandler } from '../core/request-handler.js';
 import { ProviderManager } from '../core/provider-manager.js';
@@ -20,7 +21,7 @@ import {
   type HealthStatus,
   type ProviderHealth,
   type IHttpServer,
-  type ServerModuleInfo
+  type ServerModuleInfo,
 } from './types.js';
 import fs from 'fs';
 import path from 'path';
@@ -88,7 +89,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       name: 'HttpServer',
       version: '0.0.1',
       description: 'Express.js HTTP server for RouteCodex',
-      type: 'server'
+      type: 'server',
     };
 
     super(moduleInfo);
@@ -110,15 +111,12 @@ export class HttpServer extends BaseModule implements IHttpServer {
       timestamp: new Date().toISOString(),
       uptime: 0,
       memory: process.memoryUsage(),
-      providers: {}
+      providers: {},
     };
 
     // Initialize components with default configuration - will be properly initialized in initialize() method
     this.providerManager = new ProviderManager(this.getDefaultServerConfig());
-    this.requestHandler = new RequestHandler(
-      this.providerManager,
-      this.getDefaultServerConfig()
-    );
+    this.requestHandler = new RequestHandler(this.providerManager, this.getDefaultServerConfig());
     this.openaiRouter = new OpenAIRouter(
       this.requestHandler,
       this.providerManager,
@@ -133,29 +131,47 @@ export class HttpServer extends BaseModule implements IHttpServer {
    * Get default server configuration for initialization
    */
   private getDefaultServerConfig(): ServerConfig {
+    // 检查简化日志配置
+    const simpleLogConfig = getSimpleLogConfig();
+    let loggingConfig = {
+      level: 'info' as any,
+      enableConsole: true,
+      enableFile: false,
+      categories: ['server', 'api', 'request', 'config', 'error', 'message'],
+    };
+
+    if (simpleLogConfig && simpleLogConfig.enabled) {
+      console.log('📋 检测到简化日志配置，正在应用到服务器...');
+      loggingConfig = {
+        level: simpleLogConfig.logLevel as any,
+        enableConsole: simpleLogConfig.output === 'console' || simpleLogConfig.output === 'both',
+        enableFile: simpleLogConfig.output === 'file' || simpleLogConfig.output === 'both',
+        categories: ['server', 'api', 'request', 'config', 'error', 'message'],
+      };
+
+      if (loggingConfig.enableFile) {
+        console.log(`📁 日志将保存到: ${simpleLogConfig.logDirectory}`);
+      }
+    }
+
     return {
       server: {
         port: 5506,
         host: 'localhost',
         cors: {
           origin: '*',
-          credentials: true
+          credentials: true,
         },
         timeout: 30000,
-        bodyLimit: '10mb'
+        bodyLimit: '10mb',
       },
-      logging: {
-        level: 'info',
-        enableConsole: true,
-        enableFile: false,
-        categories: ['server', 'api', 'request', 'config', 'error', 'message']
-      },
+      logging: loggingConfig,
       providers: {},
       routing: {
         strategy: 'round-robin',
         timeout: 30000,
-        retryAttempts: 3
-      }
+        retryAttempts: 3,
+      },
     };
   }
 
@@ -163,61 +179,45 @@ export class HttpServer extends BaseModule implements IHttpServer {
    * Get server configuration from modules config
    */
   private async getServerConfig(): Promise<ServerConfig> {
-    // Prefer merged configuration injected via initializeWithMergedConfig
-    if (this.config && (this.config as any).port) {
-      const cfg: any = this.config as any;
-      const logging = cfg.logging || {};
-      return {
-        server: {
-          port: cfg.port || 5506,
-          host: cfg.host || 'localhost',
-          cors: cfg.cors || { origin: '*', credentials: true },
-          timeout: cfg.timeout || 30000,
-          bodyLimit: cfg.bodyLimit || '10mb'
-        },
-        logging: {
-          level: logging.level || 'info',
-          enableConsole: logging.enableConsole !== false,
-          enableFile: logging.enableFile === true,
-          filePath: logging.filePath,
-          categories: logging.categories || ['server', 'api', 'request', 'config', 'error', 'message']
-        },
-        providers: {},
-        routing: {
-          strategy: 'round-robin',
-          timeout: 30000,
-          retryAttempts: 3
-        }
-      };
+    // Require merged configuration injected via initializeWithMergedConfig
+    if (!this.config) {
+      throw new Error('Server configuration missing. Ensure merged-config is initialized.');
     }
-    const httpServerConfig = this.moduleConfigReader.getModuleConfigValue<any>('httpserver');
-    if (!httpServerConfig) {
-      return this.getDefaultServerConfig();
+    const cfg: any = this.config as any;
+    if (typeof cfg.port !== 'number' || cfg.port <= 0) {
+      throw new Error(
+        'HTTP server port is missing. Please set httpserver.port in your user config (~/.routecodex/config.json).'
+      );
     }
-
-    const loggingConfig = httpServerConfig.logging || {};
-
+    const logging = cfg.logging || {};
     return {
       server: {
-        port: httpServerConfig.port || 5506,
-        host: httpServerConfig.host || 'localhost',
-        cors: httpServerConfig.cors || { origin: '*', credentials: true },
-        timeout: httpServerConfig.timeout || 30000,
-        bodyLimit: httpServerConfig.bodyLimit || '10mb'
+        port: cfg.port,
+        host: cfg.host || 'localhost',
+        cors: cfg.cors || { origin: '*', credentials: true },
+        timeout: cfg.timeout || 30000,
+        bodyLimit: cfg.bodyLimit || '10mb',
       },
       logging: {
-        level: loggingConfig.level || 'info',
-        enableConsole: loggingConfig.enableConsole !== false,
-        enableFile: loggingConfig.enableFile === true,
-        filePath: loggingConfig.filePath,
-        categories: loggingConfig.categories || ['server', 'api', 'request', 'config', 'error', 'message']
+        level: logging.level || 'info',
+        enableConsole: logging.enableConsole !== false,
+        enableFile: logging.enableFile === true,
+        filePath: logging.filePath,
+        categories: logging.categories || [
+          'server',
+          'api',
+          'request',
+          'config',
+          'error',
+          'message',
+        ],
       },
       providers: {},
       routing: {
         strategy: 'round-robin',
         timeout: 30000,
-        retryAttempts: 3
-      }
+        retryAttempts: 3,
+      },
     };
   }
 
@@ -237,7 +237,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       if (debugCenterConfig?.enableFile && debugCenterConfig.filePath) {
         DebugFileLogger.initialize({
           filePath: debugCenterConfig.filePath,
-          enabled: true
+          enabled: true,
         });
       }
 
@@ -270,7 +270,10 @@ export class HttpServer extends BaseModule implements IHttpServer {
       this.providerManager = new ProviderManager(serverConfig);
       this.requestHandler = new RequestHandler(this.providerManager, serverConfig);
       // Load router config from modules.json if available
-      const openaiRouterModule = this.moduleConfigReader.getModuleConfigValue<any>('openairouter', {});
+      const openaiRouterModule = this.moduleConfigReader.getModuleConfigValue<any>(
+        'openairouter',
+        {}
+      );
       this.openaiRouter = new OpenAIRouter(
         this.requestHandler,
         this.providerManager,
@@ -351,7 +354,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       // Register error handlers for HTTP server
       this.errorUtils.registerHandler(
         'server_start_error',
-        async (context) => {
+        async context => {
           console.error(`Server start error: ${context.error}`);
           // Could implement automatic port change or retry logic
         },
@@ -361,7 +364,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
 
       this.errorUtils.registerHandler(
         'initialization_error',
-        async (context) => {
+        async context => {
           console.error(`Critical initialization error: ${context.error}`);
           // Could implement component restart logic
         },
@@ -381,10 +384,9 @@ export class HttpServer extends BaseModule implements IHttpServer {
         data: {
           configPath: './config/modules.json',
           port: (await this.getServerConfig()).server.port,
-          host: (await this.getServerConfig()).server.host
-        }
+          host: (await this.getServerConfig()).server.host,
+        },
       });
-
     } catch (error) {
       await this.handleError(error as Error, 'initialization');
       throw error;
@@ -457,7 +459,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
     if (!this.serverMetrics.has(operation)) {
       this.serverMetrics.set(operation, {
         values: [],
-        lastUpdated: Date.now()
+        lastUpdated: Date.now(),
       });
     }
 
@@ -499,7 +501,9 @@ export class HttpServer extends BaseModule implements IHttpServer {
    * Publish debug event
    */
   private publishDebugEvent(type: string, data: any): void {
-    if (!this.isDebugEnhanced) {return;}
+    if (!this.isDebugEnhanced) {
+      return;
+    }
 
     try {
       this.debugEventBus.publish({
@@ -512,8 +516,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
         data: {
           ...data,
           serverId: (this as any).moduleInfo.id,
-          source: 'http-server'
-        }
+          source: 'http-server',
+        },
       });
     } catch (error) {
       // Silent fail if debug event bus is not available
@@ -530,7 +534,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       isInitialized: this._isInitialized,
       isRunning: this._isRunning,
       type: moduleInfo.type,
-      isEnhanced: this.isDebugEnhanced
+      isEnhanced: this.isDebugEnhanced,
     };
 
     if (!this.isDebugEnhanced) {
@@ -543,7 +547,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       serverMetrics: this.getServerMetrics(),
       healthStatus: this.healthStatus,
       requestHistory: [...this.requestHistory.slice(-10)], // Last 10 requests
-      errorHistory: [...this.errorHistory.slice(-10)] // Last 10 errors
+      errorHistory: [...this.errorHistory.slice(-10)], // Last 10 errors
     };
   }
 
@@ -562,7 +566,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       uptime: Date.now() - this.startupTime,
       hasPipelineManager: !!this.pipelineManager,
       hasRoutePools: !!this.routePools,
-      serverConfig: this.config?.server || null
+      serverConfig: this.config?.server || null,
     };
   }
 
@@ -576,7 +580,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       metrics[operation] = {
         count: metric.values.length,
         lastUpdated: metric.lastUpdated,
-        recentValues: metric.values.slice(-5) // Last 5 values
+        recentValues: metric.values.slice(-5), // Last 5 values
       };
     }
 
@@ -596,31 +600,29 @@ export class HttpServer extends BaseModule implements IHttpServer {
     const config = await this.getServerConfig();
 
     return new Promise((resolve, reject) => {
-      this.server = this.app.listen(
-        config.server.port,
-        config.server.host,
-        () => {
-          this._isRunning = true;
-          this.startupTime = Date.now();
+      this.server = this.app.listen(config.server.port, config.server.host, () => {
+        this._isRunning = true;
+        this.startupTime = Date.now();
 
-          this.debugEventBus.publish({
-            sessionId: `p${config.server.port}_http_server_started_${Date.now()}`,
-            moduleId: 'http-server',
-            operationId: 'http_server_started',
-            timestamp: Date.now(),
-            type: 'start',
-            position: 'middle',
-            data: {
-              port: config.server.port,
-              host: config.server.host,
-              uptime: this.getUptime()
-            }
-          });
+        this.debugEventBus.publish({
+          sessionId: `p${config.server.port}_http_server_started_${Date.now()}`,
+          moduleId: 'http-server',
+          operationId: 'http_server_started',
+          timestamp: Date.now(),
+          type: 'start',
+          position: 'middle',
+          data: {
+            port: config.server.port,
+            host: config.server.host,
+            uptime: this.getUptime(),
+          },
+        });
 
-          console.log(`🚀 RouteCodex HTTP Server started on http://${config.server.host}:${config.server.port}`);
-          resolve();
-        }
-      );
+        console.log(
+          `🚀 RouteCodex HTTP Server started on http://${config.server.host}:${config.server.port}`
+        );
+        resolve();
+      });
 
       this.server.on('error', async (error: any) => {
         await this.handleError(error, 'server_start');
@@ -635,7 +637,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
   public async stop(): Promise<void> {
     try {
       if (this.server) {
-        return new Promise((resolve) => {
+        return new Promise(resolve => {
           this.server.close(async () => {
             this._isRunning = false;
 
@@ -654,8 +656,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
               type: 'end',
               position: 'middle',
               data: {
-                uptime: this.getUptime()
-              }
+                uptime: this.getUptime(),
+              },
             });
 
             console.log('🛑 RouteCodex HTTP Server stopped');
@@ -680,7 +682,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       timestamp: new Date().toISOString(),
       uptime: this.getUptime(),
       memory: process.memoryUsage(),
-      providers: this.providerManager.getAllProvidersHealth()
+      providers: this.providerManager.getAllProvidersHealth(),
     };
   }
 
@@ -695,7 +697,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       description: 'Express.js HTTP server for RouteCodex',
       type: 'server',
       capabilities: ['http-server', 'openai-api', 'health-checks', 'metrics'],
-      dependencies: ['config-manager', 'request-handler', 'provider-manager', 'openai-router']
+      dependencies: ['config-manager', 'request-handler', 'provider-manager', 'openai-router'],
     };
   }
 
@@ -706,25 +708,29 @@ export class HttpServer extends BaseModule implements IHttpServer {
     const config = await this.getServerConfig();
 
     // Security middleware
-    this.app.use(helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
-          scriptSrc: ["'self'"],
-          imgSrc: ["'self'", "data:", "https:"],
+    this.app.use(
+      helmet({
+        contentSecurityPolicy: {
+          directives: {
+            defaultSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            scriptSrc: ["'self'"],
+            imgSrc: ["'self'", 'data:', 'https:'],
+          },
         },
-      },
-    }));
+      })
+    );
 
     // CORS middleware
     if (config.server.cors) {
       this.app.use(cors(config.server.cors));
     } else {
-      this.app.use(cors({
-        origin: '*',
-        credentials: true
-      }));
+      this.app.use(
+        cors({
+          origin: '*',
+          credentials: true,
+        })
+      );
     }
 
     // Body parsing middleware
@@ -751,8 +757,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
             status: res.statusCode,
             duration,
             userAgent: req.get('user-agent'),
-            ip: req.ip
-          }
+            ip: req.ip,
+          },
         });
       });
 
@@ -796,8 +802,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
         error: {
           message: 'Anthropic API endpoints not yet implemented',
           type: 'not_implemented_error',
-          code: 'anthropic_not_implemented'
-        }
+          code: 'anthropic_not_implemented',
+        },
       });
     });
 
@@ -813,10 +819,12 @@ export class HttpServer extends BaseModule implements IHttpServer {
         const merged = this.mergedConfig || null;
         res.status(200).json({
           mergedConfig: merged,
-          note: 'This is the in-memory merged configuration for this server instance.'
+          note: 'This is the in-memory merged configuration for this server instance.',
         });
       } catch (err) {
-        res.status(500).json({ error: { message: err instanceof Error ? err.message : 'Failed to read merged config' } });
+        res.status(500).json({
+          error: { message: err instanceof Error ? err.message : 'Failed to read merged config' },
+        });
       }
     });
 
@@ -839,8 +847,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
           status: '/status',
           openai: '/v1/openai/*',
           anthropic: '/v1/anthropic/*',
-          config: '/config'
-        }
+          config: '/config',
+        },
       });
     });
 
@@ -850,8 +858,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
         error: {
           message: `Route ${req.method} ${req.originalUrl} not found`,
           type: 'not_found_error',
-          code: 'not_found'
-        }
+          code: 'not_found',
+        },
       });
     });
   }
@@ -865,10 +873,10 @@ export class HttpServer extends BaseModule implements IHttpServer {
       if (error?.type === 'entity.parse.failed') {
         res.status(400).json({
           error: {
-            message: `Invalid JSON body: ${  error?.message || 'parse failed'}`,
+            message: `Invalid JSON body: ${error?.message || 'parse failed'}`,
             type: 'bad_request',
-            code: 'invalid_json'
-          }
+            code: 'invalid_json',
+          },
         });
         return;
       }
@@ -883,8 +891,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
           message,
           type: error.type || 'internal_error',
           code: error.code || 'internal_error',
-          ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
-        }
+          ...(process.env.NODE_ENV === 'development' && { stack: error.stack }),
+        },
       });
     });
   }
@@ -909,7 +917,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
     process.on('SIGINT', () => shutdown('SIGINT'));
 
     // Handle uncaught exceptions
-    process.on('uncaughtException', async (error) => {
+    process.on('uncaughtException', async error => {
       console.error('Uncaught Exception:', error);
       await this.handleError(error, 'uncaught_exception');
       process.exit(1);
@@ -918,7 +926,10 @@ export class HttpServer extends BaseModule implements IHttpServer {
     // Handle unhandled promise rejections
     process.on('unhandledRejection', async (reason, promise) => {
       console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-      await this.handleError(reason instanceof Error ? reason : new Error(String(reason)), 'unhandled_rejection');
+      await this.handleError(
+        reason instanceof Error ? reason : new Error(String(reason)),
+        'unhandled_rejection'
+      );
       process.exit(1);
     });
   }
@@ -935,7 +946,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       timestamp: new Date().toISOString(),
       uptime: status.uptime,
       memory: status.memory,
-      providers: status.providers
+      providers: status.providers,
     };
 
     const httpStatus = status.status === 'healthy' ? 200 : 503;
@@ -946,7 +957,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       uptime: status.uptime,
       memory: status.memory,
       version: this.getModuleInfo().version,
-      providers: status.providers
+      providers: status.providers,
     });
   }
 
@@ -963,8 +974,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
       checks: {
         initialized: this._isInitialized,
         running: this._isRunning,
-        providers: this.providerManager.getAllProvidersHealth()
-      }
+        providers: this.providerManager.getAllProvidersHealth(),
+      },
     });
   }
 
@@ -977,7 +988,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
     res.status(isAlive ? 200 : 503).json({
       status: isAlive ? 'alive' : 'not_alive',
       timestamp: new Date().toISOString(),
-      uptime: this.getUptime()
+      uptime: this.getUptime(),
     });
   }
 
@@ -992,7 +1003,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
         memory: process.memoryUsage(),
         cpu: process.cpuUsage(),
         version: this.getModuleInfo().version,
-        node_version: process.version
+        node_version: process.version,
       },
       requests: {
         // Add request metrics here if needed
@@ -1000,8 +1011,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
       providers: this.providerManager.getMetrics(),
       config: {
         provider_count: Object.keys(config.providers).length,
-        enabled_providers: Object.values(config.providers).filter((p: any) => p.enabled).length
-      }
+        enabled_providers: Object.values(config.providers).filter((p: any) => p.enabled).length,
+      },
     };
 
     res.json(metrics);
@@ -1029,10 +1040,10 @@ export class HttpServer extends BaseModule implements IHttpServer {
         acc[key] = {
           type: config.providers[key].type,
           enabled: config.providers[key].enabled,
-          models: Object.keys(config.providers[key].models || {})
+          models: Object.keys(config.providers[key].models || {}),
         };
         return acc;
-      }, {})
+      }, {}),
     };
 
     res.json(sanitizedConfig);
@@ -1047,8 +1058,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
         error: {
           message: 'Debug endpoint only available in development mode',
           type: 'forbidden_error',
-          code: 'debug_forbidden'
-        }
+          code: 'debug_forbidden',
+        },
       });
       return;
     }
@@ -1060,20 +1071,20 @@ export class HttpServer extends BaseModule implements IHttpServer {
           id: 'http-server',
           name: 'HTTP Server',
           version: '1.0.0',
-          status: this.getStatus()
+          status: this.getStatus(),
         },
         requestHandler: this.requestHandler.getModuleInfo(),
         providerManager: this.providerManager.getInfo(),
-        openaiRouter: this.openaiRouter.getModuleInfo()
+        openaiRouter: this.openaiRouter.getModuleInfo(),
       },
       environment: {
         node_version: process.version,
         platform: process.platform,
         arch: process.arch,
         memory_usage: process.memoryUsage(),
-        uptime: process.uptime()
+        uptime: process.uptime(),
       },
-      configuration: this.getServerConfig()
+      configuration: this.getServerConfig(),
     };
 
     res.json(debugInfo);
@@ -1091,14 +1102,14 @@ export class HttpServer extends BaseModule implements IHttpServer {
       res.json({
         message: 'Test error processed successfully',
         error: testError.message,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
     } catch (error) {
       res.status(500).json({
         error: {
           message: 'Failed to process test error',
-          type: 'test_error_failed'
-        }
+          type: 'test_error_failed',
+        },
       });
     }
   }
@@ -1123,8 +1134,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
           uptime: this.getUptime(),
           memory: process.memoryUsage(),
           isRunning: this._isRunning,
-          isInitialized: this._isInitialized
-        }
+          isInitialized: this._isInitialized,
+        },
       });
     } catch (handlerError) {
       console.error('Failed to handle error:', handlerError);
@@ -1136,13 +1147,25 @@ export class HttpServer extends BaseModule implements IHttpServer {
    * Get error severity based on context
    */
   private getErrorSeverity(context: string): 'low' | 'medium' | 'high' | 'critical' {
-    const criticalContexts = ['initialization', 'server_start', 'server_stop', 'uncaught_exception', 'unhandled_rejection'];
+    const criticalContexts = [
+      'initialization',
+      'server_start',
+      'server_stop',
+      'uncaught_exception',
+      'unhandled_rejection',
+    ];
     const highContexts = ['configuration', 'provider_health', 'memory'];
     const mediumContexts = ['request_handler', 'middleware', 'route'];
 
-    if (criticalContexts.some(c => context.includes(c))) {return 'critical';}
-    if (highContexts.some(c => context.includes(c))) {return 'high';}
-    if (mediumContexts.some(c => context.includes(c))) {return 'medium';}
+    if (criticalContexts.some(c => context.includes(c))) {
+      return 'critical';
+    }
+    if (highContexts.some(c => context.includes(c))) {
+      return 'high';
+    }
+    if (mediumContexts.some(c => context.includes(c))) {
+      return 'medium';
+    }
     return 'low';
   }
 
@@ -1151,21 +1174,23 @@ export class HttpServer extends BaseModule implements IHttpServer {
    */
   private getErrorCategory(context: string): string {
     const categories: Record<string, string> = {
-      'initialization': 'system',
-      'server_start': 'server',
-      'server_stop': 'server',
-      'request_handler': 'request',
-      'middleware': 'server',
-      'route': 'request',
-      'configuration': 'configuration',
-      'provider_health': 'provider',
-      'memory': 'system',
-      'uncaught_exception': 'system',
-      'unhandled_rejection': 'system'
+      initialization: 'system',
+      server_start: 'server',
+      server_stop: 'server',
+      request_handler: 'request',
+      middleware: 'server',
+      route: 'request',
+      configuration: 'configuration',
+      provider_health: 'provider',
+      memory: 'system',
+      uncaught_exception: 'system',
+      unhandled_rejection: 'system',
     };
 
     for (const [key, category] of Object.entries(categories)) {
-      if (context.includes(key)) {return category;}
+      if (context.includes(key)) {
+        return category;
+      }
     }
     return 'general';
   }

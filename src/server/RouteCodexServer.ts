@@ -64,7 +64,7 @@ export class RouteCodexServer extends BaseModule {
       name: 'RouteCodexServer',
       version: '0.0.1',
       description: 'Multi-provider OpenAI proxy server',
-      type: 'server'
+      type: 'server',
     };
 
     super(moduleInfo);
@@ -109,9 +109,8 @@ export class RouteCodexServer extends BaseModule {
       // Log initialization
       this.logEvent('server', 'initialized', {
         port: this.config.server.port,
-        host: this.config.server.host
+        host: this.config.server.host,
       });
-
     } catch (error) {
       await this.handleError(error as Error, 'initialization');
       throw error;
@@ -127,18 +126,14 @@ export class RouteCodexServer extends BaseModule {
     }
 
     return new Promise((resolve, reject) => {
-      this.server = this.app.listen(
-        this.config.server.port,
-        this.config.server.host,
-        () => {
-          this._isRunning = true;
-          this.logEvent('server', 'started', {
-            port: this.config.server.port,
-            host: this.config.server.host
-          });
-          resolve();
-        }
-      );
+      this.server = this.app.listen(this.config.server.port, this.config.server.host, () => {
+        this._isRunning = true;
+        this.logEvent('server', 'started', {
+          port: this.config.server.port,
+          host: this.config.server.host,
+        });
+        resolve();
+      });
 
       this.server.on('error', async (error: any) => {
         await this.handleError(error, 'server_start');
@@ -152,7 +147,7 @@ export class RouteCodexServer extends BaseModule {
    */
   public async stop(): Promise<void> {
     if (this.server) {
-      return new Promise((resolve) => {
+      return new Promise(resolve => {
         this.server.close(async () => {
           this._isRunning = false;
           this.logEvent('server', 'stopped', {});
@@ -189,7 +184,7 @@ export class RouteCodexServer extends BaseModule {
       port: this.config.server.port,
       host: this.config.server.host,
       uptime: process.uptime(),
-      memory: process.memoryUsage()
+      memory: process.memoryUsage(),
     };
   }
 
@@ -223,7 +218,14 @@ export class RouteCodexServer extends BaseModule {
       }
 
       // Create category subdirectories
-      const categories = this.config.logging.categories || ['server', 'api', 'request', 'config', 'error', 'message'];
+      const categories = this.config.logging.categories || [
+        'server',
+        'api',
+        'request',
+        'config',
+        'error',
+        'message',
+      ];
       const categoryPath = this.config.logging.categoryPath || logDir;
 
       categories.forEach(category => {
@@ -236,7 +238,7 @@ export class RouteCodexServer extends BaseModule {
         // Create category-specific log file stream
         const categoryLogPath = path.join(categoryDir, `${category}.log`);
         const categoryStream = fs.createWriteStream(categoryLogPath, { flags: 'a' });
-        categoryStream.on('error', (error) => {
+        categoryStream.on('error', error => {
           console.error(`Category log file stream error for ${category}:`, error);
         });
         this.categoryLogStreams.set(category, categoryStream);
@@ -244,7 +246,7 @@ export class RouteCodexServer extends BaseModule {
 
       // Create main log file write stream
       this.logFileStream = fs.createWriteStream(logPath, { flags: 'a' });
-      this.logFileStream.on('error', (error) => {
+      this.logFileStream.on('error', error => {
         console.error('Main log file stream error:', error);
       });
 
@@ -279,20 +281,19 @@ export class RouteCodexServer extends BaseModule {
 
         this.logEvent('config', 'modules_loaded', {
           modules: Object.keys(moduleConfig.modules || {}),
-          configPath: moduleConfigPath
+          configPath: moduleConfigPath,
         });
-
       } catch (error) {
         console.error('Failed to load module configurations:', error);
         this.logEvent('config', 'modules_load_failed', {
           error: error instanceof Error ? error.message : String(error),
-          configPath: moduleConfigPath
+          configPath: moduleConfigPath,
         });
       }
     } else {
       console.log('Module configuration file not found, using defaults');
       this.logEvent('config', 'modules_not_found', {
-        configPath: moduleConfigPath
+        configPath: moduleConfigPath,
       });
     }
   }
@@ -318,12 +319,16 @@ export class RouteCodexServer extends BaseModule {
         const category = event.data?.category || 'general';
         const action = event.data?.action || 'unknown';
 
-        const logMessage = `[${timestamp}] [DEBUG] ${event.operationId}: ${JSON.stringify({
-          category,
-          action,
-          moduleId: event.moduleId,
-          data: event.data
-        }, null, 2)}\n`;
+        const logMessage = `[${timestamp}] [DEBUG] ${event.operationId}: ${JSON.stringify(
+          {
+            category,
+            action,
+            moduleId: event.moduleId,
+            data: event.data,
+          },
+          null,
+          2
+        )}\n`;
 
         // Log to console
         console.log(`[DEBUG] ${event.operationId}:`, {
@@ -331,7 +336,7 @@ export class RouteCodexServer extends BaseModule {
           action,
           timestamp,
           moduleId: event.moduleId,
-          data: event.data
+          data: event.data,
         });
 
         // Log to main file
@@ -359,15 +364,19 @@ export class RouteCodexServer extends BaseModule {
     if (this.config.server.cors) {
       this.app.use(cors(this.config.server.cors));
     } else {
-      this.app.use(cors({
-        origin: '*',
-        credentials: true
-      }));
+      this.app.use(
+        cors({
+          origin: '*',
+          credentials: true,
+        })
+      );
     }
 
     // Body parsing middleware
     this.app.use(express.json({ limit: this.config.server.bodyLimit || '10mb' }));
-    this.app.use(express.urlencoded({ extended: true, limit: this.config.server.bodyLimit || '10mb' }));
+    this.app.use(
+      express.urlencoded({ extended: true, limit: this.config.server.bodyLimit || '10mb' })
+    );
 
     // Request logging middleware
     this.app.use((req: Request, res: Response, next: NextFunction) => {
@@ -381,7 +390,7 @@ export class RouteCodexServer extends BaseModule {
           status: res.statusCode,
           duration: duration,
           userAgent: req.get('user-agent'),
-          ip: req.ip
+          ip: req.ip,
         });
       });
 
@@ -401,7 +410,7 @@ export class RouteCodexServer extends BaseModule {
         timestamp: new Date().toISOString(),
         uptime: status.uptime,
         memory: status.memory,
-        version: this.getModuleInfo().version
+        version: this.getModuleInfo().version,
       });
     });
 
@@ -424,27 +433,26 @@ export class RouteCodexServer extends BaseModule {
 
         res.json({
           message: 'Test error processed successfully',
-          error: testError.message
+          error: testError.message,
         });
       } catch (error) {
         res.status(500).json({
           error: {
             message: 'Failed to process test error',
-            type: 'test_error_failed'
-          }
+            type: 'test_error_failed',
+          },
         });
       }
     });
 
-    
     // 404 handler
     this.app.use('*', (req: Request, res: Response) => {
       res.status(404).json({
         error: {
           message: 'Not Found',
           type: 'not_found_error',
-          code: 'not_found'
-        }
+          code: 'not_found',
+        },
       });
     });
   }
@@ -462,8 +470,8 @@ export class RouteCodexServer extends BaseModule {
         error: {
           message: error.message || 'Internal Server Error',
           type: error.type || 'internal_error',
-          code: error.code || 'internal_error'
-        }
+          code: error.code || 'internal_error',
+        },
       });
     });
   }
@@ -475,7 +483,7 @@ export class RouteCodexServer extends BaseModule {
     try {
       this.logEvent('api', 'chat_completions_request', {
         model: req.body.model,
-        messages: req.body.messages?.length || 0
+        messages: req.body.messages?.length || 0,
       });
 
       // Provider routing not yet implemented - return proper error
@@ -483,11 +491,10 @@ export class RouteCodexServer extends BaseModule {
         error: {
           message: 'Provider routing not yet implemented',
           type: 'not_implemented',
-          code: 'provider_routing_not_implemented'
-        }
+          code: 'provider_routing_not_implemented',
+        },
       });
       return;
-
     } catch (error) {
       await this.handleError(error as Error, 'chat_completions_handler');
       throw error;
@@ -501,7 +508,7 @@ export class RouteCodexServer extends BaseModule {
     try {
       this.logEvent('api', 'completions_request', {
         model: req.body.model,
-        prompt: req.body.prompt?.length || 0
+        prompt: req.body.prompt?.length || 0,
       });
 
       // Provider routing not yet implemented - return proper error
@@ -509,11 +516,10 @@ export class RouteCodexServer extends BaseModule {
         error: {
           message: 'Provider routing not yet implemented',
           type: 'not_implemented',
-          code: 'provider_routing_not_implemented'
-        }
+          code: 'provider_routing_not_implemented',
+        },
       });
       return;
-
     } catch (error) {
       await this.handleError(error as Error, 'completions_handler');
       throw error;
@@ -537,7 +543,7 @@ export class RouteCodexServer extends BaseModule {
               id: modelId,
               object: 'model',
               created: Math.floor(Date.now() / 1000),
-              owned_by: providerId
+              owned_by: providerId,
             });
           }
         }
@@ -545,9 +551,8 @@ export class RouteCodexServer extends BaseModule {
 
       res.json({
         object: 'list',
-        data: models
+        data: models,
       });
-
     } catch (error) {
       await this.handleError(error as Error, 'models_handler');
       throw error;
@@ -562,11 +567,15 @@ export class RouteCodexServer extends BaseModule {
       // Also log to category-specific file directly
       if (this.config.logging.enableFile) {
         const timestamp = new Date().toISOString();
-        const logMessage = `[${timestamp}] [EVENT] ${category}_${action}: ${JSON.stringify({
-          category,
-          action,
-          ...data
-        }, null, 2)}\n`;
+        const logMessage = `[${timestamp}] [EVENT] ${category}_${action}: ${JSON.stringify(
+          {
+            category,
+            action,
+            ...data,
+          },
+          null,
+          2
+        )}\n`;
 
         this.writeToCategoryLog(category, logMessage);
       }
@@ -581,8 +590,8 @@ export class RouteCodexServer extends BaseModule {
         data: {
           category,
           action,
-          ...data
-        }
+          ...data,
+        },
       });
     } catch (error) {
       // Don't let logging errors break the server
@@ -603,8 +612,8 @@ export class RouteCodexServer extends BaseModule {
         moduleId: this.getModuleInfo().id,
         context: {
           stack: error.stack,
-          name: error.name
-        }
+          name: error.name,
+        },
       };
 
       await this.errorHandling.handleError(errorContext);
@@ -623,7 +632,7 @@ export class RouteCodexServer extends BaseModule {
       name: 'RouteCodexServer',
       version: '0.0.1',
       description: 'Multi-provider OpenAI proxy server',
-      type: 'server'
+      type: 'server',
     };
   }
 
@@ -645,7 +654,7 @@ export class RouteCodexServer extends BaseModule {
     if (!this.serverMetrics.has(operation)) {
       this.serverMetrics.set(operation, {
         values: [],
-        lastUpdated: Date.now()
+        lastUpdated: Date.now(),
       });
     }
 
@@ -694,7 +703,7 @@ export class RouteCodexServer extends BaseModule {
       isInitialized: this._isInitialized,
       isRunning: this._isRunning,
       config: this.config.server,
-      isEnhanced: true
+      isEnhanced: true,
     };
 
     return {
@@ -702,7 +711,7 @@ export class RouteCodexServer extends BaseModule {
       debugInfo: this.getDebugInfo(),
       serverMetrics: this.getServerMetrics(),
       requestHistory: [...this.requestHistory.slice(-10)],
-      errorHistory: [...this.errorHistory.slice(-10)]
+      errorHistory: [...this.errorHistory.slice(-10)],
     };
   }
 
@@ -722,7 +731,7 @@ export class RouteCodexServer extends BaseModule {
       serverMetricsSize: this.serverMetrics.size,
       maxHistorySize: this.maxHistorySize,
       categoryLogStreams: this.categoryLogStreams.size,
-      hasLogFile: !!this.logFileStream
+      hasLogFile: !!this.logFileStream,
     };
   }
 
@@ -736,7 +745,7 @@ export class RouteCodexServer extends BaseModule {
       metrics[operation] = {
         count: metric.values.length,
         lastUpdated: metric.lastUpdated,
-        recentValues: metric.values.slice(-5)
+        recentValues: metric.values.slice(-5),
       };
     }
 

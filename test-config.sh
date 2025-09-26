@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Start the server in background and capture output
-RCC4_CONFIG_PATH=~/.routecodex/config/modelscope.json npm start > server-output.log 2>&1 &
+ROUTECODEX_CONFIG=~/.routecodex/config/modelscope.json npm start > server-output.log 2>&1 &
 
 # Wait a moment for server to start
 sleep 3

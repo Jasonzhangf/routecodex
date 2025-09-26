@@ -4,7 +4,10 @@
  */
 
 import { UnimplementedModuleFactory } from '../modules/unimplemented-module-factory.js';
-import { type UnimplementedCallAnalytics, type ModuleUsageStats } from '../config/unimplemented-config-types.js';
+import {
+  type UnimplementedCallAnalytics,
+  type ModuleUsageStats,
+} from '../config/unimplemented-config-types.js';
 
 /**
  * Analytics configuration
@@ -56,20 +59,20 @@ export class UnimplementedModuleAnalytics {
       enableTrendAnalysis: true,
       enableCallerAnalysis: true,
       priorityAlgorithm: 'weighted',
-      ...config
+      ...config,
     };
 
     this.timeAggregation = {
       hour: {},
       day: {},
       week: {},
-      month: {}
+      month: {},
     };
 
     this.callerAggregation = {
       callerFrequency: {},
       callerMethods: {},
-      callerContexts: {}
+      callerContexts: {},
     };
 
     this.lastAnalysis = null;
@@ -96,7 +99,7 @@ export class UnimplementedModuleAnalytics {
       mostCalledModules: this.getMostCalledModules(calledModules),
       callsByTime: this.getCallsByTime(),
       callerDistribution: this.getCallerDistribution(),
-      implementationPriority: this.calculateImplementationPriority(calledModules)
+      implementationPriority: this.calculateImplementationPriority(calledModules),
     };
 
     this.lastAnalysis = analytics;
@@ -114,10 +117,11 @@ export class UnimplementedModuleAnalytics {
     for (const [moduleId, module] of allModules) {
       const moduleStats = module.getStats();
       const calledModule = calledModules.find(cm => cm.moduleId === moduleId);
-      
+
       const moduleInfo = module.getModuleInfo();
       const daysSinceFirstCall = this.calculateDaysSince(moduleStats.firstCallTime);
-      const averageCallsPerDay = daysSinceFirstCall > 0 ? moduleStats.totalCalls / daysSinceFirstCall : 0;
+      const averageCallsPerDay =
+        daysSinceFirstCall > 0 ? moduleStats.totalCalls / daysSinceFirstCall : 0;
 
       stats.push({
         moduleId,
@@ -129,7 +133,7 @@ export class UnimplementedModuleAnalytics {
         averageCallsPerDay: Math.round(averageCallsPerDay * 100) / 100,
         uniqueCallers: new Set(moduleStats.callerInfo.map(call => call.callerId)).size,
         isImplemented: !calledModule,
-        implementationPriority: this.calculateModulePriority(moduleStats, calledModule)
+        implementationPriority: this.calculateModulePriority(moduleStats, calledModule),
       });
     }
 
@@ -164,11 +168,10 @@ export class UnimplementedModuleAnalytics {
     for (const calledModule of calledModules) {
       const currentCount = timeData[calledModule.moduleId] || 0;
       const previousCount = this.getPreviousPeriodCount(timeWindow, calledModule.moduleId);
-      
+
       if (currentCount > 0) {
-        const trendPercentage = previousCount > 0 
-          ? ((currentCount - previousCount) / previousCount) * 100 
-          : 100;
+        const trendPercentage =
+          previousCount > 0 ? ((currentCount - previousCount) / previousCount) * 100 : 100;
 
         let trend: 'increasing' | 'decreasing' | 'stable';
         if (Math.abs(trendPercentage) < 5) {
@@ -184,7 +187,7 @@ export class UnimplementedModuleAnalytics {
           moduleName: calledModule.moduleName,
           callCount: currentCount,
           trend,
-          trendPercentage: Math.round(trendPercentage * 100) / 100
+          trendPercentage: Math.round(trendPercentage * 100) / 100,
         });
       }
     }
@@ -208,7 +211,7 @@ export class UnimplementedModuleAnalytics {
       .map(([callerId, callCount]) => ({
         callerId,
         callCount,
-        uniqueModules: this.callerAggregation.callerMethods[callerId]?.size || 0
+        uniqueModules: this.callerAggregation.callerMethods[callerId]?.size || 0,
       }))
       .sort((a, b) => b.callCount - a.callCount)
       .slice(0, 10);
@@ -221,7 +224,7 @@ export class UnimplementedModuleAnalytics {
     return {
       topCallers,
       callerPatterns,
-      callerContexts: this.callerAggregation.callerContexts
+      callerContexts: this.callerAggregation.callerContexts,
     };
   }
 
@@ -238,14 +241,16 @@ export class UnimplementedModuleAnalytics {
   }> {
     const moduleStats = this.getModuleUsageStats();
     const analytics = this.getAnalytics();
-    
+
     return moduleStats
       .filter(module => module.totalCalls > 0)
       .slice(0, 20)
       .map(module => {
-        const priorityData = analytics.implementationPriority.find(p => p.moduleId === module.moduleId);
+        const priorityData = analytics.implementationPriority.find(
+          p => p.moduleId === module.moduleId
+        );
         const callerAnalysis = this.getCallerAnalysis();
-        
+
         const reasoning = this.generateReasoning(module, priorityData, callerAnalysis);
         const estimatedEffort = this.estimateImplementationEffort(module);
         const impact = this.assessImplementationImpact(module, analytics);
@@ -256,7 +261,7 @@ export class UnimplementedModuleAnalytics {
           reasoning,
           estimatedEffort,
           impact,
-          callerDiversity: module.uniqueCallers
+          callerDiversity: module.uniqueCallers,
         };
       })
       .sort((a, b) => b.priority - a.priority);
@@ -278,13 +283,17 @@ export class UnimplementedModuleAnalytics {
         return this.exportToReport(analytics, moduleStats, trending, recommendations);
       case 'json':
       default:
-        return JSON.stringify({
-          analytics,
-          moduleStats,
-          trending,
-          recommendations,
-          exportedAt: new Date().toISOString()
-        }, null, 2);
+        return JSON.stringify(
+          {
+            analytics,
+            moduleStats,
+            trending,
+            recommendations,
+            exportedAt: new Date().toISOString(),
+          },
+          null,
+          2
+        );
     }
   }
 
@@ -296,13 +305,13 @@ export class UnimplementedModuleAnalytics {
       hour: {},
       day: {},
       week: {},
-      month: {}
+      month: {},
     };
 
     this.callerAggregation = {
       callerFrequency: {},
       callerMethods: {},
-      callerContexts: {}
+      callerContexts: {},
     };
 
     this.lastAnalysis = null;
@@ -318,21 +327,23 @@ export class UnimplementedModuleAnalytics {
       mostCalledModules: [],
       callsByTime: {},
       callerDistribution: {},
-      implementationPriority: []
+      implementationPriority: [],
     };
   }
 
   /**
    * Get most called modules
    */
-  private getMostCalledModules(calledModules: any[]): UnimplementedCallAnalytics['mostCalledModules'] {
+  private getMostCalledModules(
+    calledModules: any[]
+  ): UnimplementedCallAnalytics['mostCalledModules'] {
     return calledModules
       .sort((a, b) => b.callCount - a.callCount)
       .slice(0, 10)
       .map(module => ({
         moduleId: module.moduleId,
         callCount: module.callCount,
-        lastCalled: module.lastCalled
+        lastCalled: module.lastCalled,
       }));
   }
 
@@ -344,7 +355,7 @@ export class UnimplementedModuleAnalytics {
       hour: Object.values(this.timeAggregation.hour).reduce((sum, count) => sum + count, 0),
       day: Object.values(this.timeAggregation.day).reduce((sum, count) => sum + count, 0),
       week: Object.values(this.timeAggregation.week).reduce((sum, count) => sum + count, 0),
-      month: Object.values(this.timeAggregation.month).reduce((sum, count) => sum + count, 0)
+      month: Object.values(this.timeAggregation.month).reduce((sum, count) => sum + count, 0),
     };
   }
 
@@ -358,21 +369,22 @@ export class UnimplementedModuleAnalytics {
   /**
    * Calculate implementation priority
    */
-  private calculateImplementationPriority(calledModules: any[]): UnimplementedCallAnalytics['implementationPriority'] {
-    return calledModules.map(module => {
-      const priority = this.calculateModulePriority(
-        { totalCalls: module.callCount },
-        module
-      );
+  private calculateImplementationPriority(
+    calledModules: any[]
+  ): UnimplementedCallAnalytics['implementationPriority'] {
+    return calledModules
+      .map(module => {
+        const priority = this.calculateModulePriority({ totalCalls: module.callCount }, module);
 
-      return {
-        moduleId: module.moduleId,
-        priority,
-        callCount: module.callCount,
-        lastCalled: module.lastCalled,
-        callerCount: 1 // This would need more detailed caller tracking
-      };
-    }).sort((a, b) => b.priority - a.priority);
+        return {
+          moduleId: module.moduleId,
+          priority,
+          callCount: module.callCount,
+          lastCalled: module.lastCalled,
+          callerCount: 1, // This would need more detailed caller tracking
+        };
+      })
+      .sort((a, b) => b.priority - a.priority);
   }
 
   /**
@@ -386,7 +398,8 @@ export class UnimplementedModuleAnalytics {
 
     // Recency bonus
     if (moduleStats.lastCallTime) {
-      const hoursSinceLastCall = (Date.now() - new Date(moduleStats.lastCallTime).getTime()) / (1000 * 60 * 60);
+      const hoursSinceLastCall =
+        (Date.now() - new Date(moduleStats.lastCallTime).getTime()) / (1000 * 60 * 60);
       const recencyScore = Math.max(0, 100 - hoursSinceLastCall);
       score += recencyScore;
     }
@@ -404,7 +417,9 @@ export class UnimplementedModuleAnalytics {
    * Calculate days since date
    */
   private calculateDaysSince(dateString?: string): number {
-    if (!dateString) {return 0;}
+    if (!dateString) {
+      return 0;
+    }
     const date = new Date(dateString);
     const now = new Date();
     const diffTime = Math.abs(now.getTime() - date.getTime());
@@ -417,7 +432,9 @@ export class UnimplementedModuleAnalytics {
   private getPreviousPeriodCount(timeWindow: string, moduleId: string): number {
     // This is a simplified implementation
     // In a real implementation, you'd maintain historical data
-    return Math.floor((this.timeAggregation[timeWindow as keyof TimeAggregation][moduleId] || 0) * 0.8);
+    return Math.floor(
+      (this.timeAggregation[timeWindow as keyof TimeAggregation][moduleId] || 0) * 0.8
+    );
   }
 
   /**
@@ -462,9 +479,12 @@ export class UnimplementedModuleAnalytics {
   /**
    * Assess implementation impact
    */
-  private assessImplementationImpact(module: ModuleUsageStats, analytics: UnimplementedCallAnalytics): 'low' | 'medium' | 'high' {
+  private assessImplementationImpact(
+    module: ModuleUsageStats,
+    analytics: UnimplementedCallAnalytics
+  ): 'low' | 'medium' | 'high' {
     const usagePercentage = (module.totalCalls / analytics.totalUnimplementedCalls) * 100;
-    
+
     if (usagePercentage > 20) {
       return 'high';
     } else if (usagePercentage > 5) {
@@ -485,9 +505,12 @@ export class UnimplementedModuleAnalytics {
     // Simplified CSV export
     const csvRows = [
       'Module ID,Module Name,Call Count,Unique Callers,Avg Calls/Day,Priority,Recommended Effort,Impact',
-      ...moduleStats.slice(0, 20).map(module => 
-        `${module.moduleId},${module.moduleName},${module.totalCalls},${module.uniqueCallers},${module.averageCallsPerDay},${module.implementationPriority},${recommendations.find(r => r.moduleId === module.moduleId)?.estimatedEffort || 'medium'},${recommendations.find(r => r.moduleId === module.moduleId)?.impact || 'medium'}`
-      )
+      ...moduleStats
+        .slice(0, 20)
+        .map(
+          module =>
+            `${module.moduleId},${module.moduleName},${module.totalCalls},${module.uniqueCallers},${module.averageCallsPerDay},${module.implementationPriority},${recommendations.find(r => r.moduleId === module.moduleId)?.estimatedEffort || 'medium'},${recommendations.find(r => r.moduleId === module.moduleId)?.impact || 'medium'}`
+        ),
     ];
 
     return csvRows.join('\n');
@@ -511,19 +534,28 @@ export class UnimplementedModuleAnalytics {
       `- Unique Modules Called: ${analytics.uniqueModulesCalled}`,
       '',
       '## Top 10 Most Called Modules',
-      ...analytics.mostCalledModules.slice(0, 10).map((module, index) => 
-        `${index + 1}. ${module.moduleId} - ${module.callCount} calls (last: ${module.lastCalled})`
-      ),
+      ...analytics.mostCalledModules
+        .slice(0, 10)
+        .map(
+          (module, index) =>
+            `${index + 1}. ${module.moduleId} - ${module.callCount} calls (last: ${module.lastCalled})`
+        ),
       '',
       '## Implementation Recommendations',
-      ...recommendations.slice(0, 5).map((rec, index) => 
-        `${index + 1}. ${rec.moduleId} (Priority: ${rec.priority}, Effort: ${rec.estimatedEffort}, Impact: ${rec.impact})`
-      ),
+      ...recommendations
+        .slice(0, 5)
+        .map(
+          (rec, index) =>
+            `${index + 1}. ${rec.moduleId} (Priority: ${rec.priority}, Effort: ${rec.estimatedEffort}, Impact: ${rec.impact})`
+        ),
       '',
       '## Detailed Module Statistics',
-      ...moduleStats.slice(0, 20).map(module => 
-        `- ${module.moduleName}: ${module.totalCalls} calls, ${module.uniqueCallers} callers, ${module.averageCallsPerDay}/day`
-      )
+      ...moduleStats
+        .slice(0, 20)
+        .map(
+          module =>
+            `- ${module.moduleName}: ${module.totalCalls} calls, ${module.uniqueCallers} callers, ${module.averageCallsPerDay}/day`
+        ),
     ];
 
     return report.join('\n');
@@ -533,9 +565,12 @@ export class UnimplementedModuleAnalytics {
    * Start data aggregation
    */
   private startAggregation(): void {
-    setInterval(() => {
-      this.aggregateCurrentData();
-    }, this.config.aggregationInterval || 60 * 60 * 1000);
+    setInterval(
+      () => {
+        this.aggregateCurrentData();
+      },
+      this.config.aggregationInterval || 60 * 60 * 1000
+    );
   }
 
   /**
@@ -548,22 +583,26 @@ export class UnimplementedModuleAnalytics {
     // Aggregate by time periods
     for (const calledModule of calledModules) {
       const moduleId = calledModule.moduleId;
-      
+
       // Hour aggregation
       const hourKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}`;
-      this.timeAggregation.hour[hourKey] = (this.timeAggregation.hour[hourKey] || 0) + calledModule.callCount;
+      this.timeAggregation.hour[hourKey] =
+        (this.timeAggregation.hour[hourKey] || 0) + calledModule.callCount;
 
       // Day aggregation
       const dayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
-      this.timeAggregation.day[dayKey] = (this.timeAggregation.day[dayKey] || 0) + calledModule.callCount;
+      this.timeAggregation.day[dayKey] =
+        (this.timeAggregation.day[dayKey] || 0) + calledModule.callCount;
 
       // Week aggregation
       const weekKey = `${now.getFullYear()}-W${this.getWeekNumber(now)}`;
-      this.timeAggregation.week[weekKey] = (this.timeAggregation.week[weekKey] || 0) + calledModule.callCount;
+      this.timeAggregation.week[weekKey] =
+        (this.timeAggregation.week[weekKey] || 0) + calledModule.callCount;
 
       // Month aggregation
       const monthKey = `${now.getFullYear()}-${now.getMonth()}`;
-      this.timeAggregation.month[monthKey] = (this.timeAggregation.month[monthKey] || 0) + calledModule.callCount;
+      this.timeAggregation.month[monthKey] =
+        (this.timeAggregation.month[monthKey] || 0) + calledModule.callCount;
     }
 
     // Aggregate caller data
@@ -578,12 +617,12 @@ export class UnimplementedModuleAnalytics {
 
     for (const [, module] of allModules) {
       const stats = module.getStats();
-      
+
       for (const callerInfo of stats.callerInfo) {
         const callerId = callerInfo.callerId;
-        
+
         // Update caller frequency
-        this.callerAggregation.callerFrequency[callerId] = 
+        this.callerAggregation.callerFrequency[callerId] =
           (this.callerAggregation.callerFrequency[callerId] || 0) + 1;
 
         // Update caller methods
@@ -611,6 +650,6 @@ export class UnimplementedModuleAnalytics {
     const dayNum = d.getUTCDay() || 7;
     d.setUTCDate(d.getUTCDate() + 4 - dayNum);
     const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+    return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
   }
 }

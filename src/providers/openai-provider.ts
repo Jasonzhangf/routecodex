@@ -13,7 +13,7 @@ import {
   type OpenAIModel,
   type StreamOptions,
   type StreamResponse,
-  RouteCodexError
+  RouteCodexError,
 } from '../server/types.js';
 
 /**
@@ -42,7 +42,7 @@ export class OpenAIProvider extends BaseProvider {
     this.defaultHeaders = {
       'Content-Type': 'application/json',
       'User-Agent': 'RouteCodex/0.0.1',
-      ...config.headers
+      ...config.headers,
     };
 
     if (config.apiKey) {
@@ -65,12 +65,9 @@ export class OpenAIProvider extends BaseProvider {
       // Check rate limit
       const rateLimitCheck = this.checkRateLimit('chat_completion');
       if (!rateLimitCheck.allowed) {
-        throw new RouteCodexError(
-          'Rate limit exceeded',
-          'rate_limit_exceeded',
-          429,
-          { resetTime: rateLimitCheck.resetTime }
-        );
+        throw new RouteCodexError('Rate limit exceeded', 'rate_limit_exceeded', 429, {
+          resetTime: rateLimitCheck.resetTime,
+        });
       }
 
       // Validate model
@@ -118,13 +115,14 @@ export class OpenAIProvider extends BaseProvider {
         response.statusCode,
         response.headers,
         duration,
-        completionResponse.usage ? {
-          promptTokens: completionResponse.usage.prompt_tokens,
-          completionTokens: completionResponse.usage.completion_tokens,
-          totalTokens: completionResponse.usage.total_tokens
-        } : undefined
+        completionResponse.usage
+          ? {
+              promptTokens: completionResponse.usage.prompt_tokens,
+              completionTokens: completionResponse.usage.completion_tokens,
+              totalTokens: completionResponse.usage.total_tokens,
+            }
+          : undefined
       );
-
     } catch (error) {
       const duration = Date.now() - startTime;
       this.updateStats(false, duration);
@@ -167,12 +165,9 @@ export class OpenAIProvider extends BaseProvider {
       // Check rate limit
       const rateLimitCheck = this.checkRateLimit('completion');
       if (!rateLimitCheck.allowed) {
-        throw new RouteCodexError(
-          'Rate limit exceeded',
-          'rate_limit_exceeded',
-          429,
-          { resetTime: rateLimitCheck.resetTime }
-        );
+        throw new RouteCodexError('Rate limit exceeded', 'rate_limit_exceeded', 429, {
+          resetTime: rateLimitCheck.resetTime,
+        });
       }
 
       // Validate model
@@ -220,13 +215,14 @@ export class OpenAIProvider extends BaseProvider {
         response.statusCode,
         response.headers,
         duration,
-        completionResponse.usage ? {
-          promptTokens: completionResponse.usage.prompt_tokens,
-          completionTokens: completionResponse.usage.completion_tokens,
-          totalTokens: completionResponse.usage.total_tokens
-        } : undefined
+        completionResponse.usage
+          ? {
+              promptTokens: completionResponse.usage.prompt_tokens,
+              completionTokens: completionResponse.usage.completion_tokens,
+              totalTokens: completionResponse.usage.total_tokens,
+            }
+          : undefined
       );
-
     } catch (error) {
       const duration = Date.now() - startTime;
       this.updateStats(false, duration);
@@ -267,12 +263,9 @@ export class OpenAIProvider extends BaseProvider {
       // Check rate limit
       const rateLimitCheck = this.checkRateLimit('streaming_chat_completion');
       if (!rateLimitCheck.allowed) {
-        throw new RouteCodexError(
-          'Rate limit exceeded',
-          'rate_limit_exceeded',
-          429,
-          { resetTime: rateLimitCheck.resetTime }
-        );
+        throw new RouteCodexError('Rate limit exceeded', 'rate_limit_exceeded', 429, {
+          resetTime: rateLimitCheck.resetTime,
+        });
       }
 
       // Validate model
@@ -322,7 +315,6 @@ export class OpenAIProvider extends BaseProvider {
         { 'Content-Type': 'text/event-stream' },
         duration
       );
-
     } catch (error) {
       const duration = Date.now() - startTime;
       this.updateStats(false, duration);
@@ -362,7 +354,7 @@ export class OpenAIProvider extends BaseProvider {
       messages: request.messages,
       max_tokens: request.max_tokens || modelConfig.maxTokens,
       temperature: request.temperature ?? modelConfig.temperature ?? 0.7,
-      top_p: request.top_p ?? modelConfig.topP ?? 1.0
+      top_p: request.top_p ?? modelConfig.topP ?? 1.0,
     };
 
     // Add optional parameters
@@ -405,7 +397,7 @@ export class OpenAIProvider extends BaseProvider {
       prompt: request.prompt,
       max_tokens: request.max_tokens || modelConfig.maxTokens,
       temperature: request.temperature ?? modelConfig.temperature ?? 0.7,
-      top_p: request.top_p ?? modelConfig.topP ?? 1.0
+      top_p: request.top_p ?? modelConfig.topP ?? 1.0,
     };
 
     // Add optional parameters
@@ -506,7 +498,7 @@ export class OpenAIProvider extends BaseProvider {
         method: 'POST',
         headers: this.defaultHeaders,
         body: JSON.stringify(payload),
-        signal: controller.signal
+        signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
@@ -525,28 +517,20 @@ export class OpenAIProvider extends BaseProvider {
           errorData = { error: { message: responseData, type: 'unknown' } };
         }
 
-        throw new RouteCodexError(
-          errorData.error.message,
-          errorData.error.type,
-          response.status,
-          { response: errorData }
-        );
+        throw new RouteCodexError(errorData.error.message, errorData.error.type, response.status, {
+          response: errorData,
+        });
       }
 
       const data = JSON.parse(responseData);
       return { data, statusCode: response.status, headers };
-
     } catch (error) {
       if (error instanceof RouteCodexError) {
         throw error;
       }
 
       if (error instanceof Error && error.name === 'AbortError') {
-        throw new RouteCodexError(
-          'Request timeout',
-          'timeout_error',
-          408
-        );
+        throw new RouteCodexError('Request timeout', 'timeout_error', 408);
       }
 
       throw new RouteCodexError(
@@ -576,11 +560,11 @@ export class OpenAIProvider extends BaseProvider {
         method: 'POST',
         headers: {
           ...this.defaultHeaders,
-          'Accept': 'text/event-stream',
-          'Cache-Control': 'no-cache'
+          Accept: 'text/event-stream',
+          'Cache-Control': 'no-cache',
         },
         body: JSON.stringify(payload),
-        signal: controller.signal
+        signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
@@ -596,11 +580,7 @@ export class OpenAIProvider extends BaseProvider {
 
       const reader = response.body?.getReader();
       if (!reader) {
-        throw new RouteCodexError(
-          'Stream reader not available',
-          'stream_reader_error',
-          500
-        );
+        throw new RouteCodexError('Stream reader not available', 'stream_reader_error', 500);
       }
 
       const decoder = new TextDecoder();
@@ -608,7 +588,9 @@ export class OpenAIProvider extends BaseProvider {
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) {break;}
+        if (done) {
+          break;
+        }
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
@@ -618,14 +600,18 @@ export class OpenAIProvider extends BaseProvider {
           if (line.startsWith('data: ')) {
             const data = line.slice(6);
             if (data === '[DONE]') {
-              if (options.onComplete) {options.onComplete();}
+              if (options.onComplete) {
+                options.onComplete();
+              }
               return { chunks, complete: true };
             }
 
             try {
               const parsed = JSON.parse(data);
               chunks.push(data);
-              if (options.onChunk) {options.onChunk(data);}
+              if (options.onChunk) {
+                options.onChunk(data);
+              }
             } catch (error) {
               // Ignore parse errors for incomplete chunks
             }
@@ -634,18 +620,13 @@ export class OpenAIProvider extends BaseProvider {
       }
 
       return { chunks, complete: true };
-
     } catch (error) {
       if (error instanceof RouteCodexError) {
         throw error;
       }
 
       if (error instanceof Error && error.name === 'AbortError') {
-        throw new RouteCodexError(
-          'Stream timeout',
-          'stream_timeout',
-          408
-        );
+        throw new RouteCodexError('Stream timeout', 'stream_timeout', 408);
       }
 
       if (options.onError) {
@@ -670,11 +651,13 @@ export class OpenAIProvider extends BaseProvider {
       created: data.created,
       model: data.model,
       choices: data.choices,
-      usage: data.usage ? {
-        prompt_tokens: data.usage.prompt_tokens || 0,
-        completion_tokens: data.usage.completion_tokens || 0,
-        total_tokens: data.usage.total_tokens || 0
-      } : undefined
+      usage: data.usage
+        ? {
+            prompt_tokens: data.usage.prompt_tokens || 0,
+            completion_tokens: data.usage.completion_tokens || 0,
+            total_tokens: data.usage.total_tokens || 0,
+          }
+        : undefined,
     };
   }
 
@@ -688,11 +671,13 @@ export class OpenAIProvider extends BaseProvider {
       created: data.created,
       model: data.model,
       choices: data.choices,
-      usage: data.usage ? {
-        prompt_tokens: data.usage.prompt_tokens || 0,
-        completion_tokens: data.usage.completion_tokens || 0,
-        total_tokens: data.usage.total_tokens || 0
-      } : undefined
+      usage: data.usage
+        ? {
+            prompt_tokens: data.usage.prompt_tokens || 0,
+            completion_tokens: data.usage.completion_tokens || 0,
+            total_tokens: data.usage.total_tokens || 0,
+          }
+        : undefined,
     };
   }
 
@@ -710,7 +695,6 @@ export class OpenAIProvider extends BaseProvider {
       this.health.responseTime = Date.now() - startTime;
       this.health.lastCheck = new Date().toISOString();
       this.health.error = undefined;
-
     } catch (error) {
       this.health.status = 'unhealthy';
       this.health.responseTime = Date.now() - startTime;

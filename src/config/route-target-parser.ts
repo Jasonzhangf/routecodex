@@ -11,7 +11,7 @@ export class RouteTargetParser {
    */
   parseRouteString(routeString: string): RouteTarget {
     const parts = routeString.split('.');
-    
+
     // 支持两种格式：
     // 1. provider.model → 使用provider的所有key（负载均衡）
     // 2. provider.model.key → 只使用指定key
@@ -24,7 +24,7 @@ export class RouteTargetParser {
         keyId: '*', // 通配符表示使用所有key
         actualKey: '*', // 通配符表示使用所有key
         inputProtocol: 'openai',
-        outputProtocol: 'openai'
+        outputProtocol: 'openai',
       };
     } else if (parts.length === 3) {
       // provider.model.key格式：只使用指定key
@@ -35,10 +35,12 @@ export class RouteTargetParser {
         keyId,
         actualKey: keyId, // 将由AuthFileResolver解析
         inputProtocol: 'openai',
-        outputProtocol: 'openai'
+        outputProtocol: 'openai',
       };
     } else {
-      throw new Error(`Invalid route string format: ${routeString}. Expected format: provider.model or provider.model.key`);
+      throw new Error(
+        `Invalid route string format: ${routeString}. Expected format: provider.model or provider.model.key`
+      );
     }
   }
 
@@ -49,9 +51,7 @@ export class RouteTargetParser {
     const routeTargetPool: RouteTargetPool = {};
 
     for (const [routeName, targets] of Object.entries(routingConfig)) {
-      routeTargetPool[routeName] = targets.map(target =>
-        this.parseRouteString(target)
-      );
+      routeTargetPool[routeName] = targets.map(target => this.parseRouteString(target));
     }
 
     return routeTargetPool;
@@ -92,7 +92,7 @@ export class RouteTargetParser {
 
     return {
       isValid: errors.length === 0,
-      errors
+      errors,
     };
   }
 }

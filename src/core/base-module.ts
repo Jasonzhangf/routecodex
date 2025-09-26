@@ -4,8 +4,24 @@
  */
 
 import { EventEmitter } from 'events';
-import { DebugEventBus } from "rcc-debugcenter"; 
-import { DebugCenter } from "rcc-debugcenter/dist/core/DebugCenter.js";
+import * as debugcenter from 'rcc-debugcenter';
+
+// Check if components exist, fallback to mocks if not
+const DebugCenter =
+  (debugcenter as any).DebugCenter ||
+  class {
+    constructor() {}
+  };
+
+const DebugEventBus =
+  (debugcenter as any).DebugEventBus ||
+  class {
+    static getInstance() {
+      return {
+        publish: () => {},
+      };
+    }
+  };
 import { DebugEnhancementManager } from '../modules/debug/debug-enhancement-manager.js';
 
 /**
@@ -28,7 +44,7 @@ export enum ModuleStatus {
   STARTING = 'starting',
   RUNNING = 'running',
   STOPPING = 'stopping',
-  ERROR = 'error'
+  ERROR = 'error',
 }
 
 /**
@@ -44,7 +60,7 @@ export abstract class BaseModule extends EventEmitter {
   private debugEnhancement: any = null;
 
   // Legacy debug properties for backward compatibility
-  public debugEventBus: DebugEventBus | null = null;
+  public debugEventBus: any | null = null;
   public isDebugEnhanced = false;
   public moduleMetrics: Map<string, any> = new Map();
   public operationHistory: any[] = [];
@@ -162,7 +178,7 @@ export abstract class BaseModule extends EventEmitter {
       version: this.info.version,
       status: this.status,
       isRunning: this.isRunning,
-      uptime: this.isRunning ? Date.now() - this.getStartTime() : 0
+      uptime: this.isRunning ? Date.now() - this.getStartTime() : 0,
     };
   }
 
@@ -197,7 +213,7 @@ export abstract class BaseModule extends EventEmitter {
       module: this.info,
       error,
       context,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   }
 
@@ -217,12 +233,15 @@ export abstract class BaseModule extends EventEmitter {
         performanceTracking: true,
         requestLogging: true,
         errorTracking: true,
-        maxHistorySize: this.maxHistorySize
+        maxHistorySize: this.maxHistorySize,
       });
 
       console.log(`BaseModule unified debug enhancements initialized for ${this.info.id}`);
     } catch (error) {
-      console.warn(`Failed to initialize BaseModule unified debug enhancements for ${this.info.id}:`, error);
+      console.warn(
+        `Failed to initialize BaseModule unified debug enhancements for ${this.info.id}:`,
+        error
+      );
       this.debugEnhancementManager = null;
     }
   }
@@ -249,7 +268,7 @@ export abstract class BaseModule extends EventEmitter {
     if (this.debugEnhancement && this.debugEnhancement.recordMetric) {
       this.debugEnhancement.recordMetric(operation, Date.now(), {
         moduleId: this.info.id,
-        operation
+        operation,
       });
     }
 
@@ -257,7 +276,7 @@ export abstract class BaseModule extends EventEmitter {
     if (!this.moduleMetrics.has(operation)) {
       this.moduleMetrics.set(operation, {
         values: [],
-        lastUpdated: Date.now()
+        lastUpdated: Date.now(),
       });
     }
 
@@ -280,7 +299,7 @@ export abstract class BaseModule extends EventEmitter {
       this.debugEnhancement.addRequestToHistory({
         ...operation,
         moduleId: this.info.id,
-        type: 'operation'
+        type: 'operation',
       });
     }
 
@@ -302,7 +321,7 @@ export abstract class BaseModule extends EventEmitter {
       this.debugEnhancement.addErrorToHistory({
         ...error,
         moduleId: this.info.id,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       });
     }
 
@@ -319,7 +338,9 @@ export abstract class BaseModule extends EventEmitter {
    * Publish debug event
    */
   public publishDebugEvent(type: string, data: any): void {
-    if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
+    if (!this.isDebugEnhanced || !this.debugEventBus) {
+      return;
+    }
 
     try {
       this.debugEventBus.publish({
@@ -327,13 +348,13 @@ export abstract class BaseModule extends EventEmitter {
         moduleId: this.info.id,
         operationId: type,
         timestamp: Date.now(),
-        type: "start",
+        type: 'start',
         position: 'middle',
         data: {
           ...data,
           moduleId: this.info.id,
-          source: 'base-module'
-        }
+          source: 'base-module',
+        },
       });
     } catch (error) {
       // Silent fail if debug event bus is not available
@@ -350,7 +371,7 @@ export abstract class BaseModule extends EventEmitter {
       version: this.info.version,
       status: this.status,
       isRunning: this.isRunning,
-      isEnhanced: this.isDebugEnhanced
+      isEnhanced: this.isDebugEnhanced,
     };
 
     // Add unified debug information if available
@@ -358,12 +379,14 @@ export abstract class BaseModule extends EventEmitter {
       return {
         ...baseStatus,
         unifiedDebugInfo: this.debugEnhancementManager.getSystemDebugStatus(),
-        enhancementInfo: this.debugEnhancement ? {
-          isActive: this.debugEnhancement.isActive,
-          metricsCount: this.debugEnhancement.metrics.size,
-          requestHistoryCount: this.debugEnhancement.requestHistory.length,
-          errorHistoryCount: this.debugEnhancement.errorHistory.length
-        } : null
+        enhancementInfo: this.debugEnhancement
+          ? {
+              isActive: this.debugEnhancement.isActive,
+              metricsCount: this.debugEnhancement.metrics.size,
+              requestHistoryCount: this.debugEnhancement.requestHistory.length,
+              errorHistoryCount: this.debugEnhancement.errorHistory.length,
+            }
+          : null,
       };
     }
 
@@ -377,7 +400,7 @@ export abstract class BaseModule extends EventEmitter {
       debugInfo: this.getDebugInfo(),
       moduleMetrics: this.getModuleMetrics(),
       operationHistory: [...this.operationHistory.slice(-10)], // Last 10 operations
-      errorHistory: [...this.errorHistory.slice(-10)] // Last 10 errors
+      errorHistory: [...this.errorHistory.slice(-10)], // Last 10 errors
     };
   }
 
@@ -395,7 +418,7 @@ export abstract class BaseModule extends EventEmitter {
       errorHistorySize: this.errorHistory.length,
       status: this.status,
       isRunning: this.isRunning,
-      uptime: this.isRunning ? Date.now() - this.getStartTime() : 0
+      uptime: this.isRunning ? Date.now() - this.getStartTime() : 0,
     };
   }
 
@@ -409,7 +432,7 @@ export abstract class BaseModule extends EventEmitter {
       metrics[operation] = {
         count: metric.values.length,
         lastUpdated: metric.lastUpdated,
-        recentValues: metric.values.slice(-5) // Last 5 values
+        recentValues: metric.values.slice(-5), // Last 5 values
       };
     }
 

@@ -1,0 +1,42 @@
+{
+  "sessionId": "provider-1758817056810",
+  "pipelineId": "unknown",
+  "startTime": 1758817056823,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "provider:health-check",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758817056823,
+      "status": "running",
+      "input": {
+        "status": "healthy",
+        "timestamp": 1758817056823,
+        "responseTime": 0,
+        "details": {
+          "authentication": "valid",
+          "connectivity": "connected",
+          "timestamp": 1758817056823
+        }
+      }
+    },
+    {
+      "operationId": "provider:health-check",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758817056826,
+      "status": "running",
+      "input": {
+        "status": "healthy",
+        "timestamp": 1758817056826,
+        "responseTime": 0,
+        "details": {
+          "authentication": "valid",
+          "connectivity": "connected",
+          "timestamp": 1758817056826
+        }
+      }
+    }
+  ]
+}

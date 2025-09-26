@@ -1,0 +1,93 @@
+{
+  "sessionId": "llmswitch-1758812109893",
+  "pipelineId": "unknown",
+  "startTime": 1758812128136,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "transformation:llmswitch-request-transform",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758812128136,
+      "status": "running",
+      "input": {
+        "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hello, test error handling"
+          }
+        ],
+        "max_tokens": 50
+      }
+    },
+    {
+      "operationId": "transformation:llmswitch-request-transform",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758812765890,
+      "status": "running",
+      "input": {
+        "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hello"
+          }
+        ],
+        "max_tokens": 50
+      }
+    },
+    {
+      "operationId": "transformation:llmswitch-response-transform",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758812766789,
+      "status": "running",
+      "input": {
+        "data": {
+          "id": "chatcmpl-f94f3b28-5848-473b-9e27-66d511c826da",
+          "object": "chat.completion",
+          "created": 1758812766208,
+          "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+          "system_fingerprint": "",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": null,
+                "content": "",
+                "tool_calls": null,
+                "function_calls": null,
+                "reasoning_content": ""
+              },
+              "finish_reason": "stop",
+              "message": {
+                "role": "assistant",
+                "content": "Hello! How can I help you today?",
+                "tool_calls": null,
+                "function_calls": null,
+                "reasoning_content": ""
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 9,
+            "completion_tokens": 9,
+            "total_tokens": 18
+          }
+        },
+        "status": 200,
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "openai-1758812765892-93a47vkkh"
+        },
+        "metadata": {
+          "requestId": "openai-1758812765892-93a47vkkh",
+          "processingTime": 892,
+          "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct"
+        }
+      }
+    }
+  ]
+}

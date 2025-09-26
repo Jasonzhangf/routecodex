@@ -16,17 +16,24 @@ import fs from 'fs';
 import path from 'path';
 import { homedir } from 'os';
 import { DryRunEngine, dryRunEngine } from '../modules/dry-run-engine/index.js';
-import type { RunRequestOptions, RunResponseOptions, RunBidirectionalOptions } from '../modules/dry-run-engine/index.js';
+import type {
+  RunRequestOptions,
+  RunResponseOptions,
+  RunBidirectionalOptions,
+} from '../modules/dry-run-engine/index.js';
 import { dryRunPipelineExecutor } from '../modules/pipeline/dry-run/dry-run-pipeline-executor.js';
-import { pipelineDryRunManager, type NodeDryRunConfig } from '../modules/pipeline/dry-run/pipeline-dry-run-framework.js';
+import {
+  pipelineDryRunManager,
+  type NodeDryRunConfig,
+} from '../modules/pipeline/dry-run/pipeline-dry-run-framework.js';
 
 // Logger for consistent output
 const logger = {
-  info: (msg: string) => console.log(`${chalk.blue('ℹ')  } ${  msg}`),
-  success: (msg: string) => console.log(`${chalk.green('✓')  } ${  msg}`),
-  warning: (msg: string) => console.log(`${chalk.yellow('⚠')  } ${  msg}`),
-  error: (msg: string) => console.log(`${chalk.red('✗')  } ${  msg}`),
-  debug: (msg: string) => console.log(`${chalk.gray('◉')  } ${  msg}`)
+  info: (msg: string) => console.log(`${chalk.blue('ℹ')} ${msg}`),
+  success: (msg: string) => console.log(`${chalk.green('✓')} ${msg}`),
+  warning: (msg: string) => console.log(`${chalk.yellow('⚠')} ${msg}`),
+  error: (msg: string) => console.log(`${chalk.red('✗')} ${msg}`),
+  debug: (msg: string) => console.log(`${chalk.gray('◉')} ${msg}`),
 };
 
 // File format detection utilities
@@ -66,7 +73,9 @@ async function loadFile(filePath: string): Promise<any> {
         throw new Error(`Unsupported format: ${format}`);
     }
   } catch (error) {
-    throw new Error(`Failed to load file ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Failed to load file ${filePath}: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -79,14 +88,20 @@ function formatOutput(data: any, format: 'json' | 'pretty'): void {
       const nr = (data as any)?.nodeResults;
       if (nr && typeof nr.entries === 'function') {
         const obj: any = {};
-        for (const [k, v] of nr.entries()) { obj[k] = v; }
+        for (const [k, v] of nr.entries()) {
+          obj[k] = v;
+        }
         out.nodeResults = obj;
         // derive routing decision from llm-switch if present
         const llm = obj['llm-switch']?.expectedOutput?.metadata?.routingDecision;
-        if (llm) { out.derivedRoutingDecision = llm; }
+        if (llm) {
+          out.derivedRoutingDecision = llm;
+        }
       }
       return out;
-    } catch { return data; }
+    } catch {
+      return data;
+    }
   })();
   switch (format) {
     case 'json':
@@ -94,7 +109,7 @@ function formatOutput(data: any, format: 'json' | 'pretty'): void {
       break;
     case 'pretty':
       console.log(chalk.cyan('Dry-Run Results:'));
-      console.log('=' .repeat(50));
+      console.log('='.repeat(50));
       console.log(JSON.stringify(clone, null, 2));
       break;
   }
@@ -115,9 +130,15 @@ async function scanDirectory(dirPath: string, pattern: string = '*.json'): Promi
       const fileName = entry.name;
       if (pattern === '*.json' && fileName.endsWith('.json')) {
         files.push(path.join(fullPath, fileName));
-      } else if (pattern === '*.yaml' && (fileName.endsWith('.yaml') || fileName.endsWith('.yml'))) {
+      } else if (
+        pattern === '*.yaml' &&
+        (fileName.endsWith('.yaml') || fileName.endsWith('.yml'))
+      ) {
         files.push(path.join(fullPath, fileName));
-      } else if (pattern === '*.*' && (fileName.endsWith('.json') || fileName.endsWith('.yaml') || fileName.endsWith('.yml'))) {
+      } else if (
+        pattern === '*.*' &&
+        (fileName.endsWith('.json') || fileName.endsWith('.yaml') || fileName.endsWith('.yml'))
+      ) {
         files.push(path.join(fullPath, fileName));
       }
     }
@@ -133,14 +154,19 @@ type RoutePools = Record<string, string[]>;
 function findLatestMergedConfig(): any | null {
   try {
     const cfgDir = path.resolve(process.cwd(), 'config');
-    const files = fs.readdirSync(cfgDir)
+    const files = fs
+      .readdirSync(cfgDir)
       .filter(f => /^merged-config\..*\.json$/.test(f))
       .map(f => ({ name: f, mtime: fs.statSync(path.join(cfgDir, f)).mtimeMs }))
       .sort((a, b) => b.mtime - a.mtime);
-    if (files.length === 0) {return null;}
+    if (files.length === 0) {
+      return null;
+    }
     const content = fs.readFileSync(path.join(cfgDir, files[0].name), 'utf-8');
     return JSON.parse(content);
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 function chooseRouteAndTarget(input: any) {
@@ -157,30 +183,42 @@ function chooseRouteAndTarget(input: any) {
       if (firstDot > 0 && lastKey > firstDot) {
         const providerId = inputModel.slice(0, firstDot);
         const modelId = inputModel.slice(firstDot + 1, lastKey);
-        const keyId = 'key' + inputModel.slice(lastKey + 4);
+        const keyId = `key${inputModel.slice(lastKey + 4)}`;
         // search any category
         const allTargets: RouteTarget[] = Object.values(routeTargets).flat();
-        const match = allTargets.find(t => t.providerId === providerId && t.modelId === modelId && (t.keyId === keyId || !t.keyId));
+        const match = allTargets.find(
+          t =>
+            t.providerId === providerId && t.modelId === modelId && (t.keyId === keyId || !t.keyId)
+        );
         if (match) {
           return {
             route: 'direct',
             selectedTarget: match,
             selectedPipelineId: `${match.providerId}_${match.keyId || 'key1'}.${match.modelId}`,
-            availableTargets: allTargets.filter(t => t.providerId === providerId && t.modelId === modelId)
+            availableTargets: allTargets.filter(
+              t => t.providerId === providerId && t.modelId === modelId
+            ),
           };
         }
       }
-    } catch {}
+    } catch {
+      // Silent catch for config parsing
+    }
   }
 
   // Simple dynamic route: longcontext if max_tokens large; tools if tools present; coding if model name hints; else default
-  const hasTools = Array.isArray((input?.data || input).tools) && (input?.data || input).tools.length > 0;
+  const hasTools =
+    Array.isArray((input?.data || input).tools) && (input?.data || input).tools.length > 0;
   const maxTokens = (input?.data || input)?.max_tokens || 0;
   const lowerModel = String(inputModel).toLowerCase();
   let route = 'default';
-  if (maxTokens >= 8000) route = 'longcontext';
-  else if (hasTools) route = 'tools';
-  else if (/(coder|code)/.test(lowerModel)) route = 'coding';
+  if (maxTokens >= 8000) {
+    route = 'longcontext';
+  } else if (hasTools) {
+    route = 'tools';
+  } else if (/(coder|code)/.test(lowerModel)) {
+    route = 'coding';
+  }
 
   // load balancer: pick first available in routeTargets; else fallback to default
   const targets = routeTargets[route] || routeTargets['default'] || [];
@@ -194,16 +232,31 @@ function chooseRouteAndTarget(input: any) {
     route,
     selectedTarget: selected,
     selectedPipelineId: selectedStr,
-    availableTargets: targets
+    availableTargets: targets,
   };
 }
 
 function registerDefaultDryRunNodes(): void {
   // Configure all three nodes as full-analysis by default
   const nodeCfg: Record<string, NodeDryRunConfig> = {
-    'llm-switch': { enabled: true, mode: 'full-analysis', breakpointBehavior: 'continue', verbosity: 'normal' },
-    'compatibility': { enabled: true, mode: 'full-analysis', breakpointBehavior: 'continue', verbosity: 'normal' },
-    'provider': { enabled: true, mode: 'full-analysis', breakpointBehavior: 'continue', verbosity: 'normal' }
+    'llm-switch': {
+      enabled: true,
+      mode: 'full-analysis',
+      breakpointBehavior: 'continue',
+      verbosity: 'normal',
+    },
+    compatibility: {
+      enabled: true,
+      mode: 'full-analysis',
+      breakpointBehavior: 'continue',
+      verbosity: 'normal',
+    },
+    provider: {
+      enabled: true,
+      mode: 'full-analysis',
+      breakpointBehavior: 'continue',
+      verbosity: 'normal',
+    },
   };
   // reset executor first, then set node configs
   dryRunPipelineExecutor.cleanup();
@@ -212,9 +265,17 @@ function registerDefaultDryRunNodes(): void {
 
   // Create light-weight mock modules implementing DryRunPipelineModule
   const llmSwitchModule = {
-    id: 'llm-switch', type: 'llm-switch', config: {},
-    async initialize() {}, async cleanup() {}, async processOutgoing(x: any) { return x; },
-    async processIncoming(req: any) { return req; },
+    id: 'llm-switch',
+    type: 'llm-switch',
+    config: {},
+    async initialize() {},
+    async cleanup() {},
+    async processOutgoing(x: any) {
+      return x;
+    },
+    async processIncoming(req: any) {
+      return req;
+    },
     async executeNodeDryRun(input: any) {
       const decision = chooseRouteAndTarget({ data: input?.data || input });
       const out = {
@@ -223,59 +284,141 @@ function registerDefaultDryRunNodes(): void {
           providerId: decision.selectedTarget?.providerId || 'unknown',
           modelId: decision.selectedTarget?.modelId || 'unknown',
           requestId: input?.route?.requestId || `req_${Date.now()}`,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         },
-        metadata: { ...(input?.metadata || {}), routingDecision: decision }
+        metadata: { ...(input?.metadata || {}), routingDecision: decision },
       };
       return {
-        nodeId: 'llm-switch', nodeType: 'llm-switch', status: 'success',
-        inputData: input, expectedOutput: out, validationResults: [],
-        performanceMetrics: { estimatedTime: 3, estimatedMemory: 16, complexity: 1 }, executionLog: []
+        nodeId: 'llm-switch',
+        nodeType: 'llm-switch',
+        status: 'success',
+        inputData: input,
+        expectedOutput: out,
+        validationResults: [],
+        performanceMetrics: { estimatedTime: 3, estimatedMemory: 16, complexity: 1 },
+        executionLog: [],
       };
     },
-    async validateOutput() { return []; }, async simulateError() { return null; },
-    async estimatePerformance() { return { time: 3, memory: 16, complexity: 1 }; }
+    async validateOutput() {
+      return [];
+    },
+    async simulateError() {
+      return null;
+    },
+    async estimatePerformance() {
+      return { time: 3, memory: 16, complexity: 1 };
+    },
   } as any;
 
   const compatibilityModule = {
-    id: 'compatibility', type: 'compatibility', config: {},
-    async initialize() {}, async cleanup() {}, async processIncoming(req: any) { return req; }, async processOutgoing(x: any) { return x; },
+    id: 'compatibility',
+    type: 'compatibility',
+    config: {},
+    async initialize() {},
+    async cleanup() {},
+    async processIncoming(req: any) {
+      return req;
+    },
+    async processOutgoing(x: any) {
+      return x;
+    },
     async executeNodeDryRun(input: any) {
-      const out = { ...(input || {}), metadata: { ...(input?.metadata || {}), compatibility: 'passthrough' } };
+      const out = {
+        ...(input || {}),
+        metadata: { ...(input?.metadata || {}), compatibility: 'passthrough' },
+      };
       return {
-        nodeId: 'compatibility', nodeType: 'compatibility', status: 'success',
-        inputData: input, expectedOutput: out, validationResults: [],
-        performanceMetrics: { estimatedTime: 4, estimatedMemory: 20, complexity: 1 }, executionLog: []
+        nodeId: 'compatibility',
+        nodeType: 'compatibility',
+        status: 'success',
+        inputData: input,
+        expectedOutput: out,
+        validationResults: [],
+        performanceMetrics: { estimatedTime: 4, estimatedMemory: 20, complexity: 1 },
+        executionLog: [],
       };
     },
-    async validateOutput() { return []; }, async simulateError() { return null; },
-    async estimatePerformance() { return { time: 4, memory: 20, complexity: 1 }; }
+    async validateOutput() {
+      return [];
+    },
+    async simulateError() {
+      return null;
+    },
+    async estimatePerformance() {
+      return { time: 4, memory: 20, complexity: 1 };
+    },
   } as any;
 
   const providerModule = {
-    id: 'provider', type: "start", config: {},
-    async initialize() {}, async cleanup() {}, async processIncoming(req: any) { return req; }, async processOutgoing(x: any) { return x; },
+    id: 'provider',
+    type: 'start',
+    config: {},
+    async initialize() {},
+    async cleanup() {},
+    async processIncoming(req: any) {
+      return req;
+    },
+    async processOutgoing(x: any) {
+      return x;
+    },
     async executeNodeDryRun(input: any) {
       const response = {
-        id: 'dryrun-response', object: 'chat.completion',
-        choices: [{ index: 0, message: { role: 'assistant', content: 'Simulated provider output' }, finish_reason: 'stop' }],
-        usage: { prompt_tokens: 128, completion_tokens: 256, total_tokens: 384 }
+        id: 'dryrun-response',
+        object: 'chat.completion',
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: 'Simulated provider output' },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: { prompt_tokens: 128, completion_tokens: 256, total_tokens: 384 },
       };
       return {
-        nodeId: 'provider', nodeType: 'provider', status: 'success',
-        inputData: input, expectedOutput: response, validationResults: [],
-        performanceMetrics: { estimatedTime: 6, estimatedMemory: 32, complexity: 1 }, executionLog: []
+        nodeId: 'provider',
+        nodeType: 'provider',
+        status: 'success',
+        inputData: input,
+        expectedOutput: response,
+        validationResults: [],
+        performanceMetrics: { estimatedTime: 6, estimatedMemory: 32, complexity: 1 },
+        executionLog: [],
       };
     },
-    async validateOutput() { return []; }, async simulateError() { return null; },
-    async estimatePerformance() { return { time: 6, memory: 32, complexity: 1 }; }
+    async validateOutput() {
+      return [];
+    },
+    async simulateError() {
+      return null;
+    },
+    async estimatePerformance() {
+      return { time: 6, memory: 32, complexity: 1 };
+    },
   } as any;
 
   // Register nodes and set order
   dryRunPipelineExecutor.registerNodes([
-    { id: 'llm-switch', type: 'llm-switch', module: llmSwitchModule, isDryRun: true, config: pipelineDryRunManager.getNodeConfig('llm-switch') },
-    { id: 'compatibility', type: 'compatibility', module: compatibilityModule, isDryRun: true, config: pipelineDryRunManager.getNodeConfig('compatibility') },
-    { id: 'provider', type: "start", module: providerModule, isDryRun: true, config: pipelineDryRunManager.getNodeConfig('provider') }
+    {
+      id: 'llm-switch',
+      type: 'llm-switch',
+      module: llmSwitchModule,
+      isDryRun: true,
+      config: pipelineDryRunManager.getNodeConfig('llm-switch'),
+    },
+    {
+      id: 'compatibility',
+      type: 'compatibility',
+      module: compatibilityModule,
+      isDryRun: true,
+      config: pipelineDryRunManager.getNodeConfig('compatibility'),
+    },
+    {
+      id: 'provider',
+      type: 'start',
+      module: providerModule,
+      isDryRun: true,
+      config: pipelineDryRunManager.getNodeConfig('provider'),
+    },
   ]);
   dryRunPipelineExecutor.setExecutionOrder(['llm-switch', 'compatibility', 'provider']);
 }
@@ -311,7 +454,7 @@ class ResponseCapture {
     const captureData = {
       timestamp,
       metadata,
-      response
+      response,
     };
 
     fs.writeFileSync(filepath, JSON.stringify(captureData, null, 2));
@@ -322,7 +465,8 @@ class ResponseCapture {
       return [];
     }
 
-    return fs.readdirSync(this.captureDir)
+    return fs
+      .readdirSync(this.captureDir)
       .filter(entry => fs.statSync(path.join(this.captureDir, entry)).isDirectory())
       .sort();
   }
@@ -333,7 +477,8 @@ class ResponseCapture {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    const files = fs.readdirSync(sessionDir)
+    const files = fs
+      .readdirSync(sessionDir)
       .filter(file => file.endsWith('.json'))
       .sort();
 
@@ -346,8 +491,7 @@ class ResponseCapture {
 
 // Create dry-run command group
 export function createDryRunCommands(): Command {
-  const dryRun = new Command('dry-run')
-    .description('Dry-run execution and testing commands');
+  const dryRun = new Command('dry-run').description('Dry-run execution and testing commands');
 
   // Request command
   dryRun
@@ -386,8 +530,8 @@ export function createDryRunCommands(): Command {
             includeLoadBalancerDetails: true,
             includeHealthStatus: true,
             includeWeightCalculation: true,
-            simulateProviderHealth: true
-          }
+            simulateProviderHealth: true,
+          },
         });
 
         spinner.succeed('Request pipeline completed');
@@ -401,7 +545,6 @@ export function createDryRunCommands(): Command {
           fs.writeFileSync(outputPath, JSON.stringify(result, null, 2));
           logger.success(`Results saved to: ${outputPath}`);
         }
-
       } catch (error) {
         spinner.fail('Request pipeline failed');
         logger.error(error instanceof Error ? error.message : String(error));
@@ -436,7 +579,7 @@ export function createDryRunCommands(): Command {
         const result = await dryRunEngine.runResponse(response, {
           pipelineId: options.pipelineId,
           mode: options.mode,
-          nodeConfigs
+          nodeConfigs,
         });
 
         spinner.succeed('Response pipeline completed');
@@ -450,7 +593,6 @@ export function createDryRunCommands(): Command {
           fs.writeFileSync(outputPath, JSON.stringify(result, null, 2));
           logger.success(`Results saved to: ${outputPath}`);
         }
-
       } catch (error) {
         spinner.fail('Response pipeline failed');
         logger.error(error instanceof Error ? error.message : String(error));
@@ -466,7 +608,7 @@ export function createDryRunCommands(): Command {
     .option('--list', 'List capture sessions')
     .option('--session <id>', 'View session details')
     .option('--output <path>', 'Output captured responses to file')
-    .action(async (options) => {
+    .action(async options => {
       const capture = new ResponseCapture();
 
       try {
@@ -506,7 +648,9 @@ export function createDryRunCommands(): Command {
           logger.info('Use --start, --list, or --session <id> to manage capture sessions');
         }
       } catch (error) {
-        logger.error(`Capture command failed: ${  error instanceof Error ? error.message : String(error)}`);
+        logger.error(
+          `Capture command failed: ${error instanceof Error ? error.message : String(error)}`
+        );
         process.exit(1);
       }
     });
@@ -557,19 +701,19 @@ export function createDryRunCommands(): Command {
           }
 
           for (const chunk of chunks) {
-            const promises = chunk.map(async (file) => {
+            const promises = chunk.map(async file => {
               try {
                 const request = await loadFile(file);
                 const result = await dryRunEngine.runRequest(request, {
                   pipelineId: options.pipelineId,
-                  mode: options.mode
+                  mode: options.mode,
                 });
 
                 const fileName = path.basename(file, path.extname(file));
                 const outputData = {
                   input: file,
                   result,
-                  timestamp: new Date().toISOString()
+                  timestamp: new Date().toISOString(),
                 };
 
                 if (options.output) {
@@ -579,7 +723,9 @@ export function createDryRunCommands(): Command {
 
                 return outputData;
               } catch (error) {
-                logger.error(`Failed to process ${file}: ${error instanceof Error ? error.message : String(error)}`);
+                logger.error(
+                  `Failed to process ${file}: ${error instanceof Error ? error.message : String(error)}`
+                );
                 return null;
               }
             });
@@ -596,14 +742,14 @@ export function createDryRunCommands(): Command {
               const request = await loadFile(file);
               const result = await dryRunEngine.runRequest(request, {
                 pipelineId: options.pipelineId,
-                mode: options.mode
+                mode: options.mode,
               });
 
               const fileName = path.basename(file, path.extname(file));
               const outputData = {
                 input: file,
                 result,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
               };
 
               if (options.output) {
@@ -613,12 +759,16 @@ export function createDryRunCommands(): Command {
 
               results.push(outputData);
             } catch (error) {
-              logger.error(`Failed to process ${file}: ${error instanceof Error ? error.message : String(error)}`);
+              logger.error(
+                `Failed to process ${file}: ${error instanceof Error ? error.message : String(error)}`
+              );
             }
           }
         }
 
-        spinner.succeed(`Batch processing completed. Processed ${results.length}/${files.length} files`);
+        spinner.succeed(
+          `Batch processing completed. Processed ${results.length}/${files.length} files`
+        );
 
         // Output summary
         console.log(chalk.cyan('\nBatch Processing Summary:'));
@@ -629,7 +779,6 @@ export function createDryRunCommands(): Command {
         if (options.output) {
           logger.success(`Results saved to: ${options.output}`);
         }
-
       } catch (error) {
         spinner.fail('Batch processing failed');
         logger.error(error instanceof Error ? error.message : String(error));
@@ -677,20 +826,20 @@ export function createDryRunCommands(): Command {
               result = await dryRunEngine.runRequest(currentData, {
                 pipelineId: step.pipelineId || 'request-pipeline',
                 mode: step.mode || 'dry-run',
-                nodeConfigs: step.nodeConfigs
+                nodeConfigs: step.nodeConfigs,
               });
               break;
             case 'response':
               result = await dryRunEngine.runResponse(currentData, {
                 pipelineId: step.pipelineId || 'response-pipeline',
                 mode: step.mode || 'dry-run',
-                nodeConfigs: step.nodeConfigs
+                nodeConfigs: step.nodeConfigs,
               });
               break;
             case 'bidirectional':
               result = await dryRunEngine.runBidirectional(currentData, {
                 pipelineId: step.pipelineId || 'bidirectional-pipeline',
-                nodeConfigs: step.nodeConfigs
+                nodeConfigs: step.nodeConfigs,
               });
               break;
             default:
@@ -701,7 +850,7 @@ export function createDryRunCommands(): Command {
             step: i + 1,
             name: step.name || 'unnamed',
             type: step.type,
-            result
+            result,
           });
 
           // Update current data for next step
@@ -716,8 +865,8 @@ export function createDryRunCommands(): Command {
           steps: results,
           summary: {
             totalSteps: chainConfig.steps.length,
-            completedSteps: results.length
-          }
+            completedSteps: results.length,
+          },
         };
 
         formatOutput(output, options.output);
@@ -728,7 +877,6 @@ export function createDryRunCommands(): Command {
           fs.writeFileSync(outputPath, JSON.stringify(output, null, 2));
           logger.success(`Results saved to: ${outputPath}`);
         }
-
       } catch (error) {
         spinner.fail('Chain execution failed');
         logger.error(error instanceof Error ? error.message : String(error));
@@ -741,7 +889,9 @@ export function createDryRunCommands(): Command {
 
 // Normalize any OpenAI-style input into PipelineRequest shape
 function normalizeToPipelineRequest(raw: any): any {
-  if (raw && raw.data && raw.route && raw.metadata && raw.debug) {return raw;}
+  if (raw && raw.data && raw.route && raw.metadata && raw.debug) {
+    return raw;
+  }
   const model = raw?.model || raw?.data?.model || 'unknown';
   const now = Date.now();
   return {
@@ -750,9 +900,9 @@ function normalizeToPipelineRequest(raw: any): any {
       providerId: 'dynamic',
       modelId: typeof model === 'string' ? String(model) : 'unknown',
       requestId: `req_${now}_${Math.random().toString(36).slice(2, 8)}`,
-      timestamp: now
+      timestamp: now,
     },
     metadata: { source: 'dry-run-cli', transformations: [], processingTime: 0 },
-    debug: { enabled: true, stages: { 'llm-switch': true, compatibility: true, provider: true } }
+    debug: { enabled: true, stages: { 'llm-switch': true, compatibility: true, provider: true } },
   };
 }

@@ -95,6 +95,27 @@ program
         logger.success(`Default configuration created: ${configPath}`);
       }
 
+      // 检查并应用简单日志配置
+      const simpleLogConfig = loadSimpleLogConfig();
+      if (simpleLogConfig && simpleLogConfig.enabled) {
+        logger.info('检测到简单日志配置，正在应用...');
+        logger.info(`简单日志级别: ${simpleLogConfig.logLevel}`);
+        logger.info(`简单日志输出: ${simpleLogConfig.output}`);
+        
+        // 将简单日志配置应用到环境变量或全局配置中
+        process.env.SIMPLE_LOG_ENABLED = 'true';
+        process.env.SIMPLE_LOG_LEVEL = simpleLogConfig.logLevel;
+        process.env.SIMPLE_LOG_OUTPUT = simpleLogConfig.output;
+        
+        if (simpleLogConfig.output === 'file' || simpleLogConfig.output === 'both') {
+          process.env.SIMPLE_LOG_DIRECTORY = simpleLogConfig.logDirectory;
+          logger.info(`简单日志目录: ${simpleLogConfig.logDirectory}`);
+        }
+        
+        logger.success('✨ 简单日志配置已应用！');
+        logger.info('💡 提示: 使用 "routecodex simple-log off" 可以随时关闭简单日志');
+      }
+
       // Set modules config path in process.argv and start the main application
       process.argv[2] = './config/modules.json';
       await main();
@@ -457,10 +478,28 @@ program
 // Import commands at top level
 import { createDryRunCommands } from './commands/dry-run.js';
 import { createOfflineLogCommand } from './commands/offline-log.js';
+import { createSimpleLogCommand } from './commands/simple-log.js';
+
+// 简单日志配置工具函数
+function loadSimpleLogConfig(): any {
+  const configPath = path.join(homedir(), '.routecodex', 'simple-log-config.json');
+  
+  if (!fs.existsSync(configPath)) {
+    return null;
+  }
+  
+  try {
+    return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  } catch (error) {
+    console.warn('无法读取简单日志配置，使用默认设置');
+    return null;
+  }
+}
 
 // Add commands
 program.addCommand(createDryRunCommands());
 program.addCommand(createOfflineLogCommand());
+program.addCommand(createSimpleLogCommand());
 
 // Examples command
 program

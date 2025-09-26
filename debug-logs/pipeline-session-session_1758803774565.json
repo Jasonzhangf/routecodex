@@ -1,0 +1,29 @@
+{
+  "sessionId": "session_1758803774565",
+  "pipelineId": "unknown",
+  "startTime": 1758803774565,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "error_message_registered",
+      "moduleId": "error-handler-registry",
+      "position": "middle",
+      "startTime": 1758803774565,
+      "status": "running"
+    },
+    {
+      "operationId": "error_message_registered",
+      "moduleId": "error-handler-registry",
+      "position": "middle",
+      "startTime": 1758803774565,
+      "status": "running"
+    },
+    {
+      "operationId": "error_message_registered",
+      "moduleId": "error-handler-registry",
+      "position": "middle",
+      "startTime": 1758803774565,
+      "status": "running"
+    }
+  ]
+}

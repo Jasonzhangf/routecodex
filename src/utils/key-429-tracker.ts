@@ -38,7 +38,7 @@ export class Key429Tracker {
       blacklistDurationMs: 30 * 60 * 1000, // 30 分钟
       cleanupIntervalMs: 5 * 60 * 1000, // 5 分钟
       maxRecordAgeMs: 2 * 60 * 60 * 1000, // 2 小时
-      ...config
+      ...config,
     };
 
     this.startCleanupTimer();
@@ -50,7 +50,10 @@ export class Key429Tracker {
    * @param pipelineIds 受影响的流水线 ID 列表
    * @returns 错误记录和是否触发黑名单
    */
-  record429Error(key: string, pipelineIds: string[]): {
+  record429Error(
+    key: string,
+    pipelineIds: string[]
+  ): {
     record: Key429ErrorRecord;
     blacklisted: boolean;
     shouldRetry: boolean;
@@ -74,7 +77,7 @@ export class Key429Tracker {
           timestamp: now,
           consecutiveCount: existing.consecutiveCount + 1,
           lastErrorTime: now,
-          pipelineIds: [...new Set([...existing.pipelineIds, ...pipelineIds])]
+          pipelineIds: [...new Set([...existing.pipelineIds, ...pipelineIds])],
         };
       } else {
         // 间隔太短，重置计数
@@ -83,7 +86,7 @@ export class Key429Tracker {
           timestamp: now,
           consecutiveCount: 1,
           lastErrorTime: now,
-          pipelineIds: [...new Set([...existing.pipelineIds, ...pipelineIds])]
+          pipelineIds: [...new Set([...existing.pipelineIds, ...pipelineIds])],
         };
       }
     } else {
@@ -94,7 +97,7 @@ export class Key429Tracker {
         consecutiveCount: 1,
         lastErrorTime: now,
         isBlacklisted: false,
-        pipelineIds
+        pipelineIds,
       };
     }
 
@@ -110,7 +113,7 @@ export class Key429Tracker {
     return {
       record,
       blacklisted,
-      shouldRetry: !blacklisted && record.consecutiveCount < this.config.maxConsecutiveErrors
+      shouldRetry: !blacklisted && record.consecutiveCount < this.config.maxConsecutiveErrors,
     };
   }
 
@@ -215,7 +218,7 @@ export class Key429Tracker {
       consecutiveErrors: record.consecutiveCount,
       isBlacklisted: record.isBlacklisted,
       lastErrorTime: record.lastErrorTime,
-      blacklistedAt: record.blacklistedAt
+      blacklistedAt: record.blacklistedAt,
     };
   }
 
@@ -283,14 +286,14 @@ export class Key429Tracker {
       key: record.key,
       consecutiveCount: record.consecutiveCount,
       isBlacklisted: record.isBlacklisted,
-      lastErrorTime: record.lastErrorTime
+      lastErrorTime: record.lastErrorTime,
     }));
 
     return {
       totalRecords: this.errorRecords.size,
       blacklistedKeys: this.getBlacklistedKeys(),
       config: this.config,
-      records
+      records,
     };
   }
 }

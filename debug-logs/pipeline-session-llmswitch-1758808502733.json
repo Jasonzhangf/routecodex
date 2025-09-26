@@ -1,0 +1,222 @@
+{
+  "sessionId": "llmswitch-1758808502733",
+  "pipelineId": "unknown",
+  "startTime": 1758808514239,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "transformation:llmswitch-request-transform",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758808514239,
+      "status": "running",
+      "input": {
+        "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hello, how are you?"
+          }
+        ]
+      }
+    },
+    {
+      "operationId": "transformation:llmswitch-request-transform",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758808518082,
+      "status": "running",
+      "input": {
+        "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        "messages": [
+          {
+            "role": "user",
+            "content": "请列出当前目录中的所有文件夹"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "list_files",
+              "description": "列出指定目录中的文件和文件夹",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "要列出的目录路径"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "tool_choice": "auto"
+      }
+    },
+    {
+      "operationId": "transformation:llmswitch-response-transform",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758808518824,
+      "status": "running",
+      "input": {
+        "data": {
+          "id": "chatcmpl-07ad5008-c879-43bb-889a-aec6440f3e30",
+          "object": "chat.completion",
+          "created": 1758808518256,
+          "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+          "system_fingerprint": "",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": null,
+                "content": "",
+                "tool_calls": null,
+                "function_calls": null,
+                "reasoning_content": ""
+              },
+              "finish_reason": "tool_calls",
+              "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"path\": \".\"}",
+                      "name": "list_files"
+                    },
+                    "id": "call_d8e12faba6914f38bdbeaf97",
+                    "index": 0,
+                    "type": "function"
+                  }
+                ],
+                "function_calls": null,
+                "reasoning_content": ""
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 298,
+            "completion_tokens": 19,
+            "total_tokens": 317
+          }
+        },
+        "status": 200,
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "openai-1758808518084-8kytdt8g4"
+        },
+        "metadata": {
+          "requestId": "openai-1758808518084-8kytdt8g4",
+          "processingTime": 734,
+          "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct"
+        }
+      }
+    },
+    {
+      "operationId": "transformation:llmswitch-request-transform",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758809188320,
+      "status": "running",
+      "input": {
+        "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hello, what is 2+2?"
+          }
+        ]
+      }
+    },
+    {
+      "operationId": "transformation:llmswitch-response-transform",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758809189044,
+      "status": "running",
+      "input": {
+        "data": {
+          "id": "chatcmpl-8e6bf8c1-5c74-4d58-8115-e35b04602e64",
+          "object": "chat.completion",
+          "created": 1758809188665,
+          "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+          "system_fingerprint": "",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": null,
+                "content": "",
+                "tool_calls": null,
+                "function_calls": null,
+                "reasoning_content": ""
+              },
+              "finish_reason": "stop",
+              "message": {
+                "role": "assistant",
+                "content": "Hello! 2+2 equals 4.",
+                "tool_calls": null,
+                "function_calls": null,
+                "reasoning_content": ""
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 17,
+            "completion_tokens": 10,
+            "total_tokens": 27
+          }
+        },
+        "status": 200,
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "openai-1758809188322-t9vosnbqw"
+        },
+        "metadata": {
+          "requestId": "openai-1758809188322-t9vosnbqw",
+          "processingTime": 716,
+          "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct"
+        }
+      }
+    },
+    {
+      "operationId": "transformation:llmswitch-request-transform",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758809245726,
+      "status": "running",
+      "input": {
+        "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hello, what is the answer to ?"
+          }
+        ]
+      }
+    },
+    {
+      "operationId": "transformation:llmswitch-request-transform",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758809253546,
+      "status": "running",
+      "input": {
+        "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hello, what is 2+2?"
+          }
+        ]
+      }
+    }
+  ]
+}

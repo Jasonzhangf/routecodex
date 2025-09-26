@@ -10,7 +10,7 @@ import type {
   FieldConversionInfo,
   ProtocolProcessingInfo,
   PerformanceEstimate,
-  ConfigValidationResult
+  ConfigValidationResult,
 } from '../modules/dry-run/dry-run-interface.js';
 
 /**
@@ -135,14 +135,14 @@ export class LoadBalancer {
       enableCircuitBreaker: true,
       circuitBreakerThreshold: 0.5, // 50%错误率
       circuitBreakerRecoveryTime: 60000, // 1分钟
-      ...config
+      ...config,
     };
 
     this.dryRunConfig = {
       enabled: false,
       verbosity: 'normal',
       includePerformanceEstimate: true,
-      includeConfigValidation: true
+      includeConfigValidation: true,
     };
 
     this.stats = this.initializeStats();
@@ -215,7 +215,10 @@ export class LoadBalancer {
   /**
    * 执行dry-run分析
    */
-  async executeDryRun(targets: LoadBalancerTarget[], context?: any): Promise<LoadBalancerDryRunResponse> {
+  async executeDryRun(
+    targets: LoadBalancerTarget[],
+    context?: any
+  ): Promise<LoadBalancerDryRunResponse> {
     const startTime = Date.now();
     const analysisId = `dryrun_lb_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -240,7 +243,7 @@ export class LoadBalancer {
           id: analysisId,
           type: 'load-balancer-analysis',
           timestamp: new Date().toISOString(),
-          strategy: this.config.strategy
+          strategy: this.config.strategy,
         },
         routingDecision: await this.simulateRoutingDecision(targets, analysisId),
         fieldConversion: this.simulateFieldConversion(),
@@ -250,7 +253,7 @@ export class LoadBalancer {
         healthAnalysis: healthStatus,
         executionPlan: this.generateLoadBalancerExecutionPlan(targets),
         recommendations,
-        totalDryRunTimeMs: 0
+        totalDryRunTimeMs: 0,
       };
 
       // 添加性能估算
@@ -267,7 +270,6 @@ export class LoadBalancer {
 
       console.log(`✅ Load Balancer dry-run analysis completed in ${response.totalDryRunTimeMs}ms`);
       return response;
-
     } catch (error) {
       console.error('❌ Load Balancer dry-run analysis failed:', error);
       throw error;
@@ -317,7 +319,9 @@ export class LoadBalancer {
   /**
    * 设置策略
    */
-  setStrategy(strategy: 'round-robin' | 'weighted' | 'least-connections' | 'fastest-response' | 'random'): void {
+  setStrategy(
+    strategy: 'round-robin' | 'weighted' | 'least-connections' | 'fastest-response' | 'random'
+  ): void {
     this.config.strategy = strategy;
     console.log('🔄 Load Balancer strategy changed to:', strategy);
   }
@@ -373,9 +377,9 @@ export class LoadBalancer {
       healthCheckStats: {
         total: 0,
         passed: 0,
-        failed: 0
+        failed: 0,
       },
-      circuitBreakerEvents: 0
+      circuitBreakerEvents: 0,
     };
   }
 
@@ -409,9 +413,7 @@ export class LoadBalancer {
   }
 
   private leastConnectionsSelection(targets: LoadBalancerTarget[]): LoadBalancerTarget {
-    return targets.reduce((min, target) =>
-      target.requestCount < min.requestCount ? target : min
-    );
+    return targets.reduce((min, target) => (target.requestCount < min.requestCount ? target : min));
   }
 
   private fastestResponseSelection(targets: LoadBalancerTarget[]): LoadBalancerTarget {
@@ -435,7 +437,8 @@ export class LoadBalancer {
 
     const key = this.getTargetKey(target);
     this.stats.targetDistribution[key] = (this.stats.targetDistribution[key] || 0) + 1;
-    this.stats.strategyUsage[this.config.strategy] = (this.stats.strategyUsage[this.config.strategy] || 0) + 1;
+    this.stats.strategyUsage[this.config.strategy] =
+      (this.stats.strategyUsage[this.config.strategy] || 0) + 1;
   }
 
   private async checkTargetHealth(target: LoadBalancerTarget): Promise<boolean> {
@@ -444,8 +447,16 @@ export class LoadBalancer {
     return target.health === 'healthy' && target.errorRate < 0.5;
   }
 
-  private async analyzeAllStrategies(targets: LoadBalancerTarget[]): Promise<Record<string, LoadBalancerDecisionDetails>> {
-    const strategies = ['round-robin', 'weighted', 'least-connections', 'fastest-response', 'random'];
+  private async analyzeAllStrategies(
+    targets: LoadBalancerTarget[]
+  ): Promise<Record<string, LoadBalancerDecisionDetails>> {
+    const strategies = [
+      'round-robin',
+      'weighted',
+      'least-connections',
+      'fastest-response',
+      'random',
+    ];
     const analysis: Record<string, LoadBalancerDecisionDetails> = {};
 
     for (const strategy of strategies) {
@@ -455,7 +466,10 @@ export class LoadBalancer {
     return analysis;
   }
 
-  private async analyzeStrategy(targets: LoadBalancerTarget[], strategy: string): Promise<LoadBalancerDecisionDetails> {
+  private async analyzeStrategy(
+    targets: LoadBalancerTarget[],
+    strategy: string
+  ): Promise<LoadBalancerDecisionDetails> {
     let selectedTarget: LoadBalancerTarget;
 
     switch (strategy) {
@@ -485,11 +499,15 @@ export class LoadBalancer {
       confidence: this.calculateStrategyConfidence(strategy, targets),
       estimatedResponseTime: selectedTarget.responseTime,
       alternatives: targets.filter(t => t !== selectedTarget),
-      healthStatus: this.calculateHealthStatus(targets)
+      healthStatus: this.calculateHealthStatus(targets),
     };
   }
 
-  private generateStrategyReasoning(strategy: string, selected: LoadBalancerTarget, targets: LoadBalancerTarget[]): string {
+  private generateStrategyReasoning(
+    strategy: string,
+    selected: LoadBalancerTarget,
+    targets: LoadBalancerTarget[]
+  ): string {
     switch (strategy) {
       case 'weighted':
         return `Selected based on weight (${selected.weight}) and distribution`;
@@ -533,22 +551,30 @@ export class LoadBalancer {
     const targetHealthStatus = targets.map(target => ({
       target: this.getTargetKey(target),
       health: target.health,
-      issues: this.getTargetHealthIssues(target)
+      issues: this.getTargetHealthIssues(target),
     }));
 
     return {
       overallHealth,
-      targetHealthStatus
+      targetHealthStatus,
     };
   }
 
-  private calculateOverallHealth(targets: LoadBalancerTarget[]): 'excellent' | 'good' | 'fair' | 'poor' {
+  private calculateOverallHealth(
+    targets: LoadBalancerTarget[]
+  ): 'excellent' | 'good' | 'fair' | 'poor' {
     const healthyCount = targets.filter(t => t.health === 'healthy').length;
     const healthRatio = healthyCount / targets.length;
 
-    if (healthRatio >= 0.9) {return 'excellent';}
-    if (healthRatio >= 0.7) {return 'good';}
-    if (healthRatio >= 0.5) {return 'fair';}
+    if (healthRatio >= 0.9) {
+      return 'excellent';
+    }
+    if (healthRatio >= 0.7) {
+      return 'good';
+    }
+    if (healthRatio >= 0.5) {
+      return 'fair';
+    }
     return 'poor';
   }
 
@@ -577,25 +603,35 @@ export class LoadBalancer {
     return {
       currentLoad: totalRequests > 0 ? Math.min(totalRequests / 1000, 1) : 0, // 归一化负载
       predictedResponseTime: avgResponseTime,
-      resourceUtilization: targets.reduce((util, target) => {
-        const key = this.getTargetKey(target);
-        util[key] = target.requestCount / Math.max(target.requestCount + 100, 1); // 简化的利用率计算
-        return util;
-      }, {} as Record<string, number>),
+      resourceUtilization: targets.reduce(
+        (util, target) => {
+          const key = this.getTargetKey(target);
+          util[key] = target.requestCount / Math.max(target.requestCount + 100, 1); // 简化的利用率计算
+          return util;
+        },
+        {} as Record<string, number>
+      ),
       bottlenecks: targets
         .filter(t => t.responseTime > 3000 || t.errorRate > 0.2)
-        .map(t => this.getTargetKey(t))
+        .map(t => this.getTargetKey(t)),
     };
   }
 
-  private generateRecommendations(targets: LoadBalancerTarget[], strategyAnalysis: Record<string, LoadBalancerDecisionDetails>) {
-    const bestStrategy = Object.entries(strategyAnalysis)
-      .sort(([,a], [,b]) => b.confidence - a.confidence)[0];
+  private generateRecommendations(
+    targets: LoadBalancerTarget[],
+    strategyAnalysis: Record<string, LoadBalancerDecisionDetails>
+  ) {
+    const bestStrategy = Object.entries(strategyAnalysis).sort(
+      ([, a], [, b]) => b.confidence - a.confidence
+    )[0];
 
     return {
       strategy: `Recommended strategy: ${bestStrategy[0]} (confidence: ${bestStrategy[1].confidence.toFixed(2)})`,
-      scaling: targets.length < 3 ? 'Consider adding more targets for better load distribution' : 'Current target count is adequate',
-      health: 'Enable health checks and circuit breakers for better reliability'
+      scaling:
+        targets.length < 3
+          ? 'Consider adding more targets for better load distribution'
+          : 'Current target count is adequate',
+      health: 'Enable health checks and circuit breakers for better reliability',
     };
   }
 
@@ -609,25 +645,28 @@ export class LoadBalancer {
         providerId: selectedTarget.providerId,
         modelId: selectedTarget.modelId,
         keyId: selectedTarget.keyId,
-        actualKey: 'hidden-for-security'
+        actualKey: 'hidden-for-security',
       },
       availableTargets: targets.map(t => ({
         providerId: t.providerId,
         modelId: t.modelId,
         keyId: t.keyId,
-        health: t.health
+        health: t.health,
       })),
       loadBalancerDecision: {
         algorithm: this.config.strategy,
-        weights: targets.reduce((acc, t) => {
-          acc[this.getTargetKey(t)] = t.weight;
-          return acc;
-        }, {} as Record<string, number>),
+        weights: targets.reduce(
+          (acc, t) => {
+            acc[this.getTargetKey(t)] = t.weight;
+            return acc;
+          },
+          {} as Record<string, number>
+        ),
         selectedWeight: selectedTarget.weight,
-        reasoning: this.generateStrategyReasoning(this.config.strategy, selectedTarget, targets)
+        reasoning: this.generateStrategyReasoning(this.config.strategy, selectedTarget, targets),
       },
       timestamp: new Date().toISOString(),
-      decisionTimeMs: 2
+      decisionTimeMs: 2,
     };
   }
 
@@ -638,10 +677,10 @@ export class LoadBalancer {
       fieldMappings: [
         { from: 'model', to: 'model', transformation: 'passthrough' },
         { from: 'messages', to: 'messages', transformation: 'passthrough' },
-        { from: 'temperature', to: 'temperature', transformation: 'passthrough' }
+        { from: 'temperature', to: 'temperature', transformation: 'passthrough' },
       ],
       conversionTimeMs: 1,
-      success: true
+      success: true,
     };
   }
 
@@ -651,7 +690,7 @@ export class LoadBalancer {
       outputProtocol: 'openai',
       conversionSteps: [],
       processingTimeMs: 1,
-      requiresConversion: false
+      requiresConversion: false,
     };
   }
 
@@ -661,26 +700,26 @@ export class LoadBalancer {
         step: 'target_health_check',
         module: 'load-balancer',
         description: 'Check health status of all available targets',
-        estimatedTimeMs: 5
+        estimatedTimeMs: 5,
       },
       {
         step: 'strategy_execution',
         module: 'load-balancer',
         description: `Execute ${this.config.strategy} load balancing strategy`,
-        estimatedTimeMs: 2
+        estimatedTimeMs: 2,
       },
       {
         step: 'target_selection',
         module: 'load-balancer',
         description: 'Select optimal target based on strategy and health',
-        estimatedTimeMs: 1
+        estimatedTimeMs: 1,
       },
       {
         step: 'circuit_breaker_check',
         module: 'load-balancer',
         description: 'Verify target is not in circuit breaker state',
-        estimatedTimeMs: 1
-      }
+        estimatedTimeMs: 1,
+      },
     ];
   }
 
@@ -694,10 +733,10 @@ export class LoadBalancer {
         conversion: 1,
         protocol: 1,
         execution: avgResponseTime,
-        response: 5
+        response: 5,
       },
       confidence: 0.8,
-      baselineSource: 'historical' as const
+      baselineSource: 'historical' as const,
     };
   }
 
@@ -721,7 +760,7 @@ export class LoadBalancer {
     return {
       routingConfig: { valid: errors.length === 0, errors: [], warnings: [] },
       pipelineConfig: { valid: true, errors: [], warnings: [] },
-      targetConfig: { valid: errors.length === 0, errors, warnings }
+      targetConfig: { valid: errors.length === 0, errors, warnings },
     };
   }
 

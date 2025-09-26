@@ -60,7 +60,6 @@ export class RefactoringAgent {
       console.log('   2. Run the test suite');
       console.log('   3. Test with actual configuration files');
       console.log('   4. Deploy and monitor');
-
     } catch (error) {
       console.error('❌ Refactoring failed:', error);
       throw error;
@@ -86,7 +85,7 @@ export class RefactoringAgent {
         'src/config/user-config-types.ts',
         'src/config/user-config-manager.ts',
         'config/modules.json',
-        '~/.routecodex/config.json'
+        '~/.routecodex/config.json',
       ];
 
       for (const file of filesToCheck) {
@@ -113,7 +112,7 @@ export class RefactoringAgent {
 
     const typesFile = {
       name: 'merged-config-types.ts',
-      content: this.getMergedConfigTypesCode()
+      content: this.getMergedConfigTypesCode(),
     };
 
     const configDir = path.join(this.projectRoot, 'src/config');
@@ -135,20 +134,20 @@ export class RefactoringAgent {
     const parsers = [
       {
         name: 'user-config-parser.ts',
-        content: this.getUserConfigParserCode()
+        content: this.getUserConfigParserCode(),
       },
       {
         name: 'auth-file-resolver.ts',
-        content: this.getAuthFileResolverCode()
+        content: this.getAuthFileResolverCode(),
       },
       {
         name: 'route-target-parser.ts',
-        content: this.getRouteTargetParserCode()
+        content: this.getRouteTargetParserCode(),
       },
       {
         name: 'config-merger.ts',
-        content: this.getConfigMergerCode()
-      }
+        content: this.getConfigMergerCode(),
+      },
     ];
 
     const configDir = path.join(this.projectRoot, 'src/config');
@@ -175,20 +174,20 @@ export class RefactoringAgent {
     const moduleFiles = [
       {
         name: 'virtual-router-module.ts',
-        content: this.getVirtualRouterModuleCode()
+        content: this.getVirtualRouterModuleCode(),
       },
       {
         name: 'route-target-pool.ts',
-        content: this.getRouteTargetPoolCode()
+        content: this.getRouteTargetPoolCode(),
       },
       {
         name: 'pipeline-config-manager.ts',
-        content: this.getPipelineConfigManagerCode()
+        content: this.getPipelineConfigManagerCode(),
       },
       {
         name: 'protocol-manager.ts',
-        content: this.getProtocolManagerCode()
-      }
+        content: this.getProtocolManagerCode(),
+      },
     ];
 
     for (const file of moduleFiles) {
@@ -212,16 +211,16 @@ export class RefactoringAgent {
     const moduleFiles = [
       {
         name: 'config-manager-module.ts',
-        content: this.getConfigManagerModuleCode()
+        content: this.getConfigManagerModuleCode(),
       },
       {
         name: 'merged-config-generator.ts',
-        content: this.getMergedConfigGeneratorCode()
+        content: this.getMergedConfigGeneratorCode(),
       },
       {
         name: 'config-watcher.ts',
-        content: this.getConfigWatcherCode()
-      }
+        content: this.getConfigWatcherCode(),
+      },
     ];
 
     for (const file of moduleFiles) {
@@ -259,16 +258,16 @@ export class RefactoringAgent {
     const testFiles = [
       {
         name: 'user-config-parser.test.ts',
-        content: this.getUserConfigParserTestCode()
+        content: this.getUserConfigParserTestCode(),
       },
       {
         name: 'config-merger.test.ts',
-        content: this.getConfigMergerTestCode()
+        content: this.getConfigMergerTestCode(),
       },
       {
         name: 'virtual-router.test.ts',
-        content: this.getVirtualRouterTestCode()
-      }
+        content: this.getVirtualRouterTestCode(),
+      },
     ];
 
     for (const file of testFiles) {
@@ -291,7 +290,7 @@ export class RefactoringAgent {
       'src/config/user-config-parser.ts',
       'src/config/auth-file-resolver.ts',
       'src/modules/virtual-router/virtual-router-module.ts',
-      'src/modules/config-manager/config-manager-module.ts'
+      'src/modules/config-manager/config-manager-module.ts',
     ];
 
     for (const file of requiredFiles) {

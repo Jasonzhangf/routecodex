@@ -8,7 +8,7 @@ try {
   await configManager.initialize({
     autoReload: false,
     configPath: '~/.routecodex/config/modelscope.json',
-    mergedConfigPath: './config/merged-config.4004.json',
+    mergedConfigPath: './config/merged-config.json',
     systemModulesPath: './config/modules.json'
   });
 

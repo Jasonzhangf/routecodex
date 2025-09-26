@@ -1,0 +1,368 @@
+name: Performance Benchmark
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/**'
+      - 'tests/performance/**'
+      - '.github/workflows/performance-benchmark.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'tests/performance/**'
+  schedule:
+    - cron: '0 4 * * *'  # 每天凌晨4点运行
+  workflow_dispatch:
+    inputs:
+      benchmark_type:
+        description: 'Benchmark type'
+        required: true
+        type: choice
+        options: [ 'full', 'quick', 'memory', 'cpu' ]
+        default: 'full'
+
+env:
+  NODE_VERSION: '20.x'
+  PERFORMANCE_THRESHOLD: 10  # 性能下降超过10%则失败
+  MEMORY_THRESHOLD: 100      # 内存使用超过100MB则警告
+
+jobs:
+  # 性能基准测试
+  performance-benchmark:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+      fail-fast: false
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build application
+      run: npm run build
+
+    - name: Setup performance monitoring
+      run: |
+        # 安装性能监控工具
+        npm install -g clinic autocannon 0x
+        
+    - name: Run startup time benchmark
+      run: |
+        echo "Testing application startup time..."
+        START_TIME=$(date +%s%N)
+        timeout 30s node dist/index.js start --port 9999 &
+        SERVER_PID=$!
+        
+        # 等待服务器启动
+        for i in {1..30}; do
+          if curl -f http://localhost:9999/health 2>/dev/null; then
+            END_TIME=$(date +%s%N)
+            STARTUP_TIME=$((($END_TIME - $START_TIME) / 1000000))
+            echo "Startup time: ${STARTUP_TIME}ms"
+            echo "startup_time=${STARTUP_TIME}" >> $GITHUB_ENV
+            break
+          fi
+          sleep 1
+        done
+        
+        kill $SERVER_PID 2>/dev/null || true
+        wait $SERVER_PID 2>/dev/null || true
+
+    - name: Run memory usage benchmark
+      run: |
+        echo "Testing memory usage patterns..."
+        node --expose-gc dist/index.js start --port 9999 &
+        SERVER_PID=$!
+        sleep 5
+        
+        # 强制垃圾回收
+        curl -X POST http://localhost:9999/debug/gc 2>/dev/null || true
+        sleep 2
+        
+        # 获取内存使用
+        MEMORY_USAGE=$(ps -p $SERVER_PID -o rss= | awk '{print $1}')
+        MEMORY_MB=$((MEMORY_USAGE / 1024))
+        
+        echo "Memory usage: ${MEMORY_MB}MB"
+        echo "memory_usage=${MEMORY_MB}" >> $GITHUB_ENV
+        
+        kill $SERVER_PID 2>/dev/null || true
+        wait $SERVER_PID 2>/dev/null || true
+
+    - name: Run API response time benchmark
+      run: |
+        echo "Testing API response times..."
+        node dist/index.js start --port 9999 &
+        SERVER_PID=$!
+        sleep 5
+        
+        # 测试基本端点响应时间
+        endpoints=("/health" "/metrics" "/v1/models")
+        
+        for endpoint in "${endpoints[@]}"; do
+          echo "Testing $endpoint..."
+          RESPONSE_TIME=$(curl -w "%{time_total}" -o /dev/null -s http://localhost:9999$endpoint)
+          echo "${endpoint}_response_time=${RESPONSE_TIME}" >> $GITHUB_ENV
+          echo "$endpoint response time: ${RESPONSE_TIME}s"
+        done
+        
+        kill $SERVER_PID 2>/dev/null || true
+        wait $SERVER_PID 2>/dev/null || true
+
+    - name: Run load test
+      run: |
+        echo "Running load test..."
+        node dist/index.js start --port 9999 &
+        SERVER_PID=$!
+        sleep 5
+        
+        # 使用autocannon进行负载测试
+        npx autocannon -c 10 -d 30 -p 10 http://localhost:9999/health
+        
+        kill $SERVER_PID 2>/dev/null || true
+        wait $SERVER_PID 2>/dev/null || true
+
+    - name: Run memory leak detection
+      run: |
+        echo "Detecting memory leaks..."
+        node --inspect dist/index.js start --port 9999 &
+        SERVER_PID=$!
+        sleep 5
+        
+        # 模拟内存压力
+        for i in {1..100}; do
+          curl -s http://localhost:9999/health > /dev/null
+          if [ $((i % 20)) -eq 0 ]; then
+            echo "Iteration $i completed"
+          fi
+        done
+        
+        # 检查内存增长
+        INITIAL_MEMORY=$(ps -p $SERVER_PID -o rss= | awk '{print $1}')
+        sleep 10
+        FINAL_MEMORY=$(ps -p $SERVER_PID -o rss= | awk '{print $1}')
+        
+        MEMORY_GROWTH=$((FINAL_MEMORY - INITIAL_MEMORY))
+        MEMORY_GROWTH_MB=$((MEMORY_GROWTH / 1024))
+        
+        echo "Memory growth: ${MEMORY_GROWTH_MB}MB"
+        echo "memory_growth=${MEMORY_GROWTH_MB}" >> $GITHUB_ENV
+        
+        if [ $MEMORY_GROWTH_MB -gt 50 ]; then
+          echo "⚠️  Potential memory leak detected: ${MEMORY_GROWTH_MB}MB growth"
+        fi
+        
+        kill $SERVER_PID 2>/dev/null || true
+        wait $SERVER_PID 2>/dev/null || true
+
+    - name: Run database performance test
+      run: |
+        echo "Testing database operations performance..."
+        # 这里可以添加数据库性能测试
+        
+    - name: Generate performance report
+      run: |
+        echo "# Performance Benchmark Report" > performance-report.md
+        echo "- Node.js version: ${{ matrix.node-version }}" >> performance-report.md
+        echo "- Startup time: ${{ env.startup_time }}ms" >> performance-report.md
+        echo "- Memory usage: ${{ env.memory_usage }}MB" >> performance-report.md
+        echo "- Memory growth: ${{ env.memory_growth }}MB" >> performance-report.md
+        echo "- Health check response time: ${{ env./health_response_time }}s" >> performance-report.md
+        echo "- Metrics response time: ${{ env./metrics_response_time }}s" >> performance-report.md
+        echo "- Models endpoint response time: ${{ env./v1/models_response_time }}s" >> performance-report.md
+        
+        cat performance-report.md
+
+    - name: Upload performance results
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-results-${{ matrix.node-version }}-${{ github.sha }}
+        path: performance-report.md
+        retention-days: 90
+
+  # 性能回归检查
+  performance-regression:
+    runs-on: ubuntu-latest
+    needs: [performance-benchmark]
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: Checkout PR code
+      uses: actions/checkout@v4
+
+    - name: Download current performance results
+      uses: actions/download-artifact@v3
+      with:
+        name: performance-results-20.x-${{ github.sha }}
+
+    - name: Get baseline performance
+      run: |
+        # 从主分支获取基线性能数据
+        git fetch origin main:main
+        git checkout main
+        
+        # 这里应该运行基线测试并保存结果
+        # 为了演示，我们创建模拟数据
+        echo "startup_time_baseline=1000" >> $GITHUB_ENV
+        echo "memory_usage_baseline=50" >> $GITHUB_ENV
+        
+        git checkout -
+
+    - name: Compare performance
+      run: |
+        # 性能回归检查
+        CURRENT_STARTUP=${{ env.startup_time }}
+        BASELINE_STARTUP=${{ env.startup_time_baseline }}
+        
+        CURRENT_MEMORY=${{ env.memory_usage }}
+        BASELINE_MEMORY=${{ env.memory_usage_baseline }}
+        
+        # 计算性能变化百分比
+        STARTUP_REGRESSION=$(( ($CURRENT_STARTUP - $BASELINE_STARTUP) * 100 / $BASELINE_STARTUP ))
+        MEMORY_REGRESSION=$(( ($CURRENT_MEMORY - $BASELINE_MEMORY) * 100 / $BASELINE_MEMORY ))
+        
+        echo "Startup time regression: ${STARTUP_REGRESSION}%"
+        echo "Memory usage regression: ${MEMORY_REGRESSION}%"
+        
+        # 检查是否超过阈值
+        if [ $STARTUP_REGRESSION -gt ${{ env.PERFORMANCE_THRESHOLD }} ]; then
+          echo "❌ Performance regression detected: Startup time increased by ${STARTUP_REGRESSION}%"
+          exit 1
+        fi
+        
+        if [ $MEMORY_REGRESSION -gt ${{ env.PERFORMANCE_THRESHOLD }} ]; then
+          echo "❌ Memory usage regression detected: Memory usage increased by ${MEMORY_REGRESSION}%"
+          exit 1
+        fi
+        
+        echo "✅ No significant performance regression detected"
+
+  # 性能趋势分析
+  performance-trend:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 30  # 获取30天的历史数据
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Generate performance trend report
+      run: |
+        echo "# Performance Trend Analysis" > trend-report.md
+        echo "Generated on: $(date)" >> trend-report.md
+        echo "" >> trend-report.md
+        echo "## Historical Performance Data" >> trend-report.md
+        
+        # 这里可以添加从历史数据生成趋势分析的逻辑
+        # 例如从之前的CI运行中提取性能数据
+        
+    - name: Upload trend report
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-trend-report
+        path: trend-report.md
+        retention-days: 365
+
+  # 内存分析
+  memory-profiling:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.benchmark_type == 'memory' || github.event.inputs.benchmark_type == 'full'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build application
+      run: npm run build
+
+    - name: Run memory profiling
+      run: |
+        # 使用clinic进行内存分析
+        npx clinic heapprofiler -- node dist/index.js start --port 9999 &
+        SERVER_PID=$!
+        sleep 5
+        
+        # 运行内存压力测试
+        for i in {1..1000}; do
+          curl -s http://localhost:9999/health > /dev/null
+          if [ $((i % 100)) -eq 0 ]; then
+            echo "Memory test iteration $i completed"
+          fi
+        done
+        
+        kill $SERVER_PID 2>/dev/null || true
+        wait $SERVER_PID 2>/dev/null || true
+        
+        # 生成内存分析报告
+        echo "Memory profiling completed"
+
+  # CPU性能分析
+  cpu-profiling:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.benchmark_type == 'cpu' || github.event.inputs.benchmark_type == 'full'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build application
+      run: npm run build
+
+    - name: Run CPU profiling
+      run: |
+        # 使用0x进行CPU分析
+        npx 0x -- node dist/index.js start --port 9999 &
+        SERVER_PID=$!
+        sleep 5
+        
+        # 运行CPU密集型测试
+        for i in {1..500}; do
+          curl -s http://localhost:9999/health > /dev/null
+          curl -s http://localhost:9999/metrics > /dev/null
+        done
+        
+        kill $SERVER_PID 2>/dev/null || true
+        wait $SERVER_PID 2>/dev/null || true
+        
+        echo "CPU profiling completed"

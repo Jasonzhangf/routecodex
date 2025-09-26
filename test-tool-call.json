@@ -1,0 +1,26 @@
+{
+  "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+  "messages": [
+    {"role": "user", "content": "请列出当前目录中的所有文件夹"}
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "list_files",
+        "description": "列出指定目录中的文件和文件夹",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "要列出的目录路径"
+            }
+          },
+          "required": ["path"]
+        }
+      }
+    }
+  ],
+  "tool_choice": "auto"
+}

@@ -1,0 +1,22 @@
+{
+  "sessionId": "session_1758810858031",
+  "pipelineId": "unknown",
+  "startTime": 1758810858031,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "auth_initialization_start",
+      "moduleId": "qwen-provider",
+      "position": "middle",
+      "startTime": 1758810858031,
+      "status": "running"
+    },
+    {
+      "operationId": "initialization_start",
+      "moduleId": "lmstudio-provider-simple",
+      "position": "middle",
+      "startTime": 1758810858031,
+      "status": "running"
+    }
+  ]
+}

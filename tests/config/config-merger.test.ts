@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from '@jest/globals';
-import { ConfigMerger } from '../../src/config/config-merger.js';
+import { ConfigMerger } from '../../src/config/config-merger';
 
 describe('ConfigMerger', () => {
   let merger: ConfigMerger;
@@ -59,7 +59,8 @@ describe('ConfigMerger', () => {
       const result = merger.mergeConfigs(systemConfig, userConfig, parsedUserConfig);
 
       expect(result.modules.httpserver.config.port).toBe(8080);
-      expect(result.modules.httpserver.config.host).toBe('localhost');
+      // 用户配置完全覆盖系统配置，host应该为undefined
+      expect(result.modules.httpserver.config.host).toBeUndefined();
       expect(result.modules.virtualrouter.config.routeTargets).toBeDefined();
     });
   });

@@ -105,61 +105,59 @@ export class DryRunEngine {
     const startTime = Date.now();
 
     try {
-      // 配置虚拟路由器dry-run
-      virtualRouterDryRunExecutor.updateConfig({
-        enabled: true,
-        includeLoadBalancerDetails: options.virtualRouterConfig?.includeLoadBalancerDetails ?? true,
-        includeHealthStatus: options.virtualRouterConfig?.includeHealthStatus ?? true,
-        includeWeightCalculation: options.virtualRouterConfig?.includeWeightCalculation ?? true,
-        simulateProviderHealth: options.virtualRouterConfig?.simulateProviderHealth ?? true
-      });
-
-      // 执行虚拟路由器dry-run
-      const virtualRouterResult = await virtualRouterDryRunExecutor.executeDryRun({
-        request: request.data,
-        endpoint: request.route?.providerId ? `/v1/${request.route.providerId}/chat/completions` : '/v1/chat/completions',
-        protocol: 'openai'
-      });
-
-      // 构建调度专用响应
-      const routingAnalysis = {
-        totalExecutionTime: Date.now() - startTime,
-        routingAccuracy: virtualRouterResult.routingDecision?.confidence || 0,
-        loadBalancerEffectiveness: this.calculateLoadBalancerEffectiveness(virtualRouterResult),
-        scope: 'routing-only' as const,
-        message: 'Virtual router dry-run completed - pipeline execution skipped'
+      // 创建虚拟路由器配置
+      const virtualRouterConfig = {
+        virtualRouter: {
+          dryRun: {
+            enabled: true,
+            includeLoadBalancerDetails: options.virtualRouterConfig?.includeLoadBalancerDetails ?? true,
+            includeHealthStatus: options.virtualRouterConfig?.includeHealthStatus ?? true,
+            includeWeightCalculation: options.virtualRouterConfig?.includeWeightCalculation ?? true,
+            simulateProviderHealth: options.virtualRouterConfig?.simulateProviderHealth ?? true
+          }
+        },
+        classificationConfig: {
+          protocolMapping: {
+            openai: {
+              endpoints: ['/v1/chat/completions'],
+              messageField: 'messages',
+              modelField: 'model',
+              toolsField: 'tools',
+              maxTokensField: 'max_tokens'
+            }
+          },
+          protocolHandlers: {
+            openai: {
+              tokenCalculator: {},
+              toolDetector: {}
+            }
+          },
+          modelTiers: {
+            basic: { maxTokens: 4096 },
+            advanced: { maxTokens: 8192 }
+          },
+          routingDecisions: {
+            default: {
+              criteria: { modelTier: 'basic' },
+              targets: {
+                'modelscope': { weight: 1.0 }
+              }
+            }
+          }
+        },
+        providers: {
+          modelscope: {
+            type: 'modelscope',
+            api_key: 'test-key',
+            models: {
+              'Qwen/Qwen3-Coder-480B-A35B-Instruct': { enabled: true }
+            }
+          }
+        }
       };
 
-      return {
-        virtualRouter: virtualRouterResult,
-        pipeline: undefined, // 流水线未执行
-        combinedAnalysis: routingAnalysis
-      };
-
-    } catch (error) {
-      console.error('Routing-only dry-run execution failed:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * 执行仅调度模式（虚拟路由器dry-run）
-   */
-  private async executeRoutingOnlyDryRun(
-    request: PipelineRequest,
-    options: RunRequestOptions
-  ): Promise<ExtendedDryRunResponse> {
-    const startTime = Date.now();
-
-    try {
-      // 配置虚拟路由器dry-run
-      virtualRouterDryRunExecutor.updateConfig({
-        enabled: true,
-        includeLoadBalancerDetails: options.virtualRouterConfig?.includeLoadBalancerDetails ?? true,
-        includeHealthStatus: options.virtualRouterConfig?.includeHealthStatus ?? true,
-        includeWeightCalculation: options.virtualRouterConfig?.includeWeightCalculation ?? true,
-        simulateProviderHealth: options.virtualRouterConfig?.simulateProviderHealth ?? true
-      });
+      // 初始化虚拟路由器dry-run执行器
+      await virtualRouterDryRunExecutor.initialize(virtualRouterConfig);
 
       // 执行虚拟路由器dry-run
       const virtualRouterResult = await virtualRouterDryRunExecutor.executeDryRun({
@@ -186,6 +184,8 @@ export class DryRunEngine {
   }
 
   /**
+
+  /**
    * 执行完整模式（调度 + 流水线dry-run）
    */
   private async executeFullDryRun(
@@ -197,14 +197,59 @@ export class DryRunEngine {
     const startTime = Date.now();
 
     try {
-      // 配置虚拟路由器dry-run
-      virtualRouterDryRunExecutor.updateConfig({
-        enabled: true,
-        includeLoadBalancerDetails: options.virtualRouterConfig?.includeLoadBalancerDetails ?? true,
-        includeHealthStatus: options.virtualRouterConfig?.includeHealthStatus ?? true,
-        includeWeightCalculation: options.virtualRouterConfig?.includeWeightCalculation ?? true,
-        simulateProviderHealth: options.virtualRouterConfig?.simulateProviderHealth ?? true
-      });
+      // 创建虚拟路由器配置
+      const virtualRouterConfig = {
+        virtualRouter: {
+          dryRun: {
+            enabled: true,
+            includeLoadBalancerDetails: options.virtualRouterConfig?.includeLoadBalancerDetails ?? true,
+            includeHealthStatus: options.virtualRouterConfig?.includeHealthStatus ?? true,
+            includeWeightCalculation: options.virtualRouterConfig?.includeWeightCalculation ?? true,
+            simulateProviderHealth: options.virtualRouterConfig?.simulateProviderHealth ?? true
+          }
+        },
+        classificationConfig: {
+          protocolMapping: {
+            openai: {
+              endpoints: ['/v1/chat/completions'],
+              messageField: 'messages',
+              modelField: 'model',
+              toolsField: 'tools',
+              maxTokensField: 'max_tokens'
+            }
+          },
+          protocolHandlers: {
+            openai: {
+              tokenCalculator: {},
+              toolDetector: {}
+            }
+          },
+          modelTiers: {
+            basic: { maxTokens: 4096 },
+            advanced: { maxTokens: 8192 }
+          },
+          routingDecisions: {
+            default: {
+              criteria: { modelTier: 'basic' },
+              targets: {
+                'modelscope': { weight: 1.0 }
+              }
+            }
+          }
+        },
+        providers: {
+          modelscope: {
+            type: 'modelscope',
+            api_key: 'test-key',
+            models: {
+              'Qwen/Qwen3-Coder-480B-A35B-Instruct': { enabled: true }
+            }
+          }
+        }
+      };
+
+      // 初始化虚拟路由器dry-run执行器
+      await virtualRouterDryRunExecutor.initialize(virtualRouterConfig);
 
       // 1. 执行虚拟路由器dry-run
       const virtualRouterResult = await virtualRouterDryRunExecutor.executeDryRun({
@@ -220,7 +265,9 @@ export class DryRunEngine {
       const combinedAnalysis = {
         totalExecutionTime: Date.now() - startTime,
         routingAccuracy: virtualRouterResult.routingDecision?.confidence || 0,
-        loadBalancerEffectiveness: this.calculateLoadBalancerEffectiveness(virtualRouterResult)
+        loadBalancerEffectiveness: this.calculateLoadBalancerEffectiveness(virtualRouterResult),
+        scope: 'full',
+        message: 'Virtual router + pipeline dry-run completed'
       };
 
       return {
@@ -239,7 +286,7 @@ export class DryRunEngine {
    * 计算负载均衡效果
    */
   private calculateLoadBalancerEffectiveness(virtualRouterResult: VirtualRouterDryRunResult): number {
-    if (!virtualRouterResult.loadBalancerAnalysis) return 0;
+    if (!virtualRouterResult.loadBalancerAnalysis) {return 0;}
     
     const analysis = virtualRouterResult.loadBalancerAnalysis;
     const totalProviders = Object.keys(analysis.providerWeights).length;
