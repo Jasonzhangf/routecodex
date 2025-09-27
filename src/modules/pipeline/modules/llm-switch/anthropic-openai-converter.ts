@@ -42,9 +42,6 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     this.enableTools = config.config?.enableTools ?? true;
   }
 
-  /**
-   * 初始化模块
-   */
   async initialize(): Promise<void> {
     try {
       this.logger.logModule(this.id, 'initializing', {
@@ -63,9 +60,6 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     }
   }
 
-  /**
-   * 处理入站请求 - 根据格式决定是否转换
-   */
   async processIncoming(request: any): Promise<any> {
     if (!this.isInitialized) {
       throw new Error('AnthropicOpenAIConverter is not initialized');
@@ -114,9 +108,6 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     }
   }
 
-  /**
-   * 处理出站响应 - 根据格式决定是否转换
-   */
   async processOutgoing(response: any): Promise<any> {
     if (!this.isInitialized) {
       throw new Error('AnthropicOpenAIConverter is not initialized');
@@ -167,28 +158,18 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     }
   }
 
-  /**
-   * 转换请求到目标协议
-   */
   async transformRequest(request: any): Promise<any> {
     return this.processIncoming(request);
   }
 
-  /**
-   * 转换响应从目标协议
-   */
   async transformResponse(response: any): Promise<any> {
     return this.processOutgoing(response);
   }
 
-  /**
-   * Anthropic 请求 → OpenAI 请求
-   */
   private convertAnthropicRequestToOpenAI(request: any): any {
     const { requestMappings } = this.conversionConfig;
     const transformed: any = {};
 
-    // 处理消息 - 提取系统消息
     if (request.system) {
       transformed.messages = [
         { role: 'system', content: request.system },
@@ -198,53 +179,38 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       transformed.messages = request.messages || [];
     }
 
-    // 处理工具定义转换
     if (this.enableTools && request.tools) {
       transformed.tools = this.convertAnthropicToolsToOpenAI(request.tools);
     }
 
-    // 处理通用参数
     this.copyParameters(request, transformed, requestMappings.parameters);
 
     return transformed;
   }
 
-  /**
-   * OpenAI 响应 → Anthropic 响应
-   */
   private convertOpenAIResponseToAnthropic(response: any): any {
     const { responseMappings } = this.conversionConfig;
     const transformed: any = {};
 
-    // 提取基本内容
     if (response.choices && response.choices.length > 0) {
       const choice = response.choices[0];
       const message = choice.message;
-
       transformed.role = message.role || 'assistant';
-      
-      // 处理内容
       if (message.content) {
         transformed.content = message.content;
       }
-      
-      // 处理工具调用
       if (this.enableTools && message.tool_calls) {
         transformed.content = this.convertOpenAIToolCallsToAnthropic(message.tool_calls);
       }
-      
-      // 完成原因映射
       if (choice.finish_reason) {
         transformed.stop_reason = responseMappings.finishReason.mapping[choice.finish_reason] || 'end_turn';
       }
     }
 
-    // 使用统计转换
     if (response.usage) {
-      transformed.usage = this.convertUsageStats(response.usage, responseMappings.usage.fieldMapping);
+      transformed.usage = this.convertUsageStats(response.usage, (responseMappings as any).usage.fieldMapping);
     }
 
-    // 复制其他字段
     if (response.id) {transformed.id = response.id;}
     if (response.model) {transformed.model = response.model;}
     if (response.created) {transformed.created = response.created;}
@@ -252,12 +218,8 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     return transformed;
   }
 
-  /**
-   * Anthropic 工具定义 → OpenAI 函数定义
-   */
   private convertAnthropicToolsToOpenAI(tools: any[]): any[] {
     if (!tools) {return [];}
-    
     return tools.map(tool => ({
       type: 'function',
       function: {
@@ -268,12 +230,8 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     }));
   }
 
-  /**
-   * OpenAI 工具调用 → Anthropic 工具使用
-   */
   private convertOpenAIToolCallsToAnthropic(toolCalls: any[]): any[] {
     if (!toolCalls) {return [];}
-    
     return toolCalls.map(call => ({
       type: 'tool_use',
       id: call.id,
@@ -282,38 +240,26 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     }));
   }
 
-  /**
-   * 使用统计转换
-   */
   private convertUsageStats(usage: any, fieldMapping: Record<string, string>): any {
     const transformed: any = {};
-    
     for (const [sourceField, targetField] of Object.entries(fieldMapping)) {
       if (usage[sourceField] !== undefined) {
         transformed[targetField] = usage[sourceField];
       }
     }
-    
     return transformed;
   }
 
-  /**
-   * 通用参数复制
-   */
   private copyParameters(source: any, target: any, parameterMappings: any): void {
     for (const [param, mapping] of Object.entries(parameterMappings)) {
       const sourceKey = (mapping as any).source;
       const targetKey = (mapping as any).target;
-      
       if (source[sourceKey] !== undefined) {
         target[targetKey] = source[sourceKey];
       }
     }
   }
 
-  /**
-   * 清理资源
-   */
   async cleanup(): Promise<void> {
     try {
       this.logger.logModule(this.id, 'cleanup-start');
@@ -325,19 +271,13 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     }
   }
 
-  /**
-   * 获取模块状态
-   */
   getStatus(): {
     id: string;
     type: string;
     protocol: string;
     isInitialized: boolean;
     lastActivity: number;
-    config: {
-      enableStreaming: boolean;
-      enableTools: boolean;
-    };
+    config: { enableStreaming: boolean; enableTools: boolean };
   } {
     return {
       id: this.id,
@@ -345,21 +285,14 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       protocol: this.protocol,
       isInitialized: this.isInitialized,
       lastActivity: Date.now(),
-      config: {
-        enableStreaming: this.enableStreaming,
-        enableTools: this.enableTools
-      }
+      config: { enableStreaming: this.enableStreaming, enableTools: this.enableTools }
     };
   }
 
-  /**
-   * 验证配置
-   */
   private validateConfig(): void {
     if (!this.conversionConfig) {
       throw new Error('Conversion configuration is required');
     }
-    
     this.logger.logModule(this.id, 'config-validation-success', {
       enableStreaming: this.enableStreaming,
       enableTools: this.enableTools,

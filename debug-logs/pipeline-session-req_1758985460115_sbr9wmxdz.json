@@ -1,0 +1,88 @@
+{
+  "sessionId": "req_1758985460115_sbr9wmxdz",
+  "pipelineId": "unknown",
+  "startTime": 1758985460117,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "pipeline-request",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758985460117,
+      "status": "running"
+    },
+    {
+      "operationId": "transformation:llm-switch-request",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758985460118,
+      "status": "running",
+      "input": {
+        "model": "glm-4.5",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hello, reply with the single word ok"
+          }
+        ],
+        "max_tokens": 64
+      }
+    },
+    {
+      "operationId": "transformation:compatibility-request",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758985460119,
+      "status": "running",
+      "input": {
+        "model": "glm-4.5",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hello, reply with the single word ok"
+          }
+        ],
+        "max_tokens": 64,
+        "_metadata": {
+          "switchType": "llmswitch-openai-openai",
+          "timestamp": 1758985460118,
+          "originalProtocol": "openai",
+          "targetProtocol": "openai"
+        },
+        "route": {
+          "providerId": "glm_key1.glm-4",
+          "modelId": "5",
+          "requestId": "req_1758985460115_sbr9wmxdz",
+          "timestamp": 1758985460116
+        },
+        "metadata": {
+          "method": "POST",
+          "url": "/chat/completions",
+          "headers": {
+            "host": "localhost:5507",
+            "user-agent": "curl/8.7.1",
+            "accept": "*/*",
+            "content-type": "application/json",
+            "content-length": "113"
+          }
+        },
+        "debug": {
+          "enabled": true,
+          "stages": {
+            "llmSwitch": true,
+            "workflow": true,
+            "compatibility": true,
+            "provider": true
+          }
+        }
+      }
+    },
+    {
+      "operationId": "pipeline-response",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758985466135,
+      "status": "running"
+    }
+  ]
+}

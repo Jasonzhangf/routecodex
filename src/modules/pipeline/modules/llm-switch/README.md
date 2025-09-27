@@ -1,6 +1,6 @@
 # LLMSwitch 模块
 
-LLMSwitch 模块提供协议转换功能，将不同的大语言模型API协议进行相互转换，目前主要专注于OpenAI协议的透传和转换。
+LLMSwitch 模块提供协议转换功能，将不同的大语言模型API协议进行相互转换，目前主要专注于 OpenAI 协议的透传和转换。
 
 ## 模块概述
 
@@ -82,7 +82,7 @@ private validateProtocol(request: any): void {
 ## 文件结构
 
 ```
-src/modules/pipeline/modules/llmswitch/
+src/modules/pipeline/modules/llm-switch/
 ├── openai-normalizer.ts          # OpenAI → OpenAI 规范化实现
 ├── anthropic-openai-converter.ts # Anthropic → OpenAI 转换器
 ├── anthropic-openai-config.ts    # 转换配置

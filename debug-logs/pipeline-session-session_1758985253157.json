@@ -1,0 +1,50 @@
+{
+  "sessionId": "session_1758985253157",
+  "pipelineId": "unknown",
+  "startTime": 1758985253157,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "error_handler_registered",
+      "moduleId": "error-handler-registry",
+      "position": "middle",
+      "startTime": 1758985253157,
+      "status": "running"
+    },
+    {
+      "operationId": "error_handler_registered",
+      "moduleId": "error-handler-registry",
+      "position": "middle",
+      "startTime": 1758985253157,
+      "status": "running"
+    },
+    {
+      "operationId": "request_handler_initialized",
+      "moduleId": "request-handler",
+      "position": "middle",
+      "startTime": 1758985253157,
+      "status": "running"
+    },
+    {
+      "operationId": "error_message_registered",
+      "moduleId": "error-handler-registry",
+      "position": "middle",
+      "startTime": 1758985253157,
+      "status": "running"
+    },
+    {
+      "operationId": "error_message_registered",
+      "moduleId": "error-handler-registry",
+      "position": "middle",
+      "startTime": 1758985253157,
+      "status": "running"
+    },
+    {
+      "operationId": "error_message_registered",
+      "moduleId": "error-handler-registry",
+      "position": "middle",
+      "startTime": 1758985253157,
+      "status": "running"
+    }
+  ]
+}

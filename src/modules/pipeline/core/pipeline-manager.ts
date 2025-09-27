@@ -992,12 +992,12 @@ export class PipelineManager implements RCCBaseModule {
    * Module factory functions
    */
   private createOpenAINormalizerModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { OpenAINormalizerLLMSwitch } = await import('../modules/llmswitch/openai-normalizer.js');
+    const { OpenAINormalizerLLMSwitch } = await import('../modules/llm-switch/openai-normalizer.js');
     return new OpenAINormalizerLLMSwitch(config, dependencies);
   };
 
   private createAnthropicOpenAIConverterModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { AnthropicOpenAIConverter } = await import('../modules/llmswitch/anthropic-openai-converter.js');
+    const { AnthropicOpenAIConverter } = await import('../modules/llm-switch/anthropic-openai-converter.js');
     return new AnthropicOpenAIConverter(config, dependencies);
   };
 

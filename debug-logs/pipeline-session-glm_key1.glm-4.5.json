@@ -1,0 +1,57 @@
+{
+  "sessionId": "glm_key1.glm-4.5",
+  "pipelineId": "unknown",
+  "startTime": 1758985537621,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "provider:request-start",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758985537621,
+      "status": "running",
+      "input": {
+        "model": "glm-4.5",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hello, reply with the single word ok"
+          }
+        ],
+        "max_tokens": 64,
+        "_metadata": {
+          "switchType": "llmswitch-openai-openai",
+          "timestamp": 1758985534048,
+          "originalProtocol": "openai",
+          "targetProtocol": "openai"
+        },
+        "route": {
+          "providerId": "glm_key1.glm-4",
+          "modelId": "5",
+          "requestId": "req_1758985534045_tlcy3apq5",
+          "timestamp": 1758985534046
+        },
+        "metadata": {
+          "method": "POST",
+          "url": "/chat/completions",
+          "headers": {
+            "host": "localhost:5507",
+            "user-agent": "curl/8.7.1",
+            "accept": "*/*",
+            "content-type": "application/json",
+            "content-length": "113"
+          }
+        },
+        "debug": {
+          "enabled": true,
+          "stages": {
+            "llmSwitch": true,
+            "workflow": true,
+            "compatibility": true,
+            "provider": true
+          }
+        }
+      }
+    }
+  ]
+}

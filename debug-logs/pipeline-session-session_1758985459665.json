@@ -1,0 +1,29 @@
+{
+  "sessionId": "session_1758985459665",
+  "pipelineId": "unknown",
+  "startTime": 1758985459665,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "save_complete",
+      "moduleId": "config-manager",
+      "position": "middle",
+      "startTime": 1758985459665,
+      "status": "running"
+    },
+    {
+      "operationId": "merge_complete",
+      "moduleId": "config-manager",
+      "position": "middle",
+      "startTime": 1758985459665,
+      "status": "running"
+    },
+    {
+      "operationId": "initialization_complete",
+      "moduleId": "config-manager",
+      "position": "middle",
+      "startTime": 1758985459665,
+      "status": "running"
+    }
+  ]
+}

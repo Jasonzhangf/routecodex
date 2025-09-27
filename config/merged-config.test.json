@@ -1,0 +1,465 @@
+{
+  "version": "1.0.0",
+  "mergedAt": "2025-09-27T23:00:21.676Z",
+  "modules": {
+    "basemodule": {
+      "enabled": true,
+      "config": {
+        "moduleType": "base",
+        "debugMode": true,
+        "recording": {
+          "enabled": false,
+          "maxCycles": 1000,
+          "maxErrors": 100
+        }
+      }
+    },
+    "errorhandling": {
+      "enabled": true,
+      "config": {
+        "moduleType": "error-handling",
+        "maxErrors": 1000,
+        "errorCategories": {
+          "low": "log",
+          "medium": "log_and_notify",
+          "high": "log_and_alert",
+          "critical": "log_and_immediate"
+        },
+        "autoCleanup": {
+          "enabled": true,
+          "maxAgeHours": 24
+        }
+      }
+    },
+    "debugcenter": {
+      "enabled": true,
+      "config": {
+        "moduleType": "debug-center",
+        "eventQueueSize": 1000,
+        "logLevels": [
+          "debug",
+          "info",
+          "warn",
+          "error"
+        ],
+        "enableConsole": true,
+        "enableFile": true,
+        "filePath": "~/.routecodex/logs/debug-center.log"
+      }
+    },
+    "httpserver": {
+      "enabled": true,
+      "config": {
+        "moduleType": "http-server",
+        "port": 5507
+      }
+    },
+    "configmanager": {
+      "enabled": true,
+      "config": {
+        "moduleType": "config-manager",
+        "configPath": "./routecodex.json",
+        "watchMode": true,
+        "validation": {
+          "strict": true,
+          "allowUnknown": false
+        }
+      }
+    },
+    "providermanager": {
+      "enabled": true,
+      "config": {
+        "moduleType": "provider-manager",
+        "healthCheckInterval": 30000,
+        "maxRetries": 3,
+        "retryDelay": 1000,
+        "loadBalancing": {
+          "strategy": "round-robin",
+          "stickySessions": false
+        }
+      }
+    },
+    "requesthandler": {
+      "enabled": true,
+      "config": {
+        "moduleType": "request-handler",
+        "maxRequestSize": 10485760,
+        "enableStreaming": true,
+        "rateLimitEnabled": false,
+        "authEnabled": false,
+        "validateRequests": true
+      }
+    },
+    "responsehandler": {
+      "enabled": true,
+      "config": {
+        "moduleType": "response-handler",
+        "enableCompression": true,
+        "enableCaching": false,
+        "cacheTTL": 300
+      }
+    },
+    "openairouter": {
+      "enabled": true,
+      "config": {
+        "moduleType": "openai-router",
+        "basePath": "/v1/openai",
+        "enableStreaming": true,
+        "enablePipeline": true,
+        "rateLimit": {
+          "enabled": false,
+          "requestsPerMinute": 60
+        }
+      }
+    },
+    "unimplementedmodule": {
+      "enabled": true,
+      "config": {
+        "moduleType": "unimplemented-module",
+        "maxCallerHistory": 100,
+        "enableStats": true,
+        "notificationThreshold": 10
+      }
+    },
+    "usermanager": {
+      "enabled": true,
+      "config": {
+        "moduleType": "user-manager",
+        "configPath": "./config/users.json",
+        "authMethod": "jwt",
+        "sessionTimeout": 3600000,
+        "enableUserRegistration": false,
+        "requireEmailVerification": false,
+        "defaultUserQuotas": {
+          "maxRequestsPerDay": 1000,
+          "maxTokensPerRequest": 4096,
+          "maxConcurrentRequests": 5,
+          "maxProviders": 3,
+          "maxFiles": 100,
+          "maxStorageMB": 1024
+        },
+        "maxUsers": 100,
+        "enablePasswordPolicy": true,
+        "passwordPolicy": {
+          "minLength": 8,
+          "requireUppercase": true,
+          "requireLowercase": true,
+          "requireNumbers": true,
+          "requireSpecialChars": false
+        }
+      }
+    },
+    "virtualrouter": {
+      "enabled": true,
+      "config": {
+        "moduleType": "virtual-router",
+        "routeTargets": {
+          "default": [
+            {
+              "providerId": "glm",
+              "modelId": "glm-4.5",
+              "keyId": "key1",
+              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
+              "inputProtocol": "openai",
+              "outputProtocol": "openai"
+            }
+          ],
+          "coding": [
+            {
+              "providerId": "glm",
+              "modelId": "glm-4.5",
+              "keyId": "key1",
+              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
+              "inputProtocol": "openai",
+              "outputProtocol": "openai"
+            }
+          ],
+          "longcontext": [
+            {
+              "providerId": "glm",
+              "modelId": "glm-4.5",
+              "keyId": "key1",
+              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
+              "inputProtocol": "openai",
+              "outputProtocol": "openai"
+            }
+          ],
+          "tools": [
+            {
+              "providerId": "glm",
+              "modelId": "glm-4.5",
+              "keyId": "key1",
+              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
+              "inputProtocol": "openai",
+              "outputProtocol": "openai"
+            }
+          ]
+        },
+        "pipelineConfigs": {
+          "glm.glm-4.key1": {
+            "provider": {
+              "type": "openai-provider",
+              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
+              "auth": {
+                "type": "apikey",
+                "apiKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
+              }
+            },
+            "model": {
+              "maxContext": 128000,
+              "maxTokens": 8192
+            },
+            "keyConfig": {
+              "keyId": "key1",
+              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
+              "keyType": "apiKey"
+            },
+            "protocols": {
+              "input": "openai",
+              "output": "openai"
+            },
+            "compatibility": {
+              "type": "glm-compatibility",
+              "config": {
+                "thinking": {
+                  "enabled": true,
+                  "payload": {
+                    "type": "enabled"
+                  }
+                }
+              }
+            },
+            "llmSwitch": {
+              "type": "openai-normalizer",
+              "config": {}
+            }
+          },
+          "glm.glm-4.5.key1": {
+            "provider": {
+              "type": "openai-provider",
+              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
+              "auth": {
+                "type": "apikey",
+                "apiKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
+              }
+            },
+            "model": {
+              "maxContext": 128000,
+              "maxTokens": 8192
+            },
+            "keyConfig": {
+              "keyId": "key1",
+              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
+              "keyType": "apiKey"
+            },
+            "protocols": {
+              "input": "openai",
+              "output": "openai"
+            },
+            "compatibility": {
+              "type": "glm-compatibility",
+              "config": {
+                "thinking": {
+                  "enabled": true,
+                  "payload": {
+                    "type": "enabled"
+                  }
+                }
+              }
+            },
+            "llmSwitch": {
+              "type": "openai-normalizer",
+              "config": {}
+            }
+          },
+          "glm.glm-4-air.key1": {
+            "provider": {
+              "type": "openai-provider",
+              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
+              "auth": {
+                "type": "apikey",
+                "apiKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
+              }
+            },
+            "model": {
+              "maxContext": 128000,
+              "maxTokens": 8192
+            },
+            "keyConfig": {
+              "keyId": "key1",
+              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
+              "keyType": "apiKey"
+            },
+            "protocols": {
+              "input": "openai",
+              "output": "openai"
+            },
+            "compatibility": {
+              "type": "glm-compatibility",
+              "config": {
+                "thinking": {
+                  "enabled": true,
+                  "payload": {
+                    "type": "enabled"
+                  }
+                }
+              }
+            },
+            "llmSwitch": {
+              "type": "openai-normalizer",
+              "config": {}
+            }
+          },
+          "glm.glm-4-airx.key1": {
+            "provider": {
+              "type": "openai-provider",
+              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
+              "auth": {
+                "type": "apikey",
+                "apiKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
+              }
+            },
+            "model": {
+              "maxContext": 128000,
+              "maxTokens": 8192
+            },
+            "keyConfig": {
+              "keyId": "key1",
+              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
+              "keyType": "apiKey"
+            },
+            "protocols": {
+              "input": "openai",
+              "output": "openai"
+            },
+            "compatibility": {
+              "type": "glm-compatibility",
+              "config": {
+                "thinking": {
+                  "enabled": true,
+                  "payload": {
+                    "type": "enabled"
+                  }
+                }
+              }
+            },
+            "llmSwitch": {
+              "type": "openai-normalizer",
+              "config": {}
+            }
+          },
+          "glm.glm-4-flash.key1": {
+            "provider": {
+              "type": "openai-provider",
+              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
+              "auth": {
+                "type": "apikey",
+                "apiKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
+              }
+            },
+            "model": {
+              "maxContext": 128000,
+              "maxTokens": 8192
+            },
+            "keyConfig": {
+              "keyId": "key1",
+              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
+              "keyType": "apiKey"
+            },
+            "protocols": {
+              "input": "openai",
+              "output": "openai"
+            },
+            "compatibility": {
+              "type": "glm-compatibility",
+              "config": {
+                "thinking": {
+                  "enabled": true,
+                  "payload": {
+                    "type": "enabled"
+                  }
+                }
+              }
+            },
+            "llmSwitch": {
+              "type": "openai-normalizer",
+              "config": {}
+            }
+          }
+        },
+        "authMappings": {},
+        "inputProtocol": "openai",
+        "outputProtocol": "openai"
+      }
+    },
+    "dryrunengine": {
+      "enabled": true,
+      "config": {
+        "moduleType": "dry-run-engine",
+        "requestPipeline": {
+          "dryRunMode": "partial",
+          "nodeConfigs": {
+            "llm-switch": {
+              "enabled": true,
+              "mode": "output-validation",
+              "breakpointBehavior": "continue",
+              "verbosity": "normal"
+            },
+            "compatibility": {
+              "enabled": false,
+              "mode": "output-validation",
+              "breakpointBehavior": "continue",
+              "verbosity": "minimal"
+            },
+            "provider": {
+              "enabled": false,
+              "mode": "output-validation",
+              "breakpointBehavior": "continue",
+              "verbosity": "minimal"
+            }
+          },
+          "inputSimulation": {
+            "enabled": true,
+            "primaryStrategy": "historical-data",
+            "fallbackStrategies": [
+              "schema-inference",
+              "rule-based",
+              "ai-generation",
+              "request-propagation"
+            ],
+            "qualityRequirement": "medium",
+            "useHistoricalData": true,
+            "enableSmartInference": true
+          }
+        },
+        "responsePipeline": {
+          "dryRunMode": "partial",
+          "responseDryRun": {
+            "enabled": true,
+            "inputSource": "real-response",
+            "performanceAnalysis": true,
+            "caching": {
+              "enabled": true,
+              "maxSize": 100,
+              "ttlMs": 300000,
+              "keyStrategy": "request-id"
+            }
+          },
+          "nodeConfigs": {
+            "response-processor": {
+              "enabled": true,
+              "mode": "output-validation",
+              "breakpointBehavior": "continue",
+              "verbosity": "normal"
+            }
+          }
+        },
+        "driverFeedback": {
+          "enabled": true,
+          "feedbackDelayMs": 100,
+          "analysisLevel": "detailed"
+        }
+      }
+    }
+  }
+}
