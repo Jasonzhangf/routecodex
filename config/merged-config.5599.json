@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "mergedAt": "2025-09-27T14:55:40.004Z",
+  "mergedAt": "2025-09-27T14:33:39.739Z",
   "modules": {
     "basemodule": {
       "enabled": true,
@@ -51,7 +51,7 @@
       "enabled": true,
       "config": {
         "moduleType": "http-server",
-        "port": 5507
+        "port": 5599
       }
     },
     "configmanager": {
@@ -159,88 +159,20 @@
               "providerId": "glm",
               "modelId": "glm-4.5",
               "keyId": "key1",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            }
-          ],
-          "coding": [
-            {
-              "providerId": "glm",
-              "modelId": "glm-4.5",
-              "keyId": "key1",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            }
-          ],
-          "longcontext": [
-            {
-              "providerId": "glm",
-              "modelId": "glm-4.5",
-              "keyId": "key1",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            }
-          ],
-          "tools": [
-            {
-              "providerId": "glm",
-              "modelId": "glm-4.5",
-              "keyId": "key1",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
+              "actualKey": "TEST_ENV_VALUE",
               "inputProtocol": "openai",
               "outputProtocol": "openai"
             }
           ]
         },
         "pipelineConfigs": {
-          "glm.glm-4.key1": {
-            "provider": {
-              "type": "openai-provider",
-              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
-              "auth": {
-                "type": "apikey",
-                "apiKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
-              }
-            },
-            "model": {
-              "maxContext": 128000,
-              "maxTokens": 8192
-            },
-            "keyConfig": {
-              "keyId": "key1",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
-              "keyType": "apiKey"
-            },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
-            },
-            "compatibility": {
-              "type": "glm-compatibility",
-              "config": {
-                "thinking": {
-                  "enabled": true,
-                  "payload": {
-                    "type": "enabled"
-                  }
-                }
-              }
-            },
-            "llmSwitch": {
-              "type": "openai-normalizer",
-              "config": {}
-            }
-          },
           "glm.glm-4.5.key1": {
             "provider": {
               "type": "openai-provider",
               "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
               "auth": {
                 "type": "apikey",
-                "apiKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
+                "apiKey": "TEST_ENV_VALUE"
               }
             },
             "model": {
@@ -249,141 +181,12 @@
             },
             "keyConfig": {
               "keyId": "key1",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
+              "actualKey": "TEST_ENV_VALUE",
               "keyType": "apiKey"
             },
             "protocols": {
               "input": "openai",
               "output": "openai"
-            },
-            "compatibility": {
-              "type": "glm-compatibility",
-              "config": {
-                "thinking": {
-                  "enabled": true,
-                  "payload": {
-                    "type": "enabled"
-                  }
-                }
-              }
-            },
-            "llmSwitch": {
-              "type": "openai-normalizer",
-              "config": {}
-            }
-          },
-          "glm.glm-4-air.key1": {
-            "provider": {
-              "type": "openai-provider",
-              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
-              "auth": {
-                "type": "apikey",
-                "apiKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
-              }
-            },
-            "model": {
-              "maxContext": 128000,
-              "maxTokens": 8192
-            },
-            "keyConfig": {
-              "keyId": "key1",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
-              "keyType": "apiKey"
-            },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
-            },
-            "compatibility": {
-              "type": "glm-compatibility",
-              "config": {
-                "thinking": {
-                  "enabled": true,
-                  "payload": {
-                    "type": "enabled"
-                  }
-                }
-              }
-            },
-            "llmSwitch": {
-              "type": "openai-normalizer",
-              "config": {}
-            }
-          },
-          "glm.glm-4-airx.key1": {
-            "provider": {
-              "type": "openai-provider",
-              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
-              "auth": {
-                "type": "apikey",
-                "apiKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
-              }
-            },
-            "model": {
-              "maxContext": 128000,
-              "maxTokens": 8192
-            },
-            "keyConfig": {
-              "keyId": "key1",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
-              "keyType": "apiKey"
-            },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
-            },
-            "compatibility": {
-              "type": "glm-compatibility",
-              "config": {
-                "thinking": {
-                  "enabled": true,
-                  "payload": {
-                    "type": "enabled"
-                  }
-                }
-              }
-            },
-            "llmSwitch": {
-              "type": "openai-normalizer",
-              "config": {}
-            }
-          },
-          "glm.glm-4-flash.key1": {
-            "provider": {
-              "type": "openai-provider",
-              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
-              "auth": {
-                "type": "apikey",
-                "apiKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
-              }
-            },
-            "model": {
-              "maxContext": 128000,
-              "maxTokens": 8192
-            },
-            "keyConfig": {
-              "keyId": "key1",
-              "actualKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
-              "keyType": "apiKey"
-            },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
-            },
-            "compatibility": {
-              "type": "glm-compatibility",
-              "config": {
-                "thinking": {
-                  "enabled": true,
-                  "payload": {
-                    "type": "enabled"
-                  }
-                }
-              }
-            },
-            "llmSwitch": {
-              "type": "openai-normalizer",
-              "config": {}
             }
           }
         },
@@ -459,6 +262,12 @@
           "feedbackDelayMs": 100,
           "analysisLevel": "detailed"
         }
+      }
+    },
+    "server": {
+      "enabled": true,
+      "config": {
+        "host": "localhost"
       }
     }
   }

@@ -1,28 +1,14 @@
 {
   "sessionId": "system",
   "pipelineId": "unknown",
-  "startTime": 1758982369298,
+  "startTime": 1758983619802,
   "status": "active",
   "operations": [
     {
       "operationId": "initialization-complete",
-      "moduleId": "provider-1758982369297",
+      "moduleId": "provider-1758983619800",
       "position": "middle",
-      "startTime": 1758982369298,
-      "status": "running"
-    },
-    {
-      "operationId": "request-start",
-      "moduleId": "provider-1758982369297",
-      "position": "middle",
-      "startTime": 1758982382644,
-      "status": "running"
-    },
-    {
-      "operationId": "request-error",
-      "moduleId": "provider-1758982369297",
-      "position": "middle",
-      "startTime": 1758982384468,
+      "startTime": 1758983619802,
       "status": "running"
     }
   ]

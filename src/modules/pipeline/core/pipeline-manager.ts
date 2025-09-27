@@ -789,9 +789,13 @@ export class PipelineManager implements RCCBaseModule {
     // Register default module factories
     this.registry.registerModule('llmswitch-openai-openai', this.createOpenAINormalizerModule);
     this.registry.registerModule('llmswitch-anthropic-openai', this.createAnthropicOpenAIConverterModule);
+    // Aliases for common config names
+    this.registry.registerModule('openai-normalizer', this.createOpenAINormalizerModule);
     this.registry.registerModule('streaming-control', this.createStreamingControlModule);
     this.registry.registerModule('field-mapping', this.createFieldMappingModule);
     this.registry.registerModule('qwen-compatibility', this.createQwenCompatibilityModule);
+    // Treat glm-compatibility as passthrough unless a specific module is provided
+    this.registry.registerModule('glm-compatibility', this.createPassthroughCompatibilityModule);
     this.registry.registerModule('qwen-provider', this.createQwenProviderModule);
     this.registry.registerModule('generic-http', this.createGenericHTTPModule);
     this.registry.registerModule('lmstudio-http', this.createLMStudioHTTPModule);

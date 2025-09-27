@@ -1,182 +1,70 @@
 {
   "sessionId": "unknown",
   "pipelineId": "unknown",
-  "startTime": 1758982369281,
+  "startTime": 1758984940052,
   "status": "active",
   "operations": [
     {
       "operationId": "pipeline-pipeline-lifecycle",
       "moduleId": "manager",
       "position": "middle",
-      "startTime": 1758982369281,
+      "startTime": 1758984940052,
       "status": "running"
     },
     {
       "operationId": "pipeline-pipeline-lifecycle",
       "moduleId": "manager",
       "position": "middle",
-      "startTime": 1758982369281,
+      "startTime": 1758984940053,
       "status": "running"
     },
     {
       "operationId": "pipeline-pipeline-lifecycle",
       "moduleId": "manager",
       "position": "middle",
-      "startTime": 1758982369281,
+      "startTime": 1758984940053,
       "status": "running"
     },
     {
       "operationId": "pipeline-pipeline-lifecycle",
       "moduleId": "manager",
       "position": "middle",
-      "startTime": 1758982369281,
+      "startTime": 1758984940053,
       "status": "running"
     },
     {
       "operationId": "pipeline-pipeline-lifecycle",
       "moduleId": "glm_key1.glm-4.5",
       "position": "middle",
-      "startTime": 1758982369282,
+      "startTime": 1758984940053,
       "status": "running"
     },
     {
       "operationId": "pipeline-pipeline-lifecycle",
       "moduleId": "glm_key1.glm-4.5",
       "position": "middle",
-      "startTime": 1758982369282,
-      "status": "running"
-    },
-    {
-      "operationId": "pipeline-module",
-      "moduleId": "compatibility",
-      "position": "middle",
-      "startTime": 1758982369283,
-      "status": "running"
-    },
-    {
-      "operationId": "pipeline-module",
-      "moduleId": "compatibility",
-      "position": "middle",
-      "startTime": 1758982369283,
-      "status": "running"
-    },
-    {
-      "operationId": "pipeline-module",
-      "moduleId": "compatibility",
-      "position": "middle",
-      "startTime": 1758982369283,
-      "status": "running"
-    },
-    {
-      "operationId": "pipeline-module",
-      "moduleId": "provider",
-      "position": "middle",
-      "startTime": 1758982369297,
-      "status": "running"
-    },
-    {
-      "operationId": "pipeline-module",
-      "moduleId": "provider",
-      "position": "middle",
-      "startTime": 1758982369297,
-      "status": "running"
-    },
-    {
-      "operationId": "pipeline-module",
-      "moduleId": "provider",
-      "position": "middle",
-      "startTime": 1758982369298,
-      "status": "running"
-    },
-    {
-      "operationId": "pipeline-module",
-      "moduleId": "provider",
-      "position": "middle",
-      "startTime": 1758982369298,
-      "status": "running"
-    },
-    {
-      "operationId": "pipeline-pipeline-lifecycle",
-      "moduleId": "glm_key1.glm-4.5",
-      "position": "middle",
-      "startTime": 1758982369298,
+      "startTime": 1758984940054,
       "status": "running"
     },
     {
       "operationId": "pipeline-pipeline-lifecycle",
       "moduleId": "manager",
       "position": "middle",
-      "startTime": 1758982369299,
+      "startTime": 1758984941056,
       "status": "running"
     },
     {
       "operationId": "pipeline-pipeline-lifecycle",
       "moduleId": "manager",
       "position": "middle",
-      "startTime": 1758982369299,
+      "startTime": 1758984941057,
       "status": "running"
     },
     {
       "operationId": "pipeline-pipeline-lifecycle",
       "moduleId": "manager",
       "position": "middle",
-      "startTime": 1758982369299,
-      "status": "running"
-    },
-    {
-      "operationId": "pipeline-pipeline-lifecycle",
-      "moduleId": "manager",
-      "position": "middle",
-      "startTime": 1758982382641,
-      "status": "running"
-    },
-    {
-      "operationId": "pipeline-transformation",
-      "moduleId": "unknown",
-      "position": "middle",
-      "startTime": 1758982382642,
-      "status": "running"
-    },
-    {
-      "operationId": "pipeline-module",
-      "moduleId": "compatibility",
-      "position": "middle",
-      "startTime": 1758982382643,
-      "status": "running"
-    },
-    {
-      "operationId": "pipeline-module",
-      "moduleId": "compatibility",
-      "position": "middle",
-      "startTime": 1758982382643,
-      "status": "running"
-    },
-    {
-      "operationId": "pipeline-transformation",
-      "moduleId": "unknown",
-      "position": "middle",
-      "startTime": 1758982382643,
-      "status": "running"
-    },
-    {
-      "operationId": "pipeline-module",
-      "moduleId": "provider",
-      "position": "middle",
-      "startTime": 1758982382644,
-      "status": "running"
-    },
-    {
-      "operationId": "pipeline-module",
-      "moduleId": "provider",
-      "position": "middle",
-      "startTime": 1758982384466,
-      "status": "running"
-    },
-    {
-      "operationId": "pipeline-pipeline-lifecycle",
-      "moduleId": "manager",
-      "position": "middle",
-      "startTime": 1758982384471,
+      "startTime": 1758984941058,
       "status": "running"
     }
   ]
