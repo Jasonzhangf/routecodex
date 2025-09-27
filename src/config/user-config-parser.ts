@@ -21,6 +21,23 @@ export class UserConfigParser {
   private providerConfigs: Record<string, any> = {};
 
   /**
+   * Expand simple env placeholders like ${VAR} or $VAR.
+   * If env is not set, returns the original string unchanged.
+   */
+  private expandEnvVar(value: unknown): string {
+    if (typeof value !== 'string') {return '';}
+    const trimmed = value.trim();
+    const m = trimmed.match(/^\$\{?([A-Za-z0-9_]+)\}?$/);
+    if (!m) {return trimmed;}
+    const envName = m[1];
+    const envVal = process.env[envName];
+    if (typeof envVal === 'string' && envVal.length > 0) {
+      return envVal;
+    }
+    return trimmed;
+  }
+
+  /**
    * 解析用户配置
    */
   parseUserConfig(userConfig: UserConfig): {
@@ -523,19 +540,20 @@ export class UserConfigParser {
     if (!resolvedKey) {
       return undefined;
     }
+    const expandedKey = this.expandEnvVar(resolvedKey);
 
     if (!hasAuthMapping) {
-      return resolvedKey;
+      return expandedKey;
     }
 
     const authId = this.resolveActualKey(providerId, keyId);
     if (!authId) {
-      return resolvedKey;
+      return expandedKey;
     }
 
     const authPath = this.authMappings[authId];
     if (!authPath) {
-      return resolvedKey;
+      return expandedKey;
     }
 
     const normalizedPath = authPath.startsWith('~')
@@ -553,7 +571,8 @@ export class UserConfigParser {
       console.warn(`Failed to read auth file ${normalizedPath}:`, error);
     }
 
-    return resolvedKey;
+    // If file not available or unreadable, fall back to expanded inline key
+    return expandedKey;
   }
 
   private resolveActualKey(providerId: string, keyId: string): string {
@@ -675,7 +694,8 @@ export class UserConfigParser {
     // 为每个真实key生成顺序别名：key1, key2, key3...
     providerConfig.apiKey.forEach((realKey: string, index: number) => {
       const alias = `key${index + 1}`;
-      mapping[alias] = realKey;
+      // Support env placeholders like ${VAR} or $VAR
+      mapping[alias] = this.expandEnvVar(realKey);
     });
 
     return mapping;
