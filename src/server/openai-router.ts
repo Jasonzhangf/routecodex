@@ -136,6 +136,94 @@ export class OpenAIRouter extends BaseModule {
   }
 
   /**
+   * Map unknown errors to OpenAI-style error payload with a sensible status and message.
+   * - Prefers upstream provider status and message when available
+   * - Falls back to RouteCodexError metadata
+   * - Provides consistent type/code based on HTTP status or known error kinds
+   */
+  private buildErrorPayload(error: unknown, requestId: string): { status: number; body: { error: { message: string; type: string; code: string; param?: string | null; details?: Record<string, unknown> } } } {
+    const e: any = error as any;
+    // Status precedence: explicit status -> statusCode -> response.status -> RouteCodexError.status -> 500
+    const statusFromObj = typeof e?.status === 'number' ? e.status
+      : (typeof e?.statusCode === 'number' ? e.statusCode
+        : (typeof e?.response?.status === 'number' ? e.response.status : undefined));
+    const routeCodexStatus = error instanceof RouteCodexError ? error.status : undefined;
+    const status = statusFromObj ?? routeCodexStatus ?? 500;
+
+    // Extract best-effort message from common shapes
+    const upstreamMsg = e?.response?.data?.error?.message
+      ?? e?.response?.data?.message
+      ?? e?.data?.error?.message
+      ?? e?.data?.message
+      ?? (typeof e?.message === 'string' ? e.message : undefined);
+    // Fallback when error is an object without message
+    let message = upstreamMsg ? String(upstreamMsg) : (error instanceof Error ? error.message : String(error));
+    // Guard against unhelpful stringification of objects
+    if (message && /^\[object\s+Object\]$/.test(message)) {
+      const serializable = e?.response?.data?.error
+        ?? e?.response?.data
+        ?? e?.error
+        ?? e?.data
+        ?? e?.details
+        ?? e;
+      try {
+        message = JSON.stringify(serializable);
+      } catch {
+        message = 'Unknown error';
+      }
+    }
+
+    // Derive type/code from RouteCodexError, provider error kind, or HTTP status
+    const providerKind = typeof e?.type === 'string' ? e.type : undefined; // e.g., 'network' | 'server' | 'timeout' | 'rate_limit'
+    const mapStatusToType = (s: number): string => {
+      if (s === 400) {return 'bad_request';}
+      if (s === 401) {return 'unauthorized';}
+      if (s === 403) {return 'forbidden';}
+      if (s === 404) {return 'not_found';}
+      if (s === 408) {return 'request_timeout';}
+      if (s === 409) {return 'conflict';}
+      if (s === 422) {return 'unprocessable_entity';}
+      if (s === 429) {return 'rate_limit_exceeded';}
+      if (s >= 500) {return 'server_error';}
+      return 'internal_error';
+    };
+    const mapKindToType = (k?: string): string | undefined => {
+      if (!k) {return undefined;}
+      const m: Record<string, string> = {
+        network: 'network_error',
+        server: 'server_error',
+        timeout: 'request_timeout',
+        rate_limit: 'rate_limit_exceeded',
+      };
+      return m[k] || undefined;
+    };
+    const rcxCode = error instanceof RouteCodexError ? error.code : undefined;
+    const upstreamCode = typeof e?.response?.data?.error?.code === 'string' ? e.response.data.error.code : (typeof e?.code === 'string' ? e.code : undefined);
+    const type = rcxCode || mapKindToType(providerKind) || mapStatusToType(status);
+    const code = upstreamCode || type;
+
+    // Optionally attach minimal details that help debugging without leaking secrets
+    const details: Record<string, unknown> = {};
+    if (typeof e?.retryable === 'boolean') {details.retryable = e.retryable;}
+    if (typeof statusFromObj === 'number') {details.upstreamStatus = statusFromObj;}
+    if (e?.details && typeof e.details === 'object') {details.provider = e.details;}
+    details.requestId = requestId;
+
+    return {
+      status,
+      body: {
+        error: {
+          message,
+          type,
+          code,
+          param: null,
+          details: Object.keys(details).length ? details : undefined,
+        },
+      },
+    };
+  }
+
+  /**
    * Record router metric
    */
   private recordRouterMetric(operation: string, data: any): void {
@@ -710,38 +798,12 @@ export class OpenAIRouter extends BaseModule {
         },
       });
 
-      // Send error response (respect provider error status if present)
-      const status = (error && typeof error === 'object' && 'status' in (error as any) && typeof (error as any).status === 'number')
-        ? (error as any).status
-        : (error instanceof RouteCodexError ? error.status : 500);
-
-      // Flatten upstream message if present (avoid nested JSON string)
-      const eAny: any = error as any;
-      const upstreamMsg = eAny?.data?.error?.message || eAny?.data?.message || undefined;
-      const message = upstreamMsg ? String(upstreamMsg) : getErrorMessage(error);
-
-      // Map status to type/code
-      const mapType = (s: number) => {
-        if (s === 400) {return 'bad_request';}
-        if (s === 401) {return 'unauthorized';}
-        if (s === 403) {return 'forbidden';}
-        if (s === 404) {return 'not_found';}
-        if (s === 429) {return 'rate_limit_exceeded';}
-        return 'internal_error';
-      };
-      const typeCode = error instanceof RouteCodexError ? error.code : mapType(status);
-
-      // Attach request id and standard headers on error as well
+      // Send error response with improved mapping
+      const mapped = this.buildErrorPayload(error, requestId);
       res.setHeader('x-request-id', requestId);
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.status(status).json({
-        error: {
-          message,
-          type: typeCode,
-          code: typeCode,
-        },
-      });
+      res.status(mapped.status).json(mapped.body);
     }
   }
 
@@ -879,18 +941,11 @@ export class OpenAIRouter extends BaseModule {
       });
 
       // Send error response
-      const status = error instanceof RouteCodexError ? error.status : 500;
-      // Attach request id and standard headers on error as well
+      const mapped = this.buildErrorPayload(error, requestId);
       res.setHeader('x-request-id', requestId);
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.status(status).json({
-        error: {
-          message: getErrorMessage(error),
-          type: error instanceof RouteCodexError ? error.code : 'internal_error',
-          code: error instanceof RouteCodexError ? error.code : 'internal_error',
-        },
-      });
+      res.status(mapped.status).json(mapped.body);
     }
   }
 
@@ -1304,14 +1359,11 @@ export class OpenAIRouter extends BaseModule {
       });
 
       // Send error response
-      const status = error instanceof RouteCodexError ? error.status : 500;
-      res.status(status).json({
-        error: {
-          message: getErrorMessage(error),
-          type: error instanceof RouteCodexError ? error.code : 'internal_error',
-          code: error instanceof RouteCodexError ? error.code : 'internal_error',
-        },
-      });
+      const mapped = this.buildErrorPayload(error, requestId);
+      res.setHeader('x-request-id', requestId);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.status(mapped.status).json(mapped.body);
     }
   }
 
@@ -1364,15 +1416,11 @@ export class OpenAIRouter extends BaseModule {
         },
       });
 
-      // Send error response
-      const status = error instanceof RouteCodexError ? error.status : 500;
-      res.status(status).json({
-        error: {
-          message: getErrorMessage(error),
-          type: error instanceof RouteCodexError ? error.code : 'internal_error',
-          code: error instanceof RouteCodexError ? error.code : 'internal_error',
-        },
-      });
+      const mapped = this.buildErrorPayload(error, requestId);
+      res.setHeader('x-request-id', requestId);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.status(mapped.status).json(mapped.body);
     }
   }
 
@@ -1408,13 +1456,11 @@ export class OpenAIRouter extends BaseModule {
       await this.handleError(error as Error, 'embeddings_handler');
 
       const status = error instanceof RouteCodexError ? error.status : 500;
-      res.status(status).json({
-        error: {
-          message: getErrorMessage(error),
-          type: error instanceof RouteCodexError ? error.code : 'internal_error',
-          code: error instanceof RouteCodexError ? error.code : 'internal_error',
-        },
-      });
+      const mapped = this.buildErrorPayload(error, requestId);
+      res.setHeader('x-request-id', requestId);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.status(mapped.status).json(mapped.body);
     }
   }
 
@@ -1450,13 +1496,11 @@ export class OpenAIRouter extends BaseModule {
       await this.handleError(error as Error, 'moderations_handler');
 
       const status = error instanceof RouteCodexError ? error.status : 500;
-      res.status(status).json({
-        error: {
-          message: getErrorMessage(error),
-          type: error instanceof RouteCodexError ? error.code : 'internal_error',
-          code: error instanceof RouteCodexError ? error.code : 'internal_error',
-        },
-      });
+      const mapped = this.buildErrorPayload(error, requestId);
+      res.setHeader('x-request-id', requestId);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.status(mapped.status).json(mapped.body);
     }
   }
 
@@ -1534,13 +1578,11 @@ export class OpenAIRouter extends BaseModule {
       await this.handleError(error as Error, 'audio_transcriptions_handler');
 
       const status = error instanceof RouteCodexError ? error.status : 500;
-      res.status(status).json({
-        error: {
-          message: getErrorMessage(error),
-          type: error instanceof RouteCodexError ? error.code : 'internal_error',
-          code: error instanceof RouteCodexError ? error.code : 'internal_error',
-        },
-      });
+      const mapped = this.buildErrorPayload(error, requestId);
+      res.setHeader('x-request-id', requestId);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.status(mapped.status).json(mapped.body);
     }
   }
 
@@ -1576,13 +1618,11 @@ export class OpenAIRouter extends BaseModule {
       await this.handleError(error as Error, 'audio_translations_handler');
 
       const status = error instanceof RouteCodexError ? error.status : 500;
-      res.status(status).json({
-        error: {
-          message: getErrorMessage(error),
-          type: error instanceof RouteCodexError ? error.code : 'internal_error',
-          code: error instanceof RouteCodexError ? error.code : 'internal_error',
-        },
-      });
+      const mapped = this.buildErrorPayload(error, requestId);
+      res.setHeader('x-request-id', requestId);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.status(mapped.status).json(mapped.body);
     }
   }
 

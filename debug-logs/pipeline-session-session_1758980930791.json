@@ -1,0 +1,15 @@
+{
+  "sessionId": "session_1758980930791",
+  "pipelineId": "unknown",
+  "startTime": 1758980930791,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "initialization_start",
+      "moduleId": "lmstudio-provider-simple",
+      "position": "middle",
+      "startTime": 1758980930791,
+      "status": "running"
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "sessionId": "req_1758980725395_ser8xnrh3",
+  "pipelineId": "unknown",
+  "startTime": 1758980725398,
+  "endTime": 1758980730635,
+  "status": "failed",
+  "operations": [
+    {
+      "operationId": "pipeline-request",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758980725398,
+      "status": "running"
+    },
+    {
+      "operationId": "transformation:llm-switch-request",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758980725398,
+      "status": "running",
+      "input": {
+        "model": "glm-4.5",
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好，总结下这个项目的目标。"
+          }
+        ]
+      }
+    },
+    {
+      "operationId": "transformation:compatibility-request",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758980725399,
+      "status": "running",
+      "input": {
+        "model": "glm-4.5",
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好，总结下这个项目的目标。"
+          }
+        ],
+        "_metadata": {
+          "switchType": "llmswitch-openai-openai",
+          "timestamp": 1758980725398,
+          "originalProtocol": "openai",
+          "targetProtocol": "openai"
+        },
+        "route": {
+          "providerId": "glm_key1.glm-4",
+          "modelId": "5",
+          "requestId": "req_1758980725395_ser8xnrh3",
+          "timestamp": 1758980725397
+        },
+        "metadata": {
+          "method": "POST",
+          "url": "/chat/completions",
+          "headers": {
+            "host": "localhost:5507",
+            "user-agent": "curl/8.7.1",
+            "accept": "*/*",
+            "content-type": "application/json",
+            "content-length": "103"
+          }
+        },
+        "debug": {
+          "enabled": true,
+          "stages": {
+            "llmSwitch": true,
+            "workflow": true,
+            "compatibility": true,
+            "provider": true
+          }
+        }
+      }
+    }
+  ]
+}

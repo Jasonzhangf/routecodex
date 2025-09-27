@@ -10,6 +10,8 @@ export function resolveRouteCodexConfigPath(preferredPath?: string): string {
   const candidates = [
     preferredPath,
     process.env.RCC4_CONFIG_PATH,
+    // Back-compat with docs/env usage
+    process.env.ROUTECODEX_CONFIG_PATH,
     process.env.ROUTECODEX_CONFIG,
     './routecodex.json',
     './config/routecodex.json',

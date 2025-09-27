@@ -1,0 +1,15 @@
+{
+  "sessionId": "session_1758982369230",
+  "pipelineId": "unknown",
+  "startTime": 1758982369230,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "merge_start",
+      "moduleId": "config-manager",
+      "position": "middle",
+      "startTime": 1758982369230,
+      "status": "running"
+    }
+  ]
+}

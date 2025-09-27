@@ -1,0 +1,15 @@
+{
+  "sessionId": "p5507_http_server_initialized_1758980690005",
+  "pipelineId": "unknown",
+  "startTime": 1758980690005,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "http_server_initialized",
+      "moduleId": "http-server",
+      "position": "middle",
+      "startTime": 1758980690005,
+      "status": "running"
+    }
+  ]
+}

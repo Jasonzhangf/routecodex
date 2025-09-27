@@ -1,35 +1,28 @@
 {
   "sessionId": "system",
   "pipelineId": "unknown",
-  "startTime": 1758816751493,
+  "startTime": 1758982369298,
   "status": "active",
   "operations": [
     {
       "operationId": "initialization-complete",
-      "moduleId": "provider-1758816751489",
+      "moduleId": "provider-1758982369297",
       "position": "middle",
-      "startTime": 1758816751493,
+      "startTime": 1758982369298,
       "status": "running"
     },
     {
-      "operationId": "initialization-complete",
-      "moduleId": "provider-1758816751490",
+      "operationId": "request-start",
+      "moduleId": "provider-1758982369297",
       "position": "middle",
-      "startTime": 1758816751494,
+      "startTime": 1758982382644,
       "status": "running"
     },
     {
-      "operationId": "initialization-complete",
-      "moduleId": "provider-1758816751490",
+      "operationId": "request-error",
+      "moduleId": "provider-1758982369297",
       "position": "middle",
-      "startTime": 1758816751494,
-      "status": "running"
-    },
-    {
-      "operationId": "initialization-complete",
-      "moduleId": "provider-1758816751490",
-      "position": "middle",
-      "startTime": 1758816751495,
+      "startTime": 1758982384468,
       "status": "running"
     }
   ]

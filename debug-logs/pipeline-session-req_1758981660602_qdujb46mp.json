@@ -1,0 +1,80 @@
+{
+  "sessionId": "req_1758981660602_qdujb46mp",
+  "pipelineId": "unknown",
+  "startTime": 1758981660604,
+  "endTime": 1758981663138,
+  "status": "failed",
+  "operations": [
+    {
+      "operationId": "pipeline-request",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758981660604,
+      "status": "running"
+    },
+    {
+      "operationId": "transformation:llm-switch-request",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758981660605,
+      "status": "running",
+      "input": {
+        "model": "glm-4.5",
+        "messages": [
+          {
+            "role": "user",
+            "content": "给我一句励志语录。"
+          }
+        ]
+      }
+    },
+    {
+      "operationId": "transformation:compatibility-request",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758981660608,
+      "status": "running",
+      "input": {
+        "model": "glm-4.5",
+        "messages": [
+          {
+            "role": "user",
+            "content": "给我一句励志语录。"
+          }
+        ],
+        "_metadata": {
+          "switchType": "llmswitch-openai-openai",
+          "timestamp": 1758981660605,
+          "originalProtocol": "openai",
+          "targetProtocol": "openai"
+        },
+        "route": {
+          "providerId": "modelscope_key2",
+          "modelId": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+          "requestId": "req_1758981660602_qdujb46mp",
+          "timestamp": 1758981660603
+        },
+        "metadata": {
+          "method": "POST",
+          "url": "/chat/completions",
+          "headers": {
+            "host": "localhost:5507",
+            "user-agent": "curl/8.7.1",
+            "accept": "*/*",
+            "content-type": "application/json",
+            "content-length": "88"
+          }
+        },
+        "debug": {
+          "enabled": true,
+          "stages": {
+            "llmSwitch": true,
+            "workflow": true,
+            "compatibility": true,
+            "provider": true
+          }
+        }
+      }
+    }
+  ]
+}

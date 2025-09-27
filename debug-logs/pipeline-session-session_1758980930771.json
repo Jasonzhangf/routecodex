@@ -1,0 +1,15 @@
+{
+  "sessionId": "session_1758980930771",
+  "pipelineId": "unknown",
+  "startTime": 1758980930771,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "log_message",
+      "moduleId": "DebugEnhancementManager",
+      "position": "middle",
+      "startTime": 1758980930771,
+      "status": "running"
+    }
+  ]
+}

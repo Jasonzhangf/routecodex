@@ -1,0 +1,29 @@
+{
+  "sessionId": "session_1758980930790",
+  "pipelineId": "unknown",
+  "startTime": 1758980930790,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "auth_initialization_start",
+      "moduleId": "qwen-provider",
+      "position": "middle",
+      "startTime": 1758980930790,
+      "status": "running"
+    },
+    {
+      "operationId": "initialization_start",
+      "moduleId": "qwen-provider",
+      "position": "middle",
+      "startTime": 1758980930790,
+      "status": "running"
+    },
+    {
+      "operationId": "auth_initialization_start",
+      "moduleId": "qwen-provider",
+      "position": "middle",
+      "startTime": 1758980930790,
+      "status": "running"
+    }
+  ]
+}

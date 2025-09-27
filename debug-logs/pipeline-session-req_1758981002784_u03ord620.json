@@ -1,0 +1,86 @@
+{
+  "sessionId": "req_1758981002784_u03ord620",
+  "pipelineId": "unknown",
+  "startTime": 1758981002786,
+  "status": "active",
+  "operations": [
+    {
+      "operationId": "pipeline-request",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758981002786,
+      "status": "running"
+    },
+    {
+      "operationId": "transformation:llm-switch-request",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758981002787,
+      "status": "running",
+      "input": {
+        "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        "messages": [
+          {
+            "role": "user",
+            "content": "请简要介绍一下你自己。"
+          }
+        ]
+      }
+    },
+    {
+      "operationId": "transformation:compatibility-request",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758981002788,
+      "status": "running",
+      "input": {
+        "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        "messages": [
+          {
+            "role": "user",
+            "content": "请简要介绍一下你自己。"
+          }
+        ],
+        "_metadata": {
+          "switchType": "llmswitch-openai-openai",
+          "timestamp": 1758981002787,
+          "originalProtocol": "openai",
+          "targetProtocol": "openai"
+        },
+        "route": {
+          "providerId": "modelscope_key1",
+          "modelId": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+          "requestId": "req_1758981002784_u03ord620",
+          "timestamp": 1758981002785
+        },
+        "metadata": {
+          "method": "POST",
+          "url": "/chat/completions",
+          "headers": {
+            "host": "localhost:5507",
+            "user-agent": "curl/8.7.1",
+            "accept": "*/*",
+            "content-type": "application/json",
+            "content-length": "122"
+          }
+        },
+        "debug": {
+          "enabled": true,
+          "stages": {
+            "llmSwitch": true,
+            "workflow": true,
+            "compatibility": true,
+            "provider": true
+          }
+        }
+      }
+    },
+    {
+      "operationId": "pipeline-response",
+      "moduleId": "unknown",
+      "position": "middle",
+      "startTime": 1758981004261,
+      "status": "running"
+    }
+  ]
+}

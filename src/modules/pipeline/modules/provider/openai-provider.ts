@@ -253,42 +253,44 @@ export class OpenAIProvider implements ProviderModule {
 
     } catch (error) {
       const processingTime = Date.now() - startTime;
-      const errorResponse: ProviderResponse = {
-        data: null,
-        status: 500,
-        headers: {
-          'content-type': 'application/json',
-          'x-request-id': requestId
-        },
-        metadata: {
-          requestId,
-          processingTime,
-          model: (request as { model?: string }).model as string
-        }
-      };
+
+      const errAny: any = error as any;
+      const upstreamMsg = errAny?.response?.data?.error?.message
+        ?? errAny?.response?.data?.message
+        ?? errAny?.data?.error?.message
+        ?? errAny?.data?.message
+        ?? (typeof errAny?.message === 'string' ? errAny.message : undefined);
+      const message = upstreamMsg ? String(upstreamMsg) : (error instanceof Error ? error.message : String(error));
 
       this.logger.logModule(this.id, 'sending-request-error', {
         requestId,
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
         processingTime
       });
 
       if (this.isDebugEnhanced) {
         this.publishProviderEvent('request-error', {
           requestId,
-          error: error instanceof Error ? error.message : String(error),
+          error: message,
           processingTime,
           model: (request as { model?: string }).model
         });
         this.addToErrorHistory({
           requestId,
-          error: error instanceof Error ? error.message : String(error),
-          model: request.model,
+          error: message,
+          model: (request as { model?: string }).model,
           timestamp: Date.now()
         });
       }
 
-      throw errorResponse;
+      // Map to ProviderError so router can produce consistent error payloads
+      const providerErr: any = new Error(message);
+      providerErr.type = 'server';
+      providerErr.statusCode = errAny?.status ?? errAny?.statusCode ?? errAny?.response?.status ?? 500;
+      providerErr.details = errAny?.response?.data || errAny?.data || {};
+      providerErr.retryable = providerErr.statusCode >= 500 || providerErr.statusCode === 429;
+
+      throw providerErr;
     }
   }
 
