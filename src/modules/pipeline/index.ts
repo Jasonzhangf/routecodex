@@ -33,9 +33,8 @@ export type {
   ProviderModule
 } from './interfaces/pipeline-interfaces.js';
 
-// Module registry and registrar
+// Module registry
 export { PipelineModuleRegistryImpl } from './core/pipeline-registry.js';
-export { ModuleRegistrar } from './core/module-registrar.js';
 
 // Configuration management
 export { PipelineConfigManager } from './config/pipeline-config-manager.js';
@@ -70,14 +69,6 @@ export * from './types/pipeline-types.js';
 
 // Pipeline creation helpers (when implemented)
 // export { createPipeline } from './utils/pipeline-creator.js';
-
-// Module factories (when implemented)
-// export {
-//   createLLMSwitchModule,
-//   createCompatibilityModule,
-//   createProviderModule,
-//   createWorkflowModule
-// } from './factories/module-factories.js';
 
 // Default configurations (when implemented)
 // export { defaultPipelineConfig } from './config/default-config.js';

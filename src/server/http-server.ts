@@ -11,7 +11,6 @@ import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
 import { DebugEventBus } from 'rcc-debugcenter';
 import { ErrorHandlingUtils } from '../utils/error-handling-utils.js';
 import { ModuleConfigReader } from '../utils/module-config-reader.js';
-import { isSimpleLogEnabled, getSimpleLogConfig } from '../logging/simple-log-integration.js';
 import { OpenAIRouter } from './openai-router.js';
 import { RequestHandler } from '../core/request-handler.js';
 import { ProviderManager } from '../core/provider-manager.js';
@@ -27,6 +26,7 @@ import fs from 'fs';
 import path from 'path';
 import { homedir } from 'os';
 import { DebugFileLogger } from '../debug/debug-file-logger.js';
+import { ConfigRequestClassifier } from '../modules/virtual-router/classifiers/config-request-classifier.js';
 
 /**
  * HTTP Server configuration interface
@@ -65,6 +65,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
   private mergedConfig: any | null = null;
   private pipelineManager: PipelineManager | null = null;
   private routePools: Record<string, string[]> | null = null;
+  private classifier: ConfigRequestClassifier | null = null;
 
   // Debug enhancement properties
   private isDebugEnhanced = false;
@@ -117,11 +118,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
     // Initialize components with default configuration - will be properly initialized in initialize() method
     this.providerManager = new ProviderManager(this.getDefaultServerConfig());
     this.requestHandler = new RequestHandler(this.providerManager, this.getDefaultServerConfig());
-    this.openaiRouter = new OpenAIRouter(
-      this.requestHandler,
-      this.providerManager,
-      this.moduleConfigReader
-    );
+    this.openaiRouter = new OpenAIRouter(this.requestHandler, this.providerManager, this.moduleConfigReader);
 
     // Initialize debug enhancements
     this.initializeDebugEnhancements();
@@ -131,29 +128,6 @@ export class HttpServer extends BaseModule implements IHttpServer {
    * Get default server configuration for initialization
    */
   private getDefaultServerConfig(): ServerConfig {
-    // 检查简化日志配置
-    const simpleLogConfig = getSimpleLogConfig();
-    let loggingConfig = {
-      level: 'info' as any,
-      enableConsole: true,
-      enableFile: false,
-      categories: ['server', 'api', 'request', 'config', 'error', 'message'],
-    };
-
-    if (simpleLogConfig && simpleLogConfig.enabled) {
-      console.log('📋 检测到简化日志配置，正在应用到服务器...');
-      loggingConfig = {
-        level: simpleLogConfig.logLevel as any,
-        enableConsole: simpleLogConfig.output === 'console' || simpleLogConfig.output === 'both',
-        enableFile: simpleLogConfig.output === 'file' || simpleLogConfig.output === 'both',
-        categories: ['server', 'api', 'request', 'config', 'error', 'message'],
-      };
-
-      if (loggingConfig.enableFile) {
-        console.log(`📁 日志将保存到: ${simpleLogConfig.logDirectory}`);
-      }
-    }
-
     return {
       server: {
         port: 5506,
@@ -165,7 +139,12 @@ export class HttpServer extends BaseModule implements IHttpServer {
         timeout: 30000,
         bodyLimit: '10mb',
       },
-      logging: loggingConfig,
+      logging: {
+        level: 'info',
+        enableConsole: true,
+        enableFile: false,
+        categories: ['server', 'api', 'request', 'config', 'error', 'message'],
+      },
       providers: {},
       routing: {
         strategy: 'round-robin',
@@ -274,12 +253,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
         'openairouter',
         {}
       );
-      this.openaiRouter = new OpenAIRouter(
-        this.requestHandler,
-        this.providerManager,
-        this.moduleConfigReader,
-        (openaiRouterModule || {}) as any
-      );
+      this.openaiRouter = new OpenAIRouter(this.requestHandler, this.providerManager, this.moduleConfigReader, (openaiRouterModule || {}) as any);
 
       // Initialize request handler
       await this.requestHandler.initialize();
@@ -289,9 +263,6 @@ export class HttpServer extends BaseModule implements IHttpServer {
 
       // Initialize OpenAI router
       await this.openaiRouter.initialize();
-
-      // Optionally initialize PipelineManager (LM Studio pipeline)
-      await this.initializePipelineIfConfigured();
 
       // Setup Express middleware
       await this.setupMiddleware();
@@ -394,18 +365,10 @@ export class HttpServer extends BaseModule implements IHttpServer {
   }
 
   /**
-   * Backward-compatible no-op: pipeline initialization is externally assembled now.
-   * Kept to satisfy older call sites without breaking the server lifecycle.
-   */
-  private async initializePipelineIfConfigured(): Promise<void> {
-    // Intentionally left blank. Pipeline assembly happens via merged-config assembler.
-    return;
-  }
-
-  /**
    * Attach a pipeline manager to the OpenAI router (enables HTTP → Router → Pipeline layering)
    */
   public attachPipelineManager(pipelineManager: any): void {
+    this.pipelineManager = pipelineManager as PipelineManager;
     try {
       if (this.openaiRouter && (this.openaiRouter as any).attachPipelineManager) {
         (this.openaiRouter as any).attachPipelineManager(pipelineManager);
@@ -414,6 +377,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       // Do not break server if attachment fails
       console.error('Failed to attach pipeline manager to OpenAI router:', error);
     }
+    // Router handles its own route selection; no local resolver
   }
 
   /** Attach static route pools for round-robin dispatch */
@@ -435,7 +399,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
         (this.openaiRouter as any).attachRoutingClassifierConfig(classifierConfig);
       }
     } catch (error) {
-      console.error('Failed to attach routing classifier config to OpenAI router:', error);
+      console.error('Failed to attach classifier config to OpenAI router:', error);
     }
   }
 

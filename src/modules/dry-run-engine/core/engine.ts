@@ -156,7 +156,14 @@ export class DryRunEngine {
         }
       };
 
-      // 初始化虚拟路由器dry-run执行器
+      // 初始化虚拟路由器dry-run执行器（先启用并传递详细选项）
+      virtualRouterDryRunExecutor.updateConfig({
+        enabled: true,
+        includeLoadBalancerDetails: options.virtualRouterConfig?.includeLoadBalancerDetails ?? true,
+        includeHealthStatus: options.virtualRouterConfig?.includeHealthStatus ?? true,
+        includeWeightCalculation: options.virtualRouterConfig?.includeWeightCalculation ?? true,
+        simulateProviderHealth: options.virtualRouterConfig?.simulateProviderHealth ?? true
+      });
       await virtualRouterDryRunExecutor.initialize(virtualRouterConfig);
 
       // 执行虚拟路由器dry-run
@@ -248,7 +255,14 @@ export class DryRunEngine {
         }
       };
 
-      // 初始化虚拟路由器dry-run执行器
+      // 初始化虚拟路由器dry-run执行器（先启用并传递详细选项）
+      virtualRouterDryRunExecutor.updateConfig({
+        enabled: true,
+        includeLoadBalancerDetails: options.virtualRouterConfig?.includeLoadBalancerDetails ?? true,
+        includeHealthStatus: options.virtualRouterConfig?.includeHealthStatus ?? true,
+        includeWeightCalculation: options.virtualRouterConfig?.includeWeightCalculation ?? true,
+        simulateProviderHealth: options.virtualRouterConfig?.simulateProviderHealth ?? true
+      });
       await virtualRouterDryRunExecutor.initialize(virtualRouterConfig);
 
       // 1. 执行虚拟路由器dry-run
@@ -355,4 +369,3 @@ export class DryRunEngine {
 }
 
 export const dryRunEngine = new DryRunEngine();
-

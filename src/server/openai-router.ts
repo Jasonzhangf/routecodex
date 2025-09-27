@@ -950,7 +950,7 @@ export class OpenAIRouter extends BaseModule {
       // Ensure finish_reason and role present on each choice
       clone.choices = clone.choices.map((c: any, idx: number) => {
         const choice = { index: idx, ...(c || {}) } as any;
-        if (!('finish_reason' in choice) && choice.finish_reason == null) {
+        if (!('finish_reason' in choice) && (choice.finish_reason === null || choice.finish_reason === undefined)) {
           choice.finish_reason = 'stop';
         }
         if (kind === 'chat' && choice.message && typeof choice.message === 'object') {
@@ -1001,8 +1001,8 @@ export class OpenAIRouter extends BaseModule {
 
       const normalizeChunk = (obj: any) => {
         try {
-          if (!obj || typeof obj !== 'object') return obj;
-          if (!obj.object) obj.object = 'chat.completion.chunk';
+          if (!obj || typeof obj !== 'object') {return obj;}
+          if (!obj.object) {obj.object = 'chat.completion.chunk';}
           if (Array.isArray(obj.choices)) {
             obj.choices = obj.choices.map((ch: any) => {
               const c = { ...(ch || {}) };
@@ -1011,7 +1011,7 @@ export class OpenAIRouter extends BaseModule {
                 if (d.reasoning_content && !d.content) {
                   d.content = d.reasoning_content;
                 }
-                if ('reasoning_content' in d) delete d.reasoning_content;
+                if ('reasoning_content' in d) {delete d.reasoning_content;}
                 c.delta = d;
               }
               return c;
@@ -1024,9 +1024,9 @@ export class OpenAIRouter extends BaseModule {
       if (iterator) {
         // Relay chunks as-is; assume they are OpenAI chunk objects or strings
         for await (const chunk of iterator as any) {
-          if (chunk == null) continue;
+          if (chunk === null || chunk === undefined) {continue;}
           if (typeof chunk === 'string') {
-            if (chunk.trim() === '[DONE]') break;
+            if (chunk.trim() === '[DONE]') {break;}
             // Try to parse JSON string; if fails, wrap into delta
             try {
               const obj = normalizeChunk(JSON.parse(chunk));
@@ -1109,9 +1109,9 @@ export class OpenAIRouter extends BaseModule {
         model: model || 'unknown',
         choices: [{ index: 0, delta: { content: '' }, finish_reason: 'stop' }],
       };
-      try { res.write(`data: ${JSON.stringify(errorChunk)}\n\n`); } catch {}
-      try { res.write('data: [DONE]\n\n'); } catch {}
-      try { res.end(); } catch {}
+      try { res.write(`data: ${JSON.stringify(errorChunk)}\n\n`); } catch (_e) { void 0; }
+      try { res.write('data: [DONE]\n\n'); } catch (_e) { void 0; }
+      try { res.end(); } catch (_e) { void 0; }
     }
   }
 
@@ -1124,36 +1124,36 @@ export class OpenAIRouter extends BaseModule {
       const expectJson =
         request?.response_format?.type === 'json_object' ||
         process.env.ROUTECODEX_FORCE_JSON === '1';
-      if (!expectJson || !body) return body;
+      if (!expectJson || !body) {return body;}
 
       const container = (body && typeof body === 'object' && (body as any).data) ? (body as any).data : body;
-      if (!container || typeof container !== 'object') return body;
+      if (!container || typeof container !== 'object') {return body;}
 
       const choices = Array.isArray(container.choices) ? container.choices : [];
       const clean = (s: string): string => {
-        if (typeof s !== 'string') return s as unknown as string;
+        if (typeof s !== 'string') {return s as unknown as string;}
         // Prefer fenced JSON block
         const fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
         const candidate = fence ? fence[1] : s;
         // Try parse as-is
-        try {
-          const obj = JSON.parse(candidate);
-          return JSON.stringify(obj);
-        } catch {}
+          try {
+            const obj = JSON.parse(candidate);
+            return JSON.stringify(obj);
+          } catch (_e) { void 0; }
         // Try extract first JSON object/array substring
         const matchObj = candidate.match(/\{[\s\S]*\}/);
         if (matchObj) {
           try {
             const obj = JSON.parse(matchObj[0]);
             return JSON.stringify(obj);
-          } catch {}
+          } catch (_e) { void 0; }
         }
         const matchArr = candidate.match(/\[[\s\S]*\]/);
         if (matchArr) {
           try {
             const obj = JSON.parse(matchArr[0]);
             return JSON.stringify(obj);
-          } catch {}
+          } catch (_e) { void 0; }
         }
         // Fallback: strip common wrappers/backticks
         return candidate.replace(/^```(?:json)?/i, '').replace(/```$/,'').trim();
@@ -1164,10 +1164,10 @@ export class OpenAIRouter extends BaseModule {
         if (kind === 'chat') {
           if (c.message && typeof c.message === 'object' && typeof c.message.content === 'string') {
             c.message.content = clean(c.message.content);
-            if (!c.message.role) c.message.role = 'assistant';
+            if (!c.message.role) {c.message.role = 'assistant';}
             // Remove verbose or non-standard fields that may confuse strict clients
             if ('reasoning_content' in c.message) {
-              try { delete (c.message as any).reasoning_content; } catch {}
+              try { delete (c.message as any).reasoning_content; } catch (_e) { void 0; }
             }
           }
         } else {

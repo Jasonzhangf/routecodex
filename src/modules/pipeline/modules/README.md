@@ -7,7 +7,7 @@
 ```
 modules/
 ├── llm-switch/          # LLMSwitch实现
-│   └── openai-passthrough.ts
+│   └── openai-normalizer.ts
 ├── workflow/            # Workflow实现
 │   └── streaming-control.ts
 ├── compatibility/       # Compatibility实现
@@ -22,7 +22,7 @@ modules/
 ## 模块说明
 
 ### LLMSwitch实现
-- **openai-passthrough.ts**: OpenAI协议透传实现，直接传递请求和响应
+- **openai-normalizer.ts**: OpenAI协议规范化实现，保持OpenAI→OpenAI格式
 
 ### Workflow实现
 - **streaming-control.ts**: 流式控制实现，处理流式/非流式转换

@@ -53,7 +53,7 @@ export interface UnifiedLogEntry {
   /** 日志消息 */
   message: string;
   /** 结构化数据 (可选) */
-  data?: any;
+  data?: Record<string, unknown>;
   /** 错误信息 (可选) */
   error?: LogError;
   /** 性能指标 */

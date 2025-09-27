@@ -6,6 +6,7 @@
 
 import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../types/provider-types.js';
+import type { UnknownObject } from '../../../../types/common-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { createIFlowOAuth, IFlowTokenStorage } from './iflow-oauth.js';
 import { DebugEventBus } from "rcc-debugcenter";
@@ -21,7 +22,12 @@ export class IFlowProvider implements ProviderModule {
   private isInitialized = false;
   private logger: PipelineDebugLogger;
   private authContext: AuthContext | null = null;
-  private healthStatus: any = null;
+  private healthStatus: {
+    status: 'healthy' | 'unhealthy';
+    timestamp: number;
+    responseTime: number;
+    details: Record<string, unknown>;
+  } | null = null;
   private oauth: ReturnType<typeof createIFlowOAuth>;
   private tokenStorage: IFlowTokenStorage | null = null;
   private isTestMode = false;
@@ -29,16 +35,16 @@ export class IFlowProvider implements ProviderModule {
   // Debug instrumentation
   private debugEventBus: DebugEventBus | null = null;
   private isDebugEnhanced = false;
-  private providerMetrics: Map<string, any> = new Map();
-  private requestHistory: any[] = [];
-  private authHistory: any[] = [];
-  private errorHistory: any[] = [];
+  private providerMetrics: Map<string, { values: unknown[]; lastUpdated: number }> = new Map();
+  private requestHistory: UnknownObject[] = [];
+  private authHistory: UnknownObject[] = [];
+  private errorHistory: UnknownObject[] = [];
   private maxHistorySize = 50;
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
     this.id = `provider-${Date.now()}`;
     this.config = config;
-    this.logger = dependencies.logger as any;
+    this.logger = dependencies.logger as PipelineDebugLogger;
     this.oauth = createIFlowOAuth(this.getOAuthOptions());
     this.initializeDebugEnhancements();
   }
@@ -54,7 +60,7 @@ export class IFlowProvider implements ProviderModule {
     }
   }
 
-  private recordProviderMetric(operation: string, data: any): void {
+  private recordProviderMetric(operation: string, data: unknown): void {
     if (!this.providerMetrics.has(operation)) {
       this.providerMetrics.set(operation, { values: [], lastUpdated: Date.now() });
     }
@@ -66,28 +72,28 @@ export class IFlowProvider implements ProviderModule {
     }
   }
 
-  private addToRequestHistory(operation: any): void {
+  private addToRequestHistory(operation: UnknownObject): void {
     this.requestHistory.push(operation);
     if (this.requestHistory.length > this.maxHistorySize) {
       this.requestHistory.shift();
     }
   }
 
-  private addToAuthHistory(operation: any): void {
+  private addToAuthHistory(operation: UnknownObject): void {
     this.authHistory.push(operation);
     if (this.authHistory.length > this.maxHistorySize) {
       this.authHistory.shift();
     }
   }
 
-  private addToErrorHistory(operation: any): void {
+  private addToErrorHistory(operation: UnknownObject): void {
     this.errorHistory.push(operation);
     if (this.errorHistory.length > this.maxHistorySize) {
       this.errorHistory.shift();
     }
   }
 
-  private publishDebugEvent(type: string, data: any): void {
+  private publishDebugEvent(type: string, data: UnknownObject): void {
     if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
     try {
       this.debugEventBus.publish({
@@ -108,7 +114,7 @@ export class IFlowProvider implements ProviderModule {
     }
   }
 
-  getDebugStatus(): any {
+  getDebugStatus(): UnknownObject {
     const base = {
       id: this.id,
       type: this.type,
@@ -134,7 +140,7 @@ export class IFlowProvider implements ProviderModule {
     };
   }
 
-  private getDebugInfo(): any {
+  private getDebugInfo(): UnknownObject {
     return {
       providerId: this.id,
       enhanced: this.isDebugEnhanced,
@@ -148,8 +154,8 @@ export class IFlowProvider implements ProviderModule {
     };
   }
 
-  private getProviderMetrics(): any {
-    const metrics: any = {};
+  private getProviderMetrics(): Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> {
+    const metrics: Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> = {};
     for (const [operation, metric] of this.providerMetrics.entries()) {
       metrics[operation] = {
         count: metric.values.length,
@@ -259,7 +265,7 @@ export class IFlowProvider implements ProviderModule {
     }
   }
 
-  async processIncoming(request: any): Promise<any> {
+  async processIncoming(request: Record<string, unknown>): Promise<UnknownObject> {
     if (!this.isInitialized) {
       throw new Error('iFlow Provider is not initialized');
     }
@@ -300,11 +306,11 @@ export class IFlowProvider implements ProviderModule {
     }
   }
 
-  async processOutgoing(response: any): Promise<any> {
+  async processOutgoing(response: UnknownObject): Promise<UnknownObject> {
     return response;
   }
 
-  async sendRequest(request: any): Promise<ProviderResponse> {
+  async sendRequest(request: Record<string, unknown>): Promise<ProviderResponse> {
     return this.sendChatRequest(request);
   }
 
@@ -315,7 +321,21 @@ export class IFlowProvider implements ProviderModule {
     this.tokenStorage = null;
   }
 
-  getStatus(): any {
+  getStatus(): {
+    id: string;
+    type: string;
+    providerType: string;
+    isInitialized: boolean;
+    healthStatus: {
+      status: 'healthy' | 'unhealthy';
+      timestamp: number;
+      responseTime: number;
+      details: Record<string, unknown>;
+    } | null;
+    requestMetrics: { requestCount: number; errorCount: number };
+    authStatus: string;
+    debugEnhanced: boolean;
+  } {
     return {
       id: this.id,
       type: this.type,
@@ -332,6 +352,7 @@ export class IFlowProvider implements ProviderModule {
   }
 
   async checkHealth(): Promise<boolean> {
+    const started = Date.now();
     try {
       await this.ensureValidToken();
       const response = await fetch(`${this.getAPIEndpoint()}/models`, {
@@ -344,6 +365,7 @@ export class IFlowProvider implements ProviderModule {
       this.healthStatus = {
         status: ok ? 'healthy' : 'unhealthy',
         timestamp: Date.now(),
+        responseTime: Date.now() - started,
         details: {
           httpStatus: response.status
         }
@@ -353,6 +375,7 @@ export class IFlowProvider implements ProviderModule {
       this.healthStatus = {
         status: 'unhealthy',
         timestamp: Date.now(),
+        responseTime: 0,
         details: {
           error: error instanceof Error ? error.message : String(error)
         }
@@ -423,7 +446,7 @@ export class IFlowProvider implements ProviderModule {
     return providerConfig.baseUrl || IFLOW_API_ENDPOINT;
   }
 
-  private async sendChatRequest(request: any): Promise<ProviderResponse> {
+  private async sendChatRequest(request: Record<string, unknown>): Promise<ProviderResponse> {
     const startTime = Date.now();
     const httpRequestId = `http_${Date.now()}_${Math.random().toString(36).substring(2)}`;
     const endpoint = `${this.getAPIEndpoint()}/chat/completions`;
@@ -489,8 +512,8 @@ export class IFlowProvider implements ProviderModule {
     }
   }
 
-  private buildIFlowPayload(request: any): any {
-    const allowedKeys: Array<keyof any> = [
+  private buildIFlowPayload(request: Record<string, unknown>): Record<string, unknown> {
+    const allowedKeys = [
       'model',
       'messages',
       'input',
@@ -500,11 +523,11 @@ export class IFlowProvider implements ProviderModule {
       'response_format',
       'user',
       'metadata'
-    ];
+    ] as const;
 
-    const payload: any = {};
+    const payload: Record<string, unknown> = {};
     for (const key of allowedKeys) {
-      if (request[key] !== undefined) {
+      if (key in request && request[key] !== undefined) {
         payload[key] = request[key];
       }
     }
@@ -512,7 +535,7 @@ export class IFlowProvider implements ProviderModule {
     return payload;
   }
 
-  private processResponse(response: ProviderResponse): any {
+  private processResponse(response: ProviderResponse): UnknownObject {
     return {
       ...response.data,
       _providerMetadata: {
@@ -524,14 +547,14 @@ export class IFlowProvider implements ProviderModule {
     };
   }
 
-  private async handleProviderError(error: any, request: any): Promise<void> {
+  private async handleProviderError(error: unknown, request: unknown): Promise<void> {
     const providerError = this.createProviderError(error, 'unknown');
     this.logger.logModule(this.id, 'provider-error', {
       error: providerError,
       request: {
-        model: request?.model,
-        hasMessages: Array.isArray(request?.messages),
-        hasTools: Array.isArray(request?.tools)
+        model: (request as { model?: string })?.model,
+        hasMessages: Array.isArray((request as { messages?: unknown[] })?.messages),
+        hasTools: Array.isArray((request as { tools?: unknown[] })?.tools)
       }
     });
 
@@ -547,18 +570,20 @@ export class IFlowProvider implements ProviderModule {
     });
   }
 
-  private createProviderError(error: unknown, type: string): ProviderError {
+  private createProviderError(error: unknown, type: ProviderError['type']): ProviderError {
     const err = error instanceof Error ? error : new Error(String(error));
     const providerError: ProviderError = new Error(err.message) as ProviderError;
-    providerError.type = type as any;
-    providerError.statusCode = (error as any)?.status || (error as any)?.statusCode;
-    providerError.details = (error as any)?.details || error;
+    providerError.type = type;
+    const errLike = error as { status?: number; statusCode?: number; details?: Record<string, unknown> };
+    providerError.statusCode = errLike?.status ?? errLike?.statusCode;
+    providerError.details = (errLike?.details as Record<string, unknown> | undefined) ?? {};
     providerError.retryable = this.isRetryableError(error);
     return providerError;
   }
 
-  private isRetryableError(error: any): boolean {
-    const status = error?.status || error?.statusCode;
+  private isRetryableError(error: unknown): boolean {
+    const errLike = error as { status?: number; statusCode?: number };
+    const status = errLike?.status ?? errLike?.statusCode;
     if (!status) {return false;}
     return status >= 500 || status === 429;
   }

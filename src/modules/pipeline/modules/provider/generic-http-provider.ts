@@ -6,9 +6,44 @@
  */
 
 import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
-import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../types/provider-types.js';
+import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
+import type {
+  ProviderConfig,
+  AuthContext,
+  ProviderResponse,
+  ProviderError,
+  ProviderRequestOptions,
+  APIKeyAuthConfig,
+  BearerAuthConfig,
+  BasicAuthConfig,
+  OAuthAuthConfig,
+  CustomAuthConfig,
+} from '../../types/provider-types.js';
+import type { UnknownObject } from '../../../../types/common-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { DebugEventBus } from "rcc-debugcenter";
+
+// Simulated response types for development path
+interface SimulatedChoice {
+  index: number;
+  message: { role: string; content: string };
+  finish_reason: string;
+}
+
+interface SimulatedProviderData {
+  id: string;
+  object: string;
+  created: number;
+  model: string;
+  choices: SimulatedChoice[];
+  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+}
+
+interface SimulatedHttpResponse {
+  data: SimulatedProviderData;
+  status: number;
+  headers: Record<string, string>;
+}
 
 /**
  * Generic HTTP Provider Module
@@ -22,22 +57,27 @@ export class GenericHTTPProvider implements ProviderModule {
   private isInitialized = false;
   private logger: PipelineDebugLogger;
   private authContext: AuthContext | null = null;
-  private httpClient: any = null;
-  private healthStatus: any = null;
+  private httpClient: { baseUrl: string; timeout: number; headers: Record<string, string> } | null = null;
+  private healthStatus: {
+    status: 'healthy' | 'unhealthy';
+    timestamp: number;
+    responseTime: number;
+    details: Record<string, unknown>;
+  } | null = null;
 
   // Debug enhancement properties
   private debugEventBus: DebugEventBus | null = null;
   private isDebugEnhanced = false;
-  private providerMetrics: Map<string, any> = new Map();
-  private requestHistory: any[] = [];
-  private errorHistory: any[] = [];
+  private providerMetrics: Map<string, { values: unknown[]; lastUpdated: number }> = new Map();
+  private requestHistory: UnknownObject[] = [];
+  private errorHistory: UnknownObject[] = [];
   private maxHistorySize = 50;
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
     this.id = `provider-${Date.now()}`;
     this.config = config;
     this.providerType = (config.config as ProviderConfig).type;
-    this.logger = dependencies.logger as any;
+    this.logger = dependencies.logger as PipelineDebugLogger;
 
     // Initialize debug enhancements
     this.initializeDebugEnhancements();
@@ -77,7 +117,10 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Process incoming request - Send to generic provider
    */
-  async processIncoming(request: any): Promise<any> {
+  // Overload: accept SharedPipelineRequest at the boundary
+  async processIncoming(request: SharedPipelineRequest): Promise<unknown>;
+  async processIncoming(request: UnknownObject): Promise<unknown>;
+  async processIncoming(request: SharedPipelineRequest | UnknownObject): Promise<unknown> {
     if (!this.isInitialized) {
       throw new Error('Generic HTTP Provider is not initialized');
     }
@@ -114,15 +157,20 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Process outgoing response - Not typically used for providers
    */
-  async processOutgoing(response: any): Promise<any> {
+  async processOutgoing(response: unknown): Promise<unknown> {
     return response;
   }
 
   /**
    * Send request to provider
    */
-  async sendRequest(request: any, options?: any): Promise<ProviderResponse> {
-    return this.processIncoming(request);
+  // Overload: accept SharedPipelineRequest at the boundary
+  async sendRequest(request: SharedPipelineRequest | UnknownObject, options?: ProviderRequestOptions): Promise<unknown>;
+  async sendRequest(request: SharedPipelineRequest | UnknownObject, _options?: ProviderRequestOptions): Promise<unknown> {
+    if (this.isSharedPipelineRequest(request)) {
+      return this.processIncoming(request);
+    }
+    return this.processIncoming(request as UnknownObject);
   }
 
   /**
@@ -197,7 +245,12 @@ export class GenericHTTPProvider implements ProviderModule {
     providerType: string;
     isInitialized: boolean;
     authStatus: string;
-    healthStatus: any;
+    healthStatus: {
+      status: 'healthy' | 'unhealthy';
+      timestamp: number;
+      responseTime: number;
+      details: Record<string, unknown>;
+    } | null;
     lastActivity: number;
   } {
     return {
@@ -214,7 +267,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Get provider metrics
    */
-  async getMetrics(): Promise<any> {
+  async getMetrics(): Promise<{ requestCount: number; successCount: number; errorCount: number; averageResponseTime: number; timestamp: number }> {
     return {
       requestCount: 0,
       successCount: 0,
@@ -262,19 +315,19 @@ export class GenericHTTPProvider implements ProviderModule {
 
     switch (authConfig.type) {
       case 'apikey':
-        this.authContext = this.initializeApiKeyAuth(authConfig);
+        this.authContext = this.initializeApiKeyAuth(authConfig as APIKeyAuthConfig);
         break;
       case 'bearer':
-        this.authContext = this.initializeBearerAuth(authConfig);
+        this.authContext = this.initializeBearerAuth(authConfig as BearerAuthConfig);
         break;
       case 'oauth':
-        this.authContext = await this.initializeOAuthAuth(authConfig);
+        this.authContext = await this.initializeOAuthAuth(authConfig as OAuthAuthConfig);
         break;
       case 'basic':
-        this.authContext = this.initializeBasicAuth(authConfig);
+        this.authContext = this.initializeBasicAuth(authConfig as BasicAuthConfig);
         break;
       case 'custom':
-        this.authContext = await this.initializeCustomAuth(authConfig);
+        this.authContext = await this.initializeCustomAuth(authConfig as CustomAuthConfig);
         break;
       default:
         throw new Error(`Unsupported authentication type: ${authConfig.type}`);
@@ -289,7 +342,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Initialize API key authentication
    */
-  private initializeApiKeyAuth(authConfig: any): AuthContext {
+  private initializeApiKeyAuth(authConfig: APIKeyAuthConfig): AuthContext {
     return {
       type: 'apikey',
       token: authConfig.apiKey,
@@ -308,7 +361,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Initialize bearer token authentication
    */
-  private initializeBearerAuth(authConfig: any): AuthContext {
+  private initializeBearerAuth(authConfig: BearerAuthConfig): AuthContext {
     return {
       type: 'bearer',
       token: authConfig.token,
@@ -327,7 +380,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Initialize OAuth authentication
    */
-  private async initializeOAuthAuth(authConfig: any): Promise<AuthContext> {
+  private async initializeOAuthAuth(authConfig: OAuthAuthConfig): Promise<AuthContext> {
     // Would implement OAuth flow here
     return {
       type: 'oauth',
@@ -350,7 +403,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Initialize basic authentication
    */
-  private initializeBasicAuth(authConfig: any): AuthContext {
+  private initializeBasicAuth(authConfig: BasicAuthConfig): AuthContext {
     const credentials = Buffer.from(`${authConfig.username}:${authConfig.password}`).toString('base64');
 
     return {
@@ -370,7 +423,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Initialize custom authentication
    */
-  private async initializeCustomAuth(authConfig: any): Promise<AuthContext> {
+  private async initializeCustomAuth(authConfig: CustomAuthConfig): Promise<AuthContext> {
     // Would load custom authentication implementation
     return {
       type: 'custom',
@@ -409,19 +462,21 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Prepare request for provider API
    */
-  private prepareRequest(request: any): any {
+  private prepareRequest(request: SharedPipelineRequest | UnknownObject): UnknownObject {
     const providerConfig = this.config.config as ProviderConfig;
 
-    // Basic request preparation - would be provider-specific
-    const providerRequest = {
-      ...request,
+    const payload: UnknownObject = this.isSharedPipelineRequest(request)
+      ? ((request as SharedPipelineRequest).data as UnknownObject)
+      : ((request as UnknownObject) || {});
+
+    const providerRequest: UnknownObject = {
+      ...payload,
       _metadata: {
         provider: this.providerType,
         timestamp: Date.now()
       }
     };
 
-    // Apply provider-specific transformations if configured
     if (providerConfig.compatibility?.enabled) {
       return this.applyCompatibilityTransformations(providerRequest);
     }
@@ -432,7 +487,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Apply compatibility transformations
    */
-  private applyCompatibilityTransformations(request: any): any {
+  private applyCompatibilityTransformations(request: UnknownObject): UnknownObject {
     // Would apply provider-specific compatibility transformations
     return request;
   }
@@ -440,7 +495,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Send HTTP request to provider API
    */
-  private async sendHttpRequest(request: any): Promise<ProviderResponse> {
+  private async sendHttpRequest(request: UnknownObject): Promise<ProviderResponse> {
     const startTime = Date.now();
     const endpoint = this.getEndpoint();
 
@@ -460,7 +515,7 @@ export class GenericHTTPProvider implements ProviderModule {
         metadata: {
           requestId: `req-${Date.now()}`,
           processingTime,
-          model: request.model
+          model: (request as { model?: string }).model || 'unknown'
         }
       };
 
@@ -473,8 +528,8 @@ export class GenericHTTPProvider implements ProviderModule {
    * Prepare request headers
    */
   private prepareHeaders(): Record<string, string> {
-    const headers = {
-      ...this.httpClient.headers
+    const headers: Record<string, string> = {
+      ...(this.httpClient?.headers ?? {})
     };
 
     // Add authentication headers
@@ -505,7 +560,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Process provider response
    */
-  private processResponse(response: ProviderResponse): any {
+  private processResponse(response: ProviderResponse): UnknownObject {
     return {
       ...response.data,
       _providerMetadata: {
@@ -527,7 +582,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Perform health check
    */
-  private async performHealthCheck(): Promise<{ isHealthy: boolean; details: any }> {
+  private async performHealthCheck(): Promise<{ isHealthy: boolean; details: Record<string, unknown> }> {
     try {
       const isHealthy = this.authContext !== null;
 
@@ -554,14 +609,14 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Handle provider errors
    */
-  private async handleProviderError(error: any, request: any): Promise<void> {
+  private async handleProviderError(error: unknown, request: unknown): Promise<void> {
     const providerError = this.createProviderError(error, 'unknown');
 
     this.logger.logModule(this.id, 'provider-error', {
       error: providerError,
       request: {
-        model: request.model,
-        hasMessages: !!request.messages
+        model: this.extractModel(request),
+        hasMessages: this.extractHasMessages(request)
       }
     });
 
@@ -583,12 +638,13 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Create provider error
    */
-  private createProviderError(error: unknown, type: string): ProviderError {
+  private createProviderError(error: unknown, type: ProviderError['type']): ProviderError {
     const errorObj = error instanceof Error ? error : new Error(String(error));
     const providerError: ProviderError = new Error(errorObj.message) as ProviderError;
-    providerError.type = type as any;
-    providerError.statusCode = (error as any).status || (error as any).statusCode;
-    providerError.details = (error as any).details || error;
+    providerError.type = type;
+    const errLike = error as { status?: number; statusCode?: number; details?: Record<string, unknown> };
+    providerError.statusCode = errLike.status ?? errLike.statusCode;
+    providerError.details = (errLike.details as Record<string, unknown> | undefined) ?? {};
     providerError.retryable = this.isErrorRetryable(type);
 
     return providerError;
@@ -605,7 +661,11 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Simulate HTTP request (for development)
    */
-  private async simulateHttpRequest(endpoint: string, request: any, headers: any): Promise<any> {
+  private async simulateHttpRequest(
+    endpoint: string,
+    request: UnknownObject,
+    _headers: Record<string, string>
+  ): Promise<SimulatedHttpResponse> {
     // Simulate network delay
     await new Promise(resolve => setTimeout(resolve, 50));
 
@@ -614,7 +674,7 @@ export class GenericHTTPProvider implements ProviderModule {
         id: `chat-${Date.now()}`,
         object: 'chat.completion',
         created: Math.floor(Date.now() / 1000),
-        model: request.model,
+        model: (request as { model?: string }).model || 'unknown',
         choices: [
           {
             index: 0,
@@ -663,7 +723,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Record provider metric
    */
-  private recordProviderMetric(operation: string, data: any): void {
+  private recordProviderMetric(operation: string, data: unknown): void {
     if (!this.providerMetrics.has(operation)) {
       this.providerMetrics.set(operation, {
         values: [],
@@ -684,7 +744,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Add to request history
    */
-  private addToRequestHistory(request: any): void {
+  private addToRequestHistory(request: UnknownObject): void {
     this.requestHistory.push(request);
 
     // Keep only recent history
@@ -696,7 +756,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Add to error history
    */
-  private addToErrorHistory(error: any): void {
+  private addToErrorHistory(error: UnknownObject): void {
     this.errorHistory.push(error);
 
     // Keep only recent history
@@ -708,7 +768,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Publish debug event
    */
-  private publishDebugEvent(type: string, data: any): void {
+  private publishDebugEvent(type: string, data: UnknownObject): void {
     if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
 
     try {
@@ -733,7 +793,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Get debug status with enhanced information
    */
-  getDebugStatus(): any {
+  getDebugStatus(): UnknownObject {
     const baseStatus = {
       providerId: this.id,
       type: this.type,
@@ -758,7 +818,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Get detailed debug information
    */
-  private getDebugInfo(): any {
+  private getDebugInfo(): UnknownObject {
     return {
       providerId: this.id,
       providerType: this.providerType,
@@ -774,8 +834,8 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Get provider metrics
    */
-  private getProviderMetrics(): any {
-    const metrics: any = {};
+  private getProviderMetrics(): Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> {
+    const metrics: Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> = {};
 
     for (const [operation, metric] of this.providerMetrics.entries()) {
       metrics[operation] = {
@@ -791,7 +851,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Get module debug info - helper method for consistency
    */
-  getModuleDebugInfo(): any {
+  getModuleDebugInfo(): UnknownObject {
     return this.getDebugInfo();
   }
 
@@ -800,5 +860,27 @@ export class GenericHTTPProvider implements ProviderModule {
    */
   isModuleInitialized(): boolean {
     return this.isInitialized;
+  }
+
+  private isSharedPipelineRequest(value: unknown): value is SharedPipelineRequest {
+    if (!value || typeof value !== 'object') {return false;}
+    const v = value as Record<string, unknown>;
+    return 'data' in v && 'route' in v && 'metadata' in v && 'debug' in v;
+  }
+
+  private extractModel(request: unknown): string | undefined {
+    if (this.isSharedPipelineRequest(request)) {
+      const data = request.data as UnknownObject;
+      return (data as { model?: string }).model;
+    }
+    return (request as { model?: string })?.model;
+  }
+
+  private extractHasMessages(request: unknown): boolean {
+    if (this.isSharedPipelineRequest(request)) {
+      const data = request.data as UnknownObject;
+      return Array.isArray((data as { messages?: unknown[] }).messages);
+    }
+    return Array.isArray((request as { messages?: unknown[] })?.messages);
   }
 }

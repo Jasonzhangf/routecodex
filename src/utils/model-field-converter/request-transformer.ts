@@ -5,12 +5,10 @@
 
 import type {
   OpenAIRequest,
-  RequestMeta,
   ConversionContext,
   ConversionStep,
   ConversionResult,
-  ConversionDebugInfo,
-  ConversionMetrics
+  ConversionDebugInfo
 } from './types.js';
 import { FieldMappingRules } from './field-mapping-rules.js';
 
@@ -152,7 +150,7 @@ export class RequestTransformer {
   private async transformModelField(
     request: OpenAIRequest,
     context: ConversionContext,
-    trace: ConversionStep[]
+    _trace: ConversionStep[]
   ): Promise<ConversionStep> {
     const startTime = Date.now();
     const originalValue = request.model;
@@ -183,7 +181,7 @@ export class RequestTransformer {
   private async transformParameterFields(
     request: OpenAIRequest,
     context: ConversionContext,
-    trace: ConversionStep[]
+    _trace: ConversionStep[]
   ): Promise<ConversionStep> {
     const startTime = Date.now();
     const inputState = { ...request };
@@ -238,7 +236,7 @@ export class RequestTransformer {
   private async injectMetadata(
     request: OpenAIRequest,
     context: ConversionContext,
-    trace: ConversionStep[]
+    _trace: ConversionStep[]
   ): Promise<ConversionStep> {
     const startTime = Date.now();
 
@@ -281,8 +279,8 @@ export class RequestTransformer {
    */
   private async validateTransformedRequest(
     request: OpenAIRequest,
-    context: ConversionContext,
-    trace: ConversionStep[]
+    _context: ConversionContext,
+    _trace: ConversionStep[]
   ): Promise<ConversionStep> {
     const startTime = Date.now();
     const validationErrors: string[] = [];
@@ -400,7 +398,7 @@ export class RequestTransformer {
    * 获取转换器统计信息
    */
   getStatistics(): {
-    rules: any;
+    rules: Record<string, unknown>;
     uptime: number;
   } {
     return {

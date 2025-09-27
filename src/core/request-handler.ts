@@ -5,7 +5,7 @@
 
 import { BaseModule, type ModuleInfo } from 'rcc-basemodule';
 import { DebugEventBus } from 'rcc-debugcenter';
-import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
+import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import { ErrorHandlingUtils } from '../utils/error-handling-utils.js';
 import { ProviderManager } from './provider-manager.js';
 import {
@@ -14,7 +14,7 @@ import {
   type OpenAIChatCompletionRequest,
   type OpenAICompletionRequest,
   type OpenAICompletionResponse,
-  type OpenAIModel,
+  
   type ServerConfig,
   RouteCodexError,
 } from '../server/types.js';
@@ -43,8 +43,14 @@ function isChatCompletionRequest(request: any): request is OpenAIChatCompletionR
   );
 }
 
-function isCompletionRequest(request: any): request is OpenAICompletionRequest {
-  return request && typeof request === 'object' && 'prompt' in request && !('messages' in request);
+// 工具函数：用于判断是否为completion请求，保留供未来使用
+function _isCompletionRequest(_request: unknown): _request is OpenAICompletionRequest {
+  return (
+    typeof _request === 'object' &&
+    _request !== null &&
+    'prompt' in (_request as Record<string, unknown>) &&
+    !('messages' in (_request as Record<string, unknown>))
+  );
 }
 
 /**
@@ -113,7 +119,7 @@ export class RequestHandler extends BaseModule {
   /**
    * Initialize the request handler
    */
-  public async initialize(config?: any): Promise<void> {
+  public async initialize(_config?: any): Promise<void> {
     try {
       await ErrorHandlingUtils.initialize();
       await this.errorHandling.initialize();
@@ -484,7 +490,7 @@ export class RequestHandler extends BaseModule {
    */
   private async handleStreamingChatCompletion(
     request: OpenAIChatCompletionRequest,
-    context: RequestContext
+    _context: RequestContext
   ): Promise<any> {
     // This would typically involve setting up a streaming response
     // For now, we'll return a placeholder indicating streaming support
@@ -906,7 +912,7 @@ export class RequestHandler extends BaseModule {
   /**
    * Extract request ID from context if available
    */
-  private extractRequestId(context: string): string | undefined {
+  private extractRequestId(_context: string): string | undefined {
     // This could extract request ID from context or use a tracking system
     return undefined;
   }

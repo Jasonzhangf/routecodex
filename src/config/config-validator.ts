@@ -3,7 +3,7 @@
  * Provides comprehensive validation for RouteCodex configuration
  */
 
-import type { RouteCodexConfig, ConfigValidationSchema } from './config-types';
+import type { RouteCodexConfig } from './config-types';
 import { ErrorHandlingUtils } from '../utils/error-handling-utils';
 
 /**

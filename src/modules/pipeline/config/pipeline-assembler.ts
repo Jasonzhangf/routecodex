@@ -86,10 +86,9 @@ export class PipelineAssembler {
           } else {
             const inputProtocol = (mergedConfig?.modules?.virtualrouter?.config?.inputProtocol || 'openai').toLowerCase();
             if (inputProtocol === 'anthropic') {
-              llmSwitch = { type: 'anthropic-openai-converter', config: {} };
+              llmSwitch = { type: 'llmswitch-anthropic-openai', config: {} };
             } else {
-              // 默认按openai协议直通
-              llmSwitch = { type: 'openai-passthrough', config: {} };
+              llmSwitch = { type: 'llmswitch-openai-openai', config: {} };
             }
           }
 

@@ -379,7 +379,7 @@ export class InputSimulator {
       'llm-switch': {
         ...input,
         _metadata: {
-          switchType: 'openai-passthrough',
+          switchType: 'llmswitch-openai-openai',
           timestamp: Date.now(),
           originalProtocol: 'openai',
           targetProtocol: 'openai',

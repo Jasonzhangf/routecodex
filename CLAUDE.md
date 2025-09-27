@@ -44,7 +44,7 @@ export class OpenAIPassthroughLLMSwitch implements LLM SwitchModule {
     return {
       ...request,
       _metadata: {
-        switchType: 'openai-passthrough',
+        switchType: 'llmswitch-openai-openai',
         timestamp: Date.now(),
         originalProtocol: 'openai',
         targetProtocol: 'openai',
@@ -174,7 +174,7 @@ export class LMStudioProviderSimple implements ProviderModule {
   "messages": [...],
   "tools": [...],
   "_metadata": {
-    "switchType": "openai-passthrough",
+    "switchType": "llmswitch-openai-openai",
     "timestamp": 1758554010322,
     "originalProtocol": "openai",
     "targetProtocol": "openai"
@@ -278,7 +278,7 @@ RouteCodex系统严格区分**用户基础配置**和**系统扩展配置**，�
 {
   "pipeline": {
     "llmSwitch": {
-      "type": "openai-passthrough",
+      "type": "llmswitch-openai-openai",
       "config": {
         "protocol": "openai",
         "targetFormat": "lmstudio"

@@ -68,8 +68,12 @@ export class VirtualRouterDryRunExecutor {
     if (!this.config.enabled) {return;}
 
     try {
-      // 创建分类器
-      this.classifier = ConfigRequestClassifier.fromModuleConfig(moduleConfig);
+      // 创建分类器（需要 classificationConfig 节点）
+      const classificationConfig = moduleConfig?.classificationConfig;
+      if (!classificationConfig) {
+        throw new Error('classificationConfig is missing in moduleConfig');
+      }
+      this.classifier = ConfigRequestClassifier.fromModuleConfig(classificationConfig);
       
       // 创建路由决策器
       if (moduleConfig.classificationConfig?.routingDecisions) {

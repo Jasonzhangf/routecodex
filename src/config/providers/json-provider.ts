@@ -275,24 +275,24 @@ export class JsonConfigProvider implements ConfigProvider {
     try {
       const dir = path.dirname(filePath);
       const basename = path.basename(filePath);
-      const backupPattern = `${basename}.backup.*`;
-
       const files = await fs.readdir(dir);
-      const backupFiles = files
-        .filter(file => file.startsWith(`${basename}.backup.`))
-        .map(file => ({
-          name: file,
-          path: path.join(dir, file),
-          time: fs.stat(path.join(dir, file)).then(stats => stats.mtime)
-        }));
+
+      const backupFiles = await Promise.all(
+        files
+          .filter(file => file.startsWith(`${basename}.backup.`))
+          .map(async file => {
+            const fullPath = path.join(dir, file);
+            const stats = await fs.stat(fullPath);
+            return {
+              name: file,
+              path: fullPath,
+              time: stats.mtime
+            } as const;
+          })
+      );
 
       // Sort by modification time (newest first)
-      const sortedBackups = await Promise.all(
-        backupFiles.map(async file => ({
-          ...file,
-          time: await file.time
-        }))
-      ).then(files => files.sort((a, b) => b.time.getTime() - a.time.getTime()));
+      const sortedBackups = backupFiles.sort((a, b) => b.time.getTime() - a.time.getTime());
 
       // Keep only the most recent backups
       const toDelete = sortedBackups.slice(keepCount);

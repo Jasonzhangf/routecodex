@@ -15,6 +15,7 @@ import type {
   LogStats,
   LogAnalysisResult,
 } from './types.js';
+import type { LogData } from '../types/common-types.js';
 
 /**
  * 统一日志接口
@@ -23,22 +24,22 @@ export interface UnifiedLogger {
   /**
    * 记录调试日志
    */
-  debug(message: string, data?: any): void;
+  debug(message: string, data?: LogData): void;
 
   /**
    * 记录信息日志
    */
-  info(message: string, data?: any): void;
+  info(message: string, data?: LogData): void;
 
   /**
    * 记录警告日志
    */
-  warn(message: string, data?: any): void;
+  warn(message: string, data?: LogData): void;
 
   /**
    * 记录错误日志
    */
-  error(message: string, error?: Error, data?: any): void;
+  error(message: string, error?: Error, data?: LogData): void;
 
   /**
    * 设置日志上下文

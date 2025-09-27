@@ -11,7 +11,6 @@ import type {
   ModuleConfigs,
   RouteTargetPool,
   PipelineConfigs,
-  RouteTarget,
 } from './merged-config-types.js';
 
 export class UserConfigParser {

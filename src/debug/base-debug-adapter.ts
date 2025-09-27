@@ -12,13 +12,13 @@ import type {
   DebugAdapter,
   DebugAdapterConfig,
   DebugContext,
-  DebugData,
   DebugAdapterHealth,
   DebugAdapterStats,
   DebugHealthIssue,
   DebugUtils
 } from '../types/debug-types.js';
 import { DebugSystemEvent } from '../types/debug-types.js';
+import type { DebugData } from '../types/debug-types.js';
 
 /**
  * Abstract base class for all debug adapters

@@ -24,7 +24,8 @@ export type PipelineInitializationState = 'pending' | 'initializing' | 'ready' |
  * Module type mapping
  */
 export interface ModuleTypeMapping {
-  'openai-passthrough': import('../modules/llmswitch/openai-passthrough.js').OpenAIPassthroughLLMSwitch;
+  'llmswitch-openai-openai': import('../modules/llmswitch/openai-normalizer.js').OpenAINormalizerLLMSwitch;
+  'llmswitch-anthropic-openai': import('../modules/llmswitch/anthropic-openai-converter.js').AnthropicOpenAIConverter;
   'streaming-control': import('../modules/workflow/streaming-control.js').StreamingControlWorkflow;
   'field-mapping': import('../modules/compatibility/field-mapping.js').FieldMappingCompatibility;
   'qwen-provider': import('../modules/provider/qwen-provider.js').QwenProvider;
@@ -35,7 +36,8 @@ export interface ModuleTypeMapping {
  * Pipeline module configuration variants
  */
 export type PipelineModuleConfig =
-  | { type: 'openai-passthrough'; config: Record<string, any> }
+  | { type: 'llmswitch-openai-openai'; config: Record<string, any> }
+  | { type: 'llmswitch-anthropic-openai'; config: Record<string, any> }
   | { type: 'streaming-control'; config: Record<string, any> }
   | { type: 'field-mapping'; config: { rules: TransformationRule[] } }
   | { type: 'qwen-provider'; config: Record<string, any> }

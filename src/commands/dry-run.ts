@@ -9,18 +9,125 @@
  * - Chain processing
  */
 
+// Type definitions for Dry-Run functionality
+interface FileData {
+  [key: string]: unknown;
+}
+
+interface FormatOutputData {
+  [key: string]: unknown;
+  nodeResults?: {
+    entries(): Iterable<[string, unknown]>;
+  };
+  'llm-switch'?: {
+    expectedOutput?: {
+      metadata?: {
+        routingDecision?: unknown;
+      };
+    };
+  };
+}
+
+interface MergedConfig {
+  modules?: {
+    virtualrouter?: {
+      config: {
+        routeTargets?: Record<string, RouteTarget[]>;
+      };
+    };
+  };
+}
+
+interface RouteInput {
+  model?: string;
+  messages?: Array<{
+    role: string;
+    content: string;
+  }>;
+  [key: string]: unknown;
+}
+
+interface DryRunResult {
+  [key: string]: unknown;
+}
+
+interface SessionResponse {
+  timestamp: number;
+  [key: string]: unknown;
+}
+
+// Use shared DTOs for pipeline boundaries
+import type { SharedPipelineRequest } from '../types/shared-dtos.js';
+import type { PipelineModule } from '../modules/pipeline/interfaces/pipeline-interfaces.js';
+
+interface CaptureData {
+  timestamp: number;
+  metadata: unknown;
+  response: unknown;
+}
+
+interface BatchResult {
+  input: string;
+  result: unknown;
+  timestamp: string;
+}
+
+interface ChainStep {
+  type: 'request' | 'response' | 'bidirectional';
+  name?: string;
+  pipelineId?: string;
+  mode?: string;
+  nodeConfigs?: Record<string, unknown>;
+}
+
+interface ChainResult {
+  step: number;
+  name: string;
+  type: string;
+  result: unknown;
+}
+
+interface ChainOutput {
+  chain: {
+    name: string;
+    steps: ChainStep[];
+  };
+  results: ChainResult[];
+  summary: {
+    totalSteps: number;
+    successfulSteps: number;
+    executionTime: number;
+  };
+}
+
+interface MockModule {
+  id: string;
+  type: string;
+  config: Record<string, unknown>;
+  initialize(): Promise<void>;
+  cleanup(): Promise<void>;
+  processOutgoing(x: unknown): Promise<unknown>;
+  processIncoming(req: unknown): Promise<unknown>;
+  executeNodeDryRun(input: unknown): Promise<DryRunResult>;
+  validateOutput(): Promise<unknown[]>;
+  simulateError(): Promise<unknown>;
+  estimatePerformance(): Promise<{
+    time: number;
+    memory: number;
+    complexity: number;
+  }>;
+}
+
+// -------- Default Dry-Run Modules (simulate dynamic routing, load balancer, provider) --------
+type RouteTarget = { providerId: string; modelId: string; keyId?: string; actualKey?: string };
+
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import fs from 'fs';
 import path from 'path';
 import { homedir } from 'os';
-import { DryRunEngine, dryRunEngine } from '../modules/dry-run-engine/index.js';
-import type {
-  RunRequestOptions,
-  RunResponseOptions,
-  RunBidirectionalOptions,
-} from '../modules/dry-run-engine/index.js';
+import { dryRunEngine } from '../modules/dry-run-engine/index.js';
 import { dryRunPipelineExecutor } from '../modules/pipeline/dry-run/dry-run-pipeline-executor.js';
 import {
   pipelineDryRunManager,
@@ -51,7 +158,7 @@ function detectFileFormat(filePath: string): 'json' | 'yaml' | 'yml' {
 }
 
 // File reading utilities
-async function loadFile(filePath: string): Promise<any> {
+async function loadFile(filePath: string): Promise<FileData> {
   try {
     const fullPath = path.resolve(filePath);
     if (!fs.existsSync(fullPath)) {
@@ -65,10 +172,11 @@ async function loadFile(filePath: string): Promise<any> {
       case 'json':
         return JSON.parse(content);
       case 'yaml':
-      case 'yml':
+      case 'yml': {
         // Dynamically import YAML parser
         const yamlModule = await import('yaml');
         return yamlModule.parse(content);
+      }
       default:
         throw new Error(`Unsupported format: ${format}`);
     }
@@ -80,27 +188,42 @@ async function loadFile(filePath: string): Promise<any> {
 }
 
 // Output formatting utilities
-function formatOutput(data: any, format: 'json' | 'pretty'): void {
+// Type guards/helpers for safe formatting
+function isEntriesIterable(val: unknown): val is { entries: () => Iterable<[string, unknown]> } {
+  return !!val && typeof val === 'object' && typeof (val as { entries?: unknown }).entries === 'function';
+}
+
+function getRoutingDecisionFromLLMSwitch(obj: Record<string, unknown>): unknown {
+  const llm = obj['llm-switch'];
+  if (!llm || typeof llm !== 'object') {return undefined;}
+  const expected = (llm as Record<string, unknown>)['expectedOutput'];
+  if (!expected || typeof expected !== 'object') {return undefined;}
+  const meta = (expected as Record<string, unknown>)['metadata'];
+  if (!meta || typeof meta !== 'object') {return undefined;}
+  return (meta as Record<string, unknown>)['routingDecision'];
+}
+
+function formatOutput(data: unknown, format: 'json' | 'pretty'): void {
   // Normalize Map fields for serialization
   const clone = (() => {
     try {
-      const out: any = { ...data };
-      const nr = (data as any)?.nodeResults;
-      if (nr && typeof nr.entries === 'function') {
-        const obj: any = {};
+      const out: Record<string, unknown> = typeof data === 'object' && data !== null ? { ...(data as Record<string, unknown>) } : { value: data };
+      const nr = (data as any)?.nodeResults as unknown;
+      if (isEntriesIterable(nr)) {
+        const obj: Record<string, unknown> = {};
         for (const [k, v] of nr.entries()) {
           obj[k] = v;
         }
-        out.nodeResults = obj;
-        // derive routing decision from llm-switch if present
-        const llm = obj['llm-switch']?.expectedOutput?.metadata?.routingDecision;
-        if (llm) {
-          out.derivedRoutingDecision = llm;
+        out['nodeResults'] = obj;
+        // derive routing decision from llm-switch if present (safe access)
+        const llmDecision = getRoutingDecisionFromLLMSwitch(obj);
+        if (llmDecision !== undefined) {
+          out['derivedRoutingDecision'] = llmDecision;
         }
       }
       return out;
     } catch {
-      return data;
+      return data as any;
     }
   })();
   switch (format) {
@@ -148,10 +271,9 @@ async function scanDirectory(dirPath: string, pattern: string = '*.json'): Promi
 }
 
 // -------- Default Dry-Run Modules (simulate dynamic routing, load balancer, provider) --------
-type RouteTarget = { providerId: string; modelId: string; keyId?: string; actualKey?: string };
-type RoutePools = Record<string, string[]>;
+// (duplicate removed)
 
-function findLatestMergedConfig(): any | null {
+function findLatestMergedConfig(): MergedConfig | null {
   try {
     const cfgDir = path.resolve(process.cwd(), 'config');
     const files = fs
@@ -169,11 +291,12 @@ function findLatestMergedConfig(): any | null {
   }
 }
 
-function chooseRouteAndTarget(input: any) {
+function chooseRouteAndTarget(input: RouteInput | { data?: any }) {
   const merged = findLatestMergedConfig();
   const vr = merged?.modules?.virtualrouter?.config || {};
   const routeTargets: Record<string, RouteTarget[]> = vr.routeTargets || {};
-  const inputModel: string = input?.data?.model || input?.model || 'unknown';
+  const raw: any = (input as any)?.data ?? (input as any);
+  const inputModel: string = typeof raw?.model === 'string' ? raw.model : 'unknown';
 
   // 1) Direct mapping: model like 'provider.modelId.keyX' => pick exact target across all categories
   if (typeof inputModel === 'string' && inputModel.includes('.') && inputModel.includes('.key')) {
@@ -207,9 +330,8 @@ function chooseRouteAndTarget(input: any) {
   }
 
   // Simple dynamic route: longcontext if max_tokens large; tools if tools present; coding if model name hints; else default
-  const hasTools =
-    Array.isArray((input?.data || input).tools) && (input?.data || input).tools.length > 0;
-  const maxTokens = (input?.data || input)?.max_tokens || 0;
+  const hasTools = Array.isArray(raw?.tools) && raw.tools.length > 0;
+  const maxTokens = typeof raw?.max_tokens === 'number' ? raw.max_tokens : 0;
   const lowerModel = String(inputModel).toLowerCase();
   let route = 'default';
   if (maxTokens >= 8000) {
@@ -270,23 +392,24 @@ function registerDefaultDryRunNodes(): void {
     config: {},
     async initialize() {},
     async cleanup() {},
-    async processOutgoing(x: any) {
+    async processOutgoing(x: unknown): Promise<unknown> {
       return x;
     },
-    async processIncoming(req: any) {
+    async processIncoming(req: unknown): Promise<unknown> {
       return req;
     },
-    async executeNodeDryRun(input: any) {
-      const decision = chooseRouteAndTarget({ data: input?.data || input });
+    async executeNodeDryRun(input: unknown): Promise<DryRunResult> {
+      const _in: any = input as any;
+      const decision = chooseRouteAndTarget({ data: _in?.data ?? _in });
       const out = {
-        ...(input?.data ? input : { data: input }),
-        route: input?.route || {
+        ...(_in?.data ? _in : { data: _in }),
+        route: _in?.route || {
           providerId: decision.selectedTarget?.providerId || 'unknown',
           modelId: decision.selectedTarget?.modelId || 'unknown',
-          requestId: input?.route?.requestId || `req_${Date.now()}`,
+          requestId: _in?.route?.requestId || `req_${Date.now()}`,
           timestamp: Date.now(),
         },
-        metadata: { ...(input?.metadata || {}), routingDecision: decision },
+        metadata: { ...(_in?.metadata || {}), routingDecision: decision },
       };
       return {
         nodeId: 'llm-switch',
@@ -308,7 +431,7 @@ function registerDefaultDryRunNodes(): void {
     async estimatePerformance() {
       return { time: 3, memory: 16, complexity: 1 };
     },
-  } as any;
+  } as MockModule;
 
   const compatibilityModule = {
     id: 'compatibility',
@@ -316,16 +439,16 @@ function registerDefaultDryRunNodes(): void {
     config: {},
     async initialize() {},
     async cleanup() {},
-    async processIncoming(req: any) {
+    async processIncoming(req: unknown): Promise<unknown> {
       return req;
     },
-    async processOutgoing(x: any) {
+    async processOutgoing(x: unknown): Promise<unknown> {
       return x;
     },
-    async executeNodeDryRun(input: any) {
+    async executeNodeDryRun(input: unknown): Promise<DryRunResult> {
       const out = {
         ...(input || {}),
-        metadata: { ...(input?.metadata || {}), compatibility: 'passthrough' },
+        metadata: { ...((input as any)?.metadata || {}), compatibility: 'passthrough' },
       };
       return {
         nodeId: 'compatibility',
@@ -347,7 +470,7 @@ function registerDefaultDryRunNodes(): void {
     async estimatePerformance() {
       return { time: 4, memory: 20, complexity: 1 };
     },
-  } as any;
+  } as MockModule;
 
   const providerModule = {
     id: 'provider',
@@ -355,13 +478,13 @@ function registerDefaultDryRunNodes(): void {
     config: {},
     async initialize() {},
     async cleanup() {},
-    async processIncoming(req: any) {
+    async processIncoming(req: unknown): Promise<unknown> {
       return req;
     },
-    async processOutgoing(x: any) {
+    async processOutgoing(x: unknown): Promise<unknown> {
       return x;
     },
-    async executeNodeDryRun(input: any) {
+    async executeNodeDryRun(input: unknown): Promise<DryRunResult> {
       const response = {
         id: 'dryrun-response',
         object: 'chat.completion',
@@ -394,28 +517,28 @@ function registerDefaultDryRunNodes(): void {
     async estimatePerformance() {
       return { time: 6, memory: 32, complexity: 1 };
     },
-  } as any;
+  } as MockModule;
 
   // Register nodes and set order
   dryRunPipelineExecutor.registerNodes([
     {
       id: 'llm-switch',
       type: 'llm-switch',
-      module: llmSwitchModule,
+      module: llmSwitchModule as unknown as PipelineModule,
       isDryRun: true,
       config: pipelineDryRunManager.getNodeConfig('llm-switch'),
     },
     {
       id: 'compatibility',
       type: 'compatibility',
-      module: compatibilityModule,
+      module: compatibilityModule as unknown as PipelineModule,
       isDryRun: true,
       config: pipelineDryRunManager.getNodeConfig('compatibility'),
     },
     {
       id: 'provider',
       type: 'start',
-      module: providerModule,
+      module: providerModule as unknown as PipelineModule,
       isDryRun: true,
       config: pipelineDryRunManager.getNodeConfig('provider'),
     },
@@ -442,7 +565,7 @@ class ResponseCapture {
     return this.currentSession;
   }
 
-  captureResponse(response: any, metadata: any = {}): void {
+  captureResponse(response: unknown, metadata: unknown = {}): void {
     if (!this.currentSession) {
       throw new Error('No active capture session. Call startSession() first.');
     }
@@ -451,7 +574,7 @@ class ResponseCapture {
     const filename = `response_${timestamp}.json`;
     const filepath = path.join(this.captureDir, this.currentSession, filename);
 
-    const captureData = {
+    const captureData: CaptureData = {
       timestamp,
       metadata,
       response,
@@ -471,7 +594,7 @@ class ResponseCapture {
       .sort();
   }
 
-  getSessionResponses(sessionId: string): any[] {
+  getSessionResponses(sessionId: string): SessionResponse[] {
     const sessionDir = path.join(this.captureDir, sessionId);
     if (!fs.existsSync(sessionDir)) {
       throw new Error(`Session not found: ${sessionId}`);
@@ -515,13 +638,13 @@ export function createDryRunCommands(): Command {
         const request = normalizeToPipelineRequest(raw);
 
         // Load node configuration if provided
-        let nodeConfigs = undefined;
+        let nodeConfigs: Record<string, NodeDryRunConfig> | undefined = undefined;
         if (options.nodeConfig) {
-          nodeConfigs = await loadFile(options.nodeConfig);
+          nodeConfigs = (await loadFile(options.nodeConfig)) as unknown as Record<string, NodeDryRunConfig>;
         }
 
         // Execute pipeline with scope-based dry-run
-        const result = await dryRunEngine.runRequest(request, {
+        const result = await dryRunEngine.runRequest(request as unknown as SharedPipelineRequest, {
           pipelineId: options.pipelineId,
           mode: options.mode,
           scope: options.scope, // 使用新的作用域参数
@@ -570,9 +693,9 @@ export function createDryRunCommands(): Command {
         const response = await loadFile(input);
 
         // Load node configuration if provided
-        let nodeConfigs = undefined;
+        let nodeConfigs: Record<string, NodeDryRunConfig> | undefined = undefined;
         if (options.nodeConfig) {
-          nodeConfigs = await loadFile(options.nodeConfig);
+          nodeConfigs = (await loadFile(options.nodeConfig)) as unknown as Record<string, NodeDryRunConfig>;
         }
 
         // Execute pipeline
@@ -689,7 +812,7 @@ export function createDryRunCommands(): Command {
           }
         }
 
-        const results: any[] = [];
+        const results: BatchResult[] = [];
         const maxConcurrent = parseInt(options.maxConcurrent);
 
         // Process files
@@ -703,8 +826,9 @@ export function createDryRunCommands(): Command {
           for (const chunk of chunks) {
             const promises = chunk.map(async file => {
               try {
-                const request = await loadFile(file);
-                const result = await dryRunEngine.runRequest(request, {
+                const rawInput = await loadFile(file);
+                const normalized = normalizeToPipelineRequest(rawInput);
+                const result = await dryRunEngine.runRequest(normalized as unknown as SharedPipelineRequest, {
                   pipelineId: options.pipelineId,
                   mode: options.mode,
                 });
@@ -739,8 +863,9 @@ export function createDryRunCommands(): Command {
             spinner.text = `Processing ${path.basename(file)}...`;
 
             try {
-              const request = await loadFile(file);
-              const result = await dryRunEngine.runRequest(request, {
+              const rawInput = await loadFile(file);
+              const normalized = normalizeToPipelineRequest(rawInput);
+              const result = await dryRunEngine.runRequest(normalized as unknown as SharedPipelineRequest, {
                 pipelineId: options.pipelineId,
                 mode: options.mode,
               });
@@ -813,8 +938,8 @@ export function createDryRunCommands(): Command {
         }
 
         // Execute chain
-        let currentData = inputData;
-        const results: any[] = [];
+        let currentData: unknown = inputData;
+        const results: ChainResult[] = [];
 
         for (let i = 0; i < chainConfig.steps.length; i++) {
           const step = chainConfig.steps[i];
@@ -822,13 +947,15 @@ export function createDryRunCommands(): Command {
 
           let result;
           switch (step.type) {
-            case 'request':
-              result = await dryRunEngine.runRequest(currentData, {
+            case 'request': {
+              const normalized = normalizeToPipelineRequest(currentData);
+              result = await dryRunEngine.runRequest(normalized as unknown as SharedPipelineRequest, {
                 pipelineId: step.pipelineId || 'request-pipeline',
                 mode: step.mode || 'dry-run',
                 nodeConfigs: step.nodeConfigs,
               });
               break;
+            }
             case 'response':
               result = await dryRunEngine.runResponse(currentData, {
                 pipelineId: step.pipelineId || 'response-pipeline',
@@ -836,12 +963,14 @@ export function createDryRunCommands(): Command {
                 nodeConfigs: step.nodeConfigs,
               });
               break;
-            case 'bidirectional':
-              result = await dryRunEngine.runBidirectional(currentData, {
+            case 'bidirectional': {
+              const normalized = normalizeToPipelineRequest(currentData);
+              result = await dryRunEngine.runBidirectional(normalized as unknown as SharedPipelineRequest, {
                 pipelineId: step.pipelineId || 'bidirectional-pipeline',
                 nodeConfigs: step.nodeConfigs,
               });
               break;
+            }
             default:
               throw new Error(`Unknown step type: ${step.type}`);
           }
@@ -865,11 +994,12 @@ export function createDryRunCommands(): Command {
           steps: results,
           summary: {
             totalSteps: chainConfig.steps.length,
-            completedSteps: results.length,
+            successfulSteps: results.length,
+            executionTime: 0,
           },
         };
 
-        formatOutput(output, options.output);
+        formatOutput(output as unknown, options.output);
 
         // Save results if requested
         if (options.save) {
@@ -887,15 +1017,22 @@ export function createDryRunCommands(): Command {
   return dryRun;
 }
 
-// Normalize any OpenAI-style input into PipelineRequest shape
-function normalizeToPipelineRequest(raw: any): any {
-  if (raw && raw.data && raw.route && raw.metadata && raw.debug) {
-    return raw;
+// Normalize any OpenAI-style input into SharedPipelineRequest shape
+function normalizeToPipelineRequest(raw: unknown): SharedPipelineRequest {
+  if (
+    raw &&
+    typeof raw === 'object' &&
+    'data' in raw &&
+    'route' in raw &&
+    'metadata' in raw &&
+    'debug' in raw
+  ) {
+    return raw as SharedPipelineRequest;
   }
-  const model = raw?.model || raw?.data?.model || 'unknown';
+  const model = (raw as any)?.model || (raw as any)?.data?.model || 'unknown';
   const now = Date.now();
   return {
-    data: raw?.data || raw,
+    data: (raw as any)?.data || raw,
     route: {
       providerId: 'dynamic',
       modelId: typeof model === 'string' ? String(model) : 'unknown',

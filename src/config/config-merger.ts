@@ -7,7 +7,6 @@ import type {
   ModulesConfig,
   UserConfig,
   MergedConfig,
-  ModuleConfigs,
 } from './merged-config-types.js';
 
 export class ConfigMerger {

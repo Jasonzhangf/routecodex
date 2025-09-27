@@ -6,7 +6,15 @@
  */
 
 import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
-import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../types/provider-types.js';
+import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
+import type {
+  ProviderConfig,
+  AuthContext,
+  ProviderResponse,
+  ProviderError,
+  ProviderRequestOptions,
+} from '../../types/provider-types.js';
+import type { UnknownObject } from '../../../../types/common-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { createQwenOAuth, QwenTokenStorage } from './qwen-oauth.js';
 import { DebugEventBus } from "rcc-debugcenter";
@@ -26,24 +34,29 @@ export class QwenProvider implements ProviderModule {
   private isInitialized = false;
   private logger: PipelineDebugLogger;
   private authContext: AuthContext | null = null;
-  private healthStatus: any = null;
-  private oauth: any = null;
+  private healthStatus: {
+    status: 'healthy' | 'unhealthy';
+    timestamp: number;
+    responseTime: number;
+    details: Record<string, unknown>;
+  } | null = null;
+  private oauth: ReturnType<typeof createQwenOAuth>;
   private tokenStorage: QwenTokenStorage | null = null;
   private isTestMode: boolean = false;
 
   // Debug enhancement properties
   private debugEventBus: DebugEventBus | null = null;
   private isDebugEnhanced = false;
-  private providerMetrics: Map<string, any> = new Map();
-  private requestHistory: any[] = [];
-  private authHistory: any[] = [];
-  private errorHistory: any[] = [];
+  private providerMetrics: Map<string, { values: unknown[]; lastUpdated: number }> = new Map();
+  private requestHistory: UnknownObject[] = [];
+  private authHistory: UnknownObject[] = [];
+  private errorHistory: UnknownObject[] = [];
   private maxHistorySize = 50;
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
     this.id = `provider-${Date.now()}`;
     this.config = config;
-    this.logger = dependencies.logger as any;
+    this.logger = dependencies.logger as PipelineDebugLogger;
 
     // Initialize OAuth with CLIProxyAPI-compatible settings
     this.oauth = createQwenOAuth({
@@ -71,7 +84,7 @@ export class QwenProvider implements ProviderModule {
   /**
    * Record provider metric
    */
-  private recordProviderMetric(operation: string, data: any): void {
+  private recordProviderMetric(operation: string, data: unknown): void {
     if (!this.providerMetrics.has(operation)) {
       this.providerMetrics.set(operation, {
         values: [],
@@ -92,7 +105,7 @@ export class QwenProvider implements ProviderModule {
   /**
    * Add to request history
    */
-  private addToRequestHistory(operation: any): void {
+  private addToRequestHistory(operation: UnknownObject): void {
     this.requestHistory.push(operation);
 
     // Keep only recent history
@@ -104,7 +117,7 @@ export class QwenProvider implements ProviderModule {
   /**
    * Add to auth history
    */
-  private addToAuthHistory(operation: any): void {
+  private addToAuthHistory(operation: UnknownObject): void {
     this.authHistory.push(operation);
 
     // Keep only recent history
@@ -116,7 +129,7 @@ export class QwenProvider implements ProviderModule {
   /**
    * Add to error history
    */
-  private addToErrorHistory(operation: any): void {
+  private addToErrorHistory(operation: UnknownObject): void {
     this.errorHistory.push(operation);
 
     // Keep only recent history
@@ -128,7 +141,7 @@ export class QwenProvider implements ProviderModule {
   /**
    * Publish debug event
    */
-  private publishDebugEvent(type: string, data: any): void {
+  private publishDebugEvent(type: string, data: UnknownObject): void {
     if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
 
     try {
@@ -153,7 +166,7 @@ export class QwenProvider implements ProviderModule {
   /**
    * Get debug status with enhanced information
    */
-  getDebugStatus(): any {
+  getDebugStatus(): UnknownObject {
     const baseStatus = {
       id: this.id,
       type: this.type,
@@ -182,7 +195,7 @@ export class QwenProvider implements ProviderModule {
   /**
    * Get detailed debug information
    */
-  private getDebugInfo(): any {
+  private getDebugInfo(): UnknownObject {
     return {
       providerId: this.id,
       enhanced: this.isDebugEnhanced,
@@ -199,8 +212,8 @@ export class QwenProvider implements ProviderModule {
   /**
    * Get provider metrics
    */
-  private getProviderMetrics(): any {
-    const metrics: any = {};
+  private getProviderMetrics(): Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> {
+    const metrics: Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> = {};
 
     for (const [operation, metric] of this.providerMetrics.entries()) {
       metrics[operation] = {
@@ -310,7 +323,10 @@ export class QwenProvider implements ProviderModule {
   /**
    * Process incoming request - Send to Qwen provider
    */
-  async processIncoming(request: any): Promise<any> {
+  // Overload: accept SharedPipelineRequest at the boundary
+  async processIncoming(request: SharedPipelineRequest): Promise<unknown>;
+  async processIncoming(request: UnknownObject): Promise<unknown>;
+  async processIncoming(request: SharedPipelineRequest | UnknownObject): Promise<unknown> {
     const startTime = Date.now();
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -320,17 +336,20 @@ export class QwenProvider implements ProviderModule {
 
     // Debug: Record request processing start
     if (this.isDebugEnhanced) {
+      const hasMessages = this.extractHasMessages(request);
+      const hasTools = this.extractHasTools(request);
+      const model = this.extractModel(request);
       this.recordProviderMetric('request_start', {
         requestId,
         requestType: typeof request,
-        hasMessages: !!request.messages,
-        hasTools: !!request.tools,
-        model: request.model,
+        hasMessages,
+        hasTools,
+        model,
         timestamp: startTime
       });
       this.publishDebugEvent('request_start', {
         requestId,
-        request,
+        request: (this.isSharedPipelineRequest(request) ? (request as SharedPipelineRequest).data : request) as UnknownObject,
         timestamp: startTime
       });
     }
@@ -346,7 +365,10 @@ export class QwenProvider implements ProviderModule {
       await this.ensureValidToken();
 
       // Send HTTP request using CLIProxyAPI logic
-      const response = await this.sendChatRequest(request);
+      const payload = this.isSharedPipelineRequest(request)
+        ? ((request as SharedPipelineRequest).data as UnknownObject)
+        : (request as UnknownObject);
+      const response = await this.sendChatRequest(payload);
 
       // Process response
       const processedResponse = this.processResponse(response);
@@ -355,17 +377,20 @@ export class QwenProvider implements ProviderModule {
 
       // Debug: Record request completion
       if (this.isDebugEnhanced) {
+        const choices = (processedResponse as { choices?: unknown[] }).choices;
+        const hasChoices = Array.isArray(choices) && choices.length > 0;
+        const choiceCount = Array.isArray(choices) ? choices.length : 0;
         this.recordProviderMetric('request_complete', {
           requestId,
           success: true,
           totalTime,
           responseStatus: response.status,
-          hasChoices: !!processedResponse.choices,
-          choiceCount: processedResponse.choices?.length || 0
+          hasChoices,
+          choiceCount
         });
         this.addToRequestHistory({
           requestId,
-          request,
+          request: payload,
           response: processedResponse,
           startTime,
           endTime: Date.now(),
@@ -421,7 +446,7 @@ export class QwenProvider implements ProviderModule {
   /**
    * Process outgoing response - Not typically used for providers
    */
-  async processOutgoing(response: any): Promise<any> {
+  async processOutgoing(response: unknown): Promise<unknown> {
     // For providers, outgoing response processing is usually minimal
     // as they are the final stage in the pipeline
     return response;
@@ -430,8 +455,13 @@ export class QwenProvider implements ProviderModule {
   /**
    * Send request to provider
    */
-  async sendRequest(request: any, options?: any): Promise<ProviderResponse> {
-    return this.processIncoming(request);
+  // Overload: accept SharedPipelineRequest at the boundary
+  async sendRequest(request: SharedPipelineRequest | UnknownObject, options?: ProviderRequestOptions): Promise<unknown>;
+  async sendRequest(request: SharedPipelineRequest | UnknownObject, _options?: ProviderRequestOptions): Promise<unknown> {
+    if (this.isSharedPipelineRequest(request)) {
+      return this.processIncoming(request);
+    }
+    return this.processIncoming(request as UnknownObject);
   }
 
   /**
@@ -502,7 +532,12 @@ export class QwenProvider implements ProviderModule {
     providerType: string;
     isInitialized: boolean;
     authStatus: string;
-    healthStatus: any;
+    healthStatus: {
+      status: 'healthy' | 'unhealthy';
+      timestamp: number;
+      responseTime: number;
+      details: Record<string, unknown>;
+    } | null;
     lastActivity: number;
   } {
     return {
@@ -519,7 +554,7 @@ export class QwenProvider implements ProviderModule {
   /**
    * Get provider metrics
    */
-  async getMetrics(): Promise<any> {
+  async getMetrics(): Promise<{ requestCount: number; successCount: number; errorCount: number; averageResponseTime: number; timestamp: number }> {
     return {
       requestCount: 0, // Would track actual requests
       successCount: 0,
@@ -722,7 +757,7 @@ export class QwenProvider implements ProviderModule {
   /**
    * Send chat request - EXACT copy from CLIProxyAPI logic
    */
-  private async sendChatRequest(request: any): Promise<ProviderResponse> {
+  private async sendChatRequest(request: UnknownObject): Promise<ProviderResponse> {
     const startTime = Date.now();
     const httpRequestId = `http_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const endpoint = this.getAPIEndpoint();
@@ -732,8 +767,8 @@ export class QwenProvider implements ProviderModule {
       this.recordProviderMetric('http_request_start', {
         httpRequestId,
         endpoint,
-        model: request?.model,
-        hasTools: !!request.tools,
+        model: (request as { model?: string }).model,
+        hasTools: Array.isArray((request as { tools?: unknown[] }).tools) && (request as { tools?: unknown[] }).tools!.length > 0,
         timestamp: startTime
       });
       this.publishDebugEvent('http_request_start', {
@@ -748,13 +783,13 @@ export class QwenProvider implements ProviderModule {
       const url = `${endpoint}/chat/completions`;
       const authHeader = this.oauth.getAuthorizationHeader();
       this.logger.logProviderRequest(this.id, 'request-start', {
-        model: request?.model,
-        hasInput: Array.isArray((request as any)?.input),
-        keys: Object.keys(request || {})
+        model: (request as { model?: string })?.model,
+        hasInput: Array.isArray((request as { input?: unknown[] })?.input),
+        keys: Object.keys((request as Record<string, unknown>) || {})
       });
       console.log('[QwenProvider] sending request payload:', JSON.stringify(request));
 
-      const payload = this.buildQwenPayload(request);
+      const payload = this.buildQwenPayload(request as Record<string, unknown>);
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -801,7 +836,7 @@ export class QwenProvider implements ProviderModule {
         throw this.createProviderError({
           message: `HTTP ${response.status}: ${errorText}`,
           status: response.status
-        }, 'api');
+        }, 'server');
       }
 
       const data = await response.json();
@@ -835,7 +870,7 @@ export class QwenProvider implements ProviderModule {
           requestId: `req-${Date.now()}`,
           processingTime,
           tokensUsed: data.usage?.total_tokens,
-          model: request.model
+          model: (request as { model?: string }).model || 'unknown'
         }
       };
 
@@ -872,8 +907,19 @@ export class QwenProvider implements ProviderModule {
   /**
    * Build sanitized payload for Qwen API
    */
-  private buildQwenPayload(request: any): any {
-    const allowedKeys: Array<keyof any> = [
+  private buildQwenPayload(request: Record<string, unknown>): Record<string, unknown> {
+    type AllowedKey =
+      | 'model'
+      | 'messages'
+      | 'input'
+      | 'parameters'
+      | 'tools'
+      | 'stream'
+      | 'response_format'
+      | 'user'
+      | 'metadata';
+
+    const allowedKeys: AllowedKey[] = [
       'model',
       'messages',
       'input',
@@ -885,10 +931,10 @@ export class QwenProvider implements ProviderModule {
       'metadata'
     ];
 
-    const payload: any = {};
+    const payload: Record<string, unknown> = {};
     for (const key of allowedKeys) {
-      if (request[key] !== undefined) {
-        payload[key] = request[key];
+      if (key in request && (request as Record<string, unknown>)[key] !== undefined) {
+        payload[key] = (request as Record<string, unknown>)[key];
       }
     }
 
@@ -922,7 +968,7 @@ export class QwenProvider implements ProviderModule {
   /**
    * Process provider response
    */
-  private processResponse(response: ProviderResponse): any {
+  private processResponse(response: ProviderResponse): Record<string, unknown> {
     const processedResponse = {
       ...response.data,
       _providerMetadata: {
@@ -939,7 +985,7 @@ export class QwenProvider implements ProviderModule {
   /**
    * Perform health check
    */
-  private async performHealthCheck(): Promise<{ isHealthy: boolean; details: any }> {
+  private async performHealthCheck(): Promise<{ isHealthy: boolean; details: Record<string, unknown> }> {
     try {
       // Would perform actual health check request
       // For now, simulate a health check
@@ -968,14 +1014,14 @@ export class QwenProvider implements ProviderModule {
   /**
    * Handle provider errors
    */
-  private async handleProviderError(error: any, request: any): Promise<void> {
+  private async handleProviderError(error: unknown, request: unknown): Promise<void> {
     const providerError = this.createProviderError(error, 'unknown');
 
     this.logger.logModule(this.id, 'provider-error', {
       error: providerError,
       request: {
-        model: request.model,
-        hasMessages: !!request.messages
+        model: this.extractModel(request),
+        hasMessages: this.extractHasMessages(request)
       }
     });
 
@@ -995,12 +1041,13 @@ export class QwenProvider implements ProviderModule {
   /**
    * Create provider error
    */
-  private createProviderError(error: unknown, type: string): ProviderError {
+  private createProviderError(error: unknown, type: ProviderError['type']): ProviderError {
     const errorObj = error instanceof Error ? error : new Error(String(error));
     const providerError: ProviderError = new Error(errorObj.message) as ProviderError;
-    providerError.type = type as any;
-    providerError.statusCode = (error as any).status || (error as any).statusCode;
-    providerError.details = (error as any).details || error;
+    providerError.type = type;
+    const errLike = error as { status?: number; statusCode?: number; details?: Record<string, unknown> };
+    providerError.statusCode = errLike.status ?? errLike.statusCode;
+    providerError.details = (errLike.details as Record<string, unknown> | undefined) ?? {};
     providerError.retryable = this.isErrorRetryable(type);
 
     return providerError;
@@ -1031,5 +1078,35 @@ export class QwenProvider implements ProviderModule {
     } catch (error) {
       return false;
     }
+  }
+
+  private isSharedPipelineRequest(value: unknown): value is SharedPipelineRequest {
+    if (!value || typeof value !== 'object') {return false;}
+    const v = value as Record<string, unknown>;
+    return 'data' in v && 'route' in v && 'metadata' in v && 'debug' in v;
+  }
+
+  private extractModel(request: unknown): string | undefined {
+    if (this.isSharedPipelineRequest(request)) {
+      const data = request.data as UnknownObject;
+      return (data as { model?: string }).model;
+    }
+    return (request as { model?: string })?.model;
+  }
+
+  private extractHasMessages(request: unknown): boolean {
+    if (this.isSharedPipelineRequest(request)) {
+      const data = request.data as UnknownObject;
+      return Array.isArray((data as { messages?: unknown[] }).messages);
+    }
+    return Array.isArray((request as { messages?: unknown[] })?.messages);
+  }
+
+  private extractHasTools(request: unknown): boolean {
+    if (this.isSharedPipelineRequest(request)) {
+      const data = request.data as UnknownObject;
+      return Array.isArray((data as { tools?: unknown[] }).tools) && ((data as { tools?: unknown[] }).tools?.length || 0) > 0;
+    }
+    return Array.isArray((request as { tools?: unknown[] })?.tools) && (((request as { tools?: unknown[] })?.tools?.length) || 0) > 0;
   }
 }

@@ -8,8 +8,8 @@
 - **LLMSwitch层**: 根据端点类型决定转换策略
 
 ### 工作模式
-- **Anthropic端点**: 启用 `anthropic-openai-converter` 进行协议转换
-- **OpenAI端点**: 使用 `openai-passthrough` 直接透传
+- **Anthropic端点**: 启用 `llmswitch-anthropic-openai` 进行协议转换
+- **OpenAI端点**: 使用 `llmswitch-openai-openai` 规范化请求
 
 ## 架构设计
 
@@ -36,7 +36,7 @@ export interface LLMSwitchModule extends PipelineModule {
 ```typescript
 export class AnthropicOpenAIConverter implements LLMSwitchModule {
   readonly id: string;
-  readonly type = 'anthropic-openai-converter';
+  readonly type = 'llmswitch-anthropic-openai';
   readonly protocol = 'bidirectional';
   readonly direction: 'anthropic-to-openai' | 'openai-to-anthropic';
   
@@ -44,7 +44,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
   private logger: PipelineDebugLogger;
   
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
-    this.id = `anthropic-openai-converter-${Date.now()}`;
+    this.id = `llmswitch-anthropic-openai-${Date.now()}`;
     this.logger = dependencies.logger as any;
     // 根据请求格式自动检测方向
     this.direction = this.detectDirection(config);
@@ -319,7 +319,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
   "modules": {
     "llmSwitch": {
       "enabled": true,
-      "type": "anthropic-openai-converter",
+      "type": "llmswitch-anthropic-openai",
       "config": {
         "enableStreaming": true,
         "enableTools": true,
@@ -341,7 +341,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       "model": "claude-3-5-sonnet-20241022",
       "modules": {
         "llmSwitch": {
-          "type": "anthropic-openai-converter"
+          "type": "llmswitch-anthropic-openai"
         }
       }
     },
@@ -351,7 +351,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       "model": "gpt-4o",
       "modules": {
         "llmSwitch": {
-          "type": "openai-passthrough"
+          "type": "llmswitch-openai-openai"
         }
       }
     }
@@ -456,7 +456,7 @@ logger.logTransformation(moduleId, 'response-conversion', {
 ### 模块注册
 ```typescript
 // 在 module-registrar.ts 中注册
-this.registry.registerModule('anthropic-openai-converter', async (config, dependencies) => {
+this.registry.registerModule('llmswitch-anthropic-openai', async (config, dependencies) => {
   const { AnthropicOpenAIConverter } = await import('../modules/llmswitch/anthropic-openai-converter.js');
   return new AnthropicOpenAIConverter(config, dependencies);
 });

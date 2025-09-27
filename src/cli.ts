@@ -12,6 +12,41 @@ import path from 'path';
 import fs from 'fs';
 import { homedir } from 'os';
 
+interface ServerConfig {
+  port: number;
+  host: string;
+}
+
+interface LoggingConfig {
+  level: string;
+}
+
+interface ProvidersConfig {
+  [key: string]: unknown;
+}
+
+interface DefaultConfig {
+  server: ServerConfig;
+  logging: LoggingConfig;
+  providers: ProvidersConfig;
+}
+
+interface TemplateConfig {
+  server?: Partial<ServerConfig>;
+  logging?: Partial<LoggingConfig>;
+  [key: string]: unknown;
+}
+
+// simple-log config type removed
+
+interface HealthCheckResult {
+  status: string;
+  port: number;
+  host: string;
+  responseTime?: number;
+  error?: string;
+}
+
 // Simple logger
 const logger = {
   info: (msg: string) => console.log(`${chalk.blue('ℹ')  } ${  msg}`),
@@ -72,7 +107,7 @@ program
 
         // Load default config template
         const templatePath = path.join(homedir(), '.routecodex', 'default.json');
-        let defaultConfig: any = {
+        let defaultConfig: DefaultConfig = {
           server: {
             port: parseInt(options.port),
             host: options.host
@@ -85,45 +120,26 @@ program
 
         // Use template if available
         if (fs.existsSync(templatePath)) {
-          const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
+          const template: TemplateConfig = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
           defaultConfig = {
-            ...template,
             server: {
-              ...template.server,
+              ...(template.server || {}),
               port: parseInt(options.port),
               host: options.host
             },
             logging: {
-              ...template.logging,
+              ...(template.logging || {}),
               level: options.logLevel
-            }
-          };
+            },
+            providers: (template as any).providers || {}
+          } as DefaultConfig;
         }
 
         fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
         logger.success(`Default configuration created: ${configPath}`);
       }
 
-      // 检查并应用简单日志配置
-      const simpleLogConfig = loadSimpleLogConfig();
-      if (simpleLogConfig && simpleLogConfig.enabled) {
-        logger.info('检测到简单日志配置，正在应用...');
-        logger.info(`简单日志级别: ${simpleLogConfig.logLevel}`);
-        logger.info(`简单日志输出: ${simpleLogConfig.output}`);
-        
-        // 将简单日志配置应用到环境变量或全局配置中
-        process.env.SIMPLE_LOG_ENABLED = 'true';
-        process.env.SIMPLE_LOG_LEVEL = simpleLogConfig.logLevel;
-        process.env.SIMPLE_LOG_OUTPUT = simpleLogConfig.output;
-        
-        if (simpleLogConfig.output === 'file' || simpleLogConfig.output === 'both') {
-          process.env.SIMPLE_LOG_DIRECTORY = simpleLogConfig.logDirectory;
-          logger.info(`简单日志目录: ${simpleLogConfig.logDirectory}`);
-        }
-        
-        logger.success('✨ 简单日志配置已应用！');
-        logger.info('💡 提示: 使用 "routecodex simple-log off" 可以随时关闭简单日志');
-      }
+      // simple-log application removed
 
       // Set modules config path in process.argv and start the main application
       process.argv[2] = './config/modules.json';
@@ -168,13 +184,14 @@ program
           }
           break;
 
-        case 'edit':
+        case 'edit': {
           const editor = process.env.EDITOR || 'nano';
           const { spawn } = await import('child_process');
           spawn(editor, [configPath], { stdio: 'inherit' });
           break;
+        }
 
-        case 'validate':
+        case 'validate': {
           if (fs.existsSync(configPath)) {
             try {
               JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -186,6 +203,7 @@ program
             logger.error('Configuration file not found');
           }
           break;
+        }
 
         default:
           logger.error('Unknown action. Use: show, edit, validate, init');
@@ -214,7 +232,7 @@ async function initializeConfig(configPath: string, template?: string, force: bo
     }
 
     // Load template
-    let templateConfig: any;
+    let templateConfig: TemplateConfig | undefined;
 
     switch (template) {
       case 'lmstudio':
@@ -224,8 +242,7 @@ async function initializeConfig(configPath: string, template?: string, force: bo
             host: "localhost"
           },
           logging: {
-            level: "info",
-            format: "json"
+            level: "info"
           },
           providers: {
             lmstudio: {
@@ -290,8 +307,7 @@ async function initializeConfig(configPath: string, template?: string, force: bo
             host: "localhost"
           },
           logging: {
-            level: "info",
-            format: "json"
+            level: "info"
           },
           providers: {
             qwen: {
@@ -367,8 +383,7 @@ async function initializeConfig(configPath: string, template?: string, force: bo
             host: "localhost"
           },
           logging: {
-            level: "info",
-            format: "json"
+            level: "info"
           },
           providers: {
             openai: {
@@ -426,7 +441,7 @@ program
       // Check if server is running by trying to connect
       const { get } = await import('https');
 
-      const checkServer = (port: number, host: string): Promise<any> => {
+      const checkServer = (port: number, host: string): Promise<HealthCheckResult> => {
         return new Promise((resolve) => {
           const req = get({
             hostname: host,
@@ -440,20 +455,25 @@ program
             res.on('end', () => {
               try {
                 const health = JSON.parse(data);
-                resolve(health);
+                // Ensure required fields in case health payload differs
+                resolve({
+                  status: health?.status || 'unknown',
+                  port,
+                  host
+                });
               } catch {
-                resolve({ status: 'unknown', message: 'Invalid response' });
+                resolve({ status: 'unknown', port, host });
               }
             });
           });
 
           req.on('error', () => {
-            resolve({ status: 'stopped', message: 'Server not running' });
+            resolve({ status: 'stopped', port, host });
           });
 
           req.on('timeout', () => {
             req.destroy();
-            resolve({ status: 'timeout', message: 'Server timeout' });
+            resolve({ status: 'timeout', port, host });
           });
 
           req.end();
@@ -486,29 +506,14 @@ program
 
 // Import commands at top level
 import { createDryRunCommands } from './commands/dry-run.js';
-import { createOfflineLogCommand } from './commands/offline-log.js';
-import { createSimpleLogCommand } from './commands/simple-log.js';
+// offline-log CLI temporarily disabled to simplify build
 
-// 简单日志配置工具函数
-function loadSimpleLogConfig(): any {
-  const configPath = path.join(homedir(), '.routecodex', 'simple-log-config.json');
-  
-  if (!fs.existsSync(configPath)) {
-    return null;
-  }
-  
-  try {
-    return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-  } catch (error) {
-    console.warn('无法读取简单日志配置，使用默认设置');
-    return null;
-  }
-}
+// simple-log config helper removed
 
 // Add commands
 program.addCommand(createDryRunCommands());
-program.addCommand(createOfflineLogCommand());
-program.addCommand(createSimpleLogCommand());
+// offline-log command disabled
+// simple-log command removed
 
 // Examples command
 program

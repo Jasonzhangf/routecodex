@@ -11,8 +11,7 @@ import type {
   ConverterStatus,
   ConverterMetrics,
   HealthStatus,
-  OpenAIRequest,
-  ExtendedRoutingInfo
+  OpenAIRequest
 } from './types.js';
 import { RequestTransformer } from './request-transformer.js';
 import { FieldMappingRules } from './field-mapping-rules.js';

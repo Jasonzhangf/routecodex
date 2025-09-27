@@ -229,7 +229,7 @@ npm run build
 #### LM Studio Provider (API Key)
 
 ```javascript
-import { OpenAIPassthroughLLMSwitch } from './dist/modules/pipeline/modules/llmswitch/openai-passthrough.js';
+import { OpenAINormalizerLLMSwitch } from './dist/modules/pipeline/modules/llmswitch/openai-normalizer.js';
 import { LMStudioCompatibility } from './dist/modules/pipeline/modules/compatibility/lmstudio-compatibility.js';
 import { LMStudioProviderSimple } from './dist/modules/pipeline/modules/provider/lmstudio-provider-simple.js';
 import { StreamingControlWorkflow } from './dist/modules/pipeline/modules/workflow/streaming-control.js';
@@ -242,8 +242,8 @@ const debugCenter = new DebugCenter();
 await errorHandlingCenter.initialize();
 
 // Create 4-layer pipeline
-const llmSwitch = new OpenAIPassthroughLLMSwitch({
-  type: 'openai-passthrough',
+const llmSwitch = new OpenAINormalizerLLMSwitch({
+  type: 'llmswitch-openai-openai',
   config: {
     protocol: 'openai',
     targetFormat: 'lmstudio'
@@ -293,7 +293,7 @@ const result = await provider.processIncoming(
 #### Qwen OAuth Provider
 
 ```javascript
-import { OpenAIPassthroughLLMSwitch } from './dist/modules/pipeline/modules/llmswitch/openai-passthrough.js';
+import { OpenAINormalizerLLMSwitch } from './dist/modules/pipeline/modules/llmswitch/openai-normalizer.js';
 import { QwenCompatibility } from './dist/modules/pipeline/modules/compatibility/qwen-compatibility.js';
 import { QwenProvider } from './dist/modules/pipeline/modules/provider/qwen-provider.js';
 import { StreamingControlWorkflow } from './dist/modules/pipeline/modules/workflow/streaming-control.js';
@@ -306,8 +306,8 @@ const debugCenter = new DebugCenter();
 await errorHandlingCenter.initialize();
 
 // Create 4-layer pipeline with OAuth
-const llmSwitch = new OpenAIPassthroughLLMSwitch({
-  type: 'openai-passthrough',
+const llmSwitch = new OpenAINormalizerLLMSwitch({
+  type: 'llmswitch-openai-openai',
   config: { protocol: 'openai', targetFormat: 'qwen' }
 }, { errorHandlingCenter, debugCenter, logger });
 
@@ -524,7 +524,7 @@ For detailed pipeline configuration, you can specify individual modules:
 {
   "pipeline": {
     "llmSwitch": {
-      "type": "openai-passthrough",
+      "type": "llmswitch-openai-openai",
       "config": {
         "protocol": "openai",
         "targetFormat": "lmstudio"

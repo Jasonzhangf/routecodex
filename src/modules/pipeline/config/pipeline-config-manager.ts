@@ -513,10 +513,13 @@ export class PipelineConfigManager {
 
         // Check for known module types
         const knownTypes = [
-          'openai-passthrough',
+          'llmswitch-openai-openai',
+          'llmswitch-anthropic-openai',
           'streaming-control',
           'field-mapping',
+          'passthrough-compatibility',
           'qwen-provider',
+          'openai-provider',
           'generic-http'
         ];
 

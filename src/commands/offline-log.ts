@@ -17,6 +17,71 @@ import { homedir } from 'os';
 import { JsonlLogParser } from '../logging/parser/JsonlParser.js';
 import { LogFileScanner } from '../logging/parser/LogFileScanner.js';
 import { TimeSeriesIndexEngine } from '../logging/indexer/TimeSeriesIndexer.js';
+// No unused imports from shared-dtos needed for this file
+
+// Specific types for log analysis
+interface LogEntry {
+  timestamp?: number;
+  time?: number;
+  level?: string;
+  message?: string;
+  module?: string;
+  [key: string]: unknown;
+}
+
+interface LogAnalysisOptions {
+  module?: string;
+  startTime?: number;
+  endTime?: number;
+  level?: string;
+}
+
+interface ModuleStats {
+  count: number;
+  errors: number;
+  avgResponseTime?: number;
+  lastSeen?: number;
+}
+
+interface LogAnalysisResult {
+  totalEntries: number;
+  moduleStats: Record<string, ModuleStats>;
+  timeRange: {
+    start: number;
+    end: number;
+  };
+  errorCount: number;
+  warnings: number;
+}
+
+interface TimeSeriesDataPoint {
+  timestamp: number;
+  count: number;
+  errors: number;
+  level: string;
+  module?: string;
+}
+
+interface TimeSeriesBucket {
+  timestamp: number;
+  count: number;
+  errors: number;
+  entries: LogEntry[];
+}
+
+interface TimeSeriesSummary {
+  totalPoints: number;
+  timeRange: {
+    start: number;
+    end: number;
+  };
+  totalCount: number;
+  totalErrors: number;
+  peakLoad: {
+    timestamp: number;
+    count: number;
+  };
+}
 
 // Logger for consistent output
 const logger = {
@@ -164,7 +229,7 @@ Examples:
         const config = loadConfig();
         config.enabled = true;
         config.logDirectory = resolvePath(options.directory);
-        config.logLevel = options.level as any;
+        config.logLevel = options.level as 'minimal' | 'normal' | 'detailed' | 'verbose';
         config.maxFileSize = parseInt(options.maxSize) * 1024 * 1024;
         config.maxFiles = parseInt(options.maxFiles);
         config.enableCompression = options.compression || false;
@@ -257,7 +322,7 @@ Examples:
           moduleConfig.enabled = false;
         }
         if (options.level) {
-          moduleConfig.logLevel = options.level as any;
+          moduleConfig.logLevel = options.level as 'minimal' | 'normal' | 'detailed' | 'verbose';
         }
         if (options.performance) {
           moduleConfig.includePerformance = true;
@@ -311,7 +376,7 @@ Examples:
           config.pipeline.enabled = false;
         }
         if (options.level) {
-          config.pipeline.logLevel = options.level as any;
+          config.pipeline.logLevel = options.level as 'minimal' | 'normal' | 'detailed' | 'verbose';
         }
 
         // Handle capture options
@@ -467,7 +532,7 @@ Examples:
 
         spinner.text = 'Indexing log files...';
         // 读取日志文件并添加到索引
-        const allLogs: any[] = [];
+        const allLogs: LogEntry[] = [];
         for (const fileInfo of scanResult.files) {
           const parser = new JsonlLogParser();
           const entries = await parser.parseFile(fileInfo.filePath);
@@ -495,14 +560,14 @@ Examples:
         const results = await indexer.query(query);
 
         // 生成时间序列数据 - 适配不同的返回格式
-        let logEntries: any[] = [];
+        let logEntries: LogEntry[] = [];
         if (Array.isArray(results)) {
           logEntries = results;
         } else if (results && typeof results === 'object' && 'entries' in results) {
-          logEntries = (results as any).entries || [];
+          logEntries = (results as { entries?: LogEntry[] }).entries || [];
         } else if (results && typeof results === 'object') {
           // 假设结果是直接的条目数组
-          logEntries = Object.values(results).flat() as any[];
+          logEntries = Object.values(results).flat() as LogEntry[];
         }
         const timeSeriesData = generateTimeSeriesData(logEntries, bucketSize);
 
@@ -644,11 +709,11 @@ interface UnifiedLogEntry {
   level: string;
   moduleId?: string;
   message: string;
-  data?: any;
+  data?: Record<string, unknown>;
 }
 
 // Helper functions
-function analyzeLogEntries(entries: any[], _options: any) {
+function analyzeLogEntries(entries: UnifiedLogEntry[], _options: LogAnalysisOptions) {
   const moduleStats: Record<
     string,
     { count: number; errors: number; avgDuration: number; durations: number[] }
@@ -656,7 +721,7 @@ function analyzeLogEntries(entries: any[], _options: any) {
   const errorStats = { total: 0, byType: {} as Record<string, number> };
   const levelStats = {} as Record<string, number>;
 
-  entries.forEach((entry: any) => {
+  entries.forEach((entry: UnifiedLogEntry) => {
     // 模块统计
     const moduleId = entry.moduleId || entry.context?.moduleId || 'unknown';
     if (!moduleStats[moduleId]) {
@@ -688,7 +753,7 @@ function analyzeLogEntries(entries: any[], _options: any) {
     if (stats.durations.length > 0) {
       stats.avgDuration =
         stats.durations.reduce((a: number, b: number) => a + b, 0) / stats.durations.length;
-      (stats as any).durations = undefined; // 清理临时数据
+      (stats as ModuleStats).durations = undefined; // 清理临时数据
     }
   });
 
@@ -698,13 +763,13 @@ function analyzeLogEntries(entries: any[], _options: any) {
     errorStats,
     levelStats,
     timeRange: {
-      start: Math.min(...entries.map((e: any) => e.timestamp || e.time || Date.now())),
-      end: Math.max(...entries.map((e: any) => e.timestamp || e.time || Date.now())),
+      start: Math.min(...entries.map((e: UnifiedLogEntry) => e.timestamp || e.time || Date.now())),
+      end: Math.max(...entries.map((e: UnifiedLogEntry) => e.timestamp || e.time || Date.now())),
     },
   };
 }
 
-async function generateHTMLReport(analysis: LogAnalysisResult, outputFile: string): Promise<void> {
+async function generateHTMLReport(analysis: any, outputFile: string): Promise<void> {
   const html = `
 <!DOCTYPE html>
 <html>
@@ -766,7 +831,7 @@ async function generateHTMLReport(analysis: LogAnalysisResult, outputFile: strin
             <h3>Module Statistics</h3>
             ${Object.entries(analysis.moduleStats)
               .map(
-                ([module, stats]: [string, any]) => `
+                ([module, stats]: [string, ModuleStats]) => `
                 <div class="module-item">
                     <div>
                         <strong>${module}</strong>
@@ -794,13 +859,13 @@ async function generateHTMLReport(analysis: LogAnalysisResult, outputFile: strin
                 labels: ${JSON.stringify(Object.keys(analysis.moduleStats))},
                 datasets: [{
                     label: 'Log Entries',
-                    data: ${JSON.stringify(Object.values(analysis.moduleStats).map((s: any) => s.count))},
+                    data: ${JSON.stringify(Object.values(analysis.moduleStats).map((s: ModuleStats) => s.count))},
                     backgroundColor: 'rgba(54, 162, 235, 0.8)',
                     borderColor: 'rgba(54, 162, 235, 1)',
                     borderWidth: 1
                 }, {
                     label: 'Errors',
-                    data: ${JSON.stringify(Object.values(analysis.moduleStats).map((s: any) => s.errors))},
+                    data: ${JSON.stringify(Object.values(analysis.moduleStats).map((s: ModuleStats) => s.errors))},
                     backgroundColor: 'rgba(255, 99, 132, 0.8)',
                     borderColor: 'rgba(255, 99, 132, 1)',
                     borderWidth: 1
@@ -846,19 +911,19 @@ async function generateHTMLReport(analysis: LogAnalysisResult, outputFile: strin
   fs.writeFileSync(outputFile, html);
 }
 
-async function generateCSVReport(analysis: LogAnalysisResult, outputFile: string): Promise<void> {
+async function generateCSVReport(analysis: any, outputFile: string): Promise<void> {
   const csv = [
     'Module,Total Entries,Errors,Error Rate,Avg Duration (ms)',
     ...Object.entries(analysis.moduleStats).map(
-      ([module, stats]: [string, any]) =>
-        `${module},${(stats as any).count},${(stats as any).errors},${(((stats as any).errors / (stats as any).count) * 100).toFixed(2)}%,${(stats as any).avgDuration.toFixed(2)}`
+      ([module, stats]: [string, ModuleStats]) =>
+        `${module},${stats.count},${stats.errors},${((stats.errors / stats.count) * 100).toFixed(2)}%,${stats.avgDuration.toFixed(2)}`
     ),
   ].join('\n');
 
   fs.writeFileSync(outputFile, csv);
 }
 
-function generateTimeSeriesData(results: UnifiedLogEntry[], bucketSize: number): any[] {
+function generateTimeSeriesData(results: UnifiedLogEntry[], bucketSize: number): TimeSeriesDataPoint[] {
   const timeBuckets: Record<
     number,
     { timestamp: number; count: number; errors: number; avgDuration: number; durations: number[] }
@@ -888,18 +953,18 @@ function generateTimeSeriesData(results: UnifiedLogEntry[], bucketSize: number):
   });
 
   // 计算平均持续时间
-  Object.values(timeBuckets).forEach((bucket: any) => {
+  Object.values(timeBuckets).forEach((bucket: TimeSeriesBucket) => {
     if (bucket.durations.length > 0) {
       bucket.avgDuration =
         bucket.durations.reduce((a: number, b: number) => a + b, 0) / bucket.durations.length;
-      (bucket as any).durations = undefined;
+      (bucket as TimeSeriesBucket).durations = undefined;
     }
   });
 
   return Object.values(timeBuckets).sort((a, b) => a.timestamp - b.timestamp);
 }
 
-function generateTimeSeriesSummary(timeSeriesData: any[]): any {
+function generateTimeSeriesSummary(timeSeriesData: TimeSeriesDataPoint[]): TimeSeriesSummary {
   if (timeSeriesData.length === 0) {
     return { peakActivity: { bucket: 0, count: 0 }, avgActivity: 0 };
   }

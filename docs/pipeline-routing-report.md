@@ -52,10 +52,9 @@
 目标链路（概念）：LLM Switch → Compatibility → Provider → 外部服务
 
 - LLM Switch（分类/协议识别与转换）
-  - 已有：OpenAI 直通、Anthropic↔OpenAI 映射、请求格式检测与选择。
-    - `src/modules/pipeline/modules/llmswitch/openai-passthrough.ts:15`
-    - `src/modules/pipeline/modules/llmswitch/request-format-detector.ts`
-    - 智能选择/工厂：`src/modules/pipeline/core/smart-pipeline-manager.ts:55`
+  - 已有：OpenAI→OpenAI 规范化、Anthropic→OpenAI 映射。
+    - `src/modules/pipeline/modules/llmswitch/openai-normalizer.ts`
+    - `src/modules/pipeline/modules/llmswitch/anthropic-openai-converter.ts`
   - 现状：HTTP 服务未调用。
 
 - Compatibility（格式转换）
@@ -129,8 +128,7 @@
 - 在请求进入时交给 `PipelineManager`，调用 `BasePipeline.processRequest`，串联 LLM Switch →（Workflow 可选）→ Compatibility → Provider。
 
 2) 引入“智能选择”
-- 使用 `smart-pipeline-manager` 中的工厂/选择逻辑，根据 URL/请求体识别并选择合适的 LLM Switch（如 openai‑passthrough vs anthropic‑openai‑converter）：
-  - `src/modules/pipeline/core/smart-pipeline-manager.ts:55`
+- 使用 `HttpServer` 中的配置驱动 `RouteResolver`（`src/server/http-server.ts`），根据分类器与路由表选择合适的 LLM Switch（如 OpenAI→OpenAI 或 Anthropic→OpenAI）。
 
 3) `targetUrl` 与 Provider 选择配置化
 - 将 Provider 基础地址、鉴权、模型路由统一由 `config/modules.json`（合并配置）驱动，而非在 Router 中硬编码默认值。
@@ -163,7 +161,7 @@
   - LLM Switch（OpenAI 直通）：`src/modules/pipeline/modules/llmswitch/openai-passthrough.ts:15`
   - 兼容层（LM Studio）：`src/modules/pipeline/modules/compatibility/lmstudio-compatibility.ts:16`
   - Provider（LM Studio）：`src/modules/pipeline/modules/provider/lmstudio-provider.ts:15`
-  - 智能选择（格式识别/选择）：`src/modules/pipeline/core/smart-pipeline-manager.ts:55`
+- 智能选择（格式识别/选择）：`src/server/http-server.ts` 提供的 `ConfigRequestClassifier` + RR 组合逻辑
 
 - Virtual Router 与分类
   - 模块：`src/modules/virtual-router/virtual-router-module.ts:19`
@@ -212,4 +210,3 @@ HTTP → PipelineManager → BasePipeline
 - 引入 SmartPipelineFactory/Selector，按 URL/请求体自动选择 LLM Switch。
 - 将 Provider 端点、鉴权、模型与路由统一改为配置驱动。
 - 实现真实流式透传与 Anthropic 的完整模块化链路。
-

@@ -7,6 +7,7 @@
 
 import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../pipeline/interfaces/pipeline-interfaces.js';
 import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../pipeline/types/provider-types.js';
+import type { UnknownObject } from '../../../types/common-types.js';
 import { EnhancementConfigManager } from '../enhancement-config-manager.js';
 import type { EnhancedModule } from '../module-enhancement-factory.js';
 
@@ -75,7 +76,7 @@ export class EnhancedProviderModule implements ProviderModule {
   /**
    * Process incoming request
    */
-  async processIncoming(request: any): Promise<any> {
+  async processIncoming(request: UnknownObject): Promise<ProviderResponse> {
     if (!this.isInitialized) {
       throw new Error('Enhanced Provider is not initialized');
     }
@@ -84,12 +85,12 @@ export class EnhancedProviderModule implements ProviderModule {
       // Log request start
       this.logInfo('request-start', {
         hasAuth: !!this.authContext,
-        hasTools: !!request.tools,
+        hasTools: Array.isArray((request as { tools?: unknown[] }).tools),
         requestSize: JSON.stringify(request).length
       });
 
       // Process request
-      const response = await this.processRequest(request);
+      const response = await this.processRequest(request as Record<string, unknown>);
 
       // Log request success
       this.logInfo('request-success', {
@@ -109,7 +110,7 @@ export class EnhancedProviderModule implements ProviderModule {
   /**
    * Process outgoing response
    */
-  async processOutgoing(response: any): Promise<any> {
+  async processOutgoing(response: UnknownObject): Promise<UnknownObject> {
     try {
       // Log response processing start
       this.logInfo('response-start', {
@@ -119,9 +120,10 @@ export class EnhancedProviderModule implements ProviderModule {
       // Process response
       const processedResponse = await this.processResponse(response);
 
-      // Log response processing success
+      // Log response processing success (best-effort extract)
+      const meta = processedResponse as { metadata?: { processingTime?: number } };
       this.logInfo('response-success', {
-        processingTime: processedResponse.metadata?.processingTime
+        processingTime: meta.metadata?.processingTime
       });
 
       return processedResponse;
@@ -135,7 +137,7 @@ export class EnhancedProviderModule implements ProviderModule {
   /**
    * Send request to provider
    */
-  async sendRequest(request: any, options?: any): Promise<ProviderResponse> {
+  async sendRequest(request: UnknownObject, _options?: unknown): Promise<ProviderResponse> {
     return this.processIncoming(request);
   }
 
@@ -309,7 +311,7 @@ export class EnhancedProviderModule implements ProviderModule {
   /**
    * Process request implementation
    */
-  private async processRequest(request: any): Promise<ProviderResponse> {
+  private async processRequest(request: Record<string, unknown>): Promise<ProviderResponse> {
     const startTime = Date.now();
 
     try {
@@ -327,7 +329,7 @@ export class EnhancedProviderModule implements ProviderModule {
           requestId: `req-${Date.now()}`,
           processingTime,
           tokensUsed: 0, // Would be calculated from actual response
-          model: request.model
+          model: (request as { model?: string }).model || 'unknown'
         }
       };
     } catch (error) {
@@ -339,7 +341,7 @@ export class EnhancedProviderModule implements ProviderModule {
   /**
    * Process response implementation
    */
-  private async processResponse(response: any): Promise<any> {
+  private async processResponse(response: UnknownObject): Promise<UnknownObject> {
     // This is where response processing logic would go
     // For example, transforming the response format
     return response;
@@ -348,7 +350,7 @@ export class EnhancedProviderModule implements ProviderModule {
   /**
    * Make actual provider request
    */
-  private async makeProviderRequest(request: any): Promise<any> {
+  private async makeProviderRequest(_request: Record<string, unknown>): Promise<UnknownObject> {
     // This would be replaced with actual provider-specific logic
     // For example, fetch requests to the AI service
 
@@ -383,12 +385,13 @@ export class EnhancedProviderModule implements ProviderModule {
   /**
    * Create provider error
    */
-  private createProviderError(error: any): ProviderError {
+  private createProviderError(error: unknown): ProviderError {
     const errorObj = error instanceof Error ? error : new Error(String(error));
     const providerError: ProviderError = new Error(errorObj.message) as ProviderError;
     providerError.type = 'network';
-    providerError.statusCode = error.statusCode || 500;
-    providerError.details = error;
+    const errLike = error as { statusCode?: number; details?: Record<string, unknown> };
+    providerError.statusCode = errLike?.statusCode || 500;
+    providerError.details = (errLike?.details as Record<string, unknown> | undefined) ?? {};
     providerError.retryable = this.isRetryableError(error);
 
     return providerError;
@@ -397,20 +400,18 @@ export class EnhancedProviderModule implements ProviderModule {
   /**
    * Check if error is retryable
    */
-  private isRetryableError(error: any): boolean {
-    if (!error.statusCode) {return false;}
-
-    // Retry on 5xx errors, 429 (rate limit), and network errors
-    return error.statusCode >= 500 ||
-           error.statusCode === 429 ||
-           error.code === 'ECONNREFUSED' ||
-           error.code === 'ETIMEDOUT';
+  private isRetryableError(error: unknown): boolean {
+    const errLike = error as { statusCode?: number; code?: string };
+    if (!errLike?.statusCode && !errLike?.code) {return false;}
+    return (typeof errLike.statusCode === 'number' && (errLike.statusCode >= 500 || errLike.statusCode === 429))
+      || errLike.code === 'ECONNREFUSED'
+      || errLike.code === 'ETIMEDOUT';
   }
 
   /**
    * Log info message
    */
-  private logInfo(action: string, data?: any): void {
+  private logInfo(action: string, data?: Record<string, unknown>): void {
     if (this.enhancedModule) {
       this.enhancedModule.logger.logModule(this.id, action, data);
     }
@@ -419,9 +420,10 @@ export class EnhancedProviderModule implements ProviderModule {
   /**
    * Log error message
    */
-  private logError(action: string, data?: any): void {
+  private logError(action: string, data?: Record<string, unknown>): void {
     if (this.enhancedModule) {
-      this.enhancedModule.logger.logError(data.error, {
+      const err = (data as { error?: unknown })?.error;
+      this.enhancedModule.logger.logError(err, {
         moduleId: this.id,
         action,
         ...data

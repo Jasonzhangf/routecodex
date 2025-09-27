@@ -17,7 +17,7 @@ import {
  */
 export class AnthropicOpenAIConverter implements LLMSwitchModule {
   readonly id: string;
-  readonly type = 'anthropic-openai-converter';
+  readonly type = 'llmswitch-anthropic-openai';
   readonly protocol = 'bidirectional';
   readonly config: ModuleConfig;
 
@@ -29,7 +29,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
     this.config = config;
-    this.id = `anthropic-openai-converter-${Date.now()}`;
+    this.id = `llmswitch-anthropic-openai-${Date.now()}`;
     this.logger = dependencies.logger as any;
     
     // 合并配置
@@ -83,7 +83,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
         return {
           ...transformedRequest,
           _metadata: {
-            switchType: 'anthropic-openai-converter',
+            switchType: 'llmswitch-anthropic-openai',
             direction: 'anthropic-to-openai',
             timestamp: Date.now(),
             originalFormat: 'anthropic',
@@ -100,7 +100,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       return {
         ...request,
         _metadata: {
-          switchType: 'anthropic-openai-converter',
+          switchType: 'llmswitch-anthropic-openai',
           direction: 'passthrough',
           timestamp: Date.now(),
           originalFormat: requestFormat,
@@ -135,7 +135,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
           ...transformedResponse,
           _metadata: {
             ...response._metadata,
-            switchType: 'anthropic-openai-converter',
+            switchType: 'llmswitch-anthropic-openai',
             direction: 'openai-to-anthropic',
             responseTimestamp: Date.now(),
             originalFormat: 'openai',
@@ -153,7 +153,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
         ...response,
         _metadata: {
           ...response._metadata,
-          switchType: 'anthropic-openai-converter',
+          switchType: 'llmswitch-anthropic-openai',
           direction: 'passthrough',
           responseTimestamp: Date.now(),
           originalFormat: responseFormat,

@@ -52,6 +52,7 @@
     "node_modules/**",
     "dist/**",
     "coverage/**",
+    "src/commands/offline-log.ts",
     "web-interface/node_modules/**"
   ]
 }

@@ -3,10 +3,6 @@
  * Handles loading configuration from various sources with validation and environment variable expansion
  */
 
-import fs from 'fs/promises';
-import fsSync from 'fs';
-import path from 'path';
-import { homedir } from 'os';
 import { EventEmitter } from 'events';
 import type {
   RouteCodexConfig,
@@ -16,6 +12,7 @@ import type {
 } from './config-types';
 import { ErrorHandlingUtils } from '../utils/error-handling-utils';
 import { FileWatcher } from '../utils/file-watcher';
+import { resolveRouteCodexConfigPath } from './config-paths.js';
 
 /**
  * Configuration loader with support for multiple sources and hot-reload
@@ -31,7 +28,7 @@ export class ConfigLoader extends EventEmitter {
 
   constructor(configPath?: string) {
     super();
-    this.configPath = configPath || this.getDefaultConfigPath();
+    this.configPath = resolveRouteCodexConfigPath(configPath);
     this.errorUtils = ErrorHandlingUtils.createModuleErrorHandler('config-loader');
     this.envConfig = this.createEnvironmentConfig();
     this.registerErrorHandlers();
@@ -40,25 +37,6 @@ export class ConfigLoader extends EventEmitter {
   /**
    * Get default configuration file path
    */
-  private getDefaultConfigPath(): string {
-    const possiblePaths = [
-      process.env.ROUTECODEX_CONFIG,
-      './routecodex.json',
-      './config/routecodex.json',
-      path.join(process.cwd(), 'routecodex.json'),
-      path.join(homedir(), '.routecodex', 'config.json'),
-      path.join(homedir(), '.routecodex', 'routecodex.json'),
-    ];
-
-    for (const configPath of possiblePaths) {
-      if (configPath && fsSync.existsSync(configPath)) {
-        return configPath;
-      }
-    }
-
-    return './routecodex.json';
-  }
-
   /**
    * Create environment configuration
    */

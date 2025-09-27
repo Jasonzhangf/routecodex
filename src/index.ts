@@ -8,14 +8,7 @@ import fsSync from 'fs';
 import path from 'path';
 import { homedir } from 'os';
 import { ConfigManagerModule } from './modules/config-manager/config-manager-module.js';
-import { 
-  applySimpleLogConfig, 
-  createLoggerWithSimpleConfig, 
-  isSimpleLogEnabled,
-  startSimpleLogConfigWatching,
-  stopSimpleLogConfigWatching,
-  onSimpleLogConfigChange
-} from './logging/simple-log-integration.js';
+import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 
 /**
  * Default modules configuration path
@@ -74,38 +67,14 @@ class RouteCodexApp {
       console.log('🚀 Starting RouteCodex server...');
       console.log(`📁 Modules configuration file: ${this.modulesConfigPath}`);
 
-      // 0. 应用简化日志配置（在系统初始化之前）
-      applySimpleLogConfig();
-      
-      // 0.5 启动简单日志配置监控（热更新）
-      startSimpleLogConfigWatching();
-      
-      // 监听配置变化，动态更新日志级别
-      onSimpleLogConfigChange((config) => {
-        console.log('🔄 检测到简单日志配置变化，正在更新...');
-        console.log(`📊 新日志级别: ${config.logLevel}`);
-        console.log(`🎯 新输出方式: ${config.output}`);
-        
-        // 更新环境变量
-        process.env.SIMPLE_LOG_ENABLED = config.enabled ? 'true' : 'false';
-        process.env.SIMPLE_LOG_LEVEL = config.logLevel;
-        process.env.SIMPLE_LOG_OUTPUT = config.output;
-        
-        if (config.output === 'file' || config.output === 'both') {
-          process.env.SIMPLE_LOG_DIRECTORY = config.logDirectory || path.join(homedir(), '.routecodex', 'logs');
-        }
-        
-        console.log('✨ 简单日志配置已动态更新！');
-      });
+      // 简化日志已移除运行时自动应用，保留 CLI 配置能力
 
       // 1. 初始化配置管理器
       const port = await this.detectServerPort(this.modulesConfigPath);
       this.mergedConfigPath = path.join(process.cwd(), 'config', `merged-config.${port}.json`);
 
       // 确定用户配置文件路径，优先使用RCC4_CONFIG_PATH
-      const userConfigPath = process.env.RCC4_CONFIG_PATH ||
-                           process.env.ROUTECODEX_CONFIG ||
-                           path.join(homedir(), '.routecodex', 'config.json');
+      const userConfigPath = resolveRouteCodexConfigPath();
 
       const configManagerConfig = {
         configPath: userConfigPath,
@@ -175,9 +144,6 @@ class RouteCodexApp {
     try {
       if (this._isRunning) {
         console.log('🛑 Stopping RouteCodex server...');
-
-        // 停止简单日志配置监控
-        stopSimpleLogConfigWatching();
 
         if (this.httpServer) {
           await this.httpServer.stop();

@@ -33,12 +33,12 @@ export class IFlowTokenStorage {
   expires_at: number;
   scope: string;
 
-  constructor(data: any = {}) {
-    this.access_token = data.access_token || '';
-    this.refresh_token = data.refresh_token || '';
-    this.token_type = data.token_type || 'Bearer';
-    this.scope = data.scope || '';
-    this.expires_at = data.expires_at || Date.now();
+  constructor(data: Record<string, unknown> = {}) {
+    this.access_token = String(data.access_token || '');
+    this.refresh_token = String(data.refresh_token || '');
+    this.token_type = String(data.token_type || 'Bearer');
+    this.scope = String(data.scope || '');
+    this.expires_at = Number(data.expires_at || Date.now());
   }
 
   toJSON() {
@@ -51,8 +51,9 @@ export class IFlowTokenStorage {
     };
   }
 
-  static fromJSON(json: any) {
-    return new IFlowTokenStorage(json);
+  static fromJSON(json: unknown) {
+    const src = (json && typeof json === 'object') ? (json as Record<string, unknown>) : {};
+    return new IFlowTokenStorage(src);
   }
 
   isExpired(bufferMs: number = 60_000): boolean {
@@ -225,7 +226,7 @@ export class IFlowOAuth {
     return { codeVerifier: verifier, codeChallenge: challenge };
   }
 
-  private async requestDeviceCode(codeChallenge: string) {
+  private async requestDeviceCode(codeChallenge: string): Promise<{ device_code: string; user_code: string; verification_uri: string; verification_uri_complete?: string; expires_in: number; interval?: number }> {
     const formData = new URLSearchParams({
       client_id: this.clientId,
       scope: this.scopes.join(' '),
@@ -251,10 +252,10 @@ export class IFlowOAuth {
       throw new Error(`Device authorization failed: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
-    return await response.json();
+    return await response.json() as { device_code: string; user_code: string; verification_uri: string; verification_uri_complete?: string; expires_in: number; interval?: number };
   }
 
-  private async pollForToken(device: any, codeVerifier: string) {
+  private async pollForToken(device: { device_code: string; verification_uri: string; verification_uri_complete?: string; user_code: string; expires_in?: number; interval?: number }, codeVerifier: string): Promise<{ access_token: string; refresh_token?: string; token_type?: string; scope?: string; expires_in: number }> {
     const interval = device.interval || 5;
     const maxAttempts = Math.floor((device.expires_in || 300) / interval) + 5;
 
@@ -281,7 +282,7 @@ export class IFlowOAuth {
 
       const text = await response.text();
       if (response.ok) {
-        return JSON.parse(text);
+        return JSON.parse(text) as { access_token: string; refresh_token?: string; token_type?: string; scope?: string; expires_in: number };
       }
 
       const errorData = JSON.parse(text);
@@ -296,8 +297,8 @@ export class IFlowOAuth {
     throw new Error('Authentication timeout. Please restart the device flow.');
   }
 
-  private createTokenStorage(data: any): IFlowTokenStorage {
-    const expiresAt = Date.now() + (Number(data.expires_in) || 3600) * 1000;
+  private createTokenStorage(data: { access_token: string; refresh_token?: string; token_type?: string; scope?: string; expires_in: number }): IFlowTokenStorage {
+    const expiresAt = Date.now() + ((Number(data.expires_in) || 3600) * 1000);
     return new IFlowTokenStorage({
       access_token: data.access_token,
       refresh_token: data.refresh_token,
@@ -307,22 +308,24 @@ export class IFlowOAuth {
     });
   }
 
-  private convertLegacyToken(data: any): any {
-    if (!data) {
-      return data;
+  private convertLegacyToken(data: unknown): Record<string, unknown> {
+    if (!data || typeof data !== 'object') {
+      return {};
     }
 
-    if (data.expiry_date) {
+    const src = data as Record<string, unknown>;
+
+    if ('expiry_date' in src) {
       return {
-        access_token: data.access_token,
-        refresh_token: data.refresh_token,
-        token_type: data.token_type || 'Bearer',
-        scope: data.scope || this.scopes.join(' '),
-        expires_at: data.expiry_date
-      };
+        access_token: src.access_token,
+        refresh_token: src.refresh_token,
+        token_type: src.token_type || 'Bearer',
+        scope: src.scope || this.scopes.join(' '),
+        expires_at: src.expiry_date
+      } as Record<string, unknown>;
     }
 
-    return data;
+    return src;
   }
 }
 

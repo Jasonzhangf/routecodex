@@ -423,7 +423,7 @@ const mockLLMSwitchModule = {
     return {
       ...request.data,
       _metadata: {
-        switchType: 'openai-passthrough',
+        switchType: 'llmswitch-openai-openai',
         timestamp: Date.now(),
         originalProtocol: 'openai',
         targetProtocol: 'openai',
@@ -441,7 +441,7 @@ const mockLLMSwitchModule = {
       expectedOutput: {
         ...request,
         _metadata: {
-          switchType: 'openai-passthrough',
+          switchType: 'llmswitch-openai-openai',
           timestamp: Date.now(),
           routing: 'thinking'
         }

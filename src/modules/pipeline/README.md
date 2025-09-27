@@ -48,7 +48,7 @@ src/modules/pipeline/
 │   └── provider-module.ts           # Provider接口
 ├── modules/                          # 具体模块实现
 │   ├── llm-switch/                   # LLMSwitch实现
-│   │   └── openai-passthrough.ts     # OpenAI透传实现
+│   │   └── openai-normalizer.ts      # OpenAI→OpenAI 规范化实现
 │   ├── workflow/                     # Workflow实现
 │   │   └── streaming-control.ts      # 流式控制实现
 │   ├── compatibility/                # Compatibility实现
@@ -59,7 +59,7 @@ src/modules/pipeline/
 │       ├── qwen-http-provider.ts     # Qwen HTTP Provider
 │       ├── lmstudio-provider.ts      # LM Studio Provider
 │       ├── generic-http-provider.ts   # 通用HTTP Provider
-│       └── openai-passthrough.ts     # OpenAI透传Provider
+│       └── openai-provider.ts        # OpenAI Provider
 ├── types/                            # 类型定义
 │   ├── pipeline-types.ts             # 流水线类型
 │   ├── transformation-types.ts       # 转换类型
@@ -80,13 +80,13 @@ src/modules/pipeline/
 
 ```
 源协议: OpenAI + 目标Provider: Qwen =
-  LLMSwitch(OpenAI透传) +
+  LLMSwitch(OpenAI→OpenAI规范化) +
   Workflow(流控) +
   Compatibility(Qwen适配) +
   Provider(Qwen实现)
 
 源协议: OpenAI + 目标Provider: LM Studio =
-  LLMSwitch(OpenAI透传) +
+  LLMSwitch(OpenAI→OpenAI规范化) +
   Workflow(流控) +
   Compatibility(LM Studio Tools API适配) +
   Provider(LM Studio实现)
@@ -95,9 +95,9 @@ src/modules/pipeline/
 ### 模块层次
 
 1. **LLMSwitch层**: 协议转换
-   - OpenAI ↔ OpenAI: 透传
-   - OpenAI ↔ Anthropic: 协议转换
-   - 目前专注OpenAI透传
+   - OpenAI → OpenAI: 请求规范化
+   - Anthropic → OpenAI: 协议转换
+   - 未来可扩展其他协议映射
 
 2. **Workflow层**: 流式控制
    - 流式请求 → 非流式发送
@@ -132,7 +132,7 @@ await pipelineManager.initialize({
       id: 'qwen.qwen3-coder-plus',
       provider: qwenProviderConfig,
       modules: {
-        llmSwitch: { type: 'openai-passthrough' },
+        llmSwitch: { type: 'llmswitch-openai-openai' },
         workflow: { type: 'streaming-control' },
         compatibility: { type: 'field-mapping' },
         provider: { type: 'qwen-http' }
@@ -198,7 +198,7 @@ const lmStudioPipeline = {
     }
   },
   modules: {
-    llmSwitch: { type: 'openai-passthrough' },
+    llmSwitch: { type: 'llmswitch-openai-openai' },
     workflow: { type: 'streaming-control' },
     compatibility: { type: 'lmstudio-compatibility' },
     provider: { type: 'lmstudio-http' }
@@ -282,7 +282,7 @@ interface PipelineConfig {
   provider: ProviderConfig;                // Provider配置
   modules: {
     llmSwitch: {
-      type: 'openai-passthrough';          // LLMSwitch类型
+      type: 'llmswitch-openai-openai';     // LLMSwitch类型
       config?: any;                        // 额外配置
     };
     workflow: {

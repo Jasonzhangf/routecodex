@@ -8,12 +8,7 @@ import type { UnifiedLogger, LoggerFactory, LoggerFactoryStatus } from './interf
 import type { LoggerConfig } from './types.js';
 import { UnifiedModuleLogger } from './UnifiedLogger.js';
 import { FACTORY_CONSTANTS } from './constants.js';
-import {
-  shouldUseSimpleLogConfig,
-  createLoggerWithSimpleConfig,
-  onSimpleLogConfigChange,
-  getAppliedLogLevel,
-} from './simple-log-integration.js';
+// simple-log integration removed; factory now relies solely on provided LoggerConfig
 
 /**
  * LoggerFactory 实现类
@@ -37,23 +32,8 @@ export class LoggerFactoryImpl implements LoggerFactory {
       throw new Error(`Maximum number of loggers (${FACTORY_CONSTANTS.MAX_LOGGERS}) reached`);
     }
 
-    // 应用简单日志配置（如果启用）
-    let finalConfig = config;
-    if (shouldUseSimpleLogConfig()) {
-      finalConfig = createLoggerWithSimpleConfig(config.moduleId, config.moduleType);
-      // 保留原始配置中的一些重要设置
-      finalConfig = {
-        ...finalConfig,
-        maxHistory: config.maxHistory,
-        maxFileSize: config.maxFileSize,
-        maxFiles: config.maxFiles,
-        enableCompression: config.enableCompression,
-        sensitiveFields: config.sensitiveFields,
-      };
-    }
-
-    // 创建Logger实例
-    const logger = new UnifiedModuleLogger(finalConfig);
+    // 创建Logger实例（直接使用传入配置）
+    const logger = new UnifiedModuleLogger(config);
 
     // 监听日志事件以更新统计信息
     logger.on('log_written', () => {
@@ -238,22 +218,6 @@ export class LoggerFactoryImpl implements LoggerFactory {
     }
   }
 
-  /**
-   * 根据简单日志配置更新所有Logger
-   */
-  updateAllLoggersFromSimpleConfig(config: any): void {
-    const loggers = Array.from(this.loggers.values());
-
-    for (const logger of loggers) {
-      try {
-        // 更新Logger的日志级别
-        logger.updateLogLevel(config.logLevel);
-        console.log(`✅ 已更新Logger [${logger.getModuleId()}] 的日志级别为: ${config.logLevel}`);
-      } catch (error) {
-        console.error(`❌ 更新Logger [${logger.getModuleId()}] 失败:`, error);
-      }
-    }
-  }
 }
 
 /**
@@ -270,11 +234,7 @@ export function getGlobalLoggerFactory(): LoggerFactoryImpl {
     // 启动定期清理
     globalFactory.startPeriodicCleanup();
 
-    // 监听简单日志配置变化
-    onSimpleLogConfigChange(config => {
-      console.log(`🔄 LoggerFactory: 检测到简单日志配置变化，正在更新所有Logger...`);
-      globalFactory?.updateAllLoggersFromSimpleConfig(config);
-    });
+    // simple-log config watching removed
   }
   return globalFactory;
 }

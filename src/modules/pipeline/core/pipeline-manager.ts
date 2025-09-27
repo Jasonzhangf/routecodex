@@ -787,8 +787,8 @@ export class PipelineManager implements RCCBaseModule {
    */
   private initializeModuleRegistry(): void {
     // Register default module factories
-    this.registry.registerModule('openai-passthrough', this.createOpenAIPassthroughModule);
-    this.registry.registerModule('anthropic-openai-converter', this.createAnthropicOpenAIConverterModule);
+    this.registry.registerModule('llmswitch-openai-openai', this.createOpenAINormalizerModule);
+    this.registry.registerModule('llmswitch-anthropic-openai', this.createAnthropicOpenAIConverterModule);
     this.registry.registerModule('streaming-control', this.createStreamingControlModule);
     this.registry.registerModule('field-mapping', this.createFieldMappingModule);
     this.registry.registerModule('qwen-compatibility', this.createQwenCompatibilityModule);
@@ -987,9 +987,9 @@ export class PipelineManager implements RCCBaseModule {
   /**
    * Module factory functions
    */
-  private createOpenAIPassthroughModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { OpenAIPassthroughLLMSwitch } = await import('../modules/llmswitch/openai-passthrough.js');
-    return new OpenAIPassthroughLLMSwitch(config, dependencies);
+  private createOpenAINormalizerModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { OpenAINormalizerLLMSwitch } = await import('../modules/llmswitch/openai-normalizer.js');
+    return new OpenAINormalizerLLMSwitch(config, dependencies);
   };
 
   private createAnthropicOpenAIConverterModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {

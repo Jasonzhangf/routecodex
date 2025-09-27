@@ -39,14 +39,14 @@ export class QwenTokenStorage {
   type: string;
   expired: string;
 
-  constructor(data: any = {}) {
-    this.access_token = data.access_token || '';
-    this.refresh_token = data.refresh_token || '';
-    this.last_refresh = data.last_refresh || new Date().toISOString();
-    this.resource_url = data.resource_url || '';
-    this.email = data.email || '';
-    this.type = data.type || 'qwen';
-    this.expired = data.expired || '';
+  constructor(data: Record<string, unknown> = {}) {
+    this.access_token = String(data.access_token || '');
+    this.refresh_token = String(data.refresh_token || '');
+    this.last_refresh = String(data.last_refresh || new Date().toISOString());
+    this.resource_url = String(data.resource_url || '');
+    this.email = String(data.email || '');
+    this.type = String(data.type || 'qwen');
+    this.expired = String((data as { expired?: string }).expired || '');
   }
 
   toJSON() {
@@ -61,17 +61,18 @@ export class QwenTokenStorage {
     };
   }
 
-  static fromJSON(json: any) {
+  static fromJSON(json: unknown) {
+    const src = (json && typeof json === 'object') ? (json as Record<string, unknown>) : {};
     // Be tolerant to field name differences from various tools
-    const normalized: any = { ...json };
+    const normalized: Record<string, unknown> = { ...src };
     // Some sources save `expire`, map it to `expired`
-    if (!normalized.expired && typeof normalized.expire === 'string') {
-      normalized.expired = normalized.expire;
+    if (!('expired' in normalized) && typeof normalized.expire === 'string') {
+      (normalized as Record<string, unknown>).expired = normalized.expire;
     }
     // If only expires_in is present, derive absolute expiry from last_refresh or now
-    if (!normalized.expired && typeof normalized.expires_in === 'number') {
-      const base = normalized.last_refresh ? new Date(normalized.last_refresh) : new Date();
-      normalized.expired = new Date(base.getTime() + normalized.expires_in * 1000).toISOString();
+    if (!('expired' in normalized) && typeof normalized.expires_in === 'number') {
+      const base = typeof normalized.last_refresh === 'string' ? new Date(normalized.last_refresh) : new Date();
+      (normalized as Record<string, unknown>).expired = new Date(base.getTime() + normalized.expires_in * 1000).toISOString();
     }
     return new QwenTokenStorage(normalized);
   }
@@ -92,9 +93,9 @@ export class QwenTokenStorage {
 export class QwenOAuth {
   tokenFile: string;
   tokenStorage: QwenTokenStorage | null;
-  httpClient: any;
+  httpClient: typeof fetch;
 
-  constructor(config: any = {}) {
+  constructor(config: { tokenFile?: string; httpClient?: typeof fetch } = {}) {
     this.tokenFile = config.tokenFile || path.join(process.env.HOME || '', '.qwen', 'oauth_creds.json');
     // Normalize token file path: expand ~ and resolve relative paths
     this.tokenFile = this.normalizePath(this.tokenFile);
@@ -147,7 +148,7 @@ export class QwenOAuth {
   /**
    * Initiate device flow - EXACT copy from CLIProxyAPI
    */
-  async initiateDeviceFlow() {
+  async initiateDeviceFlow(): Promise<{ device_code: string; user_code: string; verification_uri: string; verification_uri_complete: string; expires_in: number; interval?: number; code_verifier?: string; }> {
     const { codeVerifier, codeChallenge } = this.generatePKCEPair();
 
     const formData = new URLSearchParams({
@@ -184,13 +185,13 @@ export class QwenOAuth {
     // Add the code_verifier to the result so it can be used later for polling
     data.code_verifier = codeVerifier;
 
-    return data;
+    return data as { device_code: string; user_code: string; verification_uri: string; verification_uri_complete: string; expires_in: number; interval?: number; code_verifier?: string; };
   }
 
   /**
    * Poll for token - EXACT copy from CLIProxyAPI
    */
-  async pollForToken(deviceCode: string, codeVerifier: string) {
+  async pollForToken(deviceCode: string, codeVerifier: string): Promise<{ access_token: string; refresh_token?: string; token_type: string; resource_url?: string; expires_in: number; expire: string }> {
     let pollInterval = 5000; // 5 seconds
     const maxAttempts = 60; // 5 minutes max
 
@@ -257,7 +258,7 @@ export class QwenOAuth {
         }
 
         // Success - parse token data
-        const tokenResponse = JSON.parse(bodyText);
+        const tokenResponse = JSON.parse(bodyText) as { access_token: string; refresh_token?: string; token_type: string; resource_url?: string; expires_in: number; };
 
         // Convert to QwenTokenData format and save
         const tokenData = {
@@ -265,7 +266,8 @@ export class QwenOAuth {
           refresh_token: tokenResponse.refresh_token || '',
           token_type: tokenResponse.token_type,
           resource_url: tokenResponse.resource_url || '',
-          expire: new Date(Date.now() + tokenResponse.expires_in * 1000).toISOString()
+          expire: new Date(Date.now() + tokenResponse.expires_in * 1000).toISOString(),
+          expires_in: tokenResponse.expires_in
         };
 
         return tokenData;
@@ -284,7 +286,7 @@ export class QwenOAuth {
   /**
    * Refresh tokens - EXACT copy from CLIProxyAPI
    */
-  async refreshTokens(refreshToken: string) {
+  async refreshTokens(refreshToken: string): Promise<{ access_token: string; refresh_token?: string; token_type: string; resource_url?: string; expires_in: number; expire: string }> {
     const formData = new URLSearchParams({
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
@@ -316,21 +318,22 @@ export class QwenOAuth {
       }
     }
 
-    const tokenResponse = await response.json();
+    const tokenResponse = await response.json() as { access_token: string; refresh_token?: string; token_type: string; resource_url?: string; expires_in: number; };
 
     return {
       access_token: tokenResponse.access_token,
       refresh_token: tokenResponse.refresh_token || '',
       token_type: tokenResponse.token_type,
       resource_url: tokenResponse.resource_url || '',
-      expire: new Date(Date.now() + tokenResponse.expires_in * 1000).toISOString()
+      expire: new Date(Date.now() + tokenResponse.expires_in * 1000).toISOString(),
+      expires_in: tokenResponse.expires_in
     };
   }
 
   /**
    * Refresh tokens with retry - EXACT copy from CLIProxyAPI
    */
-  async refreshTokensWithRetry(refreshToken: string, maxRetries = 3) {
+  async refreshTokensWithRetry(refreshToken: string, maxRetries = 3): Promise<{ access_token: string; refresh_token?: string; token_type: string; resource_url?: string; expires_in: number; expire: string }> {
     let lastError;
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -354,7 +357,7 @@ export class QwenOAuth {
   /**
    * Create token storage - EXACT copy from CLIProxyAPI
    */
-  createTokenStorage(tokenData: any) {
+  createTokenStorage(tokenData: { access_token: string; refresh_token?: string; token_type: string; resource_url?: string; expire: string }) {
     return new QwenTokenStorage({
       access_token: tokenData.access_token,
       refresh_token: tokenData.refresh_token,
@@ -381,7 +384,7 @@ export class QwenOAuth {
   async loadToken() {
     try {
       const tokenContent = await fs.readFile(this.tokenFile, 'utf-8');
-      const tokenData = JSON.parse(tokenContent);
+      const tokenData = JSON.parse(tokenContent) as unknown;
       this.tokenStorage = QwenTokenStorage.fromJSON(tokenData);
 
       // Check if token is expired and refresh if needed
@@ -421,7 +424,7 @@ export class QwenOAuth {
   /**
    * Get API endpoint - EXACT copy from CLIProxyAPI logic
    */
-  getAPIEndpoint() {
+  getAPIEndpoint(): string {
     if (this.tokenStorage && this.tokenStorage.resource_url) {
       return `https://${this.tokenStorage.resource_url}/v1`;
     }
@@ -431,7 +434,7 @@ export class QwenOAuth {
   /**
    * Get authorization header
    */
-  getAuthorizationHeader() {
+  getAuthorizationHeader(): string {
     if (!this.tokenStorage) {
       throw new Error('No token available');
     }
@@ -441,14 +444,14 @@ export class QwenOAuth {
   /**
    * Check if authenticated
    */
-  isAuthenticated() {
+  isAuthenticated(): boolean {
     return this.tokenStorage !== null && !this.tokenStorage.isExpired();
   }
 
   /**
    * Complete OAuth flow
    */
-  async completeOAuthFlow(openBrowser = true) {
+  async completeOAuthFlow(openBrowser = true): Promise<QwenTokenStorage> {
     try {
       console.log('Starting OAuth device flow...');
 
@@ -475,7 +478,7 @@ export class QwenOAuth {
       console.log('Waiting for authentication...');
 
       // Poll for token
-      const tokenData = await this.pollForToken(deviceFlow.device_code, deviceFlow.code_verifier);
+      const tokenData = await this.pollForToken(deviceFlow.device_code, deviceFlow.code_verifier!);
 
       // Create token storage
       this.tokenStorage = this.createTokenStorage(tokenData);
@@ -503,7 +506,7 @@ export function createQwenOAuth(config = {}) {
 /**
  * Complete OAuth flow and return token
  */
-export async function completeQwenOAuth(config: any = {}) {
+export async function completeQwenOAuth(config: { tokenFile?: string; httpClient?: typeof fetch; openBrowser?: boolean } = {}) {
   const oauth = createQwenOAuth(config);
   return await oauth.completeOAuthFlow(config.openBrowser !== false);
 }

@@ -14,7 +14,6 @@ export { ConfigValidator } from './config-validator';
 
 // Configuration providers
 export { JsonConfigProvider } from './providers/json-provider';
-import { JsonConfigProvider } from './providers/json-provider';
 
 // Default configuration
 export { default as defaultConfig } from './default-config.json';

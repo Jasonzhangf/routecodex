@@ -4,6 +4,7 @@
 
 import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../types/provider-types.js';
+import type { UnknownObject } from '../../../../types/common-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { DebugEventBus } from "rcc-debugcenter";
 
@@ -25,15 +26,15 @@ export class LMStudioProviderSimple implements ProviderModule {
   // Debug enhancement properties
   private debugEventBus: DebugEventBus | null = null;
   private isDebugEnhanced = false;
-  private providerMetrics: Map<string, any> = new Map();
-  private requestHistory: any[] = [];
-  private errorHistory: any[] = [];
+  private providerMetrics: Map<string, { values: unknown[]; lastUpdated: number }> = new Map();
+  private requestHistory: UnknownObject[] = [];
+  private errorHistory: UnknownObject[] = [];
   private maxHistorySize = 50;
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
     this.id = `provider-${Date.now()}`;
     this.config = config;
-    this.logger = dependencies.logger as any;
+    this.logger = dependencies.logger as PipelineDebugLogger;
     const providerConfig = this.config.config as ProviderConfig;
     this.baseUrl = providerConfig.baseUrl || 'http://localhost:1234';
 
@@ -58,7 +59,7 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Record provider metric
    */
-  private recordProviderMetric(operation: string, data: any): void {
+  private recordProviderMetric(operation: string, data: unknown): void {
     if (!this.providerMetrics.has(operation)) {
       this.providerMetrics.set(operation, {
         values: [],
@@ -79,7 +80,7 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Add to request history
    */
-  private addToRequestHistory(request: any): void {
+  private addToRequestHistory(request: UnknownObject): void {
     this.requestHistory.push(request);
 
     // Keep only recent history
@@ -91,7 +92,7 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Add to error history
    */
-  private addToErrorHistory(error: any): void {
+  private addToErrorHistory(error: UnknownObject): void {
     this.errorHistory.push(error);
 
     // Keep only recent history
@@ -103,7 +104,7 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Publish debug event
    */
-  private publishDebugEvent(type: string, data: any): void {
+  private publishDebugEvent(type: string, data: UnknownObject): void {
     if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
 
     try {
@@ -128,7 +129,7 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Get debug status with enhanced information
    */
-  getDebugStatus(): any {
+  getDebugStatus(): UnknownObject {
     const baseStatus = {
       providerId: this.id,
       isInitialized: this.isInitialized,
@@ -152,7 +153,7 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Get detailed debug information
    */
-  private getDebugInfo(): any {
+  private getDebugInfo(): UnknownObject {
     return {
       providerId: this.id,
       providerType: this.providerType,
@@ -167,8 +168,8 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Get provider metrics
    */
-  private getProviderMetrics(): any {
-    const metrics: any = {};
+  private getProviderMetrics(): Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> {
+    const metrics: Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> = {};
 
     for (const [operation, metric] of this.providerMetrics.entries()) {
       metrics[operation] = {
@@ -270,7 +271,7 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Process incoming request - 直接发送，不做转换
    */
-  async processIncoming(request: any): Promise<any> {
+  async processIncoming(request: UnknownObject): Promise<ProviderResponse> {
     const startTime = Date.now();
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -300,11 +301,11 @@ export class LMStudioProviderSimple implements ProviderModule {
         endpoint: `${this.baseUrl}/v1/chat/completions`,
         method: 'POST',
         hasAuth: !!this.authContext,
-        hasTools: !!request.tools
+        hasTools: Array.isArray((request as { tools?: unknown[] }).tools)
       });
 
       // Compatibility模块已经处理了所有转换，直接发送请求
-      const response = await this.sendChatRequest(request);
+      const response = await this.sendChatRequest(request as Record<string, unknown>);
 
       const totalTime = Date.now() - startTime;
 
@@ -376,14 +377,14 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Process outgoing response - 直接返回
    */
-  async processOutgoing(response: any): Promise<any> {
+  async processOutgoing(response: UnknownObject): Promise<UnknownObject> {
     return response;
   }
 
   /**
    * Send request to provider
    */
-  async sendRequest(request: any, options?: any): Promise<ProviderResponse> {
+  async sendRequest(request: UnknownObject, _options?: unknown): Promise<ProviderResponse> {
     return this.processIncoming(request);
   }
 
@@ -474,10 +475,10 @@ export class LMStudioProviderSimple implements ProviderModule {
    */
   private async initializeAuth(): Promise<void> {
     const providerConfig = this.config.config as ProviderConfig;
-    const authConfig = providerConfig.auth || { type: 'apikey' } as any;
+    const authConfig = providerConfig.auth;
     let resolvedApiKey = '';
-    if (authConfig.type === 'apikey') {
-      const rawKey = authConfig.apiKey;
+    if (authConfig?.type === 'apikey') {
+      const rawKey = (authConfig as { apiKey?: string }).apiKey;
       if (typeof rawKey === 'string') {
         // Resolve ${ENV} or ${ENV:-default} patterns
         const envMatch = rawKey.match(/^\$\{([^}:]+)(?::-(.*))?}$/);
@@ -495,7 +496,7 @@ export class LMStudioProviderSimple implements ProviderModule {
     }
 
     this.authContext = {
-      type: authConfig.type,
+      type: (authConfig?.type as AuthContext['type']) || 'apikey',
       token: resolvedApiKey || '',
       credentials: {
         apiKey: resolvedApiKey || '',
@@ -510,12 +511,12 @@ export class LMStudioProviderSimple implements ProviderModule {
       'User-Agent': 'RouteCodex/1.0.0'
     };
 
-    if (authConfig.type === 'apikey' && resolvedApiKey) {
+    if (authConfig?.type === 'apikey' && resolvedApiKey) {
       this.headers['Authorization'] = `Bearer ${resolvedApiKey}`;
     }
 
     this.logger.logModule(this.id, 'auth-initialized', {
-      type: authConfig.type,
+      type: (authConfig?.type as string) || 'apikey',
       hasToken: !!authConfig.apiKey
     });
   }
@@ -523,7 +524,7 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Send chat request to LM Studio
    */
-  private async sendChatRequest(request: any): Promise<ProviderResponse> {
+  private async sendChatRequest(request: Record<string, unknown>): Promise<ProviderResponse> {
     const startTime = Date.now();
     const httpRequestId = `http_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const endpoint = `${this.baseUrl}/v1/chat/completions`;
@@ -654,7 +655,7 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Handle provider errors
    */
-  private async handleProviderError(error: any, request: any): Promise<void> {
+  private async handleProviderError(error: unknown, request: unknown): Promise<void> {
     const providerError = this.createProviderError(error);
     await this.dependencies.errorHandlingCenter.handleError(providerError, {
       module: this.id,
@@ -666,12 +667,13 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Create provider error
    */
-  private createProviderError(error: any): ProviderError {
+  private createProviderError(error: unknown): ProviderError {
     const errorObj = error instanceof Error ? error : new Error(String(error));
     const providerError: ProviderError = new Error(errorObj.message) as ProviderError;
-    providerError.type = 'network' as any;
-    providerError.statusCode = error.statusCode || 500;
-    providerError.details = error;
+    providerError.type = 'network';
+    const errLike = error as { statusCode?: number; details?: Record<string, unknown> };
+    providerError.statusCode = errLike?.statusCode || 500;
+    providerError.details = (errLike?.details as Record<string, unknown> | undefined) ?? {};
     providerError.retryable = this.isRetryableError(error);
 
     return providerError;
@@ -680,13 +682,11 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Check if error is retryable
    */
-  private isRetryableError(error: any): boolean {
-    if (!error.statusCode) {return false;}
-
-    // Retry on 5xx errors, 429 (rate limit), and network errors
-    return error.statusCode >= 500 ||
-           error.statusCode === 429 ||
-           error.code === 'ECONNREFUSED' ||
-           error.code === 'ETIMEDOUT';
+  private isRetryableError(error: unknown): boolean {
+    const errLike = error as { statusCode?: number; code?: string };
+    if (!errLike?.statusCode && !errLike?.code) {return false;}
+    return (typeof errLike.statusCode === 'number' && (errLike.statusCode >= 500 || errLike.statusCode === 429))
+      || errLike.code === 'ECONNREFUSED'
+      || errLike.code === 'ETIMEDOUT';
   }
 }

@@ -15,13 +15,13 @@ import type {
  */
 export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
   readonly id: string;
-  readonly type = 'openai-normalizer';
+  readonly type = 'llmswitch-openai-openai';
   readonly config: ModuleConfig;
   readonly protocol = 'openai';
   private isInitialized = false;
 
   constructor(config: ModuleConfig, _dependencies: ModuleDependencies) {
-    this.id = `llm-switch-openai-normalizer-${Date.now()}`;
+    this.id = `llmswitch-openai-openai-${Date.now()}`;
     this.config = config;
   }
 
@@ -42,7 +42,7 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
     return {
       ...normalized,
       _metadata: {
-        switchType: 'openai-normalizer',
+        switchType: 'llmswitch-openai-openai',
         timestamp: Date.now(),
         originalProtocol: 'openai',
         targetProtocol: 'openai'

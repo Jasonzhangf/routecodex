@@ -9,6 +9,12 @@ import type { RCCBaseModule, ErrorHandlingCenter, DebugCenter } from '../types/e
 import type { BaseProviderConfig, BaseTransformationRule } from '../types/base-types.js';
 import type { LogData } from '../../../types/common-types.js';
 import type {
+  SharedPipelineRequest,
+  SharedPipelineResponse,
+  SharedPipelineError,
+  SharedRouteRequest,
+} from '../../../types/shared-dtos.js';
+import type {
   DebugLogEntry,
   TransformationLogEntry,
   ProviderRequestLogEntry
@@ -17,76 +23,22 @@ import type {
 /**
  * Route request interface for pipeline selection
  */
-export interface RouteRequest {
-  /** Provider identifier */
-  readonly providerId: string;
-  /** Model identifier */
-  readonly modelId: string;
-  /** Request identifier */
-  readonly requestId: string;
-  /** Request timestamp */
-  readonly timestamp?: number;
-}
+export type RouteRequest = SharedRouteRequest;
 
 /**
  * Pipeline request interface
  */
-export interface PipelineRequest {
-  /** Original request data */
-  readonly data: any;
-  /** Route information */
-  readonly route: {
-    providerId: string;
-    modelId: string;
-    requestId: string;
-    timestamp: number;
-  };
-  /** Metadata from original request */
-  readonly metadata: Record<string, any>;
-  /** Debug context */
-  readonly debug: {
-    enabled: boolean;
-    stages: Record<string, boolean>;
-  };
-}
+export type PipelineRequest = SharedPipelineRequest;
 
 /**
  * Pipeline response interface
  */
-export interface PipelineResponse {
-  /** Response data */
-  readonly data: any;
-  /** Processing metadata */
-  readonly metadata: {
-    pipelineId: string;
-    processingTime: number;
-    stages: string[];
-    errors?: PipelineError[];
-  };
-  /** Debug information */
-  readonly debug?: {
-    request: any;
-    response: any;
-    transformations: TransformationLog[];
-    timings: Record<string, number>;
-  };
-}
+export type PipelineResponse = SharedPipelineResponse;
 
 /**
  * Pipeline error interface
  */
-export interface PipelineError {
-  /** Error stage */
-  readonly stage: string;
-  /** Error code */
-  readonly code: string;
-  /** Error message */
-  readonly message: string;
-  /** Error details */
-  readonly details?: any;
-  /** Error timestamp */
-  readonly timestamp: number;
-}
+export type PipelineError = SharedPipelineError;
 
 /**
  * Module interface for all pipeline modules

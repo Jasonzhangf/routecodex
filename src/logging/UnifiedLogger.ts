@@ -24,6 +24,7 @@ import type {
 } from './types.js';
 
 import type { UnifiedLogger, LogWriterStatus } from './interfaces.js';
+import type { LogData } from '../types/common-types.js';
 
 import {
   DEFAULT_CONFIG,
@@ -91,19 +92,19 @@ export class UnifiedModuleLogger extends EventEmitter implements UnifiedLogger {
   }
 
   // UnifiedLogger接口实现
-  debug(message: string, data?: any): void {
+  debug(message: string, data?: LogData): void {
     this.writeLog(LogLevel.DEBUG, message, data);
   }
 
-  info(message: string, data?: any): void {
+  info(message: string, data?: LogData): void {
     this.writeLog(LogLevel.INFO, message, data);
   }
 
-  warn(message: string, data?: any): void {
+  warn(message: string, data?: LogData): void {
     this.writeLog(LogLevel.WARN, message, data);
   }
 
-  error(message: string, error?: Error, data?: any): void {
+  error(message: string, error?: Error, data?: LogData): void {
     this.writeLog(LogLevel.ERROR, message, data, error);
   }
 

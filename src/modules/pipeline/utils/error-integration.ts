@@ -176,7 +176,7 @@ export class PipelineErrorIntegration {
    */
   private categorizeError(pipelineError: PipelineError, originalError: any): void {
     const code = pipelineError.code;
-    const details = pipelineError.details!;
+    const details: any = (pipelineError as any).details || ((pipelineError as any).details = {});
 
     // Add error category
     if (code.startsWith('HTTP_4')) {
@@ -200,16 +200,16 @@ export class PipelineErrorIntegration {
     }
 
     // Add HTTP status code if available
-    if (originalError.statusCode) {
-      details.httpStatus = originalError.statusCode;
+    if (originalError && typeof originalError === 'object' && 'statusCode' in originalError) {
+      details.httpStatus = (originalError as any).statusCode;
     }
 
     // Add rate limit information if available
-    if (code === 'RATE_LIMIT_EXCEEDED' || originalError.statusCode === 429) {
+    if (code === 'RATE_LIMIT_EXCEEDED' || (originalError && (originalError as any).statusCode === 429)) {
       details.rateLimit = {
-        limit: originalError.headers?.['x-ratelimit-limit'],
-        remaining: originalError.headers?.['x-ratelimit-remaining'],
-        resetTime: originalError.headers?.['x-ratelimit-reset']
+        limit: (originalError as any)?.headers?.['x-ratelimit-limit'],
+        remaining: (originalError as any)?.headers?.['x-ratelimit-remaining'],
+        resetTime: (originalError as any)?.['x-ratelimit-reset']
       };
     }
   }
@@ -226,8 +226,8 @@ export class PipelineErrorIntegration {
       stage: error.stage,
       code: error.code,
       message: error.message,
-      category: error.details?.category,
-      retryable: error.details?.retryable,
+      category: (error.details as any)?.category,
+      retryable: (error.details as any)?.retryable,
       context: {
         ...context,
         error: undefined // Remove circular reference
@@ -318,7 +318,7 @@ export class PipelineErrorIntegration {
    */
   private async executeRecoveryStrategy(error: PipelineError, context: ErrorContext): Promise<void> {
     // Special handling for 429 errors
-    if (error.code === 'HTTP_429' || error.details?.httpStatus === 429) {
+    if (error.code === 'HTTP_429' || (error.details as any)?.httpStatus === 429) {
       await this.execute429Strategy(error, context);
       return;
     }
@@ -384,8 +384,8 @@ export class PipelineErrorIntegration {
    */
   private async execute429Strategy(error: PipelineError, context: ErrorContext): Promise<void> {
     // Extract key information from error context
-    const key = error.details?.key || context.key || 'unknown';
-    const pipelineIds = error.details?.pipelineIds || [context.pipelineId];
+    const key = (error.details as any)?.key || (context as any).key || 'unknown';
+    const pipelineIds = (error.details as any)?.pipelineIds || [context.pipelineId];
 
     // Log 429 error to ErrorHandlingCenter
     await this.errorHandlingCenter.handleError({
@@ -431,7 +431,7 @@ export class PipelineErrorIntegration {
     const errorReport = {
       type: 'pipeline-error',
       timestamp: error.timestamp,
-      severity: error.details?.category === 'network_error' ? 'warning' : 'error',
+      severity: ((error.details as any)?.category === 'network_error') ? 'warning' : 'error',
       pipelineId: context.pipelineId,
       requestId: context.requestId,
       stage: error.stage,

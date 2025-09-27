@@ -8,9 +8,9 @@ LLMSwitch 模块是流水线架构的第 0 层（入口层），负责处理进�
 
 ## 支持的协议转换
 
-### 🔧 OpenAI 透传
-- **实现文件**: `openai-passthrough.ts`
-- **功能**: OpenAI 协议透传，添加元数据跟踪
+### 🔧 OpenAI → OpenAI 规范化
+- **实现文件**: `openai-normalizer.ts`
+- **功能**: OpenAI 协议规范化，保持请求结构一致
 - **特性**:
   - 完整的 OpenAI 协议支持
   - 请求/响应元数据添加
@@ -27,27 +27,18 @@ LLMSwitch 模块是流水线架构的第 0 层（入口层），负责处理进�
   - 工具调用适配
   - 响应格式标准化
 
-### 📋 请求格式检测
-- **实现文件**: `request-format-detector.ts`
-- **功能**: 自动检测输入请求的协议格式
-- **特性**:
-  - 多协议格式识别
-  - 置信度评估
-  - 格式验证
-  - 错误检测
-
 ## 核心功能
 
 ### 🎯 协议透传
 ```typescript
-// OpenAI 透传实现
-class OpenAIPassthroughLLMSwitch implements LLMSwitchModule {
+// OpenAI 规范化实现
+class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
   async processIncoming(request: any): Promise<any> {
     // 添加元数据但保持协议不变
     return {
       ...request,
       _metadata: {
-        switchType: 'openai-passthrough',
+        switchType: 'llmswitch-openai-openai',
         timestamp: Date.now(),
         originalProtocol: 'openai',
         targetProtocol: 'openai'
@@ -92,10 +83,9 @@ private validateProtocol(request: any): void {
 
 ```
 src/modules/pipeline/modules/llmswitch/
-├── openai-passthrough.ts         # OpenAI 透传实现
-├── anthropic-openai-converter.ts # Anthropic-OpenAI 转换器
+├── openai-normalizer.ts          # OpenAI → OpenAI 规范化实现
+├── anthropic-openai-converter.ts # Anthropic → OpenAI 转换器
 ├── anthropic-openai-config.ts    # 转换配置
-├── request-format-detector.ts    # 请求格式检测器
 └── README.md                     # 本文档
 ```
 
@@ -103,10 +93,10 @@ src/modules/pipeline/modules/llmswitch/
 
 ### 基本使用
 ```typescript
-import { OpenAIPassthroughLLMSwitch } from './openai-passthrough.js';
+import { OpenAINormalizerLLMSwitch } from './openai-normalizer.js';
 
-const llmSwitch = new OpenAIPassthroughLLMSwitch({
-  type: 'openai-passthrough',
+const llmSwitch = new OpenAINormalizerLLMSwitch({
+  type: 'llmswitch-openai-openai',
   config: {
     enableValidation: true,
     enableMetadata: true
@@ -128,7 +118,7 @@ const enhancedRequest = await llmSwitch.processIncoming({
 // 结果包含增强的元数据
 console.log(enhancedRequest._metadata);
 // {
-//   switchType: 'openai-passthrough',
+//   switchType: 'llmswitch-openai-openai',
 //   timestamp: 1643723400000,
 //   originalProtocol: 'openai',
 //   targetProtocol: 'openai'
@@ -140,7 +130,7 @@ console.log(enhancedRequest._metadata);
 const pipelineConfig = {
   modules: {
     llmSwitch: {
-      type: 'openai-passthrough',
+      type: 'llmswitch-openai-openai',
       config: {
         enableValidation: true,
         enablePerformanceTracking: true
@@ -160,7 +150,7 @@ const enhancedRequest = await llmSwitch.processIncoming(request);
 import { AnthropicOpenAIConverter } from './anthropic-openai-converter.js';
 
 const converter = new AnthropicOpenAIConverter({
-  type: 'anthropic-openai-converter',
+  type: 'llmswitch-anthropic-openai',
   config: {
     direction: 'anthropic-to-openai',
     enableTools: true

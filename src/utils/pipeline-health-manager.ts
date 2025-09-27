@@ -222,7 +222,7 @@ export class PipelineHealthManager {
    */
   getAvailablePipelines(): string[] {
     const available: string[] = [];
-    for (const [pipelineId, status] of this.healthStatuses) {
+    for (const [pipelineId, _status] of this.healthStatuses) {
       if (this.isPipelineAvailable(pipelineId)) {
         available.push(pipelineId);
       }
@@ -339,7 +339,7 @@ export class PipelineHealthManager {
    */
   getDebugInfo(): {
     config: PipelineHealthConfig;
-    stats: any;
+    stats: Record<string, unknown>;
     pipelineStatuses: PipelineHealthStatus[];
   } {
     return {

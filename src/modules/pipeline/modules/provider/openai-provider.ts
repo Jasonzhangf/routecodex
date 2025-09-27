@@ -6,7 +6,8 @@
  */
 
 import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
-import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../types/provider-types.js';
+import type { ProviderConfig, AuthContext, ProviderResponse } from '../../types/provider-types.js';
+import type { UnknownObject } from '../../../../types/common-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { DebugEventBus } from "rcc-debugcenter";
 import OpenAI from 'openai';
@@ -24,20 +25,20 @@ export class OpenAIProvider implements ProviderModule {
   private logger: PipelineDebugLogger;
   private authContext: AuthContext | null = null;
   private openai: OpenAI | null = null;
-  private client: any = null;
+  private client: OpenAI | null = null;
 
   // Debug enhancement properties
   private debugEventBus: DebugEventBus | null = null;
   private isDebugEnhanced = false;
-  private providerMetrics: Map<string, any> = new Map();
-  private requestHistory: any[] = [];
-  private errorHistory: any[] = [];
+  private providerMetrics: Map<string, { values: number[]; lastUpdated: number }> = new Map();
+  private requestHistory: UnknownObject[] = [];
+  private errorHistory: UnknownObject[] = [];
   private maxHistorySize = 50;
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
     this.id = `provider-${Date.now()}`;
     this.config = config;
-    this.logger = dependencies.logger as any;
+    this.logger = dependencies.logger as PipelineDebugLogger;
 
     // Initialize debug enhancements
     this.initializeDebugEnhancements();
@@ -73,7 +74,7 @@ export class OpenAIProvider implements ProviderModule {
       }
 
       // Initialize OpenAI client
-      const openaiConfig: any = {
+      const openaiConfig: Record<string, unknown> = {
         dangerouslyAllowBrowser: true // Allow browser usage for Node.js environments
       };
 
@@ -156,7 +157,7 @@ export class OpenAIProvider implements ProviderModule {
   /**
    * Send request to OpenAI
    */
-  async sendRequest(request: any): Promise<ProviderResponse> {
+  async sendRequest(request: UnknownObject): Promise<ProviderResponse> {
     if (!this.isInitialized) {
       throw new Error('OpenAI provider is not initialized');
     }
@@ -167,44 +168,48 @@ export class OpenAIProvider implements ProviderModule {
     try {
       this.logger.logModule(this.id, 'sending-request-start', {
         requestId,
-        model: request.model,
-        hasMessages: !!request.messages,
-        hasTools: !!request.tools
+        model: (request as { model?: string }).model,
+        hasMessages: Array.isArray((request as { messages?: unknown[] }).messages),
+        hasTools: Array.isArray((request as { tools?: unknown[] }).tools)
       });
 
       if (this.isDebugEnhanced) {
         this.publishProviderEvent('request-start', {
           requestId,
-          model: request.model,
+          model: (request as { model?: string }).model,
           timestamp: startTime
         });
       }
 
       // Prepare chat completion request
-      const chatRequest: any = {
-        model: request.model,
-        messages: request.messages || [],
-        temperature: request.temperature ?? 0.7,
-        max_tokens: request.max_tokens,
-        top_p: request.top_p,
-        frequency_penalty: request.frequency_penalty,
-        presence_penalty: request.presence_penalty,
-        stream: request.stream ?? false
+      const chatRequest: Record<string, unknown> = {
+        model: (request as { model?: string }).model,
+        messages: (request as { messages?: unknown[] }).messages || [],
+        temperature: (request as { temperature?: number }).temperature ?? 0.7,
+        max_tokens: (request as { max_tokens?: number }).max_tokens,
+        top_p: (request as { top_p?: number }).top_p,
+        frequency_penalty: (request as { frequency_penalty?: number }).frequency_penalty,
+        presence_penalty: (request as { presence_penalty?: number }).presence_penalty,
+        stream: (request as { stream?: boolean }).stream ?? false
       };
 
       // Add tools if provided
-      if (request.tools && request.tools.length > 0) {
-        chatRequest.tools = request.tools;
-        chatRequest.tool_choice = request.tool_choice || 'auto';
+      {
+        const tools = (request as { tools?: unknown[] }).tools;
+        if (Array.isArray(tools) && tools.length > 0) {
+          chatRequest.tools = tools;
+          chatRequest.tool_choice = (request as { tool_choice?: string }).tool_choice || 'auto';
+        }
       }
 
       // Add response format if provided
-      if (request.response_format) {
-        chatRequest.response_format = request.response_format;
+      if ((request as { response_format?: unknown }).response_format) {
+        chatRequest.response_format = (request as { response_format?: unknown }).response_format;
       }
 
       // Send request to OpenAI
-      const response = await this.openai!.chat.completions.create(chatRequest);
+      type ChatCreateArg = Parameters<OpenAI['chat']['completions']['create']>[0];
+      const response = await this.openai!.chat.completions.create(chatRequest as unknown as ChatCreateArg);
 
       const processingTime = Date.now() - startTime;
       const providerResponse: ProviderResponse = {
@@ -217,14 +222,14 @@ export class OpenAIProvider implements ProviderModule {
         metadata: {
           requestId,
           processingTime,
-          model: request.model
+          model: (request as { model?: string }).model as string
         }
       };
 
       this.logger.logModule(this.id, 'sending-request-complete', {
         requestId,
         processingTime,
-        model: request.model
+        model: (request as { model?: string }).model
       });
 
       if (this.isDebugEnhanced) {
@@ -232,12 +237,12 @@ export class OpenAIProvider implements ProviderModule {
           requestId,
           processingTime,
           success: true,
-          model: request.model
+          model: (request as { model?: string }).model
         });
         this.recordProviderMetric('request_time', processingTime);
         this.addToRequestHistory({
           requestId,
-          model: request.model,
+          model: (request as { model?: string }).model,
           processingTime,
           success: true,
           timestamp: Date.now()
@@ -258,7 +263,7 @@ export class OpenAIProvider implements ProviderModule {
         metadata: {
           requestId,
           processingTime,
-          model: request.model
+          model: (request as { model?: string }).model as string
         }
       };
 
@@ -273,7 +278,7 @@ export class OpenAIProvider implements ProviderModule {
           requestId,
           error: error instanceof Error ? error.message : String(error),
           processingTime,
-          model: request.model
+          model: (request as { model?: string }).model
         });
         this.addToErrorHistory({
           requestId,
@@ -338,14 +343,14 @@ export class OpenAIProvider implements ProviderModule {
   /**
    * Process incoming request (compatibility with pipeline)
    */
-  async processIncoming(request: any): Promise<any> {
+  async processIncoming(request: UnknownObject): Promise<ProviderResponse> {
     return this.sendRequest(request);
   }
 
   /**
    * Process outgoing response (compatibility with pipeline)
    */
-  async processOutgoing(response: any): Promise<any> {
+  async processOutgoing(response: UnknownObject): Promise<UnknownObject> {
     return response;
   }
 
@@ -432,7 +437,7 @@ export class OpenAIProvider implements ProviderModule {
   /**
    * Add request to history
    */
-  private addToRequestHistory(request: any): void {
+  private addToRequestHistory(request: UnknownObject): void {
     if (!this.isDebugEnhanced) {return;}
 
     this.requestHistory.push(request);
@@ -446,7 +451,7 @@ export class OpenAIProvider implements ProviderModule {
   /**
    * Add error to history
    */
-  private addToErrorHistory(error: any): void {
+  private addToErrorHistory(error: UnknownObject): void {
     if (!this.isDebugEnhanced) {return;}
 
     this.errorHistory.push(error);
@@ -460,7 +465,7 @@ export class OpenAIProvider implements ProviderModule {
   /**
    * Publish provider event
    */
-  private publishProviderEvent(type: string, data: any): void {
+  private publishProviderEvent(type: string, data: UnknownObject): void {
     if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
 
     try {
@@ -484,7 +489,7 @@ export class OpenAIProvider implements ProviderModule {
   /**
    * Get enhanced provider status with debug information
    */
-  getEnhancedStatus(): any {
+  getEnhancedStatus(): UnknownObject {
     const baseStatus = this.getStatus();
 
     if (!this.isDebugEnhanced) {
@@ -503,15 +508,15 @@ export class OpenAIProvider implements ProviderModule {
   /**
    * Get provider metrics
    */
-  private getProviderMetrics(): any {
-    const metrics: any = {};
+  private getProviderMetrics(): Record<string, { count: number; avg: number; min: number; max: number; lastUpdated: number }> {
+    const metrics: Record<string, { count: number; avg: number; min: number; max: number; lastUpdated: number }> = {};
 
     for (const [operationId, metric] of this.providerMetrics.entries()) {
       const values = metric.values;
       if (values.length > 0) {
         metrics[operationId] = {
           count: values.length,
-          avg: Math.round(values.reduce((a: any, b: any) => a + b, 0) / values.length),
+          avg: Math.round(values.reduce((a: number, b: number) => a + b, 0) / values.length),
           min: Math.min(...values),
           max: Math.max(...values),
           lastUpdated: metric.lastUpdated
@@ -525,17 +530,18 @@ export class OpenAIProvider implements ProviderModule {
   /**
    * Get performance statistics
    */
-  private getPerformanceStats(): any {
-    const requests = this.requestHistory;
+  private getPerformanceStats(): Record<string, number> {
+    const requests = this.requestHistory as Array<{ processingTime?: number }>;
     const errors = this.errorHistory;
-
+    const count = requests.length;
+    const total = count > 0 ? requests.reduce((sum, r) => sum + (typeof r.processingTime === 'number' ? r.processingTime : 0), 0) : 0;
+    const avg = count > 0 ? Math.round(total / count) : 0;
+    const successRate = count > 0 ? (count - errors.length) / count : 0;
     return {
-      totalRequests: requests.length,
+      totalRequests: count,
       totalErrors: errors.length,
-      successRate: requests.length > 0 ? (requests.length - errors.length) / requests.length : 0,
-      avgResponseTime: requests.length > 0
-        ? Math.round(requests.reduce((sum: any, req: any) => sum + req.processingTime, 0) / requests.length)
-        : 0
+      successRate,
+      avgResponseTime: avg
     };
   }
 }
