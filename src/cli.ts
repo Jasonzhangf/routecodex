@@ -50,6 +50,15 @@ program
         configPath = path.join(homedir(), '.routecodex', 'config.json');
       }
 
+      // Ensure provided config path is a file (not a directory)
+      if (fs.existsSync(configPath)) {
+        const stats = fs.statSync(configPath);
+        if (stats.isDirectory()) {
+          spinner.fail(`Configuration path must be a file, received directory: ${configPath}`);
+          process.exit(1);
+        }
+      }
+
       // Check if config exists
       if (!fs.existsSync(configPath)) {
         spinner.warn(`Configuration file not found: ${configPath}`);

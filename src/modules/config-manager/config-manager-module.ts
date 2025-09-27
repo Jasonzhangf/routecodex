@@ -455,6 +455,11 @@ export class ConfigManagerModule extends BaseModule {
     }
 
     try {
+      const systemStats = await fs.stat(this.systemConfigPath);
+      if (!systemStats.isFile()) {
+        throw new Error(`System configuration path must be a file: ${this.systemConfigPath}`);
+      }
+
       const configContent = await fs.readFile(this.systemConfigPath, 'utf-8');
       const config = JSON.parse(configContent);
       const totalTime = Date.now() - startTime;
@@ -524,11 +529,16 @@ export class ConfigManagerModule extends BaseModule {
       const expandHome = (p: string) => (p.startsWith('~') ? p.replace('~', homedir()) : p);
       const configPath = expandHome(this.configPath);
 
-      // 检查文件是否存在
+      // Ensure file exists and is a regular file
+      let stats;
       try {
-        await fs.access(configPath);
+        stats = await fs.stat(configPath);
       } catch {
         throw new Error(`Configuration file not found: ${configPath}`);
+      }
+
+      if (!stats.isFile()) {
+        throw new Error(`Configuration path must be a file: ${configPath}`);
       }
 
       // 读取配置文件

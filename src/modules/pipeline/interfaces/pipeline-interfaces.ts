@@ -7,6 +7,12 @@
 
 import type { RCCBaseModule, ErrorHandlingCenter, DebugCenter } from '../types/external-types.js';
 import type { BaseProviderConfig, BaseTransformationRule } from '../types/base-types.js';
+import type { LogData } from '../../../types/common-types.js';
+import type {
+  DebugLogEntry,
+  TransformationLogEntry,
+  ProviderRequestLogEntry
+} from '../utils/debug-logger.js';
 
 /**
  * Route request interface for pipeline selection
@@ -363,27 +369,27 @@ export interface ModuleDependencies {
  * Pipeline debug logger interface
  */
 export interface PipelineDebugLogger {
-  logModule(module: string, action: string, data?: any): void;
-  logError(error: any, context?: any): void;
-  logDebug(message: string, data?: any): void;
-  logPipeline(pipelineId: string, action: string, data?: any): void;
-  logRequest(requestId: string, action: string, data?: any): void;
-  logResponse(requestId: string, action: string, data?: any): void;
-  logTransformation(requestId: string, action: string, data?: any, result?: any): void;
-  logProviderRequest(requestId: string, action: string, request?: any, response?: any): void;
+  logModule(module: string, action: string, data?: LogData): void;
+  logError(error: unknown, context?: LogData): void;
+  logDebug(message: string, data?: LogData): void;
+  logPipeline(pipelineId: string, action: string, data?: LogData): void;
+  logRequest(requestId: string, action: string, data?: LogData): void;
+  logResponse(requestId: string, action: string, data?: LogData): void;
+  logTransformation(requestId: string, action: string, data?: LogData, result?: LogData): void;
+  logProviderRequest(requestId: string, action: string, request?: LogData, response?: LogData): void;
   getRequestLogs(requestId: string): {
-    general: any[];
-    transformations: any[];
-    provider: any[];
+    general: DebugLogEntry[];
+    transformations: TransformationLogEntry[];
+    provider: ProviderRequestLogEntry[];
   };
   getPipelineLogs(pipelineId: string): {
-    general: any[];
-    transformations: any[];
-    provider: any[];
+    general: DebugLogEntry[];
+    transformations: TransformationLogEntry[];
+    provider: ProviderRequestLogEntry[];
   };
-  getRecentLogs(count?: number): any[];
-  getTransformationLogs(): any[];
-  getProviderLogs(): any[];
+  getRecentLogs(count?: number): DebugLogEntry[];
+  getTransformationLogs(): TransformationLogEntry[];
+  getProviderLogs(): ProviderRequestLogEntry[];
   getStatistics(): {
     totalLogs: number;
     logsByLevel: Record<string, number>;
@@ -393,8 +399,8 @@ export interface PipelineDebugLogger {
     providerRequestCount: number;
   };
   clearLogs(): void;
-  exportLogs(format?: 'json' | 'csv'): any;
-  log(level: any, pipelineId: string, category: string, message: string, data?: any): void;
+  exportLogs(format?: 'json' | 'csv'): unknown;
+  log(level: DebugLogEntry['level'], pipelineId: string, category: string, message: string, data?: LogData): void;
 }
 
 /**

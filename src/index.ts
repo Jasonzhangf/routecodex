@@ -30,7 +30,10 @@ function getDefaultModulesConfigPath(): string {
 
   for (const configPath of possiblePaths) {
     if (configPath && fsSync.existsSync(configPath)) {
-      return configPath;
+      const stats = fsSync.statSync(configPath);
+      if (stats.isFile()) {
+        return configPath;
+      }
     }
   }
 
@@ -49,6 +52,16 @@ class RouteCodexApp {
 
   constructor(modulesConfigPath?: string) {
     this.modulesConfigPath = modulesConfigPath || getDefaultModulesConfigPath();
+
+    if (!fsSync.existsSync(this.modulesConfigPath)) {
+      throw new Error(`Modules configuration file not found: ${this.modulesConfigPath}`);
+    }
+
+    const modulesStats = fsSync.statSync(this.modulesConfigPath);
+    if (!modulesStats.isFile()) {
+      throw new Error(`Modules configuration path must be a file: ${this.modulesConfigPath}`);
+    }
+
     this.configManager = new ConfigManagerModule();
     this.httpServer = null; // 将在初始化时设置
   }
@@ -214,6 +227,11 @@ class RouteCodexApp {
       if (process.env.RCC4_CONFIG_PATH) {
         const configPath = process.env.RCC4_CONFIG_PATH;
         if (fsSync.existsSync(configPath)) {
+          const stats = fsSync.statSync(configPath);
+          if (!stats.isFile()) {
+            throw new Error(`RCC4_CONFIG_PATH must point to a file: ${configPath}`);
+          }
+
           const raw = await fs.readFile(configPath, 'utf-8');
           const json = JSON.parse(raw);
           const port = json?.port;
@@ -228,6 +246,11 @@ class RouteCodexApp {
       if (process.env.ROUTECODEX_CONFIG) {
         const configPath = process.env.ROUTECODEX_CONFIG;
         if (fsSync.existsSync(configPath)) {
+          const stats = fsSync.statSync(configPath);
+          if (!stats.isFile()) {
+            throw new Error(`ROUTECODEX_CONFIG must point to a file: ${configPath}`);
+          }
+
           const raw = await fs.readFile(configPath, 'utf-8');
           const json = JSON.parse(raw);
           const port = json?.port;
@@ -241,6 +264,11 @@ class RouteCodexApp {
       // 最后检查默认配置文件
       const defaultConfigPath = path.join(homedir(), '.routecodex', 'config.json');
       if (fsSync.existsSync(defaultConfigPath)) {
+        const defaultStats = fsSync.statSync(defaultConfigPath);
+        if (!defaultStats.isFile()) {
+          throw new Error(`Default configuration path must be a file: ${defaultConfigPath}`);
+        }
+
         const raw = await fs.readFile(defaultConfigPath, 'utf-8');
         const json = JSON.parse(raw);
         const port = json?.port;

@@ -221,7 +221,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
         } : undefined
       };
 
-      this.debugLogger.logResponse(requestId, 'pipeline-success', response);
+      this.debugLogger.logResponse(requestId, 'pipeline-success', { response });
       this._status.state = 'ready';
 
       return response;

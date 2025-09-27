@@ -6,6 +6,7 @@
  */
 
 import type { DebugCenter } from '../types/external-types.js';
+import type { LogData } from '../../../types/common-types.js';
 import { DebugEventBus } from 'rcc-debugcenter';
 
 /**
@@ -120,18 +121,14 @@ export class PipelineDebugLogger {
   /**
    * Log module-specific information
    */
-  logModule(module: string, action: string, data?: any): void {
+  logModule(module: string, action: string, data?: LogData): void {
     const entry: DebugLogEntry = {
       level: 'info',
       timestamp: Date.now(),
       pipelineId: this.extractPipelineId(module),
       category: 'module',
       message: `${action}: ${module}`,
-      data: {
-        moduleId: module,
-        action,
-        ...data
-      }
+      data: this.mergeLogData({ moduleId: module, action }, data)
     };
 
     this.addLogEntry(entry);
@@ -172,18 +169,14 @@ export class PipelineDebugLogger {
   /**
    * Log request processing information
    */
-  logRequest(requestId: string, action: string, data?: any): void {
+  logRequest(requestId: string, action: string, data?: LogData): void {
     const entry: DebugLogEntry = {
       level: 'info',
       timestamp: Date.now(),
       pipelineId: this.extractPipelineIdFromRequest(data),
       category: 'request',
       message: `Request ${action}`,
-      data: {
-        requestId,
-        action,
-        ...data
-      },
+      data: this.mergeLogData({ requestId, action }, data),
       requestId
     };
 
@@ -201,18 +194,14 @@ export class PipelineDebugLogger {
   /**
    * Log response processing information
    */
-  logResponse(requestId: string, action: string, data?: any): void {
+  logResponse(requestId: string, action: string, data?: LogData): void {
     const entry: DebugLogEntry = {
       level: 'info',
       timestamp: Date.now(),
       pipelineId: this.extractPipelineIdFromResponse(data),
       category: 'response',
       message: `Response ${action}`,
-      data: {
-        requestId,
-        action,
-        ...data
-      },
+      data: this.mergeLogData({ requestId, action }, data),
       requestId
     };
 
@@ -286,18 +275,52 @@ export class PipelineDebugLogger {
     request?: any,
     response?: any
   ): void {
-    const data = { ...request, response };
-    const pipelineId = request?.pipelineId || request?.providerId || 'unknown';
+    const sanitizedRequest = this.sanitizeData(request);
+    const sanitizedResponse = this.sanitizeData(response);
+
+    const pipelineIdCandidate =
+      sanitizedRequest && typeof sanitizedRequest === 'object' && !Array.isArray(sanitizedRequest)
+        ? (sanitizedRequest as Record<string, unknown>).pipelineId ||
+          (sanitizedRequest as Record<string, unknown>).providerId
+        : undefined;
+    const pipelineId =
+      typeof pipelineIdCandidate === 'string' && pipelineIdCandidate.length > 0
+        ? pipelineIdCandidate
+        : 'unknown';
+
+    const providerIdCandidate =
+      sanitizedRequest && typeof sanitizedRequest === 'object' && !Array.isArray(sanitizedRequest)
+        ? (sanitizedRequest as Record<string, unknown>).providerId
+        : undefined;
+    const providerTypeCandidate =
+      sanitizedRequest && typeof sanitizedRequest === 'object' && !Array.isArray(sanitizedRequest)
+        ? (sanitizedRequest as Record<string, unknown>).providerType
+        : undefined;
+
+    const providerId =
+      typeof providerIdCandidate === 'string' && providerIdCandidate.length > 0
+        ? providerIdCandidate
+        : 'unknown';
+    const providerType =
+      typeof providerTypeCandidate === 'string' && providerTypeCandidate.length > 0
+        ? providerTypeCandidate
+        : 'unknown';
+
+    const providerData: Record<string, unknown> = {
+      request: sanitizedRequest,
+      response: sanitizedResponse
+    };
+
     const entry: ProviderRequestLogEntry = {
       timestamp: Date.now(),
       pipelineId,
       requestId,
       action,
       provider: {
-        id: request?.providerId || 'unknown',
-        type: request?.providerType || 'unknown'
+        id: providerId,
+        type: providerType
       },
-      data: this.sanitizeData(data),
+      data: providerData,
       metrics: response?.metrics || request?.metrics
     };
 
@@ -309,7 +332,7 @@ export class PipelineDebugLogger {
     }
 
     // Log as debug entry
-    this.log('debug', pipelineId, 'provider', action, data);
+    this.log('debug', pipelineId, 'provider', action, providerData);
 
     // Publish detailed IO to DebugEventBus (if available)
     if (this.eventBus) {
@@ -321,8 +344,8 @@ export class PipelineDebugLogger {
         type: action === 'request-error' ? 'error' : 'start',
         position: 'middle',
         data: {
-          input: this.sanitizeData(request),
-          output: this.sanitizeData(response)
+          input: sanitizedRequest,
+          output: sanitizedResponse
         }
       });
     }
@@ -607,21 +630,51 @@ export class PipelineDebugLogger {
    * Extract pipeline ID from request data
    */
   private extractPipelineIdFromRequest(data: any): string {
-    return data.pipelineId || data.route?.pipelineId || 'unknown';
+    if (!data || typeof data !== 'object') {
+      return 'unknown';
+    }
+
+    const record = data as Record<string, any>;
+    return record.pipelineId || record.route?.pipelineId || 'unknown';
   }
 
   /**
    * Extract pipeline ID from response data
    */
   private extractPipelineIdFromResponse(data: any): string {
-    return data.pipelineId || data.metadata?.pipelineId || 'unknown';
+    if (!data || typeof data !== 'object') {
+      return 'unknown';
+    }
+
+    const record = data as Record<string, any>;
+    return record.pipelineId || record.metadata?.pipelineId || 'unknown';
   }
 
   /**
    * Extract pipeline ID from generic data
    */
   private extractPipelineIdFromData(data: any): string {
-    return data.pipelineId || data.metadata?.pipelineId || 'unknown';
+    if (!data || typeof data !== 'object') {
+      return 'unknown';
+    }
+
+    const record = data as Record<string, any>;
+    return record.pipelineId || record.metadata?.pipelineId || 'unknown';
+  }
+
+  /**
+   * Merge base log data with any additional payload in a safe way
+   */
+  private mergeLogData(base: Record<string, unknown>, extra?: LogData): LogData {
+    if (extra === undefined) {
+      return base;
+    }
+
+    if (typeof extra === 'object' && extra !== null && !Array.isArray(extra)) {
+      return { ...base, ...(extra as Record<string, unknown>) };
+    }
+
+    return { ...base, value: extra };
   }
 
   /**

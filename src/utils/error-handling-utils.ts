@@ -7,6 +7,13 @@ import { ErrorHandlerRegistry } from './error-handler-registry.js';
 import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
 import { DebugEventBus } from 'rcc-debugcenter';
 
+export function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
 /**
  * Error handling options
  */

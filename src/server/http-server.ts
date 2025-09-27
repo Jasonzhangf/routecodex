@@ -793,8 +793,10 @@ export class HttpServer extends BaseModule implements IHttpServer {
     // Metrics endpoint
     this.app.get('/metrics', async (req, res) => this.handleMetrics(req, res));
 
-    // OpenAI API endpoints (mounted at /v1/openai)
-    this.app.use('/v1/openai', this.openaiRouter.getRouter());
+    // OpenAI API endpoints
+    const openaiRouter = this.openaiRouter.getRouter();
+    this.app.use('/v1/openai', openaiRouter);
+    this.app.use('/v1', openaiRouter);
 
     // Anthropic API endpoints (placeholder for future implementation)
     this.app.use('/v1/anthropic', (req: Request, res: Response) => {

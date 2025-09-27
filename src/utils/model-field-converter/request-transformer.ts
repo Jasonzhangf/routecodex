@@ -252,9 +252,7 @@ export class RequestTransformer {
       route: context.routingInfo.route,
       providerId: context.routingInfo.providerId,
       modelId: context.routingInfo.modelId,
-      keyId: context.routingInfo.keyId,
-      provider: context.pipelineConfig.provider,
-      modelConfig: context.pipelineConfig.model
+      keyId: context.routingInfo.keyId
     };
 
     // 注入转换信息
