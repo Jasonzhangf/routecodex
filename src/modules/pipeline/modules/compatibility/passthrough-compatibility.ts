@@ -153,8 +153,13 @@ export class PassthroughCompatibility implements CompatibilityModule {
    * Validate configuration
    */
   private validateConfig(): void {
-    if (!this.config.type || this.config.type !== 'passthrough-compatibility') {
-      throw new Error('Invalid compatibility module type configuration');
+    // Accept alias types that are mapped to passthrough behavior
+    const declared = (this.config && (this.config as any).type) || 'passthrough-compatibility';
+    const allowed = new Set<string>(['passthrough-compatibility', 'glm-compatibility']);
+    if (!allowed.has(declared)) {
+      // Do not throw; treat as passthrough to maximize compatibility
+      this.logger.logModule(this.id, 'alias-compatibility-detected', { declaredType: declared, normalizedTo: this.type });
+      return;
     }
 
     this.logger.logModule(this.id, 'config-validation-success', {

@@ -19,6 +19,39 @@ export class UserConfigParser {
   private authMappings: Record<string, string> = {};
   private oauthAuthConfigs: Record<string, any> = {};
   private providerConfigs: Record<string, any> = {};
+  
+  /**
+   * Merge provider-level thinking config with a model-level override.
+   * Accepts either full objects or minimal shapes like { enabled: boolean }.
+   */
+  private mergeThinkingConfig(
+    providerThinking: any,
+    modelOverride: any
+  ): Record<string, any> | null {
+    const norm = (v: any): Record<string, any> | null => {
+      if (!v || typeof v !== 'object') { return null; }
+      try { return JSON.parse(JSON.stringify(v)); } catch { return { ...v }; }
+    };
+
+    const base = norm(providerThinking) || {};
+    const over = norm(modelOverride) || null;
+
+    if (!over && Object.keys(base).length === 0) {
+      return null;
+    }
+
+    const result: Record<string, any> = { ...base };
+    if (over) {
+      if (typeof over.enabled === 'boolean') { result.enabled = over.enabled; }
+      if (over.payload && typeof over.payload === 'object') { result.payload = over.payload; }
+      if (over.models && typeof over.models === 'object') { result.models = over.models; }
+    }
+    // Provide minimal default payload if enabled and no payload given
+    if (result.enabled && !result.payload) {
+      result.payload = { type: 'enabled' };
+    }
+    return result;
+  }
 
   /**
    * Expand simple env placeholders like ${VAR} or $VAR.
@@ -236,18 +269,35 @@ export class UserConfigParser {
           // compatibility selection: user config > model-level > provider-level > auto-infer
           const modelCompat = (modelConfig as any)?.compatibility;
           const providerCompat = (providerConfig as any)?.compatibility;
-          let compatibility = undefined;
+          let compatibility: { type: string; config: Record<string, any> } | undefined = undefined;
 
           // First check user config compatibility field (simple string format)
           const userCompat = (userConfig as any)?.compatibility;
           if (userCompat && typeof userCompat === 'string') {
             compatibility = this.parseCompatibilityString(userCompat);
           } else if (modelCompat?.type) {
-            // Then check model-level compatibility
-            compatibility = { type: modelCompat.type, config: modelCompat.config || {} };
+            // Then check model-level compatibility (base = model-level)
+            compatibility = { type: modelCompat.type, config: { ...(modelCompat.config || {}) } };
           } else if (providerCompat?.type) {
             // Then check provider-level compatibility
-            compatibility = { type: providerCompat.type, config: providerCompat.config || {} };
+            compatibility = { type: providerCompat.type, config: { ...(providerCompat.config || {}) } };
+          }
+
+          // If using GLM compatibility, merge model-level thinking override
+          if ((compatibility?.type || '').toLowerCase() === 'glm-compatibility') {
+            const providerThinking = (providerCompat?.type === 'glm-compatibility')
+              ? (providerCompat.config || {}).thinking
+              : undefined;
+            const modelCompatThinking = (modelCompat?.type === 'glm-compatibility')
+              ? (modelCompat.config || {}).thinking
+              : undefined;
+            const legacyModelThinking = (modelConfig as any)?.thinking; // allow models.<id>.thinking {...}
+
+            const mergedThinking = this.mergeThinkingConfig(providerThinking, modelCompatThinking || legacyModelThinking);
+            if (mergedThinking) {
+              compatibility = compatibility || { type: 'glm-compatibility', config: {} };
+              compatibility.config = { ...(compatibility.config || {}), thinking: mergedThinking };
+            }
           }
 
           const modelLlmSwitch = (modelConfig as any)?.llmSwitch;

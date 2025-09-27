@@ -794,8 +794,8 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('streaming-control', this.createStreamingControlModule);
     this.registry.registerModule('field-mapping', this.createFieldMappingModule);
     this.registry.registerModule('qwen-compatibility', this.createQwenCompatibilityModule);
-    // Treat glm-compatibility as passthrough unless a specific module is provided
-    this.registry.registerModule('glm-compatibility', this.createPassthroughCompatibilityModule);
+    // GLM compatibility module
+    this.registry.registerModule('glm-compatibility', this.createGLMCompatibilityModule);
     this.registry.registerModule('qwen-provider', this.createQwenProviderModule);
     this.registry.registerModule('generic-http', this.createGenericHTTPModule);
     this.registry.registerModule('lmstudio-http', this.createLMStudioHTTPModule);
@@ -1009,6 +1009,11 @@ export class PipelineManager implements RCCBaseModule {
   private createFieldMappingModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { FieldMappingCompatibility } = await import('../modules/compatibility/field-mapping.js');
     return new FieldMappingCompatibility(config, dependencies);
+  };
+
+  private createGLMCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { GLMCompatibility } = await import('../modules/compatibility/glm-compatibility.js');
+    return new GLMCompatibility(config, dependencies);
   };
 
   private createQwenCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
