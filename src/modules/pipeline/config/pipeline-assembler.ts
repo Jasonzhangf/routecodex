@@ -107,6 +107,9 @@ export class PipelineAssembler {
             : { type: 'passthrough-compatibility', config: {} };
 
           const providerConfigObj: Record<string, any> = {};
+          // Generic providers expect a vendor type hint for downstream compatibility modules
+          // Use providerId as the vendor type (e.g., 'glm', 'qwen', 'iflow', 'modelscope')
+          providerConfigObj.type = providerId;
           if (providerBaseUrl) {providerConfigObj.baseUrl = providerBaseUrl;}
           if (actualModelId) {providerConfigObj.model = actualModelId;}
           if (typeof maxTokens === 'number') {providerConfigObj.maxTokens = maxTokens;}

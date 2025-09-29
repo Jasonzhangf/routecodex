@@ -695,6 +695,24 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
       this.debugLogger.logProviderRequest(this.pipelineId, 'request-start', request, response);
       return response;
     } catch (error) {
+      // Enrich error with provider context for standard error center handling
+      try {
+        const provCfg: any = (this.config as any)?.modules?.provider?.config || {};
+        const details = (error as any).details || {};
+        const enriched = {
+          provider: {
+            moduleType: this.modules.provider?.type || 'unknown',
+            pipelineId: this.pipelineId,
+            vendor: provCfg?.type,
+            baseUrl: provCfg?.baseUrl || provCfg?.baseURL,
+            model: (request as any)?.model || provCfg?.model,
+          },
+        };
+        (error as any).details = { ...details, ...enriched };
+      } catch {
+        // best-effort enrichment; ignore failures
+      }
+
       await this.errorIntegration.handleModuleError(error, {
         stage: 'provider',
         pipelineId: this.pipelineId,

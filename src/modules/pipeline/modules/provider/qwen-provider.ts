@@ -780,6 +780,9 @@ export class QwenProvider implements ProviderModule {
     }
 
     try {
+      // Ensure token is valid before sending (refresh or re-auth if needed)
+      await this.ensureValidToken();
+      
       const url = `${endpoint}/chat/completions`;
       const authHeader = this.oauth.getAuthorizationHeader();
       this.logger.logProviderRequest(this.id, 'request-start', {
@@ -804,6 +807,101 @@ export class QwenProvider implements ProviderModule {
       });
 
       const processingTime = Date.now() - startTime;
+
+      // Auto-refresh on 401 (token invalid/expired), then retry; if still 401, re-auth then final retry
+      if (response.status === 401 && this.authContext?.type === 'oauth') {
+        try {
+          if (!this.tokenStorage) {
+            this.tokenStorage = await this.oauth.loadToken();
+          }
+          if (this.tokenStorage?.refresh_token) {
+            const newTokenData = await this.oauth.refreshTokensWithRetry(this.tokenStorage.refresh_token);
+            this.oauth.updateTokenStorage(this.tokenStorage, newTokenData);
+            await this.oauth.saveToken();
+            // Update auth context
+            if (this.authContext) {
+              this.authContext.token = this.tokenStorage.access_token;
+            }
+            const retryAuth = this.oauth.getAuthorizationHeader();
+            const retry = await fetch(url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': retryAuth,
+                'User-Agent': 'google-api-nodejs-client/9.15.1',
+                'X-Goog-Api-Client': 'gl-node/22.17.0',
+                'Client-Metadata': this.getClientMetadataString(),
+                'Accept': 'application/json'
+              },
+              body: JSON.stringify(payload)
+            });
+            if (retry.ok) {
+              const data = await retry.json();
+              const totalTime = Date.now() - startTime;
+              if (this.isDebugEnhanced) {
+                this.recordProviderMetric('http_request_complete', { httpRequestId, success: true, totalTime, status: retry.status });
+              }
+              return {
+                data,
+                status: retry.status,
+                headers: Object.fromEntries(retry.headers.entries()),
+                metadata: {
+                  requestId: `req-${Date.now()}`,
+                  processingTime,
+                  model: (request as { model?: string }).model || 'unknown'
+                }
+              };
+            }
+            // If retry still unauthorized, attempt full OAuth flow and final retry
+            if (retry.status === 401) {
+              try {
+                const storage = await this.oauth.completeOAuthFlow(true);
+                this.tokenStorage = storage || await this.oauth.loadToken();
+                if (!this.tokenStorage || !this.tokenStorage.access_token) {
+                  throw new Error('OAuth flow did not return a valid token');
+                }
+                if (this.authContext) {
+                  this.authContext.token = this.tokenStorage.access_token;
+                }
+                const reauthHeader = this.oauth.getAuthorizationHeader();
+                const retry2 = await fetch(url, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': reauthHeader,
+                    'User-Agent': 'google-api-nodejs-client/9.15.1',
+                    'X-Goog-Api-Client': 'gl-node/22.17.0',
+                    'Client-Metadata': this.getClientMetadataString(),
+                    'Accept': 'application/json'
+                  },
+                  body: JSON.stringify(payload)
+                });
+                if (retry2.ok) {
+                  const data2 = await retry2.json();
+                  const totalTime2 = Date.now() - startTime;
+                  if (this.isDebugEnhanced) {
+                    this.recordProviderMetric('http_request_complete', { httpRequestId, success: true, totalTime: totalTime2, status: retry2.status });
+                  }
+                  return {
+                    data: data2,
+                    status: retry2.status,
+                    headers: Object.fromEntries(retry2.headers.entries()),
+                    metadata: {
+                      requestId: `req-${Date.now()}`,
+                      processingTime,
+                      model: (request as { model?: string }).model || 'unknown'
+                    }
+                  };
+                }
+              } catch (reauthErr) {
+                this.logger.logModule(this.id, 'oauth-reauth-failed', { error: reauthErr instanceof Error ? reauthErr.message : String(reauthErr) });
+              }
+            }
+          }
+        } catch (refreshErr) {
+          this.logger.logModule(this.id, 'token-refresh-failed', { error: refreshErr instanceof Error ? refreshErr.message : String(refreshErr) });
+        }
+      }
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -833,10 +931,22 @@ export class QwenProvider implements ProviderModule {
           });
         }
 
-        throw this.createProviderError({
+        const err = this.createProviderError({
           message: `HTTP ${response.status}: ${errorText}`,
           status: response.status
         }, 'server');
+        (err as any).details = {
+          upstream: this.tryParseJson(errorText),
+          provider: {
+            moduleType: this.type,
+            moduleId: this.id,
+            vendor: 'qwen',
+            baseUrl: endpoint,
+            oauth: true,
+            model: (request as { model?: string }).model || undefined,
+          }
+        };
+        throw err;
       }
 
       const data = await response.json();
@@ -900,7 +1010,60 @@ export class QwenProvider implements ProviderModule {
         });
       }
 
-      throw this.createProviderError(error, 'network');
+      const err = this.createProviderError(error, 'network');
+      (err as any).details = {
+        upstream: undefined,
+        provider: {
+          moduleType: this.type,
+          moduleId: this.id,
+          vendor: 'qwen',
+          baseUrl: this.getAPIEndpoint(),
+          oauth: true,
+          model: (request as { model?: string }).model || undefined,
+        }
+      };
+      throw err;
+    }
+  }
+
+  /**
+   * Safely parse JSON error bodies; return raw text if not JSON.
+   */
+  private tryParseJson(text: string): any {
+    if (!text || typeof text !== 'string') { return text; }
+    try { return JSON.parse(text); } catch { return { message: text }; }
+  }
+
+  /** Ensure OAuth token is valid; refresh or re-auth if expired */
+  private async ensureValidToken(): Promise<void> {
+    if (this.authContext?.type !== 'oauth') { return; }
+    try {
+      if (!this.tokenStorage) {
+        this.tokenStorage = await this.oauth.loadToken();
+      }
+      const needsRefresh = !this.tokenStorage || this.tokenStorage.isExpired();
+      if (!needsRefresh) { return; }
+
+      if (this.tokenStorage?.refresh_token) {
+        const updated = await this.oauth.refreshTokensWithRetry(this.tokenStorage.refresh_token);
+        this.oauth.updateTokenStorage(this.tokenStorage, updated);
+        await this.oauth.saveToken();
+      } else {
+        const storage = await this.oauth.completeOAuthFlow(true);
+        this.tokenStorage = storage || await this.oauth.loadToken();
+        if (!this.tokenStorage || !this.tokenStorage.access_token) {
+          throw new Error('OAuth flow did not return a valid token');
+        }
+      }
+      if (this.authContext) {
+        this.authContext.token = this.tokenStorage?.access_token || '';
+        if (this.authContext.metadata) {
+          this.authContext.metadata.hasToken = !!this.tokenStorage?.access_token;
+          this.authContext.metadata.lastUpdated = Date.now();
+        }
+      }
+    } catch (e) {
+      this.logger.logModule(this.id, 'ensure-token-failed', { error: e instanceof Error ? e.message : String(e) });
     }
   }
 

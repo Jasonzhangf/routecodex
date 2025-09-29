@@ -37,7 +37,11 @@ export class ConfigMerger {
 
         // 用户配置完全覆盖
         routeTargets: parsedUserConfig.routeTargets,
-        pipelineConfigs: parsedUserConfig.pipelineConfigs,
+        // 统一 llmSwitch 输出命名（含默认值与历史别名收敛）
+        pipelineConfigs: this.normalizePipelineLlmSwitch(
+          parsedUserConfig.pipelineConfigs,
+          String(baseConfig.inputProtocol || 'openai').toLowerCase()
+        ),
         authMappings: parsedUserConfig.authMappings || {},
 
         // 保留其他系统配置中不在用户配置中的设置
@@ -174,6 +178,38 @@ export class ConfigMerger {
 
     // 标量：用户配置覆盖
     return source;
+  }
+
+  /**
+   * 统一 merged-config 中各 pipeline 的 llmSwitch 输出：
+   * - 默认：当缺省时按 inputProtocol 设为 llmswitch-openai-openai / llmswitch-anthropic-openai
+   * - 别名：将 openai-normalizer、llm-switch-openai-openai、llm-switch-anthropic-openai 归一为 llmswitch-*
+   * 仅命名统一，不改变功能。
+   */
+  private normalizePipelineLlmSwitch(
+    pipelineConfigs: Record<string, any>,
+    inputProtocol: string
+  ): Record<string, any> {
+    const normalized: Record<string, any> = {};
+    const normType = (t?: string): string | undefined => {
+      const s = String(t || '').toLowerCase();
+      if (s === 'openai-normalizer' || s === 'llm-switch-openai-openai') { return 'llmswitch-openai-openai'; }
+      if (s === 'anthropic-openai-converter' || s === 'llm-switch-anthropic-openai') { return 'llmswitch-anthropic-openai'; }
+      return t || undefined;
+    };
+
+    const defaultType = inputProtocol === 'anthropic'
+      ? 'llmswitch-anthropic-openai'
+      : 'llmswitch-openai-openai';
+
+    for (const [key, pc] of Object.entries(pipelineConfigs || {})) {
+      const copy = { ...(pc as any) };
+      const current = (copy.llmSwitch || {}) as { type?: string; config?: Record<string, any> };
+      const unifiedType = normType(current.type) || defaultType;
+      copy.llmSwitch = { type: unifiedType, config: current.config || {} };
+      normalized[key] = copy;
+    }
+    return normalized;
   }
 
   /**

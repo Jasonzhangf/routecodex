@@ -86,12 +86,22 @@ export class PipelineModuleRegistryImpl implements PipelineModuleRegistry {
     const entry = this.factories.get(config.type);
 
     if (!entry) {
+      // Suggest migration for deprecated/old type names
+      const suggestions: Record<string, string> = {
+        'openai-normalizer': 'llmswitch-openai-openai',
+        'llm-switch-openai-openai': 'llmswitch-openai-openai',
+        'llm-switch-anthropic-openai': 'llmswitch-anthropic-openai',
+      };
+      const hint = suggestions[config.type];
       if (this.isEnhanced) {
         this.publishRegistryEvent('creation-failed', {
           type: config.type,
           error: 'No module factory registered',
           availableTypes: this.getAvailableTypes()
         });
+      }
+      if (hint) {
+        throw new Error(`No module factory registered for type: ${config.type}. Did you mean '${hint}'?`);
       }
       throw new Error(`No module factory registered for type: ${config.type}`);
     }

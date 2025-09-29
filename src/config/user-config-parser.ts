@@ -255,17 +255,12 @@ export class UserConfigParser {
       for (const [modelId, modelConfig] of Object.entries(providerConfig.models)) {
         // 为每个key别名创建配置（使用顺序别名：key1, key2...）
         const keyAliases = this.getProviderKeyAliases(providerId);
+
         for (const keyAlias of keyAliases) {
           const configKey = `${providerId}.${modelId}.${keyAlias}`; // 使用key别名作为配置键
           const realKey = this.resolveKeyByAlias(providerId, keyAlias); // 解析真实key
           const resolvedKey = this.resolveActualKey(providerId, realKey);
           const hasAuthMapping = this.hasAuthMapping(providerId, realKey);
-          const apiKeyValue = this.resolveApiKeyValue(
-            providerId,
-            realKey,
-            resolvedKey,
-            hasAuthMapping
-          );
           // compatibility selection: user config > model-level > provider-level > auto-infer
           const modelCompat = (modelConfig as any)?.compatibility;
           const providerCompat = (providerConfig as any)?.compatibility;
@@ -300,13 +295,27 @@ export class UserConfigParser {
             }
           }
 
+          const normalizeLlmSwitchType = (t?: string) => {
+            const s = (t || '').toLowerCase();
+            if (s === 'openai-normalizer' || s === 'llm-switch-openai-openai') {return 'llmswitch-openai-openai';}
+            if (s === 'anthropic-openai-converter' || s === 'llm-switch-anthropic-openai') {return 'llmswitch-anthropic-openai';}
+            return t || undefined;
+          };
+
           const modelLlmSwitch = (modelConfig as any)?.llmSwitch;
           const providerLlmSwitch = (providerConfig as any)?.llmSwitch;
-          const llmSwitch = modelLlmSwitch?.type
-            ? { type: modelLlmSwitch.type, config: modelLlmSwitch.config || {} }
+          let llmSwitch = modelLlmSwitch?.type
+            ? { type: normalizeLlmSwitchType(modelLlmSwitch.type)!, config: modelLlmSwitch.config || {} }
             : providerLlmSwitch?.type
-              ? { type: providerLlmSwitch.type, config: providerLlmSwitch.config || {} }
+              ? { type: normalizeLlmSwitchType(providerLlmSwitch.type)!, config: providerLlmSwitch.config || {} }
               : undefined;
+
+          // Default LLMSwitch if not specified: unify to llmswitch-* names in merged-config
+          if (!llmSwitch) {
+            const inputProto = String(virtualRouterConfig.inputProtocol || 'openai').toLowerCase();
+            const defaultType = inputProto === 'anthropic' ? 'llmswitch-anthropic-openai' : 'llmswitch-openai-openai';
+            llmSwitch = { type: defaultType, config: {} };
+          }
 
           const modelWorkflow = (modelConfig as any)?.workflow;
           const providerWorkflow = (providerConfig as any)?.workflow;
@@ -327,16 +336,21 @@ export class UserConfigParser {
           // 不再在解析层推断compatibility/llmSwitch/workflow默认值，交由装配阶段按规则决定
           // Normalize provider type to registered module types
           const rawProviderType = (providerConfig.type || '').toLowerCase();
+          // Provider type normalization with Qwen special-case:
+          // If user declares `qwen` but provides API key and no OAuth, use OpenAI-compatible provider.
+          const hasOAuth = Boolean((providerConfig as any)?.oauth || (providerConfig as any)?.auth?.oauth);
           const normalizedProviderType =
-            rawProviderType === 'lmstudio'
-              ? 'lmstudio-http'
-              : rawProviderType === 'qwen'
-                ? 'qwen-provider'
-                : rawProviderType === 'openai'
-                  ? 'openai-provider'
-                  : rawProviderType === 'iflow' || rawProviderType === 'iflow-http'
-                    ? 'generic-http'
-                    : providerConfig.type;
+            providerId === 'glm'
+              ? 'glm-http-provider'
+              : rawProviderType === 'lmstudio'
+                ? 'lmstudio-http'
+                : rawProviderType === 'qwen'
+                  ? (hasOAuth ? 'qwen-provider' : 'openai-provider')
+                  : rawProviderType === 'openai'
+                    ? 'openai-provider'
+                    : rawProviderType === 'iflow' || rawProviderType === 'iflow-http'
+                      ? (hasOAuth ? 'iflow-provider' : 'generic-http')
+                      : providerConfig.type;
 
           // Normalize baseURL for LM Studio: http(s) -> ws(s)
           let baseURL = providerConfig.baseURL;
@@ -346,6 +360,25 @@ export class UserConfigParser {
               baseURL = envBase.trim();
             }
           }
+
+          // 支持通过配置显式注入 auth.apiKey（优先于环境变量占位与别名解析，仅对 openai-provider 生效）
+          const explicitAuth = (providerConfig as any)?.auth;
+          const acceptsApiKey = ['openai-provider', 'lmstudio-http', 'glm-http-provider'].includes(String(normalizedProviderType));
+          const useExplicitApiKey = (
+            acceptsApiKey &&
+            explicitAuth && typeof explicitAuth === 'object' &&
+            typeof (explicitAuth as any).apiKey === 'string' &&
+            String((explicitAuth as any).apiKey).trim().length > 0
+          );
+
+          const apiKeyValue = useExplicitApiKey
+            ? String(explicitAuth.apiKey).trim()
+            : this.resolveApiKeyValue(
+                providerId,
+                realKey,
+                resolvedKey,
+                hasAuthMapping
+              );
 
           // Build provider auth block per provider type (independent, configurable)
           let providerAuth: any = undefined;
@@ -374,14 +407,37 @@ export class UserConfigParser {
               };
             }
           }
+          // iFlow provider: prefers OAuth; read from provider-level oauth if present
+          if (normalizedProviderType === 'iflow-provider') {
+            const oauthCfg = (providerConfig as any).oauth || (providerConfig as any).auth?.oauth;
+            if (oauthCfg && typeof oauthCfg === 'object') {
+              const oc = (oauthCfg as any).default || oauthCfg;
+              providerAuth = {
+                type: 'oauth',
+                oauth: {
+                  clientId: oc.clientId,
+                  deviceCodeUrl: oc.deviceCodeUrl,
+                  tokenUrl: oc.tokenUrl,
+                  scopes: oc.scopes,
+                  tokenFile: oc.tokenFile,
+                },
+              };
+            }
+          }
           // LM Studio HTTP provider expects http(s) baseURL to REST API (e.g., http://<host>:1234)
 
           // Optional auth for providers that need API key
-          const auth =
+          let auth =
             normalizedProviderType === 'lmstudio-http' ||
-            normalizedProviderType === 'openai-provider'
+            normalizedProviderType === 'openai-provider' ||
+            normalizedProviderType === 'glm-http-provider'
               ? { type: 'apikey', ...(apiKeyValue ? { apiKey: apiKeyValue } : {}) }
               : undefined;
+
+          // If explicit auth.apiKey is provided in config, prefer it
+          if (useExplicitApiKey) {
+            auth = { type: 'apikey', apiKey: String(explicitAuth.apiKey).trim() };
+          }
 
           pipelineConfigs[configKey] = {
             provider: {
@@ -396,8 +452,9 @@ export class UserConfigParser {
             },
             keyConfig: {
               keyId: keyAlias, // 使用key别名
-              actualKey: resolvedKey,
-              keyType: hasAuthMapping ? 'authFile' : 'apiKey',
+              // 若使用显式配置的 auth.apiKey，则避免用 keyConfig 覆盖 provider.auth
+              actualKey: useExplicitApiKey ? '' : resolvedKey,
+              keyType: useExplicitApiKey ? 'apiKey' : (hasAuthMapping ? 'authFile' : 'apiKey'),
             },
             protocols: {
               input: virtualRouterConfig.inputProtocol as 'openai' | 'anthropic',

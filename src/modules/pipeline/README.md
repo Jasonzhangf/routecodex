@@ -48,7 +48,7 @@ src/modules/pipeline/
 │   └── provider-module.ts           # Provider接口
 ├── modules/                          # 具体模块实现
 │   ├── llm-switch/                   # LLMSwitch实现
-│   │   └── openai-normalizer.ts      # OpenAI→OpenAI 规范化实现
+│   │   └── llmswitch-openai-openai.ts      # OpenAI→OpenAI 规范化实现
 │   ├── workflow/                     # Workflow实现
 │   │   └── streaming-control.ts      # 流式控制实现
 │   ├── compatibility/                # Compatibility实现

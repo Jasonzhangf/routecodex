@@ -52,3 +52,6 @@ debug/
 # Cache
 .cache/
 .tmp/
+# Generated files
+debug-logs/
+config/merged-config.*.json

@@ -7,7 +7,7 @@
 ```
 modules/
 ├── llm-switch/          # LLMSwitch实现
-│   └── openai-normalizer.ts
+│   └── llmswitch-openai-openai.ts
 ├── workflow/            # Workflow实现
 │   └── streaming-control.ts
 ├── compatibility/       # Compatibility实现
@@ -22,7 +22,7 @@ modules/
 ## 模块说明
 
 ### LLMSwitch实现
-- **openai-normalizer.ts**: OpenAI协议规范化实现，保持OpenAI→OpenAI格式
+- **llmswitch-openai-openai.ts**: OpenAI协议规范化实现，保持OpenAI→OpenAI格式
 
 ### Workflow实现
 - **streaming-control.ts**: 流式控制实现，处理流式/非流式转换

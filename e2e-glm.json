@@ -8,7 +8,7 @@
     "providers": {
       "glm": {
         "type": "openai",
-        "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
+        "baseURL": "https://open.bigmodel.cn/api/paas/v4",
         "apiKey": ["key1"],
         "models": {
           "glm-4.5": { "maxContext": 128000, "maxTokens": 8192 }

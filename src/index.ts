@@ -227,6 +227,22 @@ class RouteCodexApp {
         }
       }
 
+      // 使用共享解析逻辑解析用户配置路径（支持 ~/.routecodex/config 目录）
+      try {
+        const sharedPath = resolveRouteCodexConfigPath();
+        if (sharedPath && fsSync.existsSync(sharedPath)) {
+          const raw = await fs.readFile(sharedPath, 'utf-8');
+          const json = JSON.parse(raw);
+          const port = json?.port;
+          if (typeof port === 'number' && port > 0) {
+            console.log(`🔧 Using port ${port} from resolved config: ${sharedPath}`);
+            return port;
+          }
+        }
+      } catch (e) {
+        // ignore and fall back
+      }
+
       // 最后检查默认配置文件
       const defaultConfigPath = path.join(homedir(), '.routecodex', 'config.json');
       if (fsSync.existsSync(defaultConfigPath)) {

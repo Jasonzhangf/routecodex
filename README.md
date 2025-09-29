@@ -183,6 +183,116 @@ The system follows this priority order when determining compatibility:
 - PKCE (Proof Key for Code Exchange) security
 - Persistent token storage and recovery
 
+## iFlow OAuth (CLI‑Aligned)
+
+This project’s iFlow provider implements the same end‑to‑end authorization behavior as the official iFlow CLI:
+
+- Flow priority
+  - Authorization Code + local callback (opens your default browser)
+  - Fallback: Device Code (prints `verification_uri` and `user_code`; also opens browser when possible)
+
+- Endpoints (aligned with iFlow CLI)
+  - Authorization: `https://iflow.cn/oauth`
+  - Token exchange: `https://iflow.cn/oauth/token`
+  - Device code: `https://iflow.cn/oauth/device/code` (auto‑fallback with `/device_code` variant)
+  - LLM API (OpenAI‑compatible): `https://apis.iflow.cn/v1`
+
+- Token storage (JSON)
+  - File: `~/.iflow/oauth_creds.json`
+  - Fields: `access_token`, `refresh_token`, `expires_at`, `token_type`, `scope`, `apiKey`
+  - Note: `apiKey` is fetched after OAuth (`/api/oauth/getUserInfo?accessToken=...`) and is used for LLM API calls as the primary credential
+
+- Auth header selection for LLM API
+  - Prefer: `Authorization: Bearer <apiKey>`
+  - Fallback: `Authorization: Bearer <access_token>`
+
+- Client credentials (optional, CLI‑style)
+  - If you have official client credentials, set:
+    - `IFLOW_CLIENT_ID`
+    - `IFLOW_CLIENT_SECRET`
+  - When `client_secret` is present, token exchange uses `Authorization: Basic base64(client_id:client_secret)` (same as CLI)
+  - If not provided, PKCE is used where supported; otherwise device flow is used
+
+### Quick Start: iFlow Auth
+
+- One‑shot auth helper (opens browser; writes `~/.iflow/oauth_creds.json`):
+
+```bash
+node --import tsx scripts/iflow-auth.ts
+```
+
+- Verify token file (should include `apiKey`):
+
+```bash
+sed -n '1,200p' ~/.iflow/oauth_creds.json
+```
+
+- Direct API sanity check (replace `<MODEL_ID>` with an available model for your account):
+
+```bash
+APIKEY=$(node -e 'const fs=require("fs");const p=process.env.HOME+"/.iflow/oauth_creds.json";if(fs.existsSync(p)){const j=JSON.parse(fs.readFileSync(p,"utf8"));if(j.apiKey)process.stdout.write(j.apiKey)}')
+curl -sS \
+  -H "Authorization: Bearer $APIKEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"<MODEL_ID>","messages":[{"role":"user","content":"用一句中文自我介绍。"}]}' \
+  https://apis.iflow.cn/v1/chat/completions
+```
+
+### Server Config Examples
+
+- Minimal provider (OAuth stored in default path):
+
+```json
+{
+  "virtualrouter": {
+    "providers": {
+      "iflow": {
+        "type": "iflow",
+        "baseURL": "https://api.iflow.cn/v1",
+        "oauth": {
+          "deviceCodeUrl": "https://iflow.cn/oauth/device/code",
+          "tokenUrl": "https://iflow.cn/oauth/token",
+          "tokenFile": "~/.iflow/oauth_creds.json"
+        },
+        "compatibility": { "type": "iflow-compatibility" },
+        "models": { "qwen3-coder": { "maxContext": 128000, "maxTokens": 8192 } }
+      }
+    }
+  }
+}
+```
+
+- With client credentials (CLI‑style Basic token exchange):
+
+```json
+{
+  "virtualrouter": {
+    "providers": {
+      "iflow": {
+        "type": "iflow",
+        "baseURL": "https://api.iflow.cn/v1",
+        "oauth": {
+          "deviceCodeUrl": "https://iflow.cn/oauth/device/code",
+          "tokenUrl": "https://iflow.cn/oauth/token",
+          "tokenFile": "~/.iflow/oauth_creds.json",
+          "clientId": "${IFLOW_CLIENT_ID}",
+          "clientSecret": "${IFLOW_CLIENT_SECRET}"
+        },
+        "compatibility": { "type": "iflow-compatibility" }
+      }
+    }
+  }
+}
+```
+
+### Troubleshooting
+
+- 404 on `iflow.cn/v1/...` or `api.iflow.cn/v1/...`: use `apis.iflow.cn/v1` for LLM API
+- 40308 (“APIKEY需要升级…”): regenerate your apiKey in iFlow user settings and retry
+- 400 “No provider for model: …”: the model is not enabled for your apiKey/account; choose a model available to your plan
+- Device code HTML/portal pages: the provider auto‑retries with alternate path and may switch host to `api.iflow.cn` when necessary
+
+
 ### 🌊 Streaming Support
 - Native streaming request/response handling
 - Automatic streaming/non-streaming conversion
@@ -665,7 +775,7 @@ ROUTECODEX_CONFIG_PATH=~/.routecodex/config/modelscope.json npm start
 ```bash
 curl -X POST http://localhost:5506/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ms-7d6c4fdb-4bf1-40b3-9ec6-ddea16f6702b" \
+  -H "Authorization: Bearer $MS_API_KEY" \
   -d '{
     "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
     "messages": [
@@ -681,7 +791,7 @@ curl -X POST http://localhost:5506/v1/chat/completions \
 ```bash
 curl -X POST http://localhost:5506/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ms-7d6c4fdb-4bf1-40b3-9ec6-ddea16f6702b" \
+  -H "Authorization: Bearer $MS_API_KEY" \
   -d '{
     "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
     "messages": [
@@ -716,7 +826,7 @@ curl -X POST http://localhost:5506/v1/chat/completions \
 ```bash
 curl -X POST http://localhost:5506/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ms-7d6c4fdb-4bf1-40b3-9ec6-ddea16f6702b" \
+  -H "Authorization: Bearer $MS_API_KEY" \
   -d '{
     "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
     "messages": [
@@ -753,7 +863,7 @@ curl http://localhost:5506/config
 set -e
 
 BASE_URL="http://localhost:5506"
-API_KEY="ms-7d6c4fdb-4bf1-40b3-9ec6-ddea16f6702b"
+API_KEY="${MS_API_KEY:-YOUR_MODELSCOPE_API_KEY}"
 MODEL="Qwen/Qwen3-Coder-480B-A35B-Instruct"
 
 echo "🧪 RouteCodex ModelScope API测试开始..."
@@ -859,10 +969,10 @@ echo "✅ 所有测试完成!"
         "type": "openai",
         "baseURL": "https://api-inference.modelscope.cn/v1",
         "apiKey": [
-          "ms-7d6c4fdb-4bf1-40b3-9ec6-ddea16f6702b",
-          "ms-0cf692c6-608d-42da-a2b4-e203150bb435",
-          "ms-9215edc2-dc63-4a33-9f53-e6a6080ec795",
-          "ms-cc2f461b-8228-427f-99aa-1d44fab73e67"
+          "YOUR_MODELSCOPE_KEY1",
+          "YOUR_MODELSCOPE_KEY2",
+          "YOUR_MODELSCOPE_KEY3",
+          "YOUR_MODELSCOPE_KEY4"
         ],
         "models": {
           "Qwen/Qwen3-Coder-480B-A35B-Instruct": {

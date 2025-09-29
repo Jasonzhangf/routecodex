@@ -787,15 +787,21 @@ export class PipelineManager implements RCCBaseModule {
    */
   private initializeModuleRegistry(): void {
     // Register default module factories
+    // Canonical LLMSwitch names
     this.registry.registerModule('llmswitch-openai-openai', this.createOpenAINormalizerModule);
     this.registry.registerModule('llmswitch-anthropic-openai', this.createAnthropicOpenAIConverterModule);
-    // Aliases for common config names
+    // Aliases for backward compatibility (merged-config may still emit these)
     this.registry.registerModule('openai-normalizer', this.createOpenAINormalizerModule);
+    this.registry.registerModule('anthropic-openai-converter', this.createAnthropicOpenAIConverterModule);
     this.registry.registerModule('streaming-control', this.createStreamingControlModule);
     this.registry.registerModule('field-mapping', this.createFieldMappingModule);
     this.registry.registerModule('qwen-compatibility', this.createQwenCompatibilityModule);
     // GLM compatibility module
     this.registry.registerModule('glm-compatibility', this.createGLMCompatibilityModule);
+    // iFlow compatibility + provider
+    this.registry.registerModule('iflow-compatibility', this.createIFlowCompatibilityModule);
+    this.registry.registerModule('iflow-provider', this.createIFlowProviderModule);
+    this.registry.registerModule('glm-http-provider', this.createGLMHTTPProviderModule);
     this.registry.registerModule('qwen-provider', this.createQwenProviderModule);
     this.registry.registerModule('generic-http', this.createGenericHTTPModule);
     this.registry.registerModule('lmstudio-http', this.createLMStudioHTTPModule);
@@ -992,12 +998,12 @@ export class PipelineManager implements RCCBaseModule {
    * Module factory functions
    */
   private createOpenAINormalizerModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { OpenAINormalizerLLMSwitch } = await import('../modules/llm-switch/openai-normalizer.js');
+    const { OpenAINormalizerLLMSwitch } = await import('../modules/llmswitch/openai-normalizer.js');
     return new OpenAINormalizerLLMSwitch(config, dependencies);
   };
 
   private createAnthropicOpenAIConverterModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { AnthropicOpenAIConverter } = await import('../modules/llm-switch/anthropic-openai-converter.js');
+    const { AnthropicOpenAIConverter } = await import('../modules/llmswitch/anthropic-openai-converter.js');
     return new AnthropicOpenAIConverter(config, dependencies);
   };
 
@@ -1026,6 +1032,16 @@ export class PipelineManager implements RCCBaseModule {
     return new QwenProvider(config, dependencies);
   };
 
+  private createIFlowProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { IFlowProvider } = await import('../modules/provider/iflow-provider.js');
+    return new IFlowProvider(config, dependencies);
+  };
+
+  private createGLMHTTPProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { GLMHTTPProvider } = await import('../modules/provider/glm-http-provider.js');
+    return new GLMHTTPProvider(config, dependencies);
+  };
+
   private createGenericHTTPModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { GenericHTTPProvider } = await import('../modules/provider/generic-http-provider.js');
     return new GenericHTTPProvider(config, dependencies);
@@ -1049,6 +1065,11 @@ export class PipelineManager implements RCCBaseModule {
   private createPassthroughCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { PassthroughCompatibility } = await import('../modules/compatibility/passthrough-compatibility.js');
     return new PassthroughCompatibility(config, dependencies);
+  };
+
+  private createIFlowCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { iFlowCompatibility } = await import('../modules/compatibility/iflow-compatibility.js');
+    return new iFlowCompatibility(config, dependencies);
   };
 
   /**

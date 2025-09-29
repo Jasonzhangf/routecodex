@@ -183,8 +183,9 @@ export class iFlowCompatibility implements CompatibilityModule {
         targetPath: 'model',
         mapping: {
           'gpt-3.5-turbo': 'iflow-turbo',
-          'gpt-4': 'iflow-pro',
-          'gpt-4-turbo': 'iflow-turbo-latest'
+          'gpt-4': 'qwen3-coder',
+          'gpt-4-turbo': 'iflow-turbo-latest',
+          'qwen3-coder': 'qwen3-coder'
         }
       },
       // Tools format conversion

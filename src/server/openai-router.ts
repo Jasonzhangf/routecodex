@@ -206,7 +206,14 @@ export class OpenAIRouter extends BaseModule {
     const details: Record<string, unknown> = {};
     if (typeof e?.retryable === 'boolean') {details.retryable = e.retryable;}
     if (typeof statusFromObj === 'number') {details.upstreamStatus = statusFromObj;}
-    if (e?.details && typeof e.details === 'object') {details.provider = e.details;}
+    // Prefer structured provider/upstream details when present
+    if (e?.details && typeof e.details === 'object') {
+      const d = e.details as any;
+      if (d.provider) { details.provider = d.provider; }
+      if (d.upstream) { details.upstream = d.upstream; }
+    } else if (e?.response?.data) {
+      details.upstream = e.response.data;
+    }
     details.requestId = requestId;
 
     return {
@@ -589,6 +596,8 @@ export class OpenAIRouter extends BaseModule {
   private async handleChatCompletions(req: Request, res: Response): Promise<void> {
     const startTime = Date.now();
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    let ctxProviderId: string | null = null;
+    let ctxModelId: string | null = null;
 
     // Debug: Record request start
     if (this.isDebugEnhanced) {
@@ -663,10 +672,28 @@ export class OpenAIRouter extends BaseModule {
       // Pipeline path (streaming unified to non-streaming by workflow). Use RR within category.
       if (this.shouldUsePipeline() && this.routePools) {
         const routeName = await this.decideRouteCategoryAsync(req);
-        const pipelineId = this.pickPipelineId(routeName);
+        let pipelineId = this.pickPipelineId(routeName);
+        // Optional override: x-rc-provider: glm|qwen|iflow|modelscope
+        const preferredVendor = (req.headers['x-rc-provider'] as string | undefined)?.toLowerCase()?.trim();
+        if (preferredVendor && this.routePools[routeName] && this.routePools[routeName].length) {
+          const vendorOf = (pid: string) => {
+            const dot = pid.lastIndexOf('.');
+            const left = dot > 0 ? pid.slice(0, dot) : pid;
+            const und = left.indexOf('_');
+            return und > 0 ? left.slice(0, und) : left;
+          };
+          const override = this.routePools[routeName].find(pid => vendorOf(pid) === preferredVendor);
+          if (override) { pipelineId = override; }
+        }
         const { providerId, modelId } = this.parsePipelineId(pipelineId);
+        ctxProviderId = providerId; ctxModelId = modelId;
+        // Optional: allow client Authorization header to override upstream API key per-request
+        const authHeader = (req.headers['authorization'] || req.headers['Authorization']) as string | undefined;
         const pipelineRequest = {
-          data: req.body,
+          data: {
+            ...(req.body || {}),
+            ...(authHeader ? { __rcc_overrideApiKey: authHeader } : {}),
+          },
           route: {
             providerId,
             modelId,
@@ -756,6 +783,17 @@ export class OpenAIRouter extends BaseModule {
       res.status(200).json(normalized);
     } catch (error) {
       const duration = Date.now() - startTime;
+      try {
+        const details = (error as any).details || {};
+        (error as any).details = {
+          ...details,
+          provider: {
+            ...(details.provider || {}),
+            vendor: ctxProviderId || (details.provider?.vendor),
+            model: ctxModelId || (details.provider?.model),
+          }
+        };
+      } catch {}
 
       // Debug: Record request error
       if (this.isDebugEnhanced) {
@@ -815,6 +853,8 @@ export class OpenAIRouter extends BaseModule {
   private async handleCompletions(req: Request, res: Response): Promise<void> {
     const startTime = Date.now();
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    let ctxProviderId: string | null = null;
+    let ctxModelId: string | null = null;
 
     try {
       this.debugEventBus.publish({
@@ -862,10 +902,26 @@ export class OpenAIRouter extends BaseModule {
       let response;
       if (this.shouldUsePipeline() && this.routePools) {
         const routeName = await this.decideRouteCategoryAsync(req);
-        const pipelineId = this.pickPipelineId(routeName);
+        let pipelineId = this.pickPipelineId(routeName);
+        const preferredVendor = (req.headers['x-rc-provider'] as string | undefined)?.toLowerCase()?.trim();
+        if (preferredVendor && this.routePools[routeName] && this.routePools[routeName].length) {
+          const vendorOf = (pid: string) => {
+            const dot = pid.lastIndexOf('.');
+            const left = dot > 0 ? pid.slice(0, dot) : pid;
+            const und = left.indexOf('_');
+            return und > 0 ? left.slice(0, und) : left;
+          };
+          const override = this.routePools[routeName].find(pid => vendorOf(pid) === preferredVendor);
+          if (override) { pipelineId = override; }
+        }
         const { providerId, modelId } = this.parsePipelineId(pipelineId);
+        ctxProviderId = providerId; ctxModelId = modelId;
+        const authHeader2 = (req.headers['authorization'] || req.headers['Authorization']) as string | undefined;
         const pipelineRequest = {
-          data: req.body,
+          data: {
+            ...(req.body || {}),
+            ...(authHeader2 ? { __rcc_overrideApiKey: authHeader2 } : {}),
+          },
           route: {
             providerId,
             modelId,
@@ -924,6 +980,17 @@ export class OpenAIRouter extends BaseModule {
       res.status(200).json(normalized);
     } catch (error) {
       const duration = Date.now() - startTime;
+      try {
+        const details = (error as any).details || {};
+        (error as any).details = {
+          ...details,
+          provider: {
+            ...(details.provider || {}),
+            vendor: ctxProviderId || (details.provider?.vendor),
+            model: ctxModelId || (details.provider?.model),
+          }
+        };
+      } catch {}
       await this.handleError(error as Error, 'completions_handler');
 
       this.debugEventBus.publish({

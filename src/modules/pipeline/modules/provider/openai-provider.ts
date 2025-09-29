@@ -181,6 +181,28 @@ export class OpenAIProvider implements ProviderModule {
         });
       }
 
+      // Allow per-request API key override via hidden field (e.g., injected from router headers)
+      // This does not log secrets and only affects this call.
+      let localClient: OpenAI | null = null;
+      const overrideKeyRaw = (request as any)?.__rcc_overrideApiKey as string | undefined;
+      if (overrideKeyRaw && typeof overrideKeyRaw === 'string') {
+        try {
+          const key = overrideKeyRaw.toLowerCase().startsWith('bearer ')
+            ? overrideKeyRaw.slice(7).trim()
+            : overrideKeyRaw.trim();
+          const providerConfig = this.config.config as ProviderConfig;
+          const cfg: any = {
+            dangerouslyAllowBrowser: true,
+            apiKey: key,
+          };
+          if (providerConfig.baseUrl) { cfg.baseURL = providerConfig.baseUrl; }
+          localClient = new OpenAI(cfg);
+        } catch {
+          // Ignore override errors; fall back to default client
+          localClient = null;
+        }
+      }
+
       // Prepare chat completion request
       const chatRequest: Record<string, unknown> = {
         model: (request as { model?: string }).model,
@@ -209,7 +231,7 @@ export class OpenAIProvider implements ProviderModule {
 
       // Send request to OpenAI
       type ChatCreateArg = Parameters<OpenAI['chat']['completions']['create']>[0];
-      const response = await this.openai!.chat.completions.create(chatRequest as unknown as ChatCreateArg);
+      const response = await (localClient || this.openai)!.chat.completions.create(chatRequest as unknown as ChatCreateArg);
 
       const processingTime = Date.now() - startTime;
       const providerResponse: ProviderResponse = {
@@ -287,7 +309,18 @@ export class OpenAIProvider implements ProviderModule {
       const providerErr: any = new Error(message);
       providerErr.type = 'server';
       providerErr.statusCode = errAny?.status ?? errAny?.statusCode ?? errAny?.response?.status ?? 500;
-      providerErr.details = errAny?.response?.data || errAny?.data || {};
+      const providerConfig = this.config.config as ProviderConfig;
+      // Attach helpful, non-sensitive context
+      providerErr.details = {
+        upstream: errAny?.response?.data || errAny?.data || undefined,
+        provider: {
+          moduleType: this.type,
+          moduleId: this.id,
+          vendor: providerConfig?.type || 'openai',
+          baseUrl: providerConfig?.baseUrl,
+          model: (request as { model?: string }).model || undefined,
+        }
+      };
       providerErr.retryable = providerErr.statusCode >= 500 || providerErr.statusCode === 429;
 
       throw providerErr;

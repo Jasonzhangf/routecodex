@@ -17,7 +17,9 @@ export function resolveRouteCodexConfigPath(preferredPath?: string): string {
     './config/routecodex.json',
     path.join(process.cwd(), 'routecodex.json'),
     path.join(homedir(), '.routecodex', 'config.json'),
-    path.join(homedir(), '.routecodex', 'routecodex.json')
+    path.join(homedir(), '.routecodex', 'routecodex.json'),
+    // NEW: support scanning ~/.routecodex/config directory for *.json
+    path.join(homedir(), '.routecodex', 'config')
   ];
 
   const tryResolveFromDir = (dirPath: string): string | null => {

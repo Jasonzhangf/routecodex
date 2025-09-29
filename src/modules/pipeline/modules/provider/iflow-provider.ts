@@ -11,7 +11,7 @@ import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { createIFlowOAuth, IFlowTokenStorage } from './iflow-oauth.js';
 import { DebugEventBus } from "rcc-debugcenter";
 
-const IFLOW_API_ENDPOINT = 'https://api.iflow.cn/v1';
+const IFLOW_API_ENDPOINT = 'https://apis.iflow.cn/v1';
 
 export class IFlowProvider implements ProviderModule {
   readonly id: string;
@@ -175,6 +175,7 @@ export class IFlowProvider implements ProviderModule {
       clientSecret: oauthConfig.clientSecret || DEFAULT_OAUTH_OPTIONS.clientSecret,
       deviceCodeUrl: oauthConfig.deviceCodeUrl || DEFAULT_OAUTH_OPTIONS.deviceCodeUrl,
       tokenUrl: oauthConfig.tokenUrl || DEFAULT_OAUTH_OPTIONS.tokenUrl,
+      authUrl: oauthConfig.authUrl || DEFAULT_OAUTH_OPTIONS.authUrl,
       scopes: oauthConfig.scopes || DEFAULT_OAUTH_OPTIONS.scopes
     };
   }
@@ -473,6 +474,60 @@ export class IFlowProvider implements ProviderModule {
 
       const elapsed = Date.now() - startTime;
 
+      // On 401, attempt refresh and retry; if still 401 then complete OAuth flow and final retry
+      if (response.status === 401) {
+        try {
+          if (this.tokenStorage?.refresh_token) {
+            try {
+              await this.oauth.refreshTokensWithRetry(this.tokenStorage.refresh_token);
+              this.tokenStorage = this.oauth.getToken();
+            } catch (refreshErr) {
+              this.recordTokenRefreshFailure(refreshErr);
+              const storage = await this.oauth.completeOAuthFlow(true);
+              this.tokenStorage = storage;
+            }
+          } else {
+            const storage = await this.oauth.completeOAuthFlow(true);
+            this.tokenStorage = storage;
+          }
+
+          if (this.authContext && this.tokenStorage) {
+            this.authContext.token = this.tokenStorage.access_token;
+          }
+
+          const retry = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': this.oauth.getAuthorizationHeader(),
+              'User-Agent': 'RouteCodex/1.0.0'
+            },
+            body: JSON.stringify(payload)
+          });
+
+          if (!retry.ok) {
+            const text = await retry.text();
+            throw new Error(`iFlow API error after reauth: ${retry.status} ${retry.statusText} - ${text}`);
+          }
+
+          const dataRetry = await retry.json();
+          return {
+            data: dataRetry,
+            status: retry.status,
+            headers: Object.fromEntries(retry.headers.entries()),
+            metadata: {
+              requestId: `http_${Date.now()}_${Math.random().toString(36).substring(2)}`,
+              processingTime: Date.now() - startTime,
+              tokensUsed: dataRetry?.usage?.total_tokens,
+              model: dataRetry?.model || request?.model
+            }
+          };
+        } catch (reauthErr) {
+          // fall-through to error mapping below
+          this.addToErrorHistory({ operation: 'reauth_failed', error: reauthErr, timestamp: Date.now() });
+        }
+      }
+
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`iFlow API error: ${response.status} ${response.statusText} - ${errorText}`);
@@ -508,7 +563,17 @@ export class IFlowProvider implements ProviderModule {
           elapsed
         });
       }
-      throw this.createProviderError(error, 'network');
+      const provErr = this.createProviderError(error, 'network');
+      // Attach provider context for routing error payload
+      (provErr as any).details = {
+        ...(provErr as any).details || {},
+        provider: {
+          vendor: 'iflow',
+          baseUrl: this.getAPIEndpoint(),
+          moduleType: this.type,
+        }
+      };
+      throw provErr;
     }
   }
 
@@ -590,8 +655,10 @@ export class IFlowProvider implements ProviderModule {
 }
 
 const DEFAULT_IFLOW_CONFIG = {
-  DEVICE_CODE_ENDPOINT: 'https://api.iflow.cn/oauth/device_code',
-  TOKEN_ENDPOINT: 'https://api.iflow.cn/oauth/token',
+  // Prefer iflow.cn host for OAuth; provider will fall back between device_code and device/code
+  DEVICE_CODE_ENDPOINT: 'https://iflow.cn/oauth/device/code',
+  TOKEN_ENDPOINT: 'https://iflow.cn/oauth/token',
+  AUTHORIZATION_ENDPOINT: 'https://iflow.cn/oauth',
   CLIENT_ID: 'iflow-desktop-client',
   SCOPE: 'openid profile email api'
 };
@@ -601,5 +668,6 @@ const DEFAULT_OAUTH_OPTIONS = {
   clientSecret: undefined,
   deviceCodeUrl: DEFAULT_IFLOW_CONFIG.DEVICE_CODE_ENDPOINT,
   tokenUrl: DEFAULT_IFLOW_CONFIG.TOKEN_ENDPOINT,
+  authUrl: DEFAULT_IFLOW_CONFIG.AUTHORIZATION_ENDPOINT,
   scopes: DEFAULT_IFLOW_CONFIG.SCOPE.split(' ')
 };

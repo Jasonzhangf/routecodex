@@ -9,7 +9,7 @@ LLMSwitch 模块是流水线架构的第 0 层（入口层），负责处理进�
 ## 支持的协议转换
 
 ### 🔧 OpenAI → OpenAI 规范化
-- **实现文件**: `openai-normalizer.ts`
+- **实现文件**: `llmswitch-openai-openai.ts`
 - **功能**: OpenAI 协议规范化，保持请求结构一致
 - **特性**:
   - 完整的 OpenAI 协议支持
@@ -83,7 +83,7 @@ private validateProtocol(request: any): void {
 
 ```
 src/modules/pipeline/modules/llm-switch/
-├── openai-normalizer.ts          # OpenAI → OpenAI 规范化实现
+├── llmswitch-openai-openai.ts    # OpenAI → OpenAI 规范化实现
 ├── anthropic-openai-converter.ts # Anthropic → OpenAI 转换器
 ├── anthropic-openai-config.ts    # 转换配置
 └── README.md                     # 本文档
@@ -93,7 +93,7 @@ src/modules/pipeline/modules/llm-switch/
 
 ### 基本使用
 ```typescript
-import { OpenAINormalizerLLMSwitch } from './openai-normalizer.js';
+import { OpenAINormalizerLLMSwitch } from './llmswitch-openai-openai.js';
 
 const llmSwitch = new OpenAINormalizerLLMSwitch({
   type: 'llmswitch-openai-openai',

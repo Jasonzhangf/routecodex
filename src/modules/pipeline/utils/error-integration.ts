@@ -419,9 +419,8 @@ export class PipelineErrorIntegration {
       finalError: error.code,
       action: 'request_failed'
     });
-
-    // Re-throw the error to fail the request
-    throw new Error(`Pipeline error in ${context.stage}: ${error.message}`);
+    // Do not throw a new error here to preserve original error context.
+    // The caller will rethrow the original module error after integration.
   }
 
   /**

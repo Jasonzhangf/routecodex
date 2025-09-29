@@ -762,15 +762,62 @@ export class HttpServer extends BaseModule implements IHttpServer {
     this.app.use('/v1/openai', openaiRouter);
     this.app.use('/v1', openaiRouter);
 
-    // Anthropic API endpoints (placeholder for future implementation)
-    this.app.use('/v1/anthropic', (req: Request, res: Response) => {
-      res.status(501).json({
-        error: {
-          message: 'Anthropic API endpoints not yet implemented',
-          type: 'not_implemented_error',
-          code: 'anthropic_not_implemented',
-        },
-      });
+    // Anthropic API: minimal /v1/anthropic/messages passthrough into pipeline with llmswitch-anthropic-openai
+    this.app.post('/v1/anthropic/messages', async (req: Request, res: Response) => {
+      try {
+        if (!this.pipelineManager || !this.routePools) {
+          return res.status(503).json({ error: { message: 'Pipeline not ready', code: 'pipeline_not_ready' } });
+        }
+
+        const requestId = `anth_${Date.now()}`;
+        // Simple provider override via header
+        const preferredVendor = (req.headers['x-rc-provider'] as string | undefined)?.toLowerCase()?.trim();
+        const pickVendor = (vendor?: string): string | null => {
+          const pools = this.routePools || {};
+          const list = pools['default'] || [];
+          if (!list.length) { return null; }
+          if (vendor) {
+            for (const pid of list) {
+              const left = pid.includes('.') ? pid.slice(0, pid.lastIndexOf('.')) : pid;
+              const vendorId = left.includes('_') ? left.slice(0, left.indexOf('_')) : left;
+              if (vendorId.toLowerCase() === vendor) { return pid; }
+            }
+          }
+          return list[0];
+        };
+
+        const pipelineId = pickVendor(preferredVendor);
+        if (!pipelineId) {
+          return res.status(503).json({ error: { message: 'No pipelines available', code: 'no_pipelines' } });
+        }
+
+        const dot = pipelineId.lastIndexOf('.');
+        const providerId = dot > 0 ? pipelineId.slice(0, dot) : pipelineId;
+        const modelId = dot > 0 ? pipelineId.slice(dot + 1) : 'default';
+
+        const pipelineRequest = {
+          data: req.body,
+          route: {
+            providerId,
+            modelId,
+            requestId,
+            timestamp: Date.now(),
+          },
+          metadata: {
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+          },
+          debug: { enabled: true, stages: { llmSwitch: true, workflow: true, compatibility: true, provider: true } },
+        } as any;
+
+        const pipelineResponse = await this.pipelineManager.processRequest(pipelineRequest);
+        const data = pipelineResponse?.data ?? pipelineResponse;
+        // Return anthropic-like response produced by llmswitch (if configured)
+        res.status(200).json(data);
+      } catch (err) {
+        res.status(500).json({ error: { message: (err as Error).message || 'Anthropic handler error' } });
+      }
     });
 
     // Status endpoint
