@@ -266,20 +266,20 @@ export class GLMCompatibility implements CompatibilityModule {
 
     // 1) HTML-like <invoke|function name="..."> ... </...>
     {
-      const blockRe = /<(?:(invoke|function)(?:[_\w-]*))\b[^>]*\bname\s*=\s*(?:\"([^\"]+)\"|'([^']+)'|([^\s>]+))[^>]*>([\s\S]*?)<\/(?:\1)(?:[_\w-]*)>/gi;
+      const blockRe = /<(?:(invoke|function)(?:[_\w-]*))\b[^>]*\bname\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))[^>]*>([\s\S]*?)<\/(?:\1)(?:[_\w-]*)>/gi;
       let m: RegExpExecArray | null;
       while ((m = blockRe.exec(text)) !== null) {
         const toolName = (m[2] || m[3] || m[4] || '').trim();
         const inner = m[5] || '';
         const args: Record<string, any> = {};
-        const paramRe = /<(?:parameter|param|arg)\b[^>]*\bname\s*=\s*(?:\"([^\"]+)\"|'([^']+)'|([^\s>]+))[^>]*>([\s\S]*?)<\/(?:parameter|param|arg)>/gi;
+        const paramRe = /<(?:parameter|param|arg)\b[^>]*\bname\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))[^>]*>([\s\S]*?)<\/(?:parameter|param|arg)>/gi;
         let pm: RegExpExecArray | null;
         while ((pm = paramRe.exec(inner)) !== null) {
           const key = (pm[1] || pm[2] || pm[3] || '').trim();
           let valRaw = (pm[4] || '').trim();
           valRaw = this.stripCodeFences(valRaw);
           try {
-            const looksJson = /^(\{[\s\S]*\}|\[[\s\S]*\]|\"[\s\S]*\"|-?\d+(?:\.\d+)?|true|false|null)$/i.test(valRaw);
+            const looksJson = /^(\{[\s\S]*\}|\[[\s\S]*\]|"[\s\S]*"|-?\d+(?:\.\d+)?|true|false|null)$/i.test(valRaw);
             args[key] = looksJson ? JSON.parse(valRaw) : valRaw;
           } catch {
             args[key] = valRaw;
@@ -352,7 +352,7 @@ export class GLMCompatibility implements CompatibilityModule {
 
   // Remove <think>...</think> blocks and any stray <think> or </think> tags
   private stripThinkBlocks(s: string): string {
-    if (!s || typeof s !== 'string') return s as any;
+    if (!s || typeof s !== 'string') {return s as any;}
     try {
       let out = s.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '');
       out = out.replace(/<\/?think\b[^>]*>/gi, '');
@@ -369,10 +369,10 @@ export class GLMCompatibility implements CompatibilityModule {
       // Remove common artifact lines (quotes, bullets, stray brackets)
       out = out
         .split(/\r?\n/)
-        .filter(line => !/^\s*(?:[>\]\u25CF\u2022\-\–\—\*\▌•])\s*$/.test(line))
+        .filter(line => !/^\s*(?:[>\]\u25CF\u2022\-–—*▌•])\s*$/.test(line))
         .filter(line => !/^\s*Implement\s*\{.*\}\s*$/i.test(line))
         .filter(line => !/^\s*\[?function_call\]?/i.test(line))
-        .filter(line => !/^\s*\[?tool_call\:/i.test(line))
+        .filter(line => !/^\s*\[?tool_call:/i.test(line))
         .join('\n')
         .trim();
       // Unless explicitly requested, drop any remaining text to ensure tool call is last
@@ -399,15 +399,15 @@ export class GLMCompatibility implements CompatibilityModule {
   private extractBracketToolCalls(input: string): { calls: { name: string; args: Record<string, any> }[]; rest: string } {
     const calls: { name: string; args: Record<string, any> }[] = [];
     let remaining = input;
-    const tagRe = /\[tool_call:([\w\-\.]+)\]/gi;
+    const tagRe = /\[tool_call:([\w.-]+)\]/gi;
     let m: RegExpExecArray | null;
     while ((m = tagRe.exec(input)) !== null) {
       const name = (m[1] || '').trim();
       let idx = m.index + m[0].length;
-      while (idx < input.length && /\s/.test(input[idx])) idx++;
-      if (idx >= input.length || input[idx] !== '{') continue;
+      while (idx < input.length && /\s/.test(input[idx])) {idx++;}
+      if (idx >= input.length || input[idx] !== '{') {continue;}
       const { jsonText, endIndex } = this.extractBalancedJson(input, idx);
-      if (!jsonText) continue;
+      if (!jsonText) {continue;}
       let args: any = {};
       try { args = JSON.parse(this.stripCodeFences(jsonText)); } catch { args = { _raw: jsonText }; }
       this.normalizeCommonToolArgs(name, args);
@@ -420,7 +420,7 @@ export class GLMCompatibility implements CompatibilityModule {
 
   private extractBalancedJson(input: string, startIndex: number): { jsonText: string | null; endIndex: number } {
     let i = startIndex;
-    if (input[i] !== '{') return { jsonText: null, endIndex: startIndex };
+    if (input[i] !== '{') {return { jsonText: null, endIndex: startIndex };}
     let depth = 0;
     let inString = false;
     let escaped = false;

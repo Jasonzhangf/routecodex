@@ -630,7 +630,8 @@ export function createDryRunCommands(): Command {
     .option('--save <path>', 'Save results to file')
     .option('--node-config <path>', 'Node configuration file')
     .action(async (input, options) => {
-      const spinner = ora('Running request pipeline...').start();
+      const jsonOnly = Boolean(process.env.JEST_WORKER_ID || process.env.CI);
+      const spinner = jsonOnly ? ({} as any) : ora('Running request pipeline...').start();
 
       try {
         // Default: register dynamic routing + load balancer + three nodes
@@ -659,10 +660,15 @@ export function createDryRunCommands(): Command {
           },
         });
 
-        spinner.succeed('Request pipeline completed');
-
-        // Output results
-        formatOutput(result, options.output);
+        if (!jsonOnly) {
+          spinner.succeed('Request pipeline completed');
+        }
+        // Output results (JSON-only in CI/tests)
+        if (jsonOnly) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          formatOutput(result, options.output);
+        }
 
         // Save results if requested
         if (options.save) {
@@ -671,8 +677,10 @@ export function createDryRunCommands(): Command {
           logger.success(`Results saved to: ${outputPath}`);
         }
       } catch (error) {
-        spinner.fail('Request pipeline failed');
-        logger.error(error instanceof Error ? error.message : String(error));
+        if (!jsonOnly) {
+          spinner.fail('Request pipeline failed');
+          logger.error(error instanceof Error ? error.message : String(error));
+        }
         process.exit(1);
       }
     });
@@ -688,7 +696,8 @@ export function createDryRunCommands(): Command {
     .option('--save <path>', 'Save results to file')
     .option('--node-config <path>', 'Node configuration file')
     .action(async (input, options) => {
-      const spinner = ora('Running response pipeline...').start();
+      const jsonOnly = Boolean(process.env.JEST_WORKER_ID || process.env.CI);
+      const spinner = jsonOnly ? ({} as any) : ora('Running response pipeline...').start();
 
       try {
         // Load response data
@@ -707,10 +716,15 @@ export function createDryRunCommands(): Command {
           nodeConfigs,
         });
 
-        spinner.succeed('Response pipeline completed');
-
-        // Output results
-        formatOutput(result, options.output);
+        if (!jsonOnly) {
+          spinner.succeed('Response pipeline completed');
+        }
+        // Output results (JSON-only in CI/tests)
+        if (jsonOnly) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          formatOutput(result, options.output);
+        }
 
         // Save results if requested
         if (options.save) {
@@ -719,8 +733,10 @@ export function createDryRunCommands(): Command {
           logger.success(`Results saved to: ${outputPath}`);
         }
       } catch (error) {
-        spinner.fail('Response pipeline failed');
-        logger.error(error instanceof Error ? error.message : String(error));
+        if (!jsonOnly) {
+          spinner.fail('Response pipeline failed');
+          logger.error(error instanceof Error ? error.message : String(error));
+        }
         process.exit(1);
       }
     });

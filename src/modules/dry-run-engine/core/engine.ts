@@ -45,6 +45,8 @@ export interface ExtendedDryRunResponse {
     totalExecutionTime: number;
     routingAccuracy: number;
     loadBalancerEffectiveness: number;
+    scope?: string;
+    message?: string;
   };
 }
 
@@ -206,7 +208,8 @@ export class DryRunEngine {
         combinedAnalysis: {
           totalExecutionTime: Date.now() - startTime,
           routingAccuracy: virtualRouterResult.routingDecision?.confidence || 0,
-          loadBalancerEffectiveness: this.calculateLoadBalancerEffectiveness(virtualRouterResult)
+          loadBalancerEffectiveness: this.calculateLoadBalancerEffectiveness(virtualRouterResult),
+          scope: 'routing-only'
         }
       };
 
