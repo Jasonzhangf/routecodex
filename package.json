@@ -26,6 +26,11 @@
     "README.md",
     "LICENSE"
   ],
+  "workspaces": [
+    "sharedmodule/config-engine",
+    "sharedmodule/config-compat",
+    "sharedmodule/config-testkit"
+  ],
   "scripts": {
     "build": "npm run clean && tsc",
     "build:watch": "tsc --watch",
@@ -53,6 +58,8 @@
     "dry-run": "node scripts/dry-run-cli.mjs",
     "dry-run:samples": "tsx scripts/samples-dry-run.mjs",
     "rc-config": "node scripts/rc-config.mjs",
+    "config:use-local": "node scripts/switch-config-deps.mjs local && npm i",
+    "config:use-published": "node scripts/switch-config-deps.mjs published && npm i",
     "test:modelscope": "node scripts/test-modelscope.mjs",
     "security:audit": "npm audit --audit-level high",
     "security:check": "npx audit-ci --config ./audit-ci.json",
@@ -84,8 +91,8 @@
     "rcc-basemodule-adv": "^0.0.1",
     "rcc-debugcenter": "^0.1.6",
     "rcc-errorhandling": "^1.0.10",
-    "routecodex-config-engine": "^0.1.0",
     "routecodex-config-compat": "^0.1.0",
+    "routecodex-config-engine": "^0.1.0",
     "socket.io": "^4.8.1"
   },
   "peerDependencies": {
