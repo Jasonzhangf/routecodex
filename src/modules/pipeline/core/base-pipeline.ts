@@ -26,6 +26,8 @@ import { PipelineErrorIntegration } from '../utils/error-integration.js';
 import { PipelineDebugLogger } from '../utils/debug-logger.js';
 import { DebugEventBus } from 'rcc-debugcenter';
 import { ModuleEnhancementFactory } from '../../enhancement/module-enhancement-factory.js';
+import type { SharedPipelineRequest, SharedPipelineResponse } from '../../../types/shared-dtos.js';
+import type { UnknownObject } from '../../../types/common-types.js';
 
 /**
  * Base pipeline implementation that orchestrates all modules
@@ -165,7 +167,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
 
       // Stage 1: LLMSwitch - Protocol transformation
       timings.llmSwitchStart = Date.now();
-      let processedRequest = await this.processLLMSwitch(request);
+      let processedRequest = await this.processLLMSwitch(request as SharedPipelineRequest);
       timings.llmSwitchEnd = Date.now();
       debugStages.push('llm-switch');
 
@@ -183,21 +185,31 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
 
       // Stage 4: Provider - Service execution
       timings.providerStart = Date.now();
-      let providerResponse = await this.processProvider(processedRequest);
+      const providerPayload = await this.processProvider(processedRequest);
       timings.providerEnd = Date.now();
       debugStages.push('provider');
 
+      // Wrap provider payload to DTO for response transformation chain
+      let responseDto: SharedPipelineResponse = {
+        data: providerPayload,
+        metadata: {
+          pipelineId: this.pipelineId,
+          processingTime: 0,
+          stages: []
+        }
+      };
+
       // Stage 5: Response transformation chain (reverse order)
       timings.compatibilityResponseStart = Date.now();
-      providerResponse = await this.processCompatibilityResponse(providerResponse);
+      responseDto = await this.processCompatibilityResponse(responseDto);
       timings.compatibilityResponseEnd = Date.now();
 
       timings.workflowResponseStart = Date.now();
-      providerResponse = await this.processWorkflowResponse(providerResponse);
+      responseDto = await this.processWorkflowResponse(responseDto);
       timings.workflowResponseEnd = Date.now();
 
       timings.llmSwitchResponseStart = Date.now();
-      const finalResponse = await this.processLLMSwitchResponse(providerResponse);
+      responseDto = await this.processLLMSwitchResponse(responseDto);
       timings.llmSwitchResponseEnd = Date.now();
 
       const processingTime = Date.now() - startTime;
@@ -207,7 +219,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
 
       // Create response
       const response: PipelineResponse = {
-        data: finalResponse,
+        data: responseDto.data,
         metadata: {
           pipelineId: this.pipelineId,
           processingTime,
@@ -215,7 +227,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
         },
         debug: request.debug.enabled ? {
           request: request.data,
-          response: finalResponse,
+          response: responseDto.data,
           transformations: transformationLogs,
           timings: this.calculateTimings(timings)
         } : undefined
@@ -598,22 +610,15 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Process request through LLMSwitch module
    */
-  private async processLLMSwitch(request: PipelineRequest): Promise<any> {
+  private async processLLMSwitch(request: SharedPipelineRequest): Promise<SharedPipelineRequest> {
     if (!this.modules.llmSwitch) {
       return request;
     }
 
     try {
-      const transformed = await this.modules.llmSwitch.processIncoming(request.data);
-      // Maintain the complete request structure with route information
-      const result = {
-        ...transformed,
-        route: request.route || transformed.route, // Fallback to transformed.route
-        metadata: request.metadata || transformed.metadata, // Fallback to transformed.metadata
-        debug: request.debug || transformed.debug // Fallback to transformed.debug
-      };
-      this.debugLogger.logTransformation(request.route?.requestId || transformed.route?.requestId || 'unknown', 'llm-switch-request', request.data, transformed);
-      return result;
+      const transformedDto = await this.modules.llmSwitch.processIncoming(request);
+      this.debugLogger.logTransformation(request.route?.requestId || 'unknown', 'llm-switch-request', request.data, transformedDto.data);
+      return transformedDto;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {
         stage: 'llm-switch',
@@ -627,22 +632,15 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Process request through Workflow module
    */
-  private async processWorkflow(request: any): Promise<any> {
+  private async processWorkflow(request: SharedPipelineRequest): Promise<SharedPipelineRequest> {
     if (!this.modules.workflow) {
       return request;
     }
 
     try {
       const processed = await this.modules.workflow.processIncoming(request);
-      // Maintain the complete request structure with route information
-      const result = {
-        ...processed,
-        route: request.route || processed.route, // Fallback to processed.route
-        metadata: request.metadata || processed.metadata, // Fallback to processed.metadata
-        debug: request.debug || processed.debug // Fallback to processed.debug
-      };
-      this.debugLogger.logTransformation(request.route?.requestId || processed.route?.requestId || 'unknown', 'workflow-request', request, processed);
-      return result;
+      this.debugLogger.logTransformation(request.route?.requestId || 'unknown', 'workflow-request', request.data, processed.data);
+      return processed;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {
         stage: 'workflow',
@@ -656,22 +654,15 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Process request through Compatibility module
    */
-  private async processCompatibility(request: any): Promise<any> {
+  private async processCompatibility(request: SharedPipelineRequest): Promise<SharedPipelineRequest> {
     if (!this.modules.compatibility) {
       return request;
     }
 
     try {
       const transformed = await this.modules.compatibility.processIncoming(request);
-      // Maintain the complete request structure with route information
-      const result = {
-        ...transformed,
-        route: request.route || transformed.route, // Fallback to transformed.route
-        metadata: request.metadata || transformed.metadata, // Fallback to transformed.metadata
-        debug: request.debug || transformed.debug // Fallback to transformed.debug
-      };
-      this.debugLogger.logTransformation(request.route?.requestId || transformed.route?.requestId || 'unknown', 'compatibility-request', request, transformed);
-      return result;
+      this.debugLogger.logTransformation(request.route?.requestId || 'unknown', 'compatibility-request', request.data, transformed.data);
+      return transformed;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {
         stage: 'compatibility',
@@ -685,15 +676,15 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Process request through Provider module
    */
-  private async processProvider(request: any): Promise<any> {
+  private async processProvider(request: SharedPipelineRequest): Promise<UnknownObject> {
     if (!this.modules.provider) {
       throw new Error('Provider module not available');
     }
 
     try {
-      const response = await this.modules.provider.processIncoming(request);
-      this.debugLogger.logProviderRequest(this.pipelineId, 'request-start', request, response);
-      return response;
+      const responsePayload = await this.modules.provider.processIncoming(request.data as UnknownObject);
+      this.debugLogger.logProviderRequest(this.pipelineId, 'request-start', request, responsePayload);
+      return responsePayload as UnknownObject;
     } catch (error) {
       // Enrich error with provider context for standard error center handling
       try {
@@ -725,20 +716,24 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Process response through Compatibility module
    */
-  private async processCompatibilityResponse(response: any): Promise<any> {
+  private async processCompatibilityResponse(response: SharedPipelineResponse): Promise<SharedPipelineResponse> {
     if (!this.modules.compatibility) {
       return response;
     }
 
     try {
-      const transformed = await this.modules.compatibility.processOutgoing(response);
-      this.debugLogger.logTransformation(response.route?.requestId || 'unknown', 'compatibility-response', response, transformed);
-      return transformed;
+      const transformed = await this.modules.compatibility.processOutgoing(response as unknown as UnknownObject);
+      const isDto = transformed && typeof transformed === 'object' && 'data' in (transformed as any) && 'metadata' in (transformed as any);
+      const out: SharedPipelineResponse = isDto
+        ? transformed as SharedPipelineResponse
+        : { ...response, data: transformed as UnknownObject };
+      this.debugLogger.logTransformation('unknown', 'compatibility-response', response, out);
+      return out;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {
         stage: 'compatibility-response',
         pipelineId: this.pipelineId,
-        requestId: response.route?.requestId || 'unknown'
+        requestId: 'unknown'
       });
       throw error;
     }
@@ -747,20 +742,24 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Process response through Workflow module
    */
-  private async processWorkflowResponse(response: any): Promise<any> {
+  private async processWorkflowResponse(response: SharedPipelineResponse): Promise<SharedPipelineResponse> {
     if (!this.modules.workflow) {
       return response;
     }
 
     try {
-      const processed = await this.modules.workflow.processOutgoing(response);
-      this.debugLogger.logTransformation(response.route?.requestId || 'unknown', 'workflow-response', response, processed);
-      return processed;
+      const processed = await this.modules.workflow.processOutgoing(response as unknown as UnknownObject);
+      const isDto = processed && typeof processed === 'object' && 'data' in (processed as any) && 'metadata' in (processed as any);
+      const out: SharedPipelineResponse = isDto
+        ? processed as SharedPipelineResponse
+        : { ...response, data: processed as UnknownObject };
+      this.debugLogger.logTransformation('unknown', 'workflow-response', response, out);
+      return out;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {
         stage: 'workflow-response',
         pipelineId: this.pipelineId,
-        requestId: response.route?.requestId || 'unknown'
+        requestId: 'unknown'
       });
       throw error;
     }
@@ -769,20 +768,24 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Process response through LLMSwitch module
    */
-  private async processLLMSwitchResponse(response: any): Promise<any> {
+  private async processLLMSwitchResponse(response: SharedPipelineResponse): Promise<SharedPipelineResponse> {
     if (!this.modules.llmSwitch) {
       return response;
     }
 
     try {
-      const transformed = await this.modules.llmSwitch.processOutgoing(response);
-      this.debugLogger.logTransformation(response.route?.requestId || 'unknown', 'llm-switch-response', response, transformed);
-      return transformed;
+      const transformed = await this.modules.llmSwitch.processOutgoing(response as unknown as UnknownObject);
+      const isDto = transformed && typeof transformed === 'object' && 'data' in (transformed as any) && 'metadata' in (transformed as any);
+      const out: SharedPipelineResponse = isDto
+        ? transformed as SharedPipelineResponse
+        : { ...response, data: transformed as UnknownObject };
+      this.debugLogger.logTransformation('unknown', 'llm-switch-response', response, out);
+      return out;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {
         stage: 'llm-switch-response',
         pipelineId: this.pipelineId,
-        requestId: response.route?.requestId || 'unknown'
+        requestId: 'unknown'
       });
       throw error;
     }

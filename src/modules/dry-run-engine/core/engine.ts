@@ -129,19 +129,45 @@ export class DryRunEngine {
           protocolHandlers: {
             openai: {
               tokenCalculator: {},
-              toolDetector: {}
+              toolDetector: {
+              type: 'pattern',
+              patterns: {
+                webSearch: ['search', 'web', 'google', 'bing'],
+                codeExecution: ['code', 'execute', 'run'],
+                fileSearch: ['file', 'document', 'read'],
+                dataAnalysis: ['analyze', 'data', 'chart']
+              }
+            }
             }
           },
           modelTiers: {
-            basic: { maxTokens: 4096 },
-            advanced: { maxTokens: 8192 }
+            basic: {
+              description: 'Basic model tier',
+              models: ['gpt-3.5-turbo', 'llama3-8b-instruct'],
+              maxTokens: 4096,
+              supportedFeatures: ['text_completion']
+            },
+            advanced: {
+              description: 'Advanced model tier',
+              models: ['gpt-4', 'llama3-70b-instruct'],
+              maxTokens: 8192,
+              supportedFeatures: ['text_completion', 'tool_use']
+            }
           },
           routingDecisions: {
             default: {
-              criteria: { modelTier: 'basic' },
-              targets: {
-                'modelscope': { weight: 1.0 }
-              }
+              description: 'Default routing decision',
+              modelTier: 'basic',
+              tokenThreshold: 100,
+              toolTypes: [],
+              priority: 50
+            },
+            longContext: {
+              description: 'Long context routing decision',
+              modelTier: 'advanced',
+              tokenThreshold: 4000,
+              toolTypes: [],
+              priority: 70
             }
           }
         },
@@ -228,19 +254,45 @@ export class DryRunEngine {
           protocolHandlers: {
             openai: {
               tokenCalculator: {},
-              toolDetector: {}
+              toolDetector: {
+              type: 'pattern',
+              patterns: {
+                webSearch: ['search', 'web', 'google', 'bing'],
+                codeExecution: ['code', 'execute', 'run'],
+                fileSearch: ['file', 'document', 'read'],
+                dataAnalysis: ['analyze', 'data', 'chart']
+              }
+            }
             }
           },
           modelTiers: {
-            basic: { maxTokens: 4096 },
-            advanced: { maxTokens: 8192 }
+            basic: {
+              description: 'Basic model tier',
+              models: ['gpt-3.5-turbo', 'llama3-8b-instruct'],
+              maxTokens: 4096,
+              supportedFeatures: ['text_completion']
+            },
+            advanced: {
+              description: 'Advanced model tier',
+              models: ['gpt-4', 'llama3-70b-instruct'],
+              maxTokens: 8192,
+              supportedFeatures: ['text_completion', 'tool_use']
+            }
           },
           routingDecisions: {
             default: {
-              criteria: { modelTier: 'basic' },
-              targets: {
-                'modelscope': { weight: 1.0 }
-              }
+              description: 'Default routing decision',
+              modelTier: 'basic',
+              tokenThreshold: 100,
+              toolTypes: [],
+              priority: 50
+            },
+            longContext: {
+              description: 'Long context routing decision',
+              modelTier: 'advanced',
+              tokenThreshold: 4000,
+              toolTypes: [],
+              priority: 70
             }
           }
         },

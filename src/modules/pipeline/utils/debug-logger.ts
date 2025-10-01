@@ -681,24 +681,44 @@ export class PipelineDebugLogger {
    * Sanitize data for logging (remove sensitive information)
    */
   private sanitizeData(data: any): any {
-    if (!data || typeof data !== 'object') {
-      return data;
-    }
-
-    const sanitized = { ...data };
-
-    // Remove sensitive fields
-    const sensitiveFields = [
+    const sensitiveKeys = new Set<string>([
       'apiKey', 'api_key', 'token', 'password', 'secret',
       'authorization', 'auth', 'credentials'
-    ];
+    ]);
 
-    sensitiveFields.forEach(field => {
-      if (field in sanitized) {
-        sanitized[field] = '[REDACTED]';
+    const redact = (value: any): any => {
+      if (value === null || value === undefined) { return value; }
+      const t = typeof value;
+      if (t === 'string' || t === 'number' || t === 'boolean') { return value; }
+      if (Array.isArray(value)) { return value.map(v => redact(v)); }
+      if (t === 'object') {
+        const out: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+          if (sensitiveKeys.has(k.toLowerCase()) || sensitiveKeys.has(k)) {
+            out[k] = '[REDACTED]';
+          } else if (k.toLowerCase() === 'headers') {
+            // Special-case headers: redact common auth headers
+            const headers = v as Record<string, unknown> | undefined;
+            const hOut: Record<string, unknown> = {};
+            if (headers && typeof headers === 'object') {
+              for (const [hk, hv] of Object.entries(headers)) {
+                if (/^authorization$/i.test(hk) || /api[-_]?key/i.test(hk)) {
+                  hOut[hk] = '[REDACTED]';
+                } else {
+                  hOut[hk] = redact(hv);
+                }
+              }
+            }
+            out[k] = hOut;
+          } else {
+            out[k] = redact(v);
+          }
+        }
+        return out;
       }
-    });
+      return value;
+    };
 
-    return sanitized;
+    return redact(data);
   }
 }

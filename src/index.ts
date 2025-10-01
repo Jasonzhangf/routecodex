@@ -131,6 +131,25 @@ class RouteCodexApp {
       console.log(`📖 OpenAI API: http://${serverConfig.host}:${serverConfig.port}/v1/openai`);
       console.log(`🔬 Anthropic API: http://${serverConfig.host}:${serverConfig.port}/v1/anthropic`);
 
+      // Optional: run samples dry-run on startup (non-blocking)
+      if (process.env.ROUTECODEX_SAMPLES_DRY_RUN_ON_START === '1') {
+        try {
+          const { spawn } = await import('child_process');
+          const cmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+          const child = spawn(cmd, ['run', '-s', 'dry-run:samples'], {
+            stdio: 'inherit',
+            env: process.env,
+            cwd: process.cwd(),
+            detached: false,
+          });
+          child.on('exit', (code) => {
+            console.log(`🧪 samples-dry-run finished with code ${code}`);
+          });
+        } catch (e) {
+          console.warn('⚠️ Failed to run samples dry-run on start:', e);
+        }
+      }
+
     } catch (error) {
       console.error('❌ Failed to start RouteCodex server:', error);
       process.exit(1);

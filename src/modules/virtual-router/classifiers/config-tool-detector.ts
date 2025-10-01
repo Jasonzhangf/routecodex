@@ -433,9 +433,21 @@ export class ConfigToolDetector {
    * 从模块配置创建工具检测器
    */
   static fromModuleConfig(protocolConfig: any): ConfigToolDetector {
-    const toolDetectorConfig = protocolConfig.toolDetector;
+    // 检查配置结构
+    let toolDetectorConfig = protocolConfig.toolDetector;
+    
+    // 如果protocolConfig本身就有toolDetector属性，直接使用
+    if (!toolDetectorConfig && protocolConfig.type === 'pattern') {
+      toolDetectorConfig = protocolConfig;
+    }
+    
+    // 如果仍然没有找到配置，尝试直接使用传入的配置
+    if (!toolDetectorConfig && protocolConfig.patterns) {
+      toolDetectorConfig = protocolConfig;
+    }
+    
     if (!toolDetectorConfig || toolDetectorConfig.type !== 'pattern') {
-      throw new Error('Invalid tool detector configuration');
+      throw new Error(`Invalid tool detector configuration: ${  JSON.stringify(protocolConfig, null, 2)}`);
     }
 
     const config: ConfigToolDetectionConfig = {

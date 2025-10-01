@@ -1034,38 +1034,7 @@ export class QwenProvider implements ProviderModule {
     try { return JSON.parse(text); } catch { return { message: text }; }
   }
 
-  /** Ensure OAuth token is valid; refresh or re-auth if expired */
-  private async ensureValidToken(): Promise<void> {
-    if (this.authContext?.type !== 'oauth') { return; }
-    try {
-      if (!this.tokenStorage) {
-        this.tokenStorage = await this.oauth.loadToken();
-      }
-      const needsRefresh = !this.tokenStorage || this.tokenStorage.isExpired();
-      if (!needsRefresh) { return; }
-
-      if (this.tokenStorage?.refresh_token) {
-        const updated = await this.oauth.refreshTokensWithRetry(this.tokenStorage.refresh_token);
-        this.oauth.updateTokenStorage(this.tokenStorage, updated);
-        await this.oauth.saveToken();
-      } else {
-        const storage = await this.oauth.completeOAuthFlow(true);
-        this.tokenStorage = storage || await this.oauth.loadToken();
-        if (!this.tokenStorage || !this.tokenStorage.access_token) {
-          throw new Error('OAuth flow did not return a valid token');
-        }
-      }
-      if (this.authContext) {
-        this.authContext.token = this.tokenStorage?.access_token || '';
-        if (this.authContext.metadata) {
-          this.authContext.metadata.hasToken = !!this.tokenStorage?.access_token;
-          this.authContext.metadata.lastUpdated = Date.now();
-        }
-      }
-    } catch (e) {
-      this.logger.logModule(this.id, 'ensure-token-failed', { error: e instanceof Error ? e.message : String(e) });
-    }
-  }
+  
 
   /**
    * Build sanitized payload for Qwen API

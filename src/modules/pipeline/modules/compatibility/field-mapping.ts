@@ -8,6 +8,7 @@
 
 import type { CompatibilityModule, ModuleConfig, ModuleDependencies, TransformationRule } from '../../interfaces/pipeline-interfaces.js';
 import { TransformationEngine } from '../../utils/transformation-engine.js';
+import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 
 /**
@@ -68,27 +69,31 @@ export class FieldMappingCompatibility implements CompatibilityModule {
   /**
    * Process incoming request - Apply field transformations
    */
-  async processIncoming(request: any): Promise<any> {
+  async processIncoming(requestParam: any): Promise<SharedPipelineRequest> {
     if (!this.isInitialized) {
       throw new Error('Field Mapping Compatibility is not initialized');
     }
 
     try {
+      const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam;
+      const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
+      const request = isDto ? (dto!.data as any) : (requestParam as any);
+
       // Apply request transformations if rules are defined
       if (this.rules.length > 0) {
         const transformedRequest = await this.applyTransformations(request, this.rules);
-        this.logger.logTransformation(this.id, 'request-field-mapping', request, transformedRequest);
-        return transformedRequest;
+        this.logger.logTransformation(dto?.route?.requestId || 'unknown', 'request-field-mapping', request, transformedRequest);
+        return isDto ? { ...dto!, data: transformedRequest } : { data: transformedRequest, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
       }
 
       this.logger.logModule(this.id, 'no-request-transformations', {
         ruleCount: this.rules.length
       });
 
-      return request;
+      return isDto ? dto! : { data: request, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
 
     } catch (error) {
-      this.logger.logModule(this.id, 'request-transform-error', { error, request });
+      this.logger.logModule(this.id, 'request-transform-error', { error });
       throw error;
     }
   }
@@ -102,19 +107,21 @@ export class FieldMappingCompatibility implements CompatibilityModule {
     }
 
     try {
+      const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
+      const payload = isDto ? (response as any).data : response;
       // Apply response transformations if response rules are defined
       const responseRules = this.getResponseRules();
       if (responseRules.length > 0) {
-        const transformedResponse = await this.applyTransformations(response, responseRules);
-        this.logger.logTransformation(this.id, 'response-field-mapping', response, transformedResponse);
-        return transformedResponse;
+        const transformedPayload = await this.applyTransformations(payload, responseRules);
+        this.logger.logTransformation('unknown', 'response-field-mapping', payload, transformedPayload);
+        return isDto ? { ...(response as any), data: transformedPayload } : transformedPayload;
       }
 
       this.logger.logModule(this.id, 'no-response-transformations', {
         ruleCount: responseRules.length
       });
 
-      return response;
+      return isDto ? response : payload;
 
     } catch (error) {
       this.logger.logModule(this.id, 'response-transform-error', { error, response });
@@ -126,7 +133,7 @@ export class FieldMappingCompatibility implements CompatibilityModule {
    * Apply compatibility transformations
    */
   async applyTransformations(data: any, rules: TransformationRule[]): Promise<any> {
-    return this.transformationEngine.transform(data, rules, {
+    const result = await this.transformationEngine.transform(data, rules, {
       pipelineContext: {
         pipelineId: this.id,
         timestamp: Date.now(),
@@ -142,6 +149,7 @@ export class FieldMappingCompatibility implements CompatibilityModule {
         this.logger.logModule(this.id, `transformation-${level}`, { message });
       }
     });
+    return (result && typeof result === 'object' && 'data' in result) ? (result as any).data : result;
   }
 
   /**

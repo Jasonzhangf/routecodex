@@ -8,12 +8,7 @@
 import type { RCCBaseModule, ErrorHandlingCenter, DebugCenter } from '../types/external-types.js';
 import type { BaseProviderConfig, BaseTransformationRule } from '../types/base-types.js';
 import type { LogData } from '../../../types/common-types.js';
-import type {
-  SharedPipelineRequest,
-  SharedPipelineResponse,
-  SharedPipelineError,
-  SharedRouteRequest,
-} from '../../../types/shared-dtos.js';
+import type { SharedPipelineRequest, SharedPipelineResponse, SharedPipelineError, SharedRouteRequest } from '../../../types/shared-dtos.js';
 import type {
   DebugLogEntry,
   TransformationLogEntry,
@@ -59,12 +54,12 @@ export interface PipelineModule {
   /**
    * Process incoming request
    */
-  processIncoming(request: any): Promise<any>;
+  processIncoming(request: unknown): Promise<unknown>;
 
   /**
    * Process outgoing response
    */
-  processOutgoing(response: any): Promise<any>;
+  processOutgoing(response: unknown): Promise<unknown>;
 
   /**
    * Clean up resources
@@ -202,14 +197,19 @@ export interface LLMSwitchModule extends PipelineModule {
   readonly protocol: string;
 
   /**
+   * Process incoming request as DTO
+   */
+  processIncoming(request: SharedPipelineRequest): Promise<SharedPipelineRequest>;
+
+  /**
    * Transform request to target protocol
    */
-  transformRequest(request: any): Promise<any>;
+  transformRequest(request: unknown): Promise<unknown>;
 
   /**
    * Transform response from target protocol
    */
-  transformResponse(response: any): Promise<any>;
+  transformResponse(response: unknown): Promise<unknown>;
 }
 
 /**
@@ -222,12 +222,17 @@ export interface WorkflowModule extends PipelineModule {
   /**
    * Process streaming control
    */
-  processStreamingControl(request: any): Promise<any>;
+  processStreamingControl(request: SharedPipelineRequest): Promise<SharedPipelineRequest>;
 
   /**
    * Handle streaming response
    */
-  handleStreamingResponse(response: any): Promise<any>;
+  handleStreamingResponse(response: unknown): Promise<unknown>;
+
+  /**
+   * Process incoming request
+   */
+  processIncoming(request: SharedPipelineRequest): Promise<SharedPipelineRequest>;
 }
 
 /**
@@ -240,7 +245,12 @@ export interface CompatibilityModule extends PipelineModule {
   /**
    * Apply compatibility transformations
    */
-  applyTransformations(data: any, rules: TransformationRule[]): Promise<any>;
+  applyTransformations(data: unknown, rules: TransformationRule[]): Promise<unknown>;
+
+  /**
+   * Process incoming request (DTO)
+   */
+  processIncoming(request: SharedPipelineRequest): Promise<SharedPipelineRequest>;
 }
 
 /**
@@ -253,7 +263,7 @@ export interface ProviderModule extends PipelineModule {
   /**
    * Send request to provider
    */
-  sendRequest(request: any): Promise<any>;
+  sendRequest(request: unknown): Promise<unknown>;
 
   /**
    * Check provider health

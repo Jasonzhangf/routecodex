@@ -209,7 +209,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
 
       // Set up the server with merged configuration
       this.mergedConfig = mergedConfig;
-      this.config = mergedConfig.modules?.httpserver?.config || this.getDefaultServerConfig();
+      // Use the merged config directly for server configuration (port, host, etc.)
+      this.config = mergedConfig;
 
       // Initialize DebugCenter file logging if configured
       const debugCenterConfig = mergedConfig.modules?.debugcenter?.config;

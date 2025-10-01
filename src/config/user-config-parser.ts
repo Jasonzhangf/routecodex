@@ -344,13 +344,15 @@ export class UserConfigParser {
               ? 'glm-http-provider'
               : rawProviderType === 'lmstudio'
                 ? 'lmstudio-http'
-                : rawProviderType === 'qwen'
-                  ? (hasOAuth ? 'qwen-provider' : 'openai-provider')
-                  : rawProviderType === 'openai'
-                    ? 'openai-provider'
-                    : rawProviderType === 'iflow' || rawProviderType === 'iflow-http'
-                      ? (hasOAuth ? 'iflow-provider' : 'generic-http')
-                      : providerConfig.type;
+                : rawProviderType === 'modelscope'
+                  ? 'openai-provider'
+                  : rawProviderType === 'qwen'
+                    ? (hasOAuth ? 'qwen-provider' : 'openai-provider')
+                    : rawProviderType === 'openai'
+                      ? 'openai-provider'
+                      : rawProviderType === 'iflow' || rawProviderType === 'iflow-http'
+                        ? (hasOAuth ? 'iflow-provider' : 'generic-http')
+                        : providerConfig.type;
 
           // Normalize baseURL for LM Studio: http(s) -> ws(s)
           let baseURL = providerConfig.baseURL;

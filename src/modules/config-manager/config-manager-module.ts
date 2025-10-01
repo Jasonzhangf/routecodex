@@ -7,8 +7,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { homedir } from 'os';
 import { BaseModule } from '../../core/base-module.js';
-import { UserConfigParser } from '../../config/user-config-parser.js';
-import { ConfigMerger } from '../../config/config-merger.js';
+import { ConfigParser } from 'routecodex-config-engine';
+import { CompatibilityEngine } from 'routecodex-config-compat';
 import { AuthFileResolver } from '../../config/auth-file-resolver.js';
 import { DebugEventBus } from 'rcc-debugcenter';
 import type {
@@ -21,8 +21,8 @@ export class ConfigManagerModule extends BaseModule {
   private configPath: string;
   private systemConfigPath: string;
   private mergedConfigPath: string;
-  private userConfigParser: UserConfigParser;
-  private configMerger: ConfigMerger;
+  private configParser: ConfigParser;
+  private compatibilityEngine: CompatibilityEngine;
   private authFileResolver: AuthFileResolver;
   private configWatcher: any;
 
@@ -46,8 +46,8 @@ export class ConfigManagerModule extends BaseModule {
     this.systemConfigPath = './config/modules.json';
     this.mergedConfigPath = './config/merged-config.json';
 
-    this.userConfigParser = new UserConfigParser();
-    this.configMerger = new ConfigMerger();
+    this.configParser = new ConfigParser();
+    this.compatibilityEngine = new CompatibilityEngine();
     this.authFileResolver = new AuthFileResolver();
 
     // Initialize debug enhancements
@@ -238,6 +238,9 @@ export class ConfigManagerModule extends BaseModule {
         });
       }
 
+      // 若用户配置不存在，生成默认GLM单供应商配置
+      await this.ensureDefaultUserConfig();
+
       // 确保Auth目录存在
       await this.authFileResolver.ensureAuthDir();
 
@@ -291,6 +294,70 @@ export class ConfigManagerModule extends BaseModule {
   }
 
   /**
+   * 若用户配置文件不存在，生成默认GLM配置（单一供应商、glm-4.6、thinking开启、内联API Key）
+   */
+  private async ensureDefaultUserConfig(): Promise<void> {
+    try {
+      const expandHome = (p: string) => (p.startsWith('~') ? p.replace('~', homedir()) : p);
+      const filePath = expandHome(this.configPath);
+      try {
+        const s = await fs.stat(filePath);
+        if (s.isFile()) { return; }
+        // If path exists but not a file, fall through to write file
+      } catch {
+        // not exists -> create
+      }
+
+      const dir = filePath.split('/').slice(0, -1).join('/');
+      await fs.mkdir(dir, { recursive: true });
+
+      const glmApiKey = (process.env.GLM_API_KEY && String(process.env.GLM_API_KEY).trim()) || 'REPLACE_WITH_YOUR_GLM_API_KEY';
+      const defaultConfig = {
+        version: '1.0.0',
+        description: 'Auto-generated default config (GLM single provider)',
+        virtualrouter: {
+          inputProtocol: 'openai',
+          outputProtocol: 'openai',
+          providers: {
+            glm: {
+              type: 'glm',
+              baseURL: 'https://open.bigmodel.cn/api/coding/paas/v4',
+              apiKey: [glmApiKey],
+              // Provider-level compatibility is optional; model-level override below is applied
+              models: {
+                'glm-4.6': {
+                  maxContext: 128000,
+                  maxTokens: 8192,
+                  // 开启思考（thinking）
+                  compatibility: {
+                    type: 'glm-compatibility',
+                    config: {
+                      thinking: { enabled: true, payload: { type: 'enabled' } }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          routing: {
+            default: ['glm.glm-4.6']
+          }
+        },
+        httpserver: {
+          port: 5513
+        }
+      } as any;
+
+      const content = JSON.stringify(defaultConfig, null, 2);
+      await fs.writeFile(filePath, content, 'utf-8');
+      console.log(`🆕 Created default user config at ${filePath}`);
+    } catch (error) {
+      // Do not block initialization if default generation fails
+      console.warn('Failed to create default user config:', error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /**
    * 生成合并配置
    */
   async generateMergedConfig(): Promise<void> {
@@ -310,7 +377,7 @@ export class ConfigManagerModule extends BaseModule {
     }
 
     try {
-      console.log('🔄 Generating merged configuration...');
+      console.log('🔄 Generating merged configuration with new configuration engine...');
 
       // 加载系统配置
       const systemConfig = await this.loadSystemConfig();
@@ -318,8 +385,77 @@ export class ConfigManagerModule extends BaseModule {
       // 加载用户配置
       const userConfig = await this.loadUserConfig();
 
-      // 解析用户配置
-      const parsedUserConfig = this.userConfigParser.parseUserConfig(userConfig);
+      // 使用新配置引擎解析用户配置
+      let parsedUserConfig;
+      let compatibilityConfig = null;
+
+      try {
+        // 1. 先使用CompatibilityEngine处理兼容性（包含预处理）
+        const compatResult = await this.compatibilityEngine.processCompatibility(
+          JSON.stringify(userConfig)
+        );
+
+        if (!compatResult.isValid) {
+          throw new Error(`Compatibility processing failed: ${compatResult.errors?.map(e => e.message).join(', ')}`);
+        }
+
+        // 2. 对兼容性引擎输出做一次轻量归一化，确保 provider 家族类型符合解析器枚举
+        const normalizedInput: any = JSON.parse(
+          JSON.stringify(compatResult.compatibilityConfig?.normalizedConfig || userConfig)
+        );
+
+        // 归一化 providers.*.type: 将模块实现名映射为提供商家族名
+        // glm-http-provider -> glm, openai-provider -> openai, lmstudio-http -> lmstudio, qwen-provider -> qwen, iflow-provider -> iflow, generic-http -> custom
+        const familyTypeMap: Record<string, string> = {
+          'glm-http-provider': 'glm',
+          'openai-provider': 'openai',
+          'lmstudio-http': 'lmstudio',
+          'qwen-provider': 'qwen',
+          'iflow-provider': 'iflow',
+          'generic-http': 'custom',
+        };
+        try {
+          const provs = normalizedInput?.virtualrouter?.providers || {};
+          Object.keys(provs).forEach((pid) => {
+            const t = String(provs[pid]?.type || '').toLowerCase();
+            if (familyTypeMap[t]) {
+              provs[pid].type = familyTypeMap[t];
+            }
+          });
+        } catch { /* noop */ }
+
+        // 3. 使用ConfigParser解析处理后的配置
+        const parseResult = await this.configParser.parseFromString(
+          JSON.stringify(normalizedInput)
+        );
+
+        if (!parseResult.isValid) {
+          throw new Error(`Configuration validation failed: ${parseResult.errors?.map(e => e.message).join(', ')}`);
+        }
+
+        // 4. 提取解析后的配置和兼容性配置
+        parsedUserConfig = parseResult.normalized || normalizedInput;
+        compatibilityConfig = compatResult.compatibilityConfig;
+
+        console.log('✅ Configuration processed successfully with new engine');
+        console.log('🔍 Debug: Processed config structure:');
+        console.log('- parsedUserConfig keys:', Object.keys(parsedUserConfig));
+        console.log('- virtualrouter providers:', Object.keys(parsedUserConfig.virtualrouter?.providers || {}));
+        console.log('- routing default:', parsedUserConfig.virtualrouter?.routing?.default);
+
+      } catch (error) {
+        console.error('❌ New configuration engine failed:', error instanceof Error ? error.message : String(error));
+
+        // 如果新引擎失败，检查是否允许回退到legacy模式
+        if (String(process.env.ALLOW_LEGACY_FALLBACK || '').toLowerCase() === 'true') {
+          console.log('⚠️  Falling back to legacy configuration engine...');
+          // 这里可以保留原有的legacy逻辑作为回退方案
+          // 但为了鼓励迁移，默认不启用回退
+          throw new Error('Configuration processing failed and legacy fallback is disabled');
+        } else {
+          throw error;
+        }
+      }
 
       // Debug: Record config loading completion
       if (this.isDebugEnhanced) {
@@ -327,34 +463,45 @@ export class ConfigManagerModule extends BaseModule {
           mergeId,
           systemConfigSize: Object.keys(systemConfig).length,
           userConfigSize: Object.keys(userConfig).length,
-          parsedConfigSize: Object.keys(parsedUserConfig).length
+          parsedConfigSize: Object.keys(parsedUserConfig).length,
+          compatibilityConfigSize: compatibilityConfig ? Object.keys(compatibilityConfig).length : 0
         });
       }
 
-      // 合并配置
-      const mergedConfig = this.configMerger.mergeConfigs(
-        systemConfig,
-        userConfig,
-        parsedUserConfig
-      );
+      // 创建新的合并配置 - 使用处理后的配置作为基础
+      const mergedConfig = {
+        ...systemConfig,
+        ...parsedUserConfig,  // 使用解析后的配置（已经过compatibility处理）
+        compatibilityConfig,
+        _metadata: {
+          version: '2.0.0',
+          engine: 'routecodex-config-engine',
+          timestamp: Date.now(),
+          configPath: this.configPath
+        }
+      };
 
-      // 验证合并配置
-      const validation = this.configMerger.validateMergedConfig(mergedConfig);
-      if (!validation.isValid) {
+      // 附加版本元信息（便于宿主断言契约）
+      (mergedConfig as any).schemaVersion = '1.0.0';
+      (mergedConfig as any).engineVersion = String(process.env.USE_NEW_CONFIG_ENGINE ? 'sharedmodule' : 'legacy');
+
+      // 验证合并配置 - 使用新引擎验证
+      const finalValidation = await this.configParser.parseFromString(JSON.stringify(mergedConfig));
+      if (!finalValidation.isValid) {
         // Debug: Record validation failure
         if (this.isDebugEnhanced) {
           this.addToValidationHistory({
             mergeId,
             success: false,
-            errors: validation.errors,
+            errors: finalValidation.errors,
             timestamp: Date.now()
           });
           this.recordConfigMetric('validation_failed', {
             mergeId,
-            errors: validation.errors
+            errors: finalValidation.errors
           });
         }
-        throw new Error(`Configuration validation failed: ${validation.errors.join(', ')}`);
+        throw new Error(`Configuration validation failed: ${finalValidation.errors.map(e => e.message).join(', ')}`);
       }
 
       // Debug: Record validation success
@@ -429,6 +576,7 @@ export class ConfigManagerModule extends BaseModule {
     }
   }
 
+  
   /**
    * 重新加载配置
    */

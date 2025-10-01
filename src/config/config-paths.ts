@@ -1,12 +1,39 @@
 import fs from 'fs';
 import path from 'path';
 import { homedir } from 'os';
+import { UnifiedConfigPathResolver } from './unified-config-paths.js';
 
 /**
  * Resolve the primary RouteCodex configuration file path using a shared precedence order.
- * Optional explicit path takes priority, followed by environment overrides and fallbacks.
+ *
+ * This function now uses the UnifiedConfigPathResolver for consistent path resolution
+ * across the entire RouteCodex system while maintaining backward compatibility.
+ *
+ * @param preferredPath - Optional explicit path that takes highest priority
+ * @returns The resolved configuration file path
  */
 export function resolveRouteCodexConfigPath(preferredPath?: string): string {
+  try {
+    // Use the unified resolver for consistent behavior
+    const result = UnifiedConfigPathResolver.resolveConfigPath({
+      preferredPath,
+      allowDirectoryScan: true,
+      strict: false
+    });
+
+    return result.resolvedPath;
+  } catch (error) {
+    // Fallback to legacy behavior if unified resolver fails
+    console.warn('Unified config path resolution failed, using fallback:', error);
+    return legacyResolveRouteCodexConfigPath(preferredPath);
+  }
+}
+
+/**
+ * Legacy configuration path resolution (kept for emergency fallback)
+ * @deprecated Use UnifiedConfigPathResolver instead
+ */
+function legacyResolveRouteCodexConfigPath(preferredPath?: string): string {
   const candidates = [
     preferredPath,
     process.env.RCC4_CONFIG_PATH,
@@ -18,7 +45,6 @@ export function resolveRouteCodexConfigPath(preferredPath?: string): string {
     path.join(process.cwd(), 'routecodex.json'),
     path.join(homedir(), '.routecodex', 'config.json'),
     path.join(homedir(), '.routecodex', 'routecodex.json'),
-    // NEW: support scanning ~/.routecodex/config directory for *.json
     path.join(homedir(), '.routecodex', 'config')
   ];
 

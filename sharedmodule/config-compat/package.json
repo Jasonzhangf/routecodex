@@ -1,0 +1,62 @@
+{
+  "name": "routecodex-config-compat",
+  "version": "0.1.0",
+  "description": "RouteCodex Configuration Compatibility Layer - Existing logic preservation and normalization",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "routecodex",
+    "configuration",
+    "compatibility",
+    "normalization",
+    "ai",
+    "proxy"
+  ],
+  "author": "RouteCodex Team",
+  "license": "MIT",
+  "dependencies": {
+    "routecodex-config-engine": "file:../config-engine"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@vitest/coverage-v8": "^1.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/routecodex/routecodex.git",
+    "directory": "sharedmodule/config-compat"
+  },
+  "bugs": {
+    "url": "https://github.com/routecodex/routecodex/issues"
+  },
+  "homepage": "https://github.com/routecodex/routecodex#readme"
+}

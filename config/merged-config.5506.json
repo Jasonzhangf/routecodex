@@ -1,6 +1,4 @@
 {
-  "version": "1.0.0",
-  "mergedAt": "2025-09-28T06:00:08.643Z",
   "modules": {
     "basemodule": {
       "enabled": true,
@@ -51,7 +49,29 @@
       "enabled": true,
       "config": {
         "moduleType": "http-server",
-        "port": 5513
+        "host": "localhost",
+        "cors": {
+          "origin": "*",
+          "credentials": true
+        },
+        "timeout": 30000,
+        "bodyLimit": "10mb",
+        "enableMetrics": true,
+        "enableHealthChecks": true,
+        "logging": {
+          "level": "info",
+          "enableConsole": true,
+          "enableFile": true,
+          "filePath": "~/.routecodex/logs/server/http-server.log",
+          "categories": [
+            "server",
+            "api",
+            "request",
+            "config",
+            "error",
+            "message"
+          ]
+        }
       }
     },
     "configmanager": {
@@ -153,81 +173,284 @@
       "enabled": true,
       "config": {
         "moduleType": "virtual-router",
-        "routeTargets": {
-          "default": [
-            {
-              "providerId": "glm",
-              "modelId": "glm-4.5",
-              "keyId": "key1",
-              "actualKey": "${GLM_API_KEY}",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
+        "enableClassification": true,
+        "classificationConfig": {
+          "confidenceThreshold": 60,
+          "enableSmartRouting": true,
+          "protocolMapping": {
+            "openai": {
+              "endpoints": [
+                "/v1/chat/completions",
+                "/v1/completions"
+              ],
+              "messageField": "messages",
+              "modelField": "model",
+              "toolsField": "tools",
+              "maxTokensField": "max_tokens"
             },
-            {
-              "providerId": "qwen",
-              "modelId": "qwen3-coder-plus",
-              "keyId": "key1",
-              "actualKey": "${QWEN_API_KEY}",
-              "inputProtocol": "openai",
-              "outputProtocol": "openai"
-            }
-          ]
-        },
-        "pipelineConfigs": {
-          "glm.glm-4.5.key1": {
-            "provider": {
-              "type": "openai-provider",
-              "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
-              "auth": {
-                "type": "apikey",
-                "apiKey": "${GLM_API_KEY}"
-              }
-            },
-            "model": {
-              "maxContext": 128000,
-              "maxTokens": 8192
-            },
-            "keyConfig": {
-              "keyId": "key1",
-              "actualKey": "${GLM_API_KEY}",
-              "keyType": "apiKey"
-            },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
-            },
-            "llmSwitch": {
-              "type": "llmswitch-openai-openai",
-              "config": {}
+            "anthropic": {
+              "endpoints": [
+                "/v1/messages"
+              ],
+              "messageField": "messages",
+              "modelField": "model",
+              "toolsField": "tools",
+              "maxTokensField": "max_tokens"
             }
           },
-          "qwen.qwen3-coder-plus.key1": {
-            "provider": {
-              "type": "qwen-provider",
-              "baseURL": "https://portal.qwen.ai/v1"
+          "modelTiers": {
+            "basic": {
+              "description": "Basic models for simple tasks",
+              "models": [
+                "gpt-3.5-turbo",
+                "claude-3-haiku"
+              ],
+              "maxTokens": 16384,
+              "supportedFeatures": [
+                "text_generation",
+                "conversation"
+              ]
             },
-            "model": {
-              "maxContext": 128000,
-              "maxTokens": 8192
+            "advanced": {
+              "description": "Advanced models for complex tasks",
+              "models": [
+                "gpt-5",
+                "claude-3-opus",
+                "qwen-max"
+              ],
+              "maxTokens": 262144,
+              "supportedFeatures": [
+                "text_generation",
+                "reasoning",
+                "coding",
+                "tool_use"
+              ]
+            }
+          },
+          "routingDecisions": {
+            "default": {
+              "description": "Default routing for general requests",
+              "modelTier": "basic",
+              "tokenThreshold": 8000,
+              "toolTypes": [],
+              "priority": 1
             },
-            "keyConfig": {
-              "keyId": "key1",
-              "actualKey": "${QWEN_API_KEY}",
-              "keyType": "apiKey"
+            "longContext": {
+              "description": "Routing for long context requests",
+              "modelTier": "advanced",
+              "tokenThreshold": 10000,
+              "toolTypes": [],
+              "priority": 90
             },
-            "protocols": {
-              "input": "openai",
-              "output": "openai"
+            "thinking": {
+              "description": "Routing for complex reasoning requests",
+              "modelTier": "advanced",
+              "tokenThreshold": 16000,
+              "toolTypes": [
+                "dataAnalysis",
+                "complex_reasoning"
+              ],
+              "priority": 85
             },
-            "llmSwitch": {
-              "type": "llmswitch-openai-openai",
-              "config": {}
+            "coding": {
+              "description": "Routing for code generation requests",
+              "modelTier": "advanced",
+              "tokenThreshold": 24000,
+              "toolTypes": [
+                "codeExecution",
+                "fileSearch"
+              ],
+              "priority": 80
+            },
+            "webSearch": {
+              "description": "Routing for web search requests",
+              "modelTier": "advanced",
+              "tokenThreshold": 12000,
+              "toolTypes": [
+                "webSearch"
+              ],
+              "priority": 95
+            }
+          },
+          "protocolHandlers": {
+            "openai": {
+              "tokenCalculator": {
+                "type": "openai",
+                "tokenRatio": 0.25,
+                "toolOverhead": 50,
+                "messageOverhead": 10,
+                "imageTokenDefault": 255
+              },
+              "toolDetector": {
+                "type": "pattern",
+                "patterns": {
+                  "webSearch": [
+                    "web_search",
+                    "search",
+                    "browse",
+                    "internet"
+                  ],
+                  "codeExecution": [
+                    "code",
+                    "execute",
+                    "bash",
+                    "python",
+                    "javascript"
+                  ],
+                  "fileSearch": [
+                    "file",
+                    "read",
+                    "write",
+                    "document",
+                    "pdf"
+                  ],
+                  "dataAnalysis": [
+                    "data",
+                    "analysis",
+                    "chart",
+                    "graph",
+                    "statistics"
+                  ]
+                }
+              }
+            },
+            "anthropic": {
+              "tokenCalculator": {
+                "type": "anthropic",
+                "tokenRatio": 0.25,
+                "toolOverhead": 50,
+                "messageOverhead": 10
+              },
+              "toolDetector": {
+                "type": "pattern",
+                "patterns": {
+                  "webSearch": [
+                    "web_search",
+                    "search",
+                    "browse"
+                  ],
+                  "codeExecution": [
+                    "code",
+                    "execute",
+                    "bash",
+                    "python"
+                  ],
+                  "fileSearch": [
+                    "file",
+                    "read",
+                    "write"
+                  ],
+                  "dataAnalysis": [
+                    "data",
+                    "analysis",
+                    "chart"
+                  ]
+                }
+              }
+            }
+          },
+          "inputModelWeights": {
+            "qwen3-coder": {
+              "weight": 8.5,
+              "description": "Qwen3代码模型，高复杂度",
+              "routeMapping": {
+                "default": 0.4,
+                "longContext": 0.3,
+                "thinking": 0.7,
+                "coding": 0.9,
+                "webSearch": 0.2
+              }
+            },
+            "qwen3": {
+              "weight": 7,
+              "description": "Qwen3通用模型，中高复杂度",
+              "routeMapping": {
+                "default": 0.6,
+                "longContext": 0.7,
+                "thinking": 0.8,
+                "coding": 0.6,
+                "webSearch": 0.5
+              }
+            },
+            "qwen": {
+              "weight": 6,
+              "description": "Qwen模型，中等复杂度",
+              "routeMapping": {
+                "default": 0.8,
+                "longContext": 0.6,
+                "thinking": 0.5,
+                "coding": 0.4,
+                "webSearch": 0.6
+              }
+            },
+            "gpt-4": {
+              "weight": 9,
+              "description": "GPT-4模型，极高复杂度",
+              "routeMapping": {
+                "default": 0.3,
+                "longContext": 0.8,
+                "thinking": 0.9,
+                "coding": 0.8,
+                "webSearch": 0.7
+              }
+            },
+            "claude": {
+              "weight": 8.5,
+              "description": "Claude模型，高复杂度",
+              "routeMapping": {
+                "default": 0.4,
+                "longContext": 0.8,
+                "thinking": 0.9,
+                "coding": 0.7,
+                "webSearch": 0.6
+              }
+            },
+            "code": {
+              "weight": 7.5,
+              "description": "代码专用模型，高复杂度",
+              "routeMapping": {
+                "default": 0.5,
+                "longContext": 0.4,
+                "thinking": 0.6,
+                "coding": 0.95,
+                "webSearch": 0.3
+              }
+            },
+            "thinking": {
+              "weight": 8,
+              "description": "思考模型，高复杂度",
+              "routeMapping": {
+                "default": 0.4,
+                "longContext": 0.7,
+                "thinking": 0.95,
+                "coding": 0.6,
+                "webSearch": 0.5
+              }
+            }
+          },
+          "routeThresholds": {
+            "default": {
+              "minWeight": 0,
+              "description": "默认路由，适合简单任务"
+            },
+            "longContext": {
+              "minWeight": 6,
+              "description": "长上下文路由，需要模型支持长文本"
+            },
+            "thinking": {
+              "minWeight": 7,
+              "description": "复杂推理路由，需要模型有推理能力"
+            },
+            "coding": {
+              "minWeight": 7,
+              "description": "代码生成路由，需要模型有编程能力"
+            },
+            "webSearch": {
+              "minWeight": 6,
+              "description": "网络搜索路由，需要模型有搜索能力"
             }
           }
-        },
-        "authMappings": {},
-        "inputProtocol": "openai",
-        "outputProtocol": "openai"
+        }
       }
     },
     "dryrunengine": {
@@ -298,12 +521,484 @@
           "analysisLevel": "detailed"
         }
       }
+    }
+  },
+  "virtualrouter": {
+    "providers": {
+      "glm": {
+        "apiKey": "***REDACTED***",
+        "auth": {
+          "type": "apikey"
+        },
+        "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+        "compatibility": {
+          "config": {},
+          "type": "passthrough-compatibility"
+        },
+        "enabled": true,
+        "id": "glm",
+        "keyAliases": [
+          "key1"
+        ],
+        "models": {
+          "glm-4": {
+            "maxTokens": 8192,
+            "temperature": 0.7
+          },
+          "glm-4-flash": {
+            "maxTokens": 8192,
+            "temperature": 0.7
+          },
+          "glm-4.5": {
+            "maxTokens": 8192,
+            "temperature": 0.7
+          }
+        },
+        "type": "openai"
+      }
     },
-    "server": {
-      "enabled": true,
-      "config": {
-        "host": "localhost"
+    "routing": {
+      "background": [],
+      "coding": [
+        "glm.glm-4.5.key1"
+      ],
+      "default": [
+        "glm.glm-4.5.key1"
+      ],
+      "longcontext": [
+        "glm.glm-4.5.key1"
+      ],
+      "thinking": [],
+      "tools": [
+        "glm.glm-4.5.key1"
+      ],
+      "vision": [],
+      "websearch": []
+    },
+    "inputProtocol": "openai",
+    "outputProtocol": "openai"
+  },
+  "auth": {},
+  "pipelineConfigs": {
+    "glm.glm-4.5.key1": {
+      "id": "glm-glm-4.5-key1",
+      "modules": {
+        "compatibility": {
+          "config": {
+            "thinkingEnabled": true
+          },
+          "type": "glm-compatibility"
+        },
+        "llmSwitch": {
+          "config": {
+            "protocol": "openai",
+            "targetFormat": "openai"
+          },
+          "type": "llmswitch-openai-openai"
+        },
+        "provider": {
+          "config": {
+            "maxTokens": 8192,
+            "model": "glm-4.5",
+            "temperature": 0.7
+          },
+          "type": "glm-http-provider"
+        },
+        "workflow": {
+          "config": {
+            "enabled": true
+          },
+          "type": "streaming-control"
+        }
+      },
+      "provider": {
+        "apiKey": "***REDACTED***",
+        "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+        "type": "openai"
+      },
+      "settings": {
+        "debugEnabled": false,
+        "retryAttempts": 3,
+        "timeout": 30000
       }
     }
-  }
+  },
+  "port": 5506,
+  "schemaVersion": "1.0.0",
+  "stableSorting": {
+    "enabled": true,
+    "sortKeyMappings": true,
+    "sortProviders": true,
+    "sortRouting": true
+  },
+  "version": "1.0.0",
+  "compatibilityConfig": {
+    "originalConfig": {
+      "version": "1.0.0",
+      "port": 5506,
+      "virtualrouter": {
+        "inputProtocol": "openai",
+        "outputProtocol": "openai",
+        "providers": {
+          "glm": {
+            "id": "glm",
+            "type": "openai",
+            "enabled": true,
+            "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+            "models": {
+              "glm-4.5": {
+                "maxTokens": 8192,
+                "temperature": 0.7
+              },
+              "glm-4": {
+                "maxTokens": 8192,
+                "temperature": 0.7
+              },
+              "glm-4-flash": {
+                "maxTokens": 8192,
+                "temperature": 0.7
+              }
+            },
+            "apiKey": "***REDACTED***",
+            "auth": {
+              "type": "apikey"
+            },
+            "compatibility": {
+              "type": "passthrough-compatibility",
+              "config": {}
+            }
+          }
+        },
+        "routing": {
+          "default": [
+            "glm.glm-4.5.key1"
+          ],
+          "coding": [
+            "glm.glm-4.5.key1"
+          ],
+          "longcontext": [
+            "glm.glm-4.5.key1"
+          ],
+          "tools": [
+            "glm.glm-4.5.key1"
+          ],
+          "thinking": [],
+          "vision": [],
+          "websearch": [],
+          "background": []
+        }
+      },
+      "pipelineConfigs": {
+        "glm.glm-4.5.key1": {
+          "id": "glm-glm-4.5-key1",
+          "provider": {
+            "type": "openai",
+            "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+            "apiKey": "***REDACTED***"
+          },
+          "modules": {
+            "llmSwitch": {
+              "type": "llmswitch-openai-openai",
+              "config": {
+                "protocol": "openai",
+                "targetFormat": "openai"
+              }
+            },
+            "workflow": {
+              "type": "streaming-control",
+              "config": {
+                "enabled": true
+              }
+            },
+            "compatibility": {
+              "type": "glm-compatibility",
+              "config": {
+                "thinkingEnabled": true
+              }
+            },
+            "provider": {
+              "type": "glm-http-provider",
+              "config": {
+                "model": "glm-4.5",
+                "maxTokens": 8192,
+                "temperature": 0.7
+              }
+            }
+          },
+          "settings": {
+            "timeout": 30000,
+            "retryAttempts": 3,
+            "debugEnabled": false
+          }
+        }
+      },
+      "auth": {},
+      "schemaVersion": "2.0.0",
+      "stableSorting": {
+        "enabled": true,
+        "sortProviders": true,
+        "sortRouting": true,
+        "sortKeyMappings": true
+      }
+    },
+    "normalizedConfig": {
+      "virtualrouter": {
+        "providers": {
+          "glm": {
+            "apiKey": "***REDACTED***",
+            "auth": {
+              "type": "apikey"
+            },
+            "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+            "compatibility": {
+              "config": {},
+              "type": "passthrough-compatibility"
+            },
+            "enabled": true,
+            "id": "glm",
+            "keyAliases": [
+              "key1"
+            ],
+            "models": {
+              "glm-4": {
+                "maxTokens": 8192,
+                "temperature": 0.7
+              },
+              "glm-4-flash": {
+                "maxTokens": 8192,
+                "temperature": 0.7
+              },
+              "glm-4.5": {
+                "maxTokens": 8192,
+                "temperature": 0.7
+              }
+            },
+            "type": "openai"
+          }
+        },
+        "routing": {
+          "background": [],
+          "coding": [
+            "glm.glm-4.5.key1"
+          ],
+          "default": [
+            "glm.glm-4.5.key1"
+          ],
+          "longcontext": [
+            "glm.glm-4.5.key1"
+          ],
+          "thinking": [],
+          "tools": [
+            "glm.glm-4.5.key1"
+          ],
+          "vision": [],
+          "websearch": []
+        },
+        "inputProtocol": "openai",
+        "outputProtocol": "openai"
+      },
+      "auth": {},
+      "pipelineConfigs": {
+        "glm.glm-4.5.key1": {
+          "id": "glm-glm-4.5-key1",
+          "modules": {
+            "compatibility": {
+              "config": {
+                "thinkingEnabled": true
+              },
+              "type": "glm-compatibility"
+            },
+            "llmSwitch": {
+              "config": {
+                "protocol": "openai",
+                "targetFormat": "openai"
+              },
+              "type": "llmswitch-openai-openai"
+            },
+            "provider": {
+              "config": {
+                "maxTokens": 8192,
+                "model": "glm-4.5",
+                "temperature": 0.7
+              },
+              "type": "glm-http-provider"
+            },
+            "workflow": {
+              "config": {
+                "enabled": true
+              },
+              "type": "streaming-control"
+            }
+          },
+          "provider": {
+            "apiKey": "***REDACTED***",
+            "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+            "type": "openai"
+          },
+          "settings": {
+            "debugEnabled": false,
+            "retryAttempts": 3,
+            "timeout": 30000
+          }
+        }
+      },
+      "port": 5506,
+      "schemaVersion": "2.0.0",
+      "stableSorting": {
+        "enabled": true,
+        "sortKeyMappings": true,
+        "sortProviders": true,
+        "sortRouting": true
+      },
+      "version": "1.0.0"
+    },
+    "keyMappings": {
+      "global": {
+        "key1": "***REDACTED***"
+      },
+      "oauth": {},
+      "providers": {
+        "glm": {
+          "key1": "***REDACTED***"
+        }
+      }
+    },
+    "authMappings": {
+      "authFiles": {
+        "auth-type": "apikey"
+      },
+      "oauthTokens": {},
+      "oauthConfigs": {}
+    },
+    "routeTargets": {
+      "background": [],
+      "coding": [
+        {
+          "providerId": "glm",
+          "modelId": "glm-4.5",
+          "keyId": "key1",
+          "actualKey": "***REDACTED***",
+          "inputProtocol": "openai",
+          "outputProtocol": "openai"
+        }
+      ],
+      "default": [
+        {
+          "providerId": "glm",
+          "modelId": "glm-4.5",
+          "keyId": "key1",
+          "actualKey": "***REDACTED***",
+          "inputProtocol": "openai",
+          "outputProtocol": "openai"
+        }
+      ],
+      "longcontext": [
+        {
+          "providerId": "glm",
+          "modelId": "glm-4.5",
+          "keyId": "key1",
+          "actualKey": "***REDACTED***",
+          "inputProtocol": "openai",
+          "outputProtocol": "openai"
+        }
+      ],
+      "thinking": [],
+      "tools": [
+        {
+          "providerId": "glm",
+          "modelId": "glm-4.5",
+          "keyId": "key1",
+          "actualKey": "***REDACTED***",
+          "inputProtocol": "openai",
+          "outputProtocol": "openai"
+        }
+      ],
+      "vision": [],
+      "websearch": []
+    },
+    "pipelineConfigs": {},
+    "moduleConfigs": {
+      "virtualrouter": {
+        "enabled": true,
+        "config": {
+          "moduleType": "virtual-router",
+          "inputProtocol": "openai",
+          "outputProtocol": "openai"
+        }
+      },
+      "httpserver": {
+        "enabled": true,
+        "config": {
+          "port": 5506
+        }
+      },
+      "auth": {
+        "enabled": true,
+        "config": {}
+      },
+      "pipelineConfigs": {
+        "enabled": true,
+        "config": {
+          "glm.glm-4.5.key1": {
+            "id": "glm-glm-4.5-key1",
+            "modules": {
+              "compatibility": {
+                "config": {
+                  "thinkingEnabled": true
+                },
+                "type": "glm-compatibility"
+              },
+              "llmSwitch": {
+                "config": {
+                  "protocol": "openai",
+                  "targetFormat": "openai"
+                },
+                "type": "llmswitch-openai-openai"
+              },
+              "provider": {
+                "config": {
+                  "maxTokens": 8192,
+                  "model": "glm-4.5",
+                  "temperature": 0.7
+                },
+                "type": "glm-http-provider"
+              },
+              "workflow": {
+                "config": {
+                  "enabled": true
+                },
+                "type": "streaming-control"
+              }
+            },
+            "provider": {
+              "apiKey": "***REDACTED***",
+              "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+              "type": "openai"
+            },
+            "settings": {
+              "debugEnabled": false,
+              "retryAttempts": 3,
+              "timeout": 30000
+            }
+          }
+        }
+      },
+      "stableSorting": {
+        "enabled": true,
+        "config": {
+          "enabled": true,
+          "sortKeyMappings": true,
+          "sortProviders": true,
+          "sortRouting": true
+        }
+      }
+    }
+  },
+  "_metadata": {
+    "version": "2.0.0",
+    "engine": "routecodex-config-engine",
+    "timestamp": 1759277431087,
+    "configPath": "/Users/fanzhang/.routecodex/config.json"
+  },
+  "engineVersion": "legacy"
 }

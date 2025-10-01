@@ -4,6 +4,7 @@
  */
 
 import express, { type Router, type Request, type Response, type NextFunction } from 'express';
+import fs from 'fs/promises';
 import { BaseModule, type ModuleInfo } from 'rcc-basemodule';
 import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
 import { DebugEventBus } from 'rcc-debugcenter';
@@ -655,6 +656,26 @@ export class OpenAIRouter extends BaseModule {
         ip: req.ip,
       };
 
+      // Optionally record Codex CLI inputs as standard samples (redacted)
+      try {
+        const ua = (req.get('user-agent') || '').toLowerCase();
+        if (ua.includes('codex')) {
+          const dir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
+          await fs.mkdir(dir, { recursive: true } as any);
+          const sample = {
+            requestId,
+            endpoint: '/chat/completions',
+            timestamp: startTime,
+            model: req.body?.model,
+            messageCount: Array.isArray(req.body?.messages) ? req.body.messages.length : 0,
+            headers: this.sanitizeHeaders(req.headers),
+            body: req.body,
+          } as any;
+          const p = `${dir}/chat-${requestId}.json`;
+          await fs.writeFile(p, JSON.stringify(sample, null, 2));
+        }
+      } catch { /* non-blocking */ }
+
       // Validate request
       if (this.config.enableValidation) {
         const validation = this.validateChatCompletionRequest(req.body);
@@ -716,8 +737,33 @@ export class OpenAIRouter extends BaseModule {
           },
         };
 
+        // Record pipeline input sample for Codex CLI requests
+        try {
+          const ua = (req.get('user-agent') || '').toLowerCase();
+          if (ua.includes('codex')) {
+            const dir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
+            await fs.mkdir(dir, { recursive: true } as any);
+            const sampleIn: any = JSON.parse(JSON.stringify(pipelineRequest));
+            if (sampleIn?.data?.__rcc_overrideApiKey) {
+              sampleIn.data.__rcc_overrideApiKey = '[REDACTED]';
+            }
+            await fs.writeFile(`${dir}/pipeline-in-${requestId}.json`, JSON.stringify(sampleIn, null, 2));
+          }
+        } catch { /* non-blocking */ }
+
         const pipelineResponse = await this.pipelineManager.processRequest(pipelineRequest);
         response = pipelineResponse?.data ?? pipelineResponse;
+
+        // Record pipeline output sample for Codex CLI requests
+        try {
+          const ua = (req.get('user-agent') || '').toLowerCase();
+          if (ua.includes('codex')) {
+            const dir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
+            await fs.mkdir(dir, { recursive: true } as any);
+            const sampleOut: any = JSON.parse(JSON.stringify(response));
+            await fs.writeFile(`${dir}/pipeline-out-${requestId}.json`, JSON.stringify(sampleOut, null, 2));
+          }
+        } catch { /* non-blocking */ }
 
         // If client requests streaming, bridge pipeline stream to OpenAI SSE
         if (req.body.stream) {
@@ -727,6 +773,9 @@ export class OpenAIRouter extends BaseModule {
 
         // If client requests JSON object format, coerce content to strict JSON
         response = this.ensureJsonContentIfRequested(response, req.body, 'chat');
+
+        // Tool-call reconstruction is handled in compatibility modules.
+        // Router does not mutate content/tool_calls here.
       } else {
         throw new RouteCodexError(
           'OpenAI pipeline not initialized. Configure providers and pipelines in merged-config.',
@@ -793,7 +842,7 @@ export class OpenAIRouter extends BaseModule {
             model: ctxModelId || (details.provider?.model),
           }
         };
-      } catch {}
+      } catch (_e) { void 0; }
 
       // Debug: Record request error
       if (this.isDebugEnhanced) {
@@ -844,6 +893,8 @@ export class OpenAIRouter extends BaseModule {
       res.status(mapped.status).json(mapped.body);
     }
   }
+
+  
 
   
 
@@ -990,7 +1041,7 @@ export class OpenAIRouter extends BaseModule {
             model: ctxModelId || (details.provider?.model),
           }
         };
-      } catch {}
+      } catch (_e) { void 0; }
       await this.handleError(error as Error, 'completions_handler');
 
       this.debugEventBus.publish({
@@ -1133,6 +1184,10 @@ export class OpenAIRouter extends BaseModule {
                 if (d.reasoning_content && !d.content) {
                   d.content = d.reasoning_content;
                 }
+                if (typeof d.content === 'string') {
+                  // Strip <think> private markers from streamed content
+                  d.content = d.content.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '').replace(/<\/?think\b[^>]*>/gi, '');
+                }
                 if ('reasoning_content' in d) {delete d.reasoning_content;}
                 c.delta = d;
               }
@@ -1143,6 +1198,7 @@ export class OpenAIRouter extends BaseModule {
         } catch { return obj; }
       };
 
+      let emittedToolCalls = false;
       if (iterator) {
         // Relay chunks as-is; assume they are OpenAI chunk objects or strings
         for await (const chunk of iterator as any) {
@@ -1181,9 +1237,13 @@ export class OpenAIRouter extends BaseModule {
           const normalized = this.normalizeOpenAIResponse(payload, 'chat');
           // Extract content from normalized structure
           let content = '';
+          let toolCalls: any[] | null = null;
           if (normalized && Array.isArray(normalized.choices) && normalized.choices[0]) {
             const c0 = normalized.choices[0] as any;
             content = c0?.message?.content || c0?.text || '';
+            if (Array.isArray(c0?.message?.tool_calls) && c0.message.tool_calls.length) {
+              toolCalls = c0.message.tool_calls;
+            }
           } else if (typeof normalized === 'string') {
             content = normalized;
           } else if (payload && typeof payload === 'object') {
@@ -1198,12 +1258,26 @@ export class OpenAIRouter extends BaseModule {
             'chat'
           );
           const outContent = cleaned?.choices?.[0]?.message?.content ?? content;
+          const delta: any = { };
+          const hasTool = Array.isArray(toolCalls) && toolCalls.length > 0;
+          if (!hasTool && outContent && String(outContent).length > 0) {
+            delta.content = outContent;
+          }
+          if (hasTool) {
+            // Emit tool_calls in a single delta chunk for compatibility
+            delta.tool_calls = toolCalls.map((tc: any) => ({
+              id: tc.id || `call_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+              type: 'function',
+              function: { name: tc.function?.name, arguments: tc.function?.arguments ?? '' }
+            }));
+            emittedToolCalls = true;
+          }
           const single = normalizeChunk({
             id: `chatcmpl-${Date.now()}`,
             object: 'chat.completion.chunk',
             created: Math.floor(Date.now() / 1000),
             model: model || 'unknown',
-            choices: [{ index: 0, delta: { content: outContent }, finish_reason: undefined }],
+            choices: [{ index: 0, delta, finish_reason: undefined }],
           });
           res.write(`data: ${JSON.stringify(single)}\n\n`);
         } catch {
@@ -1217,7 +1291,7 @@ export class OpenAIRouter extends BaseModule {
         object: 'chat.completion.chunk',
         created: Math.floor(Date.now() / 1000),
         model: model || 'unknown',
-        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+        choices: [{ index: 0, delta: {}, finish_reason: emittedToolCalls ? 'tool_calls' : 'stop' }],
       };
       res.write(`data: ${JSON.stringify(done)}\n\n`);
       res.write('data: [DONE]\n\n');
@@ -1967,7 +2041,7 @@ export class OpenAIRouter extends BaseModule {
       errors.push('Messages are required and must be a non-empty array');
     }
 
-    // Validate messages
+    // Validate messages (allow string | array-of-parts | object for OpenAI-compatible payloads)
     if (request.messages && Array.isArray(request.messages)) {
       for (let i = 0; i < request.messages.length; i++) {
         const message = request.messages[i];
@@ -1975,8 +2049,15 @@ export class OpenAIRouter extends BaseModule {
           errors.push(`Message ${i} has invalid role: ${message.role}`);
         }
 
-        if (!message.content || typeof message.content !== 'string') {
-          errors.push(`Message ${i} has invalid content: must be a string`);
+        const c = (message as any).content;
+        // If content is missing/null, allow it (normalizer/pipeline will coerce as needed)
+        if (c !== undefined && c !== null) {
+          const isString = typeof c === 'string';
+          const isArray = Array.isArray(c);
+          const isObject = typeof c === 'object' && !isArray;
+          if (!(isString || isArray || isObject)) {
+            errors.push(`Message ${i} has invalid content: must be string/array/object`);
+          }
         }
       }
     }

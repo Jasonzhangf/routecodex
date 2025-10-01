@@ -11,6 +11,7 @@ import type {
   TransformationRule,
   ProviderConfig
 } from '../interfaces/pipeline-interfaces.js';
+import type { PipelineManagerConfig } from '../interfaces/pipeline-interfaces.js';
 
 // Re-export PipelineConfig for compatibility
 export type { PipelineConfig };
@@ -326,19 +327,8 @@ export interface PipelineRequestProcessor {
   };
 }
 
-/**
- * Pipeline manager configuration
- */
-export interface PipelineManagerConfig {
-  /** Available pipelines */
-  readonly pipelines: PipelineConfig[];
-  /** Global settings */
-  readonly settings?: {
-    defaultTimeout?: number;
-    maxRetries?: number;
-    debugLevel?: 'none' | 'basic' | 'detailed';
-  };
-}
+// Use the canonical definition from interfaces to avoid duplication
+export type { PipelineManagerConfig } from '../interfaces/pipeline-interfaces.js';
 
 /**
  * Pipeline configuration loader interface

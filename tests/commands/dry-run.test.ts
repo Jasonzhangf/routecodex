@@ -109,7 +109,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
 
       try {
         // 执行dry-run命令
-        const result = execSync(`node dist/cli.js dry-run request ${requestFile} --config ${configFile}`, {
+        const result = execSync(`node dist/cli.js dry-run request ${requestFile}`, {
           encoding: 'utf-8',
           cwd: '/Users/fanzhang/Documents/github/routecodex'
         });
@@ -171,7 +171,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
       fs.writeFileSync(requestFile, JSON.stringify(request, null, 2));
 
       try {
-        const result = execSync(`node dist/cli.js dry-run request ${requestFile} --config ${configFile}`, {
+        const result = execSync(`node dist/cli.js dry-run request ${requestFile}`, {
           encoding: 'utf-8',
           cwd: '/Users/fanzhang/Documents/github/routecodex'
         });

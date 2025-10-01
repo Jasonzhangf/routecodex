@@ -73,13 +73,15 @@ export class VirtualRouterDryRunExecutor {
       if (!classificationConfig) {
         throw new Error('classificationConfig is missing in moduleConfig');
       }
+      
       this.classifier = ConfigRequestClassifier.fromModuleConfig(classificationConfig);
       
       // 创建路由决策器
-      if (moduleConfig.classificationConfig?.routingDecisions) {
-        this.routingDecision = ConfigRoutingDecision.fromModuleConfig(moduleConfig.classificationConfig);
+      if (classificationConfig.modelTiers && classificationConfig.routingDecisions) {
+        this.routingDecision = ConfigRoutingDecision.fromModuleConfig(classificationConfig);
       }
     } catch (error) {
+      console.error('Failed to initialize virtual router dry-run:', error);
       throw new Error(`Failed to initialize virtual router dry-run: ${error instanceof Error ? error.message : String(error)}`);
     }
   }

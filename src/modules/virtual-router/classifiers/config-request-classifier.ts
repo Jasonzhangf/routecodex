@@ -110,18 +110,26 @@ export class ConfigRequestClassifier {
       }
 
       try {
-        const toolDetector = ConfigToolDetector.fromModuleConfig(handler);
-        this.toolDetectors.set(protocol, toolDetector);
+        // 检查handler是否包含toolDetector配置
+        if (handler.toolDetector) {
+          const toolDetector = ConfigToolDetector.fromModuleConfig(handler);
+          this.toolDetectors.set(protocol, toolDetector);
+        }
       } catch (error) {
         console.warn(`Failed to initialize tool detector for protocol ${protocol}:`, error);
       }
     }
 
     // 初始化路由决策器
-    this.routingDecision = ConfigRoutingDecision.fromModuleConfig(this.config);
+    this.routingDecision = ConfigRoutingDecision.fromModuleConfig({
+      modelTiers: this.config.modelTiers,
+      routingDecisions: this.config.routingDecisions
+    });
 
     // 初始化模型层级分类器
-    this.modelTierClassifier = ConfigModelTierClassifier.fromModuleConfig(this.config);
+    this.modelTierClassifier = ConfigModelTierClassifier.fromModuleConfig({
+      modelTiers: this.config.modelTiers
+    });
   }
 
   /**

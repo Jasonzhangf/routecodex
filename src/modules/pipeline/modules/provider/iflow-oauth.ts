@@ -212,7 +212,9 @@ export class IFlowOAuth {
     console.log('Starting iFlow OAuth device flow...');
     try {
       console.log(`[iFlow OAuth] Using endpoints:\n  device: ${this.deviceCodeEndpoint}\n  token:  ${this.tokenEndpoint}`);
-    } catch {}
+    } catch {
+      // Intentionally empty - logging errors might expose sensitive information
+    }
 
     const { codeVerifier, codeChallenge } = this.generatePKCEPair();
     const device = await this.requestDeviceCode(codeChallenge);
@@ -325,7 +327,9 @@ export class IFlowOAuth {
           res.end();
           resolve(data);
         } catch (e) {
-          try { res.statusCode = 500; res.end('Authentication failed'); } catch {}
+          try { res.statusCode = 500; res.end('Authentication failed'); } catch {
+            // Response might already be closed
+          }
           reject(e instanceof Error ? e : new Error(String(e)));
         } finally {
           server.close();
@@ -408,7 +412,7 @@ export class IFlowOAuth {
     }
 
     // Attempt primary endpoint
-    let resp = await this.httpClient(this.deviceCodeEndpoint, {
+    const resp = await this.httpClient(this.deviceCodeEndpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -568,7 +572,7 @@ export class IFlowOAuth {
         formData.append('client_secret', this.clientSecret);
       }
 
-      let currentTokenEndpoint = this.tokenEndpoint;
+      const currentTokenEndpoint = this.tokenEndpoint;
       let response = await this.httpClient(currentTokenEndpoint, {
         method: 'POST',
         headers: {
@@ -603,7 +607,9 @@ export class IFlowOAuth {
             if (response.ok) {
               return JSON.parse(text) as { access_token: string; refresh_token?: string; token_type?: string; scope?: string; expires_in: number };
             }
-          } catch {}
+          } catch {
+            // Continue with next method
+          }
         }
       }
 

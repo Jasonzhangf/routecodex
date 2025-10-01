@@ -7,6 +7,7 @@
  */
 
 import type { CompatibilityModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
+import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 import type { TransformationRule } from '../../interfaces/pipeline-interfaces.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 
@@ -58,16 +59,17 @@ export class LMStudioCompatibility implements CompatibilityModule {
   /**
    * Process incoming request - Apply compatibility transformations
    */
-  async processIncoming(request: any): Promise<any> {
+  async processIncoming(requestParam: any): Promise<SharedPipelineRequest> {
     if (!this.isInitialized) {
       throw new Error('LM Studio Compatibility module is not initialized');
     }
 
     try {
-      this.logger.logModule(this.id, 'processing-request-start', {
-        hasTools: !!request.tools,
-        model: request.model
-      });
+      const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam;
+      const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
+      const request = isDto ? (dto!.data as any) : (requestParam as any);
+
+      this.logger.logModule(this.id, 'processing-request-start', { hasTools: !!request?.tools, model: request?.model });
 
       // Apply transformation rules to request
       const transformedResult = await this.applyTransformations(
@@ -82,7 +84,7 @@ export class LMStudioCompatibility implements CompatibilityModule {
         transformationCount: this.getRequestTransformationRules().length
       });
 
-      return transformedRequest;
+      return isDto ? { ...dto!, data: transformedRequest } : { data: transformedRequest, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
 
     } catch (error) {
       this.logger.logModule(this.id, 'processing-request-error', { error });
@@ -99,14 +101,16 @@ export class LMStudioCompatibility implements CompatibilityModule {
     }
 
     try {
+      const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
+      const payload = isDto ? (response as any).data : response;
       this.logger.logModule(this.id, 'processing-response-start', {
-        hasToolCalls: !!response.tool_calls,
-        hasChoices: !!response.choices
+        hasToolCalls: !!payload?.tool_calls,
+        hasChoices: !!payload?.choices
       });
 
       // Apply transformation rules to response
       const transformedResult = await this.applyTransformations(
-        response,
+        payload,
         this.getResponseTransformationRules()
       );
 
@@ -117,7 +121,7 @@ export class LMStudioCompatibility implements CompatibilityModule {
         transformationCount: this.getResponseTransformationRules().length
       });
 
-      return transformedResponse;
+      return isDto ? { ...(response as any), data: transformedResponse } : transformedResponse;
 
     } catch (error) {
       this.logger.logModule(this.id, 'processing-response-error', { error });

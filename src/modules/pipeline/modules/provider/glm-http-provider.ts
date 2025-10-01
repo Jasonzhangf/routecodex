@@ -50,6 +50,27 @@ export class GLMHTTPProvider implements ProviderModule {
     this.isInitialized = true;
   }
 
+  async checkHealth(): Promise<boolean> {
+    // Basic health check - try to make a simple request to the provider
+    try {
+      const providerConfig = this.config.config as ProviderConfig;
+      const baseUrl = (providerConfig.baseUrl || DEFAULT_GLM_BASE).replace(/\/+$/, '');
+      
+      const response = await fetch(`${baseUrl}/models`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${this.authContext?.token || ''}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      return response.ok;
+    } catch (error) {
+      this.logger.logError(error, { provider: this.id, method: 'checkHealth' });
+      return false;
+    }
+  }
+
   async processIncoming(request: UnknownObject): Promise<UnknownObject> {
     const resp = await this.sendChat(request);
     return resp.data as UnknownObject;
@@ -90,15 +111,65 @@ export class GLMHTTPProvider implements ProviderModule {
 
     const start = Date.now();
     const endpoint = `${this.getBaseUrl()}/chat/completions`;
+    // Normalize messages/content for GLM (expects plain strings)
+    const rawMessages = (request as any)?.messages || [];
+    const normalizedMessages = Array.isArray(rawMessages)
+      ? rawMessages.map((m: any) => {
+          // Normalize role: GLM supports 'system' | 'user' | 'assistant'
+          let role: string = m?.role || 'user';
+          if (role === 'tool') { role = 'user'; }
+          if (!['system','user','assistant'].includes(role)) { role = 'user'; }
+
+          const msg: any = { role };
+
+          // Merge content and tool_calls into a plain text content for GLM
+          const parts: string[] = [];
+
+          const c = m?.content;
+          if (c !== undefined && c !== null) {
+            if (typeof c === 'string') {
+              parts.push(c);
+            } else if (Array.isArray(c)) {
+              const text = c
+                .map((p: any) => (p && typeof p === 'object' && p.type === 'text' && typeof p.text === 'string' ? p.text : ''))
+                .filter((s: string) => s)
+                .join('\n');
+              if (text) {parts.push(text);}
+            } else if (typeof c === 'object') {
+              try { parts.push(JSON.stringify(c)); } catch { parts.push(String(c)); }
+            } else {
+              parts.push(String(c));
+            }
+          }
+
+          // If assistant tool_calls exist, append a readable summary so GLM can consume context
+          if (role === 'assistant' && Array.isArray(m?.tool_calls) && m.tool_calls.length) {
+            const callsText = m.tool_calls.map((tc: any, idx: number) => {
+              const name = tc?.function?.name || tc?.type || `tool_${idx}`;
+              let argsStr = '';
+              const args = tc?.function?.arguments;
+              if (typeof args === 'string') { argsStr = args; }
+              else if (args && typeof args === 'object') { try { argsStr = JSON.stringify(args); } catch { argsStr = String(args); } }
+              return `[tool_call:${name}] ${argsStr}`.trim();
+            }).join('\n');
+            if (callsText) {parts.push(callsText);}
+          }
+
+          msg.content = parts.join('\n').trim();
+          return msg;
+        })
+      : [];
+
     const payload: Record<string, unknown> = {
       model: (request as any)?.model,
-      messages: (request as any)?.messages || [],
+      messages: normalizedMessages,
       temperature: (request as any)?.temperature,
       max_tokens: (request as any)?.max_tokens,
       top_p: (request as any)?.top_p,
-      stream: Boolean((request as any)?.stream) || false,
-      tools: (request as any)?.tools,
-      response_format: (request as any)?.response_format,
+      // Force non-stream to avoid text/event-stream parsing issues
+      stream: false,
+      // Avoid sending unsupported fields by GLM to reduce 1210 errors
+      // tools and response_format omitted intentionally
     };
 
     // Allow per-request override
@@ -158,4 +229,3 @@ export class GLMHTTPProvider implements ProviderModule {
 }
 
 export default GLMHTTPProvider;
-

@@ -8,6 +8,7 @@
 import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { ProviderConfig, AuthContext, ProviderResponse } from '../../types/provider-types.js';
 import type { UnknownObject } from '../../../../types/common-types.js';
+import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { DebugEventBus } from "rcc-debugcenter";
 import OpenAI from 'openai';
@@ -378,8 +379,9 @@ export class OpenAIProvider implements ProviderModule {
   /**
    * Process incoming request (compatibility with pipeline)
    */
-  async processIncoming(request: UnknownObject): Promise<ProviderResponse> {
-    return this.sendRequest(request);
+  async processIncoming(request: UnknownObject | SharedPipelineRequest): Promise<ProviderResponse> {
+    const payload: UnknownObject = (this.isSharedPipelineRequest(request) ? (request as SharedPipelineRequest).data : request) as UnknownObject;
+    return this.sendRequest(payload);
   }
 
   /**
@@ -444,6 +446,12 @@ export class OpenAIProvider implements ProviderModule {
    */
   private generateRequestId(): string {
     return `openai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  private isSharedPipelineRequest(value: unknown): value is SharedPipelineRequest {
+    if (!value || typeof value !== 'object') {return false;}
+    const v = value as Record<string, unknown>;
+    return 'data' in v && 'route' in v && 'metadata' in v && 'debug' in v;
   }
 
   /**

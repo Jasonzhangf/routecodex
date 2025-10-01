@@ -505,26 +505,10 @@ export class PipelineConfigManager {
         errors.push(`Pipeline ${pipeline.id} must have provider module configuration`);
       }
 
-      // Validate module types
+      // Validate module types (presence only; concrete availability is runtime-registered by ModuleRegistry)
       Object.entries(modules).forEach(([moduleType, moduleConfig]) => {
         if (!moduleConfig.type) {
           errors.push(`Pipeline ${pipeline.id} ${moduleType} module must have a type`);
-        }
-
-        // Check for known module types
-        const knownTypes = [
-          'llmswitch-openai-openai',
-          'llmswitch-anthropic-openai',
-          'streaming-control',
-          'field-mapping',
-          'passthrough-compatibility',
-          'qwen-provider',
-          'openai-provider',
-          'generic-http'
-        ];
-
-        if (!knownTypes.includes(moduleConfig.type)) {
-          warnings.push(`Unknown module type '${moduleConfig.type}' in pipeline ${pipeline.id}`);
         }
       });
     });

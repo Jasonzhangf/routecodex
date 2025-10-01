@@ -3,11 +3,8 @@
  * Standardizes OpenAI requests to ensure proper format before processing.
  */
 
-import type {
-  LLMSwitchModule,
-  ModuleConfig,
-  ModuleDependencies
-} from '../../interfaces/pipeline-interfaces.js';
+import type { LLMSwitchModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
+import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 
 /**
  * OpenAI Normalizer LLM Switch Module
@@ -32,26 +29,31 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
     this.isInitialized = true;
   }
 
-  async processIncoming(request: any): Promise<any> {
+  async processIncoming(requestParam: any): Promise<SharedPipelineRequest> {
     if (!this.isInitialized) {
       await this.initialize();
     }
 
-    const normalized = this.normalizeOpenAIRequest(request);
+    const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam;
+    const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
+    const payload = isDto ? (dto!.data as any) : (requestParam as any);
 
-    return {
-      ...normalized,
-      _metadata: {
-        switchType: 'llmswitch-openai-openai',
-        timestamp: Date.now(),
-        originalProtocol: 'openai',
-        targetProtocol: 'openai'
-      }
-    };
+    const normalized = this.normalizeOpenAIRequest(payload);
+
+    const outDto: SharedPipelineRequest = isDto
+      ? { ...dto!, data: { ...normalized, _metadata: { switchType: 'llmswitch-openai-openai', timestamp: Date.now(), originalProtocol: 'openai', targetProtocol: 'openai' } } }
+      : {
+          data: { ...normalized, _metadata: { switchType: 'llmswitch-openai-openai', timestamp: Date.now(), originalProtocol: 'openai', targetProtocol: 'openai' } },
+          route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() },
+          metadata: {},
+          debug: { enabled: false, stages: {} }
+        };
+    return outDto;
   }
 
   async processOutgoing(response: any): Promise<any> {
-    return response;
+    const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
+    return response; // passthrough; DTO 也直接返回
   }
 
   async transformRequest(request: any): Promise<any> {
@@ -168,4 +170,3 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
     };
   }
 }
-

@@ -7,6 +7,7 @@
  */
 
 import type { WorkflowModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
+import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 
 /**
@@ -51,29 +52,35 @@ export class StreamingControlWorkflow implements WorkflowModule {
   /**
    * Process incoming request - Handle streaming conversion
    */
-  async processIncoming(request: any): Promise<any> {
+  async processIncoming(requestParam: SharedPipelineRequest): Promise<SharedPipelineRequest> {
     if (!this.isInitialized) {
       throw new Error('Streaming Control Workflow is not initialized');
     }
 
     try {
-      const originalStream = request.stream;
-      let transformedRequest = { ...request };
+      const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam;
+      const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
+      const payload = isDto ? (dto!.data as any) : (requestParam as any);
+
+      const originalStream = payload?.stream;
+      let transformedPayload = { ...(payload || {}) };
 
       // If streaming request, convert to non-streaming for provider
       if (originalStream === true) {
-        transformedRequest = this.convertStreamingToNonStreaming(request);
-        this.logger.logTransformation(this.id, 'streaming-to-non-streaming', request, transformedRequest);
+        transformedPayload = this.convertStreamingToNonStreaming(payload);
+        this.logger.logTransformation(dto?.route?.requestId || 'unknown', 'streaming-to-non-streaming', payload, transformedPayload);
       } else {
         this.logger.logModule(this.id, 'non-streaming-request', {
           hasStream: originalStream
         });
       }
 
-      return transformedRequest;
+      return isDto
+        ? { ...dto!, data: transformedPayload }
+        : { data: transformedPayload, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
 
     } catch (error) {
-      this.logger.logModule(this.id, 'request-process-error', { error, request });
+      this.logger.logModule(this.id, 'request-process-error', { error });
       throw error;
     }
   }
@@ -87,11 +94,13 @@ export class StreamingControlWorkflow implements WorkflowModule {
     }
 
     try {
+      const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
+      const payload = isDto ? (response as any).data : response;
       // Always return non-streaming response. No mock streaming conversion.
       this.logger.logModule(this.id, 'return-non-streaming-response', {
         note: 'Streaming responses are not implemented; unified to non-streaming.'
       });
-      return response;
+      return isDto ? response : payload;
 
     } catch (error) {
       this.logger.logModule(this.id, 'response-process-error', { error, response });
@@ -102,7 +111,7 @@ export class StreamingControlWorkflow implements WorkflowModule {
   /**
    * Process streaming control
    */
-  async processStreamingControl(request: any): Promise<any> {
+  async processStreamingControl(request: SharedPipelineRequest): Promise<SharedPipelineRequest> {
     return this.processIncoming(request);
   }
 

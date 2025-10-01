@@ -57,8 +57,10 @@ interface SessionResponse {
 }
 
 // Use shared DTOs for pipeline boundaries
-import type { SharedPipelineRequest } from '../types/shared-dtos.js';
+import type { SharedPipelineRequest, SharedPipelineResponse } from '../types/shared-dtos.js';
 import type { PipelineModule } from '../modules/pipeline/interfaces/pipeline-interfaces.js';
+import type { ExtendedDryRunResponse } from '../modules/dry-run-engine/core/engine.js';
+import type { PipelineDryRunResponse } from '../modules/pipeline/dry-run/pipeline-dry-run-framework.js';
 
 interface CaptureData {
   timestamp: number;
@@ -68,7 +70,7 @@ interface CaptureData {
 
 interface BatchResult {
   input: string;
-  result: unknown;
+  result: SharedPipelineResponse | PipelineDryRunResponse | ExtendedDryRunResponse;
   timestamp: string;
 }
 
@@ -855,7 +857,7 @@ export function createDryRunCommands(): Command {
             });
 
             const chunkResults = await Promise.all(promises);
-            results.push(...chunkResults.filter(r => r !== null));
+            results.push(...chunkResults.filter((r): r is BatchResult => r !== null));
           }
         } else {
           // Sequential processing

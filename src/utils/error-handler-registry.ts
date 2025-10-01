@@ -11,9 +11,15 @@ import * as debugcenter from 'rcc-debugcenter';
 const ErrorHandlingCenter =
   (debugcenter as any).ErrorHandlingCenter ||
   class {
-    async initialize() {}
-    async handleError() {}
-    async destroy() {}
+    async initialize() {
+      // Mock implementation
+    }
+    async handleError() {
+      // Mock implementation
+    }
+    async destroy() {
+      // Mock implementation
+    }
   };
 
 // Check if DebugEventBus exists, fallback to mock if not

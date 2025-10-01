@@ -6,6 +6,7 @@
  */
 
 import type { CompatibilityModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
+import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 import type { TransformationRule } from '../../interfaces/pipeline-interfaces.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 
@@ -51,15 +52,17 @@ export class PassthroughCompatibility implements CompatibilityModule {
   /**
    * Process incoming request - Pass through without transformation
    */
-  async processIncoming(request: any): Promise<any> {
+  async processIncoming(requestParam: any): Promise<SharedPipelineRequest> {
     if (!this.isInitialized) {
       throw new Error('Passthrough Compatibility module is not initialized');
     }
 
     try {
-      this.logger.logModule(this.id, 'processing-request-start', {
-        model: request.model
-      });
+      const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam;
+      const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
+      const request = isDto ? (dto!.data as any) : (requestParam as any);
+
+      this.logger.logModule(this.id, 'processing-request-start', { model: request?.model });
 
       // Simply return the request as-is (passthrough)
       const result = request;
@@ -68,7 +71,7 @@ export class PassthroughCompatibility implements CompatibilityModule {
         transformationCount: 0
       });
 
-      return result;
+      return isDto ? { ...dto!, data: result } : { data: result, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
 
     } catch (error) {
       this.logger.logModule(this.id, 'processing-request-error', { error });
@@ -85,18 +88,18 @@ export class PassthroughCompatibility implements CompatibilityModule {
     }
 
     try {
-      this.logger.logModule(this.id, 'processing-response-start', {
-        hasChoices: !!response.choices
-      });
+      const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
+      const payload = isDto ? (response as any).data : response;
+      this.logger.logModule(this.id, 'processing-response-start', { hasChoices: !!payload?.choices });
 
       // Simply return the response as-is (passthrough)
-      const result = response;
+      const result = payload;
 
       this.logger.logModule(this.id, 'processing-response-complete', {
         transformationCount: 0
       });
 
-      return result;
+      return isDto ? { ...(response as any), data: result } : result;
 
     } catch (error) {
       this.logger.logModule(this.id, 'processing-response-error', { error });

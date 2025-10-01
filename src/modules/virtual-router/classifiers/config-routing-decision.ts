@@ -58,7 +58,22 @@ export class ConfigRoutingDecision {
     modelTiers: { [key: string]: ModelTierConfig },
     routingDecisions: RoutingDecisionConfig
   ) {
-    this.modelTiers = modelTiers;
+    // 验证并初始化模型层级配置
+    this.modelTiers = {
+      basic: {
+        description: modelTiers?.basic?.description || 'Basic model tier',
+        models: Array.isArray(modelTiers?.basic?.models) ? modelTiers.basic.models : [],
+        maxTokens: modelTiers?.basic?.maxTokens || 4096,
+        supportedFeatures: Array.isArray(modelTiers?.basic?.supportedFeatures) ? modelTiers.basic.supportedFeatures : []
+      },
+      advanced: {
+        description: modelTiers?.advanced?.description || 'Advanced model tier',
+        models: Array.isArray(modelTiers?.advanced?.models) ? modelTiers.advanced.models : [],
+        maxTokens: modelTiers?.advanced?.maxTokens || 8192,
+        supportedFeatures: Array.isArray(modelTiers?.advanced?.supportedFeatures) ? modelTiers.advanced.supportedFeatures : []
+      }
+    };
+    
     this.routingDecisions = routingDecisions;
   }
 
@@ -251,17 +266,30 @@ export class ConfigRoutingDecision {
    * 获取模型层级
    */
   private getModelTier(model: string): 'basic' | 'advanced' {
+    // 确保模型层级配置存在且models是数组
+    if (!this.modelTiers.advanced || !Array.isArray(this.modelTiers.advanced.models)) {
+      console.warn('Advanced model tier configuration is missing or invalid');
+    }
+    
+    if (!this.modelTiers.basic || !Array.isArray(this.modelTiers.basic.models)) {
+      console.warn('Basic model tier configuration is missing or invalid');
+    }
+
     // 检查高级模型
-    for (const advancedModel of this.modelTiers.advanced.models) {
-      if (model.toLowerCase().includes(advancedModel.toLowerCase())) {
-        return 'advanced';
+    if (this.modelTiers.advanced && Array.isArray(this.modelTiers.advanced.models)) {
+      for (const advancedModel of this.modelTiers.advanced.models) {
+        if (model.toLowerCase().includes(advancedModel.toLowerCase())) {
+          return 'advanced';
+        }
       }
     }
 
     // 检查基础模型
-    for (const basicModel of this.modelTiers.basic.models) {
-      if (model.toLowerCase().includes(basicModel.toLowerCase())) {
-        return 'basic';
+    if (this.modelTiers.basic && Array.isArray(this.modelTiers.basic.models)) {
+      for (const basicModel of this.modelTiers.basic.models) {
+        if (model.toLowerCase().includes(basicModel.toLowerCase())) {
+          return 'basic';
+        }
       }
     }
 

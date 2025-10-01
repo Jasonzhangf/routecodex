@@ -661,7 +661,7 @@ export class RequestHandler extends BaseModule {
       errors.push('Messages are required and must be a non-empty array');
     }
 
-    // Validate messages
+    // Validate messages (allow string | array-of-parts | object)
     if (request.messages && Array.isArray(request.messages)) {
       for (let i = 0; i < request.messages.length; i++) {
         const message = request.messages[i];
@@ -669,8 +669,14 @@ export class RequestHandler extends BaseModule {
           errors.push(`Message ${i} has invalid role: ${message.role}`);
         }
 
-        if (!message.content || typeof message.content !== 'string') {
-          errors.push(`Message ${i} has invalid content: must be a string`);
+        const c = (message as any).content;
+        if (c !== undefined && c !== null) {
+          const isString = typeof c === 'string';
+          const isArray = Array.isArray(c);
+          const isObject = typeof c === 'object' && !isArray;
+          if (!(isString || isArray || isObject)) {
+            errors.push(`Message ${i} has invalid content: must be string/array/object`);
+          }
         }
       }
     }

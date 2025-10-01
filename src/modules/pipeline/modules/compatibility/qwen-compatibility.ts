@@ -6,6 +6,7 @@
  */
 
 import type { CompatibilityModule, ModuleConfig, ModuleDependencies, TransformationRule } from '../../interfaces/pipeline-interfaces.js';
+import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { DebugEventBus } from "rcc-debugcenter";
 
@@ -266,13 +267,17 @@ export class QwenCompatibility implements CompatibilityModule {
   /**
    * Process incoming request - Transform OpenAI format to Qwen format
    */
-  async processIncoming(request: any): Promise<any> {
+  async processIncoming(requestParam: any): Promise<SharedPipelineRequest> {
     const startTime = Date.now();
     const transformId = `transform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     if (!this.isInitialized) {
       throw new Error('Qwen Compatibility module is not initialized');
     }
+
+    const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam;
+    const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
+    const request = isDto ? (dto!.data as any) : (requestParam as any);
 
     // Debug: Record transformation start
     if (this.isDebugEnhanced) {
@@ -300,10 +305,7 @@ export class QwenCompatibility implements CompatibilityModule {
       });
 
       // Apply transformation rules
-      const transformed = await this.transformationEngine.transform(
-        request,
-        this.rules
-      );
+      const transformed = await this.transformationEngine.transform(request, this.rules);
 
       const converted = this.convertToQwenRequest(transformed.data || transformed);
 
@@ -346,7 +348,7 @@ export class QwenCompatibility implements CompatibilityModule {
         parameterKeys: Object.keys(converted.parameters || {})
       });
 
-      return converted;
+      return isDto ? { ...dto!, data: converted } : { data: converted, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
 
     } catch (error) {
       const totalTime = Date.now() - startTime;
@@ -408,13 +410,12 @@ export class QwenCompatibility implements CompatibilityModule {
     }
 
     try {
-      this.logger.logModule(this.id, 'transform-response-start', {
-        originalFormat: 'qwen',
-        targetFormat: 'openai'
-      });
+      const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
+      const payload = isDto ? (response as any).data : response;
+      this.logger.logModule(this.id, 'transform-response-start', { originalFormat: 'qwen', targetFormat: 'openai' });
 
       // Transform response back to OpenAI format
-      const transformed = this.transformQwenResponseToOpenAI(response);
+      const transformed = this.transformQwenResponseToOpenAI(payload);
 
       const totalTime = Date.now() - startTime;
 
@@ -451,7 +452,7 @@ export class QwenCompatibility implements CompatibilityModule {
         responseId: transformed.id
       });
 
-      return transformed;
+      return isDto ? { ...(response as any), data: transformed } : transformed;
 
     } catch (error) {
       const totalTime = Date.now() - startTime;

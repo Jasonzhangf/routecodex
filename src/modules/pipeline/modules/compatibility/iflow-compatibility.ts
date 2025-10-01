@@ -7,6 +7,7 @@
 
 import type { CompatibilityModule, ModuleConfig, ModuleDependencies, TransformationRule } from '../../interfaces/pipeline-interfaces.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
+import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 
 /**
  * iFlow Compatibility Module
@@ -54,12 +55,15 @@ export class iFlowCompatibility implements CompatibilityModule {
   /**
    * Process incoming request - Transform OpenAI format to iFlow format
    */
-  async processIncoming(request: any): Promise<any> {
+  async processIncoming(requestParam: any): Promise<SharedPipelineRequest> {
     if (!this.isInitialized) {
       throw new Error('iFlow Compatibility module is not initialized');
     }
 
     try {
+      const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam;
+      const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
+      const request = isDto ? (dto!.data as any) : (requestParam as any);
       this.logger.logModule(this.id, 'transform-request-start', {
         originalFormat: 'openai',
         targetFormat: 'iflow',
@@ -67,16 +71,14 @@ export class iFlowCompatibility implements CompatibilityModule {
       });
 
       // Apply transformation rules
-      const transformed = await this.transformationEngine.transform(
-        request,
-        this.rules
-      );
+      const transformed = await this.transformationEngine.transform(request, this.rules);
 
       this.logger.logModule(this.id, 'transform-request-success', {
         transformationCount: transformed.transformationCount || 0
       });
 
-      return transformed.data || transformed;
+      const out = transformed.data || transformed;
+      return isDto ? { ...dto!, data: out } : { data: out, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
 
     } catch (error) {
       this.logger.logModule(this.id, 'transformation-error', { error });
@@ -93,19 +95,16 @@ export class iFlowCompatibility implements CompatibilityModule {
     }
 
     try {
-      this.logger.logModule(this.id, 'transform-response-start', {
-        originalFormat: 'iflow',
-        targetFormat: 'openai'
-      });
+      const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
+      const payload = isDto ? (response as any).data : response;
+      this.logger.logModule(this.id, 'transform-response-start', { originalFormat: 'iflow', targetFormat: 'openai' });
 
       // Transform response back to OpenAI format
-      const transformed = this.transformIFlowResponseToOpenAI(response);
+      const transformed = this.transformIFlowResponseToOpenAI(payload);
 
-      this.logger.logModule(this.id, 'transform-response-success', {
-        responseId: transformed.id
-      });
+      this.logger.logModule(this.id, 'transform-response-success', { responseId: transformed.id });
 
-      return transformed;
+      return isDto ? { ...(response as any), data: transformed } : transformed;
 
     } catch (error) {
       this.logger.logModule(this.id, 'response-transformation-error', { error });
@@ -268,30 +267,49 @@ export class iFlowCompatibility implements CompatibilityModule {
    * Transform provider response to OpenAI format
    */
   private transformProviderResponse(data: any): any {
-    const transformed = {
+    const transformed: any = {
       id: data.id || `chatcmpl-${Date.now()}`,
       object: 'chat.completion',
-      created: Date.now(),
+      created: Number(data.created) || Date.now(),
       model: data.model || 'iflow-turbo',
       choices: [],
-      usage: data.usage || {
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        total_tokens: 0
-      }
+      usage: data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
     };
 
-    // Transform choices
-    if (data.choices && Array.isArray(data.choices)) {
-      transformed.choices = data.choices.map((choice: any) => ({
-        index: choice.index || 0,
-        message: {
-          role: choice.message?.role || 'assistant',
-          content: choice.message?.content || '',
-          tool_calls: this.transformToolCalls(choice.message?.tool_calls)
-        },
-        finish_reason: this.transformFinishReason(choice.finish_reason)
-      }));
+    // Normalize choice list from common iFlow/OpenAI variants
+    const choices = Array.isArray(data.choices) ? data.choices
+      : Array.isArray(data.output_choices) ? data.output_choices
+      : undefined;
+
+    if (choices && Array.isArray(choices) && choices.length > 0) {
+      transformed.choices = choices.map((choice: any, idx: number) => {
+        const msg = choice.message || choice.delta || {};
+        const role = msg.role || 'assistant';
+        const content = typeof msg.content === 'string' ? msg.content
+          : Array.isArray(msg.content) ? msg.content.join('\n')
+          : (typeof data.output_text === 'string' ? data.output_text : '');
+        const toolCalls = this.transformToolCalls(msg.tool_calls || choice.tool_calls);
+        return {
+          index: typeof choice.index === 'number' ? choice.index : idx,
+          message: { role, content, tool_calls: toolCalls },
+          finish_reason: this.transformFinishReason(choice.finish_reason)
+        };
+      });
+    } else {
+      // Fallback: fabricate a single assistant message if provider returned plain text
+      const fallbackText =
+        (typeof data.output_text === 'string' && data.output_text) ||
+        (typeof data.text === 'string' && data.text) ||
+        (typeof data.response === 'string' && data.response) ||
+        (data.message && typeof data.message.content === 'string' && data.message.content) ||
+        '';
+      transformed.choices = [
+        {
+          index: 0,
+          message: { role: 'assistant', content: fallbackText, tool_calls: [] },
+          finish_reason: this.transformFinishReason((data.choices && data.choices[0]?.finish_reason) || 'stop')
+        }
+      ];
     }
 
     // Add transformation metadata

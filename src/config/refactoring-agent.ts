@@ -134,7 +134,7 @@ export class RefactoringAgent {
     const parsers = [
       {
         name: 'user-config-parser.ts',
-        content: this.getUserConfigParserCode(),
+        content: this.getNewConfigSystemCode(),
       },
       {
         name: 'auth-file-resolver.ts',
@@ -258,7 +258,7 @@ export class RefactoringAgent {
     const testFiles = [
       {
         name: 'user-config-parser.test.ts',
-        content: this.getUserConfigParserTestCode(),
+        content: this.getNewConfigSystemTestCode(),
       },
       {
         name: 'config-merger.test.ts',
@@ -308,31 +308,43 @@ export class RefactoringAgent {
   /**
    * 获取用户配置解析器代码
    */
-  private getUserConfigParserCode(): string {
+  private getNewConfigSystemCode(): string {
     return `/**
- * User Configuration Parser
- * 解析用户配置为模块格式
+ * New Configuration System Implementation
+ * 新配置系统实现 - 使用模块化的配置引擎
  */
 
-import type { UserConfig, ModuleConfigs } from './user-config-types.js';
+import { ConfigParser } from 'routecodex-config-engine';
+import { CompatibilityEngine } from 'routecodex-config-compat';
 
-export class UserConfigParser {
+export class ConfigurationManager {
+  private configParser: ConfigParser;
+  private compatibilityEngine: CompatibilityEngine;
+
+  constructor() {
+    this.configParser = new ConfigParser();
+    this.compatibilityEngine = new CompatibilityEngine();
+  }
+
   /**
-   * 解析用户配置
+   * 解析和处理用户配置
    */
-  parseUserConfig(userConfig: UserConfig): {
-    routeTargets: RouteTargetPool;
-    pipelineConfigs: PipelineConfigs;
-    moduleConfigs: ModuleConfigs;
-  } {
-    const routeTargets = this.parseRouteTargets(userConfig.virtualrouter.routing);
-    const pipelineConfigs = this.parsePipelineConfigs(userConfig.virtualrouter);
-    const moduleConfigs = this.parseModuleConfigs(userConfig);
+  async processConfig(configPath: string): Promise<any> {
+    // 1. 解析配置文件
+    const parseResult = await this.configParser.parseConfigFile(configPath);
+
+    // 2. 应用兼容性处理
+    const compatResult = await this.compatibilityEngine.processCompatibility(
+      JSON.stringify(parseResult.config)
+    );
+
+    if (!compatResult.isValid) {
+      throw new Error('Configuration compatibility processing failed');
+    }
 
     return {
-      routeTargets,
-      pipelineConfigs,
-      moduleConfigs
+      ...parseResult.config,
+      compatibilityConfig: compatResult.compatibilityConfig
     };
   }
 
@@ -1575,7 +1587,8 @@ interface ProtocolManagerStatus {
  */
 
 import { BaseModule } from '../../core/base-module.js';
-import { UserConfigParser } from '../../config/user-config-parser.js';
+import { ConfigParser } from 'routecodex-config-engine';
+import { CompatibilityEngine } from 'routecodex-config-compat';
 import { ConfigMerger } from '../../config/config-merger.js';
 import { AuthFileResolver } from '../../config/auth-file-resolver.js';
 
@@ -1583,7 +1596,8 @@ export class ConfigManagerModule extends BaseModule {
   private configPath: string;
   private systemConfigPath: string;
   private mergedConfigPath: string;
-  private userConfigParser: UserConfigParser;
+  private configParser: ConfigParser;
+  private compatibilityEngine: CompatibilityEngine;
   private configMerger: ConfigMerger;
   private authFileResolver: AuthFileResolver;
   private configWatcher: any;
@@ -1600,7 +1614,8 @@ export class ConfigManagerModule extends BaseModule {
     this.systemConfigPath = './config/modules.json';
     this.mergedConfigPath = '~/.routecodex/merged-config.json';
 
-    this.userConfigParser = new UserConfigParser();
+    this.configParser = new ConfigParser();
+    this.compatibilityEngine = new CompatibilityEngine();
     this.configMerger = new ConfigMerger();
     this.authFileResolver = new AuthFileResolver();
   }
@@ -2265,19 +2280,23 @@ export { RouteCodexApp, main };
   /**
    * 获取测试用例代码
    */
-  private getUserConfigParserTestCode(): string {
+  private getNewConfigSystemTestCode(): string {
     return `/**
- * User Configuration Parser Tests
+ * New Configuration System Tests
+ * 新配置系统测试
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { UserConfigParser } from '../../src/config/user-config-parser.js';
+import { ConfigParser } from 'routecodex-config-engine';
+import { CompatibilityEngine } from 'routecodex-config-compat';
 
-describe('UserConfigParser', () => {
-  let parser: UserConfigParser;
+describe('Configuration System', () => {
+  let configParser: ConfigParser;
+  let compatibilityEngine: CompatibilityEngine;
 
   beforeEach(() => {
-    parser = new UserConfigParser();
+    configParser = new ConfigParser();
+    compatibilityEngine = new CompatibilityEngine();
   });
 
   describe('parseRouteTargets', () => {
