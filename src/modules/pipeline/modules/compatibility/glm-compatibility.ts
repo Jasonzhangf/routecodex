@@ -87,8 +87,16 @@ export class GLMCompatibility implements CompatibilityModule {
             try { delete (msg as any).reasoning_content; } catch { /* noop */ }
           }
 
-          // Strip private reasoning markers and reconstruct tools
+          // If provider already returned tool_calls, normalize and blank out content
           try {
+            if (Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length > 0) {
+              (msg as any).tool_calls = this.normalizeToolCallsForClient((msg as any).tool_calls);
+              (msg as any).content = '';
+              out.message = msg;
+              return out;
+            }
+
+            // Strip private reasoning markers and reconstruct tools
             let contentStr = typeof msg.content === 'string' ? msg.content : '';
             // Remove <think> blocks and stray tags
             contentStr = this.stripThinkBlocks(contentStr);
@@ -109,6 +117,8 @@ export class GLMCompatibility implements CompatibilityModule {
                 } else {
                   (msg as any).tool_calls = reconstructed;
                 }
+                // Normalize tool_calls to client schema (apply_patch -> { input }, shell command array)
+                (msg as any).tool_calls = this.normalizeToolCallsForClient((msg as any).tool_calls);
                 // By default, drop trailing content to keep tool_call at the end
                 const cleaned = this.sanitizePostToolContent(rest);
                 (msg as any).content = cleaned;
@@ -393,6 +403,51 @@ export class GLMCompatibility implements CompatibilityModule {
       } else if (Array.isArray(cmd)) {
         (args as any).command = cmd.map((x: any) => String(x));
       }
+    }
+  }
+
+  // Map tool_calls to client-supported schema
+  private normalizeToolCallsForClient(list: any[]): any[] {
+    try {
+      return (Array.isArray(list) ? list : []).map((tc: any) => {
+        const out = { ...(tc || {}) } as any;
+        const fn = { ...((out as any).function || {}) } as any;
+        const name = String(fn?.name || '').trim();
+        const rawArgs = fn?.arguments;
+        let argsObj: any = {};
+        if (typeof rawArgs === 'string' && rawArgs.length > 0) {
+          try { argsObj = JSON.parse(rawArgs); } catch { argsObj = { _raw: rawArgs }; }
+        } else if (rawArgs && typeof rawArgs === 'object') {
+          argsObj = rawArgs;
+        }
+        if (name === 'apply_patch') {
+          let patch = '';
+          if (typeof argsObj?.input === 'string' && argsObj.input.trim()) { patch = argsObj.input; }
+          else if (typeof argsObj?.patch === 'string' && argsObj.patch.trim()) { patch = argsObj.patch; }
+          else if (typeof argsObj?.diff === 'string' && argsObj.diff.trim()) { patch = argsObj.diff; }
+          else if (typeof argsObj?._raw === 'string' && argsObj._raw.includes('*** Begin Patch')) { patch = argsObj._raw; }
+          else if (Array.isArray(argsObj?.command) && String(argsObj.command[0]) === 'apply_patch') { patch = String(argsObj.command.slice(1).join(' ')); }
+          (out as any).function = { name: 'apply_patch', arguments: JSON.stringify({ input: patch }) };
+          return out;
+        }
+        if (name === 'shell') {
+          const cmd = (argsObj || {}).command;
+          const tryParseArray = (s: string): string[] | null => { try { const a = JSON.parse(s); return Array.isArray(a) ? a.map(String) : null; } catch { return null; } };
+          if (typeof cmd === 'string') {
+            const parsed = tryParseArray(cmd);
+            (out as any).function = { name: 'shell', arguments: JSON.stringify({ command: parsed || ['bash','-lc',cmd] }) };
+          } else if (Array.isArray(cmd)) {
+            (out as any).function = { name: 'shell', arguments: JSON.stringify({ command: cmd.map(String) }) };
+          } else {
+            (out as any).function = { name: 'shell', arguments: JSON.stringify(argsObj || {}) };
+          }
+          return out;
+        }
+        (out as any).function = { name, arguments: JSON.stringify(argsObj || {}) };
+        return out;
+      });
+    } catch {
+      return list;
     }
   }
 
