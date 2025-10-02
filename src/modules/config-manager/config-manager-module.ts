@@ -326,7 +326,7 @@ export class ConfigManagerModule extends BaseModule {
               // Provider-level compatibility is optional; model-level override below is applied
               models: {
                 'glm-4.6': {
-                  maxContext: 128000,
+                  maxContext: 200000,
                   maxTokens: 8192,
                   // 开启思考（thinking）
                   compatibility: {

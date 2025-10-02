@@ -1151,6 +1151,61 @@ export class OpenAIRouter extends BaseModule {
     res.setHeader('Transfer-Encoding', 'chunked');
     res.setHeader('x-request-id', requestId);
 
+    const HEARTBEAT_INTERVAL_MS = Number(process.env.RCC_SSE_HEARTBEAT_MS ?? 15000);
+    const HEARTBEAT_STATUS_TEXT = process.env.RCC_SSE_HEARTBEAT_STATUS_TEXT ?? 'Waiting for upstream response';
+    const EMIT_STATUS = process.env.RCC_SSE_HEARTBEAT_STATUS !== '0';
+    let heartbeatTimer: NodeJS.Timeout | null = null;
+    let streamEnded = false;
+    let heartbeatCounter = 0;
+    const heartbeatStartedAt = Date.now();
+    const heartbeatBaselineText = HEARTBEAT_STATUS_TEXT && HEARTBEAT_STATUS_TEXT.trim().length
+      ? HEARTBEAT_STATUS_TEXT.trim()
+      : 'Waiting for upstream response';
+
+    const sendHeartbeat = () => {
+      if (streamEnded) { return; }
+      try {
+        heartbeatCounter += 1;
+        const delta: Record<string, any> = {};
+        if (EMIT_STATUS) {
+          const elapsedMs = Date.now() - heartbeatStartedAt;
+          const elapsedSeconds = Math.max(1, Math.floor(elapsedMs / 1000));
+          const statusText = `${heartbeatBaselineText} (≈${elapsedSeconds}s)`;
+          delta.reasoning_content = [{
+            type: 'text',
+            text: statusText,
+            metadata: {
+              rccHeartbeat: true,
+              sequence: heartbeatCounter,
+            },
+          }];
+        }
+        const heartbeatChunk = {
+          id: `chatcmpl-${Date.now()}`,
+          object: 'chat.completion.chunk',
+          created: Math.floor(Date.now() / 1000),
+          model: model || 'unknown',
+          status: 'in_progress',
+          choices: [{ index: 0, delta, finish_reason: null }],
+        };
+        res.write(`data: ${JSON.stringify(heartbeatChunk)}\n\n`);
+      } catch { /* ignore */ }
+    };
+
+    const startHeartbeat = () => {
+      if (HEARTBEAT_INTERVAL_MS <= 0) { return; }
+      if (heartbeatTimer) { clearInterval(heartbeatTimer); }
+      sendHeartbeat();
+      heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
+    };
+
+    const stopHeartbeat = () => {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+    };
+
     const makeInitial = () => ({
       id: `chatcmpl-${Date.now()}`,
       object: 'chat.completion.chunk',
@@ -1171,29 +1226,52 @@ export class OpenAIRouter extends BaseModule {
 
       // Send initial role delta
       res.write(`data: ${JSON.stringify(makeInitial())}\n\n`);
+      startHeartbeat();
 
       const normalizeChunk = (obj: any) => {
         try {
           if (!obj || typeof obj !== 'object') {return obj;}
           if (!obj.object) {obj.object = 'chat.completion.chunk';}
-          if (Array.isArray(obj.choices)) {
-            obj.choices = obj.choices.map((ch: any) => {
-              const c = { ...(ch || {}) };
-              if (c && typeof c === 'object' && c.delta && typeof c.delta === 'object') {
-                const d = { ...c.delta } as any;
-                if (d.reasoning_content && !d.content) {
-                  d.content = d.reasoning_content;
+        if (Array.isArray(obj.choices)) {
+          obj.choices = obj.choices.map((ch: any) => {
+            const c = { ...(ch || {}) };
+            if (c && typeof c === 'object' && c.delta && typeof c.delta === 'object') {
+              const d = { ...c.delta } as any;
+              if (d.reasoning_content) {
+                const entries = Array.isArray(d.reasoning_content)
+                  ? d.reasoning_content
+                  : [d.reasoning_content];
+                const heartbeatEntries = entries.filter((entry: any) => {
+                  if (!entry || typeof entry !== 'object') { return false; }
+                  const meta = entry.metadata || entry.__metadata;
+                  return Boolean(meta && meta.rccHeartbeat);
+                });
+                const visibleEntries = entries.filter((entry: any) => !heartbeatEntries.includes(entry));
+                if (!d.content && visibleEntries.length) {
+                  d.content = visibleEntries
+                    .map((entry: any) => (entry && typeof entry.text === 'string') ? entry.text : '')
+                    .join('');
                 }
-                if (typeof d.content === 'string') {
-                  // Strip <think> private markers from streamed content
-                  d.content = d.content.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '').replace(/<\/?think\b[^>]*>/gi, '');
+                if (!visibleEntries.length && (d.content === undefined || d.content === null || d.content === '')) {
+                  delete d.content;
                 }
-                if ('reasoning_content' in d) {delete d.reasoning_content;}
-                c.delta = d;
+                if (heartbeatEntries.length && !visibleEntries.length) {
+                  d.reasoning_content = heartbeatEntries;
+                } else if (!heartbeatEntries.length) {
+                  delete d.reasoning_content;
+                } else {
+                  d.reasoning_content = heartbeatEntries;
+                }
               }
-              return c;
-            });
-          }
+              if (typeof d.content === 'string') {
+                // Strip <think> private markers from streamed content
+                d.content = d.content.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '').replace(/<\/?think\b[^>]*>/gi, '');
+              }
+              c.delta = d;
+            }
+            return c;
+          });
+        }
           return obj;
         } catch { return obj; }
       };
@@ -1294,9 +1372,11 @@ export class OpenAIRouter extends BaseModule {
         model: model || 'unknown',
         choices: [{ index: 0, delta: {}, finish_reason: emittedToolCalls ? 'tool_calls' : 'stop' }],
       };
+      stopHeartbeat();
       res.write(`data: ${JSON.stringify(done)}\n\n`);
       res.write('data: [DONE]\n\n');
       res.end();
+      streamEnded = true;
     } catch (err) {
       // On error, end stream with a final error message and DONE
       const errorChunk = {
@@ -1306,9 +1386,11 @@ export class OpenAIRouter extends BaseModule {
         model: model || 'unknown',
         choices: [{ index: 0, delta: { content: '' }, finish_reason: 'stop' }],
       };
+      stopHeartbeat();
       try { res.write(`data: ${JSON.stringify(errorChunk)}\n\n`); } catch (_e) { void 0; }
       try { res.write('data: [DONE]\n\n'); } catch (_e) { void 0; }
       try { res.end(); } catch (_e) { void 0; }
+      streamEnded = true;
     }
   }
 

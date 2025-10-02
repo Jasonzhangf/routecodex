@@ -204,8 +204,8 @@ export class OpenAIProvider implements ProviderModule {
         }
       }
 
-      // Prepare chat completion request
-      const chatRequest: Record<string, unknown> = {
+      // Build chat completion request (with optional GLM preflight)
+      let chatRequest: Record<string, unknown> = {
         model: (request as { model?: string }).model,
         messages: (request as { messages?: unknown[] }).messages || [],
         temperature: (request as { temperature?: number }).temperature ?? 0.7,
@@ -216,10 +216,23 @@ export class OpenAIProvider implements ProviderModule {
         stream: (request as { stream?: boolean }).stream ?? false
       };
 
-      // Add tools if provided
+      // If this OpenAI provider is targeting GLM-compatible endpoint, sanitize payload
+      try {
+        const providerConfig = this.config.config as ProviderConfig;
+        const baseUrl = String(providerConfig?.baseUrl || '').toLowerCase();
+        if (baseUrl.includes('open.bigmodel.cn')) {
+          const { sanitizeAndValidateOpenAIChat } = await import('../../utils/preflight-validator.js');
+          const { payload } = sanitizeAndValidateOpenAIChat({ ...chatRequest, tools: (request as any)?.tools, tool_choice: (request as any)?.tool_choice, thinking: (request as any)?.thinking }, { target: 'glm' });
+          chatRequest = payload;
+        }
+      } catch {
+        // non-blocking
+      }
+
+      // Add tools if provided (non-GLM or already preflighted)
       {
         const tools = (request as { tools?: unknown[] }).tools;
-        if (Array.isArray(tools) && tools.length > 0) {
+        if (Array.isArray(tools) && tools.length > 0 && !('tools' in chatRequest)) {
           chatRequest.tools = tools;
           chatRequest.tool_choice = (request as { tool_choice?: string }).tool_choice || 'auto';
         }

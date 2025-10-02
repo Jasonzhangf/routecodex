@@ -19,11 +19,13 @@ export class GLMCompatibility implements CompatibilityModule {
 
   private isInitialized = false;
   private logger: PipelineDebugLogger;
+  private readonly forceDisableThinking: boolean;
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
     this.logger = dependencies.logger as any;
     this.id = `compatibility-glm-${Date.now()}`;
     this.config = config;
+    this.forceDisableThinking = process.env.RCC_GLM_DISABLE_THINKING === '1';
     this.thinkingDefaults = this.normalizeThinkingConfig(this.config?.config?.thinking);
   }
 
@@ -54,7 +56,7 @@ export class GLMCompatibility implements CompatibilityModule {
 
     const outbound = { ...request };
 
-    if (outbound.thinking === undefined) {
+    if (!this.forceDisableThinking && outbound.thinking === undefined) {
       const payload = this.resolveThinkingPayload(outbound);
       if (payload) {
         outbound.thinking = payload;
@@ -119,9 +121,8 @@ export class GLMCompatibility implements CompatibilityModule {
                 }
                 // Normalize tool_calls to client schema (apply_patch -> { input }, shell command array)
                 (msg as any).tool_calls = this.normalizeToolCallsForClient((msg as any).tool_calls);
-                // By default, drop trailing content to keep tool_call at the end
-                const cleaned = this.sanitizePostToolContent(rest);
-                (msg as any).content = cleaned;
+                // When tool_calls exist, blank out content to avoid leaking markup or stray text
+                (msg as any).content = '';
               }
             }
           } catch { /* non-blocking */ }
@@ -174,6 +175,9 @@ export class GLMCompatibility implements CompatibilityModule {
   private readonly thinkingDefaults: ThinkingConfig | null;
 
   private resolveThinkingPayload(request: any): Record<string, any> | null {
+    if (this.forceDisableThinking) {
+      return null;
+    }
     const defaults = this.thinkingDefaults;
     if (!defaults || !defaults.enabled) {
       return null;

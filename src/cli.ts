@@ -8,9 +8,15 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
+import type { Ora } from 'ora';
 import path from 'path';
 import fs from 'fs';
 import { homedir } from 'os';
+import { spawnSync } from 'child_process';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 interface ServerConfig {
   port: number;
@@ -139,10 +145,22 @@ program
         logger.success(`Default configuration created: ${configPath}`);
       }
 
+      // Determine target port from config
+      const resolvedPort = determinePort(configPath, parseInt(options.port, 10));
+
+      // Ensure port is free before starting
+      await ensurePortAvailable(resolvedPort, spinner);
+
       // simple-log application removed
 
       // Set modules config path in process.argv and start the main application
-      process.argv[2] = './config/modules.json';
+      const modulesConfigPath = getModulesConfigPath();
+      if (!fs.existsSync(modulesConfigPath)) {
+        spinner.fail(`Modules configuration file not found: ${modulesConfigPath}`);
+        process.exit(1);
+      }
+
+      process.argv[2] = modulesConfigPath;
       await main();
 
       spinner.succeed(`RouteCodex server started on ${options.host}:${options.port}`);
@@ -590,6 +608,120 @@ program
     console.log('    -d \'{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello!"}]}\'');
     console.log('');
   });
+
+function determinePort(configPath: string, fallback: number): number {
+  try {
+    const content = fs.readFileSync(configPath, 'utf8');
+    const config = JSON.parse(content);
+    const candidate = config?.server?.port ?? config?.httpserver?.port ?? config?.port;
+    const parsed = parseInt(candidate, 10);
+    if (!Number.isNaN(parsed) && parsed > 0) {
+      return parsed;
+    }
+  } catch {
+    // ignore parsing errors and fall back
+  }
+  return fallback;
+}
+
+async function ensurePortAvailable(port: number, parentSpinner: Ora): Promise<void> {
+  if (!port || Number.isNaN(port)) { return; }
+
+  const initialPids = findListeningPids(port);
+  if (initialPids.length === 0) { return; }
+
+  parentSpinner.stop();
+  logger.warning(`Port ${port} is in use by PID(s): ${initialPids.join(', ')}`);
+  const stopSpinner = ora(`Port ${port} is in use on 0.0.0.0. Attempting graceful stop...`).start();
+  const gracefulTimeout = Number(process.env.ROUTECODEX_STOP_TIMEOUT_MS ?? 5000);
+  const killTimeout = Number(process.env.ROUTECODEX_KILL_TIMEOUT_MS ?? 3000);
+  const pollInterval = 150;
+
+  for (const pid of initialPids) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch (error) {
+      stopSpinner.warn(`Failed to send SIGTERM to PID ${pid}: ${(error as Error).message}`);
+    }
+  }
+
+  const gracefulDeadline = Date.now() + gracefulTimeout;
+  while (Date.now() < gracefulDeadline) {
+    if (findListeningPids(port).length === 0) {
+      stopSpinner.succeed(`Port ${port} freed after graceful stop.`);
+      logger.success(`Port ${port} freed after graceful stop.`);
+      parentSpinner.start('Starting RouteCodex server...');
+      return;
+    }
+    await sleep(pollInterval);
+  }
+
+  let remaining = findListeningPids(port);
+  if (remaining.length) {
+    stopSpinner.warn(`Graceful stop timed out, sending SIGKILL to PID(s): ${remaining.join(', ')}`);
+    logger.warning(`Graceful stop timed out. Forcing SIGKILL to PID(s): ${remaining.join(', ')}`);
+    for (const pid of remaining) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch (error) {
+        const message = (error as Error).message;
+        stopSpinner.warn(`Failed to send SIGKILL to PID ${pid}: ${message}`);
+        logger.error(`Failed to SIGKILL PID ${pid}: ${message}`);
+      }
+    }
+
+    const killDeadline = Date.now() + killTimeout;
+    while (Date.now() < killDeadline) {
+      if (findListeningPids(port).length === 0) {
+        stopSpinner.succeed(`Port ${port} freed after SIGKILL.`);
+        logger.success(`Port ${port} freed after SIGKILL.`);
+        parentSpinner.start('Starting RouteCodex server...');
+        return;
+      }
+      await sleep(pollInterval);
+    }
+  }
+
+  remaining = findListeningPids(port);
+  if (remaining.length) {
+    stopSpinner.fail(`Failed to free port ${port}. Still held by PID(s): ${remaining.join(', ')}`);
+    logger.error(`Failed to free port ${port}. Still held by PID(s): ${remaining.join(', ')}`);
+    throw new Error(`Failed to free port ${port}`);
+  }
+
+  stopSpinner.succeed(`Port ${port} freed.`);
+  logger.success(`Port ${port} freed.`);
+  parentSpinner.start('Starting RouteCodex server...');
+}
+
+function findListeningPids(port: number): number[] {
+  try {
+    const result = spawnSync('lsof', ['-tiTCP', `:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8' });
+    if (result.error) {
+      logger.warning(`lsof not available to inspect port usage: ${result.error.message}`);
+      return [];
+    }
+    const stdout = (result.stdout || '').trim();
+    if (!stdout) {
+      return [];
+    }
+    return stdout
+      .split(/\s+/)
+      .map((value) => parseInt(value, 10))
+      .filter((pid) => !Number.isNaN(pid));
+  } catch (error) {
+    logger.warning(`Failed to inspect port ${port}: ${(error as Error).message}`);
+    return [];
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getModulesConfigPath(): string {
+  return path.resolve(__dirname, '../config/modules.json');
+}
 
 // Parse command line arguments
 program.parse();
