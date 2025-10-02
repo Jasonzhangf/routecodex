@@ -460,15 +460,23 @@ export class GLMCompatibility implements CompatibilityModule {
       const name = (m[1] || '').trim();
       let idx = m.index + m[0].length;
       while (idx < input.length && /\s/.test(input[idx])) {idx++;}
-      if (idx >= input.length || input[idx] !== '{') {continue;}
-      const { jsonText, endIndex } = this.extractBalancedJson(input, idx);
-      if (!jsonText) {continue;}
-      let args: any = {};
-      try { args = JSON.parse(this.stripCodeFences(jsonText)); } catch { args = { _raw: jsonText }; }
-      this.normalizeCommonToolArgs(name, args);
-      calls.push({ name, args });
-      const full = input.slice(m.index, endIndex);
-      remaining = remaining.replace(full, '').trim();
+      if (idx < input.length && input[idx] === '{') {
+        // JSON object follows
+        const { jsonText, endIndex } = this.extractBalancedJson(input, idx);
+        if (jsonText) {
+          let args: any = {};
+          try { args = JSON.parse(this.stripCodeFences(jsonText)); } catch { args = { _raw: jsonText }; }
+          this.normalizeCommonToolArgs(name, args);
+          calls.push({ name, args });
+          const full = input.slice(m.index, endIndex);
+          remaining = remaining.replace(full, '').trim();
+          continue;
+        }
+      }
+      // No JSON args present; create an empty-args tool_call to avoid leaking as text
+      calls.push({ name, args: {} });
+      // Remove just the tag occurrence from remaining
+      remaining = remaining.replace(m[0], '').trim();
     }
     return { calls, rest: remaining };
   }
