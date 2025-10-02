@@ -344,6 +344,35 @@ export class GLMCompatibility implements CompatibilityModule {
       rest = out.rest;
     }
 
+    // 4) <tool_call:name> { json } inline
+    {
+      const tagRe = /<tool_call:([\w.-]+)\b[^>]*>/gi;
+      let m: RegExpExecArray | null;
+      while ((m = tagRe.exec(rest)) !== null) {
+        const name = (m[1] || '').trim();
+        // find JSON starting right after tag
+        let idx = m.index + m[0].length;
+        // skip whitespace/newlines
+        while (idx < rest.length && /\s/.test(rest[idx])) { idx++; }
+        let args: any = {};
+        let endIndex = idx;
+        if (idx < rest.length && rest[idx] === '{') {
+          const bal = this.extractBalancedJson(rest, idx);
+          if (bal.jsonText) {
+            try { args = JSON.parse(this.stripCodeFences(bal.jsonText)); } catch { args = { _raw: bal.jsonText }; }
+            endIndex = bal.endIndex;
+          }
+        }
+        this.normalizeCommonToolArgs(name, args);
+        calls.push({ name, args });
+        // remove the tag and its JSON (if any) from remaining
+        const full = rest.slice(m.index, endIndex);
+        rest = (rest.slice(0, m.index) + rest.slice(endIndex)).trim();
+        // reset regex lastIndex due to string mutation
+        tagRe.lastIndex = 0;
+      }
+    }
+
     return { calls, rest };
   }
 
