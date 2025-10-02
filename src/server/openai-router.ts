@@ -1265,7 +1265,7 @@ export class OpenAIRouter extends BaseModule {
           }
           if (hasTool) {
             // Emit tool_calls in a single delta chunk for compatibility
-            const list = (toolCalls as any[]);
+          const list = Array.isArray(toolCalls) ? toolCalls : [] as any[];
             delta.tool_calls = list.map((tc: any) => ({
               id: tc.id || `call_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
               type: 'function',

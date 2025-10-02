@@ -430,6 +430,13 @@ export class GLMCompatibility implements CompatibilityModule {
           (out as any).function = { name: 'apply_patch', arguments: JSON.stringify({ input: patch }) };
           return out;
         }
+        if (name === 'update_plan') {
+          // Ensure required shape: { plan: [] } at minimum
+          const plan = Array.isArray((argsObj || {}).plan) ? argsObj.plan : [];
+          const explanation = typeof (argsObj || {}).explanation === 'string' ? argsObj.explanation : '';
+          (out as any).function = { name: 'update_plan', arguments: JSON.stringify({ explanation, plan }) };
+          return out;
+        }
         if (name === 'shell') {
           const cmd = (argsObj || {}).command;
           const tryParseArray = (s: string): string[] | null => { try { const a = JSON.parse(s); return Array.isArray(a) ? a.map(String) : null; } catch { return null; } };
