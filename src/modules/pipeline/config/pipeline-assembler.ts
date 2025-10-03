@@ -68,10 +68,13 @@ export class PipelineAssembler {
       let apiKey = Array.isArray(np.apiKey) && np.apiKey.length ? String(np.apiKey[0]).trim() : '';
       const pid = String(provId || '').toLowerCase();
       const unifiedType = ((): string => {
-        // Unify only ModelScope to openai-provider; keep GLM dedicated
+        // Unify only ModelScope to openai-provider
         if (pid === 'modelscope') { return 'openai-provider'; }
         // Preserve explicit openai-provider
-        if (String(np.type || '').toLowerCase() === 'openai-provider') { return 'openai-provider'; }
+        const t = String(np.type || '').toLowerCase();
+        if (t === 'openai-provider') { return 'openai-provider'; }
+        // Map GLM family to dedicated provider module
+        if (pid === 'glm' || t === 'glm') { return 'glm-http-provider'; }
         return (np.type || provId);
       })();
       const provider: any = {
