@@ -7,6 +7,8 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
 import { homedir } from 'os';
+import net from 'net';
+import { spawn } from 'child_process';
 import { ConfigManagerModule } from './modules/config-manager/config-manager-module.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 
@@ -71,6 +73,8 @@ class RouteCodexApp {
 
       // 1. 初始化配置管理器
       const port = await this.detectServerPort(this.modulesConfigPath);
+      // Preflight: ensure port is available (graceful stop then force-kill if needed)
+      await ensurePortAvailable(port);
       this.mergedConfigPath = path.join(process.cwd(), 'config', `merged-config.${port}.json`);
 
       // 确定用户配置文件路径，优先使用RCC4_CONFIG_PATH
@@ -283,6 +287,62 @@ class RouteCodexApp {
     }
     throw new Error('HTTP server port not found. Please set "port" in your user configuration file.');
   }
+}
+
+/**
+ * Ensure a TCP port is available by attempting graceful shutdown of any process holding it,
+ * then force-killing as a last resort. Mirrors previous startup behavior.
+ */
+async function ensurePortAvailable(port: number): Promise<void> {
+  try {
+    // Quick check: attempt to bind to the port
+    const probe = net.createServer();
+    const canListen = await new Promise<boolean>(resolve => {
+      probe.once('error', () => resolve(false));
+      probe.listen({ host: '0.0.0.0', port }, () => resolve(true));
+    });
+    if (canListen) {
+      await new Promise(r => probe.close(() => r(null)));
+      return; // free
+    }
+  } catch {
+    // fallthrough
+  }
+
+  const getPids = (): string[] => {
+    try {
+      const ls = spawn('lsof', ['-ti', `:${port}`]);
+      return new Promise<string[]>((resolve) => {
+        let out = '';
+        ls.stdout.on('data', d => (out += String(d)));
+        ls.on('close', () => {
+          resolve(out.split(/\s+/).map(s => s.trim()).filter(Boolean));
+        });
+        ls.on('error', () => resolve([]));
+      });
+    } catch {
+      return [];
+    }
+  } as unknown as () => string[];
+
+  const pids = await (getPids() as unknown as Promise<string[]>);
+  if (!pids || pids.length === 0) { return; }
+  console.warn(`⚠️ Port ${port} in use by PID(s): ${pids.join(', ')} — sending SIGTERM...`);
+  for (const pid of pids) {
+    try { process.kill(Number(pid), 'SIGTERM'); } catch { /* ignore */ }
+  }
+  // wait up to 5s for graceful shutdown
+  for (let i = 0; i < 10; i++) {
+    await new Promise(r => setTimeout(r, 500));
+    const remain = await (getPids() as unknown as Promise<string[]>);
+    if (!remain.length) { return; }
+  }
+  console.warn(`⚠️ Port ${port} still in use — sending SIGKILL...`);
+  const remain = await (getPids() as unknown as Promise<string[]>);
+  for (const pid of remain) {
+    try { process.kill(Number(pid), 'SIGKILL'); } catch { /* ignore */ }
+  }
+  await new Promise(r => setTimeout(r, 800));
 }
 
 /**
