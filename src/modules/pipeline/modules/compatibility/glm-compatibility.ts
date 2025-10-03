@@ -10,6 +10,8 @@ import type { CompatibilityModule, ModuleConfig, ModuleDependencies } from '../.
 import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 import type { TransformationRule } from '../../interfaces/pipeline-interfaces.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
+import { loadToolMappings } from '../../../../config/tool-mapping-loader.js';
+import { ToolMappingExecutor } from '../../utils/tool-mapping-executor.js';
 
 export class GLMCompatibility implements CompatibilityModule {
   readonly id: string;
@@ -20,12 +22,15 @@ export class GLMCompatibility implements CompatibilityModule {
   private isInitialized = false;
   private logger: PipelineDebugLogger;
   private readonly forceDisableThinking: boolean;
+  private readonly useMappingConfig: boolean;
+  private mappingExecutor: ToolMappingExecutor | null = null;
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
     this.logger = dependencies.logger as any;
     this.id = `compatibility-glm-${Date.now()}`;
     this.config = config;
     this.forceDisableThinking = process.env.RCC_GLM_DISABLE_THINKING === '1';
+    this.useMappingConfig = process.env.RCC_GLM_USE_MAPPING_CONFIG === '1';
     this.thinkingDefaults = this.normalizeThinkingConfig(this.config?.config?.thinking);
   }
 
@@ -33,6 +38,15 @@ export class GLMCompatibility implements CompatibilityModule {
     try {
       this.logger.logModule(this.id, 'initializing', { config: this.config });
       this.validateConfig();
+      if (this.useMappingConfig) {
+        const cfg = loadToolMappings('glm');
+        if (cfg) {
+          this.mappingExecutor = new ToolMappingExecutor(cfg);
+          this.logger.logModule(this.id, 'tool-mapping-config-loaded', { tools: Object.keys(cfg.tools || {}) });
+        } else {
+          this.logger.logModule(this.id, 'tool-mapping-config-missing');
+        }
+      }
       this.isInitialized = true;
       this.logger.logModule(this.id, 'initialized');
     } catch (error) {
@@ -123,6 +137,27 @@ export class GLMCompatibility implements CompatibilityModule {
                 (msg as any).tool_calls = this.normalizeToolCallsForClient((msg as any).tool_calls);
                 // When tool_calls exist, blank out content to avoid leaking markup or stray text
                 (msg as any).content = '';
+              } else if (this.mappingExecutor && this.useMappingConfig) {
+                // Try config-driven mapping as a fallback when no calls parsed by built-ins
+                try {
+                  const mapped = this.mappingExecutor.apply(rest);
+                  if (mapped.calls.length) {
+                    const reconstructed = mapped.calls.map((call, i) => ({
+                      id: `call_${Date.now()}_${i}`,
+                      type: 'function',
+                      function: { name: call.name, arguments: JSON.stringify(call.args) }
+                    }));
+                    if (Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length) {
+                      (msg as any).tool_calls = [ ...(msg as any).tool_calls, ...reconstructed ];
+                    } else {
+                      (msg as any).tool_calls = reconstructed;
+                    }
+                    (msg as any).tool_calls = this.normalizeToolCallsForClient((msg as any).tool_calls);
+                    (msg as any).content = '';
+                  }
+                } catch {
+                  // ignore mapping errors
+                }
               }
             }
           } catch { /* non-blocking */ }

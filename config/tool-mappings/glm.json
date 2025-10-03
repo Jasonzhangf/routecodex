@@ -1,0 +1,33 @@
+{
+  "global": {
+    "strip_think_blocks": true,
+    "max_tool_calls": 1
+  },
+  "tools": {
+    "shell": {
+      "patterns": [
+        {
+          "type": "bracket",
+          "regex": "\\\\[tool_call:shell\\\\][\\\\s\\\\S]*?\\\\{\\\\\\\"command\\\\\\\",\\\\\\\"(?<cmd>[^\\\\\\\"]+)\\\\\\\"\\\\]"
+        }
+      ],
+      "postprocess": [
+        { "ensure_array": { "field": "command", "default_shell": true } }
+      ],
+      "aliases": { "cmd": "command" }
+    },
+    "apply_patch": {
+      "patterns": [
+        {
+          "type": "bracket",
+          "regex": "\\\\[tool_call:apply_patch\\\\][\\\\s\\\\S]*?\\\\{(?<patch>[\\\\s\\\\S]+)\\\\}"
+        }
+      ],
+      "postprocess": [
+        { "wrap_object": { "field": "input" } }
+      ],
+      "aliases": { "patch": "input", "diff": "input" }
+    }
+  }
+}
+
