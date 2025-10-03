@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.31.0",
+  "version": "0.31.1",
   "description": "Multi-provider OpenAI proxy server with native dry-run capabilities",
   "type": "module",
   "main": "dist/index.js",
@@ -28,6 +28,7 @@
   ],
   "scripts": {
     "build": "npm run clean && tsc",
+    "postbuild": "chmod +x dist/cli.js || true",
     "build:watch": "tsc --watch",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
