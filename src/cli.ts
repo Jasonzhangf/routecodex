@@ -65,10 +65,22 @@ const logger = {
 // CLI program setup
 const program = new Command();
 
+// Resolve version from package.json at runtime to avoid hardcoding mismatches
+const pkgVersion: string = (() => {
+  try {
+    const pkgPath = path.resolve(__dirname, '..', 'package.json');
+    const txt = fs.readFileSync(pkgPath, 'utf-8');
+    const j = JSON.parse(txt);
+    return typeof j?.version === 'string' ? j.version : '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+})();
+
 program
   .name('routecodex')
   .description('Multi-provider OpenAI proxy server')
-  .version('0.2.7');
+  .version(pkgVersion);
 
 // Start command
 program

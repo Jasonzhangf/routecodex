@@ -937,14 +937,15 @@ export class HttpServer extends BaseModule implements IHttpServer {
       process.exit(1);
     });
 
-    // Handle unhandled promise rejections
+    // Handle unhandled promise rejections (log and continue; do NOT exit process)
     process.on('unhandledRejection', async (reason, promise) => {
-      console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-      await this.handleError(
-        reason instanceof Error ? reason : new Error(String(reason)),
-        'unhandled_rejection'
-      );
-      process.exit(1);
+      try {
+        console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+        await this.handleError(
+          reason instanceof Error ? reason : new Error(String(reason)),
+          'unhandled_rejection'
+        );
+      } catch { /* ignore */ }
     });
   }
 

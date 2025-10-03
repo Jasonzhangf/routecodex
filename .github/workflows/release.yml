@@ -8,6 +8,8 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
     - name: Checkout code
@@ -41,6 +43,14 @@ jobs:
           - Automated release from CI/CD pipeline
         draft: false
         prerelease: false
+
+    - name: Publish to npm
+      if: ${{ secrets.NPM_TOKEN != '' }}
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      run: |
+        npm config set //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}
+        npm publish --access public
 
     - name: Archive build artifacts
       uses: actions/upload-artifact@v3

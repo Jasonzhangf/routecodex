@@ -59,6 +59,8 @@ jobs:
   # 严格的安全审计
   security-audit:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -84,6 +86,7 @@ jobs:
       run: npx audit-ci --config ./audit-ci.json
 
     - name: Run Snyk security scan
+      if: ${{ secrets.SNYK_TOKEN != '' }}
       uses: snyk/actions/node@master
       env:
         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}

@@ -599,6 +599,8 @@ export class OpenAIRouter extends BaseModule {
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     let ctxProviderId: string | null = null;
     let ctxModelId: string | null = null;
+    // Pre-SSE heartbeat stopper (if streaming)
+    let stopPreHeartbeat: (() => void) | null = null;
 
     // Debug: Record request start
     if (this.isDebugEnhanced) {
@@ -690,7 +692,6 @@ export class OpenAIRouter extends BaseModule {
 
       let response;
       // Start pre-stream heartbeat immediately for streaming requests (independent of upstream processing)
-      let stopPreHeartbeat: (() => void) | null = null;
       if (req.body.stream === true) {
         try {
           stopPreHeartbeat = this.startPreStreamHeartbeat(res, requestId, req.body?.model);
@@ -842,6 +843,8 @@ export class OpenAIRouter extends BaseModule {
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       res.status(200).json(normalized);
     } catch (error) {
+      // Stop early heartbeat on error if running
+      try { if (stopPreHeartbeat) { stopPreHeartbeat(); stopPreHeartbeat = null; } } catch { /* ignore */ }
       const duration = Date.now() - startTime;
       try {
         const details = (error as any).details || {};
@@ -896,11 +899,41 @@ export class OpenAIRouter extends BaseModule {
         },
       });
 
-      // Send error response with improved mapping
+      // If SSE has started (headers already sent) or client requested stream, end stream gracefully
+      const wantsStream = !!req.body?.stream;
+      if (res.headersSent || wantsStream) {
+        try {
+          // Ensure SSE headers if not yet sent
+          if (!res.headersSent) {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('Transfer-Encoding', 'chunked');
+            res.setHeader('x-request-id', requestId);
+          }
+          const errorChunk = {
+            id: `chatcmpl-${Date.now()}`,
+            object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000),
+            model: req.body?.model || 'unknown',
+            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+          };
+          try { res.write(`data: ${JSON.stringify(errorChunk)}\n\n`); } catch { /* ignore */ }
+          try { res.write('data: [DONE]\n\n'); } catch { /* ignore */ }
+          try { res.end(); } catch { /* ignore */ }
+          return;
+        } catch {
+          // fall through to JSON mapping as last resort
+        }
+      }
+
+      // Send error response with improved mapping (non-stream path)
       const mapped = this.buildErrorPayload(error, requestId);
-      res.setHeader('x-request-id', requestId);
-      res.setHeader('Cache-Control', 'no-store');
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      if (!res.headersSent) {
+        res.setHeader('x-request-id', requestId);
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      }
       res.status(mapped.status).json(mapped.body);
     }
   }

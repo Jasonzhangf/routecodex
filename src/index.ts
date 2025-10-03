@@ -309,10 +309,10 @@ async function ensurePortAvailable(port: number): Promise<void> {
     // fallthrough
   }
 
-  const getPids = (): string[] => {
+  const getPids = async (): Promise<string[]> => {
     try {
       const ls = spawn('lsof', ['-ti', `:${port}`]);
-      return new Promise<string[]>((resolve) => {
+      return await new Promise<string[]>((resolve) => {
         let out = '';
         ls.stdout.on('data', d => (out += String(d)));
         ls.on('close', () => {
@@ -323,9 +323,9 @@ async function ensurePortAvailable(port: number): Promise<void> {
     } catch {
       return [];
     }
-  } as unknown as () => string[];
+  };
 
-  const pids = await (getPids() as unknown as Promise<string[]>);
+  const pids = await getPids();
   if (!pids || pids.length === 0) { return; }
   console.warn(`⚠️ Port ${port} in use by PID(s): ${pids.join(', ')} — sending SIGTERM...`);
   for (const pid of pids) {
@@ -334,11 +334,11 @@ async function ensurePortAvailable(port: number): Promise<void> {
   // wait up to 5s for graceful shutdown
   for (let i = 0; i < 10; i++) {
     await new Promise(r => setTimeout(r, 500));
-    const remain = await (getPids() as unknown as Promise<string[]>);
+    const remain = await getPids();
     if (!remain.length) { return; }
   }
   console.warn(`⚠️ Port ${port} still in use — sending SIGKILL...`);
-  const remain = await (getPids() as unknown as Promise<string[]>);
+  const remain = await getPids();
   for (const pid of remain) {
     try { process.kill(Number(pid), 'SIGKILL'); } catch { /* ignore */ }
   }
@@ -376,10 +376,9 @@ async function main(): Promise<void> {
     gracefulShutdown(app).catch(() => process.exit(1));
   });
 
-  // Handle unhandled promise rejections
+  // Handle unhandled promise rejections (log only; do not shutdown)
   process.on('unhandledRejection', (reason, promise) => {
     console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
-    gracefulShutdown(app).catch(() => process.exit(1));
   });
 
   // Start the server
