@@ -10,6 +10,9 @@ import type { ProviderConfig, AuthContext, ProviderResponse } from '../../types/
 import type { UnknownObject } from '../../../../types/common-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { DebugEventBus } from 'rcc-debugcenter';
+import fs from 'fs/promises';
+import path from 'path';
+import { homedir } from 'os';
 
 // Coding Plan base URL (previously in use, required in this environment)
 const DEFAULT_GLM_BASE = 'https://open.bigmodel.cn/api/coding/paas/v4';
@@ -138,6 +141,17 @@ export class GLMHTTPProvider implements ProviderModule {
         data: { endpoint, model: (payloadObj as any).model }
       });
     }
+
+    // Persist final payload snapshot
+    try {
+      const dir = path.join(homedir(), '.routecodex', 'codex-samples');
+      await fs.mkdir(dir, { recursive: true });
+      const outPath = path.join(dir, `provider-out-glm_${Date.now()}_${Math.random().toString(36).slice(2,8)}.json`);
+      await fs.writeFile(outPath, JSON.stringify(payloadObj, null, 2), 'utf-8');
+      if (this.isDebugEnhanced && this.debugEventBus) {
+        this.debugEventBus.publish({ sessionId: 'system', moduleId: this.id, operationId: 'glm_http_request_payload_saved', timestamp: Date.now(), type: 'middle', position: 'middle', data: { path: outPath, model: (payloadObj as any).model, hasTools: Array.isArray((payloadObj as any).tools) } });
+      }
+    } catch {}
 
     const res = await fetch(endpoint, {
       method: 'POST',

@@ -24,6 +24,8 @@ export interface PreflightResult {
 const ALLOWED_ROLES = new Set(['system', 'user', 'assistant', 'tool']);
 const DEFAULT_GLM_MAX_CONTEXT_TOKENS = Number(process.env.RCC_GLM_MAX_CONTEXT_TOKENS ?? 200000);
 const DEFAULT_GLM_CONTEXT_SAFETY_RATIO = Number(process.env.RCC_GLM_CONTEXT_SAFETY_RATIO ?? 0.85);
+const DISABLE_GLM_CONTEXT_TRIM = String(process.env.RCC_GLM_DISABLE_TRIM || '').trim() === '1';
+const DISABLE_GLM_EMPTY_USER_FILTER = String(process.env.RCC_GLM_DISABLE_EMPTY_USER_FILTER || '').trim() === '1';
 
 const estimateTokens = (text: string): number => {
   if (!text) return 0;
@@ -152,6 +154,7 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
   });
 
   const messages = mappedMessages.filter((msg: any, idx: number) => {
+    if (DISABLE_GLM_EMPTY_USER_FILTER) { return true; }
     const text = typeof msg?.content === 'string' ? msg.content.trim() : '';
     if (msg.role === 'user' && text.length === 0) {
       issues.push({
@@ -173,7 +176,7 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
     });
   }
 
-  if (targetGLM && messages.length) {
+  if (targetGLM && messages.length && !DISABLE_GLM_CONTEXT_TRIM) {
     const safetyRatio = DEFAULT_GLM_CONTEXT_SAFETY_RATIO > 0 && DEFAULT_GLM_CONTEXT_SAFETY_RATIO < 1
       ? DEFAULT_GLM_CONTEXT_SAFETY_RATIO
       : 0.85;

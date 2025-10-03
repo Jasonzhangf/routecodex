@@ -689,6 +689,13 @@ export class OpenAIRouter extends BaseModule {
       }
 
       let response;
+      // Start pre-stream heartbeat immediately for streaming requests (independent of upstream processing)
+      let stopPreHeartbeat: (() => void) | null = null;
+      if (req.body.stream === true) {
+        try {
+          stopPreHeartbeat = this.startPreStreamHeartbeat(res, requestId, req.body?.model);
+        } catch { /* non-blocking */ }
+      }
 
       // Pipeline path (streaming unified to non-streaming by workflow). Use RR within category.
       if (this.shouldUsePipeline() && this.routePools) {
@@ -767,6 +774,8 @@ export class OpenAIRouter extends BaseModule {
 
         // If client requests streaming, bridge pipeline stream to OpenAI SSE
         if (req.body.stream) {
+          // Stop early heartbeat before handing over to real SSE bridge
+          try { if (stopPreHeartbeat) { stopPreHeartbeat(); stopPreHeartbeat = null; } } catch { /* ignore */ }
           await this.streamFromPipeline(response, requestId, res, req.body.model);
           return; // response already sent via SSE
         }
@@ -785,6 +794,8 @@ export class OpenAIRouter extends BaseModule {
       }
 
       const duration = Date.now() - startTime;
+      // Ensure early heartbeat is stopped in non-stream path as well
+      try { if (stopPreHeartbeat) { stopPreHeartbeat(); stopPreHeartbeat = null; } } catch { /* ignore */ }
 
       // Debug: Record request completion
       if (this.isDebugEnhanced) {
@@ -1144,16 +1155,23 @@ export class OpenAIRouter extends BaseModule {
    * Bridge pipeline streaming output to OpenAI-compatible Server-Sent Events (SSE).
    */
   private async streamFromPipeline(response: any, requestId: string, res: Response, model?: string) {
-    // Set SSE headers
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('Transfer-Encoding', 'chunked');
-    res.setHeader('x-request-id', requestId);
+    // Set SSE headers (guard if already sent by pre-heartbeat)
+    if (!res.headersSent) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('Transfer-Encoding', 'chunked');
+      res.setHeader('x-request-id', requestId);
+    }
 
     const HEARTBEAT_INTERVAL_MS = Number(process.env.RCC_SSE_HEARTBEAT_MS ?? 15000);
     const HEARTBEAT_STATUS_TEXT = process.env.RCC_SSE_HEARTBEAT_STATUS_TEXT ?? 'Waiting for upstream response';
     const EMIT_STATUS = process.env.RCC_SSE_HEARTBEAT_STATUS !== '0';
+    // Mode: 'chunk' (default) emits OpenAI-compatible ChatCompletionChunk; 'comment' emits SSE comment lines only
+    const HEARTBEAT_MODE = (process.env.RCC_SSE_HEARTBEAT_MODE || 'chunk').toLowerCase();
+    // Whether to place heartbeat message into reasoning_content (never content) when using 'chunk' mode
+    // Default OFF to keep chunks strictly OpenAI-compatible
+    const HEARTBEAT_USE_REASONING = process.env.RCC_SSE_HEARTBEAT_USE_REASONING === '1';
     let heartbeatTimer: NodeJS.Timeout | null = null;
     let streamEnded = false;
     let heartbeatCounter = 0;
@@ -1166,29 +1184,48 @@ export class OpenAIRouter extends BaseModule {
       if (streamEnded) { return; }
       try {
         heartbeatCounter += 1;
-        const delta: Record<string, any> = {};
-        if (EMIT_STATUS) {
-          const elapsedMs = Date.now() - heartbeatStartedAt;
-          const elapsedSeconds = Math.max(1, Math.floor(elapsedMs / 1000));
-          const statusText = `${heartbeatBaselineText} (≈${elapsedSeconds}s)`;
-          delta.reasoning_content = [{
-            type: 'text',
-            text: statusText,
-            metadata: {
-              rccHeartbeat: true,
+        if (HEARTBEAT_MODE === 'comment') {
+          // SSE comment – semantically neutral, most OpenAI-compatible clients ignore comments
+          res.write(`: ping ${heartbeatCounter}\n\n`);
+          try {
+            this.publishDebugEvent('sse_heartbeat_emit', {
+              mode: 'comment',
               sequence: heartbeatCounter,
-            },
-          }];
+              requestId,
+            });
+          } catch {}
+        } else {
+          const delta: Record<string, any> = {};
+          if (EMIT_STATUS && HEARTBEAT_USE_REASONING) {
+            const elapsedMs = Date.now() - heartbeatStartedAt;
+            const elapsedSeconds = Math.max(1, Math.floor(elapsedMs / 1000));
+            const statusText = `${heartbeatBaselineText} (≈${elapsedSeconds}s)`;
+            delta.reasoning_content = [{
+              type: 'text',
+              text: statusText,
+              metadata: {
+                rccHeartbeat: true,
+                sequence: heartbeatCounter,
+              },
+            }];
+          }
+          const heartbeatChunk = {
+            id: `chatcmpl-${Date.now()}`,
+            object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000),
+            model: model || 'unknown',
+            choices: [{ index: 0, delta, finish_reason: null }],
+          };
+          res.write(`data: ${JSON.stringify(heartbeatChunk)}\n\n`);
+          try {
+            this.publishDebugEvent('sse_heartbeat_emit', {
+              mode: 'chunk',
+              sequence: heartbeatCounter,
+              requestId,
+              hasReasoning: Boolean(delta && delta.reasoning_content),
+            });
+          } catch {}
         }
-        const heartbeatChunk = {
-          id: `chatcmpl-${Date.now()}`,
-          object: 'chat.completion.chunk',
-          created: Math.floor(Date.now() / 1000),
-          model: model || 'unknown',
-          status: 'in_progress',
-          choices: [{ index: 0, delta, finish_reason: null }],
-        };
-        res.write(`data: ${JSON.stringify(heartbeatChunk)}\n\n`);
       } catch { /* ignore */ }
     };
 
@@ -1482,6 +1519,48 @@ export class OpenAIRouter extends BaseModule {
       return 'default';
     }
     return categories[0] || 'default';
+  }
+
+  /**
+   * Start a minimal SSE heartbeat immediately, before upstream processing begins.
+   * This keeps the client connection alive without depending on provider stream.
+   * Returns a stop function to clear the interval.
+   */
+  private startPreStreamHeartbeat(res: Response, requestId: string, model?: string): () => void {
+    try {
+      // Prepare SSE headers if not already sent
+      if (!res.headersSent) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('Transfer-Encoding', 'chunked');
+        res.setHeader('x-request-id', requestId);
+      }
+    } catch { /* ignore header errors */ }
+
+    const PRE_HEARTBEAT_MS = Number(process.env.RCC_PRE_SSE_HEARTBEAT_MS ?? 3000);
+    if (!(PRE_HEARTBEAT_MS > 0)) {
+      // Emit a single comment to flush headers and return noop stopper
+      try { res.write(`: pre-start ${Date.now()}\n\n`); } catch { /* ignore */ }
+      return () => {};
+    }
+
+    let counter = 0;
+    try { res.write(`: pre-start ${Date.now()}\n\n`); } catch { /* ignore */ }
+    const timer = setInterval(() => {
+      try {
+        counter += 1;
+        res.write(`: pre-ping ${counter}\n\n`);
+      } catch {
+        // If write fails (client closed), stop interval
+        try { clearInterval(timer); } catch { /* ignore */ }
+      }
+    }, PRE_HEARTBEAT_MS);
+
+    return () => {
+      try { clearInterval(timer); } catch { /* ignore */ }
+      try { res.write(`: pre-stop ${Date.now()}\n\n`); } catch { /* ignore */ }
+    };
   }
 
   private async decideRouteCategoryAsync(req: Request): Promise<string> {

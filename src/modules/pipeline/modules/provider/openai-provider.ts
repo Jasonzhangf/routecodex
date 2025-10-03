@@ -12,6 +12,9 @@ import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { DebugEventBus } from "rcc-debugcenter";
 import OpenAI from 'openai';
+import fs from 'fs/promises';
+import path from 'path';
+import { homedir } from 'os';
 
 /**
  * OpenAI Provider Module
@@ -242,6 +245,23 @@ export class OpenAIProvider implements ProviderModule {
       if ((request as { response_format?: unknown }).response_format) {
         chatRequest.response_format = (request as { response_format?: unknown }).response_format;
       }
+
+      // Persist final payload snapshot when debug is enabled
+      try {
+        const dir = path.join(homedir(), '.routecodex', 'codex-samples');
+        await fs.mkdir(dir, { recursive: true });
+        const outPath = path.join(dir, `provider-out-openai_${Date.now()}_${Math.random().toString(36).slice(2,8)}.json`);
+        await fs.writeFile(outPath, JSON.stringify(chatRequest, null, 2), 'utf-8');
+        if (this.isDebugEnhanced) {
+          this.publishProviderEvent('request-payload-saved', {
+            requestId,
+            path: outPath,
+            model: (request as { model?: string }).model,
+            hasTools: Array.isArray((chatRequest as any).tools),
+            vendorBase: (this.config.config as ProviderConfig)?.baseUrl
+          });
+        }
+      } catch {}
 
       // Send request to OpenAI
       type ChatCreateArg = Parameters<OpenAI['chat']['completions']['create']>[0];
