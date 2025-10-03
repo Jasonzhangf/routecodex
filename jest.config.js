@@ -18,7 +18,7 @@ const config = {
     ],
   },
   transformIgnorePatterns: [
-    'node_modules/(?!(rcc-debugcenter|rcc-basemodule|rcc-basemodule-adv|rcc-errorhandling)/)',
+    'node_modules/(?!(rcc-debugcenter|rcc-basemodule|rcc-errorhandling)/)',
   ],
   roots: ['<rootDir>/src', '<rootDir>/tests'],
   testMatch: ['**/__tests__/**/*.ts', '**/?(*.)+(spec|test).ts'],
@@ -46,7 +46,6 @@ const config = {
     '^(\\.{1,2}/.*)\\.js$': '$1',
     '^rcc-debugcenter$': '<rootDir>/node_modules/rcc-debugcenter/dist/index.esm.js',
     '^rcc-basemodule$': '<rootDir>/node_modules/rcc-basemodule/dist/index.esm.js',
-    '^rcc-basemodule-adv$': '<rootDir>/node_modules/rcc-basemodule-adv/dist/index.esm.js',
     '^rcc-errorhandling$': '<rootDir>/node_modules/rcc-errorhandling/dist/index.esm.js',
   },
   };

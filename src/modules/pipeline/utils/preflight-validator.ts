@@ -26,7 +26,7 @@ const DEFAULT_GLM_MAX_CONTEXT_TOKENS = Number(process.env.RCC_GLM_MAX_CONTEXT_TO
 const DEFAULT_GLM_CONTEXT_SAFETY_RATIO = Number(process.env.RCC_GLM_CONTEXT_SAFETY_RATIO ?? 0.85);
 
 const estimateTokens = (text: string): number => {
-  if (!text) { return 0; }
+  if (!text) return 0;
   return Math.ceil(text.length / 4);
 };
 

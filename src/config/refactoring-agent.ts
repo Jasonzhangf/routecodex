@@ -982,7 +982,7 @@ export class VirtualRouterModule extends BaseModule {
    */
   getStatus(): any {
     return {
-      status: this.isRunning ? 'running' : 'stopped',
+      status: this.isModuleRunning() ? 'running' : 'stopped',
       routeTargets: Object.keys(this.routeTargets),
       pipelineConfigs: Object.keys(this.pipelineConfigs),
       protocolManager: this.protocolManager.getStatus(),
@@ -1753,7 +1753,7 @@ export class ConfigManagerModule extends BaseModule {
    */
   getStatus(): any {
     return {
-      status: this.isRunning ? 'running' : 'stopped',
+      status: this.isModuleRunning() ? 'running' : 'stopped',
       configPath: this.configPath,
       systemConfigPath: this.systemConfigPath,
       mergedConfigPath: this.mergedConfigPath,

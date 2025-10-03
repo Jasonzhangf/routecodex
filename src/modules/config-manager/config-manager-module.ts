@@ -140,10 +140,11 @@ export class ConfigManagerModule extends BaseModule {
    * Get debug status with enhanced information
    */
   getDebugStatus(): any {
+    const info = this.getInfo();
     const baseStatus = {
-      id: this.info.id,
-      name: this.info.name,
-      isRunning: this.isRunning,
+      id: info.id,
+      name: info.name,
+      isRunning: this.isRunning(),
       configPath: this.configPath,
       systemConfigPath: this.systemConfigPath,
       mergedConfigPath: this.mergedConfigPath,
@@ -822,10 +823,11 @@ export class ConfigManagerModule extends BaseModule {
    * 获取状态
    */
   getStatus(): any {
+    const info = this.getInfo();
     const baseStatus = {
-      id: this.info.id,
-      name: this.info.name,
-      status: this.isRunning ? 'running' : 'stopped',
+      id: info.id,
+      name: info.name,
+      status: this.isRunning() ? 'running' : 'stopped',
       configPath: this.configPath,
       systemConfigPath: this.systemConfigPath,
       mergedConfigPath: this.mergedConfigPath,

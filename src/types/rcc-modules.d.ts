@@ -8,12 +8,13 @@ declare module 'rcc-basemodule' {
     name: string;
     version: string;
     description: string;
-    type: string;
+    type?: string;
   }
 
   export class BaseModule {
     constructor(moduleInfo: ModuleInfo);
     getModuleInfo(): ModuleInfo;
+    getInfo(): ModuleInfo;
     isInitialized(): boolean;
     isRunning(): boolean;
   }

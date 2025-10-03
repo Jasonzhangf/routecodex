@@ -298,7 +298,7 @@ export class VirtualRouterModule extends BaseModule {
     const classifierStatus = this.inputModelRequestClassifier?.getStatus() || null;
     
     return {
-      status: this.isRunning ? 'running' : 'stopped',
+      status: this.isModuleRunning() ? 'running' : 'stopped',
       routeTargets: Object.keys(this.routeTargets),
       pipelineConfigs: Object.keys(this.pipelineConfigs),
       classifier: {

@@ -1,12 +1,10 @@
-/**
- * Base Module Class
- * 基础模块类 - 所有模块的基类
- */
-
 import { EventEmitter } from 'events';
 import * as debugcenter from 'rcc-debugcenter';
+import { BaseModule as RCCBaseModule, type ModuleInfo } from 'rcc-basemodule';
+import { DebugEnhancementManager } from '../modules/debug/debug-enhancement-manager.js';
 
-// Check if components exist, fallback to mocks if not
+export type { ModuleInfo } from 'rcc-basemodule';
+
 const DebugCenter =
   (debugcenter as any).DebugCenter ||
   class {
@@ -22,19 +20,8 @@ const DebugEventBus =
       };
     }
   };
-import { DebugEnhancementManager } from '../modules/debug/debug-enhancement-manager.js';
 
-/**
- * 模块基本信息接口
- */
-export interface ModuleInfo {
-  id: string;
-  name: string;
-  version: string;
-  description: string;
-  author?: string;
-  dependencies?: string[];
-}
+type DebugEventBusInstance = ReturnType<(typeof DebugEventBus)['getInstance']>;
 
 /**
  * 模块状态枚举
@@ -48,41 +35,71 @@ export enum ModuleStatus {
 }
 
 /**
- * 基础模块类
+ * RouteCodex Base Module
+ *
+ * Wraps the upstream RCC BaseModule while preserving the
+ * RouteCodex-specific debug and lifecycle helpers that other modules rely on.
  */
-export abstract class BaseModule extends EventEmitter {
-  protected info: ModuleInfo;
+export abstract class BaseModule extends RCCBaseModule {
   protected status: ModuleStatus = ModuleStatus.STOPPED;
-  protected isRunning: boolean = false;
+  private runningState = false;
 
-  // Debug enhancement properties - unified approach
+  // Unified debug enhancement properties
   private debugEnhancementManager: DebugEnhancementManager | null = null;
   private debugEnhancement: any = null;
 
   // Legacy debug properties for backward compatibility
-  public debugEventBus: any | null = null;
+  protected debugEventBus: DebugEventBusInstance | null = null;
   public isDebugEnhanced = false;
   public moduleMetrics: Map<string, any> = new Map();
   public operationHistory: any[] = [];
   public errorHistory: any[] = [];
   public maxHistorySize = 50;
 
+  private readonly emitter = new EventEmitter();
+
   constructor(info: ModuleInfo) {
-    super();
-    this.info = info;
-
-    // Initialize unified debug enhancements
+    super(info);
     this.initializeUnifiedDebugEnhancements();
-
-    // Initialize legacy debug enhancements for backward compatibility
     this.initializeDebugEnhancements();
+  }
+
+  /**
+   * 订阅事件
+   */
+  public on(event: string | symbol, listener: (...args: any[]) => void): this {
+    this.emitter.on(event, listener);
+    return this;
+  }
+
+  /**
+   * 订阅一次性事件
+   */
+  public once(event: string | symbol, listener: (...args: any[]) => void): this {
+    this.emitter.once(event, listener);
+    return this;
+  }
+
+  /**
+   * 取消事件订阅
+   */
+  public off(event: string | symbol, listener: (...args: any[]) => void): this {
+    this.emitter.off(event, listener);
+    return this;
+  }
+
+  /**
+   * 发射事件
+   */
+  protected emit(event: string | symbol, ...args: any[]): boolean {
+    return this.emitter.emit(event, ...args);
   }
 
   /**
    * 获取模块信息
    */
-  getInfo(): ModuleInfo {
-    return { ...this.info };
+  public override getInfo(): ModuleInfo {
+    return super.getInfo();
   }
 
   /**
@@ -96,7 +113,11 @@ export abstract class BaseModule extends EventEmitter {
    * 检查模块是否运行中
    */
   isModuleRunning(): boolean {
-    return this.isRunning;
+    return this.isRunning();
+  }
+
+  public override isRunning(): boolean {
+    return this.runningState;
   }
 
   /**
@@ -108,26 +129,28 @@ export abstract class BaseModule extends EventEmitter {
    * 启动模块
    */
   async start(): Promise<void> {
-    if (this.isRunning) {
-      console.warn(`Module ${this.info.id} is already running`);
+    if (this.runningState) {
+      const info = this.getInfo();
+      console.warn(`Module ${info.id} is already running`);
       return;
     }
 
     try {
+      const info = this.getInfo();
       this.status = ModuleStatus.STARTING;
-      this.emit('starting', this.info);
+      this.emit('starting', info);
 
-      // 子类可以重写此方法来实现启动逻辑
       await this.doStart();
 
       this.status = ModuleStatus.RUNNING;
-      this.isRunning = true;
-      this.emit('started', this.info);
+      this.runningState = true;
+      this.emit('started', info);
 
-      console.log(`✅ Module ${this.info.id} started successfully`);
+      console.log(`✅ Module ${info.id} started successfully`);
     } catch (error) {
+      const info = this.getInfo();
       this.status = ModuleStatus.ERROR;
-      this.emit('error', { module: this.info, error });
+      this.emit('error', { module: info, error });
       throw error;
     }
   }
@@ -136,26 +159,28 @@ export abstract class BaseModule extends EventEmitter {
    * 停止模块
    */
   async stop(): Promise<void> {
-    if (!this.isRunning) {
-      console.warn(`Module ${this.info.id} is not running`);
+    if (!this.runningState) {
+      const info = this.getInfo();
+      console.warn(`Module ${info.id} is not running`);
       return;
     }
 
     try {
+      const info = this.getInfo();
       this.status = ModuleStatus.STOPPING;
-      this.emit('stopping', this.info);
+      this.emit('stopping', info);
 
-      // 子类可以重写此方法来实现停止逻辑
       await this.doStop();
 
       this.status = ModuleStatus.STOPPED;
-      this.isRunning = false;
-      this.emit('stopped', this.info);
+      this.runningState = false;
+      this.emit('stopped', info);
 
-      console.log(`🛑 Module ${this.info.id} stopped successfully`);
+      console.log(`🛑 Module ${info.id} stopped successfully`);
     } catch (error) {
+      const info = this.getInfo();
       this.status = ModuleStatus.ERROR;
-      this.emit('error', { module: this.info, error });
+      this.emit('error', { module: info, error });
       throw error;
     }
   }
@@ -172,13 +197,14 @@ export abstract class BaseModule extends EventEmitter {
    * 获取模块统计信息
    */
   getStats(): any {
+    const info = this.getInfo();
     return {
-      id: this.info.id,
-      name: this.info.name,
-      version: this.info.version,
+      id: info.id,
+      name: info.name,
+      version: info.version,
       status: this.status,
-      isRunning: this.isRunning,
-      uptime: this.isRunning ? Date.now() - this.getStartTime() : 0,
+      isRunning: this.runningState,
+      uptime: this.runningState ? Date.now() - this.getStartTime() : 0,
     };
   }
 
@@ -200,8 +226,6 @@ export abstract class BaseModule extends EventEmitter {
    * 获取启动时间
    */
   private getStartTime(): number {
-    // 这里可以存储实际的启动时间
-    // 为了简化，返回当前时间
     return Date.now();
   }
 
@@ -209,8 +233,9 @@ export abstract class BaseModule extends EventEmitter {
    * 处理模块错误
    */
   protected handleError(error: Error, context?: string): void {
+    const info = this.getInfo();
     this.emit('error', {
-      module: this.info,
+      module: info,
       error,
       context,
       timestamp: new Date().toISOString(),
@@ -221,12 +246,11 @@ export abstract class BaseModule extends EventEmitter {
    * Initialize unified debug enhancements
    */
   private initializeUnifiedDebugEnhancements(): void {
+    const info = this.getInfo();
     try {
       const debugCenter = new DebugCenter();
       this.debugEnhancementManager = DebugEnhancementManager.getInstance(debugCenter);
-
-      // Register enhancement for this module
-      this.debugEnhancement = this.debugEnhancementManager.registerEnhancement(this.info.id, {
+      this.debugEnhancement = this.debugEnhancementManager.registerEnhancement(info.id, {
         enabled: true,
         consoleLogging: true,
         debugCenter: true,
@@ -236,12 +260,9 @@ export abstract class BaseModule extends EventEmitter {
         maxHistorySize: this.maxHistorySize,
       });
 
-      console.log(`BaseModule unified debug enhancements initialized for ${this.info.id}`);
+      console.log(`BaseModule unified debug enhancements initialized for ${info.id}`);
     } catch (error) {
-      console.warn(
-        `Failed to initialize BaseModule unified debug enhancements for ${this.info.id}:`,
-        error
-      );
+      console.warn(`Failed to initialize BaseModule unified debug enhancements for ${info.id}:`, error);
       this.debugEnhancementManager = null;
     }
   }
@@ -264,15 +285,14 @@ export abstract class BaseModule extends EventEmitter {
    * Record module metric - unified approach
    */
   public recordModuleMetric(operation: string, data: any): void {
-    // Use unified debug enhancement if available
-    if (this.debugEnhancement && this.debugEnhancement.recordMetric) {
+    const info = this.getInfo();
+    if (this.debugEnhancement?.recordMetric) {
       this.debugEnhancement.recordMetric(operation, Date.now(), {
-        moduleId: this.info.id,
+        moduleId: info.id,
         operation,
       });
     }
 
-    // Fallback to legacy implementation
     if (!this.moduleMetrics.has(operation)) {
       this.moduleMetrics.set(operation, {
         values: [],
@@ -284,7 +304,6 @@ export abstract class BaseModule extends EventEmitter {
     metric.values.push(data);
     metric.lastUpdated = Date.now();
 
-    // Keep only last 50 measurements
     if (metric.values.length > 50) {
       metric.values.shift();
     }
@@ -294,19 +313,16 @@ export abstract class BaseModule extends EventEmitter {
    * Add to operation history - unified approach
    */
   public addToOperationHistory(operation: any): void {
-    // Use unified debug enhancement if available
-    if (this.debugEnhancement && this.debugEnhancement.addRequestToHistory) {
+    const info = this.getInfo();
+    if (this.debugEnhancement?.addRequestToHistory) {
       this.debugEnhancement.addRequestToHistory({
         ...operation,
-        moduleId: this.info.id,
+        moduleId: info.id,
         type: 'operation',
       });
     }
 
-    // Fallback to legacy implementation
     this.operationHistory.push(operation);
-
-    // Keep only recent history
     if (this.operationHistory.length > this.maxHistorySize) {
       this.operationHistory.shift();
     }
@@ -315,20 +331,18 @@ export abstract class BaseModule extends EventEmitter {
   /**
    * Add to error history - unified approach
    */
-  public addToErrorHistory(error: any): void {
-    // Use unified debug enhancement if available
-    if (this.debugEnhancement && this.debugEnhancement.addErrorToHistory) {
+  public addToErrorHistory(error: any, metadata: Record<string, any> = {}): void {
+    const info = this.getInfo();
+    if (this.debugEnhancement?.addErrorToHistory) {
       this.debugEnhancement.addErrorToHistory({
         ...error,
-        moduleId: this.info.id,
+        ...metadata,
+        moduleId: info.id,
         timestamp: Date.now(),
       });
     }
 
-    // Fallback to legacy implementation
     this.errorHistory.push(error);
-
-    // Keep only recent history
     if (this.errorHistory.length > this.maxHistorySize) {
       this.errorHistory.shift();
     }
@@ -342,22 +356,23 @@ export abstract class BaseModule extends EventEmitter {
       return;
     }
 
+    const info = this.getInfo();
     try {
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: this.info.id,
+        moduleId: info.id,
         operationId: type,
         timestamp: Date.now(),
         type: 'start',
         position: 'middle',
         data: {
           ...data,
-          moduleId: this.info.id,
+          moduleId: info.id,
           source: 'base-module',
         },
       });
-    } catch (error) {
-      // Silent fail if debug event bus is not available
+    } catch {
+      // Ignore debug event publication failures
     }
   }
 
@@ -365,16 +380,16 @@ export abstract class BaseModule extends EventEmitter {
    * Get debug status with enhanced information - unified approach
    */
   getDebugStatus(): any {
+    const info = this.getInfo();
     const baseStatus = {
-      moduleId: this.info.id,
-      name: this.info.name,
-      version: this.info.version,
+      moduleId: info.id,
+      name: info.name,
+      version: info.version,
       status: this.status,
-      isRunning: this.isRunning,
+      isRunning: this.runningState,
       isEnhanced: this.isDebugEnhanced,
     };
 
-    // Add unified debug information if available
     if (this.debugEnhancementManager) {
       return {
         ...baseStatus,
@@ -390,7 +405,6 @@ export abstract class BaseModule extends EventEmitter {
       };
     }
 
-    // Fallback to legacy implementation
     if (!this.isDebugEnhanced) {
       return baseStatus;
     }
@@ -399,8 +413,8 @@ export abstract class BaseModule extends EventEmitter {
       ...baseStatus,
       debugInfo: this.getDebugInfo(),
       moduleMetrics: this.getModuleMetrics(),
-      operationHistory: [...this.operationHistory.slice(-10)], // Last 10 operations
-      errorHistory: [...this.errorHistory.slice(-10)], // Last 10 errors
+      operationHistory: [...this.operationHistory.slice(-10)],
+      errorHistory: [...this.errorHistory.slice(-10)],
     };
   }
 
@@ -408,17 +422,18 @@ export abstract class BaseModule extends EventEmitter {
    * Get detailed debug information
    */
   public getDebugInfo(): any {
+    const info = this.getInfo();
     return {
-      moduleId: this.info.id,
-      name: this.info.name,
-      version: this.info.version,
+      moduleId: info.id,
+      name: info.name,
+      version: info.version,
       enhanced: this.isDebugEnhanced,
       eventBusAvailable: !!this.debugEventBus,
       operationHistorySize: this.operationHistory.length,
       errorHistorySize: this.errorHistory.length,
       status: this.status,
-      isRunning: this.isRunning,
-      uptime: this.isRunning ? Date.now() - this.getStartTime() : 0,
+      isRunning: this.runningState,
+      uptime: this.runningState ? Date.now() - this.getStartTime() : 0,
     };
   }
 
@@ -426,13 +441,13 @@ export abstract class BaseModule extends EventEmitter {
    * Get module metrics
    */
   public getModuleMetrics(): any {
-    const metrics: any = {};
+    const metrics: Record<string, any> = {};
 
     for (const [operation, metric] of this.moduleMetrics.entries()) {
       metrics[operation] = {
         count: metric.values.length,
         lastUpdated: metric.lastUpdated,
-        recentValues: metric.values.slice(-5), // Last 5 values
+        recentValues: metric.values.slice(-5),
       };
     }
 
@@ -450,6 +465,6 @@ export abstract class BaseModule extends EventEmitter {
    * Check if module is initialized - helper method for consistency
    */
   isModuleInitialized(): boolean {
-    return this.isRunning;
+    return this.runningState;
   }
 }

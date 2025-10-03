@@ -12,15 +12,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
-    },
-    "./adv-base-module": {
-      "import": "./sharedmodule/rcc-basemodule-adv/adv-base-module.js",
-      "types": "./sharedmodule/rcc-basemodule-adv/types.js"
     }
   },
   "files": [
     "dist/",
-    "sharedmodule/rcc-basemodule-adv/",
     "config/",
     "scripts/",
     "README.md",
@@ -42,8 +37,7 @@
     "test:integration": "jest --testPathPattern=integration",
     "test:e2e": "jest --testPathPattern=e2e",
     "test:performance": "jest --testPathPattern=performance",
-    "test:adv-module": "NODE_OPTIONS=\"--experimental-vm-modules\" jest tests/adv-base-module-*.test.js",
-    "test:dry-run": "npm run test:adv-module && node tests/basic-dry-run.mjs",
+    "test:dry-run": "node tests/basic-dry-run.mjs",
     "test:lmstudio-dryrun": "node tests/lmstudio-tools-bidir-dry-run.mjs",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
@@ -88,7 +82,6 @@
     "openai": "^5.23.0",
     "ora": "^9.0.0",
     "rcc-basemodule": "^0.2.7",
-    "rcc-basemodule-adv": "^0.0.1",
     "rcc-debugcenter": "^0.1.6",
     "rcc-errorhandling": "^1.0.10",
     "routecodex-config-compat": "^0.1.0",
