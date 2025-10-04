@@ -1,5 +1,9 @@
 name: Release Pipeline
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     tags:
@@ -31,13 +35,30 @@ jobs:
     - name: Build project
       run: npm run build
 
+    - name: Ensure build artifacts
+      run: |
+        test -f dist/cli.js || (echo "dist/cli.js missing" && exit 1)
+        chmod +x dist/cli.js || true
+
+    - id: extract
+      name: Extract version from tag
+      run: |
+        REF="${GITHUB_REF##*/}"
+        VERSION="${REF#v}"
+        echo "tag=$REF" >> $GITHUB_OUTPUT
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Align package.json version to tag
+      run: |
+        npm version --no-git-tag-version "${{ steps.extract.outputs.version }}"
+
     - name: Create Release
       uses: actions/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ github.ref }}
+        tag_name: ${{ steps.extract.outputs.tag }}
+        release_name: Release ${{ steps.extract.outputs.tag }}
         body: |
           Changes in this Release
           - Automated release from CI/CD pipeline
@@ -50,7 +71,7 @@ jobs:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       run: |
         npm config set //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}
-        npm publish --access public
+        npm publish --access public --ignore-scripts
 
     - name: Archive build artifacts
       uses: actions/upload-artifact@v3

@@ -47,7 +47,7 @@ jobs:
       run: npm run build
 
     - name: Upload coverage to Codecov
-      if: matrix.node-version == '20.x' && success()
+      if: matrix.node-version == '20.x' && success() && secrets.CODECOV_TOKEN != '' && hashFiles('coverage/lcov.info') != ''
       uses: codecov/codecov-action@v4
       with:
         files: ./coverage/lcov.info
