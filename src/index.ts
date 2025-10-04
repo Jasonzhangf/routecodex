@@ -73,7 +73,15 @@ class RouteCodexApp {
 
       // 1. 初始化配置管理器
       const port = await this.detectServerPort(this.modulesConfigPath);
-      // Preflight: ensure port is available (graceful stop then force-kill if needed)
+
+      // If a healthy instance is already running on this port, do NOT kill it —
+      // exit early to avoid interrupting in-flight sessions.
+      if (await isServerHealthy(port)) {
+        console.log(`ℹ Server already healthy on port ${port}; skipping new start.`);
+        return;
+      }
+
+      // Otherwise, ensure the port is available (graceful stop then force-kill if needed)
       await ensurePortAvailable(port);
       this.mergedConfigPath = path.join(process.cwd(), 'config', `merged-config.${port}.json`);
 
@@ -309,6 +317,8 @@ async function ensurePortAvailable(port: number): Promise<void> {
     // fallthrough
   }
 
+  // Always attempt to free the port if bind failed (legacy behavior)
+
   const getPids = async (): Promise<string[]> => {
     try {
       const ls = spawn('lsof', ['-ti', `:${port}`]);
@@ -343,6 +353,21 @@ async function ensurePortAvailable(port: number): Promise<void> {
     try { process.kill(Number(pid), 'SIGKILL'); } catch { /* ignore */ }
   }
   await new Promise(r => setTimeout(r, 800));
+}
+
+/** Quick health probe to avoid killing a healthy server instance */
+async function isServerHealthy(port: number): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => { try { controller.abort(); } catch { /* ignore */ } }, 800);
+    const res = await fetch(`http://127.0.0.1:${port}/health`, { method: 'GET', signal: (controller as any).signal } as any);
+    clearTimeout(t);
+    if (!res.ok) return false;
+    const data = await res.json().catch(() => null);
+    return !!data && (data.status === 'healthy' || data.status === 'ready');
+  } catch {
+    return false;
+  }
 }
 
 /**

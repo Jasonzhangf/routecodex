@@ -70,6 +70,29 @@ export class ContextualError extends Error {
 export class ErrorHandlingUtils {
   private static registry: ErrorHandlerRegistry | null = null;
 
+  /** Detect sandbox/permission-denied style errors */
+  public static detectSandboxPermissionError(err: any): { isSandbox: boolean; reason: string } {
+    try {
+      const code = String(err?.code || '').toUpperCase();
+      const msg = String(err?.message || err || '').toLowerCase();
+      const text = `${code} ${msg}`;
+      const patterns = [
+        'eacces',
+        'eperm',
+        'permission denied',
+        'operation not permitted',
+        'sandbox',
+        'seatbelt',
+        'execution error: denied',
+        'not permitted',
+      ];
+      const hit = patterns.find(p => text.includes(p));
+      return { isSandbox: !!hit, reason: hit || '' };
+    } catch {
+      return { isSandbox: false, reason: '' };
+    }
+  }
+
   /**
    * Initialize error handling utilities
    */

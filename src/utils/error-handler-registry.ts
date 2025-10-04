@@ -296,6 +296,14 @@ export class ErrorHandlerRegistry {
   private async registerDefaultErrorMessages(): Promise<void> {
     const defaultTemplates: ErrorMessageTemplate[] = [
       {
+        code: 'sandbox_error',
+        message: 'Sandbox or permission policy denied the operation',
+        severity: 'high',
+        category: 'sandbox',
+        description: 'The runtime sandbox (OS or policy) blocked this action (e.g., EPERM/EACCES, MacOS Seatbelt).',
+        recovery: 'Grant required permissions, relax sandbox, or avoid restricted operations',
+      },
+      {
         code: 'validation_error',
         message: 'Request validation failed',
         severity: 'medium',

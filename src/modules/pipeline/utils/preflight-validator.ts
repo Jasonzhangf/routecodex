@@ -153,6 +153,19 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
     return msg;
   });
 
+  // GLM compatibility: remove assistant.tool_calls from historical messages (keep only on the last message if present)
+  try {
+    if (targetGLM && Array.isArray(mappedMessages) && mappedMessages.length > 0) {
+      const n = mappedMessages.length;
+      for (let i = 0; i < n - 1; i++) {
+        const mm: any = mappedMessages[i];
+        if (mm && mm.role === 'assistant' && Array.isArray(mm.tool_calls)) {
+          delete mm.tool_calls;
+        }
+      }
+    }
+  } catch { /* non-blocking */ }
+
   const messages = mappedMessages.filter((msg: any, idx: number) => {
     if (DISABLE_GLM_EMPTY_USER_FILTER) { return true; }
     const text = typeof msg?.content === 'string' ? msg.content.trim() : '';
@@ -186,11 +199,37 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
       if (totalTokens > maxTokensBudget) {
         const trimmedMessages: any[] = [];
         const startIndex = messages[0]?.role === 'system' ? 1 : 0;
-        while (messages.length > startIndex && totalTokens > maxTokensBudget) {
+        // Protect the latest message so conversation can continue
+        while ((messages.length > (startIndex + 1)) && totalTokens > maxTokensBudget) {
           const removed = messages.splice(startIndex, 1)[0];
           trimmedMessages.push(removed);
           totalTokens -= messageTokenCost(removed);
         }
+
+        // If still over budget with only [system?, last] remaining, truncate the last message content
+        if (totalTokens > maxTokensBudget && messages.length > startIndex) {
+          const lastIdx = messages.length - 1;
+          const lastMsg = messages[lastIdx] as any;
+          if (typeof lastMsg?.content === 'string' && lastMsg.content.length > 0) {
+            const systemCost = (messages[0]?.role === 'system') ? messageTokenCost(messages[0]) : 0;
+            // Leave a small headroom of 5%
+            const allowedTokens = Math.max(0, Math.floor((maxTokensBudget - systemCost) * 0.95));
+            const approxChars = Math.max(0, allowedTokens * 4);
+            if (approxChars < lastMsg.content.length) {
+              // Keep the beginning of the message which usually contains instructions/context
+              lastMsg.content = lastMsg.content.slice(0, approxChars);
+              // Recompute tokens after truncation
+              totalTokens = messages.reduce((sum: number, msg: any) => sum + messageTokenCost(msg), 0);
+              issues.push({
+                level: 'warn',
+                code: 'messages.last.truncated',
+                message: `Truncated last message to fit context budget (allowedTokens=${allowedTokens}).`,
+                path: `messages[${lastIdx}].content`
+              });
+            }
+          }
+        }
+
         if (trimmedMessages.length) {
           issues.push({
             level: 'warn',
@@ -215,7 +254,7 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
 
   // Tools
   if (targetGLM) {
-    // Enable tools by default for GLM; can be disabled via flag
+    // Enable tools by default for GLM; can be disabled via env RCC_GLM_FEATURE_TOOLS=0
     const enableTools = opts.enableTools ?? (process.env.RCC_GLM_FEATURE_TOOLS !== '0');
     if (enableTools) {
       const mapped = mapToolsForGLM(src.tools, issues);

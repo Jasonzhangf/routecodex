@@ -4,6 +4,7 @@
  */
 
 import express, { type Router, type Request, type Response, type NextFunction } from 'express';
+import { ErrorHandlingUtils } from '../utils/error-handling-utils.js';
 import fs from 'fs/promises';
 import { BaseModule, type ModuleInfo } from 'rcc-basemodule';
 import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
@@ -149,7 +150,7 @@ export class OpenAIRouter extends BaseModule {
       : (typeof e?.statusCode === 'number' ? e.statusCode
         : (typeof e?.response?.status === 'number' ? e.response.status : undefined));
     const routeCodexStatus = error instanceof RouteCodexError ? error.status : undefined;
-    const status = statusFromObj ?? routeCodexStatus ?? 500;
+    let status = statusFromObj ?? routeCodexStatus ?? 500;
 
     // Extract best-effort message from common shapes
     const upstreamMsg = e?.response?.data?.error?.message
@@ -216,6 +217,29 @@ export class OpenAIRouter extends BaseModule {
       details.upstream = e.response.data;
     }
     details.requestId = requestId;
+
+    // Sandbox/permission denied normalization => 500 + sandbox_denied
+    try {
+      const det = ErrorHandlingUtils.detectSandboxPermissionError(e);
+      if (det.isSandbox) {
+        status = 500;
+        (details as any).category = 'sandbox';
+        (details as any).retryable = false;
+        if (det.reason) { (details as any).sandbox = { reason: det.reason }; }
+        return {
+          status,
+          body: {
+            error: {
+              message: typeof e?.message === 'string' ? e.message : 'Operation denied by sandbox or permission policy',
+              type: 'server_error',
+              code: 'sandbox_denied',
+              param: null,
+              details: details,
+            },
+          },
+        };
+      }
+    } catch { /* ignore */ }
 
     return {
       status,
@@ -759,7 +783,11 @@ export class OpenAIRouter extends BaseModule {
           }
         } catch { /* non-blocking */ }
 
-        const pipelineResponse = await this.pipelineManager.processRequest(pipelineRequest);
+        const pipelineTimeoutMs = Number(process.env.RCC_PIPELINE_MAX_WAIT_MS || 300000);
+        const pipelineResponse = await Promise.race([
+          this.pipelineManager.processRequest(pipelineRequest),
+          new Promise((_, reject) => setTimeout(() => reject(new Error(`Pipeline timeout after ${pipelineTimeoutMs}ms`)), Math.max(1, pipelineTimeoutMs)))
+        ]);
         response = pipelineResponse?.data ?? pipelineResponse;
 
         // Record pipeline output sample for Codex CLI requests
@@ -899,24 +927,26 @@ export class OpenAIRouter extends BaseModule {
         },
       });
 
-      // If SSE has started (headers already sent) or client requested stream, end stream gracefully
+      // Prefer JSON error if we haven't started SSE yet (even when client requested stream)
+      // If SSE headers already sent, end stream gracefully with an error chunk.
       const wantsStream = !!req.body?.stream;
-      if (res.headersSent || wantsStream) {
+      if (res.headersSent) {
         try {
           // Ensure SSE headers if not yet sent
-          if (!res.headersSent) {
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.setHeader('Connection', 'keep-alive');
-            res.setHeader('Transfer-Encoding', 'chunked');
-            res.setHeader('x-request-id', requestId);
-          }
+      if (!res.headersSent) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('Transfer-Encoding', 'chunked');
+        res.setHeader('x-request-id', requestId);
+        try { res.setHeader('x-worker-pid', String(process.pid)); } catch { /* ignore */ }
+      }
           const errorChunk = {
             id: `chatcmpl-${Date.now()}`,
             object: 'chat.completion.chunk',
             created: Math.floor(Date.now() / 1000),
             model: req.body?.model || 'unknown',
-            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+            choices: [{ index: 0, delta: { content: `Error: ${getErrorMessage(error)}` }, finish_reason: 'stop' }],
           };
           try { res.write(`data: ${JSON.stringify(errorChunk)}\n\n`); } catch { /* ignore */ }
           try { res.write('data: [DONE]\n\n'); } catch { /* ignore */ }
@@ -1189,13 +1219,14 @@ export class OpenAIRouter extends BaseModule {
    */
   private async streamFromPipeline(response: any, requestId: string, res: Response, model?: string) {
     // Set SSE headers (guard if already sent by pre-heartbeat)
-    if (!res.headersSent) {
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      res.setHeader('Transfer-Encoding', 'chunked');
-      res.setHeader('x-request-id', requestId);
-    }
+      if (!res.headersSent) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('Transfer-Encoding', 'chunked');
+        res.setHeader('x-request-id', requestId);
+        try { res.setHeader('x-worker-pid', String(process.pid)); } catch { /* ignore */ }
+      }
 
     const HEARTBEAT_INTERVAL_MS = Number(process.env.RCC_SSE_HEARTBEAT_MS ?? 15000);
     const HEARTBEAT_STATUS_TEXT = process.env.RCC_SSE_HEARTBEAT_STATUS_TEXT ?? 'Waiting for upstream response';
@@ -1219,7 +1250,7 @@ export class OpenAIRouter extends BaseModule {
         heartbeatCounter += 1;
         if (HEARTBEAT_MODE === 'comment') {
           // SSE comment – semantically neutral, most OpenAI-compatible clients ignore comments
-          res.write(`: ping ${heartbeatCounter}\n\n`);
+          res.write(`: ping ${heartbeatCounter} pid=${process.pid} req=${requestId}\n\n`);
           try {
             this.publishDebugEvent('sse_heartbeat_emit', {
               mode: 'comment',
@@ -1239,6 +1270,7 @@ export class OpenAIRouter extends BaseModule {
               metadata: {
                 rccHeartbeat: true,
                 sequence: heartbeatCounter,
+                workerPid: process.pid,
               },
             }];
           }
@@ -1561,38 +1593,60 @@ export class OpenAIRouter extends BaseModule {
    */
   private startPreStreamHeartbeat(res: Response, requestId: string, model?: string): () => void {
     try {
-      // Prepare SSE headers if not already sent
-      if (!res.headersSent) {
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
-        res.setHeader('Transfer-Encoding', 'chunked');
-        res.setHeader('x-request-id', requestId);
-      }
+      // Defer initial SSE header write to allow early JSON error mapping
+      // Headers will be written when the first pre-heartbeat tick fires
     } catch { /* ignore header errors */ }
 
     const PRE_HEARTBEAT_MS = Number(process.env.RCC_PRE_SSE_HEARTBEAT_MS ?? 3000);
+    const PRE_HEARTBEAT_DELAY_MS = Number(process.env.RCC_PRE_SSE_HEARTBEAT_DELAY_MS ?? 800);
     if (!(PRE_HEARTBEAT_MS > 0)) {
       // Emit a single comment to flush headers and return noop stopper
-      try { res.write(`: pre-start ${Date.now()}\n\n`); } catch { /* ignore */ }
+      try {
+        if (!res.headersSent) {
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.setHeader('Transfer-Encoding', 'chunked');
+          res.setHeader('x-request-id', requestId);
+          try { res.setHeader('x-worker-pid', String(process.pid)); } catch { /* ignore */ }
+        }
+        res.write(`: pre-start ${Date.now()}\n\n`);
+      } catch { /* ignore */ }
       return () => {};
     }
 
     let counter = 0;
-    try { res.write(`: pre-start ${Date.now()}\n\n`); } catch { /* ignore */ }
-    const timer = setInterval(() => {
+    let intervalTimer: NodeJS.Timeout | null = null;
+    const delayTimer = setTimeout(() => {
       try {
-        counter += 1;
-        res.write(`: pre-ping ${counter}\n\n`);
-      } catch {
-        // If write fails (client closed), stop interval
-        try { clearInterval(timer); } catch { /* ignore */ }
-      }
-    }, PRE_HEARTBEAT_MS);
+        if (!res.headersSent) {
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.setHeader('Transfer-Encoding', 'chunked');
+          res.setHeader('x-request-id', requestId);
+          try { res.setHeader('x-worker-pid', String(process.pid)); } catch { /* ignore */ }
+        }
+        res.write(`: pre-start ${Date.now()}\n\n`);
+      } catch { /* ignore */ }
+      intervalTimer = setInterval(() => {
+        try {
+          counter += 1;
+          res.write(`: pre-ping ${counter}\n\n`);
+        } catch {
+          try { if (intervalTimer) { clearInterval(intervalTimer); intervalTimer = null; } } catch { /* ignore */ }
+        }
+      }, PRE_HEARTBEAT_MS);
+    }, Math.max(0, PRE_HEARTBEAT_DELAY_MS));
 
     return () => {
-      try { clearInterval(timer); } catch { /* ignore */ }
-      try { res.write(`: pre-stop ${Date.now()}\n\n`); } catch { /* ignore */ }
+      try { if (intervalTimer) { clearInterval(intervalTimer); intervalTimer = null; } } catch { /* ignore */ }
+      try { clearTimeout(delayTimer); } catch { /* ignore */ }
+      try {
+        if (res && !res.writableEnded) {
+          res.write(`: pre-stop ${Date.now()}\n\n`);
+        }
+      } catch { /* ignore */ }
     };
   }
 

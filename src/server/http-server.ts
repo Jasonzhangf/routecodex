@@ -897,14 +897,28 @@ export class HttpServer extends BaseModule implements IHttpServer {
 
       await this.handleError(error, 'request_handler');
 
-      const status = error.status || 500;
-      const message = error.message || 'Internal Server Error';
+      // Normalize sandbox/permission errors to explicit 500 with sandbox_denied
+      let status = error.status || error.statusCode || 500;
+      let code = error.code || 'internal_error';
+      let type = error.type || 'internal_error';
+      let message = error.message || 'Internal Server Error';
+      try {
+        const det = ErrorHandlingUtils.detectSandboxPermissionError(error);
+        if (det.isSandbox) {
+          status = 500;
+          code = 'sandbox_denied';
+          type = 'server_error';
+          if (!message || message === 'Internal Server Error') {
+            message = 'Operation denied by sandbox or permission policy';
+          }
+        }
+      } catch { /* ignore */ }
 
       res.status(status).json({
         error: {
           message,
-          type: error.type || 'internal_error',
-          code: error.code || 'internal_error',
+          type,
+          code,
           ...(process.env.NODE_ENV === 'development' && { stack: error.stack }),
         },
       });
@@ -932,9 +946,11 @@ export class HttpServer extends BaseModule implements IHttpServer {
 
     // Handle uncaught exceptions
     process.on('uncaughtException', async error => {
-      console.error('Uncaught Exception:', error);
-      await this.handleError(error, 'uncaught_exception');
-      process.exit(1);
+      try {
+        console.error('Uncaught Exception:', error);
+        await this.handleError(error, 'uncaught_exception');
+        // Do NOT exit; keep the server alive to avoid interrupting in-flight sessions.
+      } catch { /* ignore */ }
     });
 
     // Handle unhandled promise rejections (log and continue; do NOT exit process)

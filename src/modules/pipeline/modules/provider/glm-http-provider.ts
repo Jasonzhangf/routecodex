@@ -148,20 +148,51 @@ export class GLMHTTPProvider implements ProviderModule {
       await fs.mkdir(dir, { recursive: true });
       const outPath = path.join(dir, `provider-out-glm_${Date.now()}_${Math.random().toString(36).slice(2,8)}.json`);
       await fs.writeFile(outPath, JSON.stringify(payloadObj, null, 2), 'utf-8');
+      if (preflight.issues && preflight.issues.length) {
+        const issuesPath = outPath.replace(/\.json$/, '.issues.json');
+        await fs.writeFile(issuesPath, JSON.stringify({ issues: preflight.issues }, null, 2), 'utf-8');
+      }
       if (this.isDebugEnhanced && this.debugEventBus) {
         this.debugEventBus.publish({ sessionId: 'system', moduleId: this.id, operationId: 'glm_http_request_payload_saved', timestamp: Date.now(), type: 'start', position: 'middle', data: { path: outPath, model: (payloadObj as any).model, hasTools: Array.isArray((payloadObj as any).tools) } });
       }
     } catch {}
 
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'User-Agent': 'RouteCodex/GLMHTTPProvider'
-      },
-      body: JSON.stringify(payloadObj)
-    });
+    const timeoutMs = Number(process.env.GLM_HTTP_TIMEOUT_MS || process.env.RCC_UPSTREAM_TIMEOUT_MS || 300000);
+    const controller = new AbortController();
+    const t = setTimeout(() => {
+      try { controller.abort(); } catch { /* ignore */ }
+    }, Math.max(1, timeoutMs));
+
+    let res: Response;
+    try {
+      res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'User-Agent': 'RouteCodex/GLMHTTPProvider'
+        },
+        body: JSON.stringify(payloadObj),
+        signal: (controller as any).signal
+      } as any);
+    } catch (e: any) {
+      clearTimeout(t);
+      const isAbort = e?.name === 'AbortError' || String(e?.message || '').toLowerCase().includes('aborted');
+      if (isAbort) {
+        const err: any = new Error(`GLM upstream timeout after ${timeoutMs}ms`);
+        err.type = 'timeout';
+        err.statusCode = 504;
+        err.details = { upstream: { timeoutMs }, provider: { vendor: 'glm', baseUrl: this.getBaseUrl(), moduleType: this.type } };
+        err.retryable = false;
+        if (this.isDebugEnhanced && this.debugEventBus) {
+          this.debugEventBus.publish({ sessionId: 'system', moduleId: this.id, operationId: 'glm_http_request_timeout', timestamp: Date.now(), type: 'error', position: 'middle', data: { timeoutMs } });
+        }
+        throw err;
+      }
+      throw e;
+    } finally {
+      clearTimeout(t);
+    }
 
     const elapsed = Date.now() - start;
     if (!res.ok) {

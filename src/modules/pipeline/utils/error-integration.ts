@@ -188,9 +188,11 @@ export class PipelineErrorIntegration {
     } else if (code.includes('TIMEOUT') || code.includes('NETWORK')) {
       details.category = 'network_error';
       details.retryable = true;
-    } else if (code.includes('AUTH') || code.includes('PERMISSION')) {
-      details.category = 'authentication_error';
+    } else if (code.includes('AUTH') || code.includes('PERMISSION') || code.includes('EACCES') || code.includes('EPERM')) {
+      // Treat permission and sandbox-like denials as sandbox errors for clarity
+      details.category = 'sandbox_error';
       details.retryable = false;
+      if (!details.httpStatus) { details.httpStatus = 500; }
     } else if (code.includes('VALIDATION')) {
       details.category = 'validation_error';
       details.retryable = false;
