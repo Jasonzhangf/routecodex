@@ -6,6 +6,7 @@
  */
 
 import type { DebugEvent } from 'rcc-debugcenter';
+import { UnknownObject } from './common-types';
 
 /**
  * Debug system initialization options
@@ -52,7 +53,7 @@ export interface DebugAdapterConfig {
   /** Adapter class name */
   className: string;
   /** Adapter configuration */
-  config?: Record<string, any> & {
+  config?: UnknownObject & {
     maxHookEntries?: number;
     captureHeaders?: boolean;
     captureBody?: boolean;
@@ -84,7 +85,7 @@ export interface DebugAdapter {
   /**
    * Initialize the adapter
    */
-  initialize(options?: Record<string, any>): Promise<void>;
+  initialize(options?: UnknownObject): Promise<void>;
 
   /**
    * Start debugging for a specific context
@@ -114,7 +115,7 @@ export interface DebugAdapter {
   /**
    * Configure the adapter
    */
-  configure(config: Record<string, any>): Promise<void>;
+  configure(config: UnknownObject): Promise<void>;
 
   /**
    * Cleanup adapter resources
@@ -139,7 +140,7 @@ export interface DebugContext {
   /** Associated module ID */
   moduleId?: string;
   /** Context metadata */
-  metadata?: Record<string, any>;
+  metadata?: UnknownObject;
   /** Timestamp */
   timestamp?: number;
 }
@@ -155,11 +156,11 @@ export interface DebugData {
   /** Data type */
   type: 'metrics' | 'logs' | 'events' | 'errors' | 'performance' | 'memory' | 'custom';
   /** Data content */
-  content: any;
+  content: UnknownObject;
   /** Data timestamp */
   timestamp: number;
   /** Data metadata */
-  metadata?: Record<string, any>;
+  metadata?: UnknownObject;
 }
 
 /**
@@ -278,9 +279,9 @@ export interface MethodHookData {
   /** Method name */
   methodName: string;
   /** Method parameters */
-  params?: any[];
+  params?: unknown[];
   /** Method result */
-  result?: any;
+  result?: unknown;
   /** Method error */
   error?: Error;
   /** Execution time */
@@ -290,7 +291,7 @@ export interface MethodHookData {
   /** Call stack */
   callStack?: string[];
   /** Metadata */
-  metadata?: Record<string, any>;
+  metadata?: UnknownObject;
 }
 
 /**
@@ -307,11 +308,11 @@ export interface ModuleDebugData extends DebugData {
   /** Method hooks data */
   methodHooks: MethodHookData[];
   /** Module state */
-  state?: Record<string, any>;
+  state?: UnknownObject;
   /** Module events */
   events: DebugEvent[];
   /** Module errors */
-  errors: any[];
+  errors: unknown[];
   /** Content data (for compatibility) - overrides DebugData.content */
   content: {
     moduleInfo: {
@@ -321,9 +322,9 @@ export interface ModuleDebugData extends DebugData {
       type: string;
     };
     methodHooks: MethodHookData[];
-    state?: Record<string, any>;
+    state?: UnknownObject;
     events: DebugEvent[];
-    errors: any[];
+    errors: unknown[];
   };
 }
 
@@ -367,7 +368,7 @@ export interface DebugHttpRequest {
   /** Request headers */
   headers: Record<string, string>;
   /** Request body */
-  body?: any;
+  body?: unknown;
   /** Request parameters */
   params?: Record<string, string>;
   /** Request query */
@@ -375,7 +376,7 @@ export interface DebugHttpRequest {
   /** Timestamp */
   timestamp: number;
   /** Request metadata */
-  metadata?: Record<string, any>;
+  metadata?: UnknownObject;
 }
 
 /**
@@ -389,13 +390,13 @@ export interface DebugHttpResponse {
   /** Response headers */
   headers: Record<string, string>;
   /** Response body */
-  body?: any;
+  body?: unknown;
   /** Response time */
   responseTime: number;
   /** Timestamp */
   timestamp: number;
   /** Response metadata */
-  metadata?: Record<string, any>;
+  metadata?: UnknownObject;
 }
 
 /**
@@ -441,7 +442,7 @@ export interface DebugAPIExtension {
   /**
    * Initialize the extension
    */
-  initialize(options?: Record<string, any>): Promise<void>;
+  initialize(options?: UnknownObject): Promise<void>;
 
   /**
    * Register debug endpoints
@@ -477,7 +478,7 @@ export interface DebugAPIRequest {
   /** Request headers */
   headers: Record<string, string>;
   /** Request body */
-  body?: any;
+  body?: unknown;
   /** Request parameters */
   params?: Record<string, string>;
   /** Query parameters */
@@ -497,9 +498,9 @@ export interface DebugAPIResponse {
   /** Response headers */
   headers: Record<string, string>;
   /** Response body */
-  body?: any;
+  body?: unknown;
   /** Response metadata */
-  metadata?: Record<string, any>;
+  metadata?: UnknownObject;
   /** Processing time */
   processingTime: number;
   /** Timestamp */
@@ -581,11 +582,11 @@ export interface DebugWebSocketEvent {
   /** Event type */
   type: 'start' | 'log' | 'error' | 'performance' | 'system';
   /** Event data */
-  data: any;
+  data: unknown;
   /** Timestamp */
   timestamp: number;
   /** Event metadata */
-  metadata?: Record<string, any>;
+  metadata?: UnknownObject;
 }
 
 /**
@@ -597,7 +598,7 @@ export interface DebugWebSocketMessage {
   /** Message type */
   type: 'event' | 'command' | 'response' | 'heartbeat' | 'subscription' | 'system' | 'error';
   /** Message data */
-  data: any;
+  data: unknown;
   /** Timestamp */
   timestamp: number;
   /** Target client ID (optional) */
@@ -648,17 +649,17 @@ export interface DebugUtils {
   /**
    * Sanitize data for logging (remove sensitive information)
    */
-  sanitizeData(data: any, options?: SanitizeOptions): any;
+  sanitizeData(data: unknown, options?: SanitizeOptions): unknown;
 
   /**
    * Format data for display
    */
-  formatData(data: any, options?: FormatOptions): string;
+  formatData(data: unknown, options?: FormatOptions): string;
 
   /**
    * Calculate data size
    */
-  calculateDataSize(data: any): number;
+  calculateDataSize(data: unknown): number;
 
   /**
    * Deep clone data
@@ -699,7 +700,7 @@ export interface SanitizeOptions {
   /** Maximum array length */
   maxArrayLength?: number;
   /** Custom sanitizer function */
-  customSanitizer?: (data: any) => any;
+  customSanitizer?: (data: unknown) => unknown;
 }
 
 /**
@@ -711,7 +712,7 @@ export interface FormatOptions {
   /** Indentation level */
   indent?: number;
   /** Custom formatter function */
-  customFormatter?: (data: any) => string;
+  customFormatter?: (data: unknown) => string;
 }
 
 /**

@@ -2,6 +2,8 @@
  * RCC module type declarations
  */
 
+import { UnknownObject } from './common-types';
+
 declare module 'rcc-basemodule' {
   export interface ModuleInfo {
     id: string;
@@ -21,6 +23,8 @@ declare module 'rcc-basemodule' {
 }
 
 declare module 'rcc-debugcenter' {
+  import { UnknownObject } from './common-types';
+  
   export interface DebugEvent {
     sessionId: string;
     moduleId: string;
@@ -28,7 +32,7 @@ declare module 'rcc-debugcenter' {
     timestamp: number;
     type: 'start' | 'end' | 'error';
     position: 'start' | 'middle' | 'end';
-    data?: any;
+    data?: UnknownObject;
   }
 
   export class DebugEventBus {
@@ -39,13 +43,15 @@ declare module 'rcc-debugcenter' {
 }
 
 declare module 'rcc-errorhandling' {
+  import { UnknownObject } from './common-types';
+  
   export interface ErrorContext {
     error: Error | string;
     source: string;
     severity: 'low' | 'medium' | 'high' | 'critical';
     timestamp: number;
     moduleId?: string;
-    context?: Record<string, any>;
+    context?: UnknownObject;
   }
 
   export interface ErrorResponse {
@@ -63,8 +69,8 @@ declare module 'rcc-errorhandling' {
     handleErrorAsync(error: ErrorContext): void;
     handleBatchErrors(errors: ErrorContext[]): Promise<ErrorResponse[]>;
     destroy(): Promise<void>;
-    getHealth(): any;
-    getStats(): any;
+    getHealth(): UnknownObject;
+    getStats(): UnknownObject;
     resetErrorCount(): void;
   }
 }

@@ -18,6 +18,7 @@ import {
   type ServerConfig,
   RouteCodexError,
 } from '../server/types.js';
+import { UnknownObject } from '../types/common-types.js';
 
 /**
  * Request handler options
@@ -34,24 +35,24 @@ export interface RequestHandlerOptions {
 /**
  * Type guards for request discrimination
  */
-function isChatCompletionRequest(request: any): request is OpenAIChatCompletionRequest {
+function isChatCompletionRequest(request: unknown): request is OpenAIChatCompletionRequest {
   return (
-    request &&
+    request !== null && request !== undefined &&
     typeof request === 'object' &&
     'messages' in request &&
-    Array.isArray(request.messages)
+    Array.isArray((request as { messages?: unknown[] }).messages)
   );
 }
 
-// 工具函数：用于判断是否为completion请求，保留供未来使用
-function _isCompletionRequest(_request: unknown): _request is OpenAICompletionRequest {
-  return (
-    typeof _request === 'object' &&
-    _request !== null &&
-    'prompt' in (_request as Record<string, unknown>) &&
-    !('messages' in (_request as Record<string, unknown>))
-  );
-}
+// 工具函数：用于判断是否为completion请求（如需使用可恢复）
+// function _isCompletionRequest(_request: unknown): _request is OpenAICompletionRequest {
+//   return (
+//     typeof _request === 'object' &&
+//     _request !== null &&
+//     'prompt' in (_request as Record<string, unknown>) &&
+//     !('messages' in (_request as Record<string, unknown>))
+//   );
+// }
 
 /**
  * Request validation result
@@ -75,9 +76,9 @@ export class RequestHandler extends BaseModule {
   private options: RequestHandlerOptions;
 
   // Debug enhancement properties
-  private handlerMetrics: Map<string, any> = new Map();
-  private requestHistory: any[] = [];
-  private errorHistory: any[] = [];
+  private handlerMetrics: Map<string, { values: unknown[]; lastUpdated: number }> = new Map();
+  private requestHistory: unknown[] = [];
+  private errorHistory: unknown[] = [];
   private maxHistorySize = 50;
 
   constructor(
@@ -119,7 +120,7 @@ export class RequestHandler extends BaseModule {
   /**
    * Initialize the request handler
    */
-  public async initialize(_config?: any): Promise<void> {
+  public async initialize(_config?: unknown): Promise<void> {
     try {
       await ErrorHandlingUtils.initialize();
       await this.errorHandling.initialize();
@@ -244,7 +245,7 @@ export class RequestHandler extends BaseModule {
         throw new RouteCodexError('Streaming is not enabled', 'streaming_disabled', 400);
       }
 
-      let response: any;
+      let response: UnknownObject;
 
       if (processedRequest.stream && isChatCompletionRequest(processedRequest)) {
         // Handle streaming request
@@ -287,9 +288,9 @@ export class RequestHandler extends BaseModule {
         },
         body: response,
         duration,
-        providerId: (response as any).providerId || 'unknown',
-        modelId: (response as any).model || processedRequest.model,
-        usage: (response as any).usage,
+        providerId: (response as { providerId?: string }).providerId || 'unknown',
+        modelId: (response as { model?: string }).model || processedRequest.model,
+        usage: (response as { usage?: UnknownObject }).usage,
       };
 
       this.debugEventBus.publish({
@@ -422,9 +423,9 @@ export class RequestHandler extends BaseModule {
         },
         body: response,
         duration,
-        providerId: (response as any).providerId || 'unknown',
-        modelId: (response as any).model || processedRequest.model,
-        usage: (response as any).usage,
+        providerId: (response as { providerId?: string }).providerId || 'unknown',
+        modelId: (response as { model?: string }).model || processedRequest.model,
+        usage: (response as { usage?: UnknownObject }).usage,
       };
 
       this.debugEventBus.publish({
@@ -491,7 +492,7 @@ export class RequestHandler extends BaseModule {
   private async handleStreamingChatCompletion(
     request: OpenAIChatCompletionRequest,
     _context: RequestContext
-  ): Promise<any> {
+  ): Promise<UnknownObject> {
     // This would typically involve setting up a streaming response
     // For now, we'll return a placeholder indicating streaming support
     return {
@@ -537,7 +538,7 @@ export class RequestHandler extends BaseModule {
       });
 
       // Get models from active providers
-      const models: any[] = [];
+      const models: unknown[] = [];
       const activeProviders = this.providerManager.getActiveProviders();
 
       for (const provider of activeProviders) {
@@ -548,17 +549,15 @@ export class RequestHandler extends BaseModule {
           } else if (
             providerModels &&
             typeof providerModels === 'object' &&
-            'data' in providerModels &&
-            Array.isArray((providerModels as any).data)
-          ) {
-            models.push(...(providerModels as any).data);
-          } else if (
-            providerModels &&
-            typeof providerModels === 'object' &&
             'data' in providerModels
           ) {
-            // Handle case where data might not be an array
-            models.push((providerModels as any).data);
+            const data = (providerModels as { data?: unknown }).data;
+            if (Array.isArray(data)) {
+              models.push(...data);
+            } else if (data !== undefined) {
+              // Handle case where data might not be an array
+              models.push(data);
+            }
           }
         } catch (error) {
           // Continue with other providers if one fails
@@ -669,7 +668,7 @@ export class RequestHandler extends BaseModule {
           errors.push(`Message ${i} has invalid role: ${message.role}`);
         }
 
-        const c = (message as any).content;
+        const c = (message as { content?: unknown }).content;
         if (c !== undefined && c !== null) {
           const isString = typeof c === 'string';
           const isArray = Array.isArray(c);
@@ -785,7 +784,7 @@ export class RequestHandler extends BaseModule {
    */
   private formatChatCompletionResponse(
     request: OpenAIChatCompletionRequest,
-    providerResponse: any
+    providerResponse: UnknownObject
   ): OpenAICompletionResponse {
     const responseData = providerResponse.data || providerResponse;
     return {
@@ -794,7 +793,7 @@ export class RequestHandler extends BaseModule {
       created: Math.floor(Date.now() / 1000),
       model: request.model,
       choices: responseData.choices || [],
-      usage: responseData.usage || providerResponse.usage,
+      usage: responseData.usage || (providerResponse as { usage?: UnknownObject }).usage,
     };
   }
 
@@ -803,7 +802,7 @@ export class RequestHandler extends BaseModule {
    */
   private formatCompletionResponse(
     request: OpenAICompletionRequest,
-    providerResponse: any
+    providerResponse: UnknownObject
   ): OpenAICompletionResponse {
     const responseData = providerResponse.data || providerResponse;
     return {
@@ -812,7 +811,7 @@ export class RequestHandler extends BaseModule {
       created: Math.floor(Date.now() / 1000),
       model: request.model,
       choices: responseData.choices || [],
-      usage: responseData.usage || providerResponse.usage,
+      usage: responseData.usage || (providerResponse as { usage?: UnknownObject }).usage,
     };
   }
 
@@ -866,7 +865,7 @@ export class RequestHandler extends BaseModule {
     const errorName = error.constructor.name;
 
     // Critical errors
-    if (errorName === 'RouteCodexError' && (error as any).status >= 500) {
+    if (errorName === 'RouteCodexError' && (error as { status?: number }).status && (error as { status?: number }).status! >= 500) {
       return 'critical';
     }
 
@@ -961,7 +960,7 @@ export class RequestHandler extends BaseModule {
   /**
    * Get handler status
    */
-  public getStatus(): any {
+  public getStatus(): UnknownObject {
     return {
       initialized: this.isInitialized(),
       running: this.isRunning(),
@@ -991,7 +990,7 @@ export class RequestHandler extends BaseModule {
   /**
    * Record handler metric
    */
-  private recordHandlerMetric(operation: string, data: any): void {
+  private recordHandlerMetric(operation: string, data: unknown): void {
     if (!this.handlerMetrics.has(operation)) {
       this.handlerMetrics.set(operation, {
         values: [],
@@ -1012,7 +1011,7 @@ export class RequestHandler extends BaseModule {
   /**
    * Add to request history
    */
-  private addToRequestHistory(operation: any): void {
+  private addToRequestHistory(operation: unknown): void {
     this.requestHistory.push(operation);
 
     // Keep only recent history
@@ -1024,7 +1023,7 @@ export class RequestHandler extends BaseModule {
   /**
    * Add to error history
    */
-  private addToErrorHistory(operation: any): void {
+  private addToErrorHistory(operation: unknown): void {
     this.errorHistory.push(operation);
 
     // Keep only recent history
@@ -1036,7 +1035,7 @@ export class RequestHandler extends BaseModule {
   /**
    * Get debug status with enhanced information
    */
-  getDebugStatus(): any {
+  getDebugStatus(): UnknownObject {
     const baseStatus = {
       handlerId: this.getModuleInfo().id,
       name: this.getModuleInfo().name,
@@ -1059,7 +1058,7 @@ export class RequestHandler extends BaseModule {
   /**
    * Get detailed debug information
    */
-  private getDebugInfo(): any {
+  private getDebugInfo(): UnknownObject {
     return {
       handlerId: this.getModuleInfo().id,
       name: this.getModuleInfo().name,
@@ -1080,8 +1079,8 @@ export class RequestHandler extends BaseModule {
   /**
    * Get handler metrics
    */
-  private getHandlerMetrics(): any {
-    const metrics: any = {};
+  private getHandlerMetrics(): UnknownObject {
+    const metrics: UnknownObject = {};
 
     for (const [operation, metric] of this.handlerMetrics.entries()) {
       metrics[operation] = {

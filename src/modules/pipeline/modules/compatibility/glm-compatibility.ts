@@ -26,7 +26,7 @@ export class GLMCompatibility implements CompatibilityModule {
   private mappingExecutor: ToolMappingExecutor | null = null;
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
-    this.logger = dependencies.logger as any;
+    this.logger = dependencies.logger;
     this.id = `compatibility-glm-${Date.now()}`;
     this.config = config;
     this.forceDisableThinking = process.env.RCC_GLM_DISABLE_THINKING === '1';
@@ -55,27 +55,27 @@ export class GLMCompatibility implements CompatibilityModule {
     }
   }
 
-  async processIncoming(requestParam: any): Promise<SharedPipelineRequest> {
+  async processIncoming(requestParam: unknown): Promise<SharedPipelineRequest> {
     if (!this.isInitialized) {
       throw new Error('GLM Compatibility module is not initialized');
     }
 
     const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam;
     const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
-    const request = isDto ? (dto!.data as any) : (requestParam as any);
+    const request = isDto ? dto!.data : requestParam as Record<string, unknown> | null;
 
     if (!request || typeof request !== 'object') {
       return isDto ? dto! : { data: request, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
     }
 
-    const outbound = { ...request };
+    const outbound = { ...(typeof request === 'object' && request !== null ? request : {}) };
 
-    if (!this.forceDisableThinking && outbound.thinking === undefined) {
-      const payload = this.resolveThinkingPayload(outbound);
+    if (!this.forceDisableThinking && typeof outbound === 'object' && outbound !== null && !('thinking' in outbound)) {
+      const payload = this.resolveThinkingPayload(outbound as Record<string, unknown>);
       if (payload) {
-        outbound.thinking = payload;
+        (outbound as Record<string, unknown>).thinking = payload;
         this.logger.logModule(this.id, 'thinking-applied', {
-          model: this.getModelId(outbound),
+          model: this.getModelId(outbound as Record<string, unknown>),
           payload
         });
       }
@@ -84,43 +84,43 @@ export class GLMCompatibility implements CompatibilityModule {
     return isDto ? { ...dto!, data: outbound } : { data: outbound, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
   }
 
-  async processOutgoing(response: any): Promise<any> {
+  async processOutgoing(response: unknown): Promise<unknown> {
     if (!this.isInitialized) { throw new Error('GLM Compatibility module is not initialized'); }
 
     try {
       const body = this.unwrap(response);
 
-      if (body && Array.isArray((body as any).choices)) {
-        (body as any).choices = (body as any).choices.map((c: any, idx: number) => {
-          const out = { index: idx, ...(c || {}) } as any;
-          const msg = out.message || {};
+      if (body && typeof body === 'object' && body !== null && 'choices' in body && Array.isArray(body.choices)) {
+        body.choices = body.choices.map((c: unknown, idx: number) => {
+          const out = { index: idx, ...(typeof c === 'object' && c !== null ? c : {}) };
+          const msg = (typeof out === 'object' && out !== null && 'message' in out && typeof out.message === 'object' && out.message !== null) ? out.message : {} as Record<string, unknown>;
           // If GLM placed content into reasoning_content and left content empty, promote it.
-          const rc = typeof msg.reasoning_content === 'string' ? msg.reasoning_content : '';
-          if ((!msg.content || msg.content === '') && rc.trim()) {
-            msg.content = rc;
+          const rc = typeof (msg as Record<string, unknown>).reasoning_content === 'string' ? (msg as Record<string, unknown>).reasoning_content : '';
+          if ((!((msg as Record<string, unknown>).content) || (msg as Record<string, unknown>).content === '') && typeof rc === 'string' && rc.trim()) {
+            (msg as Record<string, unknown>).content = rc;
           }
           if ('reasoning_content' in msg) {
-            try { delete (msg as any).reasoning_content; } catch { /* noop */ }
+            try { delete (msg as Record<string, unknown>).reasoning_content; } catch { /* noop */ }
           }
 
           // If provider already returned tool_calls, normalize and blank out content
           try {
-            if (Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length > 0) {
-              (msg as any).tool_calls = this.normalizeToolCallsForClient((msg as any).tool_calls);
-              (msg as any).content = '';
-              out.message = msg;
+            if (Array.isArray((msg as Record<string, unknown>).tool_calls) && (msg as Record<string, unknown>).tool_calls.length > 0) {
+              (msg as Record<string, unknown>).tool_calls = this.normalizeToolCallsForClient((msg as Record<string, unknown>).tool_calls as unknown[]);
+              (msg as Record<string, unknown>).content = '';
+              (out as Record<string, unknown>).message = msg;
               return out;
             }
 
             // Strip private reasoning markers and reconstruct tools
-            let contentStr = typeof msg.content === 'string' ? msg.content : '';
+            let contentStr = typeof (msg as Record<string, unknown>).content === 'string' ? (msg as Record<string, unknown>).content : '';
             // Remove <think> blocks and stray tags
-            contentStr = this.stripThinkBlocks(contentStr);
+            contentStr = this.stripThinkBlocks(typeof contentStr === 'string' ? contentStr : '');
             if (contentStr) {
               const parsed = this.extractInvokeBlocks(contentStr);
               let calls = parsed.calls || [];
               const rest = parsed.rest || '';
-              if (calls.length) {
+              if (Array.isArray(calls) && calls.length) {
                 // Keep only the first tool call to satisfy single-tool constraint
                 if (calls.length > 1) { calls = [calls[0]]; }
                 const reconstructed = calls.map((call, i) => ({
@@ -128,32 +128,32 @@ export class GLMCompatibility implements CompatibilityModule {
                   type: 'function',
                   function: { name: call.name, arguments: JSON.stringify(call.args) }
                 }));
-                if (Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length) {
-                  (msg as any).tool_calls = [ ...(msg as any).tool_calls, ...reconstructed ];
+                if (Array.isArray((msg as Record<string, unknown>).tool_calls) && (msg as Record<string, unknown>).tool_calls && (msg as Record<string, unknown>).tool_calls.length) {
+                  (msg as Record<string, unknown>).tool_calls = [ ...(msg as Record<string, unknown>).tool_calls, ...reconstructed ];
                 } else {
-                  (msg as any).tool_calls = reconstructed;
+                  (msg as Record<string, unknown>).tool_calls = reconstructed;
                 }
                 // Normalize tool_calls to client schema (apply_patch -> { input }, shell command array)
-                (msg as any).tool_calls = this.normalizeToolCallsForClient((msg as any).tool_calls);
+                (msg as Record<string, unknown>).tool_calls = this.normalizeToolCallsForClient((msg as Record<string, unknown>).tool_calls as unknown[]);
                 // When tool_calls exist, blank out content to avoid leaking markup or stray text
-                (msg as any).content = '';
+                (msg as Record<string, unknown>).content = '';
               } else if (this.mappingExecutor && this.useMappingConfig) {
                 // Try config-driven mapping as a fallback when no calls parsed by built-ins
                 try {
                   const mapped = this.mappingExecutor.apply(rest);
-                  if (mapped.calls.length) {
+                  if (mapped.calls && Array.isArray(mapped.calls) && mapped.calls.length) {
                     const reconstructed = mapped.calls.map((call, i) => ({
                       id: `call_${Date.now()}_${i}`,
                       type: 'function',
                       function: { name: call.name, arguments: JSON.stringify(call.args) }
                     }));
-                    if (Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length) {
-                      (msg as any).tool_calls = [ ...(msg as any).tool_calls, ...reconstructed ];
+                    if (Array.isArray((msg as Record<string, unknown>).tool_calls) && (msg as Record<string, unknown>).tool_calls.length) {
+                      (msg as Record<string, unknown>).tool_calls = [ ...(msg as Record<string, unknown>).tool_calls, ...reconstructed ];
                     } else {
-                      (msg as any).tool_calls = reconstructed;
+                      (msg as Record<string, unknown>).tool_calls = reconstructed;
                     }
-                    (msg as any).tool_calls = this.normalizeToolCallsForClient((msg as any).tool_calls);
-                    (msg as any).content = '';
+                    (msg as Record<string, unknown>).tool_calls = this.normalizeToolCallsForClient((msg as Record<string, unknown>).tool_calls as unknown[]);
+                    (msg as Record<string, unknown>).content = '';
                   }
                 } catch {
                   // ignore mapping errors
@@ -162,7 +162,7 @@ export class GLMCompatibility implements CompatibilityModule {
             }
           } catch { /* non-blocking */ }
 
-          out.message = msg;
+          (out as Record<string, unknown>).message = msg;
           return out;
         });
       }
@@ -185,7 +185,7 @@ export class GLMCompatibility implements CompatibilityModule {
     }
   }
 
-  async applyTransformations(data: any, _rules: TransformationRule[]): Promise<any> {
+  async applyTransformations(data: unknown, _rules: TransformationRule[]): Promise<unknown> {
     // Currently no explicit transformation rules required beyond reasoning_content handling
     return data;
   }
@@ -209,7 +209,7 @@ export class GLMCompatibility implements CompatibilityModule {
 
   private readonly thinkingDefaults: ThinkingConfig | null;
 
-  private resolveThinkingPayload(request: any): Record<string, any> | null {
+  private resolveThinkingPayload(request: Record<string, unknown>): Record<string, unknown> | null {
     if (this.forceDisableThinking) {
       return null;
     }
@@ -228,12 +228,14 @@ export class GLMCompatibility implements CompatibilityModule {
     return this.clonePayload(payloadSource);
   }
 
-  private getModelId(request: any): string | null {
-    if (request?.route?.modelId && typeof request.route.modelId === 'string') {
-      return request.route.modelId;
-    }
-    if (typeof request?.model === 'string') {
-      return request.model;
+  private getModelId(request: Record<string, unknown>): string | null {
+    if (request && typeof request === 'object' && request !== null) {
+      if ('route' in request && typeof request.route === 'object' && request.route !== null && 'modelId' in request.route && typeof request.route.modelId === 'string') {
+        return request.route.modelId;
+      }
+      if ('model' in request && typeof request.model === 'string') {
+        return request.model;
+      }
     }
     return null;
   }
@@ -243,7 +245,7 @@ export class GLMCompatibility implements CompatibilityModule {
       return null;
     }
 
-    const cfg = value as any;
+    const cfg = value as Record<string, unknown>;
     return {
       enabled: cfg.enabled !== false,
       payload: this.clonePayload(cfg.payload),
@@ -261,7 +263,7 @@ export class GLMCompatibility implements CompatibilityModule {
       if (!raw || typeof raw !== 'object') {
         continue;
       }
-      const cfg: any = raw;
+      const cfg = raw as Record<string, unknown>;
       map[model] = {
         enabled: cfg.enabled !== false,
         payload: this.clonePayload(cfg.payload)
@@ -281,20 +283,20 @@ export class GLMCompatibility implements CompatibilityModule {
     return null;
   }
 
-  private clonePayload(payload: unknown): Record<string, any> | null {
+  private clonePayload(payload: unknown): Record<string, unknown> | null {
     if (!payload || typeof payload !== 'object') {
       return { type: 'enabled' };
     }
     try {
-      return JSON.parse(JSON.stringify(payload));
+      return JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
     } catch {
       return { type: 'enabled' };
     }
   }
 
-  private unwrap(resp: any): any {
+  private unwrap(resp: unknown): unknown {
     try {
-      const d = resp?.data;
+      const d = (resp as Record<string, unknown>)?.data;
       if (d && typeof d === 'object') {
         return d;
       }
@@ -308,9 +310,9 @@ export class GLMCompatibility implements CompatibilityModule {
    * Extract <invoke name="tool"> blocks (including variants like <invoke_plan>)
    * and convert to function call descriptors. Returns remaining content text as rest.
    */
-  private extractInvokeBlocks(text: string): { calls: { name: string; args: Record<string, any> }[]; rest: string } {
+  private extractInvokeBlocks(text: string): { calls: { name: string; args: Record<string, unknown> }[]; rest: string } {
     if (!text || typeof text !== 'string') { return { calls: [], rest: text }; }
-    const calls: { name: string; args: Record<string, any> }[] = [];
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
     let rest = text;
 
     // 1) HTML-like <invoke|function name="..."> ... </...>
@@ -320,7 +322,7 @@ export class GLMCompatibility implements CompatibilityModule {
       while ((m = blockRe.exec(text)) !== null) {
         const toolName = (m[2] || m[3] || m[4] || '').trim();
         const inner = m[5] || '';
-        const args: Record<string, any> = {};
+        const args: Record<string, unknown> = {};
         const paramRe = /<(?:parameter|param|arg)\b[^>]*\bname\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))[^>]*>([\s\S]*?)<\/(?:parameter|param|arg)>/gi;
         let pm: RegExpExecArray | null;
         while ((pm = paramRe.exec(inner)) !== null) {
@@ -350,7 +352,7 @@ export class GLMCompatibility implements CompatibilityModule {
           if (innerRaw) {
             const obj = JSON.parse(innerRaw);
             let name: string | undefined;
-            let args: any = {};
+            let args: Record<string, unknown> = {};
             if (obj && typeof obj === 'object') {
               if (typeof obj.name === 'string') {
                 name = obj.name;
@@ -393,7 +395,7 @@ export class GLMCompatibility implements CompatibilityModule {
         let idx = m.index + m[0].length;
         // skip whitespace/newlines
         while (idx < rest.length && /\s/.test(rest[idx])) { idx++; }
-        let args: any = {};
+        let args: Record<string, unknown> = {};
         let endIndex = idx;
         if (idx < rest.length && rest[idx] === '{') {
           const bal = this.extractBalancedJson(rest, idx);
@@ -405,7 +407,6 @@ export class GLMCompatibility implements CompatibilityModule {
         this.normalizeCommonToolArgs(name, args);
         calls.push({ name, args });
         // remove the tag and its JSON (if any) from remaining
-        const full = rest.slice(m.index, endIndex);
         rest = (rest.slice(0, m.index) + rest.slice(endIndex)).trim();
         // reset regex lastIndex due to string mutation
         tagRe.lastIndex = 0;
@@ -430,7 +431,7 @@ export class GLMCompatibility implements CompatibilityModule {
 
   // Remove <think>...</think> blocks and any stray <think> or </think> tags
   private stripThinkBlocks(s: string): string {
-    if (!s || typeof s !== 'string') {return s as any;}
+    if (!s || typeof s !== 'string') {return s as unknown as string;}
     try {
       let out = s.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '');
       out = out.replace(/<\/?think\b[^>]*>/gi, '');
@@ -463,46 +464,46 @@ export class GLMCompatibility implements CompatibilityModule {
     }
   }
 
-  private normalizeCommonToolArgs(toolName: string, args: Record<string, any>): void {
+  private normalizeCommonToolArgs(toolName: string, args: Record<string, unknown>): void {
     if (toolName === 'shell') {
-      const cmd = (args as any).command;
+      const cmd = args.command;
       if (typeof cmd === 'string' && cmd.trim().length > 0) {
-        (args as any).command = ['bash', '-lc', cmd];
+        args.command = ['bash', '-lc', cmd];
       } else if (Array.isArray(cmd)) {
-        (args as any).command = cmd.map((x: any) => String(x));
+        args.command = cmd.map((x: unknown) => String(x));
       }
     }
   }
 
   // Map tool_calls to client-supported schema
-  private normalizeToolCallsForClient(list: any[]): any[] {
+  private normalizeToolCallsForClient(list: unknown[]): unknown[] {
     try {
-      return (Array.isArray(list) ? list : []).map((tc: any) => {
-        const out = { ...(tc || {}) } as any;
-        const fn = { ...((out as any).function || {}) } as any;
-        const name = String(fn?.name || '').trim();
-        const rawArgs = fn?.arguments;
-        let argsObj: any = {};
+      return (Array.isArray(list) ? list : []).map((tc: unknown) => {
+        const out = { ...(typeof tc === 'object' && tc !== null ? tc : {}) };
+        const fn = { ...((typeof out === 'object' && out !== null && 'function' in out) ? (out as Record<string, unknown>).function as Record<string, unknown> : {} as Record<string, unknown>) };
+        const name = String((typeof fn === 'object' && fn !== null && 'name' in fn) ? fn.name : '').trim();
+        const rawArgs = (typeof fn === 'object' && fn !== null && 'arguments' in fn) ? fn.arguments : undefined;
+        let argsObj: Record<string, unknown> = {};
         if (typeof rawArgs === 'string' && rawArgs.length > 0) {
           try { argsObj = JSON.parse(rawArgs); } catch { argsObj = { _raw: rawArgs }; }
-        } else if (rawArgs && typeof rawArgs === 'object') {
-          argsObj = rawArgs;
+        } else if (rawArgs && typeof rawArgs === 'object' && rawArgs !== null) {
+          argsObj = rawArgs as Record<string, unknown>;
         }
         if (name === 'apply_patch') {
           let patch = '';
-          if (typeof argsObj?.input === 'string' && argsObj.input.trim()) { patch = argsObj.input; }
-          else if (typeof argsObj?.patch === 'string' && argsObj.patch.trim()) { patch = argsObj.patch; }
-          else if (typeof argsObj?.diff === 'string' && argsObj.diff.trim()) { patch = argsObj.diff; }
-          else if (typeof argsObj?._raw === 'string' && argsObj._raw.includes('*** Begin Patch')) { patch = argsObj._raw; }
+          if (typeof (argsObj?.input) === 'string' && argsObj.input.trim()) { patch = argsObj.input; }
+          else if (typeof (argsObj?.patch) === 'string' && argsObj.patch.trim()) { patch = argsObj.patch; }
+          else if (typeof (argsObj?.diff) === 'string' && argsObj.diff.trim()) { patch = argsObj.diff; }
+          else if (typeof (argsObj?._raw) === 'string' && argsObj._raw.includes('*** Begin Patch')) { patch = argsObj._raw; }
           else if (Array.isArray(argsObj?.command) && String(argsObj.command[0]) === 'apply_patch') { patch = String(argsObj.command.slice(1).join(' ')); }
-          (out as any).function = { name: 'apply_patch', arguments: JSON.stringify({ input: patch }) };
+          (out as Record<string, unknown>).function = { name: 'apply_patch', arguments: JSON.stringify({ input: patch }) };
           return out;
         }
         if (name === 'update_plan') {
           // Ensure required shape: { plan: [] } at minimum
-          const plan = Array.isArray((argsObj || {}).plan) ? argsObj.plan : [];
-          const explanation = typeof (argsObj || {}).explanation === 'string' ? argsObj.explanation : '';
-          (out as any).function = { name: 'update_plan', arguments: JSON.stringify({ explanation, plan }) };
+          const plan = Array.isArray((argsObj || {}).plan) ? (argsObj || {}).plan : [];
+          const explanation = typeof (argsObj || {}).explanation === 'string' ? (argsObj || {}).explanation : '';
+          (out as Record<string, unknown>).function = { name: 'update_plan', arguments: JSON.stringify({ explanation, plan }) };
           return out;
         }
         if (name === 'shell') {
@@ -510,15 +511,15 @@ export class GLMCompatibility implements CompatibilityModule {
           const tryParseArray = (s: string): string[] | null => { try { const a = JSON.parse(s); return Array.isArray(a) ? a.map(String) : null; } catch { return null; } };
           if (typeof cmd === 'string') {
             const parsed = tryParseArray(cmd);
-            (out as any).function = { name: 'shell', arguments: JSON.stringify({ command: parsed || ['bash','-lc',cmd] }) };
+            (out as Record<string, unknown>).function = { name: 'shell', arguments: JSON.stringify({ command: parsed || ['bash','-lc',cmd] }) };
           } else if (Array.isArray(cmd)) {
-            (out as any).function = { name: 'shell', arguments: JSON.stringify({ command: cmd.map(String) }) };
+            (out as Record<string, unknown>).function = { name: 'shell', arguments: JSON.stringify({ command: cmd.map(String) }) };
           } else {
-            (out as any).function = { name: 'shell', arguments: JSON.stringify(argsObj || {}) };
+            (out as Record<string, unknown>).function = { name: 'shell', arguments: JSON.stringify(argsObj || {}) };
           }
           return out;
         }
-        (out as any).function = { name, arguments: JSON.stringify(argsObj || {}) };
+        (out as Record<string, unknown>).function = { name, arguments: JSON.stringify(argsObj || {}) };
         return out;
       });
     } catch {
@@ -526,8 +527,8 @@ export class GLMCompatibility implements CompatibilityModule {
     }
   }
 
-  private extractBracketToolCalls(input: string): { calls: { name: string; args: Record<string, any> }[]; rest: string } {
-    const calls: { name: string; args: Record<string, any> }[] = [];
+  private extractBracketToolCalls(input: string): { calls: { name: string; args: Record<string, unknown> }[]; rest: string } {
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
     let remaining = input;
     const tagRe = /\[tool_call:([\w.-]+)\]/gi;
     let m: RegExpExecArray | null;
@@ -539,7 +540,7 @@ export class GLMCompatibility implements CompatibilityModule {
         // JSON object follows
         const { jsonText, endIndex } = this.extractBalancedJson(input, idx);
         if (jsonText) {
-          let args: any = {};
+          let args: Record<string, unknown> = {};
           try { args = JSON.parse(this.stripCodeFences(jsonText)); } catch { args = { _raw: jsonText }; }
           this.normalizeCommonToolArgs(name, args);
           calls.push({ name, args });
@@ -586,11 +587,11 @@ export class GLMCompatibility implements CompatibilityModule {
 
 interface ThinkingConfig {
   enabled: boolean;
-  payload: Record<string, any> | null;
+  payload: Record<string, unknown> | null;
   models: Record<string, ThinkingModelConfig> | null;
 }
 
 interface ThinkingModelConfig {
   enabled: boolean;
-  payload: Record<string, any> | null;
+  payload: Record<string, unknown> | null;
 }

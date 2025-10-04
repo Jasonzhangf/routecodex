@@ -3,11 +3,11 @@
  * Implements OpenAI API v1 compatibility endpoints (pipeline-only)
  */
 
-import express, { type Router, type Request, type Response, type NextFunction } from 'express';
+import express, { type Router, type Request, type Response } from 'express';
 import { ErrorHandlingUtils } from '../utils/error-handling-utils.js';
 import fs from 'fs/promises';
 import { BaseModule, type ModuleInfo } from 'rcc-basemodule';
-import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
+import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import { DebugEventBus } from 'rcc-debugcenter';
 import { ModuleConfigReader } from '../utils/module-config-reader.js';
 import { RequestHandler } from '../core/request-handler.js';
@@ -19,15 +19,10 @@ import { ProviderManager } from '../core/provider-manager.js';
 import { getErrorMessage } from '../utils/error-handling-utils.js';
 import {
   type RequestContext,
-  type ResponseContext,
   type OpenAIChatCompletionRequest,
   type OpenAICompletionRequest,
-  type OpenAIModel,
-  type OpenAICompletionResponse,
   type StreamResponse,
-  type StreamOptions,
   RouteCodexError,
-  type ServerConfig,
 } from './types.js';
 import { ConfigRequestClassifier } from '../modules/virtual-router/classifiers/config-request-classifier.js';
 
@@ -66,18 +61,18 @@ export class OpenAIRouter extends BaseModule {
   private moduleInfo: ModuleInfo;
   private _isInitialized: boolean = false;
   // Optional pipeline manager hook (attached later by server if needed)
-  private pipelineManager: any | null = null;
+  private pipelineManager: Record<string, unknown> | null = null;
   // Static route pools and RR index for round-robin scheduling per category
   private routePools: Record<string, string[]> | null = null;
   private rrIndex: Map<string, number> = new Map();
   private classifier: ConfigRequestClassifier | null = null;
-  private classifierConfig: any | null = null;
+  private classifierConfig: Record<string, unknown> | null = null;
 
   // Debug enhancement properties
   private isDebugEnhanced = false;
-  private routerMetrics: Map<string, any> = new Map();
-  private requestHistory: any[] = [];
-  private errorHistory: any[] = [];
+  private routerMetrics: Map<string, unknown> = new Map();
+  private requestHistory: unknown[] = [];
+  private errorHistory: unknown[] = [];
   private maxHistorySize = 100;
 
   constructor(
@@ -144,30 +139,29 @@ export class OpenAIRouter extends BaseModule {
    * - Provides consistent type/code based on HTTP status or known error kinds
    */
   private buildErrorPayload(error: unknown, requestId: string): { status: number; body: { error: { message: string; type: string; code: string; param?: string | null; details?: Record<string, unknown> } } } {
-    const e: any = error as any;
+    const e = error as Record<string, unknown>;
     // Status precedence: explicit status -> statusCode -> response.status -> RouteCodexError.status -> 500
     const statusFromObj = typeof e?.status === 'number' ? e.status
       : (typeof e?.statusCode === 'number' ? e.statusCode
-        : (typeof e?.response?.status === 'number' ? e.response.status : undefined));
+        : (e?.response && typeof e.response === 'object' && e.response !== null && 'status' in e.response && typeof (e.response as Record<string, unknown>).status === 'number' ? (e.response as Record<string, unknown>).status : undefined));
     const routeCodexStatus = error instanceof RouteCodexError ? error.status : undefined;
     let status = statusFromObj ?? routeCodexStatus ?? 500;
 
     // Extract best-effort message from common shapes
-    const upstreamMsg = e?.response?.data?.error?.message
-      ?? e?.response?.data?.message
-      ?? e?.data?.error?.message
-      ?? e?.data?.message
-      ?? (typeof e?.message === 'string' ? e.message : undefined);
+    const upstreamMsg = e?.response && typeof e.response === 'object' && e.response !== null && 'data' in e.response && (e.response as Record<string, unknown>).data && typeof (e.response as Record<string, unknown>).data === 'object' && (e.response as Record<string, unknown>).data !== null && 'error' in (e.response as Record<string, unknown>).data && typeof ((e.response as Record<string, unknown>).data as Record<string, unknown>).error === 'object' && ((e.response as Record<string, unknown>).data as Record<string, unknown>).error !== null && 'message' in (((e.response as Record<string, unknown>).data as Record<string, unknown>).error as Record<string, unknown>) && typeof (((e.response as Record<string, unknown>).data as Record<string, unknown>).error as Record<string, unknown>).message === 'string' ? (((e.response as Record<string, unknown>).data as Record<string, unknown>).error as Record<string, unknown>).message
+      : e?.response && typeof e.response === 'object' && e.response !== null && 'data' in e.response && (e.response as Record<string, unknown>).data && typeof (e.response as Record<string, unknown>).data === 'object' && (e.response as Record<string, unknown>).data !== null && 'message' in ((e.response as Record<string, unknown>).data as Record<string, unknown>) && typeof ((e.response as Record<string, unknown>).data as Record<string, unknown>).message === 'string' ? ((e.response as Record<string, unknown>).data as Record<string, unknown>).message
+      : e?.data && typeof e.data === 'object' && e.data !== null && 'error' in e.data && typeof (e.data as Record<string, unknown>).error === 'object' && (e.data as Record<string, unknown>).error !== null && 'message' in ((e.data as Record<string, unknown>).error as Record<string, unknown>) && typeof ((e.data as Record<string, unknown>).error as Record<string, unknown>).message === 'string' ? ((e.data as Record<string, unknown>).error as Record<string, unknown>).message
+      : e?.data && typeof e.data === 'object' && e.data !== null && 'message' in e.data && typeof (e.data as Record<string, unknown>).message === 'string' ? (e.data as Record<string, unknown>).message
+      : (typeof e?.message === 'string' ? e.message : undefined);
     // Fallback when error is an object without message
     let message = upstreamMsg ? String(upstreamMsg) : (error instanceof Error ? error.message : String(error));
     // Guard against unhelpful stringification of objects
     if (message && /^\[object\s+Object\]$/.test(message)) {
-      const serializable = e?.response?.data?.error
-        ?? e?.response?.data
-        ?? e?.error
-        ?? e?.data
-        ?? e?.details
-        ?? e;
+      const serializable = e?.response && typeof e.response === 'object' && e.response !== null && 'data' in e.response && (e.response as Record<string, unknown>).data && typeof (e.response as Record<string, unknown>).data === 'object' && (e.response as Record<string, unknown>).data !== null ? (e.response as Record<string, unknown>).data
+        : e?.error ? e.error
+        : e?.data ? e.data
+        : e?.details ? e.details
+        : e;
       try {
         message = JSON.stringify(serializable);
       } catch {
@@ -175,8 +169,10 @@ export class OpenAIRouter extends BaseModule {
       }
     }
 
-    // Derive type/code from RouteCodexError, provider error kind, or HTTP status
+    // Derive type/code from RouteCodexError, provider error kind, network cause, or HTTP status
     const providerKind = typeof e?.type === 'string' ? e.type : undefined; // e.g., 'network' | 'server' | 'timeout' | 'rate_limit'
+    const cause = (e && typeof e === 'object' && e !== null && 'cause' in e) ? (e as Record<string, unknown>).cause : undefined;
+    const causeCode: string | undefined = (cause && typeof cause === 'object' && cause !== null && 'code' in cause && typeof (cause as Record<string, unknown>).code === 'string') ? (cause as Record<string, unknown>).code : undefined;
     const mapStatusToType = (s: number): string => {
       if (s === 400) {return 'bad_request';}
       if (s === 401) {return 'unauthorized';}
@@ -199,22 +195,45 @@ export class OpenAIRouter extends BaseModule {
       };
       return m[k] || undefined;
     };
+    // Adjust status/type for known network cause codes when upstream didn't provide status
+    if (!statusFromObj && causeCode) {
+      const cc = causeCode.toUpperCase();
+      if (cc === 'ETIMEDOUT' || cc === 'UND_ERR_CONNECT_TIMEOUT') {
+        status = 504;
+      } else if (cc === 'ENOTFOUND' || cc === 'EAI_AGAIN') {
+        status = 502;
+      } else if (cc === 'ECONNREFUSED' || cc === 'ECONNRESET') {
+        status = 502;
+      } else if (cc.startsWith('CERT_') || cc.includes('TLS')) {
+        status = 502;
+      }
+    }
     const rcxCode = error instanceof RouteCodexError ? error.code : undefined;
-    const upstreamCode = typeof e?.response?.data?.error?.code === 'string' ? e.response.data.error.code : (typeof e?.code === 'string' ? e.code : undefined);
-    const type = rcxCode || mapKindToType(providerKind) || mapStatusToType(status);
-    const code = upstreamCode || type;
+    const upstreamCode = e?.response && typeof e.response === 'object' && e.response !== null && 'data' in e.response && (e.response as Record<string, unknown>).data && typeof (e.response as Record<string, unknown>).data === 'object' && (e.response as Record<string, unknown>).data !== null && 'error' in (e.response as Record<string, unknown>).data && typeof ((e.response as Record<string, unknown>).data as Record<string, unknown>).error === 'object' && ((e.response as Record<string, unknown>).data as Record<string, unknown>).error !== null && 'code' in (((e.response as Record<string, unknown>).data as Record<string, unknown>).error as Record<string, unknown>) && typeof (((e.response as Record<string, unknown>).data as Record<string, unknown>).error as Record<string, unknown>).code === 'string' ? (((e.response as Record<string, unknown>).data as Record<string, unknown>).error as Record<string, unknown>).code
+      : (typeof e?.code === 'string' ? e.code : undefined);
+    const type = rcxCode || mapKindToType(providerKind) || (causeCode ? 'network_error' : mapStatusToType(status));
+    const code = (causeCode || upstreamCode || type);
 
     // Optionally attach minimal details that help debugging without leaking secrets
     const details: Record<string, unknown> = {};
     if (typeof e?.retryable === 'boolean') {details.retryable = e.retryable;}
     if (typeof statusFromObj === 'number') {details.upstreamStatus = statusFromObj;}
     // Prefer structured provider/upstream details when present
-    if (e?.details && typeof e.details === 'object') {
-      const d = e.details as any;
-      if (d.provider) { details.provider = d.provider; }
-      if (d.upstream) { details.upstream = d.upstream; }
-    } else if (e?.response?.data) {
-      details.upstream = e.response.data;
+    if (e?.details && typeof e.details === 'object' && e.details !== null) {
+      const d = e.details as Record<string, unknown>;
+      if ('provider' in d) { details.provider = d.provider; }
+      if ('upstream' in d) { details.upstream = d.upstream; }
+    } else if (e?.response && typeof e.response === 'object' && e.response !== null && 'data' in e.response) {
+      details.upstream = (e.response as Record<string, unknown>).data;
+    }
+    if (causeCode || (cause && typeof cause === 'object' && cause !== null)) {
+      details.network = {
+        code: causeCode,
+        message: cause && typeof cause === 'object' && cause !== null && 'message' in cause ? (cause as Record<string, unknown>).message : undefined,
+        errno: cause && typeof cause === 'object' && cause !== null && 'errno' in cause ? (cause as Record<string, unknown>).errno : undefined,
+        syscall: cause && typeof cause === 'object' && cause !== null && 'syscall' in cause ? (cause as Record<string, unknown>).syscall : undefined,
+        hostname: cause && typeof cause === 'object' && cause !== null && 'hostname' in cause ? (cause as Record<string, unknown>).hostname : undefined,
+      };
     }
     details.requestId = requestId;
 
@@ -223,9 +242,9 @@ export class OpenAIRouter extends BaseModule {
       const det = ErrorHandlingUtils.detectSandboxPermissionError(e);
       if (det.isSandbox) {
         status = 500;
-        (details as any).category = 'sandbox';
-        (details as any).retryable = false;
-        if (det.reason) { (details as any).sandbox = { reason: det.reason }; }
+        (details as Record<string, unknown>).category = 'sandbox';
+        (details as Record<string, unknown>).retryable = false;
+        if (det.reason) { (details as Record<string, unknown>).sandbox = { reason: det.reason }; }
         return {
           status,
           body: {
@@ -258,7 +277,7 @@ export class OpenAIRouter extends BaseModule {
   /**
    * Record router metric
    */
-  private recordRouterMetric(operation: string, data: any): void {
+  private recordRouterMetric(operation: string, data: unknown): void {
     if (!this.routerMetrics.has(operation)) {
       this.routerMetrics.set(operation, {
         values: [],
@@ -279,7 +298,7 @@ export class OpenAIRouter extends BaseModule {
   /**
    * Add to request history
    */
-  private addToRequestHistory(request: any): void {
+  private addToRequestHistory(request: unknown): void {
     this.requestHistory.push(request);
 
     // Keep only recent history
@@ -291,7 +310,7 @@ export class OpenAIRouter extends BaseModule {
   /**
    * Add to error history
    */
-  private addToErrorHistory(error: any): void {
+  private addToErrorHistory(error: unknown): void {
     this.errorHistory.push(error);
 
     // Keep only recent history
@@ -303,7 +322,7 @@ export class OpenAIRouter extends BaseModule {
   /**
    * Publish debug event
    */
-  private publishDebugEvent(type: string, data: any): void {
+  private publishDebugEvent(type: string, data: Record<string, unknown>): void {
     if (!this.isDebugEnhanced) {
       return;
     }
@@ -330,7 +349,7 @@ export class OpenAIRouter extends BaseModule {
   /**
    * Get debug status with enhanced information
    */
-  getDebugStatus(): any {
+  getDebugStatus(): Record<string, unknown> {
     const baseStatus = {
       routerId: this.moduleInfo.id,
       isInitialized: this._isInitialized,
@@ -354,7 +373,7 @@ export class OpenAIRouter extends BaseModule {
   /**
    * Get detailed debug information
    */
-  private getDebugInfo(): any {
+  private getDebugInfo(): Record<string, unknown> {
     return {
       routerId: this.moduleInfo.id,
       routerType: this.moduleInfo.type,
@@ -371,8 +390,8 @@ export class OpenAIRouter extends BaseModule {
   /**
    * Get router metrics
    */
-  private getRouterMetrics(): any {
-    const metrics: any = {};
+  private getRouterMetrics(): Record<string, unknown> {
+    const metrics: Record<string, unknown> = {};
 
     for (const [operation, metric] of this.routerMetrics.entries()) {
       metrics[operation] = {
@@ -388,8 +407,10 @@ export class OpenAIRouter extends BaseModule {
   /**
    * Optionally attach a pipeline manager to enable modular pipeline path
    */
-  public attachPipelineManager(pipelineManager: any) {
-    this.pipelineManager = pipelineManager;
+  public attachPipelineManager(pipelineManager: unknown) {
+    if (pipelineManager && typeof pipelineManager === 'object' && pipelineManager !== null) {
+      this.pipelineManager = pipelineManager as Record<string, unknown>;
+    }
   }
 
   /** Attach static route pools (routeName -> [pipelineIds]) */
@@ -399,11 +420,11 @@ export class OpenAIRouter extends BaseModule {
   }
 
   /** Attach classification config (from merged-config) */
-  public attachRoutingClassifierConfig(classifierConfig: any): void {
+  public attachRoutingClassifierConfig(classifierConfig: unknown): void {
     try {
-      if (classifierConfig) {
-        this.classifierConfig = classifierConfig;
-        this.classifier = new ConfigRequestClassifier(classifierConfig);
+      if (classifierConfig && typeof classifierConfig === 'object' && classifierConfig !== null) {
+        this.classifierConfig = classifierConfig as Record<string, unknown>;
+        this.classifier = new ConfigRequestClassifier(classifierConfig as Record<string, unknown>);
       }
     } catch (err) {
       console.warn(
@@ -424,7 +445,7 @@ export class OpenAIRouter extends BaseModule {
   /**
    * Get provider ID for pipeline routing
    */
-  private getPipelineProviderId(model?: string): string {
+  private getPipelineProviderId(_model?: string): string {
     if (this.config.pipelineProvider?.defaultProvider) {
       return this.config.pipelineProvider.defaultProvider;
     }
@@ -670,24 +691,12 @@ export class OpenAIRouter extends BaseModule {
         },
       });
 
-      // Create request context
-      const context: RequestContext = {
-        id: requestId,
-        timestamp: startTime,
-        method: req.method,
-        url: req.url,
-        headers: this.sanitizeHeaders(req.headers),
-        body: req.body,
-        userAgent: req.get('user-agent'),
-        ip: req.ip,
-      };
-
       // Optionally record Codex CLI inputs as standard samples (redacted)
       try {
         const ua = (req.get('user-agent') || '').toLowerCase();
         if (ua.includes('codex')) {
           const dir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
-          await fs.mkdir(dir, { recursive: true } as any);
+          await fs.mkdir(dir, { recursive: true });
           const sample = {
             requestId,
             endpoint: '/chat/completions',
@@ -696,7 +705,7 @@ export class OpenAIRouter extends BaseModule {
             messageCount: Array.isArray(req.body?.messages) ? req.body.messages.length : 0,
             headers: this.sanitizeHeaders(req.headers),
             body: req.body,
-          } as any;
+          };
           const p = `${dir}/chat-${requestId}.json`;
           await fs.writeFile(p, JSON.stringify(sample, null, 2));
         }
@@ -714,7 +723,7 @@ export class OpenAIRouter extends BaseModule {
         }
       }
 
-      let response;
+      let response: unknown;
       // Start pre-stream heartbeat immediately for streaming requests (independent of upstream processing)
       if (req.body.stream === true) {
         try {
@@ -740,12 +749,17 @@ export class OpenAIRouter extends BaseModule {
         }
         const { providerId, modelId } = this.parsePipelineId(pipelineId);
         ctxProviderId = providerId; ctxModelId = modelId;
-        // Optional: allow client Authorization header to override upstream API key per-request
+        // Upstream auth override (disabled by default). Enable only if:
+        //  - explicit env RCC_ALLOW_UPSTREAM_OVERRIDE=1, or
+        //  - client uses dedicated header x-rcc-upstream-authorization / x-rc-upstream-authorization
         const authHeader = (req.headers['authorization'] || req.headers['Authorization']) as string | undefined;
+        const upstreamAuthHeader = (req.headers['x-rcc-upstream-authorization'] || req.headers['x-rc-upstream-authorization']) as string | undefined;
+        const allowOverride = process.env.RCC_ALLOW_UPSTREAM_OVERRIDE === '1' || !!upstreamAuthHeader;
+        const chosenOverride = allowOverride ? (upstreamAuthHeader || authHeader) : undefined;
         const pipelineRequest = {
           data: {
             ...(req.body || {}),
-            ...(authHeader ? { __rcc_overrideApiKey: authHeader } : {}),
+            ...(chosenOverride ? { __rcc_overrideApiKey: chosenOverride } : {}),
           },
           route: {
             providerId,
@@ -774,10 +788,10 @@ export class OpenAIRouter extends BaseModule {
           const ua = (req.get('user-agent') || '').toLowerCase();
           if (ua.includes('codex')) {
             const dir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
-            await fs.mkdir(dir, { recursive: true } as any);
-            const sampleIn: any = JSON.parse(JSON.stringify(pipelineRequest));
-            if (sampleIn?.data?.__rcc_overrideApiKey) {
-              sampleIn.data.__rcc_overrideApiKey = '[REDACTED]';
+            await fs.mkdir(dir, { recursive: true });
+            const sampleIn = JSON.parse(JSON.stringify(pipelineRequest)) as Record<string, unknown>;
+            if (sampleIn?.data && typeof sampleIn.data === 'object' && sampleIn.data !== null && '__rcc_overrideApiKey' in sampleIn.data) {
+              (sampleIn.data as Record<string, unknown>).__rcc_overrideApiKey = '[REDACTED]';
             }
             await fs.writeFile(`${dir}/pipeline-in-${requestId}.json`, JSON.stringify(sampleIn, null, 2));
           }
@@ -785,18 +799,18 @@ export class OpenAIRouter extends BaseModule {
 
         const pipelineTimeoutMs = Number(process.env.RCC_PIPELINE_MAX_WAIT_MS || 300000);
         const pipelineResponse = await Promise.race([
-          this.pipelineManager.processRequest(pipelineRequest),
+          this.pipelineManager && 'processRequest' in this.pipelineManager ? this.pipelineManager.processRequest(pipelineRequest) : Promise.reject(new Error('Pipeline manager not available')),
           new Promise((_, reject) => setTimeout(() => reject(new Error(`Pipeline timeout after ${pipelineTimeoutMs}ms`)), Math.max(1, pipelineTimeoutMs)))
         ]);
-        response = pipelineResponse?.data ?? pipelineResponse;
+        response = pipelineResponse && typeof pipelineResponse === 'object' && pipelineResponse !== null && 'data' in pipelineResponse ? (pipelineResponse as Record<string, unknown>).data : pipelineResponse;
 
         // Record pipeline output sample for Codex CLI requests
         try {
           const ua = (req.get('user-agent') || '').toLowerCase();
           if (ua.includes('codex')) {
             const dir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
-            await fs.mkdir(dir, { recursive: true } as any);
-            const sampleOut: any = JSON.parse(JSON.stringify(response));
+            await fs.mkdir(dir, { recursive: true });
+            const sampleOut = JSON.parse(JSON.stringify(response)) as Record<string, unknown>;
             await fs.writeFile(`${dir}/pipeline-out-${requestId}.json`, JSON.stringify(sampleOut, null, 2));
           }
         } catch { /* non-blocking */ }
@@ -822,7 +836,6 @@ export class OpenAIRouter extends BaseModule {
         );
       }
 
-      const duration = Date.now() - startTime;
       // Ensure early heartbeat is stopped in non-stream path as well
       try { if (stopPreHeartbeat) { stopPreHeartbeat(); stopPreHeartbeat = null; } } catch { /* ignore */ }
 
@@ -873,15 +886,15 @@ export class OpenAIRouter extends BaseModule {
     } catch (error) {
       // Stop early heartbeat on error if running
       try { if (stopPreHeartbeat) { stopPreHeartbeat(); stopPreHeartbeat = null; } } catch { /* ignore */ }
-      const duration = Date.now() - startTime;
       try {
-        const details = (error as any).details || {};
-        (error as any).details = {
-          ...details,
+        const errorObj = error as Record<string, unknown>;
+        const details = errorObj && typeof errorObj === 'object' && 'details' in errorObj ? errorObj.details : {};
+        errorObj.details = {
+          ...(details && typeof details === 'object' && details !== null ? details : {}),
           provider: {
-            ...(details.provider || {}),
-            vendor: ctxProviderId || (details.provider?.vendor),
-            model: ctxModelId || (details.provider?.model),
+            ...(details && typeof details === 'object' && details !== null && 'provider' in details && typeof (details as Record<string, unknown>).provider === 'object' && (details as Record<string, unknown>).provider !== null ? (details as Record<string, unknown>).provider : {}),
+            vendor: ctxProviderId || (details && typeof details === 'object' && details !== null && 'provider' in details && typeof (details as Record<string, unknown>).provider === 'object' && (details as Record<string, unknown>).provider !== null && 'vendor' in ((details as Record<string, unknown>).provider as Record<string, unknown>) ? (((details as Record<string, unknown>).provider as Record<string, unknown>).vendor) : undefined),
+            model: ctxModelId || (details && typeof details === 'object' && details !== null && 'provider' in details && typeof (details as Record<string, unknown>).provider === 'object' && (details as Record<string, unknown>).provider !== null && 'model' in ((details as Record<string, unknown>).provider as Record<string, unknown>) ? (((details as Record<string, unknown>).provider as Record<string, unknown>).model) : undefined),
           }
         };
       } catch (_e) { void 0; }
@@ -929,7 +942,6 @@ export class OpenAIRouter extends BaseModule {
 
       // Prefer JSON error if we haven't started SSE yet (even when client requested stream)
       // If SSE headers already sent, end stream gracefully with an error chunk.
-      const wantsStream = !!req.body?.stream;
       if (res.headersSent) {
         try {
           // Ensure SSE headers if not yet sent
@@ -941,13 +953,25 @@ export class OpenAIRouter extends BaseModule {
         res.setHeader('x-request-id', requestId);
         try { res.setHeader('x-worker-pid', String(process.pid)); } catch { /* ignore */ }
       }
+          const errorObj = error as Record<string, unknown>;
+          const cause = errorObj && typeof errorObj === 'object' && errorObj !== null && 'cause' in errorObj ? errorObj.cause : undefined;
+          const causeCode: string | undefined = cause && typeof cause === 'object' && cause !== null && 'code' in cause && typeof (cause as Record<string, unknown>).code === 'string' ? (cause as Record<string, unknown>).code : (errorObj && typeof errorObj === 'object' && errorObj !== null && 'code' in errorObj && typeof errorObj.code === 'string' ? errorObj.code : undefined);
+          const msg = getErrorMessage(error);
+          const render = causeCode ? `Error [${causeCode}]: ${msg}` : `Error: ${msg}`;
           const errorChunk = {
             id: `chatcmpl-${Date.now()}`,
             object: 'chat.completion.chunk',
             created: Math.floor(Date.now() / 1000),
             model: req.body?.model || 'unknown',
-            choices: [{ index: 0, delta: { content: `Error: ${getErrorMessage(error)}` }, finish_reason: 'stop' }],
+            choices: [{ index: 0, delta: { content: render }, finish_reason: 'stop' }],
           };
+          // Persist error snapshot for diagnostics
+          try {
+            const dir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
+            await fs.mkdir(dir, { recursive: true });
+            const snap = { requestId, model: req.body?.model, stream: true, error: render, headers: this.sanitizeHeaders(req.headers) };
+            await fs.writeFile(`${dir}/error-out-${requestId}.json`, JSON.stringify(snap, null, 2));
+          } catch { /* ignore */ }
           try { res.write(`data: ${JSON.stringify(errorChunk)}\n\n`); } catch { /* ignore */ }
           try { res.write('data: [DONE]\n\n'); } catch { /* ignore */ }
           try { res.end(); } catch { /* ignore */ }
@@ -959,6 +983,12 @@ export class OpenAIRouter extends BaseModule {
 
       // Send error response with improved mapping (non-stream path)
       const mapped = this.buildErrorPayload(error, requestId);
+      // Persist error snapshot for diagnostics
+      try {
+        const dir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(`${dir}/error-out-${requestId}.json`, JSON.stringify({ requestId, mapped, model: req.body?.model, stream: !!req.body?.stream, headers: this.sanitizeHeaders(req.headers) }, null, 2));
+      } catch { /* ignore */ }
       if (!res.headersSent) {
         res.setHeader('x-request-id', requestId);
         res.setHeader('Cache-Control', 'no-store');
@@ -999,18 +1029,6 @@ export class OpenAIRouter extends BaseModule {
         },
       });
 
-      // Create request context
-      const context: RequestContext = {
-        id: requestId,
-        timestamp: startTime,
-        method: req.method,
-        url: req.url,
-        headers: this.sanitizeHeaders(req.headers),
-        body: req.body,
-        userAgent: req.get('user-agent'),
-        ip: req.ip,
-      };
-
       // Validate request
       if (this.config.enableValidation) {
         const validation = this.validateCompletionRequest(req.body);
@@ -1024,7 +1042,7 @@ export class OpenAIRouter extends BaseModule {
       }
 
       // Pipeline path first (no streaming for legacy completions)
-      let response;
+      let response: unknown;
       if (this.shouldUsePipeline() && this.routePools) {
         const routeName = await this.decideRouteCategoryAsync(req);
         let pipelineId = this.pickPipelineId(routeName);
@@ -1042,10 +1060,13 @@ export class OpenAIRouter extends BaseModule {
         const { providerId, modelId } = this.parsePipelineId(pipelineId);
         ctxProviderId = providerId; ctxModelId = modelId;
         const authHeader2 = (req.headers['authorization'] || req.headers['Authorization']) as string | undefined;
+        const upstreamAuth2 = (req.headers['x-rcc-upstream-authorization'] || req.headers['x-rc-upstream-authorization']) as string | undefined;
+        const allowOverride2 = process.env.RCC_ALLOW_UPSTREAM_OVERRIDE === '1' || !!upstreamAuth2;
+        const chosenOverride2 = allowOverride2 ? (upstreamAuth2 || authHeader2) : undefined;
         const pipelineRequest = {
           data: {
             ...(req.body || {}),
-            ...(authHeader2 ? { __rcc_overrideApiKey: authHeader2 } : {}),
+            ...(chosenOverride2 ? { __rcc_overrideApiKey: chosenOverride2 } : {}),
           },
           route: {
             providerId,
@@ -1068,8 +1089,8 @@ export class OpenAIRouter extends BaseModule {
             },
           },
         };
-        const pipelineResponse = await this.pipelineManager.processRequest(pipelineRequest);
-        response = pipelineResponse?.data ?? pipelineResponse;
+        const pipelineResponse = await (this.pipelineManager && typeof this.pipelineManager === 'object' && this.pipelineManager !== null && 'processRequest' in this.pipelineManager ? (this.pipelineManager as Record<string, unknown>).processRequest(pipelineRequest) : Promise.reject(new Error('Pipeline manager not available')));
+        response = pipelineResponse && typeof pipelineResponse === 'object' && pipelineResponse !== null && 'data' in pipelineResponse ? (pipelineResponse as Record<string, unknown>).data : pipelineResponse;
         // If client requests JSON object format, coerce content to strict JSON
         response = this.ensureJsonContentIfRequested(response, req.body, 'text');
       } else {
@@ -1080,8 +1101,6 @@ export class OpenAIRouter extends BaseModule {
         );
       }
 
-      const duration = Date.now() - startTime;
-
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'openai-router',
@@ -1091,7 +1110,6 @@ export class OpenAIRouter extends BaseModule {
         position: 'middle',
         data: {
           requestId,
-          duration,
           status: 200,
           model: req.body.model,
         },
@@ -1104,15 +1122,15 @@ export class OpenAIRouter extends BaseModule {
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       res.status(200).json(normalized);
     } catch (error) {
-      const duration = Date.now() - startTime;
       try {
-        const details = (error as any).details || {};
-        (error as any).details = {
-          ...details,
+        const errorObj = error as Record<string, unknown>;
+        const details = errorObj && typeof errorObj === 'object' && 'details' in errorObj ? errorObj.details : {};
+        errorObj.details = {
+          ...(details && typeof details === 'object' && details !== null ? details : {}),
           provider: {
-            ...(details.provider || {}),
-            vendor: ctxProviderId || (details.provider?.vendor),
-            model: ctxModelId || (details.provider?.model),
+            ...(details && typeof details === 'object' && details !== null && 'provider' in details && typeof (details as Record<string, unknown>).provider === 'object' && (details as Record<string, unknown>).provider !== null ? (details as Record<string, unknown>).provider : {}),
+            vendor: ctxProviderId || (details && typeof details === 'object' && details !== null && 'provider' in details && typeof (details as Record<string, unknown>).provider === 'object' && (details as Record<string, unknown>).provider !== null && 'vendor' in ((details as Record<string, unknown>).provider as Record<string, unknown>) ? (((details as Record<string, unknown>).provider as Record<string, unknown>).vendor) : undefined),
+            model: ctxModelId || (details && typeof details === 'object' && details !== null && 'provider' in details && typeof (details as Record<string, unknown>).provider === 'object' && (details as Record<string, unknown>).provider !== null && 'model' in ((details as Record<string, unknown>).provider as Record<string, unknown>) ? (((details as Record<string, unknown>).provider as Record<string, unknown>).model) : undefined),
           }
         };
       } catch (_e) { void 0; }
@@ -1127,7 +1145,6 @@ export class OpenAIRouter extends BaseModule {
         position: 'middle',
         data: {
           requestId,
-          duration,
           error: getErrorMessage(error),
         },
       });
@@ -1145,25 +1162,25 @@ export class OpenAIRouter extends BaseModule {
    * Normalize provider response to OpenAI-compatible shape.
    * Adds missing standard fields while preserving existing data.
    */
-  private normalizeOpenAIResponse(body: any, kind: 'chat' | 'text'): any {
+  private normalizeOpenAIResponse(body: unknown, kind: 'chat' | 'text'): Record<string, unknown> | unknown {
     try {
       if (!body || typeof body !== 'object') {return body;}
 
       // Unwrap common wrapper shape { data, status, headers, metadata }
       if (
-        (body as any)?.data &&
-        typeof (body as any).data === 'object'
+        body && typeof body === 'object' && body !== null && 'data' in body &&
+        typeof (body as Record<string, unknown>).data === 'object'
       ) {
-        const inner = (body as any).data;
+        const inner = (body as Record<string, unknown>).data;
         if (
           inner &&
-          (Array.isArray(inner.choices) || typeof inner.id === 'string' || inner.usage)
+          (Array.isArray((inner as Record<string, unknown>).choices) || (typeof (inner as Record<string, unknown>).id === 'string') || (inner as Record<string, unknown>).usage)
         ) {
           body = inner;
         }
       }
 
-      const clone: any = { ...body };
+      const clone: Record<string, unknown> = { ...(body as Record<string, unknown>) };
 
       // Ensure top-level id
       if (!clone.id) {
@@ -1195,12 +1212,12 @@ export class OpenAIRouter extends BaseModule {
       }
 
       // Ensure finish_reason and role present on each choice
-      clone.choices = clone.choices.map((c: any, idx: number) => {
-        const choice = { index: idx, ...(c || {}) } as any;
+      clone.choices = clone.choices.map((c, idx) => {
+        const choice: Record<string, unknown> = { index: idx, ...(c && typeof c === 'object' && c !== null ? c : {}) };
         if (!('finish_reason' in choice) && (choice.finish_reason === null || choice.finish_reason === undefined)) {
           choice.finish_reason = 'stop';
         }
-        if (kind === 'chat' && choice.message && typeof choice.message === 'object') {
+        if (kind === 'chat' && choice.message && typeof choice.message === 'object' && choice.message !== null) {
           if (!choice.message.role) {
             choice.message.role = 'assistant';
           }
@@ -1217,7 +1234,7 @@ export class OpenAIRouter extends BaseModule {
   /**
    * Bridge pipeline streaming output to OpenAI-compatible Server-Sent Events (SSE).
    */
-  private async streamFromPipeline(response: any, requestId: string, res: Response, model?: string) {
+  private async streamFromPipeline(response: unknown, requestId: string, res: Response, model?: string) {
     // Set SSE headers (guard if already sent by pre-heartbeat)
       if (!res.headersSent) {
         res.setHeader('Content-Type', 'text/event-stream');
@@ -1257,9 +1274,9 @@ export class OpenAIRouter extends BaseModule {
               sequence: heartbeatCounter,
               requestId,
             });
-          } catch {}
+          } catch (_e) { void 0; }
         } else {
-          const delta: Record<string, any> = {};
+          const delta: Record<string, unknown> = {};
           if (EMIT_STATUS && HEARTBEAT_USE_REASONING) {
             const elapsedMs = Date.now() - heartbeatStartedAt;
             const elapsedSeconds = Math.max(1, Math.floor(elapsedMs / 1000));
@@ -1289,9 +1306,9 @@ export class OpenAIRouter extends BaseModule {
               requestId,
               hasReasoning: Boolean(delta && delta.reasoning_content),
             });
-          } catch {}
+          } catch (_e) { void 0; }
         }
-      } catch { /* ignore */ }
+      } catch (_e) { /* ignore */ void 0; }
     };
 
     const startHeartbeat = () => {
@@ -1318,40 +1335,40 @@ export class OpenAIRouter extends BaseModule {
 
     try {
       // Try to obtain async iterator from response
-      let iterator: AsyncIterator<any> | null = null;
+      let iterator: AsyncIterator<unknown> | null = null;
       const streamObj = response && (response.data ?? response);
-      if (streamObj && typeof streamObj[Symbol.asyncIterator] === 'function') {
-        iterator = streamObj[Symbol.asyncIterator]();
-      } else if (streamObj && typeof streamObj.iterator === 'function') {
-        iterator = (streamObj as any).iterator();
+      if (streamObj && typeof streamObj === 'object' && streamObj !== null && typeof (streamObj as unknown)[Symbol.asyncIterator] === 'function') {
+        iterator = (streamObj as unknown)[Symbol.asyncIterator]();
+      } else if (streamObj && typeof streamObj === 'object' && streamObj !== null && typeof (streamObj as unknown).iterator === 'function') {
+        iterator = (streamObj as unknown).iterator();
       }
 
       // Send initial role delta
       res.write(`data: ${JSON.stringify(makeInitial())}\n\n`);
       startHeartbeat();
 
-      const normalizeChunk = (obj: any) => {
+      const normalizeChunk = (obj: unknown) => {
         try {
           if (!obj || typeof obj !== 'object') {return obj;}
           if (!obj.object) {obj.object = 'chat.completion.chunk';}
         if (Array.isArray(obj.choices)) {
-          obj.choices = obj.choices.map((ch: any) => {
+          obj.choices = obj.choices.map((ch) => {
             const c = { ...(ch || {}) };
             if (c && typeof c === 'object' && c.delta && typeof c.delta === 'object') {
-              const d = { ...c.delta } as any;
+              const d = { ...(c as Record<string, unknown>).delta } as Record<string, unknown>;
               if (d.reasoning_content) {
                 const entries = Array.isArray(d.reasoning_content)
                   ? d.reasoning_content
                   : [d.reasoning_content];
-                const heartbeatEntries = entries.filter((entry: any) => {
+                const heartbeatEntries = entries.filter((entry) => {
                   if (!entry || typeof entry !== 'object') { return false; }
                   const meta = entry.metadata || entry.__metadata;
                   return Boolean(meta && meta.rccHeartbeat);
                 });
-                const visibleEntries = entries.filter((entry: any) => !heartbeatEntries.includes(entry));
+                const visibleEntries = entries.filter((entry) => !heartbeatEntries.includes(entry));
                 if (!d.content && visibleEntries.length) {
                   d.content = visibleEntries
-                    .map((entry: any) => (entry && typeof entry.text === 'string') ? entry.text : '')
+                    .map((entry) => (entry && typeof (entry as Record<string, unknown>).text === 'string') ? (entry as Record<string, unknown>).text : '')
                     .join('');
                 }
                 if (!visibleEntries.length && (d.content === undefined || d.content === null || d.content === '')) {
@@ -1381,7 +1398,7 @@ export class OpenAIRouter extends BaseModule {
       let emittedToolCalls = false;
       if (iterator) {
         // Relay chunks as-is; assume they are OpenAI chunk objects or strings
-        for await (const chunk of iterator as any) {
+        for await (const chunk of iterator) {
           if (chunk === null || chunk === undefined) {continue;}
           if (typeof chunk === 'string') {
             if (chunk.trim() === '[DONE]') {break;}
@@ -1410,19 +1427,19 @@ export class OpenAIRouter extends BaseModule {
         let payload = streamObj;
         try {
           // Unwrap common shape { data }
-          if (payload && typeof payload === 'object' && (payload as any).data) {
-            payload = (payload as any).data;
+          if (payload && typeof payload === 'object' && payload !== null && (payload as Record<string, unknown>).data) {
+            payload = (payload as Record<string, unknown>).data;
           }
           // Attempt to normalize to OpenAI chat completion
           const normalized = this.normalizeOpenAIResponse(payload, 'chat');
           // Extract content from normalized structure
           let content = '';
-          let toolCalls: any[] | null = null;
-          if (normalized && Array.isArray(normalized.choices) && normalized.choices[0]) {
-            const c0 = normalized.choices[0] as any;
-            content = c0?.message?.content || c0?.text || '';
-            if (Array.isArray(c0?.message?.tool_calls) && c0.message.tool_calls.length) {
-              toolCalls = c0.message.tool_calls;
+          let toolCalls: unknown[] | null = null;
+          if (normalized && typeof normalized === 'object' && normalized !== null && Array.isArray((normalized as Record<string, unknown>).choices) && (normalized as Record<string, unknown>).choices && (normalized as Record<string, unknown>).choices![0]) {
+            const c0 = (normalized as Record<string, unknown>).choices![0];
+            content = (c0 && typeof c0 === 'object' && c0 !== null && (c0 as Record<string, unknown>).message && typeof (c0 as Record<string, unknown>).message === 'object' && (c0 as Record<string, unknown>).message !== null && (c0 as Record<string, unknown>).message!.content) ? (c0 as Record<string, unknown>).message!.content as string : ((c0 && typeof c0 === 'object' && c0 !== null && (c0 as Record<string, unknown>).text) ? (c0 as Record<string, unknown>).text as string : '');
+            if (c0 && typeof c0 === 'object' && c0 !== null && (c0 as Record<string, unknown>).message && typeof (c0 as Record<string, unknown>).message === 'object' && (c0 as Record<string, unknown>).message !== null && (c0 as Record<string, unknown>).message!.tool_calls && Array.isArray((c0 as Record<string, unknown>).message!.tool_calls) && (c0 as Record<string, unknown>).message!.tool_calls.length) {
+              toolCalls = (c0 as Record<string, unknown>).message!.tool_calls as unknown[];
             }
           } else if (typeof normalized === 'string') {
             content = normalized;
@@ -1431,25 +1448,25 @@ export class OpenAIRouter extends BaseModule {
             content = JSON.stringify(payload);
           }
           // Coerce JSON if forced/asked
-          const fakeReq = { response_format: (process.env.ROUTECODEX_FORCE_JSON==='1') ? { type: 'json_object' } : undefined } as any;
+          const fakeReq = { response_format: (process.env.ROUTECODEX_FORCE_JSON==='1') ? { type: 'json_object' } : undefined };
           const cleaned = this.ensureJsonContentIfRequested(
             { choices: [{ index: 0, message: { role: 'assistant', content } }] },
             fakeReq,
             'chat'
           );
-          const outContent = cleaned?.choices?.[0]?.message?.content ?? content;
-          const delta: any = { };
+          const outContent = cleaned && typeof cleaned === 'object' && cleaned !== null && (cleaned as Record<string, unknown>).choices && Array.isArray((cleaned as Record<string, unknown>).choices) && (cleaned as Record<string, unknown>).choices![0] && typeof (cleaned as Record<string, unknown>).choices![0] === 'object' && (cleaned as Record<string, unknown>).choices![0] !== null && ((cleaned as Record<string, unknown>).choices![0] as Record<string, unknown>).message && typeof ((cleaned as Record<string, unknown>).choices![0] as Record<string, unknown>).message === 'object' && ((cleaned as Record<string, unknown>).choices![0] as Record<string, unknown>).message !== null ? (((cleaned as Record<string, unknown>).choices![0] as Record<string, unknown>).message as Record<string, unknown>).content as string : content;
+          const delta: Record<string, unknown> = { };
           const hasTool = Array.isArray(toolCalls) && toolCalls.length > 0;
           if (!hasTool && outContent && String(outContent).length > 0) {
             delta.content = outContent;
           }
           if (hasTool) {
             // Emit tool_calls in a single delta chunk for compatibility
-          const list = Array.isArray(toolCalls) ? toolCalls : [] as any[];
-            delta.tool_calls = list.map((tc: any) => ({
-              id: tc.id || `call_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+          const list = Array.isArray(toolCalls) ? toolCalls : [];
+            delta.tool_calls = list.map((tc) => ({
+              id: (tc as Record<string, unknown>).id || `call_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
               type: 'function',
-              function: { name: tc.function?.name, arguments: tc.function?.arguments ?? '' }
+              function: { name: (tc as Record<string, unknown>).function && typeof (tc as Record<string, unknown>).function === 'object' && (tc as Record<string, unknown>).function !== null ? (tc as Record<string, unknown>).function!.name : undefined, arguments: ((tc as Record<string, unknown>).function && typeof (tc as Record<string, unknown>).function === 'object' && (tc as Record<string, unknown>).function !== null && (tc as Record<string, unknown>).function!.arguments) ? (tc as Record<string, unknown>).function!.arguments : '' }
             }));
             emittedToolCalls = true;
           }
@@ -1500,19 +1517,19 @@ export class OpenAIRouter extends BaseModule {
    * If response_format.type === 'json_object', try to coerce model output to strict JSON string.
    * This helps clients that parse content as JSON and fail on code fences or extra prose.
    */
-  private ensureJsonContentIfRequested(body: any, request: any, kind: 'chat' | 'text') {
+  private ensureJsonContentIfRequested(body: unknown, request: Record<string, unknown>, kind: 'chat' | 'text') {
     try {
       const expectJson =
-        request?.response_format?.type === 'json_object' ||
+        request && typeof request === 'object' && request !== null && 'response_format' in request && request.response_format && typeof request.response_format === 'object' && request.response_format !== null && 'type' in request.response_format && (request.response_format as Record<string, unknown>).type === 'json_object' ||
         process.env.ROUTECODEX_FORCE_JSON === '1';
       if (!expectJson || !body) {return body;}
 
-      const container = (body && typeof body === 'object' && (body as any).data) ? (body as any).data : body;
+      const container = body && typeof body === 'object' && body !== null && 'data' in body ? (body as Record<string, unknown>).data : body;
       if (!container || typeof container !== 'object') {return body;}
 
-      const choices = Array.isArray(container.choices) ? container.choices : [];
+      const choices = Array.isArray((container as Record<string, unknown>).choices) ? (container as Record<string, unknown>).choices : [];
       const clean = (s: string): string => {
-        if (typeof s !== 'string') {return s as unknown as string;}
+        if (typeof s !== 'string') {return s;}
         // Prefer fenced JSON block
         const fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
         const candidate = fence ? fence[1] : s;
@@ -1543,25 +1560,25 @@ export class OpenAIRouter extends BaseModule {
       for (let i = 0; i < choices.length; i++) {
         const c = choices[i] || {};
         if (kind === 'chat') {
-          if (c.message && typeof c.message === 'object' && typeof c.message.content === 'string') {
-            c.message.content = clean(c.message.content);
-            if (!c.message.role) {c.message.role = 'assistant';}
+          if (c && typeof c === 'object' && c !== null && 'message' in c && c.message && typeof c.message === 'object' && c.message !== null && 'content' in c.message && typeof (c.message as Record<string, unknown>).content === 'string') {
+            (c.message as Record<string, unknown>).content = clean((c.message as Record<string, unknown>).content);
+            if (!(c.message as Record<string, unknown>).role) {(c.message as Record<string, unknown>).role = 'assistant';}
             // Remove verbose or non-standard fields that may confuse strict clients
             if ('reasoning_content' in c.message) {
-              try { delete (c.message as any).reasoning_content; } catch (_e) { void 0; }
+              try { delete (c.message as Record<string, unknown>).reasoning_content; } catch (_e) { void 0; }
             }
           }
         } else {
-          if (typeof c.text === 'string') {
-            c.text = clean(c.text);
+          if (c && typeof c === 'object' && c !== null && 'text' in c && typeof (c as Record<string, unknown>).text === 'string') {
+            (c as Record<string, unknown>).text = clean((c as Record<string, unknown>).text);
           }
         }
         choices[i] = c;
       }
 
-      container.choices = choices;
-      if ((body as any).data) {
-        (body as any).data = container;
+      (container as Record<string, unknown>).choices = choices;
+      if (body && typeof body === 'object' && body !== null && 'data' in body) {
+        (body as Record<string, unknown>).data = container;
       } else {
         body = container;
       }
@@ -1575,7 +1592,7 @@ export class OpenAIRouter extends BaseModule {
    * Decide route category for a request. For now, default to 'default' if available, else first key.
    * (Hook: can integrate ConfigRequestClassifier here.)
    */
-  private decideRouteCategory(req: Request): string {
+  private decideRouteCategory(_req: Request): string {
     if (!this.routePools) {
       return 'default';
     }
@@ -1591,7 +1608,7 @@ export class OpenAIRouter extends BaseModule {
    * This keeps the client connection alive without depending on provider stream.
    * Returns a stop function to clear the interval.
    */
-  private startPreStreamHeartbeat(res: Response, requestId: string, model?: string): () => void {
+  private startPreStreamHeartbeat(res: Response, requestId: string, _model?: string): () => void {
     try {
       // Defer initial SSE header write to allow early JSON error mapping
       // Headers will be written when the first pre-heartbeat tick fires
@@ -1671,8 +1688,8 @@ export class OpenAIRouter extends BaseModule {
         protocol: 'openai',
       };
       const res = await this.classifier.classify(input);
-      const route = res?.route;
-      if (route && this.routePools && this.routePools[route]) {
+      const route = res && typeof res === 'object' && res !== null && 'route' in res ? (res as Record<string, unknown>).route : undefined;
+      if (route && typeof route === 'string' && this.routePools && this.routePools[route]) {
         return route;
       }
       return fallback();
@@ -1729,9 +1746,7 @@ export class OpenAIRouter extends BaseModule {
           type: 'not_implemented',
         },
       });
-      const duration = Date.now() - startTime;
     } catch (error) {
-      const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'models_handler');
 
       this.debugEventBus.publish({
@@ -1743,7 +1758,6 @@ export class OpenAIRouter extends BaseModule {
         position: 'middle',
         data: {
           requestId,
-          duration,
           error: getErrorMessage(error),
         },
       });
@@ -1786,9 +1800,7 @@ export class OpenAIRouter extends BaseModule {
           type: 'not_implemented',
         },
       });
-      const duration = Date.now() - startTime;
     } catch (error) {
-      const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'model_handler');
 
       this.debugEventBus.publish({
@@ -1800,7 +1812,6 @@ export class OpenAIRouter extends BaseModule {
         position: 'middle',
         data: {
           requestId,
-          duration,
           modelId,
           error: getErrorMessage(error),
         },
@@ -1818,23 +1829,9 @@ export class OpenAIRouter extends BaseModule {
    * Handle embeddings (pass-through)
    */
   private async handleEmbeddings(req: Request, res: Response): Promise<void> {
-    const startTime = Date.now();
-    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
     try {
-      const context: RequestContext = {
-        id: requestId,
-        timestamp: startTime,
-        method: req.method,
-        url: req.url,
-        headers: this.sanitizeHeaders(req.headers),
-        body: req.body,
-        userAgent: req.get('user-agent'),
-        ip: req.ip,
-      };
 
       // Not implemented without pass-through
-      const duration = Date.now() - startTime;
       res.status(501).json({
         error: {
           message: 'Embeddings not implemented. Configure pipeline.',
@@ -1842,10 +1839,8 @@ export class OpenAIRouter extends BaseModule {
         },
       });
     } catch (error) {
-      const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'embeddings_handler');
 
-      const status = error instanceof RouteCodexError ? error.status : 500;
       const mapped = this.buildErrorPayload(error, requestId);
       res.setHeader('x-request-id', requestId);
       res.setHeader('Cache-Control', 'no-store');
@@ -1858,23 +1853,9 @@ export class OpenAIRouter extends BaseModule {
    * Handle moderations (pass-through)
    */
   private async handleModerations(req: Request, res: Response): Promise<void> {
-    const startTime = Date.now();
-    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
     try {
-      const context: RequestContext = {
-        id: requestId,
-        timestamp: startTime,
-        method: req.method,
-        url: req.url,
-        headers: this.sanitizeHeaders(req.headers),
-        body: req.body,
-        userAgent: req.get('user-agent'),
-        ip: req.ip,
-      };
 
       // Not implemented without pass-through
-      const duration = Date.now() - startTime;
       res.status(501).json({
         error: {
           message: 'Moderations not implemented. Configure pipeline.',
@@ -1882,10 +1863,8 @@ export class OpenAIRouter extends BaseModule {
         },
       });
     } catch (error) {
-      const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'moderations_handler');
 
-      const status = error instanceof RouteCodexError ? error.status : 500;
       const mapped = this.buildErrorPayload(error, requestId);
       res.setHeader('x-request-id', requestId);
       res.setHeader('Cache-Control', 'no-store');
@@ -1898,23 +1877,9 @@ export class OpenAIRouter extends BaseModule {
    * Handle image generations (pass-through)
    */
   private async handleImageGenerations(req: Request, res: Response): Promise<void> {
-    const startTime = Date.now();
-    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
     try {
-      const context: RequestContext = {
-        id: requestId,
-        timestamp: startTime,
-        method: req.method,
-        url: req.url,
-        headers: this.sanitizeHeaders(req.headers),
-        body: req.body,
-        userAgent: req.get('user-agent'),
-        ip: req.ip,
-      };
 
       // Not implemented without pass-through
-      const duration = Date.now() - startTime;
       res.status(501).json({
         error: {
           message: 'Image generations not implemented. Configure pipeline.',
@@ -1922,11 +1887,9 @@ export class OpenAIRouter extends BaseModule {
         },
       });
     } catch (error) {
-      const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'image_generations_handler');
 
-      const status = error instanceof RouteCodexError ? error.status : 500;
-      res.status(status).json({
+      res.status(500).json({
         error: {
           message: getErrorMessage(error),
           type: error instanceof RouteCodexError ? error.code : 'internal_error',
@@ -1940,23 +1903,9 @@ export class OpenAIRouter extends BaseModule {
    * Handle audio transcriptions (pass-through)
    */
   private async handleAudioTranscriptions(req: Request, res: Response): Promise<void> {
-    const startTime = Date.now();
-    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
     try {
-      const context: RequestContext = {
-        id: requestId,
-        timestamp: startTime,
-        method: req.method,
-        url: req.url,
-        headers: this.sanitizeHeaders(req.headers),
-        body: req.body,
-        userAgent: req.get('user-agent'),
-        ip: req.ip,
-      };
 
       // Not implemented without pass-through
-      const duration = Date.now() - startTime;
       res.status(501).json({
         error: {
           message: 'Audio transcriptions not implemented. Configure pipeline.',
@@ -1964,10 +1913,8 @@ export class OpenAIRouter extends BaseModule {
         },
       });
     } catch (error) {
-      const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'audio_transcriptions_handler');
 
-      const status = error instanceof RouteCodexError ? error.status : 500;
       const mapped = this.buildErrorPayload(error, requestId);
       res.setHeader('x-request-id', requestId);
       res.setHeader('Cache-Control', 'no-store');
@@ -1980,23 +1927,9 @@ export class OpenAIRouter extends BaseModule {
    * Handle audio translations (pass-through)
    */
   private async handleAudioTranslations(req: Request, res: Response): Promise<void> {
-    const startTime = Date.now();
-    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
     try {
-      const context: RequestContext = {
-        id: requestId,
-        timestamp: startTime,
-        method: req.method,
-        url: req.url,
-        headers: this.sanitizeHeaders(req.headers),
-        body: req.body,
-        userAgent: req.get('user-agent'),
-        ip: req.ip,
-      };
 
       // Not implemented without pass-through
-      const duration = Date.now() - startTime;
       res.status(501).json({
         error: {
           message: 'Audio translations not implemented. Configure pipeline.',
@@ -2004,10 +1937,8 @@ export class OpenAIRouter extends BaseModule {
         },
       });
     } catch (error) {
-      const duration = Date.now() - startTime;
       await this.handleError(error as Error, 'audio_translations_handler');
 
-      const status = error instanceof RouteCodexError ? error.status : 500;
       const mapped = this.buildErrorPayload(error, requestId);
       res.setHeader('x-request-id', requestId);
       res.setHeader('Cache-Control', 'no-store');
@@ -2159,10 +2090,10 @@ export class OpenAIRouter extends BaseModule {
    */
   private async handleStreamingChatCompletion(
     request: OpenAIChatCompletionRequest,
-    context: RequestContext,
+    _context: RequestContext,
     res: Response
-  ): Promise<any> {
-    return new Promise((resolve, reject) => {
+  ): Promise<unknown> {
+    return new Promise((resolve, _reject) => {
       // Set appropriate headers for streaming
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -2298,7 +2229,7 @@ export class OpenAIRouter extends BaseModule {
           errors.push(`Message ${i} has invalid role: ${message.role}`);
         }
 
-        const c = (message as any).content;
+        const c = message.content;
         // If content is missing/null, allow it (normalizer/pipeline will coerce as needed)
         if (c !== undefined && c !== null) {
           const isString = typeof c === 'string';
@@ -2392,7 +2323,7 @@ export class OpenAIRouter extends BaseModule {
   /**
    * Sanitize headers for logging
    */
-  private sanitizeHeaders(headers: any): Record<string, string> {
+  private sanitizeHeaders(headers: Record<string, string | string[]>): Record<string, string> {
     const sanitized: Record<string, string> = {};
     const sensitiveHeaders = ['authorization', 'api-key', 'x-api-key', 'cookie'];
 
@@ -2400,7 +2331,7 @@ export class OpenAIRouter extends BaseModule {
       if (sensitiveHeaders.includes(key.toLowerCase())) {
         sanitized[key] = '[REDACTED]';
       } else {
-        sanitized[key] = String(value);
+        sanitized[key] = Array.isArray(value) ? value.join(', ') : String(value);
       }
     }
 
@@ -2414,7 +2345,7 @@ export class OpenAIRouter extends BaseModule {
     try {
       // Ensure the error has a proper message property
       const errorMessage = error.message || getErrorMessage(error) || 'Unknown error';
-      const errorContext: ErrorContext = {
+      const errorContext = {
         error: errorMessage,
         source: `openai-router.${context}`,
         severity: 'medium',
