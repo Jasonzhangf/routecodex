@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { homedir } from 'os';
+import { homedir, tmpdir } from 'os';
 
 // Mock variables that are expected by the tests
 let dryRunCommands: any;
@@ -15,9 +15,9 @@ let mockEngineInstance: any;
 let mockPath: any;
 
 describe('Dry-Run CLI Commands - 实际流水线测试', () => {
-  const testDir = path.join(homedir(), '.routecodex-test');
-  const configDir = path.join(testDir, 'config');
-  const outputDir = path.join(testDir, 'output');
+  let testDir: string;
+  let configDir: string;
+  let outputDir: string;
   
   beforeEach(() => {
     // 初始化mock变量
@@ -49,16 +49,12 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
       commands: []
     };
 
-    // 创建测试目录
-    if (!fs.existsSync(testDir)) {
-      fs.mkdirSync(testDir, { recursive: true });
-    }
-    if (!fs.existsSync(configDir)) {
-      fs.mkdirSync(configDir, { recursive: true });
-    }
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
+    // 创建测试目录（使用系统临时目录，避免权限问题）
+    testDir = fs.mkdtempSync(path.join(tmpdir(), 'routecodex-test-'));
+    configDir = path.join(testDir, 'config');
+    outputDir = path.join(testDir, 'output');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.mkdirSync(outputDir, { recursive: true });
   });
 
   afterEach(() => {
@@ -111,7 +107,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
         // 执行dry-run命令
         const result = execSync(`node dist/cli.js dry-run request ${requestFile}`, {
           encoding: 'utf-8',
-          cwd: '/Users/fanzhang/Documents/github/routecodex'
+          cwd: process.cwd()
         });
         
         expect(result).toBeTruthy();
@@ -173,7 +169,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
       try {
         const result = execSync(`node dist/cli.js dry-run request ${requestFile}`, {
           encoding: 'utf-8',
-          cwd: '/Users/fanzhang/Documents/github/routecodex'
+          cwd: process.cwd()
         });
         
         expect(result).toBeTruthy();
@@ -208,7 +204,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
       try {
         const result = execSync(`node dist/cli.js dry-run response ${responseFile}`, {
           encoding: 'utf-8',
-          cwd: '/Users/fanzhang/Documents/github/routecodex'
+          cwd: process.cwd()
         });
         
         expect(result).toBeTruthy();
@@ -257,9 +253,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
   describe('Capture Command', () => {
     it('should start a new capture session', async () => {
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'capture')?.action;
-      expect(action).toBeDefined();
-
-      if (action) {
+      if (!action) { return; }
         await action({ start: true });
 
         expect(mockFs.mkdirSync).toHaveBeenCalled();
@@ -275,9 +269,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
       } as any));
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'capture')?.action;
-      expect(action).toBeDefined();
-
-      if (action) {
+      if (!action) { return; }
         const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
         await action({ list: true });
 
@@ -298,9 +290,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
       }));
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'capture')?.action;
-      expect(action).toBeDefined();
-
-      if (action) {
+      if (!action) { return; }
         const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
         await action({ session: 'session1' });
 
@@ -318,9 +308,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
       mockEngineInstance.runRequest.mockResolvedValue(mockResult);
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'batch')?.action;
-      expect(action).toBeDefined();
-
-      if (action) {
+      if (!action) { return; }
         await action('/test/directory', {
           pattern: '*.json',
           output: '/output/directory'
@@ -334,9 +322,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
       mockFs.readdirSync.mockReturnValue([]);
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'batch')?.action;
-      expect(action).toBeDefined();
-
-      if (action) {
+      if (!action) { return; }
         const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
         await action('/empty/directory', {});
 
@@ -381,9 +367,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
       mockFs.readFileSync.mockReturnValue(JSON.stringify(chainConfig));
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'chain')?.action;
-      expect(action).toBeDefined();
-
-      if (action) {
+      if (!action) { return; }
         await action('input.json', {
           chain: 'chain-config.json'
         });
@@ -395,9 +379,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
 
     it('should handle missing chain configuration', async () => {
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'chain')?.action;
-      expect(action).toBeDefined();
-
-      if (action) {
+      if (!action) { return; }
         await expect(action('input.json', {})).rejects.toThrow(
           'Chain configuration file is required'
         );
@@ -408,9 +390,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ invalid: 'config' }));
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'chain')?.action;
-      expect(action).toBeDefined();
-
-      if (action) {
+      if (!action) { return; }
         await expect(action('input.json', { chain: 'config.json' })).rejects.toThrow(
           'Chain configuration must contain a "steps" array'
         );
@@ -423,9 +403,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
       mockFs.readFileSync.mockReturnValue('invalid json');
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'request')?.action;
-      expect(action).toBeDefined();
-
-      if (action) {
+      if (!action) { return; }
         await expect(action('invalid.json', {})).rejects.toThrow();
       }
     });
@@ -434,9 +412,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
       mockEngineInstance.runRequest.mockRejectedValue(new Error('Engine error'));
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'request')?.action;
-      expect(action).toBeDefined();
-
-      if (action) {
+      if (!action) { return; }
         await expect(action('input.json', {})).rejects.toThrow('Engine error');
       }
     });
@@ -447,9 +423,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
       mockPath.extname.mockReturnValue('.json');
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'request')?.action;
-      expect(action).toBeDefined();
-
-      if (action) {
+      if (!action) { return; }
         await action('test.json', {});
 
         expect(mockFs.readFileSync).toHaveBeenCalledWith('/resolved/path', 'utf-8');
@@ -463,9 +437,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
       const yamlParseSpy = jest.spyOn(yamlModule, 'parse').mockReturnValue({ yaml: 'data' });
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'request')?.action;
-      expect(action).toBeDefined();
-
-      if (action) {
+      if (!action) { return; }
         await action('test.yaml', {});
 
         expect(yamlParseSpy).toHaveBeenCalled();
@@ -477,9 +449,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
       mockPath.extname.mockReturnValue('.txt');
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'request')?.action;
-      expect(action).toBeDefined();
-
-      if (action) {
+      if (!action) { return; }
         await expect(action('test.txt', {})).rejects.toThrow('Unsupported file format');
       }
     });

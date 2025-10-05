@@ -27,11 +27,7 @@ export type {
   DebugAPIRequest,
   DebugAPIResponse,
   DebugExtensionHealth,
-  WebSocketDebugServer,
-  DebugWebSocketEvent,
-  DebugWebSocketMessage,
-  WebSocketServerStats,
-  WebSocketServerHealth,
+  
 
   SanitizeOptions,
   FormatOptions,
@@ -49,7 +45,7 @@ export { HttpServerDebugAdapterImpl } from './http-server-debug-adapter.js';
 // Main components
 export { DebugSystemManager, debugSystemManager } from './debug-system-manager.js';
 export { DebugAPIExtensionImpl } from './debug-api-extension.js';
-export { WebSocketDebugServerImpl } from './websocket-debug-server.js';
+
 
 // Integration helpers
 export { HttpServerDebugIntegration, createHttpServerDebugIntegration } from './http-server-integration.js';

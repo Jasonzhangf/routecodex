@@ -48,7 +48,77 @@ export class OpenAIProvider implements ProviderModule {
     this.initializeDebugEnhancements();
   }
 
-  /**
+  // ---- Error normalization helpers (class-local static) ----
+  private static isRecord(v: any): v is Record<string, unknown> {
+    return typeof v === 'object' && v !== null;
+  }
+
+  private static get(obj: any, path: Array<string | number>): any {
+    let cur: any = obj;
+    for (const key of path) {
+      if (!OpenAIProvider.isRecord(cur)) return undefined;
+      const k = String(key);
+      cur = (cur as Record<string, unknown>)[k];
+    }
+    return cur;
+  }
+
+  private static normalizeError(e: any): {
+    status?: number; code?: string; message: string; upstream?: Record<string, unknown>;
+    causeCode?: string; retryable?: boolean;
+  } {
+    const r = OpenAIProvider.isRecord(e) ? (e as Record<string, unknown>) : {};
+    const resp = OpenAIProvider.isRecord((r as Record<string, unknown>).response) ? ((r as Record<string, unknown>).response as Record<string, unknown>) : undefined;
+    const respStatus = typeof resp?.status === 'number' ? (resp.status as number) : undefined;
+    const respData = OpenAIProvider.isRecord(resp?.data) ? (resp!.data as Record<string, unknown>) : undefined;
+
+  const directData = OpenAIProvider.isRecord(r.data) ? (r.data as Record<string, unknown>) : undefined;
+  const cause = OpenAIProvider.isRecord(r.cause) ? (r.cause as Record<string, unknown>) : undefined;
+  const causeCode = typeof cause?.code === 'string' ? (cause.code as string)
+    : (typeof r.code === 'string' ? (r.code as string) : undefined);
+
+  const upstreamMsg = (OpenAIProvider.get(respData, ['error','message']) as string)
+    || (OpenAIProvider.get(respData, ['message']) as string)
+    || (OpenAIProvider.get(directData, ['error','message']) as string)
+    || (OpenAIProvider.get(directData, ['message']) as string)
+    || (typeof r.message === 'string' ? (r.message as string) : undefined);
+
+    const statusFromObj = (typeof (r as Record<string, unknown>).status === 'number' ? ((r as Record<string, unknown>).status as number) : undefined)
+      ?? (typeof (r as Record<string, unknown>).statusCode === 'number' ? ((r as Record<string, unknown>).statusCode as number) : undefined);
+  const status = respStatus ?? statusFromObj ?? 500;
+
+  let message = upstreamMsg || (e instanceof Error ? e.message : String(e));
+  if (message && /^\[object\s+Object\]$/.test(message)) {
+    try {
+      message = JSON.stringify(respData ?? directData ?? r);
+    } catch {
+      message = 'Unknown error';
+    }
+  }
+
+    const code = (typeof OpenAIProvider.get(respData, ['error','code']) === 'string' ? (OpenAIProvider.get(respData, ['error','code']) as string)
+      : (typeof (r as Record<string, unknown>).code === 'string' ? ((r as Record<string, unknown>).code as string) : undefined));
+
+  let retryable = false;
+  if (status >= 500 || status === 429) retryable = true;
+  if (causeCode) {
+    const cc = causeCode.toUpperCase();
+    if (['ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT','ECONNRESET','ECONNREFUSED','EAI_AGAIN','ENOTFOUND'].includes(cc)) {
+      retryable = true;
+    }
+  }
+
+    return {
+      status,
+      code,
+      message: String(message),
+      upstream: (respData ?? directData ?? undefined) as Record<string, unknown> | undefined,
+      causeCode,
+      retryable,
+    };
+  }
+
+/**
    * Initialize debug enhancements
    */
   private initializeDebugEnhancements(): void {
@@ -173,8 +243,8 @@ export class OpenAIProvider implements ProviderModule {
       this.logger.logModule(this.id, 'sending-request-start', {
         requestId,
         model: (request as { model?: string }).model,
-        hasMessages: Array.isArray((request as { messages?: unknown[] }).messages),
-        hasTools: Array.isArray((request as { tools?: unknown[] }).tools)
+        hasMessages: Array.isArray((request as { messages?: any[] }).messages),
+        hasTools: Array.isArray((request as { tools?: any[] }).tools)
       });
 
       if (this.isDebugEnhanced) {
@@ -210,7 +280,7 @@ export class OpenAIProvider implements ProviderModule {
       // Build chat completion request (with optional GLM preflight)
       let chatRequest: Record<string, unknown> = {
         model: (request as { model?: string }).model,
-        messages: (request as { messages?: unknown[] }).messages || [],
+        messages: (request as { messages?: any[] }).messages || [],
         temperature: (request as { temperature?: number }).temperature ?? 0.7,
         max_tokens: (request as { max_tokens?: number }).max_tokens,
         top_p: (request as { top_p?: number }).top_p,
@@ -234,7 +304,7 @@ export class OpenAIProvider implements ProviderModule {
 
       // Add tools if provided (non-GLM or already preflighted)
       {
-        const tools = (request as { tools?: unknown[] }).tools;
+        const tools = (request as { tools?: any[] }).tools;
         if (Array.isArray(tools) && tools.length > 0 && !('tools' in chatRequest)) {
           chatRequest.tools = tools;
           chatRequest.tool_choice = (request as { tool_choice?: string }).tool_choice || 'auto';
@@ -242,8 +312,8 @@ export class OpenAIProvider implements ProviderModule {
       }
 
       // Add response format if provided
-      if ((request as { response_format?: unknown }).response_format) {
-        chatRequest.response_format = (request as { response_format?: unknown }).response_format;
+      if ((request as { response_format?: any }).response_format) {
+        chatRequest.response_format = (request as { response_format?: any }).response_format;
       }
 
       // Persist final payload snapshot when debug is enabled
@@ -309,14 +379,8 @@ export class OpenAIProvider implements ProviderModule {
 
     } catch (error) {
       const processingTime = Date.now() - startTime;
-
-      const errAny: any = error as any;
-      const upstreamMsg = errAny?.response?.data?.error?.message
-        ?? errAny?.response?.data?.message
-        ?? errAny?.data?.error?.message
-        ?? errAny?.data?.message
-        ?? (typeof errAny?.message === 'string' ? errAny.message : undefined);
-      const message = upstreamMsg ? String(upstreamMsg) : (error instanceof Error ? error.message : String(error));
+      const n = OpenAIProvider.normalizeError(error);
+      const message = n.message;
 
       this.logger.logModule(this.id, 'sending-request-error', {
         requestId,
@@ -340,13 +404,15 @@ export class OpenAIProvider implements ProviderModule {
       }
 
       // Map to ProviderError so router can produce consistent error payloads
-      const providerErr: any = new Error(message);
+      const providerErr = new Error(message) as Error & {
+        type: string; statusCode: number; details?: UnknownObject; retryable?: boolean;
+      };
       providerErr.type = 'server';
-      providerErr.statusCode = errAny?.status ?? errAny?.statusCode ?? errAny?.response?.status ?? 500;
+      providerErr.statusCode = n.status ?? 500;
       const providerConfig = this.config.config as ProviderConfig;
       // Attach helpful, non-sensitive context
       providerErr.details = {
-        upstream: errAny?.response?.data || errAny?.data || undefined,
+        upstream: (n.upstream as UnknownObject | undefined),
         provider: {
           moduleType: this.type,
           moduleId: this.id,
@@ -355,7 +421,7 @@ export class OpenAIProvider implements ProviderModule {
           model: (request as { model?: string }).model || undefined,
         }
       };
-      providerErr.retryable = providerErr.statusCode >= 500 || providerErr.statusCode === 429;
+      providerErr.retryable = n.retryable === true;
 
       throw providerErr;
     }
@@ -481,7 +547,7 @@ export class OpenAIProvider implements ProviderModule {
     return `openai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
-  private isSharedPipelineRequest(value: unknown): value is SharedPipelineRequest {
+  private isSharedPipelineRequest(value: any): value is SharedPipelineRequest {
     if (!value || typeof value !== 'object') {return false;}
     const v = value as Record<string, unknown>;
     return 'data' in v && 'route' in v && 'metadata' in v && 'debug' in v;

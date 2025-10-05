@@ -61,6 +61,7 @@ import type { SharedPipelineRequest, SharedPipelineResponse } from '../types/sha
 import type { PipelineModule } from '../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { ExtendedDryRunResponse } from '../modules/dry-run-engine/core/engine.js';
 import type { PipelineDryRunResponse } from '../modules/pipeline/dry-run/pipeline-dry-run-framework.js';
+import type { UnknownObject } from '../types/common-types.js';
 
 interface CaptureData {
   timestamp: number;
@@ -210,7 +211,7 @@ function formatOutput(data: unknown, format: 'json' | 'pretty'): void {
   const clone = (() => {
     try {
       const out: Record<string, unknown> = typeof data === 'object' && data !== null ? { ...(data as Record<string, unknown>) } : { value: data };
-      const nr = (data as any)?.nodeResults as unknown;
+      const nr = (data as { nodeResults?: unknown })?.nodeResults as unknown;
       if (isEntriesIterable(nr)) {
         const obj: Record<string, unknown> = {};
         for (const [k, v] of nr.entries()) {
@@ -225,7 +226,7 @@ function formatOutput(data: unknown, format: 'json' | 'pretty'): void {
       }
       return out;
     } catch {
-      return data as any;
+      return data as unknown;
     }
   })();
   switch (format) {
@@ -293,12 +294,12 @@ function findLatestMergedConfig(): MergedConfig | null {
   }
 }
 
-function chooseRouteAndTarget(input: RouteInput | { data?: any }) {
+function chooseRouteAndTarget(input: RouteInput | { data?: unknown }) {
   const merged = findLatestMergedConfig();
   const vr = merged?.modules?.virtualrouter?.config || {};
   const routeTargets: Record<string, RouteTarget[]> = vr.routeTargets || {};
-  const raw: any = (input as any)?.data ?? (input as any);
-  const inputModel: string = typeof raw?.model === 'string' ? raw.model : 'unknown';
+  const raw: unknown = (input as { data?: unknown })?.data ?? input;
+  const inputModel: string = typeof (raw as { model?: unknown })?.model === 'string' ? (raw as { model: string }).model : 'unknown';
 
   // 1) Direct mapping: model like 'provider.modelId.keyX' => pick exact target across all categories
   if (typeof inputModel === 'string' && inputModel.includes('.') && inputModel.includes('.key')) {
@@ -332,8 +333,8 @@ function chooseRouteAndTarget(input: RouteInput | { data?: any }) {
   }
 
   // Simple dynamic route: longcontext if max_tokens large; tools if tools present; coding if model name hints; else default
-  const hasTools = Array.isArray(raw?.tools) && raw.tools.length > 0;
-  const maxTokens = typeof raw?.max_tokens === 'number' ? raw.max_tokens : 0;
+  const hasTools = Array.isArray((raw as { tools?: unknown })?.tools) && (raw as { tools: unknown[] }).tools.length > 0;
+  const maxTokens = typeof (raw as { max_tokens?: unknown })?.max_tokens === 'number' ? (raw as { max_tokens: number }).max_tokens : 0;
   const lowerModel = String(inputModel).toLowerCase();
   let route = 'default';
   if (maxTokens >= 8000) {
@@ -401,17 +402,17 @@ function registerDefaultDryRunNodes(): void {
       return req;
     },
     async executeNodeDryRun(input: unknown): Promise<DryRunResult> {
-      const _in: any = input as any;
-      const decision = chooseRouteAndTarget({ data: _in?.data ?? _in });
+      const _in = input as { data?: unknown; route?: unknown; metadata?: unknown };
+      const decision = chooseRouteAndTarget({ data: _in?.data ?? input });
       const out = {
-        ...(_in?.data ? _in : { data: _in }),
+        ...(_in?.data ? _in : { data: input }),
         route: _in?.route || {
           providerId: decision.selectedTarget?.providerId || 'unknown',
           modelId: decision.selectedTarget?.modelId || 'unknown',
-          requestId: _in?.route?.requestId || `req_${Date.now()}`,
+          requestId: (_in?.route as { requestId?: string })?.requestId || `req_${Date.now()}`,
           timestamp: Date.now(),
         },
-        metadata: { ...(_in?.metadata || {}), routingDecision: decision },
+        metadata: { ...((_in?.metadata as UnknownObject) || {}), routingDecision: decision },
       };
       return {
         nodeId: 'llm-switch',
@@ -450,7 +451,7 @@ function registerDefaultDryRunNodes(): void {
     async executeNodeDryRun(input: unknown): Promise<DryRunResult> {
       const out = {
         ...(input || {}),
-        metadata: { ...((input as any)?.metadata || {}), compatibility: 'passthrough' },
+        metadata: { ...(((input as { metadata?: UnknownObject })?.metadata) || {}), compatibility: 'passthrough' },
       };
       return {
         nodeId: 'compatibility',
@@ -631,7 +632,7 @@ export function createDryRunCommands(): Command {
     .option('--node-config <path>', 'Node configuration file')
     .action(async (input, options) => {
       const jsonOnly = Boolean(process.env.JEST_WORKER_ID || process.env.CI);
-      const spinner = jsonOnly ? ({} as any) : ora('Running request pipeline...').start();
+      const spinner = jsonOnly ? { start: () => {}, stop: () => {} } as any : ora('Running request pipeline...').start();
 
       try {
         // Default: register dynamic routing + load balancer + three nodes
@@ -697,7 +698,7 @@ export function createDryRunCommands(): Command {
     .option('--node-config <path>', 'Node configuration file')
     .action(async (input, options) => {
       const jsonOnly = Boolean(process.env.JEST_WORKER_ID || process.env.CI);
-      const spinner = jsonOnly ? ({} as any) : ora('Running response pipeline...').start();
+      const spinner = jsonOnly ? { start: () => {}, stop: () => {} } as any : ora('Running response pipeline...').start();
 
       try {
         // Load response data
@@ -1047,10 +1048,10 @@ function normalizeToPipelineRequest(raw: unknown): SharedPipelineRequest {
   ) {
     return raw as SharedPipelineRequest;
   }
-  const model = (raw as any)?.model || (raw as any)?.data?.model || 'unknown';
+  const model = (raw as { model?: string })?.model || (raw as { data?: { model?: string } })?.data?.model || 'unknown';
   const now = Date.now();
   return {
-    data: (raw as any)?.data || raw,
+    data: (raw as { data?: unknown })?.data || raw,
     route: {
       providerId: 'dynamic',
       modelId: typeof model === 'string' ? String(model) : 'unknown',

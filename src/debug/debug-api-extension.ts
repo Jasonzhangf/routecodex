@@ -32,7 +32,7 @@ export class DebugAPIExtensionImpl implements DebugAPIExtension {
   private adapters: Map<string, DebugAdapter> = new Map();
   private startTime: number;
   private health: DebugExtensionHealth;
-  private server: any; // Express app or similar
+  private server: unknown; // Express app or similar
   private config: {
     host: string;
     port: number;
@@ -445,7 +445,7 @@ export class DebugAPIExtensionImpl implements DebugAPIExtension {
    * Start session handler
    */
   private async handleStartSession(request: DebugAPIRequest): Promise<DebugAPIResponse> {
-    const { adapterId, context } = request.body || {};
+    const { adapterId, context } = (request.body as any) || {};
 
     if (!adapterId || !context) {
       return {
@@ -784,7 +784,7 @@ export class DebugAPIExtensionImpl implements DebugAPIExtension {
   /**
    * Publish event to DebugEventBus
    */
-  private publishEvent(eventType: string, data: any): void {
+  private publishEvent(eventType: string, data: unknown): void {
     try {
       this.debugEventBus.publish({
         sessionId: `debug_api_${this.id}`,

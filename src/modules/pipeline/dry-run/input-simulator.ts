@@ -95,7 +95,7 @@ export interface ContextPropagationData {
  */
 export class InputSimulator {
   private strategies: Map<string, (input: any, context: NodeDryRunContext) => Promise<SimulatedInput>> = new Map();
-  private historicalData: Map<string, any[]> = new Map();
+  private historicalData: Map<string, unknown[]> = new Map();
   private quality: MockDataQuality = 'medium';
 
   constructor() {

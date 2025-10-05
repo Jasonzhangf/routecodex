@@ -5,7 +5,7 @@
 
 import { BaseModule, type ModuleInfo } from './base-module.js';
 import { DebugEventBus } from 'rcc-debugcenter';
-import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
+import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import { ErrorHandlingUtils } from '../utils/error-handling-utils.js';
 import { BaseProvider } from '../providers/base-provider.js';
 import { OpenAIProvider } from '../providers/openai-provider.js';
@@ -16,6 +16,7 @@ import {
   type ServerConfig,
   RouteCodexError,
 } from '../server/types.js';
+import type { UnknownObject } from '../types/common-types.js';
 
 /**
  * Provider management options
@@ -94,7 +95,7 @@ export class ProviderManager extends BaseModule {
   /**
    * Initialize the provider manager
    */
-  public async initialize(config?: any): Promise<void> {
+  public async initialize(_config?: UnknownObject): Promise<void> {
     try {
       await ErrorHandlingUtils.initialize();
       await this.errorHandling.initialize();
@@ -197,7 +198,7 @@ export class ProviderManager extends BaseModule {
     for (const [providerId, providerConfig] of Object.entries(this.config.providers)) {
       if (providerConfig.enabled) {
         try {
-          await this.addProvider(providerId, providerConfig);
+          await this.addProvider(providerId, providerConfig as unknown as ProviderConfig);
         } catch (error) {
           console.error(`Failed to initialize provider ${providerId}:`, error);
           await this.handleError(error as Error, 'provider_initialization');
@@ -311,7 +312,7 @@ export class ProviderManager extends BaseModule {
   public getActiveProviders(): BaseProvider[] {
     const activeProviders: BaseProvider[] = [];
 
-    for (const [providerId, providerInstance] of this.providers.entries()) {
+    for (const [_providerId, providerInstance] of this.providers.entries()) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (providerInstance.isActive) {
         activeProviders.push(providerInstance.provider);
       }
@@ -368,7 +369,7 @@ export class ProviderManager extends BaseModule {
     this.metrics.totalHealthChecks++;
 
     const healthCheckPromises = Array.from(this.providers.entries()).map(
-      async ([providerId, providerInstance]) => {
+      async ([_providerId, providerInstance]) => {
         try {
           const startTime = Date.now();
           const health = await providerInstance.provider.healthCheck();
@@ -380,9 +381,9 @@ export class ProviderManager extends BaseModule {
 
           // Handle health status changes
           if (health.status === 'healthy' && !providerInstance.isActive) {
-            await this.handleProviderRecovery(providerId, providerInstance);
+            await this.handleProviderRecovery(_providerId, providerInstance);
           } else if (health.status === 'unhealthy' && providerInstance.isActive) {
-            await this.handleProviderFailure(providerId, providerInstance, health);
+            await this.handleProviderFailure(_providerId, providerInstance, health);
           }
 
           this.debugEventBus?.publish({
@@ -393,7 +394,7 @@ export class ProviderManager extends BaseModule {
             type: 'start',
             position: 'middle',
             data: {
-              providerId,
+              providerId: _providerId,
               healthStatus: health.status,
               responseTime: health.responseTime,
               duration,
@@ -401,7 +402,7 @@ export class ProviderManager extends BaseModule {
           });
         } catch (error) {
           this.metrics.failedHealthChecks++;
-          await this.handleProviderFailure(providerId, providerInstance, {
+          await this.handleProviderFailure(_providerId, providerInstance, {
             status: 'unhealthy',
             error: error instanceof Error ? error.message : String(error),
             consecutiveFailures: 0,
@@ -556,7 +557,7 @@ export class ProviderManager extends BaseModule {
    */
   public getBestProviderForRequest(
     modelId?: string,
-    requestType: 'chat' | 'completion' | 'embedding' = 'chat'
+    _requestType: 'chat' | 'completion' | 'embedding' = 'chat'
   ): BaseProvider | null {
     const activeProviders = this.getActiveProviders();
     if (activeProviders.length === 0) {
@@ -615,8 +616,8 @@ export class ProviderManager extends BaseModule {
       averageResponseTime: number;
     }> = [];
 
-    const now = Date.now();
-    const oneMinuteAgo = now - 60000;
+    // const now = Date.now();
+    // const oneMinuteAgo = now - 60000; // Reserved for future use
 
     for (const [providerId, providerInstance] of this.providers.entries()) {
       const providerStats = providerInstance.stats;
@@ -821,7 +822,7 @@ export class ProviderManager extends BaseModule {
   /**
    * Get manager metrics
    */
-  public getMetrics(): any {
+  public getMetrics(): UnknownObject {
     return {
       ...this.metrics,
       providerCount: this.providers.size,
@@ -835,7 +836,7 @@ export class ProviderManager extends BaseModule {
   /**
    * Get debug status with enhanced information
    */
-  getDebugStatus(): any {
+  getDebugStatus(): UnknownObject {
     const baseStatus = {
       providerManagerId: this.getInfo().id,
       name: this.getInfo().name,
@@ -867,8 +868,8 @@ export class ProviderManager extends BaseModule {
   /**
    * Get provider metrics
    */
-  private getProviderMetrics(): any {
-    const metrics: any = {};
+  private getProviderMetrics(): UnknownObject {
+    const metrics: UnknownObject = {};
 
     for (const [operation, metric] of this.moduleMetrics.entries()) {
       metrics[operation] = {
@@ -884,7 +885,7 @@ export class ProviderManager extends BaseModule {
   /**
    * Get health monitoring statistics
    */
-  private getHealthStats(): any {
+  private getHealthStats(): UnknownObject {
     const healthChecks = this.metrics.totalHealthChecks;
     const failedChecks = this.metrics.failedHealthChecks;
     const successRate =
@@ -903,7 +904,7 @@ export class ProviderManager extends BaseModule {
   /**
    * Get manager metrics
    */
-  private getManagerMetrics(): any {
+  private getManagerMetrics(): UnknownObject {
     return {
       ...this.metrics,
       providerCount: this.providers.size,
@@ -919,14 +920,14 @@ export class ProviderManager extends BaseModule {
   /**
    * Get providers grouped by health status
    */
-  private getProvidersByHealthStatus(): any {
+  private getProvidersByHealthStatus(): UnknownObject {
     const status = {
       healthy: 0,
       unhealthy: 0,
       unknown: 0,
     };
 
-    for (const [providerId, providerInstance] of this.providers.entries()) {
+    for (const [_providerId, providerInstance] of this.providers.entries()) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const health = providerInstance.provider.getHealth();
       status[health.status]++;
     }
@@ -937,7 +938,7 @@ export class ProviderManager extends BaseModule {
   /**
    * Get detailed debug information
    */
-  public getDebugInfo(): any {
+  public getDebugInfo(): UnknownObject {
     return {
       providerManagerId: this.getInfo().id,
       name: this.getInfo().name,
@@ -952,14 +953,14 @@ export class ProviderManager extends BaseModule {
       maxConsecutiveFailures: this.options.maxConsecutiveFailures,
       providerTimeout: this.options.providerTimeout,
       enableMetrics: this.options.enableMetrics,
-      uptime: this.isModuleRunning() ? Date.now() - (this.getStats().uptime || Date.now()) : 0,
+      uptime: this.isModuleRunning() ? Date.now() - ((this.getStats().uptime as number) || Date.now()) : 0,
     };
   }
 
   /**
    * Get manager status
    */
-  public getStatus(): any {
+  public getManagerStatus(): UnknownObject {
     return {
       initialized: this.isModuleRunning(),
       running: this.isModuleRunning(),

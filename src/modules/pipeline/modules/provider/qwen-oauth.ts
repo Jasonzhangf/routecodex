@@ -61,7 +61,7 @@ export class QwenTokenStorage {
     };
   }
 
-  static fromJSON(json: unknown) {
+  static fromJSON(json: any) {
     const src = (json && typeof json === 'object') ? (json as Record<string, unknown>) : {};
     // Be tolerant to field name differences from various tools
     const normalized: Record<string, unknown> = { ...src };

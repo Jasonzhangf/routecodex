@@ -48,7 +48,7 @@ const messageTokenCost = (msg: any): number => {
   return total;
 };
 
-function coerceStringContent(value: unknown): string {
+function coerceStringContent(value: any): string {
   if (typeof value === 'string') return value;
   if (Array.isArray(value)) {
     const text = value
@@ -70,15 +70,15 @@ function coerceStringContent(value: unknown): string {
   return String(value);
 }
 
-function stringifyFunctionArguments(args: unknown): string {
+function stringifyFunctionArguments(args: any): string {
   if (typeof args === 'string') return args;
   if (args == null) return '{}';
   try { return JSON.stringify(args); } catch { return String(args); }
 }
 
-function mapToolsForGLM(raw: unknown, issues: PreflightResult['issues']): unknown[] | undefined {
+function mapToolsForGLM(raw: any, issues: PreflightResult['issues']): any[] | undefined {
   if (!Array.isArray(raw) || raw.length === 0) return undefined;
-  const out: unknown[] = [];
+  const out: any[] = [];
   for (let i = 0; i < raw.length; i++) {
     const t = raw[i] as any;
     if (!t || typeof t !== 'object') continue;

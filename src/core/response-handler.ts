@@ -12,6 +12,7 @@ import {
   type ServerConfig,
   RouteCodexError,
 } from '../server/types.js';
+import type { UnknownObject } from '../types/common-types.js';
 
 /**
  * Response handler options
@@ -29,7 +30,7 @@ export interface ResponseHandlerOptions {
  * Cached response
  */
 interface CachedResponse {
-  data: any;
+  data: UnknownObject;
   headers: Record<string, string>;
   timestamp: number;
   hits: number;
@@ -101,7 +102,7 @@ export class ResponseHandler extends BaseModule {
     // Add debug properties
     this.id = moduleInfo.id;
     this.type = 'core';
-    this.version = moduleInfo.version;
+    this.version = moduleInfo.version || '0.0.1';
 
     // Set default options
     this.options = {
@@ -281,7 +282,7 @@ export class ResponseHandler extends BaseModule {
           requestId,
           processingTime,
           errorStatus: responseContext.status,
-          errorType: responseContext.body.error.type,
+          errorType: (responseContext.body.error as any)?.type,
         },
       });
 
@@ -466,7 +467,7 @@ export class ResponseHandler extends BaseModule {
   /**
    * Format response body
    */
-  private formatResponseBody(responseContext: ResponseContext): any {
+  private formatResponseBody(responseContext: ResponseContext): UnknownObject {
     // If body is already properly formatted, return as-is
     if (responseContext.body && typeof responseContext.body === 'object') {
       // Add response metadata
@@ -530,7 +531,7 @@ export class ResponseHandler extends BaseModule {
     const chunks: string[] = [];
 
     // Generate some sample streaming chunks
-    const sampleResponse = responseContext.body as OpenAICompletionResponse;
+    const sampleResponse = responseContext.body as unknown as OpenAICompletionResponse;
     if (
       sampleResponse &&
       sampleResponse.choices &&
@@ -768,7 +769,7 @@ export class ResponseHandler extends BaseModule {
   /**
    * Get debug status with enhanced information
    */
-  getDebugStatus(): any {
+  getDebugStatus(): UnknownObject {
     const baseStatus = {
       responseHandlerId: this.id,
       name: 'ResponseHandler',
@@ -792,7 +793,7 @@ export class ResponseHandler extends BaseModule {
   /**
    * Get detailed debug information
    */
-  private getDebugInfo(): any {
+  private getDebugInfo(): UnknownObject {
     return {
       responseHandlerId: this.id,
       name: 'ResponseHandler',
@@ -812,7 +813,7 @@ export class ResponseHandler extends BaseModule {
   /**
    * Get response metrics
    */
-  private getResponseMetrics(): any {
+  private getResponseMetrics(): UnknownObject {
     return {
       totalResponses: this.metrics.totalResponses,
       cachedResponses: this.metrics.cachedResponses,
@@ -831,7 +832,7 @@ export class ResponseHandler extends BaseModule {
   /**
    * Get cache statistics
    */
-  private getCacheStats(): any {
+  private getCacheStats(): UnknownObject {
     return {
       cacheSize: this.responseCache.size,
       cacheEnabled: this.options.enableCaching,
@@ -847,7 +848,7 @@ export class ResponseHandler extends BaseModule {
   /**
    * Get metrics
    */
-  public getMetrics(): any {
+  public getMetrics(): UnknownObject {
     return {
       ...this.metrics,
       cacheSize: this.responseCache.size,
@@ -910,7 +911,7 @@ export class ResponseHandler extends BaseModule {
   /**
    * Get handler status
    */
-  public getStatus(): any {
+  public getStatus(): UnknownObject {
     return {
       initialized: this._isInitialized,
       running: true,

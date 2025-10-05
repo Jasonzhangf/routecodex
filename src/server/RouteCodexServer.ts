@@ -7,11 +7,21 @@ import express, { type Application, type Request, type Response, type NextFuncti
 import cors from 'cors';
 import helmet from 'helmet';
 import { BaseModule, type ModuleInfo } from 'rcc-basemodule';
-import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
+import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import { DebugEventBus } from 'rcc-debugcenter';
 import path from 'path';
 import fs from 'fs';
 import { homedir } from 'os';
+import type { UnknownObject } from '../types/common-types.js';
+
+interface ErrorContext {
+  error: Error | string;
+  source: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  timestamp: number;
+  moduleId?: string;
+  context?: UnknownObject;
+}
 
 /**
  * Server configuration interface
@@ -35,7 +45,7 @@ export interface ServerConfig {
     categories?: string[];
     categoryPath?: string;
   };
-  providers: Record<string, any>;
+  providers: Record<string, UnknownObject>;
 }
 
 /**
@@ -43,7 +53,7 @@ export interface ServerConfig {
  */
 export class RouteCodexServer extends BaseModule {
   private app: Application;
-  private server?: any;
+  private server?: unknown;
   private config: ServerConfig;
   private errorHandling: ErrorHandlingCenter;
   private debugEventBus: DebugEventBus;
@@ -53,9 +63,9 @@ export class RouteCodexServer extends BaseModule {
   private _isRunning: boolean = false;
 
   // Debug enhancement properties
-  private serverMetrics: Map<string, any> = new Map();
-  private requestHistory: any[] = [];
-  private errorHistory: any[] = [];
+  private serverMetrics: Map<string, UnknownObject> = new Map();
+  private requestHistory: UnknownObject[] = [];
+  private errorHistory: UnknownObject[] = [];
   private maxHistorySize = 50;
 
   constructor(config: ServerConfig) {
@@ -135,7 +145,7 @@ export class RouteCodexServer extends BaseModule {
         resolve();
       });
 
-      this.server.on('error', async (error: any) => {
+      (this.server as any).on('error', async (error: Error) => {
         await this.handleError(error, 'server_start');
         reject(error);
       });
@@ -148,7 +158,7 @@ export class RouteCodexServer extends BaseModule {
   public async stop(): Promise<void> {
     if (this.server) {
       return new Promise(resolve => {
-        this.server.close(async () => {
+        (this.server as any)?.close(async () => {
           this._isRunning = false;
           this.logEvent('server', 'stopped', {});
 
@@ -271,10 +281,11 @@ export class RouteCodexServer extends BaseModule {
 
         // Log each module's configuration status
         if (moduleConfig.modules) {
-          Object.entries(moduleConfig.modules).forEach(([moduleName, config]: [string, any]) => {
-            console.log(`[CONFIG] ${moduleName}: ${config.enabled ? 'enabled' : 'disabled'}`);
-            if (config.enabled && config.config) {
-              console.log(`[CONFIG] ${moduleName} settings:`, Object.keys(config.config));
+          Object.entries(moduleConfig.modules).forEach(([moduleName, config]: [string, unknown]) => {
+            const configObj = config as UnknownObject;
+            console.log(`[CONFIG] ${moduleName}: ${configObj.enabled ? 'enabled' : 'disabled'}`);
+            if (configObj.enabled && configObj.config) {
+              console.log(`[CONFIG] ${moduleName} settings:`, Object.keys(configObj.config));
             }
           });
         }
@@ -313,11 +324,12 @@ export class RouteCodexServer extends BaseModule {
    */
   private setupDebugLogging(): void {
     // Subscribe to all debug events
-    this.debugEventBus.subscribe('*', (event: any) => {
+    this.debugEventBus.subscribe('*', (event: UnknownObject) => {
       if (this.config.logging.level === 'debug') {
-        const timestamp = new Date(event.timestamp).toISOString();
-        const category = event.data?.category || 'general';
-        const action = event.data?.action || 'unknown';
+        const timestamp = new Date(event.timestamp as any).toISOString();
+        const eventData = event.data as Record<string, unknown>;
+        const category = (eventData?.category as string) || 'general';
+        const action = (eventData?.action as string) || 'unknown';
 
         const logMessage = `[${timestamp}] [DEBUG] ${event.operationId}: ${JSON.stringify(
           {
@@ -461,15 +473,16 @@ export class RouteCodexServer extends BaseModule {
    * Setup error handling
    */
   private setupErrorHandling(): void {
-    this.app.use((error: any, req: Request, res: Response, next: NextFunction) => {
-      this.handleError(error, 'request_handler').catch(() => {
+    this.app.use((error: UnknownObject, req: Request, res: Response, _next: NextFunction) => {
+      this.handleError(error as unknown as Error, 'request_handler').catch(() => {
         // Ignore handler errors, just send response
       });
 
-      res.status(error.status || 500).json({
+      const errorStatus = (error as any).status || 500;
+      res.status(errorStatus).json({
         error: {
-          message: error.message || 'Internal Server Error',
-          type: error.type || 'internal_error',
+          message: (error as any).message || 'Internal Server Error',
+          type: (error as any).type || 'internal_error',
           code: error.code || 'internal_error',
         },
       });
@@ -538,7 +551,7 @@ export class RouteCodexServer extends BaseModule {
 
       for (const [providerId, providerConfig] of Object.entries(this.config.providers)) {
         if (providerConfig.enabled && providerConfig.models) {
-          for (const [modelId, modelConfig] of Object.entries(providerConfig.models)) {
+          for (const [modelId, _modelConfig] of Object.entries(providerConfig.models)) { // eslint-disable-line @typescript-eslint/no-unused-vars
             models.push({
               id: modelId,
               object: 'model',
@@ -562,7 +575,7 @@ export class RouteCodexServer extends BaseModule {
   /**
    * Log event to debug center
    */
-  private logEvent(category: string, action: string, data: any): void {
+  private logEvent(category: string, action: string, data: UnknownObject): void {
     try {
       // Also log to category-specific file directly
       if (this.config.logging.enableFile) {
@@ -650,7 +663,7 @@ export class RouteCodexServer extends BaseModule {
   /**
    * Record server metric
    */
-  private recordServerMetric(operation: string, data: any): void {
+  private recordServerMetric(operation: string, data: UnknownObject): void {
     if (!this.serverMetrics.has(operation)) {
       this.serverMetrics.set(operation, {
         values: [],
@@ -658,7 +671,7 @@ export class RouteCodexServer extends BaseModule {
       });
     }
 
-    const metric = this.serverMetrics.get(operation)!;
+    const metric = this.serverMetrics.get(operation)! as any;
     metric.values.push(data);
     metric.lastUpdated = Date.now();
 
@@ -671,7 +684,7 @@ export class RouteCodexServer extends BaseModule {
   /**
    * Add to request history
    */
-  private addToRequestHistory(operation: any): void {
+  private addToRequestHistory(operation: UnknownObject): void {
     this.requestHistory.push(operation);
 
     // Keep only recent history
@@ -683,7 +696,7 @@ export class RouteCodexServer extends BaseModule {
   /**
    * Add to error history
    */
-  private addToErrorHistory(operation: any): void {
+  private addToErrorHistory(operation: UnknownObject): void {
     this.errorHistory.push(operation);
 
     // Keep only recent history
@@ -695,7 +708,7 @@ export class RouteCodexServer extends BaseModule {
   /**
    * Get debug status with enhanced information
    */
-  getDebugStatus(): any {
+  getDebugStatus(): UnknownObject {
     const baseStatus = {
       serverId: this.getModuleInfo().id,
       name: this.getModuleInfo().name,
@@ -718,7 +731,7 @@ export class RouteCodexServer extends BaseModule {
   /**
    * Get detailed debug information
    */
-  private getDebugInfo(): any {
+  private getDebugInfo(): UnknownObject {
     return {
       serverId: this.getModuleInfo().id,
       name: this.getModuleInfo().name,
@@ -738,14 +751,15 @@ export class RouteCodexServer extends BaseModule {
   /**
    * Get server metrics
    */
-  private getServerMetrics(): any {
-    const metrics: any = {};
+  private getServerMetrics(): UnknownObject {
+    const metrics: UnknownObject = {};
 
     for (const [operation, metric] of this.serverMetrics.entries()) {
+      const metricObj = metric as any;
       metrics[operation] = {
-        count: metric.values.length,
-        lastUpdated: metric.lastUpdated,
-        recentValues: metric.values.slice(-5),
+        count: metricObj.values.length,
+        lastUpdated: metricObj.lastUpdated,
+        recentValues: metricObj.values.slice(-5),
       };
     }
 

@@ -18,6 +18,7 @@ import type {
   DebugUtils
 } from '../types/debug-types.js';
 import { DebugSystemEvent } from '../types/debug-types.js';
+import type { UnknownObject } from '../types/common-types.js';
 
 /**
  * HTTP Server Debug Adapter implementation
@@ -32,13 +33,13 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   private responseData: Map<string, DebugHttpResponse> = new Map();
   private requestMetrics: Map<string, {
     startTime: number;
-    events: any[];
+    events: unknown[];
   }> = new Map();
 
   // Debug enhancement properties
   private performanceMetrics: Map<string, number[]> = new Map();
   private serverMetrics: Map<string, any> = new Map();
-  private requestHistory: any[] = [];
+  private requestHistory: unknown[] = [];
   private maxHistorySize = 100;
 
   /**
@@ -120,7 +121,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
       id: this.debugUtils.generateId(`http_debug_${context.id}`),
       context,
       type: 'metrics',
-      content: httpDebugData,
+      content: (httpDebugData as unknown) as UnknownObject,
       timestamp: Date.now(),
       metadata: {
         serverInfo: this.serverInfo,
@@ -291,13 +292,13 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
       type: 'metrics',
       request,
       response,
-      events: metrics?.events || [],
+      events: (metrics?.events as any[]) || [],
       performance,
       timestamp: Date.now(),
       content: {
         request,
         response,
-        events: metrics?.events || [],
+        events: (metrics?.events as any[]) || [],
         performance
       }
     };
@@ -500,7 +501,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   /**
    * Sanitize body
    */
-  private sanitizeBody(body: any, maxSize: number): any {
+  private sanitizeBody(body: unknown, maxSize: number): unknown {
     if (typeof body === 'string') {
       return body.length > maxSize ? `${body.substring(0, maxSize)}...[TRUNCATED]` : body;
     }
@@ -526,7 +527,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   private calculatePerformanceMetrics(
     request: DebugHttpRequest,
     response?: DebugHttpResponse,
-    metrics?: { startTime: number; events: any[] }
+    metrics?: { startTime: number; events: unknown[] }
   ): HttpDebugData['performance'] {
     if (!response || !metrics) {
       return {
@@ -536,10 +537,10 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
       };
     }
 
-    const totalProcessingTime = response.responseTime;
-    const serverProcessingTime = metrics.events
-      .filter(event => event.type.includes('server'))
-      .reduce((total, event) => total + (event.duration || 0), 0);
+    const totalProcessingTime = (response as any).responseTime as number;
+    const serverProcessingTime = (metrics.events as any[])
+      .filter((event: any) => event.type?.includes('server'))
+      .reduce((total: number, event: any) => total + (event.duration || 0), 0);
     const networkTime = totalProcessingTime - serverProcessingTime;
 
     return {
@@ -604,7 +605,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   /**
    * Get request metrics
    */
-  getRequestMetrics(requestId: string): { startTime: number; events: any[] } | undefined {
+  getRequestMetrics(requestId: string): { startTime: number; events: unknown[] } | undefined {
     return this.requestMetrics.get(requestId);
   }
 
@@ -646,7 +647,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   private subscribeToDebugEvents(): void {
     if (!this.debugEventBus) {return;}
 
-    this.debugEventBus.subscribe('http-server-debug', (event: any) => {
+    this.debugEventBus.subscribe('http-server-debug', (event: unknown) => {
       this.handleDebugEvent(event);
     });
   }
@@ -654,12 +655,13 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   /**
    * Handle debug events
    */
-  private handleDebugEvent(event: any): void {
+  private handleDebugEvent(event: unknown): void {
+    const eventObj = event as any;
     // Process HTTP server specific debug events
-    if (event.type === 'request') {
-      this.recordRequestMetric(event.data);
-    } else if (event.type === 'response') {
-      this.recordResponseMetric(event.data);
+    if (eventObj.type === 'request') {
+      this.recordRequestMetric(eventObj.data);
+    } else if (eventObj.type === 'response') {
+      this.recordResponseMetric(eventObj.data);
     }
 
     // Forward to WebSocket
@@ -669,8 +671,9 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   /**
    * Record request metric
    */
-  private recordRequestMetric(data: any): void {
-    const processingTime = data.processingTime || 0;
+  private recordRequestMetric(data: unknown): void {
+    const dataObj = data as any;
+    const processingTime = dataObj.processingTime || 0;
     this.recordPerformanceMetric('request_processing', processingTime);
 
     // Add to request history
@@ -684,8 +687,9 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   /**
    * Record response metric
    */
-  private recordResponseMetric(data: any): void {
-    const processingTime = data.processingTime || 0;
+  private recordResponseMetric(data: unknown): void {
+    const dataObj = data as any;
+    const processingTime = dataObj.processingTime || 0;
     this.recordPerformanceMetric('response_processing', processingTime);
 
     // Add to request history
@@ -716,7 +720,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   /**
    * Get performance statistics
    */
-  getPerformanceStats(): any {
+  getPerformanceStats(): unknown {
     const stats: any = {};
 
     for (const [operationId, metrics] of this.performanceMetrics.entries()) {
@@ -737,7 +741,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   /**
    * Add to request history
    */
-  private addToRequestHistory(entry: any): void {
+  private addToRequestHistory(entry: unknown): void {
     this.requestHistory.push(entry);
 
     // Keep only recent history
@@ -749,7 +753,7 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   /**
    * Get debug information
    */
-  getDebugInfo(): any {
+  getDebugInfo(): unknown {
     return {
       adapterId: this.id,
       adapterType: 'http-server',
@@ -767,19 +771,20 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
   /**
    * Publish event to WebSocket
    */
-  private publishToWebSocket(event: any): void {
+  private publishToWebSocket(event: unknown): void {
     if (!this.debugEventBus) {return;}
+    const eventObj = event as any;
 
     try {
       this.debugEventBus.publish({
-        sessionId: event.sessionId || 'http-server',
+        sessionId: eventObj.sessionId || 'http-server',
         moduleId: 'http-server-debug-adapter',
-        operationId: event.operationId || event.type,
-        timestamp: event.timestamp || Date.now(),
-        type: event.type || 'debug',
+        operationId: eventObj.operationId || eventObj.type,
+        timestamp: eventObj.timestamp || Date.now(),
+        type: eventObj.type || 'debug',
         position: 'middle',
         data: {
-          ...event.data,
+          ...(eventObj.data && typeof eventObj.data === 'object' ? eventObj.data : {}),
           adapterId: this.id,
           serverInfo: this.serverInfo,
           source: 'http-server-debug-adapter'

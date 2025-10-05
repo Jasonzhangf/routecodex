@@ -398,7 +398,7 @@ export class RequestTransformer {
    * 获取转换器统计信息
    */
   getStatistics(): {
-    rules: Record<string, unknown>;
+    rules: Record<string, any>;
     uptime: number;
   } {
     return {

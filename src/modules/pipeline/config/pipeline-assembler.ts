@@ -43,7 +43,7 @@ export class PipelineAssembler {
   static async assemble(mergedConfig: any): Promise<AssembledPipelines> {
     // New logic: consume routeTargets/pipelineConfigs from compatibilityConfig (primary)
     // Fallbacks are kept temporarily for migration and will be removed after validation
-    const routeTargets = (mergedConfig?.compatibilityConfig?.routeTargets || {}) as Record<string, any[]>;
+    const routeTargets = (mergedConfig?.compatibilityConfig?.routeTargets || {}) as Record<string, unknown[]>;
     const pipelineConfigs = (mergedConfig?.compatibilityConfig?.pipelineConfigs || {}) as Record<string, any>;
 
     // Normalized providers info from compatibility engine
@@ -140,10 +140,10 @@ export class PipelineAssembler {
     const createdPipelines = new Map<string, PipelineConfig>();
 
     // For each route category, build pipelines for all targets
-    for (const [routeName, targets] of Object.entries(routeTargets as Record<string, any[]>)) {
-      const targetList: any[] = Array.isArray(targets) && Array.isArray((targets as any[])[0])
-        ? (targets as any[]).flat()
-        : (targets as any[]);
+    for (const [routeName, targets] of Object.entries(routeTargets as Record<string, unknown[]>)) {
+      const targetList: any[] = Array.isArray(targets) && Array.isArray((targets as unknown[])[0])
+        ? (targets as unknown[]).flat()
+        : (targets as unknown[]);
       console.log(`[PipelineAssembler] DEBUG - Processing route: ${routeName} with ${targetList.length} targets`);
       routePools[routeName] = [];
       for (const target of targetList) {

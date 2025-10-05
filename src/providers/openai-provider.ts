@@ -15,6 +15,7 @@ import {
   type StreamResponse,
   RouteCodexError,
 } from '../server/types.js';
+import type { UnknownObject } from '../types/common-types.js';
 
 /**
  * OpenAI API response format
@@ -66,7 +67,7 @@ export class OpenAIProvider extends BaseProvider {
       const rateLimitCheck = this.checkRateLimit('chat_completion');
       if (!rateLimitCheck.allowed) {
         throw new RouteCodexError('Rate limit exceeded', 'rate_limit_exceeded', 429, {
-          resetTime: rateLimitCheck.resetTime,
+          meta: { resetTime: rateLimitCheck.resetTime ?? null } as unknown as UnknownObject,
         });
       }
 
@@ -166,7 +167,7 @@ export class OpenAIProvider extends BaseProvider {
       const rateLimitCheck = this.checkRateLimit('completion');
       if (!rateLimitCheck.allowed) {
         throw new RouteCodexError('Rate limit exceeded', 'rate_limit_exceeded', 429, {
-          resetTime: rateLimitCheck.resetTime,
+          meta: { resetTime: rateLimitCheck.resetTime ?? null } as unknown as UnknownObject,
         });
       }
 
@@ -264,7 +265,7 @@ export class OpenAIProvider extends BaseProvider {
       const rateLimitCheck = this.checkRateLimit('streaming_chat_completion');
       if (!rateLimitCheck.allowed) {
         throw new RouteCodexError('Rate limit exceeded', 'rate_limit_exceeded', 429, {
-          resetTime: rateLimitCheck.resetTime,
+          meta: { resetTime: rateLimitCheck.resetTime ?? null } as unknown as UnknownObject,
         });
       }
 
@@ -518,7 +519,7 @@ export class OpenAIProvider extends BaseProvider {
         }
 
         throw new RouteCodexError(errorData.error.message, errorData.error.type, response.status, {
-          response: errorData,
+          response: (errorData as unknown) as UnknownObject,
         });
       }
 

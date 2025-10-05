@@ -8,7 +8,8 @@
 import type { CompatibilityModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 import type { TransformationRule } from '../../interfaces/pipeline-interfaces.js';
-import { PipelineDebugLogger } from '../../utils/debug-logger.js';
+import type { PipelineDebugLogger as PipelineDebugLoggerInterface } from '../../interfaces/pipeline-interfaces.js';
+import type { UnknownObject } from '../../../../types/common-types.js';
 
 /**
  * Passthrough Compatibility Module
@@ -20,10 +21,10 @@ export class PassthroughCompatibility implements CompatibilityModule {
   readonly rules: TransformationRule[] = [];
 
   private isInitialized = false;
-  private logger: PipelineDebugLogger;
+  private logger: PipelineDebugLoggerInterface;
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
-    this.logger = dependencies.logger as any;
+    this.logger = dependencies.logger;
     this.id = `compatibility-passthrough-${Date.now()}`;
     this.config = config;
   }
@@ -33,16 +34,13 @@ export class PassthroughCompatibility implements CompatibilityModule {
    */
   async initialize(): Promise<void> {
     try {
-      this.logger.logModule(this.id, 'initializing', {
-        config: this.config
-      });
-
+      this.logger.logModule(this.id, 'initialization-start');
+      
       // Validate configuration
       this.validateConfig();
-
+      
       this.isInitialized = true;
-      this.logger.logModule(this.id, 'initialized');
-
+      this.logger.logModule(this.id, 'initialization-complete');
     } catch (error) {
       this.logger.logModule(this.id, 'initialization-error', { error });
       throw error;
@@ -52,26 +50,24 @@ export class PassthroughCompatibility implements CompatibilityModule {
   /**
    * Process incoming request - Pass through without transformation
    */
-  async processIncoming(requestParam: any): Promise<SharedPipelineRequest> {
+  async processIncoming(request: SharedPipelineRequest): Promise<SharedPipelineRequest> {
     if (!this.isInitialized) {
       throw new Error('Passthrough Compatibility module is not initialized');
     }
 
     try {
-      const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam;
-      const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
-      const request = isDto ? (dto!.data as any) : (requestParam as any);
-
-      this.logger.logModule(this.id, 'processing-request-start', { model: request?.model });
+      const isDto = this.isSharedPipelineRequest(request);
+      const payload = isDto ? ((request as unknown as UnknownObject).data) : (request as unknown);
+      this.logger.logModule(this.id, 'processing-request-start', { hasModel: !!(payload as any)?.model });
 
       // Simply return the request as-is (passthrough)
-      const result = request;
+      const result = payload;
 
       this.logger.logModule(this.id, 'processing-request-complete', {
         transformationCount: 0
       });
 
-      return isDto ? { ...dto!, data: result } : { data: result, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
+      return isDto ? { ...(request as unknown as UnknownObject), data: result } as SharedPipelineRequest : ({ data: result, route: (request as any).route, metadata: (request as any).metadata, debug: (request as any).debug } as SharedPipelineRequest);
 
     } catch (error) {
       this.logger.logModule(this.id, 'processing-request-error', { error });
@@ -82,15 +78,15 @@ export class PassthroughCompatibility implements CompatibilityModule {
   /**
    * Process outgoing response - Pass through without transformation
    */
-  async processOutgoing(response: any): Promise<any> {
+  async processOutgoing(response: any): Promise<unknown> {
     if (!this.isInitialized) {
       throw new Error('Passthrough Compatibility module is not initialized');
     }
 
     try {
-      const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
-      const payload = isDto ? (response as any).data : response;
-      this.logger.logModule(this.id, 'processing-response-start', { hasChoices: !!payload?.choices });
+      const isDto = this.isPipelineResponse(response);
+      const payload = isDto ? (response as UnknownObject).data : response;
+      this.logger.logModule(this.id, 'processing-response-start', { hasChoices: !!(payload as any)?.choices });
 
       // Simply return the response as-is (passthrough)
       const result = payload;
@@ -99,7 +95,7 @@ export class PassthroughCompatibility implements CompatibilityModule {
         transformationCount: 0
       });
 
-      return isDto ? { ...(response as any), data: result } : result;
+      return isDto ? { ...(response as UnknownObject), data: result } : result;
 
     } catch (error) {
       this.logger.logModule(this.id, 'processing-response-error', { error });
@@ -108,17 +104,32 @@ export class PassthroughCompatibility implements CompatibilityModule {
   }
 
   /**
+   * Apply compatibility transformations
+   */
+  async applyTransformations(data: any, rules: TransformationRule[]): Promise<unknown> {
+    if (!this.isInitialized) {
+      throw new Error('Passthrough Compatibility module is not initialized');
+    }
+
+    // For passthrough, we don't apply any transformations
+    this.logger.logModule(this.id, 'apply-transformations', { 
+      ruleCount: rules.length,
+      transformationCount: 0 
+    });
+    
+    return data;
+  }
+
+  /**
    * Clean up resources
    */
   async cleanup(): Promise<void> {
     try {
       this.logger.logModule(this.id, 'cleanup-start');
-
-      // Reset state
+      
       this.isInitialized = false;
-
+      
       this.logger.logModule(this.id, 'cleanup-complete');
-
     } catch (error) {
       this.logger.logModule(this.id, 'cleanup-error', { error });
       throw error;
@@ -126,11 +137,35 @@ export class PassthroughCompatibility implements CompatibilityModule {
   }
 
   /**
-   * Apply compatibility transformations
+   * Validate module configuration
    */
-  async applyTransformations(data: any, rules: TransformationRule[]): Promise<any> {
-    // Passthrough compatibility simply returns the data as-is
-    return data;
+  private validateConfig(): void {
+    const declared = this.config.config;
+    const allowed = ['enabled', 'priority'];
+    
+    for (const key of Object.keys(declared || {})) {
+      if (!allowed.includes(key)) {
+        this.logger.logModule(this.id, 'config-warning', {
+          message: `Unknown configuration property: ${key}`,
+          allowedProperties: allowed,
+          declaredProperties: Object.keys(declared || {})
+        });
+      }
+    }
+  }
+
+  /**
+   * Check if object is a SharedPipelineRequest
+   */
+  private isSharedPipelineRequest(obj: any): obj is SharedPipelineRequest {
+    return typeof obj === 'object' && obj !== null && 'data' in obj && 'route' in obj && 'metadata' in obj;
+  }
+
+  /**
+   * Check if object is a PipelineResponse
+   */
+  private isPipelineResponse(obj: any): obj is UnknownObject {
+    return typeof obj === 'object' && obj !== null && 'data' in obj;
   }
 
   /**
@@ -139,34 +174,14 @@ export class PassthroughCompatibility implements CompatibilityModule {
   getStatus(): {
     id: string;
     type: string;
-    isInitialized: boolean;
+    initialized: boolean;
     ruleCount: number;
-    lastActivity: number;
   } {
     return {
       id: this.id,
       type: this.type,
-      isInitialized: this.isInitialized,
-      ruleCount: this.rules.length,
-      lastActivity: Date.now()
+      initialized: this.isInitialized,
+      ruleCount: this.rules.length
     };
-  }
-
-  /**
-   * Validate configuration
-   */
-  private validateConfig(): void {
-    // Accept alias types that are mapped to passthrough behavior
-    const declared = (this.config && (this.config as any).type) || 'passthrough-compatibility';
-    const allowed = new Set<string>(['passthrough-compatibility', 'glm-compatibility']);
-    if (!allowed.has(declared)) {
-      // Do not throw; treat as passthrough to maximize compatibility
-      this.logger.logModule(this.id, 'alias-compatibility-detected', { declaredType: declared, normalizedTo: this.type });
-      return;
-    }
-
-    this.logger.logModule(this.id, 'config-validation-success', {
-      type: this.config.type
-    });
   }
 }

@@ -85,7 +85,7 @@ export class EnhancedProviderModule implements ProviderModule {
       // Log request start
       this.logInfo('request-start', {
         hasAuth: !!this.authContext,
-        hasTools: Array.isArray((request as { tools?: unknown[] }).tools),
+        hasTools: Array.isArray((request as { tools?: any[] }).tools),
         requestSize: JSON.stringify(request).length
       });
 
@@ -137,7 +137,7 @@ export class EnhancedProviderModule implements ProviderModule {
   /**
    * Send request to provider
    */
-  async sendRequest(request: UnknownObject, _options?: unknown): Promise<ProviderResponse> {
+  async sendRequest(request: UnknownObject, _options?: any): Promise<ProviderResponse> {
     return this.processIncoming(request);
   }
 
@@ -385,7 +385,7 @@ export class EnhancedProviderModule implements ProviderModule {
   /**
    * Create provider error
    */
-  private createProviderError(error: unknown): ProviderError {
+  private createProviderError(error: any): ProviderError {
     const errorObj = error instanceof Error ? error : new Error(String(error));
     const providerError: ProviderError = new Error(errorObj.message) as ProviderError;
     providerError.type = 'network';
@@ -400,7 +400,7 @@ export class EnhancedProviderModule implements ProviderModule {
   /**
    * Check if error is retryable
    */
-  private isRetryableError(error: unknown): boolean {
+  private isRetryableError(error: any): boolean {
     const errLike = error as { statusCode?: number; code?: string };
     if (!errLike?.statusCode && !errLike?.code) {return false;}
     return (typeof errLike.statusCode === 'number' && (errLike.statusCode >= 500 || errLike.statusCode === 429))
@@ -422,7 +422,7 @@ export class EnhancedProviderModule implements ProviderModule {
    */
   private logError(action: string, data?: Record<string, unknown>): void {
     if (this.enhancedModule) {
-      const err = (data as { error?: unknown })?.error;
+      const err = (data as { error?: any })?.error;
       this.enhancedModule.logger.logError(err, {
         moduleId: this.id,
         action,

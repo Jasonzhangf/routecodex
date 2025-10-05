@@ -39,7 +39,7 @@ function getDefaultModulesConfigPath(): string {
  * Main application class
  */
 class RouteCodexApp {
-  private httpServer: any;
+  private httpServer: unknown;
   private configManager: ConfigManagerModule;
   private modulesConfigPath: string;
   private _isRunning: boolean = false;
@@ -74,14 +74,20 @@ class RouteCodexApp {
       // 1. 初始化配置管理器
       const port = await this.detectServerPort(this.modulesConfigPath);
 
-      // If a healthy instance is already running on this port, do NOT kill it —
-      // exit early to avoid interrupting in-flight sessions.
+      // Legacy behavior: always free the port first, even if the instance is healthy
+      // 1) If healthy, attempt graceful shutdown via /shutdown endpoint (best-effort)
       if (await isServerHealthy(port)) {
-        console.log(`ℹ Server already healthy on port ${port}; skipping new start.`);
-        return;
+        console.log(`ℹ Healthy instance detected on port ${port}; attempting graceful stop...`);
+        try {
+          const controller = new AbortController();
+          const t = setTimeout(() => { try { controller.abort(); } catch {} }, 1500);
+          await fetch(`http://127.0.0.1:${port}/shutdown`, { method: 'POST', signal: (controller as any).signal } as any).catch(() => {});
+          clearTimeout(t);
+          // wait a moment for shutdown
+          await new Promise(r => setTimeout(r, 800));
+        } catch {}
       }
-
-      // Otherwise, ensure the port is available (graceful stop then force-kill if needed)
+      // 2) Ensure port is free (graceful SIGTERM then SIGKILL as fallback)
       await ensurePortAvailable(port);
       this.mergedConfigPath = path.join(process.cwd(), 'config', `merged-config.${port}.json`);
 
@@ -103,21 +109,21 @@ class RouteCodexApp {
 
       // 3. 初始化HTTP服务器
       const HttpServer = (await import('./server/http-server.js')).HttpServer;
-      this.httpServer = new HttpServer(this.modulesConfigPath);
+      this.httpServer = new HttpServer(this.modulesConfigPath) as any;
 
       // 4. 使用合并后的配置初始化服务器
-      await this.httpServer.initializeWithMergedConfig(mergedConfig);
+      await (this.httpServer as any).initializeWithMergedConfig(mergedConfig);
 
       // 5. 按 merged-config 组装流水线并注入（完全配置驱动，无硬编码）
       try {
         const { PipelineAssembler } = await import('./modules/pipeline/config/pipeline-assembler.js');
         const { manager, routePools } = await PipelineAssembler.assemble(mergedConfig);
-        this.httpServer.attachPipelineManager(manager);
-        this.httpServer.attachRoutePools(routePools);
+        (this.httpServer as any).attachPipelineManager(manager);
+        (this.httpServer as any).attachRoutePools(routePools);
         // Attach classifier config if present
         const classifierConfig = mergedConfig?.modules?.virtualrouter?.config?.classificationConfig;
         if (classifierConfig) {
-          this.httpServer.attachRoutingClassifierConfig(classifierConfig);
+          (this.httpServer as any).attachRoutingClassifierConfig(classifierConfig);
         }
         console.log('🧩 Pipeline assembled from merged-config and attached to server.');
       } catch (e) {
@@ -125,11 +131,11 @@ class RouteCodexApp {
       }
 
       // 6. 启动服务器
-      await this.httpServer.start();
+      await (this.httpServer as any).start();
       this._isRunning = true;
 
       // 7. 获取服务器状态
-      const status = this.httpServer.getStatus();
+      const status = (this.httpServer as any).getStatus();
       const serverConfig = {
         host: 'localhost',
         port
@@ -177,7 +183,7 @@ class RouteCodexApp {
         console.log('🛑 Stopping RouteCodex server...');
 
         if (this.httpServer) {
-          await this.httpServer.stop();
+          await (this.httpServer as any).stop();
         }
 
         this._isRunning = false;
@@ -192,9 +198,9 @@ class RouteCodexApp {
   /**
    * Get server status
    */
-  getStatus(): any {
+  getStatus(): unknown {
     if (this.httpServer) {
-      return this.httpServer.getStatus();
+      return (this.httpServer as any).getStatus();
     }
     return {
       status: 'stopped',

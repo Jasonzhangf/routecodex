@@ -519,7 +519,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Enhanced error handling with debug context
    */
-  private async handleEnhancedError(error: unknown, context: any): Promise<void> {
+  private async handleEnhancedError(error: any, context: any): Promise<void> {
     const errorContext = {
       ...context,
       pipelineId: this.pipelineId,
@@ -857,7 +857,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Handle initialization error
    */
-  private async handleInitializationError(error: unknown): Promise<void> {
+  private async handleInitializationError(error: any): Promise<void> {
     await this.errorIntegration.handleModuleError(error, {
       stage: 'initialization',
       pipelineId: this.pipelineId,
@@ -868,7 +868,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Handle request processing error
    */
-  private async handleRequestError(error: unknown, request: PipelineRequest, stages: string[]): Promise<void> {
+  private async handleRequestError(error: any, request: PipelineRequest, stages: string[]): Promise<void> {
     const errorObj = error instanceof Error ? error : new Error(String(error));
     const pipelineError: PipelineError = {
       stage: stages[stages.length - 1] || 'unknown',

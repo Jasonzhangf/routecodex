@@ -339,7 +339,7 @@ export class PipelineHealthManager {
    */
   getDebugInfo(): {
     config: PipelineHealthConfig;
-    stats: Record<string, unknown>;
+    stats: Record<string, any>;
     pipelineStatuses: PipelineHealthStatus[];
   } {
     return {

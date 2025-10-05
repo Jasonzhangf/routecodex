@@ -769,7 +769,7 @@ function analyzeLogEntries(entries: UnifiedLogEntry[], _options: LogAnalysisOpti
   };
 }
 
-async function generateHTMLReport(analysis: any, outputFile: string): Promise<void> {
+async function generateHTMLReport(analysis: unknown, outputFile: string): Promise<void> {
   const html = `
 <!DOCTYPE html>
 <html>
@@ -911,7 +911,7 @@ async function generateHTMLReport(analysis: any, outputFile: string): Promise<vo
   fs.writeFileSync(outputFile, html);
 }
 
-async function generateCSVReport(analysis: any, outputFile: string): Promise<void> {
+async function generateCSVReport(analysis: unknown, outputFile: string): Promise<void> {
   const csv = [
     'Module,Total Entries,Errors,Error Rate,Avg Duration (ms)',
     ...Object.entries(analysis.moduleStats).map(

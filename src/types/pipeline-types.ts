@@ -3,8 +3,9 @@
  * 用于定义RouteCodex中流水线架构的类型
  */
 
-import { HttpRequest, HttpResponse, UnknownObject } from './http-types';
-import { BaseModuleConfig } from './config-types';
+import type { HttpRequest, HttpResponse } from './http-types';
+import type { BaseModuleConfig } from './config-types';
+import type { UnknownObject } from './common-types';
 
 /**
  * 流水线上下文对象

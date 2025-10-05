@@ -7,7 +7,7 @@ import express, { type Application, type Request, type Response, type NextFuncti
 import cors from 'cors';
 import helmet from 'helmet';
 import { BaseModule, type ModuleInfo } from 'rcc-basemodule';
-import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
+import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import { DebugEventBus } from 'rcc-debugcenter';
 import { ErrorHandlingUtils } from '../utils/error-handling-utils.js';
 import { ModuleConfigReader } from '../utils/module-config-reader.js';
@@ -18,13 +18,10 @@ import { PipelineManager } from '../modules/pipeline/core/pipeline-manager.js';
 import {
   type ServerConfig,
   type HealthStatus,
-  type ProviderHealth,
   type IHttpServer,
   type ServerModuleInfo,
 } from './types.js';
-import fs from 'fs';
-import path from 'path';
-import { homedir } from 'os';
+import type { UnknownObject } from '../types/common-types.js';
 import { DebugFileLogger } from '../debug/debug-file-logger.js';
 import { ConfigRequestClassifier } from '../modules/virtual-router/classifiers/config-request-classifier.js';
 
@@ -49,7 +46,7 @@ export interface HttpServerConfig {
  */
 export class HttpServer extends BaseModule implements IHttpServer {
   private app: Application;
-  private server?: any;
+  private server?: unknown;
   private moduleConfigReader: ModuleConfigReader;
   private openaiRouter: OpenAIRouter;
   private requestHandler: RequestHandler;
@@ -61,17 +58,17 @@ export class HttpServer extends BaseModule implements IHttpServer {
   private _isRunning: boolean = false;
   private healthStatus: HealthStatus;
   private startupTime: number;
-  private config: any;
-  private mergedConfig: any | null = null;
+  private config: UnknownObject = {};
+  private mergedConfig: UnknownObject | null = null;
   private pipelineManager: PipelineManager | null = null;
   private routePools: Record<string, string[]> | null = null;
   private classifier: ConfigRequestClassifier | null = null;
 
   // Debug enhancement properties
   private isDebugEnhanced = false;
-  private serverMetrics: Map<string, any> = new Map();
-  private requestHistory: any[] = [];
-  private errorHistory: any[] = [];
+  private serverMetrics: Map<string, { values: UnknownObject[]; lastUpdated: number }> = new Map();
+  private requestHistory: UnknownObject[] = [];
+  private errorHistory: UnknownObject[] = [];
   private maxHistorySize = 100;
 
   /** Generate a session id that embeds the current port for DebugCenter port-level separation */
@@ -97,7 +94,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
 
     // Store module info for debug access
     const moduleInfoForDebug = moduleInfo;
-    (this as any).moduleInfo = moduleInfoForDebug;
+    (this as UnknownObject).moduleInfo = moduleInfoForDebug;
 
     this.moduleConfigReader = new ModuleConfigReader(modulesConfigPath);
     this.errorHandling = new ErrorHandlingCenter();
@@ -162,27 +159,27 @@ export class HttpServer extends BaseModule implements IHttpServer {
     if (!this.config) {
       throw new Error('Server configuration missing. Ensure merged-config is initialized.');
     }
-    const cfg: any = this.config as any;
+    const cfg: UnknownObject = this.config;
     if (typeof cfg.port !== 'number' || cfg.port <= 0) {
       throw new Error(
         'HTTP server port is missing. Please set httpserver.port in your user config (~/.routecodex/config.json).'
       );
     }
-    const logging = cfg.logging || {};
+    const logging = (cfg.logging as UnknownObject) || {};
     return {
       server: {
-        port: cfg.port,
-        host: cfg.host || 'localhost',
-        cors: cfg.cors || { origin: '*', credentials: true },
-        timeout: cfg.timeout || 30000,
-        bodyLimit: cfg.bodyLimit || '10mb',
+        port: cfg.port || 5506,
+        host: (cfg.host as string) || 'localhost',
+        cors: (cfg.cors as any) || { origin: '*', credentials: true },
+        timeout: (cfg.timeout as number) || 30000,
+        bodyLimit: (cfg.bodyLimit as string) || '10mb',
       },
       logging: {
-        level: logging.level || 'info',
-        enableConsole: logging.enableConsole !== false,
-        enableFile: logging.enableFile === true,
-        filePath: logging.filePath,
-        categories: logging.categories || [
+        level: ((logging.level as string) || 'info') as 'debug' | 'info' | 'warn' | 'error',
+        enableConsole: (logging.enableConsole as boolean) !== false,
+        enableFile: (logging.enableFile as boolean) === true,
+        filePath: logging.filePath as string,
+        categories: (logging.categories as string[]) || [
           'server',
           'api',
           'request',
@@ -203,7 +200,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
   /**
    * Initialize the HTTP server with merged configuration
    */
-  public async initializeWithMergedConfig(mergedConfig: any): Promise<void> {
+  public async initializeWithMergedConfig(mergedConfig: UnknownObject): Promise<void> {
     try {
       console.log('🔄 Initializing HTTP server with merged configuration...');
 
@@ -213,7 +210,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       this.config = mergedConfig;
 
       // Initialize DebugCenter file logging if configured
-      const debugCenterConfig = mergedConfig.modules?.debugcenter?.config;
+      const debugCenterConfig = (mergedConfig.modules as any)?.debugcenter?.config;
       if (debugCenterConfig?.enableFile && debugCenterConfig.filePath) {
         DebugFileLogger.initialize({
           filePath: debugCenterConfig.filePath,
@@ -250,11 +247,11 @@ export class HttpServer extends BaseModule implements IHttpServer {
       this.providerManager = new ProviderManager(serverConfig);
       this.requestHandler = new RequestHandler(this.providerManager, serverConfig);
       // Load router config from modules.json if available
-      const openaiRouterModule = this.moduleConfigReader.getModuleConfigValue<any>(
+      const openaiRouterModule = this.moduleConfigReader.getModuleConfigValue<UnknownObject>(
         'openairouter',
         {}
       );
-      this.openaiRouter = new OpenAIRouter(this.requestHandler, this.providerManager, this.moduleConfigReader, (openaiRouterModule || {}) as any);
+      this.openaiRouter = new OpenAIRouter(this.requestHandler, this.providerManager, this.moduleConfigReader, (openaiRouterModule || {}) as UnknownObject);
 
       // Initialize request handler
       await this.requestHandler.initialize();
@@ -368,7 +365,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
   /**
    * Attach a pipeline manager to the OpenAI router (enables HTTP → Router → Pipeline layering)
    */
-  public attachPipelineManager(pipelineManager: any): void {
+  public attachPipelineManager(pipelineManager: PipelineManager): void {
     this.pipelineManager = pipelineManager as PipelineManager;
     try {
       if (this.openaiRouter && (this.openaiRouter as any).attachPipelineManager) {
@@ -394,10 +391,10 @@ export class HttpServer extends BaseModule implements IHttpServer {
   }
 
   /** Attach classification config to router */
-  public attachRoutingClassifierConfig(classifierConfig: any): void {
+  public attachRoutingClassifierConfig(classifierConfig: UnknownObject): void {
     try {
       if (this.openaiRouter && (this.openaiRouter as any).attachRoutingClassifierConfig) {
-        (this.openaiRouter as any).attachRoutingClassifierConfig(classifierConfig);
+      (this.openaiRouter as any).attachRoutingClassifierConfig(classifierConfig);
       }
     } catch (error) {
       console.error('Failed to attach classifier config to OpenAI router:', error);
@@ -420,12 +417,9 @@ export class HttpServer extends BaseModule implements IHttpServer {
   /**
    * Record server metric
    */
-  private recordServerMetric(operation: string, data: any): void {
+  private recordServerMetric(operation: string, data: UnknownObject): void {
     if (!this.serverMetrics.has(operation)) {
-      this.serverMetrics.set(operation, {
-        values: [],
-        lastUpdated: Date.now(),
-      });
+      this.serverMetrics.set(operation, { values: [], lastUpdated: Date.now() });
     }
 
     const metric = this.serverMetrics.get(operation)!;
@@ -441,7 +435,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
   /**
    * Add to request history
    */
-  private addToRequestHistory(request: any): void {
+  private addToRequestHistory(request: UnknownObject): void {
     this.requestHistory.push(request);
 
     // Keep only recent history
@@ -453,7 +447,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
   /**
    * Add to error history
    */
-  private addToErrorHistory(error: any): void {
+  private addToErrorHistory(error: UnknownObject): void {
     this.errorHistory.push(error);
 
     // Keep only recent history
@@ -465,7 +459,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
   /**
    * Publish debug event
    */
-  private publishDebugEvent(type: string, data: any): void {
+  private publishDebugEvent(type: string, data: UnknownObject): void {
     if (!this.isDebugEnhanced) {
       return;
     }
@@ -480,7 +474,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
         position: 'middle',
         data: {
           ...data,
-          serverId: (this as any).moduleInfo.id,
+          serverId: ((this as UnknownObject).moduleInfo as any).id,
           source: 'http-server',
         },
       });
@@ -492,8 +486,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
   /**
    * Get debug status with enhanced information
    */
-  getDebugStatus(): any {
-    const moduleInfo = (this as any).moduleInfo;
+  getDebugStatus(): UnknownObject {
+    const moduleInfo = (this as any).moduleInfo as any;
     const baseStatus = {
       serverId: moduleInfo.id,
       isInitialized: this._isInitialized,
@@ -519,8 +513,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
   /**
    * Get detailed debug information
    */
-  private getDebugInfo(): any {
-    const moduleInfo = (this as any).moduleInfo;
+  private getDebugInfo(): UnknownObject {
+    const moduleInfo = (this as any).moduleInfo as any;
     return {
       serverId: moduleInfo.id,
       serverType: moduleInfo.type,
@@ -538,8 +532,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
   /**
    * Get server metrics
    */
-  private getServerMetrics(): any {
-    const metrics: any = {};
+  private getServerMetrics(): UnknownObject {
+    const metrics: UnknownObject = {};
 
     for (const [operation, metric] of this.serverMetrics.entries()) {
       metrics[operation] = {
@@ -589,8 +583,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
         resolve();
       });
 
-      this.server.on('error', async (error: any) => {
-        await this.handleError(error, 'server_start');
+      (this.server as any).on('error', async (error: Error) => {
+        await this.handleError(error as Error, 'server_start');
         reject(error);
       });
     });
@@ -603,7 +597,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
     try {
       if (this.server) {
         return new Promise(resolve => {
-          this.server.close(async () => {
+          (this.server as any).close(async () => {
             this._isRunning = false;
 
             // Stop all components
@@ -640,7 +634,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
    * Get current health status
    */
   public getStatus(): HealthStatus {
-    const config = this.getDefaultServerConfig();
+    // const config = this.getDefaultServerConfig(); // Reserved for future use
 
     return {
       status: this._isRunning ? 'healthy' : 'unhealthy',
@@ -810,9 +804,9 @@ export class HttpServer extends BaseModule implements IHttpServer {
             headers: req.headers,
           },
           debug: { enabled: true, stages: { llmSwitch: true, workflow: true, compatibility: true, provider: true } },
-        } as any;
+        } as UnknownObject;
 
-        const pipelineResponse = await this.pipelineManager.processRequest(pipelineRequest);
+        const pipelineResponse = await this.pipelineManager.processRequest(pipelineRequest as any);
         const data = pipelineResponse?.data ?? pipelineResponse;
         // Return anthropic-like response produced by llmswitch (if configured)
         res.status(200).json(data);
@@ -882,7 +876,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
    * Setup error handling
    */
   private setupErrorHandling(): void {
-    this.app.use(async (error: any, req: Request, res: Response, next: NextFunction) => {
+    this.app.use(async (error: UnknownObject, req: Request, res: Response, _next: NextFunction) => {
       // Friendly JSON parse error mapping
       if (error?.type === 'entity.parse.failed') {
         res.status(400).json({
@@ -895,11 +889,12 @@ export class HttpServer extends BaseModule implements IHttpServer {
         return;
       }
 
-      await this.handleError(error, 'request_handler');
+      await this.handleError(error as unknown as Error, 'request_handler');
 
       // Normalize sandbox/permission errors to explicit 500 with sandbox_denied
-      let status = error.status || error.statusCode || 500;
-      let code = error.code || 'internal_error';
+      const errObj = error as any;
+      let status = (errObj.status as number) || (errObj.statusCode as number) || 500;
+      let code = (errObj.code as string) || 'internal_error';
       let type = error.type || 'internal_error';
       let message = error.message || 'Internal Server Error';
       try {
@@ -1042,7 +1037,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       providers: this.providerManager.getMetrics(),
       config: {
         provider_count: Object.keys(config.providers).length,
-        enabled_providers: Object.values(config.providers).filter((p: any) => p.enabled).length,
+        enabled_providers: Object.values(config.providers).filter((p: UnknownObject) => (p as UnknownObject).enabled).length,
       },
     };
 
@@ -1067,7 +1062,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       server: config.server,
       logging: config.logging,
       routing: config.routing,
-      providers: Object.keys(config.providers).reduce((acc: any, key: string) => {
+      providers: Object.keys(config.providers).reduce((acc: UnknownObject, key: string) => {
         acc[key] = {
           type: config.providers[key].type,
           enabled: config.providers[key].enabled,
@@ -1104,9 +1099,9 @@ export class HttpServer extends BaseModule implements IHttpServer {
           version: '1.0.0',
           status: this.getStatus(),
         },
-        requestHandler: this.requestHandler.getModuleInfo(),
+        requestHandler: this.requestHandler.getInfo(),
         providerManager: this.providerManager.getInfo(),
-        openaiRouter: this.openaiRouter.getModuleInfo(),
+        openaiRouter: this.openaiRouter.getInfo(),
       },
       environment: {
         node_version: process.version,

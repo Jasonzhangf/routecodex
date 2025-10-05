@@ -7,7 +7,7 @@ import { ErrorHandlerRegistry } from './error-handler-registry.js';
 import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
 import { DebugEventBus } from 'rcc-debugcenter';
 
-export function getErrorMessage(error: unknown): string {
+export function getErrorMessage(error: any): string {
   if (error instanceof Error) {
     return error.message;
   }
@@ -239,7 +239,7 @@ export class ErrorHandlingUtils {
       return;
     }
 
-    // @ts-ignore - Type mismatch between ErrorContext definitions
+    
     ErrorHandlingUtils.registry.registerErrorHandler({
       errorCode,
       handler: handler as any,

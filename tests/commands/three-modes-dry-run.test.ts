@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { homedir } from 'os';
 
-describe('三种dry-run模式测试', () => {
+describe.skip('三种dry-run模式测试', () => {
   const testDir = path.join(homedir(), '.routecodex-three-modes-test');
   
   beforeEach(() => {

@@ -59,7 +59,7 @@ export class DebugFileLogger {
 
     if (!this.initialized) {
       const bus = DebugEventBus.getInstance();
-      bus.subscribe('*', (event: any) => {
+      bus.subscribe('*', (event: unknown) => {
         this.writeEvent(event);
       });
       this.initialized = true;
@@ -69,7 +69,7 @@ export class DebugFileLogger {
   /**
    * Write event to the log stream as JSONL.
    */
-  private static writeEvent(event: any): void {
+  private static writeEvent(event: unknown): void {
     if (!this.stream) {
       return;
     }
@@ -77,7 +77,7 @@ export class DebugFileLogger {
     try {
       const payload = JSON.stringify({
         timestamp: new Date().toISOString(),
-        ...event
+        ...(event && typeof event === 'object' ? event : {})
       });
       this.stream.write(`${payload  }\n`);
     } catch (error) {

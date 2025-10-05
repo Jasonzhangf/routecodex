@@ -1,7 +1,8 @@
 import { EventEmitter } from 'events';
 import * as debugcenter from 'rcc-debugcenter';
 import { BaseModule as RCCBaseModule, type ModuleInfo } from 'rcc-basemodule';
-import { DebugEnhancementManager } from '../modules/debug/debug-enhancement-manager.js';
+import { DebugEnhancementManager, type DebugEnhancement } from '../modules/debug/debug-enhancement-manager.js';
+import type { UnknownObject, LogData } from '../types/common-types.js';
 
 export type { ModuleInfo } from 'rcc-basemodule';
 
@@ -46,14 +47,14 @@ export abstract class BaseModule extends RCCBaseModule {
 
   // Unified debug enhancement properties
   private debugEnhancementManager: DebugEnhancementManager | null = null;
-  private debugEnhancement: any = null;
+  private debugEnhancement: DebugEnhancement | null = null;
 
   // Legacy debug properties for backward compatibility
   protected debugEventBus: DebugEventBusInstance | null = null;
   public isDebugEnhanced = false;
-  public moduleMetrics: Map<string, any> = new Map();
-  public operationHistory: any[] = [];
-  public errorHistory: any[] = [];
+  public moduleMetrics: Map<string, { values: any[]; lastUpdated: number }> = new Map();
+  public operationHistory: UnknownObject[] = [];
+  public errorHistory: UnknownObject[] = [];
   public maxHistorySize = 50;
 
   private readonly emitter = new EventEmitter();
@@ -123,7 +124,7 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * 初始化模块 - 子类必须实现
    */
-  abstract initialize(config?: any): Promise<void>;
+  abstract initialize(config?: UnknownObject): Promise<void>;
 
   /**
    * 启动模块
@@ -196,7 +197,7 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * 获取模块统计信息
    */
-  getStats(): any {
+  getStats(): UnknownObject {
     const info = this.getInfo();
     return {
       id: info.id,
@@ -284,7 +285,7 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * Record module metric - unified approach
    */
-  public recordModuleMetric(operation: string, data: any): void {
+  public recordModuleMetric(operation: string, data: LogData): void {
     const info = this.getInfo();
     if (this.debugEnhancement?.recordMetric) {
       this.debugEnhancement.recordMetric(operation, Date.now(), {
@@ -312,7 +313,7 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * Add to operation history - unified approach
    */
-  public addToOperationHistory(operation: any): void {
+  public addToOperationHistory(operation: UnknownObject): void {
     const info = this.getInfo();
     if (this.debugEnhancement?.addRequestToHistory) {
       this.debugEnhancement.addRequestToHistory({
@@ -331,7 +332,7 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * Add to error history - unified approach
    */
-  public addToErrorHistory(error: any, metadata: Record<string, any> = {}): void {
+  public addToErrorHistory(error: UnknownObject, metadata: Record<string, unknown> = {}): void {
     const info = this.getInfo();
     if (this.debugEnhancement?.addErrorToHistory) {
       this.debugEnhancement.addErrorToHistory({
@@ -351,7 +352,7 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * Publish debug event
    */
-  public publishDebugEvent(type: string, data: any): void {
+  public publishDebugEvent(type: string, data: UnknownObject): void {
     if (!this.isDebugEnhanced || !this.debugEventBus) {
       return;
     }
@@ -379,7 +380,7 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * Get debug status with enhanced information - unified approach
    */
-  getDebugStatus(): any {
+  getDebugStatus(): UnknownObject {
     const info = this.getInfo();
     const baseStatus = {
       moduleId: info.id,
@@ -421,7 +422,7 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * Get detailed debug information
    */
-  public getDebugInfo(): any {
+  public getDebugInfo(): UnknownObject {
     const info = this.getInfo();
     return {
       moduleId: info.id,
@@ -440,8 +441,8 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * Get module metrics
    */
-  public getModuleMetrics(): any {
-    const metrics: Record<string, any> = {};
+  public getModuleMetrics(): UnknownObject {
+    const metrics: Record<string, UnknownObject> = {};
 
     for (const [operation, metric] of this.moduleMetrics.entries()) {
       metrics[operation] = {
@@ -457,7 +458,7 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * Get module debug info - helper method for consistency
    */
-  getModuleDebugInfo(): any {
+  getModuleDebugInfo(): UnknownObject {
     return this.getDebugInfo();
   }
 

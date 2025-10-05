@@ -147,11 +147,16 @@ export class JsonConfigProvider implements ConfigProvider {
   }
 
   /**
-   * Validate basic configuration structure
+   * Validates basic configuration structure
    */
-  private validateBasicStructure(config: any): void {
+  private validateBasicStructure(config: unknown): void {
+    if (!config || typeof config !== 'object') {
+      throw new Error('Configuration must be an object');
+    }
+    
+    const configObj = config as Record<string, unknown>;
     const requiredFields = ['version', 'environment', 'debug', 'logLevel'];
-    const missingFields = requiredFields.filter(field => !(field in config));
+    const missingFields = requiredFields.filter(field => !(field in configObj));
 
     if (missingFields.length > 0) {
       throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
@@ -159,14 +164,14 @@ export class JsonConfigProvider implements ConfigProvider {
 
     // Validate environment
     const validEnvironments = ['development', 'production', 'test'];
-    if (!validEnvironments.includes(config.environment)) {
-      throw new Error(`Invalid environment: ${config.environment}`);
+    if (typeof configObj.environment !== 'string' || !validEnvironments.includes(configObj.environment)) {
+      throw new Error(`Invalid environment: ${configObj.environment}`);
     }
 
     // Validate log level
     const validLogLevels = ['error', 'warn', 'info', 'debug'];
-    if (!validLogLevels.includes(config.logLevel)) {
-      throw new Error(`Invalid log level: ${config.logLevel}`);
+    if (typeof configObj.logLevel !== 'string' || !validLogLevels.includes(configObj.logLevel)) {
+      throw new Error(`Invalid log level: ${configObj.logLevel}`);
     }
   }
 

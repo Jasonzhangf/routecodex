@@ -9,9 +9,10 @@
 import type { CompatibilityModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 import type { TransformationRule } from '../../interfaces/pipeline-interfaces.js';
-import { PipelineDebugLogger } from '../../utils/debug-logger.js';
+import type { PipelineDebugLogger as PipelineDebugLoggerInterface } from '../../interfaces/pipeline-interfaces.js';
 import { loadToolMappings } from '../../../../config/tool-mapping-loader.js';
 import { ToolMappingExecutor } from '../../utils/tool-mapping-executor.js';
+import type { UnknownObject, LogData } from '../../../../types/common-types.js';
 
 export class GLMCompatibility implements CompatibilityModule {
   readonly id: string;
@@ -20,7 +21,7 @@ export class GLMCompatibility implements CompatibilityModule {
   readonly rules: TransformationRule[] = [];
 
   private isInitialized = false;
-  private logger: PipelineDebugLogger;
+  private logger: PipelineDebugLoggerInterface;
   private readonly forceDisableThinking: boolean;
   private readonly useMappingConfig: boolean;
   private mappingExecutor: ToolMappingExecutor | null = null;
@@ -55,27 +56,27 @@ export class GLMCompatibility implements CompatibilityModule {
     }
   }
 
-  async processIncoming(requestParam: unknown): Promise<SharedPipelineRequest> {
+  async processIncoming(requestParam: any): Promise<SharedPipelineRequest> {
     if (!this.isInitialized) {
       throw new Error('GLM Compatibility module is not initialized');
     }
 
-    const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam;
-    const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
-    const request = isDto ? dto!.data : requestParam as Record<string, unknown> | null;
+    const isDto = this.isSharedPipelineRequest(requestParam);
+    const dto = isDto ? requestParam as SharedPipelineRequest : null;
+    const request = isDto ? dto!.data : requestParam as unknown;
 
     if (!request || typeof request !== 'object') {
       return isDto ? dto! : { data: request, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
     }
 
-    const outbound = { ...(typeof request === 'object' && request !== null ? request : {}) };
+    const outbound = { ...(typeof request === 'object' && request !== null ? request : {}) } as UnknownObject;
 
     if (!this.forceDisableThinking && typeof outbound === 'object' && outbound !== null && !('thinking' in outbound)) {
-      const payload = this.resolveThinkingPayload(outbound as Record<string, unknown>);
+      const payload = this.resolveThinkingPayload(outbound);
       if (payload) {
-        (outbound as Record<string, unknown>).thinking = payload;
+        outbound.thinking = payload;
         this.logger.logModule(this.id, 'thinking-applied', {
-          model: this.getModelId(outbound as Record<string, unknown>),
+          model: this.getModelId(outbound),
           payload
         });
       }
@@ -84,36 +85,36 @@ export class GLMCompatibility implements CompatibilityModule {
     return isDto ? { ...dto!, data: outbound } : { data: outbound, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
   }
 
-  async processOutgoing(response: unknown): Promise<unknown> {
+  async processOutgoing(response: any): Promise<unknown> {
     if (!this.isInitialized) { throw new Error('GLM Compatibility module is not initialized'); }
 
     try {
       const body = this.unwrap(response);
 
       if (body && typeof body === 'object' && body !== null && 'choices' in body && Array.isArray(body.choices)) {
-        body.choices = body.choices.map((c: unknown, idx: number) => {
-          const out = { index: idx, ...(typeof c === 'object' && c !== null ? c : {}) };
-          const msg = (typeof out === 'object' && out !== null && 'message' in out && typeof out.message === 'object' && out.message !== null) ? out.message : {} as Record<string, unknown>;
+        body.choices = body.choices.map((c: any, idx: number) => {
+          const out = { index: idx, ...(typeof c === 'object' && c !== null ? c : {}) } as UnknownObject;
+          const msg = (typeof out === 'object' && out !== null && 'message' in out && typeof out.message === 'object' && out.message !== null) ? out.message as UnknownObject : {} as UnknownObject;
           // If GLM placed content into reasoning_content and left content empty, promote it.
-          const rc = typeof (msg as Record<string, unknown>).reasoning_content === 'string' ? (msg as Record<string, unknown>).reasoning_content : '';
-          if ((!((msg as Record<string, unknown>).content) || (msg as Record<string, unknown>).content === '') && typeof rc === 'string' && rc.trim()) {
-            (msg as Record<string, unknown>).content = rc;
+          const rc = typeof msg.reasoning_content === 'string' ? msg.reasoning_content : '';
+          if ((!msg.content || msg.content === '') && typeof rc === 'string' && rc.trim()) {
+            msg.content = rc;
           }
           if ('reasoning_content' in msg) {
-            try { delete (msg as Record<string, unknown>).reasoning_content; } catch { /* noop */ }
+            try { delete msg.reasoning_content; } catch { /* noop */ }
           }
 
           // If provider already returned tool_calls, normalize and blank out content
           try {
-            if (Array.isArray((msg as Record<string, unknown>).tool_calls) && (msg as Record<string, unknown>).tool_calls.length > 0) {
-              (msg as Record<string, unknown>).tool_calls = this.normalizeToolCallsForClient((msg as Record<string, unknown>).tool_calls as unknown[]);
-              (msg as Record<string, unknown>).content = '';
-              (out as Record<string, unknown>).message = msg;
+            if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+              msg.tool_calls = this.normalizeToolCallsForClient(msg.tool_calls);
+              msg.content = '';
+              out.message = msg;
               return out;
             }
 
             // Strip private reasoning markers and reconstruct tools
-            let contentStr = typeof (msg as Record<string, unknown>).content === 'string' ? (msg as Record<string, unknown>).content : '';
+            let contentStr = typeof msg.content === 'string' ? msg.content : '';
             // Remove <think> blocks and stray tags
             contentStr = this.stripThinkBlocks(typeof contentStr === 'string' ? contentStr : '');
             if (contentStr) {
@@ -128,15 +129,15 @@ export class GLMCompatibility implements CompatibilityModule {
                   type: 'function',
                   function: { name: call.name, arguments: JSON.stringify(call.args) }
                 }));
-                if (Array.isArray((msg as Record<string, unknown>).tool_calls) && (msg as Record<string, unknown>).tool_calls && (msg as Record<string, unknown>).tool_calls.length) {
-                  (msg as Record<string, unknown>).tool_calls = [ ...(msg as Record<string, unknown>).tool_calls, ...reconstructed ];
+                if (Array.isArray(msg.tool_calls) && msg.tool_calls && msg.tool_calls.length) {
+                  msg.tool_calls = [ ...msg.tool_calls, ...reconstructed ];
                 } else {
-                  (msg as Record<string, unknown>).tool_calls = reconstructed;
+                  msg.tool_calls = reconstructed;
                 }
                 // Normalize tool_calls to client schema (apply_patch -> { input }, shell command array)
-                (msg as Record<string, unknown>).tool_calls = this.normalizeToolCallsForClient((msg as Record<string, unknown>).tool_calls as unknown[]);
+                msg.tool_calls = this.normalizeToolCallsForClient(msg.tool_calls as unknown[]);
                 // When tool_calls exist, blank out content to avoid leaking markup or stray text
-                (msg as Record<string, unknown>).content = '';
+                msg.content = '';
               } else if (this.mappingExecutor && this.useMappingConfig) {
                 // Try config-driven mapping as a fallback when no calls parsed by built-ins
                 try {
@@ -147,13 +148,13 @@ export class GLMCompatibility implements CompatibilityModule {
                       type: 'function',
                       function: { name: call.name, arguments: JSON.stringify(call.args) }
                     }));
-                    if (Array.isArray((msg as Record<string, unknown>).tool_calls) && (msg as Record<string, unknown>).tool_calls.length) {
-                      (msg as Record<string, unknown>).tool_calls = [ ...(msg as Record<string, unknown>).tool_calls, ...reconstructed ];
+                    if (Array.isArray(msg.tool_calls) && msg.tool_calls.length) {
+                      msg.tool_calls = [ ...msg.tool_calls, ...reconstructed ];
                     } else {
-                      (msg as Record<string, unknown>).tool_calls = reconstructed;
+                      msg.tool_calls = reconstructed;
                     }
-                    (msg as Record<string, unknown>).tool_calls = this.normalizeToolCallsForClient((msg as Record<string, unknown>).tool_calls as unknown[]);
-                    (msg as Record<string, unknown>).content = '';
+                    msg.tool_calls = this.normalizeToolCallsForClient(msg.tool_calls as unknown[]);
+                    msg.content = '';
                   }
                 } catch {
                   // ignore mapping errors
@@ -162,7 +163,7 @@ export class GLMCompatibility implements CompatibilityModule {
             }
           } catch { /* non-blocking */ }
 
-          (out as Record<string, unknown>).message = msg;
+          out.message = msg;
           return out;
         });
       }
@@ -185,7 +186,7 @@ export class GLMCompatibility implements CompatibilityModule {
     }
   }
 
-  async applyTransformations(data: unknown, _rules: TransformationRule[]): Promise<unknown> {
+  async applyTransformations(data: any, _rules: TransformationRule[]): Promise<unknown> {
     // Currently no explicit transformation rules required beyond reasoning_content handling
     return data;
   }
@@ -240,12 +241,12 @@ export class GLMCompatibility implements CompatibilityModule {
     return null;
   }
 
-  private normalizeThinkingConfig(value: unknown): ThinkingConfig | null {
+  private normalizeThinkingConfig(value: any): ThinkingConfig | null {
     if (!value || typeof value !== 'object') {
       return null;
     }
 
-    const cfg = value as Record<string, unknown>;
+    const cfg = value as UnknownObject;
     return {
       enabled: cfg.enabled !== false,
       payload: this.clonePayload(cfg.payload),
@@ -253,17 +254,17 @@ export class GLMCompatibility implements CompatibilityModule {
     };
   }
 
-  private normalizePerModel(value: unknown): Record<string, ThinkingModelConfig> | null {
+  private normalizePerModel(value: any): Record<string, ThinkingModelConfig> | null {
     if (!value || typeof value !== 'object') {
       return null;
     }
 
     const map: Record<string, ThinkingModelConfig> = {};
-    for (const [model, raw] of Object.entries(value as Record<string, unknown>)) {
+    for (const [model, raw] of Object.entries(value as UnknownObject)) {
       if (!raw || typeof raw !== 'object') {
         continue;
       }
-      const cfg = raw as Record<string, unknown>;
+      const cfg = raw as UnknownObject;
       map[model] = {
         enabled: cfg.enabled !== false,
         payload: this.clonePayload(cfg.payload)
@@ -283,20 +284,20 @@ export class GLMCompatibility implements CompatibilityModule {
     return null;
   }
 
-  private clonePayload(payload: unknown): Record<string, unknown> | null {
+  private clonePayload(payload: any): UnknownObject | null {
     if (!payload || typeof payload !== 'object') {
       return { type: 'enabled' };
     }
     try {
-      return JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
+      return JSON.parse(JSON.stringify(payload)) as UnknownObject;
     } catch {
       return { type: 'enabled' };
     }
   }
 
-  private unwrap(resp: unknown): unknown {
+  private unwrap(resp: any): any {
     try {
-      const d = (resp as Record<string, unknown>)?.data;
+      const d = (resp as UnknownObject)?.data;
       if (d && typeof d === 'object') {
         return d;
       }
@@ -363,7 +364,7 @@ export class GLMCompatibility implements CompatibilityModule {
               if (typeof rawArgs === 'string') {
                 try { args = JSON.parse(rawArgs); } catch { args = { _raw: rawArgs }; }
               } else if (rawArgs && typeof rawArgs === 'object') {
-                args = rawArgs;
+                args = rawArgs as UnknownObject;
               }
             }
             if (name) {
@@ -470,56 +471,56 @@ export class GLMCompatibility implements CompatibilityModule {
       if (typeof cmd === 'string' && cmd.trim().length > 0) {
         args.command = ['bash', '-lc', cmd];
       } else if (Array.isArray(cmd)) {
-        args.command = cmd.map((x: unknown) => String(x));
+        args.command = cmd.map((x: any) => String(x));
       }
     }
   }
 
   // Map tool_calls to client-supported schema
-  private normalizeToolCallsForClient(list: unknown[]): unknown[] {
+  private normalizeToolCallsForClient(list: any[]): any[] {
     try {
-      return (Array.isArray(list) ? list : []).map((tc: unknown) => {
-        const out = { ...(typeof tc === 'object' && tc !== null ? tc : {}) };
-        const fn = { ...((typeof out === 'object' && out !== null && 'function' in out) ? (out as Record<string, unknown>).function as Record<string, unknown> : {} as Record<string, unknown>) };
+      return (Array.isArray(list) ? list : []).map((tc: any) => {
+        const out = { ...(typeof tc === 'object' && tc !== null ? tc : {}) } as UnknownObject;
+        const fn = ((typeof out === 'object' && out !== null && 'function' in out) ? out.function as UnknownObject : {} as UnknownObject);
         const name = String((typeof fn === 'object' && fn !== null && 'name' in fn) ? fn.name : '').trim();
         const rawArgs = (typeof fn === 'object' && fn !== null && 'arguments' in fn) ? fn.arguments : undefined;
-        let argsObj: Record<string, unknown> = {};
+        let argsObj: UnknownObject = {};
         if (typeof rawArgs === 'string' && rawArgs.length > 0) {
           try { argsObj = JSON.parse(rawArgs); } catch { argsObj = { _raw: rawArgs }; }
         } else if (rawArgs && typeof rawArgs === 'object' && rawArgs !== null) {
-          argsObj = rawArgs as Record<string, unknown>;
+          argsObj = rawArgs as UnknownObject;
         }
         if (name === 'apply_patch') {
           let patch = '';
-          if (typeof (argsObj?.input) === 'string' && argsObj.input.trim()) { patch = argsObj.input; }
-          else if (typeof (argsObj?.patch) === 'string' && argsObj.patch.trim()) { patch = argsObj.patch; }
-          else if (typeof (argsObj?.diff) === 'string' && argsObj.diff.trim()) { patch = argsObj.diff; }
-          else if (typeof (argsObj?._raw) === 'string' && argsObj._raw.includes('*** Begin Patch')) { patch = argsObj._raw; }
+          if (typeof argsObj?.input === 'string' && argsObj.input.trim()) { patch = argsObj.input; }
+          else if (typeof argsObj?.patch === 'string' && argsObj.patch.trim()) { patch = argsObj.patch; }
+          else if (typeof argsObj?.diff === 'string' && argsObj.diff.trim()) { patch = argsObj.diff; }
+          else if (typeof argsObj?._raw === 'string' && argsObj._raw.includes('*** Begin Patch')) { patch = argsObj._raw; }
           else if (Array.isArray(argsObj?.command) && String(argsObj.command[0]) === 'apply_patch') { patch = String(argsObj.command.slice(1).join(' ')); }
-          (out as Record<string, unknown>).function = { name: 'apply_patch', arguments: JSON.stringify({ input: patch }) };
+          out.function = { name: 'apply_patch', arguments: JSON.stringify({ input: patch }) };
           return out;
         }
         if (name === 'update_plan') {
           // Ensure required shape: { plan: [] } at minimum
-          const plan = Array.isArray((argsObj || {}).plan) ? (argsObj || {}).plan : [];
-          const explanation = typeof (argsObj || {}).explanation === 'string' ? (argsObj || {}).explanation : '';
-          (out as Record<string, unknown>).function = { name: 'update_plan', arguments: JSON.stringify({ explanation, plan }) };
+          const plan = Array.isArray(argsObj?.plan) ? argsObj.plan : [];
+          const explanation = typeof argsObj?.explanation === 'string' ? argsObj.explanation : '';
+          out.function = { name: 'update_plan', arguments: JSON.stringify({ explanation, plan }) };
           return out;
         }
         if (name === 'shell') {
-          const cmd = (argsObj || {}).command;
+          const cmd = argsObj?.command;
           const tryParseArray = (s: string): string[] | null => { try { const a = JSON.parse(s); return Array.isArray(a) ? a.map(String) : null; } catch { return null; } };
           if (typeof cmd === 'string') {
             const parsed = tryParseArray(cmd);
-            (out as Record<string, unknown>).function = { name: 'shell', arguments: JSON.stringify({ command: parsed || ['bash','-lc',cmd] }) };
+            out.function = { name: 'shell', arguments: JSON.stringify({ command: parsed || ['bash','-lc',cmd] }) };
           } else if (Array.isArray(cmd)) {
-            (out as Record<string, unknown>).function = { name: 'shell', arguments: JSON.stringify({ command: cmd.map(String) }) };
+            out.function = { name: 'shell', arguments: JSON.stringify({ command: cmd.map(String) }) };
           } else {
-            (out as Record<string, unknown>).function = { name: 'shell', arguments: JSON.stringify(argsObj || {}) };
+            out.function = { name: 'shell', arguments: JSON.stringify(argsObj || {}) };
           }
           return out;
         }
-        (out as Record<string, unknown>).function = { name, arguments: JSON.stringify(argsObj || {}) };
+        out.function = { name, arguments: JSON.stringify(argsObj || {}) };
         return out;
       });
     } catch {
@@ -583,15 +584,27 @@ export class GLMCompatibility implements CompatibilityModule {
     }
     return { jsonText: null, endIndex: input.length };
   }
+
+  /**
+   * Type guard for SharedPipelineRequest
+   */
+  private isSharedPipelineRequest(obj: any): obj is SharedPipelineRequest {
+    return obj !== null && 
+           typeof obj === 'object' && 
+           'data' in obj && 
+           'route' in obj &&
+           'metadata' in obj &&
+           'debug' in obj;
+  }
 }
 
 interface ThinkingConfig {
   enabled: boolean;
-  payload: Record<string, unknown> | null;
+  payload: UnknownObject | null;
   models: Record<string, ThinkingModelConfig> | null;
 }
 
 interface ThinkingModelConfig {
   enabled: boolean;
-  payload: Record<string, unknown> | null;
+  payload: UnknownObject | null;
 }

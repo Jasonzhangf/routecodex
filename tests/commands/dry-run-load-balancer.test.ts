@@ -2,15 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { homedir } from 'os';
+import { homedir, tmpdir } from 'os';
 
 describe('负载均衡器dry-run功能测试', () => {
-  const testDir = path.join(homedir(), '.routecodex-test');
+  let testDir: string;
   
   beforeEach(() => {
-    if (!fs.existsSync(testDir)) {
-      fs.mkdirSync(testDir, { recursive: true });
-    }
+    testDir = fs.mkdtempSync(path.join(tmpdir(), 'routecodex-lb-'));
   });
 
   afterEach(() => {
@@ -30,7 +28,7 @@ describe('负载均衡器dry-run功能测试', () => {
     try {
       const result = execSync(`node dist/cli.js dry-run request ${requestFile}`, {
         encoding: 'utf-8',
-        cwd: '/Users/fanzhang/Documents/github/routecodex'
+        cwd: process.cwd()
       });
       
       console.log('Dry-run结果:', result);
@@ -77,7 +75,7 @@ describe('负载均衡器dry-run功能测试', () => {
       // 使用默认配置文件
       const result = execSync(`node dist/cli.js dry-run request ${requestFile}`, {
         encoding: 'utf-8',
-        cwd: '/Users/fanzhang/Documents/github/routecodex'
+        cwd: process.cwd()
       });
       
       console.log('负载均衡dry-run结果:', result);

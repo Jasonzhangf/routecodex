@@ -59,7 +59,7 @@ export class IFlowTokenStorage {
     };
   }
 
-  static fromJSON(json: unknown) {
+  static fromJSON(json: any) {
     const src = (json && typeof json === 'object') ? (json as Record<string, unknown>) : {};
     return new IFlowTokenStorage(src);
   }
@@ -137,7 +137,7 @@ export class IFlowOAuth {
    * Refresh token with retries
    */
   async refreshTokensWithRetry(refreshToken: string, maxRetries = 3) {
-    let lastError: unknown;
+    let lastError: any;
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       if (attempt > 0) {
@@ -640,7 +640,7 @@ export class IFlowOAuth {
     });
   }
 
-  private convertLegacyToken(data: unknown): Record<string, unknown> {
+  private convertLegacyToken(data: any): Record<string, unknown> {
     if (!data || typeof data !== 'object') {
       return {};
     }

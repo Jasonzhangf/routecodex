@@ -6,7 +6,7 @@
  */
 
 import type { DebugEvent } from 'rcc-debugcenter';
-import { UnknownObject } from './common-types';
+import type { UnknownObject } from './common-types';
 
 /**
  * Debug system initialization options
@@ -527,67 +527,7 @@ export interface DebugExtensionHealth {
   avgResponseTime: number;
 }
 
-/**
- * WebSocket debug server interface
- */
-export interface WebSocketDebugServer {
-  /** Server identifier */
-  readonly id: string;
-  /** Server version */
-  readonly version: string;
-  /** Server information */
-  readonly serverInfo: {
-    host: string;
-    port: number;
-    path: string;
-  };
 
-  /**
-   * Start the WebSocket server
-   */
-  start(): Promise<void>;
-
-  /**
-   * Stop the WebSocket server
-   */
-  stop(): Promise<void>;
-
-  /**
-   * Send debug event to connected clients
-   */
-  sendEvent(event: DebugWebSocketEvent): Promise<void>;
-
-  /**
-   * Broadcast message to all clients
-   */
-  broadcast(message: DebugWebSocketMessage): Promise<void>;
-
-  /**
-   * Get server statistics
-   */
-  getStats(): WebSocketServerStats;
-
-  /**
-   * Get server health
-   */
-  getHealth(): WebSocketServerHealth;
-}
-
-/**
- * Debug WebSocket event
- */
-export interface DebugWebSocketEvent {
-  /** Event identifier */
-  id: string;
-  /** Event type */
-  type: 'start' | 'log' | 'error' | 'performance' | 'system';
-  /** Event data */
-  data: unknown;
-  /** Timestamp */
-  timestamp: number;
-  /** Event metadata */
-  metadata?: UnknownObject;
-}
 
 /**
  * Debug WebSocket message

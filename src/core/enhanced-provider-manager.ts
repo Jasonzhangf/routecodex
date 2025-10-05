@@ -5,11 +5,22 @@
 
 import { ProviderManager, type ProviderManagerOptions } from './provider-manager.js';
 import {
+  BaseProvider,
+  type ProviderResponse,
+  type ProviderHealth,
+  type ProviderStats,
+} from '../providers/base-provider.js';
+import { 
   UnimplementedProvider,
-  type UnimplementedProviderConfig,
+  type UnimplementedProviderConfig
 } from '../providers/unimplemented-provider.js';
+import {
+  type OpenAIModel,
+  type ModelConfig,
+} from '../server/types.js';
 import { UnimplementedModuleFactory } from '../modules/unimplemented-module-factory.js';
 import { type ProviderConfig, type ServerConfig, RouteCodexError } from '../server/types.js';
+import type { UnknownObject } from '../types/common-types.js';
 
 /**
  * Enhanced Provider Manager Configuration
@@ -125,7 +136,7 @@ export class EnhancedProviderManager extends ProviderManager {
   /**
    * Get provider by ID - falls back to unimplemented providers
    */
-  public getProvider(providerId: string): any | null {
+  public getProvider(providerId: string): BaseProvider | null {
     // Try regular provider first
     const regularProvider = super.getProvider(providerId);
     if (regularProvider) {
@@ -139,8 +150,8 @@ export class EnhancedProviderManager extends ProviderManager {
   /**
    * Get all providers (regular + unimplemented)
    */
-  public getAllProviders(): Map<string, any> {
-    const allProviders = new Map<string, any>();
+  public getAllProviders(): Map<string, BaseProvider> {
+    const allProviders = new Map<string, BaseProvider>();
 
     // Add regular providers
     const regularProviders = (this as any).providers; // Access private field from parent
@@ -159,14 +170,14 @@ export class EnhancedProviderManager extends ProviderManager {
   /**
    * Get active providers (excluding unimplemented ones by default)
    */
-  public getActiveProviders(includeUnimplemented: boolean = false): any[] {
+  public getActiveProviders(includeUnimplemented: boolean = false): BaseProvider[] {
     const activeProviders = super.getActiveProviders();
 
     if (includeUnimplemented) {
       // Add unimplemented providers that have been called (have stats)
-      for (const [providerId, unimplementedProvider] of this.unimplementedProviders) {
+      for (const [_providerId, unimplementedProvider] of this.unimplementedProviders) { // eslint-disable-line @typescript-eslint/no-unused-vars
         const stats = unimplementedProvider.getUnimplementedStats();
-        if (stats.totalCalls > 0) {
+        if ((stats.totalCalls as number) > 0) {
           activeProviders.push(unimplementedProvider);
         }
       }
@@ -198,8 +209,8 @@ export class EnhancedProviderManager extends ProviderManager {
   /**
    * Get enhanced statistics including unimplemented provider usage
    */
-  public getEnhancedStats(): any {
-    const baseStats = (this as any).metrics; // Access private field from parent
+  public getEnhancedStats(): UnknownObject {
+    const baseStats = (this as UnknownObject).metrics; // Access private field from parent
     const unimplementedStats = this.unimplementedFactory.getStats();
 
     return {
@@ -223,14 +234,14 @@ export class EnhancedProviderManager extends ProviderManager {
   /**
    * Get unimplemented provider statistics
    */
-  public getUnimplementedProviderStats(providerId?: string): any {
+  public getUnimplementedProviderStats(providerId?: string): UnknownObject | null {
     if (providerId) {
       const provider = this.unimplementedProviders.get(providerId);
       return provider ? provider.getUnimplementedStats() : null;
     }
 
     // Return stats for all unimplemented providers
-    const allStats: Record<string, any> = {};
+    const allStats: Record<string, UnknownObject> = {};
     for (const [id, provider] of this.unimplementedProviders) {
       allStats[id] = provider.getUnimplementedStats();
     }

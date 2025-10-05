@@ -382,7 +382,7 @@ export class TimeSeriesIndexEngine extends EventEmitter implements LogQueryEngin
     
     for (const entry of entries) {
       // 基于关键字段生成唯一键
-      const key = `${entry.timestamp}-${entry.moduleId}-${entry.level}-${entry.message}`;
+      const key = `${(entry as any).timestamp}-${entry.moduleId}-${entry.level}-${entry.message}`;
       
       if (!seen.has(key)) {
         seen.add(key);

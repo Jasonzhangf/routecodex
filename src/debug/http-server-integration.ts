@@ -29,8 +29,8 @@ export class HttpServerDebugIntegration {
     protocol: string;
   };
   private config: DebugAdapterConfig;
-  private requestMiddleware?: (request: any, next: Function) => Promise<any>;
-  private responseMiddleware?: (response: any, next: Function) => Promise<any>;
+  private requestMiddleware?: (request: unknown, next: Function) => Promise<any>;
+  private responseMiddleware?: (response: unknown, next: Function) => Promise<any>;
 
   /**
    * Constructor
@@ -85,24 +85,25 @@ export class HttpServerDebugIntegration {
    */
   private setupMiddleware(): void {
     // Request middleware
-    this.requestMiddleware = async (request: any, next: Function) => {
+    this.requestMiddleware = async (request: unknown, next: Function) => {
       const startTime = Date.now();
+      const req = request as any;
 
       try {
         // Create debug request
         const debugRequest: DebugHttpRequest = {
           id: DebugUtils.generateId('http_req'),
-          method: request.method || 'GET',
-          url: request.url || '/',
-          headers: this.sanitizeHeaders(request.headers || {}),
-          body: this.sanitizeBody(request.body),
-          params: this.extractParams(request),
-          query: this.extractQuery(request),
+          method: req.method || 'GET',
+          url: req.url || '/',
+          headers: this.sanitizeHeaders(req.headers || {}),
+          body: this.sanitizeBody(req.body),
+          params: this.extractParams(req),
+          query: this.extractQuery(req),
           timestamp: startTime,
           metadata: {
-            remoteAddress: this.extractRemoteAddress(request),
-            userAgent: this.extractUserAgent(request),
-            originalUrl: request.originalUrl || request.url
+            remoteAddress: this.extractRemoteAddress(req),
+            userAgent: this.extractUserAgent(req),
+            originalUrl: req.originalUrl || req.url
           }
         };
 
@@ -110,7 +111,7 @@ export class HttpServerDebugIntegration {
         await this.httpAdapter!.captureRequest(debugRequest);
 
         // Add debug info to request for later use
-        request._debug = {
+        req._debug = {
           id: debugRequest.id,
           startTime,
           debugRequest
@@ -125,23 +126,24 @@ export class HttpServerDebugIntegration {
     };
 
     // Response middleware
-    this.responseMiddleware = async (response: any, next: Function) => {
+    this.responseMiddleware = async (response: unknown, next: Function) => {
+      const res = response as any;
       try {
-        const request = response.req || response.request;
+        const request = res.req || res.request;
         const debugInfo = request?._debug;
 
         if (debugInfo) {
           // Create debug response
           const debugResponse: DebugHttpResponse = {
             requestId: debugInfo.id,
-            status: response.statusCode || response.status || 200,
-            headers: this.sanitizeHeaders(response.getHeaders ? response.getHeaders() : response.headers || {}),
-            body: this.sanitizeBody(response.body),
+            status: res.statusCode || res.status || 200,
+            headers: this.sanitizeHeaders(res.getHeaders ? res.getHeaders() : res.headers || {}),
+            body: this.sanitizeBody(res.body),
             responseTime: Date.now() - debugInfo.startTime,
             timestamp: Date.now(),
             metadata: {
-              contentType: response.get('content-type') || response.headers?.['content-type'],
-              contentLength: response.get('content-length') || response.headers?.['content-length']
+              contentType: res.get('content-type') || res.headers?.['content-type'],
+              contentLength: res.get('content-length') || res.headers?.['content-length']
             }
           };
 
@@ -161,8 +163,8 @@ export class HttpServerDebugIntegration {
   /**
    * Get Express middleware for request interception
    */
-  getRequestMiddleware(): (req: any, res: any, next: Function) => void {
-    return async (req: any, res: any, next: Function) => {
+  getRequestMiddleware(): (req: unknown, res: unknown, next: Function) => void {
+    return async (req: unknown, res: unknown, next: Function) => {
       if (!this.requestMiddleware) {
         return next();
       }
@@ -180,47 +182,50 @@ export class HttpServerDebugIntegration {
   /**
    * Get Express middleware for response interception
    */
-  getResponseMiddleware(): (req: any, res: any, next: Function) => void {
-    return async (req: any, res: any, next: Function) => {
+  getResponseMiddleware(): (req: unknown, res: unknown, next: Function) => void {
+    return async (req: unknown, res: unknown, next: Function) => {
       if (!this.responseMiddleware) {
         return next();
       }
 
+      const resObj = res as any;
+
       // Store original end method
-      const originalEnd = res.end;
-      const originalJson = res.json;
-      const originalSend = res.send;
+      const originalEnd = resObj.end;
+      const originalJson = resObj.json;
+      const originalSend = resObj.send;
 
       // Override end method
-      res.end = function(chunk?: any, encoding?: any) {
+      resObj.end = function(chunk?: any, encoding?: unknown) {
         const result = originalEnd.call(this, chunk, encoding);
 
         // Call response middleware
-        if (res._debugResponseMiddleware) {
-          res._debugResponseMiddleware(res, () => Promise.resolve()).catch(console.warn);
+        if (resObj._debugResponseMiddleware) {
+          resObj._debugResponseMiddleware(resObj, () => Promise.resolve()).catch(console.warn);
         }
 
         return result;
       };
 
       // Override json method
-      res.json = function(body: any) {
-        const result = originalJson.call(this, body);
-        this.body = body;
+      resObj.json = function(obj: any) {
+        const result = originalJson.call(this, obj);
+        if (resObj._debugResponseMiddleware) {
+          resObj._debugResponseMiddleware(resObj, () => Promise.resolve()).catch(console.warn);
+        }
         return result;
       };
 
       // Override send method
-      res.send = function(body: any) {
-        const result = originalSend.call(this, body);
-        this.body = body;
+      resObj.send = function(obj: any) {
+        const result = originalSend.call(this, obj);
+        if (resObj._debugResponseMiddleware) {
+          resObj._debugResponseMiddleware(resObj, () => Promise.resolve()).catch(console.warn);
+        }
         return result;
       };
 
-      // Store response middleware reference
-      res._debugResponseMiddleware = this.responseMiddleware;
-
-      next();
+      return next();
     };
   }
 
@@ -228,25 +233,25 @@ export class HttpServerDebugIntegration {
    * Get HTTP server wrapper for debugging
    */
   getServerWrapper(): {
-    onRequest: (listener: (request: any, response: any) => void) => void;
-    onConnection: (listener: (socket: any) => void) => void;
+    onRequest: (listener: (request: unknown, response: unknown) => void) => void;
+    onConnection: (listener: (socket: unknown) => void) => void;
     onClose: (listener: () => void) => void;
     onError: (listener: (error: Error) => void) => void;
   } {
     return {
-      onRequest: (listener: (request: any, response: any) => void) => {
+      onRequest: (listener: (request: unknown, response: unknown) => void) => {
         // Wrap request listener with debugging
-        const wrappedListener = async (request: any, response: any) => {
+        const wrappedListener = async (request: unknown, response: unknown) => {
           const startTime = Date.now();
 
           try {
             // Create debug request
             const debugRequest: DebugHttpRequest = {
               id: DebugUtils.generateId('http_req'),
-              method: request.method || 'GET',
-              url: request.url || '/',
-              headers: this.sanitizeHeaders(request.headers || {}),
-              body: this.sanitizeBody(request.body),
+              method: (request as any).method || 'GET',
+              url: (request as any).url || '/',
+              headers: this.sanitizeHeaders((request as any).headers || {}),
+              body: this.sanitizeBody((request as any).body),
               params: {},
               query: {},
               timestamp: startTime,
@@ -260,7 +265,7 @@ export class HttpServerDebugIntegration {
             await this.httpAdapter!.captureRequest(debugRequest);
 
             // Store debug info
-            request._debug = {
+            (request as any)._debug = {
               id: debugRequest.id,
               startTime,
               debugRequest
@@ -281,7 +286,7 @@ export class HttpServerDebugIntegration {
         return wrappedListener;
       },
 
-      onConnection: (listener: (socket: any) => void) => {
+      onConnection: (listener: (socket: unknown) => void) => {
         return listener;
       },
 
@@ -298,29 +303,30 @@ export class HttpServerDebugIntegration {
   /**
    * Setup response capture for raw HTTP responses
    */
-  private setupResponseCapture(response: any, requestId: string, startTime: number): void {
+  private setupResponseCapture(response: unknown, requestId: string, startTime: number): void {
     const bodyChunks: Buffer[] = [];
-    const originalWrite = response.write;
-    const originalEnd = response.end;
+    const responseObj = response as any;
+    const originalWrite = responseObj.write;
+    const originalEnd = responseObj.end;
     // Override write method to capture response body
-    response.write = (chunk: any, encoding?: any) => {
+    responseObj.write = (chunk: unknown, encoding?: unknown) => {
       if (chunk) {
         if (Buffer.isBuffer(chunk)) {
           bodyChunks.push(chunk);
         } else {
-          bodyChunks.push(Buffer.from(chunk, encoding || 'utf8'));
+          bodyChunks.push(Buffer.from(chunk as any, encoding as any || 'utf8'));
         }
       }
-      return originalWrite.call(response, chunk, encoding);
+      return originalWrite.call(responseObj, chunk, encoding);
     };
 
     // Override end method to capture final response
-    response.end = (chunk?: any, encoding?: any) => {
+    responseObj.end = (chunk?: any, encoding?: unknown) => {
       if (chunk) {
         if (Buffer.isBuffer(chunk)) {
           bodyChunks.push(chunk);
         } else {
-          bodyChunks.push(Buffer.from(chunk, encoding || 'utf8'));
+          bodyChunks.push(Buffer.from(chunk as any, encoding as any || 'utf8'));
         }
       }
 
@@ -329,14 +335,14 @@ export class HttpServerDebugIntegration {
       // Create debug response
       const debugResponse: DebugHttpResponse = {
         requestId,
-        status: response.statusCode || 200,
-        headers: this.sanitizeHeaders(response._headers || response.headers || {}),
+        status: responseObj.statusCode || 200,
+        headers: this.sanitizeHeaders(responseObj._headers || responseObj.headers || {}),
         body: this.sanitizeBody(body),
         responseTime: Date.now() - startTime,
         timestamp: Date.now(),
         metadata: {
-          contentType: response._headers?.['content-type'] || response.headers?.['content-type'],
-          contentLength: response._headers?.['content-length'] || response.headers?.['content-length']
+          contentType: responseObj._headers?.['content-type'] || responseObj.headers?.['content-type'],
+          contentLength: responseObj._headers?.['content-length'] || responseObj.headers?.['content-length']
         }
       };
 
@@ -344,7 +350,7 @@ export class HttpServerDebugIntegration {
       this.httpAdapter!.captureResponse(debugResponse).catch(console.warn);
 
       // Call original end method
-      return originalEnd.call(response, chunk, encoding);
+      return originalEnd.call(responseObj, chunk, encoding);
     };
   }
 
@@ -377,7 +383,7 @@ export class HttpServerDebugIntegration {
   /**
    * Sanitize body for logging
    */
-  private sanitizeBody(body: any): any {
+  private sanitizeBody(body: unknown): unknown {
     if (!body) {
       return undefined;
     }
@@ -411,9 +417,10 @@ export class HttpServerDebugIntegration {
   /**
    * Extract parameters from request
    */
-  private extractParams(request: any): Record<string, string> {
-    if (request.params) {
-      return request.params;
+  private extractParams(request: unknown): Record<string, string> {
+    const req = request as any;
+    if (req.params) {
+      return req.params;
     }
     return {};
   }
@@ -421,9 +428,10 @@ export class HttpServerDebugIntegration {
   /**
    * Extract query parameters from request
    */
-  private extractQuery(request: any): Record<string, string> {
-    if (request.query) {
-      return request.query;
+  private extractQuery(request: unknown): Record<string, string> {
+    const req = request as any;
+    if (req.query) {
+      return req.query;
     }
     return {};
   }
@@ -431,20 +439,23 @@ export class HttpServerDebugIntegration {
   /**
    * Extract remote address from request
    */
-  private extractRemoteAddress(request: any): string {
-    return request.ip ||
-           request.connection?.remoteAddress ||
-           request.socket?.remoteAddress ||
-           request.info?.remoteAddress ||
+  private extractRemoteAddress(request: unknown): string {
+    const req = request as any;
+    return req.ip ||
+           req.connection?.remoteAddress ||
+           req.socket?.remoteAddress ||
+           req.info?.remoteAddress ||
            'unknown';
   }
 
   /**
    * Extract user agent from request
    */
-  private extractUserAgent(request: any): string {
-    return request.headers?.['user-agent'] ||
-           request.headers?.['User-Agent'] ||
+  private extractUserAgent(request: unknown): string {
+    const req = request as any;
+    return req.headers?.['user-agent'] ||
+           req.get?.('user-agent') ||
+           req.info?.userAgent ||
            'unknown';
   }
 

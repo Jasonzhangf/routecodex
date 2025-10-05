@@ -553,7 +553,7 @@ export abstract class BaseDebugAdapter implements DebugAdapter {
    */
   protected publishEvent(
     eventType: DebugSystemEvent | string,
-    data: any,
+    data: unknown,
     position: 'start' | 'middle' | 'end' = 'middle'
   ): void {
     try {
@@ -567,7 +567,7 @@ export abstract class BaseDebugAdapter implements DebugAdapter {
         data: {
           adapterId: this.id,
           adapterType: this.type,
-          ...data
+          ...(data && typeof data === 'object' ? data : {})
         }
       });
     } catch (error) {

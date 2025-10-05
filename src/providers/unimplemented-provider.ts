@@ -8,8 +8,14 @@ import {
   BaseProvider,
   type ProviderResponse,
   type ProviderHealth,
+  type ProviderStats,
 } from '../providers/base-provider.js';
+import {
+  type OpenAIModel,
+  type ModelConfig,
+} from '../server/types.js';
 import { UnimplementedModuleFactory } from '../modules/unimplemented-module-factory.js';
+import type { UnknownObject } from '../types/common-types.js';
 import { type UnimplementedModuleConfig } from '../modules/unimplemented-module.js';
 import {
   type ProviderConfig,
@@ -155,7 +161,9 @@ export class UnimplementedProvider extends BaseProvider {
   /**
    * Get available models - returns empty list for unimplemented provider
    */
-  public async getModels(): Promise<any[]> {
+  public async getModels(): Promise<OpenAIModel[]> {
+    // Return empty array since provider is not implemented
+    return [];
     const callerInfo = this.config.trackCallerInfo
       ? {
           callerId: 'get-models',
@@ -188,7 +196,7 @@ export class UnimplementedProvider extends BaseProvider {
   /**
    * Get model configuration - returns undefined for unimplemented provider
    */
-  public getModelConfig(modelId: string): any {
+  public getModelConfig(modelId: string): ModelConfig | undefined {
     // Log the check but don't create full response for performance
     if (this.config.logUnimplementedCalls) {
       this.unimplementedModule
@@ -198,7 +206,7 @@ export class UnimplementedProvider extends BaseProvider {
         .catch(() => {}); // Silently handle logging errors
     }
 
-    return undefined;
+    return undefined; // No config available for unimplemented provider
   }
 
   /**
@@ -214,19 +222,18 @@ export class UnimplementedProvider extends BaseProvider {
   }
 
   /**
-   * Get provider statistics - includes unimplemented module stats
+   * Get provider statistics
    */
-  public getStats(): any {
+  public getStats(): ProviderStats {
     const baseStats = super.getStats();
-    const unimplementedStats = this.unimplementedModule?.getStats() || {};
-
-    return {
-      ...baseStats,
-      unimplementedCalls: unimplementedStats.totalCalls || 0,
-      lastUnimplementedCall: unimplementedStats.lastCallTime,
-      firstUnimplementedCall: unimplementedStats.firstCallTime,
-      callerHistory: unimplementedStats.callerInfo || [],
+    const unimplementedStats = (this.unimplementedModule?.getStats() as UnknownObject) || {};
+    const extended: UnknownObject = {
+      ...baseStats as unknown as UnknownObject,
+      unimplementedCalls: (unimplementedStats.totalCalls as number) || 0,
+      lastUnimplementedCall: unimplementedStats.lastCallTime as string,
+      firstUnimplementedCall: unimplementedStats.firstCallTime as string,
     };
+    return extended as unknown as ProviderStats;
   }
 
   /**
@@ -265,8 +272,8 @@ export class UnimplementedProvider extends BaseProvider {
   /**
    * Get unimplemented module stats
    */
-  public getUnimplementedStats(): any {
-    return this.unimplementedModule?.getStats() || {};
+  public getUnimplementedStats(): UnknownObject {
+    return (this.unimplementedModule?.getStats() as UnknownObject) || {};
   }
 
   /**

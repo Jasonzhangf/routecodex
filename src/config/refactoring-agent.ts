@@ -351,7 +351,7 @@ export class ConfigurationManager {
   /**
    * 解析路由目标池
    */
-  private parseRouteTargets(routingConfig: any): RouteTargetPool {
+  private parseRouteTargets(routingConfig: unknown): RouteTargetPool {
     const routeTargets: RouteTargetPool = {};
 
     for (const [routeName, targets] of Object.entries(routingConfig)) {
@@ -394,7 +394,7 @@ export class ConfigurationManager {
   /**
    * 解析流水线配置
    */
-  private parsePipelineConfigs(virtualRouterConfig: any): PipelineConfigs {
+  private parsePipelineConfigs(virtualRouterConfig: unknown): PipelineConfigs {
     const pipelineConfigs: PipelineConfigs = {};
 
     for (const [providerId, providerConfig] of Object.entries(virtualRouterConfig.providers)) {
@@ -732,7 +732,7 @@ export class ConfigMerger {
   mergeConfigs(
     systemConfig: ModulesConfig,
     userConfig: UserConfig,
-    parsedUserConfig: any
+    parsedUserConfig: unknown
   ): MergedConfig {
     const mergedModules = this.mergeModules(systemConfig.modules, parsedUserConfig.moduleConfigs);
 
@@ -794,7 +794,7 @@ export class ConfigMerger {
   /**
    * 深度合并对象
    */
-  private deepMerge(target: any, source: any): any {
+  private deepMerge(target: unknown, source: unknown): unknown {
     if (typeof target !== 'object' || target === null) {
       return source;
     }
@@ -908,7 +908,7 @@ export class VirtualRouterModule extends BaseModule {
   /**
    * 路由请求
    */
-  async routeRequest(request: any, routeName: string = 'default'): Promise<any> {
+  async routeRequest(request: unknown, routeName: string = 'default'): Promise<any> {
     try {
       // 获取可用目标
       const targets = this.routeTargets[routeName];
@@ -958,7 +958,7 @@ export class VirtualRouterModule extends BaseModule {
   /**
    * 执行请求
    */
-  private async executeRequest(request: any, pipelineConfig: PipelineConfig): Promise<any> {
+  private async executeRequest(request: unknown, pipelineConfig: PipelineConfig): Promise<any> {
     // TODO: 实现实际的请求执行逻辑
     console.log(\`🔄 Executing request to \${pipelineConfig.provider.baseURL}\`);
 
@@ -980,7 +980,7 @@ export class VirtualRouterModule extends BaseModule {
   /**
    * 获取状态
    */
-  getStatus(): any {
+  getStatus(): unknown {
     return {
       status: this.isModuleRunning() ? 'running' : 'stopped',
       routeTargets: Object.keys(this.routeTargets),
@@ -1001,7 +1001,7 @@ class ProtocolManager {
     this.outputProtocol = config.outputProtocol;
   }
 
-  async convertRequest(request: any, fromProtocol: string, toProtocol: string): Promise<any> {
+  async convertRequest(request: unknown, fromProtocol: string, toProtocol: string): Promise<any> {
     if (fromProtocol === toProtocol) {
       return request;
     }
@@ -1011,7 +1011,7 @@ class ProtocolManager {
     return request;
   }
 
-  async convertResponse(response: any, fromProtocol: string, toProtocol: string): Promise<any> {
+  async convertResponse(response: unknown, fromProtocol: string, toProtocol: string): Promise<any> {
     if (fromProtocol === toProtocol) {
       return response;
     }
@@ -1021,7 +1021,7 @@ class ProtocolManager {
     return response;
   }
 
-  getStatus(): any {
+  getStatus(): unknown {
     return {
       inputProtocol: this.inputProtocol,
       outputProtocol: this.outputProtocol
@@ -1063,7 +1063,7 @@ class LoadBalancer {
     return targets[nextIndex];
   }
 
-  getStatus(): any {
+  getStatus(): unknown {
     return {
       strategy: 'round-robin',
       currentIndex: Object.fromEntries(this.currentIndex)
@@ -1357,7 +1357,7 @@ export class PipelineConfigManager {
       provider: config.provider,
       model: config.model,
       protocols: config.protocols,
-      execute: async (request: any) => {
+      execute: async (request: unknown) => {
         // 模拟流水线执行
         return {
           id: 'pipeline-response-' + Date.now(),
@@ -1438,7 +1438,7 @@ export class ProtocolManager {
   /**
    * 转换请求
    */
-  async convertRequest(request: any, fromProtocol: string, toProtocol: string): Promise<any> {
+  async convertRequest(request: unknown, fromProtocol: string, toProtocol: string): Promise<any> {
     if (fromProtocol === toProtocol) {
       return request;
     }
@@ -1456,7 +1456,7 @@ export class ProtocolManager {
   /**
    * 转换响应
    */
-  async convertResponse(response: any, fromProtocol: string, toProtocol: string): Promise<any> {
+  async convertResponse(response: unknown, fromProtocol: string, toProtocol: string): Promise<any> {
     if (fromProtocol === toProtocol) {
       return response;
     }
@@ -1492,18 +1492,18 @@ export class ProtocolManager {
 
 // 协议转换器接口
 interface ProtocolConverter {
-  convertRequest(request: any): Promise<any>;
-  convertResponse(response: any): Promise<any>;
+  convertRequest(request: unknown): Promise<any>;
+  convertResponse(response: unknown): Promise<any>;
 }
 
 // OpenAI to Anthropic 转换器
 class OpenAIToAnthropicConverter implements ProtocolConverter {
-  async convertRequest(request: any): Promise<any> {
+  async convertRequest(request: unknown): Promise<any> {
     // 将OpenAI格式转换为Anthropic格式
     const anthropicRequest = {
       model: request.model,
       max_tokens: request.max_tokens || 1024,
-      messages: request.messages.map((msg: any) => ({
+      messages: request.messages.map((msg: unknown) => ({
         role: msg.role === 'system' ? 'assistant' : msg.role,
         content: msg.content
       }))
@@ -1513,7 +1513,7 @@ class OpenAIToAnthropicConverter implements ProtocolConverter {
     return anthropicRequest;
   }
 
-  async convertResponse(response: any): Promise<any> {
+  async convertResponse(response: unknown): Promise<any> {
     // 将Anthropic格式转换为OpenAI格式
     const openaiResponse = {
       id: response.id,
@@ -1537,12 +1537,12 @@ class OpenAIToAnthropicConverter implements ProtocolConverter {
 
 // Anthropic to OpenAI 转换器
 class AnthropicToOpenAIConverter implements ProtocolConverter {
-  async convertRequest(request: any): Promise<any> {
+  async convertRequest(request: unknown): Promise<any> {
     // 将Anthropic格式转换为OpenAI格式
     const openaiRequest = {
       model: request.model,
       max_tokens: request.max_tokens || 1024,
-      messages: request.messages.map((msg: any) => ({
+      messages: request.messages.map((msg: unknown) => ({
         role: msg.role === 'assistant' ? 'system' : msg.role,
         content: typeof msg.content === 'string' ? msg.content : msg.content.text
       }))
@@ -1552,7 +1552,7 @@ class AnthropicToOpenAIConverter implements ProtocolConverter {
     return openaiRequest;
   }
 
-  async convertResponse(response: any): Promise<any> {
+  async convertResponse(response: unknown): Promise<any> {
     // 将OpenAI格式转换为Anthropic格式
     const anthropicResponse = {
       id: response.id,
@@ -1600,7 +1600,7 @@ export class ConfigManagerModule extends BaseModule {
   private compatibilityEngine: CompatibilityEngine;
   private configMerger: ConfigMerger;
   private authFileResolver: AuthFileResolver;
-  private configWatcher: any;
+  private configWatcher: unknown;
 
   constructor(configPath?: string) {
     super({
@@ -1623,7 +1623,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * 初始化模块
    */
-  async initialize(config: any): Promise<void> {
+  async initialize(config: unknown): Promise<void> {
     console.log('🔄 Initializing Config Manager Module...');
 
     try {
@@ -1725,7 +1725,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * 保存合并配置
    */
-  private async saveMergedConfig(mergedConfig: any): Promise<void> {
+  private async saveMergedConfig(mergedConfig: unknown): Promise<void> {
     try {
       const configDir = this.mergedConfigPath.split('/').slice(0, -1).join('/');
       await fs.mkdir(configDir, { recursive: true });
@@ -1751,7 +1751,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * 获取状态
    */
-  getStatus(): any {
+  getStatus(): unknown {
     return {
       status: this.isModuleRunning() ? 'running' : 'stopped',
       configPath: this.configPath,
@@ -1780,9 +1780,9 @@ export class MergedConfigGenerator {
    * 生成合并配置
    */
   generateMergedConfig(
-    systemConfig: any,
-    userConfig: any,
-    parsedUserConfig: any
+    systemConfig: unknown,
+    userConfig: unknown,
+    parsedUserConfig: unknown
   ): MergedConfig {
     return {
       version: '1.0.0',
@@ -1796,11 +1796,11 @@ export class MergedConfigGenerator {
    * 修复：用户配置应该完全覆盖系统配置，而不是合并
    */
   private generateModuleConfigs(
-    systemConfig: any,
-    userConfig: any,
-    parsedUserConfig: any
-  ): any {
-    const moduleConfigs: any = {};
+    systemConfig: unknown,
+    userConfig: unknown,
+    parsedUserConfig: unknown
+  ): unknown {
+    const moduleConfigs: unknown = {};
 
     // 首先复制系统模块的基础配置（不包含具体的路由/模型配置）
     for (const [moduleName, systemModule] of Object.entries(systemConfig.modules)) {
@@ -1854,7 +1854,7 @@ export class MergedConfigGenerator {
   /**
    * 深度合并对象
    */
-  private deepMerge(target: any, source: any): any {
+  private deepMerge(target: unknown, source: unknown): unknown {
     if (typeof target !== 'object' || target === null) {
       return source;
     }
@@ -1879,8 +1879,8 @@ export class MergedConfigGenerator {
   /**
    * 提取系统基础配置（不包含具体的路由/模型配置）
    */
-  private extractSystemBaseConfig(systemConfig: any): any {
-    const baseConfig: any = {};
+  private extractSystemBaseConfig(systemConfig: unknown): unknown {
+    const baseConfig: unknown = {};
     
     // 只保留基础框架配置，不包含具体的路由目标、模型列表等
     if (systemConfig.moduleType !== undefined) {
@@ -1908,8 +1908,8 @@ export class MergedConfigGenerator {
   /**
    * 提取系统关键配置（端口、主机等不应被用户配置覆盖的设置）
    */
-  private extractSystemCriticalConfig(systemConfig: any): any {
-    const criticalConfig: any = {};
+  private extractSystemCriticalConfig(systemConfig: unknown): unknown {
+    const criticalConfig: unknown = {};
     
     // 保留关键的系统配置，不应被用户配置覆盖
     if (systemConfig.port !== undefined) {
@@ -1947,8 +1947,8 @@ export class MergedConfigGenerator {
   /**
    * 提取用户补充配置（不包含会覆盖系统关键配置的设置）
    */
-  private extractUserSupplementalConfig(userConfig: any): any {
-    const supplementalConfig: any = {};
+  private extractUserSupplementalConfig(userConfig: unknown): unknown {
+    const supplementalConfig: unknown = {};
     
     // 只添加用户的补充配置，不覆盖系统关键配置
     for (const [key, value] of Object.entries(userConfig)) {
@@ -2112,7 +2112,7 @@ function getDefaultModulesConfigPath(): string {
  * Main application class
  */
 class RouteCodexApp {
-  private httpServer: any;
+  private httpServer: unknown;
   private configManager: ConfigManagerModule;
   private modulesConfigPath: string;
   private _isRunning: boolean = false;
@@ -2199,7 +2199,7 @@ class RouteCodexApp {
   /**
    * Get server status
    */
-  getStatus(): any {
+  getStatus(): unknown {
     if (this.httpServer) {
       return this.httpServer.getStatus();
     }
@@ -2776,7 +2776,7 @@ export interface UserConfig {
     autoReload?: boolean;
     watchInterval?: number;
   };
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 /**
@@ -2818,8 +2818,8 @@ export interface ConfigValidationResult {
  * 协议转换器接口
  */
 export interface ProtocolConverter {
-  convertRequest(request: any): Promise<any>;
-  convertResponse(response: any): Promise<any>;
+  convertRequest(request: unknown): Promise<any>;
+  convertResponse(response: unknown): Promise<any>;
 }
 
 /**
@@ -2828,7 +2828,7 @@ export interface ProtocolConverter {
 export interface LoadBalancer {
   selectTarget(targets: RouteTarget[]): Promise<RouteTarget | null>;
   updateMetrics(targetId: string, success: boolean): void;
-  getStatus(): any;
+  getStatus(): unknown;
 }
 
 /**

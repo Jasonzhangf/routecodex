@@ -192,7 +192,7 @@ export interface UserConfig {
     autoReload?: boolean;
     watchInterval?: number;
   };
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 /**
@@ -234,8 +234,8 @@ export interface ConfigValidationResult {
  * 协议转换器接口
  */
 export interface ProtocolConverter {
-  convertRequest(request: any): Promise<any>;
-  convertResponse(response: any): Promise<any>;
+  convertRequest(request: unknown): Promise<any>;
+  convertResponse(response: unknown): Promise<any>;
 }
 
 /**
@@ -244,7 +244,7 @@ export interface ProtocolConverter {
 export interface LoadBalancer {
   selectTarget(targets: RouteTarget[]): Promise<RouteTarget | null>;
   updateMetrics(targetId: string, success: boolean): void;
-  getStatus(): any;
+  getStatus(): unknown;
 }
 
 /**

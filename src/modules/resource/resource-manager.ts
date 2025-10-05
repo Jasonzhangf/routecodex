@@ -126,7 +126,7 @@ export class ResourceManager {
 
   // Resource metrics
   private resourceMetrics: Map<string, ResourceMetrics> = new Map();
-  private metricsHistory: Map<string, any[]> = new Map();
+  private metricsHistory: Map<string, unknown[]> = new Map();
 
   // Performance tracking
   private performanceMetrics: Map<string, any> = new Map();

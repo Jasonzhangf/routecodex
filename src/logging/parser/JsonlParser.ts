@@ -218,24 +218,25 @@ export class JsonlLogParser {
   /**
    * 验证日志格式
    */
-  validate(entry: any): entry is UnifiedLogEntry {
+  validate(entry: unknown): entry is UnifiedLogEntry {
     if (!entry || typeof entry !== 'object') {
       return false;
     }
     
     // 检查必需字段
-    if (!entry.timestamp || !entry.level || !entry.moduleId || !entry.moduleType) {
+    const ent = entry as any;
+    if (!ent.timestamp || !ent.level || !ent.moduleId || !ent.moduleType) {
       return false;
     }
     
     // 检查日志级别
-    if (!Object.values(LogLevel).includes(entry.level)) {
+    if (!Object.values(LogLevel).includes(ent.level)) {
       return false;
     }
     
     // 检查时间戳
     if (this.config.validateTimestamps) {
-      if (typeof entry.timestamp !== 'number' || entry.timestamp <= 0) {
+      if (typeof ent.timestamp !== 'number' || ent.timestamp <= 0) {
         return false;
       }
       
@@ -244,7 +245,7 @@ export class JsonlLogParser {
       const oneYearAgo = now - 365 * 24 * 60 * 60 * 1000;
       const oneHourLater = now + 60 * 60 * 1000;
       
-      if (entry.timestamp < oneYearAgo || entry.timestamp > oneHourLater) {
+      if (ent.timestamp < oneYearAgo || ent.timestamp > oneHourLater) {
         return false;
       }
     }
@@ -463,12 +464,12 @@ export class JsonlLogParser {
     // 时间范围
     if (!stats.timeRange) {
       stats.timeRange = {
-        start: entry.timestamp,
-        end: entry.timestamp
+        start: (entry as any).timestamp,
+        end: (entry as any).timestamp
       };
     } else {
-      stats.timeRange.start = Math.min(stats.timeRange.start, entry.timestamp);
-      stats.timeRange.end = Math.max(stats.timeRange.end, entry.timestamp);
+      stats.timeRange.start = Math.min(stats.timeRange.start, (entry as any).timestamp);
+      stats.timeRange.end = Math.max(stats.timeRange.end, (entry as any).timestamp);
     }
   }
 

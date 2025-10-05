@@ -37,7 +37,7 @@ interface TimeAggregation {
 interface CallerAggregation {
   callerFrequency: Record<string, number>;
   callerMethods: Record<string, Set<string>>;
-  callerContexts: Record<string, any[]>;
+  callerContexts: Record<string, unknown[]>;
 }
 
 /**
@@ -118,7 +118,7 @@ export class UnimplementedModuleAnalytics {
       const moduleStats = module.getStats();
       const calledModule = calledModules.find(cm => cm.moduleId === moduleId);
 
-      const moduleInfo = module.getModuleInfo();
+      const moduleInfo = (module as any).getInfo ? (module as any).getInfo() : { name: String(moduleId), type: 'unimplemented' };
       const daysSinceFirstCall = this.calculateDaysSince(moduleStats.firstCallTime);
       const averageCallsPerDay =
         daysSinceFirstCall > 0 ? moduleStats.totalCalls / daysSinceFirstCall : 0;
@@ -201,7 +201,7 @@ export class UnimplementedModuleAnalytics {
   public getCallerAnalysis(): {
     topCallers: Array<{ callerId: string; callCount: number; uniqueModules: number }>;
     callerPatterns: Record<string, string[]>;
-    callerContexts: Record<string, any[]>;
+    callerContexts: Record<string, unknown[]>;
   } {
     if (!this.config.enableCallerAnalysis) {
       return { topCallers: [], callerPatterns: {}, callerContexts: {} };

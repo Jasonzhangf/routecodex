@@ -4,6 +4,7 @@
  */
 
 import { type ModuleInfo } from 'rcc-basemodule';
+import type { UnknownObject } from '../types/common-types.js';
 
 /**
  * OpenAI API request types
@@ -39,7 +40,7 @@ export interface OpenAIChatCompletionRequest {
     function: {
       name: string;
       description?: string;
-      parameters: Record<string, any>;
+      parameters: Record<string, UnknownObject>;
     };
   }>;
   tool_choice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
@@ -117,7 +118,7 @@ export interface ServerConfig {
     categories?: string[];
     categoryPath?: string;
   };
-  providers: Record<string, any>;
+  providers: Record<string, UnknownObject>;
   routing?: {
     strategy: 'round-robin' | 'weighted' | 'least-loaded';
     timeout?: number;
@@ -171,7 +172,7 @@ export interface RequestContext {
   method: string;
   url: string;
   headers: Record<string, string>;
-  body: any;
+  body: UnknownObject;
   userAgent?: string;
   ip?: string;
   userId?: string;
@@ -183,7 +184,7 @@ export interface ResponseContext {
   timestamp: number;
   status: number;
   headers: Record<string, string>;
-  body: any;
+  body: UnknownObject;
   duration: number;
   providerId?: string;
   modelId?: string;
@@ -200,22 +201,22 @@ export interface ResponseContext {
 export interface ServerError extends Error {
   code: string;
   status: number;
-  context?: Record<string, any>;
-  providerError?: any;
+  context?: Record<string, UnknownObject>;
+  providerError?: UnknownObject;
 }
 
 export class RouteCodexError extends Error implements ServerError {
   public code: string;
   public status: number;
-  public context?: Record<string, any>;
-  public providerError?: any;
+  public context?: Record<string, UnknownObject>;
+  public providerError?: UnknownObject;
 
   constructor(
     message: string,
     code: string,
     status: number = 500,
-    context?: Record<string, any>,
-    providerError?: any
+    context?: Record<string, UnknownObject>,
+    providerError?: UnknownObject
   ) {
     super(message);
     this.name = 'RouteCodexError';
@@ -265,7 +266,7 @@ export interface ServerEvent {
   type: 'request_start' | 'request_end' | 'error' | 'provider_change' | 'config_update';
   timestamp: number;
   moduleId: string;
-  data: any;
+  data: UnknownObject;
 }
 
 /**
@@ -302,7 +303,7 @@ export interface IRouter {
 /**
  * Middleware types
  */
-export type MiddlewareFunction = (req: any, res: any, next: (err?: any) => void) => void;
+export type MiddlewareFunction = (req: UnknownObject, res: UnknownObject, next: (err?: UnknownObject) => void) => void;
 
 export interface MiddlewareConfig {
   name: string;
@@ -328,9 +329,9 @@ export interface RateLimitInfo {
 export interface RateLimitConfig {
   windowMs: number;
   max: number;
-  skip?: (req: any) => boolean;
-  keyGenerator?: (req: any) => string;
-  handler?: (req: any, res: any) => void;
+  skip?: (req: UnknownObject) => boolean;
+  keyGenerator?: (req: UnknownObject) => string;
+  handler?: (req: UnknownObject, res: UnknownObject) => void;
 }
 
 /**

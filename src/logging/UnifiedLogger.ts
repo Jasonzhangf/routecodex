@@ -258,7 +258,7 @@ export class UnifiedModuleLogger extends EventEmitter implements UnifiedLogger {
     this.emit('cleanup_completed');
   }
 
-  private writeLog(level: LogLevel, message: string, data?: any, error?: Error): void {
+  private writeLog(level: LogLevel, message: string, data?: unknown, error?: Error): void {
     // 检查日志级别
     if (LOG_LEVEL_PRIORITY[level] < LOG_LEVEL_PRIORITY[this.config.logLevel]) {
       return;
@@ -272,8 +272,8 @@ export class UnifiedModuleLogger extends EventEmitter implements UnifiedLogger {
     const currentMemoryUsage = memUsage.heapUsed;
 
     let duration: number | undefined;
-    if (data && typeof data === 'object' && data.duration) {
-      duration = data.duration;
+    if (data && typeof data === 'object' && (data as any).duration) {
+      duration = (data as any).duration;
     }
 
     const entry: UnifiedLogEntry = {
@@ -283,7 +283,7 @@ export class UnifiedModuleLogger extends EventEmitter implements UnifiedLogger {
       moduleType: this.config.moduleType,
       ...this.context,
       message: this.standardizeMessage(message),
-      data: sanitizedData,
+      data: sanitizedData as Record<string, unknown> | undefined,
       error: formattedError,
       duration,
       memoryUsage: currentMemoryUsage,
@@ -308,20 +308,24 @@ export class UnifiedModuleLogger extends EventEmitter implements UnifiedLogger {
     this.emit('log_written', entry);
   }
 
-  private sanitizeData(data: any): any {
-    if (!data) {
-      return data;
+  private sanitizeData(data: unknown): Record<string, unknown> | undefined {
+    if (data === undefined || data === null) {
+      return undefined;
     }
 
     try {
       const sanitized = JSON.parse(JSON.stringify(data));
-      return this.removeSensitiveData(sanitized);
-    } catch (error) {
-      return { error: 'Failed to sanitize data', originalType: typeof data };
+      const cleaned = this.removeSensitiveData(sanitized);
+      if (cleaned && typeof cleaned === 'object') {
+        return cleaned as Record<string, unknown>;
+      }
+      return { value: cleaned } as Record<string, unknown>;
+    } catch {
+      return { error: 'Failed to sanitize data', originalType: typeof data } as unknown as Record<string, unknown>;
     }
   }
 
-  private removeSensitiveData(obj: any): any {
+  private removeSensitiveData(obj: unknown): unknown {
     if (typeof obj !== 'object' || obj === null) {
       return obj;
     }
@@ -356,7 +360,7 @@ export class UnifiedModuleLogger extends EventEmitter implements UnifiedLogger {
     return message.trim().substring(0, 10000);
   }
 
-  private generateTags(level: LogLevel, message: string, data?: any): string[] {
+  private generateTags(level: LogLevel, message: string, data?: unknown): string[] {
     const tags: string[] = [level];
 
     // 基于消息内容生成标签
@@ -381,12 +385,12 @@ export class UnifiedModuleLogger extends EventEmitter implements UnifiedLogger {
       this.stats.errorCount++;
     }
 
-    this.stats.earliestLog = Math.min(this.stats.earliestLog || entry.timestamp, entry.timestamp);
-    this.stats.latestLog = Math.max(this.stats.latestLog || entry.timestamp, entry.timestamp);
+    this.stats.earliestLog = Math.min(this.stats.earliestLog || (entry as any).timestamp, (entry as any).timestamp);
+    this.stats.latestLog = Math.max(this.stats.latestLog || (entry as any).timestamp, (entry as any).timestamp);
   }
 
   private writeToConsole(entry: UnifiedLogEntry): void {
-    const timestamp = new Date(entry.timestamp).toISOString();
+    const timestamp = new Date((entry as any).timestamp).toISOString();
     const levelStr = entry.level.toUpperCase().padEnd(5);
     const moduleInfo = `[${entry.moduleId}]`;
 

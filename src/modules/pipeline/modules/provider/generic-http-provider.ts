@@ -68,7 +68,7 @@ export class GenericHTTPProvider implements ProviderModule {
   // Debug enhancement properties
   private debugEventBus: DebugEventBus | null = null;
   private isDebugEnhanced = false;
-  private providerMetrics: Map<string, { values: unknown[]; lastUpdated: number }> = new Map();
+  private providerMetrics: Map<string, { values: any[]; lastUpdated: number }> = new Map();
   private requestHistory: UnknownObject[] = [];
   private errorHistory: UnknownObject[] = [];
   private maxHistorySize = 50;
@@ -157,7 +157,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Process outgoing response - Not typically used for providers
    */
-  async processOutgoing(response: unknown): Promise<unknown> {
+  async processOutgoing(response: any): Promise<unknown> {
     return response;
   }
 
@@ -609,7 +609,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Handle provider errors
    */
-  private async handleProviderError(error: unknown, request: unknown): Promise<void> {
+  private async handleProviderError(error: any, request: any): Promise<void> {
     const providerError = this.createProviderError(error, 'unknown');
 
     this.logger.logModule(this.id, 'provider-error', {
@@ -638,7 +638,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Create provider error
    */
-  private createProviderError(error: unknown, type: ProviderError['type']): ProviderError {
+  private createProviderError(error: any, type: ProviderError['type']): ProviderError {
     const errorObj = error instanceof Error ? error : new Error(String(error));
     const providerError: ProviderError = new Error(errorObj.message) as ProviderError;
     providerError.type = type;
@@ -723,7 +723,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Record provider metric
    */
-  private recordProviderMetric(operation: string, data: unknown): void {
+  private recordProviderMetric(operation: string, data: any): void {
     if (!this.providerMetrics.has(operation)) {
       this.providerMetrics.set(operation, {
         values: [],
@@ -834,8 +834,8 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Get provider metrics
    */
-  private getProviderMetrics(): Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> {
-    const metrics: Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> = {};
+  private getProviderMetrics(): Record<string, { count: number; lastUpdated: number; recentValues: any[] }> {
+    const metrics: Record<string, { count: number; lastUpdated: number; recentValues: any[] }> = {};
 
     for (const [operation, metric] of this.providerMetrics.entries()) {
       metrics[operation] = {
@@ -862,13 +862,13 @@ export class GenericHTTPProvider implements ProviderModule {
     return this.isInitialized;
   }
 
-  private isSharedPipelineRequest(value: unknown): value is SharedPipelineRequest {
+  private isSharedPipelineRequest(value: any): value is SharedPipelineRequest {
     if (!value || typeof value !== 'object') {return false;}
     const v = value as Record<string, unknown>;
     return 'data' in v && 'route' in v && 'metadata' in v && 'debug' in v;
   }
 
-  private extractModel(request: unknown): string | undefined {
+  private extractModel(request: any): string | undefined {
     if (this.isSharedPipelineRequest(request)) {
       const data = request.data as UnknownObject;
       return (data as { model?: string }).model;
@@ -876,11 +876,11 @@ export class GenericHTTPProvider implements ProviderModule {
     return (request as { model?: string })?.model;
   }
 
-  private extractHasMessages(request: unknown): boolean {
+  private extractHasMessages(request: any): boolean {
     if (this.isSharedPipelineRequest(request)) {
       const data = request.data as UnknownObject;
-      return Array.isArray((data as { messages?: unknown[] }).messages);
+      return Array.isArray((data as { messages?: any[] }).messages);
     }
-    return Array.isArray((request as { messages?: unknown[] })?.messages);
+    return Array.isArray((request as { messages?: any[] })?.messages);
   }
 }

@@ -282,25 +282,25 @@ export class CompatibilityLogger {
       });
   }
 
-  log = (message: string, ...args: any[]): void => {
+  log = (message: string, ...args: unknown[]): void => {
     this.logger.info(message, { args });
   };
 
-  info = (message: string, ...args: any[]): void => {
+  info = (message: string, ...args: unknown[]): void => {
     this.logger.info(message, { args });
   };
 
-  warn = (message: string, ...args: any[]): void => {
+  warn = (message: string, ...args: unknown[]): void => {
     this.logger.warn(message, { args });
   };
 
-  error = (message: string, ...args: any[]): void => {
+  error = (message: string, ...args: unknown[]): void => {
     const error = args.find(arg => arg instanceof Error);
     const data = error ? { args: args.filter(arg => arg !== error) } : { args };
     this.logger.error(message, error, data);
   };
 
-  debug = (message: string, ...args: any[]): void => {
+  debug = (message: string, ...args: unknown[]): void => {
     this.logger.debug(message, { args });
   };
 }

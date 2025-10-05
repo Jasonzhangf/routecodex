@@ -423,7 +423,6 @@ export class PipelineModuleRegistryImpl implements PipelineModuleRegistry {
       };
 
       // Initialize enhancement factory with proper debug center
-      // @ts-ignore - DebugCenter interface mismatch, using mock object
       this.enhancementFactory = new ModuleEnhancementFactory(debugCenter as any);
 
       // Register this registry for enhancement

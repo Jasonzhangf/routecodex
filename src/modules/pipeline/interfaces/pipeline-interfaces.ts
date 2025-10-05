@@ -54,12 +54,12 @@ export interface PipelineModule {
   /**
    * Process incoming request
    */
-  processIncoming(request: unknown): Promise<unknown>;
+  processIncoming(request: any): Promise<unknown>;
 
   /**
    * Process outgoing response
    */
-  processOutgoing(response: unknown): Promise<unknown>;
+  processOutgoing(response: any): Promise<unknown>;
 
   /**
    * Clean up resources
@@ -204,12 +204,12 @@ export interface LLMSwitchModule extends PipelineModule {
   /**
    * Transform request to target protocol
    */
-  transformRequest(request: unknown): Promise<unknown>;
+  transformRequest(request: any): Promise<unknown>;
 
   /**
    * Transform response from target protocol
    */
-  transformResponse(response: unknown): Promise<unknown>;
+  transformResponse(response: any): Promise<unknown>;
 }
 
 /**
@@ -227,7 +227,7 @@ export interface WorkflowModule extends PipelineModule {
   /**
    * Handle streaming response
    */
-  handleStreamingResponse(response: unknown): Promise<unknown>;
+  handleStreamingResponse(response: any): Promise<unknown>;
 
   /**
    * Process incoming request
@@ -245,7 +245,7 @@ export interface CompatibilityModule extends PipelineModule {
   /**
    * Apply compatibility transformations
    */
-  applyTransformations(data: unknown, rules: TransformationRule[]): Promise<unknown>;
+  applyTransformations(data: any, rules: TransformationRule[]): Promise<unknown>;
 
   /**
    * Process incoming request (DTO)
@@ -263,7 +263,7 @@ export interface ProviderModule extends PipelineModule {
   /**
    * Send request to provider
    */
-  sendRequest(request: unknown): Promise<unknown>;
+  sendRequest(request: any): Promise<unknown>;
 
   /**
    * Check provider health
@@ -332,7 +332,7 @@ export interface ModuleDependencies {
  */
 export interface PipelineDebugLogger {
   logModule(module: string, action: string, data?: LogData): void;
-  logError(error: unknown, context?: LogData): void;
+  logError(error: any, context?: LogData): void;
   logDebug(message: string, data?: LogData): void;
   logPipeline(pipelineId: string, action: string, data?: LogData): void;
   logRequest(requestId: string, action: string, data?: LogData): void;
@@ -361,7 +361,7 @@ export interface PipelineDebugLogger {
     providerRequestCount: number;
   };
   clearLogs(): void;
-  exportLogs(format?: 'json' | 'csv'): unknown;
+  exportLogs(format?: 'json' | 'csv'): any;
   log(level: DebugLogEntry['level'], pipelineId: string, category: string, message: string, data?: LogData): void;
 }
 

@@ -8,8 +8,9 @@
 import type { CompatibilityModule, ModuleConfig, ModuleDependencies, TransformationRule } from '../../interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 import type { TransformationEngine } from '../../utils/transformation-engine.js';
-import type { DebugEventBus } from "rcc-debugcenter";
-import { PipelineDebugLogger } from '../../utils/debug-logger.js';
+import { DebugEventBus } from "rcc-debugcenter";
+import type { PipelineDebugLogger as PipelineDebugLoggerInterface } from '../../interfaces/pipeline-interfaces.js';
+import type { UnknownObject, LogData } from '../../../../types/common-types.js';
 
 /**
  * Qwen Compatibility Module
@@ -21,15 +22,15 @@ export class QwenCompatibility implements CompatibilityModule {
   readonly rules: TransformationRule[];
 
   private isInitialized = false;
-  private logger: PipelineDebugLogger;
-  private transformationEngine: TransformationEngine | null = null; // TransformationEngine instance
+  private logger: PipelineDebugLoggerInterface;
+  private transformationEngine: any; // TransformationEngine instance
 
   // Debug enhancement properties
   private debugEventBus: DebugEventBus | null = null;
   private isDebugEnhanced = false;
-  private compatibilityMetrics: Map<string, { values: unknown[]; lastUpdated: number }> = new Map();
-  private transformationHistory: unknown[] = [];
-  private errorHistory: unknown[] = [];
+  private compatibilityMetrics: Map<string, { values: any[]; lastUpdated: number }> = new Map();
+  private transformationHistory: any[] = [];
+  private errorHistory: any[] = [];
   private maxHistorySize = 50;
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
@@ -59,7 +60,7 @@ export class QwenCompatibility implements CompatibilityModule {
   /**
    * Record compatibility metric
    */
-  private recordCompatibilityMetric(operation: string, data: unknown): void {
+  private recordCompatibilityMetric(operation: string, data: any): void {
     if (!this.compatibilityMetrics.has(operation)) {
       this.compatibilityMetrics.set(operation, {
         values: [],
@@ -80,7 +81,7 @@ export class QwenCompatibility implements CompatibilityModule {
   /**
    * Add to transformation history
    */
-  private addToTransformationHistory(transformation: unknown): void {
+  private addToTransformationHistory(transformation: any): void {
     this.transformationHistory.push(transformation);
 
     // Keep only recent history
@@ -92,7 +93,7 @@ export class QwenCompatibility implements CompatibilityModule {
   /**
    * Add to error history
    */
-  private addToErrorHistory(error: unknown): void {
+  private addToErrorHistory(error: any): void {
     this.errorHistory.push(error);
 
     // Keep only recent history
@@ -104,7 +105,7 @@ export class QwenCompatibility implements CompatibilityModule {
   /**
    * Publish debug event
    */
-  private publishDebugEvent(type: string, data: unknown): void {
+  private publishDebugEvent(type: string, data: any): void {
     if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
 
     try {
@@ -129,7 +130,7 @@ export class QwenCompatibility implements CompatibilityModule {
   /**
    * Get debug status with enhanced information
    */
-  getDebugStatus(): unknown {
+  getDebugStatus(): any {
     const baseStatus = {
       compatibilityId: this.id,
       isInitialized: this.isInitialized,
@@ -153,7 +154,7 @@ export class QwenCompatibility implements CompatibilityModule {
   /**
    * Get detailed debug information
    */
-  private getDebugInfo(): unknown {
+  private getDebugInfo(): any {
     return {
       compatibilityId: this.id,
       compatibilityType: this.type,
@@ -169,7 +170,7 @@ export class QwenCompatibility implements CompatibilityModule {
   /**
    * Get compatibility metrics
    */
-  private getCompatibilityMetrics(): unknown {
+  private getCompatibilityMetrics(): any {
     const metrics: Record<string, unknown> = {};
 
     for (const [operation, metric] of this.compatibilityMetrics.entries()) {
@@ -268,7 +269,7 @@ export class QwenCompatibility implements CompatibilityModule {
   /**
    * Process incoming request - Transform OpenAI format to Qwen format
    */
-  async processIncoming(requestParam: unknown): Promise<SharedPipelineRequest> {
+  async processIncoming(requestParam: any): Promise<SharedPipelineRequest> {
     const startTime = Date.now();
     const transformId = `transform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -276,19 +277,23 @@ export class QwenCompatibility implements CompatibilityModule {
       throw new Error('Qwen Compatibility module is not initialized');
     }
 
-    const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam;
-    const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
-    const request = isDto ? (dto!.data as Record<string, unknown>) : (requestParam as Record<string, unknown>);
+    const isDto = this.isSharedPipelineRequest(requestParam);
+    const dto = isDto ? requestParam as SharedPipelineRequest : null;
+    const request = isDto ? (dto!.data as unknown) : requestParam;
 
     // Debug: Record transformation start
     if (this.isDebugEnhanced) {
+      const reqObj = (request as Record<string, unknown>) || {};
+      const hasTools = !!(reqObj as Record<string, unknown>).tools;
+      const model = (reqObj as Record<string, unknown>).model as unknown;
+      const msgs = Array.isArray(reqObj.messages as unknown) ? (reqObj.messages as unknown[]) : [];
       this.recordCompatibilityMetric('transformation_start', {
         transformId,
         originalFormat: 'openai',
         targetFormat: 'qwen',
-        hasTools: !!(request as Record<string, unknown>).tools,
-        model: (request as Record<string, unknown>).model,
-        messageCount: (request as Record<string, unknown>).messages ? Array.isArray((request as Record<string, unknown>).messages) ? (request as Record<string, unknown>).messages.length : 0 : 0,
+        hasTools,
+        model,
+        messageCount: msgs.length,
         timestamp: startTime
       });
       this.publishDebugEvent('transformation_start', {
@@ -302,23 +307,24 @@ export class QwenCompatibility implements CompatibilityModule {
       this.logger.logModule(this.id, 'transform-request-start', {
         originalFormat: 'openai',
         targetFormat: 'qwen',
-        hasTools: !!(request as Record<string, unknown>).tools
+        hasTools: !!(request as UnknownObject).tools
       });
 
       // Apply transformation rules
       if (!this.transformationEngine) {
         throw new Error('Transformation engine not initialized');
       }
-      const transformed = await this.transformationEngine.transform(request, this.rules);
+      const engine = this.transformationEngine as any;
+      const transformed = await engine.transform(request, this.rules);
 
-      const converted = this.convertToQwenRequest(transformed.data || transformed);
+      const converted = this.convertToQwenRequest(this.extractTransformationResult(transformed));
 
       const totalTime = Date.now() - startTime;
 
       // Debug: Record transformation completion
       if (this.isDebugEnhanced) {
-        const transformedObj = typeof transformed === 'object' && transformed !== null ? transformed as Record<string, unknown> : {};
-        const convertedObj = typeof converted === 'object' && converted !== null ? converted as Record<string, unknown> : {};
+        const transformedObj = typeof transformed === 'object' && transformed !== null ? transformed as UnknownObject : {};
+        const convertedObj = typeof converted === 'object' && converted !== null ? converted as UnknownObject : {};
         
         this.recordCompatibilityMetric('transformation_complete', {
           transformId,
@@ -338,7 +344,7 @@ export class QwenCompatibility implements CompatibilityModule {
           endTime: Date.now(),
           totalTime,
           success: true,
-          transformationCount: (transformed as Record<string, unknown>).transformationCount || 0
+          transformationCount: (transformed as UnknownObject).transformationCount || 0
         });
         this.publishDebugEvent('transformation_complete', {
           transformId,
@@ -349,8 +355,8 @@ export class QwenCompatibility implements CompatibilityModule {
         });
       }
 
-      const transformedObj = typeof transformed === 'object' && transformed !== null ? transformed as Record<string, unknown> : {};
-      const convertedObj = typeof converted === 'object' && converted !== null ? converted as Record<string, unknown> : {};
+      const transformedObj = typeof transformed === 'object' && transformed !== null ? transformed as UnknownObject : {};
+      const convertedObj = typeof converted === 'object' && converted !== null ? converted as UnknownObject : {};
       
       this.logger.logModule(this.id, 'transform-request-success', {
         transformationCount: typeof transformedObj.transformationCount === 'number' ? transformedObj.transformationCount : 0,
@@ -394,7 +400,7 @@ export class QwenCompatibility implements CompatibilityModule {
   /**
    * Process outgoing response - Transform Qwen format to OpenAI format
    */
-  async processOutgoing(response: unknown): Promise<unknown> {
+  async processOutgoing(response: any): Promise<unknown> {
     const startTime = Date.now();
     const responseId = `response_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -404,12 +410,15 @@ export class QwenCompatibility implements CompatibilityModule {
 
     // Debug: Record response transformation start
     if (this.isDebugEnhanced) {
+      const respObj = (response as Record<string, unknown>) || {};
+      const dataObj = (respObj.data as Record<string, unknown> | undefined);
+      const hasChoices = Array.isArray((dataObj?.choices as unknown)) || Array.isArray((respObj.choices as unknown));
       this.recordCompatibilityMetric('response_transform_start', {
         responseId,
         originalFormat: 'qwen',
         targetFormat: 'openai',
-        hasData: !!(response as Record<string, unknown>).data,
-        hasChoices: !!((response as Record<string, unknown>).data && (response as Record<string, unknown>).data.choices || (response as Record<string, unknown>).choices),
+        hasData: !!dataObj,
+        hasChoices,
         timestamp: startTime
       });
       this.publishDebugEvent('response_transform_start', {
@@ -441,7 +450,7 @@ export class QwenCompatibility implements CompatibilityModule {
           transformedResponseId: typeof transformedObj.id === 'string' ? transformedObj.id : undefined,
           hasChoices: Array.isArray(transformedObj.choices),
           choiceCount: choices.length,
-          hasToolCalls: choices.some((c: unknown) => {
+          hasToolCalls: choices.some((c: any) => {
             if (c && typeof c === 'object') {
               const choiceObj = c as Record<string, unknown>;
               if (choiceObj.message && typeof choiceObj.message === 'object') {
@@ -627,7 +636,7 @@ export class QwenCompatibility implements CompatibilityModule {
   /**
    * Apply compatibility transformations
    */
-  async applyTransformations(data: unknown, rules: TransformationRule[]): Promise<unknown> {
+  async applyTransformations(data: any, rules: TransformationRule[]): Promise<unknown> {
     const startTime = Date.now();
     const transformId = `custom_transform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -651,7 +660,8 @@ export class QwenCompatibility implements CompatibilityModule {
       if (!this.transformationEngine) {
         throw new Error('Transformation engine not initialized');
       }
-      const result = await this.transformationEngine.transform(data, rules);
+      const engine = this.transformationEngine as any;
+      const result = await engine.transform(data, rules);
       const totalTime = Date.now() - startTime;
 
       // Debug: Record custom transformation completion
@@ -775,7 +785,7 @@ export class QwenCompatibility implements CompatibilityModule {
   /**
    * Transform Qwen response to OpenAI format
    */
-  private transformQwenResponseToOpenAI(response: unknown): unknown {
+  private transformQwenResponseToOpenAI(response: any): any {
     // Handle different response formats
     if (response && typeof response === 'object' && (response as Record<string, unknown>).data) {
       // Provider response format
@@ -789,7 +799,7 @@ export class QwenCompatibility implements CompatibilityModule {
   /**
    * Transform provider response to OpenAI format
    */
-  private transformProviderResponse(data: unknown): unknown {
+  private transformProviderResponse(data: any): any {
     const dataObj = typeof data === 'object' && data !== null ? data as Record<string, unknown> : {};
     
     const transformed: Record<string, unknown> = {
@@ -807,7 +817,7 @@ export class QwenCompatibility implements CompatibilityModule {
 
     // Transform choices
     if (dataObj.choices && Array.isArray(dataObj.choices)) {
-      transformed.choices = dataObj.choices.map((choice: unknown) => {
+      transformed.choices = dataObj.choices.map((choice: any) => {
         const choiceObj = typeof choice === 'object' && choice !== null ? choice as Record<string, unknown> : {};
         const messageObj = typeof choiceObj.message === 'object' && choiceObj.message !== null ? choiceObj.message as Record<string, unknown> : {};
         
@@ -834,7 +844,7 @@ export class QwenCompatibility implements CompatibilityModule {
   /**
    * Transform tool calls from Qwen format to OpenAI format
    */
-  private transformToolCalls(toolCalls: unknown[] | undefined): unknown[] {
+  private transformToolCalls(toolCalls: any[] | undefined): any[] {
     if (!toolCalls || !Array.isArray(toolCalls)) {
       return [];
     }
@@ -873,7 +883,7 @@ export class QwenCompatibility implements CompatibilityModule {
   /**
    * Convert OpenAI-style request into Qwen API payload
    */
-  private convertToQwenRequest(request: unknown): unknown {
+  private convertToQwenRequest(request: any): any {
     if (!request || typeof request !== 'object') {
       return request;
     }
@@ -890,8 +900,9 @@ export class QwenCompatibility implements CompatibilityModule {
 
     // Convert messages -> input structure expected by Qwen portal API, but retain original messages field
     if (request && typeof request === 'object' && (request as Record<string, unknown>).messages && Array.isArray((request as Record<string, unknown>).messages)) {
-      qwenRequest.messages = (request as Record<string, unknown>).messages;
-      qwenRequest.input = (request as Record<string, unknown>).messages.map((message: unknown) => {
+      const msgs = (request as Record<string, unknown>).messages as unknown[];
+      qwenRequest.messages = msgs as unknown;
+      qwenRequest.input = msgs.map((message: any) => {
         const normalizedContent = this.normalizeMessageContent(message && typeof message === 'object' && (message as Record<string, unknown>).content ? (message as Record<string, unknown>).content : undefined);
         return {
           role: message && typeof message === 'object' && (message as Record<string, unknown>).role ? (message as Record<string, unknown>).role : 'user',
@@ -959,7 +970,7 @@ export class QwenCompatibility implements CompatibilityModule {
   /**
    * Normalize message content into Qwen's expected format
    */
-  private normalizeMessageContent(content: unknown): unknown[] {
+  private normalizeMessageContent(content: any): any[] {
     if (content === undefined || content === null) {
       return [{ text: '' }];
     }
@@ -996,5 +1007,27 @@ export class QwenCompatibility implements CompatibilityModule {
     }
 
     return [{ text: String(content) }];
+  }
+
+  /**
+   * Type guard for SharedPipelineRequest
+   */
+  private isSharedPipelineRequest(obj: any): obj is SharedPipelineRequest {
+    return obj !== null && 
+           typeof obj === 'object' && 
+           'data' in obj && 
+           'route' in obj &&
+           'metadata' in obj &&
+           'debug' in obj;
+  }
+
+  /**
+   * Extract transformation result from engine response
+   */
+  private extractTransformationResult(result: any): any {
+    if (result && typeof result === 'object' && 'data' in result) {
+      return (result as UnknownObject).data;
+    }
+    return result;
   }
 }

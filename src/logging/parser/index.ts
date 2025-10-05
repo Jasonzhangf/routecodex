@@ -47,11 +47,11 @@ export type {
   ValidationFix,
   CleaningResult,
   CleaningStats
-} from '../validator/DataValidator.js';
+} from '../validator/index.js';
 
 export { 
   DataValidatorAndCleaner
-} from '../validator/DataValidator.js';
+} from '../validator/index.js';
 
 /**
  * 完整的解析流程 - 一站式函数
@@ -184,8 +184,8 @@ export function quickValidateLogContent(content: string): Promise<boolean> {
       }
       
       // 动态导入避免循环依赖
-      import('../validator/DataValidator.js').then(module => {
-        const { DataValidatorAndCleaner } = module;
+      (async () => {
+        const { DataValidatorAndCleaner } = await import('../validator/DataValidator.js');
         const validator = new DataValidatorAndCleaner({ validationLevel: 'lenient' });
         
         for (const line of lines.slice(0, 5)) { // 只检查前5行
@@ -203,7 +203,7 @@ export function quickValidateLogContent(content: string): Promise<boolean> {
         }
         
         resolve(true);
-      }).catch(() => {
+      })().catch(() => {
         resolve(false);
       });
     } catch {

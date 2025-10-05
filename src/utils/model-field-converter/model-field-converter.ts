@@ -210,7 +210,7 @@ export class ModelFieldConverter {
           });
 
           // 统计错误分布
-          const errorType = result.errors?.[0] || 'unknown';
+          const errorType = result.errors?.[0] || 'any';
           errorDistribution[errorType] = (errorDistribution[errorType] || 0) + 1;
         }
       } catch (error) {
@@ -220,7 +220,7 @@ export class ModelFieldConverter {
           timestamp: new Date()
         });
 
-        const errorType = error instanceof Error ? error.constructor.name : 'unknown';
+        const errorType = error instanceof Error ? error.constructor.name : 'any';
         errorDistribution[errorType] = (errorDistribution[errorType] || 0) + 1;
       }
     }

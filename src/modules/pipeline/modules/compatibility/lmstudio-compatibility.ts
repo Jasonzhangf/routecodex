@@ -9,7 +9,8 @@
 import type { CompatibilityModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 import type { TransformationRule } from '../../interfaces/pipeline-interfaces.js';
-import { PipelineDebugLogger } from '../../utils/debug-logger.js';
+import type { PipelineDebugLogger as PipelineDebugLoggerInterface } from '../../interfaces/pipeline-interfaces.js';
+import type { UnknownObject, LogData } from '../../../../types/common-types.js';
 
 /**
  * LM Studio Compatibility Module
@@ -21,11 +22,11 @@ export class LMStudioCompatibility implements CompatibilityModule {
   readonly rules: TransformationRule[];
 
   private isInitialized = false;
-  private logger: PipelineDebugLogger;
+  private logger: PipelineDebugLoggerInterface;
   private transformationEngine: any; // TransformationEngine instance
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
-    this.logger = dependencies.logger as any;
+    this.logger = dependencies.logger;
     this.id = `compatibility-${Date.now()}`;
     this.config = config;
     this.rules = this.initializeTransformationRules();
@@ -65,11 +66,12 @@ export class LMStudioCompatibility implements CompatibilityModule {
     }
 
     try {
-      const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam;
-      const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
-      const request = isDto ? (dto!.data as any) : (requestParam as any);
+      const isDto = this.isSharedPipelineRequest(requestParam);
+      const dto = isDto ? requestParam as SharedPipelineRequest : null;
+      const request = isDto ? (dto!.data as unknown) : requestParam;
 
-      this.logger.logModule(this.id, 'processing-request-start', { hasTools: !!request?.tools, model: request?.model });
+      const requestObj = request as UnknownObject;
+      this.logger.logModule(this.id, 'processing-request-start', { hasTools: !!requestObj?.tools, model: requestObj?.model });
 
       // Apply transformation rules to request
       const transformedResult = await this.applyTransformations(
@@ -78,7 +80,7 @@ export class LMStudioCompatibility implements CompatibilityModule {
       );
 
       // Extract the actual transformed data from the result
-      const transformedRequest = transformedResult.data || transformedResult;
+      const transformedRequest = this.extractTransformationResult(transformedResult);
 
       this.logger.logModule(this.id, 'processing-request-complete', {
         transformationCount: this.getRequestTransformationRules().length
@@ -95,17 +97,18 @@ export class LMStudioCompatibility implements CompatibilityModule {
   /**
    * Process outgoing response - Apply reverse compatibility transformations
    */
-  async processOutgoing(response: any): Promise<any> {
+  async processOutgoing(response: any): Promise<unknown> {
     if (!this.isInitialized) {
       throw new Error('LM Studio Compatibility module is not initialized');
     }
 
     try {
-      const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
-      const payload = isDto ? (response as any).data : response;
+      const isDto = this.isPipelineResponse(response);
+      const payload = isDto ? (response as UnknownObject).data : response;
+      const payloadObj = payload as UnknownObject;
       this.logger.logModule(this.id, 'processing-response-start', {
-        hasToolCalls: !!payload?.tool_calls,
-        hasChoices: !!payload?.choices
+        hasToolCalls: !!payloadObj?.tool_calls,
+        hasChoices: !!payloadObj?.choices
       });
 
       // Apply transformation rules to response
@@ -115,13 +118,13 @@ export class LMStudioCompatibility implements CompatibilityModule {
       );
 
       // Extract the actual transformed data from the result
-      const transformedResponse = transformedResult.data || transformedResult;
+      const transformedResponse = this.extractTransformationResult(transformedResult);
 
       this.logger.logModule(this.id, 'processing-response-complete', {
         transformationCount: this.getResponseTransformationRules().length
       });
 
-      return isDto ? { ...(response as any), data: transformedResponse } : transformedResponse;
+      return isDto ? { ...(response as UnknownObject), data: transformedResponse } : transformedResponse;
 
     } catch (error) {
       this.logger.logModule(this.id, 'processing-response-error', { error });
@@ -132,13 +135,22 @@ export class LMStudioCompatibility implements CompatibilityModule {
   /**
    * Apply compatibility transformations
    */
-  async applyTransformations(data: any, rules: TransformationRule[]): Promise<any> {
+  async applyTransformations(data: any, rules: TransformationRule[]): Promise<unknown> {
     if (!rules || rules.length === 0) {
       return data;
     }
 
     try {
-      const result = await this.transformationEngine.transform(data, rules);
+      if (!this.transformationEngine || typeof this.transformationEngine !== 'object') {
+        throw new Error('Transformation engine not initialized');
+      }
+      
+      const engine = this.transformationEngine as UnknownObject;
+      if (typeof engine.transform !== 'function') {
+        throw new Error('Invalid transformation engine: missing transform method');
+      }
+      
+      const result = await engine.transform(data, rules);
 
       this.logger.logModule(this.id, 'transformations-applied', {
         ruleCount: rules.length,
@@ -201,7 +213,7 @@ export class LMStudioCompatibility implements CompatibilityModule {
       throw new Error('Invalid compatibility module type configuration');
     }
 
-    const moduleConfig = this.config.config;
+    const moduleConfig = this.config.config as UnknownObject;
     if (!moduleConfig) {
       throw new Error('LM Studio compatibility configuration is required');
     }
@@ -217,11 +229,11 @@ export class LMStudioCompatibility implements CompatibilityModule {
    * Initialize transformation rules
    */
   private initializeTransformationRules(): TransformationRule[] {
-    const moduleConfig = this.config.config;
+    const moduleConfig = this.config.config as UnknownObject;
     const rules: TransformationRule[] = [];
 
     // Add custom rules from configuration
-    if (moduleConfig.customRules) {
+    if (moduleConfig.customRules && Array.isArray(moduleConfig.customRules)) {
       rules.push(...moduleConfig.customRules);
     }
 
@@ -267,11 +279,11 @@ export class LMStudioCompatibility implements CompatibilityModule {
    * Get request transformation rules
    */
   private getRequestTransformationRules(): TransformationRule[] {
-    const moduleConfig = this.config.config;
+    const moduleConfig = this.config.config as UnknownObject;
     const rules = [...this.rules];
 
     // Add request-specific rules
-    if (moduleConfig.toolsEnabled) {
+    if (moduleConfig.toolsEnabled === true) {
       rules.push({
         id: 'tools-request-conversion',
         transform: 'mapping',
@@ -292,7 +304,7 @@ export class LMStudioCompatibility implements CompatibilityModule {
    * Get response transformation rules
    */
   private getResponseTransformationRules(): TransformationRule[] {
-    const moduleConfig = this.config.config;
+    const moduleConfig = this.config.config as UnknownObject;
     const rules = [...this.rules];
 
     // Add response-specific rules
@@ -385,5 +397,37 @@ export class LMStudioCompatibility implements CompatibilityModule {
     }
 
     return false;
+  }
+
+  /**
+   * Type guard for SharedPipelineRequest
+   */
+  private isSharedPipelineRequest(obj: any): obj is SharedPipelineRequest {
+    return obj !== null && 
+           typeof obj === 'object' && 
+           'data' in obj && 
+           'route' in obj &&
+           'metadata' in obj &&
+           'debug' in obj;
+  }
+
+  /**
+   * Type guard for pipeline response (has data and metadata)
+   */
+  private isPipelineResponse(obj: any): obj is UnknownObject {
+    return obj !== null && 
+           typeof obj === 'object' && 
+           'data' in obj && 
+           'metadata' in obj;
+  }
+
+  /**
+   * Extract transformation result from engine response
+   */
+  private extractTransformationResult(result: any): any {
+    if (result && typeof result === 'object' && 'data' in result) {
+      return (result as UnknownObject).data;
+    }
+    return result;
   }
 }

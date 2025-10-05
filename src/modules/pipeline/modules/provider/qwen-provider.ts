@@ -47,7 +47,7 @@ export class QwenProvider implements ProviderModule {
   // Debug enhancement properties
   private debugEventBus: DebugEventBus | null = null;
   private isDebugEnhanced = false;
-  private providerMetrics: Map<string, { values: unknown[]; lastUpdated: number }> = new Map();
+  private providerMetrics: Map<string, { values: any[]; lastUpdated: number }> = new Map();
   private requestHistory: UnknownObject[] = [];
   private authHistory: UnknownObject[] = [];
   private errorHistory: UnknownObject[] = [];
@@ -84,7 +84,7 @@ export class QwenProvider implements ProviderModule {
   /**
    * Record provider metric
    */
-  private recordProviderMetric(operation: string, data: unknown): void {
+  private recordProviderMetric(operation: string, data: any): void {
     if (!this.providerMetrics.has(operation)) {
       this.providerMetrics.set(operation, {
         values: [],
@@ -212,8 +212,8 @@ export class QwenProvider implements ProviderModule {
   /**
    * Get provider metrics
    */
-  private getProviderMetrics(): Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> {
-    const metrics: Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> = {};
+  private getProviderMetrics(): Record<string, { count: number; lastUpdated: number; recentValues: any[] }> {
+    const metrics: Record<string, { count: number; lastUpdated: number; recentValues: any[] }> = {};
 
     for (const [operation, metric] of this.providerMetrics.entries()) {
       metrics[operation] = {
@@ -377,7 +377,7 @@ export class QwenProvider implements ProviderModule {
 
       // Debug: Record request completion
       if (this.isDebugEnhanced) {
-        const choices = (processedResponse as { choices?: unknown[] }).choices;
+        const choices = (processedResponse as { choices?: any[] }).choices;
         const hasChoices = Array.isArray(choices) && choices.length > 0;
         const choiceCount = Array.isArray(choices) ? choices.length : 0;
         this.recordProviderMetric('request_complete', {
@@ -446,7 +446,7 @@ export class QwenProvider implements ProviderModule {
   /**
    * Process outgoing response - Not typically used for providers
    */
-  async processOutgoing(response: unknown): Promise<unknown> {
+  async processOutgoing(response: any): Promise<unknown> {
     // For providers, outgoing response processing is usually minimal
     // as they are the final stage in the pipeline
     return response;
@@ -768,7 +768,7 @@ export class QwenProvider implements ProviderModule {
         httpRequestId,
         endpoint,
         model: (request as { model?: string }).model,
-        hasTools: Array.isArray((request as { tools?: unknown[] }).tools) && (request as { tools?: unknown[] }).tools!.length > 0,
+        hasTools: Array.isArray((request as { tools?: any[] }).tools) && (request as { tools?: any[] }).tools!.length > 0,
         timestamp: startTime
       });
       this.publishDebugEvent('http_request_start', {
@@ -787,7 +787,7 @@ export class QwenProvider implements ProviderModule {
       const authHeader = this.oauth.getAuthorizationHeader();
       this.logger.logProviderRequest(this.id, 'request-start', {
         model: (request as { model?: string })?.model,
-        hasInput: Array.isArray((request as { input?: unknown[] })?.input),
+        hasInput: Array.isArray((request as { input?: any[] })?.input),
         keys: Object.keys((request as Record<string, unknown>) || {})
       });
       console.log('[QwenProvider] sending request payload:', JSON.stringify(request));
@@ -1146,7 +1146,7 @@ export class QwenProvider implements ProviderModule {
   /**
    * Handle provider errors
    */
-  private async handleProviderError(error: unknown, request: unknown): Promise<void> {
+  private async handleProviderError(error: any, request: any): Promise<void> {
     const providerError = this.createProviderError(error, 'unknown');
 
     this.logger.logModule(this.id, 'provider-error', {
@@ -1173,7 +1173,7 @@ export class QwenProvider implements ProviderModule {
   /**
    * Create provider error
    */
-  private createProviderError(error: unknown, type: ProviderError['type']): ProviderError {
+  private createProviderError(error: any, type: ProviderError['type']): ProviderError {
     const errorObj = error instanceof Error ? error : new Error(String(error));
     const providerError: ProviderError = new Error(errorObj.message) as ProviderError;
     providerError.type = type;
@@ -1212,13 +1212,13 @@ export class QwenProvider implements ProviderModule {
     }
   }
 
-  private isSharedPipelineRequest(value: unknown): value is SharedPipelineRequest {
+  private isSharedPipelineRequest(value: any): value is SharedPipelineRequest {
     if (!value || typeof value !== 'object') {return false;}
     const v = value as Record<string, unknown>;
     return 'data' in v && 'route' in v && 'metadata' in v && 'debug' in v;
   }
 
-  private extractModel(request: unknown): string | undefined {
+  private extractModel(request: any): string | undefined {
     if (this.isSharedPipelineRequest(request)) {
       const data = request.data as UnknownObject;
       return (data as { model?: string }).model;
@@ -1226,19 +1226,19 @@ export class QwenProvider implements ProviderModule {
     return (request as { model?: string })?.model;
   }
 
-  private extractHasMessages(request: unknown): boolean {
+  private extractHasMessages(request: any): boolean {
     if (this.isSharedPipelineRequest(request)) {
       const data = request.data as UnknownObject;
-      return Array.isArray((data as { messages?: unknown[] }).messages);
+      return Array.isArray((data as { messages?: any[] }).messages);
     }
-    return Array.isArray((request as { messages?: unknown[] })?.messages);
+    return Array.isArray((request as { messages?: any[] })?.messages);
   }
 
-  private extractHasTools(request: unknown): boolean {
+  private extractHasTools(request: any): boolean {
     if (this.isSharedPipelineRequest(request)) {
       const data = request.data as UnknownObject;
-      return Array.isArray((data as { tools?: unknown[] }).tools) && ((data as { tools?: unknown[] }).tools?.length || 0) > 0;
+      return Array.isArray((data as { tools?: any[] }).tools) && ((data as { tools?: any[] }).tools?.length || 0) > 0;
     }
-    return Array.isArray((request as { tools?: unknown[] })?.tools) && (((request as { tools?: unknown[] })?.tools?.length) || 0) > 0;
+    return Array.isArray((request as { tools?: any[] })?.tools) && (((request as { tools?: any[] })?.tools?.length) || 0) > 0;
   }
 }

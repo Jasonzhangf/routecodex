@@ -119,7 +119,7 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
       id: this.debugUtils.generateId(`module_debug_${context.id}`),
       context,
       type: 'custom',
-      content: filteredData,
+      content: filteredData as any,
       timestamp: Date.now(),
       metadata: {
         moduleId: this.moduleInfo.id,
@@ -264,14 +264,14 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
       moduleInfo: this.moduleInfo,
       methodHooks: allHookData,
       state,
-      events,
-      errors,
+      events: events as any[],
+      errors: errors as any[],
       content: {
         moduleInfo: this.moduleInfo,
         methodHooks: allHookData,
         state,
-        events,
-        errors
+        events: events as any[],
+        errors: errors as any[]
       }
     };
   }
@@ -368,7 +368,7 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
   /**
    * Get recent module events
    */
-  private async getRecentModuleEvents(): Promise<any[]> {
+  private async getRecentModuleEvents(): Promise<unknown[]> {
     // This would typically query the DebugEventBus for recent events
     // For now, return empty array
     return [];
@@ -377,7 +377,7 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
   /**
    * Get recent module errors
    */
-  private async getRecentModuleErrors(): Promise<any[]> {
+  private async getRecentModuleErrors(): Promise<unknown[]> {
     // This would typically query the ErrorHandlerRegistry for recent errors
     // For now, return empty array
     return [];
@@ -446,7 +446,7 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
   /**
    * Filter data for specific context
    */
-  private filterDataForContext(data: ModuleDebugData, context: DebugContext): any {
+  private filterDataForContext(data: ModuleDebugData, context: DebugContext): unknown {
     // Filter hook data for the specific context
     const filteredHookData = data.methodHooks.filter(hook =>
       !hook.metadata?.contextId || hook.metadata.contextId === context.id
@@ -501,7 +501,7 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
     originalMethod: Function,
     options: MethodHookOptions
   ): Function {
-    return async (...args: any[]): Promise<any> => {
+    return async (...args: unknown[]): Promise<any> => {
       const startTime = Date.now();
       const hookData: MethodHookData = {
         methodName,
@@ -553,19 +553,19 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
   /**
    * Sanitize parameters for logging
    */
-  private sanitizeParameters(params: any[], depth: number): any[] {
+  private sanitizeParameters(params: unknown[], depth: number): unknown[] {
     const actualDepth = depth || 3;
     return this.debugUtils.sanitizeData(params, {
       maxDepth: actualDepth,
       maxArrayLength: 10,
       maxStringLength: 100
-    });
+    }) as unknown as unknown[];
   }
 
   /**
    * Sanitize result for logging
    */
-  private sanitizeResult(result: any, depth: number): any {
+  private sanitizeResult(result: unknown, depth: number): unknown {
     const actualDepth = depth || 3;
     return this.debugUtils.sanitizeData(result, {
       maxDepth: actualDepth,
