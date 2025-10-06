@@ -57,6 +57,10 @@ jobs:
     - name: Run tests
       run: npm test
 
+    - name: Generate coverage (non-blocking)
+      if: matrix.node-version == '20.x'
+      run: npm run test:coverage || true
+
     - name: Build project
       run: npm run build
 
