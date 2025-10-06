@@ -15,6 +15,7 @@ import type {
   ProviderRequestOptions,
 } from '../../types/provider-types.js';
 import type { UnknownObject } from '../../../../types/common-types.js';
+import { createProviderError, isRetryableError } from './shared/provider-helpers.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { createQwenOAuth, QwenTokenStorage } from './qwen-oauth.js';
 import { DebugEventBus } from "rcc-debugcenter";
@@ -931,7 +932,7 @@ export class QwenProvider implements ProviderModule {
           });
         }
 
-        const err = this.createProviderError({
+        const err = createProviderError({
           message: `HTTP ${response.status}: ${errorText}`,
           status: response.status
         }, 'server');
@@ -1010,7 +1011,7 @@ export class QwenProvider implements ProviderModule {
         });
       }
 
-      const err = this.createProviderError(error, 'network');
+      const err = createProviderError(error, 'network');
       (err as any).details = {
         upstream: undefined,
         provider: {
@@ -1147,7 +1148,7 @@ export class QwenProvider implements ProviderModule {
    * Handle provider errors
    */
   private async handleProviderError(error: any, request: any): Promise<void> {
-    const providerError = this.createProviderError(error, 'unknown');
+    const providerError = createProviderError(error, 'unknown');
 
     this.logger.logModule(this.id, 'provider-error', {
       error: providerError,
@@ -1173,25 +1174,7 @@ export class QwenProvider implements ProviderModule {
   /**
    * Create provider error
    */
-  private createProviderError(error: any, type: ProviderError['type']): ProviderError {
-    const errorObj = error instanceof Error ? error : new Error(String(error));
-    const providerError: ProviderError = new Error(errorObj.message) as ProviderError;
-    providerError.type = type;
-    const errLike = error as { status?: number; statusCode?: number; details?: Record<string, unknown> };
-    providerError.statusCode = errLike.status ?? errLike.statusCode;
-    providerError.details = (errLike.details as Record<string, unknown> | undefined) ?? {};
-    providerError.retryable = this.isErrorRetryable(type);
-
-    return providerError;
-  }
-
-  /**
-   * Check if error is retryable
-   */
-  private isErrorRetryable(errorType: string): boolean {
-    const retryableTypes = ['network', 'timeout', 'rate_limit', 'server'];
-    return retryableTypes.includes(errorType);
-  }
+  // Provider error logic centralized in shared helpers
 
   /**
    * Set test mode

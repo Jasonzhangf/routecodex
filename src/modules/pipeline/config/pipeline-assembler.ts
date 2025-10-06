@@ -8,7 +8,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { homedir } from 'os';
+// import { homedir } from 'os';
 import { resolveInlineApiKey } from '../utils/inline-auth-resolver.js';
 import type { MergedConfig } from '../../../config/merged-config-types.js';
 import type {
@@ -25,6 +25,9 @@ export interface AssembledPipelines {
 }
 
 export class PipelineAssembler {
+  private static asRecord(v: unknown): Record<string, unknown> {
+    return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+  }
   /**
    * Assemble from a merged-config.json file path
    */
@@ -40,19 +43,27 @@ export class PipelineAssembler {
   /**
    * Assemble from an in-memory merged configuration object
    */
-  static async assemble(mergedConfig: any): Promise<AssembledPipelines> {
+  static async assemble(mergedConfig: unknown): Promise<AssembledPipelines> {
     // New logic: consume routeTargets/pipelineConfigs from compatibilityConfig (primary)
     // Fallbacks are kept temporarily for migration and will be removed after validation
-    const routeTargets = (mergedConfig?.compatibilityConfig?.routeTargets || {}) as Record<string, unknown[]>;
-    const pipelineConfigs = (mergedConfig?.compatibilityConfig?.pipelineConfigs || {}) as Record<string, any>;
+    const mc = this.asRecord(mergedConfig);
+    const cc = this.asRecord(mc.compatibilityConfig);
+    const routeTargets = (this.asRecord(cc.routeTargets)) as Record<string, unknown[]>;
+    const pipelineConfigs = (this.asRecord(cc.pipelineConfigs)) as Record<string, unknown>;
 
     // Normalized providers info from compatibility engine
-    const normalizedProviders: Record<string, any> =
-      (mergedConfig?.compatibilityConfig?.normalizedConfig?.virtualrouter?.providers as Record<string, any>) || {};
+    const normalizedProviders: Record<string, unknown> =
+      this.asRecord(
+        this.asRecord(
+          this.asRecord(cc.normalizedConfig).virtualrouter
+        ).providers
+      );
 
+    const modulesRec = this.asRecord(mc.modules);
+    const vrCfg = this.asRecord(this.asRecord(modulesRec.virtualrouter).config);
     const inputProtocol = String(
-      mergedConfig?.compatibilityConfig?.normalizedConfig?.virtualrouter?.inputProtocol ||
-      mergedConfig?.modules?.virtualrouter?.config?.inputProtocol ||
+      this.asRecord(this.asRecord(this.asRecord(cc.normalizedConfig).virtualrouter)).inputProtocol ||
+      vrCfg.inputProtocol ||
       'openai'
     ).toLowerCase();
 
@@ -61,11 +72,22 @@ export class PipelineAssembler {
       config: {}
     };
 
-    const buildPcFromNormalized = (provId: string, mdlId: string): any => {
-      const np = normalizedProviders[provId] || {};
-      const modelCfg = (np.models || {})[mdlId] || {};
-      const compat = modelCfg.compatibility || np.compatibility || null;
-      let apiKey = Array.isArray(np.apiKey) && np.apiKey.length ? String(np.apiKey[0]).trim() : '';
+    type PcShape = {
+      provider?: { type?: string; baseURL?: string; baseUrl?: string; auth?: unknown };
+      model?: { actualModelId?: string; maxTokens?: number; maxContext?: number };
+      protocols?: { input?: string; output?: string };
+      llmSwitch?: { type?: string; config?: Record<string, unknown>; enabled?: boolean };
+      workflow?: { type?: string; enabled?: boolean; config?: Record<string, unknown> };
+      compatibility?: { type?: string; config?: Record<string, unknown> };
+      keyConfig?: { actualKey?: string; keyType?: string };
+      __attachAuth?: () => Promise<void>;
+    };
+
+    const buildPcFromNormalized = (provId: string, mdlId: string): PcShape => {
+      const np = PipelineAssembler.asRecord(normalizedProviders[provId]);
+      const modelCfg = PipelineAssembler.asRecord(PipelineAssembler.asRecord(np.models)[mdlId]);
+      const compat = PipelineAssembler.asRecord(modelCfg.compatibility || np.compatibility);
+      let apiKey = Array.isArray(np.apiKey) && (np.apiKey as unknown[]).length ? String((np.apiKey as unknown[])[0]).trim() : '';
       const pid = String(provId || '').toLowerCase();
       const unifiedType = ((): string => {
         // Unify only ModelScope to openai-provider
@@ -75,19 +97,19 @@ export class PipelineAssembler {
         if (t === 'openai-provider') { return 'openai-provider'; }
         // Map GLM family to dedicated provider module
         if (pid === 'glm' || t === 'glm') { return 'glm-http-provider'; }
-        return (np.type || provId);
+        return String(np.type || provId);
       })();
-      const provider: any = {
+      const provider: Record<string, unknown> = {
         type: unifiedType,
-        baseURL: np.baseURL || np.baseUrl,
+        baseURL: (np.baseURL as string | undefined) || (np.baseUrl as string | undefined),
         // auth added below after potential secret resolution
       };
-      const model: any = {
+      const model: Record<string, unknown> = {
         actualModelId: mdlId,
-        maxTokens: modelCfg.maxTokens,
-        maxContext: modelCfg.maxContext
+        maxTokens: modelCfg.maxTokens as number | undefined,
+        maxContext: modelCfg.maxContext as number | undefined,
       };
-      const pc: any = {
+      const pc: PcShape = {
         provider,
         model,
         protocols: { input: inputProtocol || 'openai', output: 'openai' },
@@ -104,7 +126,8 @@ export class PipelineAssembler {
           console.log(`- resolved apiKey prefix: ${apiKey?.substring(0, 10) || 'EMPTY'}...`);
         }
         if (apiKey) {
-          pc.provider.auth = { type: 'apikey', apiKey };
+          pc.provider = pc.provider || {};
+          (pc.provider as Record<string, unknown>).auth = { type: 'apikey', apiKey };
           console.log(`- auth set successfully for ${provId}`);
         } else {
           console.log(`- ERROR: No API key found for ${provId}`);
@@ -112,9 +135,10 @@ export class PipelineAssembler {
       };
       // Attach auth synchronously best-effort (will complete before use in practice)
       // Note: assemble is async; we can await later before using pc
-      (pc as any).__attachAuth = attachAuth;
-      if (compat && compat.type) {
-        pc.compatibility = { type: compat.type, config: compat.config || {} };
+      (pc as Record<string, unknown>).__attachAuth = attachAuth;
+      if (compat && (compat as Record<string, unknown>)['type']) {
+        const ctype = String((compat as Record<string, unknown>)['type'] || '');
+        pc.compatibility = { type: ctype || 'passthrough-compatibility', config: (compat as Record<string, unknown>)['config'] as Record<string, unknown> || {} };
       }
       return pc;
     };
@@ -127,11 +151,11 @@ export class PipelineAssembler {
 
     // Enhanced debug for routeTargets
     console.log('[PipelineAssembler] DEBUG - Route targets analysis:');
-    console.log('- mergedConfig.compatibilityConfig exists:', !!mergedConfig?.compatibilityConfig);
-    console.log('- compatibilityConfig keys:', Object.keys(mergedConfig?.compatibilityConfig || {}));
+    console.log('- mergedConfig.compatibilityConfig exists:', !!(mc as Record<string, unknown>)['compatibilityConfig']);
+    console.log('- compatibilityConfig keys:', Object.keys(cc || {}));
     console.log('- routeTargets type:', typeof routeTargets);
     console.log('- routeTargets keys:', Object.keys(routeTargets || {}));
-    console.log('- routeTargets default sample:', JSON.stringify(routeTargets?.default || 'NO DEFAULT', null, 2));
+    console.log('- routeTargets default sample:', JSON.stringify((routeTargets as Record<string, unknown>)?.['default'] || 'NO DEFAULT', null, 2));
 
     const pipelines: PipelineConfig[] = [];
     const routePools: Record<string, string[]> = {};
@@ -141,7 +165,7 @@ export class PipelineAssembler {
 
     // For each route category, build pipelines for all targets
     for (const [routeName, targets] of Object.entries(routeTargets as Record<string, unknown[]>)) {
-      const targetList: any[] = Array.isArray(targets) && Array.isArray((targets as unknown[])[0])
+      const targetList: unknown[] = Array.isArray(targets) && Array.isArray((targets as unknown[])[0])
         ? (targets as unknown[]).flat()
         : (targets as unknown[]);
       console.log(`[PipelineAssembler] DEBUG - Processing route: ${routeName} with ${targetList.length} targets`);
@@ -158,11 +182,15 @@ export class PipelineAssembler {
           providerId = parts[0] || 'undefined';
           modelId = parts[1] || 'undefined';
           keyId = parts[2] || 'undefined';
+        } else if (target && typeof target === 'object') {
+          const tobj = target as { providerId?: string; modelId?: string; keyId?: string };
+          providerId = tobj.providerId || 'undefined';
+          modelId = tobj.modelId || 'undefined';
+          keyId = tobj.keyId || 'undefined';
         } else {
-          // Object format
-          providerId = target.providerId || 'undefined';
-          modelId = target.modelId || 'undefined';
-          keyId = target.keyId || 'undefined';
+          providerId = 'undefined';
+          modelId = 'undefined';
+          keyId = 'undefined';
         }
 
         // Unique target identifier based on provider+model+key (not route)
@@ -170,11 +198,11 @@ export class PipelineAssembler {
         console.log(`[PipelineAssembler] DEBUG - Looking for pipeline config with key: ${targetKey}`);
         console.log(`[PipelineAssembler] DEBUG - Available pipeline config keys:`, Object.keys(pipelineConfigs));
 
-        const pc = pipelineConfigs[targetKey] || buildPcFromNormalized(providerId, modelId);
+        const pc = (pipelineConfigs[targetKey] || buildPcFromNormalized(providerId, modelId)) as PcShape;
         // Ensure auth is resolved if builder provided async hook
-        if ((pc as any).__attachAuth) {
-          await (pc as any).__attachAuth();
-          delete (pc as any).__attachAuth;
+        if (pc.__attachAuth) {
+          await pc.__attachAuth();
+          delete pc.__attachAuth;
         }
         console.log(`[PipelineAssembler] DEBUG - Found pipeline config:`, pc);
 
@@ -209,12 +237,12 @@ export class PipelineAssembler {
           });
 
           // LLM Switch: 由 inputProtocol 决定，若用户已显式提供则使用用户配置
-          const llmSwitchDecl = pc?.llmSwitch;
+          const llmSwitchDecl = pc?.llmSwitch as { type?: string; enabled?: boolean; config?: Record<string, unknown> } | undefined;
           let llmSwitch: ModuleConfig | undefined;
           if (llmSwitchDecl?.type) {
             llmSwitch = { type: llmSwitchDecl.type, config: llmSwitchDecl.config || {} };
           } else {
-            const inputProtocol = (mergedConfig?.modules?.virtualrouter?.config?.inputProtocol || 'openai').toLowerCase();
+            const inputProtocol = String(vrCfg.inputProtocol || 'openai').toLowerCase();
             if (inputProtocol === 'anthropic') {
               llmSwitch = { type: 'llmswitch-anthropic-openai', config: {} };
             } else {
@@ -223,20 +251,21 @@ export class PipelineAssembler {
           }
 
           // Workflow: 若用户提供则使用，否则可选
-          const workflowDecl = pc?.workflow;
+          const workflowDecl = pc?.workflow as { type?: string; enabled?: boolean; config?: Record<string, unknown> } | undefined;
           const workflow: ModuleConfig | undefined = workflowDecl?.type
             ? { type: workflowDecl.type, enabled: workflowDecl.enabled !== false, config: workflowDecl.config || {} }
             : { type: 'streaming-control', config: { streamingToNonStreaming: true } };
 
           // Compatibility must be specified by config
           // Compatibility: 由provider配置的compatibility决定；未配置则使用passthrough
-          const compatType: string | undefined = pc?.compatibility?.type;
-          const compatCfg: Record<string, any> = pc?.compatibility?.config || {};
+          const compatDecl = pc?.compatibility as { type?: string; config?: Record<string, unknown> } | undefined;
+          const compatType: string | undefined = compatDecl?.type;
+          const compatCfg: Record<string, unknown> = compatDecl?.config || {};
           const compatibility: ModuleConfig = compatType
             ? { type: compatType, config: compatCfg }
             : { type: 'passthrough-compatibility', config: {} };
 
-          const providerConfigObj: Record<string, any> = {};
+          const providerConfigObj: Record<string, unknown> = {};
           // Generic providers expect a vendor type hint for downstream compatibility modules
           // Use providerId as the vendor type (e.g., 'glm', 'qwen', 'iflow', 'modelscope')
           providerConfigObj.type = providerId;
@@ -263,8 +292,8 @@ export class PipelineAssembler {
             }
           } else {
             // Carry auth from pipelineConfigs if present for other auth types
-            if (pc?.provider && (pc.provider as any).auth) {
-              providerConfigObj.auth = (pc.provider as any).auth;
+            if (pc?.provider && (pc.provider as Record<string, unknown>).auth) {
+              providerConfigObj.auth = (pc.provider as Record<string, unknown>).auth;
             }
           }
 
@@ -276,7 +305,7 @@ export class PipelineAssembler {
           // Unique pipeline ID based on target, not route - enables reuse across categories
           const pipelineId = `${providerId}_${keyId}.${modelId}`;
 
-          const modulesBlock: any = { llmSwitch, compatibility, provider };
+          const modulesBlock: Record<string, unknown> = { llmSwitch, compatibility, provider };
           if (workflow) { modulesBlock.workflow = workflow; }
 
           pipeline = {
@@ -284,7 +313,7 @@ export class PipelineAssembler {
             provider: { type: providerType },
             modules: modulesBlock,
             settings: { debugEnabled: true }
-          } as any;
+          } as PipelineConfig;
 
           pipelines.push(pipeline);
           createdPipelines.set(targetKey, pipeline);
@@ -300,8 +329,8 @@ export class PipelineAssembler {
       settings: { debugLevel: 'basic', defaultTimeout: 30000, maxRetries: 2 }
     };
 
-    const dummyErrorCenter: any = { handleError: async () => {}, createContext: () => ({}), getStatistics: () => ({}) };
-    const dummyDebugCenter: any = { logDebug: () => {}, logError: () => {}, logModule: () => {}, processDebugEvent: () => {}, getLogs: () => [] };
+    const dummyErrorCenter: { handleError: () => Promise<void>, createContext: () => unknown, getStatistics: () => unknown } = { handleError: async () => {}, createContext: () => ({}), getStatistics: () => ({}) };
+    const dummyDebugCenter: { logDebug: () => void, logError: () => void, logModule: () => void, processDebugEvent: () => void, getLogs: () => unknown[] } = { logDebug: () => {}, logError: () => {}, logModule: () => {}, processDebugEvent: () => {}, getLogs: () => [] };
 
     const manager = new PipelineManager(managerConfig, dummyErrorCenter, dummyDebugCenter);
     await manager.initialize();

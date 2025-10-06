@@ -20,7 +20,7 @@ import type {
   ProviderModule,
   ModuleDependencies,
   ModuleFactory,
-  ModuleConfig
+  // ModuleConfig
 } from '../interfaces/pipeline-interfaces.js';
 import { PipelineErrorIntegration } from '../utils/error-integration.js';
 import { PipelineDebugLogger } from '../utils/debug-logger.js';
@@ -138,7 +138,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     const startTime = Date.now();
     const requestId = request.route?.requestId || `req-${Date.now()}-${this.pipelineId}`;
     const debugStages: string[] = [];
-    const transformationLogs: any[] = [];
+    const transformationLogs: unknown[] = [];
     const timings: Record<string, number> = {};
 
     try {
@@ -342,7 +342,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     if (!this.debugEventBus) {return;}
 
     // Subscribe to pipeline-specific events
-    this.debugEventBus.subscribe('pipeline-subscription', (event: any) => {
+    this.debugEventBus.subscribe('pipeline-subscription', (event: unknown) => {
       this.handleDebugEvent(event);
     });
   }
@@ -350,10 +350,16 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Handle debug events
    */
-  private handleDebugEvent(event: any): void {
+  private handleDebugEvent(event: unknown): void {
     // Process debug events for real-time monitoring
-    if (event.type === 'performance') {
-      this.recordPerformanceMetric(event.data.operationId, event.data.processingTime);
+    const ev = event as Record<string, unknown>;
+    if (ev && typeof ev === 'object' && ev['type'] === 'performance') {
+      const data = ev['data'] as Record<string, unknown> | undefined;
+      const opId = typeof data?.operationId === 'string' ? data.operationId : undefined;
+      const pt = typeof data?.processingTime === 'number' ? data.processingTime : undefined;
+      if (opId && typeof pt === 'number') {
+        this.recordPerformanceMetric(opId, pt);
+      }
     }
 
     // Forward to web interface if available
@@ -380,14 +386,14 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Get performance statistics
    */
-  getPerformanceStats(operationId?: string): any {
+  getPerformanceStats(operationId?: string): unknown {
     if (operationId) {
       const metrics = this.performanceMetrics.get(operationId) || [];
       return this.calculateStats(metrics);
     }
 
     // Return stats for all operations
-    const allStats: any = {};
+    const allStats: Record<string, { count: number; avg: number; min: number; max: number; sum: number }> = {};
     for (const [opId, metrics] of Array.from(this.performanceMetrics.entries())) {
       allStats[opId] = this.calculateStats(metrics);
     }
@@ -397,9 +403,9 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Calculate statistics from metrics array
    */
-  private calculateStats(metrics: number[]): any {
+  private calculateStats(metrics: number[]): { count: number; avg: number; min: number; max: number; sum: number } {
     if (metrics.length === 0) {
-      return { count: 0, avg: 0, min: 0, max: 0 };
+      return { count: 0, avg: 0, min: 0, max: 0, sum: 0 };
     }
 
     const sum = metrics.reduce((a, b) => a + b, 0);
@@ -419,19 +425,25 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Publish event to WebSocket for real-time monitoring
    */
-  private publishToWebSocket(event: any): void {
+  private publishToWebSocket(event: unknown): void {
     // This will be connected to the WebSocket debug server
     try {
       // Event will be published through the debug center to WebSocket
+      const edata = (event as Record<string, unknown>)?.['data'] as unknown;
+      const dataObj = (edata && typeof edata === 'object') ? (edata as Record<string, unknown>) : { value: edata };
       this.debugCenter.processDebugEvent({
-        sessionId: event.sessionId || 'system',
+        sessionId: (typeof (event as Record<string, unknown>)?.sessionId === 'string'
+          ? (event as Record<string, unknown>)?.sessionId as string
+          : 'system'),
         moduleId: this.pipelineId,
-        operationId: event.operationId || event.type,
-        timestamp: event.timestamp || Date.now(),
-        type: (event.type || 'debug') as 'start' | 'end' | 'error',
+        operationId: (typeof (event as Record<string, unknown>)?.operationId === 'string'
+          ? (event as Record<string, unknown>)?.operationId as string
+          : String((event as Record<string, unknown>)?.type || 'event')),
+        timestamp: (event as Record<string, unknown>)?.timestamp as number || Date.now(),
+        type: (((event as Record<string, unknown>)?.type as 'start' | 'end' | 'error') || 'debug') as any,
         position: 'middle' as 'start' | 'middle' | 'end',
         data: {
-          ...event.data,
+          ...dataObj,
           pipelineId: this.pipelineId,
           source: 'base-pipeline'
         }
@@ -444,7 +456,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Get detailed debug information
    */
-  getDebugInfo(): any {
+  getDebugInfo(): unknown {
     return {
       pipelineId: this.pipelineId,
       enhanced: this.isEnhanced,
@@ -459,7 +471,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Get debug status with enhanced information
    */
-  getDebugStatus(): any {
+  getDebugStatus(): unknown {
     const baseStatus = {
       pipelineId: this.pipelineId,
       id: this.id,
@@ -490,15 +502,15 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Get module debug information
    */
-  private getModuleDebugInfo(): any {
-    const moduleInfo: any = {};
+  private getModuleDebugInfo(): Record<string, unknown> {
+    const moduleInfo: Record<string, unknown> = {};
 
     for (const [moduleName, module] of Object.entries(this.modules)) {
       if (module) {
         moduleInfo[moduleName] = {
           isInitialized: this.isModuleInitialized(module),
           type: module.type,
-          hasDebugStatus: typeof (module as any).getDebugStatus === 'function',
+          hasDebugStatus: typeof (module as any)?.getDebugStatus === 'function',
           status: this._status.modules[moduleName] || null
         };
       } else {
@@ -512,20 +524,24 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Check if module is initialized
    */
-  private isModuleInitialized(module: any): boolean {
-    return module && typeof module.isInitialized === 'boolean' ? module.isInitialized : false;
+  private isModuleInitialized(module: unknown): boolean {
+    const m = module as { isInitialized?: boolean };
+    return !!(m && typeof m.isInitialized === 'boolean' ? m.isInitialized : false);
   }
 
   /**
    * Enhanced error handling with debug context
    */
-  private async handleEnhancedError(error: any, context: any): Promise<void> {
+  private async handleEnhancedError(error: unknown, context: unknown): Promise<void> {
+    const baseCtx = (context && typeof context === 'object') ? (context as Record<string, unknown>) : {};
     const errorContext = {
-      ...context,
+      ...baseCtx,
       pipelineId: this.pipelineId,
       enhanced: this.isEnhanced,
       performanceMetrics: this.getPerformanceStats(),
-      moduleStatus: this._status.modules
+      moduleStatus: this._status.modules,
+      requestId: (baseCtx['requestId'] as string) || 'unknown',
+      stage: (baseCtx['stage'] as string) || 'enhanced-error'
     };
 
     // Publish enhanced error event
@@ -540,13 +556,13 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     });
 
     // Use existing error integration
-    await this.errorIntegration.handleModuleError(error, context);
+    await this.errorIntegration.handleModuleError(error, errorContext);
   }
 
   /**
    * Sanitize request for WebSocket publishing (remove sensitive data)
    */
-  private sanitizeRequest(request: PipelineRequest): any {
+  private sanitizeRequest(request: PipelineRequest): unknown {
     const sanitized = {
       route: request.route,
       metadata: request.metadata,
@@ -554,16 +570,20 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     };
 
     // Copy safe data fields
-    if ((request as any).data) {
-      (sanitized as any).data = {
-        model: (request as any).data.model,
-        messages: (request as any).data.messages?.map((msg: any) => ({
-          role: msg.role,
-          content: typeof msg.content === 'string' ? '[CONTENT]' : '[MULTIMODAL_CONTENT]'
-        })),
-        max_tokens: (request as any).data.max_tokens,
-        temperature: (request as any).data.temperature,
-        stream: (request as any).data.stream
+    const reqo = request as unknown as { data?: unknown };
+    const data = reqo.data as Record<string, unknown> | undefined;
+    if (data) {
+      (sanitized as Record<string, unknown>)['data'] = {
+        model: data['model'],
+        messages: Array.isArray(data['messages'])
+          ? (data['messages'] as Array<Record<string, unknown>>).map((msg) => ({
+              role: msg['role'],
+              content: typeof msg['content'] === 'string' ? '[CONTENT]' : '[MULTIMODAL_CONTENT]'
+            }))
+          : undefined,
+        max_tokens: data['max_tokens'],
+        temperature: data['temperature'],
+        stream: data['stream']
       };
     }
 
@@ -688,18 +708,21 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     } catch (error) {
       // Enrich error with provider context for standard error center handling
       try {
-        const provCfg: any = (this.config as any)?.modules?.provider?.config || {};
-        const details = (error as any).details || {};
+        type ProviderModuleConfig = { type?: string; baseUrl?: string; baseURL?: string; model?: string };
+        const provCfg = ((this.config as unknown as { modules?: { provider?: { config?: ProviderModuleConfig } } })
+          ?.modules?.provider?.config) ?? {};
+        const errRec = error as Record<string, unknown>;
+        const details = (errRec['details'] as Record<string, unknown>) || {};
         const enriched = {
           provider: {
             moduleType: this.modules.provider?.type || 'unknown',
             pipelineId: this.pipelineId,
             vendor: provCfg?.type,
             baseUrl: provCfg?.baseUrl || provCfg?.baseURL,
-            model: (request as any)?.model || provCfg?.model,
+            model: ((request.data as Record<string, unknown>)?.['model'] as string | undefined) || provCfg?.model,
           },
         };
-        (error as any).details = { ...details, ...enriched };
+        errRec['details'] = { ...details, ...enriched } as unknown;
       } catch {
         // best-effort enrichment; ignore failures
       }
@@ -723,7 +746,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
 
     try {
       const transformed = await this.modules.compatibility.processOutgoing(response as unknown as UnknownObject);
-      const isDto = transformed && typeof transformed === 'object' && 'data' in (transformed as any) && 'metadata' in (transformed as any);
+      const isDto = transformed && typeof transformed === 'object' && 'data' in (transformed as Record<string, unknown>) && 'metadata' in (transformed as Record<string, unknown>);
       const out: SharedPipelineResponse = isDto
         ? transformed as SharedPipelineResponse
         : { ...response, data: transformed as UnknownObject };
@@ -749,7 +772,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
 
     try {
       const processed = await this.modules.workflow.processOutgoing(response as unknown as UnknownObject);
-      const isDto = processed && typeof processed === 'object' && 'data' in (processed as any) && 'metadata' in (processed as any);
+      const isDto = processed && typeof processed === 'object' && 'data' in (processed as Record<string, unknown>) && 'metadata' in (processed as Record<string, unknown>);
       const out: SharedPipelineResponse = isDto
         ? processed as SharedPipelineResponse
         : { ...response, data: processed as UnknownObject };
@@ -775,7 +798,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
 
     try {
       const transformed = await this.modules.llmSwitch.processOutgoing(response as unknown as UnknownObject);
-      const isDto = transformed && typeof transformed === 'object' && 'data' in (transformed as any) && 'metadata' in (transformed as any);
+      const isDto = transformed && typeof transformed === 'object' && 'data' in (transformed as Record<string, unknown>) && 'metadata' in (transformed as Record<string, unknown>);
       const out: SharedPipelineResponse = isDto
         ? transformed as SharedPipelineResponse
         : { ...response, data: transformed as UnknownObject };
@@ -857,7 +880,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Handle initialization error
    */
-  private async handleInitializationError(error: any): Promise<void> {
+  private async handleInitializationError(error: unknown): Promise<void> {
     await this.errorIntegration.handleModuleError(error, {
       stage: 'initialization',
       pipelineId: this.pipelineId,
@@ -868,19 +891,20 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   /**
    * Handle request processing error
    */
-  private async handleRequestError(error: any, request: PipelineRequest, stages: string[]): Promise<void> {
+  private async handleRequestError(error: unknown, request: PipelineRequest, stages: string[]): Promise<void> {
     const errorObj = error instanceof Error ? error : new Error(String(error));
+    const eRec = errorObj as unknown as Record<string, unknown>;
     const pipelineError: PipelineError = {
       stage: stages[stages.length - 1] || 'unknown',
-      code: (errorObj as any).code || 'PROCESSING_ERROR',
+      code: (eRec['code'] as string) || 'PROCESSING_ERROR',
       message: errorObj.message,
-      details: (errorObj as any).details || { stack: errorObj.stack },
+      details: eRec['details'] as Record<string, unknown> || { stack: errorObj.stack },
       timestamp: Date.now()
     };
 
     // Defensive coding for undefined route
     const requestId = request.route?.requestId || 'unknown';
-    const route = request.route || { providerId: 'unknown', modelId: 'unknown', requestId, timestamp: Date.now() };
+    // const route = request.route || { providerId: 'unknown', modelId: 'unknown', requestId, timestamp: Date.now() };
 
     await this.errorIntegration.handleModuleError(error, {
       stage: pipelineError.stage,

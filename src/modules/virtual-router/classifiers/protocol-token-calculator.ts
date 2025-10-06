@@ -3,7 +3,7 @@
  * 支持多种协议的Token估算器
  */
 
-import type { ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources/chat/completions';
+import type { ChatCompletionMessageParam, ChatCompletionTool, ChatCompletionMessageToolCall } from 'openai/resources/chat/completions';
 
 export interface ProtocolTokenCalculationConfig {
   type: 'openai' | 'anthropic';
@@ -45,7 +45,7 @@ export class ProtocolTokenCalculator {
   /**
    * 根据协议计算Token数
    */
-  calculate(request: any, endpoint: string): ProtocolTokenCalculationResult {
+  calculate(request: Record<string, unknown>, endpoint: string): ProtocolTokenCalculationResult {
     const protocol = this.detectProtocol(endpoint);
     const messages = this.extractMessages(request);
     const tools = this.extractTools(request);
@@ -86,23 +86,23 @@ export class ProtocolTokenCalculator {
   /**
    * 提取消息内容
    */
-  private extractMessages(request: any): ChatCompletionMessageParam[] {
-    const messages = request[this.fieldMapping.messageField];
+  private extractMessages(request: Record<string, unknown>): ChatCompletionMessageParam[] {
+    const messages = (request as Record<string, unknown>)[this.fieldMapping.messageField] as unknown;
     if (!Array.isArray(messages)) {
       return [];
     }
-    return messages;
+    return messages as ChatCompletionMessageParam[];
   }
 
   /**
    * 提取工具定义
    */
-  private extractTools(request: any): ChatCompletionTool[] {
-    const tools = request[this.fieldMapping.toolsField];
+  private extractTools(request: Record<string, unknown>): ChatCompletionTool[] {
+    const tools = (request as Record<string, unknown>)[this.fieldMapping.toolsField] as unknown;
     if (!Array.isArray(tools)) {
       return [];
     }
-    return tools;
+    return tools as ChatCompletionTool[];
   }
 
   /**
@@ -194,19 +194,18 @@ export class ProtocolTokenCalculator {
   /**
    * 计算工具调用的Token数
    */
-  private calculateToolCallTokens(toolCalls: any[]): number {
+  private calculateToolCallTokens(toolCalls: ChatCompletionMessageToolCall[]): number {
     let tokens = 0;
 
     for (const toolCall of toolCalls) {
       // 工具调用开销
       tokens += 20;
 
-      // 工具名称
-      tokens += this.estimateTextTokens(toolCall.function?.name || '');
-
-      // 工具参数
-      if (toolCall.function?.arguments) {
-        tokens += this.estimateTextTokens(toolCall.function.arguments);
+      // 工具名称/参数（兼容不同SDK类型定义）
+      const fn: { name?: string; arguments?: string } | undefined = (toolCall as unknown as { function?: { name?: string; arguments?: string } }).function;
+      tokens += this.estimateTextTokens(fn?.name || '');
+      if (fn?.arguments) {
+        tokens += this.estimateTextTokens(fn.arguments);
       }
     }
 
@@ -228,7 +227,7 @@ export class ProtocolTokenCalculator {
   /**
    * 获取详细的Token分析
    */
-  getDetailedAnalysis(request: any, endpoint: string): {
+  getDetailedAnalysis(request: Record<string, unknown>, endpoint: string): {
     calculation: ProtocolTokenCalculationResult;
     estimates: {
       low: number;

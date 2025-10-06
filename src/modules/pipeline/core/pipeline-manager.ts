@@ -23,7 +23,7 @@ import { PipelineModuleRegistryImpl } from '../core/pipeline-registry.js';
 import { PipelineDebugLogger } from '../utils/debug-logger.js';
 import { DebugEventBus } from 'rcc-debugcenter';
 import { ModuleEnhancementFactory } from '../../enhancement/module-enhancement-factory.js';
-import { Key429Tracker, type Key429ErrorRecord } from '../../../utils/key-429-tracker.js';
+import { Key429Tracker, /* type Key429ErrorRecord */ } from '../../../utils/key-429-tracker.js';
 import { PipelineHealthManager } from '../../../utils/pipeline-health-manager.js';
 
 /**
@@ -46,8 +46,8 @@ export class PipelineManager implements RCCBaseModule {
   private enhancementFactory!: ModuleEnhancementFactory;
   private isEnhanced = false;
   private debugEventBus!: DebugEventBus;
-  private managerMetrics: Map<string, any> = new Map();
-  private requestHistory: any[] = [];
+  private managerMetrics: Map<string, { values: number[]; lastUpdated: number }> = new Map();
+  private requestHistory: unknown[] = [];
   private maxHistorySize = 100;
 
   // 429 error handling properties
@@ -240,14 +240,14 @@ export class PipelineManager implements RCCBaseModule {
   /**
    * Get pipeline status
    */
-  getPipelineStatus(pipelineId?: string): any {
+  getPipelineStatus(pipelineId?: string): unknown {
     if (pipelineId) {
       const pipeline = this.pipelines.get(pipelineId);
       return pipeline ? pipeline.getStatus() : null;
     }
 
     // Return status of all pipelines
-    const statuses: any = {};
+    const statuses: Record<string, unknown> = {};
     for (const [id, pipeline] of this.pipelines.entries()) {
       statuses[id] = pipeline.getStatus();
     }
@@ -257,7 +257,7 @@ export class PipelineManager implements RCCBaseModule {
   /**
    * Get debug status with enhanced information
    */
-  getDebugStatus(): any {
+  getDebugStatus(): unknown {
     const baseStatus = {
       managerId: this.id,
       isInitialized: this.isInitialized,
@@ -282,8 +282,8 @@ export class PipelineManager implements RCCBaseModule {
   /**
    * Get manager metrics
    */
-  private getManagerMetrics(): any {
-    const metrics: any = {};
+  private getManagerMetrics(): Record<string, { count: number; lastUpdated: number; recentValues: number[] }> {
+    const metrics: Record<string, { count: number; lastUpdated: number; recentValues: number[] }> = {};
 
     for (const [operation, metric] of this.managerMetrics.entries()) {
       metrics[operation] = {
@@ -302,15 +302,15 @@ export class PipelineManager implements RCCBaseModule {
   getStatus(): {
     isInitialized: boolean;
     pipelineCount: number;
-    pipelines: any;
-    registry: any;
-    statistics: any;
-    debugInfo?: any;
-    performanceStats?: any;
-    requestHistory?: any[];
+    pipelines: unknown;
+    registry: unknown;
+    statistics: unknown;
+    debugInfo?: unknown;
+    performanceStats?: unknown;
+    requestHistory?: unknown[];
     errorHandling429?: {
-      keyTracker: any;
-      healthManager: any;
+      keyTracker: unknown;
+      healthManager: unknown;
       retryAttempts: number;
     };
   } {
@@ -403,7 +403,7 @@ export class PipelineManager implements RCCBaseModule {
    * Handle 429 error with automatic retry
    */
   private async handle429Error(
-    error: any,
+    error: unknown,
     request: PipelineRequest,
     attemptedPipelines: Set<string>,
     retryKey: string
@@ -448,7 +448,7 @@ export class PipelineManager implements RCCBaseModule {
 
     this.logger.logPipeline('manager', '429-retry-attempt', {
       retryKey,
-      originalError: error.message,
+      originalError: (error instanceof Error ? error.message : String(error)),
       nextPipeline: nextPipeline.pipelineId,
       attempt: this.retryAttempts.get(retryKey) || 1,
       maxAttempts: this.maxRetries
@@ -461,25 +461,32 @@ export class PipelineManager implements RCCBaseModule {
   /**
    * Extract key from error
    */
-  private extractKeyFromError(error: any): string | null {
+  private extractKeyFromError(error: unknown): string | null {
     // Try to extract key from error details
-    if (error.details?.key) {
-      return error.details.key;
+    const e = error as Record<string, unknown>;
+    const details = e['details'] as Record<string, unknown> | undefined;
+    if (details && typeof details['key'] === 'string') {
+      return details['key'];
     }
 
     // Try to extract from error context
-    if (error.context?.key) {
-      return error.context.key;
+    const context = e['context'] as Record<string, unknown> | undefined;
+    if (context && typeof context['key'] === 'string') {
+      return context['key'];
     }
 
     // Try to extract from pipeline config
-    if (error.config?.auth?.apiKey) {
-      return error.config.auth.apiKey;
+    const config = e['config'] as Record<string, unknown> | undefined;
+    const auth = config?.['auth'] as Record<string, unknown> | undefined;
+    if (auth && typeof auth['apiKey'] === 'string') {
+      return auth['apiKey'];
     }
 
     // Try to extract from headers or other common places
-    if (error.config?.headers?.['Authorization']) {
-      return error.config.headers['Authorization'];
+    const headers = config?.['headers'] as Record<string, unknown> | undefined;
+    const authHeader = headers?.['Authorization'] as string | undefined;
+    if (typeof authHeader === 'string') {
+      return authHeader;
     }
 
     return null;
@@ -540,8 +547,8 @@ export class PipelineManager implements RCCBaseModule {
       return response;
     } catch (error) {
       // Check if it's a 429 error
-      const errorObj = error as any;
-      if (errorObj.statusCode === 429 || errorObj.code === 'HTTP_429') {
+      const errorObj = error as Record<string, unknown>;
+      if (errorObj['statusCode'] === 429 || errorObj['code'] === 'HTTP_429') {
         const currentAttempt = this.retryAttempts.get(retryKey) || 0;
 
         if (currentAttempt < this.maxRetries) {
@@ -863,7 +870,7 @@ export class PipelineManager implements RCCBaseModule {
   private subscribeToManagerEvents(): void {
     if (!this.debugEventBus) {return;}
 
-    this.debugEventBus.subscribe('manager-subscription', (event: any) => {
+    this.debugEventBus.subscribe('manager-subscription', (event: unknown) => {
       this.handleManagerDebugEvent(event);
     });
   }
@@ -871,10 +878,16 @@ export class PipelineManager implements RCCBaseModule {
   /**
    * Handle manager debug events
    */
-  private handleManagerDebugEvent(event: any): void {
+  private handleManagerDebugEvent(event: unknown): void {
     // Process manager-specific debug events
-    if (event.type === 'performance') {
-      this.recordManagerMetric(event.data.operationId, event.data.processingTime);
+    const ev = event as Record<string, unknown>;
+    if (ev && typeof ev === 'object' && ev['type'] === 'performance') {
+      const data = ev['data'] as Record<string, unknown> | undefined;
+      const opId = typeof data?.operationId === 'string' ? data.operationId : undefined;
+      const val = typeof data?.processingTime === 'number' ? data.processingTime : undefined;
+      if (opId && typeof val === 'number') {
+        this.recordManagerMetric(opId, val);
+      }
     }
 
     // Forward to web interface
@@ -905,15 +918,15 @@ export class PipelineManager implements RCCBaseModule {
   /**
    * Get manager performance statistics
    */
-  private getPerformanceStats(): any {
-    const stats: any = {};
+  private getPerformanceStats(): Record<string, { count: number; avg: number; min: number; max: number; lastUpdated: number }> {
+    const stats: Record<string, { count: number; avg: number; min: number; max: number; lastUpdated: number }> = {};
 
     for (const [operationId, metric] of this.managerMetrics.entries()) {
       const values = metric.values;
       if (values.length > 0) {
         stats[operationId] = {
           count: values.length,
-          avg: Math.round(values.reduce((a: any, b: any) => a + b, 0) / values.length),
+          avg: Math.round(values.reduce((a: number, b: number) => a + b, 0) / values.length),
           min: Math.min(...values),
           max: Math.max(...values),
           lastUpdated: metric.lastUpdated
@@ -927,7 +940,7 @@ export class PipelineManager implements RCCBaseModule {
   /**
    * Get detailed manager debug information
    */
-  private getDebugInfo(): any {
+  private getDebugInfo(): unknown {
     return {
       managerId: this.id,
       enhanced: this.isEnhanced,
@@ -942,16 +955,17 @@ export class PipelineManager implements RCCBaseModule {
   /**
    * Publish manager-specific events
    */
-  private publishManagerEvent(type: string, data: any): void {
+  private publishManagerEvent(type: string, data: unknown): void {
     if (!this.isEnhanced) {return;}
 
+    const payload = (data && typeof data === 'object') ? (data as Record<string, unknown>) : { value: data };
     this.publishToWebSocket({
       type: 'manager',
       timestamp: Date.now(),
       data: {
         operation: type,
         managerId: this.id,
-        ...data
+        ...payload
       }
     });
   }
@@ -959,9 +973,10 @@ export class PipelineManager implements RCCBaseModule {
   /**
    * Add request to history for debugging
    */
-  private addToRequestHistory(request: any): void {
+  private addToRequestHistory(request: unknown): void {
+    const reqObj = (request && typeof request === 'object') ? (request as Record<string, unknown>) : { value: request };
     this.requestHistory.push({
-      ...request,
+      ...reqObj,
       timestamp: Date.now()
     });
 
@@ -974,17 +989,23 @@ export class PipelineManager implements RCCBaseModule {
   /**
    * Publish event to WebSocket
    */
-  private publishToWebSocket(event: any): void {
+  private publishToWebSocket(event: unknown): void {
     try {
+      const edata = (event as Record<string, unknown>)?.['data'] as unknown;
+      const dataObj = (edata && typeof edata === 'object') ? (edata as Record<string, unknown>) : { value: edata };
       this.debugCenter.processDebugEvent({
-        sessionId: event.sessionId || 'system',
-        moduleId: 'pipeline-manager',
-        operationId: event.operationId || event.type,
-        timestamp: event.timestamp || Date.now(),
-        type: (event.type || 'debug') as 'start' | 'end' | 'error',
-        position: 'middle' as 'start' | 'middle' | 'end',
+        sessionId: (typeof (event as Record<string, unknown>)?.sessionId === 'string'
+          ? (event as Record<string, unknown>)?.sessionId as string
+          : 'system'),
+        moduleId: 'pipeline-manager' as string,
+        operationId: (typeof (event as Record<string, unknown>)?.operationId === 'string'
+          ? (event as Record<string, unknown>)?.operationId as string
+          : String((event as Record<string, unknown>)?.type || 'event')),
+        timestamp: (event as Record<string, unknown>)?.timestamp as number || Date.now(),
+        type: (((event as Record<string, unknown>)?.type as 'start' | 'end' | 'error') || 'debug') as any,
+        position: 'middle' as const,
         data: {
-          ...event.data,
+          ...dataObj,
           managerId: this.id,
           source: 'pipeline-manager'
         }

@@ -11,7 +11,7 @@ import type {
   ConfigClassificationInput, 
   ConfigClassificationResult 
 } from './classifiers/config-request-classifier.js';
-import type { RoutingDecisionInput, RoutingDecisionResult } from './classifiers/config-routing-decision.js';
+import type { /* RoutingDecisionInput, */ RoutingDecisionResult } from './classifiers/config-routing-decision.js';
 
 export interface VirtualRouterDryRunConfig {
   enabled: boolean;
@@ -64,12 +64,12 @@ export class VirtualRouterDryRunExecutor {
   /**
    * 初始化分类器和路由决策器
    */
-  async initialize(moduleConfig: any): Promise<void> {
+  async initialize(moduleConfig: Record<string, unknown>): Promise<void> {
     if (!this.config.enabled) {return;}
 
     try {
       // 创建分类器（需要 classificationConfig 节点）
-      const classificationConfig = moduleConfig?.classificationConfig;
+      const classificationConfig = (moduleConfig as Record<string, unknown>)?.['classificationConfig'] as Record<string, unknown> | undefined;
       if (!classificationConfig) {
         throw new Error('classificationConfig is missing in moduleConfig');
       }
@@ -77,7 +77,7 @@ export class VirtualRouterDryRunExecutor {
       this.classifier = ConfigRequestClassifier.fromModuleConfig(classificationConfig);
       
       // 创建路由决策器
-      if (classificationConfig.modelTiers && classificationConfig.routingDecisions) {
+      if (classificationConfig['modelTiers'] && classificationConfig['routingDecisions']) {
         this.routingDecision = ConfigRoutingDecision.fromModuleConfig(classificationConfig);
       }
     } catch (error) {
@@ -144,15 +144,16 @@ export class VirtualRouterDryRunExecutor {
    * 分析负载均衡决策的详细信息
    */
   private analyzeLoadBalancerDecision(
-    routingDecision: any,
-    classificationResult: ConfigClassificationResult
+    routingDecision: unknown,
+    _classificationResult: ConfigClassificationResult
   ) {
     if (!this.config.includeLoadBalancerDetails) {
       return undefined;
     }
 
-    const selectedTarget = routingDecision?.selectedTarget;
-    const availableTargets = routingDecision?.availableTargets || [];
+    const rd = routingDecision as Record<string, unknown> | undefined;
+    const selectedTarget = rd?.['selectedTarget'] as Record<string, unknown> | undefined;
+    const availableTargets = (rd?.['availableTargets'] as Array<Record<string, unknown>> | undefined) || [];
     
     // 获取提供商权重（如果配置了的话）
     const providerWeights: Record<string, number> = {};
@@ -160,10 +161,10 @@ export class VirtualRouterDryRunExecutor {
     
     if (this.routingDecision && this.config.includeWeightCalculation) {
       // 从路由决策器获取权重信息
-      const routingConfig = (this.routingDecision as any).routingDecisions;
+      const routingConfig = (this.routingDecision as unknown as { routingDecisions?: Record<string, { weight?: number }> }).routingDecisions;
       if (routingConfig) {
-        Object.entries(routingConfig).forEach(([provider, config]: [string, any]) => {
-          if (config.weight !== undefined) {
+        Object.entries(routingConfig).forEach(([provider, config]: [string, { weight?: number }]) => {
+          if (typeof config.weight === 'number') {
             providerWeights[provider] = config.weight;
           }
           if (this.config.includeHealthStatus) {
@@ -175,18 +176,18 @@ export class VirtualRouterDryRunExecutor {
     }
 
     // 构建选择原因
-    let selectionReason = routingDecision?.reasoning || 'Based on routing configuration';
+    let selectionReason = (rd?.['reasoning'] as string) || 'Based on routing configuration';
     if (this.config.forcedProviderId) {
       selectionReason = `Forced provider selection for testing: ${this.config.forcedProviderId}`;
     }
 
     return {
-      algorithm: routingDecision?.algorithm || 'weighted-round-robin',
+      algorithm: (rd?.['algorithm'] as string) || 'weighted-round-robin',
       providerWeights,
       healthStatuses,
-      selectedProvider: selectedTarget?.providerId || 'unknown',
+      selectedProvider: (selectedTarget?.['providerId'] as string) || 'unknown',
       selectionReason,
-      availableProviders: availableTargets.map((t: any) => t.providerId),
+      availableProviders: availableTargets.map((t) => t['providerId'] as string),
       filteredProviders: [] // 可以扩展添加被健康检查过滤的提供商
     };
   }

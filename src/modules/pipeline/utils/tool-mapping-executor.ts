@@ -9,7 +9,7 @@ export class ToolMappingExecutor {
     let rest = content || '';
     const calls: { name: string; args: Record<string, any> }[] = [];
 
-    if (!this.config?.tools) return { calls, rest };
+    if (!this.config?.tools) {return { calls, rest };}
 
     // Iterate each tool config and try patterns
     for (const [toolName, mapping] of Object.entries(this.config.tools)) {
@@ -19,7 +19,7 @@ export class ToolMappingExecutor {
         calls.push(...out.calls);
         rest = out.rest;
         const maxCalls = this.config?.global?.max_tool_calls ?? Infinity;
-        if (calls.length >= maxCalls) break;
+        if (calls.length >= maxCalls) {break;}
       }
     }
 
@@ -45,10 +45,10 @@ export class ToolMappingExecutor {
           rest = (rest.slice(0, m.index) + rest.slice(m.index + m[0].length)).trim();
           re.lastIndex = 0; // reset due to mutation
           const maxCalls = this.config?.global?.max_tool_calls ?? Infinity;
-          if (calls.length >= maxCalls) break;
+          if (calls.length >= maxCalls) {break;}
         }
       }
-      if (calls.length >= (this.config?.global?.max_tool_calls ?? Infinity)) break;
+      if (calls.length >= (this.config?.global?.max_tool_calls ?? Infinity)) {break;}
     }
 
     return { calls, rest };
@@ -71,7 +71,7 @@ export class ToolMappingExecutor {
     }
     if (value && typeof value === 'object') {
       const out: Record<string, any> = {};
-      for (const [k, v] of Object.entries(value)) out[k] = this.interpolate(v as any, vars);
+      for (const [k, v] of Object.entries(value)) {out[k] = this.interpolate(v as any, vars);}
       return out;
     }
     return value;
@@ -89,7 +89,7 @@ export class ToolMappingExecutor {
   }
 
   private postprocess(args: Record<string, any>, steps: ToolMapping['postprocess']): Record<string, any> {
-    let out = { ...args };
+    const out = { ...args };
     for (const step of steps || []) {
       if ('ensure_array' in step) {
         const field = step.ensure_array.field;

@@ -4,7 +4,7 @@
  * 展示如何在流水线中使用节点级dry-run功能
  */
 
-import type { NodeDryRunConfig, OutputValidationRule } from './pipeline-dry-run-framework.js';
+import type { NodeDryRunConfig /*, OutputValidationRule */ } from './pipeline-dry-run-framework.js';
 import { dryRunPipelineExecutor } from './dry-run-pipeline-executor.js';
 import { pipelineDryRunManager } from './pipeline-dry-run-framework.js';
 
@@ -466,11 +466,11 @@ const mockLLMSwitchModule = {
     }));
   },
 
-  async simulateError(config: any) {
+  async simulateError(_config: any) {
     return new Error('Simulated LLM Switch error');
   },
 
-  async estimatePerformance(input: any) {
+  async estimatePerformance(_input: any) {
     return { time: 5, memory: 100, complexity: 1 };
   },
   async processOutgoing(response: any) {

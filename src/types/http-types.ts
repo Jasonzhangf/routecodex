@@ -26,7 +26,7 @@ export interface HttpRequest {
   /** 请求头 */
   headers?: HttpHeaders;
   /** 请求体 */
-  body?: any;
+  body?: unknown;
   /** 查询参数 */
   query?: Record<string, string | string[]>;
   /** 路径参数 */
@@ -47,7 +47,7 @@ export interface HttpResponse {
   /** 响应头 */
   headers?: HttpHeaders;
   /** 响应体 */
-  body?: any;
+  body?: unknown;
   /** 状态消息 */
   statusMessage?: string;
 }
@@ -69,7 +69,7 @@ export interface HttpError extends HttpResponse {
   /** 错误码 */
   code?: string;
   /** 错误详情 */
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
 }
 
 /**
@@ -77,7 +77,7 @@ export interface HttpError extends HttpResponse {
  */
 export interface JsonResponse extends HttpResponse {
   /** JSON格式的响应体 */
-  body: Record<string, any> | Array<any>;
+  body: Record<string, unknown> | Array<unknown>;
 }
 
 /**
@@ -99,7 +99,7 @@ export interface OpenAIChatCompletionRequest {
   /** 工具选择策略 */
   tool_choice?: 'none' | 'auto' | { type: 'function'; function: { name: string } };
   /** 其他参数 */
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 /**
@@ -135,7 +135,7 @@ export interface FunctionDefinition {
   /** 函数描述 */
   description?: string;
   /** 参数定义 */
-  parameters?: Record<string, any>;
+  parameters?: Record<string, unknown>;
 }
 
 /**

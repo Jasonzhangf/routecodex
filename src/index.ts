@@ -80,12 +80,12 @@ class RouteCodexApp {
         console.log(`ℹ Healthy instance detected on port ${port}; attempting graceful stop...`);
         try {
           const controller = new AbortController();
-          const t = setTimeout(() => { try { controller.abort(); } catch {} }, 1500);
+          const t = setTimeout(() => { try { controller.abort(); } catch { void controller; } }, 1500);
           await fetch(`http://127.0.0.1:${port}/shutdown`, { method: 'POST', signal: (controller as any).signal } as any).catch(() => {});
           clearTimeout(t);
           // wait a moment for shutdown
           await new Promise(r => setTimeout(r, 800));
-        } catch {}
+        } catch { /* noop */ void 0; }
       }
       // 2) Ensure port is free (graceful SIGTERM then SIGKILL as fallback)
       await ensurePortAvailable(port);
@@ -135,7 +135,7 @@ class RouteCodexApp {
       this._isRunning = true;
 
       // 7. 获取服务器状态
-      const status = (this.httpServer as any).getStatus();
+      // const status = (this.httpServer as any).getStatus();
       const serverConfig = {
         host: 'localhost',
         port
@@ -224,7 +224,7 @@ class RouteCodexApp {
   /**
    * Detect server port from user configuration
    */
-  private async detectServerPort(modulesConfigPath: string): Promise<number> {
+  private async detectServerPort(_modulesConfigPath: string): Promise<number> {
     try {
       // 首先检查RCC4_CONFIG_PATH环境变量（当前使用的）
       if (process.env.RCC4_CONFIG_PATH) {
@@ -368,7 +368,7 @@ async function isServerHealthy(port: number): Promise<boolean> {
     const t = setTimeout(() => { try { controller.abort(); } catch { /* ignore */ } }, 800);
     const res = await fetch(`http://127.0.0.1:${port}/health`, { method: 'GET', signal: (controller as any).signal } as any);
     clearTimeout(t);
-    if (!res.ok) return false;
+    if (!res.ok) { return false; }
     const data = await res.json().catch(() => null);
     return !!data && (data.status === 'healthy' || data.status === 'ready');
   } catch {

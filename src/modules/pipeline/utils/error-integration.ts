@@ -243,7 +243,7 @@ export class PipelineErrorIntegration {
   /**
    * Determine if error should be retried
    */
-  private shouldRetry(error: any, context: ErrorContext): boolean {
+  private shouldRetry(error: any, _context: ErrorContext): boolean {
     if (!this.options.retry) {
       return false;
     }

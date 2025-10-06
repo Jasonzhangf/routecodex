@@ -10,7 +10,7 @@ import fs from 'fs/promises';
  */
 export interface ModuleConfig {
   enabled: boolean;
-  config: Record<string, any>;
+  config: Record<string, unknown>;
 }
 
 /**
@@ -51,7 +51,7 @@ export class ModuleConfigReader {
   /**
    * Get specific module configuration
    */
-  getModuleConfig<T = Record<string, any>>(moduleName: string): ModuleConfig | null {
+  getModuleConfig<T = Record<string, unknown>>(moduleName: string): ModuleConfig | null {
     if (!this.config || !this.config.modules[moduleName]) {
       return null;
     }

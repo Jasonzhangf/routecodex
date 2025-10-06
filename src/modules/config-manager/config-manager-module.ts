@@ -7,14 +7,15 @@ import fs from 'fs/promises';
 import path from 'path';
 import { homedir } from 'os';
 import { BaseModule } from '../../core/base-module.js';
+import type { UnknownObject } from '../../types/common-types.js';
 import { ConfigParser } from 'routecodex-config-engine';
 import { CompatibilityEngine } from 'routecodex-config-compat';
 import { AuthFileResolver } from '../../config/auth-file-resolver.js';
-import { DebugEventBus } from 'rcc-debugcenter';
+// import { DebugEventBus } from 'rcc-debugcenter';
 import type {
-  ModulesConfig,
-  UserConfig,
-  MergedConfig
+  // ModulesConfig,
+  // UserConfig,
+  // MergedConfig
 } from '../../config/merged-config-types.js';
 
 export class ConfigManagerModule extends BaseModule {
@@ -24,13 +25,13 @@ export class ConfigManagerModule extends BaseModule {
   private configParser: ConfigParser;
   private compatibilityEngine: CompatibilityEngine;
   private authFileResolver: AuthFileResolver;
-  private configWatcher: any;
+  private configWatcher: unknown;
 
   // Debug enhancement properties - now inherited from BaseModule
-  private configMetrics: Map<string, any> = new Map();
-  private loadingHistory: any[] = [];
-  private mergeHistory: any[] = [];
-  private validationHistory: any[] = [];
+  private configMetrics: Map<string, { values: unknown[]; lastUpdated: number }> = new Map();
+  private loadingHistory: unknown[] = [];
+  private mergeHistory: unknown[] = [];
+  private validationHistory: unknown[] = [];
   // maxHistorySize is now inherited from BaseModule
 
   constructor(configPath?: string) {
@@ -57,7 +58,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * Record config metric
    */
-  public recordConfigMetric(operation: string, data: any): void {
+  public recordConfigMetric(operation: string, data: unknown): void {
     if (!this.configMetrics.has(operation)) {
       this.configMetrics.set(operation, {
         values: [],
@@ -78,7 +79,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * Add to loading history
    */
-  public addToLoadingHistory(operation: any): void {
+  public addToLoadingHistory(operation: unknown): void {
     this.loadingHistory.push(operation);
 
     // Keep only recent history
@@ -90,7 +91,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * Add to merge history
    */
-  public addToMergeHistory(operation: any): void {
+  public addToMergeHistory(operation: unknown): void {
     this.mergeHistory.push(operation);
 
     // Keep only recent history
@@ -102,7 +103,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * Add to validation history
    */
-  public addToValidationHistory(operation: any): void {
+  public addToValidationHistory(operation: unknown): void {
     this.validationHistory.push(operation);
 
     // Keep only recent history
@@ -114,7 +115,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * Publish debug event
    */
-  public publishDebugEvent(type: string, data: any): void {
+  public publishDebugEvent(type: string, data: Record<string, unknown>): void {
     if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
 
     try {
@@ -139,7 +140,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * Get debug status with enhanced information
    */
-  getDebugStatus(): any {
+  getDebugStatus(): UnknownObject {
     const info = this.getInfo();
     const baseStatus = {
       id: info.id,
@@ -168,7 +169,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * Get detailed debug information
    */
-  public getDebugInfo(): any {
+  public getDebugInfo(): UnknownObject {
     return {
       managerId: 'config-manager',
       enhanced: this.isDebugEnhanced,
@@ -184,8 +185,8 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * Get config metrics
    */
-  public getConfigMetrics(): any {
-    const metrics: any = {};
+  public getConfigMetrics(): Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> {
+    const metrics: Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> = {};
 
     for (const [operation, metric] of this.configMetrics.entries()) {
       metrics[operation] = {
@@ -201,7 +202,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * 初始化模块
    */
-  async initialize(config?: any): Promise<void> {
+  async initialize(config?: unknown): Promise<void> {
     const startTime = Date.now();
     const initId = `init_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -222,11 +223,12 @@ export class ConfigManagerModule extends BaseModule {
     console.log('🔄 Initializing Config Manager Module...');
 
     try {
-      this.configPath = config?.configPath || this.configPath;
-      this.mergedConfigPath = config?.mergedConfigPath || this.mergedConfigPath;
+      const cfg = config as Record<string, unknown> | undefined;
+      this.configPath = (cfg?.['configPath'] as string) || this.configPath;
+      this.mergedConfigPath = (cfg?.['mergedConfigPath'] as string) || this.mergedConfigPath;
       // Allow passing the same modules config path used by HttpServer to avoid fallback warnings
-      if (config?.systemModulesPath) {
-        this.systemConfigPath = config.systemModulesPath;
+      if (cfg?.['systemModulesPath']) {
+        this.systemConfigPath = cfg['systemModulesPath'] as string;
       }
 
       // Debug: Record configuration setup
@@ -249,7 +251,7 @@ export class ConfigManagerModule extends BaseModule {
       await this.generateMergedConfig();
 
       // 启动配置监听
-      if (config.autoReload) {
+      if ((cfg?.['autoReload'] as boolean) === true) {
         await this.startConfigWatcher();
       }
 
@@ -261,13 +263,13 @@ export class ConfigManagerModule extends BaseModule {
           initId,
           success: true,
           totalTime,
-          autoReload: config?.autoReload || false
+          autoReload: Boolean(cfg?.['autoReload'])
         });
         this.publishDebugEvent('initialization_complete', {
           initId,
           success: true,
           totalTime,
-          autoReload: config?.autoReload || false
+          autoReload: Boolean(cfg?.['autoReload'])
         });
       }
 
@@ -347,7 +349,7 @@ export class ConfigManagerModule extends BaseModule {
         httpserver: {
           port: 5513
         }
-      } as any;
+      } as Record<string, unknown>;
 
       const content = JSON.stringify(defaultConfig, null, 2);
       await fs.writeFile(filePath, content, 'utf-8');
@@ -401,9 +403,9 @@ export class ConfigManagerModule extends BaseModule {
         }
 
         // 2. 对兼容性引擎输出做一次轻量归一化，确保 provider 家族类型符合解析器枚举
-        const normalizedInput: any = JSON.parse(
+        const normalizedInput = JSON.parse(
           JSON.stringify(compatResult.compatibilityConfig?.normalizedConfig || userConfig)
-        );
+        ) as Record<string, unknown>;
 
         // 归一化 providers.*.type: 将模块实现名映射为提供商家族名
         // glm-http-provider -> glm, openai-provider -> openai, lmstudio-http -> lmstudio, qwen-provider -> qwen, iflow-provider -> iflow, generic-http -> custom
@@ -416,7 +418,10 @@ export class ConfigManagerModule extends BaseModule {
           'generic-http': 'custom',
         };
         try {
-          const provs = normalizedInput?.virtualrouter?.providers || {};
+          const vrNode = (normalizedInput as Record<string, unknown>)?.['virtualrouter'] as Record<string, unknown> | undefined;
+          const provs = (vrNode && typeof vrNode['providers'] === 'object' && vrNode['providers'] !== null)
+            ? (vrNode['providers'] as Record<string, any>)
+            : {};
           Object.keys(provs).forEach((pid) => {
             const t = String(provs[pid]?.type || '').toLowerCase();
             if (familyTypeMap[t]) {
@@ -483,8 +488,9 @@ export class ConfigManagerModule extends BaseModule {
       };
 
       // 附加版本元信息（便于宿主断言契约）
-      (mergedConfig as any).schemaVersion = '1.0.0';
-      (mergedConfig as any).engineVersion = String(process.env.USE_NEW_CONFIG_ENGINE ? 'sharedmodule' : 'legacy');
+      const mergedRec = mergedConfig as Record<string, unknown>;
+      mergedRec['schemaVersion'] = '1.0.0';
+      mergedRec['engineVersion'] = String(process.env.USE_NEW_CONFIG_ENGINE ? 'sharedmodule' : 'legacy');
 
       // 验证合并配置 - 使用新引擎验证
       const finalValidation = await this.configParser.parseFromString(JSON.stringify(mergedConfig));
@@ -590,7 +596,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * 加载系统配置
    */
-  private async loadSystemConfig(): Promise<any> {
+  private async loadSystemConfig(): Promise<Record<string, unknown>> {
     const startTime = Date.now();
     const loadId = `load_system_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -610,7 +616,7 @@ export class ConfigManagerModule extends BaseModule {
       }
 
       const configContent = await fs.readFile(this.systemConfigPath, 'utf-8');
-      const config = JSON.parse(configContent);
+      const config = JSON.parse(configContent) as Record<string, unknown>;
       const totalTime = Date.now() - startTime;
 
       // Debug: Record system config load success
@@ -661,7 +667,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * 加载用户配置
    */
-  private async loadUserConfig(): Promise<any> {
+  private async loadUserConfig(): Promise<Record<string, unknown>> {
     const startTime = Date.now();
     const loadId = `load_user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -692,7 +698,7 @@ export class ConfigManagerModule extends BaseModule {
 
       // 读取配置文件
       const configContent = await fs.readFile(configPath, 'utf-8');
-      const config = JSON.parse(configContent);
+      const config = JSON.parse(configContent) as Record<string, unknown>;
 
       const totalTime = Date.now() - startTime;
 
@@ -743,7 +749,7 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * 保存合并配置
    */
-  private async saveMergedConfig(mergedConfig: any): Promise<void> {
+  private async saveMergedConfig(mergedConfig: unknown): Promise<void> {
     const startTime = Date.now();
     const saveId = `save_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -752,7 +758,7 @@ export class ConfigManagerModule extends BaseModule {
       this.recordConfigMetric('save_start', {
         saveId,
         configPath: this.mergedConfigPath,
-        configSize: Object.keys(mergedConfig).length,
+        configSize: Object.keys(mergedConfig as Record<string, unknown>).length,
         timestamp: startTime
       });
     }
@@ -775,7 +781,7 @@ export class ConfigManagerModule extends BaseModule {
       if (this.isDebugEnhanced) {
         this.recordConfigMetric('save_success', {
           saveId,
-          configSize: Object.keys(mergedConfig).length,
+          configSize: Object.keys(mergedConfig as Record<string, unknown>).length,
           contentLength: configContent.length,
           totalTime
         });
@@ -783,7 +789,7 @@ export class ConfigManagerModule extends BaseModule {
           saveId,
           success: true,
           configPath: this.mergedConfigPath,
-          configSize: Object.keys(mergedConfig).length,
+          configSize: Object.keys(mergedConfig as Record<string, unknown>).length,
           totalTime
         });
       }
@@ -822,7 +828,8 @@ export class ConfigManagerModule extends BaseModule {
   /**
    * 获取状态
    */
-  getStatus(): any {
+  // Provide detailed module status separate from BaseModule's minimal status
+  getStatus(): UnknownObject {
     const info = this.getInfo();
     const baseStatus = {
       id: info.id,

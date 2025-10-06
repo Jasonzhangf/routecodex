@@ -15,7 +15,7 @@ import type {
   DebugExtensionHealth,
   DebugAdapter,
   DebugContext,
-  DebugData
+  // DebugData
 } from '../types/debug-types.js';
 
 /**
@@ -650,7 +650,7 @@ export class DebugAPIExtensionImpl implements DebugAPIExtension {
   /**
    * Initialize server
    */
-  private async initializeServer(options?: Record<string, any>): Promise<void> {
+  private async initializeServer(_options?: Record<string, any>): Promise<void> {
     // This would typically initialize an Express app or similar HTTP server
     // For now, we'll just mark it as initialized
     this.server = {
@@ -665,7 +665,7 @@ export class DebugAPIExtensionImpl implements DebugAPIExtension {
   private async registerEndpoint(
     method: string,
     path: string,
-    handler: (request: DebugAPIRequest) => Promise<DebugAPIResponse>
+    _handler: (request: DebugAPIRequest) => Promise<DebugAPIResponse>
   ): Promise<void> {
     // This would typically register the endpoint with the HTTP server
     // For now, we'll just store the handler mapping

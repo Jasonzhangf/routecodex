@@ -282,7 +282,7 @@ export class ResponseHandler extends BaseModule {
           requestId,
           processingTime,
           errorStatus: responseContext.status,
-          errorType: (responseContext.body.error as any)?.type,
+          errorType: (responseContext.body.error as Record<string, unknown>)?.['type'],
         },
       });
 

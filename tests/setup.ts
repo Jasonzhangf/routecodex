@@ -16,6 +16,11 @@ jest.mock('rcc-debugcenter', () => ({
 
 // Global test setup
 beforeEach(() => {
-  // Clear any mock calls between tests
+  // Clear mock call history between tests; jest.config resetMocks will reset implementations
   jest.clearAllMocks();
 });
+
+// Provide a spy-friendly mock for 'yaml' ESM package
+jest.mock('yaml', () => ({
+  parse: jest.fn((content: string) => ({ mocked: true, content })),
+}), { virtual: true });

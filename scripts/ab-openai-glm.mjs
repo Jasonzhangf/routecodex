@@ -4,15 +4,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { repoRootFrom, listFiles as listFilesUtil, readJSON } from './lib/utils.mjs';
 import url from 'node:url';
 
-const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, '..');
+const repoRoot = repoRootFrom(import.meta.url);
 
-function readJSON(p) { return JSON.parse(fs.readFileSync(p, 'utf-8')); }
 function listFiles(dir, prefix) {
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir).filter(f => f.startsWith(prefix) && f.endsWith('.json')).map(f => path.join(dir, f)).sort();
+  return listFilesUtil(dir, { prefix, suffix: '.json' });
 }
 
 async function importPreferSrc(relJs, relTs) {
@@ -135,4 +133,3 @@ async function main() {
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
-

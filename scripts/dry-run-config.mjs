@@ -5,25 +5,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import url from 'node:url';
-
-const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, '..');
-
-function resolvePath(p) {
-  if (!p) return null;
-  if (p.startsWith('~/')) {
-    return path.join(os.homedir(), p.slice(2));
-  }
-  return path.isAbsolute(p) ? p : path.join(repoRoot, p);
-}
-
-function readJSON(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-}
+import { resolveFromRepo, readJSON } from './lib/utils.mjs';
 
 async function main() {
-  const modulesPath = resolvePath('config/modules.json');
-  const configArg = process.argv[2] ? resolvePath(process.argv[2]) : resolvePath('config/config.json');
+  const modulesPath = resolveFromRepo(import.meta.url, 'config/modules.json');
+  const configArg = process.argv[2] ? resolveFromRepo(import.meta.url, process.argv[2]) : resolveFromRepo(import.meta.url, 'config/config.json');
 
   if (!configArg || !fs.existsSync(configArg)) {
     console.error(`Config file not found: ${configArg}`);
@@ -39,9 +25,8 @@ async function main() {
     process.exit(1);
   }
 
-  const { VirtualRouterDryRunExecutor } = await import(
-    url.pathToFileURL(path.join(repoRoot, 'dist/modules/virtual-router/virtual-router-dry-run.js')).href
-  );
+  const vrDryRunDist = resolveFromRepo(import.meta.url, 'dist/modules/virtual-router/virtual-router-dry-run.js');
+  const { VirtualRouterDryRunExecutor } = await import(url.pathToFileURL(vrDryRunDist).href);
 
   const executor = new VirtualRouterDryRunExecutor({
     enabled: true,

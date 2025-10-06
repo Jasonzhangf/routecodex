@@ -10,9 +10,9 @@ import {
   type OpenAIChatCompletionRequest,
   type OpenAICompletionRequest,
   type OpenAICompletionResponse,
-  type OpenAIModel,
+  /* type OpenAIModel, */
   type StreamOptions,
-  type StreamResponse,
+  /* type StreamResponse, */
   RouteCodexError,
 } from '../server/types.js';
 import type { UnknownObject } from '../types/common-types.js';
@@ -608,7 +608,7 @@ export class OpenAIProvider extends BaseProvider {
             }
 
             try {
-              const parsed = JSON.parse(data);
+              // const parsed = JSON.parse(data);
               chunks.push(data);
               if (options.onChunk) {
                 options.onChunk(data);

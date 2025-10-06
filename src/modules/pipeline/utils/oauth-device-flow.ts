@@ -142,7 +142,7 @@ export class OAuthDeviceFlow {
   /**
    * Poll for token using device code
    */
-  private async pollForToken(deviceCode: DeviceCodeResponse, callback?: OAuthProgressCallback): Promise<OAuthTokenResponse> {
+  private async pollForToken(deviceCode: DeviceCodeResponse, _callback?: OAuthProgressCallback): Promise<OAuthTokenResponse> {
     const maxAttempts = Math.floor(deviceCode.expires_in / deviceCode.interval) + 10;
     let attempts = 0;
 

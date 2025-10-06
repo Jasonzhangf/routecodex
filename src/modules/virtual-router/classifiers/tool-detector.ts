@@ -5,6 +5,14 @@
 
 import type { ChatCompletionTool, ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
+type ToolCategories = {
+  webSearch: boolean;
+  codeExecution: boolean;
+  fileSearch: boolean;
+  dataAnalysis: boolean;
+  general: boolean;
+};
+
 export interface ToolDetectionResult {
   hasTools: boolean;
   toolCount: number;
@@ -203,14 +211,8 @@ export class ToolDetector {
   /**
    * 对工具进行分类
    */
-  private categorizeTools(toolTypes: string[]): {
-    webSearch: boolean;
-    codeExecution: boolean;
-    fileSearch: boolean;
-    dataAnalysis: boolean;
-    general: boolean;
-  } {
-    const categories = {
+  private categorizeTools(toolTypes: string[]): ToolCategories {
+    const categories: ToolCategories = {
       webSearch: false,
       codeExecution: false,
       fileSearch: false,
@@ -235,7 +237,7 @@ export class ToolDetector {
   private calculateComplexity(
     toolDefinitions: { hasTools: boolean; toolCount: number },
     toolCalls: { hasToolCalls: boolean; toolCallCount: number },
-    categories: any
+    categories: ToolCategories
   ): {
     low: number;
     medium: number;
@@ -272,7 +274,7 @@ export class ToolDetector {
    */
   private generateRecommendations(
     hasTools: boolean,
-    categories: any,
+    categories: ToolCategories,
     complexity: { low: number; medium: number; high: number }
   ): {
     suggestedRoute: string;
@@ -379,7 +381,7 @@ export class ToolDetector {
     };
   }
 
-  private getPrimaryCategory(categories: any): string {
+  private getPrimaryCategory(categories: ToolCategories): string {
     if (categories.webSearch) {return 'webSearch';}
     if (categories.codeExecution) {return 'codeExecution';}
     if (categories.dataAnalysis) {return 'dataAnalysis';}
@@ -388,7 +390,7 @@ export class ToolDetector {
     return 'none';
   }
 
-  private getSecondaryCategories(categories: any): string[] {
+  private getSecondaryCategories(categories: ToolCategories): string[] {
     const secondary: string[] = [];
     for (const [category, hasCategory] of Object.entries(categories)) {
       if (hasCategory && category !== 'general') {

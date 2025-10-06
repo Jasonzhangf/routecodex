@@ -95,7 +95,7 @@ export interface PassThroughConfig {
     rules: Array<{
       path: string;
       operation: 'add' | 'remove' | 'replace';
-      value: any;
+      value: unknown;
     }>;
   };
   responseTransform?: {
@@ -103,7 +103,7 @@ export interface PassThroughConfig {
     rules: Array<{
       path: string;
       operation: 'add' | 'remove' | 'replace';
-      value: any;
+      value: unknown;
     }>;
   };
 }
@@ -226,7 +226,7 @@ export interface SecurityConfig {
       resource: string;
       action: string;
       effect: 'allow' | 'deny';
-      conditions?: Record<string, any>;
+      conditions?: Record<string, unknown>;
     }>;
   };
   encryption: {
@@ -265,7 +265,7 @@ export interface MonitoringConfig {
     format: 'json' | 'text';
     outputs: Array<{
       type: 'console' | 'file' | 'remote';
-      config: Record<string, any>;
+      config: Record<string, unknown>;
     }>;
   };
   tracing: {
@@ -311,14 +311,14 @@ export interface RouteCodexConfig extends BaseConfig {
   modules: {
     [key: string]: {
       enabled: boolean;
-      config: Record<string, any>;
+      config: Record<string, unknown>;
     };
   };
 }
 
 // Configuration validation schema
 export interface ConfigValidationSchema {
-  schema: any; // ZodSchema placeholder
+  schema: unknown; // ZodSchema placeholder
   validators: Array<{
     name: string;
     validate: (config: RouteCodexConfig) => boolean | Promise<boolean>;
@@ -368,7 +368,7 @@ export interface EnvironmentConfig {
     [key: string]: {
       type: 'string' | 'number' | 'boolean';
       required: boolean;
-      default?: any;
+      default?: unknown;
       description: string;
     };
   };
@@ -386,7 +386,7 @@ export interface ConfigPreset {
 export interface ConfigMigration {
   version: string;
   description: string;
-  migrate: (config: any) => Promise<RouteCodexConfig>;
+  migrate: (config: unknown) => Promise<RouteCodexConfig>;
 }
 
 // Configuration utilities

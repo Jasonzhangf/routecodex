@@ -33,12 +33,12 @@ interface OAuthConfig {
 /**
  * Authentication Configuration
  */
-interface AuthConfig {
-  type: 'oauth' | 'apikey' | 'static';
-  oauth?: OAuthConfig;
-  apiKey?: string;
-  tokenFile?: string;
-}
+// interface AuthConfig {
+//   type: 'oauth' | 'apikey' | 'static';
+//   oauth?: OAuthConfig;
+//   apiKey?: string;
+//   tokenFile?: string;
+// }
 
 export class EnhancedAuthResolver {
   private authMappings: Record<string, string>;

@@ -8,7 +8,7 @@
 import { DebugEventBus } from 'rcc-debugcenter';
 import { ErrorHandlerRegistry } from '../utils/error-handler-registry.js';
 import { DebugUtilsStatic, DebugUtilsImpl } from '../utils/debug-utils.js';
-import { BaseDebugAdapter } from './base-debug-adapter.js';
+// import { BaseDebugAdapter } from './base-debug-adapter.js';
 import { ModuleDebugAdapterImpl } from './module-debug-adapter.js';
 import { HttpServerDebugAdapterImpl } from './http-server-debug-adapter.js';
 import { DebugAPIExtensionImpl } from './debug-api-extension.js';

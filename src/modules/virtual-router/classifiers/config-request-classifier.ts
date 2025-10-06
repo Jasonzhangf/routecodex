@@ -5,11 +5,14 @@
 
 import { ProtocolTokenCalculator } from './protocol-token-calculator.js';
 import { ConfigToolDetector } from './config-tool-detector.js';
-import { ConfigRoutingDecision } from './config-routing-decision.js';
-import { ConfigModelTierClassifier } from './config-model-tier-classifier.js';
+import { ConfigRoutingDecision, type RoutingDecisionResult } from './config-routing-decision.js';
+import { ConfigModelTierClassifier, type ModelTierClassificationResult, type EnhancedModelTierConfig } from './config-model-tier-classifier.js';
+import type { ProtocolTokenCalculationResult } from './protocol-token-calculator.js';
+import type { ConfigToolDetectionResult } from './config-tool-detector.js';
+import type { UnknownObject } from '../../../types/common-types.js';
 
 export interface ConfigClassificationInput {
-  request: any;
+  request: UnknownObject;
   endpoint: string;
   protocol?: string;
   userPreferences?: {
@@ -28,10 +31,10 @@ export interface ConfigClassificationResult {
   reasoning: string;
   analysis: {
     protocol: string;
-    tokenAnalysis: any;
-    toolAnalysis: any;
-    modelTierAnalysis: any;
-    routingDecision: any;
+    tokenAnalysis: ProtocolTokenCalculationResult;
+    toolAnalysis: ConfigToolDetectionResult;
+    modelTierAnalysis: ModelTierClassificationResult;
+    routingDecision: RoutingDecisionResult;
   };
   factors: {
     tokenBased: boolean;
@@ -72,15 +75,15 @@ export interface ConfigClassifierConfig {
   };
   protocolHandlers: {
     [key: string]: {
-      tokenCalculator: any;
-      toolDetector: any;
+      tokenCalculator: unknown;
+      toolDetector: unknown;
     };
   };
   modelTiers: {
-    basic: any;
-    advanced: any;
+    basic: EnhancedModelTierConfig;
+    advanced: EnhancedModelTierConfig;
   };
-  routingDecisions: any;
+  routingDecisions: import('./config-routing-decision.js').RoutingDecisionConfig;
   confidenceThreshold: number;
 }
 
@@ -135,7 +138,7 @@ export class ConfigRequestClassifier {
   /**
    * 创建协议专用的Token计算器
    */
-  private createTokenCalculator(protocol: string, config: any): ProtocolTokenCalculator {
+  private createTokenCalculator(protocol: string, _config: unknown): ProtocolTokenCalculator {
     if (protocol === 'openai') {
       return ProtocolTokenCalculator.createOpenAICalculator();
     } else if (protocol === 'anthropic') {
@@ -176,14 +179,14 @@ export class ConfigRequestClassifier {
       steps.push({ step: 'tool_analysis', duration: Date.now() - startTime, success: toolStep.success });
 
       // 4. 模型层级分析
-      const modelTierStep = await this.analyzeModelTier(input.request, tokenStep.result, input.userPreferences);
+      const modelTierStep = await this.analyzeModelTier(input.request, tokenStep.result!, input.userPreferences);
       steps.push({ step: 'model_tier_analysis', duration: Date.now() - startTime, success: modelTierStep.success });
 
       // 5. 路由决策
       const routingStep = await this.makeRoutingDecision(
-        tokenStep.result,
-        toolStep.result,
-        modelTierStep.result,
+        tokenStep.result!,
+        toolStep.result!,
+        modelTierStep.result!,
         protocol || 'openai',
         input.endpoint,
         input.request
@@ -197,10 +200,10 @@ export class ConfigRequestClassifier {
       // 6. 整合结果
       const result = this.integrateResults(
         protocol || 'openai',
-        tokenStep.result,
-        toolStep.result,
-        modelTierStep.result,
-        routingStep.result,
+        tokenStep.result!,
+        toolStep.result!,
+        modelTierStep.result!,
+        routingStep.result!,
         steps,
         Date.now() - startTime
       );
@@ -234,7 +237,7 @@ export class ConfigRequestClassifier {
   /**
    * 分析Token
    */
-  private async analyzeTokens(request: any, endpoint: string, protocol: string): Promise<{ success: boolean; result?: any }> {
+  private async analyzeTokens(request: UnknownObject, endpoint: string, protocol: string): Promise<{ success: boolean; result?: ProtocolTokenCalculationResult }> {
     try {
       const tokenCalculator = this.tokenCalculators.get(protocol);
       if (!tokenCalculator) {
@@ -251,21 +254,23 @@ export class ConfigRequestClassifier {
   /**
    * 分析工具
    */
-  private async analyzeTools(request: any, protocol: string): Promise<{ success: boolean; result?: any }> {
+  private async analyzeTools(request: UnknownObject, protocol: string): Promise<{ success: boolean; result?: ConfigToolDetectionResult }> {
     try {
       const toolDetector = this.toolDetectors.get(protocol);
       if (!toolDetector) {
-        return { success: false, result: { hasTools: false, toolTypes: [], complexity: { medium: 0 } } };
+        return { success: false, result: { hasTools: false, toolTypes: [], toolCount: 0, toolCategories: { webSearch: false, codeExecution: false, fileSearch: false, dataAnalysis: false, general: false }, complexity: { low: 0, medium: 0, high: 0 }, recommendations: { suggestedRoute: 'default', reasoning: 'no-detector', confidence: 0 }, configBased: true } };
       }
 
       const protocolConfig = this.config.protocolMapping[protocol];
-      const messages = request[protocolConfig.messageField];
-      const tools = request[protocolConfig.toolsField];
+      const rawMessages = (request as Record<string, unknown>)[protocolConfig.messageField] as unknown;
+      const rawTools = (request as Record<string, unknown>)[protocolConfig.toolsField] as unknown;
+      const messages = Array.isArray(rawMessages) ? (rawMessages as any[]) : undefined;
+      const tools = Array.isArray(rawTools) ? (rawTools as any[]) : undefined;
 
-      const result = toolDetector.detect(tools, messages);
+      const result = toolDetector.detect(tools as any, messages as any);
       return { success: true, result };
     } catch (error) {
-      return { success: false, result: { hasTools: false, toolTypes: [], complexity: { medium: 0 } } };
+      return { success: false, result: { hasTools: false, toolTypes: [], toolCount: 0, toolCategories: { webSearch: false, codeExecution: false, fileSearch: false, dataAnalysis: false, general: false }, complexity: { low: 0, medium: 0, high: 0 }, recommendations: { suggestedRoute: 'default', reasoning: 'error', confidence: 0 }, configBased: true } };
     }
   }
 
@@ -273,25 +278,35 @@ export class ConfigRequestClassifier {
    * 分析模型层级
    */
   private async analyzeModelTier(
-    request: any,
-    tokenAnalysis: any,
-    userPreferences?: any
-  ): Promise<{ success: boolean; result?: any }> {
+    request: UnknownObject,
+    tokenAnalysis: ProtocolTokenCalculationResult,
+    userPreferences?: {
+      preferredTier?: 'basic' | 'advanced';
+      costSensitive?: boolean;
+      performanceCritical?: boolean;
+      qualityCritical?: boolean;
+    }
+  ): Promise<{ success: boolean; result?: ModelTierClassificationResult }> {
     try {
-      const protocol = this.detectProtocolSync(request.endpoint || '');
+      const endpointStr = typeof (request as Record<string, unknown>)['endpoint'] === 'string'
+        ? (request as Record<string, unknown>)['endpoint'] as string
+        : '';
+      const protocol = this.detectProtocolSync(endpointStr);
       const protocolConfig = this.config.protocolMapping[protocol];
       if (!protocolConfig) {
         return { success: false };
       }
 
-      const model = request[protocolConfig.modelField];
+      const model = String((request as Record<string, unknown>)[protocolConfig.modelField] || 'unknown');
 
+      const maxValRaw = (request as Record<string, unknown>)[protocolConfig.maxTokensField] as unknown;
+      const requestedMax = typeof maxValRaw === 'number' ? maxValRaw : undefined;
       const result = this.modelTierClassifier.classify({
         model,
-        requestedMaxTokens: request[protocolConfig.maxTokensField],
+        requestedMaxTokens: requestedMax,
         context: {
           protocol,
-          endpoint: request.endpoint || '',
+          endpoint: endpointStr,
           estimatedTokens: tokenAnalysis?.totalTokens || 0,
           userPreferences
         }
@@ -307,13 +322,13 @@ export class ConfigRequestClassifier {
    * 做出路由决策
    */
   private async makeRoutingDecision(
-    tokenAnalysis: any,
-    toolAnalysis: any,
-    modelTierAnalysis: any,
+    tokenAnalysis: ProtocolTokenCalculationResult,
+    toolAnalysis: ConfigToolDetectionResult,
+    modelTierAnalysis: ModelTierClassificationResult,
     protocol: string,
     endpoint: string,
-    request: any
-  ): Promise<{ success: boolean; result?: any }> {
+    request: UnknownObject
+  ): Promise<{ success: boolean; result?: RoutingDecisionResult }> {
     try {
       const protocolConfig = this.config.protocolMapping[protocol];
       if (!protocolConfig) {
@@ -322,15 +337,16 @@ export class ConfigRequestClassifier {
 
       const model = this.extractModelFromRequest(request, protocolConfig);
 
+      const requestedMax = this.extractMaxTokensFromRequest(request, protocolConfig);
       const input = {
         protocol,
         endpoint,
         model,
-        tokenCount: request[protocolConfig.maxTokensField] || tokenAnalysis?.totalTokens || 0,
+        tokenCount: (typeof requestedMax === 'number' ? requestedMax : (tokenAnalysis?.totalTokens || 0)),
         toolTypes: toolAnalysis?.toolTypes || [],
         hasTools: toolAnalysis?.hasTools || false,
-        complexity: toolAnalysis?.complexity?.medium || 0,
-        requestedMaxTokens: this.extractMaxTokensFromRequest(request, protocolConfig)
+        complexity: (toolAnalysis?.complexity?.medium || 0),
+        requestedMaxTokens: requestedMax
       };
 
       const result = this.routingDecision.makeDecision(input);
@@ -345,11 +361,11 @@ export class ConfigRequestClassifier {
    */
   private integrateResults(
     protocol: string,
-    tokenAnalysis: any,
-    toolAnalysis: any,
-    modelTierAnalysis: any,
-    routingDecision: any,
-    steps: any[],
+    tokenAnalysis: ProtocolTokenCalculationResult,
+    toolAnalysis: ConfigToolDetectionResult,
+    modelTierAnalysis: ModelTierClassificationResult,
+    routingDecision: RoutingDecisionResult,
+    steps: Array<{ step: string; duration: number; success: boolean }>,
     totalTime: number
   ): ConfigClassificationResult {
     // 安全地访问置信度和属性
@@ -403,7 +419,43 @@ export class ConfigRequestClassifier {
   /**
    * 创建错误结果
    */
-  private createErrorResult(error: string, steps: any[]): ConfigClassificationResult {
+  private createErrorResult(error: string, steps: Array<{ step: string; duration: number; success: boolean }>): ConfigClassificationResult {
+    const emptyToken: ProtocolTokenCalculationResult = {
+      totalTokens: 0,
+      messageTokens: 0,
+      systemTokens: 0,
+      toolTokens: 0,
+      breakdown: { messages: 0, system: 0, tools: 0 },
+      protocol: 'unknown'
+    };
+    const emptyTool: ConfigToolDetectionResult = {
+      hasTools: false,
+      toolCount: 0,
+      toolTypes: [],
+      toolCategories: { webSearch: false, codeExecution: false, fileSearch: false, dataAnalysis: false, general: false },
+      complexity: { low: 0, medium: 0, high: 0 },
+      recommendations: { suggestedRoute: 'default', reasoning: 'error', confidence: 0 },
+      configBased: true
+    };
+    const emptyTier: ModelTierClassificationResult = {
+      tier: 'basic',
+      confidence: 0,
+      reasoning: 'error',
+      maxAllowedTokens: 0,
+      supportedFeatures: [],
+      recommendations: { suitableForTask: true, alternativeTiers: [], warnings: [] },
+      factors: { patternMatch: false, tokenCapacity: false, featureCompatibility: false, userPreference: false },
+      configBased: true,
+    };
+    const emptyRouting: RoutingDecisionResult = {
+      route: 'default',
+      modelTier: 'basic',
+      confidence: 0,
+      reasoning: 'error',
+      factors: { tokenBased: false, toolBased: false, modelBased: false, complexityBased: false },
+      alternativeRoutes: [],
+      configBased: true
+    };
     return {
       success: false,
       route: 'default',
@@ -412,10 +464,10 @@ export class ConfigRequestClassifier {
       reasoning: error,
       analysis: {
         protocol: 'unknown',
-        tokenAnalysis: null,
-        toolAnalysis: null,
-        modelTierAnalysis: null,
-        routingDecision: null
+        tokenAnalysis: emptyToken,
+        toolAnalysis: emptyTool,
+        modelTierAnalysis: emptyTier,
+        routingDecision: emptyRouting
       },
       factors: {
         tokenBased: false,
@@ -454,17 +506,23 @@ export class ConfigRequestClassifier {
   /**
    * 从请求中提取模型
    */
-  private extractModelFromRequest(request: any, protocolConfig: any): string {
+  private extractModelFromRequest(
+    request: UnknownObject,
+    protocolConfig: { modelField: string }
+  ): string {
     // 从请求中提取模型字段
-    return request[protocolConfig.modelField] || 'unknown-model';
+    return (request as Record<string, unknown>)[protocolConfig.modelField] as string || 'unknown-model';
   }
 
   /**
    * 从请求中提取最大Token数
    */
-  private extractMaxTokensFromRequest(request: any, protocolConfig: any): number | undefined {
+  private extractMaxTokensFromRequest(
+    request: UnknownObject,
+    protocolConfig: { maxTokensField: string }
+  ): number | undefined {
     // 从请求中提取最大Token字段
-    return request[protocolConfig.maxTokensField];
+    return (request as Record<string, unknown>)[protocolConfig.maxTokensField] as number | undefined;
   }
 
   /**
@@ -475,7 +533,7 @@ export class ConfigRequestClassifier {
     protocols: string[];
     tokenCalculators: number;
     toolDetectors: number;
-    configValidation: any;
+    configValidation: ReturnType<ConfigRoutingDecision['validateConfig']>;
   } {
     const configValidation = this.routingDecision.validateConfig();
 
@@ -491,13 +549,14 @@ export class ConfigRequestClassifier {
   /**
    * 从模块配置创建请求分类器
    */
-  static fromModuleConfig(classificationConfig: any): ConfigRequestClassifier {
+  static fromModuleConfig(classificationConfig: UnknownObject): ConfigRequestClassifier {
+    const cfg = classificationConfig as Record<string, unknown>;
     const config: ConfigClassifierConfig = {
-      protocolMapping: classificationConfig.protocolMapping,
-      protocolHandlers: classificationConfig.protocolHandlers,
-      modelTiers: classificationConfig.modelTiers,
-      routingDecisions: classificationConfig.routingDecisions,
-      confidenceThreshold: classificationConfig.confidenceThreshold || 60
+      protocolMapping: cfg.protocolMapping as ConfigClassifierConfig['protocolMapping'],
+      protocolHandlers: cfg.protocolHandlers as ConfigClassifierConfig['protocolHandlers'],
+      modelTiers: cfg.modelTiers as ConfigClassifierConfig['modelTiers'],
+      routingDecisions: cfg.routingDecisions as ConfigClassifierConfig['routingDecisions'],
+      confidenceThreshold: (cfg.confidenceThreshold as number) || 60
     };
 
     return new ConfigRequestClassifier(config);

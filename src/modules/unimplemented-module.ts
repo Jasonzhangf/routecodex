@@ -5,8 +5,9 @@
  */
 
 import { BaseModule, type ModuleInfo } from 'rcc-basemodule';
-import { DebugEventBus } from 'rcc-debugcenter';
-import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
+import * as debugcenter from 'rcc-debugcenter';
+import * as errorhandling from 'rcc-errorhandling';
+import type { ErrorContext } from 'rcc-errorhandling';
 // import { Logger } from '../utils/logger.js';
 
 /**
@@ -54,8 +55,12 @@ export interface UnimplementedResponse {
  */
 export class RCCUnimplementedModule extends BaseModule {
   private config: UnimplementedModuleConfig;
-  private debugEventBus: DebugEventBus;
-  private errorHandling: ErrorHandlingCenter;
+  private debugEventBus: { publish: (evt: unknown) => void };
+  private errorHandling: {
+    initialize: () => Promise<void>;
+    handleError: (e?: unknown) => Promise<void>;
+    destroy: () => Promise<void>;
+  };
   // private logger: Logger;
   private stats: UnimplementedModuleStats;
   private static readonly MAX_CALLER_HISTORY = 100;
@@ -85,8 +90,19 @@ export class RCCUnimplementedModule extends BaseModule {
       ...config,
     };
 
-    this.debugEventBus = DebugEventBus.getInstance();
-    this.errorHandling = new ErrorHandlingCenter();
+    const deb: any = (debugcenter as any).DebugEventBus;
+    const DebugEventBusObj = deb && typeof deb.getInstance === 'function'
+      ? deb
+      : { getInstance: () => ({ publish: (_evt: unknown) => {}, subscribe: (_: any, __: any) => {} }) };
+    this.debugEventBus = DebugEventBusObj.getInstance();
+
+    const ErrorHandlingCenterClass: new () => {
+      initialize: () => Promise<void>;
+      handleError: (e?: unknown) => Promise<void>;
+      destroy: () => Promise<void>;
+    } =
+      ((errorhandling as any).ErrorHandlingCenter as any) ?? class { async initialize() {} async handleError() {} async destroy() {} };
+    this.errorHandling = new ErrorHandlingCenterClass();
     // this.logger = new Logger();
 
     // Initialize statistics
@@ -224,7 +240,7 @@ export class RCCUnimplementedModule extends BaseModule {
    */
   public async updateConfig(newConfig: Partial<UnimplementedModuleConfig>): Promise<void> {
     try {
-      const oldConfig = { ...this.config };
+      // const oldConfig = { ...this.config };
       this.config = { ...this.config, ...newConfig };
 
       this.debugEventBus.publish({
@@ -293,7 +309,7 @@ export class RCCUnimplementedModule extends BaseModule {
    * Log module initialization
    */
   private logModuleInitialization(): void {
-    const logMessage = `Unimplemented module initialized: ${this.config.moduleId} (${this.config.moduleName})`;
+    // const logMessage = `Unimplemented module initialized: ${this.config.moduleId} (${this.config.moduleName})`;
 
     switch (this.config.logLevel) {
       case 'debug':
@@ -351,19 +367,19 @@ export class RCCUnimplementedModule extends BaseModule {
    * Log unimplemented call
    */
   private logUnimplementedCall(
-    methodName: string,
-    callerInfo?: { callerId?: string; context?: any },
-    requestId?: string
+    _methodName: string,
+    _callerInfo?: { callerId?: string; context?: any },
+    _requestId?: string
   ): void {
-    const logMessage = `Unimplemented call: ${methodName} (module: ${this.config.moduleId}, requestId: ${requestId})`;
-    const logData = {
-      methodName,
-      moduleId: this.config.moduleId,
-      moduleName: this.config.moduleName,
-      requestId,
-      callerId: callerInfo?.callerId,
-      totalCalls: this.stats.totalCalls,
-    };
+    // const logMessage = `Unimplemented call: ${methodName} (module: ${this.config.moduleId}, requestId: ${requestId})`;
+    // const logData = {
+    //   methodName,
+    //   moduleId: this.config.moduleId,
+    //   moduleName: this.config.moduleName,
+    //   requestId,
+    //   callerId: callerInfo?.callerId,
+    //   totalCalls: this.stats.totalCalls,
+    // };
 
     switch (this.config.logLevel) {
       case 'debug':

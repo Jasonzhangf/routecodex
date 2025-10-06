@@ -5,6 +5,7 @@
 
 import type {
   PipelineConfig,
+  PipelineConfigs,
   RouteTarget,
   RoutingInfo
 } from '../../config/merged-config-types.js';
@@ -21,7 +22,7 @@ export interface ModelFieldConverterConfig {
   traceSampling?: number;            // 轨迹采样率 (0-1)
   defaultMaxTokens?: number;         // 默认最大Token数量
   defaultModel?: string;             // 默认目标模型
-  pipelineConfigs?: any;             // 流水线配置（用于动态提取默认值）
+  pipelineConfigs?: PipelineConfigs; // 流水线配置（用于动态提取默认值）
 }
 
 /**
@@ -41,7 +42,7 @@ export interface ModelMappingRule {
 export interface MappingCondition {
   field: string;                     // 条件字段
   operator: 'eq' | 'gt' | 'lt' | 'gte' | 'lte' | 'contains'; // 操作符
-  value: any;                        // 条件值
+  value: unknown;                    // 条件值
 }
 
 /**
@@ -52,21 +53,21 @@ export interface ParameterMappingRule {
   targetField?: string;              // 目标字段名 (可选，默认同源字段)
   transformer?: ParamTransformer;    // 参数转换器
   validator?: ParamValidator;        // 参数验证器
-  defaultValue?: any;                // 默认值
+  defaultValue?: unknown;            // 默认值
 }
 
 /**
  * 参数转换器
  */
 export interface ParamTransformer {
-  (value: any, context: ConversionContext): any;
+  (value: unknown, context: ConversionContext): unknown;
 }
 
 /**
  * 参数验证器
  */
 export interface ParamValidator {
-  (value: any, context: ConversionContext): ValidationResult;
+  (value: unknown, context: ConversionContext): ValidationResult;
 }
 
 /**
@@ -84,8 +85,8 @@ export interface ValidationResult {
 export interface ConversionContext {
   pipelineConfig: PipelineConfig;    // 流水线配置
   routingInfo: RoutingInfo;          // 路由信息
-  originalRequest: any;              // 原始请求
-  metadata?: Record<string, any>;    // 额外元数据
+  originalRequest: unknown;          // 原始请求
+  metadata?: Record<string, unknown>; // 额外元数据
 }
 
 /**
@@ -94,8 +95,8 @@ export interface ConversionContext {
 export interface ConversionStep {
   step: string;                      // 转换步骤名称
   description: string;               // 步骤描述
-  input: any;                        // 输入数据
-  output: any;                       // 输出数据
+  input: unknown;                    // 输入数据
+  output: unknown;                   // 输出数据
   timestamp: Date;                   // 时间戳
   rules: string[];                   // 应用的规则
   duration: number;                  // 执行时间 (ms)
@@ -105,7 +106,7 @@ export interface ConversionStep {
  * 转换结果
  */
 export interface ConversionResult {
-  convertedRequest: any;             // 转换后的请求
+  convertedRequest: unknown;         // 转换后的请求
   debugInfo: ConversionDebugInfo;    // 调试信息
   success: boolean;                  // 是否成功
   errors?: string[];                 // 错误信息
@@ -117,13 +118,13 @@ export interface ConversionResult {
  */
 export interface ConversionDebugInfo {
   conversionId: string;              // 转换ID
-  originalRequest: any;              // 原始请求
+  originalRequest: unknown;          // 原始请求
   routingInfo: RoutingInfo;          // 路由信息
   pipelineConfig: PipelineConfig;    // 使用的流水线配置
   conversionTrace: ConversionStep[];  // 转换轨迹
   appliedRules: string[];             // 应用的规则列表
   metrics: ConversionMetrics;         // 转换指标
-  meta: Record<string, any>;          // 额外元数据
+  meta: Record<string, unknown>;      // 额外元数据
 }
 
 /**
@@ -150,7 +151,7 @@ export interface BatchConversionResult {
  * 失败的转换
  */
 export interface FailedConversion {
-  request: any;                      // 原始请求
+  request: unknown;                  // 原始请求
   error: ConversionError;             // 转换错误
   timestamp: Date;                   // 时间戳
 }
@@ -161,7 +162,7 @@ export interface FailedConversion {
 export interface ConversionError {
   code: string;                       // 错误代码
   message: string;                    // 错误消息
-  details?: any;                      // 错误详情
+  details?: unknown;                  // 错误详情
   step?: string;                      // 失败步骤
   recovery?: RecoverySuggestion;      // 恢复建议
 }
@@ -267,8 +268,8 @@ export interface RequestMeta {
     providerId: string;               // Provider ID
     modelId: string;                  // 模型ID
     keyId: string;                    // 密钥ID
-    provider?: any;                   // Provider配置
-    modelConfig?: any;                // 模型配置
+    provider?: Record<string, unknown>; // Provider配置
+    modelConfig?: Record<string, unknown>; // 模型配置
   };
   originalModel?: string;             // 原始模型
   conversionId?: string;              // 转换ID

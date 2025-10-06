@@ -2,42 +2,13 @@
 // Dry-run against captured Codex samples to validate compatibility/tool-calls
 
 import fs from 'node:fs';
-import path from 'node:path';
 import os from 'node:os';
-import url from 'node:url';
-
-const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, '..');
-
-function readJSON(p) {
-  return JSON.parse(fs.readFileSync(p, 'utf-8'));
-}
-
-async function importModulePreferSrc(relJs, relTs) {
-  // Prefer src (run with tsx), fallback to dist
-  try {
-    const p = path.join(repoRoot, 'src', relTs);
-    const href = url.pathToFileURL(p).href;
-    return await import(href);
-  } catch {
-    const p = path.join(repoRoot, 'dist', relJs);
-    const href = url.pathToFileURL(p).href;
-    return await import(href);
-  }
-}
+import { importModulePreferSrc, listFiles, readJSON } from './lib/utils.mjs';
 
 function findSampleDir(dirArg) {
   if (dirArg) return path.resolve(dirArg);
   const defaultDir = path.join(os.homedir(), '.routecodex', 'codex-samples');
   return defaultDir;
-}
-
-function listFiles(dir, prefix) {
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir)
-    .filter(f => f.startsWith(prefix) && f.endsWith('.json'))
-    .map(f => path.join(dir, f))
-    .sort();
 }
 
 function hasInvokeMarkup(text) {
@@ -49,16 +20,17 @@ async function main() {
   const dirArg = process.argv[2];
   const sampleDir = findSampleDir(dirArg);
   if (!fs.existsSync(sampleDir)) {
-    console.error(`Sample directory not found: ${sampleDir}`);
-    process.exit(2);
+    // Treat missing samples as a no-op in CI to avoid false failures
+    console.log(`Sample directory not found (skipping): ${sampleDir}`);
+    process.exit(0);
   }
 
   // Import real GLM Compatibility module from dist
-  const { GLMCompatibility } = await importModulePreferSrc(
+  const { GLMCompatibility } = await importModulePreferSrc(import.meta.url,
     'modules/pipeline/modules/compatibility/glm-compatibility.js',
     'modules/pipeline/modules/compatibility/glm-compatibility.ts'
   );
-  const { PipelineDebugLogger } = await importModulePreferSrc(
+  const { PipelineDebugLogger } = await importModulePreferSrc(import.meta.url,
     'modules/pipeline/utils/debug-logger.js',
     'modules/pipeline/utils/debug-logger.ts'
   );
@@ -72,7 +44,7 @@ async function main() {
   const compat = new GLMCompatibility({ type: 'glm-compatibility', config: { thinking: { enabled: true, payload: { type: 'enabled' } } } }, dependencies);
   await compat.initialize();
 
-  const files = listFiles(sampleDir, 'pipeline-out-');
+  const files = listFiles(sampleDir, { prefix: 'pipeline-out-', suffix: '.json' });
   if (files.length === 0) {
     console.log(`No pipeline-out samples found in ${sampleDir}`);
     process.exit(0);

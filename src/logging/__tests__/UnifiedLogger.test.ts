@@ -95,7 +95,7 @@ describe('统一日志系统测试', () => {
     logger.warn('警告消息 - 应该被记录');
     logger.error('错误消息 - 应该被记录');
 
-    const history = logger.getHistory();
+    // const history = logger.getHistory();
     const stats = logger.getStats();
 
     // 验证只有WARN和ERROR级别的日志被记录

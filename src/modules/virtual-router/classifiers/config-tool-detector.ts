@@ -5,6 +5,14 @@
 
 import type { ChatCompletionTool, ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
+type ToolCategories = {
+  webSearch: boolean;
+  codeExecution: boolean;
+  fileSearch: boolean;
+  dataAnalysis: boolean;
+  general: boolean;
+};
+
 export interface ToolPatternConfig {
   webSearch: string[];
   codeExecution: string[];
@@ -186,14 +194,8 @@ export class ConfigToolDetector {
   /**
    * 对工具进行分类
    */
-  private categorizeTools(toolTypes: string[]): {
-    webSearch: boolean;
-    codeExecution: boolean;
-    fileSearch: boolean;
-    dataAnalysis: boolean;
-    general: boolean;
-  } {
-    const categories = {
+  private categorizeTools(toolTypes: string[]): ToolCategories {
+    const categories: ToolCategories = {
       webSearch: false,
       codeExecution: false,
       fileSearch: false,
@@ -218,7 +220,7 @@ export class ConfigToolDetector {
   private calculateComplexity(
     toolDefinitions: { hasTools: boolean; toolCount: number },
     toolCalls: { hasToolCalls: boolean; toolCallCount: number },
-    categories: any
+    categories: ToolCategories
   ): {
     low: number;
     medium: number;
@@ -255,7 +257,7 @@ export class ConfigToolDetector {
    */
   private generateRecommendations(
     hasTools: boolean,
-    categories: any,
+    categories: ToolCategories,
     complexity: { low: number; medium: number; high: number }
   ): {
     suggestedRoute: string;
@@ -364,7 +366,7 @@ export class ConfigToolDetector {
     };
   }
 
-  private getPrimaryCategory(categories: any): string {
+  private getPrimaryCategory(categories: ToolCategories): string {
     if (categories.webSearch) {return 'webSearch';}
     if (categories.codeExecution) {return 'codeExecution';}
     if (categories.dataAnalysis) {return 'dataAnalysis';}
@@ -373,7 +375,7 @@ export class ConfigToolDetector {
     return 'none';
   }
 
-  private getSecondaryCategories(categories: any): string[] {
+  private getSecondaryCategories(categories: ToolCategories): string[] {
     const secondary: string[] = [];
     for (const [category, hasCategory] of Object.entries(categories)) {
       if (hasCategory && category !== 'general') {
@@ -432,27 +434,29 @@ export class ConfigToolDetector {
   /**
    * 从模块配置创建工具检测器
    */
-  static fromModuleConfig(protocolConfig: any): ConfigToolDetector {
+  static fromModuleConfig(protocolConfig: Record<string, unknown>): ConfigToolDetector {
     // 检查配置结构
-    let toolDetectorConfig = protocolConfig.toolDetector;
+    const cfg = protocolConfig as Record<string, unknown>;
+    let toolDetectorConfig = cfg['toolDetector'] as Record<string, unknown> | undefined;
     
     // 如果protocolConfig本身就有toolDetector属性，直接使用
-    if (!toolDetectorConfig && protocolConfig.type === 'pattern') {
-      toolDetectorConfig = protocolConfig;
+    if (!toolDetectorConfig && (cfg['type'] as string) === 'pattern') {
+      toolDetectorConfig = protocolConfig as Record<string, unknown>;
     }
     
     // 如果仍然没有找到配置，尝试直接使用传入的配置
-    if (!toolDetectorConfig && protocolConfig.patterns) {
-      toolDetectorConfig = protocolConfig;
+    if (!toolDetectorConfig && cfg['patterns']) {
+      toolDetectorConfig = protocolConfig as Record<string, unknown>;
     }
     
-    if (!toolDetectorConfig || toolDetectorConfig.type !== 'pattern') {
+    const td = toolDetectorConfig as Record<string, unknown>;
+    if (!toolDetectorConfig || (td['type'] as string) !== 'pattern') {
       throw new Error(`Invalid tool detector configuration: ${  JSON.stringify(protocolConfig, null, 2)}`);
     }
 
     const config: ConfigToolDetectionConfig = {
       type: 'pattern',
-      patterns: toolDetectorConfig.patterns
+      patterns: td['patterns'] as ToolPatternConfig
     };
 
     return new ConfigToolDetector(config);

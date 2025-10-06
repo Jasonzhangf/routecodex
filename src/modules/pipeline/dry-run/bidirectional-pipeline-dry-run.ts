@@ -6,18 +6,18 @@
  */
 
 import type {
-  PipelineModule,
+  // PipelineModule,
   PipelineRequest,
   PipelineResponse
 } from '../interfaces/pipeline-interfaces.js';
 import type {
-  DryRunPipelineModule,
+  // DryRunPipelineModule,
   NodeDryRunConfig,
-  NodeDryRunResult,
+  // NodeDryRunResult,
   PipelineDryRunResponse,
-  NodeDryRunContext
+  // NodeDryRunContext
 } from './pipeline-dry-run-framework.js';
-import type { InputSimulationConfig, ContextPropagationData } from './input-simulator.js';
+import type { InputSimulationConfig /*, ContextPropagationData */ } from './input-simulator.js';
 import { dryRunPipelineExecutor } from './dry-run-pipeline-executor.js';
 import { inputSimulator } from './input-simulator.js';
 import { pipelineDryRunManager } from './pipeline-dry-run-framework.js';
@@ -267,7 +267,7 @@ export class BidirectionalPipelineManager {
     request: PipelineRequest,
     pipelineId: string
   ): Promise<PipelineResponse | PipelineDryRunResponse> {
-    const { dryRunMode, nodeConfigs, inputSimulation } = this.config.requestConfig;
+    const { dryRunMode, nodeConfigs /*, inputSimulation */ } = this.config.requestConfig;
 
     if (dryRunMode === 'none') {
       // 正常执行请求流水线
@@ -313,7 +313,7 @@ export class BidirectionalPipelineManager {
     executionId: string
   ): Promise<ResponseData> {
     const { inputSource, caching } = this.config.responseConfig.responseDryRun;
-    const startTime = Date.now();
+    // const startTime = Date.now();
 
     // 检查缓存
     if (caching?.enabled) {
@@ -364,7 +364,7 @@ export class BidirectionalPipelineManager {
    */
   private async processRealResponse(
     realResponse: any,
-    request: PipelineRequest
+    _request: PipelineRequest
   ): Promise<ResponseData> {
     const processingStart = Date.now();
 
@@ -439,9 +439,9 @@ export class BidirectionalPipelineManager {
   /**
    * 获取缓存的响应
    */
-  private async getCachedResponse(request: PipelineRequest): Promise<ResponseData> {
+  private async getCachedResponse(_request: PipelineRequest): Promise<ResponseData> {
     // 从历史数据中查找类似的响应
-    const historicalResponses = this.findHistoricalResponses(request);
+    const historicalResponses = this.findHistoricalResponses(_request);
 
     if (historicalResponses.length > 0) {
       const bestMatch = historicalResponses[0];
@@ -458,7 +458,7 @@ export class BidirectionalPipelineManager {
     }
 
     // 如果没有缓存，生成模拟响应
-    return this.generateSimulatedResponse(request);
+    return this.generateSimulatedResponse(_request);
   }
 
   /**
@@ -654,7 +654,7 @@ export class BidirectionalPipelineManager {
     correlation: any,
     performance: any,
     quality: any,
-    analysisLevel: string
+    _analysisLevel: string
   ): any {
     const routing: string[] = [];
     const performanceRecs: string[] = [];
@@ -730,35 +730,35 @@ export class BidirectionalPipelineManager {
     }
   }
 
-  private matchesCondition(data: any, condition: any): boolean {
+  private matchesCondition(_data: any, _condition: any): boolean {
     // 简化的条件匹配
     return true;
   }
 
-  private applyTransformation(data: any, transformation: any): any {
+  private applyTransformation(data: any, _transformation: any): any {
     // 简化的转换应用
     return { ...data, transformed: true };
   }
 
-  private findHistoricalResponses(request: PipelineRequest): ResponseData[] {
+  private findHistoricalResponses(_request: PipelineRequest): ResponseData[] {
     // 简化的历史响应查找
     return [];
   }
 
-  private calculateSimilarity(request: any, response: any): number {
+  private calculateSimilarity(_request: any, _response: any): number {
     // 简化的相似度计算
     return 0.8;
   }
 
-  private extractProcessingTime(result: any): number {
+  private extractProcessingTime(_result: any): number {
     // 提取处理时间
-    if (result && result.metadata && result.metadata.processingTime) {
-      return result.metadata.processingTime;
-    }
+    // if (result && result.metadata && result.metadata.processingTime) {
+    //   return result.metadata.processingTime;
+    // }
     return 100; // 默认值
   }
 
-  private calculateQualityScore(result: any): number {
+  private calculateQualityScore(_result: any): number {
     // 简化的质量评分
     return 0.85;
   }

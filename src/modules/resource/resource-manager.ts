@@ -725,7 +725,7 @@ export class ResourceManager {
     const cutoffTime = Date.now() - 3600000; // 1 hour ago
 
     // Clean old performance metrics
-    for (const [name, metric] of this.performanceMetrics) {
+    for (const [, metric] of this.performanceMetrics) {
       metric.values = metric.values.filter((v: any) => v.timestamp > cutoffTime);
     }
 
@@ -740,7 +740,7 @@ export class ResourceManager {
   /**
    * Calculate average wait time (mock implementation)
    */
-  private calculateAverageWaitTimeForPool(poolId: string): number {
+  private calculateAverageWaitTimeForPool(_poolId: string): number {
     // Mock implementation - would track actual wait times in real implementation
     return Math.random() * 100; // Random wait time between 0-100ms
   }

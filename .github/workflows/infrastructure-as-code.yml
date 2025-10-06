@@ -6,7 +6,6 @@ on:
     paths:
       - 'terraform/**'
       - 'k8s/**'
-      - 'docker-compose.yml'
       - '.github/workflows/infrastructure-as-code.yml'
       - 'helm/**'
   pull_request:
@@ -14,7 +13,6 @@ on:
     paths:
       - 'terraform/**'
       - 'k8s/**'
-      - 'docker-compose.yml'
       - 'helm/**'
 
 env:
@@ -297,56 +295,7 @@ jobs:
           rm rendered.yaml
         done
 
-  # Docker Compose 安全检查
-  docker-compose-security:
-    runs-on: ubuntu-latest
-    if: hashFiles('docker-compose.yml') != ''
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Validate Docker Compose
-      run: |
-        # 基本语法验证
-        docker-compose config > /dev/null
-        if [ $? -ne 0 ]; then
-          echo "❌ Invalid Docker Compose file"
-          exit 1
-        fi
-
-    - name: Check Docker Compose security
-      run: |
-        # 检查安全最佳实践
-        
-        # 检查是否使用了root用户
-        if grep -q "user:.*root" docker-compose.yml; then
-          echo "❌ Root user specified in docker-compose.yml"
-          exit 1
-        fi
-        
-        # 检查是否使用了特权模式
-        if grep -q "privileged:.*true" docker-compose.yml; then
-          echo "❌ Privileged mode enabled in docker-compose.yml"
-          exit 1
-        fi
-        
-        # 检查资源限制
-        if ! grep -q "deploy:" docker-compose.yml; then
-          echo "⚠️  Resource limits not specified - consider adding deploy section"
-        fi
-        
-        # 检查网络配置
-        if grep -q "network_mode:.*host" docker-compose.yml; then
-          echo "⚠️  Host network mode used - ensure this is necessary"
-        fi
-
-    - name: Validate Docker Compose secrets
-      run: |
-        # 检查是否正确使用secrets
-        if grep -q "password\|secret\|key" docker-compose.yml && ! grep -q "secrets:" docker-compose.yml; then
-          echo "⚠️  Potential secrets found - consider using Docker secrets"
-        fi
+  # Docker Compose 安全检查（已移除；项目不支持 Docker）
 
   # 基础设施成本估算
   infrastructure-cost:

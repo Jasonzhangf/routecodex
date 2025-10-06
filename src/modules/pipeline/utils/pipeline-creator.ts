@@ -2,7 +2,7 @@
  * Pipeline creation utility functions
  */
 
-import type { PipelineConfig, ModuleDependencies } from '../interfaces/pipeline-interfaces.js';
+import type { PipelineConfig, /* ModuleDependencies */ } from '../interfaces/pipeline-interfaces.js';
 import { BasePipeline } from '../core/base-pipeline.js';
 import type { ErrorHandlingCenter, DebugCenter } from '../types/external-types.js';
 
@@ -18,7 +18,7 @@ export async function createPipeline(
     config,
     errorHandlingCenter,
     debugCenter,
-    async (moduleConfig, dependencies) => {
+    async (_moduleConfig, _dependencies) => {
       // Default module factory - in a real implementation this would be more sophisticated
       throw new Error('Module factory not implemented');
     }

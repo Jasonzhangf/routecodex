@@ -5,7 +5,7 @@
  */
 
 import type {
-  LogLevel,
+  // LogLevel,
   LogContext,
   UnifiedLogEntry,
   LoggerConfig,

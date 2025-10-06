@@ -5,7 +5,7 @@
  * 防止内存泄漏，确保系统稳定性
  */
 
-import type { Disposable, ResourceUsage } from './memory-interface.js';
+import type { /* Disposable, */ ResourceUsage } from './memory-interface.js';
 
 /**
  * 资源类型枚举
@@ -340,7 +340,7 @@ export class MemoryManager {
    */
   async cleanup(force: boolean = false): Promise<CleanupResult> {
     const startTime = Date.now();
-    const initialResourceCount = this.resources.size;
+    // const initialResourceCount = this.resources.size;
 
     // 确定要清理的资源
     const resourcesToClean = this.selectResourcesForCleanup(force);

@@ -5,7 +5,7 @@
 
 export class PipelineConfigManager {
   private configs: Map<string, PipelineConfig> = new Map();
-  private configCache: Map<string, any> = new Map();
+  private configCache: Map<string, unknown> = new Map();
 
   /**
    * 添加流水线配置
@@ -34,7 +34,7 @@ export class PipelineConfigManager {
   /**
    * 获取或创建流水线实例
    */
-  async getPipelineInstance(key: string): Promise<any> {
+  async getPipelineInstance(key: string): Promise<unknown> {
     // 检查缓存
     if (this.configCache.has(key)) {
       return this.configCache.get(key);
@@ -102,7 +102,7 @@ export class PipelineConfigManager {
   /**
    * 创建流水线实例
    */
-  private async createPipelineInstance(config: PipelineConfig): Promise<any> {
+  private async createPipelineInstance(config: PipelineConfig): Promise<unknown> {
     // TODO: 实现实际的流水线创建逻辑
     console.log(`🔄 Creating pipeline instance for ${config.provider.type}`);
 
@@ -110,7 +110,7 @@ export class PipelineConfigManager {
       provider: config.provider,
       model: config.model,
       protocols: config.protocols,
-      execute: async (request: any) => {
+      execute: async (_request: unknown) => {
         // 模拟流水线执行
         return {
           id: `pipeline-response-${  Date.now()}`,

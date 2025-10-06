@@ -14,8 +14,8 @@ import {
   type OpenAICompletionResponse,
   type OpenAIModel,
   type StreamOptions,
-  type StreamResponse,
-  RouteCodexError,
+  /* type StreamResponse, */
+  /* RouteCodexError, */
 } from '../server/types.js';
 
 /**
@@ -104,7 +104,7 @@ export abstract class BaseProvider extends BaseModule {
   /**
    * Initialize the provider
    */
-  public async initialize(config?: any): Promise<void> {
+  public async initialize(_config?: any): Promise<void> {
     try {
       await this.errorHandling.initialize();
       await this.validateConfiguration();
@@ -390,7 +390,7 @@ export abstract class BaseProvider extends BaseModule {
    */
   public async updateConfig(newConfig: Partial<ProviderConfig>): Promise<void> {
     try {
-      const oldConfig = { ...this.config };
+      // const oldConfig = { ...this.config };
       this.config = { ...this.config, ...newConfig };
 
       await this.validateConfiguration();

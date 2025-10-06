@@ -8,10 +8,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
 import { createReadStream } from 'fs';
-import { createInterface } from 'readline';
+// import { createInterface } from 'readline';
 
-import type { LogFilter } from '../types.js';
-import { FILE_LOG_CONSTANTS, QUERY_CONSTANTS } from '../constants.js';
+// import type { LogFilter } from '../types.js';
+// import { FILE_LOG_CONSTANTS, QUERY_CONSTANTS } from '../constants.js';
 
 /**
  * 日志文件信息
@@ -101,7 +101,7 @@ export class LogFileScanner {
       recursive: options.recursive ?? true,
       moduleIds: options.moduleIds || [],
       timeRange: options.timeRange || { start: 0, end: Date.now() },
-      maxFileSize: options.maxFileSize || QUERY_CONSTANTS.MAX_TIME_RANGE * 10, // 默认30天数据
+      maxFileSize: options.maxFileSize || 2592000 * 10, // 默认30天数据 (30 * 24 * 60 * 60 * 1000 * 10)
       includeCompressed: options.includeCompressed ?? true,
       maxDepth: options.maxDepth ?? 10
     };

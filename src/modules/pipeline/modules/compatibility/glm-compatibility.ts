@@ -12,7 +12,7 @@ import type { TransformationRule } from '../../interfaces/pipeline-interfaces.js
 import type { PipelineDebugLogger as PipelineDebugLoggerInterface } from '../../interfaces/pipeline-interfaces.js';
 import { loadToolMappings } from '../../../../config/tool-mapping-loader.js';
 import { ToolMappingExecutor } from '../../utils/tool-mapping-executor.js';
-import type { UnknownObject, LogData } from '../../../../types/common-types.js';
+import type { UnknownObject, /* LogData */ } from '../../../../types/common-types.js';
 
 export class GLMCompatibility implements CompatibilityModule {
   readonly id: string;

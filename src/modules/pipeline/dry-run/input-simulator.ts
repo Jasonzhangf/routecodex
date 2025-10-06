@@ -5,7 +5,7 @@
  * 通过智能输入模拟和上下文传播，实现完整的全流水线dry-run
  */
 
-import type { PipelineModule } from '../interfaces/pipeline-interfaces.js';
+// import type { PipelineModule } from '../interfaces/pipeline-interfaces.js';
 import type { NodeDryRunContext } from './pipeline-dry-run-framework.js';
 
 /**
@@ -473,7 +473,7 @@ export class InputSimulator {
   /**
    * 生成模拟值
    */
-  private generateMockValue(field: string, schema: any): any {
+  private generateMockValue(field: string, _schema: any): any {
     const mockValues: Record<string, any> = {
       'timestamp': Date.now(),
       'id': `mock-${Date.now()}`,

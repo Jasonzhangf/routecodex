@@ -14,6 +14,7 @@ import fs from 'fs';
 import { homedir } from 'os';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import type { UnknownObject } from './types/common-types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -149,7 +150,7 @@ program
               ...(template.logging || {}),
               level: options.logLevel
             },
-            providers: (template as any).providers || {}
+            providers: (template as UnknownObject).providers || {}
           } as DefaultConfig;
         }
 

@@ -28,7 +28,7 @@ const DISABLE_GLM_CONTEXT_TRIM = String(process.env.RCC_GLM_DISABLE_TRIM || '').
 const DISABLE_GLM_EMPTY_USER_FILTER = String(process.env.RCC_GLM_DISABLE_EMPTY_USER_FILTER || '').trim() === '1';
 
 const estimateTokens = (text: string): number => {
-  if (!text) return 0;
+  if (!text) {return 0;}
   return Math.ceil(text.length / 4);
 };
 
@@ -49,13 +49,13 @@ const messageTokenCost = (msg: any): number => {
 };
 
 function coerceStringContent(value: any): string {
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') {return value;}
   if (Array.isArray(value)) {
     const text = value
       .map((p: any) => {
         if (p && typeof p === 'object') {
-          if (typeof p.text === 'string') return p.text; // OpenAI-style {type:'text',text:'...'}
-          if (typeof p.content === 'string') return p.content;
+          if (typeof p.text === 'string') {return p.text;} // OpenAI-style {type:'text',text:'...'}
+          if (typeof p.content === 'string') {return p.content;}
         }
         return '';
       })
@@ -66,22 +66,22 @@ function coerceStringContent(value: any): string {
   if (value && typeof value === 'object') {
     try { return JSON.stringify(value); } catch { return String(value); }
   }
-  if (value == null) return '';
+  if (value === null || value === undefined) {return '';}
   return String(value);
 }
 
 function stringifyFunctionArguments(args: any): string {
-  if (typeof args === 'string') return args;
-  if (args == null) return '{}';
+  if (typeof args === 'string') {return args;}
+  if (args === null || args === undefined) {return '{}';}
   try { return JSON.stringify(args); } catch { return String(args); }
 }
 
 function mapToolsForGLM(raw: any, issues: PreflightResult['issues']): any[] | undefined {
-  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  if (!Array.isArray(raw) || raw.length === 0) {return undefined;}
   const out: any[] = [];
   for (let i = 0; i < raw.length; i++) {
     const t = raw[i] as any;
-    if (!t || typeof t !== 'object') continue;
+    if (!t || typeof t !== 'object') {continue;}
     if (t.type === 'function' || (!t.type && t.function)) {
       const fn = t.function || {};
       const name = typeof fn?.name === 'string' ? fn.name : undefined;
@@ -111,14 +111,14 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
   const out: Record<string, unknown> = {};
 
   // model
-  if (typeof src.model === 'string') out.model = src.model;
+  if (typeof src.model === 'string') {out.model = src.model;}
 
   // messages
   const rawMessages = Array.isArray(src.messages) ? src.messages : [];
   const mappedMessages = rawMessages.map((m: any, idx: number) => {
     const role0 = typeof m?.role === 'string' ? m.role : 'user';
     const role = ALLOWED_ROLES.has(role0) ? role0 : 'user';
-    if (role0 !== role) issues.push({ level:'warn', code:'messages.role.coerced', message:`coerced role ${role0} -> ${role}`, path:`messages[${idx}].role` });
+    if (role0 !== role) {issues.push({ level:'warn', code:'messages.role.coerced', message:`coerced role ${role0} -> ${role}`, path:`messages[${idx}].role` });}
 
     const msg: any = { role };
 
@@ -141,7 +141,7 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
           const fn = tc?.function || {};
           const name = typeof fn?.name === 'string' ? fn.name : undefined;
           const args = stringifyFunctionArguments(fn?.arguments);
-          if (!name) issues.push({ level:'warn', code:'tool_calls.missing_name', message:'assistant.tool_calls missing function.name', path:`messages[${idx}].tool_calls[${j}]` });
+          if (!name) {issues.push({ level:'warn', code:'tool_calls.missing_name', message:'assistant.tool_calls missing function.name', path:`messages[${idx}].tool_calls[${j}]` });}
           return { id: tc?.id, type: 'function', function: { ...(name?{name}:{ }), arguments: args } };
         });
         // GLM request schema for messages does not require tool_calls on assistant history; keep but safe-typed
@@ -245,12 +245,12 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
   out.messages = messages;
 
   // Sampling & limits
-  if (typeof src.temperature === 'number') out.temperature = src.temperature;
-  if (typeof src.top_p === 'number') out.top_p = src.top_p;
-  if (typeof src.max_tokens === 'number') out.max_tokens = src.max_tokens;
+  if (typeof src.temperature === 'number') {out.temperature = src.temperature;}
+  if (typeof src.top_p === 'number') {out.top_p = src.top_p;}
+  if (typeof src.max_tokens === 'number') {out.max_tokens = src.max_tokens;}
 
   // Thinking payload passthrough
-  if (src.thinking && typeof src.thinking === 'object') out.thinking = src.thinking;
+  if (src.thinking && typeof src.thinking === 'object') {out.thinking = src.thinking;}
 
   // Tools
   if (targetGLM) {
@@ -275,7 +275,7 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
     (out as any).stream = false;
   } else {
     // For non-GLM targets, preserve stream flag if provided
-    if (typeof src.stream === 'boolean') (out as any).stream = src.stream;
+    if (typeof src.stream === 'boolean') {(out as any).stream = src.stream;}
   }
 
   return { payload: out, issues };

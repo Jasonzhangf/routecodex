@@ -63,7 +63,7 @@ export interface ProviderConfig {
     oauth?: OAuthConfig;
   };
   /** 提供商特定配置 */
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 /**
@@ -115,7 +115,7 @@ export interface CompatibilityConfig {
   /** 兼容性类型 */
   type: string;
   /** 转换规则 */
-  transformations?: Record<string, any>;
+  transformations?: Record<string, unknown>;
 }
 
 /**
@@ -177,7 +177,7 @@ export interface RootConfig {
   /** 流水线配置 */
   pipelines?: PipelineConfig[];
   /** 其他配置 */
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 /**

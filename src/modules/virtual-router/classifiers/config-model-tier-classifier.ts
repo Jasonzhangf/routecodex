@@ -378,18 +378,19 @@ export class ConfigModelTierClassifier {
     };
     totalPatterns: number;
   } {
+    const tiers = this.modelTiers as { basic: EnhancedModelTierConfig; advanced: EnhancedModelTierConfig };
     return {
       basic: {
-        modelCount: this.modelTiers.basic.models.length,
-        maxTokens: this.modelTiers.basic.maxTokens,
-        featureCount: this.modelTiers.basic.supportedFeatures.length,
-        models: this.modelTiers.basic.models
+        modelCount: tiers.basic.models.length,
+        maxTokens: tiers.basic.maxTokens,
+        featureCount: tiers.basic.supportedFeatures.length,
+        models: tiers.basic.models
       },
       advanced: {
-        modelCount: this.modelTiers.advanced.models.length,
-        maxTokens: this.modelTiers.advanced.maxTokens,
-        featureCount: this.modelTiers.advanced.supportedFeatures.length,
-        models: this.modelTiers.advanced.models
+        modelCount: tiers.advanced.models.length,
+        maxTokens: tiers.advanced.maxTokens,
+        featureCount: tiers.advanced.supportedFeatures.length,
+        models: tiers.advanced.models
       },
       totalPatterns: this.modelPatterns.size
     };
@@ -398,25 +399,25 @@ export class ConfigModelTierClassifier {
   /**
    * 从模块配置创建模型层级分类器
    */
-  static fromModuleConfig(classificationConfig: any): ConfigModelTierClassifier {
-    const modelTiers = classificationConfig.modelTiers;
+  static fromModuleConfig(classificationConfig: Record<string, unknown>): ConfigModelTierClassifier {
+    const modelTiers = classificationConfig['modelTiers'] as { basic?: EnhancedModelTierConfig; advanced?: EnhancedModelTierConfig };
     if (!modelTiers || !modelTiers.basic || !modelTiers.advanced) {
       throw new Error('Invalid model tiers configuration');
     }
 
     // 增强配置
-    const enhancedTiers = {
+    const enhancedTiers: { basic: EnhancedModelTierConfig; advanced: EnhancedModelTierConfig } = {
       basic: {
-        ...modelTiers.basic,
+        ...(modelTiers?.basic || {}),
         costMultiplier: 1.0,
         performanceMultiplier: 1.0,
         qualityMultiplier: 1.0
       },
       advanced: {
-        ...modelTiers.advanced,
-        costMultiplier: 2.0,
-        performanceMultiplier: 1.5,
-        qualityMultiplier: 1.8
+        ...(modelTiers?.advanced || {}),
+        costMultiplier: 1.0,
+        performanceMultiplier: 1.0,
+        qualityMultiplier: 1.0
       }
     };
 

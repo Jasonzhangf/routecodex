@@ -159,7 +159,7 @@ export class RequestTransformer {
     const modelRule = rules.find(rule => rule.sourceField === 'model');
 
     if (modelRule && modelRule.transformer) {
-      request.model = modelRule.transformer(originalValue, context);
+      request.model = String(modelRule.transformer(originalValue, context) as unknown);
     }
 
     const endTime = Date.now();
@@ -194,11 +194,11 @@ export class RequestTransformer {
         continue; // 模型字段已在前面处理
       }
 
-      const originalValue = (request as any)[rule.sourceField];
+      const originalValue = (request as unknown as Record<string, unknown>)[rule.sourceField];
       if (originalValue !== undefined) {
         // 应用转换器
         if (rule.transformer) {
-          (request as any)[rule.sourceField] = rule.transformer(originalValue, context);
+          (request as unknown as Record<string, unknown>)[rule.sourceField] = rule.transformer(originalValue, context) as unknown;
         }
 
         // 应用验证器
@@ -212,7 +212,7 @@ export class RequestTransformer {
         appliedRules.push(`${rule.sourceField}_transformation`);
       } else if (rule.defaultValue !== undefined) {
         // 应用默认值
-        (request as any)[rule.sourceField] = rule.defaultValue;
+        (request as unknown as Record<string, unknown>)[rule.sourceField] = rule.defaultValue as unknown;
         appliedRules.push(`${rule.sourceField}_default_value`);
       }
     }
@@ -257,7 +257,7 @@ export class RequestTransformer {
     request._meta.conversion = {
       convertedAt: new Date().toISOString(),
       converter: 'RequestTransformer',
-      originalModel: context.originalRequest.model,
+      originalModel: (context.originalRequest as { model?: string })?.model,
       targetModel: request.model
     };
 
@@ -398,7 +398,7 @@ export class RequestTransformer {
    * 获取转换器统计信息
    */
   getStatistics(): {
-    rules: Record<string, any>;
+    rules: Record<string, unknown>;
     uptime: number;
   } {
     return {

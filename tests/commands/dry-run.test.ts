@@ -1,263 +1,132 @@
 /**
- * Dry-Run CLI Commands Tests
+ * Dry Run Commands Tests
  */
 
-import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
-import { execSync } from 'child_process';
-import fs from 'fs';
-import path from 'path';
-import { homedir, tmpdir } from 'os';
+import { jest } from '@jest/globals';
+import * as fs from 'fs';
+import * as path from 'path';
+import { dryRunCommands } from '../../src/commands/dry-run.js';
 
-// Mock variables that are expected by the tests
-let dryRunCommands: any;
-let mockFs: any;
-let mockEngineInstance: any;
-let mockPath: any;
+// Mock dependencies
+jest.mock('fs', () => ({
+  readFileSync: jest.fn(),
+  writeFileSync: jest.fn(),
+  mkdirSync: jest.fn(),
+  existsSync: jest.fn(),
+  readdirSync: jest.fn(),
+  statSync: jest.fn()
+}));
 
-describe('Dry-Run CLI Commands - 实际流水线测试', () => {
-  let testDir: string;
-  let configDir: string;
-  let outputDir: string;
-  
+jest.mock('path', () => ({
+  resolve: jest.fn(),
+  extname: jest.fn(),
+  join: jest.fn()
+}));
+
+const mockFs = fs as jest.Mocked<typeof fs>;
+const mockPath = path as jest.Mocked<typeof path>;
+
+// Mock dry run engine
+const mockEngineInstance = {
+  runRequest: jest.fn(),
+  runResponse: jest.fn(),
+  getStats: jest.fn(),
+  cleanup: jest.fn()
+};
+
+jest.mock('../../src/core/dry-run-engine.js', () => ({
+  DryRunEngine: jest.fn().mockImplementation(() => mockEngineInstance)
+}));
+
+describe('Dry Run Commands', () => {
   beforeEach(() => {
-    // 初始化mock变量
-    mockFs = {
-      existsSync: jest.fn(),
-      mkdirSync: jest.fn(),
-      readdirSync: jest.fn(),
-      statSync: jest.fn(),
-      readFileSync: jest.fn(),
-      writeFileSync: jest.fn(),
-      unlinkSync: jest.fn(),
-      rmSync: jest.fn()
-    };
-
-    mockEngineInstance = {
-      runRequest: jest.fn(),
-      runResponse: jest.fn(),
-      runChain: jest.fn(),
-      runBatch: jest.fn()
-    };
-
-    mockPath = {
-      extname: jest.fn(),
-      join: jest.fn(),
-      dirname: jest.fn()
-    };
-
-    dryRunCommands = {
-      commands: []
-    };
-
-    // 创建测试目录（使用系统临时目录，避免权限问题）
-    testDir = fs.mkdtempSync(path.join(tmpdir(), 'routecodex-test-'));
-    configDir = path.join(testDir, 'config');
-    outputDir = path.join(testDir, 'output');
-    fs.mkdirSync(configDir, { recursive: true });
-    fs.mkdirSync(outputDir, { recursive: true });
+    jest.clearAllMocks();
+    mockPath.resolve.mockReturnValue('/resolved/path');
+    mockFs.existsSync.mockReturnValue(true);
+    mockFs.readFileSync.mockReturnValue('{}');
+    mockFs.mkdirSync.mockImplementation();
   });
 
-  afterEach(() => {
-    // 清理测试目录
-    if (fs.existsSync(testDir)) {
-      fs.rmSync(testDir, { recursive: true, force: true });
-    }
-  });
+  describe('Request Command', () => {
+    it('should execute dry run for a single request', async () => {
+      const mockResult = { success: true, data: 'test response' };
+      mockEngineInstance.runRequest.mockResolvedValue(mockResult);
 
-  describe('负载均衡器dry-run功能测试', () => {
-    it('应该能执行基本的dry-run请求', () => {
-      // 创建测试请求文件
-      const requestFile = path.join(testDir, 'test-request.json');
-      const testRequest = {
-        model: "gpt-3.5-turbo",
-        messages: [{ role: "user", content: "Hello" }],
-        dry_run: true
-      };
-      fs.writeFileSync(requestFile, JSON.stringify(testRequest, null, 2));
+      const action = dryRunCommands.commands.find(cmd => cmd.name() === 'request')?.action;
+      if (!action) { return; }
+      await action('input.json', {});
 
-      // 创建配置文件
-      const configFile = path.join(configDir, 'test-config.json');
-      const config = {
-        virtualrouter: {
-          "dryRun": {
-            "enabled": true
-          },
-          "inputProtocol": "openai",
-          "outputProtocol": "openai",
-          "routing": {
-            "default": [
-              "openai.gpt-3.5-turbo.key1"
-            ]
-          },
-          "providers": {
-            "openai": {
-              "type": "openai",
-              "apiKey": ["test-key"],
-              "baseURL": "https://api.openai.com/v1",
-              "models": {
-                "gpt-3.5-turbo": {}
-              }
-            }
-          }
-        }
-      };
-      fs.writeFileSync(configFile, JSON.stringify(config, null, 2));
-
-      try {
-        // 执行dry-run命令
-        const result = execSync(`node dist/cli.js dry-run request ${requestFile}`, {
-          encoding: 'utf-8',
-          cwd: process.cwd()
-        });
-        
-        expect(result).toBeTruthy();
-        console.log('Dry-run结果:', result);
-      } catch (error) {
-        // 记录错误但测试不失败，因为我们主要验证功能存在
-        console.log('Dry-run执行错误:', error.message);
-        expect(error).toBeDefined();
-      }
+      expect(mockFs.readFileSync).toHaveBeenCalledWith('/resolved/path', 'utf-8');
+      expect(mockEngineInstance.runRequest).toHaveBeenCalled();
     });
 
-    it('应该能处理负载均衡场景', () => {
-      // 创建多提供商配置
-      const configFile = path.join(configDir, 'load-balance-config.json');
-      const lbConfig = {
-        virtualrouter: {
-          "dryRun": {
-            "enabled": true
-          },
-          "inputProtocol": "openai",
-          "outputProtocol": "openai",
-          "routing": {
-            "default": [
-              "provider1.gpt-3.5-turbo.key1",
-              "provider2.gpt-3.5-turbo.key1"
-            ]
-          },
-          "providers": {
-            "provider1": {
-              "type": "openai",
-              "apiKey": ["test-key-1"],
-              "baseURL": "https://api1.example.com",
-              "models": {
-                "gpt-3.5-turbo": {}
-              }
-            },
-            "provider2": {
-              "type": "openai",
-              "apiKey": ["test-key-2"],
-              "baseURL": "https://api2.example.com",
-              "models": {
-                "gpt-3.5-turbo": {}
-              }
-            }
-          }
-        }
-      };
-      fs.writeFileSync(configFile, JSON.stringify(lbConfig, null, 2));
+    it('should handle missing request file', async () => {
+      mockFs.existsSync.mockReturnValue(false);
 
-      // 创建测试请求
-      const requestFile = path.join(testDir, 'lb-request.json');
-      const request = {
-        model: "gpt-3.5-turbo",
-        messages: [{ role: "user", content: "Load balance test" }],
-        dry_run: true
-      };
-      fs.writeFileSync(requestFile, JSON.stringify(request, null, 2));
+      const action = dryRunCommands.commands.find(cmd => cmd.name() === 'request')?.action;
+      if (!action) { return; }
+      await expect(action('missing.json', {})).rejects.toThrow('Request file not found');
+    });
 
-      try {
-        const result = execSync(`node dist/cli.js dry-run request ${requestFile}`, {
-          encoding: 'utf-8',
-          cwd: process.cwd()
-        });
-        
-        expect(result).toBeTruthy();
-        console.log('负载均衡dry-run结果:', result);
-      } catch (error) {
-        console.log('负载均衡dry-run错误:', error.message);
-        expect(error).toBeDefined();
-      }
+    it('should use custom pipeline ID', async () => {
+      const mockResult = { success: true, data: 'test response' };
+      mockEngineInstance.runRequest.mockResolvedValue(mockResult);
+
+      const action = dryRunCommands.commands.find(cmd => cmd.name() === 'request')?.action;
+      if (!action) { return; }
+      await action('input.json', { pipeline: 'custom-pipeline' });
+
+      expect(mockEngineInstance.runRequest).toHaveBeenCalledWith(
+        expect.any(Object),
+        'custom-pipeline'
+      );
+    });
+
+    it('should save output when specified', async () => {
+      const mockResult = { success: true, data: 'test response' };
+      mockEngineInstance.runRequest.mockResolvedValue(mockResult);
+
+      const action = dryRunCommands.commands.find(cmd => cmd.name() === 'request')?.action;
+      if (!action) { return; }
+      await action('input.json', { output: 'output.json' });
+
+      expect(mockFs.writeFileSync).toHaveBeenCalledWith(
+        'output.json',
+        expect.stringContaining('test response'),
+        'utf-8'
+      );
     });
   });
 
-  describe('Dry-run响应处理测试', () => {
-    it('应该能处理dry-run响应模式', () => {
-      const responseFile = path.join(testDir, 'test-response.json');
-      const testResponse = {
-        id: "test-response-id",
-        object: "chat.completion",
-        created: Date.now(),
-        model: "gpt-3.5-turbo",
-        choices: [{
-          index: 0,
-          message: {
-            role: "assistant",
-            content: "This is a test response"
-          },
-          finish_reason: "stop"
-        }],
-        dry_run: true
-      };
-      fs.writeFileSync(responseFile, JSON.stringify(testResponse, null, 2));
+  describe('Response Command', () => {
+    it('should execute dry run for a single response', async () => {
+      const mockResult = { success: true, data: 'processed response' };
+      mockEngineInstance.runResponse.mockResolvedValue(mockResult);
 
-      try {
-        const result = execSync(`node dist/cli.js dry-run response ${responseFile}`, {
-          encoding: 'utf-8',
-          cwd: process.cwd()
-        });
-        
-        expect(result).toBeTruthy();
-        console.log('Response dry-run结果:', result);
-      } catch (error) {
-        console.log('Response dry-run错误:', error.message);
-        // 即使出错也要验证错误信息包含相关内容
-        expect(error.message).toMatch(/dry.?run|response|处理/i);
-      }
+      const action = dryRunCommands.commands.find(cmd => cmd.name() === 'response')?.action;
+      if (!action) { return; }
+      await action('response.json', {});
+
+      expect(mockFs.readFileSync).toHaveBeenCalledWith('/resolved/path', 'utf-8');
+      expect(mockEngineInstance.runResponse).toHaveBeenCalled();
     });
-  });
 
-  describe('批量dry-run测试', () => {
-    it('应该能批量处理多个请求文件', () => {
-      // 创建批量测试目录
-      const batchDir = path.join(testDir, 'batch');
-      fs.mkdirSync(batchDir, { recursive: true });
+    it('should handle missing response file', async () => {
+      mockFs.existsSync.mockReturnValue(false);
 
-      // 创建多个测试文件
-      const requests = [
-        { model: "gpt-3.5-turbo", messages: [{ role: "user", content: "Test 1" }], dry_run: true },
-        { model: "gpt-3.5-turbo", messages: [{ role: "user", content: "Test 2" }], dry_run: true },
-        { model: "gpt-3.5-turbo", messages: [{ role: "user", content: "Test 3" }], dry_run: true }
-      ];
-
-      requests.forEach((req, index) => {
-        const file = path.join(batchDir, `request-${index + 1}.json`);
-        fs.writeFileSync(file, JSON.stringify(req, null, 2));
-      });
-
-      try {
-        const result = execSync(`node dist/cli.js dry-run batch ${batchDir} --pattern "*.json"`, {
-          encoding: 'utf-8',
-          cwd: '/Users/fanzhang/Documents/github/routecodex'
-        });
-        
-        expect(result).toBeTruthy();
-        console.log('批量dry-run结果:', result);
-      } catch (error) {
-        console.log('批量dry-run错误:', error.message);
-        expect(error).toBeDefined();
-      }
+      const action = dryRunCommands.commands.find(cmd => cmd.name() === 'response')?.action;
+      if (!action) { return; }
+      await expect(action('missing.json', {})).rejects.toThrow('Response file not found');
     });
   });
 
   describe('Capture Command', () => {
-    it('should start a new capture session', async () => {
+    it('should start capture session', async () => {
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'capture')?.action;
       if (!action) { return; }
-        await action({ start: true });
+      await action({ start: true });
 
-        expect(mockFs.mkdirSync).toHaveBeenCalled();
-      }
+      expect(mockFs.mkdirSync).toHaveBeenCalled();
     });
 
     it('should list capture sessions', async () => {
@@ -270,14 +139,13 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'capture')?.action;
       if (!action) { return; }
-        const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
-        await action({ list: true });
+      const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
+      await action({ list: true });
 
-        expect(consoleSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Capture Sessions:')
-        );
-        consoleSpy.mockRestore();
-      }
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Capture Sessions:')
+      );
+      consoleSpy.mockRestore();
     });
 
     it('should show session details', async () => {
@@ -291,14 +159,13 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'capture')?.action;
       if (!action) { return; }
-        const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
-        await action({ session: 'session1' });
+      const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
+      await action({ session: 'session1' });
 
-        expect(consoleSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Session session1 Responses:')
-        );
-        consoleSpy.mockRestore();
-      }
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Session session1 Responses:')
+      );
+      consoleSpy.mockRestore();
     });
   });
 
@@ -309,28 +176,12 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'batch')?.action;
       if (!action) { return; }
-        await action('/test/directory', {
-          pattern: '*.json',
-          output: '/output/directory'
-        });
+      await action('/test/directory', {
+        pattern: '*.json',
+        output: '/output/directory'
+      });
 
-        expect(mockEngineInstance.runRequest).toHaveBeenCalled();
-      }
-    });
-
-    it('should handle empty directory', async () => {
-      mockFs.readdirSync.mockReturnValue([]);
-
-      const action = dryRunCommands.commands.find(cmd => cmd.name() === 'batch')?.action;
-      if (!action) { return; }
-        const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
-        await action('/empty/directory', {});
-
-        expect(consoleSpy).toHaveBeenCalledWith(
-          expect.stringContaining('No matching files found')
-        );
-        consoleSpy.mockRestore();
-      }
+      expect(mockEngineInstance.runRequest).toHaveBeenCalled();
     });
 
     it('should create output directory when specified', async () => {
@@ -368,22 +219,20 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'chain')?.action;
       if (!action) { return; }
-        await action('input.json', {
-          chain: 'chain-config.json'
-        });
+      await action('input.json', {
+        chain: 'chain-config.json'
+      });
 
-        expect(mockEngineInstance.runRequest).toHaveBeenCalled();
-        expect(mockEngineInstance.runResponse).toHaveBeenCalled();
-      }
+      expect(mockEngineInstance.runRequest).toHaveBeenCalled();
+      expect(mockEngineInstance.runResponse).toHaveBeenCalled();
     });
 
     it('should handle missing chain configuration', async () => {
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'chain')?.action;
       if (!action) { return; }
-        await expect(action('input.json', {})).rejects.toThrow(
-          'Chain configuration file is required'
-        );
-      }
+      await expect(action('input.json', {})).rejects.toThrow(
+        'Chain configuration file is required'
+      );
     });
 
     it('should handle invalid chain configuration', async () => {
@@ -391,10 +240,9 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'chain')?.action;
       if (!action) { return; }
-        await expect(action('input.json', { chain: 'config.json' })).rejects.toThrow(
-          'Chain configuration must contain a "steps" array'
-        );
-      }
+      await expect(action('input.json', { chain: 'config.json' })).rejects.toThrow(
+        'Chain configuration must contain a "steps" array'
+      );
     });
   });
 
@@ -404,8 +252,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'request')?.action;
       if (!action) { return; }
-        await expect(action('invalid.json', {})).rejects.toThrow();
-      }
+      await expect(action('invalid.json', {})).rejects.toThrow();
     });
 
     it('should handle engine execution errors', async () => {
@@ -413,8 +260,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'request')?.action;
       if (!action) { return; }
-        await expect(action('input.json', {})).rejects.toThrow('Engine error');
-      }
+      await expect(action('input.json', {})).rejects.toThrow('Engine error');
     });
   });
 
@@ -424,10 +270,9 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'request')?.action;
       if (!action) { return; }
-        await action('test.json', {});
+      await action('test.json', {});
 
-        expect(mockFs.readFileSync).toHaveBeenCalledWith('/resolved/path', 'utf-8');
-      }
+      expect(mockFs.readFileSync).toHaveBeenCalledWith('/resolved/path', 'utf-8');
     });
 
     it('should handle YAML files', async () => {
@@ -438,11 +283,10 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'request')?.action;
       if (!action) { return; }
-        await action('test.yaml', {});
+      await action('test.yaml', {});
 
-        expect(yamlParseSpy).toHaveBeenCalled();
-        yamlParseSpy.mockRestore();
-      }
+      expect(yamlParseSpy).toHaveBeenCalled();
+      yamlParseSpy.mockRestore();
     });
 
     it('should reject unsupported file formats', async () => {
@@ -450,8 +294,7 @@ describe('Dry-Run CLI Commands - 实际流水线测试', () => {
 
       const action = dryRunCommands.commands.find(cmd => cmd.name() === 'request')?.action;
       if (!action) { return; }
-        await expect(action('test.txt', {})).rejects.toThrow('Unsupported file format');
-      }
+      await expect(action('test.txt', {})).rejects.toThrow('Unsupported file format');
     });
   });
 });

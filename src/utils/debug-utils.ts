@@ -34,7 +34,7 @@ export class DebugUtilsImpl implements DebugUtils {
   /**
    * Sanitize data for logging (remove sensitive information)
    */
-  sanitizeData(data: any, options: SanitizeOptions = {}): any {
+  sanitizeData(data: unknown, options: SanitizeOptions = {}): unknown {
     const opts: SanitizeOptions = {
       redactFields: this.defaultSensitiveFields,
       maxDepth: 5,
@@ -49,7 +49,7 @@ export class DebugUtilsImpl implements DebugUtils {
   /**
    * Format data for display
    */
-  formatData(data: any, options: FormatOptions = {}): string {
+  formatData(data: unknown, options: FormatOptions = {}): string {
     const opts: FormatOptions = {
       format: 'json',
       indent: 2,
@@ -73,7 +73,7 @@ export class DebugUtilsImpl implements DebugUtils {
   /**
    * Calculate data size
    */
-  calculateDataSize(data: any): number {
+  calculateDataSize(data: unknown): number {
     if (data === null || data === undefined) {
       return 0;
     }
@@ -91,11 +91,11 @@ export class DebugUtilsImpl implements DebugUtils {
     }
 
     if (Array.isArray(data)) {
-      return data.reduce((total, item) => total + this.calculateDataSize(item), 0);
+      return (data as unknown[]).reduce((total: number, item) => (total as number) + this.calculateDataSize(item), 0 as number);
     }
 
     if (typeof data === 'object') {
-      return Object.entries(data).reduce((total, [key, value]) => {
+      return Object.entries(data as Record<string, unknown>).reduce((total: number, [key, value]) => {
         return total + key.length + this.calculateDataSize(value);
       }, 0);
     }
@@ -127,12 +127,12 @@ export class DebugUtilsImpl implements DebugUtils {
       return data.map(item => this.deepClone(item)) as T;
     }
 
-    const cloned: any = {};
-    for (const [key, value] of Object.entries(data)) {
+    const cloned: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
       cloned[key] = this.deepClone(value);
     }
 
-    return cloned;
+    return cloned as unknown as T;
   }
 
   /**
@@ -178,7 +178,7 @@ export class DebugUtilsImpl implements DebugUtils {
   /**
    * Internal method to sanitize data recursively
    */
-  private doSanitizeData(data: any, options: SanitizeOptions, depth: number): any {
+  private doSanitizeData(data: unknown, options: SanitizeOptions, depth: number): unknown {
     // Check depth limit
     if (depth > (options.maxDepth || 5)) {
       return '[MAX_DEPTH_REACHED]';
@@ -215,26 +215,27 @@ export class DebugUtilsImpl implements DebugUtils {
 
     // Handle Arrays
     if (Array.isArray(data)) {
-      if (data.length > (options.maxArrayLength || 50)) {
+      const arr = data as unknown[];
+      if (arr.length > (options.maxArrayLength || 50)) {
         return {
           type: 'array',
-          length: data.length,
+          length: arr.length,
           truncated: true,
-          data: data
+          data: arr
             .slice(0, options.maxArrayLength)
             .map(item => this.doSanitizeData(item, options, depth + 1)),
         };
       }
 
-      return data.map(item => this.doSanitizeData(item, options, depth + 1));
+      return arr.map(item => this.doSanitizeData(item, options, depth + 1));
     }
 
     // Handle Objects
-    const sanitized: any = {};
+    const sanitized: Record<string, unknown> = {};
     let entriesProcessed = 0;
     const maxEntries = options.maxArrayLength || 50;
 
-    for (const [key, value] of Object.entries(data)) {
+    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
       // Check field limit
       if (entriesProcessed >= maxEntries) {
         sanitized['_truncated'] = true;
@@ -265,7 +266,7 @@ export class DebugUtilsImpl implements DebugUtils {
   /**
    * Format data in pretty print style
    */
-  private formatPretty(data: any, indent: number = 2): string {
+  private formatPretty(data: unknown, indent: number = 2): string {
     if (typeof data !== 'object' || data === null) {
       return String(data);
     }
@@ -275,14 +276,14 @@ export class DebugUtilsImpl implements DebugUtils {
 
     if (Array.isArray(data)) {
       lines.push('[');
-      data.forEach((item, index) => {
+      (data as unknown[]).forEach((item, index, arr) => {
         const itemStr = this.formatPretty(item, indent + 2);
-        lines.push(`${indentStr}  ${itemStr}${index < data.length - 1 ? ',' : ''}`);
+        lines.push(`${indentStr}  ${itemStr}${index < arr.length - 1 ? ',' : ''}`);
       });
       lines.push(`${indentStr}]`);
     } else {
       lines.push('{');
-      const entries = Object.entries(data);
+      const entries = Object.entries(data as Record<string, unknown>);
       entries.forEach(([key, value], index) => {
         const valueStr = this.formatPretty(value, indent + 2);
         lines.push(`${indentStr}  ${key}: ${valueStr}${index < entries.length - 1 ? ',' : ''}`);
@@ -347,21 +348,21 @@ export class DebugUtilsStatic {
   /**
    * Sanitize data for logging
    */
-  static sanitizeData(data: any, options?: SanitizeOptions): any {
+  static sanitizeData(data: unknown, options?: SanitizeOptions): unknown {
     return DebugUtilsStatic.getInstance().sanitizeData(data, options);
   }
 
   /**
    * Format data for display
    */
-  static formatData(data: any, options?: FormatOptions): string {
+  static formatData(data: unknown, options?: FormatOptions): string {
     return DebugUtilsStatic.getInstance().formatData(data, options);
   }
 
   /**
    * Calculate data size
    */
-  static calculateDataSize(data: any): number {
+  static calculateDataSize(data: unknown): number {
     return DebugUtilsStatic.getInstance().calculateDataSize(data);
   }
 
@@ -403,7 +404,7 @@ export class DebugUtilsStatic {
   /**
    * Extract error information safely
    */
-  static extractErrorInfo(error: any): {
+  static extractErrorInfo(error: unknown): {
     message: string;
     stack?: string;
     name?: string;
@@ -414,7 +415,7 @@ export class DebugUtilsStatic {
         message: error.message,
         stack: error.stack,
         name: error.name,
-        code: (error as any).code,
+        code: (error as unknown as Record<string, unknown>)['code'] as string | undefined,
       };
     }
 
@@ -426,11 +427,12 @@ export class DebugUtilsStatic {
     }
 
     if (typeof error === 'object' && error !== null) {
+      const rec = error as Record<string, unknown>;
       return {
-        message: error.message || String(error),
-        stack: error.stack,
-        name: error.name || 'ObjectError',
-        code: error.code,
+        message: (rec['message'] as string) || String(error),
+        stack: rec['stack'] as string | undefined,
+        name: (rec['name'] as string | undefined) || 'ObjectError',
+        code: rec['code'] as string | undefined,
       };
     }
 
@@ -510,7 +512,7 @@ export class DebugUtilsStatic {
   /**
    * Safe JSON parsing
    */
-  static safeJsonParse<T = any>(jsonString: string, defaultValue: T): T {
+  static safeJsonParse<T = unknown>(jsonString: string, defaultValue: T): T {
     try {
       return JSON.parse(jsonString);
     } catch {
@@ -521,7 +523,7 @@ export class DebugUtilsStatic {
   /**
    * Safe JSON stringifying
    */
-  static safeJsonStringify(data: any, indent?: number): string {
+  static safeJsonStringify(data: unknown, indent?: number): string {
     try {
       return JSON.stringify(data, null, indent);
     } catch {
@@ -532,7 +534,7 @@ export class DebugUtilsStatic {
   /**
    * Create debounced function
    */
-  static debounce<T extends (...args: any[]) => any>(
+  static debounce<T extends (...args: unknown[]) => unknown>(
     func: T,
     wait: number
   ): (...args: Parameters<T>) => void {
@@ -547,7 +549,7 @@ export class DebugUtilsStatic {
   /**
    * Create throttled function
    */
-  static throttle<T extends (...args: any[]) => any>(
+  static throttle<T extends (...args: unknown[]) => unknown>(
     func: T,
     limit: number
   ): (...args: Parameters<T>) => void {
@@ -617,23 +619,30 @@ export class DebugUtilsStatic {
   /**
    * Get nested value from object using dot notation
    */
-  static getNestedValue(obj: any, path: string, defaultValue?: any): any {
-    return path.split('.').reduce((current, key) => {
-      return current && current[key] !== undefined ? current[key] : defaultValue;
-    }, obj);
+  static getNestedValue(obj: unknown, path: string, defaultValue?: unknown): unknown {
+    const keys = path.split('.');
+    let current: unknown = obj;
+    for (const key of keys) {
+      if (current && typeof current === 'object' && key in (current as Record<string, unknown>)) {
+        current = (current as Record<string, unknown>)[key];
+      } else {
+        return defaultValue;
+      }
+    }
+    return current;
   }
 
   /**
    * Set nested value in object using dot notation
    */
-  static setNestedValue(obj: any, path: string, value: any): void {
+  static setNestedValue(obj: Record<string, unknown>, path: string, value: unknown): void {
     const keys = path.split('.');
     const lastKey = keys.pop()!;
-    const target = keys.reduce((current, key) => {
-      if (current[key] === undefined) {
+    const target = keys.reduce((current: Record<string, unknown>, key: string) => {
+      if (current[key] === undefined || typeof current[key] !== 'object' || current[key] === null) {
         current[key] = {};
       }
-      return current[key];
+      return current[key] as Record<string, unknown>;
     }, obj);
 
     target[lastKey] = value;

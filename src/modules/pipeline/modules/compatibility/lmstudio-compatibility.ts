@@ -10,7 +10,7 @@ import type { CompatibilityModule, ModuleConfig, ModuleDependencies } from '../.
 import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 import type { TransformationRule } from '../../interfaces/pipeline-interfaces.js';
 import type { PipelineDebugLogger as PipelineDebugLoggerInterface } from '../../interfaces/pipeline-interfaces.js';
-import type { UnknownObject, LogData } from '../../../../types/common-types.js';
+import type { UnknownObject, /* LogData */ } from '../../../../types/common-types.js';
 
 /**
  * LM Studio Compatibility Module
@@ -304,7 +304,7 @@ export class LMStudioCompatibility implements CompatibilityModule {
    * Get response transformation rules
    */
   private getResponseTransformationRules(): TransformationRule[] {
-    const moduleConfig = this.config.config as UnknownObject;
+    // const moduleConfig = this.config.config as UnknownObject;
     const rules = [...this.rules];
 
     // Add response-specific rules

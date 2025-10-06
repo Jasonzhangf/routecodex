@@ -12,7 +12,7 @@ import type {
 } from '../types/pipeline-types.js';
 import { PipelineDebugLogger } from '../utils/debug-logger.js';
 import fs from 'fs/promises';
-import path from 'path';
+// import path from 'path';
 
 /**
  * Configuration source type
@@ -429,7 +429,7 @@ export class PipelineConfigManager {
   /**
    * Load configuration from URL
    */
-  private async loadFromUrl(url: string): Promise<PipelineManagerConfig> {
+  private async loadFromUrl(_url: string): Promise<PipelineManagerConfig> {
     // Would implement HTTP/HTTPS configuration loading here
     // For now, throw an error as this is not implemented
     throw new Error('URL configuration loading not implemented yet');
@@ -441,7 +441,7 @@ export class PipelineConfigManager {
   private validateBasicStructure(
     config: PipelineManagerConfig,
     errors: string[],
-    warnings: string[]
+    _warnings: string[]
   ): void {
     if (!config.pipelines || !Array.isArray(config.pipelines)) {
       errors.push('Configuration must contain a pipelines array');
@@ -449,7 +449,7 @@ export class PipelineConfigManager {
     }
 
     if (config.pipelines.length === 0) {
-      warnings.push('No pipelines configured - at least one pipeline is recommended');
+      _warnings.push('No pipelines configured - at least one pipeline is recommended');
     }
   }
 
@@ -459,7 +459,7 @@ export class PipelineConfigManager {
   private validatePipelines(
     config: PipelineManagerConfig,
     errors: string[],
-    warnings: string[]
+    _warnings: string[]
   ): void {
     const pipelineIds = new Set<string>();
 
@@ -488,7 +488,7 @@ export class PipelineConfigManager {
   private validateModules(
     config: PipelineManagerConfig,
     errors: string[],
-    warnings: string[]
+    _warnings: string[]
   ): void {
     config.pipelines.forEach(pipeline => {
       const modules = pipeline.modules;
@@ -520,7 +520,7 @@ export class PipelineConfigManager {
   private validateProviders(
     config: PipelineManagerConfig,
     errors: string[],
-    warnings: string[]
+    _warnings: string[]
   ): void {
     config.pipelines.forEach(pipeline => {
       const provider = pipeline.provider;

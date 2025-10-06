@@ -566,8 +566,8 @@ export class HttpServerDebugAdapterImpl extends BaseDebugAdapter implements Http
     }
 
     const avgResponseTime = responses.reduce((sum, r) => sum + r.responseTime, 0) / responses.length;
-    const maxResponseTime = Math.max(...responses.map(r => r.responseTime));
-    const minResponseTime = Math.min(...responses.map(r => r.responseTime));
+    // const maxResponseTime = Math.max(...responses.map(r => r.responseTime));
+    // const minResponseTime = Math.min(...responses.map(r => r.responseTime));
 
     return {
       totalProcessingTime: avgResponseTime,

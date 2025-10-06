@@ -497,7 +497,7 @@ export class ParallelInitializer {
       inDegree.set(taskId, 0);
     }
 
-    for (const [taskId, deps] of dependencies) {
+    for (const [, deps] of dependencies) {
       for (const dep of deps) {
         inDegree.set(dep, (inDegree.get(dep) || 0) + 1);
       }

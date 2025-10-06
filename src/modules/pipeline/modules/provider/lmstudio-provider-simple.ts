@@ -4,6 +4,7 @@
 
 import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../types/provider-types.js';
+import { buildAuthHeaders, createProviderError, isRetryableError } from './shared/provider-helpers.js';
 import type { UnknownObject } from '../../../../types/common-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { DebugEventBus } from "rcc-debugcenter";
@@ -26,7 +27,7 @@ export class LMStudioProviderSimple implements ProviderModule {
   // Debug enhancement properties
   private debugEventBus: DebugEventBus | null = null;
   private isDebugEnhanced = false;
-  private providerMetrics: Map<string, { values: any[]; lastUpdated: number }> = new Map();
+  private providerMetrics: Map<string, { values: unknown[]; lastUpdated: number }> = new Map();
   private requestHistory: UnknownObject[] = [];
   private errorHistory: UnknownObject[] = [];
   private maxHistorySize = 50;
@@ -59,7 +60,7 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Record provider metric
    */
-  private recordProviderMetric(operation: string, data: any): void {
+  private recordProviderMetric(operation: string, data: unknown): void {
     if (!this.providerMetrics.has(operation)) {
       this.providerMetrics.set(operation, {
         values: [],
@@ -168,8 +169,8 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Get provider metrics
    */
-  private getProviderMetrics(): Record<string, { count: number; lastUpdated: number; recentValues: any[] }> {
-    const metrics: Record<string, { count: number; lastUpdated: number; recentValues: any[] }> = {};
+  private getProviderMetrics(): Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> {
+    const metrics: Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> = {};
 
     for (const [operation, metric] of this.providerMetrics.entries()) {
       metrics[operation] = {
@@ -301,7 +302,7 @@ export class LMStudioProviderSimple implements ProviderModule {
         endpoint: `${this.baseUrl}/v1/chat/completions`,
         method: 'POST',
         hasAuth: !!this.authContext,
-        hasTools: Array.isArray((request as { tools?: any[] }).tools)
+        hasTools: Array.isArray((request as { tools?: unknown[] }).tools)
       });
 
       // Compatibility模块已经处理了所有转换，直接发送请求
@@ -384,7 +385,7 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Send request to provider
    */
-  async sendRequest(request: UnknownObject, _options?: any): Promise<ProviderResponse> {
+  async sendRequest(request: UnknownObject, _options?: unknown): Promise<ProviderResponse> {
     return this.processIncoming(request);
   }
 
@@ -506,14 +507,10 @@ export class LMStudioProviderSimple implements ProviderModule {
     };
 
     // Prepare headers
-    this.headers = {
+    this.headers = buildAuthHeaders(this.authContext, {
       'Content-Type': 'application/json',
       'User-Agent': 'RouteCodex/1.0.0'
-    };
-
-    if (authConfig?.type === 'apikey' && resolvedApiKey) {
-      this.headers['Authorization'] = `Bearer ${resolvedApiKey}`;
-    }
+    });
 
     this.logger.logModule(this.id, 'auth-initialized', {
       type: (authConfig?.type as string) || 'apikey',
@@ -647,7 +644,7 @@ export class LMStudioProviderSimple implements ProviderModule {
         });
       }
 
-      const providerError = this.createProviderError(error);
+      const providerError = createProviderError(error);
       throw providerError;
     }
   }
@@ -655,7 +652,7 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Handle provider errors
    */
-  private async handleProviderError(error: any, request: any): Promise<void> {
+  private async handleProviderError(error: unknown, request: unknown): Promise<void> {
     const providerError = this.createProviderError(error);
     await this.dependencies.errorHandlingCenter.handleError(providerError, {
       module: this.id,
@@ -667,26 +664,8 @@ export class LMStudioProviderSimple implements ProviderModule {
   /**
    * Create provider error
    */
-  private createProviderError(error: any): ProviderError {
-    const errorObj = error instanceof Error ? error : new Error(String(error));
-    const providerError: ProviderError = new Error(errorObj.message) as ProviderError;
-    providerError.type = 'network';
-    const errLike = error as { statusCode?: number; details?: Record<string, unknown> };
-    providerError.statusCode = errLike?.statusCode || 500;
-    providerError.details = (errLike?.details as Record<string, unknown> | undefined) ?? {};
-    providerError.retryable = this.isRetryableError(error);
-
-    return providerError;
+  private createProviderError(error: unknown): ProviderError {
+    return createProviderError(error);
   }
-
-  /**
-   * Check if error is retryable
-   */
-  private isRetryableError(error: any): boolean {
-    const errLike = error as { statusCode?: number; code?: string };
-    if (!errLike?.statusCode && !errLike?.code) {return false;}
-    return (typeof errLike.statusCode === 'number' && (errLike.statusCode >= 500 || errLike.statusCode === 429))
-      || errLike.code === 'ECONNREFUSED'
-      || errLike.code === 'ETIMEDOUT';
-  }
+  private isRetryableError(error: unknown): boolean { return isRetryableError(error); }
 }

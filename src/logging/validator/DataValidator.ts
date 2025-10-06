@@ -278,7 +278,7 @@ export class DataValidatorAndCleaner {
   /**
    * 验证时间戳
    */
-  private validateTimestamp(timestamp: unknown, errors: ValidationError[], warnings: ValidationWarning[], fixes: ValidationFix[]): void {
+  private validateTimestamp(timestamp: unknown, errors: ValidationError[], _warnings: ValidationWarning[], _fixes: ValidationFix[]): void {
     if (typeof timestamp !== 'number') {
       errors.push({
         type: 'invalid_type',
@@ -308,7 +308,7 @@ export class DataValidatorAndCleaner {
     const oneHourLater = now + 60 * 60 * 1000;
 
     if (timestamp < oneYearAgo) {
-      warnings.push({
+      _warnings.push({
         type: 'data_quality',
         field: 'timestamp',
         message: '时间戳过早（超过1年前）',
@@ -317,7 +317,7 @@ export class DataValidatorAndCleaner {
     }
 
     if (timestamp > oneHourLater) {
-      warnings.push({
+      _warnings.push({
         type: 'data_quality',
         field: 'timestamp',
         message: '时间戳在未来（超过1小时后）',
@@ -343,7 +343,7 @@ export class DataValidatorAndCleaner {
   /**
    * 验证日志级别
    */
-  private validateLogLevel(level: unknown, errors: ValidationError[], warnings: ValidationWarning[], fixes: ValidationFix[]): void {
+  private validateLogLevel(level: unknown, errors: ValidationError[], _warnings: ValidationWarning[], _fixes: ValidationFix[]): void {
     if (typeof level !== 'string') {
       errors.push({
         type: 'invalid_type',
@@ -372,7 +372,7 @@ export class DataValidatorAndCleaner {
   /**
    * 验证模块ID
    */
-  private validateModuleId(moduleId: unknown, errors: ValidationError[], warnings: ValidationWarning[], fixes: ValidationFix[]): void {
+  private validateModuleId(moduleId: unknown, errors: ValidationError[], _warnings: ValidationWarning[], _fixes: ValidationFix[]): void {
     if (typeof moduleId !== 'string') {
       errors.push({
         type: 'invalid_type',
@@ -410,7 +410,7 @@ export class DataValidatorAndCleaner {
   /**
    * 验证模块类型
    */
-  private validateModuleType(moduleType: unknown, errors: ValidationError[], warnings: ValidationWarning[], fixes: ValidationFix[]): void {
+  private validateModuleType(moduleType: unknown, errors: ValidationError[], _warnings: ValidationWarning[], _fixes: ValidationFix[]): void {
     if (typeof moduleType !== 'string') {
       errors.push({
         type: 'invalid_type',
@@ -436,7 +436,7 @@ export class DataValidatorAndCleaner {
   /**
    * 验证消息
    */
-  private validateMessage(message: unknown, errors: ValidationError[], warnings: ValidationWarning[], fixes: ValidationFix[]): void {
+  private validateMessage(message: unknown, errors: ValidationError[], _warnings: ValidationWarning[], _fixes: ValidationFix[]): void {
     if (typeof message !== 'string') {
       errors.push({
         type: 'invalid_type',
@@ -450,7 +450,7 @@ export class DataValidatorAndCleaner {
     }
 
     if (message.length === 0) {
-      warnings.push({
+      _warnings.push({
         type: 'data_quality',
         field: 'message',
         message: '消息为空',
@@ -473,7 +473,7 @@ export class DataValidatorAndCleaner {
   /**
    * 验证数据字段
    */
-  private validateDataFields(data: unknown, errors: ValidationError[], warnings: ValidationWarning[], fixes: ValidationFix[]): void {
+  private validateDataFields(data: unknown, errors: ValidationError[], _warnings: ValidationWarning[], _fixes: ValidationFix[]): void {
     if (data === null || data === undefined) {
       return;
     }
@@ -506,7 +506,7 @@ export class DataValidatorAndCleaner {
   /**
    * 验证错误格式
    */
-  private validateErrorFormat(error: unknown, errors: ValidationError[], warnings: ValidationWarning[], fixes: ValidationFix[]): void {
+  private validateErrorFormat(error: unknown, errors: ValidationError[], _warnings: ValidationWarning[], _fixes: ValidationFix[]): void {
     if (typeof error !== 'object' || error === null) {
       errors.push({
         type: 'invalid_type',
@@ -536,7 +536,7 @@ export class DataValidatorAndCleaner {
   /**
    * 验证版本
    */
-  private validateVersion(version: unknown, errors: ValidationError[], warnings: ValidationWarning[], fixes: ValidationFix[]): void {
+  private validateVersion(version: unknown, errors: ValidationError[], _warnings: ValidationWarning[], _fixes: ValidationFix[]): void {
     if (typeof version !== 'string') {
       errors.push({
         type: 'invalid_type',
@@ -552,7 +552,7 @@ export class DataValidatorAndCleaner {
     // 版本格式验证 (语义化版本)
     const versionPattern = /^\d+\.\d+\.\d+$/;
     if (!versionPattern.test(version)) {
-      warnings.push({
+      _warnings.push({
         type: 'data_quality',
         field: 'version',
         message: `版本格式不符合语义化版本规范: ${version}`,
@@ -564,7 +564,7 @@ export class DataValidatorAndCleaner {
   /**
    * 验证可选字段
    */
-  private validateOptionalFields(entry: UnifiedLogEntry, errors: ValidationError[], warnings: ValidationWarning[], fixes: ValidationFix[]): void {
+  private validateOptionalFields(entry: UnifiedLogEntry, errors: ValidationError[], _warnings: ValidationWarning[], _fixes: ValidationFix[]): void {
     // 验证持续时间
     if (entry.duration !== undefined) {
       if (typeof entry.duration !== 'number' || entry.duration < 0) {
@@ -649,7 +649,7 @@ export class DataValidatorAndCleaner {
     for (const entry of uniqueEntries) {
       let cleanedEntry = { ...entry };
       let wasFixed = false;
-      const isValid = true;
+      // const isValid = true;
 
       // 标准化时间戳
       if (this.cleaningOptions.normalizeTimestamps) {
@@ -892,7 +892,8 @@ export class DataValidatorAndCleaner {
 
     // 如果清理后数据对象为空，则移除data字段
     if (Object.keys(cleanedData).length === 0) {
-      const { data, ...rest } = entry as any;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { data: _data, ...rest } = entry as any;
       return {
         entry: rest as UnifiedLogEntry,
         fixed: true

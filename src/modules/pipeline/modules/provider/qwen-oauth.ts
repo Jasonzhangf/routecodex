@@ -9,11 +9,12 @@ import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { homedir } from 'os';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import { generatePKCEPair, normalizePath } from '../../utils/oauth-helpers.js';
+// import { fileURLToPath } from 'url';
+import { /* dirname */ } from 'path';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+// const __filename = fileURLToPath(import.meta.url);
+// const __dirname = dirname(__filename);
 
 // OAuth Configuration - EXACT copy from CLIProxyAPI
 const QWEN_OAUTH_CONFIG = {
@@ -61,7 +62,7 @@ export class QwenTokenStorage {
     };
   }
 
-  static fromJSON(json: any) {
+  static fromJSON(json: unknown) {
     const src = (json && typeof json === 'object') ? (json as Record<string, unknown>) : {};
     // Be tolerant to field name differences from various tools
     const normalized: Record<string, unknown> = { ...src };
@@ -97,8 +98,8 @@ export class QwenOAuth {
 
   constructor(config: { tokenFile?: string; httpClient?: typeof fetch } = {}) {
     this.tokenFile = config.tokenFile || path.join(process.env.HOME || '', '.qwen', 'oauth_creds.json');
-    // Normalize token file path: expand ~ and resolve relative paths
-    this.tokenFile = this.normalizePath(this.tokenFile);
+    // Normalize token file path: expand ~ and resolve relative paths (shared helper)
+    this.tokenFile = normalizePath(this.tokenFile);
     this.tokenStorage = null;
     this.httpClient = config.httpClient || fetch;
   }
@@ -120,36 +121,13 @@ export class QwenOAuth {
     }
   }
 
-  /**
-   * Generate PKCE code verifier - EXACT copy from CLIProxyAPI
-   */
-  generateCodeVerifier() {
-    const bytes = crypto.randomBytes(32);
-    return bytes.toString('base64url');
-  }
-
-  /**
-   * Generate PKCE code challenge - EXACT copy from CLIProxyAPI
-   */
-  generateCodeChallenge(codeVerifier: string): string {
-    const hash = crypto.createHash('sha256').update(codeVerifier).digest();
-    return hash.toString('base64url');
-  }
-
-  /**
-   * Generate PKCE pair - EXACT copy from CLIProxyAPI
-   */
-  generatePKCEPair() {
-    const codeVerifier = this.generateCodeVerifier();
-    const codeChallenge = this.generateCodeChallenge(codeVerifier);
-    return { codeVerifier, codeChallenge };
-  }
+  // PKCE helpers moved to shared oauth-helpers
 
   /**
    * Initiate device flow - EXACT copy from CLIProxyAPI
    */
   async initiateDeviceFlow(): Promise<{ device_code: string; user_code: string; verification_uri: string; verification_uri_complete: string; expires_in: number; interval?: number; code_verifier?: string; }> {
-    const { codeVerifier, codeChallenge } = this.generatePKCEPair();
+    const { codeVerifier, codeChallenge } = generatePKCEPair();
 
     const formData = new URLSearchParams({
       client_id: QWEN_OAUTH_CONFIG.CLIENT_ID,
@@ -370,11 +348,14 @@ export class QwenOAuth {
   /**
    * Update token storage - EXACT copy from CLIProxyAPI
    */
-  updateTokenStorage(storage: QwenTokenStorage, tokenData: any) {
+  updateTokenStorage(
+    storage: QwenTokenStorage,
+    tokenData: { access_token: string; refresh_token?: string; resource_url?: string; expire: string }
+  ) {
     storage.access_token = tokenData.access_token;
-    storage.refresh_token = tokenData.refresh_token;
+    storage.refresh_token = tokenData.refresh_token ?? '';
     storage.last_refresh = new Date().toISOString();
-    storage.resource_url = tokenData.resource_url;
+    storage.resource_url = tokenData.resource_url ?? '';
     storage.expired = tokenData.expire;
   }
 

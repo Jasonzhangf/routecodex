@@ -6,6 +6,7 @@
 
 import type { ProviderModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { ProviderConfig, AuthContext, ProviderResponse, ProviderError } from '../../types/provider-types.js';
+import { createProviderError, isRetryableError } from './shared/provider-helpers.js';
 import type { UnknownObject } from '../../../../types/common-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { createIFlowOAuth, IFlowTokenStorage } from './iflow-oauth.js';
@@ -35,7 +36,7 @@ export class IFlowProvider implements ProviderModule {
   // Debug instrumentation
   private debugEventBus: DebugEventBus | null = null;
   private isDebugEnhanced = false;
-  private providerMetrics: Map<string, { values: any[]; lastUpdated: number }> = new Map();
+  private providerMetrics: Map<string, { values: unknown[]; lastUpdated: number }> = new Map();
   private requestHistory: UnknownObject[] = [];
   private authHistory: UnknownObject[] = [];
   private errorHistory: UnknownObject[] = [];
@@ -60,7 +61,7 @@ export class IFlowProvider implements ProviderModule {
     }
   }
 
-  private recordProviderMetric(operation: string, data: any): void {
+  private recordProviderMetric(operation: string, data: unknown): void {
     if (!this.providerMetrics.has(operation)) {
       this.providerMetrics.set(operation, { values: [], lastUpdated: Date.now() });
     }
@@ -154,8 +155,8 @@ export class IFlowProvider implements ProviderModule {
     };
   }
 
-  private getProviderMetrics(): Record<string, { count: number; lastUpdated: number; recentValues: any[] }> {
-    const metrics: Record<string, { count: number; lastUpdated: number; recentValues: any[] }> = {};
+  private getProviderMetrics(): Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> {
+    const metrics: Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> = {};
     for (const [operation, metric] of this.providerMetrics.entries()) {
       metrics[operation] = {
         count: metric.values.length,
@@ -429,7 +430,7 @@ export class IFlowProvider implements ProviderModule {
     }
   }
 
-  private recordTokenRefreshFailure(error: any): void {
+  private recordTokenRefreshFailure(error: unknown): void {
     if (!this.isDebugEnhanced) {return;}
     this.recordProviderMetric('token_refresh_failed', {
       error: error instanceof Error ? error.message : String(error),
@@ -563,10 +564,10 @@ export class IFlowProvider implements ProviderModule {
           elapsed
         });
       }
-      const provErr = this.createProviderError(error, 'network');
+      const provErr = createProviderError(error, 'network');
       // Attach provider context for routing error payload
-      (provErr as any).details = {
-        ...(provErr as any).details || {},
+      (provErr as { details?: unknown }).details = {
+        ...(provErr as { details?: unknown }).details || {},
         provider: {
           vendor: 'iflow',
           baseUrl: this.getAPIEndpoint(),
@@ -612,46 +613,32 @@ export class IFlowProvider implements ProviderModule {
     };
   }
 
-  private async handleProviderError(error: any, request: any): Promise<void> {
-    const providerError = this.createProviderError(error, 'unknown');
+  private async handleProviderError(error: unknown, request: unknown): Promise<void> {
+    const providerError = createProviderError(error, 'unknown');
     this.logger.logModule(this.id, 'provider-error', {
       error: providerError,
       request: {
         model: (request as { model?: string })?.model,
-        hasMessages: Array.isArray((request as { messages?: any[] })?.messages),
-        hasTools: Array.isArray((request as { tools?: any[] })?.tools)
+        hasMessages: Array.isArray((request as { messages?: unknown[] })?.messages),
+        hasTools: Array.isArray((request as { tools?: unknown[] })?.tools)
       }
     });
 
     await this.dependencies.errorHandlingCenter.handleError({
       type: 'provider-error',
       message: providerError.message,
-      details: {
+      details: providerError.details as unknown,
+      context: {
         providerId: this.id,
-        request,
-        error: providerError
-      },
-      timestamp: Date.now()
+        request: request as unknown
+      }
     });
   }
 
-  private createProviderError(error: any, type: ProviderError['type']): ProviderError {
-    const err = error instanceof Error ? error : new Error(String(error));
-    const providerError: ProviderError = new Error(err.message) as ProviderError;
-    providerError.type = type;
-    const errLike = error as { status?: number; statusCode?: number; details?: Record<string, unknown> };
-    providerError.statusCode = errLike?.status ?? errLike?.statusCode;
-    providerError.details = (errLike?.details as Record<string, unknown> | undefined) ?? {};
-    providerError.retryable = this.isRetryableError(error);
-    return providerError;
+  private createProviderError(error: unknown, type: ProviderError['type']): ProviderError {
+    return createProviderError(error, type);
   }
-
-  private isRetryableError(error: any): boolean {
-    const errLike = error as { status?: number; statusCode?: number };
-    const status = errLike?.status ?? errLike?.statusCode;
-    if (!status) {return false;}
-    return status >= 500 || status === 429;
-  }
+  private isRetryableError(error: unknown): boolean { return isRetryableError(error); }
 }
 
 const DEFAULT_IFLOW_CONFIG = {

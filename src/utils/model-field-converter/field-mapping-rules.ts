@@ -7,11 +7,10 @@ import type {
   ModelMappingRule,
   ParameterMappingRule,
   MappingCondition,
-  ParamTransformer,
-  ParamValidator,
   ValidationResult,
   ConversionContext
 } from './types.js';
+import type { PipelineConfigs } from '../../config/merged-config-types.js';
 
 /**
  * 字段映射规则管理器
@@ -25,15 +24,15 @@ export class FieldMappingRules {
     defaultModel: string;
   };
 
-  constructor(config?: { defaultMaxTokens?: number; defaultModel?: string; pipelineConfigs?: any }) {
+  constructor(config?: { defaultMaxTokens?: number; defaultModel?: string; pipelineConfigs?: PipelineConfigs }) {
     // Extract defaults from pipeline configs if available
     let defaultMaxTokens = 32000;
     let defaultModel = 'qwen3-coder-plus';
 
     if (config?.pipelineConfigs && Object.keys(config.pipelineConfigs).length > 0) {
       const firstConfigKey = Object.keys(config.pipelineConfigs)[0];
-      const firstConfig = config.pipelineConfigs[firstConfigKey];
-      defaultMaxTokens = firstConfig.model?.maxTokens || 32000;
+      const firstConfig = (config.pipelineConfigs as Record<string, { model?: { maxTokens?: number } }>)[firstConfigKey];
+      defaultMaxTokens = firstConfig?.model?.maxTokens || 32000;
 
       // Extract model ID from the pipeline config key (format: provider.model.keyId)
       const keyParts = firstConfigKey.split('.');
@@ -203,7 +202,7 @@ export class FieldMappingRules {
   /**
    * 模型转换器
    */
-  private transformModel(value: any, context: ConversionContext): string {
+  private transformModel(value: unknown, context: ConversionContext): string {
     const { pipelineConfig, routingInfo } = context;
 
     // 如果配置中有指定的实际模型ID，优先使用
@@ -212,7 +211,7 @@ export class FieldMappingRules {
     }
 
     // 尝试从模型映射规则查找
-    const mappingRule = this.findModelMapping(value);
+    const mappingRule = this.findModelMapping(String(value));
     if (mappingRule) {
       return mappingRule.targetModel;
     }
@@ -229,7 +228,7 @@ export class FieldMappingRules {
   /**
    * 模型验证器
    */
-  private validateModel(value: any, context: ConversionContext): ValidationResult {
+  private validateModel(value: unknown, _context: ConversionContext): ValidationResult {
     if (!value || typeof value !== 'string') {
       return {
         isValid: false,
@@ -251,7 +250,7 @@ export class FieldMappingRules {
   /**
    * MaxTokens转换器
    */
-  private transformMaxTokens(value: any, context: ConversionContext): number {
+  private transformMaxTokens(value: unknown, context: ConversionContext): number {
     const { pipelineConfig } = context;
 
     // 如果配置中有maxTokens，优先使用配置值
@@ -271,7 +270,7 @@ export class FieldMappingRules {
   /**
    * MaxTokens验证器
    */
-  private validateMaxTokens(value: any, context: ConversionContext): ValidationResult {
+  private validateMaxTokens(value: unknown, context: ConversionContext): ValidationResult {
     const numValue = Number(value);
 
     if (isNaN(numValue) || numValue <= 0) {
@@ -297,7 +296,7 @@ export class FieldMappingRules {
   /**
    * Temperature转换器
    */
-  private transformTemperature(value: any, context: ConversionContext): number {
+  private transformTemperature(value: unknown, _context: ConversionContext): number {
     const numValue = Number(value);
 
     if (isNaN(numValue) || numValue < 0 || numValue > 2) {
@@ -310,7 +309,7 @@ export class FieldMappingRules {
   /**
    * Temperature验证器
    */
-  private validateTemperature(value: any, context: ConversionContext): ValidationResult {
+  private validateTemperature(value: unknown, _context: ConversionContext): ValidationResult {
     const numValue = Number(value);
 
     if (isNaN(numValue)) {
@@ -333,7 +332,7 @@ export class FieldMappingRules {
   /**
    * TopP转换器
    */
-  private transformTopP(value: any, context: ConversionContext): number {
+  private transformTopP(value: unknown, _context: ConversionContext): number {
     const numValue = Number(value);
 
     if (isNaN(numValue) || numValue <= 0 || numValue > 1) {
@@ -346,7 +345,7 @@ export class FieldMappingRules {
   /**
    * TopP验证器
    */
-  private validateTopP(value: any, context: ConversionContext): ValidationResult {
+  private validateTopP(value: unknown, _context: ConversionContext): ValidationResult {
     const numValue = Number(value);
 
     if (isNaN(numValue)) {
@@ -369,16 +368,16 @@ export class FieldMappingRules {
   /**
    * Stream转换器
    */
-  private transformStream(value: any, context: ConversionContext): boolean {
+  private transformStream(value: unknown, _context: ConversionContext): boolean {
     return Boolean(value);
   }
 
   /**
    * Stop转换器
    */
-  private transformStop(value: any, context: ConversionContext): string[] | undefined {
+  private transformStop(value: unknown, _context: ConversionContext): string[] | undefined {
     if (Array.isArray(value)) {
-      return value.map(item => String(item));
+      return (value as unknown[]).map(item => String(item));
     }
 
     if (typeof value === 'string') {
@@ -406,16 +405,16 @@ export class FieldMappingRules {
   /**
    * 获取字段值
    */
-  private getFieldValue(field: string, context: ConversionContext): any {
-    const { originalRequest, pipelineConfig, routingInfo } = context;
+  private getFieldValue(field: string, context: ConversionContext): unknown {
+    const { originalRequest } = context;
 
     // 支持嵌套字段访问
     const fieldPath = field.split('.');
-    let value: any = originalRequest;
+    let value: unknown = originalRequest;
 
     for (const segment of fieldPath) {
       if (value && typeof value === 'object') {
-        value = value[segment];
+        value = (value as Record<string, unknown>)[segment];
       } else {
         return undefined;
       }
@@ -427,7 +426,7 @@ export class FieldMappingRules {
   /**
    * 评估条件
    */
-  private evaluateCondition(value: any, operator: string, expected: any): boolean {
+  private evaluateCondition(value: unknown, operator: string, expected: unknown): boolean {
     switch (operator) {
       case 'eq':
         return value === expected;

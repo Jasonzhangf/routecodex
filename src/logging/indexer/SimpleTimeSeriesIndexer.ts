@@ -108,7 +108,7 @@ export class SimpleTimeSeriesIndexer extends EventEmitter implements LogQueryEng
   /**
    * 从索引中移除日志
    */
-  async remove(index: string): Promise<void> {
+  async remove(_index: string): Promise<void> {
     // 简化实现：清空所有日志
     await this.clear();
   }

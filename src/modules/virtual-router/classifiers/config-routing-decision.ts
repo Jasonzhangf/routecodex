@@ -393,9 +393,10 @@ export class ConfigRoutingDecision {
   /**
    * 从模块配置创建路由决策器
    */
-  static fromModuleConfig(classificationConfig: any): ConfigRoutingDecision {
-    const modelTiers = classificationConfig.modelTiers;
-    const routingDecisions = classificationConfig.routingDecisions;
+  static fromModuleConfig(classificationConfig: Record<string, unknown>): ConfigRoutingDecision {
+    const cfg = classificationConfig as Record<string, unknown>;
+    const modelTiers = cfg['modelTiers'] as { [key: string]: ModelTierConfig };
+    const routingDecisions = cfg['routingDecisions'] as RoutingDecisionConfig;
 
     if (!modelTiers || !routingDecisions) {
       throw new Error('Missing required routing configuration');

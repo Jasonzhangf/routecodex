@@ -32,7 +32,7 @@ export class ProtocolManager {
   /**
    * 转换请求
    */
-  async convertRequest(request: any, fromProtocol: string, toProtocol: string): Promise<any> {
+  async convertRequest(request: Record<string, unknown>, fromProtocol: string, toProtocol: string): Promise<Record<string, unknown>> {
     if (fromProtocol === toProtocol) {
       return request;
     }
@@ -50,7 +50,7 @@ export class ProtocolManager {
   /**
    * 转换响应
    */
-  async convertResponse(response: any, fromProtocol: string, toProtocol: string): Promise<any> {
+  async convertResponse(response: Record<string, unknown>, fromProtocol: string, toProtocol: string): Promise<Record<string, unknown>> {
     if (fromProtocol === toProtocol) {
       return response;
     }
@@ -86,20 +86,21 @@ export class ProtocolManager {
 
 // 协议转换器接口
 interface ProtocolConverter {
-  convertRequest(request: any): Promise<any>;
-  convertResponse(response: any): Promise<any>;
+  convertRequest(request: Record<string, unknown>): Promise<Record<string, unknown>>;
+  convertResponse(response: Record<string, unknown>): Promise<Record<string, unknown>>;
 }
 
 // OpenAI to Anthropic 转换器
 class OpenAIToAnthropicConverter implements ProtocolConverter {
-  async convertRequest(request: any): Promise<any> {
+  async convertRequest(request: Record<string, unknown>): Promise<Record<string, unknown>> {
     // 将OpenAI格式转换为Anthropic格式
-    const anthropicRequest = {
-      model: request.model,
-      max_tokens: request.max_tokens || 1024,
-      messages: request.messages.map((msg: any) => ({
-        role: msg.role === 'system' ? 'assistant' : msg.role,
-        content: msg.content
+    const messages = (request['messages'] as Array<Record<string, unknown>> | undefined) || [];
+    const anthropicRequest: Record<string, unknown> = {
+      model: request['model'],
+      max_tokens: (request['max_tokens'] as number) || 1024,
+      messages: messages.map((msg) => ({
+        role: msg['role'] === 'system' ? 'assistant' : msg['role'],
+        content: msg['content']
       }))
     };
 
@@ -107,20 +108,21 @@ class OpenAIToAnthropicConverter implements ProtocolConverter {
     return anthropicRequest;
   }
 
-  async convertResponse(response: any): Promise<any> {
+  async convertResponse(response: Record<string, unknown>): Promise<Record<string, unknown>> {
     // 将Anthropic格式转换为OpenAI格式
-    const openaiResponse = {
-      id: response.id,
+    const contentArr = (response['content'] as Array<Record<string, unknown>> | undefined) || [];
+    const openaiResponse: Record<string, unknown> = {
+      id: response['id'],
       object: 'chat.completion',
       created: Date.now(),
-      model: response.model,
+      model: response['model'],
       choices: [{
         index: 0,
         message: {
           role: 'assistant',
-          content: response.content[0]?.text || ''
+          content: (contentArr[0]?.['text'] as string) || ''
         },
-        finish_reason: response.stop_reason
+        finish_reason: response['stop_reason']
       }]
     };
 
@@ -131,14 +133,15 @@ class OpenAIToAnthropicConverter implements ProtocolConverter {
 
 // Anthropic to OpenAI 转换器
 class AnthropicToOpenAIConverter implements ProtocolConverter {
-  async convertRequest(request: any): Promise<any> {
+  async convertRequest(request: Record<string, unknown>): Promise<Record<string, unknown>> {
     // 将Anthropic格式转换为OpenAI格式
-    const openaiRequest = {
-      model: request.model,
-      max_tokens: request.max_tokens || 1024,
-      messages: request.messages.map((msg: any) => ({
-        role: msg.role === 'assistant' ? 'system' : msg.role,
-        content: typeof msg.content === 'string' ? msg.content : msg.content.text
+    const messages = (request['messages'] as Array<Record<string, unknown>> | undefined) || [];
+    const openaiRequest: Record<string, unknown> = {
+      model: request['model'],
+      max_tokens: (request['max_tokens'] as number) || 1024,
+      messages: messages.map((msg) => ({
+        role: msg['role'] === 'assistant' ? 'system' : msg['role'],
+        content: typeof msg['content'] === 'string' ? msg['content'] : (msg['content'] as Record<string, unknown>)?.['text']
       }))
     };
 
@@ -146,15 +149,18 @@ class AnthropicToOpenAIConverter implements ProtocolConverter {
     return openaiRequest;
   }
 
-  async convertResponse(response: any): Promise<any> {
+  async convertResponse(response: Record<string, unknown>): Promise<Record<string, unknown>> {
     // 将OpenAI格式转换为Anthropic格式
-    const anthropicResponse = {
-      id: response.id,
+    const choices = (response['choices'] as Array<Record<string, unknown>> | undefined) || [];
+    const choice0 = choices[0] || {};
+    const message = (choice0['message'] as Record<string, unknown>) || {};
+    const anthropicResponse: Record<string, unknown> = {
+      id: response['id'],
       type: 'message',
       role: 'assistant',
-      content: [{ type: 'text', text: response.choices[0]?.message?.content || '' }],
-      model: response.model,
-      stop_reason: response.choices[0]?.finish_reason
+      content: [{ type: 'text', text: (message['content'] as string) || '' }],
+      model: response['model'],
+      stop_reason: choice0['finish_reason']
     };
 
     console.log('🔄 Converted OpenAI response to Anthropic format');

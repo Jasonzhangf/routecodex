@@ -390,7 +390,7 @@ export class UnimplementedModuleAnalytics {
   /**
    * Calculate module priority score
    */
-  private calculateModulePriority(moduleStats: any, calledModule?: any): number {
+  private calculateModulePriority(moduleStats: any, _calledModule?: any): number {
     let score = 0;
 
     // Base score from call count
@@ -442,8 +442,8 @@ export class UnimplementedModuleAnalytics {
    */
   private generateReasoning(
     module: ModuleUsageStats,
-    priorityData: any,
-    callerAnalysis: any
+    _priorityData: any,
+    _callerAnalysis: any
   ): string {
     const reasons = [];
 
@@ -582,7 +582,7 @@ export class UnimplementedModuleAnalytics {
 
     // Aggregate by time periods
     for (const calledModule of calledModules) {
-      const moduleId = calledModule.moduleId;
+      // const moduleId = calledModule.moduleId;
 
       // Hour aggregation
       const hourKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}`;

@@ -7,8 +7,8 @@ export interface MappingPattern {
   regex?: string;
   json_path?: string;
   fallback_paths?: string[];
-  fields?: Record<string, any>;
-  on_missing?: { fields?: Record<string, any> };
+  fields?: Record<string, unknown>;
+  on_missing?: { fields?: Record<string, unknown> };
 }
 
 export interface ToolMapping {
@@ -28,7 +28,7 @@ export interface ToolMappingsConfig {
   tools: Record<string, ToolMapping>;
 }
 
-function readIfExists(file: string): any | null {
+function readIfExists(file: string): unknown | null {
   try {
     if (fs.existsSync(file)) {
       const raw = fs.readFileSync(file, 'utf-8');
@@ -45,13 +45,16 @@ export function loadToolMappings(provider: string): ToolMappingsConfig | null {
   const homePath = path.join(homedir(), '.routecodex', 'config', 'tool-mappings', `${provider}.json`);
   const repoPath = path.join(process.cwd(), 'config', 'tool-mappings', `${provider}.json`);
 
-  const data = readIfExists(homePath) ?? readIfExists(repoPath);
-  if (!data) return null;
+  const raw = readIfExists(homePath) ?? readIfExists(repoPath);
+  if (!raw) { return null; }
 
-  // Basic shape validation
-  if (!data.tools || typeof data.tools !== 'object') {
+  // Basic shape validation with narrowing
+  if (typeof raw !== 'object' || raw === null) {
     return { tools: {} };
   }
-  return data as ToolMappingsConfig;
+  const maybe = raw as { tools?: unknown };
+  if (!maybe.tools || typeof maybe.tools !== 'object') {
+    return { tools: {} };
+  }
+  return raw as ToolMappingsConfig;
 }
-

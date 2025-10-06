@@ -7,10 +7,10 @@
 
 import type { CompatibilityModule, ModuleConfig, ModuleDependencies, TransformationRule } from '../../interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
-import type { TransformationEngine } from '../../utils/transformation-engine.js';
+import type { /* TransformationEngine */ } from '../../utils/transformation-engine.js';
 import { DebugEventBus } from "rcc-debugcenter";
 import type { PipelineDebugLogger as PipelineDebugLoggerInterface } from '../../interfaces/pipeline-interfaces.js';
-import type { UnknownObject, LogData } from '../../../../types/common-types.js';
+import type { UnknownObject, /* LogData */ } from '../../../../types/common-types.js';
 
 /**
  * Qwen Compatibility Module

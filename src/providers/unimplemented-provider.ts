@@ -21,7 +21,7 @@ import {
   type ProviderConfig,
   type OpenAIChatCompletionRequest,
   type OpenAICompletionRequest,
-  type OpenAICompletionResponse,
+  /* type OpenAICompletionResponse, */
   type StreamOptions,
   RouteCodexError,
 } from '../server/types.js';
@@ -89,7 +89,7 @@ export class UnimplementedProvider extends BaseProvider {
    */
   public async processChatCompletion(
     request: OpenAIChatCompletionRequest,
-    options?: { timeout?: number; retryAttempts?: number }
+    _options?: { timeout?: number; retryAttempts?: number }
   ): Promise<ProviderResponse> {
     const callerInfo = this.config.trackCallerInfo
       ? {
@@ -111,7 +111,7 @@ export class UnimplementedProvider extends BaseProvider {
    */
   public async processCompletion(
     request: OpenAICompletionRequest,
-    options?: { timeout?: number; retryAttempts?: number }
+    _options?: { timeout?: number; retryAttempts?: number }
   ): Promise<ProviderResponse> {
     const callerInfo = this.config.trackCallerInfo
       ? {
@@ -141,7 +141,7 @@ export class UnimplementedProvider extends BaseProvider {
    */
   public async processStreamingChatCompletion(
     request: OpenAIChatCompletionRequest,
-    options: StreamOptions
+    _options: StreamOptions
   ): Promise<ProviderResponse> {
     const callerInfo = this.config.trackCallerInfo
       ? {

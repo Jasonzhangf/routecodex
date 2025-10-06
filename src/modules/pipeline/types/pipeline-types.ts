@@ -9,7 +9,7 @@ import type {
   PipelineRequest,
   PipelineResponse,
   TransformationRule,
-  ProviderConfig
+  /* ProviderConfig */
 } from '../interfaces/pipeline-interfaces.js';
 import type { PipelineManagerConfig } from '../interfaces/pipeline-interfaces.js';
 

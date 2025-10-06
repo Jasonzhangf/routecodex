@@ -14,7 +14,7 @@ export interface ClassificationInput {
   model?: string;
   tools?: ChatCompletionTool[];
   thinking?: boolean;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ClassificationResult {
@@ -131,8 +131,8 @@ export class RequestClassifier {
    * 分析分类因素
    */
   private analyzeFactors(
-    tokenAnalysis: any,
-    toolAnalysis: any,
+    tokenAnalysis: ReturnType<TokenCalculator['getDetailedEstimate']>,
+    toolAnalysis: ReturnType<ToolDetector['getDetailedAnalysis']>,
     input: ClassificationInput
   ): ClassificationFactors {
     const totalTokens = tokenAnalysis.calculation.totalTokens;
@@ -163,7 +163,7 @@ export class RequestClassifier {
    */
   private generateRecommendations(
     factors: ClassificationFactors,
-    modelCategoryResult: any
+    modelCategoryResult: ReturnType<ModelCategoryResolver['resolveCategory']>
   ): ClassificationRecommendations {
     const suggestedRoute = modelCategoryResult.definition.routeTarget;
     const alternativeRoutes = this.generateAlternativeRoutes(factors);
@@ -183,7 +183,7 @@ export class RequestClassifier {
    */
   private calculateConfidence(
     factors: ClassificationFactors,
-    modelCategoryResult: any
+    modelCategoryResult: ReturnType<ModelCategoryResolver['resolveCategory']>
   ): number {
     let confidence = modelCategoryResult.confidence;
 
@@ -210,7 +210,7 @@ export class RequestClassifier {
    */
   private generateReasoning(
     factors: ClassificationFactors,
-    modelCategoryResult: any
+    modelCategoryResult: ReturnType<ModelCategoryResolver['resolveCategory']>
   ): string {
     const reasons = [];
 
@@ -242,9 +242,9 @@ export class RequestClassifier {
    */
   private generateMetadata(
     processingTime: number,
-    modelCategoryResult: any,
-    tokenAnalysis: any,
-    toolAnalysis: any
+    modelCategoryResult: ReturnType<ModelCategoryResolver['resolveCategory']>,
+    tokenAnalysis: ReturnType<TokenCalculator['getDetailedEstimate']>,
+    toolAnalysis: ReturnType<ToolDetector['getDetailedAnalysis']>
   ): ClassificationMetadata {
     return {
       processingTime,
@@ -407,8 +407,8 @@ export class RequestClassifier {
   /**
    * 获取Token分析置信度
    */
-  private getTokenConfidence(tokenAnalysis: any): number {
-    const { estimates, recommendations } = tokenAnalysis;
+  private getTokenConfidence(tokenAnalysis: ReturnType<TokenCalculator['getDetailedEstimate']>): number {
+    const { recommendations } = tokenAnalysis;
 
     if (recommendations.category === 'very_long') {return 90;}
     if (recommendations.category === 'long') {return 80;}
@@ -419,7 +419,7 @@ export class RequestClassifier {
   /**
    * 获取工具分析置信度
    */
-  private getToolConfidence(toolAnalysis: any): number {
+  private getToolConfidence(toolAnalysis: ReturnType<ToolDetector['getDetailedAnalysis']>): number {
     const { detection } = toolAnalysis;
 
     if (!detection.hasTools) {return 50;}
@@ -432,7 +432,10 @@ export class RequestClassifier {
   /**
    * 获取上下文分析置信度
    */
-  private getContextConfidence(tokenAnalysis: any, toolAnalysis: any): number {
+  private getContextConfidence(
+    tokenAnalysis: ReturnType<TokenCalculator['getDetailedEstimate']>,
+    toolAnalysis: ReturnType<ToolDetector['getDetailedAnalysis']>
+  ): number {
     const tokenConfidence = this.getTokenConfidence(tokenAnalysis);
     const toolConfidence = this.getToolConfidence(toolAnalysis);
 

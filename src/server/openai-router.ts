@@ -1457,9 +1457,9 @@ export class OpenAIRouter extends BaseModule {
               const c0 = choicesArray[0] as Record<string, unknown>;
               const msg = (typeof c0.message === 'object' && c0.message !== null) ? (c0.message as Record<string, unknown>) : undefined;
               const maybeContent = typeof msg?.content === 'string' ? (msg!.content as string) : '';
-              if (maybeContent && !content) content = maybeContent;
+              if (maybeContent && !content) {content = maybeContent;}
               const tc = (msg && Array.isArray(msg.tool_calls)) ? (msg.tool_calls as unknown[]) : null;
-              if (tc && tc.length) toolCalls = tc;
+              if (tc && tc.length) {toolCalls = tc;}
             }
           } else if (typeof normalized === 'string') {
             content = normalized;
@@ -1469,11 +1469,11 @@ export class OpenAIRouter extends BaseModule {
           }
           // Coerce JSON if forced/asked
           const fakeReq = { response_format: (process.env.ROUTECODEX_FORCE_JSON==='1') ? { type: 'json_object' } : undefined };
-          const cleaned = this.ensureJsonContentIfRequested(
-            { choices: [{ index: 0, message: { role: 'assistant', content } }] },
-            fakeReq,
-            'chat'
-          );
+          // const cleaned = this.ensureJsonContentIfRequested(
+          //   { choices: [{ index: 0, message: { role: 'assistant', content } }] },
+          //   fakeReq,
+          //   'chat'
+          // );
           const outContent = content; // Simplified for type safety
           const delta: Record<string, unknown> = { };
           const hasTool = Array.isArray(toolCalls) && toolCalls.length > 0;

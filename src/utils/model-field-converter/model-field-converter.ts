@@ -100,8 +100,8 @@ export class ModelFieldConverter {
    */
   async convertRequest(
     request: OpenAIRequest,
-    pipelineConfig: any,
-    routingInfo: any
+    pipelineConfig: import('../../config/merged-config-types.js').PipelineConfig,
+    routingInfo: import('../../config/merged-config-types.js').RoutingInfo
   ): Promise<ConversionResult> {
     this.ensureInitialized();
 
@@ -138,9 +138,9 @@ export class ModelFieldConverter {
       const errorResult: ConversionResult = {
         convertedRequest: request,
         debugInfo: {
-          conversionId: conversionContext.metadata!.conversionId,
+          conversionId: String(conversionContext.metadata && (conversionContext.metadata as Record<string, unknown>)['conversionId'] || `conv_${Date.now()}`),
           originalRequest: request,
-          routingInfo,
+          routingInfo: routingInfo,
           pipelineConfig,
           conversionTrace: [],
           appliedRules: [],
@@ -178,8 +178,8 @@ export class ModelFieldConverter {
    */
   async convertBatch(
     requests: OpenAIRequest[],
-    pipelineConfigs: any[],
-    routingInfos: any[]
+    pipelineConfigs: import('../../config/merged-config-types.js').PipelineConfig[],
+    routingInfos: import('../../config/merged-config-types.js').RoutingInfo[]
   ): Promise<BatchConversionResult> {
     this.ensureInitialized();
 
@@ -189,7 +189,7 @@ export class ModelFieldConverter {
 
     const startTime = Date.now();
     const successful: ConversionResult[] = [];
-    const failed: any[] = [];
+    const failed: import('./types.js').FailedConversion[] = [];
     const errorDistribution: Record<string, number> = {};
 
     for (let i = 0; i < requests.length; i++) {
@@ -205,7 +205,7 @@ export class ModelFieldConverter {
         } else {
           failed.push({
             request: requests[i],
-            error: result.errors?.join(', ') || 'Unknown error',
+            error: { code: 'CONVERSION_ERROR', message: result.errors?.join(', ') || 'Unknown error' },
             timestamp: new Date()
           });
 
@@ -216,7 +216,7 @@ export class ModelFieldConverter {
       } catch (error) {
         failed.push({
           request: requests[i],
-          error: error instanceof Error ? error.message : String(error),
+          error: { code: 'CONVERSION_ERROR', message: error instanceof Error ? error.message : String(error) },
           timestamp: new Date()
         });
 
@@ -252,7 +252,7 @@ export class ModelFieldConverter {
       providerId: string;
       modelId: string;
       keyId: string;
-      pipelineConfig: any;
+      pipelineConfig: import('../../config/merged-config-types.js').PipelineConfig;
     }
   ): Promise<ConversionResult> {
     // 创建简化的路由信息
@@ -448,8 +448,8 @@ export class ModelFieldConverter {
   private logConversionResult(result: ConversionResult): void {
     if (result.success) {
       console.log('✅ Request conversion successful');
-      console.log('   Original model:', result.debugInfo.originalRequest.model);
-      console.log('   Converted model:', result.convertedRequest.model);
+      console.log('   Original model:', (result.debugInfo.originalRequest as { model?: string })?.model);
+      console.log('   Converted model:', (result.convertedRequest as { model?: string })?.model);
       console.log('   Conversion time:', result.debugInfo.metrics.totalDuration, 'ms');
       console.log('   Steps:', result.debugInfo.metrics.totalSteps);
     } else {

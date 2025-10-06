@@ -6,47 +6,44 @@
 
 // Import error handling components with proper type handling
 import * as debugcenter from 'rcc-debugcenter';
+import * as errorhandling from 'rcc-errorhandling';
 
 // Check if ErrorHandlingCenter exists, fallback to mock if not
-const ErrorHandlingCenter =
-  (debugcenter as any).ErrorHandlingCenter ||
+const EHC: any = (errorhandling as any).ErrorHandlingCenter as (new () => {
+  initialize: () => Promise<void>;
+  handleError: (ctx?: unknown) => Promise<void>;
+  destroy: () => Promise<void>;
+}) | undefined;
+const ErrorHandlingCenterClass: new () => {
+  initialize: () => Promise<void>;
+  handleError: (ctx?: unknown) => Promise<void>;
+  destroy: () => Promise<void>;
+} = EHC ??
   class {
-    async initialize() {
-      // Mock implementation
-    }
-    async handleError() {
-      // Mock implementation
-    }
-    async destroy() {
-      // Mock implementation
-    }
+    async initialize() {/* noop */}
+    async handleError() {/* noop */}
+    async destroy() {/* noop */}
   };
 
 // Check if DebugEventBus exists, fallback to mock if not
-const DebugEventBus =
-  (debugcenter as any).DebugEventBus ||
-  class {
-    static getInstance() {
-      return {
-        publish: () => {},
-      };
-    }
-  };
+const DEB: any = (debugcenter as any).DebugEventBus as { getInstance: () => { publish: (evt: unknown) => void } } | undefined;
+const DebugEventBusClass: { getInstance: () => { publish: (evt: unknown) => void } } =
+  DEB ?? { getInstance: () => ({ publish: (_evt: unknown) => {} }) };
 
 // Define ErrorContext interface locally
 interface ErrorContext {
-  error: any;
+  error: unknown;
   source: string;
   severity: string;
   timestamp: number;
   module?: string;
-  context: any;
+  context: unknown;
 }
 
 /**
  * Error handler function type
  */
-export type ErrorHandlerFunction = (context: any) => Promise<void>;
+export type ErrorHandlerFunction = (context: ErrorContext) => Promise<void>;
 
 /**
  * Error message template interface
@@ -76,15 +73,15 @@ export interface ErrorHandlerRegistration {
  */
 export class ErrorHandlerRegistry {
   private static instance: ErrorHandlerRegistry;
-  private errorHandlingCenter: any;
-  private debugEventBus: any;
+  private errorHandlingCenter: unknown;
+  private debugEventBus: unknown;
   private messageTemplates: Map<string, ErrorMessageTemplate> = new Map();
   private errorHandlers: Map<string, ErrorHandlerFunction[]> = new Map();
   private initialized: boolean = false;
 
   private constructor() {
-    this.errorHandlingCenter = new ErrorHandlingCenter();
-    this.debugEventBus = DebugEventBus.getInstance();
+    this.errorHandlingCenter = new ErrorHandlingCenterClass();
+    this.debugEventBus = DebugEventBusClass.getInstance();
   }
 
   /**
@@ -106,13 +103,13 @@ export class ErrorHandlerRegistry {
     }
 
     try {
-      await this.errorHandlingCenter.initialize();
+      await (this.errorHandlingCenter as { initialize: () => Promise<void> }).initialize();
       await this.registerDefaultErrorMessages();
       await this.registerDefaultErrorHandlers();
 
       this.initialized = true;
 
-      this.debugEventBus.publish({
+      (this.debugEventBus as { publish: (evt: unknown) => void }).publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'error-handler-registry',
         operationId: 'error_handler_registry_initialized',
@@ -136,7 +133,7 @@ export class ErrorHandlerRegistry {
   public registerErrorMessage(template: ErrorMessageTemplate): void {
     this.messageTemplates.set(template.code, template);
 
-    this.debugEventBus.publish({
+    (this.debugEventBus as { publish: (evt: unknown) => void }).publish({
       sessionId: `session_${Date.now()}`,
       moduleId: 'error-handler-registry',
       operationId: 'error_message_registered',
@@ -164,15 +161,15 @@ export class ErrorHandlerRegistry {
 
     // Sort by priority (lower number = higher priority)
     handlers.sort((a, b) => {
-      const priorityA = (a as any)._priority || 0;
-      const priorityB = (b as any)._priority || 0;
+      const priorityA = (a as unknown as { _priority?: number })._priority || 0;
+      const priorityB = (b as unknown as { _priority?: number })._priority || 0;
       return priorityA - priorityB;
     });
 
     // Store priority on handler for future sorting
-    (registration.handler as any)._priority = registration.priority;
+    (registration.handler as unknown as { _priority?: number })._priority = registration.priority;
 
-    this.debugEventBus.publish({
+    (this.debugEventBus as { publish: (evt: unknown) => void }).publish({
       sessionId: `session_${Date.now()}`,
       moduleId: 'error-handler-registry',
       operationId: 'error_handler_registered',
@@ -194,7 +191,7 @@ export class ErrorHandlerRegistry {
     error: Error,
     context: string,
     moduleId: string,
-    additionalContext?: Record<string, any>
+    additionalContext?: Record<string, unknown>
   ): Promise<void> {
     try {
       // Get error message template
@@ -219,7 +216,7 @@ export class ErrorHandlerRegistry {
       };
 
       // Use ErrorHandlingCenter for base error handling
-      await this.errorHandlingCenter.handleError(errorContext);
+      await (this.errorHandlingCenter as { handleError: (ctx: unknown) => Promise<void> }).handleError(errorContext);
 
       // Execute registered error handlers
       await this.executeErrorHandlers(template.code, errorContext);
@@ -451,10 +448,10 @@ export class ErrorHandlerRegistry {
     try {
       this.messageTemplates.clear();
       this.errorHandlers.clear();
-      await this.errorHandlingCenter.destroy();
+      await (this.errorHandlingCenter as { destroy: () => Promise<void> }).destroy();
       this.initialized = false;
 
-      this.debugEventBus.publish({
+      (this.debugEventBus as { publish: (evt: unknown) => void }).publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'error-handler-registry',
         operationId: 'error_handler_registry_destroyed',

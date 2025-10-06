@@ -66,12 +66,12 @@ const CONFIG_FILE_PREFERENCES = [
 /**
  * Default configuration directory structure
  */
-const DEFAULT_CONFIG_DIRECTORIES = [
-  path.join(homedir(), '.routecodex', 'config'),  // Primary config directory
-  path.join(homedir(), '.routecodex'),               // Legacy directory
-  path.join(process.cwd(), 'config'),               // Current directory config
-  process.cwd(),                                    // Current directory
-];
+// const DEFAULT_CONFIG_DIRECTORIES = [
+//   path.join(homedir(), '.routecodex', 'config'),  // Primary config directory
+//   path.join(homedir(), '.routecodex'),               // Legacy directory
+//   path.join(process.cwd(), 'config'),               // Current directory config
+//   process.cwd(),                                    // Current directory
+// ];
 
 /**
  * Unified configuration path resolver

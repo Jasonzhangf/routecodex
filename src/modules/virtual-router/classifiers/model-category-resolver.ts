@@ -47,14 +47,14 @@ export interface ModelCapability {
 
 export interface ModelCharacteristic {
   name: string;
-  value: any;
+  value: unknown;
   description: string;
 }
 
 export interface ModelCondition {
   field: string;
   operator: 'equals' | 'contains' | 'starts_with' | 'ends_with' | 'regex' | 'greater_than' | 'less_than';
-  value: any;
+  value: unknown;
 }
 
 export interface ClassificationRule {
@@ -69,13 +69,13 @@ export interface ClassificationRule {
 export interface RuleCondition {
   field: string;
   operator: string;
-  value: any;
+  value: unknown;
 }
 
 export interface RuleAction {
   type: 'set_category' | 'set_priority' | 'modify_confidence';
   target: string;
-  value?: any;
+  value?: unknown;
 }
 
 export interface ModelCategoryResult {
@@ -86,6 +86,13 @@ export interface ModelCategoryResult {
   matchedRules: string[];
   fallbackUsed: boolean;
 }
+
+type ResolverContext = {
+  tokenCount?: number;
+  hasTools?: boolean;
+  toolTypes?: string[];
+  thinking?: boolean;
+};
 
 export class ModelCategoryResolver {
   private config: ModelCategoryConfig;
@@ -237,7 +244,7 @@ export class ModelCategoryResolver {
    */
   private applyRules(
     modelName: string,
-    context?: any
+    context?: ResolverContext
   ): { category: string; priority: number; reasoning: string; matchedRules: string[] } | null {
     const matchedRules: string[] = [];
     let bestMatch: { category: string; priority: number } | null = null;
@@ -278,7 +285,7 @@ export class ModelCategoryResolver {
   /**
    * 评估规则条件
    */
-  private evaluateRule(rule: ClassificationRule, modelName: string, context?: any): boolean {
+  private evaluateRule(rule: ClassificationRule, modelName: string, context?: ResolverContext): boolean {
     for (const condition of rule.conditions) {
       if (!this.evaluateCondition(condition, modelName, context)) {
         return false;
@@ -290,7 +297,7 @@ export class ModelCategoryResolver {
   /**
    * 评估单个条件
    */
-  private evaluateCondition(condition: RuleCondition, modelName: string, context?: any): boolean {
+  private evaluateCondition(condition: RuleCondition, modelName: string, context?: ResolverContext): boolean {
     const fieldValue = this.getFieldValue(condition.field, modelName, context);
 
     switch (condition.operator) {
@@ -303,7 +310,7 @@ export class ModelCategoryResolver {
       case 'ends_with':
         return String(fieldValue).endsWith(String(condition.value));
       case 'regex':
-        return new RegExp(condition.value).test(String(fieldValue));
+        return new RegExp(String(condition.value)).test(String(fieldValue));
       case 'greater_than':
         return Number(fieldValue) > Number(condition.value);
       case 'less_than':
@@ -316,7 +323,7 @@ export class ModelCategoryResolver {
   /**
    * 获取字段值
    */
-  private getFieldValue(field: string, modelName: string, context?: any): any {
+  private getFieldValue(field: string, modelName: string, context?: ResolverContext): unknown {
     switch (field) {
       case 'model':
         return modelName;
@@ -338,11 +345,11 @@ export class ModelCategoryResolver {
   /**
    * 基于上下文推断
    */
-  private inferFromContext(context: any): { category: string; priority: number; reasoning: string } | null {
+  private inferFromContext(context: ResolverContext): { category: string; priority: number; reasoning: string } | null {
     if (!context) {return null;}
 
     // 基于Token数量推断
-    if (context.tokenCount > 50000) {
+    if ((context.tokenCount ?? 0) > 50000) {
       return {
         category: 'longContext',
         priority: 80,
@@ -564,17 +571,22 @@ export class ModelCategoryResolver {
     suggestedRules: Array<{
       id: string;
       name: string;
-      conditions: Array<{ field: string; operator: string; value: any }>;
+      conditions: Array<{ field: string; operator: string; value: unknown }>;
       action: { type: string; target: string };
     }>;
   } {
     const suggestions = {
-      missingCategories: [],
-      suggestedMappings: [],
-      suggestedRules: []
-    } as any;
+      missingCategories: [] as string[],
+      suggestedMappings: [] as Array<{ pattern: string; category: string; reasoning: string }>,
+      suggestedRules: [] as Array<{
+        id: string;
+        name: string;
+        conditions: Array<{ field: string; operator: string; value: unknown }>;
+        action: { type: string; target: string };
+      }>,
+    };
 
-    // 分析当前配置，提供建议
+    // TODO: 分析当前配置，提供建议（占位实现返回空建议）
     return suggestions;
   }
 }

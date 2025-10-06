@@ -12,7 +12,7 @@ import type {
   PipelineConfig,
   PipelineManagerConfig,
   ModuleFactory,
-  ModuleDependencies,
+  // ModuleDependencies,
   BasePipeline
 } from '../../pipeline/interfaces/pipeline-interfaces.js';
 import { EnhancementConfigManager } from '../enhancement-config-manager.js';
@@ -477,7 +477,7 @@ export class EnhancedPipelineManager implements RCCBaseModule {
     const { BasePipeline } = await import('../../pipeline/core/base-pipeline');
 
     // Create module factory function
-    const moduleFactory: ModuleFactory = async (moduleConfig, dependencies) => {
+    const moduleFactory: ModuleFactory = async (moduleConfig, _dependencies) => {
       // This would be replaced with actual module creation logic
       // For now, return a simple module
       return {

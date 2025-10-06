@@ -143,7 +143,7 @@ export class OAuthManager {
             this.openVerificationUrl(deviceCode.verification_uri_complete);
           }
         },
-        onTokenReceived: (token) => {
+        onTokenReceived: (_token) => {
           console.log(`✅ Token received for ${provider.name}`);
         },
         onError: (error) => {

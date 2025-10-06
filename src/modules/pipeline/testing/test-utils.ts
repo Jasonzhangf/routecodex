@@ -47,7 +47,7 @@ export async function createMockPipeline(
     mockConfig,
     mockErrorHandlingCenter,
     mockDebugCenter,
-    async (moduleConfig, dependencies) => {
+    async (_moduleConfig, _dependencies) => {
       throw new Error('Mock module factory not implemented');
     }
   );

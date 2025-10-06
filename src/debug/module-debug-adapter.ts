@@ -6,7 +6,7 @@
  */
 
 import { BaseDebugAdapter } from './base-debug-adapter.js';
-import { DebugEventBus } from "rcc-debugcenter";
+// import { DebugEventBus } from "rcc-debugcenter";
 import type {
   ModuleDebugAdapter,
   DebugContext,
@@ -297,7 +297,7 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
   /**
    * Apply method hooks for context
    */
-  private async applyMethodHooks(context: DebugContext): Promise<void> {
+  private async applyMethodHooks(_context: DebugContext): Promise<void> {
     // Apply all registered method hooks
     for (const methodName of this.methodHooks.keys()) {
       try {
@@ -311,7 +311,7 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
   /**
    * Remove method hooks for context
    */
-  private async removeMethodHooks(context: DebugContext): Promise<void> {
+  private async removeMethodHooks(_context: DebugContext): Promise<void> {
     // This can be used for context-specific hook removal
     // For now, we keep hooks active for the module lifetime
   }
@@ -386,7 +386,7 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
   /**
    * Update module configuration
    */
-  private async updateModuleConfig(config: Record<string, any>): Promise<void> {
+  private async updateModuleConfig(_config: Record<string, any>): Promise<void> {
     // This should be implemented by subclasses to update module configuration
     console.warn('Module configuration update not implemented for', this.moduleInfo.id);
   }
@@ -404,7 +404,7 @@ export class ModuleDebugAdapterImpl extends BaseDebugAdapter implements ModuleDe
    */
   private async restoreOriginalMethods(): Promise<void> {
     // Restore all original methods that were wrapped
-    for (const [methodName, originalMethod] of this.originalMethods) {
+    for (const [methodName, /*_originalMethod*/] of this.originalMethods) {
       try {
         // This would typically restore the original method on the target object
         // Implementation depends on the specific module structure

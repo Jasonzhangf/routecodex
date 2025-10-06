@@ -43,8 +43,9 @@ export class IFlowTokenStorage {
     this.token_type = String(data.token_type || 'Bearer');
     this.scope = String(data.scope || '');
     this.expires_at = Number(data.expires_at || Date.now());
-    if (typeof (data as any).apiKey === 'string') {
-      this.apiKey = String((data as any).apiKey);
+    const apiKeyVal = (data as Record<string, unknown>)['apiKey'];
+    if (typeof apiKeyVal === 'string') {
+      this.apiKey = apiKeyVal;
     }
   }
 
@@ -59,7 +60,7 @@ export class IFlowTokenStorage {
     };
   }
 
-  static fromJSON(json: any) {
+  static fromJSON(json: unknown) {
     const src = (json && typeof json === 'object') ? (json as Record<string, unknown>) : {};
     return new IFlowTokenStorage(src);
   }
@@ -137,7 +138,7 @@ export class IFlowOAuth {
    * Refresh token with retries
    */
   async refreshTokensWithRetry(refreshToken: string, maxRetries = 3) {
-    let lastError: any;
+    let lastError: unknown;
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       if (attempt > 0) {
@@ -216,7 +217,8 @@ export class IFlowOAuth {
       // Intentionally empty - logging errors might expose sensitive information
     }
 
-    const { codeVerifier, codeChallenge } = this.generatePKCEPair();
+    const { generatePKCEPair } = await import('../../utils/oauth-helpers.js');
+    const { codeVerifier, codeChallenge } = generatePKCEPair();
     const device = await this.requestDeviceCode(codeChallenge);
 
     console.log('Please visit the following URL to authenticate:');
@@ -246,11 +248,12 @@ export class IFlowOAuth {
   }
 
   private async completeAuthCodeFlow(openBrowser = true): Promise<IFlowTokenStorage> {
-    const { codeVerifier, codeChallenge } = this.generatePKCEPair();
+    const { generatePKCEPair, findOpenPort } = await import('../../utils/oauth-helpers.js');
+    const { codeVerifier, codeChallenge } = generatePKCEPair();
     const http = await import('http');
     const url = await import('url');
     const host = process.env.OAUTH_CALLBACK_HOST || 'localhost';
-    const port = await this.findOpenPort();
+    const port = await findOpenPort();
     const redirectUri = `http://${host}:${port}/oauth2callback`;
     const state = crypto.randomBytes(16).toString('hex');
 
@@ -263,7 +266,7 @@ export class IFlowOAuth {
     auth.searchParams.set('code_challenge', codeChallenge);
     auth.searchParams.set('code_challenge_method', 'S256');
 
-    const loginComplete = new Promise<any>((resolve, reject) => {
+    const loginComplete = new Promise<Record<string, unknown>>((resolve, reject) => {
       const server = http.createServer(async (req, res) => {
         try {
           if (!req.url || req.url.indexOf('/oauth2callback') === -1) {
@@ -325,7 +328,7 @@ export class IFlowOAuth {
           res.statusCode = 302;
           res.setHeader('Location', 'https://iflow.cn');
           res.end();
-          resolve(data);
+          resolve(data as Record<string, unknown>);
         } catch (e) {
           try { res.statusCode = 500; res.end('Authentication failed'); } catch {
             // Response might already be closed
@@ -352,7 +355,7 @@ export class IFlowOAuth {
     }
 
     const tokenData = await loginComplete;
-    const storage = this.createTokenStorage(tokenData);
+    const storage = this.createTokenStorage(tokenData as { access_token: string; refresh_token?: string; token_type?: string; scope?: string; expires_in: number });
     await this.fetchAndAttachApiKey(storage.access_token);
     return storage;
   }
@@ -366,14 +369,14 @@ export class IFlowOAuth {
           const addr = server.address();
           server.close();
           if (typeof addr === 'object' && addr && 'port' in addr) {
-            resolve((addr as any).port);
+            resolve((addr as import('net').AddressInfo).port);
           } else {
             reject(new Error('Failed to acquire an open port'));
           }
         });
         server.on('error', reject);
       } catch (e) {
-        reject(e as any);
+        reject(e instanceof Error ? e : new Error(String(e)));
       }
     });
   }
@@ -640,7 +643,7 @@ export class IFlowOAuth {
     });
   }
 
-  private convertLegacyToken(data: any): Record<string, unknown> {
+  private convertLegacyToken(data: unknown): Record<string, unknown> {
     if (!data || typeof data !== 'object') {
       return {};
     }
@@ -669,8 +672,9 @@ export class IFlowOAuth {
       const url = `https://iflow.cn/api/oauth/getUserInfo?accessToken=${encodeURIComponent(accessToken)}`;
       const resp = await this.httpClient(url, { method: 'GET' });
       if (!resp.ok) { return; }
-      const data = await resp.json().catch(() => null) as any;
-      const apiKey = data?.apiKey || data?.data?.apiKey;
+      const data = await resp.json().catch(() => null) as unknown;
+      const rec = (data || {}) as Record<string, unknown>;
+      const apiKey = (rec['apiKey'] as string) || ((rec['data'] as Record<string, unknown> | undefined)?.['apiKey'] as string | undefined);
       if (typeof apiKey === 'string' && apiKey.trim()) {
         if (!this.tokenStorage) {
           this.tokenStorage = new IFlowTokenStorage({ access_token: accessToken, expires_at: Date.now() + 3600_000 });

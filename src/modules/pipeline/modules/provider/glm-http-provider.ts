@@ -155,7 +155,7 @@ export class GLMHTTPProvider implements ProviderModule {
       if (this.isDebugEnhanced && this.debugEventBus) {
         this.debugEventBus.publish({ sessionId: 'system', moduleId: this.id, operationId: 'glm_http_request_payload_saved', timestamp: Date.now(), type: 'start', position: 'middle', data: { path: outPath, model: (payloadObj as any).model, hasTools: Array.isArray((payloadObj as any).tools) } });
       }
-    } catch {}
+    } catch { /* noop: optional debug payload save */ void 0; }
 
     const timeoutMs = Number(process.env.GLM_HTTP_TIMEOUT_MS || process.env.RCC_UPSTREAM_TIMEOUT_MS || 300000);
     const controller = new AbortController();

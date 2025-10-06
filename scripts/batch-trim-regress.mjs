@@ -6,9 +6,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import url from 'node:url';
+import { repoRootFrom, readJSON } from './lib/utils.mjs';
 
-const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, '..');
+const repoRoot = repoRootFrom(import.meta.url);
 
 async function importPreferSrc(relJs, relTs) {
   try {
@@ -17,8 +17,6 @@ async function importPreferSrc(relJs, relTs) {
     return await import(url.pathToFileURL(path.join(repoRoot, 'dist', relJs)).href);
   }
 }
-
-function readJSON(p) { return JSON.parse(fs.readFileSync(p, 'utf-8')); }
 function listChatReq(dir) {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir).filter(f => f.startsWith('chat-req_') && f.endsWith('.json')).sort();
@@ -133,4 +131,3 @@ async function main() {
 }
 
 main().catch(e => { console.error('batch-trim-regress failed:', e); process.exit(1); });
-

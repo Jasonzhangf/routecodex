@@ -5,7 +5,7 @@
 
 import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
-import path from 'path';
+// import path from 'path';
 
 export class ConfigWatcher {
   private watchers: Map<string, FSWatcher> = new Map();

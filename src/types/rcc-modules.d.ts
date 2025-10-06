@@ -2,7 +2,7 @@
  * RCC module type declarations
  */
 
-import { UnknownObject } from './common-types';
+// import { UnknownObject } from './common-types';
 
 declare module 'rcc-basemodule' {
   export interface ModuleInfo {

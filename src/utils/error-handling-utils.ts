@@ -4,10 +4,11 @@
  */
 
 import { ErrorHandlerRegistry } from './error-handler-registry.js';
-import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
-import { DebugEventBus } from 'rcc-debugcenter';
+import type { ErrorHandlerFunction as RegistryErrorHandlerFunction } from './error-handler-registry.js';
+import { /* ErrorHandlingCenter, */ type ErrorContext } from 'rcc-errorhandling';
+// import { DebugEventBus } from 'rcc-debugcenter';
 
-export function getErrorMessage(error: any): string {
+export function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
@@ -21,7 +22,7 @@ export interface ErrorHandlingOptions {
   severity?: 'low' | 'medium' | 'high' | 'critical';
   category?: string;
   recovery?: string;
-  additionalContext?: Record<string, any>;
+  additionalContext?: Record<string, unknown>;
   suppressLogging?: boolean;
 }
 
@@ -32,7 +33,7 @@ export interface ErrorContextBuilder {
   withSeverity(severity: 'low' | 'medium' | 'high' | 'critical'): ErrorContextBuilder;
   withCategory(category: string): ErrorContextBuilder;
   withRecovery(recovery: string): ErrorContextBuilder;
-  withAdditionalContext(context: Record<string, any>): ErrorContextBuilder;
+  withAdditionalContext(context: Record<string, unknown>): ErrorContextBuilder;
   withSuppressedLogging(): ErrorContextBuilder;
   build(): ErrorContext;
 }
@@ -45,7 +46,7 @@ export class ContextualError extends Error {
   public readonly moduleId: string;
   public readonly severity: 'low' | 'medium' | 'high' | 'critical';
   public readonly category: string;
-  public readonly additionalContext?: Record<string, any>;
+  public readonly additionalContext?: Record<string, unknown>;
 
   constructor(
     message: string,
@@ -71,10 +72,11 @@ export class ErrorHandlingUtils {
   private static registry: ErrorHandlerRegistry | null = null;
 
   /** Detect sandbox/permission-denied style errors */
-  public static detectSandboxPermissionError(err: any): { isSandbox: boolean; reason: string } {
+  public static detectSandboxPermissionError(err: unknown): { isSandbox: boolean; reason: string } {
     try {
-      const code = String(err?.code || '').toUpperCase();
-      const msg = String(err?.message || err || '').toLowerCase();
+      const rec = err as Record<string, unknown>;
+      const code = String(rec?.['code'] || '').toUpperCase();
+      const msg = String((rec?.['message'] as string) || err || '').toLowerCase();
       const text = `${code} ${msg}`;
       const patterns = [
         'eacces',
@@ -242,7 +244,7 @@ export class ErrorHandlingUtils {
     
     ErrorHandlingUtils.registry.registerErrorHandler({
       errorCode,
-      handler: handler as any,
+      handler: handler as unknown as RegistryErrorHandlerFunction,
       priority,
       description,
     });
@@ -456,7 +458,7 @@ class ErrorContextBuilderImpl implements ErrorContextBuilder {
     return this;
   }
 
-  public withAdditionalContext(context: Record<string, any>): ErrorContextBuilder {
+  public withAdditionalContext(context: Record<string, unknown>): ErrorContextBuilder {
     this.options.additionalContext = { ...this.options.additionalContext, ...context };
     return this;
   }

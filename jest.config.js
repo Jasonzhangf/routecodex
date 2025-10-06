@@ -44,10 +44,11 @@ const config = {
   testTimeout: 30000,
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
-    '^rcc-debugcenter$': '<rootDir>/node_modules/rcc-debugcenter/dist/index.esm.js',
-    '^rcc-basemodule$': '<rootDir>/node_modules/rcc-basemodule/dist/index.esm.js',
-    '^rcc-errorhandling$': '<rootDir>/node_modules/rcc-errorhandling/dist/index.esm.js',
+    '^rcc-debugcenter$': '<rootDir>/tests/mocks/rcc-debugcenter.ts',
+    '^rcc-basemodule$': '<rootDir>/tests/mocks/rcc-basemodule.ts',
+    '^rcc-errorhandling$': '<rootDir>/tests/mocks/rcc-errorhandling.ts',
+    '^yaml$': '<rootDir>/tests/mocks/yaml.js',
   },
-  };
+};
 
 export default config;

@@ -42,6 +42,7 @@ export enum ModuleStatus {
  * RouteCodex-specific debug and lifecycle helpers that other modules rely on.
  */
 export abstract class BaseModule extends RCCBaseModule {
+  private readonly moduleInfo: ModuleInfo;
   protected status: ModuleStatus = ModuleStatus.STOPPED;
   private runningState = false;
 
@@ -61,6 +62,7 @@ export abstract class BaseModule extends RCCBaseModule {
 
   constructor(info: ModuleInfo) {
     super(info);
+    this.moduleInfo = info;
     this.initializeUnifiedDebugEnhancements();
     this.initializeDebugEnhancements();
   }
@@ -100,13 +102,24 @@ export abstract class BaseModule extends RCCBaseModule {
    * 获取模块信息
    */
   public override getInfo(): ModuleInfo {
-    return super.getInfo();
+    try {
+      const fn = (RCCBaseModule.prototype as unknown as Record<string, unknown>)['getInfo'];
+      if (typeof fn === 'function') {
+        return super.getInfo();
+      }
+    } catch {
+      // ignore
+    }
+    return this.moduleInfo;
   }
 
   /**
    * 获取模块状态
+   * Note: Return type is intentionally broad to allow subclasses
+   * to expose richer status objects without conflicting types.
    */
-  getStatus(): ModuleStatus {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getStatus(): any {
     return this.status;
   }
 

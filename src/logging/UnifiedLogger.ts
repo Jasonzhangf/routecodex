@@ -5,9 +5,9 @@
  */
 
 import { EventEmitter } from 'events';
-import * as fs from 'fs';
-import * as path from 'path';
-import { promisify } from 'util';
+// import * as fs from 'fs';
+// import * as path from 'path';
+// import { promisify } from 'util';
 
 import { LogLevel } from './types.js';
 
@@ -23,16 +23,16 @@ import type {
   LoggerConfig,
 } from './types.js';
 
-import type { UnifiedLogger, LogWriterStatus } from './interfaces.js';
+import type { UnifiedLogger /*, LogWriterStatus */ } from './interfaces.js';
 import type { LogData } from '../types/common-types.js';
 
 import {
   DEFAULT_CONFIG,
   LOG_LEVEL_PRIORITY,
-  CONSOLE_LOG_CONSTANTS,
-  FILE_LOG_CONSTANTS,
+  // CONSOLE_LOG_CONSTANTS,
+  // FILE_LOG_CONSTANTS,
   SENSITIVE_FIELDS,
-  ERROR_CONSTANTS,
+  // ERROR_CONSTANTS,
 } from './constants.js';
 
 /**
@@ -360,7 +360,7 @@ export class UnifiedModuleLogger extends EventEmitter implements UnifiedLogger {
     return message.trim().substring(0, 10000);
   }
 
-  private generateTags(level: LogLevel, message: string, data?: unknown): string[] {
+  private generateTags(level: LogLevel, message: string, _data?: unknown): string[] {
     const tags: string[] = [level];
 
     // 基于消息内容生成标签

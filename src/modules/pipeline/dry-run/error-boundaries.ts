@@ -5,8 +5,8 @@
  * 确保系统在异常情况下的稳定性和可靠性
  */
 
-import type { ResourceInfo } from './memory-management.js';
-import { memoryManager, ResourceType } from './memory-management.js';
+// import type { ResourceInfo } from './memory-management.js';
+import { memoryManager /*, ResourceType */ } from './memory-management.js';
 
 /**
  * 错误级别

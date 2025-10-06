@@ -3,7 +3,7 @@
  * 基于OpenAI格式的Token估算器
  */
 
-import type { ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources/chat/completions';
+import type { ChatCompletionMessageParam, ChatCompletionTool, ChatCompletionMessageToolCall } from 'openai/resources/chat/completions';
 
 export interface TokenCalculationResult {
   totalTokens: number;
@@ -139,19 +139,17 @@ export class TokenCalculator {
   /**
    * 计算工具调用的Token数
    */
-  private calculateToolCallTokens(toolCalls: any[]): number {
+  private calculateToolCallTokens(toolCalls: ChatCompletionMessageToolCall[]): number {
     let tokens = 0;
 
     for (const toolCall of toolCalls) {
       // 工具调用开销
       tokens += 20;
 
-      // 工具名称
-      tokens += this.estimateTextTokens(toolCall.function?.name || '');
-
-      // 工具参数
-      if (toolCall.function?.arguments) {
-        tokens += this.estimateTextTokens(toolCall.function.arguments);
+      const fn: { name?: string; arguments?: string } | undefined = (toolCall as unknown as { function?: { name?: string; arguments?: string } }).function;
+      tokens += this.estimateTextTokens(fn?.name || '');
+      if (fn?.arguments) {
+        tokens += this.estimateTextTokens(fn.arguments);
       }
     }
 
@@ -176,7 +174,7 @@ export class TokenCalculator {
   /**
    * 估算图像Token数
    */
-  private estimateImageTokens(imageUrl: any): number {
+  private estimateImageTokens(_imageUrl: unknown): number {
     // 简化的图像Token估算
     // 实际Token数取决于图像尺寸、细节程度等
     return 255; // OpenAI的标准图像Token估算

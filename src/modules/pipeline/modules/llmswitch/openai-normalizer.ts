@@ -52,7 +52,7 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
   }
 
   async processOutgoing(response: any): Promise<any> {
-    const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
+    // const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
     return response; // passthrough; DTO 也直接返回
   }
 

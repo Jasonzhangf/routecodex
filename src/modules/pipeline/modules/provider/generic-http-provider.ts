@@ -22,6 +22,7 @@ import type {
 import type { UnknownObject } from '../../../../types/common-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { DebugEventBus } from "rcc-debugcenter";
+import { buildAuthHeaders, createProviderError } from './shared/provider-helpers.js';
 
 // Simulated response types for development path
 interface SimulatedChoice {
@@ -68,7 +69,7 @@ export class GenericHTTPProvider implements ProviderModule {
   // Debug enhancement properties
   private debugEventBus: DebugEventBus | null = null;
   private isDebugEnhanced = false;
-  private providerMetrics: Map<string, { values: any[]; lastUpdated: number }> = new Map();
+  private providerMetrics: Map<string, { values: unknown[]; lastUpdated: number }> = new Map();
   private requestHistory: UnknownObject[] = [];
   private errorHistory: UnknownObject[] = [];
   private maxHistorySize = 50;
@@ -157,7 +158,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Process outgoing response - Not typically used for providers
    */
-  async processOutgoing(response: any): Promise<unknown> {
+  async processOutgoing(response: unknown): Promise<unknown> {
     return response;
   }
 
@@ -520,7 +521,7 @@ export class GenericHTTPProvider implements ProviderModule {
       };
 
     } catch (error) {
-      throw this.createProviderError(error, 'network');
+      throw createProviderError(error, 'network');
     }
   }
 
@@ -528,33 +529,7 @@ export class GenericHTTPProvider implements ProviderModule {
    * Prepare request headers
    */
   private prepareHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {
-      ...(this.httpClient?.headers ?? {})
-    };
-
-    // Add authentication headers
-    if (this.authContext) {
-      switch (this.authContext.type) {
-        case 'apikey':
-          headers[this.authContext.credentials.headerName] =
-            this.authContext.credentials.prefix + this.authContext.token;
-          break;
-        case 'bearer':
-          headers['Authorization'] = `Bearer ${this.authContext.token}`;
-          break;
-        case 'basic':
-          headers['Authorization'] = `Basic ${this.authContext.token}`;
-          break;
-        case 'oauth':
-          headers['Authorization'] = `Bearer ${this.authContext.token}`;
-          break;
-        case 'custom':
-          // Would apply custom authentication headers
-          break;
-      }
-    }
-
-    return headers;
+    return buildAuthHeaders(this.authContext, this.httpClient?.headers ?? {});
   }
 
   /**
@@ -609,8 +584,8 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Handle provider errors
    */
-  private async handleProviderError(error: any, request: any): Promise<void> {
-    const providerError = this.createProviderError(error, 'unknown');
+  private async handleProviderError(error: unknown, request: unknown): Promise<void> {
+    const providerError = createProviderError(error, 'unknown');
 
     this.logger.logModule(this.id, 'provider-error', {
       error: providerError,
@@ -638,25 +613,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Create provider error
    */
-  private createProviderError(error: any, type: ProviderError['type']): ProviderError {
-    const errorObj = error instanceof Error ? error : new Error(String(error));
-    const providerError: ProviderError = new Error(errorObj.message) as ProviderError;
-    providerError.type = type;
-    const errLike = error as { status?: number; statusCode?: number; details?: Record<string, unknown> };
-    providerError.statusCode = errLike.status ?? errLike.statusCode;
-    providerError.details = (errLike.details as Record<string, unknown> | undefined) ?? {};
-    providerError.retryable = this.isErrorRetryable(type);
-
-    return providerError;
-  }
-
-  /**
-   * Check if error is retryable
-   */
-  private isErrorRetryable(errorType: string): boolean {
-    const retryableTypes = ['network', 'timeout', 'rate_limit', 'server'];
-    return retryableTypes.includes(errorType);
-  }
+  // Provider error logic centralized in shared helpers
 
   /**
    * Simulate HTTP request (for development)
@@ -723,7 +680,7 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Record provider metric
    */
-  private recordProviderMetric(operation: string, data: any): void {
+  private recordProviderMetric(operation: string, data: unknown): void {
     if (!this.providerMetrics.has(operation)) {
       this.providerMetrics.set(operation, {
         values: [],
@@ -834,8 +791,8 @@ export class GenericHTTPProvider implements ProviderModule {
   /**
    * Get provider metrics
    */
-  private getProviderMetrics(): Record<string, { count: number; lastUpdated: number; recentValues: any[] }> {
-    const metrics: Record<string, { count: number; lastUpdated: number; recentValues: any[] }> = {};
+  private getProviderMetrics(): Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> {
+    const metrics: Record<string, { count: number; lastUpdated: number; recentValues: unknown[] }> = {};
 
     for (const [operation, metric] of this.providerMetrics.entries()) {
       metrics[operation] = {
@@ -862,13 +819,13 @@ export class GenericHTTPProvider implements ProviderModule {
     return this.isInitialized;
   }
 
-  private isSharedPipelineRequest(value: any): value is SharedPipelineRequest {
+  private isSharedPipelineRequest(value: unknown): value is SharedPipelineRequest {
     if (!value || typeof value !== 'object') {return false;}
     const v = value as Record<string, unknown>;
     return 'data' in v && 'route' in v && 'metadata' in v && 'debug' in v;
   }
 
-  private extractModel(request: any): string | undefined {
+  private extractModel(request: unknown): string | undefined {
     if (this.isSharedPipelineRequest(request)) {
       const data = request.data as UnknownObject;
       return (data as { model?: string }).model;
@@ -876,11 +833,11 @@ export class GenericHTTPProvider implements ProviderModule {
     return (request as { model?: string })?.model;
   }
 
-  private extractHasMessages(request: any): boolean {
+  private extractHasMessages(request: unknown): boolean {
     if (this.isSharedPipelineRequest(request)) {
       const data = request.data as UnknownObject;
-      return Array.isArray((data as { messages?: any[] }).messages);
+      return Array.isArray((data as { messages?: unknown[] }).messages);
     }
-    return Array.isArray((request as { messages?: any[] })?.messages);
+    return Array.isArray((request as { messages?: unknown[] })?.messages);
   }
 }

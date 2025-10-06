@@ -15,6 +15,7 @@ import OpenAI from 'openai';
 import fs from 'fs/promises';
 import path from 'path';
 import { homedir } from 'os';
+import { createProviderError } from './shared/provider-helpers.js';
 
 /**
  * OpenAI Provider Module
@@ -56,7 +57,7 @@ export class OpenAIProvider implements ProviderModule {
   private static get(obj: any, path: Array<string | number>): any {
     let cur: any = obj;
     for (const key of path) {
-      if (!OpenAIProvider.isRecord(cur)) return undefined;
+      if (!OpenAIProvider.isRecord(cur)) {return undefined;}
       const k = String(key);
       cur = (cur as Record<string, unknown>)[k];
     }
@@ -100,7 +101,7 @@ export class OpenAIProvider implements ProviderModule {
       : (typeof (r as Record<string, unknown>).code === 'string' ? ((r as Record<string, unknown>).code as string) : undefined));
 
   let retryable = false;
-  if (status >= 500 || status === 429) retryable = true;
+  if (status >= 500 || status === 429) {retryable = true;}
   if (causeCode) {
     const cc = causeCode.toUpperCase();
     if (['ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT','ECONNRESET','ECONNREFUSED','EAI_AGAIN','ENOTFOUND'].includes(cc)) {
@@ -331,7 +332,7 @@ export class OpenAIProvider implements ProviderModule {
             vendorBase: (this.config.config as ProviderConfig)?.baseUrl
           });
         }
-      } catch {}
+      } catch { /* noop: optional debug payload save */ void 0; }
 
       // Send request to OpenAI
       type ChatCreateArg = Parameters<OpenAI['chat']['completions']['create']>[0];
@@ -404,14 +405,10 @@ export class OpenAIProvider implements ProviderModule {
       }
 
       // Map to ProviderError so router can produce consistent error payloads
-      const providerErr = new Error(message) as Error & {
-        type: string; statusCode: number; details?: UnknownObject; retryable?: boolean;
-      };
-      providerErr.type = 'server';
-      providerErr.statusCode = n.status ?? 500;
+      const e = new Error(message) as Error & { status?: number; details?: UnknownObject };
+      e.status = n.status ?? 500;
       const providerConfig = this.config.config as ProviderConfig;
-      // Attach helpful, non-sensitive context
-      providerErr.details = {
+      e.details = {
         upstream: (n.upstream as UnknownObject | undefined),
         provider: {
           moduleType: this.type,
@@ -421,8 +418,8 @@ export class OpenAIProvider implements ProviderModule {
           model: (request as { model?: string }).model || undefined,
         }
       };
+      const providerErr = createProviderError(e, 'server');
       providerErr.retryable = n.retryable === true;
-
       throw providerErr;
     }
   }

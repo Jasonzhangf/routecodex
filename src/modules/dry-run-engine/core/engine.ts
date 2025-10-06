@@ -196,7 +196,7 @@ export class DryRunEngine {
 
       // 执行虚拟路由器dry-run
       const virtualRouterResult = await virtualRouterDryRunExecutor.executeDryRun({
-        request: request.data,
+        request: (request.data && typeof request.data === 'object') ? (request.data as Record<string, unknown>) : { value: request.data },
         endpoint: request.route?.providerId ? `/v1/${request.route.providerId}/chat/completions` : '/v1/chat/completions',
         protocol: 'openai'
       });
@@ -322,7 +322,7 @@ export class DryRunEngine {
 
       // 1. 执行虚拟路由器dry-run
       const virtualRouterResult = await virtualRouterDryRunExecutor.executeDryRun({
-        request: request.data,
+        request: (request.data && typeof request.data === 'object') ? (request.data as Record<string, unknown>) : { value: request.data },
         endpoint: request.route?.providerId ? `/v1/${request.route.providerId}/chat/completions` : '/v1/chat/completions',
         protocol: 'openai'
       });
@@ -358,7 +358,7 @@ export class DryRunEngine {
     if (!virtualRouterResult.loadBalancerAnalysis) {return 0;}
     
     const analysis = virtualRouterResult.loadBalancerAnalysis;
-    const totalProviders = Object.keys(analysis.providerWeights).length;
+    // const totalProviders = Object.keys(analysis.providerWeights).length;
     const selectedWeight = analysis.providerWeights[analysis.selectedProvider] || 0;
     
     // 简单的效果计算：基于权重分布和选择合理性

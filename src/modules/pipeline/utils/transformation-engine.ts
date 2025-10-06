@@ -12,14 +12,15 @@ import type {
   TransformationResult,
   TransformationEngineConfig,
   TransformationValidationRule,
-  ValidationResult
+  ValidationResult,
+  TransformationFunction,
 } from '../types/transformation-types.js';
 import type { TransformationLog } from '../interfaces/pipeline-interfaces.js';
 
-/**
- * JSON Path utility functions
- */
-class JSONPathUtils {
+  /**
+   * JSON Path utility functions
+   */
+  class JSONPathUtils {
   /**
    * Get value from object using JSON path
    */
@@ -90,7 +91,7 @@ class JSONPathUtils {
 export class TransformationEngine {
   private config: TransformationEngineConfig;
   private cache: Map<string, { result: TransformationResult; expires: number }> = new Map();
-  private customFunctions: Map<string, Function> = new Map();
+  private customFunctions: Map<string, TransformationFunction> = new Map();
   private statistics = {
     totalTransformations: 0,
     successfulTransformations: 0,
@@ -203,7 +204,7 @@ export class TransformationEngine {
       // Create result
       const result: TransformationResult = {
         data: transformedData,
-        logs: logs as any,
+        logs: logs,
         validations: [...validations, ...outputValidations],
         metrics: {
           totalTransformations: rules.length,
@@ -374,7 +375,7 @@ export class TransformationEngine {
   private async applyMappingRule(
     data: any,
     rule: TransformationRule,
-    context: TransformationContext
+    _context: TransformationContext
   ): Promise<any> {
     const sourceValue = JSONPathUtils.getValue(data, rule.sourcePath || '');
 
@@ -402,7 +403,7 @@ export class TransformationEngine {
   private async applyRenameRule(
     data: any,
     rule: TransformationRule,
-    context: TransformationContext
+    _context: TransformationContext
   ): Promise<any> {
     const sourceValue = JSONPathUtils.getValue(data, rule.sourcePath || '');
 
@@ -421,11 +422,11 @@ export class TransformationEngine {
    */
   private async applyValueRule(
     data: any,
-    rule: TransformationRule & { defaultValue?: any },
-    context: TransformationContext
+    rule: TransformationRule & { defaultValue?: unknown },
+    _context: TransformationContext
   ): Promise<any> {
     const sourceValue = rule.sourcePath ? JSONPathUtils.getValue(data, rule.sourcePath) : undefined;
-    const valueToSet = sourceValue !== undefined ? sourceValue : (rule as any).defaultValue;
+    const valueToSet = sourceValue !== undefined ? sourceValue : (rule).defaultValue;
     if (rule.targetPath) {
       JSONPathUtils.setValue(data, rule.targetPath, valueToSet);
       if (rule.removeSource && rule.sourcePath) {
@@ -441,12 +442,12 @@ export class TransformationEngine {
   private async applyExtractRule(
     data: any,
     rule: TransformationRule,
-    context: TransformationContext
+    _context: TransformationContext
   ): Promise<any> {
     const sourceValue = JSONPathUtils.getValue(data, rule.sourcePath || '');
     let extractedValue = sourceValue;
 
-    const extractRule = rule as any;
+    const extractRule = rule as { extractor?: 'regex' | string; pattern?: string };
     if (extractRule.extractor === 'regex' && extractRule.pattern && typeof sourceValue === 'string') {
       const regex = new RegExp(extractRule.pattern);
       const match = sourceValue.match(regex);
@@ -468,20 +469,22 @@ export class TransformationEngine {
   private async applyCombineRule(
     data: any,
     rule: TransformationRule,
-    context: TransformationContext
+    _context: TransformationContext
   ): Promise<any> {
-    const combineRule = rule as any;
-    const sourcePaths = combineRule.sourcePaths || [rule.sourcePath];
-    const values = sourcePaths.map((path: string) => JSONPathUtils.getValue(data, path));
+    const combineRule = rule as { sourcePaths?: string[]; combiner?: string; separator?: string };
+    const sourcePaths = (combineRule.sourcePaths ?? [rule.sourcePath]).filter(
+      (p): p is string => typeof p === 'string'
+    );
+    const values = sourcePaths.map((path) => JSONPathUtils.getValue(data, path));
 
-    let combinedValue: any;
+    let combinedValue: unknown;
 
     switch (combineRule.combiner) {
       case 'concat':
-        combinedValue = values.filter((v: any) => v !== undefined).join(combineRule.separator || '');
+        combinedValue = values.filter((v) => v !== undefined).join(combineRule.separator || '');
         break;
       case 'merge':
-        combinedValue = Object.assign({}, ...values.filter((v: any) => v !== undefined && typeof v === 'object'));
+        combinedValue = Object.assign({}, ...values.filter((v) => v !== undefined && typeof v === 'object'));
         break;
       default:
         combinedValue = values[0]; // fallback to first value
@@ -490,10 +493,8 @@ export class TransformationEngine {
     JSONPathUtils.setValue(data, rule.targetPath || '', combinedValue);
 
     if (rule.removeSource) {
-      sourcePaths.forEach((path: string) => {
-        if (path) {
-          JSONPathUtils.deleteValue(data, path);
-        }
+      sourcePaths.forEach((path) => {
+        JSONPathUtils.deleteValue(data, path);
       });
     }
 
@@ -559,25 +560,29 @@ export class TransformationEngine {
         };
 
       case 'type':
-        const expectedType = rule.parameters.type;
-        const actualType = Array.isArray(value) ? 'array' : typeof value;
-        return {
-          ruleId: rule.id,
-          isValid: actualType === expectedType,
-          errorMessage: actualType !== expectedType ? rule.errorMessage : undefined,
-          context: { value, expectedType, actualType, rule }
-        };
+        {
+          const expectedType = rule.parameters.type;
+          const actualType = Array.isArray(value) ? 'array' : typeof value;
+          return {
+            ruleId: rule.id,
+            isValid: actualType === expectedType,
+            errorMessage: actualType !== expectedType ? rule.errorMessage : undefined,
+            context: { value, expectedType, actualType, rule }
+          };
+        }
 
       case 'format':
-        const pattern = rule.parameters.pattern;
-        const regex = new RegExp(pattern);
-        const isValid = regex.test(String(value));
-        return {
-          ruleId: rule.id,
-          isValid,
-          errorMessage: !isValid ? rule.errorMessage : undefined,
-          context: { value, pattern, rule }
-        };
+        {
+          const pattern = rule.parameters.pattern;
+          const regex = new RegExp(pattern);
+          const isValid = regex.test(String(value));
+          return {
+            ruleId: rule.id,
+            isValid,
+            errorMessage: !isValid ? rule.errorMessage : undefined,
+            context: { value, pattern, rule }
+          };
+        }
 
       default:
         return {

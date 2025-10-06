@@ -6,11 +6,11 @@
  */
 
 import type {
-  PipelineModule,
-  PipelineRequest,
-  PipelineResponse
+  // PipelineModule,
+  // PipelineRequest,
+  // PipelineResponse
 } from '../interfaces/pipeline-interfaces.js';
-import type { DryRunConfig, DryRunResponse } from '../../dry-run/dry-run-interface.js';
+import type { /* DryRunConfig, */ DryRunResponse } from '../../dry-run/dry-run-interface.js';
 
 /**
  * 节点级Dry-Run配置
@@ -214,6 +214,8 @@ export interface PipelineDryRunResponse extends Omit<DryRunResponse, 'requestSum
 /**
  * 支持Dry-Run的PipelineModule接口扩展
  */
+import type { PipelineModule } from '../interfaces/pipeline-interfaces.js';
+
 export interface DryRunPipelineModule extends PipelineModule {
   /** 节点级dry-run配置 */
   dryRunConfig?: NodeDryRunConfig;
@@ -357,7 +359,7 @@ export class PipelineDryRunManager {
     context: NodeDryRunContext,
     config: NodeDryRunConfig
   ): Promise<NodeDryRunResult> {
-    const startTime = Date.now();
+    // const startTime = Date.now();
     const logs: LogEntry[] = [];
 
     try {
@@ -423,7 +425,7 @@ export class PipelineDryRunManager {
     module: DryRunPipelineModule,
     request: any,
     context: NodeDryRunContext,
-    config: NodeDryRunConfig
+    _config: NodeDryRunConfig
   ): Promise<NodeDryRunResult> {
     // 执行完整的节点dry-run分析
     return module.executeNodeDryRun(request, context);

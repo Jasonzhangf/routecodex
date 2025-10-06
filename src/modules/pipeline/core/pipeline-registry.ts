@@ -12,7 +12,7 @@ import type {
   ModuleFactory,
   ModuleDependencies
 } from '../interfaces/pipeline-interfaces.js';
-import type { DebugCenter } from '../types/external-types.js';
+// import type { DebugCenter } from '../types/external-types.js';
 import { DebugEventBus } from 'rcc-debugcenter';
 import { ModuleEnhancementFactory } from '../../enhancement/module-enhancement-factory.js';
 
@@ -293,7 +293,7 @@ export class PipelineModuleRegistryImpl implements PipelineModuleRegistry {
   /**
    * Validate module instance
    */
-  private validateModuleInstance(instance: any, expectedType: string): void {
+  private validateModuleInstance(instance: any, _expectedType: string): void {
     if (!instance || typeof instance !== 'object') {
       throw new Error('Module instance must be an object');
     }
