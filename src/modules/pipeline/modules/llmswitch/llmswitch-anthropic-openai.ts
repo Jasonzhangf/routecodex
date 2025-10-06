@@ -87,7 +87,14 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
   async processOutgoing(responseParam: SharedPipelineResponse | any): Promise<SharedPipelineResponse | any> {
     if (!this.isInitialized) { throw new Error('AnthropicOpenAIConverter is not initialized'); }
     const isDto = responseParam && typeof responseParam === 'object' && 'data' in responseParam && 'metadata' in responseParam;
-    const payload = isDto ? (responseParam as SharedPipelineResponse).data : responseParam;
+    let payload = isDto ? (responseParam as SharedPipelineResponse).data : responseParam;
+    // Unwrap provider wrapper if present
+    if (payload && typeof payload === 'object' && 'data' in (payload as Record<string, unknown>)) {
+      const inner = (payload as Record<string, unknown>)['data'];
+      if (inner && typeof inner === 'object' && (('choices' in (inner as Record<string, unknown>)) || ('content' in (inner as Record<string, unknown>)))) {
+        payload = inner as unknown;
+      }
+    }
     const responseFormat = detectResponseFormat(payload);
 
     if (responseFormat === 'openai') {
@@ -126,7 +133,13 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     const isDto = input && typeof input === 'object' && 'data' in input && 'route' in input;
     if (isDto) { return this.processIncoming(input as SharedPipelineRequest); }
     // Plain object: convert plain→plain
-    const payload = input as any;
+    let payload = input as any;
+    if (payload && typeof payload === 'object' && 'data' in payload) {
+      const inner = (payload as Record<string, unknown>)['data'];
+      if (inner && typeof inner === 'object' && (('choices' in (inner as Record<string, unknown>)) || ('content' in (inner as Record<string, unknown>)))) {
+        payload = inner as unknown;
+      }
+    }
     const requestFormat = detectRequestFormat(payload);
     if (requestFormat === 'anthropic') {
       const out = this.convertAnthropicRequestToOpenAI(payload);

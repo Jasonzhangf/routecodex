@@ -339,7 +339,8 @@ export class PipelineAssembler {
 
           // Provider module type equals to provider.type from config (as requested)
           const providerType: string = pc?.provider?.type || 'generic-http';
-          const providerBaseUrl: string | undefined = pc?.provider?.baseURL || pc?.provider?.baseUrl;
+          // Prefer explicit override baseUrl (pipelineConfigs) over normalized baseURL
+          const providerBaseUrl: string | undefined = (pc?.provider as any)?.baseUrl || (pc?.provider as any)?.baseURL;
           const actualModelId: string | undefined = pc?.model?.actualModelId || modelId;
           const maxTokens: number | undefined = pc?.model?.maxTokens;
           const maxContext: number | undefined = pc?.model?.maxContext;

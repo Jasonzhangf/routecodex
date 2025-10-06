@@ -5,7 +5,7 @@
       "category": "default",
       "description": "Standard general purpose request",
       "data": {
-        "model": "llama3-8b-instruct",
+        "model": "gpt-oss-20b-mlx",
         "messages": [
           {
             "role": "user",
@@ -18,7 +18,7 @@
       "expectedRoute": {
         "category": "default",
         "providers": ["lmstudio", "qwen"],
-        "models": ["llama3-8b-instruct", "qwen3-coder-plus"]
+        "models": ["gpt-oss-20b-mlx", "qwen3-coder-plus"]
       }
     },
     {
@@ -47,7 +47,7 @@
       "category": "thinking",
       "description": "Complex reasoning request",
       "data": {
-        "model": "llama3-70b-instruct",
+        "model": "gpt-oss-20b-mlx",
         "messages": [
           {
             "role": "user",
@@ -60,7 +60,7 @@
       "expectedRoute": {
         "category": "thinking",
         "providers": ["lmstudio", "qwen"],
-        "models": ["llama3-70b-instruct", "qwen3-coder-plus"]
+        "models": ["gpt-oss-20b-mlx", "qwen3-coder-plus"]
       }
     },
     {
@@ -81,7 +81,7 @@
       "expectedRoute": {
         "category": "coding",
         "providers": ["lmstudio", "qwen"],
-        "models": ["llama3-8b-instruct", "qwen3-coder-plus"]
+        "models": ["gpt-oss-20b-mlx", "qwen3-coder-plus"]
       }
     },
     {
@@ -110,7 +110,7 @@
       "category": "vision",
       "description": "Image processing request",
       "data": {
-        "model": "llama3-8b-instruct",
+        "model": "gpt-oss-20b-mlx",
         "messages": [
           {
             "role": "user",
@@ -123,7 +123,7 @@
       "expectedRoute": {
         "category": "vision",
         "providers": ["lmstudio"],
-        "models": ["llama3-8b-instruct"]
+        "models": ["gpt-oss-20b-mlx"]
       }
     },
     {
@@ -131,7 +131,7 @@
       "category": "background",
       "description": "Background processing request",
       "data": {
-        "model": "llama3-8b-instruct",
+        "model": "gpt-oss-20b-mlx",
         "messages": [
           {
             "role": "user",
@@ -144,7 +144,7 @@
       "expectedRoute": {
         "category": "background",
         "providers": ["lmstudio"],
-        "models": ["llama3-8b-instruct"]
+        "models": ["gpt-oss-20b-mlx"]
       }
     }
   ]

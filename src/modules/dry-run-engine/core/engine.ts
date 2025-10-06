@@ -145,13 +145,13 @@ export class DryRunEngine {
           modelTiers: {
             basic: {
               description: 'Basic model tier',
-              models: ['gpt-3.5-turbo', 'llama3-8b-instruct'],
+              models: ['gpt-3.5-turbo', 'gpt-oss-20b-mlx'],
               maxTokens: 4096,
               supportedFeatures: ['text_completion']
             },
             advanced: {
               description: 'Advanced model tier',
-              models: ['gpt-4', 'llama3-70b-instruct'],
+              models: ['gpt-4', 'gpt-oss-20b-mlx'],
               maxTokens: 8192,
               supportedFeatures: ['text_completion', 'tool_use']
             }
@@ -271,13 +271,13 @@ export class DryRunEngine {
           modelTiers: {
             basic: {
               description: 'Basic model tier',
-              models: ['gpt-3.5-turbo', 'llama3-8b-instruct'],
+              models: ['gpt-3.5-turbo', 'gpt-oss-20b-mlx'],
               maxTokens: 4096,
               supportedFeatures: ['text_completion']
             },
             advanced: {
               description: 'Advanced model tier',
-              models: ['gpt-4', 'llama3-70b-instruct'],
+              models: ['gpt-4', 'gpt-oss-20b-mlx'],
               maxTokens: 8192,
               supportedFeatures: ['text_completion', 'tool_use']
             }

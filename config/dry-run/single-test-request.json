@@ -1,6 +1,6 @@
 {
   "data": {
-    "model": "gpt-4",
+    "model": "gpt-oss-20b-mlx",
     "messages": [
       {
         "role": "user",
@@ -12,7 +12,7 @@
   },
   "route": {
     "providerId": "lmstudio",
-    "modelId": "llama3-8b-instruct",
+    "modelId": "gpt-oss-20b-mlx",
     "requestId": "single-provider-test-001",
     "timestamp": 1642684800000
   },

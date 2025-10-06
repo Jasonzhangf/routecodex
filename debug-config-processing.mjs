@@ -17,7 +17,7 @@ const testConfig = {
       enabled: true,
       baseUrl: 'http://localhost:1234',
       models: {
-        'llama3-8b-instruct': {
+        'gpt-oss-20b-mlx': {
           maxTokens: 4096,
           temperature: 0.7
         }
@@ -35,7 +35,7 @@ const testConfig = {
     outputProtocol: 'openai',
     providers: {},
     routing: {
-      default: ['lmstudio.llama3-8b-instruct.test-key'],
+      default: ['lmstudio.gpt-oss-20b-mlx.test-key'],
       coding: [],
       longcontext: [],
       tools: [],
