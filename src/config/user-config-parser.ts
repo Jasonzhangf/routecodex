@@ -73,6 +73,16 @@ export class UserConfigParser {
       }
     }
 
+    // 合并用户自定义的pipelineConfigs
+    const userPipelineConfigs = (userConfig?.pipelineConfigs ?? {}) as Record<string, any>;
+    for (const [key, config] of Object.entries(userPipelineConfigs)) {
+      if (!pipelineConfigs[key]) {
+        pipelineConfigs[key] = {};
+      }
+      // 深度合并用户配置
+      pipelineConfigs[key] = { ...pipelineConfigs[key], ...config };
+    }
+
     return {
       routeTargets,
       pipelineConfigs,

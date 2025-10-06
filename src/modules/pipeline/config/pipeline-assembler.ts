@@ -28,6 +28,44 @@ export class PipelineAssembler {
   private static asRecord(v: unknown): Record<string, unknown> {
     return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
   }
+
+  /**
+   * 查找端点特定的LLMSwitch配置
+   */
+  private static findEndpointSpecificLLMSwitch(
+    providerId: string, 
+    modelId: string, 
+    keyId: string, 
+    pipelineConfigs: Record<string, unknown>
+  ): ModuleConfig | undefined {
+    const targetKey = `${providerId}.${modelId}.${keyId}`;
+    
+    // 检查是否有端点特定的配置
+    const endpointBased = (pipelineConfigs as Record<string, unknown>)['endpoint-based'] as Record<string, unknown>;
+    if (endpointBased) {
+      // 检查Anthropic端点配置
+      const anthropicConfig = (endpointBased as Record<string, unknown>)['/v1/anthropic/messages'] as Record<string, unknown>;
+      if (anthropicConfig && (anthropicConfig as Record<string, unknown>)['llmSwitch']) {
+        const llmSwitchConfig = (anthropicConfig as Record<string, unknown>)['llmSwitch'] as Record<string, unknown>;
+        return {
+          type: String(llmSwitchConfig.type || 'llmswitch-anthropic-openai'),
+          config: (llmSwitchConfig.config as Record<string, unknown>) || {}
+        };
+      }
+      
+      // 检查OpenAI端点配置
+      const openaiConfig = (endpointBased as Record<string, unknown>)['/v1/chat/completions'] as Record<string, unknown>;
+      if (openaiConfig && (openaiConfig as Record<string, unknown>)['llmSwitch']) {
+        const llmSwitchConfig = (openaiConfig as Record<string, unknown>)['llmSwitch'] as Record<string, unknown>;
+        return {
+          type: String(llmSwitchConfig.type || 'llmswitch-openai-openai'),
+          config: (llmSwitchConfig.config as Record<string, unknown>) || {}
+        };
+      }
+    }
+    
+    return undefined;
+  }
   /**
    * Assemble from a merged-config.json file path
    */
@@ -50,6 +88,51 @@ export class PipelineAssembler {
     const cc = this.asRecord(mc.compatibilityConfig);
     const routeTargets = (this.asRecord(cc.routeTargets)) as Record<string, unknown[]>;
     const pipelineConfigs = (this.asRecord(cc.pipelineConfigs)) as Record<string, unknown>;
+    
+    // Also check for top-level pipelineConfigs if compatibilityConfig.pipelineConfigs is empty
+    const topLevelPipelineConfigs = (this.asRecord(mc.pipelineConfigs)) as Record<string, unknown>;
+    
+    // Merge top-level pipelineConfigs if they exist
+    if (Object.keys(topLevelPipelineConfigs).length > 0) {
+      for (const [key, config] of Object.entries(topLevelPipelineConfigs)) {
+        if (!pipelineConfigs[key]) {
+          pipelineConfigs[key] = config;
+        } else {
+          // Deep merge with existing config
+          const existing = this.asRecord(pipelineConfigs[key]);
+          const newConfig = this.asRecord(config);
+          
+          // Create a new merged config
+          const merged: Record<string, unknown> = {};
+          
+          // Copy all properties from existing
+          for (const [prop, value] of Object.entries(existing)) {
+            merged[prop] = value;
+          }
+          
+          // Merge properties from new config
+          for (const [prop, value] of Object.entries(newConfig)) {
+            if (prop === 'llmSwitch' && existing[prop]) {
+              // Special handling for llmSwitch - merge the nested config
+              const existingLlmSwitch = this.asRecord(existing[prop]);
+              const newLlmSwitch = this.asRecord(value);
+              merged[prop] = {
+                ...existingLlmSwitch,
+                ...newLlmSwitch,
+                config: {
+                  ...(existingLlmSwitch.config || {}),
+                  ...(newLlmSwitch.config || {})
+                }
+              };
+            } else {
+              merged[prop] = value;
+            }
+          }
+          
+          pipelineConfigs[key] = merged;
+        }
+      }
+    }
 
     // Normalized providers info from compatibility engine
     const normalizedProviders: Record<string, unknown> =
@@ -68,8 +151,15 @@ export class PipelineAssembler {
     ).toLowerCase();
 
     const defaultLlmSwitch: ModuleConfig = {
-      type: inputProtocol === 'anthropic' ? 'llmswitch-anthropic-openai' : 'llmswitch-openai-openai',
+      // Use unified LLMSwitch by default to auto-detect by endpoint
+      type: 'llmswitch-unified',
       config: {}
+    };
+
+    // 端点特定的LLMSwitch选择
+    const selectLLMSwitchForRoute = (_routeName: string): ModuleConfig => {
+      // Route-based default now unified as well; endpoint decides inside the module
+      return { type: 'llmswitch-unified', config: {} };
     };
 
     type PcShape = {
@@ -198,13 +288,42 @@ export class PipelineAssembler {
         console.log(`[PipelineAssembler] DEBUG - Looking for pipeline config with key: ${targetKey}`);
         console.log(`[PipelineAssembler] DEBUG - Available pipeline config keys:`, Object.keys(pipelineConfigs));
 
-        const pc = (pipelineConfigs[targetKey] || buildPcFromNormalized(providerId, modelId)) as PcShape;
+        let pc = buildPcFromNormalized(providerId, modelId) as PcShape;
+        
+        // If there's a custom pipeline config, merge it with the default
+        const customConfig = pipelineConfigs[targetKey] as Record<string, unknown>;
+        if (customConfig) {
+          console.log(`[PipelineAssembler] DEBUG - Merging custom pipeline config:`, customConfig);
+          
+          // Merge llmSwitch config if present
+          if (customConfig.llmSwitch) {
+            pc.llmSwitch = customConfig.llmSwitch as PcShape['llmSwitch'];
+          }
+          
+          // Merge other configurations as needed
+          if (customConfig.provider) {
+            pc.provider = { ...pc.provider, ...customConfig.provider } as PcShape['provider'];
+          }
+          
+          if (customConfig.model) {
+            pc.model = { ...pc.model, ...customConfig.model } as PcShape['model'];
+          }
+          
+          if (customConfig.compatibility) {
+            pc.compatibility = { ...pc.compatibility, ...customConfig.compatibility } as PcShape['compatibility'];
+          }
+          
+          if (customConfig.workflow) {
+            pc.workflow = { ...pc.workflow, ...customConfig.workflow } as PcShape['workflow'];
+          }
+        }
+        
         // Ensure auth is resolved if builder provided async hook
         if (pc.__attachAuth) {
           await pc.__attachAuth();
           delete pc.__attachAuth;
         }
-        console.log(`[PipelineAssembler] DEBUG - Found pipeline config:`, pc);
+        console.log(`[PipelineAssembler] DEBUG - Final pipeline config:`, pc);
 
         let pipeline: PipelineConfig;
 
@@ -235,20 +354,6 @@ export class PipelineAssembler {
             providerField: pc?.provider,
             modelField: pc?.model
           });
-
-          // LLM Switch: 由 inputProtocol 决定，若用户已显式提供则使用用户配置
-          const llmSwitchDecl = pc?.llmSwitch as { type?: string; enabled?: boolean; config?: Record<string, unknown> } | undefined;
-          let llmSwitch: ModuleConfig | undefined;
-          if (llmSwitchDecl?.type) {
-            llmSwitch = { type: llmSwitchDecl.type, config: llmSwitchDecl.config || {} };
-          } else {
-            const inputProtocol = String(vrCfg.inputProtocol || 'openai').toLowerCase();
-            if (inputProtocol === 'anthropic') {
-              llmSwitch = { type: 'llmswitch-anthropic-openai', config: {} };
-            } else {
-              llmSwitch = { type: 'llmswitch-openai-openai', config: {} };
-            }
-          }
 
           // Workflow: 若用户提供则使用，否则可选
           const workflowDecl = pc?.workflow as { type?: string; enabled?: boolean; config?: Record<string, unknown> } | undefined;
@@ -301,6 +406,31 @@ export class PipelineAssembler {
             type: providerType,
             config: providerConfigObj
           };
+
+          // 使用配置中的LLMSwitch，如果配置中没有则使用路由基础的LLMSwitch选择
+          // 注意：如果配置了unified LLMSwitch，优先使用它而不是路由基础的LLMSwitch
+          let llmSwitch: ModuleConfig;
+          if (pc.llmSwitch && pc.llmSwitch.type === 'llmswitch-unified') {
+            // 如果配置了unified LLMSwitch，使用它
+            llmSwitch = {
+              type: pc.llmSwitch.type || 'llmswitch-unified',
+              config: pc.llmSwitch.config || {},
+              enabled: pc.llmSwitch.enabled !== false
+            };
+            console.log(`[PipelineAssembler] DEBUG - Using unified LLMSwitch: ${JSON.stringify(llmSwitch)}`);
+          } else if (pc.llmSwitch) {
+            // 如果配置了其他LLMSwitch，使用它
+            llmSwitch = {
+              type: pc.llmSwitch.type || 'llmswitch-openai-openai',
+              config: pc.llmSwitch.config || {},
+              enabled: pc.llmSwitch.enabled !== false
+            };
+            console.log(`[PipelineAssembler] DEBUG - Using configured LLMSwitch: ${JSON.stringify(llmSwitch)}`);
+          } else {
+            // 否则使用路由基础的LLMSwitch选择
+            llmSwitch = selectLLMSwitchForRoute(routeName);
+            console.log(`[PipelineAssembler] DEBUG - Using route-based LLMSwitch for ${routeName}: ${JSON.stringify(llmSwitch)}`);
+          }
 
           // Unique pipeline ID based on target, not route - enables reuse across categories
           const pipelineId = `${providerId}_${keyId}.${modelId}`;

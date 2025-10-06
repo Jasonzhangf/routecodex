@@ -797,6 +797,7 @@ export class PipelineManager implements RCCBaseModule {
     // Canonical LLMSwitch names
     this.registry.registerModule('llmswitch-openai-openai', this.createOpenAINormalizerModule);
     this.registry.registerModule('llmswitch-anthropic-openai', this.createAnthropicOpenAIConverterModule);
+    this.registry.registerModule('llmswitch-unified', this.createUnifiedLLMSwitchModule);
     // Aliases for backward compatibility (merged-config may still emit these)
     this.registry.registerModule('openai-normalizer', this.createOpenAINormalizerModule);
     this.registry.registerModule('anthropic-openai-converter', this.createAnthropicOpenAIConverterModule);
@@ -1026,6 +1027,11 @@ export class PipelineManager implements RCCBaseModule {
   private createAnthropicOpenAIConverterModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { AnthropicOpenAIConverter } = await import('../modules/llmswitch/anthropic-openai-converter.js');
     return new AnthropicOpenAIConverter(config, dependencies);
+  };
+
+  private createUnifiedLLMSwitchModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { UnifiedLLMSwitch } = await import('../modules/llmswitch/llmswitch-unified.js');
+    return new UnifiedLLMSwitch(config, dependencies);
   };
 
   private createStreamingControlModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {

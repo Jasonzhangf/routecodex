@@ -195,7 +195,8 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
         metadata: {
           pipelineId: this.pipelineId,
           processingTime: 0,
-          stages: []
+          stages: [],
+          requestId: request.route?.requestId || 'unknown'
         }
       };
 
@@ -223,7 +224,8 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
         metadata: {
           pipelineId: this.pipelineId,
           processingTime,
-          stages: debugStages
+          stages: debugStages,
+          requestId: request.route?.requestId || 'unknown'
         },
         debug: request.debug.enabled ? {
           request: request.data,

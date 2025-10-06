@@ -4,6 +4,7 @@
  */
 
 import type { LLMSwitchModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
+import type { SharedPipelineRequest, SharedPipelineResponse } from '../../../../types/shared-dtos.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import {
   DEFAULT_CONVERSION_CONFIG,
@@ -43,30 +44,110 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     this.isInitialized = true;
   }
 
-  async processIncoming(request: any): Promise<any> {
-    if (!this.isInitialized) {throw new Error('AnthropicOpenAIConverter is not initialized');}
-    const requestFormat = detectRequestFormat(request);
+  async processIncoming(requestParam: SharedPipelineRequest): Promise<SharedPipelineRequest> {
+    if (!this.isInitialized) { throw new Error('AnthropicOpenAIConverter is not initialized'); }
+    const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam;
+    const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
+    const payload = isDto ? (dto!.data as any) : (requestParam as unknown as any);
+    const requestFormat = detectRequestFormat(payload);
+
     if (requestFormat === 'anthropic') {
-      const transformedRequest = this.convertAnthropicRequestToOpenAI(request);
-      this.logger.logTransformation(this.id, 'anthropic-to-openai-request', request, transformedRequest);
-      return { ...transformedRequest, _metadata: { switchType: this.type, direction: 'anthropic-to-openai', timestamp: Date.now(), originalFormat: 'anthropic', targetFormat: 'openai' } };
+      const transformedRequest = this.convertAnthropicRequestToOpenAI(payload);
+      this.logger.logTransformation(this.id, 'anthropic-to-openai-request', payload, transformedRequest);
+      const out = {
+        ...transformedRequest,
+        _metadata: {
+          switchType: this.type,
+          direction: 'anthropic-to-openai',
+          timestamp: Date.now(),
+          originalFormat: 'anthropic',
+          targetFormat: 'openai'
+        }
+      } as Record<string, unknown>;
+      return isDto
+        ? { ...dto!, data: out }
+        : ({ data: out, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest);
     }
-    return { ...request, _metadata: { switchType: this.type, direction: 'passthrough', timestamp: Date.now(), originalFormat: requestFormat, targetFormat: requestFormat } };
+
+    const passthrough = {
+      ...payload,
+      _metadata: {
+        switchType: this.type,
+        direction: 'passthrough',
+        timestamp: Date.now(),
+        originalFormat: requestFormat,
+        targetFormat: requestFormat
+      }
+    } as Record<string, unknown>;
+    return isDto
+      ? { ...dto!, data: passthrough }
+      : ({ data: passthrough, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest);
   }
 
-  async processOutgoing(response: any): Promise<any> {
-    if (!this.isInitialized) {throw new Error('AnthropicOpenAIConverter is not initialized');}
-    const responseFormat = detectResponseFormat(response);
+  async processOutgoing(responseParam: SharedPipelineResponse | any): Promise<SharedPipelineResponse | any> {
+    if (!this.isInitialized) { throw new Error('AnthropicOpenAIConverter is not initialized'); }
+    const isDto = responseParam && typeof responseParam === 'object' && 'data' in responseParam && 'metadata' in responseParam;
+    const payload = isDto ? (responseParam as SharedPipelineResponse).data : responseParam;
+    const responseFormat = detectResponseFormat(payload);
+
     if (responseFormat === 'openai') {
-      const transformedResponse = this.convertOpenAIResponseToAnthropic(response);
-      this.logger.logTransformation(this.id, 'openai-to-anthropic-response', response, transformedResponse);
-      return { ...transformedResponse, _metadata: { ...response._metadata, switchType: this.type, direction: 'openai-to-anthropic', responseTimestamp: Date.now(), originalFormat: 'openai', targetFormat: 'anthropic' } };
+      const transformedResponse = this.convertOpenAIResponseToAnthropic(payload);
+      this.logger.logTransformation(this.id, 'openai-to-anthropic-response', payload, transformedResponse);
+      const out = {
+        ...transformedResponse,
+        _metadata: {
+          ...(payload?._metadata || {}),
+          switchType: this.type,
+          direction: 'openai-to-anthropic',
+          responseTimestamp: Date.now(),
+          originalFormat: 'openai',
+          targetFormat: 'anthropic'
+        }
+      } as Record<string, unknown>;
+      return isDto ? { ...(responseParam as SharedPipelineResponse), data: out } : out;
     }
-    return { ...response, _metadata: { ...response._metadata, switchType: this.type, direction: 'passthrough', responseTimestamp: Date.now(), originalFormat: responseFormat, targetFormat: responseFormat } };
+
+    const passthrough = {
+      ...payload,
+      _metadata: {
+        ...(payload?._metadata || {}),
+        switchType: this.type,
+        direction: 'passthrough',
+        responseTimestamp: Date.now(),
+        originalFormat: responseFormat,
+        targetFormat: responseFormat
+      }
+    } as Record<string, unknown>;
+    return isDto ? { ...(responseParam as SharedPipelineResponse), data: passthrough } : passthrough;
   }
 
-  async transformRequest(request: any): Promise<any> { return this.processIncoming(request); }
-  async transformResponse(response: any): Promise<any> { return this.processOutgoing(response); }
+  async transformRequest(input: any): Promise<any> {
+    // If DTO, delegate to processIncoming to keep DTO shape
+    const isDto = input && typeof input === 'object' && 'data' in input && 'route' in input;
+    if (isDto) { return this.processIncoming(input as SharedPipelineRequest); }
+    // Plain object: convert plain→plain
+    const payload = input as any;
+    const requestFormat = detectRequestFormat(payload);
+    if (requestFormat === 'anthropic') {
+      const out = this.convertAnthropicRequestToOpenAI(payload);
+      return out;
+    }
+    return payload;
+  }
+
+  async transformResponse(input: any): Promise<any> {
+    // If DTO, delegate to processOutgoing to keep DTO shape
+    const isDto = input && typeof input === 'object' && 'data' in input && 'metadata' in input;
+    if (isDto) { return this.processOutgoing(input as SharedPipelineResponse); }
+    // Plain object: convert plain→plain
+    const payload = input as any;
+    const responseFormat = detectResponseFormat(payload);
+    if (responseFormat === 'openai') {
+      const out = this.convertOpenAIResponseToAnthropic(payload);
+      return out;
+    }
+    return payload;
+  }
 
   private convertAnthropicRequestToOpenAI(request: any): any {
     const { requestMappings } = this.conversionConfig;
@@ -74,12 +155,14 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     // Build OpenAI-style messages from Anthropic system + messages
     const msgs: any[] = [];
     if (request.system) {
-      const sys = Array.isArray(request.system) ? request.system.join('\n') : String(request.system);
-      msgs.push({ role: 'system', content: sys });
+      const sys = Array.isArray(request.system) ? request.system.map((s: any) => (typeof s === 'string' ? s : '')).join('\n') : String(request.system);
+      if (sys && sys.length > 0) { msgs.push({ role: 'system', content: sys }); }
     }
     for (const m of (request.messages || [])) {
       const role = m.role || 'user';
-      const blocks = Array.isArray(m.content) ? m.content : (typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : []);
+      const blocks = Array.isArray(m.content)
+        ? m.content
+        : (typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : []);
 
       // Tool use -> OpenAI tool_calls on assistant message
       const toolUses = blocks.filter((b: any) => b && b.type === 'tool_use');
@@ -89,11 +172,14 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
           type: 'function',
           function: {
             name: t.name || 'tool',
-            arguments: typeof t.input === 'string' ? t.input : JSON.stringify(t.input || {})
+            arguments: typeof t.input === 'string' ? t.input : safeStringify(t.input || {})
           }
         }));
         // Optional assistant text blocks alongside tool calls
-        const text = blocks.filter((b: any) => b && b.type === 'text' && typeof b.text === 'string').map((b: any) => b.text).join('\n');
+        const text = blocks
+          .filter((b: any) => b && b.type === 'text' && typeof b.text === 'string')
+          .map((b: any) => b.text)
+          .join('\n');
         msgs.push({ role: 'assistant', content: text || '', tool_calls });
         continue;
       }
@@ -102,21 +188,31 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       const toolResults = blocks.filter((b: any) => b && b.type === 'tool_result');
       if (toolResults.length > 0) {
         for (const tr of toolResults) {
-          const content = typeof tr.content === 'string' ? tr.content : JSON.stringify(tr.content || {});
+          const content = typeof tr.content === 'string' ? tr.content : safeStringify(tr.content || {});
           msgs.push({ role: 'tool', content, tool_call_id: tr.tool_use_id || tr.id || '' });
         }
         // Also append any user/assistant text blocks in same message
-        const text = blocks.filter((b: any) => b && b.type === 'text' && typeof b.text === 'string').map((b: any) => b.text).join('\n');
+        const text = blocks
+          .filter((b: any) => b && b.type === 'text' && typeof b.text === 'string')
+          .map((b: any) => b.text)
+          .join('\n');
         if (text) { msgs.push({ role, content: text }); }
         continue;
       }
 
       // Plain user/assistant text-only
-      const text = blocks.filter((b: any) => b && b.type === 'text' && typeof b.text === 'string').map((b: any) => b.text).join('\n');
+      const text = blocks
+        .filter((b: any) => b && b.type === 'text' && typeof b.text === 'string')
+        .map((b: any) => b.text)
+        .join('\n');
       msgs.push({ role, content: text });
     }
     transformed.messages = msgs;
-    if (this.enableTools && request.tools) {transformed.tools = this.convertAnthropicToolsToOpenAI(request.tools);}
+    if (this.enableTools && request.tools) { transformed.tools = this.convertAnthropicToolsToOpenAI(request.tools); }
+    // tool_choice mapping (Anthropic -> OpenAI)
+    if (request.tool_choice) {
+      transformed.tool_choice = this.mapAnthropicToolChoiceToOpenAI(request.tool_choice);
+    }
     this.copyParameters(request, transformed, requestMappings.parameters);
     return transformed;
   }
@@ -169,7 +265,12 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
 
   private convertOpenAIToolCallsToAnthropic(toolCalls: any[]): any[] {
     if (!toolCalls) {return [];}
-    return toolCalls.map(call => ({ type: 'tool_use', id: call.id, name: call.function.name, input: JSON.parse(call.function.arguments || '{}') }));
+    return toolCalls.map(call => ({
+      type: 'tool_use',
+      id: call.id,
+      name: call.function?.name,
+      input: safeParse(call.function?.arguments) ?? {}
+    }));
   }
 
   private convertUsageStats(usage: any, fieldMapping: Record<string, string>): any {
@@ -188,4 +289,28 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
   }
 
   async cleanup(): Promise<void> { this.isInitialized = false; }
+
+  private mapAnthropicToolChoiceToOpenAI(input: any): any {
+    if (!input) { return undefined; }
+    if (typeof input === 'string') {
+      if (input === 'auto' || input === 'none') { return input; }
+      return 'auto';
+    }
+    if (typeof input === 'object' && input !== null) {
+      if (input.type === 'tool' && typeof input.name === 'string') {
+        return { type: 'function', function: { name: input.name } };
+      }
+    }
+    return undefined;
+  }
+}
+
+function safeParse(text: any): any | undefined {
+  if (text === undefined || text === null) { return undefined; }
+  if (typeof text !== 'string') { return text; }
+  try { return JSON.parse(text); } catch { return undefined; }
+}
+
+function safeStringify(obj: any): string {
+  try { return JSON.stringify(obj ?? {}); } catch { return String(obj); }
 }

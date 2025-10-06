@@ -46,6 +46,7 @@ export interface SharedPipelineResponse {
     pipelineId: string;
     processingTime: number;
     stages: string[];
+    requestId?: string;
     errors?: SharedPipelineError[];
   };
   readonly debug?: {
@@ -56,4 +57,3 @@ export interface SharedPipelineResponse {
     timings: Record<string, number>;
   };
 }
-
