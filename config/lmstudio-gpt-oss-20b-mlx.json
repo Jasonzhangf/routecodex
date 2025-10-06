@@ -1,0 +1,73 @@
+{
+  "version": "1.0.0",
+  "port": 5520,
+  "host": "127.0.0.1",
+  "virtualrouter": {
+    "inputProtocol": "openai",
+    "outputProtocol": "openai",
+    "providers": {
+      "lmstudio": {
+        "type": "lmstudio",
+        "baseURL": "http://127.0.0.1:1234",
+        "apiKey": [
+          "${LMSTUDIO_API_KEY:-}"
+        ],
+        "models": {
+          "gpt-oss-20b-mlx": {
+            "maxContext": 200000,
+            "maxTokens": 8192
+          }
+        },
+        "enabled": true,
+        "id": "lmstudio"
+      }
+    },
+    "routing": {
+      "default": [
+        "lmstudio.gpt-oss-20b-mlx.key1"
+      ],
+      "anthropic": [
+        "lmstudio.gpt-oss-20b-mlx.key1"
+      ],
+      "coding": [],
+      "longcontext": [],
+      "tools": [],
+      "thinking": [],
+      "vision": [],
+      "websearch": [],
+      "background": []
+    }
+  },
+  "httpserver": {
+    "port": 5520,
+    "host": "127.0.0.1"
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 5520
+  },
+  "pipelineConfigs": {
+    "lmstudio.gpt-oss-20b-mlx.key1": {
+      "llmSwitch": {
+        "type": "llmswitch-unified",
+        "enabled": true,
+        "config": {
+          "protocolDetection": "endpoint-based",
+          "defaultProtocol": "openai"
+        }
+      },
+      "provider": {
+        "type": "lmstudio-http",
+        "baseUrl": "http://127.0.0.1:7788",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "${LMSTUDIO_API_KEY:-}"
+        }
+      },
+      "compatibility": {
+        "type": "lmstudio-compatibility",
+        "config": {}
+      }
+    }
+  }
+}
