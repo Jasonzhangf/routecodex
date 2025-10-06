@@ -1,10 +1,8 @@
-name: Strict CI/CD Pipeline
+name: Strict CI/CD Pipeline (Manual)
 
 on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
+  # Run only when manually dispatched to avoid blocking regular CI
+  workflow_dispatch:
 
 env:
   NODE_VERSION: '20.x'

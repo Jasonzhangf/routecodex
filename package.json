@@ -60,6 +60,8 @@
     "security:check": "npx audit-ci --config ./audit-ci.json",
     "complexity:check": "echo 'Complexity check temporarily disabled - tool incompatible with current codebase'",
     "duplication:check": "npx jscpd --threshold 5 src/",
+    "duplication:analyze": "node scripts/duplicate-code-handler.mjs --threshold 5 --output reports",
+    "duplication:fix": "node scripts/duplicate-code-handler.mjs --threshold 5 --output reports --auto-fix true",
     "dup:scan": "node scripts/duplicate-code-handler.mjs --threshold 5 --output reports",
     "dup:auto-fix": "node scripts/duplicate-code-handler.mjs --threshold 5 --output reports --auto-fix true",
     "duplication:analyze": "node scripts/duplicate-code-handler.mjs --threshold 5",
