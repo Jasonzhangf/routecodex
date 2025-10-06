@@ -111,7 +111,7 @@
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^6.7.4",
     "@typescript-eslint/parser": "^6.7.4",
-    "@typescript-eslint/typescript-estree": "^6.7.4",
+    "@typescript-eslint/typescript-estree": "^8.45.0",
     "complexity-report": "^2.0.0-alpha",
     "depcheck": "^1.4.7",
     "eslint": "^8.50.0",
