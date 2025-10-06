@@ -281,13 +281,7 @@ async function initializeConfig(configPath: string, template?: string, force: bo
               baseUrl: "http://localhost:1234",
               apiKey: "${LM_STUDIO_API_KEY:-}",
               models: {
-                "llama3-8b-instruct": {
-                  maxTokens: 8192,
-                  temperature: 0.7,
-                  supportsStreaming: true,
-                  supportsTools: true
-                },
-                "llama3-70b-instruct": {
+                "gpt-oss-20b-mlx": {
                   maxTokens: 8192,
                   temperature: 0.7,
                   supportsStreaming: true,
@@ -307,11 +301,11 @@ async function initializeConfig(configPath: string, template?: string, force: bo
           routing: {
             default: "lmstudio",
             models: {
-              "gpt-4": "llama3-70b-instruct",
-              "gpt-4-turbo": "llama3-70b-instruct",
-              "gpt-3.5-turbo": "llama3-8b-instruct",
+              "gpt-4": "gpt-oss-20b-mlx",
+              "gpt-4-turbo": "gpt-oss-20b-mlx",
+              "gpt-3.5-turbo": "gpt-oss-20b-mlx",
               "claude-3-haiku": "qwen2.5-7b-instruct",
-              "claude-3-sonnet": "llama3-70b-instruct"
+              "claude-3-sonnet": "gpt-oss-20b-mlx"
             }
           },
           features: {

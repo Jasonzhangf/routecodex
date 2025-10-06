@@ -46,14 +46,14 @@ async function main() {
   const apiKey = process.env.LMSTUDIO_API_KEY || (Array.isArray(lmstudioConf.apiKey) ? lmstudioConf.apiKey[0] : '');
 
   // Build modules from dist
-  const { OpenAIPassthroughLLMSwitch } = await importFromDist('modules/pipeline/modules/llmswitch/openai-passthrough.js');
+  const { OpenAINormalizerLLMSwitch } = await importFromDist('modules/pipeline/modules/llmswitch/llmswitch-openai-openai.js');
   const { LMStudioCompatibility } = await importFromDist('modules/pipeline/modules/compatibility/lmstudio-compatibility.js');
   const { LMStudioProviderSimple } = await importFromDist('modules/pipeline/modules/provider/lmstudio-provider-simple.js');
   const { dryRunPipelineExecutor } = await importFromDist('modules/pipeline/dry-run/dry-run-pipeline-executor.js');
   const { pipelineDryRunManager } = await importFromDist('modules/pipeline/dry-run/pipeline-dry-run-framework.js');
 
   // Instantiate real modules
-  const llmSwitch = new OpenAIPassthroughLLMSwitch({ type: 'openai-passthrough', config: {} }, dependencies);
+  const llmSwitch = new OpenAINormalizerLLMSwitch({ type: 'llmswitch-openai-openai', config: {} }, dependencies);
   const compatibility = new LMStudioCompatibility({ type: 'lmstudio-compatibility', config: { toolsEnabled: true } }, dependencies);
   const provider = new LMStudioProviderSimple({ type: 'lmstudio-http', config: { baseUrl, auth: { type: 'apikey', apiKey } } }, dependencies);
 

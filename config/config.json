@@ -5,7 +5,7 @@
     "providers": {
       "lmstudio": {
         "type": "lmstudio",
-        "baseURL": "http://192.168.99.149:1234",
+        "baseURL": "http://localhost:1234",
         "apiKey": ["lm-studio-api-key-1234567890abcdef"],
         "models": {
           "qwen3-4b-thinking-2507-mlx": {

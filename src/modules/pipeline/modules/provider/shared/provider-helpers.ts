@@ -2,7 +2,7 @@ import type { AuthContext, ProviderError } from '../../../types/provider-types.j
 
 export function buildAuthHeaders(ctx: AuthContext | null, base: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = { ...base };
-  if (!ctx) return headers;
+  if (!ctx) {return headers;}
   switch (ctx.type) {
     case 'apikey': {
       const name = (ctx.credentials as { headerName?: string })?.headerName || 'Authorization';
@@ -26,9 +26,9 @@ export function buildAuthHeaders(ctx: AuthContext | null, base: Record<string, s
 
 export function isRetryableError(error: unknown): boolean {
   const e = error as { statusCode?: number; code?: string };
-  if (!e) return false;
+  if (!e) {return false;}
   if (typeof e.statusCode === 'number') {
-    if (e.statusCode >= 500 || e.statusCode === 429) return true;
+    if (e.statusCode >= 500 || e.statusCode === 429) {return true;}
   }
   return e.code === 'ECONNREFUSED' || e.code === 'ETIMEDOUT' || e.code === 'ECONNRESET';
 }

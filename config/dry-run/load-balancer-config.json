@@ -7,16 +7,10 @@
       "type": "lmstudio",
       "baseUrl": "http://localhost:1234",
       "models": {
-        "llama3-8b-instruct": {
+        "gpt-oss-20b-mlx": {
           "maxTokens": 8192,
           "temperature": 0.7,
-          "weight": 0.4,
-          "enabled": true
-        },
-        "llama3-70b-instruct": {
-          "maxTokens": 8192,
-          "temperature": 0.7,
-          "weight": 0.3,
+          "weight": 0.7,
           "enabled": true
         }
       }
@@ -44,25 +38,6 @@
           "enabled": true
         }
       }
-    }
-  },
-  "loadBalancer": {
-    "strategy": "weighted",
-    "healthCheck": {
-      "enabled": true,
-      "interval": 30000,
-      "timeout": 5000,
-      "retries": 3
-    },
-    "failover": {
-      "enabled": true,
-      "maxRetries": 3,
-      "backoffMultiplier": 2
-    },
-    "circuitBreaker": {
-      "enabled": true,
-      "failureThreshold": 5,
-      "recoveryTimeout": 60000
     }
   },
   "loadBalancer": {

@@ -1,0 +1,77 @@
+{
+  "version": "1.0.0",
+  "port": 5520,
+  "host": "0.0.0.0",
+  "virtualrouter": {
+    "inputProtocol": "openai",
+    "outputProtocol": "openai",
+    "providers": {
+      "glm": {
+        "type": "custom",
+        "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
+        "apiKey": [
+          "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
+        ],
+        "models": {
+          "glm-4.6": {
+            "maxContext": 200000,
+            "maxTokens": 8192,
+            "compatibility": {
+              "type": "glm-compatibility",
+              "config": {
+                "thinking": {
+                  "enabled": true,
+                  "payload": {
+                    "type": "enabled"
+                  }
+                },
+                "sanitization": {
+                  "dropMetaAssistant": true,
+                  "disableEmptyUserFilter": false,
+                  "disableContextTrim": false
+                }
+              }
+            }
+          }
+        },
+        "id": "glm",
+        "enabled": true
+      }
+    },
+    "routing": {
+      "default": [
+        "glm.glm-4.6.key1"
+      ],
+      "anthropic": [
+        "glm.glm-4.6.key1"
+      ],
+      "coding": [],
+      "longcontext": [],
+      "tools": [],
+      "thinking": [],
+      "vision": [],
+      "websearch": [],
+      "background": []
+    }
+  },
+  "httpserver": {
+    "port": 5520,
+    "host": "0.0.0.0"
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 5520
+  },
+  "pipelineConfigs": {
+    "glm.glm-4.6.key1": {
+      "llmSwitch": {
+        "type": "llmswitch-unified",
+        "enabled": true,
+        "config": {
+          "protocolDetection": "endpoint-based",
+          "defaultProtocol": "openai"
+        }
+      }
+    }
+  }
+}

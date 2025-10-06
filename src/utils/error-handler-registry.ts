@@ -131,21 +131,29 @@ export class ErrorHandlerRegistry {
    * Register error message template
    */
   public registerErrorMessage(template: ErrorMessageTemplate): void {
+    // Check if already registered to avoid duplicates
+    if (this.messageTemplates.has(template.code)) {
+      return;
+    }
+    
     this.messageTemplates.set(template.code, template);
 
-    (this.debugEventBus as { publish: (evt: unknown) => void }).publish({
-      sessionId: `session_${Date.now()}`,
-      moduleId: 'error-handler-registry',
-      operationId: 'error_message_registered',
-      timestamp: Date.now(),
-      type: 'start',
-      position: 'middle',
-      data: {
-        errorCode: template.code,
-        severity: template.severity,
-        category: template.category,
-      },
-    });
+    // Only publish debug events during normal operation (not during initialization)
+    if (this.initialized) {
+      (this.debugEventBus as { publish: (evt: unknown) => void }).publish({
+        sessionId: `session_${Date.now()}`,
+        moduleId: 'error-handler-registry',
+        operationId: 'error_message_registered',
+        timestamp: Date.now(),
+        type: 'start',
+        position: 'middle',
+        data: {
+          errorCode: template.code,
+          severity: template.severity,
+          category: template.category,
+        },
+      });
+    }
   }
 
   /**
@@ -157,6 +165,13 @@ export class ErrorHandlerRegistry {
     }
 
     const handlers = this.errorHandlers.get(registration.errorCode)!;
+    
+    // Check if this handler is already registered to avoid duplicates
+    const existingHandlerIndex = handlers.findIndex(h => h === registration.handler);
+    if (existingHandlerIndex !== -1) {
+      return;
+    }
+    
     handlers.push(registration.handler);
 
     // Sort by priority (lower number = higher priority)
@@ -169,19 +184,22 @@ export class ErrorHandlerRegistry {
     // Store priority on handler for future sorting
     (registration.handler as unknown as { _priority?: number })._priority = registration.priority;
 
-    (this.debugEventBus as { publish: (evt: unknown) => void }).publish({
-      sessionId: `session_${Date.now()}`,
-      moduleId: 'error-handler-registry',
-      operationId: 'error_handler_registered',
-      timestamp: Date.now(),
-      type: 'start',
-      position: 'middle',
-      data: {
-        errorCode: registration.errorCode,
-        priority: registration.priority,
-        description: registration.description,
-      },
-    });
+    // Only publish debug events during normal operation (not during initialization)
+    if (this.initialized) {
+      (this.debugEventBus as { publish: (evt: unknown) => void }).publish({
+        sessionId: `session_${Date.now()}`,
+        moduleId: 'error-handler-registry',
+        operationId: 'error_handler_registered',
+        timestamp: Date.now(),
+        type: 'start',
+        position: 'middle',
+        data: {
+          errorCode: registration.errorCode,
+          priority: registration.priority,
+          description: registration.description,
+        },
+      });
+    }
   }
 
   /**
