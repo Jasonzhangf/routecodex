@@ -221,6 +221,11 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       msgs.push({ role, content: text });
     }
     transformed.messages = msgs;
+    if (request.model) {
+      transformed.model = request.model;
+    } else if ((request as any)?.route?.modelId) {
+      transformed.model = (request as any).route.modelId;
+    }
     if (this.enableTools && request.tools) { transformed.tools = this.convertAnthropicToolsToOpenAI(request.tools); }
     // tool_choice mapping (Anthropic -> OpenAI)
     if (request.tool_choice) {
