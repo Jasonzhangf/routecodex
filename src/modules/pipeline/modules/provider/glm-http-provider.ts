@@ -189,6 +189,37 @@ export class GLMHTTPProvider implements ProviderModule {
         }
         throw err;
       }
+
+      const socketCode = String(e?.code || '').toUpperCase();
+      const msg = String(e?.message || '').toLowerCase();
+      const isSocketError = socketCode === 'UND_ERR_SOCKET' || socketCode === 'ECONNREFUSED' || socketCode === 'ENOTFOUND' || msg.includes('fetch failed');
+
+      if (isSocketError) {
+        const err: any = new Error('GLM provider network request failed: outbound sandbox access required');
+        err.code = 'SANDBOX_NETWORK_BLOCKED';
+        err.type = 'sandbox';
+        err.statusCode = 503;
+        err.retryable = false;
+        err.details = {
+          upstream: { code: e?.code, message: e?.message },
+          provider: { vendor: 'glm', baseUrl: this.getBaseUrl(), moduleType: this.type },
+          hint: 'Grant outbound network access or disable sandbox restrictions to reach https://open.bigmodel.cn'
+        };
+
+        if (this.isDebugEnhanced && this.debugEventBus) {
+          this.debugEventBus.publish({
+            sessionId: 'system',
+            moduleId: this.id,
+            operationId: 'glm_http_request_network_error',
+            timestamp: Date.now(),
+            type: 'error',
+            position: 'middle',
+            data: { code: e?.code, message: e?.message }
+          });
+        }
+
+        throw err;
+      }
       throw e;
     } finally {
       clearTimeout(t);

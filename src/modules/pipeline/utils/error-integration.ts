@@ -179,6 +179,13 @@ export class PipelineErrorIntegration {
     const details: any = (pipelineError as any).details || ((pipelineError as any).details = {});
 
     // Add error category
+    if (code.includes('SANDBOX')) {
+      details.category = 'sandbox_error';
+      details.retryable = false;
+      if (!details.httpStatus) { details.httpStatus = 503; }
+      return;
+    }
+
     if (code.startsWith('HTTP_4')) {
       details.category = 'client_error';
       details.retryable = false;
