@@ -408,29 +408,37 @@ export class PipelineManager implements RCCBaseModule {
     attemptedPipelines: Set<string>,
     retryKey: string
   ): Promise<PipelineResponse> {
-    // Extract key from error or request
-    const key = this.extractKeyFromError(error) || 'unknown';
+    // Extract key from error or request; avoid blacklisting unknown keys
+    const rawKey = this.extractKeyFromError(error) || 'unknown';
     const pipelineIds = Array.from(attemptedPipelines);
+    let trackerResult: { blacklisted: boolean; shouldRetry: boolean; record: any } = { blacklisted: false, shouldRetry: true, record: { consecutiveCount: 0 } } as any;
+    if (rawKey && rawKey !== 'unknown') {
+      // Record 429 error in tracker only when key is known (fingerprinted)
+      trackerResult = this.key429Tracker.record429Error(rawKey, pipelineIds);
 
-    // Record 429 error in tracker
-    const trackerResult = this.key429Tracker.record429Error(key, pipelineIds);
+      this.logger.logPipeline('manager', '429-error-recorded', {
+        key: rawKey,
+        pipelineIds,
+        blacklisted: trackerResult.blacklisted,
+        shouldRetry: trackerResult.shouldRetry,
+        consecutiveCount: trackerResult.record.consecutiveCount
+      });
 
-    this.logger.logPipeline('manager', '429-error-recorded', {
-      key,
-      pipelineIds,
-      blacklisted: trackerResult.blacklisted,
-      shouldRetry: trackerResult.shouldRetry,
-      consecutiveCount: trackerResult.record.consecutiveCount
-    });
+      // If key is blacklisted, don't retry
+      if (trackerResult.blacklisted) {
+        // Mark affected pipelines as unhealthy
+        for (const pipelineId of pipelineIds) {
+          this.pipelineHealthManager.record429Error(pipelineId, rawKey);
+        }
 
-    // If key is blacklisted, don't retry
-    if (trackerResult.blacklisted) {
-      // Mark affected pipelines as unhealthy
-      for (const pipelineId of pipelineIds) {
-        this.pipelineHealthManager.record429Error(pipelineId, key);
+        throw new Error(`Key ${rawKey} is blacklisted due to too many 429 errors`);
       }
-
-      throw new Error(`Key ${key} is blacklisted due to too many 429 errors`);
+    } else {
+      // Unknown key: avoid blacklisting; just log and proceed with generic retry flow
+      this.logger.logPipeline('manager', '429-error-unknown-key', {
+        key: rawKey,
+        pipelineIds
+      });
     }
 
     // Get available pipelines excluding attempted ones

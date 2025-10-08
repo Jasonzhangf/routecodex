@@ -115,14 +115,8 @@ export class GLMHTTPProvider implements ProviderModule {
 
     const start = Date.now();
     const endpoint = `${this.getBaseUrl()}/chat/completions`;
-    // Preflight sanitize to GLM schema (content as string, roles, tool args)
-    const { sanitizeAndValidateOpenAIChat } = await import('../../utils/preflight-validator.js');
-    const preflight = sanitizeAndValidateOpenAIChat(request as any, { target: 'glm' });
-    const payloadObj: Record<string, unknown> = {
-      ...preflight.payload,
-      // Force non-stream for all GLM calls; Workflow will re-stream when requested
-      stream: false,
-    };
+    // Passthrough payload as-is. Do not sanitize/trim/strip tool_calls.
+    const payloadObj: Record<string, unknown> = { ...(request as any) };
 
     // Allow per-request override
     const overrideKeyRaw = (request as any)?.__rcc_overrideApiKey as string | undefined;
@@ -148,10 +142,6 @@ export class GLMHTTPProvider implements ProviderModule {
       await fs.mkdir(dir, { recursive: true });
       const outPath = path.join(dir, `provider-out-glm_${Date.now()}_${Math.random().toString(36).slice(2,8)}.json`);
       await fs.writeFile(outPath, JSON.stringify(payloadObj, null, 2), 'utf-8');
-      if (preflight.issues && preflight.issues.length) {
-        const issuesPath = outPath.replace(/\.json$/, '.issues.json');
-        await fs.writeFile(issuesPath, JSON.stringify({ issues: preflight.issues }, null, 2), 'utf-8');
-      }
       if (this.isDebugEnhanced && this.debugEventBus) {
         this.debugEventBus.publish({ sessionId: 'system', moduleId: this.id, operationId: 'glm_http_request_payload_saved', timestamp: Date.now(), type: 'start', position: 'middle', data: { path: outPath, model: (payloadObj as any).model, hasTools: Array.isArray((payloadObj as any).tools) } });
       }

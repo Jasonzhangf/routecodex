@@ -6,6 +6,7 @@
 import type { LLMSwitchModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest, SharedPipelineResponse } from '../../../../types/shared-dtos.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
+import { normalizeArgsBySchema } from '../../utils/schema-arg-normalizer.js';
 import {
   DEFAULT_CONVERSION_CONFIG,
   detectRequestFormat,
@@ -24,6 +25,9 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
   private conversionConfig: ConversionConfig;
   private enableStreaming: boolean;
   private enableTools: boolean;
+  private trustSchema: boolean;
+
+  // Sticky tools/backfill is disabled per request: do not inject or cache tools
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
     this.config = config;
@@ -32,6 +36,8 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     this.conversionConfig = { ...DEFAULT_CONVERSION_CONFIG, ...(config.config?.conversionMappings || {}) };
     this.enableStreaming = config.config?.enableStreaming ?? true;
     this.enableTools = config.config?.enableTools ?? true;
+    // When true, do not rename tool names or remap arguments; rely on provided tool schemas
+    this.trustSchema = config.config?.trustSchema ?? true;
   }
 
   async initialize(): Promise<void> {
@@ -52,8 +58,22 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     const requestFormat = detectRequestFormat(payload);
 
     if (requestFormat === 'anthropic') {
-      const transformedRequest = this.convertAnthropicRequestToOpenAI(payload);
+      // Debug presence of tools before conversion
+      try {
+        const toolsIn = Array.isArray((payload as any)?.tools) ? (payload as any).tools.length : 0;
+        this.logger.logModule(this.id, 'tools-presence-before', { direction: 'anthropic->openai', toolsIn });
+      } catch { /* ignore */ }
+
+      let transformedRequest = this.convertAnthropicRequestToOpenAI(payload);
+      // IMPORTANT: Do not perform sticky tool backfill/injection.
+      // If caller omits tools this turn, we will NOT inject cached tools.
+
       this.logger.logTransformation(this.id, 'anthropic-to-openai-request', payload, transformedRequest);
+      // Debug presence of tools after conversion
+      try {
+        const toolsOut = Array.isArray((transformedRequest as any)?.tools) ? (transformedRequest as any).tools.length : 0;
+        this.logger.logModule(this.id, 'tools-presence-after', { direction: 'anthropic->openai', toolsOut });
+      } catch { /* ignore */ }
       const out = {
         ...transformedRequest,
         _metadata: {
@@ -66,6 +86,25 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       } as Record<string, unknown>;
       return isDto
         ? { ...dto!, data: out }
+        : ({ data: out, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest);
+    }
+
+    if (requestFormat === 'openai') {
+      // Convert OpenAI-style request to Anthropic-style when selected switch is Anthropic
+      const transformedRequest = this.convertOpenAIRequestToAnthropic(payload);
+      this.logger.logTransformation(this.id, 'openai-to-anthropic-request', payload, transformedRequest);
+      const out = {
+        ...transformedRequest,
+        _metadata: {
+          switchType: this.type,
+          direction: 'openai-to-anthropic',
+          timestamp: Date.now(),
+          originalFormat: 'openai',
+          targetFormat: 'anthropic'
+        }
+      } as Record<string, unknown>;
+      return isDto
+        ? { ...dto!, data: out as any }
         : ({ data: out, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest);
     }
 
@@ -98,6 +137,13 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     const responseFormat = detectResponseFormat(payload);
 
     if (responseFormat === 'openai') {
+      // Debug: presence of tool_calls in OpenAI response before conversion
+      try {
+        const toolCalls = Array.isArray((payload as any)?.choices?.[0]?.message?.tool_calls)
+          ? (payload as any).choices[0].message.tool_calls.length
+          : 0;
+        this.logger.logModule(this.id, 'tools-presence-outgoing', { direction: 'openai->anthropic', toolCalls });
+      } catch { /* ignore */ }
       const transformedResponse = this.convertOpenAIResponseToAnthropic(payload);
       this.logger.logTransformation(this.id, 'openai-to-anthropic-response', payload, transformedResponse);
       const out = {
@@ -142,8 +188,10 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     }
     const requestFormat = detectRequestFormat(payload);
     if (requestFormat === 'anthropic') {
-      const out = this.convertAnthropicRequestToOpenAI(payload);
-      return out;
+      return this.convertAnthropicRequestToOpenAI(payload);
+    }
+    if (requestFormat === 'openai') {
+      return this.convertOpenAIRequestToAnthropic(payload);
     }
     return payload;
   }
@@ -171,29 +219,84 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       const sys = Array.isArray(request.system) ? request.system.map((s: any) => (typeof s === 'string' ? s : '')).join('\n') : String(request.system);
       if (sys && sys.length > 0) { msgs.push({ role: 'system', content: sys }); }
     }
+    // Index Anthropic tool schemas by (lowercased) name for argument normalization
+    const toolSchemaByName: Map<string, any> = new Map();
+    if (Array.isArray((request as any)?.tools)) {
+      for (const t of (request as any).tools) {
+        if (t && typeof t.name === 'string') {
+          toolSchemaByName.set(String(t.name).toLowerCase(), (t as any).input_schema || {});
+        }
+      }
+    }
+
     for (const m of (request.messages || [])) {
       const role = m.role || 'user';
       const blocks = Array.isArray(m.content)
         ? m.content
         : (typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : []);
 
-      // Tool use -> OpenAI tool_calls on assistant message
+      // Tool use -> OpenAI tool_calls on assistant message (drop empty/invalid input)
       const toolUses = blocks.filter((b: any) => b && b.type === 'tool_use');
       if (role === 'assistant' && toolUses.length > 0) {
-        const tool_calls = toolUses.map((t: any) => ({
-          id: t.id || t.tool_use_id || `tool_${Math.random().toString(36).slice(2)}`,
-          type: 'function',
-          function: {
-            name: t.name || 'tool',
-            arguments: typeof t.input === 'string' ? t.input : safeStringify(t.input || {})
-          }
-        }));
-        // Optional assistant text blocks alongside tool calls
-        const text = blocks
-          .filter((b: any) => b && b.type === 'text' && typeof b.text === 'string')
-          .map((b: any) => b.text)
-          .join('\n');
-        msgs.push({ role: 'assistant', content: text || '', tool_calls });
+        const tool_calls = toolUses
+          .map((t: any) => {
+            const raw = t?.input;
+            // Parse raw input into object
+            let inputObj: any = undefined;
+            if (raw !== undefined) {
+              if (typeof raw === 'string') {
+                try {
+                  const parsed = JSON.parse(raw);
+                  if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) { inputObj = parsed; }
+                } catch { /* ignore */ }
+              } else if (typeof raw === 'object' && raw !== null) {
+                if (Object.keys(raw).length > 0) { inputObj = raw; }
+              }
+            }
+            if (!inputObj) { return null; }
+
+            // Normalize according to the matching tool's input_schema (if any)
+            const toolName: string = typeof t?.name === 'string' ? t.name : 'tool';
+            const schema = toolSchemaByName.get(toolName.toLowerCase());
+            const norm = normalizeArgsBySchema(inputObj, schema);
+            let finalArgs: any = (norm && norm.value && typeof norm.value === 'object' && Object.keys(norm.value).length > 0)
+              ? norm.value
+              : inputObj; // fallback to raw if normalization produced empty
+
+            // Defensive fallback: if no schema and this looks like a search tool, coerce common synonyms
+            if (!schema) {
+              const lname = toolName.toLowerCase();
+              if (lname.includes('search') || lname === 'grep' || lname === 'rg' || lname === 'ripgrep') {
+                if (finalArgs && typeof finalArgs === 'object') {
+                  if (!('pattern' in finalArgs)) {
+                    const q = (finalArgs as any)['query'] ?? (finalArgs as any)['regex'] ?? (finalArgs as any)['_raw'];
+                    if (q !== undefined) { finalArgs = { ...finalArgs, pattern: String(q) };
+                    }
+                  }
+                  if (!('glob' in finalArgs) && (finalArgs as any)['include'] !== undefined) {
+                    finalArgs = { ...finalArgs, glob: String((finalArgs as any)['include']) };
+                  }
+                }
+              }
+            }
+
+            return {
+              id: t.id || t.tool_use_id || `call_${Math.random().toString(36).slice(2)}`,
+              type: 'function',
+              function: { name: toolName, arguments: safeStringify(finalArgs) }
+            };
+          })
+          .filter(Boolean);
+        if (tool_calls.length > 0) {
+          msgs.push({ role: 'assistant', content: '', tool_calls });
+        } else {
+          // No valid tool_calls to emit; fall back to any text blocks
+          const text = blocks
+            .filter((b: any) => b && b.type === 'text' && typeof b.text === 'string')
+            .map((b: any) => b.text)
+            .join('\n');
+          if (text) { msgs.push({ role: 'assistant', content: text }); }
+        }
         continue;
       }
 
@@ -235,6 +338,161 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     return transformed;
   }
 
+  private convertOpenAIRequestToAnthropic(request: any): any {
+    const out: any = {};
+    // Extract system message from OpenAI messages
+    const msgs: any[] = Array.isArray(request?.messages) ? request.messages : [];
+    const sysMsg = msgs.find((m: any) => m && m.role === 'system' && typeof m.content === 'string');
+    if (sysMsg && typeof sysMsg.content === 'string') {
+      out.system = sysMsg.content;
+    }
+    // Build Anthropic messages
+    const contentMsgs: any[] = [];
+    for (const m of msgs) {
+      if (!m || typeof m !== 'object') continue;
+      if (m.role === 'system') continue; // moved to out.system
+      const role = m.role === 'assistant' ? 'assistant' : (m.role === 'user' ? 'user' : (m.role === 'tool' ? 'user' : m.role));
+      const blocks: any[] = [];
+      // Assistant tool_calls -> tool_use blocks
+      if (m.role === 'assistant') {
+        const toolCalls: any[] = Array.isArray((m as any).tool_calls) ? (m as any).tool_calls : [];
+        for (const tc of toolCalls) {
+          const name = tc?.function?.name || 'tool';
+          const rawArgs = tc?.function?.arguments;
+          let input: any = undefined;
+          if (typeof rawArgs === 'string') {
+            try { const parsed = JSON.parse(rawArgs); if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) { input = parsed; } } catch { /* ignore */ }
+          } else if (rawArgs && typeof rawArgs === 'object') {
+            if (Object.keys(rawArgs).length > 0) { input = rawArgs; }
+          }
+          // Skip empty/invalid args to avoid tool_use {}
+          input = this.normalizeArgsForAnthropic(name, input);
+          if (!input) { continue; }
+          blocks.push({ type: 'tool_use', id: tc?.id || `call_${Math.random().toString(36).slice(2,8)}`, name, input });
+        }
+      }
+      // Tool role -> tool_result
+      if (m.role === 'tool') {
+        const tool_call_id = (m as any).tool_call_id || '';
+        const content = typeof m.content === 'string' ? m.content : (typeof m.content === 'object' ? JSON.stringify(m.content) : String(m.content ?? ''));
+        blocks.push({ type: 'tool_result', tool_use_id: tool_call_id, content });
+      }
+      // Text content
+      if (typeof m.content === 'string' && m.content.length > 0) {
+        blocks.push({ type: 'text', text: m.content });
+      } else if (Array.isArray(m.content)) {
+        for (const part of m.content) {
+          if (part && typeof part === 'object' && typeof (part as any).text === 'string') {
+            blocks.push({ type: 'text', text: (part as any).text });
+          }
+        }
+      }
+      contentMsgs.push({ role, content: blocks.length ? blocks : [{ type: 'text', text: '' }] });
+    }
+    out.messages = contentMsgs;
+    if (request.model) { out.model = request.model; }
+    if (typeof request.max_tokens === 'number') { out.max_tokens = request.max_tokens; }
+    if (typeof request.temperature === 'number') { out.temperature = request.temperature; }
+    if (typeof request.top_p === 'number') { out.top_p = request.top_p; }
+    // Tools mapping
+    // Tools + tool_choice mapping (preserve semantics):
+    // - OpenAI 'none' means disable tools => for Anthropic, omit tools entirely
+    const oaiToolChoice = request.tool_choice;
+    const disableTools = (typeof oaiToolChoice === 'string' && oaiToolChoice === 'none');
+    if (this.enableTools && Array.isArray(request.tools) && !disableTools) {
+      out.tools = request.tools.map((t: any) => {
+        const fn = t?.function || {};
+        const name = fn?.name;
+        const description = fn?.description;
+        let parameters = fn?.parameters;
+        if (typeof parameters === 'string') { try { parameters = JSON.parse(parameters); } catch { parameters = {}; } }
+        return { name, description, input_schema: parameters || {} };
+      });
+    }
+    if (!disableTools && oaiToolChoice !== undefined) {
+      const mapped = this.mapOpenAIToolChoiceToAnthropic(oaiToolChoice);
+      if (mapped !== undefined) { out.tool_choice = mapped; }
+    }
+    // stream passthrough
+    if (typeof request.stream === 'boolean') { out.stream = request.stream; }
+    return out;
+  }
+
+  // Normalize OpenAI arguments to Anthropic tool input schema; return null to drop invalid
+  private normalizeArgsForAnthropic(toolName: string, args: any): Record<string, unknown> | null {
+    const name = String(toolName || '').toLowerCase();
+    const hasKeys = (o: any) => o && typeof o === 'object' && Object.keys(o).length > 0;
+    if (!args || typeof args !== 'object') { return null; }
+    const obj: any = { ...args };
+    const take = (o: any, keys: string[]) => {
+      const out: any = {};
+      for (const k of keys) { if (k in o) out[k] = o[k]; }
+      return out;
+    };
+
+    if (name === 'bash' || name === 'shell') {
+      let command = obj.command;
+      if (Array.isArray(command)) { command = command.map((x: any) => String(x)).join(' '); }
+      else if (typeof command !== 'string') { command = ''; }
+      command = String(command).trim();
+      if (!command) { return null; }
+      const out: any = { command };
+      if (typeof obj.timeout === 'number') out.timeout = obj.timeout;
+      if (typeof obj.description === 'string') out.description = obj.description;
+      if (typeof obj.run_in_background === 'boolean') out.run_in_background = obj.run_in_background;
+      return out;
+    }
+
+    if (name === 'read') {
+      obj.file_path = obj.file_path || obj.filepath || obj.file || obj.path;
+      const out = take(obj, ['file_path','offset','limit']);
+      if (!out.file_path || typeof out.file_path !== 'string' || !out.file_path.trim()) { return null; }
+      return out;
+    }
+
+    if (name === 'write') {
+      obj.file_path = obj.file_path || obj.filepath || obj.file || obj.path;
+      obj.content = obj.content || obj.text || obj.data;
+      const out = take(obj, ['file_path','content']);
+      if (!out.file_path || typeof out.file_path !== 'string' || !out.file_path.trim()) { return null; }
+      if (!out.content || typeof out.content !== 'string') { return null; }
+      return out;
+    }
+
+    if (name === 'edit') {
+      obj.file_path = obj.file_path || obj.filepath || obj.file || obj.path;
+      obj.old_string = obj.old_string || obj.old || obj.from || obj.before;
+      obj.new_string = obj.new_string || obj.new || obj.to || obj.after;
+      const out = take(obj, ['file_path','old_string','new_string','replace_all']);
+      if (!out.file_path || typeof out.file_path !== 'string' || !out.file_path.trim()) { return null; }
+      if (!out.old_string || typeof out.old_string !== 'string') { return null; }
+      if (!out.new_string || typeof out.new_string !== 'string') { return null; }
+      return out;
+    }
+
+    if (name === 'glob') {
+      obj.pattern = obj.pattern || obj.glob || obj.include;
+      // accept array includes
+      if (Array.isArray(obj.pattern)) { obj.pattern = obj.pattern.join(','); }
+      const out = take(obj, ['pattern']);
+      if (!out.pattern || typeof out.pattern !== 'string') { return null; }
+      return out;
+    }
+
+    if (name === 'grep' || name === 'search') {
+      obj.pattern = obj.pattern || obj.query || obj.regex;
+      obj.path = obj.path || obj.dir;
+      obj.glob = obj.glob || obj.include;
+      // accept array includes/globs
+      if (Array.isArray(obj.glob)) { obj.glob = obj.glob.join(','); }
+      const out = take(obj, ['pattern','path','glob']);
+      if (!out.pattern || typeof out.pattern !== 'string') { return null; }
+      return out;
+    }
+
+    return hasKeys(obj) ? obj : null;
+  }
+
   private convertOpenAIResponseToAnthropic(response: any): any {
     const { responseMappings } = this.conversionConfig;
     const transformed: any = {};
@@ -258,16 +516,37 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       if (typeof (message as any).reasoning_content === 'string' && (message as any).reasoning_content.length > 0) {
         blocks.push({ type: 'text', text: (message as any).reasoning_content });
       }
-      if (this.enableTools && message.tool_calls) {
+      if (this.enableTools) {
+        // OpenAI multi-tool schema
+        if (message.tool_calls) {
         const toolBlocks = this.convertOpenAIToolCallsToAnthropic(message.tool_calls);
         blocks.push(...toolBlocks);
+        }
+        // Legacy single function_call schema
+        if (message.function_call) {
+          const fc: any = (message as any).function_call;
+          const name = fc?.name || 'tool';
+          const rawArgs = fc?.arguments || '';
+          let input: any = {};
+          try { input = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : (rawArgs || {}); } catch { input = { arguments: rawArgs }; }
+          blocks.push({ type: 'tool_use', id: `call_${Math.random().toString(36).slice(2,8)}`, name, input });
+        }
       }
       // Ensure content has at least one text block for Anthropic schema compliance
       if (blocks.length === 0) {
         blocks.push({ type: 'text', text: '' });
       }
       transformed.content = blocks;
-      if (choice.finish_reason) {transformed.stop_reason = responseMappings.finishReason.mapping[choice.finish_reason] || 'end_turn';}
+      // Map finish_reason. If any tool calls present, prefer 'tool_use' to drive client tool flow.
+      const hasToolCalls = Array.isArray((message as any).tool_calls) && (message as any).tool_calls.length > 0;
+      const hasLegacyFn = !!(message as any).function_call;
+      if (hasToolCalls || hasLegacyFn) {
+        transformed.stop_reason = 'tool_use';
+      } else if (choice.finish_reason) {
+        transformed.stop_reason = responseMappings.finishReason.mapping[choice.finish_reason] || 'end_turn';
+      } else {
+        transformed.stop_reason = 'end_turn';
+      }
     }
     if (response.usage) {transformed.usage = this.convertUsageStats(response.usage, (responseMappings as any).usage.fieldMapping);}
     if (response.id) {transformed.id = response.id;}
@@ -283,12 +562,120 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
 
   private convertOpenAIToolCallsToAnthropic(toolCalls: any[]): any[] {
     if (!toolCalls) {return [];}
-    return toolCalls.map(call => ({
-      type: 'tool_use',
-      id: call.id,
-      name: call.function?.name,
-      input: safeParse(call.function?.arguments) ?? {}
-    }));
+    return toolCalls.map(call => {
+      const rawName = call?.function?.name;
+      const rawArgs = safeParse(call?.function?.arguments) ?? {};
+      const id = call?.id || `call_${Math.random().toString(36).slice(2,8)}`;
+      if (this.trustSchema) {
+        const name = typeof rawName === 'string' ? rawName : 'tool';
+        return { type: 'tool_use', id, name, input: rawArgs };
+      }
+      const { name, args } = this.normalizeStandardToolCall(rawName, rawArgs);
+      return { type: 'tool_use', id, name, input: args };
+    });
+  }
+
+  /**
+   * Canonicalize common tool names and arguments into the shapes expected by clients.
+   * This layer is protocol conversion (OpenAI -> Anthropic), so it's the right place
+   * to normalize standard tools independent of provider quirks.
+   */
+  private normalizeStandardToolCall(rawName: any, rawArgs: any): { name: string; args: Record<string, unknown> } {
+    const name0 = typeof rawName === 'string' ? rawName : '';
+    const lower = name0.toLowerCase();
+    const argsIn = (rawArgs && typeof rawArgs === 'object') ? rawArgs as Record<string, unknown> : {};
+
+    // Helper coercers
+    const toStr = (v: any, d = '') => (typeof v === 'string' ? v : (v == null ? d : String(v)));
+    const toBool = (v: any, d = false) => (typeof v === 'boolean' ? v : (v == null ? d : String(v).toLowerCase() === 'true'));
+    const toInt = (v: any, d = 1) => { const n = Number.parseInt(String(v), 10); return Number.isFinite(n) && n > 0 ? n : d; };
+
+    // Canonicalize common coding-agent tools similar to Claude Code Router
+    // apply_patch => ensure argument { input: string }
+    if (lower === 'apply_patch' || lower === 'applypatch') {
+      let input = '';
+      if (typeof (argsIn as any).input === 'string' && (argsIn as any).input.trim()) { input = (argsIn as any).input; }
+      else if (typeof (argsIn as any).patch === 'string' && (argsIn as any).patch.trim()) { input = (argsIn as any).patch; }
+      else if (typeof (argsIn as any).diff === 'string' && (argsIn as any).diff.trim()) { input = (argsIn as any).diff; }
+      else if (typeof (argsIn as any)._raw === 'string' && (argsIn as any)._raw.includes('*** Begin Patch')) { input = (argsIn as any)._raw; }
+      else if (Array.isArray((argsIn as any).command) && String((argsIn as any).command[0]) === 'apply_patch') {
+        input = String((argsIn as any).command.slice(1).join(' '));
+      }
+      return { name: 'apply_patch', args: { input } };
+    }
+
+    // update_plan => ensure { explanation?: string, plan: [] }
+    if (lower === 'update_plan') {
+      const plan = Array.isArray((argsIn as any).plan) ? (argsIn as any).plan : [];
+      const explanation = typeof (argsIn as any).explanation === 'string' ? (argsIn as any).explanation : '';
+      return { name: 'update_plan', args: { explanation, plan } };
+    }
+
+    // shell => ensure { command: string[] }
+    if (lower === 'shell') {
+      const cmd = (argsIn as any).command;
+      const tryParseArray = (s: string): string[] | null => { try { const a = JSON.parse(s); return Array.isArray(a) ? a.map(String) : null; } catch { return null; } };
+      if (typeof cmd === 'string') {
+        const parsed = tryParseArray(cmd);
+        return { name: 'shell', args: { command: parsed || ['bash','-lc',cmd] } };
+      } else if (Array.isArray(cmd)) {
+        return { name: 'shell', args: { command: cmd.map(String) } };
+      }
+      return { name: 'shell', args: { ...(argsIn as any) } };
+    }
+
+    // Read: canonical name 'Read', arguments must use { file_path }
+    if (['read', 'read_file', 'readfile', 'mcp__read__read', 'mcp__read-file__readfile', 'readfileexact', 'read_file_exact'].includes(lower)) {
+      const file_path = toStr(
+        (argsIn as any)['file_path'] ??
+        (argsIn as any)['filepath'] ??
+        (argsIn as any)['file'] ??
+        (argsIn as any)['path'] ??
+        ((Array.isArray((argsIn as any)['paths']) && (argsIn as any)['paths'][0]) ? String((argsIn as any)['paths'][0]) : '') ??
+        (argsIn as any)['_raw']
+      );
+      const offset = (argsIn as any)['offset'];
+      const limit = (argsIn as any)['limit'];
+      const out: Record<string, unknown> = { file_path };
+      if (offset !== undefined) out.offset = offset;
+      if (limit !== undefined) out.limit = limit;
+      return { name: 'Read', args: out };
+    }
+
+    // Search: canonical name 'Search', arguments { pattern, path?, glob? }
+    if (['search', 'search_files', 'searchfiles', 'grep', 'mcp__search__search', 'ripgrep', 'rg'].includes(lower)) {
+      const pattern = toStr(argsIn['pattern'] ?? (argsIn as any)['query'] ?? (argsIn as any)['regex'] ?? (argsIn as any)['_raw']);
+      const basePath = toStr(argsIn['path'] ?? (argsIn as any)['dir'] ?? '');
+      const glob = toStr((argsIn as any)['glob'] ?? (argsIn as any)['include'] ?? '');
+      const out: Record<string, unknown> = { pattern };
+      if (basePath) { out.path = basePath; }
+      if (glob) { out.glob = glob; }
+      return { name: 'Search', args: out };
+    }
+
+    // Glob: canonical name 'Glob', arguments { pattern }
+    if (['glob', 'mcp__glob__glob'].includes(lower)) {
+      const pattern = toStr((argsIn as any)['pattern'] ?? (argsIn as any)['glob'] ?? (argsIn as any)['_raw']);
+      return { name: 'Glob', args: { pattern } };
+    }
+
+    // Sequential thinking: canonical name 'sequential-thinking', coerce fields
+    if (lower.includes('sequential-thinking') || lower === 'sequentialthinking' || lower === 'mcp__sequential-thinking__sequentialthinking') {
+      const thought = toStr(argsIn['thought'] ?? (argsIn as any)['text'] ?? (argsIn as any)['message'] ?? (argsIn as any)['_raw']);
+      const nextThoughtNeeded = toBool(argsIn['nextThoughtNeeded'] ?? (argsIn as any)['next_thought_needed'] ?? (argsIn as any)['next'], true);
+      const thoughtNumber = toInt(argsIn['thoughtNumber'] ?? (argsIn as any)['thought_number'] ?? 1, 1);
+      const totalThoughts = toInt(argsIn['totalThoughts'] ?? (argsIn as any)['total_thoughts'] ?? (argsIn as any)['total'] ?? Math.max(1, Number(thoughtNumber)), 1);
+      const mapped: Record<string, unknown> = { thought, nextThoughtNeeded, thoughtNumber, totalThoughts };
+      if ('isRevision' in argsIn) { mapped.isRevision = toBool((argsIn as any)['isRevision']); }
+      if ('revisesThought' in argsIn) { mapped.revisesThought = toInt((argsIn as any)['revisesThought'], 1); }
+      if ('branchFromThought' in argsIn) { mapped.branchFromThought = toInt((argsIn as any)['branchFromThought'], 1); }
+      if (typeof (argsIn as any)['branchId'] === 'string') { mapped.branchId = (argsIn as any)['branchId']; }
+      if ('needsMoreThoughts' in argsIn) { mapped.needsMoreThoughts = toBool((argsIn as any)['needsMoreThoughts']); }
+      return { name: 'sequential-thinking', args: mapped };
+    }
+
+    // Default: keep as-is
+    return { name: name0, args: argsIn };
   }
 
   private convertUsageStats(usage: any, fieldMapping: Record<string, string>): any {
@@ -320,6 +707,101 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       }
     }
     return undefined;
+  }
+
+  private mapOpenAIToolChoiceToAnthropic(input: any): any {
+    if (input === undefined || input === null) return undefined;
+    if (typeof input === 'string') {
+      // Anthropic supports 'auto' and specific tool selection; map unknown/none to 'auto'
+      if (input === 'auto') return 'auto';
+      if (input === 'none') return 'auto';
+      return 'auto';
+    }
+    if (typeof input === 'object') {
+      const t = (input as any);
+      if (t.type === 'function' && t.function && typeof t.function.name === 'string') {
+        return { type: 'tool', name: t.function.name };
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Build Anthropic SSE-style events from an OpenAI chat.completions response (non-stream).
+   * This is used to drive Claude/Anthropic-compatible clients that expect
+   * message_start → content_block_(start|delta|stop) → message_stop sequence.
+   */
+  static toAnthropicEventsFromOpenAI(response: any): Array<{ event: string; data: Record<string, unknown> }> {
+    const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+    if (!response || typeof response !== 'object') { return events; }
+    const id = (response as any).id || `resp_${Date.now()}`;
+    const model = (response as any).model || 'unknown';
+    const choice = Array.isArray((response as any).choices) ? (response as any).choices[0] : undefined;
+    const message = choice?.message || {};
+    const usage = (response as any).usage || null;
+
+    // Start message
+    events.push({ event: 'message_start', data: { type: 'message_start', message: { id, type: 'message', role: 'assistant', model, content: [], stop_reason: null, stop_sequence: null } } });
+
+    // Tool calls → tool_use blocks
+    const toolCalls: any[] = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+    const singleFn = (message as any).function_call ? [(message as any).function_call] : [];
+    let idx = 0;
+    let emittedAnyTool = false;
+    const emitToolUse = (name: string, rawArgs: any) => {
+      // Only emit tool_use if arguments parse to a non-empty object
+      let argsObj: any = undefined;
+      if (typeof rawArgs === 'string') {
+        try { const parsed = JSON.parse(rawArgs); if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) { argsObj = parsed; } } catch { /* ignore */ }
+      } else if (rawArgs && typeof rawArgs === 'object') {
+        if (Object.keys(rawArgs).length > 0) { argsObj = rawArgs; }
+      }
+      if (!argsObj) { return; }
+
+      const toolId = `call_${Math.random().toString(36).slice(2,8)}`;
+      events.push({ event: 'content_block_start', data: { type: 'content_block_start', index: idx, content_block: { type: 'tool_use', id: toolId, name } } });
+      const partial = safeStringify(argsObj);
+      events.push({ event: 'content_block_delta', data: { type: 'content_block_delta', index: idx, delta: { type: 'input_json_delta', partial_json: partial } } });
+      events.push({ event: 'content_block_stop', data: { type: 'content_block_stop', index: idx } });
+      idx++; emittedAnyTool = true;
+    };
+
+    for (const tc of toolCalls) {
+      const name = tc?.function?.name || 'tool';
+      const rawArgs = tc?.function?.arguments;
+      emitToolUse(name, rawArgs);
+    }
+    for (const fc of singleFn) {
+      const name = fc?.name || 'tool';
+      const rawArgs = (fc as any)?.arguments;
+      emitToolUse(name, rawArgs);
+    }
+
+    // Assistant text content → text block
+    const textContent: string = typeof message.content === 'string' ? message.content : '';
+    if (textContent && textContent.length > 0) {
+      events.push({ event: 'content_block_start', data: { type: 'content_block_start', index: toolCalls.length, content_block: { type: 'text', text: '' } } });
+      events.push({ event: 'content_block_delta', data: { type: 'content_block_delta', index: toolCalls.length, delta: { type: 'text_delta', text: textContent } } });
+      events.push({ event: 'content_block_stop', data: { type: 'content_block_stop', index: toolCalls.length } });
+    }
+
+    // Message delta (stop reason)
+    // Align with Anthropic semantics: if any tool calls exist, emit 'tool_use'.
+    const rawStop: string | null = choice?.finish_reason || null;
+    const hasAnyTool = emittedAnyTool;
+    const mappedStop = hasAnyTool
+      ? 'tool_use'
+      : (rawStop && (DEFAULT_CONVERSION_CONFIG.responseMappings.finishReason.mapping as Record<string,string>)[rawStop]
+        ? (DEFAULT_CONVERSION_CONFIG.responseMappings.finishReason.mapping as Record<string,string>)[rawStop]
+        : (rawStop || 'end_turn'));
+    events.push({ event: 'message_delta', data: { type: 'message_delta', delta: { stop_reason: mappedStop, stop_sequence: null } } });
+    // Message stop
+    events.push({ event: 'message_stop', data: { type: 'message_stop', message: { id, type: 'message', role: 'assistant', model, content: [], stop_reason: mappedStop } } });
+    // Optional usage
+    if (usage) {
+      events.push({ event: 'message_stream_complete', data: { type: 'message_stream_complete', message_id: id, usage } });
+    }
+    return events;
   }
 }
 

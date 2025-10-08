@@ -74,21 +74,8 @@ class RouteCodexApp {
       // 1. 初始化配置管理器
       const port = await this.detectServerPort(this.modulesConfigPath);
 
-      // Legacy behavior: always free the port first, even if the instance is healthy
-      // 1) If healthy, attempt graceful shutdown via /shutdown endpoint (best-effort)
-      if (await isServerHealthy(port)) {
-        console.log(`ℹ Healthy instance detected on port ${port}; attempting graceful stop...`);
-        try {
-          const controller = new AbortController();
-          const t = setTimeout(() => { try { controller.abort(); } catch { void controller; } }, 1500);
-          await fetch(`http://127.0.0.1:${port}/shutdown`, { method: 'POST', signal: (controller as any).signal } as any).catch(() => {});
-          clearTimeout(t);
-          // wait a moment for shutdown
-          await new Promise(r => setTimeout(r, 800));
-        } catch { /* noop */ void 0; }
-      }
-      // 2) Ensure port is free (graceful SIGTERM then SIGKILL as fallback)
-      await ensurePortAvailable(port);
+      // Do not implicitly stop an existing healthy instance here.
+      // Port checks and restart behavior are handled in CLI (start --restart).
       this.mergedConfigPath = path.join(process.cwd(), 'config', `merged-config.${port}.json`);
 
       // 确定用户配置文件路径，优先使用RCC4_CONFIG_PATH
@@ -130,8 +117,24 @@ class RouteCodexApp {
         console.warn('⚠️ Failed to assemble pipeline from merged-config. Router requires pipeline; requests will fail until assembly is provided.', e);
       }
 
-      // 6. 启动服务器
-      await (this.httpServer as any).start();
+      // 6. 启动服务器（若端口被占用，自动释放后重试一次）
+      try {
+        await (this.httpServer as any).start();
+      } catch (err: any) {
+        const code = (err && (err as any).code) || (err && (err as any).errno) || '';
+        const msg = (err instanceof Error ? err.message : String(err || ''));
+        if (String(code) === 'EADDRINUSE' || /address already in use/i.test(msg)) {
+          console.warn(`⚠ Port ${port} in use; attempting to free and retry...`);
+          try {
+            await ensurePortAvailable(port);
+            await (this.httpServer as any).start();
+          } catch (e) {
+            throw err; // keep original error context
+          }
+        } else {
+          throw err;
+        }
+      }
       this._isRunning = true;
 
       // 7. 获取服务器状态
@@ -308,6 +311,7 @@ class RouteCodexApp {
  * then force-killing as a last resort. Mirrors previous startup behavior.
  */
 async function ensurePortAvailable(port: number): Promise<void> {
+  // Retained for backward-compatibility but no longer called on normal start.
   try {
     // Quick check: attempt to bind to the port
     const probe = net.createServer();

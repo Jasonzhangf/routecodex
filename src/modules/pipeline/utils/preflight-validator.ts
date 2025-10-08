@@ -154,8 +154,10 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
   });
 
   // GLM compatibility: remove assistant.tool_calls from historical messages (keep only on the last message if present)
+  // Allow override via RCC_DISABLE_GLM_TOOLCALL_STRIP=1 to preserve history for long multi-tool sessions.
   try {
-    if (targetGLM && Array.isArray(mappedMessages) && mappedMessages.length > 0) {
+    const disableStrip = process.env.RCC_DISABLE_GLM_TOOLCALL_STRIP === '1';
+    if (targetGLM && !disableStrip && Array.isArray(mappedMessages) && mappedMessages.length > 0) {
       const n = mappedMessages.length;
       for (let i = 0; i < n - 1; i++) {
         const mm: any = mappedMessages[i];

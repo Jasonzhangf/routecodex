@@ -4,6 +4,7 @@
  */
 
 import express, { type Application, type Request, type Response, type NextFunction } from 'express';
+import fs from 'fs/promises';
 import cors from 'cors';
 import helmet from 'helmet';
 import { BaseModule, type ModuleInfo } from 'rcc-basemodule';
@@ -783,6 +784,28 @@ export class HttpServer extends BaseModule implements IHttpServer {
           return protocolSpecific || list[0];
         };
 
+        let codexCaptured = false;
+        const maybeCapture = async (payload: UnknownObject): Promise<void> => {
+          if (codexCaptured) { return; }
+          try {
+            const ua = (req.get('user-agent') || '').toLowerCase();
+            if (!(ua.includes('codex') || ua.includes('claude'))) { return; }
+            const dir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
+            await fs.mkdir(dir, { recursive: true });
+            const sample = {
+              requestId,
+              endpoint: '/v1/anthropic/messages',
+              timestamp: Date.now(),
+              headers: req.headers,
+              data: payload,
+            };
+            await fs.writeFile(`${dir}/pipeline-in-${requestId}.json`, JSON.stringify(sample, null, 2));
+            codexCaptured = true;
+          } catch { /* ignore */ }
+        };
+
+        await maybeCapture(req.body as UnknownObject);
+
         const pipelineId = pickPipeline('anthropic', preferredVendor);
         if (!pipelineId) {
           return res.status(503).json({ error: { message: 'No pipelines available', code: 'no_pipelines' } });
@@ -791,6 +814,21 @@ export class HttpServer extends BaseModule implements IHttpServer {
         const dot = pipelineId.lastIndexOf('.');
         const providerId = dot > 0 ? pipelineId.slice(0, dot) : pipelineId;
         const modelId = dot > 0 ? pipelineId.slice(dot + 1) : 'default';
+
+        // Optional: Replace only system prompt (tools untouched) if selector active
+        try {
+          const { shouldReplaceSystemPrompt, SystemPromptLoader } = await import('../utils/system-prompt-loader.js');
+          const sel = shouldReplaceSystemPrompt();
+          if (sel) {
+            const loader = SystemPromptLoader.getInstance();
+            const sys = await loader.getPrompt(sel);
+            const currentSys = (req.body && typeof req.body === 'object' && (req.body as any).system) ? String((req.body as any).system) : '';
+            const hasMdMarkers = /\bCLAUDE\.md\b|\bAGENT(?:S)?\.md\b/i.test(currentSys);
+            if (sys && req.body && typeof req.body === 'object' && !hasMdMarkers) {
+              req.body = { ...(req.body as Record<string, unknown>), system: sys } as any;
+            }
+          }
+        } catch { /* non-blocking */ }
 
         const pipelineRequest = {
           data: req.body,
@@ -808,10 +846,65 @@ export class HttpServer extends BaseModule implements IHttpServer {
           debug: { enabled: true, stages: { llmSwitch: true, workflow: true, compatibility: true, provider: true } },
         } as UnknownObject;
 
+        // Pre-SSE heartbeat for anthropic when waiting on pipeline (disabled when RCC_DISABLE_ANTHROPIC_STREAM=1)
+        let preHeartbeat: NodeJS.Timeout | null = null;
+        // Non-stream JSON keep-alive heartbeat (writes whitespace to keep connection alive)
+        let jsonHeartbeat: NodeJS.Timeout | null = null;
+        // Enable JSON keep-alive by default; set RCC_JSON_HEARTBEAT=0 to disable
+        const jsonHeartbeatEnabled = process.env.RCC_JSON_HEARTBEAT !== '0';
+        const disableAnthropicStreamA = process.env.RCC_DISABLE_ANTHROPIC_STREAM === '1';
+        if (!disableAnthropicStreamA && (req.body as any)?.stream && !res.headersSent) {
+          try {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('Transfer-Encoding', 'chunked');
+            res.setHeader('x-request-id', requestId);
+            const interval = Math.max(5000, Number(process.env.RCC_SSE_HEARTBEAT_MS || 15000));
+            const send = () => {
+              try { res.write(`event: ping\n` + `data: ${JSON.stringify({ type: 'ping', stage: 'pre', requestId, ts: Date.now() })}\n\n`); } catch { /* ignore */ }
+            };
+            send();
+            preHeartbeat = setInterval(send, interval);
+          } catch { /* ignore */ }
+        }
+        // If non-stream requested and JSON heartbeat enabled, start chunked keep-alive
+        if (jsonHeartbeatEnabled && !(req.body as any)?.stream && !res.headersSent) {
+          try {
+            res.status(200);
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-store');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('Transfer-Encoding', 'chunked');
+            res.setHeader('x-request-id', requestId);
+            const interval = Math.max(5000, Number(process.env.RCC_JSON_HEARTBEAT_MS || 15000));
+            const send = () => { try { res.write(' \n'); } catch { /* ignore */ } };
+            send();
+            jsonHeartbeat = setInterval(send, interval);
+          } catch { /* ignore */ }
+        }
+
         const pipelineResponse = await this.pipelineManager.processRequest(pipelineRequest as any);
         const data = pipelineResponse?.data ?? pipelineResponse;
+        if (!disableAnthropicStreamA && (req.body as any)?.stream) {
+          res.status(200);
+          const openaiRouterAny = this.openaiRouter as unknown as { streamFromPipeline?: (response: unknown, requestId: string, res: Response, model?: string, protocol?: 'openai' | 'anthropic') => Promise<void> };
+          if (openaiRouterAny?.streamFromPipeline) {
+            try { if (preHeartbeat) { clearInterval(preHeartbeat); preHeartbeat = null; } } catch { /* ignore */ }
+            try { if (jsonHeartbeat) { clearInterval(jsonHeartbeat); jsonHeartbeat = null; } } catch { /* ignore */ }
+            await openaiRouterAny.streamFromPipeline(pipelineResponse, requestId, res, (req.body as any)?.model as string | undefined, 'anthropic');
+            return;
+          }
+        }
+        try { if (preHeartbeat) { clearInterval(preHeartbeat); preHeartbeat = null; } } catch { /* ignore */ }
         // Return anthropic-like response produced by llmswitch (if configured)
-        res.status(200).json(data);
+        if (jsonHeartbeat) {
+          try { clearInterval(jsonHeartbeat); jsonHeartbeat = null; } catch { /* ignore */ }
+          try { res.write(JSON.stringify(data)); } catch { /* ignore */ }
+          try { res.end(); } catch { /* ignore */ }
+        } else {
+          res.status(200).json(data);
+        }
       } catch (err) {
         res.status(500).json({ error: { message: (err as Error).message || 'Anthropic handler error' } });
       }
@@ -840,6 +933,28 @@ export class HttpServer extends BaseModule implements IHttpServer {
           return list[0];
         };
 
+        let codexCaptured = false;
+        const maybeCapture = async (payload: UnknownObject): Promise<void> => {
+          if (codexCaptured) { return; }
+          try {
+            const ua = (req.get('user-agent') || '').toLowerCase();
+            if (!(ua.includes('codex') || ua.includes('claude'))) { return; }
+            const dir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
+            await fs.mkdir(dir, { recursive: true });
+            const sample = {
+              requestId,
+              endpoint: '/v1/messages',
+              timestamp: Date.now(),
+              headers: req.headers,
+              data: payload,
+            };
+            await fs.writeFile(`${dir}/pipeline-in-${requestId}.json`, JSON.stringify(sample, null, 2));
+            codexCaptured = true;
+          } catch { /* ignore */ }
+        };
+
+        await maybeCapture(req.body as UnknownObject);
+
         const pipelineId = pickVendor(preferredVendor);
         if (!pipelineId) {
           return res.status(503).json({ error: { message: 'No pipelines available', code: 'no_pipelines' } });
@@ -848,6 +963,21 @@ export class HttpServer extends BaseModule implements IHttpServer {
         const dot = pipelineId.lastIndexOf('.');
         const providerId = dot > 0 ? pipelineId.slice(0, dot) : pipelineId;
         const modelId = dot > 0 ? pipelineId.slice(dot + 1) : 'default';
+
+        // Optional: Replace only system prompt (tools untouched) if selector active
+        try {
+          const { shouldReplaceSystemPrompt, SystemPromptLoader } = await import('../utils/system-prompt-loader.js');
+          const sel = shouldReplaceSystemPrompt();
+          if (sel) {
+            const loader = SystemPromptLoader.getInstance();
+            const sys = await loader.getPrompt(sel);
+            const currentSys = (req.body && typeof req.body === 'object' && (req.body as any).system) ? String((req.body as any).system) : '';
+            const hasMdMarkers = /\bCLAUDE\.md\b|\bAGENT(?:S)?\.md\b/i.test(currentSys);
+            if (sys && req.body && typeof req.body === 'object' && !hasMdMarkers) {
+              req.body = { ...(req.body as Record<string, unknown>), system: sys } as any;
+            }
+          }
+        } catch { /* non-blocking */ }
 
         const pipelineRequest = {
           data: req.body,
@@ -865,9 +995,62 @@ export class HttpServer extends BaseModule implements IHttpServer {
           debug: { enabled: true, stages: { llmSwitch: true, workflow: true, compatibility: true, provider: true } },
         } as UnknownObject;
 
+        // Pre-SSE heartbeat for anthropic when waiting on pipeline (disabled when RCC_DISABLE_ANTHROPIC_STREAM=1)
+        let preHeartbeat: NodeJS.Timeout | null = null;
+        // Non-stream JSON keep-alive heartbeat
+        let jsonHeartbeat2: NodeJS.Timeout | null = null;
+        const jsonHeartbeatEnabled2 = process.env.RCC_JSON_HEARTBEAT !== '0';
+        const disableAnthropicStreamB = process.env.RCC_DISABLE_ANTHROPIC_STREAM === '1';
+        if (!disableAnthropicStreamB && (req.body as any)?.stream && !res.headersSent) {
+          try {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('Transfer-Encoding', 'chunked');
+            res.setHeader('x-request-id', requestId);
+            const interval = Math.max(5000, Number(process.env.RCC_SSE_HEARTBEAT_MS || 15000));
+            const send = () => {
+              try { res.write(`event: ping\n` + `data: ${JSON.stringify({ type: 'ping', stage: 'pre', requestId, ts: Date.now() })}\n\n`); } catch { /* ignore */ }
+            };
+            send();
+            preHeartbeat = setInterval(send, interval);
+          } catch { /* ignore */ }
+        }
+        if (jsonHeartbeatEnabled2 && !(req.body as any)?.stream && !res.headersSent) {
+          try {
+            res.status(200);
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-store');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('Transfer-Encoding', 'chunked');
+            res.setHeader('x-request-id', requestId);
+            const interval = Math.max(5000, Number(process.env.RCC_JSON_HEARTBEAT_MS || 15000));
+            const send = () => { try { res.write(' \n'); } catch { /* ignore */ } };
+            send();
+            jsonHeartbeat2 = setInterval(send, interval);
+          } catch { /* ignore */ }
+        }
+
         const pipelineResponse = await this.pipelineManager.processRequest(pipelineRequest as any);
         const data = (pipelineResponse as any)?.data ?? pipelineResponse;
-        res.status(200).json(data);
+        if (!disableAnthropicStreamB && (req.body as any)?.stream) {
+          res.status(200);
+          const openaiRouterAny = this.openaiRouter as unknown as { streamFromPipeline?: (response: unknown, requestId: string, res: Response, model?: string, protocol?: 'openai' | 'anthropic') => Promise<void> };
+          if (openaiRouterAny?.streamFromPipeline) {
+            try { if (preHeartbeat) { clearInterval(preHeartbeat); preHeartbeat = null; } } catch { /* ignore */ }
+            try { if (jsonHeartbeat2) { clearInterval(jsonHeartbeat2); jsonHeartbeat2 = null; } } catch { /* ignore */ }
+            await openaiRouterAny.streamFromPipeline(pipelineResponse, requestId, res, (req.body as any)?.model as string | undefined, 'anthropic');
+            return;
+          }
+        }
+        try { if (preHeartbeat) { clearInterval(preHeartbeat); preHeartbeat = null; } } catch { /* ignore */ }
+        if (jsonHeartbeat2) {
+          try { clearInterval(jsonHeartbeat2); jsonHeartbeat2 = null; } catch { /* ignore */ }
+          try { res.write(JSON.stringify(data)); } catch { /* ignore */ }
+          try { res.end(); } catch { /* ignore */ }
+        } else {
+          res.status(200).json(data);
+        }
       } catch (err) {
         res.status(500).json({ error: { message: (err as Error).message || 'Anthropic handler error' } });
       }
@@ -878,6 +1061,20 @@ export class HttpServer extends BaseModule implements IHttpServer {
 
     // Configuration endpoint
     this.app.get('/config', async (req, res) => this.handleConfig(req, res));
+
+    // Graceful shutdown endpoint (local control)
+    this.app.post('/shutdown', async (_req: Request, res: Response) => {
+      try {
+        res.status(200).json({ ok: true, message: 'Shutting down' });
+      } catch { /* ignore */ }
+      // Defer actual stop to avoid tearing down before response flush
+      setTimeout(async () => {
+        try {
+          await this.stop();
+        } catch { /* ignore */ }
+        try { process.exit(0); } catch { /* ignore */ }
+      }, 50);
+    });
 
     // Merged configuration endpoint (raw merged-config for current instance)
     this.app.get('/merged-config', async (_req: Request, res: Response) => {

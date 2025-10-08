@@ -91,12 +91,27 @@ program
   .option('-h, --host <host>', 'Server host', 'localhost')
   .option('-c, --config <config>', 'Configuration file path')
   .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
+  .option('--codex', 'Use Codex system prompt (tools unchanged)')
+  .option('--claude', 'Use Claude system prompt (tools unchanged)')
+  .option('--restart', 'Restart if an instance is already running')
   .action(async (options) => {
     const spinner = ora('Starting RouteCodex server...').start();
 
     try {
-      // Import main application
-      const { main } = await import('./index.js');
+      // Validate system prompt replacement flags
+      try {
+        if (options.codex && options.claude) {
+          spinner.fail('Flags --codex and --claude are mutually exclusive');
+          process.exit(1);
+        }
+        if (options.codex) {
+          process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = 'codex';
+        } else if (options.claude) {
+          process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = 'claude';
+        }
+      } catch { /* ignore */ }
+
+      // Prepare to spawn server as child process for robust Ctrl+C handling
 
       // Resolve config path
       let configPath = options.config;
@@ -161,26 +176,94 @@ program
       // Determine target port from config
       const resolvedPort = determinePort(configPath, parseInt(options.port, 10));
 
-      // Ensure port is free before starting
-      await ensurePortAvailable(resolvedPort, spinner);
+      // Ensure port state aligns with requested behavior (no implicit self-stop)
+      await ensurePortAvailable(resolvedPort, spinner, { restart: !!options.restart });
 
       // simple-log application removed
 
-      // Set modules config path in process.argv and start the main application
+      // Resolve modules config path
       const modulesConfigPath = getModulesConfigPath();
       if (!fs.existsSync(modulesConfigPath)) {
         spinner.fail(`Modules configuration file not found: ${modulesConfigPath}`);
         process.exit(1);
       }
 
-      process.argv[2] = modulesConfigPath;
-      await main();
+      // resolvedPort already determined above
 
-      spinner.succeed(`RouteCodex server started on ${options.host}:${options.port}`);
+      // Spawn child Node process to run the server entry; forward signals
+      const nodeBin = process.execPath; // current Node
+      const serverEntry = path.resolve(__dirname, 'index.js');
+      const child = spawnSync as any; // keep type imports happy
+      // Use spawn (not spawnSync); import child_process at top already
+      const { spawn } = await import('child_process');
+
+      const env = { ...process.env } as NodeJS.ProcessEnv;
+      const args: string[] = [serverEntry, modulesConfigPath];
+
+      const childProc = spawn(nodeBin, args, { stdio: 'inherit', env });
+      // Persist child pid for out-of-band stop diagnostics
+      try {
+        const pidFile = path.join(homedir(), '.routecodex', 'server.cli.pid');
+        fs.writeFileSync(pidFile, String(childProc.pid ?? ''), 'utf8');
+      } catch { /* ignore */ }
+
+      spinner.succeed(`RouteCodex server starting on ${options.host}:${options.port}`);
       logger.info(`Configuration loaded from: ${configPath}`);
       logger.info('Press Ctrl+C to stop the server');
 
-      // Note: Graceful shutdown is handled by the main application
+      // Forward signals to child
+      const shutdown = async (sig: NodeJS.Signals) => {
+        // 1) Ask server to shutdown over HTTP
+        try {
+          await fetch(`http://127.0.0.1:${resolvedPort}/shutdown`, { method: 'POST' } as any).catch(() => {});
+        } catch { /* ignore */ }
+        // 2) Forward signal to child
+        try { childProc.kill(sig); } catch { /* ignore */ }
+        try { if (childProc.pid) { process.kill(-childProc.pid, sig); } } catch { /* ignore */ }
+        // 3) Wait briefly; if still listening, try SIGTERM/SIGKILL by port
+        const deadline = Date.now() + 3500;
+        while (Date.now() < deadline) {
+          if (findListeningPids(resolvedPort).length === 0) break;
+          await sleep(120);
+        }
+        const remain = findListeningPids(resolvedPort);
+        if (remain.length) {
+          for (const pid of remain) {
+            try { process.kill(pid, 'SIGTERM'); } catch { /* ignore */ }
+          }
+          const killDeadline = Date.now() + 1500;
+          while (Date.now() < killDeadline) {
+            if (findListeningPids(resolvedPort).length === 0) break;
+            await sleep(100);
+          }
+        }
+        const still = findListeningPids(resolvedPort);
+        if (still.length) {
+          for (const pid of still) {
+            try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ }
+          }
+        }
+        // Ensure parent exits even if child fails to exit
+        try { process.exit(0); } catch { /* ignore */ }
+      };
+      process.on('SIGINT', () => { void shutdown('SIGINT'); });
+      process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
+
+      // Fallback keypress handler: capture Ctrl+C / q when some environments swallow SIGINT
+      const cleanupKeypress = setupKeypress(() => { void shutdown('SIGINT'); });
+
+      childProc.on('exit', (code, signal) => {
+        // Propagate exit code
+        try { cleanupKeypress(); } catch { /* ignore */ }
+        if (signal) {
+          process.exit(0);
+        } else {
+          process.exit(code ?? 0);
+        }
+      });
+
+      // Do not exit parent; keep process alive to relay signals
+      await new Promise(() => {});
 
     } catch (error) {
       spinner.fail('Failed to start server');
@@ -456,6 +539,143 @@ async function initializeConfig(configPath: string, template?: string, force: bo
   }
 }
 
+// Stop command
+program
+  .command('stop')
+  .description('Stop the RouteCodex server')
+  .option('-p, --port <port>', 'Server port')
+  .action(async (options) => {
+    const spinner = ora('Stopping RouteCodex server...').start();
+    try {
+      // Resolve config path and port
+      const configPath = path.join(homedir(), '.routecodex', 'config.json');
+      const resolvedPort = determinePort(configPath, options.port ? parseInt(options.port, 10) : 5520);
+
+      const pids = findListeningPids(resolvedPort);
+      if (!pids.length) {
+        spinner.succeed(`No server listening on ${resolvedPort}.`);
+        return;
+      }
+      for (const pid of pids) {
+        try { process.kill(pid, 'SIGTERM'); } catch { /* ignore */ }
+      }
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        if (findListeningPids(resolvedPort).length === 0) {
+          spinner.succeed(`Stopped server on ${resolvedPort}.`);
+          return;
+        }
+        await sleep(100);
+      }
+      const remain = findListeningPids(resolvedPort);
+      if (remain.length) {
+        for (const pid of remain) { try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ } }
+      }
+      spinner.succeed(`Force stopped server on ${resolvedPort}.`);
+    } catch (e) {
+      spinner.fail(`Failed to stop: ${(e as Error).message}`);
+      process.exit(1);
+    }
+  });
+
+// Restart command (stop + start with same environment)
+program
+  .command('restart')
+  .description('Restart the RouteCodex server')
+  .option('-p, --port <port>', 'Server port (fallback if config missing)')
+  .option('-h, --host <host>', 'Server host', 'localhost')
+  .option('-c, --config <config>', 'Configuration file path')
+  .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
+  .option('--codex', 'Use Codex system prompt (tools unchanged)')
+  .option('--claude', 'Use Claude system prompt (tools unchanged)')
+  .action(async (options) => {
+    const spinner = ora('Restarting RouteCodex server...').start();
+    try {
+      // Resolve config and port
+      const configPath = options.config || path.join(homedir(), '.routecodex', 'config.json');
+      const resolvedPort = determinePort(configPath, options.port ? parseInt(options.port, 10) : 5520);
+
+      // Stop current instance (if any)
+      const pids = findListeningPids(resolvedPort);
+      if (pids.length) {
+        for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch { /* ignore */ } }
+        const deadline = Date.now() + 3500;
+        while (Date.now() < deadline) {
+          if (findListeningPids(resolvedPort).length === 0) break;
+          await sleep(120);
+        }
+        const remain = findListeningPids(resolvedPort);
+        for (const pid of remain) { try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ } }
+      }
+
+      spinner.text = 'Starting RouteCodex server...';
+
+      // Delegate to start command behavior with --restart semantics
+      const nodeBin = process.execPath;
+      const serverEntry = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'index.js');
+      const { spawn } = await import('child_process');
+
+      // Prompt source flags
+      if (options.codex && options.claude) {
+        spinner.fail('Flags --codex and --claude are mutually exclusive');
+        process.exit(1);
+      }
+      if (options.codex) { process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = 'codex'; }
+      else if (options.claude) { process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = 'claude'; }
+      else if (!process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE) {
+        // Default to Codex system prompt source if not specified
+        process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = 'codex';
+      }
+
+      const modulesConfigPath = getModulesConfigPath();
+      const env = { ...process.env } as NodeJS.ProcessEnv;
+      const args: string[] = [serverEntry, modulesConfigPath];
+      const child = spawn(nodeBin, args, { stdio: 'inherit', env });
+      try { fs.writeFileSync(path.join(homedir(), '.routecodex', 'server.cli.pid'), String(child.pid ?? ''), 'utf8'); } catch {}
+
+      spinner.succeed(`RouteCodex server restarting on ${options.host || 'localhost'}:${resolvedPort}`);
+      logger.info('Press Ctrl+C to stop the server');
+
+      const shutdown = async (sig: NodeJS.Signals) => {
+        try { await fetch(`http://127.0.0.1:${resolvedPort}/shutdown`, { method: 'POST' } as any).catch(() => {}); } catch {}
+        try { child.kill(sig); } catch {}
+        try { if (child.pid) { process.kill(-child.pid, sig); } } catch {}
+        const deadline = Date.now() + 3500;
+        while (Date.now() < deadline) {
+          if (findListeningPids(resolvedPort).length === 0) break;
+          await sleep(120);
+        }
+        const remain = findListeningPids(resolvedPort);
+        for (const pid of remain) { try { process.kill(pid, 'SIGTERM'); } catch {} }
+        const killDeadline = Date.now() + 1500;
+        while (Date.now() < killDeadline) {
+          if (findListeningPids(resolvedPort).length === 0) break;
+          await sleep(100);
+        }
+        const still = findListeningPids(resolvedPort);
+        for (const pid of still) { try { process.kill(pid, 'SIGKILL'); } catch {} }
+        // Ensure parent exits in any case
+        try { process.exit(0); } catch {}
+      };
+      process.on('SIGINT', () => { void shutdown('SIGINT'); });
+      process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
+
+      // Fallback keypress handler for restart mode as well
+      const cleanupKeypress2 = setupKeypress(() => { void shutdown('SIGINT'); });
+
+      child.on('exit', (code, signal) => {
+        try { cleanupKeypress2(); } catch { /* ignore */ }
+        if (signal) process.exit(0);
+        else process.exit(code ?? 0);
+      });
+
+      await new Promise(() => {});
+    } catch (e) {
+      spinner.fail(`Failed to restart: ${(e as Error).message}`);
+      process.exit(1);
+    }
+  });
+
 // Status command
 program
   .command('status')
@@ -463,8 +683,8 @@ program
   .option('-j, --json', 'Output in JSON format')
   .action(async (options) => {
     try {
-      // Check if server is running by trying to connect
-      const { get } = await import('https');
+      // Check if server is running by trying to connect (HTTP)
+      const { get } = await import('http');
 
       const checkServer = (port: number, host: string): Promise<HealthCheckResult> => {
         return new Promise((resolve) => {
@@ -526,6 +746,55 @@ program
       }
     } catch (error) {
       logger.error(`Status check failed: ${  error instanceof Error ? error.message : String(error)}`);
+    }
+  });
+
+// Clean command: purge local capture and debug data for fresh runs
+program
+  .command('clean')
+  .description('Clean captured data and debug logs')
+  .option('-y, --yes', 'Confirm deletion without prompt')
+  .option('--what <targets>', 'Targets to clean: captures,logs,all', 'all')
+  .action(async (options) => {
+    const confirm = Boolean(options.yes);
+    const what = String(options.what || 'all');
+    if (!confirm) {
+      logger.warning("Add --yes to confirm deletion.");
+      logger.info("Example: routecodex clean --yes --what all");
+      return;
+    }
+    const home = homedir();
+    const targets: Array<{ path: string; label: string }>= [];
+    if (what === 'captures' || what === 'all') {
+      targets.push({ path: path.join(home, '.routecodex', 'codex-samples'), label: 'captures' });
+    }
+    if (what === 'logs' || what === 'all') {
+      targets.push({ path: path.join(process.cwd(), 'debug-logs'), label: 'debug-logs' });
+      targets.push({ path: path.join(home, '.routecodex', 'logs'), label: 'user-logs' });
+    }
+    let removedAny = false;
+    for (const t of targets) {
+      try {
+        if (fs.existsSync(t.path)) {
+          const entries = fs.readdirSync(t.path);
+          for (const name of entries) {
+            const p = path.join(t.path, name);
+            try {
+              // Recursively remove files/folders
+              fs.rmSync(p, { recursive: true, force: true });
+              removedAny = true;
+            } catch (e) {
+              logger.warning(`Failed to remove ${p}: ${(e as Error).message}`);
+            }
+          }
+          logger.success(`Cleared ${t.label} at ${t.path}`);
+        }
+      } catch (e) {
+        logger.warning(`Unable to access ${t.label} at ${t.path}: ${(e as Error).message}`);
+      }
+    }
+    if (!removedAny) {
+      logger.info('Nothing to clean.');
     }
   });
 
@@ -631,11 +900,20 @@ function determinePort(configPath: string, fallback: number): number {
   return fallback;
 }
 
-async function ensurePortAvailable(port: number, parentSpinner: Ora): Promise<void> {
+async function ensurePortAvailable(port: number, parentSpinner: Ora, opts: { restart?: boolean } = {}): Promise<void> {
   if (!port || Number.isNaN(port)) { return; }
 
   const initialPids = findListeningPids(port);
   if (initialPids.length === 0) { return; }
+
+  // If a healthy server is already running and no restart requested, report and exit gracefully
+  const healthy = await isServerHealthyQuick(port);
+  if (healthy && !opts.restart) {
+    parentSpinner.stop();
+    logger.success(`RouteCodex is already running on port ${port}.`);
+    logger.info(`Use 'routecodex stop' or 'routecodex start --restart' to restart.`);
+    process.exit(0);
+  }
 
   parentSpinner.stop();
   logger.warning(`Port ${port} is in use by PID(s): ${initialPids.join(', ')}`);
@@ -724,6 +1002,52 @@ function findListeningPids(port: number): number[] {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Fallback keypress setup: capture Ctrl+C and 'q' to trigger shutdown when SIGINT is not delivered
+function setupKeypress(onInterrupt: () => void): () => void {
+  try {
+    const stdin = process.stdin as unknown as {
+      isTTY?: boolean;
+      setRawMode?: (v: boolean) => void;
+      resume?: () => void;
+      pause?: () => void;
+      on?: (ev: string, cb: (data: Buffer) => void) => void;
+      off?: (ev: string, cb: (data: Buffer) => void) => void;
+    };
+    if (stdin && stdin.isTTY) {
+      const onData = (data: Buffer) => {
+        const s = data.toString('utf8');
+        // Ctrl+C
+        if (s === '\u0003') { try { onInterrupt(); } catch { /* ignore */ } return; }
+        // 'q' or 'Q' quick quit
+        if (s === 'q' || s === 'Q') { try { onInterrupt(); } catch { /* ignore */ } return; }
+      };
+      stdin.setRawMode?.(true);
+      stdin.resume?.();
+      stdin.on?.('data', onData);
+      return () => {
+        try { stdin.off?.('data', onData); } catch { /* ignore */ }
+        try { stdin.setRawMode?.(false); } catch { /* ignore */ }
+        try { stdin.pause?.(); } catch { /* ignore */ }
+      };
+    }
+  } catch { /* ignore */ }
+  return () => {};
+}
+
+async function isServerHealthyQuick(port: number): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => { try { controller.abort(); } catch { /* ignore */ } }, 800);
+    const res = await fetch(`http://127.0.0.1:${port}/health`, { method: 'GET', signal: (controller as any).signal } as any);
+    clearTimeout(t);
+    if (!res.ok) { return false; }
+    const data = await res.json().catch(() => null);
+    return !!data && (data.status === 'healthy' || data.status === 'ready');
+  } catch {
+    return false;
+  }
 }
 
 function getModulesConfigPath(): string {

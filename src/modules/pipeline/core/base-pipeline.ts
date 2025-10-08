@@ -601,29 +601,42 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
       debugCenter: this.debugCenter,
       logger: this.debugLogger
     };
+    const strict = process.env.ROUTECODEX_PIPELINE_STRICT !== '0';
 
-    // Initialize LLMSwitch module
-    if (this.config.modules.llmSwitch.enabled !== false) {
+    // Initialize LLMSwitch module (required in strict mode)
+    if (this.config.modules.llmSwitch && this.config.modules.llmSwitch.enabled !== false) {
       this.modules.llmSwitch = await this.moduleFactory(this.config.modules.llmSwitch, dependencies) as LLMSwitchModule;
       await this.modules.llmSwitch.initialize();
     }
+    if (strict && !this.modules.llmSwitch) {
+      throw new Error(`Pipeline ${this.pipelineId} missing required module: llmSwitch`);
+    }
 
-    // Initialize Workflow module (optional)
+    // Initialize Workflow module (required in strict mode)
     if (this.config.modules.workflow && this.config.modules.workflow.enabled !== false) {
       this.modules.workflow = await this.moduleFactory(this.config.modules.workflow, dependencies) as WorkflowModule;
       await this.modules.workflow.initialize();
     }
+    if (strict && !this.modules.workflow) {
+      throw new Error(`Pipeline ${this.pipelineId} missing required module: workflow`);
+    }
 
-    // Initialize Compatibility module
-    if (this.config.modules.compatibility.enabled !== false) {
+    // Initialize Compatibility module (required)
+    if (this.config.modules.compatibility && this.config.modules.compatibility.enabled !== false) {
       this.modules.compatibility = await this.moduleFactory(this.config.modules.compatibility, dependencies) as CompatibilityModule;
       await this.modules.compatibility.initialize();
     }
+    if (strict && !this.modules.compatibility) {
+      throw new Error(`Pipeline ${this.pipelineId} missing required module: compatibility`);
+    }
 
-    // Initialize Provider module
-    if (this.config.modules.provider.enabled !== false) {
+    // Initialize Provider module (required)
+    if (this.config.modules.provider && this.config.modules.provider.enabled !== false) {
       this.modules.provider = await this.moduleFactory(this.config.modules.provider, dependencies) as ProviderModule;
       await this.modules.provider.initialize();
+    }
+    if (strict && !this.modules.provider) {
+      throw new Error(`Pipeline ${this.pipelineId} missing required module: provider`);
     }
 
     this.updateModuleStatuses();
@@ -634,7 +647,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
    */
   private async processLLMSwitch(request: SharedPipelineRequest): Promise<SharedPipelineRequest> {
     if (!this.modules.llmSwitch) {
-      return request;
+      throw new Error(`Pipeline ${this.pipelineId} llmSwitch not initialized`);
     }
 
     try {
@@ -656,7 +669,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
    */
   private async processWorkflow(request: SharedPipelineRequest): Promise<SharedPipelineRequest> {
     if (!this.modules.workflow) {
-      return request;
+      throw new Error(`Pipeline ${this.pipelineId} workflow not initialized`);
     }
 
     try {
@@ -678,7 +691,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
    */
   private async processCompatibility(request: SharedPipelineRequest): Promise<SharedPipelineRequest> {
     if (!this.modules.compatibility) {
-      return request;
+      throw new Error(`Pipeline ${this.pipelineId} compatibility not initialized`);
     }
 
     try {
@@ -700,7 +713,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
    */
   private async processProvider(request: SharedPipelineRequest): Promise<UnknownObject> {
     if (!this.modules.provider) {
-      throw new Error('Provider module not available');
+      throw new Error(`Pipeline ${this.pipelineId} provider not initialized`);
     }
 
     try {

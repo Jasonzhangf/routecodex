@@ -23,6 +23,8 @@ import { formatBytes, formatDuration, formatNumber, getHealthScoreColor } from '
 import { MetricCard } from './MetricCard';
 import { ModuleStatusCard } from './ModuleStatusCard';
 import { EventLog } from './EventLog';
+import { RoutingManager } from './RoutingManager';
+import { BackendStatusIndicator } from './BackendStatusIndicator';
 
 export function Dashboard() {
   const [isAutoRefresh, setIsAutoRefresh] = useState(true);
@@ -108,6 +110,9 @@ export function Dashboard() {
           </div>
         </div>
 
+        {/* Backend Status Indicator */}
+        <BackendStatusIndicator />
+
         {/* System Overview Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <MetricCard
@@ -145,9 +150,10 @@ export function Dashboard() {
 
         {/* Main Content Tabs */}
         <Tabs defaultValue="overview" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="modules">Modules</TabsTrigger>
+            <TabsTrigger value="routing">Routing</TabsTrigger>
             <TabsTrigger value="events">Events</TabsTrigger>
             <TabsTrigger value="performance">Performance</TabsTrigger>
           </TabsList>
@@ -246,6 +252,10 @@ export function Dashboard() {
 
           <TabsContent value="events" className="space-y-6">
             <EventLog events={events} maxEvents={50} />
+          </TabsContent>
+
+          <TabsContent value="routing" className="space-y-6">
+            <RoutingManager />
           </TabsContent>
 
           <TabsContent value="performance" className="space-y-6">

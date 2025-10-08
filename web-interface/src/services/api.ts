@@ -155,6 +155,48 @@ export class DebugApiService {
     const response = await this.api.get('/health');
     return response.data;
   }
+
+  // Dynamic Routing Configuration
+  async getRoutingConfig(): Promise<any> {
+    const response = await this.api.get('/routing/config');
+    return response.data;
+  }
+
+  async updateRoutingConfig(config: any): Promise<void> {
+    await this.api.put('/routing/config', config);
+  }
+
+  async getRoutingRules(): Promise<any[]> {
+    const response = await this.api.get('/routing/rules');
+    return response.data;
+  }
+
+  async createRoutingRule(rule: any): Promise<void> {
+    await this.api.post('/routing/rules', rule);
+  }
+
+  async updateRoutingRule(ruleId: string, rule: any): Promise<void> {
+    await this.api.put(`/routing/rules/${ruleId}`, rule);
+  }
+
+  async deleteRoutingRule(ruleId: string): Promise<void> {
+    await this.api.delete(`/routing/rules/${ruleId}`);
+  }
+
+  async testRoutingRule(request: any): Promise<any> {
+    const response = await this.api.post('/routing/rules/test', { request });
+    return response.data;
+  }
+
+  async getRoutingProviders(): Promise<any[]> {
+    const response = await this.api.get('/routing/providers');
+    return response.data;
+  }
+
+  async getRoutingStats(): Promise<any> {
+    const response = await this.api.get('/routing/stats');
+    return response.data;
+  }
 }
 
 // Singleton instance

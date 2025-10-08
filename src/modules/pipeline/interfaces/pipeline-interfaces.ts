@@ -92,7 +92,7 @@ export interface PipelineConfig {
   /** Module configurations */
   readonly modules: {
     llmSwitch: ModuleConfig;
-    workflow: ModuleConfig;
+    workflow: ModuleConfig; // required in strict mode
     compatibility: ModuleConfig;
     provider: ModuleConfig;
   };

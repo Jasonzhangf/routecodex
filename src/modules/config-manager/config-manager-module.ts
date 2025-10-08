@@ -393,16 +393,29 @@ export class ConfigManagerModule extends BaseModule {
       let compatibilityConfig = null;
 
       try {
-        // 1. 先使用CompatibilityEngine处理兼容性（包含预处理）
+        // 1. 先做一次轻量预归一化，避免兼容性引擎因类型枚举拒绝（如 'glm'）
+        const preNormalized = JSON.parse(JSON.stringify(userConfig)) as Record<string, unknown>;
+        try {
+          const vrNode = (preNormalized as Record<string, unknown>)?.['virtualrouter'] as Record<string, unknown> | undefined;
+          const provs = (vrNode && typeof vrNode['providers'] === 'object' && vrNode['providers'] !== null)
+            ? (vrNode['providers'] as Record<string, any>)
+            : {};
+          Object.keys(provs).forEach((pid) => {
+            const family = String(provs[pid]?.type || '').toLowerCase();
+            if (family === 'glm') { provs[pid].type = 'custom'; }
+          });
+        } catch { /* noop */ }
+
+        // 2. 使用CompatibilityEngine处理兼容性（包含引擎内预处理）
         const compatResult = await this.compatibilityEngine.processCompatibility(
-          JSON.stringify(userConfig)
+          JSON.stringify(preNormalized)
         );
 
         if (!compatResult.isValid) {
           throw new Error(`Compatibility processing failed: ${compatResult.errors?.map(e => e.message).join(', ')}`);
         }
 
-        // 2. 对兼容性引擎输出做一次轻量归一化，确保 provider 家族类型符合解析器枚举
+        // 3. 对兼容性引擎输出做一次轻量归一化，确保 provider 家族类型符合解析器枚举
         const normalizedInput = JSON.parse(
           JSON.stringify(compatResult.compatibilityConfig?.normalizedConfig || userConfig)
         ) as Record<string, unknown>;
@@ -427,10 +440,17 @@ export class ConfigManagerModule extends BaseModule {
             if (familyTypeMap[t]) {
               provs[pid].type = familyTypeMap[t];
             }
+            // Normalize unsupported family names to allowed enum for parser
+            // The parser only allows: openai | anthropic | qwen | lmstudio | iflow | custom
+            // Accept legacy 'glm' family by mapping to 'custom' here; assembler will still detect pid==='glm'
+            const family = String(provs[pid]?.type || '').toLowerCase();
+            if (family === 'glm') {
+              provs[pid].type = 'custom';
+            }
           });
         } catch { /* noop */ }
 
-        // 3. 使用ConfigParser解析处理后的配置
+        // 4. 使用ConfigParser解析处理后的配置
         const parseResult = await this.configParser.parseFromString(
           JSON.stringify(normalizedInput)
         );
@@ -439,7 +459,7 @@ export class ConfigManagerModule extends BaseModule {
           throw new Error(`Configuration validation failed: ${parseResult.errors?.map(e => e.message).join(', ')}`);
         }
 
-        // 4. 提取解析后的配置和兼容性配置
+        // 5. 提取解析后的配置和兼容性配置
         parsedUserConfig = parseResult.normalized || normalizedInput;
         compatibilityConfig = compatResult.compatibilityConfig;
 

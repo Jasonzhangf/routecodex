@@ -30,6 +30,32 @@ export class PipelineAssembler {
   }
 
   /**
+   * Minimal pipeline config validation to avoid assembling half-broken pipelines.
+   */
+  private static validatePc(
+    pc: {
+      provider?: { type?: string };
+      model?: { actualModelId?: string };
+      llmSwitch?: { type?: string };
+      compatibility?: { type?: string };
+      workflow?: { type?: string };
+    },
+    context: { routeName: string; targetKey: string }
+  ): { ok: boolean; errors: string[] } {
+    const errors: string[] = [];
+    if (!pc?.provider?.type) { errors.push('provider.type missing'); }
+    if (!pc?.model?.actualModelId) { errors.push('model.actualModelId missing'); }
+    if (!pc?.llmSwitch?.type) { errors.push('llmSwitch.type missing'); }
+    if (!pc?.compatibility?.type) { errors.push('compatibility.type missing'); }
+    if (!pc?.workflow?.type) { errors.push('workflow.type missing'); }
+    if (errors.length) {
+      console.error(`[PipelineAssembler] INVALID pipeline config for ${context.routeName}/${context.targetKey}: ${errors.join(', ')}`);
+      return { ok: false, errors };
+    }
+    return { ok: true, errors: [] };
+  }
+
+  /**
    * 查找端点特定的LLMSwitch配置
    */
   private static findEndpointSpecificLLMSwitch(
@@ -185,6 +211,8 @@ export class PipelineAssembler {
         // Preserve explicit openai-provider
         const t = String(np.type || '').toLowerCase();
         if (t === 'openai-provider') { return 'openai-provider'; }
+        // Map engine family 'openai' to concrete provider module
+        if (t === 'openai') { return 'openai-provider'; }
         // Map GLM family to dedicated provider module
         if (pid === 'glm' || t === 'glm') { return 'glm-http-provider'; }
         return String(np.type || provId);
@@ -205,6 +233,14 @@ export class PipelineAssembler {
         protocols: { input: inputProtocol || 'openai', output: 'openai' },
         llmSwitch: defaultLlmSwitch
       };
+      // Propagate compatibility from normalized provider/model config if present
+      try {
+        const ctype = (compat && typeof compat.type === 'string') ? String(compat.type) : undefined;
+        const ccfg = (compat && typeof compat.config === 'object' && compat.config !== null) ? (compat.config as Record<string, unknown>) : {};
+        if (ctype) {
+          (pc as any).compatibility = { type: ctype, config: ccfg } as PcShape['compatibility'];
+        }
+      } catch { /* ignore */ }
       const attachAuth = async () => {
         console.log(`[PipelineAssembler] DEBUG - Resolving auth for ${provId}:`);
         console.log(`- initial apiKey exists: ${!!apiKey}`);
@@ -439,6 +475,21 @@ export class PipelineAssembler {
           const modulesBlock: Record<string, unknown> = { llmSwitch, compatibility, provider };
           if (workflow) { modulesBlock.workflow = workflow; }
 
+          // Validate assembled module set (post-defaults), not raw pc
+          const v2 = PipelineAssembler.validatePc(
+            {
+              provider: { type: providerType },
+              model: { actualModelId: actualModelId || modelId },
+              llmSwitch: { type: (llmSwitch as any)?.type },
+              compatibility: { type: (compatibility as any)?.type },
+              workflow: { type: (modulesBlock.workflow as any)?.type }
+            },
+            { routeName, targetKey }
+          );
+          if (!v2.ok) {
+            continue;
+          }
+
           pipeline = {
             id: pipelineId,
             provider: { type: providerType },
@@ -452,6 +503,11 @@ export class PipelineAssembler {
 
         // Link this route to the pipeline (either newly created or reused)
         routePools[routeName].push(pipeline.id);
+      }
+
+      // Ensure this route has at least one valid pipeline
+      if ((routePools[routeName] || []).length === 0) {
+        console.error(`[PipelineAssembler] ERROR - No valid pipelines assembled for route '${routeName}'. Check configuration (routeTargets, provider/model compatibility, llmSwitch).`);
       }
     }
 

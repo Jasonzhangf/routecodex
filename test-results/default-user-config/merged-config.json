@@ -533,7 +533,7 @@
     "outputProtocol": "openai",
     "providers": {
       "glm": {
-        "type": "glm",
+        "type": "custom",
         "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
         "apiKey": [
           "REPLACE_WITH_YOUR_GLM_API_KEY"
@@ -575,7 +575,7 @@
         "outputProtocol": "openai",
         "providers": {
           "glm": {
-            "type": "glm",
+            "type": "custom",
             "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
             "apiKey": [
               "REPLACE_WITH_YOUR_GLM_API_KEY"
@@ -613,7 +613,7 @@
   "_metadata": {
     "version": "2.0.0",
     "engine": "routecodex-config-engine",
-    "timestamp": 1759749491537,
+    "timestamp": 1759847767915,
     "configPath": "./test-results/default-user-config/config.json"
   },
   "schemaVersion": "1.0.0",

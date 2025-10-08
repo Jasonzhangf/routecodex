@@ -6,6 +6,9 @@
 
 A sophisticated AI service routing and transformation system that provides seamless integration with multiple AI providers through a clean, modular architecture.
 
+Important: Anthropic tool-calls (since 0.4.0)
+- By default we trust tool schemas (trustSchema=true). When converting OpenAI `tool_calls` to Anthropic `tool_use`, we preserve `function.name` and `arguments` as-is without renaming tool names or remapping argument fields. This aligns with Claude Code Router and guarantees correct tool flow (emitting `stop_reason=tool_use` on `message_delta`).
+
 ## ✅ GLM‑4.6 Works With Codex CLI
 
 RouteCodex now supports running GLM‑4.6 with Codex CLI through the OpenAI‑compatible endpoint. Highlights:

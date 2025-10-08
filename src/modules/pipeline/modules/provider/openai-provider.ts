@@ -16,6 +16,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { homedir } from 'os';
 import { createProviderError } from './shared/provider-helpers.js';
+import crypto from 'crypto';
 
 /**
  * OpenAI Provider Module
@@ -278,7 +279,7 @@ export class OpenAIProvider implements ProviderModule {
         }
       }
 
-      // Build chat completion request (with optional GLM preflight)
+      // Build chat completion request (passthrough using standard OpenAI schema)
       let chatRequest: Record<string, unknown> = {
         model: (request as { model?: string }).model,
         messages: (request as { messages?: any[] }).messages || [],
@@ -289,19 +290,6 @@ export class OpenAIProvider implements ProviderModule {
         presence_penalty: (request as { presence_penalty?: number }).presence_penalty,
         stream: (request as { stream?: boolean }).stream ?? false
       };
-
-      // If this OpenAI provider is targeting GLM-compatible endpoint, sanitize payload
-      try {
-        const providerConfig = this.config.config as ProviderConfig;
-        const baseUrl = String(providerConfig?.baseUrl || '').toLowerCase();
-        if (baseUrl.includes('open.bigmodel.cn')) {
-          const { sanitizeAndValidateOpenAIChat } = await import('../../utils/preflight-validator.js');
-          const { payload } = sanitizeAndValidateOpenAIChat({ ...chatRequest, tools: (request as any)?.tools, tool_choice: (request as any)?.tool_choice, thinking: (request as any)?.thinking }, { target: 'glm' });
-          chatRequest = payload;
-        }
-      } catch {
-        // non-blocking
-      }
 
       // Add tools if provided (non-GLM or already preflighted)
       {
@@ -408,6 +396,14 @@ export class OpenAIProvider implements ProviderModule {
       const e = new Error(message) as Error & { status?: number; details?: UnknownObject };
       e.status = n.status ?? 500;
       const providerConfig = this.config.config as ProviderConfig;
+      // Compute a non-reversible fingerprint for apiKey to aid 429 tracker without leaking secrets
+      let keyFingerprint: string | undefined;
+      try {
+        const rawKey = (providerConfig?.auth as any)?.apiKey as string | undefined;
+        if (rawKey && typeof rawKey === 'string' && rawKey.length > 0) {
+          keyFingerprint = `sha256:${crypto.createHash('sha256').update(rawKey).digest('hex').slice(0, 16)}`;
+        }
+      } catch { /* ignore */ }
       e.details = {
         upstream: (n.upstream as UnknownObject | undefined),
         provider: {
@@ -416,10 +412,15 @@ export class OpenAIProvider implements ProviderModule {
           vendor: providerConfig?.type || 'openai',
           baseUrl: providerConfig?.baseUrl,
           model: (request as { model?: string }).model || undefined,
-        }
+        },
+        ...(keyFingerprint ? { key: keyFingerprint } : {})
       };
       const providerErr = createProviderError(e, 'server');
       providerErr.retryable = n.retryable === true;
+      // If upstream indicates quota/balance issue, avoid retriable marking to prevent noisy loops
+      if (/insufficient balance|no resource package|recharge/i.test(message)) {
+        providerErr.retryable = false;
+      }
       throw providerErr;
     }
   }

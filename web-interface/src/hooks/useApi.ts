@@ -214,3 +214,162 @@ export function useDataClear() {
     error,
   };
 }
+
+// Hook for dynamic routing configuration
+export function useRoutingConfig() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const getRoutingConfig = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await debugApi.getRoutingConfig();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const updateRoutingConfig = useCallback(async (config: any) => {
+    try {
+      setLoading(true);
+      setError(null);
+      await debugApi.updateRoutingConfig(config);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return {
+    getRoutingConfig,
+    updateRoutingConfig,
+    loading,
+    error,
+  };
+}
+
+// Hook for routing rules management
+export function useRoutingRules() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const getRoutingRules = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await debugApi.getRoutingRules();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const createRoutingRule = useCallback(async (rule: any) => {
+    try {
+      setLoading(true);
+      setError(null);
+      await debugApi.createRoutingRule(rule);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const updateRoutingRule = useCallback(async (ruleId: string, rule: any) => {
+    try {
+      setLoading(true);
+      setError(null);
+      await debugApi.updateRoutingRule(ruleId, rule);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const deleteRoutingRule = useCallback(async (ruleId: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      await debugApi.deleteRoutingRule(ruleId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const testRoutingRule = useCallback(async (request: any) => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await debugApi.testRoutingRule(request);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return {
+    getRoutingRules,
+    createRoutingRule,
+    updateRoutingRule,
+    deleteRoutingRule,
+    testRoutingRule,
+    loading,
+    error,
+  };
+}
+
+// Hook for routing providers and stats
+export function useRoutingInfo() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const getProviders = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await debugApi.getRoutingProviders();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const getStats = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await debugApi.getRoutingStats();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return {
+    getProviders,
+    getStats,
+    loading,
+    error,
+  };
+}

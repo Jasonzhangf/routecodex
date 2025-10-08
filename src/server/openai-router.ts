@@ -697,7 +697,7 @@ export class OpenAIRouter extends BaseModule {
       // Optionally record Codex CLI inputs as standard samples (redacted)
       try {
         const ua = (req.get('user-agent') || '').toLowerCase();
-        if (ua.includes('codex')) {
+        if (ua.includes('codex') || ua.includes('claude')) {
           const dir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
           await fs.mkdir(dir, { recursive: true });
           const sample = {
@@ -759,6 +759,26 @@ export class OpenAIRouter extends BaseModule {
         const upstreamAuthHeader = (req.headers['x-rcc-upstream-authorization'] || req.headers['x-rc-upstream-authorization']) as string | undefined;
         const allowOverride = process.env.RCC_ALLOW_UPSTREAM_OVERRIDE === '1' || !!upstreamAuthHeader;
         const chosenOverride = allowOverride ? (upstreamAuthHeader || authHeader) : undefined;
+        // Optional: Replace only system prompt (tools untouched) if selector active
+        try {
+          const { shouldReplaceSystemPrompt, SystemPromptLoader, replaceSystemInOpenAIMessages } = await import('../utils/system-prompt-loader.js');
+          const sel = shouldReplaceSystemPrompt();
+          if (sel) {
+            const loader = SystemPromptLoader.getInstance();
+            const sys = await loader.getPrompt(sel);
+            if (sys && req.body && Array.isArray(req.body.messages)) {
+              // Guard: do not replace if system content references CLAUDE.md / AGENT(S).md
+              const msgs = req.body.messages as any[];
+              const idx = msgs.findIndex((m) => m && m.role === 'system' && typeof m.content === 'string');
+              const currentSys = idx >= 0 ? String(msgs[idx].content) : '';
+              const hasMdMarkers = /\bCLAUDE\.md\b|\bAGENT(?:S)?\.md\b/i.test(currentSys);
+              if (!hasMdMarkers) {
+                req.body = { ...req.body, messages: replaceSystemInOpenAIMessages(req.body.messages, sys) };
+              }
+            }
+          }
+        } catch { /* non-blocking */ }
+
         const pipelineRequest = {
           data: {
             ...(req.body || {}),
@@ -789,7 +809,7 @@ export class OpenAIRouter extends BaseModule {
         // Record pipeline input sample for Codex CLI requests
         try {
           const ua = (req.get('user-agent') || '').toLowerCase();
-          if (ua.includes('codex')) {
+          if (ua.includes('codex') || ua.includes('claude')) {
             const dir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
             await fs.mkdir(dir, { recursive: true });
             const sampleIn = JSON.parse(JSON.stringify(pipelineRequest)) as Record<string, unknown>;
@@ -810,7 +830,7 @@ export class OpenAIRouter extends BaseModule {
         // Record pipeline output sample for Codex CLI requests
         try {
           const ua = (req.get('user-agent') || '').toLowerCase();
-          if (ua.includes('codex')) {
+          if (ua.includes('codex') || ua.includes('claude')) {
             const dir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
             await fs.mkdir(dir, { recursive: true });
             const sampleOut = JSON.parse(JSON.stringify(response)) as Record<string, unknown>;
@@ -1247,11 +1267,27 @@ export class OpenAIRouter extends BaseModule {
   }
 
   /**
+   * Bridge pipeline streaming output to protocol-specific Server-Sent Events (SSE).
+   */
+  private async streamFromPipeline(
+    response: unknown,
+    requestId: string,
+    res: Response,
+    model?: string,
+    protocol: 'openai' | 'anthropic' = 'openai'
+  ) {
+    if (protocol === 'anthropic') {
+      return this.streamAnthropicFromPipeline(response, requestId, res, model);
+    }
+    return this.streamOpenAIFromPipeline(response, requestId, res, model);
+  }
+
+  /**
    * Bridge pipeline streaming output to OpenAI-compatible Server-Sent Events (SSE).
    */
-  private async streamFromPipeline(response: unknown, requestId: string, res: Response, model?: string) {
+  private async streamOpenAIFromPipeline(response: unknown, requestId: string, res: Response, model?: string) {
     // Set SSE headers (guard if already sent by pre-heartbeat)
-      if (!res.headersSent) {
+    if (!res.headersSent) {
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
@@ -1451,6 +1487,7 @@ export class OpenAIRouter extends BaseModule {
           // Extract content from normalized structure
           let content = '';
           let toolCalls: unknown[] | null = null;
+          let legacyFn: Record<string, unknown> | null = null;
           if (normalized && typeof normalized === 'object' && normalized !== null && Array.isArray((normalized as Record<string, unknown>).choices)) {
             const choicesArray = (normalized as Record<string, unknown>).choices as unknown[];
             if (choicesArray && choicesArray[0] && typeof choicesArray[0] === 'object') {
@@ -1458,8 +1495,11 @@ export class OpenAIRouter extends BaseModule {
               const msg = (typeof c0.message === 'object' && c0.message !== null) ? (c0.message as Record<string, unknown>) : undefined;
               const maybeContent = typeof msg?.content === 'string' ? (msg!.content as string) : '';
               if (maybeContent && !content) {content = maybeContent;}
-              const tc = (msg && Array.isArray(msg.tool_calls)) ? (msg.tool_calls as unknown[]) : null;
-              if (tc && tc.length) {toolCalls = tc;}
+              const tc = (msg && Array.isArray((msg as any).tool_calls)) ? ((msg as any).tool_calls as unknown[]) : null;
+              if (tc && tc.length) { toolCalls = tc; }
+              // Detect legacy single function_call
+              const fc = (msg && (msg as any).function_call) ? ((msg as any).function_call as Record<string, unknown>) : null;
+              if (!tc && fc) { legacyFn = fc; }
             }
           } else if (typeof normalized === 'string') {
             content = normalized;
@@ -1480,18 +1520,32 @@ export class OpenAIRouter extends BaseModule {
           if (!hasTool && outContent && String(outContent).length > 0) {
             delta.content = outContent;
           }
-          if (hasTool) {
-            // Emit tool_calls in a single delta chunk for compatibility
-          const list = Array.isArray(toolCalls) ? toolCalls : [];
+          if (hasTool || legacyFn) {
+            // Emit tool_calls in a single delta chunk for compatibility (OpenAI spec expects stringified JSON arguments)
+            const list = Array.isArray(toolCalls) ? toolCalls : [];
+            // If only legacy function_call present, convert to single tool_call
+            if ((!list || list.length === 0) && legacyFn) {
+              const name = typeof legacyFn.name === 'string' ? (legacyFn.name as string) : 'tool';
+              let argsStr = '';
+              const rawArgs = (legacyFn as any).arguments;
+              if (typeof rawArgs === 'string') { argsStr = rawArgs; }
+              else if (rawArgs !== undefined) { try { argsStr = JSON.stringify(rawArgs); } catch { argsStr = String(rawArgs); } }
+              toolCalls = [{ id: `call_${Date.now()}_${Math.random().toString(36).slice(2,6)}`, type: 'function', function: { name, arguments: argsStr } }];
+            }
             delta.tool_calls = list.map((tc) => {
               const obj = (tc as Record<string, unknown>) || {};
-              const fn = (obj.function as Record<string, unknown> | undefined);
-              const name = typeof fn?.name === 'string' ? fn.name : undefined;
-              const args = typeof fn?.arguments === 'string' ? fn.arguments : '';
+              const fn = (obj.function as Record<string, unknown> | undefined) || {} as Record<string, unknown>;
+              const name = typeof fn.name === 'string' ? (fn.name as string) : 'tool';
+              let argsStr = '';
+              if (typeof fn.arguments === 'string') {
+                argsStr = fn.arguments as string;
+              } else if (fn.arguments !== undefined) {
+                try { argsStr = JSON.stringify(fn.arguments); } catch { argsStr = String(fn.arguments); }
+              }
               return {
                 id: (obj.id as string) || `call_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
                 type: 'function',
-                function: { name, arguments: args },
+                function: { name, arguments: argsStr },
               };
             });
             emittedToolCalls = true;
@@ -1536,6 +1590,234 @@ export class OpenAIRouter extends BaseModule {
       try { res.write('data: [DONE]\n\n'); } catch (_e) { void 0; }
       try { res.end(); } catch (_e) { void 0; }
       streamEnded = true;
+    }
+  }
+
+  /**
+   * Bridge pipeline streaming output to Anthropic-compatible SSE sequence with heartbeats.
+   */
+  private async streamAnthropicFromPipeline(response: unknown, requestId: string, res: Response, model?: string) {
+    type AnthropicMessage = {
+      id: string;
+      type: string;
+      role: string;
+      content: Array<Record<string, unknown>>;
+      model: string;
+      stop_reason: string | null;
+      stop_sequence?: string | null;
+      usage?: Record<string, unknown> | null;
+      [key: string]: unknown;
+    };
+    if (!res.headersSent) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('Transfer-Encoding', 'chunked');
+      res.setHeader('x-request-id', requestId);
+      try { res.setHeader('x-worker-pid', String(process.pid)); } catch { /* ignore */ }
+    }
+
+    const HEARTBEAT_INTERVAL_MS = Number(process.env.RCC_SSE_HEARTBEAT_MS ?? 15000);
+    let heartbeatTimer: NodeJS.Timeout | null = null;
+    let streamEnded = false;
+    let heartbeatCounter = 0;
+
+    const writeEvent = (eventType: string, payload: Record<string, unknown>) => {
+      try {
+        const data = `data: ${JSON.stringify(payload)}\n\n`;
+        if (eventType) {
+          res.write(`event: ${eventType}\n${data}`);
+        } else {
+          res.write(data);
+        }
+      } catch (_err) {
+        /* ignore */
+      }
+    };
+
+    const sendPing = () => {
+      if (streamEnded) { return; }
+      heartbeatCounter += 1;
+      writeEvent('ping', { type: 'ping', sequence: heartbeatCounter, timestamp: new Date().toISOString() });
+    };
+
+    const startHeartbeat = () => {
+      if (HEARTBEAT_INTERVAL_MS <= 0) { return; }
+      if (heartbeatTimer) { clearInterval(heartbeatTimer); }
+      sendPing();
+      heartbeatTimer = setInterval(sendPing, HEARTBEAT_INTERVAL_MS);
+    };
+
+    const stopHeartbeat = () => {
+      if (heartbeatTimer) { clearInterval(heartbeatTimer); }
+      heartbeatTimer = null;
+    };
+
+    const coerceAnthropicMessage = (payload: unknown): AnthropicMessage => {
+      if (!payload || typeof payload !== 'object') {
+        return {
+          id: `msg_${Date.now()}`,
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'text', text: String(payload ?? '') }],
+          model: model || 'unknown',
+          stop_reason: 'end_turn',
+          usage: null,
+        };
+      }
+      const message = payload as Record<string, unknown>;
+      const ensured = { ...message } as Record<string, unknown>;
+      ensured.id = typeof ensured.id === 'string' && ensured.id.length ? ensured.id : `msg_${Date.now()}`;
+      ensured.type = typeof ensured.type === 'string' ? ensured.type : 'message';
+      ensured.role = typeof ensured.role === 'string' ? ensured.role : 'assistant';
+      ensured.model = typeof ensured.model === 'string' ? ensured.model : (model || 'unknown');
+      if (!Array.isArray(ensured.content)) {
+        const text = typeof ensured.content === 'string' ? ensured.content : '';
+        ensured.content = [{ type: 'text', text }];
+      }
+      if (!('stop_reason' in ensured)) {
+        ensured.stop_reason = 'end_turn';
+      }
+      if (!('usage' in ensured)) {
+        ensured.usage = null;
+      }
+      return ensured as AnthropicMessage;
+    };
+
+    try {
+      let iterator: AsyncIterableIterator<unknown> | null = null;
+      const streamObj = response && ((response as any).data ?? response);
+      if (streamObj && typeof streamObj === 'object' && streamObj !== null) {
+        const maybeIterator = (streamObj as any)[Symbol.asyncIterator];
+        if (typeof maybeIterator === 'function') {
+          const candidate = maybeIterator.call(streamObj);
+          if (candidate && typeof candidate === 'object' && typeof (candidate as any)[Symbol.asyncIterator] === 'function') {
+            iterator = candidate as AsyncIterableIterator<unknown>;
+          }
+        }
+      }
+
+      const collected: unknown[] = [];
+      if (iterator) {
+        for await (const chunk of iterator) {
+          if (chunk !== undefined) { collected.push(chunk); }
+        }
+      } else if (streamObj !== undefined) {
+        collected.push(streamObj);
+      }
+
+      const finalPayload = collected.length > 0 ? collected[collected.length - 1] : null;
+
+      // If payload looks like OpenAI chat completion, convert to Anthropic SSE event sequence via llmswitch helper
+      const looksOpenAI = finalPayload && typeof finalPayload === 'object' && Array.isArray((finalPayload as any).choices);
+      // Default: disable SSE simulation. Enable only when ROUTECODEX_ENABLE_SSE_SIM=1
+      const enableSim = String(process.env.ROUTECODEX_ENABLE_SSE_SIM || '').trim() === '1';
+      if (looksOpenAI && enableSim) {
+        try {
+          const { AnthropicOpenAIConverter } = await import('../modules/pipeline/modules/llmswitch/llmswitch-anthropic-openai.js');
+          const toEvents = (AnthropicOpenAIConverter as any)?.toAnthropicEventsFromOpenAI;
+          const events = typeof toEvents === 'function' ? toEvents(finalPayload) : [];
+          startHeartbeat();
+          for (const ev of events) {
+            writeEvent(ev.event, ev.data);
+          }
+          stopHeartbeat();
+          streamEnded = true;
+          res.write('data: [DONE]\n\n');
+          res.end();
+          return;
+        } catch (_e) {
+          // fallthrough to generic coercion
+        }
+      }
+
+      const message = coerceAnthropicMessage(finalPayload);
+      const messageId = message.id;
+      const contentBlocks = Array.isArray(message.content) ? message.content : [];
+
+      writeEvent('message_start', {
+        type: 'message_start',
+        message: {
+          ...message,
+          content: [],
+          stop_reason: null,
+          stop_sequence: null,
+        },
+      });
+
+      startHeartbeat();
+
+      const sendTextBlock = (block: Record<string, unknown>, index: number) => {
+        const text = typeof block.text === 'string' ? block.text : '';
+        writeEvent('content_block_start', {
+          type: 'content_block_start',
+          index,
+          content_block: { type: 'text', text: '' },
+        });
+        if (text.length > 0) {
+          writeEvent('content_block_delta', {
+            type: 'content_block_delta',
+            index,
+            delta: { type: 'text_delta', text },
+          });
+        }
+        writeEvent('content_block_stop', { type: 'content_block_stop', index });
+      };
+
+      const sendToolBlock = (block: Record<string, unknown>, index: number) => {
+        writeEvent('content_block_start', {
+          type: 'content_block_start',
+          index,
+          content_block: block,
+        });
+        writeEvent('content_block_stop', { type: 'content_block_stop', index });
+      };
+
+      contentBlocks.forEach((blockRaw, index) => {
+        const block = (blockRaw && typeof blockRaw === 'object') ? blockRaw as Record<string, unknown> : { type: 'text', text: String(blockRaw ?? '') };
+        const blockType = typeof block.type === 'string' ? block.type : 'text';
+        if (blockType === 'text') {
+          sendTextBlock(block, index);
+        } else {
+          sendToolBlock(block, index);
+        }
+      });
+
+      const stopReason = message.stop_reason ?? null;
+      writeEvent('message_delta', {
+        type: 'message_delta',
+        delta: {
+          stop_reason: stopReason,
+          stop_sequence: (message as any).stop_sequence ?? null,
+        },
+      });
+
+      writeEvent('message_stop', {
+        type: 'message_stop',
+        message,
+      });
+
+      if ('usage' in message) {
+        writeEvent('message_stream_complete', {
+          type: 'message_stream_complete',
+          message_id: messageId,
+          usage: (message as any).usage ?? null,
+        });
+      }
+
+      stopHeartbeat();
+      streamEnded = true;
+      res.write('data: [DONE]\n\n');
+      res.end();
+    } catch (error) {
+      stopHeartbeat();
+      streamEnded = true;
+      writeEvent('error', {
+        type: 'error',
+        error: { message: (error as Error).message || 'Anthropic stream failure', request_id: requestId },
+      });
+      try { res.write('data: [DONE]\n\n'); } catch { /* ignore */ }
+      try { res.end(); } catch { /* ignore */ }
     }
   }
 
