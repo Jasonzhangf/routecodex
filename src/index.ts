@@ -74,8 +74,9 @@ class RouteCodexApp {
       // 1. 初始化配置管理器
       const port = await this.detectServerPort(this.modulesConfigPath);
 
-      // Do not implicitly stop an existing healthy instance here.
-      // Port checks and restart behavior are handled in CLI (start --restart).
+      // Ensure the port is available before continuing. Attempt graceful shutdown first.
+      await ensurePortAvailable(port, { attemptGraceful: true });
+
       this.mergedConfigPath = path.join(process.cwd(), 'config', `merged-config.${port}.json`);
 
       // 确定用户配置文件路径，优先使用RCC4_CONFIG_PATH
@@ -126,7 +127,7 @@ class RouteCodexApp {
         if (String(code) === 'EADDRINUSE' || /address already in use/i.test(msg)) {
           console.warn(`⚠ Port ${port} in use; attempting to free and retry...`);
           try {
-            await ensurePortAvailable(port);
+            await ensurePortAvailable(port, { attemptGraceful: true });
             await (this.httpServer as any).start();
           } catch (e) {
             throw err; // keep original error context
@@ -310,7 +311,7 @@ class RouteCodexApp {
  * Ensure a TCP port is available by attempting graceful shutdown of any process holding it,
  * then force-killing as a last resort. Mirrors previous startup behavior.
  */
-async function ensurePortAvailable(port: number): Promise<void> {
+async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boolean } = {}): Promise<void> {
   // Retained for backward-compatibility but no longer called on normal start.
   try {
     // Quick check: attempt to bind to the port
@@ -347,6 +348,19 @@ async function ensurePortAvailable(port: number): Promise<void> {
 
   const pids = await getPids();
   if (!pids || pids.length === 0) { return; }
+
+  if (opts.attemptGraceful) {
+    const graceful = await attemptHttpShutdown(port);
+    if (graceful) {
+      // Give the server a moment to exit cleanly
+      for (let i = 0; i < 10; i++) {
+        await new Promise(r => setTimeout(r, 300));
+        const remain = await getPids();
+        if (!remain.length) { return; }
+      }
+    }
+  }
+
   console.warn(`⚠️ Port ${port} in use by PID(s): ${pids.join(', ')} — sending SIGTERM...`);
   for (const pid of pids) {
     try { process.kill(Number(pid), 'SIGTERM'); } catch { /* ignore */ }
@@ -363,6 +377,29 @@ async function ensurePortAvailable(port: number): Promise<void> {
     try { process.kill(Number(pid), 'SIGKILL'); } catch { /* ignore */ }
   }
   await new Promise(r => setTimeout(r, 800));
+}
+
+async function attemptHttpShutdown(port: number): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      try { controller.abort(); } catch { /* ignore */ }
+    }, 1000);
+
+    const res = await fetch(`http://127.0.0.1:${port}/shutdown`, {
+      method: 'POST',
+      signal: (controller as any).signal
+    } as any).catch(() => null);
+
+    clearTimeout(timeout);
+    if (res && res.ok) {
+      console.warn(`⚠️ Requested graceful shutdown on port ${port} via /shutdown.`);
+      return true;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
 }
 
 /** Quick health probe to avoid killing a healthy server instance */

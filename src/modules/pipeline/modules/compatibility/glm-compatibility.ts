@@ -13,6 +13,7 @@ import type { PipelineDebugLogger as PipelineDebugLoggerInterface } from '../../
 import { loadToolMappings } from '../../../../config/tool-mapping-loader.js';
 import { ToolMappingExecutor } from '../../utils/tool-mapping-executor.js';
 import type { UnknownObject, /* LogData */ } from '../../../../types/common-types.js';
+import { sanitizeAndValidateOpenAIChat } from '../../utils/preflight-validator.js';
 
 export class GLMCompatibility implements CompatibilityModule {
   readonly id: string;
@@ -80,6 +81,8 @@ export class GLMCompatibility implements CompatibilityModule {
         });
       }
     }
+
+    this.sanitizeRequest(outbound);
 
     return isDto ? { ...dto!, data: outbound } : { data: outbound, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
   }
@@ -187,6 +190,35 @@ export class GLMCompatibility implements CompatibilityModule {
     }
     return Object.keys(map).length > 0 ? map : null;
   }
+
+  private sanitizeRequest(payload: UnknownObject): void {
+    if (!payload || typeof payload !== 'object') {
+      return;
+    }
+
+    const result = sanitizeAndValidateOpenAIChat(payload, { target: 'glm' });
+
+    if (result.issues.length) {
+      this.logger.logModule(this.id, 'glm-preflight-issues', {
+        count: result.issues.length,
+        issues: result.issues.map((issue) => ({ level: issue.level, code: issue.code }))
+      });
+    }
+
+    const sanitized = result.payload;
+
+    const assignableKeys = new Set(Object.keys(sanitized));
+    for (const [key, value] of Object.entries(sanitized)) {
+      (payload as UnknownObject)[key] = value as unknown;
+    }
+
+    for (const key of ['messages', 'tools', 'tool_choice', 'stream', 'temperature', 'top_p', 'max_tokens']) {
+      if (!assignableKeys.has(key)) {
+        delete (payload as UnknownObject)[key];
+      }
+    }
+  }
+
 
   private extractModelConfig(modelId: string | null): ThinkingModelConfig | null {
     if (!modelId) {
