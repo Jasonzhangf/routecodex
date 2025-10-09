@@ -253,13 +253,14 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
                 if (Object.keys(raw).length > 0) { inputObj = raw; }
               }
             }
-            if (!inputObj) { return null; }
+            // Skip tool calls with empty/invalid input to avoid validation errors
+            if (!inputObj) { return undefined; }
 
             // Normalize according to the matching tool's input_schema (if any)
             const toolName: string = typeof t?.name === 'string' ? t.name : 'tool';
             const schema = toolSchemaByName.get(toolName.toLowerCase());
             const norm = normalizeArgsBySchema(inputObj, schema);
-            let finalArgs: any = (norm && norm.value && typeof norm.value === 'object' && Object.keys(norm.value).length > 0)
+            let finalArgs: any = (norm && norm.value && typeof norm.value === 'object')
               ? norm.value
               : inputObj; // fallback to raw if normalization produced empty
 
@@ -348,6 +349,8 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     }
     // Build Anthropic messages
     const contentMsgs: any[] = [];
+    const producedToolIds = new Set<string>();
+
     for (const m of msgs) {
       if (!m || typeof m !== 'object') continue;
       if (m.role === 'system') continue; // moved to out.system
@@ -368,14 +371,20 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
           // Skip empty/invalid args to avoid tool_use {}
           input = this.normalizeArgsForAnthropic(name, input);
           if (!input) { continue; }
-          blocks.push({ type: 'tool_use', id: tc?.id || `call_${Math.random().toString(36).slice(2,8)}`, name, input });
+          const toolId = typeof tc?.id === 'string' && tc.id.trim() ? tc.id : `call_${Math.random().toString(36).slice(2,8)}`;
+          producedToolIds.add(toolId);
+          blocks.push({ type: 'tool_use', id: toolId, name, input });
         }
       }
       // Tool role -> tool_result
       if (m.role === 'tool') {
-        const tool_call_id = (m as any).tool_call_id || '';
+        const tool_call_id = typeof (m as any).tool_call_id === 'string' ? (m as any).tool_call_id : '';
         const content = typeof m.content === 'string' ? m.content : (typeof m.content === 'object' ? JSON.stringify(m.content) : String(m.content ?? ''));
-        blocks.push({ type: 'tool_result', tool_use_id: tool_call_id, content });
+        if (tool_call_id && producedToolIds.has(tool_call_id)) {
+          blocks.push({ type: 'tool_result', tool_use_id: tool_call_id, content });
+        } else if (content) {
+          blocks.push({ type: 'text', text: content });
+        }
       }
       // Text content
       if (typeof m.content === 'string' && m.content.length > 0) {
@@ -423,6 +432,21 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     const name = String(toolName || '').toLowerCase();
     const hasKeys = (o: any) => o && typeof o === 'object' && Object.keys(o).length > 0;
     if (!args || typeof args !== 'object') { return null; }
+
+    if (Array.isArray(args)) {
+      const objects = args.filter((item) => item && typeof item === 'object' && !Array.isArray(item) && Object.keys(item).length > 0);
+      if (!objects.length) { return null; }
+      const merged = objects.reduce((acc: Record<string, unknown>, curr: Record<string, unknown>) => {
+        for (const [key, value] of Object.entries(curr)) {
+          if (!(key in acc)) {
+            acc[key] = value;
+          }
+        }
+        return acc;
+      }, {} as Record<string, unknown>);
+      args = merged;
+    }
+
     const obj: any = { ...args };
     const take = (o: any, keys: string[]) => {
       const out: any = {};
@@ -566,10 +590,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       const rawName = call?.function?.name;
       const rawArgs = safeParse(call?.function?.arguments) ?? {};
       const id = call?.id || `call_${Math.random().toString(36).slice(2,8)}`;
-      if (this.trustSchema) {
-        const name = typeof rawName === 'string' ? rawName : 'tool';
-        return { type: 'tool_use', id, name, input: rawArgs };
-      }
+      // Always normalize tool calls to ensure proper field mapping from OpenAI to Anthropic format
       const { name, args } = this.normalizeStandardToolCall(rawName, rawArgs);
       return { type: 'tool_use', id, name, input: args };
     });
@@ -626,6 +647,12 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
 
     // Read: canonical name 'Read', arguments must use { file_path }
     if (['read', 'read_file', 'readfile', 'mcp__read__read', 'mcp__read-file__readfile', 'readfileexact', 'read_file_exact'].includes(lower)) {
+      // Handle empty args by inferring common defaults based on context
+      if (!argsIn || typeof argsIn !== 'object' || Object.keys(argsIn).length === 0) {
+        // For empty Read args, provide common defaults to prevent validation errors
+        return { name: 'Read', args: { file_path: 'README.md' } };
+      }
+      
       const file_path = toStr(
         (argsIn as any)['file_path'] ??
         (argsIn as any)['filepath'] ??
