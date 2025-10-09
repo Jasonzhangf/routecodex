@@ -70,6 +70,29 @@ export class GLMCompatibility implements CompatibilityModule {
 
     const outbound = { ...(typeof request === 'object' && request !== null ? request : {}) } as UnknownObject;
 
+    // GLM 1210 compatibility: strip historical assistant.tool_calls
+    try {
+      const msgs = Array.isArray((outbound as any).messages) ? (outbound as any).messages as any[] : null;
+      if (msgs && msgs.length > 0) {
+        let lastAssistantWithTools = -1;
+        for (let i = 0; i < msgs.length; i++) {
+          const m = msgs[i];
+          if (m && m.role === 'assistant' && Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0) {
+            lastAssistantWithTools = i;
+          }
+        }
+        if (lastAssistantWithTools >= 0) {
+          for (let i = 0; i < lastAssistantWithTools; i++) {
+            const m = msgs[i];
+            if (m && m.role === 'assistant' && Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0) {
+              // Remove historical tool_calls to avoid GLM 1210
+              delete (m as any).tool_calls;
+            }
+          }
+        }
+      }
+    } catch { /* ignore sanitize errors */ }
+
     if (!this.forceDisableThinking && typeof outbound === 'object' && outbound !== null && !('thinking' in outbound)) {
       const payload = this.resolveThinkingPayload(outbound);
       if (payload) {

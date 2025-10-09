@@ -35,14 +35,16 @@
         "moduleType": "debug-center",
         "eventQueueSize": 1000,
         "logLevels": [
-          "debug",
           "info",
           "warn",
           "error"
         ],
         "enableConsole": true,
         "enableFile": true,
-        "filePath": "~/.routecodex/logs/debug-center.log"
+        "filePath": "~/.routecodex/logs/debug-center.log",
+        "maxFileSize": "10MB",
+        "maxFiles": 5,
+        "enableRotation": true
       }
     },
     "httpserver": {
@@ -190,7 +192,8 @@
             },
             "anthropic": {
               "endpoints": [
-                "/v1/messages"
+                "/v1/messages",
+                "/v1/anthropic/messages"
               ],
               "messageField": "messages",
               "modelField": "model",
@@ -525,31 +528,26 @@
   },
   "virtualrouter": {
     "providers": {
-      "glm": {
-        "apiKey": "***REDACTED***",
-        "auth": {
-          "type": "apikey"
-        },
-        "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+      "openai": {
+        "apiKey": [
+          "${OPENAI_API_KEY}"
+        ],
+        "baseURL": "https://api.openai.com/v1",
         "compatibility": {
           "config": {},
           "type": "passthrough-compatibility"
         },
         "enabled": true,
-        "id": "glm",
+        "id": "openai",
         "keyAliases": [
           "key1"
         ],
         "models": {
-          "glm-4": {
-            "maxTokens": 8192,
+          "gpt-3.5-turbo": {
+            "maxTokens": 4096,
             "temperature": 0.7
           },
-          "glm-4-flash": {
-            "maxTokens": 8192,
-            "temperature": 0.7
-          },
-          "glm-4.5": {
+          "gpt-4": {
             "maxTokens": 8192,
             "temperature": 0.7
           }
@@ -558,71 +556,36 @@
       }
     },
     "routing": {
-      "background": [],
+      "background": [
+        "openai.gpt-4"
+      ],
       "coding": [
-        "glm.glm-4.5.key1"
+        "openai.gpt-4"
       ],
       "default": [
-        "glm.glm-4.5.key1"
+        "openai.gpt-4"
       ],
       "longcontext": [
-        "glm.glm-4.5.key1"
+        "openai.gpt-4"
       ],
-      "thinking": [],
+      "thinking": [
+        "openai.gpt-4"
+      ],
       "tools": [
-        "glm.glm-4.5.key1"
+        "openai.gpt-4"
       ],
-      "vision": [],
-      "websearch": []
+      "vision": [
+        "openai.gpt-4"
+      ],
+      "websearch": [
+        "openai.gpt-4"
+      ]
     },
     "inputProtocol": "openai",
     "outputProtocol": "openai"
   },
-  "auth": {},
-  "pipelineConfigs": {
-    "glm.glm-4.5.key1": {
-      "id": "glm-glm-4.5-key1",
-      "modules": {
-        "compatibility": {
-          "config": {
-            "thinkingEnabled": true
-          },
-          "type": "glm-compatibility"
-        },
-        "llmSwitch": {
-          "config": {
-            "protocol": "openai",
-            "targetFormat": "openai"
-          },
-          "type": "llmswitch-openai-openai"
-        },
-        "provider": {
-          "config": {
-            "maxTokens": 8192,
-            "model": "glm-4.5",
-            "temperature": 0.7
-          },
-          "type": "glm-http-provider"
-        },
-        "workflow": {
-          "config": {
-            "enabled": true
-          },
-          "type": "streaming-control"
-        }
-      },
-      "provider": {
-        "apiKey": "***REDACTED***",
-        "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
-        "type": "openai"
-      },
-      "settings": {
-        "debugEnabled": false,
-        "retryAttempts": 3,
-        "timeout": 30000
-      }
-    }
-  },
+  "description": "Minimal OpenAI-only config for v0.40.5",
+  "host": "localhost",
   "port": 5506,
   "schemaVersion": "1.0.0",
   "stableSorting": {
@@ -635,33 +598,30 @@
   "compatibilityConfig": {
     "originalConfig": {
       "version": "1.0.0",
+      "description": "Minimal OpenAI-only config for v0.40.5",
       "port": 5506,
+      "host": "localhost",
       "virtualrouter": {
         "inputProtocol": "openai",
         "outputProtocol": "openai",
         "providers": {
-          "glm": {
-            "id": "glm",
+          "openai": {
+            "id": "openai",
             "type": "openai",
             "enabled": true,
-            "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+            "baseURL": "https://api.openai.com/v1",
+            "apiKey": [
+              "${OPENAI_API_KEY}"
+            ],
             "models": {
-              "glm-4.5": {
+              "gpt-4": {
                 "maxTokens": 8192,
                 "temperature": 0.7
               },
-              "glm-4": {
-                "maxTokens": 8192,
-                "temperature": 0.7
-              },
-              "glm-4-flash": {
-                "maxTokens": 8192,
+              "gpt-3.5-turbo": {
+                "maxTokens": 4096,
                 "temperature": 0.7
               }
-            },
-            "apiKey": "***REDACTED***",
-            "auth": {
-              "type": "apikey"
             },
             "compatibility": {
               "type": "passthrough-compatibility",
@@ -671,68 +631,31 @@
         },
         "routing": {
           "default": [
-            "glm.glm-4.5.key1"
+            "openai.gpt-4"
           ],
           "coding": [
-            "glm.glm-4.5.key1"
+            "openai.gpt-4"
           ],
           "longcontext": [
-            "glm.glm-4.5.key1"
+            "openai.gpt-4"
           ],
           "tools": [
-            "glm.glm-4.5.key1"
+            "openai.gpt-4"
           ],
-          "thinking": [],
-          "vision": [],
-          "websearch": [],
-          "background": []
+          "thinking": [
+            "openai.gpt-4"
+          ],
+          "vision": [
+            "openai.gpt-4"
+          ],
+          "websearch": [
+            "openai.gpt-4"
+          ],
+          "background": [
+            "openai.gpt-4"
+          ]
         }
       },
-      "pipelineConfigs": {
-        "glm.glm-4.5.key1": {
-          "id": "glm-glm-4.5-key1",
-          "provider": {
-            "type": "openai",
-            "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
-            "apiKey": "***REDACTED***"
-          },
-          "modules": {
-            "llmSwitch": {
-              "type": "llmswitch-openai-openai",
-              "config": {
-                "protocol": "openai",
-                "targetFormat": "openai"
-              }
-            },
-            "workflow": {
-              "type": "streaming-control",
-              "config": {
-                "enabled": true
-              }
-            },
-            "compatibility": {
-              "type": "glm-compatibility",
-              "config": {
-                "thinkingEnabled": true
-              }
-            },
-            "provider": {
-              "type": "glm-http-provider",
-              "config": {
-                "model": "glm-4.5",
-                "maxTokens": 8192,
-                "temperature": 0.7
-              }
-            }
-          },
-          "settings": {
-            "timeout": 30000,
-            "retryAttempts": 3,
-            "debugEnabled": false
-          }
-        }
-      },
-      "auth": {},
       "schemaVersion": "2.0.0",
       "stableSorting": {
         "enabled": true,
@@ -744,31 +667,26 @@
     "normalizedConfig": {
       "virtualrouter": {
         "providers": {
-          "glm": {
-            "apiKey": "***REDACTED***",
-            "auth": {
-              "type": "apikey"
-            },
-            "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+          "openai": {
+            "apiKey": [
+              "${OPENAI_API_KEY}"
+            ],
+            "baseURL": "https://api.openai.com/v1",
             "compatibility": {
               "config": {},
               "type": "passthrough-compatibility"
             },
             "enabled": true,
-            "id": "glm",
+            "id": "openai",
             "keyAliases": [
               "key1"
             ],
             "models": {
-              "glm-4": {
-                "maxTokens": 8192,
+              "gpt-3.5-turbo": {
+                "maxTokens": 4096,
                 "temperature": 0.7
               },
-              "glm-4-flash": {
-                "maxTokens": 8192,
-                "temperature": 0.7
-              },
-              "glm-4.5": {
+              "gpt-4": {
                 "maxTokens": 8192,
                 "temperature": 0.7
               }
@@ -777,71 +695,36 @@
           }
         },
         "routing": {
-          "background": [],
+          "background": [
+            "openai.gpt-4"
+          ],
           "coding": [
-            "glm.glm-4.5.key1"
+            "openai.gpt-4"
           ],
           "default": [
-            "glm.glm-4.5.key1"
+            "openai.gpt-4"
           ],
           "longcontext": [
-            "glm.glm-4.5.key1"
+            "openai.gpt-4"
           ],
-          "thinking": [],
+          "thinking": [
+            "openai.gpt-4"
+          ],
           "tools": [
-            "glm.glm-4.5.key1"
+            "openai.gpt-4"
           ],
-          "vision": [],
-          "websearch": []
+          "vision": [
+            "openai.gpt-4"
+          ],
+          "websearch": [
+            "openai.gpt-4"
+          ]
         },
         "inputProtocol": "openai",
         "outputProtocol": "openai"
       },
-      "auth": {},
-      "pipelineConfigs": {
-        "glm.glm-4.5.key1": {
-          "id": "glm-glm-4.5-key1",
-          "modules": {
-            "compatibility": {
-              "config": {
-                "thinkingEnabled": true
-              },
-              "type": "glm-compatibility"
-            },
-            "llmSwitch": {
-              "config": {
-                "protocol": "openai",
-                "targetFormat": "openai"
-              },
-              "type": "llmswitch-openai-openai"
-            },
-            "provider": {
-              "config": {
-                "maxTokens": 8192,
-                "model": "glm-4.5",
-                "temperature": 0.7
-              },
-              "type": "glm-http-provider"
-            },
-            "workflow": {
-              "config": {
-                "enabled": true
-              },
-              "type": "streaming-control"
-            }
-          },
-          "provider": {
-            "apiKey": "***REDACTED***",
-            "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
-            "type": "openai"
-          },
-          "settings": {
-            "debugEnabled": false,
-            "retryAttempts": 3,
-            "timeout": 30000
-          }
-        }
-      },
+      "description": "Minimal OpenAI-only config for v0.40.5",
+      "host": "localhost",
       "port": 5506,
       "schemaVersion": "2.0.0",
       "stableSorting": {
@@ -854,67 +737,117 @@
     },
     "keyMappings": {
       "global": {
-        "key1": "***REDACTED***"
+        "key1": "${OPENAI_API_KEY}"
       },
       "oauth": {},
       "providers": {
-        "glm": {
-          "key1": "***REDACTED***"
+        "openai": {
+          "key1": "${OPENAI_API_KEY}"
         }
       }
     },
     "authMappings": {
-      "authFiles": {
-        "auth-type": "apikey"
-      },
+      "authFiles": {},
       "oauthTokens": {},
       "oauthConfigs": {}
     },
     "routeTargets": {
-      "background": [],
+      "background": [
+        [
+          {
+            "providerId": "openai",
+            "modelId": "gpt-4",
+            "keyId": "key1",
+            "actualKey": "${OPENAI_API_KEY}",
+            "inputProtocol": "openai",
+            "outputProtocol": "openai"
+          }
+        ]
+      ],
       "coding": [
-        {
-          "providerId": "glm",
-          "modelId": "glm-4.5",
-          "keyId": "key1",
-          "actualKey": "***REDACTED***",
-          "inputProtocol": "openai",
-          "outputProtocol": "openai"
-        }
+        [
+          {
+            "providerId": "openai",
+            "modelId": "gpt-4",
+            "keyId": "key1",
+            "actualKey": "${OPENAI_API_KEY}",
+            "inputProtocol": "openai",
+            "outputProtocol": "openai"
+          }
+        ]
       ],
       "default": [
-        {
-          "providerId": "glm",
-          "modelId": "glm-4.5",
-          "keyId": "key1",
-          "actualKey": "***REDACTED***",
-          "inputProtocol": "openai",
-          "outputProtocol": "openai"
-        }
+        [
+          {
+            "providerId": "openai",
+            "modelId": "gpt-4",
+            "keyId": "key1",
+            "actualKey": "${OPENAI_API_KEY}",
+            "inputProtocol": "openai",
+            "outputProtocol": "openai"
+          }
+        ]
       ],
       "longcontext": [
-        {
-          "providerId": "glm",
-          "modelId": "glm-4.5",
-          "keyId": "key1",
-          "actualKey": "***REDACTED***",
-          "inputProtocol": "openai",
-          "outputProtocol": "openai"
-        }
+        [
+          {
+            "providerId": "openai",
+            "modelId": "gpt-4",
+            "keyId": "key1",
+            "actualKey": "${OPENAI_API_KEY}",
+            "inputProtocol": "openai",
+            "outputProtocol": "openai"
+          }
+        ]
       ],
-      "thinking": [],
+      "thinking": [
+        [
+          {
+            "providerId": "openai",
+            "modelId": "gpt-4",
+            "keyId": "key1",
+            "actualKey": "${OPENAI_API_KEY}",
+            "inputProtocol": "openai",
+            "outputProtocol": "openai"
+          }
+        ]
+      ],
       "tools": [
-        {
-          "providerId": "glm",
-          "modelId": "glm-4.5",
-          "keyId": "key1",
-          "actualKey": "***REDACTED***",
-          "inputProtocol": "openai",
-          "outputProtocol": "openai"
-        }
+        [
+          {
+            "providerId": "openai",
+            "modelId": "gpt-4",
+            "keyId": "key1",
+            "actualKey": "${OPENAI_API_KEY}",
+            "inputProtocol": "openai",
+            "outputProtocol": "openai"
+          }
+        ]
       ],
-      "vision": [],
-      "websearch": []
+      "vision": [
+        [
+          {
+            "providerId": "openai",
+            "modelId": "gpt-4",
+            "keyId": "key1",
+            "actualKey": "${OPENAI_API_KEY}",
+            "inputProtocol": "openai",
+            "outputProtocol": "openai"
+          }
+        ]
+      ],
+      "websearch": [
+        [
+          {
+            "providerId": "openai",
+            "modelId": "gpt-4",
+            "keyId": "key1",
+            "actualKey": "${OPENAI_API_KEY}",
+            "inputProtocol": "openai",
+            "outputProtocol": "openai"
+          }
+        ]
+      ]
     },
     "pipelineConfigs": {},
     "moduleConfigs": {
@@ -932,57 +865,6 @@
           "port": 5506
         }
       },
-      "auth": {
-        "enabled": true,
-        "config": {}
-      },
-      "pipelineConfigs": {
-        "enabled": true,
-        "config": {
-          "glm.glm-4.5.key1": {
-            "id": "glm-glm-4.5-key1",
-            "modules": {
-              "compatibility": {
-                "config": {
-                  "thinkingEnabled": true
-                },
-                "type": "glm-compatibility"
-              },
-              "llmSwitch": {
-                "config": {
-                  "protocol": "openai",
-                  "targetFormat": "openai"
-                },
-                "type": "llmswitch-openai-openai"
-              },
-              "provider": {
-                "config": {
-                  "maxTokens": 8192,
-                  "model": "glm-4.5",
-                  "temperature": 0.7
-                },
-                "type": "glm-http-provider"
-              },
-              "workflow": {
-                "config": {
-                  "enabled": true
-                },
-                "type": "streaming-control"
-              }
-            },
-            "provider": {
-              "apiKey": "***REDACTED***",
-              "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
-              "type": "openai"
-            },
-            "settings": {
-              "debugEnabled": false,
-              "retryAttempts": 3,
-              "timeout": 30000
-            }
-          }
-        }
-      },
       "stableSorting": {
         "enabled": true,
         "config": {
@@ -997,7 +879,7 @@
   "_metadata": {
     "version": "2.0.0",
     "engine": "routecodex-config-engine",
-    "timestamp": 1759277431087,
+    "timestamp": 1759970226335,
     "configPath": "/Users/fanzhang/.routecodex/config.json"
   },
   "engineVersion": "legacy"

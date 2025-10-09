@@ -1,0 +1,15 @@
+{
+  "model": "glm-4.5-air",
+  "messages": [
+    {
+      "role": "user",
+      "content": "继续实现"
+    }
+  ],
+  "temperature": 0,
+  "max_tokens": 512,
+  "thinking": {
+    "type": "enabled"
+  },
+  "stream": false
+}

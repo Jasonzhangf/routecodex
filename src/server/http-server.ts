@@ -128,8 +128,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
   private getDefaultServerConfig(): ServerConfig {
     return {
       server: {
-        port: 5506,
-        host: 'localhost',
+        port: 0,
+        host: '127.0.0.1',
         cors: {
           origin: '*',
           credentials: true,
@@ -167,10 +167,25 @@ export class HttpServer extends BaseModule implements IHttpServer {
       );
     }
     const logging = (cfg.logging as UnknownObject) || {};
+    // Normalize host preference: avoid IPv6-only localhost (::1) binding which may look occupied but unreachable.
+    const requestedHost = ((cfg.host as string) || '127.0.0.1').trim();
+    const ipv6Enabled = process.env.ROUTECODEX_ENABLE_IPV6 === '1';
+    const normalizedHost = (() => {
+      if (ipv6Enabled) {
+        // Caller explicitly enables IPv6; use provided host as-is
+        return requestedHost || '::';
+      }
+      // Default to IPv4 loopback to avoid ::1-only binding
+      if (requestedHost === 'localhost' || requestedHost === '::1' || requestedHost === '::') {
+        return '127.0.0.1';
+      }
+      return requestedHost || '127.0.0.1';
+    })();
+
     return {
       server: {
-        port: cfg.port || 5506,
-        host: (cfg.host as string) || 'localhost',
+        port: cfg.port as number,
+        host: normalizedHost,
         cors: (cfg.cors as any) || { origin: '*', credentials: true },
         timeout: (cfg.timeout as number) || 30000,
         bodyLimit: (cfg.bodyLimit as string) || '10mb',

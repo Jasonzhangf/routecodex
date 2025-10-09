@@ -1,0 +1,15 @@
+{
+  "model": "glm-4.5-air",
+  "messages": [
+    {
+      "role": "user",
+      "content": "修复编译的问题 ，进行集成测试 消除警告和编译错误 "
+    }
+  ],
+  "temperature": 0,
+  "max_tokens": 512,
+  "thinking": {
+    "type": "enabled"
+  },
+  "stream": false
+}

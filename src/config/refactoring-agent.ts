@@ -2158,8 +2158,8 @@ class RouteCodexApp {
       // 6. 获取服务器状态
       const status = this.httpServer.getStatus();
       const serverConfig = {
-        host: 'localhost',
-        port: mergedConfig.modules.httpserver?.config?.port || 5506
+        host: String(mergedConfig.modules.httpserver?.config?.host || '127.0.0.1'),
+        port: Number(mergedConfig.modules.httpserver?.config?.port)
       };
 
       console.log(\`✅ RouteCodex server started successfully!\`);
@@ -2406,8 +2406,8 @@ describe('ConfigMerger', () => {
             enabled: true,
             config: {
               moduleType: 'http-server',
-              port: 5506,
-              host: 'localhost'
+              port: 0,
+              host: '127.0.0.1'
             }
           },
           virtualrouter: {

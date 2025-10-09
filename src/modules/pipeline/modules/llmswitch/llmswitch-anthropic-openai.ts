@@ -520,7 +520,8 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
         // OpenAI multi-tool schema
         if (message.tool_calls) {
         const toolBlocks = this.convertOpenAIToolCallsToAnthropic(message.tool_calls);
-        blocks.push(...toolBlocks);
+        // Drop any empties defensively
+        for (const tb of toolBlocks) { if (tb && tb.input && typeof tb.input === 'object' && Object.keys(tb.input).length > 0) { blocks.push(tb); } }
         }
         // Legacy single function_call schema
         if (message.function_call) {
@@ -529,7 +530,10 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
           const rawArgs = fc?.arguments || '';
           let input: any = {};
           try { input = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : (rawArgs || {}); } catch { input = { arguments: rawArgs }; }
-          blocks.push({ type: 'tool_use', id: `call_${Math.random().toString(36).slice(2,8)}`, name, input });
+          // Only emit tool_use if arguments produce a non-empty object
+          if (input && typeof input === 'object' && Object.keys(input).length > 0) {
+            blocks.push({ type: 'tool_use', id: `call_${Math.random().toString(36).slice(2,8)}`, name, input });
+          }
         }
       }
       // Ensure content has at least one text block for Anthropic schema compliance
@@ -566,11 +570,15 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       const rawName = call?.function?.name;
       const rawArgs = safeParse(call?.function?.arguments) ?? {};
       const id = call?.id || `call_${Math.random().toString(36).slice(2,8)}`;
+      const hasKeys = (o: any) => o && typeof o === 'object' && Object.keys(o).length > 0;
       if (this.trustSchema) {
         const name = typeof rawName === 'string' ? rawName : 'tool';
+        // Do not emit empty-args tool_use
+        if (!hasKeys(rawArgs)) { return null; }
         return { type: 'tool_use', id, name, input: rawArgs };
       }
       const { name, args } = this.normalizeStandardToolCall(rawName, rawArgs);
+      if (!hasKeys(args)) { return null; }
       return { type: 'tool_use', id, name, input: args };
     });
   }

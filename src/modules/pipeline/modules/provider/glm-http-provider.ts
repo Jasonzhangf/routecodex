@@ -115,8 +115,44 @@ export class GLMHTTPProvider implements ProviderModule {
 
     const start = Date.now();
     const endpoint = `${this.getBaseUrl()}/chat/completions`;
-    // Passthrough payload as-is. Do not sanitize/trim/strip tool_calls.
+    // Passthrough payload with minimal coercions for GLM endpoint
     const payloadObj: Record<string, unknown> = { ...(request as any) };
+    // Provider-level 1210 guard: remove historical assistant.tool_calls (keep only the last assistant's tool_calls)
+    try {
+      const msgs = Array.isArray((payloadObj as any).messages) ? (payloadObj as any).messages as any[] : null;
+      if (msgs && msgs.length > 0) {
+        let lastAssistantWithTools = -1;
+        for (let i = 0; i < msgs.length; i++) {
+          const m = msgs[i];
+          if (m && m.role === 'assistant' && Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0) {
+            lastAssistantWithTools = i;
+          }
+        }
+        if (lastAssistantWithTools >= 0) {
+          for (let i = 0; i < lastAssistantWithTools; i++) {
+            const m = msgs[i];
+            if (m && m.role === 'assistant' && Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0) {
+              delete (m as any).tool_calls;
+            }
+          }
+        }
+
+        // Drop tool role messages and ensure content is string for GLM endpoint
+        const allowRoles = new Set(['system', 'user', 'assistant']);
+        const sanitized: any[] = [];
+        for (const m of msgs) {
+          if (!m || !allowRoles.has(m.role)) { continue; }
+          const mm: any = { role: m.role };
+          const c = (m as any).content;
+          mm.content = typeof c === 'string' ? c : (c == null ? '' : (typeof c === 'object' ? JSON.stringify(c) : String(c)));
+          // Do not pass tool_calls to GLM coding endpoint
+          sanitized.push(mm);
+        }
+        (payloadObj as any).messages = sanitized;
+      }
+    } catch { /* ignore sanitize errors */ }
+    // GLM coding endpoint expects non-streaming JSON; force stream=false
+    if ((payloadObj as any).stream === true) { (payloadObj as any).stream = false; }
 
     // Allow per-request override
     const overrideKeyRaw = (request as any)?.__rcc_overrideApiKey as string | undefined;

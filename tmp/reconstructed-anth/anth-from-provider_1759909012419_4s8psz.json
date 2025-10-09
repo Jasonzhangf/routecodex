@@ -1,0 +1,12 @@
+{
+  "model": "glm-4.5-air",
+  "messages": [
+    {
+      "role": "user",
+      "content": "继续修复"
+    }
+  ],
+  "temperature": 0,
+  "max_tokens": 512,
+  "stream": false
+}

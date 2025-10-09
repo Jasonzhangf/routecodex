@@ -117,16 +117,30 @@ class RouteCodexApp {
         console.warn('⚠️ Failed to assemble pipeline from merged-config. Router requires pipeline; requests will fail until assembly is provided.', e);
       }
 
-      // 6. 启动服务器（若端口被占用，自动释放后重试一次）
+      // 6. 启动服务器
+      // 6.1 预清理（默认关闭，仅当显式开启时生效，避免误判）：
+      // 设置环境变量 ROUTECODEX_SERVER_PREFLIGHT=1 才会在启动前回收端口
+      if (process.env.ROUTECODEX_SERVER_PREFLIGHT === '1') {
+        try {
+          await ensurePortAvailable(port);
+        } catch (e) {
+          console.warn('⚠️ Port preflight ensure failed (will still attempt to start):', (e as Error)?.message || e);
+        }
+      }
+      // 6.2 启动（若端口被占用，自动释放后重试一次 — 可通过环境变量禁用，避免与 CLI 的预清理重复）
       try {
         await (this.httpServer as any).start();
       } catch (err: any) {
         const code = (err && (err as any).code) || (err && (err as any).errno) || '';
         const msg = (err instanceof Error ? err.message : String(err || ''));
-        if (String(code) === 'EADDRINUSE' || /address already in use/i.test(msg)) {
+        const serverRetryDisabled = process.env.ROUTECODEX_DISABLE_SERVER_PORT_RETRY === '1';
+        if ((String(code) === 'EADDRINUSE' || /address already in use/i.test(msg)) && !serverRetryDisabled) {
           console.warn(`⚠ Port ${port} in use; attempting to free and retry...`);
           try {
-            await ensurePortAvailable(port);
+            // 重试阶段同样受控于 SERVER_PREFLIGHT；若未开启预清理则只重试一次不杀进程
+            if (process.env.ROUTECODEX_SERVER_PREFLIGHT === '1') {
+              await ensurePortAvailable(port);
+            }
             await (this.httpServer as any).start();
           } catch (e) {
             throw err; // keep original error context

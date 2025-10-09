@@ -87,8 +87,8 @@ program
 program
   .command('start')
   .description('Start the RouteCodex server')
-  .option('-p, --port <port>', 'Server port', '5506')
-  .option('-h, --host <host>', 'Server host', 'localhost')
+  .option('-p, --port <port>', 'Server port')
+  .option('-h, --host <host>', 'Server host', '127.0.0.1')
   .option('-c, --config <config>', 'Configuration file path')
   .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
   .option('--codex', 'Use Codex system prompt (tools unchanged)')
@@ -141,43 +141,83 @@ program
 
         // Load default config template
         const templatePath = path.join(homedir(), '.routecodex', 'default.json');
-        let defaultConfig: DefaultConfig = {
+        // Include root-level port/host so server entry can detect it
+        const explicitPort = Number.isFinite(parseInt(options.port, 10)) ? parseInt(options.port, 10) : parseInt(String(process.env.ROUTECODEX_PORT || process.env.PORT || ''), 10);
+        if (!explicitPort || Number.isNaN(explicitPort)) {
+          spinner.fail('No port specified. Use --port <number> or set ROUTECODEX_PORT/PORT.');
+          process.exit(1);
+        }
+        // Minimal but valid config for new configuration engine
+        const defaultConfigFull = {
+          version: '1.0.0',
+          description: 'Auto-generated default config',
+          port: explicitPort,
+          host: options.host,
           server: {
-            port: parseInt(options.port),
+            port: explicitPort,
             host: options.host
           },
           logging: {
             level: options.logLevel
           },
-          providers: {}
-        };
+          virtualrouter: {
+            inputProtocol: 'openai',
+            outputProtocol: 'openai',
+            providers: {
+              openai: {
+                id: 'openai',
+                type: 'openai',
+                enabled: true,
+                baseURL: 'https://api.openai.com/v1',
+                apiKey: [process.env.OPENAI_API_KEY || '${OPENAI_API_KEY}'],
+                models: {
+                  'gpt-4': { maxTokens: 8192 },
+                  'gpt-3.5-turbo': { maxTokens: 4096 }
+                }
+              }
+            },
+            routing: {
+              default: ['openai.gpt-4'],
+              coding: ['openai.gpt-4'],
+              longcontext: ['openai.gpt-4'],
+              tools: ['openai.gpt-4'],
+              thinking: ['openai.gpt-4'],
+              vision: ['openai.gpt-4'],
+              websearch: ['openai.gpt-4'],
+              background: ['openai.gpt-4']
+            }
+          }
+        } as Record<string, unknown>;
 
         // Use template if available
         if (fs.existsSync(templatePath)) {
           const template: TemplateConfig = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
-          defaultConfig = {
-            server: {
-              ...(template.server || {}),
-              port: parseInt(options.port),
-              host: options.host
-            },
-            logging: {
-              ...(template.logging || {}),
-              level: options.logLevel
-            },
-            providers: (template as UnknownObject).providers || {}
-          } as DefaultConfig;
+          // Merge explicit port/host into template
+          (template as any).server = { ...(template.server || {}), port: explicitPort, host: options.host };
+          (template as any).port = explicitPort;
+          (template as any).host = options.host;
+          // Fall back to our defaultFull if template is incomplete
+          const merged = { ...defaultConfigFull, ...(template as any) };
+          fs.writeFileSync(configPath, JSON.stringify(merged, null, 2));
+        } else {
+          fs.writeFileSync(configPath, JSON.stringify(defaultConfigFull, null, 2));
         }
-
-        fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
         logger.success(`Default configuration created: ${configPath}`);
       }
 
-      // Determine target port from config
-      const resolvedPort = determinePort(configPath, parseInt(options.port, 10));
+      // Determine target port from config/env; avoid hardcoded fallback
+      const resolvedPort = determinePort(configPath, options.port ? parseInt(options.port, 10) : undefined);
+      if (!resolvedPort || Number.isNaN(resolvedPort)) {
+        spinner.fail('HTTP server port not found. Pass --port or set ROUTECODEX_PORT/PORT or include in config.');
+        process.exit(1);
+      }
 
-      // Ensure port state aligns with requested behavior (no implicit self-stop)
-      await ensurePortAvailable(resolvedPort, spinner, { restart: !!options.restart });
+      // Ensure port state aligns with requested behavior
+      // 默认不回收端口，只有 --restart 或设置 ROUTECODEX_FORCE_FREE_PORT=1 时才回收，避免误判导致的干扰
+      const forceFree = process.env.ROUTECODEX_FORCE_FREE_PORT === '1' || !!options.restart;
+      if (forceFree) {
+        await ensurePortAvailable(resolvedPort, spinner, { restart: true });
+      }
 
       // simple-log application removed
 
@@ -207,7 +247,7 @@ program
         fs.writeFileSync(pidFile, String(childProc.pid ?? ''), 'utf8');
       } catch { /* ignore */ }
 
-      spinner.succeed(`RouteCodex server starting on ${options.host}:${options.port}`);
+      spinner.succeed(`RouteCodex server starting on ${options.host}:${resolvedPort}`);
       logger.info(`Configuration loaded from: ${configPath}`);
       logger.info('Press Ctrl+C to stop the server');
 
@@ -351,9 +391,11 @@ async function initializeConfig(configPath: string, template?: string, force: bo
     switch (template) {
       case 'lmstudio':
         templateConfig = {
+          port: 5520,
+          host: "127.0.0.1",
           server: {
-            port: 5506,
-            host: "localhost"
+            port: 5520,
+            host: "127.0.0.1"
           },
           logging: {
             level: "info"
@@ -410,9 +452,11 @@ async function initializeConfig(configPath: string, template?: string, force: bo
 
       case 'oauth':
         templateConfig = {
+          port: 5520,
+          host: "127.0.0.1",
           server: {
-            port: 5506,
-            host: "localhost"
+            port: 5520,
+            host: "127.0.0.1"
           },
           logging: {
             level: "info"
@@ -486,9 +530,11 @@ async function initializeConfig(configPath: string, template?: string, force: bo
 
       default:
         templateConfig = {
+          port: 5520,
+          host: "127.0.0.1",
           server: {
-            port: 5506,
-            host: "localhost"
+            port: 5520,
+            host: "127.0.0.1"
           },
           logging: {
             level: "info"
@@ -527,7 +573,15 @@ async function initializeConfig(configPath: string, template?: string, force: bo
     }
 
     // Write configuration file
-    fs.writeFileSync(configPath, JSON.stringify(templateConfig, null, 2));
+    // Persist both server.* and root-level port/host for compatibility
+    const toWrite = { ...(templateConfig as any) };
+    if (!('port' in toWrite) && toWrite.server?.port) {
+      (toWrite as any).port = toWrite.server.port;
+    }
+    if (!('host' in toWrite) && toWrite.server?.host) {
+      (toWrite as any).host = toWrite.server.host;
+    }
+    fs.writeFileSync(configPath, JSON.stringify(toWrite, null, 2));
 
     spinner.succeed(`Configuration initialized: ${configPath}`);
     logger.info(`Template used: ${template || 'default'}`);
@@ -549,7 +603,11 @@ program
     try {
       // Resolve config path and port
       const configPath = path.join(homedir(), '.routecodex', 'config.json');
-      const resolvedPort = determinePort(configPath, options.port ? parseInt(options.port, 10) : 5520);
+      const resolvedPort = determinePort(configPath, options.port ? parseInt(options.port, 10) : undefined);
+      if (!resolvedPort || Number.isNaN(resolvedPort)) {
+        spinner.fail('HTTP server port not found. Pass --port or set ROUTECODEX_PORT/PORT or include in config.');
+        process.exit(1);
+      }
 
       const pids = findListeningPids(resolvedPort);
       if (!pids.length) {
@@ -593,7 +651,11 @@ program
     try {
       // Resolve config and port
       const configPath = options.config || path.join(homedir(), '.routecodex', 'config.json');
-      const resolvedPort = determinePort(configPath, options.port ? parseInt(options.port, 10) : 5520);
+      const resolvedPort = determinePort(configPath, options.port ? parseInt(options.port, 10) : undefined);
+      if (!resolvedPort || Number.isNaN(resolvedPort)) {
+        spinner.fail('HTTP server port not found. Pass --port or set ROUTECODEX_PORT/PORT or include in config.');
+        process.exit(1);
+      }
 
       // Stop current instance (if any)
       const pids = findListeningPids(resolvedPort);
@@ -725,7 +787,12 @@ program
         });
       };
 
-      const status = await checkServer(5506, 'localhost');
+      // Try to detect port from config or environment
+      const cfgPath = path.join(homedir(), '.routecodex', 'config.json');
+      const envPort = parseInt(String(process.env.ROUTECODEX_PORT || process.env.PORT || ''), 10);
+      const portCandidate = determinePort(cfgPath, Number.isFinite(envPort) ? envPort : undefined);
+      const targetPort = (!portCandidate || Number.isNaN(portCandidate)) ? envPort : portCandidate;
+      const status = await checkServer((!targetPort || Number.isNaN(targetPort)) ? 0 : targetPort, '127.0.0.1');
 
       if (options.json) {
         console.log(JSON.stringify(status, null, 2));
@@ -878,46 +945,64 @@ program
 
     console.log(chalk.yellow('6. Testing:'));
     console.log('  # Test with curl');
-    console.log('  curl -X POST http://localhost:5506/v1/chat/completions \\');
+    console.log('  curl -X POST http://127.0.0.1:5520/v1/chat/completions \\');
     console.log('    -H "Content-Type: application/json" \\');
     console.log('    -H "Authorization: Bearer test-key" \\');
     console.log('    -d \'{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello!"}]}\'');
     console.log('');
   });
 
-function determinePort(configPath: string, fallback: number): number {
+function determinePort(configPath: string, fallback?: number): number {
+  // Try from config
   try {
-    const content = fs.readFileSync(configPath, 'utf8');
-    const config = JSON.parse(content);
-    const candidate = config?.server?.port ?? config?.httpserver?.port ?? config?.port;
-    const parsed = parseInt(candidate, 10);
-    if (!Number.isNaN(parsed) && parsed > 0) {
-      return parsed;
+    if (configPath && fs.existsSync(configPath)) {
+      const content = fs.readFileSync(configPath, 'utf8');
+      const config = JSON.parse(content);
+      const candidate = config?.server?.port ?? config?.httpserver?.port ?? config?.port;
+      const parsed = parseInt(candidate, 10);
+      if (!Number.isNaN(parsed) && parsed > 0) {
+        return parsed;
+      }
     }
   } catch {
-    // ignore parsing errors and fall back
+    // ignore parsing errors
   }
-  return fallback;
+  // Try from environment
+  try {
+    const envPort = parseInt(String(process.env.ROUTECODEX_PORT || process.env.PORT || ''), 10);
+    if (!Number.isNaN(envPort) && envPort > 0) {
+      return envPort;
+    }
+  } catch { /* ignore */ }
+  // Fallback only if provided
+  if (typeof fallback === 'number' && !Number.isNaN(fallback) && fallback > 0) {
+    return fallback;
+  }
+  return NaN as unknown as number;
 }
 
 async function ensurePortAvailable(port: number, parentSpinner: Ora, opts: { restart?: boolean } = {}): Promise<void> {
   if (!port || Number.isNaN(port)) { return; }
 
+  // Quick probe to avoid false positives: if we can bind, it's free
+  const canBind = await canBindQuick(port);
+  if (canBind) { return; }
+
   const initialPids = findListeningPids(port);
   if (initialPids.length === 0) { return; }
 
-  // If a healthy server is already running and no restart requested, report and exit gracefully
+  // 仅当明确要求重启时才强制回收端口
   const healthy = await isServerHealthyQuick(port);
   if (healthy && !opts.restart) {
+    // 健康且未请求重启：直接提示已运行，避免误杀
     parentSpinner.stop();
     logger.success(`RouteCodex is already running on port ${port}.`);
-    logger.info(`Use 'routecodex stop' or 'routecodex start --restart' to restart.`);
-    process.exit(0);
+    return; // 不回收
   }
 
   parentSpinner.stop();
   logger.warning(`Port ${port} is in use by PID(s): ${initialPids.join(', ')}`);
-  const stopSpinner = ora(`Port ${port} is in use on 0.0.0.0. Attempting graceful stop...`).start();
+  const stopSpinner = ora(`Port ${port} is in use. Attempting graceful stop...`).start();
   const gracefulTimeout = Number(process.env.ROUTECODEX_STOP_TIMEOUT_MS ?? 5000);
   const killTimeout = Number(process.env.ROUTECODEX_KILL_TIMEOUT_MS ?? 3000);
   const pollInterval = 150;
@@ -968,7 +1053,9 @@ async function ensurePortAvailable(port: number, parentSpinner: Ora, opts: { res
   }
 
   remaining = findListeningPids(port);
-  if (remaining.length) {
+  // Double-check with bind probe to avoid lsof quirks
+  const freedByProbe = await canBindQuick(port);
+  if (!freedByProbe && remaining.length) {
     stopSpinner.fail(`Failed to free port ${port}. Still held by PID(s): ${remaining.join(', ')}`);
     logger.error(`Failed to free port ${port}. Still held by PID(s): ${remaining.join(', ')}`);
     throw new Error(`Failed to free port ${port}`);
@@ -1002,6 +1089,22 @@ function findListeningPids(port: number): number[] {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Try binding to the port to determine availability (IPv4 loopback)
+async function canBindQuick(port: number): Promise<boolean> {
+  try {
+    const net = await import('net');
+    const server: any = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', (err: any) => reject(err));
+      server.listen({ host: '127.0.0.1', port }, () => resolve());
+    });
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Fallback keypress setup: capture Ctrl+C and 'q' to trigger shutdown when SIGINT is not delivered

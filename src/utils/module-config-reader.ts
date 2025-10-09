@@ -99,8 +99,8 @@ export class ModuleConfigReader {
           enabled: true,
           config: {
             moduleType: 'http-server',
-            port: 5506,
-            host: 'localhost',
+            port: 0,
+            host: '127.0.0.1',
             cors: {
               origin: '*',
               credentials: true,
