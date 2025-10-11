@@ -48,6 +48,7 @@ export interface HttpServerConfig {
 export class HttpServer extends BaseModule implements IHttpServer {
   private app: Application;
   private server?: unknown;
+  private servers: unknown[] = [];
   private moduleConfigReader: ModuleConfigReader;
   private openaiRouter: OpenAIRouter;
   private requestHandler: RequestHandler;
@@ -558,36 +559,58 @@ export class HttpServer extends BaseModule implements IHttpServer {
     }
 
     const config = await this.getServerConfig();
+    const rootCfg = (this.config as UnknownObject) || {};
+    const dualStack: boolean = Boolean((rootCfg as any).dualStack ?? (rootCfg as any)?.server?.dualStack);
+    const requestedHost = config.server.host;
+    const hostsToBind: string[] = (() => {
+      if (!dualStack) { return [requestedHost]; }
+      const set = new Set<string>();
+      const lower = String(requestedHost || '').toLowerCase();
+      if (lower === 'localhost') { set.add('127.0.0.1'); set.add('::1'); }
+      else if (lower === '127.0.0.1') { set.add('127.0.0.1'); set.add('::1'); }
+      else if (lower === '::1') { set.add('::1'); set.add('127.0.0.1'); }
+      else { set.add(requestedHost); }
+      return Array.from(set.values());
+    })();
 
     return new Promise((resolve, reject) => {
-      this.server = this.app.listen(config.server.port, config.server.host, () => {
+      let resolved = false;
+      const onBound = (host: string, srv: any) => {
         this._isRunning = true;
         this.startupTime = Date.now();
-
-        this.debugEventBus.publish({
-          sessionId: `p${config.server.port}_http_server_started_${Date.now()}`,
-          moduleId: 'http-server',
-          operationId: 'http_server_started',
-          timestamp: Date.now(),
-          type: 'start',
-          position: 'middle',
-          data: {
-            port: config.server.port,
-            host: config.server.host,
-            uptime: this.getUptime(),
-          },
-        });
-
-        console.log(
-          `🚀 RouteCodex HTTP Server started on http://${config.server.host}:${config.server.port}`
-        );
-        resolve();
-      });
-
-      (this.server as any).on('error', async (error: Error) => {
+        this.servers.push(srv);
+        if (!this.server) { this.server = srv; }
+        try {
+          this.debugEventBus.publish({
+            sessionId: `p${config.server.port}_http_server_started_${Date.now()}`,
+            moduleId: 'http-server',
+            operationId: 'http_server_started',
+            timestamp: Date.now(),
+            type: 'start',
+            position: 'middle',
+            data: {
+              port: config.server.port,
+              host,
+              uptime: this.getUptime(),
+            },
+          });
+        } catch { /* ignore */ }
+        console.log(`🚀 RouteCodex HTTP Server started on http://${host}:${config.server.port}`);
+        if (!resolved) { resolved = true; resolve(); }
+      };
+      const onError = async (error: Error) => {
         await this.handleError(error as Error, 'server_start');
-        reject(error);
-      });
+        if (!resolved) { resolved = true; reject(error); }
+      };
+
+      for (const h of hostsToBind) {
+        try {
+          const srv: any = this.app.listen(config.server.port, h, () => onBound(h, srv));
+          srv.on('error', onError);
+        } catch (e) {
+          // try next, but if all fail, we will reject via onError
+        }
+      }
     });
   }
 
@@ -596,34 +619,39 @@ export class HttpServer extends BaseModule implements IHttpServer {
    */
   public async stop(): Promise<void> {
     try {
-      if (this.server) {
-        return new Promise(resolve => {
-          (this.server as any).close(async () => {
-            this._isRunning = false;
-
-            // Stop all components
-            await this.openaiRouter.stop();
-            await this.providerManager.stop();
-            await this.requestHandler.stop();
-            // Config manager doesn't need to be closed in new architecture
-            await this.errorHandling.destroy();
-
-            this.debugEventBus.publish({
-              sessionId: `session_${Date.now()}`,
-              moduleId: 'http-server',
-              operationId: 'http_server_stopped',
-              timestamp: Date.now(),
-              type: 'end',
-              position: 'middle',
-              data: {
-                uptime: this.getUptime(),
-              },
-            });
-
-            console.log('🛑 RouteCodex HTTP Server stopped');
-            resolve();
-          });
+      const toClose: unknown[] = this.servers && this.servers.length ? this.servers : (this.server ? [this.server] : []);
+      if (toClose.length) {
+        await new Promise<void>((resolveAll) => {
+          let remaining = toClose.length;
+          const done = () => { remaining -= 1; if (remaining <= 0) resolveAll(); };
+          for (const srv of toClose) {
+            try { (srv as any).close(() => done()); } catch { done(); }
+          }
         });
+        this._isRunning = false;
+        this.servers = [];
+
+        // Stop all components
+        await this.openaiRouter.stop();
+        await this.providerManager.stop();
+        await this.requestHandler.stop();
+        // Config manager doesn't need to be closed in new architecture
+        await this.errorHandling.destroy();
+
+        this.debugEventBus.publish({
+          sessionId: `session_${Date.now()}`,
+          moduleId: 'http-server',
+          operationId: 'http_server_stopped',
+          timestamp: Date.now(),
+          type: 'end',
+          position: 'middle',
+          data: {
+            uptime: this.getUptime(),
+          },
+        });
+
+        console.log('🛑 RouteCodex HTTP Server stopped');
+        return;
       }
     } catch (error) {
       await this.handleError(error as Error, 'server_stop');
