@@ -543,8 +543,8 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       if (this.enableTools) {
         // OpenAI multi-tool schema
         if (message.tool_calls) {
-        const toolBlocks = this.convertOpenAIToolCallsToAnthropic(message.tool_calls);
-        blocks.push(...toolBlocks);
+          const toolBlocks = this.convertOpenAIToolCallsToAnthropic(message.tool_calls);
+          blocks.push(...toolBlocks);
         }
         // Legacy single function_call schema
         if (message.function_call) {
@@ -562,7 +562,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       }
       transformed.content = blocks;
       // Map finish_reason. If any tool calls present, prefer 'tool_use' to drive client tool flow.
-      const hasToolCalls = Array.isArray((message as any).tool_calls) && (message as any).tool_calls.length > 0;
+      const hasToolCalls = Array.isArray(blocks) && blocks.some((b: any) => b && b.type === 'tool_use');
       const hasLegacyFn = !!(message as any).function_call;
       if (hasToolCalls || hasLegacyFn) {
         transformed.stop_reason = 'tool_use';
@@ -586,14 +586,57 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
 
   private convertOpenAIToolCallsToAnthropic(toolCalls: any[]): any[] {
     if (!toolCalls) {return [];}
-    return toolCalls.map(call => {
+    const out: any[] = [];
+    const coerceArgs = (raw: any): any => {
+      if (raw === undefined || raw === null) { return {}; }
+      if (typeof raw === 'object') { return raw; }
+      if (typeof raw !== 'string') { return { _raw: String(raw) }; }
+      const s = raw.trim();
+      if (!s) { return {}; }
+      // Try strict JSON first
+      const j = safeParse(s);
+      if (j !== undefined) { return j; }
+      // Try fenced or substring JSON
+      const fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+      const jsonCandidate = fence ? fence[1] : s;
+      const objMatch = jsonCandidate.match(/\{[\s\S]*\}/);
+      if (objMatch) { const p = safeParse(objMatch[0]); if (p !== undefined) return p; }
+      const arrMatch = jsonCandidate.match(/\[[\s\S]*\]/);
+      if (arrMatch) { const p = safeParse(arrMatch[0]); if (p !== undefined) return p; }
+      // Try json-ish: single quotes and unquoted keys
+      let t = jsonCandidate.replace(/'([^']*)'/g, '"$1"');
+      t = t.replace(/([\{,\s])([A-Za-z_][A-Za-z0-9_\-]*)\s*:/g, '$1"$2":');
+      const jj = safeParse(t);
+      if (jj !== undefined) { return jj; }
+      // Try key=value lines
+      const obj: Record<string, any> = {};
+      const parts = s.split(/[\n,]+/).map(p => p.trim()).filter(Boolean);
+      for (const p of parts) {
+        const m = p.match(/^([A-Za-z_][A-Za-z0-9_\-]*)\s*[:=]\s*(.+)$/);
+        if (!m) continue;
+        const key = m[1];
+        let val = m[2].trim();
+        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) { val = val.slice(1, -1); }
+        const pv = safeParse(val);
+        if (pv !== undefined) { obj[key] = pv; continue; }
+        if (/^(true|false)$/i.test(val)) { obj[key] = /^true$/i.test(val); continue; }
+        if (/^-?\d+(?:\.\d+)?$/.test(val)) { obj[key] = Number(val); continue; }
+        obj[key] = val;
+      }
+      if (Object.keys(obj).length) { return obj; }
+      return { _raw: s };
+    };
+
+    for (const call of toolCalls) {
       const rawName = call?.function?.name;
-      const rawArgs = safeParse(call?.function?.arguments) ?? {};
+      const argIn = coerceArgs(call?.function?.arguments);
       const id = call?.id || `call_${Math.random().toString(36).slice(2,8)}`;
-      // Always normalize tool calls to ensure proper field mapping from OpenAI to Anthropic format
-      const { name, args } = this.normalizeStandardToolCall(rawName, rawArgs);
-      return { type: 'tool_use', id, name, input: args };
-    });
+      const { name, args } = this.normalizeStandardToolCall(rawName, argIn);
+      // Drop empty input to avoid invalid parameter errors downstream
+      if (!args || (typeof args === 'object' && Object.keys(args).length === 0)) { continue; }
+      out.push({ type: 'tool_use', id, name, input: args });
+    }
+    return out;
   }
 
   /**
