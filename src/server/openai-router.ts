@@ -779,6 +779,7 @@ export class OpenAIRouter extends BaseModule {
           }
         } catch { /* non-blocking */ }
 
+        const endpointStr = `${(req.baseUrl || '')}${req.url || ''}`;
         const pipelineRequest = {
           data: {
             ...(req.body || {}),
@@ -794,6 +795,8 @@ export class OpenAIRouter extends BaseModule {
             method: req.method,
             url: req.url,
             headers: this.sanitizeHeaders(req.headers),
+            targetProtocol: 'openai',
+            endpoint: endpointStr,
           },
           debug: {
             enabled: this.config.enableMetrics ?? true,
@@ -1097,6 +1100,7 @@ export class OpenAIRouter extends BaseModule {
         const upstreamAuth2 = (req.headers['x-rcc-upstream-authorization'] || req.headers['x-rc-upstream-authorization']) as string | undefined;
         const allowOverride2 = process.env.RCC_ALLOW_UPSTREAM_OVERRIDE === '1' || !!upstreamAuth2;
         const chosenOverride2 = allowOverride2 ? (upstreamAuth2 || authHeader2) : undefined;
+        const endpointStr2 = `${(req.baseUrl || '')}${req.url || ''}`;
         const pipelineRequest = {
           data: {
             ...(req.body || {}),
@@ -1112,6 +1116,8 @@ export class OpenAIRouter extends BaseModule {
             method: req.method,
             url: req.url,
             headers: this.sanitizeHeaders(req.headers),
+            targetProtocol: 'openai',
+            endpoint: endpointStr2,
           },
           debug: {
             enabled: this.config.enableMetrics ?? true,

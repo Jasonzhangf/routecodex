@@ -191,11 +191,18 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
    * 基于端点检测协议
    */
   private detectProtocolByEndpoint(request: any): 'anthropic' | 'openai' {
+    // 优先使用显式目标协议
+    const explicit = (request?._metadata?.targetProtocol || request?.metadata?.targetProtocol) as string | undefined;
+    if (explicit && (explicit === 'anthropic' || explicit === 'openai')) {
+      return explicit;
+    }
+
     // 尝试从多个位置获取端点信息
-    const endpoint = request._metadata?.endpoint || 
-                     request.endpoint || 
-                     request.metadata?.url || 
-                     request.url || 
+    const endpoint = request._metadata?.endpoint ||
+                     request.endpoint ||
+                     request.metadata?.endpoint ||
+                     request.metadata?.url ||
+                     request.url ||
                      '';
     
     console.log(`[UnifiedLLMSwitch] DEBUG - Endpoint detection: endpoint="${endpoint}"`);

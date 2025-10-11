@@ -842,6 +842,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
             method: req.method,
             url: '/v1/anthropic/messages',
             headers: req.headers,
+            targetProtocol: 'anthropic',
+            endpoint: '/v1/anthropic/messages'
           },
           debug: { enabled: true, stages: { llmSwitch: true, workflow: true, compatibility: true, provider: true } },
         } as UnknownObject;
@@ -903,7 +905,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
           try { res.write(JSON.stringify(data)); } catch { /* ignore */ }
           try { res.end(); } catch { /* ignore */ }
         } else {
-          res.status(200).json(data);
+        try { res.setHeader('x-rc-target-protocol', 'anthropic'); } catch { /* ignore */ }
+        res.status(200).json(data);
         }
       } catch (err) {
         res.status(500).json({ error: { message: (err as Error).message || 'Anthropic handler error' } });
@@ -991,6 +994,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
             method: req.method,
             url: '/v1/messages',
             headers: req.headers,
+            targetProtocol: 'anthropic',
+            endpoint: '/v1/messages'
           },
           debug: { enabled: true, stages: { llmSwitch: true, workflow: true, compatibility: true, provider: true } },
         } as UnknownObject;
@@ -1049,7 +1054,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
           try { res.write(JSON.stringify(data)); } catch { /* ignore */ }
           try { res.end(); } catch { /* ignore */ }
         } else {
-          res.status(200).json(data);
+        try { res.setHeader('x-rc-target-protocol', 'anthropic'); } catch { /* ignore */ }
+        res.status(200).json(data);
         }
       } catch (err) {
         res.status(500).json({ error: { message: (err as Error).message || 'Anthropic handler error' } });

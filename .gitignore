@@ -56,3 +56,13 @@ debug/
 debug-logs/
 config/merged-config.*.json
 experiments/
+
+# Local caches and package tarballs
+.npm-cache/
+routecodex-*.tgz
+
+# Generated test artifacts
+tests/output/
+
+# Generated merged configs under sharedmodule
+sharedmodule/config-engine/config/merged-config.*.json
