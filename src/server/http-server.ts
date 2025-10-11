@@ -787,7 +787,9 @@ export class HttpServer extends BaseModule implements IHttpServer {
     this.app.use('/v1', openaiRouter);
 
     // Anthropic API: minimal /v1/anthropic/messages passthrough into pipeline with unified llmswitch
-    this.app.post('/v1/anthropic/messages', async (req: Request, res: Response) => {
+    // Allow disabling this alias via config: set anthropicAlias: false at root level
+    const anthropicAliasEnabled = ((this.config as any)?.anthropicAlias !== false);
+    if (anthropicAliasEnabled) this.app.post('/v1/anthropic/messages', async (req: Request, res: Response) => {
       try {
         if (!this.pipelineManager || !this.routePools) {
           return res.status(503).json({ error: { message: 'Pipeline not ready', code: 'pipeline_not_ready' } });
