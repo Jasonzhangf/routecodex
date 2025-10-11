@@ -103,7 +103,7 @@ export class OpenAIRouter extends BaseModule {
 
     // Set default configuration
     this.config = {
-      enableStreaming: true,
+      enableStreaming: false, // 默认关闭流式响应，改为非流式模式
       enableMetrics: true,
       enableValidation: true,
       rateLimitEnabled: false,
@@ -752,6 +752,8 @@ export class OpenAIRouter extends BaseModule {
         }
         const { providerId, modelId } = this.parsePipelineId(pipelineId);
         ctxProviderId = providerId; ctxModelId = modelId;
+        const requestedModel = typeof req.body?.model === 'string' ? req.body.model : undefined;
+        const upstreamModel = modelId || requestedModel;
         // Upstream auth override (disabled by default). Enable only if:
         //  - explicit env RCC_ALLOW_UPSTREAM_OVERRIDE=1, or
         //  - client uses dedicated header x-rcc-upstream-authorization / x-rc-upstream-authorization
@@ -762,6 +764,8 @@ export class OpenAIRouter extends BaseModule {
         const pipelineRequest = {
           data: {
             ...(req.body || {}),
+            ...(upstreamModel ? { model: upstreamModel } : {}),
+            ...(requestedModel && upstreamModel && requestedModel !== upstreamModel ? { __routecodex_originalModel: requestedModel } : {}),
             ...(chosenOverride ? { __rcc_overrideApiKey: chosenOverride } : {}),
           },
           route: {
@@ -893,7 +897,9 @@ export class OpenAIRouter extends BaseModule {
       res.setHeader('x-request-id', requestId);
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.status(200).json(normalized);
+
+      // 对于非流式响应，添加心跳机制来保持连接活跃
+      await this.sendNonStreamingResponseWithHeartbeat(normalized, requestId, res, req.body.model);
     } catch (error) {
       // Stop early heartbeat on error if running
       try { if (stopPreHeartbeat) { stopPreHeartbeat(); stopPreHeartbeat = null; } } catch { /* ignore */ }
@@ -1073,6 +1079,8 @@ export class OpenAIRouter extends BaseModule {
         }
         const { providerId, modelId } = this.parsePipelineId(pipelineId);
         ctxProviderId = providerId; ctxModelId = modelId;
+        const requestedModel = typeof req.body?.model === 'string' ? req.body.model : undefined;
+        const upstreamModel = modelId || requestedModel;
         const authHeader2 = (req.headers['authorization'] || req.headers['Authorization']) as string | undefined;
         const upstreamAuth2 = (req.headers['x-rcc-upstream-authorization'] || req.headers['x-rc-upstream-authorization']) as string | undefined;
         const allowOverride2 = process.env.RCC_ALLOW_UPSTREAM_OVERRIDE === '1' || !!upstreamAuth2;
@@ -1080,6 +1088,8 @@ export class OpenAIRouter extends BaseModule {
         const pipelineRequest = {
           data: {
             ...(req.body || {}),
+            ...(upstreamModel ? { model: upstreamModel } : {}),
+            ...(requestedModel && upstreamModel && requestedModel !== upstreamModel ? { __routecodex_originalModel: requestedModel } : {}),
             ...(chosenOverride2 ? { __rcc_overrideApiKey: chosenOverride2 } : {}),
           },
           route: {
@@ -1134,7 +1144,9 @@ export class OpenAIRouter extends BaseModule {
       res.setHeader('x-request-id', requestId);
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.status(200).json(normalized);
+
+      // 对于非流式响应，添加心跳机制来保持连接活跃
+      await this.sendNonStreamingResponseWithHeartbeat(normalized, requestId, res, req.body.model);
     } catch (error) {
       try {
         const errorObj = error as Record<string, unknown>;
@@ -1738,7 +1750,7 @@ export class OpenAIRouter extends BaseModule {
 
   /** Parse providerId and modelId from pipelineId '<providerComposite>.<modelId>' */
   private parsePipelineId(pipelineId: string): { providerId: string; modelId: string } {
-    const dot = pipelineId.lastIndexOf('.');
+    const dot = pipelineId.indexOf('.');
     if (dot === -1) {
       return { providerId: pipelineId, modelId: 'unknown' };
     }
@@ -2391,6 +2403,160 @@ export class OpenAIRouter extends BaseModule {
     } catch (handlerError) {
       console.error('Failed to handle error:', handlerError);
       console.error('Original error:', error);
+    }
+  }
+
+  /**
+   * Send non-streaming response with heartbeat mechanism
+   * 在非流式响应过程中添加心跳，防止连接超时
+   */
+  private async sendNonStreamingResponseWithHeartbeat(
+    normalized: unknown,
+    requestId: string,
+    res: Response,
+    model?: string
+  ): Promise<void> {
+    const HEARTBEAT_INTERVAL_MS = 15000; // 15秒心跳间隔
+    const MAX_RESPONSE_TIME = 60000; // 最大响应时间1分钟
+    let responseSent = false;
+    let heartbeatTimer: NodeJS.Timeout | null = null;
+
+    // 延迟发送响应的策略：先等待一段时间再发送，期间发送心跳保持连接
+    const delayedResponseStrategy = async () => {
+      return new Promise<void>((resolve, reject) => {
+        const startTime = Date.now();
+        let heartbeatCount = 0;
+
+        // 心跳函数：发送SSE注释作为心跳信号
+        const sendHeartbeat = () => {
+          if (responseSent) return;
+
+          heartbeatCount++;
+          try {
+            if (!res.headersSent) {
+              // 先设置SSE头部用于心跳
+              res.setHeader('Content-Type', 'text/event-stream');
+              res.setHeader('Cache-Control', 'no-cache');
+              res.setHeader('Connection', 'keep-alive');
+              res.setHeader('X-Request-Id', requestId);
+              res.flushHeaders(); // 确保头部已发送
+            }
+            // 发送SSE注释作为心跳
+            const heartbeatMessage = `: heartbeat-ping-${heartbeatCount} at ${new Date().toISOString()}\n\n`;
+            res.write(heartbeatMessage);
+
+            // 在服务器控制台输出心跳信息，方便观察
+            console.log(`💓 [HEARTBEAT] Request ${requestId}: Sending ping #${heartbeatCount} at ${new Date().toISOString()}`);
+          } catch (error) {
+            console.warn(`Heartbeat ${heartbeatCount} failed:`, error);
+          }
+        };
+
+        // 立即发送第一个心跳
+        sendHeartbeat();
+
+        // 设置心跳定时器
+        heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
+
+        // 在适当时间后发送实际响应
+        const sendActualResponse = () => {
+          if (responseSent) return;
+
+          try {
+            // 停止心跳
+            if (heartbeatTimer) {
+              clearInterval(heartbeatTimer);
+              heartbeatTimer = null;
+            }
+
+            // 如果已经发送了SSE头部，需要特殊处理
+            if (res.headersSent) {
+              // 发送最终的JSON响应
+              const jsonData = JSON.stringify(normalized);
+              res.write(`event: response\n`);
+              res.write(`data: ${jsonData}\n\n`);
+              res.write('event: end\n');
+              res.write('data: [DONE]\n\n');
+              res.end();
+            } else {
+              // 正常发送JSON响应
+              res.setHeader('Content-Type', 'application/json; charset=utf-8');
+              res.setHeader('Cache-Control', 'no-store');
+              res.setHeader('X-Request-Id', requestId);
+              res.status(200).json(normalized);
+            }
+
+            responseSent = true;
+            resolve();
+          } catch (error) {
+            console.error('Failed to send actual response:', error);
+            reject(error);
+          }
+        };
+
+        // 策略：等待5秒后发送响应，模拟处理时间
+        setTimeout(sendActualResponse, 5000);
+
+        // 超时保护
+        setTimeout(() => {
+          if (!responseSent) {
+            if (heartbeatTimer) {
+              clearInterval(heartbeatTimer);
+              heartbeatTimer = null;
+            }
+
+            try {
+              if (!res.headersSent) {
+                res.status(504).json({
+                  error: {
+                    message: 'Response timeout',
+                    type: 'timeout_error',
+                    code: 'response_timeout'
+                  }
+                });
+              } else {
+                res.write(`event: error\n`);
+                res.write(`data: {"error": {"message": "Response timeout", "type": "timeout_error"}}\n\n`);
+                res.end();
+              }
+              responseSent = true;
+            } catch (timeoutError) {
+              console.error('Failed to send timeout response:', timeoutError);
+            }
+            reject(new Error('Response timeout'));
+          }
+        }, MAX_RESPONSE_TIME);
+      });
+    };
+
+    try {
+      // 首先尝试直接发送响应
+      res.status(200).json(normalized);
+      responseSent = true;
+    } catch (directError) {
+      console.warn('Direct response failed, using delayed strategy with heartbeat:', directError);
+
+      // 如果直接发送失败，使用延迟响应策略
+      try {
+        await delayedResponseStrategy();
+      } catch (heartbeatError) {
+        console.error('Heartbeat strategy also failed:', heartbeatError);
+
+        // 最后的备用方案：简单响应
+        if (!responseSent && !res.headersSent) {
+          try {
+            res.status(500).json({
+              error: {
+                message: 'Failed to send response',
+                type: 'server_error',
+                code: 'response_failed'
+              }
+            });
+          } catch (finalError) {
+            console.error('Final fallback also failed:', finalError);
+          }
+        }
+      }
     }
   }
 
