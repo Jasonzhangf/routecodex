@@ -1,9 +1,6 @@
 name: Duplicate Code Management
 
 on:
-  schedule:
-    # 每周运行一次重复代码检查
-    - cron: '0 2 * * 1'  # 周一凌晨2点
   workflow_dispatch:
     inputs:
       auto_fix:
