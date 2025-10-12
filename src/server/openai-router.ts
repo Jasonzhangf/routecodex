@@ -1736,7 +1736,16 @@ export class OpenAIRouter extends BaseModule {
       // to ensure tool_use arguments are delivered via input_json_delta, matching clients' expectations.
       if (looksOpenAI) {
         try {
-          const { AnthropicOpenAIConverter } = await import('../modules/pipeline/modules/llmswitch/llmswitch-anthropic-openai.js');
+          // Prefer pipeline-core facade if available, fallback to local implementation for backward-compat
+          let AnthropicOpenAIConverter: any;
+          try {
+            const core = await import('@routecodex/pipeline-core');
+            AnthropicOpenAIConverter = (core as any)?.AnthropicOpenAIConverter;
+          } catch { /* ignore */ }
+          if (!AnthropicOpenAIConverter) {
+            const local = await import('../modules/pipeline/modules/llmswitch/llmswitch-anthropic-openai.js');
+            AnthropicOpenAIConverter = (local as any)?.AnthropicOpenAIConverter;
+          }
           const toEvents = (AnthropicOpenAIConverter as any)?.toAnthropicEventsFromOpenAI;
           const events = typeof toEvents === 'function' ? toEvents(finalPayload) : [];
           // Best-effort capture of final message_stop message

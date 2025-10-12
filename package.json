@@ -24,7 +24,8 @@
   "workspaces": [
     "sharedmodule/config-engine",
     "sharedmodule/config-compat",
-    "sharedmodule/config-testkit"
+    "sharedmodule/config-testkit",
+    "sharedmodule/pipeline-core"
   ],
   "scripts": {
     "build": "npm run clean && tsc",
