@@ -1,7 +1,11 @@
-name: Strict CI/CD Pipeline (Manual)
+name: Strict CI/CD Pipeline
 
 on:
-  # Run only when manually dispatched to avoid blocking regular CI
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+  # Manual heavy run remains available
   workflow_dispatch:
 
 env:
@@ -10,9 +14,16 @@ env:
   MAX_COMPLEXITY: 10
 
 jobs:
-  # 严格的代码质量检查
+  quick-pass:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Quick pass (disabled strict checks by default)
+      run: echo "Strict checks disabled by default; use workflow_dispatch to run heavy checks." 
+
+  # 严格的代码质量检查（仅手动触发时运行）
   code-quality:
     runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
