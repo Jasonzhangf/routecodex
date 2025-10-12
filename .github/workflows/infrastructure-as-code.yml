@@ -1,19 +1,7 @@
 name: Infrastructure as Code Security
 
 on:
-  push:
-    branches: [ main, develop ]
-    paths:
-      - 'terraform/**'
-      - 'k8s/**'
-      - '.github/workflows/infrastructure-as-code.yml'
-      - 'helm/**'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'terraform/**'
-      - 'k8s/**'
-      - 'helm/**'
+  workflow_dispatch:
 
 env:
   TERRAFORM_VERSION: '1.7.0'

@@ -1,19 +1,6 @@
 name: Performance Benchmark
 
 on:
-  push:
-    branches: [ main, develop ]
-    paths:
-      - 'src/**'
-      - 'tests/performance/**'
-      - '.github/workflows/performance-benchmark.yml'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'src/**'
-      - 'tests/performance/**'
-  schedule:
-    - cron: '0 4 * * *'  # 每天凌晨4点运行
   workflow_dispatch:
     inputs:
       benchmark_type:
