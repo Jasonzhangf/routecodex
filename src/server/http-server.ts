@@ -923,24 +923,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
           debug: { enabled: true, stages: { llmSwitch: true, workflow: true, compatibility: true, provider: true } },
         } as UnknownObject;
 
-        // Capture Anthropics ingress request for diagnostics
-        try {
-          const baseDir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
-          const subDir = `${baseDir}/anth-replay`;
-          await fs.mkdir(subDir, { recursive: true });
-          const toWrite = {
-            requestId,
-            endpoint: '/v1/anthropic/messages',
-            targetProtocol: 'anthropic',
-            receivedAt: Date.now(),
-            headers: {
-              'content-type': req.get('content-type') || undefined,
-              'accept': req.get('accept') || undefined,
-            },
-            body: req.body
-          };
-          await fs.writeFile(`${subDir}/anthropic-request-${requestId}.json`, JSON.stringify(toWrite, null, 2));
-        } catch { /* non-blocking */ }
+        // (reverted) no ingress request capture here
 
         // Pre-SSE heartbeat for anthropic when waiting on pipeline (disabled when RCC_DISABLE_ANTHROPIC_STREAM=1)
         let preHeartbeat: NodeJS.Timeout | null = null;
@@ -1148,24 +1131,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
           debug: { enabled: true, stages: { llmSwitch: true, workflow: true, compatibility: true, provider: true } },
         } as UnknownObject;
 
-        // Capture Anthropics ingress request for diagnostics
-        try {
-          const baseDir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
-          const subDir = `${baseDir}/anth-replay`;
-          await fs.mkdir(subDir, { recursive: true });
-          const toWrite = {
-            requestId,
-            endpoint: '/v1/messages',
-            targetProtocol: 'anthropic',
-            receivedAt: Date.now(),
-            headers: {
-              'content-type': req.get('content-type') || undefined,
-              'accept': req.get('accept') || undefined,
-            },
-            body: req.body
-          };
-          await fs.writeFile(`${subDir}/anthropic-request-${requestId}.json`, JSON.stringify(toWrite, null, 2));
-        } catch { /* non-blocking */ }
+        // (reverted) no ingress request capture here
 
         // Pre-SSE heartbeat for anthropic when waiting on pipeline (disabled when RCC_DISABLE_ANTHROPIC_STREAM=1)
         let preHeartbeat: NodeJS.Timeout | null = null;

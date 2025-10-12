@@ -21,7 +21,7 @@ export class StreamingControlWorkflow implements WorkflowModule {
 
   private isInitialized = false;
   private logger: PipelineDebugLogger;
-  private protocolByReq: Map<string, 'anthropic' | 'openai'> = new Map();
+  private protocolByReq: Map<string, 'anthropic' | 'openai'> = new Map(); // unused after revert
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
     this.id = `workflow-${Date.now()}`;
@@ -63,15 +63,7 @@ export class StreamingControlWorkflow implements WorkflowModule {
       const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
       const payload = isDto ? (dto!.data as any) : (requestParam as any);
 
-      // Memorize target protocol per request for response stage filtering
-      try {
-        const reqId = dto?.route?.requestId || 'unknown';
-        const md: any = (requestParam as any)?.metadata || {};
-        const explicit = typeof md?.targetProtocol === 'string' ? String(md.targetProtocol).toLowerCase() : undefined;
-        const endpoint = String(md?.endpoint || md?.url || '');
-        let proto: 'anthropic' | 'openai' = explicit === 'anthropic' ? 'anthropic' : (explicit === 'openai' ? 'openai' : (endpoint.includes('/v1/messages') ? 'anthropic' : 'openai'));
-        if (reqId) this.protocolByReq.set(reqId, proto);
-      } catch { /* ignore */ }
+      // No protocol memorization needed here after revert
 
       const originalStream = payload?.stream;
       let transformedPayload = { ...(payload || {}) };
@@ -107,18 +99,11 @@ export class StreamingControlWorkflow implements WorkflowModule {
     try {
       const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
       const payload = isDto ? (response as any).data : response;
-      const reqId: string = isDto ? String((response as any)?.metadata?.requestId || '') : '';
-      const proto = (reqId && this.protocolByReq.has(reqId)) ? this.protocolByReq.get(reqId)! : 'openai';
-
-      // Optional reasoning filtering (config-driven)
-      const policy = ((this.config?.config as any)?.reasoningPolicy) || {};
-      const cleaned = this.applyReasoningPolicy(payload, proto, policy);
-
-      // Always return non-streaming response
-      if (isDto) {
-        return { ...(response as any), data: cleaned };
-      }
-      return cleaned;
+      // Always return non-streaming response. No mock streaming conversion or reasoning filtering.
+      this.logger.logModule(this.id, 'return-non-streaming-response', {
+        note: 'Streaming responses are not implemented; unified to non-streaming.'
+      });
+      return isDto ? response : payload;
 
     } catch (error) {
       this.logger.logModule(this.id, 'response-process-error', { error, response });
@@ -224,7 +209,7 @@ export class StreamingControlWorkflow implements WorkflowModule {
     config.enableStreaming = config.enableStreaming ?? true;
     config.bufferSize = config.bufferSize ?? 1024;
     config.timeout = config.timeout ?? 30000;
-    // reasoningPolicy defaults are not enforced here; they are optional and endpoint-driven
+    // No reasoning policy defaults required after revert
 
     this.logger.logModule(this.id, 'config-validation-success', {
       type: this.config.type,
@@ -234,79 +219,7 @@ export class StreamingControlWorkflow implements WorkflowModule {
     });
   }
 
-  // --- Reasoning policy helpers ---
-  private applyReasoningPolicy(payload: any, proto: 'anthropic' | 'openai', policy: any): any {
-    try {
-      const obj = (payload && typeof payload === 'object') ? { ...payload } : payload;
-      if (!obj || typeof obj !== 'object') return payload;
-      if (!Array.isArray((obj as any).choices)) return payload;
-      const dispAnth = (policy?.anthropic?.disposition === 'text') ? 'text' : 'drop';
-      const strictAnth = policy?.anthropic?.strict !== false;
-      const dispOpen = (policy?.openai?.disposition === 'safe_text') ? 'safe_text' : 'keep';
-      if (proto === 'anthropic') {
-        (obj as any).choices = (obj as any).choices.map((c: any) => this.cleanAnthropicChoice(c, dispAnth, strictAnth));
-      } else {
-        (obj as any).choices = (obj as any).choices.map((c: any) => this.cleanOpenAIChoice(c, dispOpen));
-      }
-      return obj;
-    } catch {
-      return payload;
-    }
-  }
-
-  private cleanOpenAIChoice(choiceIn: any, disposition: 'keep' | 'safe_text'): any {
-    const c = (choiceIn && typeof choiceIn === 'object') ? { ...choiceIn } : choiceIn;
-    if (!c || typeof c !== 'object') return c;
-    const msg = (c.message && typeof c.message === 'object') ? { ...c.message } : c.message;
-    if (!msg || typeof msg !== 'object') return c;
-    msg.content = this.mergeContentToString(msg.content);
-    if ('reasoning_content' in msg) {
-      if (disposition === 'safe_text') {
-        const rcStr = this.mergeContentToString((msg as any).reasoning_content);
-        msg.content = msg.content ? `${msg.content}\n${rcStr}` : rcStr;
-        delete (msg as any).reasoning_content;
-      } else {
-        (msg as any).reasoning_content = this.mergeContentToString((msg as any).reasoning_content);
-      }
-    }
-    delete (msg as any).thinking;
-    delete (msg as any).thought;
-    c.message = msg;
-    return c;
-  }
-
-  private cleanAnthropicChoice(choiceIn: any, disposition: 'drop' | 'text', _strict: boolean): any {
-    const c = (choiceIn && typeof choiceIn === 'object') ? { ...choiceIn } : choiceIn;
-    if (!c || typeof c !== 'object') return c;
-    const msg = (c.message && typeof c.message === 'object') ? { ...c.message } : c.message;
-    if (!msg || typeof msg !== 'object') return c;
-    msg.content = this.mergeContentToString(msg.content);
-    if ('reasoning_content' in msg) {
-      if (disposition === 'text') {
-        const rcStr = this.mergeContentToString((msg as any).reasoning_content);
-        msg.content = msg.content ? `${msg.content}\n${rcStr}` : rcStr;
-      }
-      delete (msg as any).reasoning_content;
-    }
-    delete (msg as any).thinking;
-    delete (msg as any).thought;
-    c.message = msg;
-    return c;
-  }
-
-  private mergeContentToString(content: any): string {
-    if (typeof content === 'string') return content;
-    if (Array.isArray(content)) {
-      const texts = content.map((it) => {
-        if (typeof it === 'string') return it;
-        if (it && typeof it === 'object' && typeof (it as any).text === 'string') return (it as any).text;
-        return '';
-      }).filter(Boolean);
-      return texts.join('');
-    }
-    if (content && typeof content === 'object' && typeof (content as any).text === 'string') return (content as any).text;
-    try { return JSON.stringify(content ?? ''); } catch { return String(content ?? ''); }
-  }
+  // Reasoning policy helpers removed in revert
 
   /**
    * Extract streaming metadata for debugging

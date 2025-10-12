@@ -102,20 +102,9 @@ class RouteCodexApp {
       // 4. 使用合并后的配置初始化服务器
       await (this.httpServer as any).initializeWithMergedConfig(mergedConfig);
 
-      // 5. 按 merged-config 组装流水线并注入（优先使用 sharedmodule/pipeline-core，失败则回退本地实现）
+      // 5. 按 merged-config 组装流水线并注入（使用本地实现；如需 core 请后续再切换）
       try {
-        let PipelineAssembler: any = null;
-        try {
-          // Prefer shared core package (phase 1 extraction)
-          const core = await import('@routecodex/pipeline-core');
-          PipelineAssembler = (core as any)?.PipelineAssembler || null;
-        } catch {
-          /* ignore and fallback */
-        }
-        if (!PipelineAssembler) {
-          // Fallback to local assembler
-          PipelineAssembler = (await import('./modules/pipeline/config/pipeline-assembler.js')).PipelineAssembler;
-        }
+        const { PipelineAssembler } = await import('./modules/pipeline/config/pipeline-assembler.js');
         const { manager, routePools } = await PipelineAssembler.assemble(mergedConfig);
         (this.httpServer as any).attachPipelineManager(manager);
         (this.httpServer as any).attachRoutePools(routePools);

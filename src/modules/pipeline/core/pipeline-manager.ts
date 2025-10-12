@@ -810,7 +810,6 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('openai-normalizer', this.createOpenAINormalizerModule);
     this.registry.registerModule('anthropic-openai-converter', this.createAnthropicOpenAIConverterModule);
     this.registry.registerModule('streaming-control', this.createStreamingControlModule);
-    this.registry.registerModule('workflow-reasoning-filter', this.createReasoningFilterModule);
     this.registry.registerModule('field-mapping', this.createFieldMappingModule);
     this.registry.registerModule('qwen-compatibility', this.createQwenCompatibilityModule);
     // GLM compatibility module
@@ -1046,10 +1045,6 @@ export class PipelineManager implements RCCBaseModule {
   private createStreamingControlModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { StreamingControlWorkflow } = await import('../modules/workflow/streaming-control.js');
     return new StreamingControlWorkflow(config, dependencies);
-  };
-  private createReasoningFilterModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { ReasoningFilterWorkflow } = await import('../modules/workflow/reasoning-filter.js');
-    return new ReasoningFilterWorkflow(config, dependencies);
   };
 
   private createFieldMappingModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
