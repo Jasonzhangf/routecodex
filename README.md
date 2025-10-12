@@ -557,15 +557,9 @@ const result = await provider.processIncoming(
   - If no port is provided, the server will fail to start with an explicit error.
 - Merged config output: `~/routecodex/config/merged-config.json`
 
-### Helper Scripts
+### Helper Notes
 
-- `test-config.sh`
-  - Starts server with `ROUTECODEX_CONFIG_PATH=~/.routecodex/config/modelscope.json`
-  - Captures output to `server-output.log` and checks pipeline logs
-- `graceful-port-handler.sh <port> [timeout]`
-  - Frees port gracefully, then launches server with `ROUTECODEX_CONFIG_PATH` set to the config file path
-  - Example: `./graceful-port-handler.sh 5506 10`
-  - Note: The HTTP port is determined by your user config. The script argument is only for freeing the port.
+Port cleanup is now handled by the built‑in CLI (routecodex start --restart) and server shutdown endpoint. No external helper scripts are required.
 
 ### 🔧 Simplified Logging System
 
