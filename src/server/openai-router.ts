@@ -1693,128 +1693,93 @@ export class OpenAIRouter extends BaseModule {
     try {
       let iterator: AsyncIterableIterator<unknown> | null = null;
       const streamObj = response && ((response as any).data ?? response);
-      if (streamObj && typeof streamObj === 'object' && streamObj !== null) {
-        const maybeIterator = (streamObj as any)[Symbol.asyncIterator];
-        if (typeof maybeIterator === 'function') {
-          const candidate = maybeIterator.call(streamObj);
-          if (candidate && typeof candidate === 'object' && typeof (candidate as any)[Symbol.asyncIterator] === 'function') {
-            iterator = candidate as AsyncIterableIterator<unknown>;
-          }
-        }
+      if (streamObj && typeof streamObj === 'object' && streamObj !== null && typeof (streamObj as any)[Symbol.asyncIterator] === 'function') {
+        iterator = (streamObj as any)[Symbol.asyncIterator]();
       }
 
-      const collected: unknown[] = [];
+      // If we have a streaming iterator: convert incrementally using transformer
       if (iterator) {
-        for await (const chunk of iterator) {
-          if (chunk !== undefined) { collected.push(chunk); }
+        const { AnthropicSSETransformer } = await import('./anthropic-sse-transformer.js');
+        const transformer = new AnthropicSSETransformer();
+        const capture: Array<{ event: string; data: Record<string, unknown> }> = [];
+        const doCapture = process.env.RCC_SSE_CAPTURE === '1';
+        const cap = (ev: string, payload: Record<string, unknown>) => {
+          if (doCapture) capture.push({ event: ev, data: payload });
+          writeEvent(ev, payload);
+        };
+
+        startHeartbeat();
+        for await (const rawChunk of iterator) {
+          const evs = transformer.processOpenAIChunk(rawChunk);
+          for (const e of evs) cap(e.event, e.data);
         }
-      } else if (streamObj !== undefined) {
-        collected.push(streamObj);
+        const tail = transformer.finalize();
+        for (const e of tail) cap(e.event, e.data);
+        stopHeartbeat();
+        streamEnded = true;
+        try { res.write('data: [DONE]\n\n'); } catch { /* ignore */ }
+        try { res.end(); } catch { /* ignore */ }
+        if (doCapture) {
+          try {
+            const baseDir = `${process.env.HOME || ''}/.routecodex/codex-samples/anth-replay`;
+            await fs.mkdir(baseDir, { recursive: true });
+            await fs.writeFile(`${baseDir}/sse-events-${requestId}.log`, capture.map(e => `${e.event}: ${JSON.stringify(e.data)}`).join('\n'));
+          } catch { /* ignore */ }
+        }
+        return;
       }
 
-      const finalPayload = collected.length > 0 ? collected[collected.length - 1] : null;
+      // Non-stream: convert to Anthropic message via llmswitch, then simulate SSE incrementally
+      try {
+        const { PipelineDebugLogger } = await import('../modules/pipeline/utils/debug-logger.js');
+        const { AnthropicOpenAIConverter } = await import('../modules/pipeline/modules/llmswitch/llmswitch-anthropic-openai.js');
+        const logger = new (PipelineDebugLogger as any)({} as any, { enableConsoleLogging: false, enableDebugCenter: false });
+        const deps = { errorHandlingCenter: {} as any, debugCenter: {} as any, logger } as any;
+        const conv = new (AnthropicOpenAIConverter as any)({ type: 'llmswitch-anthropic-openai', config: {} }, deps);
+        if (typeof conv.initialize === 'function') { await conv.initialize(); }
+        const converted = await conv.transformResponse(streamObj);
+        const msg: any = converted && typeof converted === 'object' && 'data' in converted ? (converted as any).data : converted;
 
-      // If payload looks like OpenAI chat completion, convert to Anthropic SSE event sequence via llmswitch helper
-      const looksOpenAI = finalPayload && typeof finalPayload === 'object' && Array.isArray((finalPayload as any).choices);
-      // For Anthropic SSE, default to streaming-style event synthesis from OpenAI payloads
-      // to ensure tool_use arguments are delivered via input_json_delta, matching clients' expectations.
-      if (looksOpenAI) {
-        try {
-          const { AnthropicOpenAIConverter } = await import('../modules/pipeline/modules/llmswitch/llmswitch-anthropic-openai.js');
-          const toEvents = (AnthropicOpenAIConverter as any)?.toAnthropicEventsFromOpenAI;
-          const events = typeof toEvents === 'function' ? toEvents(finalPayload) : [];
-          startHeartbeat();
-          for (const ev of events) {
-            writeEvent(ev.event, ev.data);
-          }
-          stopHeartbeat();
-          streamEnded = true;
-          res.write('data: [DONE]\n\n');
-          res.end();
-          return;
-        } catch (_e) {
-          // fallthrough to generic coercion
+        const { AnthropicSSESimulator } = await import('./anthropic-sse-simulator.js');
+        const simulator = new AnthropicSSESimulator();
+        const events = simulator.buildEvents(msg);
+
+        const capture: Array<{ event: string; data: Record<string, unknown> }> = [];
+        const doCapture = process.env.RCC_SSE_CAPTURE === '1';
+        startHeartbeat();
+        for (const e of events) {
+          if (doCapture) capture.push(e);
+          writeEvent(e.event, e.data);
         }
+        stopHeartbeat();
+        streamEnded = true;
+        try { res.write('data: [DONE]\n\n'); } catch { /* ignore */ }
+        try { res.end(); } catch { /* ignore */ }
+        if (doCapture) {
+          try {
+            const baseDir = `${process.env.HOME || ''}/.routecodex/codex-samples/anth-replay`;
+            await fs.mkdir(baseDir, { recursive: true });
+            await fs.writeFile(`${baseDir}/sse-events-${requestId}.log`, capture.map(ev => `${ev.event}: ${JSON.stringify(ev.data)}`).join('\n'));
+          } catch { /* ignore */ }
+        }
+      } catch (e) {
+        // As a last resort, coerce message and send minimal sequence
+        const finalPayload = streamObj;
+        const message = coerceAnthropicMessage(finalPayload);
+        writeEvent('message_start', { type: 'message_start', message: { id: message.id, type: 'message', role: 'assistant', model: message.model, content: [], stop_reason: null, stop_sequence: null } });
+        const text = (() => { try { const c = Array.isArray(message.content) ? message.content : []; const t = c.find((b: any) => b && b.type === 'text'); return (t && t.text) || ''; } catch { return ''; } })();
+        if (text) {
+          writeEvent('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+          writeEvent('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } });
+          writeEvent('content_block_stop', { type: 'content_block_stop', index: 0 });
+        }
+        writeEvent('message_delta', { type: 'message_delta', delta: { stop_reason: message.stop_reason ?? null, stop_sequence: null } });
+        writeEvent('message_stop', { type: 'message_stop' });
+        stopHeartbeat();
+        streamEnded = true;
+        try { res.write('data: [DONE]\n\n'); } catch { /* ignore */ }
+        try { res.end(); } catch { /* ignore */ }
       }
-
-      const message = coerceAnthropicMessage(finalPayload);
-      const messageId = message.id;
-      const contentBlocks = Array.isArray(message.content) ? message.content : [];
-
-      writeEvent('message_start', {
-        type: 'message_start',
-        message: {
-          ...message,
-          content: [],
-          stop_reason: null,
-          stop_sequence: null,
-        },
-      });
-
-      startHeartbeat();
-
-      const sendTextBlock = (block: Record<string, unknown>, index: number) => {
-        const text = typeof block.text === 'string' ? block.text : '';
-        writeEvent('content_block_start', {
-          type: 'content_block_start',
-          index,
-          content_block: { type: 'text', text: '' },
-        });
-        if (text.length > 0) {
-          writeEvent('content_block_delta', {
-            type: 'content_block_delta',
-            index,
-            delta: { type: 'text_delta', text },
-          });
-        }
-        writeEvent('content_block_stop', { type: 'content_block_stop', index });
-      };
-
-      const sendToolBlock = (block: Record<string, unknown>, index: number) => {
-        writeEvent('content_block_start', {
-          type: 'content_block_start',
-          index,
-          content_block: block,
-        });
-        writeEvent('content_block_stop', { type: 'content_block_stop', index });
-      };
-
-      contentBlocks.forEach((blockRaw, index) => {
-        const block = (blockRaw && typeof blockRaw === 'object') ? blockRaw as Record<string, unknown> : { type: 'text', text: String(blockRaw ?? '') };
-        const blockType = typeof block.type === 'string' ? block.type : 'text';
-        if (blockType === 'text') {
-          sendTextBlock(block, index);
-        } else {
-          sendToolBlock(block, index);
-        }
-      });
-
-      const stopReason = message.stop_reason ?? null;
-      writeEvent('message_delta', {
-        type: 'message_delta',
-        delta: {
-          stop_reason: stopReason,
-          stop_sequence: (message as any).stop_sequence ?? null,
-        },
-      });
-
-      writeEvent('message_stop', {
-        type: 'message_stop',
-        message,
-      });
-
-      if ('usage' in message) {
-        writeEvent('message_stream_complete', {
-          type: 'message_stream_complete',
-          message_id: messageId,
-          usage: (message as any).usage ?? null,
-        });
-      }
-
-      stopHeartbeat();
-      streamEnded = true;
-      res.write('data: [DONE]\n\n');
-      res.end();
     } catch (error) {
       stopHeartbeat();
       streamEnded = true;

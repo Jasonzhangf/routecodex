@@ -301,21 +301,63 @@ export class OpenAIProvider extends BaseProvider {
       const payload = this.prepareChatCompletionPayload(request, modelConfig);
       payload.stream = true;
 
-      // Make streaming request
-      const streamResponse = await this.makeStreamingRequest('/chat/completions', payload, options);
+      // Make streaming request as AsyncIterable producing parsed JSON chunks
+      const iterator = (async function* makeIterator(self: OpenAIProvider, endpoint: string, body: any, opts: StreamOptions) {
+        const url = `${self.baseUrl}${endpoint}`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), opts.timeout || 30000);
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { ...self.defaultHeaders, Accept: 'text/event-stream', 'Cache-Control': 'no-cache' },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+          if (!response.ok) {
+            const errorData = await response.text();
+            throw new RouteCodexError(`Stream request failed: ${errorData}`,'stream_error',response.status);
+          }
+          const reader = response.body?.getReader();
+          if (!reader) { throw new RouteCodexError('Stream reader not available','stream_reader_error',500); }
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              const data = line.slice(6).trim();
+              if (data === '[DONE]') {
+                if (opts.onComplete) { try { opts.onComplete(); } catch { /* ignore */ } }
+                return;
+              }
+              try {
+                if (opts.onChunk) { try { opts.onChunk(data); } catch { /* ignore */ } }
+                const obj = JSON.parse(data);
+                yield obj;
+              } catch {
+                // ignore malformed lines
+              }
+            }
+          }
+        } catch (e) {
+          if (e instanceof Error && e.name === 'AbortError') {
+            if (opts.onError) { try { opts.onError(new RouteCodexError('Stream timeout','stream_timeout',408)); } catch { /* ignore */ } }
+            throw new RouteCodexError('Stream timeout','stream_timeout',408);
+          }
+          if (opts.onError) { try { opts.onError(e as Error); } catch { /* ignore */ } }
+          throw e;
+        }
+      })(this, '/chat/completions', payload, options);
 
-      // Update statistics
+      // Update statistics and return async iterator as data
       const duration = Date.now() - startTime;
       this.updateStats(true, duration);
-
-      return this.createResponse(
-        true,
-        streamResponse,
-        undefined,
-        200,
-        { 'Content-Type': 'text/event-stream' },
-        duration
-      );
+      return this.createResponse(true, iterator, undefined, 200, { 'Content-Type': 'text/event-stream' }, duration);
     } catch (error) {
       const duration = Date.now() - startTime;
       this.updateStats(false, duration);
