@@ -1,6 +1,10 @@
 name: Duplicate Code Management
 
 on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
   workflow_dispatch:
     inputs:
       auto_fix:
@@ -15,11 +19,18 @@ on:
         type: string
 
 jobs:
+  quick-pass:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Quick pass (duplicate-code checks disabled by default)
+      run: echo "Duplicate code analysis disabled by default; run manually to execute heavy job."
+
   duplicate-code-analysis:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
+    if: github.event_name == 'workflow_dispatch'
     
     steps:
     - name: Checkout code

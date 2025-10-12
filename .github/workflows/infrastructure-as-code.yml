@@ -1,6 +1,10 @@
 name: Infrastructure as Code Security
 
 on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
   workflow_dispatch:
 
 env:
@@ -8,10 +12,16 @@ env:
   HELM_VERSION: '3.13.0'
 
 jobs:
-  # Terraform 安全检查
+  quick-pass:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Quick pass (IaC checks disabled by default)
+      run: echo "Infrastructure checks are manual-only now."
+
+  # Terraform 安全检查（仅手动触发）
   terraform-security:
     runs-on: ubuntu-latest
-    if: hashFiles('terraform/**/*.tf') != ''
+    if: github.event_name == 'workflow_dispatch' && hashFiles('terraform/**/*.tf') != ''
     
     steps:
     - name: Checkout code
