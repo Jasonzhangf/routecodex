@@ -1614,6 +1614,22 @@ export class OpenAIRouter extends BaseModule {
       usage?: Record<string, unknown> | null;
       [key: string]: unknown;
     };
+    // Helper: capture final Anthropics message payload for diagnostics (non-intrusive)
+    const captureFinalAnthropic = async (msg: AnthropicMessage) => {
+      try {
+        const baseDir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
+        const subDir = `${baseDir}/anth-replay`;
+        await fs.mkdir(subDir, { recursive: true });
+        const out = {
+          requestId,
+          endpoint: '/v1/messages',
+          targetProtocol: 'anthropic',
+          timestamp: Date.now(),
+          message: msg
+        };
+        await fs.writeFile(`${subDir}/anthropic-response-${requestId}.json`, JSON.stringify(out, null, 2));
+      } catch { /* ignore capture errors */ }
+    };
     if (!res.headersSent) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -1723,6 +1739,12 @@ export class OpenAIRouter extends BaseModule {
           const { AnthropicOpenAIConverter } = await import('../modules/pipeline/modules/llmswitch/llmswitch-anthropic-openai.js');
           const toEvents = (AnthropicOpenAIConverter as any)?.toAnthropicEventsFromOpenAI;
           const events = typeof toEvents === 'function' ? toEvents(finalPayload) : [];
+          // Best-effort capture of final message_stop message
+          try {
+            const stopEv = Array.isArray(events) ? events.find((e: any) => e && e.event === 'message_stop') : null;
+            const finalMsg = stopEv && stopEv.data && stopEv.data.message ? stopEv.data.message as AnthropicMessage : undefined;
+            if (finalMsg) { await captureFinalAnthropic(finalMsg); }
+          } catch { /* ignore */ }
           startHeartbeat();
           for (const ev of events) {
             writeEvent(ev.event, ev.data);
@@ -1802,6 +1824,8 @@ export class OpenAIRouter extends BaseModule {
         type: 'message_stop',
         message,
       });
+      // Capture final message payload (non-stream aggregation)
+      await captureFinalAnthropic(message);
 
       if ('usage' in message) {
         writeEvent('message_stream_complete', {
