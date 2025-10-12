@@ -903,6 +903,20 @@ function determinePort(configPath: string, fallback: number): number {
 async function ensurePortAvailable(port: number, parentSpinner: Ora, opts: { restart?: boolean } = {}): Promise<void> {
   if (!port || Number.isNaN(port)) { return; }
 
+  // Best-effort HTTP shutdown on common loopback hosts to cover IPv4/IPv6
+  try {
+    const candidates = ['127.0.0.1', 'localhost'];
+    for (const h of candidates) {
+      try {
+        const controller = new AbortController();
+        const t = setTimeout(() => { try { controller.abort(); } catch { /* ignore */ } }, 700);
+        await fetch(`http://${h}:${port}/shutdown`, { method: 'POST', signal: (controller as any).signal } as any).catch(() => {});
+        clearTimeout(t);
+      } catch { /* ignore */ }
+    }
+    await sleep(300);
+  } catch { /* ignore */ }
+
   const initialPids = findListeningPids(port);
   if (initialPids.length === 0) { return; }
 

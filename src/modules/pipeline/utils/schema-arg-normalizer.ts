@@ -54,18 +54,14 @@ function getDefaultAliases(prop: string): string[] {
 function buildPropertyMap(schema: JsonSchema): Map<string, string> {
   const map = new Map<string, string>();
   const props = schema?.properties || {};
-  const enableAliases = String((globalThis as any).process?.env?.ROUTECODEX_ARG_ALIASES || '').trim() === '1';
   for (const [p, s] of Object.entries(props)) {
     map.set(normKey(p), p);
     const aliases = (s as any)['x-aliases'];
     if (Array.isArray(aliases)) {
       for (const a of aliases) { if (typeof a === 'string') { map.set(normKey(a), p); } }
     }
-    if (enableAliases) {
-      for (const a of getDefaultAliases(p)) {
-        map.set(normKey(a), p);
-      }
-    }
+    // Always include built-in generic aliases for common property names
+    for (const a of getDefaultAliases(p)) { map.set(normKey(a), p); }
   }
   return map;
 }
@@ -120,6 +116,19 @@ export function normalizeArgsBySchema(input: any, schema?: JsonSchema): Normaliz
   const errors: string[] = [];
   const additional = schema.additionalProperties !== false;
 
+  // Special case: only a raw string provided under _raw, and schema has exactly one required string property
+  const reqList = Array.isArray(schema.required) ? schema.required : [];
+  if (Object.keys(input).length === 1 && typeof (input as any)._raw === 'string' && reqList.length === 1) {
+    const only = reqList[0];
+    const child = (schema.properties || {})[only] as JsonSchema | undefined;
+    if (child) {
+      const coerced = coerceType((input as any)._raw, child);
+      if (typeof coerced === 'string' && coerced.trim().length > 0) {
+        out[only] = coerced;
+      }
+    }
+  }
+
   // map known properties
   for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
     const key = normKey(k);
@@ -132,11 +141,25 @@ export function normalizeArgsBySchema(input: any, schema?: JsonSchema): Normaliz
     }
   }
 
-  // required check
+  // required check (treat empty string/empty array/empty object as missing)
   const req = schema.required || [];
   for (const r of req) {
     if (!(r in out)) {
       errors.push(`missing_required:${r}`);
+      continue;
+    }
+    const v: any = out[r as keyof typeof out];
+    if (typeof v === 'string' && v.trim().length === 0) {
+      errors.push(`missing_required:${r}`);
+      continue;
+    }
+    if (Array.isArray(v) && v.length === 0) {
+      errors.push(`missing_required:${r}`);
+      continue;
+    }
+    if (v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0) {
+      errors.push(`missing_required:${r}`);
+      continue;
     }
   }
 

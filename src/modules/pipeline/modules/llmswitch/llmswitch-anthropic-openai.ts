@@ -6,6 +6,9 @@
 import type { LLMSwitchModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest, SharedPipelineResponse } from '../../../../types/shared-dtos.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
+import fs from 'fs/promises';
+import path from 'path';
+import os from 'os';
 import { normalizeArgsBySchema } from '../../utils/schema-arg-normalizer.js';
 import {
   DEFAULT_CONVERSION_CONFIG,
@@ -69,6 +72,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       // If caller omits tools this turn, we will NOT inject cached tools.
 
       this.logger.logTransformation(this.id, 'anthropic-to-openai-request', payload, transformedRequest);
+      try { await this.captureConversion('anth-to-openai-request', requestParam, payload, transformedRequest); } catch {}
       // Debug presence of tools after conversion
       try {
         const toolsOut = Array.isArray((transformedRequest as any)?.tools) ? (transformedRequest as any).tools.length : 0;
@@ -93,6 +97,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       // Convert OpenAI-style request to Anthropic-style when selected switch is Anthropic
       const transformedRequest = this.convertOpenAIRequestToAnthropic(payload);
       this.logger.logTransformation(this.id, 'openai-to-anthropic-request', payload, transformedRequest);
+      try { await this.captureConversion('openai-to-anth-request', requestParam, payload, transformedRequest); } catch {}
       const out = {
         ...transformedRequest,
         _metadata: {
@@ -127,14 +132,25 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     if (!this.isInitialized) { throw new Error('AnthropicOpenAIConverter is not initialized'); }
     const isDto = responseParam && typeof responseParam === 'object' && 'data' in responseParam && 'metadata' in responseParam;
     let payload = isDto ? (responseParam as SharedPipelineResponse).data : responseParam;
-    // Unwrap provider wrapper if present
-    if (payload && typeof payload === 'object' && 'data' in (payload as Record<string, unknown>)) {
-      const inner = (payload as Record<string, unknown>)['data'];
-      if (inner && typeof inner === 'object' && (('choices' in (inner as Record<string, unknown>)) || ('content' in (inner as Record<string, unknown>)))) {
-        payload = inner as unknown;
+    // Recursively unwrap nested { data: {...} } wrappers until reaching a shape that
+    // actually contains OpenAI "choices" or Anthropic "content".
+    const unwrap = (obj: any): any => {
+      let cur = obj;
+      const guard = new Set<any>();
+      while (cur && typeof cur === 'object' && !Array.isArray(cur) && !guard.has(cur)) {
+        guard.add(cur);
+        if ('choices' in cur || 'content' in cur) { break; }
+        if ('data' in cur && cur.data && typeof cur.data === 'object') { cur = cur.data; continue; }
+        break;
       }
-    }
+      return cur;
+    };
+    payload = unwrap(payload);
     const responseFormat = detectResponseFormat(payload);
+
+    // Attempt to extract tool schemas from the original request context (if available)
+    // so we can normalize OpenAI tool_calls → Anthropic tool_use against declared schemas.
+    const toolSchemaMap = this.extractToolSchemaMapFromContext(responseParam);
 
     if (responseFormat === 'openai') {
       // Debug: presence of tool_calls in OpenAI response before conversion
@@ -144,8 +160,9 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
           : 0;
         this.logger.logModule(this.id, 'tools-presence-outgoing', { direction: 'openai->anthropic', toolCalls });
       } catch { /* ignore */ }
-      const transformedResponse = this.convertOpenAIResponseToAnthropic(payload);
+      const transformedResponse = this.convertOpenAIResponseToAnthropic(payload, toolSchemaMap);
       this.logger.logTransformation(this.id, 'openai-to-anthropic-response', payload, transformedResponse);
+      try { await this.captureConversion('openai-to-anth-response', responseParam, payload, transformedResponse); } catch {}
       const out = {
         ...transformedResponse,
         _metadata: {
@@ -201,13 +218,66 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     const isDto = input && typeof input === 'object' && 'data' in input && 'metadata' in input;
     if (isDto) { return this.processOutgoing(input as SharedPipelineResponse); }
     // Plain object: convert plain→plain
-    const payload = input as any;
+    // Recursively unwrap nested data wrappers for plain object input as well
+    const unwrap = (obj: any): any => {
+      let cur = obj;
+      const seen = new Set<any>();
+      while (cur && typeof cur === 'object' && !Array.isArray(cur) && !seen.has(cur)) {
+        seen.add(cur);
+        if ('choices' in cur || 'content' in cur) { break; }
+        if ('data' in cur && cur.data && typeof cur.data === 'object') { cur = cur.data; continue; }
+        break;
+      }
+      return cur;
+    };
+    const payload = unwrap(input as any);
     const responseFormat = detectResponseFormat(payload);
     if (responseFormat === 'openai') {
-      const out = this.convertOpenAIResponseToAnthropic(payload);
+      const out = this.convertOpenAIResponseToAnthropic(payload, this.extractToolSchemaMapFromContext(input));
+      try { await this.captureConversion('openai-to-anth-response-plain', undefined as any, payload, out); } catch {}
       return out;
     }
     return payload;
+  }
+
+  private async captureConversion(kind: string, dto: any, input: any, output: any): Promise<void> {
+    try {
+      const home = os.homedir();
+      const baseDir = path.join(home, '.routecodex', 'codex-samples', 'anth-replay');
+      await fs.mkdir(baseDir, { recursive: true });
+      const requestId = (dto && dto.route && dto.route.requestId) ? String(dto.route.requestId) : `conv_${Date.now()}`;
+      const summarize = (obj: any) => {
+        const sum: any = { hasChoices: !!obj?.choices, hasContent: Array.isArray(obj?.content) };
+        try {
+          const tc = obj?.choices?.[0]?.message?.tool_calls;
+          if (Array.isArray(tc)) {
+            sum.openai_tool_calls = tc.map((t: any) => ({ id: t?.id, name: t?.function?.name, args: t?.function?.arguments }));
+          }
+        } catch {}
+        try {
+          const blocks = Array.isArray(obj?.content) ? obj.content : [];
+          const tus = blocks.filter((b: any) => b && b.type === 'tool_use');
+          if (tus.length) {
+            sum.anthropic_tool_use = tus.map((b: any) => ({ id: b?.id, name: b?.name, input: b?.input }));
+          }
+        } catch {}
+        return sum;
+      };
+      const payload = {
+        requestId,
+        moduleId: this.id,
+        kind,
+        timestamp: Date.now(),
+        inputSummary: summarize(input),
+        outputSummary: summarize(output),
+        input,
+        output,
+      };
+      const file = path.join(baseDir, `llmswitch-trace_${kind}_${requestId}.json`);
+      await fs.writeFile(file, JSON.stringify(payload, null, 2), 'utf-8');
+    } catch {
+      // ignore capture failures
+    }
   }
 
   private convertAnthropicRequestToOpenAI(request: any): any {
@@ -235,59 +305,78 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
         ? m.content
         : (typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : []);
 
-      // Tool use -> OpenAI tool_calls on assistant message (drop empty/invalid input)
+      // Tool use -> OpenAI tool_calls on assistant message (robust unwrapping; drop empty/invalid input)
       const toolUses = blocks.filter((b: any) => b && b.type === 'tool_use');
       if (role === 'assistant' && toolUses.length > 0) {
-        const tool_calls = toolUses
-          .map((t: any) => {
-            const raw = t?.input;
-            // Parse raw input into object
-            let inputObj: any = undefined;
-            if (raw !== undefined) {
-              if (typeof raw === 'string') {
-                try {
-                  const parsed = JSON.parse(raw);
-                  if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) { inputObj = parsed; }
-                } catch { /* ignore */ }
-              } else if (typeof raw === 'object' && raw !== null) {
-                if (Object.keys(raw).length > 0) { inputObj = raw; }
-              }
+        // local coercer mirrors finalizeToolUseBlock
+        const coerce = (val: any): any => {
+          if (val === undefined || val === null) { return {}; }
+          if (typeof val === 'object') { return val; }
+          if (typeof val !== 'string') { return { _raw: String(val) }; }
+          const s = val.trim(); if (!s) return {};
+          const strict = safeParse(s); if (strict !== undefined) return strict;
+          const fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i); const jsonCandidate = fence ? fence[1] : s;
+          const objMatch = jsonCandidate.match(/\{[\s\S]*\}/); if (objMatch) { const p = safeParse(objMatch[0]); if (p !== undefined) return p; }
+          const arrMatch = jsonCandidate.match(/\[[\s\S]*\]/); if (arrMatch) { const p = safeParse(arrMatch[0]); if (p !== undefined) return p; }
+          let tstr = jsonCandidate.replace(/'([^']*)'/g, '"$1"');
+          tstr = tstr.replace(/([\{,\s])([A-Za-z_][A-Za-z0-9_\-]*)\s*:/g, '$1"$2":');
+          const jj = safeParse(tstr); if (jj !== undefined) return jj;
+          // key=value fallback
+          const obj: Record<string, any> = {};
+          const parts = s.split(/[\n,]+/).map(p => p.trim()).filter(Boolean);
+          for (const p of parts) {
+            const m = p.match(/^([A-Za-z_][A-Za-z0-9_\-]*)\s*[:=]\s*(.+)$/);
+            if (!m) continue; const k = m[1]; let v = m[2].trim();
+            if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) { v = v.slice(1, -1); }
+            const pv = safeParse(v); if (pv !== undefined) { obj[k] = pv; continue; }
+            if (/^(true|false)$/i.test(v)) { obj[k] = /^true$/i.test(v); continue; }
+            if (/^-?\d+(?:\.\d+)?$/.test(v)) { obj[k] = Number(v); continue; }
+            obj[k] = v;
+          }
+          return Object.keys(obj).length ? obj : { _raw: s };
+        };
+
+        const unwrap = (o: any): any => {
+          let cur = o;
+          const seen = new Set<any>();
+          const keys = ['input','args','arguments','parameters','data','payload'];
+          while (cur && typeof cur === 'object' && !Array.isArray(cur) && !seen.has(cur)) {
+            seen.add(cur);
+            const ks = Object.keys(cur);
+            if (ks.length === 1 && keys.includes(ks[0])) { const inner = (cur as any)[ks[0]]; cur = typeof inner === 'string' ? coerce(inner) : inner; continue; }
+            break;
+          }
+          return cur;
+        };
+
+        const tool_calls = toolUses.map((t: any) => {
+          let inputObj: any = t?.input;
+          if (typeof inputObj === 'string') inputObj = coerce(inputObj);
+          if (Array.isArray(inputObj)) {
+            const objs = inputObj.filter((x: any) => x && typeof x === 'object' && !Array.isArray(x));
+            if (objs.length) {
+              inputObj = objs.reduce((acc: any, cur: any) => { for (const [k,v] of Object.entries(cur)) { if (!(k in acc)) acc[k]=v; } return acc; }, {});
+            } else {
+              const prim = inputObj.find((x: any) => x != null && (typeof x === 'string' || typeof x === 'number' || typeof x === 'boolean'));
+              inputObj = prim != null ? { _raw: String(prim) } : {};
             }
-            // Skip tool calls with empty/invalid input to avoid validation errors
-            if (!inputObj) { return undefined; }
+          }
+          inputObj = unwrap(inputObj);
+          if (!inputObj || typeof inputObj !== 'object') return undefined;
 
-            // Normalize according to the matching tool's input_schema (if any)
-            const toolName: string = typeof t?.name === 'string' ? t.name : 'tool';
-            const schema = toolSchemaByName.get(toolName.toLowerCase());
-            const norm = normalizeArgsBySchema(inputObj, schema);
-            let finalArgs: any = (norm && norm.value && typeof norm.value === 'object')
-              ? norm.value
-              : inputObj; // fallback to raw if normalization produced empty
-
-            // Defensive fallback: if no schema and this looks like a search tool, coerce common synonyms
-            if (!schema) {
-              const lname = toolName.toLowerCase();
-              if (lname.includes('search') || lname === 'grep' || lname === 'rg' || lname === 'ripgrep') {
-                if (finalArgs && typeof finalArgs === 'object') {
-                  if (!('pattern' in finalArgs)) {
-                    const q = (finalArgs as any)['query'] ?? (finalArgs as any)['regex'] ?? (finalArgs as any)['_raw'];
-                    if (q !== undefined) { finalArgs = { ...finalArgs, pattern: String(q) };
-                    }
-                  }
-                  if (!('glob' in finalArgs) && (finalArgs as any)['include'] !== undefined) {
-                    finalArgs = { ...finalArgs, glob: String((finalArgs as any)['include']) };
-                  }
-                }
-              }
-            }
-
-            return {
-              id: t.id || t.tool_use_id || `call_${Math.random().toString(36).slice(2)}`,
-              type: 'function',
-              function: { name: toolName, arguments: safeStringify(finalArgs) }
-            };
-          })
-          .filter(Boolean);
+          const toolName: string = typeof t?.name === 'string' ? t.name : 'tool';
+          const schema = toolSchemaByName.get(toolName.toLowerCase());
+          const norm = normalizeArgsBySchema(inputObj, schema);
+          if (!(norm && norm.ok && norm.value && typeof norm.value === 'object' && Object.keys(norm.value).length>0)) {
+            return undefined; // drop empty/invalid
+          }
+          const finalArgs = norm.value as Record<string, unknown>;
+          return {
+            id: t.id || t.tool_use_id || `call_${Math.random().toString(36).slice(2)}`,
+            type: 'function',
+            function: { name: toolName, arguments: safeStringify(finalArgs) }
+          };
+        }).filter(Boolean);
         if (tool_calls.length > 0) {
           msgs.push({ role: 'assistant', content: '', tool_calls });
         } else {
@@ -351,6 +440,24 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     const contentMsgs: any[] = [];
     const producedToolIds = new Set<string>();
 
+    // Build a local schema map (from OpenAI request.tools) to normalize arguments
+    const reqToolSchemaMap: Map<string, any> | undefined = (() => {
+      try {
+        const map = new Map<string, any>();
+        if (Array.isArray(request?.tools)) {
+          for (const t of request.tools) {
+            const fn = (t as any)?.function;
+            if (fn && typeof fn.name === 'string') {
+              let parameters = fn.parameters;
+              if (typeof parameters === 'string') { try { parameters = JSON.parse(parameters); } catch { parameters = {}; } }
+              map.set(fn.name.toLowerCase(), parameters || {});
+            }
+          }
+        }
+        return map.size ? map : undefined;
+      } catch { return undefined; }
+    })();
+
     for (const m of msgs) {
       if (!m || typeof m !== 'object') continue;
       if (m.role === 'system') continue; // moved to out.system
@@ -362,18 +469,10 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
         for (const tc of toolCalls) {
           const name = tc?.function?.name || 'tool';
           const rawArgs = tc?.function?.arguments;
-          let input: any = undefined;
-          if (typeof rawArgs === 'string') {
-            try { const parsed = JSON.parse(rawArgs); if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) { input = parsed; } } catch { /* ignore */ }
-          } else if (rawArgs && typeof rawArgs === 'object') {
-            if (Object.keys(rawArgs).length > 0) { input = rawArgs; }
-          }
-          // Skip empty/invalid args to avoid tool_use {}
-          input = this.normalizeArgsForAnthropic(name, input);
-          if (!input) { continue; }
-          const toolId = typeof tc?.id === 'string' && tc.id.trim() ? tc.id : `call_${Math.random().toString(36).slice(2,8)}`;
-          producedToolIds.add(toolId);
-          blocks.push({ type: 'tool_use', id: toolId, name, input });
+          const built = this.finalizeToolUseBlock(name, rawArgs, reqToolSchemaMap);
+          if (!built) { continue; }
+          producedToolIds.add(built.id);
+          blocks.push(built);
         }
       }
       // Tool role -> tool_result
@@ -517,12 +616,14 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     return hasKeys(obj) ? obj : null;
   }
 
-  private convertOpenAIResponseToAnthropic(response: any): any {
+  private convertOpenAIResponseToAnthropic(response: any, toolSchemaMap?: Map<string, any>): any {
     const { responseMappings } = this.conversionConfig;
     const transformed: any = {};
     if (response.choices && response.choices.length > 0) {
       const choice = response.choices[0];
       const message = choice.message || {};
+      // Ensure Anthropic message has explicit type
+      transformed.type = 'message';
       transformed.role = message.role || 'assistant';
       const blocks: any[] = [];
       if (message.content) {
@@ -543,7 +644,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       if (this.enableTools) {
         // OpenAI multi-tool schema
         if (message.tool_calls) {
-          const toolBlocks = this.convertOpenAIToolCallsToAnthropic(message.tool_calls);
+          const toolBlocks = this.convertOpenAIToolCallsToAnthropic(message.tool_calls, toolSchemaMap);
           blocks.push(...toolBlocks);
         }
         // Legacy single function_call schema
@@ -551,9 +652,8 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
           const fc: any = (message as any).function_call;
           const name = fc?.name || 'tool';
           const rawArgs = fc?.arguments || '';
-          let input: any = {};
-          try { input = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : (rawArgs || {}); } catch { input = { arguments: rawArgs }; }
-          blocks.push({ type: 'tool_use', id: `call_${Math.random().toString(36).slice(2,8)}`, name, input });
+          const built = this.finalizeToolUseBlock(name, rawArgs, toolSchemaMap);
+          if (built) { blocks.push(built); }
         }
       }
       // Ensure content has at least one text block for Anthropic schema compliance
@@ -564,7 +664,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       // Map finish_reason. If any tool calls present, prefer 'tool_use' to drive client tool flow.
       const hasToolCalls = Array.isArray(blocks) && blocks.some((b: any) => b && b.type === 'tool_use');
       const hasLegacyFn = !!(message as any).function_call;
-      if (hasToolCalls || hasLegacyFn) {
+      if (hasToolCalls) {
         transformed.stop_reason = 'tool_use';
       } else if (choice.finish_reason) {
         transformed.stop_reason = responseMappings.finishReason.mapping[choice.finish_reason] || 'end_turn';
@@ -584,7 +684,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     return tools.map(tool => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.input_schema } }));
   }
 
-  private convertOpenAIToolCallsToAnthropic(toolCalls: any[]): any[] {
+  private convertOpenAIToolCallsToAnthropic(toolCalls: any[], toolSchemaMap?: Map<string, any>): any[] {
     if (!toolCalls) {return [];}
     const out: any[] = [];
     const coerceArgs = (raw: any): any => {
@@ -629,12 +729,9 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
 
     for (const call of toolCalls) {
       const rawName = call?.function?.name;
-      const argIn = coerceArgs(call?.function?.arguments);
-      const id = call?.id || `call_${Math.random().toString(36).slice(2,8)}`;
-      const { name, args } = this.normalizeStandardToolCall(rawName, argIn);
-      // Drop empty input to avoid invalid parameter errors downstream
-      if (!args || (typeof args === 'object' && Object.keys(args).length === 0)) { continue; }
-      out.push({ type: 'tool_use', id, name, input: args });
+      const rawArgs = call?.function?.arguments;
+      const built = this.finalizeToolUseBlock(rawName, rawArgs, toolSchemaMap, call?.id);
+      if (built) { out.push(built); }
     }
     return out;
   }
@@ -777,6 +874,131 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       }
     }
     return undefined;
+  }
+
+  /**
+   * Build a tool_use block by parsing/coercing arguments, then normalizing against
+   * the declared tool input_schema if available. Falls back to generic normalization
+   * for common patterns when no schema is provided. Never emits tool_use with empty input.
+   */
+  private finalizeToolUseBlock(rawName: any, rawArgs: any, toolSchemaMap?: Map<string, any>, preferredId?: string): { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> } | null {
+    const name = typeof rawName === 'string' && rawName.trim() ? rawName : 'tool';
+    // Coerce arguments from string → object using same logic as convertOpenAIToolCallsToAnthropic
+    const coerce = (val: any): any => {
+      if (val === undefined || val === null) { return {}; }
+      if (typeof val === 'object') { return val; }
+      if (typeof val !== 'string') { return { _raw: String(val) }; }
+      const s = val.trim(); if (!s) return {};
+      const strict = safeParse(s); if (strict !== undefined) return strict;
+      const fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i); const jsonCandidate = fence ? fence[1] : s;
+      const objMatch = jsonCandidate.match(/\{[\s\S]*\}/); if (objMatch) { const p = safeParse(objMatch[0]); if (p !== undefined) return p; }
+      const arrMatch = jsonCandidate.match(/\[[\s\S]*\]/); if (arrMatch) { const p = safeParse(arrMatch[0]); if (p !== undefined) return p; }
+      let t = jsonCandidate.replace(/'([^']*)'/g, '"$1"');
+      t = t.replace(/([\{,\s])([A-Za-z_][A-Za-z0-9_\-]*)\s*:/g, '$1"$2":');
+      const jj = safeParse(t); if (jj !== undefined) return jj;
+      // key=value fallback
+      const obj: Record<string, any> = {};
+      const parts = s.split(/[\n,]+/).map(p => p.trim()).filter(Boolean);
+      for (const p of parts) {
+        const m = p.match(/^([A-Za-z_][A-Za-z0-9_\-]*)\s*[:=]\s*(.+)$/);
+        if (!m) continue; const k = m[1]; let v = m[2].trim();
+        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith('\'') && v.endsWith('\''))) { v = v.slice(1, -1); }
+        const pv = safeParse(v); if (pv !== undefined) { obj[k] = pv; continue; }
+        if (/^(true|false)$/i.test(v)) { obj[k] = /^true$/i.test(v); continue; }
+        if (/^-?\d+(?:\.\d+)?$/.test(v)) { obj[k] = Number(v); continue; }
+        obj[k] = v;
+      }
+      return Object.keys(obj).length ? obj : { _raw: s };
+    };
+
+    let argsObj: any = coerce(rawArgs);
+    // Unwrap common wrappers generically: input/args/arguments/parameters/data/payload
+    const unwrapKeys = ['input','args','arguments','parameters','data','payload'];
+    const tryUnwrap = (o: any): any => {
+      let cur = o;
+      const seen = new Set<any>();
+      while (cur && typeof cur === 'object' && !Array.isArray(cur) && !seen.has(cur)) {
+        seen.add(cur);
+        const keys = Object.keys(cur);
+        if (keys.length === 1 && unwrapKeys.includes(keys[0])) {
+          const inner = (cur as any)[keys[0]];
+          cur = (typeof inner === 'string' || typeof inner === 'number' || typeof inner === 'boolean') ? coerce(inner) : inner;
+          continue;
+        }
+        break;
+      }
+      return cur;
+    };
+    argsObj = tryUnwrap(argsObj);
+    // Merge array-of-objects into a single object; drop arrays of primitives
+    if (Array.isArray(argsObj)) {
+      const objs = argsObj.filter((x: any) => x && typeof x === 'object' && !Array.isArray(x));
+      if (objs.length > 0) {
+        argsObj = objs.reduce((acc: any, cur: any) => {
+          for (const [k, v] of Object.entries(cur)) { if (!(k in acc)) acc[k] = v; }
+          return acc;
+        }, {} as Record<string, unknown>);
+      } else {
+        // Use first primitive as raw value if present (generic, schema will map via _raw rule)
+        const prim = argsObj.find((x: any) => x != null && (typeof x === 'string' || typeof x === 'number' || typeof x === 'boolean'));
+        argsObj = prim != null ? { _raw: String(prim) } : {};
+      }
+    }
+    if (!argsObj || typeof argsObj !== 'object' || Object.keys(argsObj).length === 0) { return null; }
+
+    // Schema-driven normalization
+    const schema = toolSchemaMap?.get(String(name).toLowerCase());
+    if (schema && typeof schema === 'object') {
+      const norm = normalizeArgsBySchema(argsObj, schema);
+      if (norm && norm.ok && norm.value && typeof norm.value === 'object' && Object.keys(norm.value).length > 0) {
+        const candidate = norm.value as Record<string, unknown>;
+        return { type: 'tool_use', id: preferredId || `call_${Math.random().toString(36).slice(2,8)}`, name, input: candidate };
+      } else {
+        // When schema is available but cannot be satisfied, drop the tool_use to avoid invalid parameters
+        return null;
+      }
+    }
+
+    // No schema: emit only non-empty object as-is; do not inject defaults or tool-specific mappings
+    if (argsObj && typeof argsObj === 'object' && Object.keys(argsObj).length > 0) {
+      return { type: 'tool_use', id: preferredId || `call_${Math.random().toString(36).slice(2,8)}`, name, input: argsObj };
+    }
+    return null;
+  }
+
+  /**
+   * Build a map of tool name → input_schema (Anthropic) or parameters (OpenAI) from the
+   * original request context, if present on the response DTO/debug payload.
+   */
+  private extractToolSchemaMapFromContext(responseOrMaybeDto: any): Map<string, any> | undefined {
+    try {
+      // Response DTO path: SharedPipelineResponse { data, metadata, debug? }
+      const isDto = responseOrMaybeDto && typeof responseOrMaybeDto === 'object' && 'data' in responseOrMaybeDto && 'metadata' in responseOrMaybeDto;
+      const debugReq = isDto ? (responseOrMaybeDto as any)?.debug?.request : undefined;
+      const req = debugReq && typeof debugReq === 'object' ? debugReq : (responseOrMaybeDto && typeof responseOrMaybeDto === 'object' ? (responseOrMaybeDto as any).data : undefined);
+      if (!req || typeof req !== 'object') { return undefined; }
+
+      const map = new Map<string, any>();
+      const tools = (req as any).tools;
+      if (Array.isArray(tools)) {
+        for (const t of tools) {
+          if (!t) continue;
+          // Anthropic style: { name, input_schema }
+          if (typeof t.name === 'string' && t.input_schema) {
+            map.set(t.name.toLowerCase(), t.input_schema);
+            continue;
+          }
+          // OpenAI style: { type:'function', function:{ name, parameters } }
+          const fn = (t as any).function;
+          if (fn && typeof fn.name === 'string') {
+            let parameters = fn.parameters;
+            if (typeof parameters === 'string') { try { parameters = JSON.parse(parameters); } catch { parameters = {}; } }
+            map.set(fn.name.toLowerCase(), parameters || {});
+          }
+        }
+      }
+      return map.size ? map : undefined;
+    } catch { return undefined; }
   }
 
   private mapOpenAIToolChoiceToAnthropic(input: any): any {

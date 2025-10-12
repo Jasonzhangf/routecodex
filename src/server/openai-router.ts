@@ -1716,9 +1716,9 @@ export class OpenAIRouter extends BaseModule {
 
       // If payload looks like OpenAI chat completion, convert to Anthropic SSE event sequence via llmswitch helper
       const looksOpenAI = finalPayload && typeof finalPayload === 'object' && Array.isArray((finalPayload as any).choices);
-      // Default: disable SSE simulation. Enable only when ROUTECODEX_ENABLE_SSE_SIM=1
-      const enableSim = String(process.env.ROUTECODEX_ENABLE_SSE_SIM || '').trim() === '1';
-      if (looksOpenAI && enableSim) {
+      // For Anthropic SSE, default to streaming-style event synthesis from OpenAI payloads
+      // to ensure tool_use arguments are delivered via input_json_delta, matching clients' expectations.
+      if (looksOpenAI) {
         try {
           const { AnthropicOpenAIConverter } = await import('../modules/pipeline/modules/llmswitch/llmswitch-anthropic-openai.js');
           const toEvents = (AnthropicOpenAIConverter as any)?.toAnthropicEventsFromOpenAI;

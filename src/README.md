@@ -98,6 +98,10 @@ npm run install:global
 routecodex start
 ```
 
+## 最近更新
+
+- 0.41.1: 修复 Anthropic 流式工具调用事件规范。现在会按照标准事件顺序输出工具输入（tool_use），避免在 Claude Code 中出现空参数工具调用导致的错误。
+
 ## 配置
 
 RouteCodex 使用 JSON 配置文件来定义系统行为：

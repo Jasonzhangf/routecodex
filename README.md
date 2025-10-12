@@ -6,6 +6,9 @@
 
 A sophisticated AI service routing and transformation system that provides seamless integration with multiple AI providers through a clean, modular architecture.
 
+Release 0.41.1
+- Fix: Anthropic streaming compliance for tool_use. RouteCodex now emits standard SSE events for tool inputs so Claude Code correctly accumulates parameters during streaming tool calls.
+
 Important: Anthropic tool-calls (since 0.4.0)
 - By default we trust tool schemas (trustSchema=true). When converting OpenAI `tool_calls` to Anthropic `tool_use`, we preserve `function.name` and `arguments` as-is without renaming tool names or remapping argument fields. This aligns with Claude Code Router and guarantees correct tool flow (emitting `stop_reason=tool_use` on `message_delta`).
 

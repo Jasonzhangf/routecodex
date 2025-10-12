@@ -279,9 +279,15 @@ export class OpenAIProvider implements ProviderModule {
         }
       }
 
-      // Build chat completion request (passthrough using standard OpenAI schema)
+      // Build chat completion request (use pipeline-assembled provider model; do NOT trust inbound request.model)
+      const providerCfg = this.config?.config as ProviderConfig;
+      const configuredModel = (providerCfg as any)?.model as string | undefined;
+      const routeModel = (request as any)?.route?.modelId as string | undefined;
+      const inboundModel = (request as { model?: string }).model as string | undefined;
+      const effectiveModel = configuredModel || routeModel || inboundModel;
+
       let chatRequest: Record<string, unknown> = {
-        model: (request as { model?: string }).model,
+        model: effectiveModel,
         messages: (request as { messages?: any[] }).messages || [],
         temperature: (request as { temperature?: number }).temperature ?? 0.7,
         max_tokens: (request as { max_tokens?: number }).max_tokens,
@@ -340,6 +346,36 @@ export class OpenAIProvider implements ProviderModule {
           model: (request as { model?: string }).model as string
         }
       };
+
+      // Capture provider request+response pair for Anthropic-schema replay validation
+      try {
+        const baseDir = path.join(homedir(), '.routecodex', 'codex-samples');
+        const subDir = path.join(baseDir, 'anth-replay');
+        await fs.mkdir(subDir, { recursive: true });
+        const filePath = path.join(
+          subDir,
+          `openai-provider-pair_${Date.now()}_${Math.random().toString(36).slice(2,8)}.json`
+        );
+        const pair = {
+          type: 'openai-provider-pair',
+          requestId,
+          timestamp: Date.now(),
+          meta: {
+            provider: 'openai',
+            model: (request as { model?: string }).model,
+            baseURL: (this.config.config as ProviderConfig)?.baseUrl || undefined,
+          },
+          // OpenAI request payload (includes tools/function.parameters schemas)
+          request: chatRequest,
+          // Raw OpenAI ChatCompletion response (contains choices[*].message.tool_calls)
+          response,
+          // Extracted schemas for convenience
+          schemas: {
+            openai: (chatRequest as any).tools || []
+          }
+        };
+        await fs.writeFile(filePath, JSON.stringify(pair, null, 2), 'utf-8');
+      } catch { /* optional capture; ignore on failure */ }
 
       this.logger.logModule(this.id, 'sending-request-complete', {
         requestId,

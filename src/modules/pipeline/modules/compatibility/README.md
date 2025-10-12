@@ -118,6 +118,10 @@ console.log({
 src/modules/pipeline/modules/compatibility/
 ├── field-mapping.ts              # 通用字段映射实现
 ├── lmstudio-compatibility.ts     # LM Studio 兼容性实现
+ 
+## 更新（0.41.1）
+
+- 与路由层配合，Anthropic 端点的流式输出已对齐规范：当上游为 OpenAI 形态时，路由层会合成标准 SSE 事件顺序（包含 tool_use 输入），避免客户端在累积阶段出现空参数工具调用。
 ├── qwen-compatibility.ts         # Qwen 兼容性实现
 ├── iflow-compatibility.ts        # iFlow 兼容性实现
 └── README.md                     # 本文档
