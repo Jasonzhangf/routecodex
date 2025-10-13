@@ -412,7 +412,7 @@ export class ConfigManagerModule extends BaseModule {
         );
 
         if (!compatResult.isValid) {
-          throw new Error(`Compatibility processing failed: ${compatResult.errors?.map(e => e.message).join(', ')}`);
+          throw new Error(`Compatibility processing failed: ${compatResult.errors?.map((e: any) => e.message).join(', ')}`);
         }
 
         // 3. 对兼容性引擎输出做一次轻量归一化，确保 provider 家族类型符合解析器枚举
@@ -545,22 +545,45 @@ export class ConfigManagerModule extends BaseModule {
         });
       }
 
-      // Ensure httpserver.port is determined by user config if provided
+      // Ensure httpserver.{port,host} translated from user config
       try {
-        const uHttp = (userConfig as Record<string, any>)?.httpserver || (parsedUserConfig as Record<string, any>)?.httpserver || {};
+        const userAny = (userConfig as Record<string, any>) || {};
+        const uHttp = (userAny.httpserver as Record<string, any>) || {};
         const mergedAny = mergedConfig as Record<string, any>;
-if (!mergedAny.modules) { mergedAny.modules = {}; }
-const mModules = mergedAny.modules as Record<string, any>;
+        if (!mergedAny.modules) { mergedAny.modules = {}; }
+        const mModules = mergedAny.modules as Record<string, any>;
         if (!mModules.httpserver) { mModules.httpserver = { enabled: true, config: {} }; }
-const mHttp = mModules.httpserver as Record<string, any>;
+        const mHttp = mModules.httpserver as Record<string, any>;
         if (!mHttp.config) { mHttp.config = {}; }
-const mHttpCfg = mHttp.config as Record<string, any>;
-        // Only project user-provided values; do NOT apply implicit defaults here
-        if (typeof uHttp.port === 'number' && uHttp.port > 0) {
-          mHttpCfg.port = uHttp.port;
+        const mHttpCfg = mHttp.config as Record<string, any>;
+
+        // 1) Prefer explicit httpserver.port/host from user config
+        let port: number | undefined = (typeof uHttp.port === 'number' && uHttp.port > 0) ? uHttp.port : undefined;
+        let host: string | undefined = (typeof uHttp.host === 'string' && uHttp.host.trim()) ? String(uHttp.host).trim() : undefined;
+
+        // 2) Translate legacy top-level fields if not provided above
+        if (!port && typeof userAny.port === 'number' && userAny.port > 0) {
+          port = userAny.port;
         }
-        if (typeof uHttp.host === 'string' && uHttp.host.trim()) {
-          mHttpCfg.host = uHttp.host.trim();
+        if (!host && typeof userAny.host === 'string' && userAny.host.trim()) {
+          host = String(userAny.host).trim();
+        }
+
+        // 3) Translate from legacy server block if still missing
+        const uServer = (userAny.server as Record<string, any>) || {};
+        if (!port && typeof uServer.port === 'number' && uServer.port > 0) {
+          port = uServer.port;
+        }
+        if (!host && typeof uServer.host === 'string' && uServer.host.trim()) {
+          host = String(uServer.host).trim();
+        }
+
+        // 4) Project into merged-config if present and not set yet
+        if (port && !(typeof mHttpCfg.port === 'number' && mHttpCfg.port > 0)) {
+          mHttpCfg.port = port;
+        }
+        if (host && !mHttpCfg.host) {
+          mHttpCfg.host = host;
         }
       } catch { /* ignore normalization errors */ }
 
