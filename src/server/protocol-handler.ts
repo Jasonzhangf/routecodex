@@ -126,9 +126,9 @@ export class ProtocolHandler extends BaseModule {
   private initializeDebugEnhancements(): void {
     try {
       this.isDebugEnhanced = true;
-      console.log('OpenAI Router debug enhancements initialized');
+      console.log('Protocol Handler debug enhancements initialized');
     } catch (error) {
-      console.warn('Failed to initialize OpenAI Router debug enhancements:', error);
+      console.warn('Failed to initialize Protocol Handler debug enhancements:', error);
       this.isDebugEnhanced = false;
     }
   }
