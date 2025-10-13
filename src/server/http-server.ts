@@ -158,23 +158,33 @@ export class HttpServer extends BaseModule implements IHttpServer {
    */
   private async getServerConfig(): Promise<ServerConfig> {
     // Require merged configuration injected via initializeWithMergedConfig
-    if (!this.config) {
+    if (!this.mergedConfig) {
       throw new Error('Server configuration missing. Ensure merged-config is initialized.');
     }
-    const cfg: UnknownObject = this.config;
-    if (typeof cfg.port !== 'number' || cfg.port <= 0) {
-      throw new Error(
-        'HTTP server port is missing. Please set httpserver.port in your user config (~/.routecodex/config.json).'
-      );
+
+    const mc: UnknownObject = this.mergedConfig as UnknownObject;
+    const httpCfg = (((mc.modules as UnknownObject) || {} as UnknownObject)['httpserver'] as UnknownObject)?.['config'] as UnknownObject | undefined;
+    const rootCfg: UnknownObject = (this.config as UnknownObject) || {};
+
+    // Prefer merged-config module block; fall back to root (back-compat) then defaults
+    const resolvedPort = typeof (httpCfg as any)?.port === 'number' ? (httpCfg as any).port : undefined;
+    if (!(resolvedPort && resolvedPort > 0)) {
+      throw new Error('HTTP server port is missing. Please set httpserver.port in your user config (~/.routecodex/config.json).');
     }
-    const logging = (cfg.logging as UnknownObject) || {};
+
+    const resolvedHost = ((httpCfg as any)?.host as string) || ((rootCfg as any)?.host as string) || 'localhost';
+    const resolvedCors = (httpCfg as any)?.cors || (rootCfg as any)?.cors || { origin: '*', credentials: true };
+    const resolvedTimeout = (httpCfg as any)?.timeout ?? (rootCfg as any)?.timeout ?? 30000;
+    const resolvedBodyLimit = (httpCfg as any)?.bodyLimit ?? (rootCfg as any)?.bodyLimit ?? '10mb';
+
+    const logging = (rootCfg.logging as UnknownObject) || {};
     return {
       server: {
-        port: cfg.port || 5506,
-        host: (cfg.host as string) || 'localhost',
-        cors: (cfg.cors as any) || { origin: '*', credentials: true },
-        timeout: (cfg.timeout as number) || 30000,
-        bodyLimit: (cfg.bodyLimit as string) || '10mb',
+        port: resolvedPort as number,
+        host: resolvedHost,
+        cors: resolvedCors as any,
+        timeout: Number(resolvedTimeout),
+        bodyLimit: String(resolvedBodyLimit),
       },
       logging: {
         level: ((logging.level as string) || 'info') as 'debug' | 'info' | 'warn' | 'error',

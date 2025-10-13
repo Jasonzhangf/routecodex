@@ -177,15 +177,15 @@ export class PipelineAssembler {
     ).toLowerCase();
 
     const defaultLlmSwitch: ModuleConfig = {
-      // Use unified LLMSwitch by default to auto-detect by endpoint
-      type: 'llmswitch-unified',
+      // Unified switch is deprecated; default to anthropic-openai
+      type: 'llmswitch-anthropic-openai',
       config: {}
     };
 
     // 端点特定的LLMSwitch选择
     const selectLLMSwitchForRoute = (_routeName: string): ModuleConfig => {
-      // Route-based default now unified as well; endpoint decides inside the module
-      return { type: 'llmswitch-unified', config: {} };
+      // Use anthropic-openai as the sole default
+      return { type: 'llmswitch-anthropic-openai', config: {} };
     };
 
     type PcShape = {
@@ -447,18 +447,12 @@ export class PipelineAssembler {
           // 使用配置中的LLMSwitch，如果配置中没有则使用路由基础的LLMSwitch选择
           // 注意：如果配置了unified LLMSwitch，优先使用它而不是路由基础的LLMSwitch
           let llmSwitch: ModuleConfig;
-          if (pc.llmSwitch && pc.llmSwitch.type === 'llmswitch-unified') {
-            // 如果配置了unified LLMSwitch，使用它
-            llmSwitch = {
-              type: pc.llmSwitch.type || 'llmswitch-unified',
-              config: pc.llmSwitch.config || {},
-              enabled: pc.llmSwitch.enabled !== false
-            };
-            console.log(`[PipelineAssembler] DEBUG - Using unified LLMSwitch: ${JSON.stringify(llmSwitch)}`);
-          } else if (pc.llmSwitch) {
+          if (pc.llmSwitch) {
+            // Map legacy unified to anthropic-openai
+            const mappedType = pc.llmSwitch.type === 'llmswitch-unified' ? 'llmswitch-anthropic-openai' : (pc.llmSwitch.type || 'llmswitch-anthropic-openai');
             // 如果配置了其他LLMSwitch，使用它
             llmSwitch = {
-              type: pc.llmSwitch.type || 'llmswitch-openai-openai',
+              type: mappedType,
               config: pc.llmSwitch.config || {},
               enabled: pc.llmSwitch.enabled !== false
             };

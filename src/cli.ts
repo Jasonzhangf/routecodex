@@ -128,49 +128,11 @@ program
         }
       }
 
-      // Check if config exists
+      // Check if config exists; do NOT create defaults
       if (!fs.existsSync(configPath)) {
-        spinner.warn(`Configuration file not found: ${configPath}`);
-        logger.info('Creating default configuration...');
-
-        // Create config directory if it doesn't exist
-        const configDir = path.dirname(configPath);
-        if (!fs.existsSync(configDir)) {
-          fs.mkdirSync(configDir, { recursive: true });
-        }
-
-        // Load default config template
-        const templatePath = path.join(homedir(), '.routecodex', 'default.json');
-        let defaultConfig: DefaultConfig = {
-          server: {
-            port: parseInt(options.port),
-            host: options.host
-          },
-          logging: {
-            level: options.logLevel
-          },
-          providers: {}
-        };
-
-        // Use template if available
-        if (fs.existsSync(templatePath)) {
-          const template: TemplateConfig = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
-          defaultConfig = {
-            server: {
-              ...(template.server || {}),
-              port: parseInt(options.port),
-              host: options.host
-            },
-            logging: {
-              ...(template.logging || {}),
-              level: options.logLevel
-            },
-            providers: (template as UnknownObject).providers || {}
-          } as DefaultConfig;
-        }
-
-        fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
-        logger.success(`Default configuration created: ${configPath}`);
+        spinner.fail(`Configuration file not found: ${configPath}`);
+        logger.error('Please create a RouteCodex user config first (e.g., ~/.routecodex/config.json).');
+        process.exit(1);
       }
 
       // Determine target port from config

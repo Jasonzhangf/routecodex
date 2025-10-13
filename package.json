@@ -1,12 +1,13 @@
 {
   "name": "routecodex",
-  "version": "0.45.0",
+  "version": "0.46.0",
   "description": "Multi-provider OpenAI proxy server with native dry-run capabilities",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "bin": {
-    "routecodex": "./dist/cli.js"
+    "routecodex": "./dist/cli.js",
+    "rcc": "./rcc"
   },
   "exports": {
     ".": {
@@ -18,6 +19,7 @@
     "dist/",
     "config/",
     "scripts/",
+    "rcc",
     "README.md",
     "LICENSE"
   ],

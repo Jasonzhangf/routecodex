@@ -41,8 +41,15 @@ export class ModuleConfigReader {
       this.config = JSON.parse(configContent);
       return this.config;
     } catch (error) {
-      console.warn(`Failed to load modules config from ${this.configPath}:`, error);
-      // Return default configuration
+      const strict = String(process.env.RCC_STRICT_MODULES_CONFIG || '').trim() === '1' ||
+        String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+      const msg = `Failed to load modules config from ${this.configPath}: ${error instanceof Error ? error.message : String(error)}`;
+      if (strict) {
+        // In production/strict mode, do not silently fall back
+        throw new Error(`${msg}. Strict mode is enabled; aborting without default fallback.`);
+      }
+      console.warn(`${msg}. Using development fallback defaults (non-strict mode).`);
+      // Return default configuration in non-strict/dev mode
       this.config = this.getDefaultConfig();
       return this.config;
     }
@@ -115,7 +122,8 @@ export class ModuleConfigReader {
           enabled: true,
           config: {
             moduleType: 'config-manager',
-            configPath: './routecodex.json',
+            // Align with ConfigManager default user config path
+            configPath: '~/.routecodex/config.json',
             watchMode: true,
           },
         },

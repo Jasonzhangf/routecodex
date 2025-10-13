@@ -241,8 +241,7 @@ export class ConfigManagerModule extends BaseModule {
         });
       }
 
-      // 若用户配置不存在，生成默认GLM单供应商配置
-      await this.ensureDefaultUserConfig();
+      // 不再自动生成默认用户配置；缺失用户配置应视为错误并由上层处理
 
       // 确保Auth目录存在
       await this.authFileResolver.ensureAuthDir();
@@ -314,7 +313,6 @@ export class ConfigManagerModule extends BaseModule {
       const dir = filePath.split('/').slice(0, -1).join('/');
       await fs.mkdir(dir, { recursive: true });
 
-      const glmApiKey = (process.env.GLM_API_KEY && String(process.env.GLM_API_KEY).trim()) || 'REPLACE_WITH_YOUR_GLM_API_KEY';
       const defaultConfig = {
         version: '1.0.0',
         description: 'Auto-generated default config (GLM single provider)',
@@ -324,8 +322,9 @@ export class ConfigManagerModule extends BaseModule {
           providers: {
             glm: {
               type: 'glm',
-              baseURL: 'https://open.bigmodel.cn/api/coding/paas/v4',
-              apiKey: [glmApiKey],
+              // Do not hardcode upstream endpoint or credentials in default config
+              // Require explicit configuration or environment variables
+              apiKey: [],
               // Provider-level compatibility is optional; model-level override below is applied
               models: {
                 'glm-4.6': {
@@ -347,7 +346,8 @@ export class ConfigManagerModule extends BaseModule {
           }
         },
         httpserver: {
-          port: 5513
+          // Align default port with system defaults
+          port: 5506
         }
       } as Record<string, unknown>;
 
@@ -544,6 +544,21 @@ export class ConfigManagerModule extends BaseModule {
           mergedConfigSize: Object.keys(mergedConfig).length
         });
       }
+
+      // Ensure httpserver.port is determined by user config if provided
+      try {
+        const uHttp = (userConfig as Record<string, any>)?.httpserver || (parsedUserConfig as Record<string, any>)?.httpserver || {};
+        const mModules = ((mergedConfig as Record<string, any>)?.modules ||= {});
+        const mHttp = ((mModules.httpserver ||= { enabled: true, config: {} }));
+        const mHttpCfg = ((mHttp.config ||= {}));
+        // Only project user-provided values; do NOT apply implicit defaults here
+        if (typeof uHttp.port === 'number' && uHttp.port > 0) {
+          mHttpCfg.port = uHttp.port;
+        }
+        if (typeof uHttp.host === 'string' && uHttp.host.trim()) {
+          mHttpCfg.host = uHttp.host.trim();
+        }
+      } catch { /* ignore normalization errors */ }
 
       // 保存合并配置
       await this.saveMergedConfig(mergedConfig);

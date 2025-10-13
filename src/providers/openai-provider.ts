@@ -39,7 +39,14 @@ export class OpenAIProvider extends BaseProvider {
   constructor(config: ProviderConfig) {
     super(config);
 
-    this.baseUrl = config.baseUrl || 'https://api.openai.com/v1';
+    if (!config.baseUrl) {
+      throw new RouteCodexError(
+        'OpenAIProvider requires explicit baseUrl in configuration',
+        'provider_config_error',
+        400
+      );
+    }
+    this.baseUrl = config.baseUrl;
     this.defaultHeaders = {
       'Content-Type': 'application/json',
       'User-Agent': 'RouteCodex/0.0.1',
