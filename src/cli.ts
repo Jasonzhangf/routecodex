@@ -208,6 +208,10 @@ program
         ANTHROPIC_API_URL: anthropicBase,
         ANTHROPIC_API_KEY: 'rcc-proxy-key'
       } as NodeJS.ProcessEnv;
+      // Avoid auth conflict: prefer API key routed via RouteCodex; remove shell tokens
+      try { delete (claudeEnv as Record<string, unknown>)['ANTHROPIC_AUTH_TOKEN']; } catch { /* ignore */ }
+      try { delete (claudeEnv as Record<string, unknown>)['ANTHROPIC_TOKEN']; } catch { /* ignore */ }
+      logger.info('Unset ANTHROPIC_AUTH_TOKEN/ANTHROPIC_TOKEN for Claude process to avoid conflicts');
       logger.info(`Setting Anthropic base URL to: ${anthropicBase}`);
 
       // Prepare Claude Code command arguments
