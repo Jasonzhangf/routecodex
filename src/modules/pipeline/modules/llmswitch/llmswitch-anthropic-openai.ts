@@ -5,6 +5,7 @@
 
 import type { LLMSwitchModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest, SharedPipelineResponse } from '../../../../types/shared-dtos.js';
+import type { OpenAIChatCompletionRequest, OpenAIChatCompletionResponse, AnthropicRequest, AnthropicResponse } from '../../types/pipeline-types.js';
 import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import fs from 'fs/promises';
 import path from 'path';
@@ -35,7 +36,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
     this.config = config;
     this.id = `llmswitch-anthropic-openai-${Date.now()}`;
-    this.logger = dependencies.logger as any;
+    this.logger = dependencies.logger as PipelineDebugLogger;
     this.conversionConfig = { ...DEFAULT_CONVERSION_CONFIG, ...(config.config?.conversionMappings || {}) };
     this.enableStreaming = config.config?.enableStreaming ?? true;
     this.enableTools = config.config?.enableTools ?? true;
@@ -53,17 +54,18 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     this.isInitialized = true;
   }
 
-  async processIncoming(requestParam: SharedPipelineRequest): Promise<SharedPipelineRequest> {
+  async processIncoming<T>(requestParam: T): Promise<T> {
     if (!this.isInitialized) { throw new Error('AnthropicOpenAIConverter is not initialized'); }
-    const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam;
+    const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam && 'metadata' in requestParam && 'debug' in requestParam;
     const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
-    const payload = isDto ? (dto!.data as any) : (requestParam as unknown as any);
+    const payload = isDto ? (dto!.data as unknown) : (requestParam as unknown);
     const requestFormat = detectRequestFormat(payload);
 
     if (requestFormat === 'anthropic') {
       // Debug presence of tools before conversion
       try {
-        const toolsIn = Array.isArray((payload as any)?.tools) ? (payload as any).tools.length : 0;
+        const tools = (payload as Record<string, unknown>)?.tools;
+        const toolsIn = Array.isArray(tools) ? tools.length : 0;
         this.logger.logModule(this.id, 'tools-presence-before', { direction: 'anthropic->openai', toolsIn });
       } catch { /* ignore */ }
 
@@ -75,7 +77,8 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       try { await this.captureConversion('anth-to-openai-request', requestParam, payload, transformedRequest); } catch { /* Empty catch block */ }
       // Debug presence of tools after conversion
       try {
-        const toolsOut = Array.isArray((transformedRequest as any)?.tools) ? (transformedRequest as any).tools.length : 0;
+        const tools = (transformedRequest as Record<string, unknown>)?.tools;
+        const toolsOut = Array.isArray(tools) ? tools.length : 0;
         this.logger.logModule(this.id, 'tools-presence-after', { direction: 'anthropic->openai', toolsOut });
       } catch { /* ignore */ }
       const out = {
@@ -89,8 +92,8 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
         }
       } as Record<string, unknown>;
       return isDto
-        ? { ...dto!, data: out }
-        : ({ data: out, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest);
+        ? { ...dto!, data: out } as T
+        : out as T;
     }
 
     if (requestFormat === 'openai') {
@@ -109,12 +112,12 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
         }
       } as Record<string, unknown>;
       return isDto
-        ? { ...dto!, data: out as any }
-        : ({ data: out, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest);
+        ? { ...dto!, data: out } as T
+        : out as T;
     }
 
     const passthrough = {
-      ...payload,
+      ...payload as Record<string, unknown>,
       _metadata: {
         switchType: this.type,
         direction: 'passthrough',
@@ -124,11 +127,11 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       }
     } as Record<string, unknown>;
     return isDto
-      ? { ...dto!, data: passthrough }
-      : ({ data: passthrough, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest);
+      ? { ...dto!, data: passthrough } as T
+      : passthrough as T;
   }
 
-  async processOutgoing(responseParam: SharedPipelineResponse | any): Promise<SharedPipelineResponse | any> {
+  async processOutgoing(responseParam: SharedPipelineResponse<OpenAIChatCompletionResponse | AnthropicResponse> | any): Promise<SharedPipelineResponse<OpenAIChatCompletionResponse | AnthropicResponse> | any> {
     if (!this.isInitialized) { throw new Error('AnthropicOpenAIConverter is not initialized'); }
     const isDto = responseParam && typeof responseParam === 'object' && 'data' in responseParam && 'metadata' in responseParam;
     let payload = isDto ? (responseParam as SharedPipelineResponse).data : responseParam;

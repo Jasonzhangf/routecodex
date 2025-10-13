@@ -192,17 +192,19 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
    */
   private detectProtocolByEndpoint(request: unknown): 'anthropic' | 'openai' {
     // 优先使用显式目标协议
-    const explicit = (request?._metadata?.targetProtocol || request?.metadata?.targetProtocol) as string | undefined;
+    const requestObj = request as Record<string, unknown>;
+    const metadata = requestObj?._metadata as Record<string, unknown> | undefined;
+    const explicit = (metadata?.['targetProtocol'] || (requestObj?.metadata as Record<string, unknown>)?.['targetProtocol']) as string | undefined;
     if (explicit && (explicit === 'anthropic' || explicit === 'openai')) {
       return explicit;
     }
 
     // 尝试从多个位置获取端点信息
-    const endpoint = request._metadata?.endpoint ||
-                     request.endpoint ||
-                     request.metadata?.endpoint ||
-                     request.metadata?.url ||
-                     request.url ||
+    const endpoint = (metadata?.['endpoint'] as string) ||
+                     (requestObj['endpoint'] as string) ||
+                     (requestObj.metadata as Record<string, unknown>)?.['endpoint'] ||
+                     (requestObj.metadata as Record<string, unknown>)?.['url'] ||
+                     (requestObj['url'] as string) ||
                      '';
     
     console.log(`[UnifiedLLMSwitch] DEBUG - Endpoint detection: endpoint="${endpoint}"`);
@@ -215,12 +217,12 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
       return this.switchConfig.defaultProtocol;
     }
     
-    if (mapping.anthropic.some(ep => endpoint.includes(ep))) {
+    if (mapping.anthropic.some(ep => typeof ep === 'string' && (endpoint as string).includes(ep))) {
       console.log(`[UnifiedLLMSwitch] DEBUG - Detected anthropic protocol for endpoint: ${endpoint}`);
       return 'anthropic';
     }
     
-    if (mapping.openai.some(ep => endpoint.includes(ep))) {
+    if (mapping.openai.some(ep => typeof ep === 'string' && (endpoint as string).includes(ep))) {
       console.log(`[UnifiedLLMSwitch] DEBUG - Detected openai protocol for endpoint: ${endpoint}`);
       return 'openai';
     }
@@ -234,12 +236,13 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
    */
   private detectProtocolByContent(request: unknown): 'anthropic' | 'openai' {
     // 根据请求内容特征检测协议
-    if (request.messages && Array.isArray(request.messages)) {
+    const requestObj = request as Record<string, unknown>;
+    if (requestObj.messages && Array.isArray(requestObj.messages)) {
       // OpenAI格式通常有messages数组
       return 'openai';
     }
     
-    if (request.max_tokens !== undefined && request.model !== undefined) {
+    if (requestObj.max_tokens !== undefined && requestObj.model !== undefined) {
       // Anthropic格式通常有max_tokens和model
       return 'anthropic';
     }
@@ -251,7 +254,9 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
    * 基于请求头检测协议
    */
   private detectProtocolByHeaders(request: unknown): 'anthropic' | 'openai' {
-    const headers = request._metadata?.headers || request.headers || {};
+    const requestObj = request as Record<string, unknown>;
+    const metadata = requestObj._metadata as Record<string, unknown> | undefined;
+    const headers = (metadata?.['headers'] as Record<string, string>) || (requestObj['headers'] as Record<string, string>) || {};
     
     if (headers['anthropic-version']) {
       return 'anthropic';
