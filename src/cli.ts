@@ -282,10 +282,11 @@ program
         }
       }
 
-      // Check if config exists
+      // Check if config exists; do NOT create defaults
       if (!fs.existsSync(configPath)) {
         spinner.fail(`Configuration file not found: ${configPath}`);
-        logger.error('Please create a configuration file first:');
+        logger.error('Please create a RouteCodex user config first (e.g., ~/.routecodex/config.json).');
+        logger.error('Or initialize via CLI:');
         logger.error('  rcc config init');
         logger.error('Or specify a custom configuration file:');
         logger.error('  rcc start --config ./my-config.json');

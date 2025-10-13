@@ -141,7 +141,7 @@ class RouteCodexApp {
       // 7. 获取服务器状态
       // const status = (this.httpServer as any).getStatus();
       const serverConfig = {
-        host: 'localhost',
+        host: (mergedConfig && (mergedConfig as any).modules && (mergedConfig as any).modules.httpserver && (mergedConfig as any).modules.httpserver.config && (mergedConfig as any).modules.httpserver.config.host) || 'localhost',
         port
       };
 
@@ -241,7 +241,9 @@ class RouteCodexApp {
 
           const raw = await fs.readFile(configPath, 'utf-8');
           const json = JSON.parse(raw);
-          const port = json?.port;
+          const port = (json && typeof json.httpserver === 'object' && typeof json.httpserver.port === 'number')
+            ? json.httpserver.port
+            : json?.port;
           if (typeof port === 'number' && port > 0) {
             console.log(`🔧 Using port ${port} from RCC4_CONFIG_PATH: ${configPath}`);
             return port;
@@ -260,7 +262,9 @@ class RouteCodexApp {
 
           const raw = await fs.readFile(configPath, 'utf-8');
           const json = JSON.parse(raw);
-          const port = json?.port;
+          const port = (json && typeof json.httpserver === 'object' && typeof json.httpserver.port === 'number')
+            ? json.httpserver.port
+            : json?.port;
           if (typeof port === 'number' && port > 0) {
             console.log(`🔧 Using port ${port} from ROUTECODEX_CONFIG: ${configPath}`);
             return port;
@@ -274,7 +278,9 @@ class RouteCodexApp {
         if (sharedPath && fsSync.existsSync(sharedPath)) {
           const raw = await fs.readFile(sharedPath, 'utf-8');
           const json = JSON.parse(raw);
-          const port = json?.port;
+          const port = (json && typeof json.httpserver === 'object' && typeof json.httpserver.port === 'number')
+            ? json.httpserver.port
+            : json?.port;
           if (typeof port === 'number' && port > 0) {
             console.log(`🔧 Using port ${port} from resolved config: ${sharedPath}`);
             return port;
@@ -294,7 +300,9 @@ class RouteCodexApp {
 
         const raw = await fs.readFile(defaultConfigPath, 'utf-8');
         const json = JSON.parse(raw);
-        const port = json?.port;
+        const port = (json && typeof json.httpserver === 'object' && typeof json.httpserver.port === 'number')
+          ? json.httpserver.port
+          : json?.port;
         if (typeof port === 'number' && port > 0) {
           console.log(`🔧 Using port ${port} from default config: ${defaultConfigPath}`);
           return port;
