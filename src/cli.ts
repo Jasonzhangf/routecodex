@@ -159,7 +159,7 @@ program
           // Start RouteCodex server in background
           const { spawn } = await import('child_process');
           const modulesConfigPath = path.resolve(__dirname, '../config/modules.json');
-          const serverEntry = path.resolve(__dirname, 'index.js');
+          const serverEntry = path.resolve(__dirname, '..', 'dist', 'index.js');
 
           const serverProcess = spawn(process.execPath, [serverEntry, modulesConfigPath], {
             stdio: 'pipe',

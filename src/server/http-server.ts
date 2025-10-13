@@ -971,13 +971,17 @@ export class HttpServer extends BaseModule implements IHttpServer {
         // Non-stream JSON: do not use chunked heartbeats; return a single JSON frame
         const jsonHeartbeatEnabled = false;
         const disableAnthropicStreamA = process.env.RCC_DISABLE_ANTHROPIC_STREAM === '1';
-        if (!disableAnthropicStreamA && (req.body as any)?.stream && !res.headersSent) {
+        const isStreamingRequestA = !disableAnthropicStreamA && (req.body as any)?.stream;
+
+        if (isStreamingRequestA && !res.headersSent) {
           try {
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
             res.setHeader('Transfer-Encoding', 'chunked');
             res.setHeader('x-request-id', requestId);
+            res.setHeader('x-rc-target-protocol', 'anthropic');
+            res.setHeader('anthropic-version', '2023-06-01');
             const interval = Math.max(5000, Number(process.env.RCC_SSE_HEARTBEAT_MS || 15000));
             const send = () => {
               try { res.write(`event: ping\n` + `data: ${JSON.stringify({ type: 'ping', stage: 'pre', requestId, ts: Date.now() })}\n\n`); } catch { /* ignore */ }
@@ -1176,13 +1180,17 @@ export class HttpServer extends BaseModule implements IHttpServer {
         let preHeartbeat: NodeJS.Timeout | null = null;
         const jsonHeartbeatEnabled2 = false;
         const disableAnthropicStreamB = process.env.RCC_DISABLE_ANTHROPIC_STREAM === '1';
-        if (!disableAnthropicStreamB && (req.body as any)?.stream && !res.headersSent) {
+        const isStreamingRequest = !disableAnthropicStreamB && (req.body as any)?.stream;
+
+        if (isStreamingRequest && !res.headersSent) {
           try {
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
             res.setHeader('Transfer-Encoding', 'chunked');
             res.setHeader('x-request-id', requestId);
+            res.setHeader('x-rc-target-protocol', 'anthropic');
+            res.setHeader('anthropic-version', '2023-06-01');
             const interval = Math.max(5000, Number(process.env.RCC_SSE_HEARTBEAT_MS || 15000));
             const send = () => {
               try { res.write(`event: ping\n` + `data: ${JSON.stringify({ type: 'ping', stage: 'pre', requestId, ts: Date.now() })}\n\n`); } catch { /* ignore */ }
@@ -1241,10 +1249,19 @@ export class HttpServer extends BaseModule implements IHttpServer {
           }
         }
         try { if (preHeartbeat) { clearInterval(preHeartbeat); preHeartbeat = null; } } catch { /* ignore */ }
-        try { res.setHeader('x-rc-target-protocol', 'anthropic'); } catch { /* ignore */ }
-        try { res.setHeader('anthropic-version', '2023-06-01'); } catch { /* ignore */ }
+
+        // Only set headers for non-streaming responses (streaming already has headers set)
+        if (!isStreamingRequest) {
+          try { res.setHeader('x-rc-target-protocol', 'anthropic'); } catch { /* ignore */ }
+          try { res.setHeader('anthropic-version', '2023-06-01'); } catch { /* ignore */ }
+        }
+
         await captureAnthropicResponse2(data);
-        res.status(200).json(data);
+
+        // For streaming requests, headers are already set and response is handled by protocolHandler
+        if (!isStreamingRequest) {
+          res.status(200).json(data);
+        }
       } catch (err) {
         res.status(500).json({ error: { message: (err as Error).message || 'Anthropic handler error' } });
       }
