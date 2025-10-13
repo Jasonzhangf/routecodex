@@ -1,6 +1,32 @@
 // Minimal user config parser used by tests
 
-type UserConfig = Record<string, unknown>;
+type UserConfig = {
+  virtualrouter?: {
+    inputProtocol?: string;
+    outputProtocol?: string;
+    routing?: Record<string, string[]>;
+    providers?: Record<string, {
+      auth?: Record<string, string>;
+      type?: string;
+      baseURL?: string;
+      models?: Record<string, {
+        maxContext?: number;
+        maxTokens?: number;
+      }>;
+    }>;
+  };
+  pipelineConfigs?: Record<string, unknown>;
+};
+
+type ProviderConfig = {
+  auth?: Record<string, string>;
+  type?: string;
+  baseURL?: string;
+  models?: Record<string, {
+    maxContext?: number;
+    maxTokens?: number;
+  }>;
+};
 
 export class UserConfigParser {
   parseUserConfig(userConfig: UserConfig) {
@@ -17,7 +43,8 @@ export class UserConfigParser {
     const pipelineConfigs: Record<string, unknown> = {};
 
     const getAuthActualKey = (provId: string, keyId: string): string => {
-      const authMap = (providers[provId]?.auth ?? {}) as Record<string, string>;
+      const provider = providers[provId] as ProviderConfig | undefined;
+      const authMap = (provider?.auth ?? {}) as Record<string, string>;
       if (!authMap[keyId]) { return keyId; }
       const base = `auth-${keyId}`;
       let candidate = base;
@@ -51,14 +78,15 @@ export class UserConfigParser {
 
         // Build pipeline config
         const key = `${providerId}.${modelId}.${keyId}`;
+        const providerConfig = prov as ProviderConfig;
         pipelineConfigs[key] = {
           provider: {
-            type: String(prov.type || providerId),
-            baseURL: prov.baseURL,
+            type: String(providerConfig.type || providerId),
+            baseURL: providerConfig.baseURL,
           },
           model: {
-            maxContext: prov.models?.[modelId]?.maxContext,
-            maxTokens: prov.models?.[modelId]?.maxTokens,
+            maxContext: providerConfig.models?.[modelId]?.maxContext,
+            maxTokens: providerConfig.models?.[modelId]?.maxTokens,
           },
           keyConfig: {
             keyId,

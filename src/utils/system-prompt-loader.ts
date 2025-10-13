@@ -77,16 +77,18 @@ export class SystemPromptLoader {
     // Accept shapes: { data: { messages: [...] } } or { body: { messages: [...] } } or { messages: [...] }
     const candidates: unknown[] = [];
     if (j && typeof j === 'object') {
-      if (j.data && typeof j.data === 'object') {candidates.push(j.data);}
-      if (j.body && typeof j.body === 'object') {candidates.push(j.body);}
+      const obj = j as Record<string, unknown>;
+      if (obj.data && typeof obj.data === 'object') {candidates.push(obj.data);}
+      if (obj.body && typeof obj.body === 'object') {candidates.push(obj.body);}
       candidates.push(j);
     }
     for (const obj of candidates) {
       const msgs = (obj as Record<string, unknown>)?.messages;
       if (Array.isArray(msgs) && msgs.length) {
         for (const m of msgs) {
-          if (m && (m as Record<string, unknown>).role === 'system' && typeof (m as Record<string, unknown>).content === 'string' && (m as Record<string, unknown>).content.trim().length > 0) {
-            return (m as Record<string, unknown>).content as string;
+          const msg = m as Record<string, unknown>;
+          if (msg && msg.role === 'system' && typeof msg.content === 'string' && msg.content.trim().length > 0) {
+            return msg.content as string;
           }
         }
       }
@@ -98,13 +100,15 @@ export class SystemPromptLoader {
     // Accept shapes: { data: { system: string } } or { body: { system: string } } or { system: string }
     const candidates: unknown[] = [];
     if (j && typeof j === 'object') {
-      if (j.data && typeof j.data === 'object') {candidates.push(j.data);}
-      if (j.body && typeof j.body === 'object') {candidates.push(j.body);}
+      const obj = j as Record<string, unknown>;
+      if (obj.data && typeof obj.data === 'object') {candidates.push(obj.data);}
+      if (obj.body && typeof obj.body === 'object') {candidates.push(obj.body);}
       candidates.push(j);
     }
     for (const obj of candidates) {
-      if (obj && typeof (obj as Record<string, unknown>).system === 'string' && (obj as Record<string, unknown>).system.trim().length > 0) {
-        return (obj as Record<string, unknown>).system as string;
+      const candidate = obj as Record<string, unknown>;
+      if (candidate && typeof candidate.system === 'string' && candidate.system.trim().length > 0) {
+        return candidate.system as string;
       }
     }
     return null;
@@ -141,7 +145,9 @@ export class SystemPromptLoader {
       const j = await this.readJson(f.full);
       if (!j) {continue;}
       // Ensure it was a /v1/messages request if metadata present
-      const url = j?.metadata?.url as string | undefined;
+      const obj = j as Record<string, unknown>;
+      const metadata = obj.metadata as Record<string, unknown> | undefined;
+      const url = metadata?.url as string | undefined;
       if (url && !url.includes('/v1/messages') && !url.includes('/anthropic/messages')) {
         continue;
       }
@@ -172,9 +178,12 @@ export function shouldReplaceSystemPrompt(): Source | null {
 export function replaceSystemInOpenAIMessages(messages: unknown[], systemText: string): unknown[] {
   if (!Array.isArray(messages)) {return messages;}
   const out = [...messages];
-  const idx = out.findIndex((m) => m && m.role === 'system');
+  const idx = out.findIndex((m) => {
+    const msg = m as Record<string, unknown>;
+    return msg && msg.role === 'system';
+  });
   if (idx >= 0) {
-    const m = { ...(out[idx] || {}) };
+    const m = { ...(out[idx] as Record<string, unknown> || {}) } as Record<string, unknown>;
     m.content = systemText;
     out[idx] = m;
   } else {
