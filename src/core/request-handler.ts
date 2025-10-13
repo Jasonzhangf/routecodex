@@ -40,7 +40,7 @@ function isChatCompletionRequest(request: unknown): request is OpenAIChatComplet
     request !== null && request !== undefined &&
     typeof request === 'object' &&
     'messages' in request &&
-    Array.isArray((request as { messages?: any[] }).messages)
+    Array.isArray((request as { messages?: unknown[] }).messages)
   );
 }
 
@@ -76,9 +76,9 @@ export class RequestHandler extends BaseModule {
   private options: RequestHandlerOptions;
 
   // Debug enhancement properties
-  private handlerMetrics: Map<string, { values: any[]; lastUpdated: number }> = new Map();
-  private requestHistory: any[] = [];
-  private errorHistory: any[] = [];
+  private handlerMetrics: Map<string, { values: unknown[]; lastUpdated: number }> = new Map();
+  private requestHistory: unknown[] = [];
+  private errorHistory: unknown[] = [];
   private maxHistorySize = 50;
 
   constructor(
@@ -120,7 +120,7 @@ export class RequestHandler extends BaseModule {
   /**
    * Initialize the request handler
    */
-  public async initialize(_config?: any): Promise<void> {
+  public async initialize(_config?: unknown): Promise<void> {
     try {
       await ErrorHandlingUtils.initialize();
       await this.errorHandling.initialize();
@@ -245,7 +245,7 @@ export class RequestHandler extends BaseModule {
         throw new RouteCodexError('Streaming is not enabled', 'streaming_disabled', 400);
       }
 
-      let response: any;
+      let response: unknown;
 
       if (processedRequest.stream && isChatCompletionRequest(processedRequest)) {
         // Handle streaming request
@@ -536,7 +536,7 @@ export class RequestHandler extends BaseModule {
       });
 
       // Get models from active providers
-      const models: any[] = [];
+      const models: unknown[] = [];
       const activeProviders = this.providerManager.getActiveProviders();
 
       for (const provider of activeProviders) {
@@ -549,7 +549,7 @@ export class RequestHandler extends BaseModule {
             typeof providerModels === 'object' &&
             'data' in providerModels
           ) {
-            const data = (providerModels as { data?: any }).data;
+            const data = (providerModels as { data?: unknown }).data;
             if (Array.isArray(data)) {
               models.push(...data);
             } else if (data !== undefined) {
@@ -666,7 +666,7 @@ export class RequestHandler extends BaseModule {
           errors.push(`Message ${i} has invalid role: ${message.role}`);
         }
 
-        const c = (message as { content?: any }).content;
+        const c = (message as { content?: unknown }).content;
         if (c !== undefined && c !== null) {
           const isString = typeof c === 'string';
           const isArray = Array.isArray(c);
@@ -784,14 +784,14 @@ export class RequestHandler extends BaseModule {
     request: OpenAIChatCompletionRequest,
     providerResponse: UnknownObject
   ): OpenAICompletionResponse {
-    const responseData = (providerResponse as any).data || providerResponse as UnknownObject;
+    const responseData = (providerResponse as Record<string, unknown>).data || providerResponse as UnknownObject;
     return {
       id: ((responseData as UnknownObject)?.id as string) || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
       model: request.model,
-      choices: ((responseData as UnknownObject)?.choices as any[]) || [],
-      usage: (responseData as UnknownObject)?.usage as any,
+      choices: ((responseData as UnknownObject)?.choices as unknown[]) || [],
+      usage: (responseData as UnknownObject)?.usage as unknown,
     };
   }
 
@@ -802,14 +802,14 @@ export class RequestHandler extends BaseModule {
     request: OpenAICompletionRequest,
     providerResponse: UnknownObject
   ): OpenAICompletionResponse {
-    const responseData = (providerResponse as any).data || providerResponse as UnknownObject;
+    const responseData = (providerResponse as Record<string, unknown>).data || providerResponse as UnknownObject;
     return {
       id: ((responseData as UnknownObject)?.id as string) || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
       model: request.model,
-      choices: ((responseData as UnknownObject)?.choices as any[]) || [],
-      usage: (responseData as UnknownObject)?.usage as any,
+      choices: ((responseData as UnknownObject)?.choices as unknown[]) || [],
+      usage: (responseData as UnknownObject)?.usage as unknown,
     };
   }
 
@@ -988,7 +988,7 @@ export class RequestHandler extends BaseModule {
   /**
    * Record handler metric
    */
-  private recordHandlerMetric(operation: string, data: any): void {
+  private recordHandlerMetric(operation: string, data: unknown): void {
     if (!this.handlerMetrics.has(operation)) {
       this.handlerMetrics.set(operation, {
         values: [],
@@ -1009,7 +1009,7 @@ export class RequestHandler extends BaseModule {
   /**
    * Add to request history
    */
-  private addToRequestHistory(operation: any): void {
+  private addToRequestHistory(operation: unknown): void {
     this.requestHistory.push(operation);
 
     // Keep only recent history
@@ -1021,7 +1021,7 @@ export class RequestHandler extends BaseModule {
   /**
    * Add to error history
    */
-  private addToErrorHistory(operation: any): void {
+  private addToErrorHistory(operation: unknown): void {
     this.errorHistory.push(operation);
 
     // Keep only recent history

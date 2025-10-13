@@ -7,13 +7,13 @@ import type { UnknownObject, LogData } from '../types/common-types.js';
 export type { ModuleInfo } from 'rcc-basemodule';
 
 const DebugCenter =
-  (debugcenter as any).DebugCenter ||
+  (debugcenter as Record<string, unknown>).DebugCenter ||
   class {
     constructor() {}
   };
 
 const DebugEventBus =
-  (debugcenter as any).DebugEventBus ||
+  (debugcenter as Record<string, unknown>).DebugEventBus ||
   class {
     static getInstance() {
       return {
@@ -53,7 +53,7 @@ export abstract class BaseModule extends RCCBaseModule {
   // Legacy debug properties for backward compatibility
   protected debugEventBus: DebugEventBusInstance | null = null;
   public isDebugEnhanced = false;
-  public moduleMetrics: Map<string, { values: any[]; lastUpdated: number }> = new Map();
+  public moduleMetrics: Map<string, { values: unknown[]; lastUpdated: number }> = new Map();
   public operationHistory: UnknownObject[] = [];
   public errorHistory: UnknownObject[] = [];
   public maxHistorySize = 50;
@@ -70,7 +70,7 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * 订阅事件
    */
-  public on(event: string | symbol, listener: (...args: any[]) => void): this {
+  public on(event: string | symbol, listener: (...args: unknown[]) => void): this {
     this.emitter.on(event, listener);
     return this;
   }
@@ -78,7 +78,7 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * 订阅一次性事件
    */
-  public once(event: string | symbol, listener: (...args: any[]) => void): this {
+  public once(event: string | symbol, listener: (...args: unknown[]) => void): this {
     this.emitter.once(event, listener);
     return this;
   }
@@ -86,7 +86,7 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * 取消事件订阅
    */
-  public off(event: string | symbol, listener: (...args: any[]) => void): this {
+  public off(event: string | symbol, listener: (...args: unknown[]) => void): this {
     this.emitter.off(event, listener);
     return this;
   }
@@ -94,7 +94,7 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * 发射事件
    */
-  protected emit(event: string | symbol, ...args: any[]): boolean {
+  protected emit(event: string | symbol, ...args: unknown[]): boolean {
     return this.emitter.emit(event, ...args);
   }
 

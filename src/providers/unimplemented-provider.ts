@@ -41,7 +41,7 @@ export interface UnimplementedProviderConfig extends ProviderConfig {
  */
 export class UnimplementedProvider extends BaseProvider {
   private unimplementedFactory: UnimplementedModuleFactory;
-  private unimplementedModule: any;
+  private unimplementedModule: unknown;
   protected config: UnimplementedProviderConfig;
 
   constructor(config: UnimplementedProviderConfig) {
@@ -239,7 +239,7 @@ export class UnimplementedProvider extends BaseProvider {
   /**
    * Create standardized provider response from unimplemented response
    */
-  private createProviderResponse(unimplementedResponse: any): ProviderResponse {
+  private createProviderResponse(unimplementedResponse: unknown): ProviderResponse {
     return {
       success: false,
       error: unimplementedResponse.error,

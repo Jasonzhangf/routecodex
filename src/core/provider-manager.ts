@@ -1034,7 +1034,7 @@ export class ProviderManager extends BaseModule {
     if (
       context.includes('initialization') ||
       context.includes('critical_provider_failure') ||
-      (errorName === 'RouteCodexError' && (error as any).status >= 500)
+      (errorName === 'RouteCodexError' && (error as Record<string, unknown>).status >= 500)
     ) {
       return 'critical';
     }

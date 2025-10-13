@@ -302,7 +302,7 @@ export class OpenAIProvider extends BaseProvider {
       payload.stream = true;
 
       // Make streaming request as AsyncIterable producing parsed JSON chunks
-      const iterator = (async function* makeIterator(self: OpenAIProvider, endpoint: string, body: any, opts: StreamOptions) {
+      const iterator = (async function* makeIterator(self: OpenAIProvider, endpoint: string, body: unknown, opts: StreamOptions) {
         const url = `${self.baseUrl}${endpoint}`;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), opts.timeout || 30000);
@@ -391,8 +391,8 @@ export class OpenAIProvider extends BaseProvider {
   private prepareChatCompletionPayload(
     request: OpenAIChatCompletionRequest,
     modelConfig: ModelConfig
-  ): any {
-    const payload: any = {
+  ): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
       model: request.model,
       messages: request.messages,
       max_tokens: request.max_tokens || modelConfig.maxTokens,
@@ -434,8 +434,8 @@ export class OpenAIProvider extends BaseProvider {
   private prepareCompletionPayload(
     request: OpenAICompletionRequest,
     modelConfig: ModelConfig
-  ): any {
-    const payload: any = {
+  ): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
       model: request.model,
       prompt: request.prompt,
       max_tokens: request.max_tokens || modelConfig.maxTokens,
@@ -492,10 +492,10 @@ export class OpenAIProvider extends BaseProvider {
    */
   private async makeRequestWithRetry(
     endpoint: string,
-    payload: any,
+    payload: unknown,
     timeout: number,
     retryAttempts: number
-  ): Promise<{ data: any; statusCode: number; headers: Record<string, string> }> {
+  ): Promise<{ data: unknown; statusCode: number; headers: Record<string, string> }> {
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= retryAttempts; attempt++) {
@@ -528,9 +528,9 @@ export class OpenAIProvider extends BaseProvider {
    */
   private async makeHttpRequest(
     endpoint: string,
-    payload: any,
+    payload: unknown,
     timeout: number
-  ): Promise<{ data: any; statusCode: number; headers: Record<string, string> }> {
+  ): Promise<{ data: unknown; statusCode: number; headers: Record<string, string> }> {
     const url = `${this.baseUrl}${endpoint}`;
 
     try {
@@ -589,9 +589,9 @@ export class OpenAIProvider extends BaseProvider {
    */
   private async makeStreamingRequest(
     endpoint: string,
-    payload: any,
+    payload: unknown,
     options: StreamOptions
-  ): Promise<any> {
+  ): Promise<unknown> {
     const url = `${this.baseUrl}${endpoint}`;
     const chunks: string[] = [];
 
@@ -687,7 +687,7 @@ export class OpenAIProvider extends BaseProvider {
   /**
    * Parse chat completion response
    */
-  private parseChatCompletionResponse(data: any): OpenAICompletionResponse {
+  private parseChatCompletionResponse(data: unknown): OpenAICompletionResponse {
     return {
       id: data.id,
       object: data.object,
@@ -707,7 +707,7 @@ export class OpenAIProvider extends BaseProvider {
   /**
    * Parse completion response
    */
-  private parseCompletionResponse(data: any): OpenAICompletionResponse {
+  private parseCompletionResponse(data: unknown): OpenAICompletionResponse {
     return {
       id: data.id,
       object: data.object,

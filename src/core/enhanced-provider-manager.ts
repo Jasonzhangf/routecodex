@@ -154,9 +154,9 @@ export class EnhancedProviderManager extends ProviderManager {
     const allProviders = new Map<string, BaseProvider>();
 
     // Add regular providers
-    const regularProviders = (this as any).providers; // Access private field from parent
+    const regularProviders = (this as Record<string, unknown>).providers as Map<string, unknown>; // Access private field from parent
     for (const [providerId, providerInstance] of regularProviders) {
-      allProviders.set(providerId, providerInstance.provider);
+      allProviders.set(providerId, (providerInstance as Record<string, unknown>).provider as BaseProvider);
     }
 
     // Add unimplemented providers
@@ -223,8 +223,8 @@ export class EnhancedProviderManager extends ProviderManager {
         unusedModules: this.unimplementedFactory.getUnusedModules(),
       },
       summary: {
-        totalProviders: (this as any).providers.size + this.unimplementedProviders.size,
-        regularProviders: (this as any).providers.size,
+        totalProviders: ((this as Record<string, unknown>).providers as Map<string, unknown>).size + this.unimplementedProviders.size,
+        regularProviders: ((this as Record<string, unknown>).providers as Map<string, unknown>).size,
         unimplementedProviders: this.unimplementedProviders.size,
         totalUnimplementedCalls: unimplementedStats.totalCalls,
       },

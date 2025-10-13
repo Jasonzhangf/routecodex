@@ -23,7 +23,7 @@ import {
  */
 export interface ProviderResponse {
   success: boolean;
-  data?: any;
+  data?: unknown;
   error?: string;
   statusCode?: number;
   headers?: Record<string, string>;
@@ -104,7 +104,7 @@ export abstract class BaseProvider extends BaseModule {
   /**
    * Initialize the provider
    */
-  public async initialize(_config?: any): Promise<void> {
+  public async initialize(_config?: unknown): Promise<void> {
     try {
       await this.errorHandling.initialize();
       await this.validateConfiguration();
@@ -446,7 +446,7 @@ export abstract class BaseProvider extends BaseModule {
    */
   protected createResponse(
     success: boolean,
-    data?: any,
+    data?: unknown,
     error?: string,
     statusCode?: number,
     headers?: Record<string, string>,
@@ -469,7 +469,7 @@ export abstract class BaseProvider extends BaseModule {
    */
   protected formatOpenAIResponse(
     request: OpenAIChatCompletionRequest | OpenAICompletionRequest,
-    response: any,
+    response: unknown,
     usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
   ): OpenAICompletionResponse {
     // Convert usage object to match OpenAI format
