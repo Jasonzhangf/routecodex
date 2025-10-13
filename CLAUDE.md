@@ -520,3 +520,4 @@ if (levelPriority[level] >= levelPriority[config.logLevel]) {
 ```
 
 This architecture provides a solid foundation for building scalable, maintainable AI service integrations with proper separation of concerns and flexible configuration options.
+- 跟你说了不要改默认的config.json 你用--config指向你的config，不要占用5520端口
