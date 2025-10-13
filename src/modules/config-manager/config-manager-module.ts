@@ -456,7 +456,7 @@ export class ConfigManagerModule extends BaseModule {
         );
 
         if (!parseResult.isValid) {
-          throw new Error(`Configuration validation failed: ${parseResult.errors?.map(e => e.message).join(', ')}`);
+          throw new Error(`Configuration validation failed: ${parseResult.errors?.map((e: any) => e.message).join(', ')}`);
         }
 
         // 5. 提取解析后的配置和兼容性配置
@@ -528,7 +528,7 @@ export class ConfigManagerModule extends BaseModule {
             errors: finalValidation.errors
           });
         }
-        throw new Error(`Configuration validation failed: ${finalValidation.errors.map(e => e.message).join(', ')}`);
+        throw new Error(`Configuration validation failed: ${finalValidation.errors.map((e: any) => e.message).join(', ')}`);
       }
 
       // Debug: Record validation success
