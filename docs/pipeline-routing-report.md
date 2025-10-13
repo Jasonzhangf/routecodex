@@ -22,15 +22,15 @@
 
 2) OpenAI Chat Completions（非流式）
 - 路由注册：
-  - `src/server/openai-router.ts:139`
+  - `src/server/protocol-handler.ts:139`
 - 处理函数直接调用“直通 Provider”（未经过 LLM Switch / Compatibility）：
-  - `src/server/openai-router.ts:244`
+  - `src/server/protocol-handler.ts:244`
 - 将返回值直接写回客户端：
-  - `src/server/openai-router.ts:269`
+  - `src/server/protocol-handler.ts:269`
 
 3) Pass‑Through Provider（直通转发）
 - 目标地址为 `targetUrl + path`，默认 `targetUrl` 指向 OpenAI 官方 API（如未通过构造参数覆盖）：
-  - 默认取值位置：`src/server/openai-router.ts:89`
+  - 默认取值位置：`src/server/protocol-handler.ts:89`
 - Chat 请求通过 `forwardRequest('/chat/completions', ...)` 直接转发：
   - `src/providers/pass-through-provider.ts:154`
 - 实际发起 HTTP 请求与头处理：
@@ -39,7 +39,7 @@
 
 4) 流式（SSE）
 - 当前在 Router 内为“本地模拟流式”，并非真实上游 SSE 透传：
-  - `src/server/openai-router.ts:812`
+  - `src/server/protocol-handler.ts:812`
 
 5) Anthropic 端点
 - 已挂载 `/v1/anthropic/*`，但固定返回 501：
@@ -84,7 +84,7 @@
 - `config/modules.json` 定义了包括 `virtualrouter`、`httpserver` 等在内的模块。合并配置时会把路由目标与流水线配置合入，但 HTTP 请求链路目前并未消费这些配置。
   - 合并器注入 `routeTargets/pipelineConfigs`：`src/modules/config-manager/merged-config-generator.ts:40`
 - OpenAI Router 中的 `targetUrl` 由构造参数/默认值直接决定，并非来自 `modules.json`：
-  - `src/server/openai-router.ts:89`
+  - `src/server/protocol-handler.ts:89`
 
 ---
 
@@ -106,7 +106,7 @@
 ## 响应返回结构
 
 - 直通路径下，Router 将 `PassThroughProvider.processChatCompletion` 的返回对象直接 `res.json` 给客户端。该对象是 Provider 自定义的 `ProviderResponse` 包装，含 `success/data/error/usage` 等字段，真实上游的 OpenAI JSON 在 `data` 字段内：
-  - 写回位置举例：`src/server/openai-router.ts:269` 等
+  - 写回位置举例：`src/server/protocol-handler.ts:269` 等
 
 如需“完全 OpenAI 兼容”输出，应考虑在最终响应前去掉外层包装或改用严格对齐的响应结构。
 
@@ -149,9 +149,9 @@
 - 服务器与路由
   - HTTP Server 挂载：`src/server/http-server.ts:518`
   - Anthropic 占位：`src/server/http-server.ts:521`
-  - OpenAI Chat 路由：`src/server/openai-router.ts:139`
-  - 直通调用位置：`src/server/openai-router.ts:244`
-  - 响应写回：`src/server/openai-router.ts:269`
+  - OpenAI Chat 路由：`src/server/protocol-handler.ts:139`
+  - 直通调用位置：`src/server/protocol-handler.ts:244`
+  - 响应写回：`src/server/protocol-handler.ts:269`
 
 - 直通 Provider
   - 转发与 fetch：`src/providers/pass-through-provider.ts:520`

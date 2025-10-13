@@ -72,24 +72,24 @@ function coerceType(value: any, schema: JsonSchema): any {
   if (!want) { return value; }
   switch (want) {
     case 'string':
-      if (typeof value === 'string') return value;
+      if (typeof value === 'string') {return value;}
       if (Array.isArray(value)) { return value.map(v => String(v)).join(' '); }
-      if (value === null || value === undefined) return value;
+      if (value === null || value === undefined) {return value;}
       return String(value);
     case 'number':
-      if (typeof value === 'number') return value;
+      if (typeof value === 'number') {return value;}
       if (typeof value === 'string') { const n = Number(value); return Number.isFinite(n) ? n : value; }
       return value;
     case 'integer':
-      if (typeof value === 'number') return Math.trunc(value);
+      if (typeof value === 'number') {return Math.trunc(value);}
       if (typeof value === 'string') { const n = parseInt(value, 10); return Number.isFinite(n) ? n : value; }
       return value;
     case 'boolean':
-      if (typeof value === 'boolean') return value;
-      if (typeof value === 'string') { const s = value.toLowerCase(); if (s === 'true') return true; if (s === 'false') return false; }
+      if (typeof value === 'boolean') {return value;}
+      if (typeof value === 'string') { const s = value.toLowerCase(); if (s === 'true') {return true;} if (s === 'false') {return false;} }
       return value;
     case 'array':
-      if (Array.isArray(value)) return value;
+      if (Array.isArray(value)) {return value;}
       if (typeof value === 'string') {
         // split comma/space
         const parts = value.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
@@ -97,7 +97,7 @@ function coerceType(value: any, schema: JsonSchema): any {
       }
       return value;
     case 'object':
-      if (value && typeof value === 'object') return value;
+      if (value && typeof value === 'object') {return value;}
       return value;
     default:
       return value;

@@ -7,7 +7,7 @@
   "module": "dist/index.js",
   "bin": {
     "routecodex": "./dist/cli.js",
-    "rcc": "./rcc"
+    "rcc": "./dist/cli.js"
   },
   "exports": {
     ".": {
@@ -49,9 +49,10 @@
     "prebuild": "echo skip-lint",
     "prepare": "npm run build",
     "prepublishOnly": "npm run build && npm test",
-    "install:global": "./scripts/simple-install.sh",
-    "install:quick": "./scripts/simple-install.sh",
-    "install:skip-tests": "./scripts/simple-install.sh",
+    "install:global": "./scripts/quick-install.sh",
+    "install:quick": "./scripts/quick-install.sh",
+    "install:skip-tests": "./scripts/quick-install.sh --skip-tests",
+    "install:simple": "./scripts/simple-install.sh",
     "dry-run": "node scripts/dry-run-cli.mjs",
     "dry-run:samples": "tsx scripts/samples-dry-run.mjs",
     "rc-config": "node scripts/rc-config.mjs",
@@ -110,7 +111,7 @@
     "@types/cors": "^2.8.13",
     "@types/express": "^4.17.17",
     "@types/jest": "^29.5.5",
-    "@types/node": "^20.0.0",
+    "@types/node": "^20.19.21",
     "@typescript-eslint/eslint-plugin": "^6.7.4",
     "@typescript-eslint/parser": "^6.7.4",
     "@typescript-eslint/typescript-estree": "^6.7.4",

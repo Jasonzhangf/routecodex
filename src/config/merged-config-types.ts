@@ -131,7 +131,7 @@ export interface DebugCenterConfig {
  */
 export interface ModuleConfig {
   enabled: boolean;
-  config: VirtualRouterConfig | HttpServerConfig | ConfigManagerConfig | DebugCenterConfig | any;
+  config: VirtualRouterConfig | HttpServerConfig | ConfigManagerConfig | DebugCenterConfig | Record<string, unknown>;
 }
 
 /**
@@ -234,8 +234,8 @@ export interface ConfigValidationResult {
  * 协议转换器接口
  */
 export interface ProtocolConverter {
-  convertRequest(request: unknown): Promise<any>;
-  convertResponse(response: unknown): Promise<any>;
+  convertRequest(request: unknown): Promise<unknown>;
+  convertResponse(response: unknown): Promise<unknown>;
 }
 
 /**

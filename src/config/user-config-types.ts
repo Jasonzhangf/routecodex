@@ -16,7 +16,7 @@ export interface UserProfile {
   lastLogin?: string;
   apiKeys?: string[];
   quotas: UserQuotas;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -39,7 +39,7 @@ export interface Permission {
   resources: string[];
   actions: string[];
   effect: 'allow' | 'deny';
-  conditions?: Record<string, any>;
+  conditions?: Record<string, unknown>;
   priority?: number;
 }
 
@@ -169,7 +169,7 @@ export interface UserManagementEvent {
   type: 'user_created' | 'user_updated' | 'user_deleted' | 'user_login' | 'user_logout';
   userId: string;
   timestamp: string;
-  data?: any;
+  data?: unknown;
 }
 
 /**
@@ -243,5 +243,5 @@ export interface IUserConfigManager {
   checkPermission(userId: string, resource: string, action: string): boolean;
   searchUsers(options: UserSearchOptions): Promise<UserSearchResult>;
   getUserMetrics(): UserMetrics;
-  validateConfig(config: any): UserConfigValidationResult;
+  validateConfig(config: unknown): UserConfigValidationResult;
 }

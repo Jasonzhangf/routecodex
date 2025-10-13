@@ -9,7 +9,7 @@ import * as debugcenter from 'rcc-debugcenter';
 import * as errorhandling from 'rcc-errorhandling';
 
 // Check if ErrorHandlingCenter exists, fallback to mock if not
-const EHC: any = (errorhandling as any).ErrorHandlingCenter as (new () => {
+const EHC = (errorhandling as Record<string, unknown>).ErrorHandlingCenter as (new () => {
   initialize: () => Promise<void>;
   handleError: (ctx?: unknown) => Promise<void>;
   destroy: () => Promise<void>;
@@ -26,7 +26,7 @@ const ErrorHandlingCenterClass: new () => {
   };
 
 // Check if DebugEventBus exists, fallback to mock if not
-const DEB: any = (debugcenter as any).DebugEventBus as { getInstance: () => { publish: (evt: unknown) => void } } | undefined;
+const DEB = (debugcenter as Record<string, unknown>).DebugEventBus as { getInstance: () => { publish: (evt: unknown) => void } } | undefined;
 const DebugEventBusClass: { getInstance: () => { publish: (evt: unknown) => void } } =
   DEB ?? { getInstance: () => ({ publish: (_evt: unknown) => {} }) };
 

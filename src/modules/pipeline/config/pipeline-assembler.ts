@@ -324,7 +324,7 @@ export class PipelineAssembler {
         console.log(`[PipelineAssembler] DEBUG - Looking for pipeline config with key: ${targetKey}`);
         console.log(`[PipelineAssembler] DEBUG - Available pipeline config keys:`, Object.keys(pipelineConfigs));
 
-        let pc = buildPcFromNormalized(providerId, modelId) as PcShape;
+        const pc = buildPcFromNormalized(providerId, modelId) as PcShape;
         
         // If there's a custom pipeline config, merge it with the default
         const customConfig = pipelineConfigs[targetKey] as Record<string, unknown>;

@@ -67,7 +67,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
         this.logger.logModule(this.id, 'tools-presence-before', { direction: 'anthropic->openai', toolsIn });
       } catch { /* ignore */ }
 
-      let transformedRequest = this.convertAnthropicRequestToOpenAI(payload);
+      const transformedRequest = this.convertAnthropicRequestToOpenAI(payload);
       // IMPORTANT: Do not perform sticky tool backfill/injection.
       // If caller omits tools this turn, we will NOT inject cached tools.
 
@@ -313,20 +313,20 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
           if (val === undefined || val === null) { return {}; }
           if (typeof val === 'object') { return val; }
           if (typeof val !== 'string') { return { _raw: String(val) }; }
-          const s = val.trim(); if (!s) return {};
-          const strict = safeParse(s); if (strict !== undefined) return strict;
+          const s = val.trim(); if (!s) {return {};}
+          const strict = safeParse(s); if (strict !== undefined) {return strict;}
           const fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i); const jsonCandidate = fence ? fence[1] : s;
-          const objMatch = jsonCandidate.match(/\{[\s\S]*\}/); if (objMatch) { const p = safeParse(objMatch[0]); if (p !== undefined) return p; }
-          const arrMatch = jsonCandidate.match(/\[[\s\S]*\]/); if (arrMatch) { const p = safeParse(arrMatch[0]); if (p !== undefined) return p; }
+          const objMatch = jsonCandidate.match(/\{[\s\S]*\}/); if (objMatch) { const p = safeParse(objMatch[0]); if (p !== undefined) {return p;} }
+          const arrMatch = jsonCandidate.match(/\[[\s\S]*\]/); if (arrMatch) { const p = safeParse(arrMatch[0]); if (p !== undefined) {return p;} }
           let tstr = jsonCandidate.replace(/'([^']*)'/g, '"$1"');
           tstr = tstr.replace(/([\{,\s])([A-Za-z_][A-Za-z0-9_\-]*)\s*:/g, '$1"$2":');
-          const jj = safeParse(tstr); if (jj !== undefined) return jj;
+          const jj = safeParse(tstr); if (jj !== undefined) {return jj;}
           // key=value fallback
           const obj: Record<string, any> = {};
           const parts = s.split(/[\n,]+/).map(p => p.trim()).filter(Boolean);
           for (const p of parts) {
             const m = p.match(/^([A-Za-z_][A-Za-z0-9_\-]*)\s*[:=]\s*(.+)$/);
-            if (!m) continue; const k = m[1]; let v = m[2].trim();
+            if (!m) {continue;} const k = m[1]; let v = m[2].trim();
             if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) { v = v.slice(1, -1); }
             const pv = safeParse(v); if (pv !== undefined) { obj[k] = pv; continue; }
             if (/^(true|false)$/i.test(v)) { obj[k] = /^true$/i.test(v); continue; }
@@ -351,18 +351,18 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
 
         const tool_calls = toolUses.map((t: any) => {
           let inputObj: any = t?.input;
-          if (typeof inputObj === 'string') inputObj = coerce(inputObj);
+          if (typeof inputObj === 'string') {inputObj = coerce(inputObj);}
           if (Array.isArray(inputObj)) {
             const objs = inputObj.filter((x: any) => x && typeof x === 'object' && !Array.isArray(x));
             if (objs.length) {
-              inputObj = objs.reduce((acc: any, cur: any) => { for (const [k,v] of Object.entries(cur)) { if (!(k in acc)) acc[k]=v; } return acc; }, {});
+              inputObj = objs.reduce((acc: any, cur: any) => { for (const [k,v] of Object.entries(cur)) { if (!(k in acc)) {acc[k]=v;} } return acc; }, {});
             } else {
               const prim = inputObj.find((x: any) => x != null && (typeof x === 'string' || typeof x === 'number' || typeof x === 'boolean'));
               inputObj = prim != null ? { _raw: String(prim) } : {};
             }
           }
           inputObj = unwrap(inputObj);
-          if (!inputObj || typeof inputObj !== 'object') return undefined;
+          if (!inputObj || typeof inputObj !== 'object') {return undefined;}
 
           const toolName: string = typeof t?.name === 'string' ? t.name : 'tool';
           const schema = toolSchemaByName.get(toolName.toLowerCase());
@@ -459,8 +459,8 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     })();
 
     for (const m of msgs) {
-      if (!m || typeof m !== 'object') continue;
-      if (m.role === 'system') continue; // moved to out.system
+      if (!m || typeof m !== 'object') {continue;}
+      if (m.role === 'system') {continue;} // moved to out.system
       const role = m.role === 'assistant' ? 'assistant' : (m.role === 'user' ? 'user' : (m.role === 'tool' ? 'user' : m.role));
       const blocks: any[] = [];
       // Assistant tool_calls -> tool_use blocks
@@ -549,7 +549,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     const obj: any = { ...args };
     const take = (o: any, keys: string[]) => {
       const out: any = {};
-      for (const k of keys) { if (k in o) out[k] = o[k]; }
+      for (const k of keys) { if (k in o) {out[k] = o[k];} }
       return out;
     };
 
@@ -560,9 +560,9 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       command = String(command).trim();
       if (!command) { return null; }
       const out: any = { command };
-      if (typeof obj.timeout === 'number') out.timeout = obj.timeout;
-      if (typeof obj.description === 'string') out.description = obj.description;
-      if (typeof obj.run_in_background === 'boolean') out.run_in_background = obj.run_in_background;
+      if (typeof obj.timeout === 'number') {out.timeout = obj.timeout;}
+      if (typeof obj.description === 'string') {out.description = obj.description;}
+      if (typeof obj.run_in_background === 'boolean') {out.run_in_background = obj.run_in_background;}
       return out;
     }
 
@@ -700,9 +700,9 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       const fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
       const jsonCandidate = fence ? fence[1] : s;
       const objMatch = jsonCandidate.match(/\{[\s\S]*\}/);
-      if (objMatch) { const p = safeParse(objMatch[0]); if (p !== undefined) return p; }
+      if (objMatch) { const p = safeParse(objMatch[0]); if (p !== undefined) {return p;} }
       const arrMatch = jsonCandidate.match(/\[[\s\S]*\]/);
-      if (arrMatch) { const p = safeParse(arrMatch[0]); if (p !== undefined) return p; }
+      if (arrMatch) { const p = safeParse(arrMatch[0]); if (p !== undefined) {return p;} }
       // Try json-ish: single quotes and unquoted keys
       let t = jsonCandidate.replace(/'([^']*)'/g, '"$1"');
       t = t.replace(/([\{,\s])([A-Za-z_][A-Za-z0-9_\-]*)\s*:/g, '$1"$2":');
@@ -713,7 +713,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       const parts = s.split(/[\n,]+/).map(p => p.trim()).filter(Boolean);
       for (const p of parts) {
         const m = p.match(/^([A-Za-z_][A-Za-z0-9_\-]*)\s*[:=]\s*(.+)$/);
-        if (!m) continue;
+        if (!m) {continue;}
         const key = m[1];
         let val = m[2].trim();
         if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) { val = val.slice(1, -1); }
@@ -804,8 +804,8 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       const offset = (argsIn as any)['offset'];
       const limit = (argsIn as any)['limit'];
       const out: Record<string, unknown> = { file_path };
-      if (offset !== undefined) out.offset = offset;
-      if (limit !== undefined) out.limit = limit;
+      if (offset !== undefined) {out.offset = offset;}
+      if (limit !== undefined) {out.limit = limit;}
       return { name: 'Read', args: out };
     }
 
@@ -888,20 +888,20 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       if (val === undefined || val === null) { return {}; }
       if (typeof val === 'object') { return val; }
       if (typeof val !== 'string') { return { _raw: String(val) }; }
-      const s = val.trim(); if (!s) return {};
-      const strict = safeParse(s); if (strict !== undefined) return strict;
+      const s = val.trim(); if (!s) {return {};}
+      const strict = safeParse(s); if (strict !== undefined) {return strict;}
       const fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i); const jsonCandidate = fence ? fence[1] : s;
-      const objMatch = jsonCandidate.match(/\{[\s\S]*\}/); if (objMatch) { const p = safeParse(objMatch[0]); if (p !== undefined) return p; }
-      const arrMatch = jsonCandidate.match(/\[[\s\S]*\]/); if (arrMatch) { const p = safeParse(arrMatch[0]); if (p !== undefined) return p; }
+      const objMatch = jsonCandidate.match(/\{[\s\S]*\}/); if (objMatch) { const p = safeParse(objMatch[0]); if (p !== undefined) {return p;} }
+      const arrMatch = jsonCandidate.match(/\[[\s\S]*\]/); if (arrMatch) { const p = safeParse(arrMatch[0]); if (p !== undefined) {return p;} }
       let t = jsonCandidate.replace(/'([^']*)'/g, '"$1"');
       t = t.replace(/([\{,\s])([A-Za-z_][A-Za-z0-9_\-]*)\s*:/g, '$1"$2":');
-      const jj = safeParse(t); if (jj !== undefined) return jj;
+      const jj = safeParse(t); if (jj !== undefined) {return jj;}
       // key=value fallback
       const obj: Record<string, any> = {};
       const parts = s.split(/[\n,]+/).map(p => p.trim()).filter(Boolean);
       for (const p of parts) {
         const m = p.match(/^([A-Za-z_][A-Za-z0-9_\-]*)\s*[:=]\s*(.+)$/);
-        if (!m) continue; const k = m[1]; let v = m[2].trim();
+        if (!m) {continue;} const k = m[1]; let v = m[2].trim();
         if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith('\'') && v.endsWith('\''))) { v = v.slice(1, -1); }
         const pv = safeParse(v); if (pv !== undefined) { obj[k] = pv; continue; }
         if (/^(true|false)$/i.test(v)) { obj[k] = /^true$/i.test(v); continue; }
@@ -935,7 +935,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       const objs = argsObj.filter((x: any) => x && typeof x === 'object' && !Array.isArray(x));
       if (objs.length > 0) {
         argsObj = objs.reduce((acc: any, cur: any) => {
-          for (const [k, v] of Object.entries(cur)) { if (!(k in acc)) acc[k] = v; }
+          for (const [k, v] of Object.entries(cur)) { if (!(k in acc)) {acc[k] = v;} }
           return acc;
         }, {} as Record<string, unknown>);
       } else {
@@ -982,7 +982,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       const tools = (req as any).tools;
       if (Array.isArray(tools)) {
         for (const t of tools) {
-          if (!t) continue;
+          if (!t) {continue;}
           // Anthropic style: { name, input_schema }
           if (typeof t.name === 'string' && t.input_schema) {
             map.set(t.name.toLowerCase(), t.input_schema);
@@ -1002,11 +1002,11 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
   }
 
   private mapOpenAIToolChoiceToAnthropic(input: any): any {
-    if (input === undefined || input === null) return undefined;
+    if (input === undefined || input === null) {return undefined;}
     if (typeof input === 'string') {
       // Anthropic supports 'auto' and specific tool selection; map unknown/none to 'auto'
-      if (input === 'auto') return 'auto';
-      if (input === 'none') return 'auto';
+      if (input === 'auto') {return 'auto';}
+      if (input === 'none') {return 'auto';}
       return 'auto';
     }
     if (typeof input === 'object') {

@@ -12,7 +12,7 @@ import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import { DebugEventBus } from 'rcc-debugcenter';
 import { ErrorHandlingUtils } from '../utils/error-handling-utils.js';
 import { ModuleConfigReader } from '../utils/module-config-reader.js';
-import { OpenAIRouter } from './openai-router.js';
+import { ProtocolHandler } from './protocol-handler.js';
 import { RequestHandler } from '../core/request-handler.js';
 import { ProviderManager } from '../core/provider-manager.js';
 import { PipelineManager } from '../modules/pipeline/core/pipeline-manager.js';
@@ -50,7 +50,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
   private server?: unknown;
   private servers: unknown[] = [];
   private moduleConfigReader: ModuleConfigReader;
-  private openaiRouter: OpenAIRouter;
+  private protocolHandler: ProtocolHandler;
   private requestHandler: RequestHandler;
   private providerManager: ProviderManager;
   private errorHandling: ErrorHandlingCenter;
@@ -117,7 +117,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
     // Initialize components with default configuration - will be properly initialized in initialize() method
     this.providerManager = new ProviderManager(this.getDefaultServerConfig());
     this.requestHandler = new RequestHandler(this.providerManager, this.getDefaultServerConfig());
-    this.openaiRouter = new OpenAIRouter(this.requestHandler, this.providerManager, this.moduleConfigReader);
+    this.protocolHandler = new ProtocolHandler(this.requestHandler, this.providerManager, this.moduleConfigReader);
 
     // Initialize debug enhancements
     this.initializeDebugEnhancements();
@@ -259,11 +259,11 @@ export class HttpServer extends BaseModule implements IHttpServer {
       this.providerManager = new ProviderManager(serverConfig);
       this.requestHandler = new RequestHandler(this.providerManager, serverConfig);
       // Load router config from modules.json if available
-      const openaiRouterModule = this.moduleConfigReader.getModuleConfigValue<UnknownObject>(
-        'openairouter',
+      const protocolHandlerModule = this.moduleConfigReader.getModuleConfigValue<UnknownObject>(
+        'protocolhandler',
         {}
       );
-      this.openaiRouter = new OpenAIRouter(this.requestHandler, this.providerManager, this.moduleConfigReader, (openaiRouterModule || {}) as UnknownObject);
+      this.protocolHandler = new ProtocolHandler(this.requestHandler, this.providerManager, this.moduleConfigReader, (protocolHandlerModule || {}) as UnknownObject);
 
       // Initialize request handler
       await this.requestHandler.initialize();
@@ -272,7 +272,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       await this.providerManager.initialize();
 
       // Initialize OpenAI router
-      await this.openaiRouter.initialize();
+      await this.protocolHandler.initialize();
 
       // Setup Express middleware
       await this.setupMiddleware();
@@ -380,8 +380,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
   public attachPipelineManager(pipelineManager: PipelineManager): void {
     this.pipelineManager = pipelineManager as PipelineManager;
     try {
-      if (this.openaiRouter && (this.openaiRouter as any).attachPipelineManager) {
-        (this.openaiRouter as any).attachPipelineManager(pipelineManager);
+      if (this.protocolHandler && (this.protocolHandler as any).attachPipelineManager) {
+        (this.protocolHandler as any).attachPipelineManager(pipelineManager);
       }
     } catch (error) {
       // Do not break server if attachment fails
@@ -394,8 +394,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
   public attachRoutePools(routePools: Record<string, string[]>): void {
     this.routePools = routePools;
     try {
-      if (this.openaiRouter && (this.openaiRouter as any).attachRoutePools) {
-        (this.openaiRouter as any).attachRoutePools(routePools);
+      if (this.protocolHandler && (this.protocolHandler as any).attachRoutePools) {
+        (this.protocolHandler as any).attachRoutePools(routePools);
       }
     } catch (error) {
       console.error('Failed to attach route pools to OpenAI router:', error);
@@ -405,8 +405,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
   /** Attach classification config to router */
   public attachRoutingClassifierConfig(classifierConfig: UnknownObject): void {
     try {
-      if (this.openaiRouter && (this.openaiRouter as any).attachRoutingClassifierConfig) {
-      (this.openaiRouter as any).attachRoutingClassifierConfig(classifierConfig);
+      if (this.protocolHandler && (this.protocolHandler as any).attachRoutingClassifierConfig) {
+      (this.protocolHandler as any).attachRoutingClassifierConfig(classifierConfig);
       }
     } catch (error) {
       console.error('Failed to attach classifier config to OpenAI router:', error);
@@ -646,7 +646,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       if (toClose.length) {
         await new Promise<void>((resolveAll) => {
           let remaining = toClose.length;
-          const done = () => { remaining -= 1; if (remaining <= 0) resolveAll(); };
+          const done = () => { remaining -= 1; if (remaining <= 0) {resolveAll();} };
           for (const srv of toClose) {
             try { (srv as any).close(() => done()); } catch { done(); }
           }
@@ -655,7 +655,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
         this.servers = [];
 
         // Stop all components
-        await this.openaiRouter.stop();
+        await this.protocolHandler.stop();
         await this.providerManager.stop();
         await this.requestHandler.stop();
         // Config manager doesn't need to be closed in new architecture
@@ -708,7 +708,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       description: 'Express.js HTTP server for RouteCodex',
       type: 'server',
       capabilities: ['http-server', 'openai-api', 'health-checks', 'metrics'],
-      dependencies: ['config-manager', 'request-handler', 'provider-manager', 'openai-router'],
+      dependencies: ['config-manager', 'request-handler', 'provider-manager', 'protocol-handler'],
     };
   }
 
@@ -809,7 +809,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
     // Anthropic API: minimal /v1/anthropic/messages passthrough into pipeline with unified llmswitch
     // Allow disabling this alias via config: set anthropicAlias: false at root level
     const anthropicAliasEnabled = ((this.config as any)?.anthropicAlias !== false);
-    if (anthropicAliasEnabled) this.app.post('/v1/anthropic/messages', async (req: Request, res: Response) => {
+    if (anthropicAliasEnabled) {this.app.post('/v1/anthropic/messages', async (req: Request, res: Response) => {
       try {
         if (!this.pipelineManager || !this.routePools) {
           return res.status(503).json({ error: { message: 'Pipeline not ready', code: 'pipeline_not_ready' } });
@@ -998,11 +998,11 @@ export class HttpServer extends BaseModule implements IHttpServer {
         };
         if (!disableAnthropicStreamA && (req.body as any)?.stream) {
           res.status(200);
-          const openaiRouterAny = this.openaiRouter as unknown as { streamFromPipeline?: (response: unknown, requestId: string, res: Response, model?: string, protocol?: 'openai' | 'anthropic') => Promise<void> };
-          if (openaiRouterAny?.streamFromPipeline) {
+          const protocolHandlerAny = this.protocolHandler as unknown as { streamFromPipeline?: (response: unknown, requestId: string, res: Response, model?: string, protocol?: 'openai' | 'anthropic') => Promise<void> };
+          if (protocolHandlerAny?.streamFromPipeline) {
             try { if (preHeartbeat) { clearInterval(preHeartbeat); preHeartbeat = null; } } catch { /* ignore */ }
             // no JSON heartbeat cleanup needed
-            await openaiRouterAny.streamFromPipeline(pipelineResponse, requestId, res, (req.body as any)?.model as string | undefined, 'anthropic');
+            await protocolHandlerAny.streamFromPipeline(pipelineResponse, requestId, res, (req.body as any)?.model as string | undefined, 'anthropic');
             return;
           }
         }
@@ -1015,7 +1015,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       } catch (err) {
         res.status(500).json({ error: { message: (err as Error).message || 'Anthropic handler error' } });
       }
-    });
+    });}
 
     // Anthropic API canonical endpoint /v1/messages (Anthropic SDK default)
     this.app.post('/v1/messages', async (req: Request, res: Response) => {
@@ -1199,11 +1199,11 @@ export class HttpServer extends BaseModule implements IHttpServer {
         };
         if (!disableAnthropicStreamB && (req.body as any)?.stream) {
           res.status(200);
-          const openaiRouterAny = this.openaiRouter as unknown as { streamFromPipeline?: (response: unknown, requestId: string, res: Response, model?: string, protocol?: 'openai' | 'anthropic') => Promise<void> };
-          if (openaiRouterAny?.streamFromPipeline) {
+          const protocolHandlerAny = this.protocolHandler as unknown as { streamFromPipeline?: (response: unknown, requestId: string, res: Response, model?: string, protocol?: 'openai' | 'anthropic') => Promise<void> };
+          if (protocolHandlerAny?.streamFromPipeline) {
             try { if (preHeartbeat) { clearInterval(preHeartbeat); preHeartbeat = null; } } catch { /* ignore */ }
             // no JSON heartbeat cleanup needed
-            await openaiRouterAny.streamFromPipeline(pipelineResponse, requestId, res, (req.body as any)?.model as string | undefined, 'anthropic');
+            await protocolHandlerAny.streamFromPipeline(pipelineResponse, requestId, res, (req.body as any)?.model as string | undefined, 'anthropic');
             return;
           }
         }
@@ -1218,9 +1218,19 @@ export class HttpServer extends BaseModule implements IHttpServer {
     });
 
     // OpenAI API endpoints (mounted after Anthropic endpoints to prevent route shadowing)
-    const openaiRouter = this.openaiRouter.getRouter();
-    this.app.use('/v1/openai', openaiRouter);
-    this.app.use('/v1', openaiRouter);
+    const protocolRouter = this.protocolHandler.getRouter();
+    const protocolHandlerConfig = this.moduleConfigReader.getModuleConfigValue<UnknownObject>(
+      'protocolhandler',
+      {}
+    );
+    const basePath = (protocolHandlerConfig as any)?.basePath || '/v1/openai';
+
+    // Mount router at configured base path and at /v1 for compatibility
+    // Only mount at /v1 if basePath is not already /v1 to avoid conflicts
+    this.app.use(basePath, protocolRouter);
+    if (basePath !== '/v1') {
+      this.app.use('/v1', protocolRouter);
+    }
 
     // Status endpoint
     this.app.get('/status', this.handleStatus.bind(this));
@@ -1522,7 +1532,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
         },
         requestHandler: this.requestHandler.getInfo(),
         providerManager: this.providerManager.getInfo(),
-        openaiRouter: this.openaiRouter.getInfo(),
+        protocolRouter: this.protocolHandler.getInfo(),
       },
       environment: {
         node_version: process.version,

@@ -110,10 +110,10 @@
         "cacheTTL": 300
       }
     },
-    "openairouter": {
+    "protocolhandler": {
       "enabled": true,
       "config": {
-        "moduleType": "openai-router",
+        "moduleType": "protocol-handler",
         "basePath": "/v1/openai",
         "enableStreaming": true,
         "enablePipeline": true,
