@@ -54,9 +54,9 @@ export interface ResponseTransformationRule {
   /** 转换类型 */
   type: 'format' | 'protocol' | 'content' | 'metadata';
   /** 转换条件 */
-  condition: any;
+  condition: Record<string, unknown> | ((data: unknown) => boolean);
   /** 转换操作 */
-  transformation: any;
+  transformation: Record<string, unknown> | ((data: unknown) => unknown);
   /** 优先级 */
   priority: number;
 }
@@ -70,7 +70,7 @@ export interface ResponseValidationRule {
   /** 验证类型 */
   type: 'schema' | 'format' | 'content' | 'performance';
   /** 验证条件 */
-  condition: any;
+  condition: Record<string, unknown> | ((data: unknown) => boolean);
   /** 错误消息 */
   errorMessage: string;
   /** 严重级别 */
@@ -120,9 +120,9 @@ export interface BidirectionalPipelineConfig {
  */
 export interface ResponseData {
   /** 原始响应 */
-  rawResponse: any;
+  rawResponse: unknown;
   /** 处理后的响应 */
-  processedResponse: any;
+  processedResponse: unknown;
   /** 响应元数据 */
   metadata: {
     timestamp: number;
@@ -202,7 +202,7 @@ export class BidirectionalPipelineManager {
   async executeBidirectionalPipeline(
     request: PipelineRequest,
     pipelineId: string,
-    realResponse?: any
+    realResponse?: unknown
   ): Promise<BidirectionalPipelineResult> {
     const startTime = Date.now();
     const executionId = `${pipelineId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -308,7 +308,7 @@ export class BidirectionalPipelineManager {
    * 准备响应数据
    */
   private async prepareResponseData(
-    realResponse: any,
+    realResponse: unknown,
     request: PipelineRequest,
     executionId: string
   ): Promise<ResponseData> {
@@ -363,7 +363,7 @@ export class BidirectionalPipelineManager {
    * 处理真实响应
    */
   private async processRealResponse(
-    realResponse: any,
+    realResponse: unknown,
     _request: PipelineRequest
   ): Promise<ResponseData> {
     const processingStart = Date.now();
