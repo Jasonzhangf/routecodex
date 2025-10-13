@@ -1,0 +1,1559 @@
+{
+  "modules": {
+    "basemodule": {
+      "enabled": true,
+      "config": {
+        "moduleType": "base",
+        "debugMode": true,
+        "recording": {
+          "enabled": false,
+          "maxCycles": 1000,
+          "maxErrors": 100
+        }
+      }
+    },
+    "errorhandling": {
+      "enabled": true,
+      "config": {
+        "moduleType": "error-handling",
+        "maxErrors": 1000,
+        "errorCategories": {
+          "low": "log",
+          "medium": "log_and_notify",
+          "high": "log_and_alert",
+          "critical": "log_and_immediate"
+        },
+        "autoCleanup": {
+          "enabled": true,
+          "maxAgeHours": 24
+        }
+      }
+    },
+    "debugcenter": {
+      "enabled": true,
+      "config": {
+        "moduleType": "debug-center",
+        "eventQueueSize": 1000,
+        "logLevels": [
+          "info",
+          "warn",
+          "error"
+        ],
+        "enableConsole": true,
+        "enableFile": true,
+        "filePath": "~/.routecodex/logs/debug-center.log",
+        "maxFileSize": "10MB",
+        "maxFiles": 5,
+        "enableRotation": true
+      }
+    },
+    "httpserver": {
+      "enabled": true,
+      "config": {
+        "moduleType": "http-server",
+        "host": "localhost",
+        "cors": {
+          "origin": "*",
+          "credentials": true
+        },
+        "timeout": 30000,
+        "bodyLimit": "10mb",
+        "enableMetrics": true,
+        "enableHealthChecks": true,
+        "logging": {
+          "level": "info",
+          "enableConsole": true,
+          "enableFile": true,
+          "filePath": "~/.routecodex/logs/server/http-server.log",
+          "categories": [
+            "server",
+            "api",
+            "request",
+            "config",
+            "error",
+            "message"
+          ]
+        }
+      }
+    },
+    "configmanager": {
+      "enabled": true,
+      "config": {
+        "moduleType": "config-manager",
+        "configPath": "./routecodex.json",
+        "watchMode": true,
+        "validation": {
+          "strict": true,
+          "allowUnknown": false
+        }
+      }
+    },
+    "providermanager": {
+      "enabled": true,
+      "config": {
+        "moduleType": "provider-manager",
+        "healthCheckInterval": 30000,
+        "maxRetries": 3,
+        "retryDelay": 1000,
+        "loadBalancing": {
+          "strategy": "round-robin",
+          "stickySessions": false
+        }
+      }
+    },
+    "requesthandler": {
+      "enabled": true,
+      "config": {
+        "moduleType": "request-handler",
+        "maxRequestSize": 10485760,
+        "enableStreaming": true,
+        "rateLimitEnabled": false,
+        "authEnabled": false,
+        "validateRequests": true
+      }
+    },
+    "responsehandler": {
+      "enabled": true,
+      "config": {
+        "moduleType": "response-handler",
+        "enableCompression": true,
+        "enableCaching": false,
+        "cacheTTL": 300
+      }
+    },
+    "openairouter": {
+      "enabled": true,
+      "config": {
+        "moduleType": "openai-router",
+        "basePath": "/v1/openai",
+        "enableStreaming": true,
+        "enablePipeline": true,
+        "rateLimit": {
+          "enabled": false,
+          "requestsPerMinute": 60
+        }
+      }
+    },
+    "unimplementedmodule": {
+      "enabled": true,
+      "config": {
+        "moduleType": "unimplemented-module",
+        "maxCallerHistory": 100,
+        "enableStats": true,
+        "notificationThreshold": 10
+      }
+    },
+    "usermanager": {
+      "enabled": true,
+      "config": {
+        "moduleType": "user-manager",
+        "configPath": "./config/users.json",
+        "authMethod": "jwt",
+        "sessionTimeout": 3600000,
+        "enableUserRegistration": false,
+        "requireEmailVerification": false,
+        "defaultUserQuotas": {
+          "maxRequestsPerDay": 1000,
+          "maxTokensPerRequest": 4096,
+          "maxConcurrentRequests": 5,
+          "maxProviders": 3,
+          "maxFiles": 100,
+          "maxStorageMB": 1024
+        },
+        "maxUsers": 100,
+        "enablePasswordPolicy": true,
+        "passwordPolicy": {
+          "minLength": 8,
+          "requireUppercase": true,
+          "requireLowercase": true,
+          "requireNumbers": true,
+          "requireSpecialChars": false
+        }
+      }
+    },
+    "virtualrouter": {
+      "enabled": true,
+      "config": {
+        "moduleType": "virtual-router",
+        "enableClassification": true,
+        "classificationConfig": {
+          "confidenceThreshold": 60,
+          "enableSmartRouting": true,
+          "protocolMapping": {
+            "openai": {
+              "endpoints": [
+                "/v1/chat/completions",
+                "/v1/completions"
+              ],
+              "messageField": "messages",
+              "modelField": "model",
+              "toolsField": "tools",
+              "maxTokensField": "max_tokens"
+            },
+            "anthropic": {
+              "endpoints": [
+                "/v1/messages",
+                "/v1/anthropic/messages"
+              ],
+              "messageField": "messages",
+              "modelField": "model",
+              "toolsField": "tools",
+              "maxTokensField": "max_tokens"
+            }
+          },
+          "modelTiers": {
+            "basic": {
+              "description": "Basic models for simple tasks",
+              "models": [
+                "gpt-3.5-turbo",
+                "claude-3-haiku"
+              ],
+              "maxTokens": 16384,
+              "supportedFeatures": [
+                "text_generation",
+                "conversation"
+              ]
+            },
+            "advanced": {
+              "description": "Advanced models for complex tasks",
+              "models": [
+                "gpt-5",
+                "claude-3-opus",
+                "qwen-max"
+              ],
+              "maxTokens": 262144,
+              "supportedFeatures": [
+                "text_generation",
+                "reasoning",
+                "coding",
+                "tool_use"
+              ]
+            }
+          },
+          "routingDecisions": {
+            "default": {
+              "description": "Default routing for general requests",
+              "modelTier": "basic",
+              "tokenThreshold": 8000,
+              "toolTypes": [],
+              "priority": 1
+            },
+            "longContext": {
+              "description": "Routing for long context requests",
+              "modelTier": "advanced",
+              "tokenThreshold": 10000,
+              "toolTypes": [],
+              "priority": 90
+            },
+            "thinking": {
+              "description": "Routing for complex reasoning requests",
+              "modelTier": "advanced",
+              "tokenThreshold": 16000,
+              "toolTypes": [
+                "dataAnalysis",
+                "complex_reasoning"
+              ],
+              "priority": 85
+            },
+            "coding": {
+              "description": "Routing for code generation requests",
+              "modelTier": "advanced",
+              "tokenThreshold": 24000,
+              "toolTypes": [
+                "codeExecution",
+                "fileSearch"
+              ],
+              "priority": 80
+            },
+            "webSearch": {
+              "description": "Routing for web search requests",
+              "modelTier": "advanced",
+              "tokenThreshold": 12000,
+              "toolTypes": [
+                "webSearch"
+              ],
+              "priority": 95
+            }
+          },
+          "protocolHandlers": {
+            "openai": {
+              "tokenCalculator": {
+                "type": "openai",
+                "tokenRatio": 0.25,
+                "toolOverhead": 50,
+                "messageOverhead": 10,
+                "imageTokenDefault": 255
+              },
+              "toolDetector": {
+                "type": "pattern",
+                "patterns": {
+                  "webSearch": [
+                    "web_search",
+                    "search",
+                    "browse",
+                    "internet"
+                  ],
+                  "codeExecution": [
+                    "code",
+                    "execute",
+                    "bash",
+                    "python",
+                    "javascript"
+                  ],
+                  "fileSearch": [
+                    "file",
+                    "read",
+                    "write",
+                    "document",
+                    "pdf"
+                  ],
+                  "dataAnalysis": [
+                    "data",
+                    "analysis",
+                    "chart",
+                    "graph",
+                    "statistics"
+                  ]
+                }
+              }
+            },
+            "anthropic": {
+              "tokenCalculator": {
+                "type": "anthropic",
+                "tokenRatio": 0.25,
+                "toolOverhead": 50,
+                "messageOverhead": 10
+              },
+              "toolDetector": {
+                "type": "pattern",
+                "patterns": {
+                  "webSearch": [
+                    "web_search",
+                    "search",
+                    "browse"
+                  ],
+                  "codeExecution": [
+                    "code",
+                    "execute",
+                    "bash",
+                    "python"
+                  ],
+                  "fileSearch": [
+                    "file",
+                    "read",
+                    "write"
+                  ],
+                  "dataAnalysis": [
+                    "data",
+                    "analysis",
+                    "chart"
+                  ]
+                }
+              }
+            }
+          },
+          "inputModelWeights": {
+            "qwen3-coder": {
+              "weight": 8.5,
+              "description": "Qwen3代码模型，高复杂度",
+              "routeMapping": {
+                "default": 0.4,
+                "longContext": 0.3,
+                "thinking": 0.7,
+                "coding": 0.9,
+                "webSearch": 0.2
+              }
+            },
+            "qwen3": {
+              "weight": 7,
+              "description": "Qwen3通用模型，中高复杂度",
+              "routeMapping": {
+                "default": 0.6,
+                "longContext": 0.7,
+                "thinking": 0.8,
+                "coding": 0.6,
+                "webSearch": 0.5
+              }
+            },
+            "qwen": {
+              "weight": 6,
+              "description": "Qwen模型，中等复杂度",
+              "routeMapping": {
+                "default": 0.8,
+                "longContext": 0.6,
+                "thinking": 0.5,
+                "coding": 0.4,
+                "webSearch": 0.6
+              }
+            },
+            "gpt-4": {
+              "weight": 9,
+              "description": "GPT-4模型，极高复杂度",
+              "routeMapping": {
+                "default": 0.3,
+                "longContext": 0.8,
+                "thinking": 0.9,
+                "coding": 0.8,
+                "webSearch": 0.7
+              }
+            },
+            "claude": {
+              "weight": 8.5,
+              "description": "Claude模型，高复杂度",
+              "routeMapping": {
+                "default": 0.4,
+                "longContext": 0.8,
+                "thinking": 0.9,
+                "coding": 0.7,
+                "webSearch": 0.6
+              }
+            },
+            "code": {
+              "weight": 7.5,
+              "description": "代码专用模型，高复杂度",
+              "routeMapping": {
+                "default": 0.5,
+                "longContext": 0.4,
+                "thinking": 0.6,
+                "coding": 0.95,
+                "webSearch": 0.3
+              }
+            },
+            "thinking": {
+              "weight": 8,
+              "description": "思考模型，高复杂度",
+              "routeMapping": {
+                "default": 0.4,
+                "longContext": 0.7,
+                "thinking": 0.95,
+                "coding": 0.6,
+                "webSearch": 0.5
+              }
+            }
+          },
+          "routeThresholds": {
+            "default": {
+              "minWeight": 0,
+              "description": "默认路由，适合简单任务"
+            },
+            "longContext": {
+              "minWeight": 6,
+              "description": "长上下文路由，需要模型支持长文本"
+            },
+            "thinking": {
+              "minWeight": 7,
+              "description": "复杂推理路由，需要模型有推理能力"
+            },
+            "coding": {
+              "minWeight": 7,
+              "description": "代码生成路由，需要模型有编程能力"
+            },
+            "webSearch": {
+              "minWeight": 6,
+              "description": "网络搜索路由，需要模型有搜索能力"
+            }
+          }
+        }
+      }
+    },
+    "dryrunengine": {
+      "enabled": true,
+      "config": {
+        "moduleType": "dry-run-engine",
+        "requestPipeline": {
+          "dryRunMode": "partial",
+          "nodeConfigs": {
+            "llm-switch": {
+              "enabled": true,
+              "mode": "output-validation",
+              "breakpointBehavior": "continue",
+              "verbosity": "normal"
+            },
+            "compatibility": {
+              "enabled": false,
+              "mode": "output-validation",
+              "breakpointBehavior": "continue",
+              "verbosity": "minimal"
+            },
+            "provider": {
+              "enabled": false,
+              "mode": "output-validation",
+              "breakpointBehavior": "continue",
+              "verbosity": "minimal"
+            }
+          },
+          "inputSimulation": {
+            "enabled": true,
+            "primaryStrategy": "historical-data",
+            "fallbackStrategies": [
+              "schema-inference",
+              "rule-based",
+              "ai-generation",
+              "request-propagation"
+            ],
+            "qualityRequirement": "medium",
+            "useHistoricalData": true,
+            "enableSmartInference": true
+          }
+        },
+        "responsePipeline": {
+          "dryRunMode": "partial",
+          "responseDryRun": {
+            "enabled": true,
+            "inputSource": "real-response",
+            "performanceAnalysis": true,
+            "caching": {
+              "enabled": true,
+              "maxSize": 100,
+              "ttlMs": 300000,
+              "keyStrategy": "request-id"
+            }
+          },
+          "nodeConfigs": {
+            "response-processor": {
+              "enabled": true,
+              "mode": "output-validation",
+              "breakpointBehavior": "continue",
+              "verbosity": "normal"
+            }
+          }
+        },
+        "driverFeedback": {
+          "enabled": true,
+          "feedbackDelayMs": 100,
+          "analysisLevel": "detailed"
+        }
+      }
+    }
+  },
+  "virtualrouter": {
+    "providers": {
+      "qwen-provider": {
+        "auth": {
+          "clientId": "***REDACTED***",
+          "deviceCodeUrl": "https://chat.qwen.ai/api/v1/oauth2/device/code",
+          "scopes": [
+            "email",
+            "model.completion",
+            "openid",
+            "profile"
+          ],
+          "tokenFile": "/Users/fanzhang/.qwen/oauth_creds.json",
+          "tokenUrl": "https://chat.qwen.ai/api/v1/oauth2/token",
+          "type": "oauth"
+        },
+        "baseURL": "https://portal.qwen.ai/v1",
+        "compatibility": {
+          "config": {},
+          "type": "passthrough-compatibility"
+        },
+        "enabled": true,
+        "id": "qwen-provider",
+        "keyAliases": [
+          "key1"
+        ],
+        "models": {
+          "qwen3-30b-a3b-instruct-2507-mlx": {
+            "compatibility": {
+              "config": {
+                "streamingEnabled": true,
+                "toolsEnabled": true
+              },
+              "type": "qwen-compatibility"
+            },
+            "maxContext": 262144,
+            "maxTokens": 262144,
+            "supportsStreaming": true,
+            "supportsTools": true,
+            "temperature": 0.7
+          },
+          "qwen3-4b-thinking-2507-mlx": {
+            "compatibility": {
+              "config": {
+                "streamingEnabled": true,
+                "toolsEnabled": true
+              },
+              "type": "qwen-compatibility"
+            },
+            "maxContext": 262144,
+            "maxTokens": 262144,
+            "supportsStreaming": true,
+            "supportsTools": true,
+            "temperature": 0.7
+          },
+          "qwen3-coder-480b-a35b-instruct-mlx": {
+            "compatibility": {
+              "config": {
+                "streamingEnabled": true,
+                "toolsEnabled": true
+              },
+              "type": "qwen-compatibility"
+            },
+            "maxContext": 262144,
+            "maxTokens": 262144,
+            "supportsStreaming": true,
+            "supportsTools": true,
+            "temperature": 0.7
+          },
+          "qwen3-coder-plus": {
+            "compatibility": {
+              "config": {
+                "streamingEnabled": true,
+                "toolsEnabled": true
+              },
+              "type": "qwen-compatibility"
+            },
+            "maxContext": 262144,
+            "maxTokens": 262144,
+            "supportsStreaming": true,
+            "supportsTools": true,
+            "temperature": 0.7
+          }
+        },
+        "retryAttempts": 3,
+        "timeout": 60000,
+        "type": "qwen"
+      }
+    },
+    "routing": {
+      "anthropic": [
+        "qwen-provider.qwen3-coder-plus"
+      ],
+      "background": [
+        "qwen-provider.qwen3-coder-plus"
+      ],
+      "coding": [
+        "qwen-provider.qwen3-coder-plus"
+      ],
+      "default": [
+        "qwen-provider.qwen3-coder-plus"
+      ],
+      "longcontext": [
+        "qwen-provider.qwen3-coder-plus"
+      ],
+      "thinking": [
+        "qwen-provider.qwen3-4b-thinking-2507-mlx"
+      ],
+      "tools": [
+        "qwen-provider.qwen3-coder-plus"
+      ],
+      "vision": [
+        "qwen-provider.qwen3-coder-plus"
+      ],
+      "websearch": [
+        "qwen-provider.qwen3-coder-plus"
+      ]
+    },
+    "dryRun": {
+      "enabled": false,
+      "includeHealthStatus": false,
+      "includeLoadBalancerDetails": false,
+      "includeWeightCalculation": false,
+      "simulateProviderHealth": false
+    },
+    "inputProtocol": "openai",
+    "llmSwitch": {
+      "config": {
+        "defaultProtocol": "openai",
+        "endpointMapping": {
+          "anthropic": [
+            "/v1/anthropic/messages",
+            "/v1/messages"
+          ],
+          "openai": [
+            "/v1/chat/completions",
+            "/v1/completions"
+          ]
+        },
+        "protocolDetection": "endpoint-based"
+      },
+      "type": "llmswitch-unified"
+    },
+    "outputProtocol": "openai"
+  },
+  "host": "0.0.0.0",
+  "pipelineConfigs": {
+    "endpoint-based": {
+      "/v1/chat/completions": {
+        "workflow": {
+          "config": {
+            "enableStreaming": true,
+            "reasoningPolicy": {
+              "openai": {
+                "disposition": "keep"
+              }
+            }
+          },
+          "enabled": true,
+          "type": "streaming-control"
+        }
+      },
+      "/v1/messages": {
+        "llmSwitch": {
+          "config": {},
+          "type": "llmswitch-anthropic-openai"
+        },
+        "workflow": {
+          "config": {
+            "enableStreaming": true,
+            "reasoningPolicy": {
+              "anthropic": {
+                "disposition": "drop",
+                "strict": true
+              }
+            }
+          },
+          "enabled": true,
+          "type": "streaming-control"
+        }
+      },
+      "qwen-provider.qwen3-30b-a3b-instruct-2507-mlx": {
+        "compatibility": {
+          "config": {
+            "streamingEnabled": true,
+            "toolsEnabled": true
+          },
+          "enabled": true,
+          "type": "qwen-compatibility"
+        },
+        "llmSwitch": {
+          "config": {},
+          "enabled": true,
+          "type": "llmswitch-unified"
+        }
+      },
+      "qwen-provider.qwen3-4b-thinking-2507-mlx": {
+        "compatibility": {
+          "config": {
+            "streamingEnabled": true,
+            "toolsEnabled": true
+          },
+          "enabled": true,
+          "type": "qwen-compatibility"
+        },
+        "llmSwitch": {
+          "config": {},
+          "enabled": true,
+          "type": "llmswitch-unified"
+        }
+      },
+      "qwen-provider.qwen3-coder-480b-a35b-instruct-mlx": {
+        "compatibility": {
+          "config": {
+            "streamingEnabled": true,
+            "toolsEnabled": true
+          },
+          "enabled": true,
+          "type": "qwen-compatibility"
+        },
+        "llmSwitch": {
+          "config": {},
+          "enabled": true,
+          "type": "llmswitch-unified"
+        }
+      },
+      "qwen-provider.qwen3-coder-plus": {
+        "compatibility": {
+          "config": {
+            "streamingEnabled": true,
+            "toolsEnabled": true
+          },
+          "enabled": true,
+          "type": "qwen-compatibility"
+        },
+        "llmSwitch": {
+          "config": {},
+          "enabled": true,
+          "type": "llmswitch-unified"
+        }
+      }
+    }
+  },
+  "port": 5522,
+  "schemaVersion": "1.0.0",
+  "stableSorting": {
+    "enabled": true,
+    "sortKeyMappings": true,
+    "sortProviders": true,
+    "sortRouting": true
+  },
+  "version": "1.0.0",
+  "compatibilityConfig": {
+    "originalConfig": {
+      "version": "1.0.0",
+      "port": 5522,
+      "host": "0.0.0.0",
+      "virtualrouter": {
+        "inputProtocol": "openai",
+        "outputProtocol": "openai",
+        "providers": {
+          "qwen-provider": {
+            "id": "qwen-provider",
+            "type": "qwen",
+            "enabled": true,
+            "baseURL": "https://portal.qwen.ai/v1",
+            "auth": {
+              "type": "oauth",
+              "clientId": "***REDACTED***",
+              "deviceCodeUrl": "https://chat.qwen.ai/api/v1/oauth2/device/code",
+              "tokenUrl": "https://chat.qwen.ai/api/v1/oauth2/token",
+              "scopes": [
+                "openid",
+                "profile",
+                "email",
+                "model.completion"
+              ],
+              "tokenFile": "/Users/fanzhang/.qwen/oauth_creds.json"
+            },
+            "models": {
+              "qwen3-coder-plus": {
+                "maxContext": 262144,
+                "maxTokens": 262144,
+                "temperature": 0.7,
+                "supportsStreaming": true,
+                "supportsTools": true,
+                "compatibility": {
+                  "type": "qwen-compatibility",
+                  "config": {
+                    "toolsEnabled": true,
+                    "streamingEnabled": true
+                  }
+                }
+              },
+              "qwen3-4b-thinking-2507-mlx": {
+                "maxContext": 262144,
+                "maxTokens": 262144,
+                "temperature": 0.7,
+                "supportsStreaming": true,
+                "supportsTools": true,
+                "compatibility": {
+                  "type": "qwen-compatibility",
+                  "config": {
+                    "toolsEnabled": true,
+                    "streamingEnabled": true
+                  }
+                }
+              },
+              "qwen3-30b-a3b-instruct-2507-mlx": {
+                "maxContext": 262144,
+                "maxTokens": 262144,
+                "temperature": 0.7,
+                "supportsStreaming": true,
+                "supportsTools": true,
+                "compatibility": {
+                  "type": "qwen-compatibility",
+                  "config": {
+                    "toolsEnabled": true,
+                    "streamingEnabled": true
+                  }
+                }
+              },
+              "qwen3-coder-480b-a35b-instruct-mlx": {
+                "maxContext": 262144,
+                "maxTokens": 262144,
+                "temperature": 0.7,
+                "supportsStreaming": true,
+                "supportsTools": true,
+                "compatibility": {
+                  "type": "qwen-compatibility",
+                  "config": {
+                    "toolsEnabled": true,
+                    "streamingEnabled": true
+                  }
+                }
+              }
+            },
+            "timeout": 60000,
+            "retryAttempts": 3,
+            "compatibility": {
+              "type": "passthrough-compatibility",
+              "config": {}
+            }
+          }
+        },
+        "routing": {
+          "default": [
+            "qwen-provider.qwen3-coder-plus"
+          ],
+          "anthropic": [
+            "qwen-provider.qwen3-coder-plus"
+          ],
+          "background": [
+            "qwen-provider.qwen3-coder-plus"
+          ],
+          "coding": [
+            "qwen-provider.qwen3-coder-plus"
+          ],
+          "longcontext": [
+            "qwen-provider.qwen3-coder-plus"
+          ],
+          "thinking": [
+            "qwen-provider.qwen3-4b-thinking-2507-mlx"
+          ],
+          "tools": [
+            "qwen-provider.qwen3-coder-plus"
+          ],
+          "vision": [
+            "qwen-provider.qwen3-coder-plus"
+          ],
+          "websearch": [
+            "qwen-provider.qwen3-coder-plus"
+          ]
+        },
+        "dryRun": {
+          "enabled": false,
+          "includeLoadBalancerDetails": false,
+          "includeHealthStatus": false,
+          "includeWeightCalculation": false,
+          "simulateProviderHealth": false
+        },
+        "llmSwitch": {
+          "type": "llmswitch-unified",
+          "config": {
+            "protocolDetection": "endpoint-based",
+            "defaultProtocol": "openai",
+            "endpointMapping": {
+              "anthropic": [
+                "/v1/anthropic/messages",
+                "/v1/messages"
+              ],
+              "openai": [
+                "/v1/chat/completions",
+                "/v1/completions"
+              ]
+            }
+          }
+        }
+      },
+      "pipelineConfigs": {
+        "endpoint-based": {
+          "/v1/messages": {
+            "llmSwitch": {
+              "type": "llmswitch-anthropic-openai",
+              "config": {}
+            },
+            "workflow": {
+              "type": "streaming-control",
+              "enabled": true,
+              "config": {
+                "enableStreaming": true,
+                "reasoningPolicy": {
+                  "anthropic": {
+                    "disposition": "drop",
+                    "strict": true
+                  }
+                }
+              }
+            }
+          },
+          "/v1/chat/completions": {
+            "workflow": {
+              "type": "streaming-control",
+              "enabled": true,
+              "config": {
+                "enableStreaming": true,
+                "reasoningPolicy": {
+                  "openai": {
+                    "disposition": "keep"
+                  }
+                }
+              }
+            }
+          },
+          "qwen-provider.qwen3-coder-plus": {
+            "llmSwitch": {
+              "type": "llmswitch-unified",
+              "enabled": true,
+              "config": {}
+            },
+            "compatibility": {
+              "type": "qwen-compatibility",
+              "enabled": true,
+              "config": {
+                "toolsEnabled": true,
+                "streamingEnabled": true
+              }
+            }
+          },
+          "qwen-provider.qwen3-4b-thinking-2507-mlx": {
+            "llmSwitch": {
+              "type": "llmswitch-unified",
+              "enabled": true,
+              "config": {}
+            },
+            "compatibility": {
+              "type": "qwen-compatibility",
+              "enabled": true,
+              "config": {
+                "toolsEnabled": true,
+                "streamingEnabled": true
+              }
+            }
+          },
+          "qwen-provider.qwen3-30b-a3b-instruct-2507-mlx": {
+            "llmSwitch": {
+              "type": "llmswitch-unified",
+              "enabled": true,
+              "config": {}
+            },
+            "compatibility": {
+              "type": "qwen-compatibility",
+              "enabled": true,
+              "config": {
+                "toolsEnabled": true,
+                "streamingEnabled": true
+              }
+            }
+          },
+          "qwen-provider.qwen3-coder-480b-a35b-instruct-mlx": {
+            "llmSwitch": {
+              "type": "llmswitch-unified",
+              "enabled": true,
+              "config": {}
+            },
+            "compatibility": {
+              "type": "qwen-compatibility",
+              "enabled": true,
+              "config": {
+                "toolsEnabled": true,
+                "streamingEnabled": true
+              }
+            }
+          }
+        }
+      },
+      "schemaVersion": "2.0.0",
+      "stableSorting": {
+        "enabled": true,
+        "sortKeyMappings": true,
+        "sortProviders": true,
+        "sortRouting": true
+      }
+    },
+    "normalizedConfig": {
+      "virtualrouter": {
+        "providers": {
+          "qwen-provider": {
+            "auth": {
+              "clientId": "***REDACTED***",
+              "deviceCodeUrl": "https://chat.qwen.ai/api/v1/oauth2/device/code",
+              "scopes": [
+                "email",
+                "model.completion",
+                "openid",
+                "profile"
+              ],
+              "tokenFile": "/Users/fanzhang/.qwen/oauth_creds.json",
+              "tokenUrl": "https://chat.qwen.ai/api/v1/oauth2/token",
+              "type": "oauth"
+            },
+            "baseURL": "https://portal.qwen.ai/v1",
+            "compatibility": {
+              "config": {},
+              "type": "passthrough-compatibility"
+            },
+            "enabled": true,
+            "id": "qwen-provider",
+            "keyAliases": [
+              "key1"
+            ],
+            "models": {
+              "qwen3-30b-a3b-instruct-2507-mlx": {
+                "compatibility": {
+                  "config": {
+                    "streamingEnabled": true,
+                    "toolsEnabled": true
+                  },
+                  "type": "qwen-compatibility"
+                },
+                "maxContext": 262144,
+                "maxTokens": 262144,
+                "supportsStreaming": true,
+                "supportsTools": true,
+                "temperature": 0.7
+              },
+              "qwen3-4b-thinking-2507-mlx": {
+                "compatibility": {
+                  "config": {
+                    "streamingEnabled": true,
+                    "toolsEnabled": true
+                  },
+                  "type": "qwen-compatibility"
+                },
+                "maxContext": 262144,
+                "maxTokens": 262144,
+                "supportsStreaming": true,
+                "supportsTools": true,
+                "temperature": 0.7
+              },
+              "qwen3-coder-480b-a35b-instruct-mlx": {
+                "compatibility": {
+                  "config": {
+                    "streamingEnabled": true,
+                    "toolsEnabled": true
+                  },
+                  "type": "qwen-compatibility"
+                },
+                "maxContext": 262144,
+                "maxTokens": 262144,
+                "supportsStreaming": true,
+                "supportsTools": true,
+                "temperature": 0.7
+              },
+              "qwen3-coder-plus": {
+                "compatibility": {
+                  "config": {
+                    "streamingEnabled": true,
+                    "toolsEnabled": true
+                  },
+                  "type": "qwen-compatibility"
+                },
+                "maxContext": 262144,
+                "maxTokens": 262144,
+                "supportsStreaming": true,
+                "supportsTools": true,
+                "temperature": 0.7
+              }
+            },
+            "retryAttempts": 3,
+            "timeout": 60000,
+            "type": "qwen"
+          }
+        },
+        "routing": {
+          "anthropic": [
+            "qwen-provider.qwen3-coder-plus"
+          ],
+          "background": [
+            "qwen-provider.qwen3-coder-plus"
+          ],
+          "coding": [
+            "qwen-provider.qwen3-coder-plus"
+          ],
+          "default": [
+            "qwen-provider.qwen3-coder-plus"
+          ],
+          "longcontext": [
+            "qwen-provider.qwen3-coder-plus"
+          ],
+          "thinking": [
+            "qwen-provider.qwen3-4b-thinking-2507-mlx"
+          ],
+          "tools": [
+            "qwen-provider.qwen3-coder-plus"
+          ],
+          "vision": [
+            "qwen-provider.qwen3-coder-plus"
+          ],
+          "websearch": [
+            "qwen-provider.qwen3-coder-plus"
+          ]
+        },
+        "dryRun": {
+          "enabled": false,
+          "includeHealthStatus": false,
+          "includeLoadBalancerDetails": false,
+          "includeWeightCalculation": false,
+          "simulateProviderHealth": false
+        },
+        "inputProtocol": "openai",
+        "llmSwitch": {
+          "config": {
+            "defaultProtocol": "openai",
+            "endpointMapping": {
+              "anthropic": [
+                "/v1/anthropic/messages",
+                "/v1/messages"
+              ],
+              "openai": [
+                "/v1/chat/completions",
+                "/v1/completions"
+              ]
+            },
+            "protocolDetection": "endpoint-based"
+          },
+          "type": "llmswitch-unified"
+        },
+        "outputProtocol": "openai"
+      },
+      "host": "0.0.0.0",
+      "pipelineConfigs": {
+        "endpoint-based": {
+          "/v1/chat/completions": {
+            "workflow": {
+              "config": {
+                "enableStreaming": true,
+                "reasoningPolicy": {
+                  "openai": {
+                    "disposition": "keep"
+                  }
+                }
+              },
+              "enabled": true,
+              "type": "streaming-control"
+            }
+          },
+          "/v1/messages": {
+            "llmSwitch": {
+              "config": {},
+              "type": "llmswitch-anthropic-openai"
+            },
+            "workflow": {
+              "config": {
+                "enableStreaming": true,
+                "reasoningPolicy": {
+                  "anthropic": {
+                    "disposition": "drop",
+                    "strict": true
+                  }
+                }
+              },
+              "enabled": true,
+              "type": "streaming-control"
+            }
+          },
+          "qwen-provider.qwen3-30b-a3b-instruct-2507-mlx": {
+            "compatibility": {
+              "config": {
+                "streamingEnabled": true,
+                "toolsEnabled": true
+              },
+              "enabled": true,
+              "type": "qwen-compatibility"
+            },
+            "llmSwitch": {
+              "config": {},
+              "enabled": true,
+              "type": "llmswitch-unified"
+            }
+          },
+          "qwen-provider.qwen3-4b-thinking-2507-mlx": {
+            "compatibility": {
+              "config": {
+                "streamingEnabled": true,
+                "toolsEnabled": true
+              },
+              "enabled": true,
+              "type": "qwen-compatibility"
+            },
+            "llmSwitch": {
+              "config": {},
+              "enabled": true,
+              "type": "llmswitch-unified"
+            }
+          },
+          "qwen-provider.qwen3-coder-480b-a35b-instruct-mlx": {
+            "compatibility": {
+              "config": {
+                "streamingEnabled": true,
+                "toolsEnabled": true
+              },
+              "enabled": true,
+              "type": "qwen-compatibility"
+            },
+            "llmSwitch": {
+              "config": {},
+              "enabled": true,
+              "type": "llmswitch-unified"
+            }
+          },
+          "qwen-provider.qwen3-coder-plus": {
+            "compatibility": {
+              "config": {
+                "streamingEnabled": true,
+                "toolsEnabled": true
+              },
+              "enabled": true,
+              "type": "qwen-compatibility"
+            },
+            "llmSwitch": {
+              "config": {},
+              "enabled": true,
+              "type": "llmswitch-unified"
+            }
+          }
+        }
+      },
+      "port": 5522,
+      "schemaVersion": "2.0.0",
+      "stableSorting": {
+        "enabled": true,
+        "sortKeyMappings": true,
+        "sortProviders": true,
+        "sortRouting": true
+      },
+      "version": "1.0.0"
+    },
+    "keyMappings": {
+      "global": {
+        "key1": "default"
+      },
+      "oauth": {},
+      "providers": {
+        "qwen-provider": {
+          "key1": "default"
+        }
+      }
+    },
+    "authMappings": {
+      "authFiles": {
+        "auth-clientId": "***REDACTED***",
+        "auth-deviceCodeUrl": "https://chat.qwen.ai/api/v1/oauth2/device/code",
+        "auth-scopes": [
+          "email",
+          "model.completion",
+          "openid",
+          "profile"
+        ],
+        "auth-tokenFile": "/Users/fanzhang/.qwen/oauth_creds.json",
+        "auth-tokenUrl": "https://chat.qwen.ai/api/v1/oauth2/token",
+        "auth-type": "oauth"
+      },
+      "oauthTokens": {},
+      "oauthConfigs": {}
+    },
+    "routeTargets": {
+      "anthropic": [
+        [
+          {
+            "providerId": "qwen-provider",
+            "modelId": "qwen3-coder-plus",
+            "keyId": "key1",
+            "actualKey": "default",
+            "inputProtocol": "openai",
+            "outputProtocol": "openai"
+          }
+        ]
+      ],
+      "background": [
+        [
+          {
+            "providerId": "qwen-provider",
+            "modelId": "qwen3-coder-plus",
+            "keyId": "key1",
+            "actualKey": "default",
+            "inputProtocol": "openai",
+            "outputProtocol": "openai"
+          }
+        ]
+      ],
+      "coding": [
+        [
+          {
+            "providerId": "qwen-provider",
+            "modelId": "qwen3-coder-plus",
+            "keyId": "key1",
+            "actualKey": "default",
+            "inputProtocol": "openai",
+            "outputProtocol": "openai"
+          }
+        ]
+      ],
+      "default": [
+        [
+          {
+            "providerId": "qwen-provider",
+            "modelId": "qwen3-coder-plus",
+            "keyId": "key1",
+            "actualKey": "default",
+            "inputProtocol": "openai",
+            "outputProtocol": "openai"
+          }
+        ]
+      ],
+      "longcontext": [
+        [
+          {
+            "providerId": "qwen-provider",
+            "modelId": "qwen3-coder-plus",
+            "keyId": "key1",
+            "actualKey": "default",
+            "inputProtocol": "openai",
+            "outputProtocol": "openai"
+          }
+        ]
+      ],
+      "thinking": [
+        [
+          {
+            "providerId": "qwen-provider",
+            "modelId": "qwen3-4b-thinking-2507-mlx",
+            "keyId": "key1",
+            "actualKey": "default",
+            "inputProtocol": "openai",
+            "outputProtocol": "openai"
+          }
+        ]
+      ],
+      "tools": [
+        [
+          {
+            "providerId": "qwen-provider",
+            "modelId": "qwen3-coder-plus",
+            "keyId": "key1",
+            "actualKey": "default",
+            "inputProtocol": "openai",
+            "outputProtocol": "openai"
+          }
+        ]
+      ],
+      "vision": [
+        [
+          {
+            "providerId": "qwen-provider",
+            "modelId": "qwen3-coder-plus",
+            "keyId": "key1",
+            "actualKey": "default",
+            "inputProtocol": "openai",
+            "outputProtocol": "openai"
+          }
+        ]
+      ],
+      "websearch": [
+        [
+          {
+            "providerId": "qwen-provider",
+            "modelId": "qwen3-coder-plus",
+            "keyId": "key1",
+            "actualKey": "default",
+            "inputProtocol": "openai",
+            "outputProtocol": "openai"
+          }
+        ]
+      ]
+    },
+    "pipelineConfigs": {},
+    "moduleConfigs": {
+      "virtualrouter": {
+        "enabled": true,
+        "config": {
+          "moduleType": "virtual-router",
+          "inputProtocol": "openai",
+          "outputProtocol": "openai"
+        }
+      },
+      "httpserver": {
+        "enabled": true,
+        "config": {
+          "port": 5522
+        }
+      },
+      "pipelineConfigs": {
+        "enabled": true,
+        "config": {
+          "endpoint-based": {
+            "/v1/chat/completions": {
+              "workflow": {
+                "config": {
+                  "enableStreaming": true,
+                  "reasoningPolicy": {
+                    "openai": {
+                      "disposition": "keep"
+                    }
+                  }
+                },
+                "enabled": true,
+                "type": "streaming-control"
+              }
+            },
+            "/v1/messages": {
+              "llmSwitch": {
+                "config": {},
+                "type": "llmswitch-anthropic-openai"
+              },
+              "workflow": {
+                "config": {
+                  "enableStreaming": true,
+                  "reasoningPolicy": {
+                    "anthropic": {
+                      "disposition": "drop",
+                      "strict": true
+                    }
+                  }
+                },
+                "enabled": true,
+                "type": "streaming-control"
+              }
+            },
+            "qwen-provider.qwen3-30b-a3b-instruct-2507-mlx": {
+              "compatibility": {
+                "config": {
+                  "streamingEnabled": true,
+                  "toolsEnabled": true
+                },
+                "enabled": true,
+                "type": "qwen-compatibility"
+              },
+              "llmSwitch": {
+                "config": {},
+                "enabled": true,
+                "type": "llmswitch-unified"
+              }
+            },
+            "qwen-provider.qwen3-4b-thinking-2507-mlx": {
+              "compatibility": {
+                "config": {
+                  "streamingEnabled": true,
+                  "toolsEnabled": true
+                },
+                "enabled": true,
+                "type": "qwen-compatibility"
+              },
+              "llmSwitch": {
+                "config": {},
+                "enabled": true,
+                "type": "llmswitch-unified"
+              }
+            },
+            "qwen-provider.qwen3-coder-480b-a35b-instruct-mlx": {
+              "compatibility": {
+                "config": {
+                  "streamingEnabled": true,
+                  "toolsEnabled": true
+                },
+                "enabled": true,
+                "type": "qwen-compatibility"
+              },
+              "llmSwitch": {
+                "config": {},
+                "enabled": true,
+                "type": "llmswitch-unified"
+              }
+            },
+            "qwen-provider.qwen3-coder-plus": {
+              "compatibility": {
+                "config": {
+                  "streamingEnabled": true,
+                  "toolsEnabled": true
+                },
+                "enabled": true,
+                "type": "qwen-compatibility"
+              },
+              "llmSwitch": {
+                "config": {},
+                "enabled": true,
+                "type": "llmswitch-unified"
+              }
+            }
+          }
+        }
+      },
+      "stableSorting": {
+        "enabled": true,
+        "config": {
+          "enabled": true,
+          "sortKeyMappings": true,
+          "sortProviders": true,
+          "sortRouting": true
+        }
+      }
+    }
+  },
+  "_metadata": {
+    "version": "2.0.0",
+    "engine": "routecodex-config-engine",
+    "timestamp": 1760320614169,
+    "configPath": "/Users/fanzhang/.routecodex/config/qwen-5522-qwen3-coder-plus.json"
+  },
+  "engineVersion": "legacy"
+}

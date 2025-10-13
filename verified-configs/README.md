@@ -5,12 +5,14 @@
 ## 版本历史
 
 ### v0.45.0 (当前版本)
-**验证日期**: 2025-10-13T01:04:00Z
-**验证状态**: ✅ 通过 - LM Studio 集成验证成功
+**验证日期**: 2025-10-13T01:56:00Z
+**验证状态**: ✅ 通过 - LM Studio + Qwen Provider 集成验证成功
 
 #### 配置文件
 - `lmstudio-5521-gpt-oss-20b-mlx.json` - LM Studio 用户配置 (端口 5521)
 - `merged-config.5521.json` - 系统合并后的完整配置
+- `qwen-5522-qwen3-coder-plus.json` - Qwen 用户配置 (端口 5522)
+- `merged-config.qwen-5522.json` - Qwen 系统合并配置
 - `README.md` - 详细验证报告
 
 #### 验证环境
@@ -21,8 +23,11 @@
 
 #### 使用方法
 ```bash
-# 启动验证过的配置
-npx ts-node src/cli.ts start --config verified-configs/v0.45.0/lmstudio-5521-gpt-oss-20b-mlx.json --port 5521
+# 启动 LM Studio 配置 (端口 5521)
+npx ts-node src/cli.ts start --config ~/.routecodex/config/lmstudio-5521-gpt-oss-20b-mlx.json --port 5521
+
+# 启动 Qwen Provider 配置 (端口 5522)
+npx ts-node src/cli.ts start --config ~/.routecodex/config/qwen-5522-qwen3-coder-plus.json --port 5522
 ```
 
 ## 目录结构
