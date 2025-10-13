@@ -548,9 +548,13 @@ export class ConfigManagerModule extends BaseModule {
       // Ensure httpserver.port is determined by user config if provided
       try {
         const uHttp = (userConfig as Record<string, any>)?.httpserver || (parsedUserConfig as Record<string, any>)?.httpserver || {};
-        const mModules = ((mergedConfig as Record<string, any>)?.modules ||= {});
-        const mHttp = ((mModules.httpserver ||= { enabled: true, config: {} }));
-        const mHttpCfg = ((mHttp.config ||= {}));
+        const mergedAny = mergedConfig as Record<string, any>;
+if (!mergedAny.modules) { mergedAny.modules = {}; }
+const mModules = mergedAny.modules as Record<string, any>;
+        if (!mModules.httpserver) { mModules.httpserver = { enabled: true, config: {} }; }
+const mHttp = mModules.httpserver as Record<string, any>;
+        if (!mHttp.config) { mHttp.config = {}; }
+const mHttpCfg = mHttp.config as Record<string, any>;
         // Only project user-provided values; do NOT apply implicit defaults here
         if (typeof uHttp.port === 'number' && uHttp.port > 0) {
           mHttpCfg.port = uHttp.port;
