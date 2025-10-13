@@ -112,23 +112,31 @@ program
         try {
           const configContent = fs.readFileSync(configPath, 'utf8');
           const config = JSON.parse(configContent);
-          actualPort = config?.port || config?.server?.port;
-          actualHost = config?.server?.host || config?.host || actualHost;
+          actualPort = (config?.httpserver?.port ?? config?.server?.port ?? config?.port) || null;
+          actualHost = (config?.httpserver?.host || config?.server?.host || config?.host || actualHost);
         } catch (error) {
           spinner.warn('Failed to read configuration file, using defaults');
         }
       }
 
-      // Fallback to default if still no port
+      // Require explicit port if not provided via flag or config
       if (!actualPort) {
-        actualPort = 5520;
+        spinner.fail('Invalid or missing port configuration for RouteCodex server');
+        logger.error('Please set httpserver.port in your configuration (e.g., ~/.routecodex/config.json)');
+        process.exit(1);
       }
 
       // Check if RouteCodex server needs to be started
       if (options.ensureServer) {
         spinner.text = 'Checking RouteCodex server status...';
-
-        const serverUrl = `http://${actualHost}:${actualPort}`;
+        const normalizeConnectHost = (h: string): string => {
+          const v = String(h || '').toLowerCase();
+          if (v === '0.0.0.0') { return '127.0.0.1'; }
+          if (v === '::') { return '::1'; }
+          return h || '127.0.0.1';
+        };
+        const connectHost = normalizeConnectHost(actualHost);
+        const serverUrl = `http://${connectHost}:${actualPort}`;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 3000);
 
@@ -188,7 +196,7 @@ program
       // Prepare environment variables for Claude Code
       const claudeEnv = {
         ...process.env,
-        ANTHROPIC_BASE_URL: `http://${actualHost}:${actualPort}`,
+        ANTHROPIC_BASE_URL: `http://${String((() => { const v = String(actualHost || '').toLowerCase(); if (v==='0.0.0.0') return '127.0.0.1'; if (v==='::') return '::1'; return actualHost || '127.0.0.1'; })())}:${actualPort}`,
         ANTHROPIC_API_KEY: 'rcc-proxy-key'
       };
 
@@ -304,13 +312,11 @@ program
         process.exit(1);
       }
 
-      // Validate required configuration fields
-      const port = config?.port || config?.server?.port;
+      // Validate required configuration fields (prefer httpserver.port; allow top-level port)
+      const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
       if (!port || typeof port !== 'number' || port <= 0) {
         spinner.fail('Invalid or missing port configuration');
-        logger.error('Configuration file must specify a valid port number');
-        logger.error('Example configuration:');
-        logger.error(JSON.stringify({ port: 5506 }, null, 2));
+        logger.error('Please set a valid port (httpserver.port or top-level port) in your configuration');
         process.exit(1);
       }
 
@@ -346,7 +352,7 @@ program
         fs.writeFileSync(pidFile, String(childProc.pid ?? ''), 'utf8');
       } catch (error) { /* ignore */ }
 
-      const host = config?.server?.host || config?.host || 'localhost';
+      const host = (config?.httpserver?.host || config?.server?.host || config?.host || 'localhost');
       spinner.succeed(`RouteCodex server starting on ${host}:${resolvedPort}`);
       logger.info(`Configuration loaded from: ${configPath}`);
       logger.info(`Server will run on port: ${resolvedPort}`);
@@ -710,7 +716,7 @@ program
         process.exit(1);
       }
 
-      const port = config?.port || config?.server?.port;
+      const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
       if (!port || typeof port !== 'number' || port <= 0) {
         spinner.fail('Invalid or missing port configuration');
         logger.error('Configuration file must specify a valid port number');
@@ -780,7 +786,7 @@ program
         process.exit(1);
       }
 
-      const port = config?.port || config?.server?.port;
+      const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
       if (!port || typeof port !== 'number' || port <= 0) {
         spinner.fail('Invalid or missing port configuration');
         logger.error('Configuration file must specify a valid port number');
@@ -827,7 +833,7 @@ program
       const child = spawn(nodeBin, args, { stdio: 'inherit', env });
       try { fs.writeFileSync(path.join(homedir(), '.routecodex', 'server.cli.pid'), String(child.pid ?? ''), 'utf8'); } catch (error) { /* ignore */ }
 
-      const host = config?.server?.host || config?.host || 'localhost';
+      const host = (config?.httpserver?.host || config?.server?.host || config?.host || 'localhost');
       spinner.succeed(`RouteCodex server restarting on ${host}:${resolvedPort}`);
       logger.info(`Server will run on port: ${resolvedPort}`);
       logger.info('Press Ctrl+C to stop the server');
