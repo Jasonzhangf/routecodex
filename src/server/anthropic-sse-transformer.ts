@@ -37,7 +37,7 @@ export class AnthropicSSETransformer {
    * Map OpenAI finish_reason to Anthropic stop_reason
    */
   private mapFinish(reason: string | null | undefined): string | null {
-    if (!reason) return null;
+    if (!reason) {return null;}
     switch (reason) {
       case 'stop':
         return 'end_turn';
@@ -59,9 +59,9 @@ export class AnthropicSSETransformer {
 
     // Initialize IDs/model/created
     try {
-      if (!this.messageId) this.messageId = String(chunk.id || `chatcmpl_${Date.now()}`);
-      if (!this.model) this.model = String(chunk.model || 'unknown');
-      if (!this.createdAt) this.createdAt = Number(chunk.created || Math.floor(Date.now() / 1000));
+      if (!this.messageId) {this.messageId = String(chunk.id || `chatcmpl_${Date.now()}`);}
+      if (!this.model) {this.model = String(chunk.model || 'unknown');}
+      if (!this.createdAt) {this.createdAt = Number(chunk.created || Math.floor(Date.now() / 1000));}
     } catch {}
 
     const choice = Array.isArray(chunk?.choices) ? chunk.choices[0] : undefined;

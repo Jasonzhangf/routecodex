@@ -47,7 +47,7 @@ export class SystemPromptLoader {
       const entries = await fs.readdir(dir, { withFileTypes: true });
       const files: Array<{ name: string; full: string; mtimeMs: number }> = [];
       for (const e of entries) {
-        if (!e.isFile()) continue;
+        if (!e.isFile()) {continue;}
         const full = path.join(dir, e.name);
         try {
           const st = await fs.stat(full);
@@ -64,7 +64,7 @@ export class SystemPromptLoader {
     }
   }
 
-  private async readJson(p: string): Promise<any | null> {
+  private async readJson(p: string): Promise<unknown | null> {
     try {
       const txt = await fs.readFile(p, 'utf8');
       return JSON.parse(txt);
@@ -73,20 +73,20 @@ export class SystemPromptLoader {
     }
   }
 
-  private extractSystemFromOpenAIShape(j: any): string | null {
+  private extractSystemFromOpenAIShape(j: unknown): string | null {
     // Accept shapes: { data: { messages: [...] } } or { body: { messages: [...] } } or { messages: [...] }
-    const candidates: any[] = [];
+    const candidates: unknown[] = [];
     if (j && typeof j === 'object') {
-      if (j.data && typeof j.data === 'object') candidates.push(j.data);
-      if (j.body && typeof j.body === 'object') candidates.push(j.body);
+      if (j.data && typeof j.data === 'object') {candidates.push(j.data);}
+      if (j.body && typeof j.body === 'object') {candidates.push(j.body);}
       candidates.push(j);
     }
     for (const obj of candidates) {
-      const msgs = obj?.messages;
+      const msgs = (obj as Record<string, unknown>)?.messages;
       if (Array.isArray(msgs) && msgs.length) {
         for (const m of msgs) {
-          if (m && m.role === 'system' && typeof m.content === 'string' && m.content.trim().length > 0) {
-            return m.content as string;
+          if (m && (m as Record<string, unknown>).role === 'system' && typeof (m as Record<string, unknown>).content === 'string' && (m as Record<string, unknown>).content.trim().length > 0) {
+            return (m as Record<string, unknown>).content as string;
           }
         }
       }
@@ -94,17 +94,17 @@ export class SystemPromptLoader {
     return null;
   }
 
-  private extractSystemFromAnthropicShape(j: any): string | null {
+  private extractSystemFromAnthropicShape(j: unknown): string | null {
     // Accept shapes: { data: { system: string } } or { body: { system: string } } or { system: string }
-    const candidates: any[] = [];
+    const candidates: unknown[] = [];
     if (j && typeof j === 'object') {
-      if (j.data && typeof j.data === 'object') candidates.push(j.data);
-      if (j.body && typeof j.body === 'object') candidates.push(j.body);
+      if (j.data && typeof j.data === 'object') {candidates.push(j.data);}
+      if (j.body && typeof j.body === 'object') {candidates.push(j.body);}
       candidates.push(j);
     }
     for (const obj of candidates) {
-      if (obj && typeof obj.system === 'string' && obj.system.trim().length > 0) {
-        return obj.system as string;
+      if (obj && typeof (obj as Record<string, unknown>).system === 'string' && (obj as Record<string, unknown>).system.trim().length > 0) {
+        return (obj as Record<string, unknown>).system as string;
       }
     }
     return null;
@@ -114,9 +114,9 @@ export class SystemPromptLoader {
     const files = await this.listFiles();
     // First pass: look for a recognizable Codex CLI system prompt
     for (const f of files) {
-      if (!/^(pipeline-in-|chat-req_)/.test(f.name)) continue;
+      if (!/^(pipeline-in-|chat-req_)/.test(f.name)) {continue;}
       const j = await this.readJson(f.full);
-      if (!j) continue;
+      if (!j) {continue;}
       const sys = this.extractSystemFromOpenAIShape(j);
       if (sys && /Codex CLI/i.test(sys)) {
         return sys;
@@ -124,11 +124,11 @@ export class SystemPromptLoader {
     }
     // Fallback: return the latest system message regardless of content
     for (const f of files) {
-      if (!/^(pipeline-in-|chat-req_)/.test(f.name)) continue;
+      if (!/^(pipeline-in-|chat-req_)/.test(f.name)) {continue;}
       const j = await this.readJson(f.full);
-      if (!j) continue;
+      if (!j) {continue;}
       const sys = this.extractSystemFromOpenAIShape(j);
-      if (sys) return sys;
+      if (sys) {return sys;}
     }
     return null;
   }
@@ -137,22 +137,22 @@ export class SystemPromptLoader {
     const files = await this.listFiles();
     // First, look for anthropic canonical captures with system field
     for (const f of files) {
-      if (!/^pipeline-in-/.test(f.name)) continue;
+      if (!/^pipeline-in-/.test(f.name)) {continue;}
       const j = await this.readJson(f.full);
-      if (!j) continue;
+      if (!j) {continue;}
       // Ensure it was a /v1/messages request if metadata present
       const url = j?.metadata?.url as string | undefined;
       if (url && !url.includes('/v1/messages') && !url.includes('/anthropic/messages')) {
         continue;
       }
       const sys = this.extractSystemFromAnthropicShape(j);
-      if (sys) return sys;
+      if (sys) {return sys;}
     }
     // Fallback: any recent chat/pipeline-in file that contains a Claude-flavored system string
     for (const f of files) {
-      if (!/^(pipeline-in-|chat-req_)/.test(f.name)) continue;
+      if (!/^(pipeline-in-|chat-req_)/.test(f.name)) {continue;}
       const j = await this.readJson(f.full);
-      if (!j) continue;
+      if (!j) {continue;}
       const sys = this.extractSystemFromOpenAIShape(j);
       if (sys && /claude|anthropic/i.test(sys)) {
         return sys;
@@ -164,13 +164,13 @@ export class SystemPromptLoader {
 
 export function shouldReplaceSystemPrompt(): Source | null {
   const sel = (process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE || '').toLowerCase();
-  if (sel === 'codex') return 'codex';
-  if (sel === 'claude') return 'claude';
+  if (sel === 'codex') {return 'codex';}
+  if (sel === 'claude') {return 'claude';}
   return null;
 }
 
-export function replaceSystemInOpenAIMessages(messages: any[], systemText: string): any[] {
-  if (!Array.isArray(messages)) return messages;
+export function replaceSystemInOpenAIMessages(messages: unknown[], systemText: string): unknown[] {
+  if (!Array.isArray(messages)) {return messages;}
   const out = [...messages];
   const idx = out.findIndex((m) => m && m.role === 'system');
   if (idx >= 0) {
