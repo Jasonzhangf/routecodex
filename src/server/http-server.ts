@@ -1209,8 +1209,18 @@ export class HttpServer extends BaseModule implements IHttpServer {
 
     // OpenAI API endpoints (mounted after Anthropic endpoints to prevent route shadowing)
     const protocolRouter = this.protocolHandler.getRouter();
-    this.app.use('/v1/openai', protocolRouter);
-    this.app.use('/v1', protocolRouter);
+    const protocolHandlerConfig = this.moduleConfigReader.getModuleConfigValue<UnknownObject>(
+      'protocolhandler',
+      {}
+    );
+    const basePath = (protocolHandlerConfig as any)?.basePath || '/v1/openai';
+
+    // Mount router at configured base path and at /v1 for compatibility
+    // Only mount at /v1 if basePath is not already /v1 to avoid conflicts
+    this.app.use(basePath, protocolRouter);
+    if (basePath !== '/v1') {
+      this.app.use('/v1', protocolRouter);
+    }
 
     // Status endpoint
     this.app.get('/status', this.handleStatus.bind(this));
