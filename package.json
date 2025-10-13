@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.46.6",
+  "version": "0.46.7",
   "description": "Multi-provider OpenAI proxy server with native dry-run capabilities",
   "type": "module",
   "main": "dist/index.js",
@@ -47,7 +47,7 @@
     "lint:strict": "eslint --no-eslintrc -c .eslintrc.json src --ext .ts --max-warnings 0 --no-cache",
     "clean": "rm -rf dist coverage",
     "prebuild": "echo skip-lint",
-    "prepare": "echo skip-prepare",
+    "prepare": "npm run build",
     "prepublishOnly": "npm run build && npm test",
     "install:global": "./scripts/quick-install.sh",
     "install:quick": "./scripts/quick-install.sh",

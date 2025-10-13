@@ -166,13 +166,46 @@ export class HttpServer extends BaseModule implements IHttpServer {
     const httpCfg = (((mc.modules as UnknownObject) || {} as UnknownObject)['httpserver'] as UnknownObject)?.['config'] as UnknownObject | undefined;
     const rootCfg: UnknownObject = (this.config as UnknownObject) || {};
 
-    // Prefer merged-config module block; fall back to root (back-compat) then defaults
-    const resolvedPort = typeof (httpCfg as any)?.port === 'number' ? (httpCfg as any).port : undefined;
-    if (!(resolvedPort && resolvedPort > 0)) {
-      throw new Error('HTTP server port is missing. Please set httpserver.port in your user config (~/.routecodex/config.json).');
+    // Port field translation: support multiple configuration field names
+    // Priority: httpserver.port > server.port > port (root level)
+    let resolvedPort: number | undefined;
+
+    // 1. Try httpserver.config.port from merged config
+    if (typeof (httpCfg as any)?.port === 'number' && (httpCfg as any).port > 0) {
+      resolvedPort = (httpCfg as any).port;
+    }
+    // 2. Try server.port from root config
+    else if (typeof (rootCfg as any)?.server?.port === 'number' && (rootCfg as any)?.server?.port > 0) {
+      resolvedPort = (rootCfg as any).server.port;
+    }
+    // 3. Try port from root config (user's current format)
+    else if (typeof (rootCfg as any)?.port === 'number' && (rootCfg as any)?.port > 0) {
+      resolvedPort = (rootCfg as any).port;
     }
 
-    const resolvedHost = ((httpCfg as any)?.host as string) || ((rootCfg as any)?.host as string) || 'localhost';
+    if (!(resolvedPort && resolvedPort > 0)) {
+      throw new Error('HTTP server port is missing. Please set port, server.port, or httpserver.port in your user config (~/.routecodex/config.json).');
+    }
+
+    // Host field translation: support multiple configuration field names
+    // Priority: httpserver.host > server.host > host (root level)
+    let resolvedHost: string | undefined;
+
+    // 1. Try httpserver.config.host from merged config
+    if (typeof (httpCfg as any)?.host === 'string' && (httpCfg as any).host.trim()) {
+      resolvedHost = (httpCfg as any).host.trim();
+    }
+    // 2. Try server.host from root config
+    else if (typeof (rootCfg as any)?.server?.host === 'string' && (rootCfg as any)?.server?.host.trim()) {
+      resolvedHost = (rootCfg as any).server.host.trim();
+    }
+    // 3. Try host from root config (user's current format)
+    else if (typeof (rootCfg as any)?.host === 'string' && (rootCfg as any)?.host.trim()) {
+      resolvedHost = (rootCfg as any).host.trim();
+    }
+
+    // Fallback to localhost if no host found
+    resolvedHost = resolvedHost || 'localhost';
     const resolvedCors = (httpCfg as any)?.cors || (rootCfg as any)?.cors || { origin: '*', credentials: true };
     const resolvedTimeout = (httpCfg as any)?.timeout ?? (rootCfg as any)?.timeout ?? 30000;
     const resolvedBodyLimit = (httpCfg as any)?.bodyLimit ?? (rootCfg as any)?.bodyLimit ?? '10mb';
