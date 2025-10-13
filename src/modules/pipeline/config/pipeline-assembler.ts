@@ -112,7 +112,7 @@ export class PipelineAssembler {
     // Fallbacks are kept temporarily for migration and will be removed after validation
     const mc = this.asRecord(mergedConfig);
     const cc = this.asRecord(mc.compatibilityConfig);
-    const routeTargets = (this.asRecord(cc.routeTargets)) as Record<string, unknown[]>;
+    let routeTargets = (this.asRecord(cc.routeTargets)) as Record<string, unknown[]>;
     const pipelineConfigs = (this.asRecord(cc.pipelineConfigs)) as Record<string, unknown>;
     
     // Also check for top-level pipelineConfigs if compatibilityConfig.pipelineConfigs is empty
@@ -158,6 +158,32 @@ export class PipelineAssembler {
           pipelineConfigs[key] = merged;
         }
       }
+    }
+
+    // Fallback for routeTargets: derive from modules.virtualrouter.config if compatibilityConfig.routeTargets is empty
+    try {
+      if (!routeTargets || Object.keys(routeTargets).length === 0) {
+        const modulesRec = this.asRecord(mc.modules);
+        const vrCfg = this.asRecord(this.asRecord(modulesRec.virtualrouter).config);
+        const rtFromVr = this.asRecord(vrCfg.routeTargets) as Record<string, unknown[]>;
+        if (rtFromVr && Object.keys(rtFromVr).length > 0) {
+          routeTargets = rtFromVr;
+        } else {
+          // As a last resort, support legacy routing: Record<string, string[]> where each item is 'provider.model.key'
+          const legacyRouting = this.asRecord(vrCfg.routing) as Record<string, unknown>;
+          const derived: Record<string, unknown[]> = {};
+          for (const [route, list] of Object.entries(legacyRouting)) {
+            if (Array.isArray(list)) {
+              derived[route] = (list as unknown[]).map(v => String(v));
+            }
+          }
+          if (Object.keys(derived).length > 0) {
+            routeTargets = derived;
+          }
+        }
+      }
+    } catch {
+      // non-fatal
     }
 
     // Normalized providers info from compatibility engine
@@ -335,7 +361,27 @@ export class PipelineAssembler {
           
           // Merge llmSwitch config if present
           if (customConfig.llmSwitch) {
-            pc.llmSwitch = customConfig.llmSwitch as PcShape['llmSwitch'];
+            // Normalize llmSwitch type to canonical identifiers
+            const raw = (customConfig.llmSwitch as Record<string, unknown>);
+            const normType = String(raw?.type || '').toLowerCase();
+            const mapType = (t: string): string => {
+              switch (t) {
+                case 'openai-passthrough':
+                case 'openai-normalizer':
+                  return (routeName === 'anthropic') ? 'llmswitch-anthropic-openai' : 'llmswitch-openai-openai';
+                case 'anthropic-openai':
+                case 'anthropic-openai-converter':
+                  return 'llmswitch-anthropic-openai';
+                case 'llmswitch-unified':
+                  return 'llmswitch-anthropic-openai';
+                default:
+                  return raw?.type as string || 'llmswitch-anthropic-openai';
+              }
+            };
+            pc.llmSwitch = {
+              ...(raw as Record<string, unknown>),
+              type: mapType(normType)
+            } as PcShape['llmSwitch'];
           }
           
           // Merge other configurations as needed
@@ -400,14 +446,13 @@ export class PipelineAssembler {
             ? { type: workflowDecl.type, enabled: workflowDecl.enabled !== false, config: workflowDecl.config || {} }
             : { type: 'streaming-control', config: { streamingToNonStreaming: true } };
 
-          // Compatibility must be specified by config
-          // Compatibility: 由provider/模型或pipelineConfigs配置的compatibility决定（不再使用默认passthrough）
+          // Compatibility: 如果未在配置中显式提供，则默认使用 passthrough-compatibility
           const compatDecl = pc?.compatibility as { type?: string; config?: Record<string, unknown> } | undefined;
           const compatType: string | undefined = compatDecl?.type;
           const compatCfg: Record<string, unknown> = compatDecl?.config || {};
-          const compatibility: ModuleConfig | undefined = compatType
+          const compatibility: ModuleConfig = compatType
             ? { type: compatType, config: compatCfg }
-            : undefined;
+            : { type: 'passthrough-compatibility', config: {} };
 
           const providerConfigObj: Record<string, unknown> = {};
           // Generic providers expect a vendor type hint for downstream compatibility modules
@@ -451,7 +496,21 @@ export class PipelineAssembler {
           let llmSwitch: ModuleConfig;
           if (pc.llmSwitch) {
             // Map legacy unified to anthropic-openai
-            const mappedType = pc.llmSwitch.type === 'llmswitch-unified' ? 'llmswitch-anthropic-openai' : (pc.llmSwitch.type || 'llmswitch-anthropic-openai');
+            const normalizedType = String(pc.llmSwitch.type || '').toLowerCase();
+            const mappedType = (() => {
+              switch (normalizedType) {
+                case 'llmswitch-unified':
+                  return 'llmswitch-anthropic-openai';
+                case 'openai-passthrough':
+                case 'openai-normalizer':
+                  return (routeName === 'anthropic') ? 'llmswitch-anthropic-openai' : 'llmswitch-openai-openai';
+                case 'anthropic-openai':
+                case 'anthropic-openai-converter':
+                  return 'llmswitch-anthropic-openai';
+                default:
+                  return pc.llmSwitch!.type || 'llmswitch-anthropic-openai';
+              }
+            })();
             // 如果配置了其他LLMSwitch，使用它
             llmSwitch = {
               type: mappedType,
@@ -468,8 +527,7 @@ export class PipelineAssembler {
           // Unique pipeline ID based on target, not route - enables reuse across categories
           const pipelineId = `${providerId}_${keyId}.${modelId}`;
 
-          const modulesBlock: Record<string, unknown> = { llmSwitch, provider };
-          if (compatibility) { (modulesBlock as any).compatibility = compatibility; }
+          const modulesBlock: Record<string, unknown> = { llmSwitch, provider, compatibility };
           if (workflow) { modulesBlock.workflow = workflow; }
 
           // Validate assembled module set (post-defaults), not raw pc
@@ -518,6 +576,18 @@ export class PipelineAssembler {
 
     const manager = new PipelineManager(managerConfig, dummyErrorCenter, dummyDebugCenter);
     await manager.initialize();
+
+    // Debug dump for quick triage
+    try {
+      const ids = managerConfig.pipelines.map(p => p.id);
+      const sample = ids.slice(0, 10);
+      console.log('[PipelineAssembler] SUMMARY:', {
+        pipelineCount: ids.length,
+        firstPipelines: sample,
+        routes: Object.fromEntries(Object.entries(routePools).map(([k, v]) => [k, (v || []).length]))
+      });
+    } catch { /* ignore */ }
+
     return { manager, routePools };
   }
 
