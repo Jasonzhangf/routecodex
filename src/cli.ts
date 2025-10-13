@@ -353,6 +353,8 @@ program
       const { spawn } = await import('child_process');
 
       const env = { ...process.env } as NodeJS.ProcessEnv;
+      // Ensure server process picks the intended user config path
+      env.ROUTECODEX_CONFIG = configPath;
       const args: string[] = [serverEntry, modulesConfigPath];
 
       const childProc = spawn(nodeBin, args, { stdio: 'inherit', env });
