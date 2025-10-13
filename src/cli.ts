@@ -332,11 +332,17 @@ program
 
       // Spawn child Node process to run the server entry; forward signals
       const nodeBin = process.execPath; // current Node
-      const serverEntry = path.resolve(__dirname, 'index.js');
+      const serverEntry = path.resolve(__dirname, '..', 'dist', 'index.js');
       // Use spawn (not spawnSync); import child_process at top already
       const { spawn } = await import('child_process');
 
       const env = { ...process.env } as NodeJS.ProcessEnv;
+
+      // Pass the config path to the server via environment variable
+      if (configPath) {
+        env.RCC4_CONFIG_PATH = configPath;
+      }
+
       const args: string[] = [serverEntry, modulesConfigPath];
 
       const childProc = spawn(nodeBin, args, { stdio: 'inherit', env });
@@ -806,7 +812,7 @@ program
 
       // Delegate to start command behavior with --restart semantics
       const nodeBin = process.execPath;
-      const serverEntry = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'index.js');
+      const serverEntry = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'index.js');
       const { spawn } = await import('child_process');
 
       // Prompt source flags
@@ -823,6 +829,12 @@ program
 
       const modulesConfigPath = getModulesConfigPath();
       const env = { ...process.env } as NodeJS.ProcessEnv;
+
+      // Pass the config path to the server via environment variable
+      if (configPath) {
+        env.RCC4_CONFIG_PATH = configPath;
+      }
+
       const args: string[] = [serverEntry, modulesConfigPath];
       const child = spawn(nodeBin, args, { stdio: 'inherit', env });
       try { fs.writeFileSync(path.join(homedir(), '.routecodex', 'server.cli.pid'), String(child.pid ?? ''), 'utf8'); } catch (error) { /* ignore */ }
@@ -1037,13 +1049,13 @@ program
   });
 
 // Import commands at top level
-import { createDryRunCommands } from './commands/dry-run.js';
+// import { createDryRunCommands } from './commands/dry-run.js';
 // offline-log CLI temporarily disabled to simplify build
 
 // simple-log config helper removed
 
 // Add commands
-program.addCommand(createDryRunCommands());
+// program.addCommand(createDryRunCommands());
 // offline-log command disabled
 // simple-log command removed
 
