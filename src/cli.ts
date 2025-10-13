@@ -87,7 +87,7 @@ program
 program
   .command('code')
   .description('Launch Claude Code interface with RouteCodex as proxy')
-  .option('-p, --port <port>', 'RouteCodex server port', '5520')
+  .option('-p, --port <port>', 'RouteCodex server port (overrides config file)')
   .option('-h, --host <host>', 'RouteCodex server host', 'localhost')
   .option('-c, --config <config>', 'RouteCodex configuration file path')
   .option('--claude-path <path>', 'Path to Claude Code executable', 'claude')
@@ -98,11 +98,37 @@ program
     const spinner = ora('Preparing Claude Code with RouteCodex...').start();
 
     try {
+      // Resolve configuration and determine port
+      let configPath = options.config;
+      if (!configPath) {
+        configPath = path.join(homedir(), '.routecodex', 'config.json');
+      }
+
+      let actualPort = options.port ? parseInt(options.port, 10) : null;
+      let actualHost = options.host;
+
+      // If no explicit port provided, try to read from config file
+      if (!actualPort && fs.existsSync(configPath)) {
+        try {
+          const configContent = fs.readFileSync(configPath, 'utf8');
+          const config = JSON.parse(configContent);
+          actualPort = config?.port || config?.server?.port;
+          actualHost = config?.server?.host || config?.host || actualHost;
+        } catch (error) {
+          spinner.warn('Failed to read configuration file, using defaults');
+        }
+      }
+
+      // Fallback to default if still no port
+      if (!actualPort) {
+        actualPort = 5520;
+      }
+
       // Check if RouteCodex server needs to be started
       if (options.ensureServer) {
         spinner.text = 'Checking RouteCodex server status...';
 
-        const serverUrl = `http://${options.host}:${options.port}`;
+        const serverUrl = `http://${actualHost}:${actualPort}`;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 3000);
 
@@ -124,7 +150,6 @@ program
 
           // Start RouteCodex server in background
           const { spawn } = await import('child_process');
-          const configPath = options.config || path.join(homedir(), '.routecodex', 'config.json');
           const modulesConfigPath = path.resolve(__dirname, '../config/modules.json');
           const serverEntry = path.resolve(__dirname, 'index.js');
 
@@ -163,7 +188,7 @@ program
       // Prepare environment variables for Claude Code
       const claudeEnv = {
         ...process.env,
-        ANTHROPIC_BASE_URL: `http://${options.host}:${options.port}/v1`,
+        ANTHROPIC_BASE_URL: `http://${actualHost}:${actualPort}`,
         ANTHROPIC_API_KEY: 'rcc-proxy-key'
       };
 
@@ -186,7 +211,7 @@ program
       });
 
       spinner.succeed('Claude Code launched with RouteCodex proxy');
-      logger.info(`Using RouteCodex server at: http://${options.host}:${options.port}`);
+      logger.info(`Using RouteCodex server at: http://${actualHost}:${actualPort}`);
       logger.info('Press Ctrl+C to exit Claude Code');
 
       // Handle graceful shutdown
