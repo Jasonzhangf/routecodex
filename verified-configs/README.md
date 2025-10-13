@@ -1,100 +1,55 @@
-# LM Studio 配置验证报告
+# RouteCodex 验证配置集合
 
-## 验证时间
-2025-10-13T01:04:00Z
+本目录包含经过端到端测试验证的 RouteCodex 配置文件，按版本组织。
 
-## 验证状态
-✅ **通过** - LM Studio 在 RouteCodex 系统中工作正常
+## 版本历史
 
-## 验证环境
-- **分支**: feat-new-feature
-- **端口**: 5521
+### v0.45.0 (当前版本)
+**验证日期**: 2025-10-13T01:04:00Z
+**验证状态**: ✅ 通过 - LM Studio 集成验证成功
+
+#### 配置文件
+- `lmstudio-5521-gpt-oss-20b-mlx.json` - LM Studio 用户配置 (端口 5521)
+- `merged-config.5521.json` - 系统合并后的完整配置
+- `README.md` - 详细验证报告
+
+#### 验证环境
+- **分支**: feat/new-feature
 - **模型**: gpt-oss-20b-mlx
-- **LM Studio 服务**: localhost:1234
+- **LM Studio**: localhost:1234
+- **协议支持**: OpenAI + Anthropic
 
-## 验证项目
-
-### ✅ 配置加载系统
-- [x] 用户配置文件正确加载
-- [x] 端口配置生效 (5521)
-- [x] CLI 配置传递机制正常
-
-### ✅ 4层管道架构
-- [x] LLM Switch: 动态路由分类
-- [x] Compatibility: 格式转换
-- [x] Provider: HTTP 通信
-- [x] AI Service: 本地 LM Studio 集成
-
-### ✅ 动态路由分类
-支持的7种路由类别全部配置正确：
-- [x] default
-- [x] longcontext
-- [x] thinking
-- [x] coding
-- [x] tools
-- [x] vision
-- [x] websearch
-- [x] background
-- [x] anthropic
-
-### ✅ LM Studio 集成
-- [x] baseURL: http://localhost:1234
-- [x] 认证配置正确
-- [x] 模型配置: gpt-oss-20b-mlx
-- [x] 流式支持已启用
-- [x] 工具调用支持已启用
-
-## 配置文件
-
-### 1. 用户配置文件
-`~/.routecodex/config/lmstudio-5521-gpt-oss-20b-mlx.json`
-- 端口: 5521
-- 主机: 0.0.0.0
-- 虚拟路由器配置正确
-- 流水线配置完整
-
-### 2. 系统合并配置
-`config/merged-config.5521.json`
-- 动态路由映射正确
-- 认证映射完整
-- 管道配置有效
-
-## 使用方法
-
-### 启动命令
+#### 使用方法
 ```bash
-npx ts-node src/cli.ts start --config ~/.routecodex/config/lmstudio-5521-gpt-oss-20b-mlx.json --port 5521
+# 启动验证过的配置
+npx ts-node src/cli.ts start --config verified-configs/v0.45.0/lmstudio-5521-gpt-oss-20b-mlx.json --port 5521
 ```
 
-### 测试端点
-```bash
-# OpenAI 协议
-curl -X POST http://localhost:5521/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer test-key" \
-  -d '{
-    "model": "gpt-oss-20b-mlx",
-    "messages": [{"role": "user", "content": "Hello"}],
-    "max_tokens": 50
-  }'
-
-# Anthropic 协议
-curl -X POST http://localhost:5521/v1/messages \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer test-key" \
-  -d '{
-    "model": "gpt-oss-20b-mlx",
-    "messages": [{"role": "user", "content": "Hello"}],
-    "max_tokens": 50
-  }'
+## 目录结构
+```
+verified-configs/
+├── README.md                 # 本文件
+└── v0.45.0/                 # 版本化配置目录
+    ├── lmstudio-5521-gpt-oss-20b-mlx.json
+    ├── merged-config.5521.json
+    └── README.md             # 详细验证报告
 ```
 
-## 注意事项
+## 验证标准
 
-1. **前置条件**: LM Studio 需要在 localhost:1234 运行
-2. **模型要求**: gpt-oss-20b-mlx 模型需要在 LM Studio 中加载
-3. **配置文件**: 使用验证过的配置文件确保最佳兼容性
+每个版本的配置都必须通过以下验证：
 
-## 设计验证结论
+1. **✅ 配置加载系统** - 用户配置正确加载
+2. **✅ 4层管道架构** - LLM Switch, Compatibility, Provider, AI Service
+3. **✅ 动态路由分类** - 9种路由类别配置正确
+4. **✅ 服务集成** - 目标服务连接测试通过
+5. **✅ 协议支持** - OpenAI 和 Anthropic 协议端点
+6. **✅ 功能测试** - 基本请求/响应流程验证
 
-RouteCodex 的 4 层管道架构设计完全正确，LM Studio 本地 LLM 服务集成验证成功。配置驱动的系统架构展现了良好的灵活性和可靠性。
+## 版本管理策略
+
+- **主版本** (Major): 重大架构变更，配置可能不兼容
+- **次版本** (Minor): 新功能添加，保持向后兼容
+- **修订版本** (Patch): Bug修复，配置格式不变
+
+每个验证过的配置都绑定到特定的 RouteCodex 版本，确保兼容性。
