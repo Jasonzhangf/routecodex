@@ -14,7 +14,7 @@ import {
   type OpenAIChatCompletionRequest,
   type OpenAICompletionRequest,
   type OpenAICompletionResponse,
-  
+  type OpenAICompletionResponseChoice,
   type ServerConfig,
   RouteCodexError,
 } from '../server/types.js';
@@ -786,12 +786,12 @@ export class RequestHandler extends BaseModule {
   ): OpenAICompletionResponse {
     const responseData = (providerResponse as Record<string, unknown>).data || providerResponse as UnknownObject;
     return {
-      id: ((responseData as UnknownObject)?.id as string) || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: ((responseData as Record<string, unknown>)?.id as string) || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
       model: request.model,
-      choices: ((responseData as UnknownObject)?.choices as unknown[]) || [],
-      usage: (responseData as UnknownObject)?.usage as unknown,
+      choices: ((responseData as Record<string, unknown>)?.choices as OpenAICompletionResponseChoice[]) || [],
+      usage: (responseData as Record<string, unknown>)?.usage as { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined,
     };
   }
 
@@ -804,12 +804,12 @@ export class RequestHandler extends BaseModule {
   ): OpenAICompletionResponse {
     const responseData = (providerResponse as Record<string, unknown>).data || providerResponse as UnknownObject;
     return {
-      id: ((responseData as UnknownObject)?.id as string) || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: ((responseData as Record<string, unknown>)?.id as string) || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
       model: request.model,
-      choices: ((responseData as UnknownObject)?.choices as unknown[]) || [],
-      usage: (responseData as UnknownObject)?.usage as unknown,
+      choices: ((responseData as Record<string, unknown>)?.choices as OpenAICompletionResponseChoice[]) || [],
+      usage: (responseData as Record<string, unknown>)?.usage as { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined,
     };
   }
 

@@ -20,7 +20,8 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "noEmitOnError": true,
-    "typeRoots": ["./node_modules/@types", "./src/types"]
+    "typeRoots": ["./node_modules/@types", "./src/types"],
+    "incremental": false
   },
   "include": ["src/**/*"],
   "exclude": [

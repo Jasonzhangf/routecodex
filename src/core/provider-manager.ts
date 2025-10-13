@@ -164,7 +164,7 @@ export class ProviderManager extends BaseModule {
       // Start health monitoring
       this.startHealthMonitoring();
 
-      this.debugEventBus?.publish({
+      (this.debugEventBus as any)?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'provider-manager',
         operationId: 'provider_manager_initialized',
@@ -176,7 +176,7 @@ export class ProviderManager extends BaseModule {
           healthCheckInterval: this.options.healthCheckInterval,
           autoRecoveryEnabled: this.options.autoRecoveryEnabled,
         },
-      });
+      } as unknown);
 
       // Record initialization metric
       this.recordModuleMetric('initialization', {
@@ -241,7 +241,7 @@ export class ProviderManager extends BaseModule {
 
       this.providers.set(providerId, providerInstance);
 
-      this.debugEventBus?.publish({
+      (this.debugEventBus as any)?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'provider-manager',
         operationId: 'provider_added',
@@ -253,7 +253,7 @@ export class ProviderManager extends BaseModule {
           providerType: config.type,
           modelCount: Object.keys(config.models).length,
         },
-      });
+      } as unknown);
 
       // Record provider addition metric
       this.recordModuleMetric('provider_added', {
@@ -281,7 +281,7 @@ export class ProviderManager extends BaseModule {
       await providerInstance.provider.destroy();
       this.providers.delete(providerId);
 
-      this.debugEventBus?.publish({
+      (this.debugEventBus as any)?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'provider-manager',
         operationId: 'provider_removed',
@@ -291,7 +291,7 @@ export class ProviderManager extends BaseModule {
         data: {
           providerId,
         },
-      });
+      } as unknown);
     } catch (error) {
       await this.handleError(error as Error, 'remove_provider');
       throw error;
@@ -386,7 +386,7 @@ export class ProviderManager extends BaseModule {
             await this.handleProviderFailure(_providerId, providerInstance, health);
           }
 
-          this.debugEventBus?.publish({
+          (this.debugEventBus as any)?.publish({
             sessionId: `session_${Date.now()}`,
             moduleId: 'provider-manager',
             operationId: 'provider_health_check',
@@ -399,7 +399,7 @@ export class ProviderManager extends BaseModule {
               responseTime: health.responseTime,
               duration,
             },
-          });
+          } as unknown);
         } catch (error) {
           this.metrics.failedHealthChecks++;
           await this.handleProviderFailure(_providerId, providerInstance, {
@@ -430,7 +430,7 @@ export class ProviderManager extends BaseModule {
     if (providerInstance.consecutiveFailures >= maxFailures) {
       providerInstance.isActive = false;
 
-      this.debugEventBus?.publish({
+      (this.debugEventBus as any)?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'provider-manager',
         operationId: 'provider_deactivated',
@@ -442,7 +442,7 @@ export class ProviderManager extends BaseModule {
           consecutiveFailures: providerInstance.consecutiveFailures,
           reason: health.error || 'Unknown',
         },
-      });
+      } as unknown);
     }
   }
 
@@ -466,7 +466,7 @@ export class ProviderManager extends BaseModule {
         this.metrics.totalHealthChecks;
     }
 
-    this.debugEventBus?.publish({
+    (this.debugEventBus as any)?.publish({
       sessionId: `session_${Date.now()}`,
       moduleId: 'provider-manager',
       operationId: 'provider_recovered',
@@ -478,7 +478,7 @@ export class ProviderManager extends BaseModule {
         recoveryTime,
         consecutiveFailures: 0,
       },
-    });
+    } as unknown);
   }
 
   /**
@@ -500,7 +500,7 @@ export class ProviderManager extends BaseModule {
     if (selectedProvider !== currentProviderId) {
       this.metrics.providerSwitches++;
 
-      this.debugEventBus?.publish({
+      (this.debugEventBus as any)?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'provider-manager',
         operationId: 'provider_switch',
@@ -512,7 +512,7 @@ export class ProviderManager extends BaseModule {
           toProvider: selectedProvider,
           availableProviders: availableProviders.length,
         },
-      });
+      } as unknown);
     }
 
     return selectedProvider;
@@ -534,7 +534,7 @@ export class ProviderManager extends BaseModule {
       await providerInstance.provider.updateConfig(newConfig);
       providerInstance.config = { ...providerInstance.config, ...newConfig };
 
-      this.debugEventBus?.publish({
+      (this.debugEventBus as any)?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'provider-manager',
         operationId: 'provider_config_updated',
@@ -545,7 +545,7 @@ export class ProviderManager extends BaseModule {
           providerId,
           changes: Object.keys(newConfig),
         },
-      });
+      } as unknown);
     } catch (error) {
       await this.handleError(error as Error, 'update_provider_config');
       throw error;
@@ -682,7 +682,7 @@ export class ProviderManager extends BaseModule {
         lastError = error as Error;
 
         // Log the attempt failure
-        this.debugEventBus?.publish({
+        (this.debugEventBus as any)?.publish({
           sessionId: `session_${Date.now()}`,
           moduleId: 'provider-manager',
           operationId: 'provider_request_failed',
@@ -696,7 +696,7 @@ export class ProviderManager extends BaseModule {
             requestType,
             error: error instanceof Error ? error.message : String(error),
           },
-        });
+        } as unknown);
 
         // If this isn't the last attempt, try to switch provider
         if (attempt < maxRetries) {
@@ -787,7 +787,7 @@ export class ProviderManager extends BaseModule {
         health = await provider.healthCheck();
       }
 
-      this.debugEventBus?.publish({
+      (this.debugEventBus as any)?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'provider-manager',
         operationId: 'dynamic_provider_added',
@@ -801,7 +801,7 @@ export class ProviderManager extends BaseModule {
           healthCheck: !!healthCheck,
           healthStatus: health?.status,
         },
-      });
+      } as unknown);
 
       return {
         success: true,
@@ -983,7 +983,7 @@ export class ProviderManager extends BaseModule {
       providerInstance.isActive = true;
       providerInstance.consecutiveFailures = 0;
 
-      this.debugEventBus?.publish({
+      (this.debugEventBus as any)?.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'provider-manager',
         operationId: 'provider_reset',
@@ -993,7 +993,7 @@ export class ProviderManager extends BaseModule {
         data: {
           providerId,
         },
-      });
+      } as unknown);
     } catch (error) {
       await this.handleError(error as Error, 'reset_provider');
       throw error;
@@ -1034,7 +1034,7 @@ export class ProviderManager extends BaseModule {
     if (
       context.includes('initialization') ||
       context.includes('critical_provider_failure') ||
-      (errorName === 'RouteCodexError' && (error as Record<string, unknown>).status >= 500)
+            (errorName === 'RouteCodexError' && (error as any).status >= 500)
     ) {
       return 'critical';
     }

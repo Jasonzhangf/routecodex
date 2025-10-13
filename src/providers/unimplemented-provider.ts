@@ -98,10 +98,10 @@ export class UnimplementedProvider extends BaseProvider {
         }
       : undefined;
 
-    const unimplementedResponse = await this.unimplementedModule.handleUnimplementedCall(
+    const unimplementedResponse = await (this.unimplementedModule as any).handleUnimplementedCall(
       'processChatCompletion',
       callerInfo
-    );
+    ) as Record<string, unknown>;
 
     return this.createProviderResponse(unimplementedResponse);
   }
@@ -128,10 +128,10 @@ export class UnimplementedProvider extends BaseProvider {
         }
       : undefined;
 
-    const unimplementedResponse = await this.unimplementedModule.handleUnimplementedCall(
+    const unimplementedResponse = await (this.unimplementedModule as any).handleUnimplementedCall(
       'processCompletion',
       callerInfo
-    );
+    ) as Record<string, unknown>;
 
     return this.createProviderResponse(unimplementedResponse);
   }
@@ -150,10 +150,10 @@ export class UnimplementedProvider extends BaseProvider {
         }
       : undefined;
 
-    const unimplementedResponse = await this.unimplementedModule.handleUnimplementedCall(
+    const unimplementedResponse = await (this.unimplementedModule as any).handleUnimplementedCall(
       'processStreamingChatCompletion',
       callerInfo
-    );
+    ) as Record<string, unknown>;
 
     return this.createProviderResponse(unimplementedResponse);
   }
@@ -171,7 +171,7 @@ export class UnimplementedProvider extends BaseProvider {
         }
       : undefined;
 
-    await this.unimplementedModule.handleUnimplementedCall('getModels', callerInfo);
+    await ((this.unimplementedModule as any).handleUnimplementedCall('getModels', callerInfo) as Promise<unknown>);
 
     // Return empty models list
     return [];
@@ -183,10 +183,10 @@ export class UnimplementedProvider extends BaseProvider {
   public isModelSupported(modelId: string): boolean {
     // Log the check but don't create full response for performance
     if (this.config.logUnimplementedCalls) {
-      this.unimplementedModule
+      ((this.unimplementedModule as any)
         .handleUnimplementedCall('isModelSupported', {
           callerId: `model-check-${modelId}`,
-        })
+        }) as Promise<unknown>)
         .catch(() => {}); // Silently handle logging errors
     }
 
@@ -199,10 +199,10 @@ export class UnimplementedProvider extends BaseProvider {
   public getModelConfig(modelId: string): ModelConfig | undefined {
     // Log the check but don't create full response for performance
     if (this.config.logUnimplementedCalls) {
-      this.unimplementedModule
+      ((this.unimplementedModule as any)
         .handleUnimplementedCall('getModelConfig', {
           callerId: `config-check-${modelId}`,
-        })
+        }) as Promise<unknown>)
         .catch(() => {}); // Silently handle logging errors
     }
 
@@ -226,9 +226,9 @@ export class UnimplementedProvider extends BaseProvider {
    */
   public getStats(): ProviderStats {
     const baseStats = super.getStats();
-    const unimplementedStats = (this.unimplementedModule?.getStats() as UnknownObject) || {};
-    const extended: UnknownObject = {
-      ...baseStats as unknown as UnknownObject,
+    const unimplementedStats = (this.unimplementedModule as any)?.getStats() as Record<string, unknown> || {};
+    const extended: Record<string, unknown> = {
+      ...baseStats as unknown as Record<string, unknown>,
       unimplementedCalls: (unimplementedStats.totalCalls as number) || 0,
       lastUnimplementedCall: unimplementedStats.lastCallTime as string,
       firstUnimplementedCall: unimplementedStats.firstCallTime as string,
@@ -239,25 +239,25 @@ export class UnimplementedProvider extends BaseProvider {
   /**
    * Create standardized provider response from unimplemented response
    */
-  private createProviderResponse(unimplementedResponse: unknown): ProviderResponse {
+  private createProviderResponse(unimplementedResponse: Record<string, unknown>): ProviderResponse {
     return {
       success: false,
-      error: unimplementedResponse.error,
-      statusCode: unimplementedResponse.statusCode,
+      error: unimplementedResponse.error as string,
+      statusCode: unimplementedResponse.statusCode as number,
       headers: {
-        'X-Module-Id': unimplementedResponse.moduleId,
-        'X-Module-Name': unimplementedResponse.moduleName,
-        'X-Request-Id': unimplementedResponse.requestId,
-        'X-Timestamp': unimplementedResponse.timestamp,
+        'X-Module-Id': unimplementedResponse.moduleId as string,
+        'X-Module-Name': unimplementedResponse.moduleName as string,
+        'X-Request-Id': unimplementedResponse.requestId as string,
+        'X-Timestamp': unimplementedResponse.timestamp as string,
         'X-Unimplemented': 'true',
       },
       duration: 0,
       data: {
-        moduleId: unimplementedResponse.moduleId,
-        moduleName: unimplementedResponse.moduleName,
-        requestId: unimplementedResponse.requestId,
-        timestamp: unimplementedResponse.timestamp,
-        message: unimplementedResponse.error,
+        moduleId: unimplementedResponse.moduleId as string,
+        moduleName: unimplementedResponse.moduleName as string,
+        requestId: unimplementedResponse.requestId as string,
+        timestamp: unimplementedResponse.timestamp as string,
+        message: unimplementedResponse.error as string,
       },
     };
   }
@@ -273,7 +273,7 @@ export class UnimplementedProvider extends BaseProvider {
    * Get unimplemented module stats
    */
   public getUnimplementedStats(): UnknownObject {
-    return (this.unimplementedModule?.getStats() as UnknownObject) || {};
+    return ((this.unimplementedModule as any)?.getStats() as Record<string, unknown>) || {};
   }
 
   /**
@@ -281,7 +281,7 @@ export class UnimplementedProvider extends BaseProvider {
    */
   public resetUnimplementedStats(): void {
     if (this.unimplementedModule) {
-      this.unimplementedModule.resetStats();
+      (this.unimplementedModule as any).resetStats();
     }
   }
 }

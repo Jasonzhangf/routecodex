@@ -119,7 +119,7 @@ export class ConfigManagerModule extends BaseModule {
     if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
 
     try {
-      this.debugEventBus.publish({
+      (this.debugEventBus as any).publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'config-manager',
         operationId: type,
@@ -131,7 +131,7 @@ export class ConfigManagerModule extends BaseModule {
           managerId: 'config-manager',
           source: 'config-manager'
         }
-      });
+      } as unknown);
     } catch (error) {
       // Silent fail if debug event bus is not available
     }
