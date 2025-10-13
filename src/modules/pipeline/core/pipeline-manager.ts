@@ -819,6 +819,8 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('iflow-provider', this.createIFlowProviderModule);
     this.registry.registerModule('glm-http-provider', this.createGLMHTTPProviderModule);
     this.registry.registerModule('qwen-provider', this.createQwenProviderModule);
+    // Add alias for configuration compatibility
+    this.registry.registerModule('qwen', this.createQwenProviderModule);
     this.registry.registerModule('generic-http', this.createGenericHTTPModule);
     this.registry.registerModule('lmstudio-http', this.createLMStudioHTTPModule);
     this.registry.registerModule('openai-provider', this.createOpenAIProviderModule);
