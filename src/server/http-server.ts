@@ -1008,12 +1008,23 @@ export class HttpServer extends BaseModule implements IHttpServer {
         }
         try { if (preHeartbeat) { clearInterval(preHeartbeat); preHeartbeat = null; } } catch { /* ignore */ }
         // Return anthropic-like response produced by llmswitch (if configured)
-        try { res.setHeader('x-rc-target-protocol', 'anthropic'); } catch { /* ignore */ }
-        try { res.setHeader('anthropic-version', '2023-06-01'); } catch { /* ignore */ }
+        if (!res.headersSent) {
+          try { res.setHeader('x-rc-target-protocol', 'anthropic'); } catch { /* ignore */ }
+          try { res.setHeader('anthropic-version', '2023-06-01'); } catch { /* ignore */ }
+        }
         await captureAnthropicResponse(data);
-        res.status(200).json(data);
+        if (!res.headersSent) {
+          res.status(200).json(data);
+        } else {
+          try { res.write(typeof data === 'string' ? data : JSON.stringify(data)); } catch { /* ignore */ }
+          try { res.end(); } catch { /* ignore */ }
+        }
       } catch (err) {
-        res.status(500).json({ error: { message: (err as Error).message || 'Anthropic handler error' } });
+        if (!res.headersSent) {
+          res.status(500).json({ error: { message: (err as Error).message || 'Anthropic handler error' } });
+        } else {
+          try { res.end(); } catch { /* ignore */ }
+        }
       }
     });}
 
@@ -1208,12 +1219,23 @@ export class HttpServer extends BaseModule implements IHttpServer {
           }
         }
         try { if (preHeartbeat) { clearInterval(preHeartbeat); preHeartbeat = null; } } catch { /* ignore */ }
-        try { res.setHeader('x-rc-target-protocol', 'anthropic'); } catch { /* ignore */ }
-        try { res.setHeader('anthropic-version', '2023-06-01'); } catch { /* ignore */ }
+        if (!res.headersSent) {
+          try { res.setHeader('x-rc-target-protocol', 'anthropic'); } catch { /* ignore */ }
+          try { res.setHeader('anthropic-version', '2023-06-01'); } catch { /* ignore */ }
+        }
         await captureAnthropicResponse2(data);
-        res.status(200).json(data);
+        if (!res.headersSent) {
+          res.status(200).json(data);
+        } else {
+          try { res.write(typeof data === 'string' ? data : JSON.stringify(data)); } catch { /* ignore */ }
+          try { res.end(); } catch { /* ignore */ }
+        }
       } catch (err) {
-        res.status(500).json({ error: { message: (err as Error).message || 'Anthropic handler error' } });
+        if (!res.headersSent) {
+          res.status(500).json({ error: { message: (err as Error).message || 'Anthropic handler error' } });
+        } else {
+          try { res.end(); } catch { /* ignore */ }
+        }
       }
     });
 

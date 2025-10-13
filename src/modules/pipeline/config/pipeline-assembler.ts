@@ -46,7 +46,7 @@ export class PipelineAssembler {
     if (!pc?.provider?.type) { errors.push('provider.type missing'); }
     if (!pc?.model?.actualModelId) { errors.push('model.actualModelId missing'); }
     if (!pc?.llmSwitch?.type) { errors.push('llmSwitch.type missing'); }
-    if (!pc?.compatibility?.type) { errors.push('compatibility.type missing'); }
+    // Compatibility is optional when not specified in config
     if (!pc?.workflow?.type) { errors.push('workflow.type missing'); }
     if (errors.length) {
       console.error(`[PipelineAssembler] INVALID pipeline config for ${context.routeName}/${context.targetKey}: ${errors.join(', ')}`);

@@ -169,23 +169,19 @@ program
 
           serverProcess.unref();
 
-          // Wait a bit for server to start
+          // Wait for server to become healthy (up to ~10s)
           spinner.text = 'Waiting for RouteCodex server to start...';
-          await sleep(3000);
-
-          // Verify server started
-          try {
-            const healthResponse = await fetch(`${serverUrl}/health`, {
-              method: 'GET',
-              timeout: 2000
-            } as any);
-
-            if (healthResponse.ok) {
-              spinner.succeed('RouteCodex server started successfully');
-            } else {
-              throw new Error('Server health check failed');
-            }
-          } catch (healthError) {
+          let healthy = false;
+          for (let i = 0; i < 10; i++) {
+            await sleep(1000);
+            try {
+              const res = await fetch(`${serverUrl}/health`, { method: 'GET' } as any);
+              if (res.ok) { healthy = true; break; }
+            } catch { /* ignore */ }
+          }
+          if (healthy) {
+            spinner.succeed('RouteCodex server started successfully');
+          } else {
             spinner.warn('RouteCodex server may not be fully ready, continuing...');
           }
         }
