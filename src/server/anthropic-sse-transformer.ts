@@ -62,7 +62,7 @@ export class AnthropicSSETransformer {
       if (!this.messageId) {this.messageId = String(chunk.id || `chatcmpl_${Date.now()}`);}
       if (!this.model) {this.model = String(chunk.model || 'unknown');}
       if (!this.createdAt) {this.createdAt = Number(chunk.created || Math.floor(Date.now() / 1000));}
-    } catch {}
+    } catch { /* Empty catch block */ }
 
     const choice = Array.isArray(chunk?.choices) ? chunk.choices[0] : undefined;
     const delta = choice?.delta || {};

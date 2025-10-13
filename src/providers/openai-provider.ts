@@ -3,16 +3,22 @@
  * Implements OpenAI API compatible provider
  */
 
-import { BaseProvider, type ProviderResponse, type ProviderHealth } from './base-provider.js';
 import {
-  type ProviderConfig,
+  BaseProvider,
+  type ProviderResponse,
+  type ProviderHealth,
+  type ProviderStats,
+} from '../providers/base-provider.js';
+import {
+  type OpenAIModel,
   type ModelConfig,
   type OpenAIChatCompletionRequest,
   type OpenAICompletionRequest,
   type OpenAICompletionResponse,
-  /* type OpenAIModel, */
+  type OpenAIChatToolCall,
+  type OpenAICompletionResponseChoice,
   type StreamOptions,
-  /* type StreamResponse, */
+  type ProviderConfig,
   RouteCodexError,
 } from '../server/types.js';
 import type { UnknownObject } from '../types/common-types.js';
@@ -109,7 +115,7 @@ export class OpenAIProvider extends BaseProvider {
       );
 
       // Parse response
-      const completionResponse = this.parseChatCompletionResponse(response.data);
+      const completionResponse = this.parseChatCompletionResponse(response.data as Record<string, unknown>);
 
       // Update statistics
       const duration = Date.now() - startTime;
@@ -209,7 +215,7 @@ export class OpenAIProvider extends BaseProvider {
       );
 
       // Parse response
-      const completionResponse = this.parseCompletionResponse(response.data);
+      const completionResponse = this.parseCompletionResponse(response.data as Record<string, unknown>);
 
       // Update statistics
       const duration = Date.now() - startTime;
@@ -309,7 +315,7 @@ export class OpenAIProvider extends BaseProvider {
       payload.stream = true;
 
       // Make streaming request as AsyncIterable producing parsed JSON chunks
-      const iterator = (async function* makeIterator(self: OpenAIProvider, endpoint: string, body: any, opts: StreamOptions) {
+      const iterator = (async function* makeIterator(self: OpenAIProvider, endpoint: string, body: unknown, opts: StreamOptions) {
         const url = `${self.baseUrl}${endpoint}`;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), opts.timeout || 30000);
@@ -398,8 +404,8 @@ export class OpenAIProvider extends BaseProvider {
   private prepareChatCompletionPayload(
     request: OpenAIChatCompletionRequest,
     modelConfig: ModelConfig
-  ): any {
-    const payload: any = {
+  ): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
       model: request.model,
       messages: request.messages,
       max_tokens: request.max_tokens || modelConfig.maxTokens,
@@ -441,8 +447,8 @@ export class OpenAIProvider extends BaseProvider {
   private prepareCompletionPayload(
     request: OpenAICompletionRequest,
     modelConfig: ModelConfig
-  ): any {
-    const payload: any = {
+  ): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
       model: request.model,
       prompt: request.prompt,
       max_tokens: request.max_tokens || modelConfig.maxTokens,
@@ -499,10 +505,10 @@ export class OpenAIProvider extends BaseProvider {
    */
   private async makeRequestWithRetry(
     endpoint: string,
-    payload: any,
+    payload: unknown,
     timeout: number,
     retryAttempts: number
-  ): Promise<{ data: any; statusCode: number; headers: Record<string, string> }> {
+  ): Promise<{ data: unknown; statusCode: number; headers: Record<string, string> }> {
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= retryAttempts; attempt++) {
@@ -535,9 +541,9 @@ export class OpenAIProvider extends BaseProvider {
    */
   private async makeHttpRequest(
     endpoint: string,
-    payload: any,
+    payload: unknown,
     timeout: number
-  ): Promise<{ data: any; statusCode: number; headers: Record<string, string> }> {
+  ): Promise<{ data: unknown; statusCode: number; headers: Record<string, string> }> {
     const url = `${this.baseUrl}${endpoint}`;
 
     try {
@@ -596,9 +602,9 @@ export class OpenAIProvider extends BaseProvider {
    */
   private async makeStreamingRequest(
     endpoint: string,
-    payload: any,
+    payload: unknown,
     options: StreamOptions
-  ): Promise<any> {
+  ): Promise<unknown> {
     const url = `${this.baseUrl}${endpoint}`;
     const chunks: string[] = [];
 
@@ -694,18 +700,18 @@ export class OpenAIProvider extends BaseProvider {
   /**
    * Parse chat completion response
    */
-  private parseChatCompletionResponse(data: any): OpenAICompletionResponse {
+  private parseChatCompletionResponse(data: Record<string, unknown>): OpenAICompletionResponse {
     return {
-      id: data.id,
-      object: data.object,
-      created: data.created,
-      model: data.model,
-      choices: data.choices,
+      id: data.id as string,
+      object: 'chat.completion',
+      created: data.created as number,
+      model: data.model as string,
+      choices: data.choices as OpenAICompletionResponseChoice[],
       usage: data.usage
         ? {
-            prompt_tokens: data.usage.prompt_tokens || 0,
-            completion_tokens: data.usage.completion_tokens || 0,
-            total_tokens: data.usage.total_tokens || 0,
+            prompt_tokens: (data.usage as Record<string, number>).prompt_tokens || 0,
+            completion_tokens: (data.usage as Record<string, number>).completion_tokens || 0,
+            total_tokens: (data.usage as Record<string, number>).total_tokens || 0,
           }
         : undefined,
     };
@@ -714,18 +720,18 @@ export class OpenAIProvider extends BaseProvider {
   /**
    * Parse completion response
    */
-  private parseCompletionResponse(data: any): OpenAICompletionResponse {
+  private parseCompletionResponse(data: Record<string, unknown>): OpenAICompletionResponse {
     return {
-      id: data.id,
-      object: data.object,
-      created: data.created,
-      model: data.model,
-      choices: data.choices,
+      id: data.id as string,
+      object: 'chat.completion',
+      created: data.created as number,
+      model: data.model as string,
+      choices: data.choices as OpenAICompletionResponseChoice[],
       usage: data.usage
         ? {
-            prompt_tokens: data.usage.prompt_tokens || 0,
-            completion_tokens: data.usage.completion_tokens || 0,
-            total_tokens: data.usage.total_tokens || 0,
+            prompt_tokens: (data.usage as Record<string, number>).prompt_tokens || 0,
+            completion_tokens: (data.usage as Record<string, number>).completion_tokens || 0,
+            total_tokens: (data.usage as Record<string, number>).total_tokens || 0,
           }
         : undefined,
     };

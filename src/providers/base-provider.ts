@@ -7,13 +7,15 @@ import { BaseModule, type ModuleInfo } from 'rcc-basemodule';
 import { DebugEventBus } from 'rcc-debugcenter';
 import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
 import {
-  type ProviderConfig,
   type ModelConfig,
   type OpenAIChatCompletionRequest,
   type OpenAICompletionRequest,
   type OpenAICompletionResponse,
+  type OpenAIChatToolCall,
+  type OpenAICompletionResponseChoice,
   type OpenAIModel,
   type StreamOptions,
+  type ProviderConfig,
   /* type StreamResponse, */
   /* RouteCodexError, */
 } from '../server/types.js';
@@ -23,7 +25,7 @@ import {
  */
 export interface ProviderResponse {
   success: boolean;
-  data?: any;
+  data?: unknown;
   error?: string;
   statusCode?: number;
   headers?: Record<string, string>;
@@ -104,7 +106,7 @@ export abstract class BaseProvider extends BaseModule {
   /**
    * Initialize the provider
    */
-  public async initialize(_config?: any): Promise<void> {
+  public async initialize(_config?: unknown): Promise<void> {
     try {
       await this.errorHandling.initialize();
       await this.validateConfiguration();
@@ -446,7 +448,7 @@ export abstract class BaseProvider extends BaseModule {
    */
   protected createResponse(
     success: boolean,
-    data?: any,
+    data?: unknown,
     error?: string,
     statusCode?: number,
     headers?: Record<string, string>,
@@ -469,7 +471,7 @@ export abstract class BaseProvider extends BaseModule {
    */
   protected formatOpenAIResponse(
     request: OpenAIChatCompletionRequest | OpenAICompletionRequest,
-    response: any,
+    response: Record<string, unknown>,
     usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
   ): OpenAICompletionResponse {
     // Convert usage object to match OpenAI format
@@ -491,10 +493,10 @@ export abstract class BaseProvider extends BaseModule {
           index: 0,
           message: {
             role: 'assistant',
-            content: response.content || response.text || '',
-            tool_calls: response.tool_calls,
+            content: (response.content as string) || (response.text as string) || '',
+            tool_calls: response.tool_calls as OpenAIChatToolCall[],
           },
-          finish_reason: response.finish_reason || 'stop',
+          finish_reason: (response.finish_reason as 'stop' | 'length' | 'tool_calls' | 'content_filter') || 'stop',
         },
       ],
       usage: normalizedUsage,

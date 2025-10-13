@@ -77,18 +77,26 @@ export class SystemPromptLoader {
     // Accept shapes: { data: { messages: [...] } } or { body: { messages: [...] } } or { messages: [...] }
     const candidates: unknown[] = [];
     if (j && typeof j === 'object') {
-      const obj = j as Record<string, unknown>;
-      if (obj.data && typeof obj.data === 'object') {candidates.push(obj.data);}
-      if (obj.body && typeof obj.body === 'object') {candidates.push(obj.body);}
+
+      if ((j as Record<string, unknown>).data && typeof (j as Record<string, unknown>).data === 'object') {candidates.push((j as Record<string, unknown>).data);}
+      if ((j as Record<string, unknown>).body && typeof (j as Record<string, unknown>).body === 'object') {candidates.push((j as Record<string, unknown>).body);}
       candidates.push(j);
     }
     for (const obj of candidates) {
-      const msgs = (obj as Record<string, unknown>)?.messages;
-      if (Array.isArray(msgs) && msgs.length) {
-        for (const m of msgs) {
-          const msg = m as Record<string, unknown>;
-          if (msg && msg.role === 'system' && typeof msg.content === 'string' && msg.content.trim().length > 0) {
-            return msg.content as string;
+      if (obj && typeof obj === 'object') {
+        const objRecord = obj as Record<string, unknown>;
+        const msgs = objRecord.messages;
+        if (Array.isArray(msgs) && msgs.length) {
+          for (const m of msgs) {
+            if (m && typeof m === 'object') {
+              const mRecord = m as Record<string, unknown>;
+              if (mRecord.role === 'system' && 
+                  typeof mRecord.content === 'string' && 
+                  mRecord.content.trim().length > 0) {
+                return mRecord.content as string;
+              }
+            }
+
           }
         }
       }
@@ -100,15 +108,18 @@ export class SystemPromptLoader {
     // Accept shapes: { data: { system: string } } or { body: { system: string } } or { system: string }
     const candidates: unknown[] = [];
     if (j && typeof j === 'object') {
-      const obj = j as Record<string, unknown>;
-      if (obj.data && typeof obj.data === 'object') {candidates.push(obj.data);}
-      if (obj.body && typeof obj.body === 'object') {candidates.push(obj.body);}
+
+      if ((j as Record<string, unknown>).data && typeof (j as Record<string, unknown>).data === 'object') {candidates.push((j as Record<string, unknown>).data);}
+      if ((j as Record<string, unknown>).body && typeof (j as Record<string, unknown>).body === 'object') {candidates.push((j as Record<string, unknown>).body);}
       candidates.push(j);
     }
     for (const obj of candidates) {
-      const candidate = obj as Record<string, unknown>;
-      if (candidate && typeof candidate.system === 'string' && candidate.system.trim().length > 0) {
-        return candidate.system as string;
+      if (obj && typeof obj === 'object') {
+        const objRecord = obj as Record<string, unknown>;
+        if (typeof objRecord.system === 'string' && objRecord.system.trim().length > 0) {
+          return objRecord.system as string;
+        }
+
       }
     }
     return null;
@@ -145,9 +156,9 @@ export class SystemPromptLoader {
       const j = await this.readJson(f.full);
       if (!j) {continue;}
       // Ensure it was a /v1/messages request if metadata present
-      const obj = j as Record<string, unknown>;
-      const metadata = obj.metadata as Record<string, unknown> | undefined;
-      const url = metadata?.url as string | undefined;
+
+      const url = j && typeof j === 'object' ? (j as Record<string, unknown>).metadata && typeof (j as Record<string, unknown>).metadata === 'object' ? ((j as Record<string, unknown>).metadata as Record<string, unknown>).url as string | undefined : undefined : undefined;
+
       if (url && !url.includes('/v1/messages') && !url.includes('/anthropic/messages')) {
         continue;
       }
@@ -178,13 +189,12 @@ export function shouldReplaceSystemPrompt(): Source | null {
 export function replaceSystemInOpenAIMessages(messages: unknown[], systemText: string): unknown[] {
   if (!Array.isArray(messages)) {return messages;}
   const out = [...messages];
-  const idx = out.findIndex((m) => {
-    const msg = m as Record<string, unknown>;
-    return msg && msg.role === 'system';
-  });
+
+  const idx = out.findIndex((m) => m && typeof m === 'object' && (m as Record<string, unknown>).role === 'system');
   if (idx >= 0) {
-    const m = { ...(out[idx] as Record<string, unknown> || {}) } as Record<string, unknown>;
-    m.content = systemText;
+    const m = { ...(out[idx] || {}) };
+    (m as Record<string, unknown>).content = systemText;
+
     out[idx] = m;
   } else {
     out.unshift({ role: 'system', content: systemText });

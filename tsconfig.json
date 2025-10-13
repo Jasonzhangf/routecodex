@@ -19,8 +19,11 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
-    "noEmitOnError": false,
+    "noEmitOnError": true,
     "typeRoots": ["./node_modules/@types", "./src/types"]
+    "noEmitOnError": true,
+    "typeRoots": ["./node_modules/@types", "./src/types"],
+    "incremental": false
   },
   "include": ["src/**/*"],
   "exclude": [

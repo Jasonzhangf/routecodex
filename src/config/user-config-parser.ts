@@ -43,8 +43,8 @@ export class UserConfigParser {
     const pipelineConfigs: Record<string, unknown> = {};
 
     const getAuthActualKey = (provId: string, keyId: string): string => {
-      const provider = providers[provId] as ProviderConfig | undefined;
-      const authMap = (provider?.auth ?? {}) as Record<string, string>;
+      const prov = providers[provId] as Record<string, unknown> || {};
+      const authMap = (prov.auth ?? {}) as Record<string, string>;
       if (!authMap[keyId]) { return keyId; }
       const base = `auth-${keyId}`;
       let candidate = base;
@@ -63,7 +63,7 @@ export class UserConfigParser {
       for (const ref of targetList) {
         // expected format: provider.model.keyId
         const [providerId, modelId, keyId] = String(ref).split('.');
-        const prov = providers[providerId] || {};
+        const prov = providers[providerId] as Record<string, unknown> || {};
         const actualKey = getAuthActualKey(providerId, keyId);
 
         // Build route target
@@ -85,8 +85,8 @@ export class UserConfigParser {
             baseURL: providerConfig.baseURL,
           },
           model: {
-            maxContext: providerConfig.models?.[modelId]?.maxContext,
-            maxTokens: providerConfig.models?.[modelId]?.maxTokens,
+            maxContext: ((prov.models as Record<string, unknown> | undefined)?.[modelId] as Record<string, unknown> | undefined)?.maxContext as number | undefined,
+            maxTokens: ((prov.models as Record<string, unknown> | undefined)?.[modelId] as Record<string, unknown> | undefined)?.maxTokens as number | undefined,
           },
           keyConfig: {
             keyId,
@@ -121,4 +121,3 @@ export class UserConfigParser {
 }
 
 export default UserConfigParser;
-
