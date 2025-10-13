@@ -202,19 +202,15 @@ export class PipelineAssembler {
     const buildPcFromNormalized = (provId: string, mdlId: string): PcShape => {
       const np = PipelineAssembler.asRecord(normalizedProviders[provId]);
       const modelCfg = PipelineAssembler.asRecord(PipelineAssembler.asRecord(np.models)[mdlId]);
-      const compat = PipelineAssembler.asRecord(modelCfg.compatibility || np.compatibility);
+      // Compatibility: Only use provider-level compatibility, ignore model-level settings
+      const compat = PipelineAssembler.asRecord(np.compatibility);
       let apiKey = Array.isArray(np.apiKey) && (np.apiKey as unknown[]).length ? String((np.apiKey as unknown[])[0]).trim() : '';
       const pid = String(provId || '').toLowerCase();
       const unifiedType = ((): string => {
-        // Unify only ModelScope to openai-provider
-        if (pid === 'modelscope') { return 'openai-provider'; }
-        // Preserve explicit openai-provider
+        // Preserve explicit provider types from configuration
         const t = String(np.type || '').toLowerCase();
         if (t === 'openai-provider') { return 'openai-provider'; }
-        // Map engine family 'openai' to concrete provider module
-        if (t === 'openai') { return 'openai-provider'; }
-        // Map GLM family to dedicated provider module
-        if (pid === 'glm' || t === 'glm') { return 'glm-http-provider'; }
+        // Use configured type directly, no hardcoded fallbacks
         return String(np.type || provId);
       })();
       const provider: Record<string, unknown> = {
