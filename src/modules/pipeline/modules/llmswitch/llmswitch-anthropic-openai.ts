@@ -72,7 +72,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       // If caller omits tools this turn, we will NOT inject cached tools.
 
       this.logger.logTransformation(this.id, 'anthropic-to-openai-request', payload, transformedRequest);
-      try { await this.captureConversion('anth-to-openai-request', requestParam, payload, transformedRequest); } catch {}
+      try { await this.captureConversion('anth-to-openai-request', requestParam, payload, transformedRequest); } catch { /* Empty catch block */ }
       // Debug presence of tools after conversion
       try {
         const toolsOut = Array.isArray((transformedRequest as any)?.tools) ? (transformedRequest as any).tools.length : 0;
@@ -97,7 +97,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       // Convert OpenAI-style request to Anthropic-style when selected switch is Anthropic
       const transformedRequest = this.convertOpenAIRequestToAnthropic(payload);
       this.logger.logTransformation(this.id, 'openai-to-anthropic-request', payload, transformedRequest);
-      try { await this.captureConversion('openai-to-anth-request', requestParam, payload, transformedRequest); } catch {}
+      try { await this.captureConversion('openai-to-anth-request', requestParam, payload, transformedRequest); } catch { /* Empty catch block */ }
       const out = {
         ...transformedRequest,
         _metadata: {
@@ -162,7 +162,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       } catch { /* ignore */ }
       const transformedResponse = this.convertOpenAIResponseToAnthropic(payload, toolSchemaMap);
       this.logger.logTransformation(this.id, 'openai-to-anthropic-response', payload, transformedResponse);
-      try { await this.captureConversion('openai-to-anth-response', responseParam, payload, transformedResponse); } catch {}
+      try { await this.captureConversion('openai-to-anth-response', responseParam, payload, transformedResponse); } catch { /* Empty catch block */ }
       const out = {
         ...transformedResponse,
         _metadata: {
@@ -234,7 +234,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     const responseFormat = detectResponseFormat(payload);
     if (responseFormat === 'openai') {
       const out = this.convertOpenAIResponseToAnthropic(payload, this.extractToolSchemaMapFromContext(input));
-      try { await this.captureConversion('openai-to-anth-response-plain', undefined as any, payload, out); } catch {}
+      try { await this.captureConversion('openai-to-anth-response-plain', undefined as any, payload, out); } catch { /* Empty catch block */ }
       return out;
     }
     return payload;
@@ -253,14 +253,14 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
           if (Array.isArray(tc)) {
             sum.openai_tool_calls = tc.map((t: any) => ({ id: t?.id, name: t?.function?.name, args: t?.function?.arguments }));
           }
-        } catch {}
+        } catch { /* Empty catch block */ }
         try {
           const blocks = Array.isArray(obj?.content) ? obj.content : [];
           const tus = blocks.filter((b: any) => b && b.type === 'tool_use');
           if (tus.length) {
             sum.anthropic_tool_use = tus.map((b: any) => ({ id: b?.id, name: b?.name, input: b?.input }));
           }
-        } catch {}
+        } catch { /* Empty catch block */ }
         return sum;
       };
       const payload = {
@@ -319,13 +319,13 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
           const objMatch = jsonCandidate.match(/\{[\s\S]*\}/); if (objMatch) { const p = safeParse(objMatch[0]); if (p !== undefined) {return p;} }
           const arrMatch = jsonCandidate.match(/\[[\s\S]*\]/); if (arrMatch) { const p = safeParse(arrMatch[0]); if (p !== undefined) {return p;} }
           let tstr = jsonCandidate.replace(/'([^']*)'/g, '"$1"');
-          tstr = tstr.replace(/([\{,\s])([A-Za-z_][A-Za-z0-9_\-]*)\s*:/g, '$1"$2":');
+          tstr = tstr.replace(/([{,\s])([A-Za-z_][A-Za-z0-9_-]*)\s*:/g, '$1"$2":');
           const jj = safeParse(tstr); if (jj !== undefined) {return jj;}
           // key=value fallback
           const obj: Record<string, any> = {};
           const parts = s.split(/[\n,]+/).map(p => p.trim()).filter(Boolean);
           for (const p of parts) {
-            const m = p.match(/^([A-Za-z_][A-Za-z0-9_\-]*)\s*[:=]\s*(.+)$/);
+            const m = p.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*[:=]\s*(.+)$/);
             if (!m) {continue;} const k = m[1]; let v = m[2].trim();
             if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) { v = v.slice(1, -1); }
             const pv = safeParse(v); if (pv !== undefined) { obj[k] = pv; continue; }
@@ -705,14 +705,14 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       if (arrMatch) { const p = safeParse(arrMatch[0]); if (p !== undefined) {return p;} }
       // Try json-ish: single quotes and unquoted keys
       let t = jsonCandidate.replace(/'([^']*)'/g, '"$1"');
-      t = t.replace(/([\{,\s])([A-Za-z_][A-Za-z0-9_\-]*)\s*:/g, '$1"$2":');
+      t = t.replace(/([{,\s])([A-Za-z_][A-Za-z0-9_-]*)\s*:/g, '$1"$2":');
       const jj = safeParse(t);
       if (jj !== undefined) { return jj; }
       // Try key=value lines
       const obj: Record<string, any> = {};
       const parts = s.split(/[\n,]+/).map(p => p.trim()).filter(Boolean);
       for (const p of parts) {
-        const m = p.match(/^([A-Za-z_][A-Za-z0-9_\-]*)\s*[:=]\s*(.+)$/);
+        const m = p.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*[:=]\s*(.+)$/);
         if (!m) {continue;}
         const key = m[1];
         let val = m[2].trim();
@@ -894,13 +894,13 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       const objMatch = jsonCandidate.match(/\{[\s\S]*\}/); if (objMatch) { const p = safeParse(objMatch[0]); if (p !== undefined) {return p;} }
       const arrMatch = jsonCandidate.match(/\[[\s\S]*\]/); if (arrMatch) { const p = safeParse(arrMatch[0]); if (p !== undefined) {return p;} }
       let t = jsonCandidate.replace(/'([^']*)'/g, '"$1"');
-      t = t.replace(/([\{,\s])([A-Za-z_][A-Za-z0-9_\-]*)\s*:/g, '$1"$2":');
+      t = t.replace(/([{,\s])([A-Za-z_][A-Za-z0-9_-]*)\s*:/g, '$1"$2":');
       const jj = safeParse(t); if (jj !== undefined) {return jj;}
       // key=value fallback
       const obj: Record<string, any> = {};
       const parts = s.split(/[\n,]+/).map(p => p.trim()).filter(Boolean);
       for (const p of parts) {
-        const m = p.match(/^([A-Za-z_][A-Za-z0-9_\-]*)\s*[:=]\s*(.+)$/);
+        const m = p.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*[:=]\s*(.+)$/);
         if (!m) {continue;} const k = m[1]; let v = m[2].trim();
         if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith('\'') && v.endsWith('\''))) { v = v.slice(1, -1); }
         const pv = safeParse(v); if (pv !== undefined) { obj[k] = pv; continue; }
