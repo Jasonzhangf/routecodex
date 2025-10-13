@@ -1,6 +1,6 @@
 import { describe, it, expect, jest } from '@jest/globals';
 
-import { OpenAIRouter } from '../src/server/openai-router.js';
+import { ProtocolHandler } from '../src/server/protocol-handler.js';
 import { RequestHandler } from '../src/core/request-handler.js';
 import { ProviderManager } from '../src/core/provider-manager.js';
 import type { ServerConfig } from '../src/server/types.js';
@@ -78,11 +78,11 @@ function makeStreamRes() {
   return res as any as { setHeader: (k: string, v: string) => void; status: (n: number) => any; json: (o: any) => any; write: (s: string) => any; end: () => any } & { __out: typeof out };
 }
 
-describe('OpenAIRouter SSE bridging (stream=true → non-stream provider → SSE to client)', () => {
+describe('ProtocolHandler SSE bridging (stream=true → non-stream provider → SSE to client)', () => {
   it('emits text/event-stream with [DONE] when provider returns non-stream', async () => {
     const providerManager = new ProviderManager(serverConfig);
     const requestHandler = new RequestHandler(providerManager, serverConfig, { validateRequests: false } as any);
-    const router = new OpenAIRouter(requestHandler, providerManager, {} as any, { enablePipeline: true, enableValidation: false });
+    const router = new ProtocolHandler(requestHandler, providerManager, {} as any, { enablePipeline: true, enableValidation: false });
     await router.initialize();
     (router as any).attachPipelineManager(new StubPipelineManager());
     (router as any).attachRoutePools({ default: ['stub.gpt-4o-mini'] });

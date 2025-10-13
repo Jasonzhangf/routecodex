@@ -1,6 +1,6 @@
 import { describe, it, expect, jest } from '@jest/globals';
 
-import { OpenAIRouter } from '../src/server/openai-router.js';
+import { ProtocolHandler } from '../src/server/protocol-handler.js';
 import { RequestHandler } from '../src/core/request-handler.js';
 import { ProviderManager } from '../src/core/provider-manager.js';
 import type { ServerConfig } from '../src/server/types.js';
@@ -64,10 +64,10 @@ function makeRes() {
   function thisRes() { return (arguments.callee as any); }
 }
 
-// NOTE: This suite exercises OpenAIRouter with ESM dependencies.
+// NOTE: This suite exercises ProtocolHandler with ESM dependencies.
 // Current Jest config treats ESM in node_modules inconsistently in this environment.
 // Marked as skipped to avoid destabilizing CI until ESM transform is enabled for rcc-* deps.
-describe('OpenAIRouter pipeline path', () => {
+describe('ProtocolHandler pipeline path', () => {
   it('routes to PipelineManager and returns mapped model', async () => {
     // Prepare PipelineManager with one pipeline id 'test.gpt-4'
     const pipelineCfg: PipelineConfig = {
@@ -89,7 +89,7 @@ describe('OpenAIRouter pipeline path', () => {
     // OpenAI Router with pipeline enabled
     const providerManager = new ProviderManager(serverConfig);
     const requestHandler = new RequestHandler(providerManager, serverConfig, { validateRequests: false } as any);
-    const router = new OpenAIRouter(requestHandler, providerManager, {} as any, { enablePipeline: true, enableValidation: false });
+    const router = new ProtocolHandler(requestHandler, providerManager, {} as any, { enablePipeline: true, enableValidation: false });
     await router.initialize();
     (router as any).attachPipelineManager(manager);
     (router as any).attachRoutePools({ default: ['test.gpt-4'] });

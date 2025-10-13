@@ -10,7 +10,7 @@ Summary
 Key changes
 - Added `src/server/anthropic-sse-transformer.ts`: converts OpenAI streaming chunks (AsyncIterable) → Anthropic SSE events (message_start/content_block_*/message_delta/message_stop) with input_json_delta append-only semantics.
 - Added `src/server/anthropic-sse-simulator.ts`: simulates Anthropic SSE from a complete Anthropic message when upstream is non-stream, splitting tool_use.input into multiple input_json_delta fragments.
-- Updated `src/server/openai-router.ts`:
+- Updated `src/server/protocol-handler.ts`:
   - If provider returns AsyncIterable: use transformer incrementally.
   - Else (non-stream): convert OpenAI → Anthropic message via llmswitch, then simulate SSE using the simulator.
   - Always send tool_use.content_block_start with `input:{}`, append-only `input_json_delta` fragments, content_block_stop, message_delta (stop_reason mapping), message_stop.

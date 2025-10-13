@@ -79,16 +79,147 @@ const pkgVersion: string = (() => {
 })();
 
 program
-  .name('routecodex')
-  .description('Multi-provider OpenAI proxy server')
+  .name('rcc')
+  .description('RouteCodex CLI - Multi-provider OpenAI proxy server and Claude Code interface')
   .version(pkgVersion);
+
+// Code command - Launch Claude Code interface
+program
+  .command('code')
+  .description('Launch Claude Code interface with RouteCodex as proxy')
+  .option('-p, --port <port>', 'RouteCodex server port', '5520')
+  .option('-h, --host <host>', 'RouteCodex server host', 'localhost')
+  .option('-c, --config <config>', 'RouteCodex configuration file path')
+  .option('--claude-path <path>', 'Path to Claude Code executable', 'claude')
+  .option('--model <model>', 'Model to use with Claude Code')
+  .option('--profile <profile>', 'Claude Code profile to use')
+  .option('--ensure-server', 'Ensure RouteCodex server is running before launching Claude')
+  .action(async (options) => {
+    const spinner = ora('Preparing Claude Code with RouteCodex...').start();
+
+    try {
+      // Check if RouteCodex server needs to be started
+      if (options.ensureServer) {
+        spinner.text = 'Checking RouteCodex server status...';
+
+        const serverUrl = `http://${options.host}:${options.port}`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+        try {
+          const response = await fetch(`${serverUrl}/health`, {
+            signal: controller.signal,
+            method: 'GET'
+          } as any);
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            throw new Error('Server not healthy');
+          }
+
+          spinner.succeed('RouteCodex server is running');
+        } catch (error) {
+          clearTimeout(timeoutId);
+          spinner.info('RouteCodex server is not running, starting it...');
+
+          // Start RouteCodex server in background
+          const { spawn } = await import('child_process');
+          const configPath = options.config || path.join(homedir(), '.routecodex', 'config.json');
+          const modulesConfigPath = path.resolve(__dirname, '../config/modules.json');
+          const serverEntry = path.resolve(__dirname, 'index.js');
+
+          const serverProcess = spawn(process.execPath, [serverEntry, modulesConfigPath], {
+            stdio: 'pipe',
+            env: { ...process.env },
+            detached: true
+          });
+
+          serverProcess.unref();
+
+          // Wait a bit for server to start
+          spinner.text = 'Waiting for RouteCodex server to start...';
+          await sleep(3000);
+
+          // Verify server started
+          try {
+            const healthResponse = await fetch(`${serverUrl}/health`, {
+              method: 'GET',
+              timeout: 2000
+            } as any);
+
+            if (healthResponse.ok) {
+              spinner.succeed('RouteCodex server started successfully');
+            } else {
+              throw new Error('Server health check failed');
+            }
+          } catch (healthError) {
+            spinner.warn('RouteCodex server may not be fully ready, continuing...');
+          }
+        }
+      }
+
+      spinner.text = 'Launching Claude Code...';
+
+      // Prepare environment variables for Claude Code
+      const claudeEnv = {
+        ...process.env,
+        ANTHROPIC_BASE_URL: `http://${options.host}:${options.port}/v1`,
+        ANTHROPIC_API_KEY: 'rcc-proxy-key'
+      };
+
+      // Prepare Claude Code command arguments
+      const claudeArgs = [];
+
+      if (options.model) {
+        claudeArgs.push('--model', options.model);
+      }
+
+      if (options.profile) {
+        claudeArgs.push('--profile', options.profile);
+      }
+
+      // Launch Claude Code
+      const { spawn } = await import('child_process');
+      const claudeProcess = spawn(options.claudePath, claudeArgs, {
+        stdio: 'inherit',
+        env: claudeEnv
+      });
+
+      spinner.succeed('Claude Code launched with RouteCodex proxy');
+      logger.info(`Using RouteCodex server at: http://${options.host}:${options.port}`);
+      logger.info('Press Ctrl+C to exit Claude Code');
+
+      // Handle graceful shutdown
+      const shutdown = async (sig: NodeJS.Signals) => {
+        try { claudeProcess.kill(sig); } catch { /* ignore */ }
+        try { process.exit(0); } catch { /* ignore */ }
+      };
+
+      process.on('SIGINT', () => { void shutdown('SIGINT'); });
+      process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
+
+      claudeProcess.on('exit', (code, signal) => {
+        if (signal) {
+          process.exit(0);
+        } else {
+          process.exit(code ?? 0);
+        }
+      });
+
+      // Keep process alive
+      await new Promise(() => {});
+
+    } catch (error) {
+      spinner.fail('Failed to launch Claude Code');
+      logger.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  });
 
 // Start command
 program
   .command('start')
   .description('Start the RouteCodex server')
-  .option('-p, --port <port>', 'Server port', '5506')
-  .option('-h, --host <host>', 'Server host', 'localhost')
   .option('-c, --config <config>', 'Configuration file path')
   .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
   .option('--codex', 'Use Codex system prompt (tools unchanged)')
@@ -111,8 +242,6 @@ program
         }
       } catch { /* ignore */ }
 
-      // Prepare to spawn server as child process for robust Ctrl+C handling
-
       // Resolve config path
       let configPath = options.config;
       if (!configPath) {
@@ -130,51 +259,36 @@ program
 
       // Check if config exists
       if (!fs.existsSync(configPath)) {
-        spinner.warn(`Configuration file not found: ${configPath}`);
-        logger.info('Creating default configuration...');
-
-        // Create config directory if it doesn't exist
-        const configDir = path.dirname(configPath);
-        if (!fs.existsSync(configDir)) {
-          fs.mkdirSync(configDir, { recursive: true });
-        }
-
-        // Load default config template
-        const templatePath = path.join(homedir(), '.routecodex', 'default.json');
-        let defaultConfig: DefaultConfig = {
-          server: {
-            port: parseInt(options.port),
-            host: options.host
-          },
-          logging: {
-            level: options.logLevel
-          },
-          providers: {}
-        };
-
-        // Use template if available
-        if (fs.existsSync(templatePath)) {
-          const template: TemplateConfig = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
-          defaultConfig = {
-            server: {
-              ...(template.server || {}),
-              port: parseInt(options.port),
-              host: options.host
-            },
-            logging: {
-              ...(template.logging || {}),
-              level: options.logLevel
-            },
-            providers: (template as UnknownObject).providers || {}
-          } as DefaultConfig;
-        }
-
-        fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
-        logger.success(`Default configuration created: ${configPath}`);
+        spinner.fail(`Configuration file not found: ${configPath}`);
+        logger.error('Please create a configuration file first:');
+        logger.error('  rcc config init');
+        logger.error('Or specify a custom configuration file:');
+        logger.error('  rcc start --config ./my-config.json');
+        process.exit(1);
       }
 
-      // Determine target port from config
-      const resolvedPort = determinePort(configPath, parseInt(options.port, 10));
+      // Load and validate configuration
+      let config;
+      try {
+        const configContent = fs.readFileSync(configPath, 'utf8');
+        config = JSON.parse(configContent);
+      } catch (error) {
+        spinner.fail('Failed to parse configuration file');
+        logger.error(`Invalid JSON in configuration file: ${configPath}`);
+        process.exit(1);
+      }
+
+      // Validate required configuration fields
+      const port = config?.port || config?.server?.port;
+      if (!port || typeof port !== 'number' || port <= 0) {
+        spinner.fail('Invalid or missing port configuration');
+        logger.error('Configuration file must specify a valid port number');
+        logger.error('Example configuration:');
+        logger.error(JSON.stringify({ port: 5506 }, null, 2));
+        process.exit(1);
+      }
+
+      const resolvedPort = port;
 
       // Ensure port state aligns with requested behavior (no implicit self-stop)
       await ensurePortAvailable(resolvedPort, spinner, { restart: !!options.restart });
@@ -207,8 +321,10 @@ program
         fs.writeFileSync(pidFile, String(childProc.pid ?? ''), 'utf8');
       } catch { /* ignore */ }
 
-      spinner.succeed(`RouteCodex server starting on ${options.host}:${options.port}`);
+      const host = config?.server?.host || config?.host || 'localhost';
+      spinner.succeed(`RouteCodex server starting on ${host}:${resolvedPort}`);
       logger.info(`Configuration loaded from: ${configPath}`);
+      logger.info(`Server will run on port: ${resolvedPort}`);
       logger.info('Press Ctrl+C to stop the server');
 
       // Forward signals to child
@@ -531,7 +647,7 @@ async function initializeConfig(configPath: string, template?: string, force: bo
 
     spinner.succeed(`Configuration initialized: ${configPath}`);
     logger.info(`Template used: ${template || 'default'}`);
-    logger.info('You can now start the server with: routecodex start');
+    logger.info('You can now start the server with: rcc start');
 
   } catch (error) {
     spinner.fail('Failed to initialize configuration');
@@ -543,13 +659,40 @@ async function initializeConfig(configPath: string, template?: string, force: bo
 program
   .command('stop')
   .description('Stop the RouteCodex server')
-  .option('-p, --port <port>', 'Server port')
   .action(async (options) => {
     const spinner = ora('Stopping RouteCodex server...').start();
     try {
       // Resolve config path and port
       const configPath = path.join(homedir(), '.routecodex', 'config.json');
-      const resolvedPort = determinePort(configPath, options.port ? parseInt(options.port, 10) : 5520);
+
+      // Check if config exists
+      if (!fs.existsSync(configPath)) {
+        spinner.fail(`Configuration file not found: ${configPath}`);
+        logger.error('Cannot determine server port without configuration file');
+        logger.info('Please create a configuration file first:');
+        logger.info('  rcc config init');
+        process.exit(1);
+      }
+
+      // Load configuration to get port
+      let config;
+      try {
+        const configContent = fs.readFileSync(configPath, 'utf8');
+        config = JSON.parse(configContent);
+      } catch (error) {
+        spinner.fail('Failed to parse configuration file');
+        logger.error(`Invalid JSON in configuration file: ${configPath}`);
+        process.exit(1);
+      }
+
+      const port = config?.port || config?.server?.port;
+      if (!port || typeof port !== 'number' || port <= 0) {
+        spinner.fail('Invalid or missing port configuration');
+        logger.error('Configuration file must specify a valid port number');
+        process.exit(1);
+      }
+
+      const resolvedPort = port;
 
       const pids = findListeningPids(resolvedPort);
       if (!pids.length) {
@@ -582,8 +725,6 @@ program
 program
   .command('restart')
   .description('Restart the RouteCodex server')
-  .option('-p, --port <port>', 'Server port (fallback if config missing)')
-  .option('-h, --host <host>', 'Server host', 'localhost')
   .option('-c, --config <config>', 'Configuration file path')
   .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
   .option('--codex', 'Use Codex system prompt (tools unchanged)')
@@ -591,9 +732,37 @@ program
   .action(async (options) => {
     const spinner = ora('Restarting RouteCodex server...').start();
     try {
-      // Resolve config and port
+      // Resolve config path
       const configPath = options.config || path.join(homedir(), '.routecodex', 'config.json');
-      const resolvedPort = determinePort(configPath, options.port ? parseInt(options.port, 10) : 5520);
+
+      // Check if config exists
+      if (!fs.existsSync(configPath)) {
+        spinner.fail(`Configuration file not found: ${configPath}`);
+        logger.error('Cannot determine server port without configuration file');
+        logger.info('Please create a configuration file first:');
+        logger.info('  rcc config init');
+        process.exit(1);
+      }
+
+      // Load configuration to get port
+      let config;
+      try {
+        const configContent = fs.readFileSync(configPath, 'utf8');
+        config = JSON.parse(configContent);
+      } catch (error) {
+        spinner.fail('Failed to parse configuration file');
+        logger.error(`Invalid JSON in configuration file: ${configPath}`);
+        process.exit(1);
+      }
+
+      const port = config?.port || config?.server?.port;
+      if (!port || typeof port !== 'number' || port <= 0) {
+        spinner.fail('Invalid or missing port configuration');
+        logger.error('Configuration file must specify a valid port number');
+        process.exit(1);
+      }
+
+      const resolvedPort = port;
 
       // Stop current instance (if any)
       const pids = findListeningPids(resolvedPort);
@@ -633,7 +802,9 @@ program
       const child = spawn(nodeBin, args, { stdio: 'inherit', env });
       try { fs.writeFileSync(path.join(homedir(), '.routecodex', 'server.cli.pid'), String(child.pid ?? ''), 'utf8'); } catch {}
 
-      spinner.succeed(`RouteCodex server restarting on ${options.host || 'localhost'}:${resolvedPort}`);
+      const host = config?.server?.host || config?.host || 'localhost';
+      spinner.succeed(`RouteCodex server restarting on ${host}:${resolvedPort}`);
+      logger.info(`Server will run on port: ${resolvedPort}`);
       logger.info('Press Ctrl+C to stop the server');
 
       const shutdown = async (sig: NodeJS.Signals) => {
@@ -683,6 +854,48 @@ program
   .option('-j, --json', 'Output in JSON format')
   .action(async (options) => {
     try {
+      // Resolve config path and get configuration
+      const configPath = path.join(homedir(), '.routecodex', 'config.json');
+
+      // Check if config exists
+      if (!fs.existsSync(configPath)) {
+        logger.error('Configuration file not found');
+        logger.info('Please create a configuration file first:');
+        logger.info('  rcc config init');
+        if (options.json) {
+          console.log(JSON.stringify({ error: 'Configuration file not found' }, null, 2));
+        }
+        return;
+      }
+
+      let port: number;
+      let host: string;
+
+      // Load configuration to get port and host
+      try {
+        const configContent = fs.readFileSync(configPath, 'utf8');
+        const config = JSON.parse(configContent);
+
+        port = config?.port || config?.server?.port;
+        host = config?.server?.host || config?.host || 'localhost';
+
+        if (!port || typeof port !== 'number' || port <= 0) {
+          const errorMsg = 'Invalid or missing port configuration in configuration file';
+          logger.error(errorMsg);
+          if (options.json) {
+            console.log(JSON.stringify({ error: errorMsg }, null, 2));
+          }
+          return;
+        }
+      } catch (error) {
+        const errorMsg = `Failed to parse configuration file: ${configPath}`;
+        logger.error(errorMsg);
+        if (options.json) {
+          console.log(JSON.stringify({ error: errorMsg }, null, 2));
+        }
+        return;
+      }
+
       // Check if server is running by trying to connect (HTTP)
       const { get } = await import('http');
 
@@ -725,14 +938,14 @@ program
         });
       };
 
-      const status = await checkServer(5506, 'localhost');
+      const status = await checkServer(port, host);
 
       if (options.json) {
         console.log(JSON.stringify(status, null, 2));
       } else {
         switch (status.status) {
           case 'running':
-            logger.success('Server is running');
+            logger.success(`Server is running on ${host}:${port}`);
             break;
           case 'stopped':
             logger.error('Server is not running');
@@ -760,7 +973,7 @@ program
     const what = String(options.what || 'all');
     if (!confirm) {
       logger.warning("Add --yes to confirm deletion.");
-      logger.info("Example: routecodex clean --yes --what all");
+      logger.info("Example: rcc clean --yes --what all");
       return;
     }
     const home = homedir();
@@ -820,55 +1033,66 @@ program
 
     console.log(chalk.yellow('1. Initialize Configuration:'));
     console.log('  # Create default configuration');
-    console.log('  routecodex config init');
+    console.log('  rcc config init');
     console.log('');
     console.log('  # Create LMStudio configuration');
-    console.log('  routecodex config init --template lmstudio');
+    console.log('  rcc config init --template lmstudio');
     console.log('');
     console.log('  # Create OAuth configuration');
-    console.log('  routecodex config init --template oauth');
+    console.log('  rcc config init --template oauth');
     console.log('');
 
     console.log(chalk.yellow('2. Start Server:'));
     console.log('  # Start with default config');
-    console.log('  routecodex start');
+    console.log('  rcc start');
     console.log('');
     console.log('  # Start with custom config');
-    console.log('  routecodex start --config ./config/lmstudio-config.json');
+    console.log('  rcc start --config ./config/lmstudio-config.json');
     console.log('');
-    console.log('  # Start with custom port');
-    console.log('  routecodex start --port 8080');
+    console.log('  # Note: Port must be specified in configuration file');
+    console.log('  # Server will not start without valid port configuration');
     console.log('');
 
-    console.log(chalk.yellow('3. Configuration Management:'));
+    console.log(chalk.yellow('3. Launch Claude Code:'));
+    console.log('  # Launch Claude Code with automatic server start');
+    console.log('  rcc code --ensure-server');
+    console.log('');
+    console.log('  # Launch Claude Code with specific model');
+    console.log('  rcc code --model claude-3-haiku');
+    console.log('');
+    console.log('  # Launch Claude Code with custom profile');
+    console.log('  rcc code --profile my-profile');
+    console.log('');
+
+    console.log(chalk.yellow('4. Configuration Management:'));
     console.log('  # Show current configuration');
-    console.log('  routecodex config show');
+    console.log('  rcc config show');
     console.log('');
     console.log('  # Edit configuration');
-    console.log('  routecodex config edit');
+    console.log('  rcc config edit');
     console.log('');
     console.log('  # Validate configuration');
-    console.log('  routecodex config validate');
+    console.log('  rcc config validate');
     console.log('');
 
-    console.log(chalk.yellow('4. Dry-Run Testing:'));
+    console.log(chalk.yellow('5. Dry-Run Testing:'));
     console.log('  # Execute request pipeline dry-run');
-    console.log('  routecodex dry-run request ./request.json --pipeline-id test --mode dry-run');
+    console.log('  rcc dry-run request ./request.json --pipeline-id test --mode dry-run');
     console.log('');
     console.log('  # Execute response pipeline dry-run');
-    console.log('  routecodex dry-run response ./response.json --pipeline-id test');
+    console.log('  rcc dry-run response ./response.json --pipeline-id test');
     console.log('');
     console.log('  # Start response capture session');
-    console.log('  routecodex dry-run capture --start');
+    console.log('  rcc dry-run capture --start');
     console.log('');
     console.log('  # Process multiple files in batch');
-    console.log('  routecodex dry-run batch ./test-data --pattern *.json --output ./results');
+    console.log('  rcc dry-run batch ./test-data --pattern *.json --output ./results');
     console.log('');
     console.log('  # Execute chain of pipelines');
-    console.log('  routecodex dry-run chain ./input.json --chain ./chain-config.json');
+    console.log('  rcc dry-run chain ./input.json --chain ./chain-config.json');
     console.log('');
 
-    console.log(chalk.yellow('5. Environment Variables:'));
+    console.log(chalk.yellow('6. Environment Variables:'));
     console.log('  # Set LM Studio API Key');
     console.log('  export LM_STUDIO_API_KEY="your-api-key"');
     console.log('');
@@ -876,7 +1100,7 @@ program
     console.log('  export OPENAI_API_KEY="your-api-key"');
     console.log('');
 
-    console.log(chalk.yellow('6. Testing:'));
+    console.log(chalk.yellow('7. Testing:'));
     console.log('  # Test with curl');
     console.log('  curl -X POST http://localhost:5506/v1/chat/completions \\');
     console.log('    -H "Content-Type: application/json" \\');
@@ -925,7 +1149,7 @@ async function ensurePortAvailable(port: number, parentSpinner: Ora, opts: { res
   if (healthy && !opts.restart) {
     parentSpinner.stop();
     logger.success(`RouteCodex is already running on port ${port}.`);
-    logger.info(`Use 'routecodex stop' or 'routecodex start --restart' to restart.`);
+    logger.info(`Use 'rcc stop' or 'rcc start --restart' to restart.`);
     process.exit(0);
   }
 

@@ -1,11 +1,12 @@
 /**
- * OpenAI Router Implementation
- * Implements OpenAI API v1 compatibility endpoints (pipeline-only)
+ * Protocol Handler Implementation
+ * Implements OpenAI API v1 and Anthropic API compatibility endpoints (pipeline-only)
  */
 
 import express, { type Router, type Request, type Response } from 'express';
 import { ErrorHandlingUtils } from '../utils/error-handling-utils.js';
 import fs from 'fs/promises';
+import path from 'path';
 import { BaseModule, type ModuleInfo } from 'rcc-basemodule';
 import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import { DebugEventBus } from 'rcc-debugcenter';
@@ -27,9 +28,9 @@ import {
 import { ConfigRequestClassifier, type ConfigClassifierConfig, type ConfigClassificationInput } from '../modules/virtual-router/classifiers/config-request-classifier.js';
 
 /**
- * OpenAI Router configuration interface
+ * Protocol Handler configuration interface
  */
-export interface OpenAIRouterConfig {
+export interface ProtocolHandlerConfig {
   enableStreaming?: boolean;
   enableMetrics?: boolean;
   enableValidation?: boolean;
@@ -47,16 +48,16 @@ export interface OpenAIRouterConfig {
 }
 
 /**
- * OpenAI Router class
+ * Protocol Handler class
  */
-export class OpenAIRouter extends BaseModule {
+export class ProtocolHandler extends BaseModule {
   private router: Router;
   private moduleConfigReader: ModuleConfigReader;
   private requestHandler: RequestHandler;
   private providerManager: ProviderManager;
   private errorHandling: ErrorHandlingCenter;
   private debugEventBus: DebugEventBus;
-  private config: OpenAIRouterConfig;
+  private config: ProtocolHandlerConfig;
   // Removed pass-through provider; pipeline-only routing
   private moduleInfo: ModuleInfo;
   private _isInitialized: boolean = false;
@@ -79,13 +80,13 @@ export class OpenAIRouter extends BaseModule {
     requestHandler: RequestHandler,
     providerManager: ProviderManager,
     moduleConfigReader: ModuleConfigReader,
-    config: OpenAIRouterConfig = {}
+    config: ProtocolHandlerConfig = {}
   ) {
     const moduleInfo: ModuleInfo = {
-      id: 'openai-router',
-      name: 'OpenAIRouter',
+      id: 'protocol-handler',
+      name: 'ProtocolHandler',
       version: '0.0.1',
-      description: 'OpenAI API v1 compatibility router (pipeline-only)',
+      description: 'OpenAI API v1 and Anthropic API compatibility handler (pipeline-only)',
       type: 'server',
     };
 
@@ -332,7 +333,7 @@ export class OpenAIRouter extends BaseModule {
     try {
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: 'openai-router',
+        moduleId: 'protocol-handler',
         operationId: type,
         timestamp: Date.now(),
         type: 'start',
@@ -340,7 +341,7 @@ export class OpenAIRouter extends BaseModule {
         data: {
           ...data,
           routerId: this.moduleInfo.id,
-          source: 'openai-router',
+          source: 'protocol-handler',
         },
       });
     } catch (error) {
@@ -527,7 +528,7 @@ export class OpenAIRouter extends BaseModule {
 
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: 'openai-router',
+        moduleId: 'protocol-handler',
         operationId: 'openai_router_initialized',
         timestamp: Date.now(),
         type: 'start',
@@ -583,6 +584,10 @@ export class OpenAIRouter extends BaseModule {
 
     // Completions endpoint
     this.router.post('/completions', this.handleCompletions.bind(this));
+
+    // Anthropic Messages endpoint (compatibility)
+    // This handles /v1/messages requests when the OpenAI router is mounted at /v1
+    this.router.post('/messages', this.handleMessages.bind(this));
 
     // Models endpoint
     this.router.get('/models', this.handleModels.bind(this));
@@ -681,7 +686,7 @@ export class OpenAIRouter extends BaseModule {
     try {
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: 'openai-router',
+        moduleId: 'protocol-handler',
         operationId: 'chat_completions_request_start',
         timestamp: startTime,
         type: 'start',
@@ -897,7 +902,7 @@ export class OpenAIRouter extends BaseModule {
 
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: 'openai-router',
+        moduleId: 'protocol-handler',
         operationId: 'chat_completions_request_end',
         timestamp: Date.now(),
         type: 'end',
@@ -963,7 +968,7 @@ export class OpenAIRouter extends BaseModule {
 
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: 'openai-router',
+        moduleId: 'protocol-handler',
         operationId: 'chat_completions_request_error',
         timestamp: Date.now(),
         type: 'error',
@@ -1051,7 +1056,7 @@ export class OpenAIRouter extends BaseModule {
     try {
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: 'openai-router',
+        moduleId: 'protocol-handler',
         operationId: 'completions_request_start',
         timestamp: startTime,
         type: 'start',
@@ -1143,7 +1148,7 @@ export class OpenAIRouter extends BaseModule {
 
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: 'openai-router',
+        moduleId: 'protocol-handler',
         operationId: 'completions_request_end',
         timestamp: Date.now(),
         type: 'end',
@@ -1178,7 +1183,7 @@ export class OpenAIRouter extends BaseModule {
 
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: 'openai-router',
+        moduleId: 'protocol-handler',
         operationId: 'completions_request_error',
         timestamp: Date.now(),
         type: 'error',
@@ -1186,6 +1191,186 @@ export class OpenAIRouter extends BaseModule {
         data: {
           requestId,
           error: getErrorMessage(error),
+        },
+      });
+
+      // Send error response
+      const mapped = this.buildErrorPayload(error, requestId);
+      res.setHeader('x-request-id', requestId);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.status(mapped.status).json(mapped.body);
+    }
+  }
+
+  /**
+   * Handle Anthropic Messages endpoint (compatibility)
+   * This handles /v1/messages requests that come through the OpenAI router mounted at /v1
+   */
+  private async handleMessages(req: Request, res: Response): Promise<void> {
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    let ctxProviderId: string | undefined;
+    let ctxModelId: string | undefined;
+
+    try {
+      this.debugEventBus.publish({
+        sessionId: `session_${Date.now()}`,
+        moduleId: 'protocol-handler',
+        operationId: 'messages_request_start',
+        timestamp: Date.now(),
+        type: 'start',
+        position: 'middle',
+        data: {
+          requestId,
+          hasMessages: Array.isArray((req.body || {}).messages),
+          hasTools: Array.isArray((req.body || {}).tools),
+          model: (req.body || {}).model,
+          userAgent: req.get('user-agent'),
+        },
+      });
+
+      let response: unknown;
+
+      // Pipeline path. Use RR within category.
+      if (this.shouldUsePipeline() && this.routePools) {
+        const routeName = await this.decideRouteCategoryAsync(req);
+        let pipelineId = this.pickPipelineId(routeName);
+
+      const preferredVendor = (req.headers['x-rc-provider'] as string | undefined)?.toLowerCase()?.trim();
+      if (preferredVendor && this.routePools[routeName] && this.routePools[routeName].length) {
+        const vendorOf = (pid: string) => {
+          const dot = pid.lastIndexOf('.');
+          const left = dot > 0 ? pid.slice(0, dot) : pid;
+          const und = left.indexOf('_');
+          return und > 0 ? left.slice(0, und) : left;
+        };
+        const override = this.routePools[routeName].find(pid => vendorOf(pid) === preferredVendor);
+        if (override) { pipelineId = override; }
+      }
+      const { providerId, modelId } = this.parsePipelineId(pipelineId);
+      ctxProviderId = providerId; ctxModelId = modelId;
+
+      const authHeader = (req.headers['authorization'] || req.headers['Authorization']) as string | undefined;
+      const upstreamAuth = (req.headers['x-rcc-upstream-authorization'] || req.headers['x-rc-upstream-authorization']) as string | undefined;
+      const allowOverride = process.env.RCC_ALLOW_UPSTREAM_OVERRIDE === '1' || !!upstreamAuth;
+      const chosenOverride = allowOverride ? (upstreamAuth || authHeader) : undefined;
+      const endpointStr = `${(req.baseUrl || '')}${req.url || ''}`;
+
+      const pipelineRequest = {
+        data: {
+          ...(req.body || {}),
+          ...(chosenOverride ? { __rcc_overrideApiKey: chosenOverride } : {}),
+        },
+        route: {
+          providerId,
+          modelId,
+          requestId,
+          timestamp: Date.now(),
+        },
+        metadata: {
+          method: req.method,
+          url: req.url,
+          headers: this.sanitizeHeaders(req.headers),
+          targetProtocol: 'anthropic',
+          endpoint: '/v1/messages',
+        },
+        debug: {
+          enabled: this.config.enableMetrics ?? true,
+          stages: {
+            llmSwitch: true,
+            workflow: true,
+            compatibility: true,
+            provider: true,
+          },
+        },
+      };
+
+      // Record pipeline input sample for Codex CLI requests
+      try {
+        const ua = (req.get('user-agent') || '').toLowerCase();
+        if (ua.includes('codex') || ua.includes('claude')) {
+          const dir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
+          await fs.mkdir(dir, { recursive: true });
+          const sampleIn = JSON.parse(JSON.stringify(pipelineRequest)) as Record<string, unknown>;
+          if (sampleIn?.data && typeof sampleIn.data === 'object' && sampleIn.data !== null && '__rcc_overrideApiKey' in sampleIn.data) {
+            (sampleIn.data as Record<string, unknown>).__rcc_overrideApiKey = '[REDACTED]';
+          }
+          await fs.writeFile(`${dir}/pipeline-in-${requestId}.json`, JSON.stringify(sampleIn, null, 2));
+        }
+      } catch { /* non-blocking */ }
+
+      const pipelineResponse = await (this.pipelineManager && typeof this.pipelineManager === 'object' && this.pipelineManager !== null && 'processRequest' in this.pipelineManager ? ((this.pipelineManager as Record<string, unknown>).processRequest as Function)(pipelineRequest) : Promise.reject(new Error('Pipeline manager not available')));
+        response = pipelineResponse && typeof pipelineResponse === 'object' && pipelineResponse !== null && 'data' in pipelineResponse ? (pipelineResponse as Record<string, unknown>).data : pipelineResponse;
+
+        // Capture provider request+response pair for Anthropic-schema replay validation
+        try {
+          const baseDir = path.join(process.env.HOME || '', '.routecodex', 'codex-samples');
+          const subDir = path.join(baseDir, 'anth-replay');
+          await fs.mkdir(subDir, { recursive: true });
+          const filePath = path.join(subDir, `protocol-handler-messages-${Date.now()}_${Math.random().toString(36).slice(2,8)}.json`);
+          const pair = {
+            type: 'protocol-handler-messages-pair',
+            requestId,
+            timestamp: Date.now(),
+            meta: {
+              provider: ctxProviderId,
+              model: ctxModelId,
+              endpoint: endpointStr,
+            },
+            request: pipelineRequest.data,
+            response,
+          };
+          await fs.writeFile(filePath, JSON.stringify(pair, null, 2), 'utf-8');
+        } catch { /* optional capture; ignore on failure */ }
+
+        this.debugEventBus.publish({
+          sessionId: `session_${Date.now()}`,
+          moduleId: 'protocol-handler',
+          operationId: 'messages_request_end',
+          timestamp: Date.now(),
+          type: 'end',
+          position: 'middle',
+          data: {
+            requestId,
+            status: 200,
+            model: req.body.model,
+          },
+        });
+
+        // Set appropriate headers for Anthropic compatibility
+        res.setHeader('x-request-id', requestId);
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        try { res.setHeader('anthropic-version', '2023-06-01'); } catch { /* ignore */ }
+        res.status(200).json(response);
+      } else {
+        throw new Error('Pipeline manager not available or route pools not configured');
+      }
+    } catch (error) {
+      try {
+        const errorObj = error as Record<string, unknown>;
+        const details = errorObj && typeof errorObj === 'object' && 'details' in errorObj ? errorObj.details : {};
+        errorObj.details = {
+          ...((details && typeof details === 'object' && details !== null ? (details as Record<string, unknown>) : {})),
+          provider: {
+            ...(details && typeof details === 'object' && details !== null && 'provider' in details && typeof (details as Record<string, unknown>).provider === 'object' && (details as Record<string, unknown>).provider !== null ? (details as Record<string, unknown>).provider as Record<string, unknown> : {}),
+            vendor: ctxProviderId || (details && typeof details === 'object' && details !== null && 'provider' in details && typeof (details as Record<string, unknown>).provider === 'object' && (details as Record<string, unknown>).provider !== null && 'vendor' in ((details as Record<string, unknown>).provider as Record<string, unknown>) ? (((details as Record<string, unknown>).provider as Record<string, unknown>).vendor) : undefined),
+            model: ctxModelId || (details && typeof details === 'object' && details !== null && 'provider' in details && typeof (details as Record<string, unknown>).provider === 'object' && (details as Record<string, unknown>).provider !== null && 'model' in ((details as Record<string, unknown>).provider as Record<string, unknown>) ? (((details as Record<string, unknown>).provider as Record<string, unknown>).model) : undefined),
+          }
+        };
+      } catch (_e) { void 0; }
+      await this.handleError(error as Error, 'messages_handler');
+
+      this.debugEventBus.publish({
+        sessionId: `session_${Date.now()}`,
+        moduleId: 'protocol-handler',
+        operationId: 'messages_request_error',
+        timestamp: Date.now(),
+        type: 'error',
+        position: 'middle',
+        data: {
+          requestId,
+          error: (error as Error).message,
         },
       });
 
@@ -2008,7 +2193,7 @@ export class OpenAIRouter extends BaseModule {
     try {
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: 'openai-router',
+        moduleId: 'protocol-handler',
         operationId: 'models_request_start',
         timestamp: startTime,
         type: 'start',
@@ -2030,7 +2215,7 @@ export class OpenAIRouter extends BaseModule {
 
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: 'openai-router',
+        moduleId: 'protocol-handler',
         operationId: 'models_request_error',
         timestamp: Date.now(),
         type: 'error',
@@ -2061,7 +2246,7 @@ export class OpenAIRouter extends BaseModule {
     try {
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: 'openai-router',
+        moduleId: 'protocol-handler',
         operationId: 'model_request_start',
         timestamp: startTime,
         type: 'start',
@@ -2084,7 +2269,7 @@ export class OpenAIRouter extends BaseModule {
 
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
-        moduleId: 'openai-router',
+        moduleId: 'protocol-handler',
         operationId: 'model_request_error',
         timestamp: Date.now(),
         type: 'error',
@@ -2630,10 +2815,10 @@ export class OpenAIRouter extends BaseModule {
       const errorMessage = error.message || getErrorMessage(error) || 'Unknown error';
       const errorContext = {
         error: errorMessage,
-        source: `openai-router.${context}`,
+        source: `protocol-handler.${context}`,
         severity: 'medium',
         timestamp: Date.now(),
-        moduleId: 'openai-router',
+        moduleId: 'protocol-handler',
         context: {
           stack: error.stack,
           name: error.name || 'UnknownError',
