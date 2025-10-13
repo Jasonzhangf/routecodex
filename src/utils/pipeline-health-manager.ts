@@ -222,7 +222,7 @@ export class PipelineHealthManager {
    */
   getAvailablePipelines(): string[] {
     const available: string[] = [];
-    for (const [pipelineId, _status] of this.healthStatuses) {
+    for (const [pipelineId] of this.healthStatuses) {
       if (this.isPipelineAvailable(pipelineId)) {
         available.push(pipelineId);
       }
@@ -286,7 +286,6 @@ export class PipelineHealthManager {
    * 执行健康检查
    */
   private async performHealthCheck(): Promise<void> {
-    const now = Date.now();
     for (const [pipelineId, status] of this.healthStatuses) {
       // 检查是否需要自动恢复
       if (status.disabled && this.shouldRecover(status)) {

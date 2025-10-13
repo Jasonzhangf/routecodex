@@ -51,7 +51,7 @@ export class ModuleConfigReader {
   /**
    * Get specific module configuration
    */
-  getModuleConfig<T = Record<string, unknown>>(moduleName: string): ModuleConfig | null {
+  getModuleConfig(moduleName: string): ModuleConfig | null {
     if (!this.config || !this.config.modules[moduleName]) {
       return null;
     }

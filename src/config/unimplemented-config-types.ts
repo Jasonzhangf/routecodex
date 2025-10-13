@@ -46,7 +46,7 @@ export interface ProviderModuleConfiguration extends BaseModuleConfig {
  */
 export interface CoreModuleConfiguration extends BaseModuleConfig {
   type: 'core';
-  coreConfig: Record<string, any>;
+  coreConfig: Record<string, unknown>;
 }
 
 /**
@@ -54,7 +54,7 @@ export interface CoreModuleConfiguration extends BaseModuleConfig {
  */
 export interface CustomModuleConfiguration extends BaseModuleConfig {
   type: 'custom';
-  customConfig: Record<string, any>;
+  customConfig: Record<string, unknown>;
 }
 
 /**

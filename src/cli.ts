@@ -307,7 +307,6 @@ program
       // Spawn child Node process to run the server entry; forward signals
       const nodeBin = process.execPath; // current Node
       const serverEntry = path.resolve(__dirname, 'index.js');
-      const child = spawnSync as any; // keep type imports happy
       // Use spawn (not spawnSync); import child_process at top already
       const { spawn } = await import('child_process');
 
@@ -319,7 +318,7 @@ program
       try {
         const pidFile = path.join(homedir(), '.routecodex', 'server.cli.pid');
         fs.writeFileSync(pidFile, String(childProc.pid ?? ''), 'utf8');
-      } catch { /* ignore */ }
+      } catch (error) { /* ignore */ }
 
       const host = config?.server?.host || config?.host || 'localhost';
       spinner.succeed(`RouteCodex server starting on ${host}:${resolvedPort}`);
@@ -331,15 +330,15 @@ program
       const shutdown = async (sig: NodeJS.Signals) => {
         // 1) Ask server to shutdown over HTTP
         try {
-          await fetch(`http://127.0.0.1:${resolvedPort}/shutdown`, { method: 'POST' } as any).catch(() => {});
-        } catch { /* ignore */ }
+          await fetch(`http://127.0.0.1:${resolvedPort}/shutdown`, { method: 'POST' }).catch(() => {});
+        } catch (error) { /* ignore */ }
         // 2) Forward signal to child
-        try { childProc.kill(sig); } catch { /* ignore */ }
-        try { if (childProc.pid) { process.kill(-childProc.pid, sig); } } catch { /* ignore */ }
+        try { childProc.kill(sig); } catch (error) { /* ignore */ }
+        try { if (childProc.pid) { process.kill(-childProc.pid, sig); } } catch (error) { /* ignore */ }
         // 3) Wait briefly; if still listening, try SIGTERM/SIGKILL by port
         const deadline = Date.now() + 3500;
         while (Date.now() < deadline) {
-          if (findListeningPids(resolvedPort).length === 0) break;
+          if (findListeningPids(resolvedPort).length === 0) {break;}
           await sleep(120);
         }
         const remain = findListeningPids(resolvedPort);
@@ -349,7 +348,7 @@ program
           }
           const killDeadline = Date.now() + 1500;
           while (Date.now() < killDeadline) {
-            if (findListeningPids(resolvedPort).length === 0) break;
+            if (findListeningPids(resolvedPort).length === 0) {break;}
             await sleep(100);
           }
         }
@@ -770,7 +769,7 @@ program
         for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch { /* ignore */ } }
         const deadline = Date.now() + 3500;
         while (Date.now() < deadline) {
-          if (findListeningPids(resolvedPort).length === 0) break;
+          if (findListeningPids(resolvedPort).length === 0) {break;}
           await sleep(120);
         }
         const remain = findListeningPids(resolvedPort);
@@ -800,7 +799,7 @@ program
       const env = { ...process.env } as NodeJS.ProcessEnv;
       const args: string[] = [serverEntry, modulesConfigPath];
       const child = spawn(nodeBin, args, { stdio: 'inherit', env });
-      try { fs.writeFileSync(path.join(homedir(), '.routecodex', 'server.cli.pid'), String(child.pid ?? ''), 'utf8'); } catch {}
+      try { fs.writeFileSync(path.join(homedir(), '.routecodex', 'server.cli.pid'), String(child.pid ?? ''), 'utf8'); } catch (error) { /* ignore */ }
 
       const host = config?.server?.host || config?.host || 'localhost';
       spinner.succeed(`RouteCodex server restarting on ${host}:${resolvedPort}`);
@@ -808,25 +807,25 @@ program
       logger.info('Press Ctrl+C to stop the server');
 
       const shutdown = async (sig: NodeJS.Signals) => {
-        try { await fetch(`http://127.0.0.1:${resolvedPort}/shutdown`, { method: 'POST' } as any).catch(() => {}); } catch {}
-        try { child.kill(sig); } catch {}
-        try { if (child.pid) { process.kill(-child.pid, sig); } } catch {}
+        try { await fetch(`http://127.0.0.1:${resolvedPort}/shutdown`, { method: 'POST' }).catch(() => {}); } catch (error) { /* ignore */ }
+        try { child.kill(sig); } catch (error) { /* ignore */ }
+        try { if (child.pid) { process.kill(-child.pid, sig); } } catch (error) { /* ignore */ }
         const deadline = Date.now() + 3500;
         while (Date.now() < deadline) {
-          if (findListeningPids(resolvedPort).length === 0) break;
+          if (findListeningPids(resolvedPort).length === 0) {break;}
           await sleep(120);
         }
         const remain = findListeningPids(resolvedPort);
-        for (const pid of remain) { try { process.kill(pid, 'SIGTERM'); } catch {} }
+        for (const pid of remain) { try { process.kill(pid, 'SIGTERM'); } catch (error) { /* ignore */ } }
         const killDeadline = Date.now() + 1500;
         while (Date.now() < killDeadline) {
-          if (findListeningPids(resolvedPort).length === 0) break;
+          if (findListeningPids(resolvedPort).length === 0) {break;}
           await sleep(100);
         }
         const still = findListeningPids(resolvedPort);
-        for (const pid of still) { try { process.kill(pid, 'SIGKILL'); } catch {} }
+        for (const pid of still) { try { process.kill(pid, 'SIGKILL'); } catch (error) { /* ignore */ } }
         // Ensure parent exits in any case
-        try { process.exit(0); } catch {}
+        try { process.exit(0); } catch (error) { /* ignore */ }
       };
       process.on('SIGINT', () => { void shutdown('SIGINT'); });
       process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
@@ -836,8 +835,8 @@ program
 
       child.on('exit', (code, signal) => {
         try { cleanupKeypress2(); } catch { /* ignore */ }
-        if (signal) process.exit(0);
-        else process.exit(code ?? 0);
+        if (signal) {process.exit(0);}
+        else {process.exit(code ?? 0);}
       });
 
       await new Promise(() => {});
@@ -1133,10 +1132,10 @@ async function ensurePortAvailable(port: number, parentSpinner: Ora, opts: { res
     for (const h of candidates) {
       try {
         const controller = new AbortController();
-        const t = setTimeout(() => { try { controller.abort(); } catch { /* ignore */ } }, 700);
-        await fetch(`http://${h}:${port}/shutdown`, { method: 'POST', signal: (controller as any).signal } as any).catch(() => {});
+        const t = setTimeout(() => { try { controller.abort(); } catch (error) { /* ignore */ } }, 700);
+        await fetch(`http://${h}:${port}/shutdown`, { method: 'POST', signal: controller.signal }).catch(() => {});
         clearTimeout(t);
-      } catch { /* ignore */ }
+      } catch (error) { /* ignore */ }
     }
     await sleep(300);
   } catch { /* ignore */ }
@@ -1278,12 +1277,12 @@ async function isServerHealthyQuick(port: number): Promise<boolean> {
   try {
     const controller = new AbortController();
     const t = setTimeout(() => { try { controller.abort(); } catch { /* ignore */ } }, 800);
-    const res = await fetch(`http://127.0.0.1:${port}/health`, { method: 'GET', signal: (controller as any).signal } as any);
+    const res = await fetch(`http://127.0.0.1:${port}/health`, { method: 'GET', signal: controller.signal });
     clearTimeout(t);
     if (!res.ok) { return false; }
     const data = await res.json().catch(() => null);
     return !!data && (data.status === 'healthy' || data.status === 'ready');
-  } catch {
+  } catch (error) {
     return false;
   }
 }

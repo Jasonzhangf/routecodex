@@ -6,11 +6,6 @@
 import type {
   DryRunConfig,
   DryRunResponse,
-  RoutingDecision,
-  FieldConversionInfo,
-  ProtocolProcessingInfo,
-  PerformanceEstimate,
-  ConfigValidationResult,
 } from '../modules/dry-run/dry-run-interface.js';
 
 /**
@@ -172,7 +167,7 @@ export class LoadBalancer {
   /**
    * 选择目标（正常模式）
    */
-  async selectTarget(targets: LoadBalancerTarget[], context?: any): Promise<LoadBalancerTarget> {
+  async selectTarget(targets: LoadBalancerTarget[], _context?: Record<string, unknown>): Promise<LoadBalancerTarget> {
     if (this.dryRunConfig.enabled) {
       // 在dry-run模式下，返回第一个可用的目标
       return this.selectTargetForDryRun(targets);
@@ -217,7 +212,7 @@ export class LoadBalancer {
    */
   async executeDryRun(
     targets: LoadBalancerTarget[],
-    context?: any
+    _context?: Record<string, unknown>
   ): Promise<LoadBalancerDryRunResponse> {
     const startTime = Date.now();
     const analysisId = `dryrun_lb_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -506,7 +501,7 @@ export class LoadBalancer {
   private generateStrategyReasoning(
     strategy: string,
     selected: LoadBalancerTarget,
-    targets: LoadBalancerTarget[]
+    _targets: LoadBalancerTarget[]
   ): string {
     switch (strategy) {
       case 'weighted':
@@ -694,7 +689,7 @@ export class LoadBalancer {
     };
   }
 
-  private generateLoadBalancerExecutionPlan(targets: LoadBalancerTarget[]) {
+  private generateLoadBalancerExecutionPlan(_targets: LoadBalancerTarget[]) {
     return [
       {
         step: 'target_health_check',

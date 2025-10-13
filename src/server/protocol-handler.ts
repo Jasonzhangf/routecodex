@@ -1889,17 +1889,17 @@ export class ProtocolHandler extends BaseModule {
         const capture: Array<{ event: string; data: Record<string, unknown> }> = [];
         const doCapture = process.env.RCC_SSE_CAPTURE === '1';
         const cap = (ev: string, payload: Record<string, unknown>) => {
-          if (doCapture) capture.push({ event: ev, data: payload });
+          if (doCapture) {capture.push({ event: ev, data: payload });}
           writeEvent(ev, payload);
         };
 
         startHeartbeat();
         for await (const rawChunk of iterator) {
           const evs = transformer.processOpenAIChunk(rawChunk);
-          for (const e of evs) cap(e.event, e.data);
+          for (const e of evs) {cap(e.event, e.data);}
         }
         const tail = transformer.finalize();
-        for (const e of tail) cap(e.event, e.data);
+        for (const e of tail) {cap(e.event, e.data);}
         stopHeartbeat();
         streamEnded = true;
         try { res.write('data: [DONE]\n\n'); } catch { /* ignore */ }
@@ -1933,7 +1933,7 @@ export class ProtocolHandler extends BaseModule {
         const doCapture = process.env.RCC_SSE_CAPTURE === '1';
         startHeartbeat();
         for (const e of events) {
-          if (doCapture) capture.push(e);
+          if (doCapture) {capture.push(e);}
           writeEvent(e.event, e.data);
         }
         stopHeartbeat();

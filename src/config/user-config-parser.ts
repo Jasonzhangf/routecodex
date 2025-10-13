@@ -1,20 +1,20 @@
 // Minimal user config parser used by tests
 
-type UserConfig = Record<string, any>;
+type UserConfig = Record<string, unknown>;
 
 export class UserConfigParser {
   parseUserConfig(userConfig: UserConfig) {
-    const vr = (userConfig?.virtualrouter ?? {}) as Record<string, any>;
+    const vr = (userConfig?.virtualrouter ?? {}) as Record<string, unknown>;
     const inputProtocol = String(vr.inputProtocol || 'openai');
     const outputProtocol = String(vr.outputProtocol || 'openai');
     const routing = (vr.routing ?? {}) as Record<string, string[]>;
-    const providers = (vr.providers ?? {}) as Record<string, any>;
+    const providers = (vr.providers ?? {}) as Record<string, unknown>;
 
     const authMappings: Record<string, string> = {};
     const usedAuthKeys = new Set<string>();
 
-    const routeTargets: Record<string, Array<any>> = {};
-    const pipelineConfigs: Record<string, any> = {};
+    const routeTargets: Record<string, Array<unknown>> = {};
+    const pipelineConfigs: Record<string, unknown> = {};
 
     const getAuthActualKey = (provId: string, keyId: string): string => {
       const authMap = (providers[provId]?.auth ?? {}) as Record<string, string>;
@@ -74,13 +74,13 @@ export class UserConfigParser {
     }
 
     // 合并用户自定义的pipelineConfigs
-    const userPipelineConfigs = (userConfig?.pipelineConfigs ?? {}) as Record<string, any>;
+    const userPipelineConfigs = (userConfig?.pipelineConfigs ?? {}) as Record<string, unknown>;
     for (const [key, config] of Object.entries(userPipelineConfigs)) {
       if (!pipelineConfigs[key]) {
         pipelineConfigs[key] = {};
       }
       // 深度合并用户配置
-      pipelineConfigs[key] = { ...pipelineConfigs[key], ...config };
+      pipelineConfigs[key] = { ...(pipelineConfigs[key] as Record<string, unknown>), ...(config as Record<string, unknown>) };
     }
 
     return {

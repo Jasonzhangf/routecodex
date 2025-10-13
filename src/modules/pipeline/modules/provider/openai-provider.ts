@@ -286,7 +286,7 @@ export class OpenAIProvider implements ProviderModule {
       const inboundModel = (request as { model?: string }).model as string | undefined;
       const effectiveModel = configuredModel || routeModel || inboundModel;
 
-      let chatRequest: Record<string, unknown> = {
+      const chatRequest: Record<string, unknown> = {
         model: effectiveModel,
         messages: (request as { messages?: any[] }).messages || [],
         temperature: (request as { temperature?: number }).temperature ?? 0.7,

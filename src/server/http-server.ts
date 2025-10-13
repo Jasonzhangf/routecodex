@@ -636,7 +636,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       if (toClose.length) {
         await new Promise<void>((resolveAll) => {
           let remaining = toClose.length;
-          const done = () => { remaining -= 1; if (remaining <= 0) resolveAll(); };
+          const done = () => { remaining -= 1; if (remaining <= 0) {resolveAll();} };
           for (const srv of toClose) {
             try { (srv as any).close(() => done()); } catch { done(); }
           }
@@ -799,7 +799,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
     // Anthropic API: minimal /v1/anthropic/messages passthrough into pipeline with unified llmswitch
     // Allow disabling this alias via config: set anthropicAlias: false at root level
     const anthropicAliasEnabled = ((this.config as any)?.anthropicAlias !== false);
-    if (anthropicAliasEnabled) this.app.post('/v1/anthropic/messages', async (req: Request, res: Response) => {
+    if (anthropicAliasEnabled) {this.app.post('/v1/anthropic/messages', async (req: Request, res: Response) => {
       try {
         if (!this.pipelineManager || !this.routePools) {
           return res.status(503).json({ error: { message: 'Pipeline not ready', code: 'pipeline_not_ready' } });
@@ -1005,7 +1005,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       } catch (err) {
         res.status(500).json({ error: { message: (err as Error).message || 'Anthropic handler error' } });
       }
-    });
+    });}
 
     // Anthropic API canonical endpoint /v1/messages (Anthropic SDK default)
     this.app.post('/v1/messages', async (req: Request, res: Response) => {
