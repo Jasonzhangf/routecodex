@@ -194,11 +194,21 @@ program
       spinner.text = 'Launching Claude Code...';
 
       // Prepare environment variables for Claude Code
+      const resolvedBaseHost = String((() => {
+        const v = String(actualHost || '').toLowerCase();
+        if (v === '0.0.0.0') return '127.0.0.1';
+        if (v === '::') return '::1';
+        return actualHost || '127.0.0.1';
+      })());
+      const anthropicBase = `http://${resolvedBaseHost}:${actualPort}`;
       const claudeEnv = {
         ...process.env,
-        ANTHROPIC_BASE_URL: `http://${String((() => { const v = String(actualHost || '').toLowerCase(); if (v==='0.0.0.0') return '127.0.0.1'; if (v==='::') return '::1'; return actualHost || '127.0.0.1'; })())}:${actualPort}`,
+        // Cover both common env var names used by Anthropic SDK / tools
+        ANTHROPIC_BASE_URL: anthropicBase,
+        ANTHROPIC_API_URL: anthropicBase,
         ANTHROPIC_API_KEY: 'rcc-proxy-key'
-      };
+      } as NodeJS.ProcessEnv;
+      logger.info(`Setting Anthropic base URL to: ${anthropicBase}`);
 
       // Prepare Claude Code command arguments
       const claudeArgs = [];
