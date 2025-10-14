@@ -202,19 +202,15 @@ export class PipelineAssembler {
     const buildPcFromNormalized = (provId: string, mdlId: string): PcShape => {
       const np = PipelineAssembler.asRecord(normalizedProviders[provId]);
       const modelCfg = PipelineAssembler.asRecord(PipelineAssembler.asRecord(np.models)[mdlId]);
-      const compat = PipelineAssembler.asRecord(modelCfg.compatibility || np.compatibility);
+      // Compatibility: Only use provider-level compatibility, ignore model-level settings
+      const compat = PipelineAssembler.asRecord(np.compatibility);
       let apiKey = Array.isArray(np.apiKey) && (np.apiKey as unknown[]).length ? String((np.apiKey as unknown[])[0]).trim() : '';
       const pid = String(provId || '').toLowerCase();
       const unifiedType = ((): string => {
-        // Unify only ModelScope to openai-provider
-        if (pid === 'modelscope') { return 'openai-provider'; }
-        // Preserve explicit openai-provider
+        // Preserve explicit provider types from configuration
         const t = String(np.type || '').toLowerCase();
         if (t === 'openai-provider') { return 'openai-provider'; }
-        // Map engine family 'openai' to concrete provider module
-        if (t === 'openai') { return 'openai-provider'; }
-        // Map GLM family to dedicated provider module
-        if (pid === 'glm' || t === 'glm') { return 'glm-http-provider'; }
+        // Use configured type directly, no hardcoded fallbacks
         return String(np.type || provId);
       })();
       const provider: Record<string, unknown> = {
@@ -264,7 +260,9 @@ export class PipelineAssembler {
       (pc as Record<string, unknown>).__attachAuth = attachAuth;
       if (compat && (compat as Record<string, unknown>)['type']) {
         const ctype = String((compat as Record<string, unknown>)['type'] || '');
-        pc.compatibility = { type: ctype || 'passthrough-compatibility', config: (compat as Record<string, unknown>)['config'] as Record<string, unknown> || {} };
+        if (ctype) {
+          pc.compatibility = { type: ctype, config: (compat as Record<string, unknown>)['config'] as Record<string, unknown> || {} };
+        }
       }
       return pc;
     };
@@ -399,13 +397,13 @@ export class PipelineAssembler {
             : { type: 'streaming-control', config: { streamingToNonStreaming: true } };
 
           // Compatibility must be specified by config
-          // Compatibility: 由provider配置的compatibility决定；未配置则使用passthrough
+          // Compatibility: 由provider/模型或pipelineConfigs配置的compatibility决定（不再使用默认passthrough）
           const compatDecl = pc?.compatibility as { type?: string; config?: Record<string, unknown> } | undefined;
           const compatType: string | undefined = compatDecl?.type;
           const compatCfg: Record<string, unknown> = compatDecl?.config || {};
-          const compatibility: ModuleConfig = compatType
+          const compatibility: ModuleConfig | undefined = compatType
             ? { type: compatType, config: compatCfg }
-            : { type: 'passthrough-compatibility', config: {} };
+            : undefined;
 
           const providerConfigObj: Record<string, unknown> = {};
           // Generic providers expect a vendor type hint for downstream compatibility modules
@@ -466,7 +464,8 @@ export class PipelineAssembler {
           // Unique pipeline ID based on target, not route - enables reuse across categories
           const pipelineId = `${providerId}_${keyId}.${modelId}`;
 
-          const modulesBlock: Record<string, unknown> = { llmSwitch, compatibility, provider };
+          const modulesBlock: Record<string, unknown> = { llmSwitch, provider };
+          if (compatibility) { (modulesBlock as any).compatibility = compatibility; }
           if (workflow) { modulesBlock.workflow = workflow; }
 
           // Validate assembled module set (post-defaults), not raw pc

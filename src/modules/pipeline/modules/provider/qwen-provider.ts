@@ -569,7 +569,7 @@ export class QwenProvider implements ProviderModule {
    * Validate provider configuration
    */
   private validateConfig(): void {
-    if (!this.config.type || this.config.type !== 'qwen-provider') {
+    if (!this.config.type || this.config.type !== 'qwen') {
       throw new Error('Invalid Provider type configuration');
     }
 

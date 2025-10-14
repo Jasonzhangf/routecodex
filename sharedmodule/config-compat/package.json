@@ -1,6 +1,6 @@
 {
   "name": "routecodex-config-compat",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "RouteCodex Configuration Compatibility Layer - Existing logic preservation and normalization",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -31,7 +31,7 @@
   "author": "RouteCodex Team",
   "license": "MIT",
   "dependencies": {
-    "routecodex-config-engine": "file:../config-engine"
+    "routecodex-config-engine": "^0.1.1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

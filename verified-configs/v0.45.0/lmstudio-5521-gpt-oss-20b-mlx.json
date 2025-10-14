@@ -1,0 +1,135 @@
+{
+  "version": "1.0.0",
+  "port": 5521,
+  "host": "0.0.0.0",
+  "virtualrouter": {
+    "inputProtocol": "openai",
+    "outputProtocol": "openai",
+    "providers": {
+      "lmstudio": {
+        "id": "lmstudio",
+        "type": "lmstudio",
+        "enabled": true,
+        "baseURL": "http://localhost:1234",
+        "apiKey": [
+          "lm-studio-api-key-1234567890abcdef"
+        ],
+        "models": {
+          "gpt-oss-20b-mlx": {
+            "maxContext": 262144,
+            "maxTokens": 8192,
+            "temperature": 0.7,
+            "supportsStreaming": true,
+            "supportsTools": true,
+            "compatibility": {
+              "type": "passthrough-compatibility",
+              "config": {
+                "toolsEnabled": true,
+                "streamingEnabled": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "routing": {
+      "default": [
+        "lmstudio.gpt-oss-20b-mlx"
+      ],
+      "anthropic": [
+        "lmstudio.gpt-oss-20b-mlx"
+      ],
+      "background": [
+        "lmstudio.gpt-oss-20b-mlx"
+      ],
+      "coding": [
+        "lmstudio.gpt-oss-20b-mlx"
+      ],
+      "longcontext": [
+        "lmstudio.gpt-oss-20b-mlx"
+      ],
+      "thinking": [
+        "lmstudio.gpt-oss-20b-mlx"
+      ],
+      "tools": [
+        "lmstudio.gpt-oss-20b-mlx"
+      ],
+      "vision": [
+        "lmstudio.gpt-oss-20b-mlx"
+      ],
+      "websearch": [
+        "lmstudio.gpt-oss-20b-mlx"
+      ]
+    },
+    "dryRun": {
+      "enabled": false,
+      "includeLoadBalancerDetails": false,
+      "includeHealthStatus": false,
+      "includeWeightCalculation": false,
+      "simulateProviderHealth": false
+    },
+    "llmSwitch": {
+      "type": "llmswitch-unified",
+      "config": {
+        "protocolDetection": "endpoint-based",
+        "defaultProtocol": "openai",
+        "endpointMapping": {
+          "anthropic": ["/v1/anthropic/messages", "/v1/messages"],
+          "openai": ["/v1/chat/completions", "/v1/completions"]
+        }
+      }
+    }
+  },
+  "pipelineConfigs": {
+    "lmstudio.gpt-oss-20b-mlx": {
+      "llmSwitch": {
+        "type": "llmswitch-unified",
+        "enabled": true,
+        "config": {}
+      },
+      "compatibility": {
+        "type": "passthrough-compatibility",
+        "enabled": true,
+        "config": {
+          "toolsEnabled": true,
+          "streamingEnabled": true
+        }
+      }
+    },
+    "endpoint-based": {
+      "/v1/messages": {
+        "llmSwitch": {
+          "type": "llmswitch-anthropic-openai",
+          "config": {}
+        },
+        "workflow": {
+          "type": "streaming-control",
+          "enabled": true,
+          "config": {
+            "enableStreaming": true,
+            "reasoningPolicy": {
+              "anthropic": {
+                "disposition": "drop",
+                "strict": true
+              }
+            }
+          }
+        }
+      },
+      "/v1/chat/completions": {
+        "workflow": {
+          "type": "streaming-control",
+          "enabled": true,
+          "config": {
+            "enableStreaming": true,
+            "reasoningPolicy": {
+              "openai": {
+                "disposition": "keep"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
