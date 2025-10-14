@@ -91,7 +91,7 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
     const selectedSwitch = protocol === 'anthropic' ? this.anthropicSwitch : this.openaiSwitch;
 
     // 使用选中的转换器处理请求
-    return await selectedSwitch.processIncoming(request);
+    return await selectedSwitch.processIncoming(request) as T;
   }
 
   /**

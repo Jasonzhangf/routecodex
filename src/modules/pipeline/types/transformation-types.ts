@@ -232,9 +232,9 @@ export interface TransformationValidationRule {
 /**
  * Transformation result interface
  */
-export interface TransformationResult {
+export interface TransformationResult<T = any> {
   /** Transformed data */
-  data: any;
+  data: T;
   /** Transformation logs */
   logs: TransformationLog[];
   /** Validation results */

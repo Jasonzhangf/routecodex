@@ -529,3 +529,112 @@ export interface GenericProviderConfig {
   models: Record<string, any>;
   compatibility?: any;
 }
+
+/**
+ * Anthropic message request
+ */
+export interface AnthropicRequest {
+  /** Model to use */
+  model: string;
+  /** Messages to send */
+  messages: AnthropicMessage[];
+  /** System prompt */
+  system?: string;
+  /** Maximum number of tokens to generate */
+  max_tokens: number;
+  /** Sampling temperature */
+  temperature?: number;
+  /** Top-p sampling */
+  top_p?: number;
+  /** Top-k sampling */
+  top_k?: number;
+  /** Stop sequences */
+  stop_sequences?: string[];
+  /** Stream response */
+  stream?: boolean;
+  /** Tools for function calling */
+  tools?: AnthropicTool[];
+  /** Tool choice behavior */
+  tool_choice?: 'auto' | 'any' | 'none' | { type: 'tool'; name: string };
+  /** Metadata */
+  metadata?: Record<string, any>;
+}
+
+/**
+ * Anthropic message
+ */
+export interface AnthropicMessage {
+  /** Message role */
+  role: 'user' | 'assistant';
+  /** Message content */
+  content: string | AnthropicContentBlock[];
+}
+
+/**
+ * Anthropic content block
+ */
+export interface AnthropicContentBlock {
+  /** Block type */
+  type: 'text' | 'tool_use' | 'tool_result' | 'image';
+  /** Text content (for text blocks) */
+  text?: string;
+  /** Tool use ID (for tool_use/tool_result blocks) */
+  id?: string;
+  /** Tool name (for tool_use blocks) */
+  name?: string;
+  /** Tool input (for tool_use blocks) */
+  input?: Record<string, any>;
+  /** Tool use ID (for tool_result blocks) */
+  tool_use_id?: string;
+  /** Tool result content (for tool_result blocks) */
+  content?: string | Array<AnthropicContentBlock>;
+  /** Whether tool result is an error (for tool_result blocks) */
+  is_error?: boolean;
+  /** Image source (for image blocks) */
+  source?: {
+    type: 'base64';
+    media_type: string;
+    data: string;
+  };
+}
+
+/**
+ * Anthropic tool
+ */
+export interface AnthropicTool {
+  /** Tool name */
+  name: string;
+  /** Tool description */
+  description?: string;
+  /** Input schema */
+  input_schema: Record<string, any>;
+}
+
+/**
+ * Anthropic response
+ */
+export interface AnthropicResponse {
+  /** Response ID */
+  id: string;
+  /** Response type */
+  type: 'message';
+  /** Response role */
+  role: 'assistant';
+  /** Response content */
+  content: AnthropicContentBlock[];
+  /** Model used */
+  model: string;
+  /** Stop reason */
+  stop_reason: 'end_turn' | 'max_tokens' | 'stop_sequence' | 'tool_use';
+  /** Stop sequence used */
+  stop_sequence?: string;
+  /** Usage statistics */
+  usage: {
+    /** Input tokens used */
+    input_tokens: number;
+    /** Output tokens used */
+    output_tokens: number;
+  };
+  /** Creation timestamp */
+  created?: number;
+}

@@ -40,8 +40,8 @@ export interface SharedPipelineError {
 }
 
 // Pipeline response payload
-export interface SharedPipelineResponse {
-  readonly data: unknown;
+export interface SharedPipelineResponse<T = unknown> {
+  readonly data: T;
   readonly metadata: {
     pipelineId: string;
     processingTime: number;
