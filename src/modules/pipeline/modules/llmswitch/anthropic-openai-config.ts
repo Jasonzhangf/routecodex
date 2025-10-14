@@ -27,31 +27,33 @@ export const DEFAULT_CONVERSION_CONFIG: ConversionConfig = {
   toolMappings: {},
 };
 
-export function detectRequestFormat(request: any): 'anthropic' | 'openai' | 'unknown' {
+export function detectRequestFormat(request: unknown): 'anthropic' | 'openai' | 'unknown' {
   if (request && typeof request === 'object') {
     if ('system' in request) {return 'anthropic';}
-    if (request.tools && Array.isArray(request.tools) && request.tools.length > 0) {
-      const firstTool = request.tools[0];
-      if (firstTool && 'input_schema' in firstTool) {return 'anthropic';}
+    const tools = (request as Record<string, unknown>).tools;
+    if (tools && Array.isArray(tools) && tools.length > 0) {
+      const firstTool = tools[0];
+      if (firstTool && typeof firstTool === 'object' && firstTool !== null && 'input_schema' in firstTool) {return 'anthropic';}
     }
-    if (request.messages && Array.isArray(request.messages)) {
-      for (const message of request.messages) {
-        if (message.tool_calls || message.function_call) {return 'openai';}
+    const messages = (request as Record<string, unknown>).messages;
+    if (messages && Array.isArray(messages)) {
+      for (const message of messages) {
+        if (message && typeof message === 'object' && ((message as Record<string, unknown>).tool_calls || (message as Record<string, unknown>).function_call)) {return 'openai';}
       }
     }
-    if (request.tools && Array.isArray(request.tools) && request.tools.length > 0) {
-      const firstTool = request.tools[0];
-      if (firstTool && firstTool.type === 'function' && 'function' in firstTool) {return 'openai';}
+    if ('model' in request && 'messages' in request) {
+      if (typeof (request as Record<string, unknown>).max_tokens === 'number') {return 'anthropic';}
+      return 'openai';
     }
   }
   return 'unknown';
 }
 
-export function detectResponseFormat(response: any): 'anthropic' | 'openai' | 'unknown' {
+export function detectResponseFormat(response: unknown): 'anthropic' | 'openai' | 'unknown' {
   if (response && typeof response === 'object') {
-    if ('choices' in response && Array.isArray(response.choices)) {return 'openai';}
+    if ('choices' in response && Array.isArray((response as Record<string, unknown>).choices)) {return 'openai';}
     if ('content' in response && 'role' in response) {return 'anthropic';}
-    if (response.object === 'chat.completion.chunk') {return 'openai';}
+    if ((response as Record<string, unknown>).object === 'chat.completion.chunk') {return 'openai';}
   }
   return 'unknown';
 }

@@ -24,55 +24,77 @@ import type { TransformationLog } from '../interfaces/pipeline-interfaces.js';
   /**
    * Get value from object using JSON path
    */
-  static getValue(obj: any, path: string): any {
-    const normalizedPath = path.replace(/\[('([^']*)'|"([^"]*)")\]/g, '.$1$2');
+  static getValue<T, R>(obj: T, path: string): R | undefined {
+    // 类型守卫确保obj是可索引的对象
+    if (obj === null || obj === undefined || typeof obj !== 'object') {
+      return undefined;
+    }
+
+    const normalizedPath = path.replace(/\[('([^']*)'|"([^"]*)")\]/g, '.$2$3');
     const keys = normalizedPath.split('.');
 
-    let current = obj;
+    let current: unknown = obj;
     for (const key of keys) {
       if (current === null || current === undefined) {
         return undefined;
       }
-      current = current[key];
+      
+      // 类型守卫确保current是可索引的对象
+      if (typeof current === 'object' && key in current) {
+        current = (current as Record<string, unknown>)[key];
+      } else {
+        return undefined;
+      }
     }
 
-    return current;
+    return current as R | undefined;
   }
 
   /**
    * Set value in object using JSON path
    */
-  static setValue(obj: any, path: string, value: any): void {
-    const normalizedPath = path.replace(/\[('([^']*)'|"([^"]*)")\]/g, '.$1$2');
+  static setValue<T, V>(obj: T, path: string, value: V): boolean {
+    // 类型守卫确保obj是可修改的对象
+    if (obj === null || obj === undefined || typeof obj !== 'object') {
+      return false;
+    }
+
+    const normalizedPath = path.replace(/\[('([^']*)'|"([^"]*)")\]/g, '.$2$3');
     const keys = normalizedPath.split('.');
 
-    let current = obj;
+    let current: Record<string, unknown> = obj as Record<string, unknown>;
     for (let i = 0; i < keys.length - 1; i++) {
       const key = keys[i];
-      if (!(key in current) || typeof current[key] !== 'object') {
+      if (!(key in current) || (typeof current[key] !== 'object' || current[key] === null)) {
         current[key] = {};
       }
-      current = current[key];
+      current = current[key] as Record<string, unknown>;
     }
 
     const lastKey = keys[keys.length - 1];
     current[lastKey] = value;
+    return true;
   }
 
   /**
    * Delete value from object using JSON path
    */
-  static deleteValue(obj: any, path: string): boolean {
+  static deleteValue<T>(obj: T, path: string): boolean {
+    // 类型守卫确保obj是可修改的对象
+    if (obj === null || obj === undefined || typeof obj !== 'object') {
+      return false;
+    }
+
     const normalizedPath = path.replace(/\[('([^']*)'|"([^"]*)")\]/g, '.$1$2');
     const keys = normalizedPath.split('.');
 
-    let current = obj;
+    let current = obj as Record<string, unknown>;
     for (let i = 0; i < keys.length - 1; i++) {
       const key = keys[i];
       if (!(key in current) || typeof current[key] !== 'object') {
         return false;
       }
-      current = current[key];
+      current = current[key] as Record<string, unknown>;
     }
 
     const lastKey = keys[keys.length - 1];
@@ -139,11 +161,11 @@ export class TransformationEngine {
   /**
    * Apply transformation rules to data
    */
-  async transform(
-    data: any,
+  async transform<T, R>(
+    data: T,
     rules: TransformationRule[],
     context?: Partial<TransformationContext>
-  ): Promise<TransformationResult> {
+  ): Promise<TransformationResult<R>> {
     const startTime = Date.now();
     const transformationId = this.generateTransformationId(data, rules);
 
@@ -152,7 +174,7 @@ export class TransformationEngine {
       const cached = this.cache.get(transformationId);
       if (cached && cached.expires > Date.now()) {
         this.statistics.cacheHits++;
-        return cached.result;
+        return cached.result as TransformationResult<R>;
       }
       this.statistics.cacheMisses++;
     }
@@ -180,7 +202,7 @@ export class TransformationEngine {
       const validations = await this.validateData(data);
 
       // Apply transformations
-      const transformedData = { ...data };
+      let transformedData: R = { ...(data as any) };
       const logs: TransformationLog[] = [];
       let currentDepth = 0;
 
@@ -189,9 +211,9 @@ export class TransformationEngine {
           throw new Error(`Maximum transformation depth exceeded: ${this.config.maxDepth}`);
         }
 
-        const result = await this.applyRule(transformedData, rule, fullContext);
+        const result = await this.applyRule(transformedData as unknown as Record<string, unknown>, rule, fullContext);
         if (result.transformed) {
-          Object.assign(transformedData, result.data);
+          Object.assign(transformedData as any, result.data);
           logs.push(result.log);
         }
 
@@ -202,7 +224,7 @@ export class TransformationEngine {
       const outputValidations = await this.validateData(transformedData);
 
       // Create result
-      const result: TransformationResult = {
+      const result: TransformationResult<R> = {
         data: transformedData,
         logs: logs,
         validations: [...validations, ...outputValidations],
@@ -384,8 +406,8 @@ export class TransformationEngine {
       return data;
     }
 
-    if (rule.mapping && rule.mapping[sourceValue] !== undefined && rule.targetPath) {
-      JSONPathUtils.setValue(data, rule.targetPath, rule.mapping[sourceValue]);
+    if (rule.mapping && sourceValue !== undefined && rule.mapping[sourceValue as any] !== undefined && rule.targetPath) {
+      JSONPathUtils.setValue(data, rule.targetPath, rule.mapping[sourceValue as any]);
     } else if (rule.targetPath) {
       JSONPathUtils.setValue(data, rule.targetPath, sourceValue);
     }

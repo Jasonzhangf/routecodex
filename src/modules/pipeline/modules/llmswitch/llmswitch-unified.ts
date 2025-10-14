@@ -76,16 +76,16 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
   /**
    * Process incoming request as DTO
    */
-  async processIncoming(request: SharedPipelineRequest): Promise<SharedPipelineRequest> {
+  async processIncoming<T>(request: T): Promise<T> {
     if (!this.isInitialized) {
       await this.initialize();
     }
 
     // 根据协议检测选择转换器
-    const protocol = this.detectProtocol(request);
+    const protocol = this.detectProtocol(request as unknown as SharedPipelineRequest);
     try {
       // Remember decision for response stage using requestId
-      const reqId = request?.route?.requestId;
+      const reqId = (request as unknown as SharedPipelineRequest)?.route?.requestId;
       if (reqId) { this.protocolByRequestId.set(reqId, protocol); }
     } catch { /* non-blocking */ }
     const selectedSwitch = protocol === 'anthropic' ? this.anthropicSwitch : this.openaiSwitch;
@@ -97,13 +97,13 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
   /**
    * Transform request to target protocol
    */
-  async transformRequest(request: any): Promise<unknown> {
+  async transformRequest<T>(request: T): Promise<T> {
     if (!this.isInitialized) {
       await this.initialize();
     }
 
     // 根据协议检测选择转换器
-    const protocol = this.detectProtocol(request);
+    const protocol = this.detectProtocol(request as unknown as SharedPipelineRequest);
     const selectedSwitch = protocol === 'anthropic' ? this.anthropicSwitch : this.openaiSwitch;
 
     // 使用选中的转换器转换请求
@@ -113,7 +113,7 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
   /**
    * Process outgoing response
    */
-  async processOutgoing(response: any): Promise<unknown> {
+  async processOutgoing<T>(response: T): Promise<T> {
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -129,10 +129,10 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
         // cleanup to avoid memory leaks
         this.protocolByRequestId.delete(reqId);
       } else {
-        protocol = this.detectProtocol(response);
+        protocol = this.detectProtocol(response as unknown as SharedPipelineRequest);
       }
     } catch {
-      protocol = this.detectProtocol(response);
+      protocol = this.detectProtocol(response as unknown as SharedPipelineRequest);
     }
     const selectedSwitch = protocol === 'anthropic' ? this.anthropicSwitch : this.openaiSwitch;
 
@@ -143,13 +143,13 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
   /**
    * Transform response from target protocol
    */
-  async transformResponse(response: any): Promise<unknown> {
+  async transformResponse<T>(response: T): Promise<T> {
     if (!this.isInitialized) {
       await this.initialize();
     }
 
     // 根据协议检测选择转换器
-    const protocol = this.detectProtocol(response);
+    const protocol = this.detectProtocol(response as unknown as SharedPipelineRequest);
     const selectedSwitch = protocol === 'anthropic' ? this.anthropicSwitch : this.openaiSwitch;
 
     // 使用选中的转换器转换响应
@@ -172,7 +172,7 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
   /**
    * 检测请求协议
    */
-  private detectProtocol(request: any): 'anthropic' | 'openai' {
+  private detectProtocol(request: unknown): 'anthropic' | 'openai' {
     const detectionMethod = this.switchConfig.protocolDetection;
     
     switch (detectionMethod) {
@@ -190,19 +190,21 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
   /**
    * 基于端点检测协议
    */
-  private detectProtocolByEndpoint(request: any): 'anthropic' | 'openai' {
+  private detectProtocolByEndpoint(request: unknown): 'anthropic' | 'openai' {
     // 优先使用显式目标协议
-    const explicit = (request?._metadata?.targetProtocol || request?.metadata?.targetProtocol) as string | undefined;
+    const requestObj = request as Record<string, unknown>;
+    const metadata = requestObj?._metadata as Record<string, unknown> | undefined;
+    const explicit = (metadata?.['targetProtocol'] || (requestObj?.metadata as Record<string, unknown>)?.['targetProtocol']) as string | undefined;
     if (explicit && (explicit === 'anthropic' || explicit === 'openai')) {
       return explicit;
     }
 
     // 尝试从多个位置获取端点信息
-    const endpoint = request._metadata?.endpoint ||
-                     request.endpoint ||
-                     request.metadata?.endpoint ||
-                     request.metadata?.url ||
-                     request.url ||
+    const endpoint = (metadata?.['endpoint'] as string) ||
+                     (requestObj['endpoint'] as string) ||
+                     (requestObj.metadata as Record<string, unknown>)?.['endpoint'] ||
+                     (requestObj.metadata as Record<string, unknown>)?.['url'] ||
+                     (requestObj['url'] as string) ||
                      '';
     
     console.log(`[UnifiedLLMSwitch] DEBUG - Endpoint detection: endpoint="${endpoint}"`);
@@ -215,12 +217,12 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
       return this.switchConfig.defaultProtocol;
     }
     
-    if (mapping.anthropic.some(ep => endpoint.includes(ep))) {
+    if (mapping.anthropic.some(ep => typeof ep === 'string' && (endpoint as string).includes(ep))) {
       console.log(`[UnifiedLLMSwitch] DEBUG - Detected anthropic protocol for endpoint: ${endpoint}`);
       return 'anthropic';
     }
     
-    if (mapping.openai.some(ep => endpoint.includes(ep))) {
+    if (mapping.openai.some(ep => typeof ep === 'string' && (endpoint as string).includes(ep))) {
       console.log(`[UnifiedLLMSwitch] DEBUG - Detected openai protocol for endpoint: ${endpoint}`);
       return 'openai';
     }
@@ -232,14 +234,15 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
   /**
    * 基于内容检测协议
    */
-  private detectProtocolByContent(request: any): 'anthropic' | 'openai' {
+  private detectProtocolByContent(request: unknown): 'anthropic' | 'openai' {
     // 根据请求内容特征检测协议
-    if (request.messages && Array.isArray(request.messages)) {
+    const requestObj = request as Record<string, unknown>;
+    if (requestObj.messages && Array.isArray(requestObj.messages)) {
       // OpenAI格式通常有messages数组
       return 'openai';
     }
     
-    if (request.max_tokens !== undefined && request.model !== undefined) {
+    if (requestObj.max_tokens !== undefined && requestObj.model !== undefined) {
       // Anthropic格式通常有max_tokens和model
       return 'anthropic';
     }
@@ -250,8 +253,10 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
   /**
    * 基于请求头检测协议
    */
-  private detectProtocolByHeaders(request: any): 'anthropic' | 'openai' {
-    const headers = request._metadata?.headers || request.headers || {};
+  private detectProtocolByHeaders(request: unknown): 'anthropic' | 'openai' {
+    const requestObj = request as Record<string, unknown>;
+    const metadata = requestObj._metadata as Record<string, unknown> | undefined;
+    const headers = (metadata?.['headers'] as Record<string, string>) || (requestObj['headers'] as Record<string, string>) || {};
     
     if (headers['anthropic-version']) {
       return 'anthropic';
@@ -268,7 +273,7 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
   /**
    * 获取状态信息
    */
-  getStats(): any {
+  getStats(): Record<string, unknown> {
     return {
       type: this.type,
       protocol: this.protocol,

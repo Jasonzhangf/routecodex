@@ -7,22 +7,22 @@ import type { UnknownObject, LogData } from '../types/common-types.js';
 export type { ModuleInfo } from 'rcc-basemodule';
 
 const DebugCenter =
-  (debugcenter as any).DebugCenter ||
+  (debugcenter as Record<string, unknown>).DebugCenter ||
   class {
     constructor() {}
-  };
+  } as unknown as typeof debugcenter.DebugCenter;
 
 const DebugEventBus =
-  (debugcenter as any).DebugEventBus ||
+  (debugcenter as Record<string, unknown>).DebugEventBus ||
   class {
     static getInstance() {
       return {
         publish: () => {},
       };
     }
-  };
+  } as unknown as typeof debugcenter.DebugEventBus;
 
-type DebugEventBusInstance = ReturnType<(typeof DebugEventBus)['getInstance']>;
+type DebugEventBusInstance = unknown;
 
 /**
  * 模块状态枚举
@@ -53,7 +53,7 @@ export abstract class BaseModule extends RCCBaseModule {
   // Legacy debug properties for backward compatibility
   protected debugEventBus: DebugEventBusInstance | null = null;
   public isDebugEnhanced = false;
-  public moduleMetrics: Map<string, { values: any[]; lastUpdated: number }> = new Map();
+  public moduleMetrics: Map<string, { values: unknown[]; lastUpdated: number }> = new Map();
   public operationHistory: UnknownObject[] = [];
   public errorHistory: UnknownObject[] = [];
   public maxHistorySize = 50;
@@ -70,7 +70,7 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * 订阅事件
    */
-  public on(event: string | symbol, listener: (...args: any[]) => void): this {
+  public on(event: string | symbol, listener: (...args: unknown[]) => void): this {
     this.emitter.on(event, listener);
     return this;
   }
@@ -78,7 +78,7 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * 订阅一次性事件
    */
-  public once(event: string | symbol, listener: (...args: any[]) => void): this {
+  public once(event: string | symbol, listener: (...args: unknown[]) => void): this {
     this.emitter.once(event, listener);
     return this;
   }
@@ -86,7 +86,7 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * 取消事件订阅
    */
-  public off(event: string | symbol, listener: (...args: any[]) => void): this {
+  public off(event: string | symbol, listener: (...args: unknown[]) => void): this {
     this.emitter.off(event, listener);
     return this;
   }
@@ -94,7 +94,7 @@ export abstract class BaseModule extends RCCBaseModule {
   /**
    * 发射事件
    */
-  protected emit(event: string | symbol, ...args: any[]): boolean {
+  protected emit(event: string | symbol, ...args: unknown[]): boolean {
     return this.emitter.emit(event, ...args);
   }
 
@@ -262,8 +262,9 @@ export abstract class BaseModule extends RCCBaseModule {
   private initializeUnifiedDebugEnhancements(): void {
     const info = this.getInfo();
     try {
-      const debugCenter = new DebugCenter();
-      this.debugEnhancementManager = DebugEnhancementManager.getInstance(debugCenter);
+      const DebugCenterClass = DebugCenter as unknown as new () => unknown;
+      const debugCenter = new DebugCenterClass() as unknown;
+      this.debugEnhancementManager = DebugEnhancementManager.getInstance(debugCenter as any);
       this.debugEnhancement = this.debugEnhancementManager.registerEnhancement(info.id, {
         enabled: true,
         consoleLogging: true,
@@ -286,7 +287,8 @@ export abstract class BaseModule extends RCCBaseModule {
    */
   public initializeDebugEnhancements(): void {
     try {
-      this.debugEventBus = DebugEventBus.getInstance();
+      const debugEventBusInstance = (DebugEventBus as unknown as typeof debugcenter.DebugEventBus).getInstance?.() || null;
+      this.debugEventBus = debugEventBusInstance as DebugEventBusInstance;
       this.isDebugEnhanced = true;
       console.log('BaseModule debug enhancements initialized');
     } catch (error) {
@@ -372,7 +374,8 @@ export abstract class BaseModule extends RCCBaseModule {
 
     const info = this.getInfo();
     try {
-      this.debugEventBus.publish({
+      if (this.debugEventBus && typeof (this.debugEventBus as any).publish === "function") {
+        (this.debugEventBus as any).publish({
         sessionId: `session_${Date.now()}`,
         moduleId: info.id,
         operationId: type,
@@ -384,7 +387,8 @@ export abstract class BaseModule extends RCCBaseModule {
           moduleId: info.id,
           source: 'base-module',
         },
-      });
+      } as unknown);
+      }
     } catch {
       // Ignore debug event publication failures
     }
