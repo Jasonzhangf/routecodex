@@ -544,11 +544,19 @@ export class LMStudioProviderSimple implements ProviderModule {
     }
 
     try {
+      // Normalize LM Studio quirks: tool_choice must be a string
+      const body: Record<string, unknown> = { ...(request || {}) };
+      try {
+        const tc = (body as Record<string, unknown>)['tool_choice'];
+        if (tc && typeof tc === 'object' && !Array.isArray(tc)) {
+          (body as Record<string, unknown>)['tool_choice'] = 'required';
+        }
+      } catch { /* ignore */ }
       // Make HTTP request using fetch
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: this.headers,
-        body: JSON.stringify(request)
+        body: JSON.stringify(body)
       });
 
       if (!response.ok) {
