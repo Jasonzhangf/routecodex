@@ -1,4 +1,11 @@
+## 0.46.30 - 2025-10-15
+- QwenProvider: accept top-level type 'qwen-provider' or 'qwen' in validation to match registry keys.
+- LMStudio Provider: enforce string tool_choice=required for object inputs (double guard).
+
 ## 0.46.29 - 2025-10-15
+- LMStudio compatibility: auto-normalize object tool_choice to "required" to trigger tool calls.
+- Local assembler: support lmstudio/qwen/glm/iflow providers in fallback pipelines (not only openai).
+
 - LMStudio compatibility: auto-normalize object tool_choice to "required" to trigger tool calls.
 - Local assembler: support lmstudio/qwen/glm/iflow providers in fallback pipelines (not only openai).
 
