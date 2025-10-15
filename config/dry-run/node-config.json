@@ -1,23 +1,4 @@
 {
-  "llm-switch": {
-    "enabled": true,
-    "mode": "dry-run",
-    "simulateRouting": true,
-    "simulateLoadBalancer": true,
-    "config": {
-      "routingStrategy": "weighted",
-      "providerWeights": {
-        "lmstudio": 0.4,
-        "qwen": 0.3,
-        "openai": 0.3
-      },
-      "healthCheck": {
-        "enabled": true,
-        "interval": 30000,
-        "timeout": 5000
-      }
-    }
-  },
   "compatibility": {
     "enabled": true,
     "mode": "dry-run",

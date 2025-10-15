@@ -46,66 +46,9 @@ export class PipelineAssembler {
   static async assemble(mergedConfig: unknown): Promise<AssembledPipelines> {
     const mc = this.asRecord(mergedConfig);
     const pac = this.asRecord(this.asRecord(mc.pipeline_assembler).config);
-    let pipelinesIn = Array.isArray((pac as any).pipelines) ? (pac as any).pipelines as any[] : [];
-    // If no pipelines provided by exporter, synthesize from merged-config (robust fallback)
+    const pipelinesIn = Array.isArray((pac as any).pipelines) ? (pac as any).pipelines as any[] : [];
     if (!pipelinesIn.length) {
-      try {
-        const vr = this.asRecord((mc as any).virtualrouter || {});
-        const providers = this.asRecord(vr.providers || {});
-        const routing = this.asRecord(vr.routing || {});
-        const modelKeysByProvider: Record<string, string[]> = {};
-        for (const [pid, pCfg] of Object.entries(providers)) {
-          const models = Object.keys(this.asRecord((pCfg as any).models || {}));
-          const keys = models.map(m => `${pid}.${m}.key1`);
-          modelKeysByProvider[pid] = keys;
-        }
-        const synthesized: any[] = [];
-        const synthPush = (pid: string, mid: string, keyId: string) => {
-          const fam = String(((providers as any)[pid]?.type) || pid).toLowerCase();
-          const provType = fam.includes('glm') ? 'glm-http-provider'
-            : fam.includes('lmstudio') ? 'lmstudio-http'
-            : fam.includes('qwen') ? 'qwen-provider'
-            : 'openai-provider';
-          const baseUrl = (providers as any)[pid]?.baseUrl || (providers as any)[pid]?.baseURL;
-          synthesized.push({
-            id: `${pid}_${keyId}.${mid}`,
-            modules: {
-              provider: { type: provType, config: { baseUrl, model: mid, auth: { type: 'apikey' } } },
-              compatibility: { type: fam.includes('glm') ? 'glm-compatibility' : fam.includes('lmstudio') ? 'lmstudio-compatibility' : fam.includes('qwen') ? 'qwen-compatibility' : 'field-mapping', config: {} },
-              llmSwitch: { type: 'llmswitch-openai-openai', config: {} },
-              workflow: { type: 'streaming-control', config: {} },
-            },
-            settings: { debugEnabled: true }
-          });
-        };
-        // Prefer explicit routing targets if present
-        let any = false;
-        for (const [routeName, arr] of Object.entries(routing)) {
-          const list = Array.isArray(arr) ? (arr as any[]) : [];
-          for (const t of list) {
-            const s = String(t);
-            const parts = s.split('.');
-            if (parts.length >= 2) {
-              const pid = parts[0];
-              const keyId = /\.key\d+$/.test(s) ? parts[parts.length - 1] : 'key1';
-              const mid = keyId === 'key1' ? parts.slice(1).join('.').replace(/\.key\d+$/, '') : parts.slice(1, -1).join('.');
-              synthPush(pid, mid, keyId);
-              any = true;
-            }
-          }
-        }
-        if (!any) {
-          // Fallback: synthesize from provider models
-          for (const [pid, pCfg] of Object.entries(providers)) {
-            const models = Object.keys(this.asRecord((pCfg as any).models || {}));
-            for (const mid of models) { synthPush(pid, mid, 'key1'); any = true; }
-          }
-        }
-        pipelinesIn = synthesized;
-      } catch {
-        // If even synthesis fails, throw original error
-        throw new Error('[PipelineAssembler] No pipelines in pipeline_assembler.config. Ensure config-manager generated pipelines.');
-      }
+      throw new Error('[PipelineAssembler] No pipelines in pipeline_assembler.config. Ensure config-manager generated pipelines.');
     }
 
     const pipelines: PipelineConfig[] = [];
@@ -257,7 +200,18 @@ export class PipelineAssembler {
         provider: { type: provider.type, config: provCfg },
         compatibility: { type: compatibility.type, config: compatibility.config || {} },
       };
-      if (llmSwitch?.type) { modBlock.llmSwitch = { type: llmSwitch.type, config: llmSwitch.config || {} }; }
+      // Always ensure llmSwitch exists. If user omitted or provided legacy, default to llmswitch-anthropic-openai
+      if (llmSwitch?.type) {
+        const t = String(llmSwitch.type).toLowerCase();
+        if (t === 'llmswitch-anthropic-openai') {
+          modBlock.llmSwitch = { type: 'llmswitch-anthropic-openai', config: llmSwitch.config || {} };
+        } else {
+          // Replace legacy llmswitch types transparently
+          modBlock.llmSwitch = { type: 'llmswitch-anthropic-openai', config: {} };
+        }
+      } else {
+        modBlock.llmSwitch = { type: 'llmswitch-anthropic-openai', config: {} };
+      }
       if (workflow?.type) { modBlock.workflow = { type: workflow.type, config: workflow.config || {} }; }
       pipelines.push({ id, provider: { type: provider.type }, modules: modBlock, settings: { debugEnabled: true } } as PipelineConfig);
       seen.add(id);

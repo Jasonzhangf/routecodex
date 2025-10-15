@@ -605,7 +605,13 @@ export class ConfigManagerModule extends BaseModule {
 
       // 生成 pipeline_assembler.config 作为流水线唯一出口
       try {
-        const { buildPipelineAssemblerConfig } = await import('routecodex-config-compat');
+        const compatModule = await import('routecodex-config-compat');
+        const buildPipelineAssemblerConfig = (compatModule as any).buildPipelineAssemblerConfig;
+
+        if (typeof buildPipelineAssemblerConfig !== 'function') {
+          throw new Error('buildPipelineAssemblerConfig is not available in routecodex-config-compat module');
+        }
+
         // 合并逐目标 pipelineConfigs（用户提供的）到兼容层，以便导出器能够生成 pipelines
         const ccAny = compatibilityConfig as Record<string, any>;
         const userPipelineConfigs = (parsedUserConfig as any)?.pipelineConfigs
@@ -619,7 +625,7 @@ export class ConfigManagerModule extends BaseModule {
           if (k.includes('.')) { perTargetOnly[k] = v; }
         }
 
-  
+
         const compatForExport = {
           ...ccAny,
           pipelineConfigs: { ...ccPc, ...perTargetOnly },
@@ -651,7 +657,95 @@ export class ConfigManagerModule extends BaseModule {
 
         (mergedConfig as any).pipeline_assembler = { config: pac };
       } catch (e) {
-        console.warn('Failed to produce pipeline_assembler.config from compatibility layer:', e instanceof Error ? e.message : String(e));
+        // 兼容模块不可用时，使用严格且最小化的本地装配器，仅支持 openai 提供方，且不做任何 provider 猜测/替换。
+        try {
+          const pu = parsedUserConfig as Record<string, any>;
+          const vr = (pu && pu.virtualrouter) ? pu.virtualrouter as Record<string, any> : {};
+          const providers = (vr.providers || {}) as Record<string, any>;
+          const routing = (vr.routing || {}) as Record<string, any>;
+
+          // Helper: parse "provider.model[.keyX]" keeping internal dots in model
+          const parseTarget = (s: string): { providerId: string; modelId: string; keyId: string } | null => {
+            if (typeof s !== 'string' || !s.includes('.')) return null;
+            const firstDot = s.indexOf('.');
+            const providerId = s.slice(0, firstDot).trim();
+            let rest = s.slice(firstDot + 1);
+            let keyId = 'key1';
+            const m = rest.match(/\.key(\d+)$/i);
+            if (m) { keyId = `key${m[1]}`; rest = rest.slice(0, rest.lastIndexOf(m[0])); }
+            const modelId = rest.trim();
+            if (!providerId || !modelId) return null;
+            return { providerId, modelId, keyId };
+          };
+
+          const pipelines: any[] = [];
+          const routePools: Record<string, string[]> = {};
+          const routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }> = {};
+          const ensureArr = (v: any) => Array.isArray(v) ? v : [];
+          const seen = new Set<string>();
+
+          for (const [routeName, arr] of Object.entries(routing)) {
+            const targets = ensureArr(arr);
+            const ids: string[] = [];
+            for (const t of targets) {
+              const parsed = typeof t === 'string' ? parseTarget(t) : null;
+              if (!parsed) { continue; }
+              const { providerId, modelId, keyId } = parsed;
+              const provCfg = providers[providerId] || {};
+              const provTypeRaw = String(provCfg.type || providerId).toLowerCase();
+              if (provTypeRaw !== 'openai') {
+                // 严格模式：不支持非 openai 提供方的本地装配，避免隐式映射或误判
+                continue;
+              }
+              const pipelineId = `${providerId}_${keyId}.${modelId}`;
+              ids.push(pipelineId);
+              if (!seen.has(pipelineId)) {
+                seen.add(pipelineId);
+                // 提取 baseUrl / baseURL 与 apiKey（若存在）
+                const baseUrl = provCfg.baseUrl || provCfg.baseURL;
+                let apiKey: string | undefined;
+                if (provCfg.auth && typeof provCfg.auth === 'object' && provCfg.auth.apiKey) {
+                  apiKey = String(provCfg.auth.apiKey);
+                } else if (Array.isArray(provCfg.apiKey) && provCfg.apiKey[0]) {
+                  apiKey = String(provCfg.apiKey[0]);
+                } else if (typeof provCfg.apiKey === 'string' && provCfg.apiKey.trim()) {
+                  apiKey = String(provCfg.apiKey).trim();
+                }
+
+                pipelines.push({
+                  id: pipelineId,
+                  modules: {
+                    llmSwitch: { type: 'llmswitch-anthropic-openai', config: {} },
+                    workflow: { type: 'streaming-control', config: {} },
+                    compatibility: { type: 'field-mapping', config: {} },
+                    provider: {
+                      type: 'openai-provider',
+                      config: {
+                        ...(baseUrl ? { baseUrl } : {}),
+                        model: modelId,
+                        ...(apiKey ? { auth: { type: 'apikey', apiKey } } : {})
+                      }
+                    }
+                  },
+                  settings: { debugEnabled: true }
+                });
+                routeMeta[pipelineId] = { providerId, modelId, keyId };
+              }
+            }
+            routePools[routeName] = ids;
+          }
+
+          // 最少要有 default 路由；否则视为配置不完整
+          if (!routePools.default || routePools.default.length === 0) {
+            throw new Error('No default route targets available for local assembler');
+          }
+
+          (mergedConfig as any).pipeline_assembler = {
+            config: { pipelines, routePools, routeMeta, routeTargets: routing }
+          };
+        } catch (fallbackError) {
+          throw new Error(`Failed to produce pipeline_assembler.config: ${e instanceof Error ? e.message : String(e)}; local assembler also failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+        }
       }
 
       // 附加版本元信息（便于宿主断言契约）

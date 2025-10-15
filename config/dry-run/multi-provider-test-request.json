@@ -73,7 +73,6 @@
   "debug": {
     "enabled": true,
     "stages": {
-      "llm-switch": true,
       "compatibility": true,
       "provider": true,
       "load-balancer": true

@@ -872,10 +872,17 @@ export class HttpServer extends BaseModule implements IHttpServer {
 
         const requestId = `anth_${Date.now()}`;
         const pickFirst = (): string | null => {
-          const pools = this.routePools || {};
-          const list = pools['anthropic'] || pools['default'] || [];
-          if (!list.length) { return null; }
-          return list[0];
+          const pools = this.routePools || {} as Record<string, string[]>;
+          // Prefer non-empty anthropic pool; otherwise fallback to default
+          const anth = Array.isArray(pools['anthropic']) ? pools['anthropic'] : [];
+          const def = Array.isArray(pools['default']) ? pools['default'] : [];
+          const list = anth.length > 0 ? anth : def;
+          if (list.length > 0) { return list[0]; }
+          // As a last resort, pick the first pipeline id from any non-empty pool
+          for (const v of Object.values(pools)) {
+            if (Array.isArray(v) && v.length > 0) { return v[0]; }
+          }
+          return null;
         };
 
         let codexCaptured = false;

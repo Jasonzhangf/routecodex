@@ -135,13 +135,6 @@
   "dryRun": {
     "simulationMode": "full",
     "nodeConfigs": {
-      "llm-switch": {
-        "enabled": true,
-        "mode": "dry-run",
-        "simulateRouting": true,
-        "simulateClassification": true,
-        "classifyRequests": true
-      },
       "compatibility": {
         "enabled": true,
         "mode": "dry-run",

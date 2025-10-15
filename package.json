@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.46.25",
+  "version": "0.46.26",
   "description": "Multi-provider OpenAI proxy server with native dry-run capabilities",
   "type": "module",
   "main": "dist/index.js",
@@ -30,7 +30,7 @@
   ],
   "scripts": {
     "build": "npm run clean && tsc",
-    "postbuild": "chmod +x dist/cli.js || true",
+    "postbuild": "chmod +x dist/cli.js || true && node scripts/start-verify.mjs --mode bg --timeout 120 || true",
     "build:watch": "tsc --watch",
     "start": "npm run -s start:bg",
     "dev": "tsx watch src/index.ts",
@@ -56,6 +56,7 @@
     "start:bg": "bash scripts/run-bg.sh -- 'node dist/index.js'",
     "start:fg": "bash scripts/run-fg-gtimeout.sh 12 -- 'node dist/index.js'",
     "start:verify": "node scripts/start-verify.mjs --mode bg --timeout 180",
+    "build:verify": "npm run build && npm run -s start:verify",
     "start:verify:fg": "node scripts/start-verify.mjs --mode fg --timeout 90",
     "dry-run": "node scripts/dry-run-cli.mjs",
     "dry-run:samples": "tsx scripts/samples-dry-run.mjs",

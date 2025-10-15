@@ -29,6 +29,8 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
   private enableStreaming: boolean;
   private enableTools: boolean;
   private trustSchema: boolean;
+  // Remember entry protocol by requestId so responses map back to entry
+  private entryByRequestId: Map<string, 'anthropic' | 'openai'> = new Map();
 
   // Sticky tools/backfill is disabled per request: do not inject or cache tools
 
@@ -60,6 +62,24 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     const payload = isDto ? (dto!.data as any) : (requestParam as unknown as any);
     const requestFormat = detectRequestFormat(payload);
 
+    // Determine entry protocol from metadata/url first; fallback to format detection
+    const reqId = dto?.route?.requestId;
+    const meta: any = isDto ? (dto as any).metadata || {} : {};
+    const targetProto: string | undefined = meta?.targetProtocol || payload?._metadata?.targetProtocol;
+    const endpoint: string = (meta?.endpoint || meta?.url || payload?._metadata?.endpoint || '') as string;
+    const inferEntry = (): 'anthropic' | 'openai' => {
+      if (targetProto === 'anthropic' || targetProto === 'openai') { return targetProto; }
+      if (typeof endpoint === 'string' && endpoint.includes('/v1/messages')) { return 'anthropic'; }
+      if (typeof endpoint === 'string' && (endpoint.includes('/v1/chat/completions') || endpoint.includes('/v1/completions'))) { return 'openai'; }
+      // fallback: infer from body shape
+      const rf = requestFormat;
+      if (rf === 'anthropic') { return 'anthropic'; }
+      return 'openai';
+    };
+    const entry = inferEntry();
+    try { if (reqId) { this.entryByRequestId.set(reqId, entry); } } catch { /* ignore */ }
+
+    // Canonicalize inbound to OpenAI regardless of entry
     if (requestFormat === 'anthropic') {
       // Debug presence of tools before conversion
       try {
@@ -88,29 +108,31 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
           targetFormat: 'openai'
         }
       } as Record<string, unknown>;
+      const stamped = { ...(out as any), _metadata: { ...(out as any)?._metadata, entryProtocol: entry, targetProtocol: entry } };
       return isDto
-        ? { ...dto!, data: out }
-        : ({ data: out, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest);
+        ? { ...dto!, data: stamped }
+        : ({ data: stamped, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest);
     }
 
     if (requestFormat === 'openai') {
-      // Convert OpenAI-style request to Anthropic-style when selected switch is Anthropic
-      const transformedRequest = this.convertOpenAIRequestToAnthropic(payload);
-      this.logger.logTransformation(this.id, 'openai-to-anthropic-request', payload, transformedRequest);
-      try { await this.captureConversion('openai-to-anth-request', requestParam, payload, transformedRequest); } catch { /* Empty catch block */ }
+      // Keep OpenAI as canonical. Optionally normalize arguments to strings.
+      const normalized = this.normalizeOpenAIInbound(payload);
+      this.logger.logTransformation(this.id, 'openai-canonical-request', payload, normalized);
+      try { await this.captureConversion('openai-canonical-request', requestParam, payload, normalized); } catch { /* Empty catch block */ }
       const out = {
-        ...transformedRequest,
+        ...normalized,
         _metadata: {
           switchType: this.type,
-          direction: 'openai-to-anthropic',
+          direction: 'openai-canonical',
           timestamp: Date.now(),
           originalFormat: 'openai',
-          targetFormat: 'anthropic'
+          targetFormat: 'openai'
         }
       } as Record<string, unknown>;
+      const stamped = { ...(out as any), _metadata: { ...(out as any)?._metadata, entryProtocol: entry, targetProtocol: entry } };
       return isDto
-        ? { ...dto!, data: out as any }
-        : ({ data: out, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest);
+        ? { ...dto!, data: stamped as any }
+        : ({ data: stamped, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest);
     }
 
     const passthrough = {
@@ -123,9 +145,10 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
         targetFormat: requestFormat
       }
     } as Record<string, unknown>;
+    const stamped = { ...(passthrough as any), _metadata: { ...(passthrough as any)?._metadata, entryProtocol: entry, targetProtocol: entry } };
     return isDto
-      ? { ...dto!, data: passthrough }
-      : ({ data: passthrough, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest);
+      ? { ...dto!, data: stamped }
+      : ({ data: stamped, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest);
   }
 
   async processOutgoing(responseParam: SharedPipelineResponse | any): Promise<SharedPipelineResponse | any> {
@@ -148,11 +171,25 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     payload = unwrap(payload);
     const responseFormat = detectResponseFormat(payload);
 
+    // Decide target protocol based on sticky entry (or fallback to metadata/url)
+    const reqId: string | undefined = isDto ? ((responseParam as SharedPipelineResponse).metadata as any)?.requestId : undefined;
+    let entry: 'anthropic' | 'openai' | null = null;
+    if (reqId && this.entryByRequestId.has(reqId)) {
+      entry = this.entryByRequestId.get(reqId)!;
+      try { this.entryByRequestId.delete(reqId); } catch { /* ignore */ }
+    } else {
+      // fallback: inspect metadata on body
+      const meta: any = (isDto ? (responseParam as any)?.metadata : (payload as any)?._metadata) || {};
+      const targetProto = meta?.targetProtocol || meta?.entryProtocol;
+      if (targetProto === 'anthropic' || targetProto === 'openai') { entry = targetProto; }
+      // else leave null, will decide based on format and prefer openai
+    }
+
     // Attempt to extract tool schemas from the original request context (if available)
     // so we can normalize OpenAI tool_calls → Anthropic tool_use against declared schemas.
     const toolSchemaMap = this.extractToolSchemaMapFromContext(responseParam);
 
-    if (responseFormat === 'openai') {
+    if (entry === 'anthropic' || (entry === null && responseFormat === 'openai')) {
       // Debug: presence of tool_calls in OpenAI response before conversion
       try {
         const toolCalls = Array.isArray((payload as any)?.choices?.[0]?.message?.tool_calls)
@@ -172,6 +209,25 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
           responseTimestamp: Date.now(),
           originalFormat: 'openai',
           targetFormat: 'anthropic'
+        }
+      } as Record<string, unknown>;
+      return isDto ? { ...(responseParam as SharedPipelineResponse), data: out } : out;
+    }
+
+    // OpenAI target path: convert Anthropic -> OpenAI when needed
+    if (entry === 'openai' && responseFormat === 'anthropic') {
+      const transformedResponse = this.convertAnthropicResponseToOpenAI(payload);
+      this.logger.logTransformation(this.id, 'anthropic-to-openai-response', payload, transformedResponse);
+      try { await this.captureConversion('anth-to-openai-response', responseParam, payload, transformedResponse); } catch { /* ignore */ }
+      const out = {
+        ...transformedResponse,
+        _metadata: {
+          ...(payload?._metadata || {}),
+          switchType: this.type,
+          direction: 'anthropic-to-openai',
+          responseTimestamp: Date.now(),
+          originalFormat: 'anthropic',
+          targetFormat: 'openai'
         }
       } as Record<string, unknown>;
       return isDto ? { ...(responseParam as SharedPipelineResponse), data: out } : out;
@@ -235,6 +291,11 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     if (responseFormat === 'openai') {
       const out = this.convertOpenAIResponseToAnthropic(payload, this.extractToolSchemaMapFromContext(input));
       try { await this.captureConversion('openai-to-anth-response-plain', undefined as any, payload, out); } catch { /* Empty catch block */ }
+      return out;
+    }
+    if (responseFormat === 'anthropic') {
+      const out = this.convertAnthropicResponseToOpenAI(payload);
+      try { await this.captureConversion('anth-to-openai-response-plain', undefined as any, payload, out); } catch { /* ignore */ }
       return out;
     }
     return payload;
@@ -426,6 +487,29 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     }
     this.copyParameters(request, transformed, requestMappings.parameters);
     return transformed;
+  }
+
+  // Normalize OpenAI inbound request (make sure tool_calls args are strings)
+  private normalizeOpenAIInbound(request: any): any {
+    if (!request || typeof request !== 'object') { return request; }
+    const out = { ...request };
+    if (Array.isArray(out.messages)) {
+      out.messages = out.messages.map((m: any) => {
+        if (!m || typeof m !== 'object') { return m; }
+        if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+          m = { ...m, tool_calls: m.tool_calls.map((tc: any) => {
+            if (!tc || typeof tc !== 'object') { return tc; }
+            const fn = tc.function || {};
+            if (fn && typeof fn === 'object' && fn.arguments !== undefined && typeof fn.arguments !== 'string') {
+              try { fn.arguments = JSON.stringify(fn.arguments); } catch { fn.arguments = String(fn.arguments); }
+            }
+            return { ...tc, function: fn };
+          }) };
+        }
+        return m;
+      });
+    }
+    return out;
   }
 
   private convertOpenAIRequestToAnthropic(request: any): any {
@@ -677,6 +761,56 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     if (response.model) {transformed.model = response.model;}
     if (response.created) {transformed.created = response.created;}
     return transformed;
+  }
+
+  private convertAnthropicResponseToOpenAI(response: any): any {
+    const out: any = {
+      id: response?.id || `chatcmpl_${Date.now()}`,
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: response?.model || 'unknown',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: '' as any },
+          finish_reason: undefined as any
+        }
+      ]
+    };
+    const choice = out.choices[0];
+    const blocks = Array.isArray(response?.content) ? response.content : [];
+    const toolCalls: any[] = [];
+    const textParts: string[] = [];
+    for (const b of blocks) {
+      if (!b || typeof b !== 'object') { continue; }
+      if (b.type === 'text' && typeof b.text === 'string') {
+        textParts.push(b.text);
+      }
+      if (b.type === 'tool_use') {
+        const name = typeof b.name === 'string' ? b.name : 'tool';
+        let args = b.input;
+        if (typeof args !== 'string') { try { args = JSON.stringify(args ?? {}); } catch { args = '{}'; } }
+        toolCalls.push({ id: b.id || `call_${Math.random().toString(36).slice(2)}`, type: 'function', function: { name, arguments: args } });
+      }
+    }
+    // Set assistant message
+    const contentStr = textParts.join('\n');
+    if (toolCalls.length > 0) {
+      choice.message = { role: 'assistant', content: contentStr || '', tool_calls: toolCalls };
+      choice.finish_reason = 'tool_calls';
+    } else {
+      choice.message = { role: 'assistant', content: contentStr };
+      choice.finish_reason = response?.stop_reason ? this.conversionConfig.responseMappings?.finishReason?.mapping?.[response.stop_reason] || 'stop' : 'stop';
+    }
+    if (response?.usage && typeof response.usage === 'object') {
+      const u = response.usage;
+      out.usage = {
+        prompt_tokens: u.input_tokens ?? u.prompt_tokens,
+        completion_tokens: u.output_tokens ?? u.completion_tokens,
+        total_tokens: u.total_tokens ?? ((u.input_tokens || 0) + (u.output_tokens || 0))
+      };
+    }
+    return out;
   }
 
   private convertAnthropicToolsToOpenAI(tools: any[]): any[] {
