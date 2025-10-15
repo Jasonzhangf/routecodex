@@ -70,4 +70,12 @@ Summary
 - Verified build triggers postbuild background start + /ready self-check.
 - Ensured quick-install runs a runtime verification after global install.
 - Reaffirmed Anthropic GLM path: `/v1/messages` returns Anthropic payload; OpenAI path: `/v1/chat/completions` returns OpenAI payload. No glm-http-provider fallback.
+## 0.46.28 (2025-10-15)
+
+Title: Merge additional worktrees; build + global install
+
+Summary
+- Merged feat/new-feature and fix/syntax-errors into main.
+- Bumped version to 0.46.28.
+- Verified build hooks and global install flows.
 
