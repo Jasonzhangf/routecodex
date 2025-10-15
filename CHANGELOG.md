@@ -60,4 +60,14 @@ Verification
   - `POST /v1/messages` (Anthropic) → 200, Anthropic message payload
   - `POST /v1/chat/completions` (OpenAI) → 200, OpenAI chat.completion payload
 - Log `pipeline-created` shows only `openai-provider`; no `glm-http-provider` artifacts.
+## 0.46.27 (2025-10-15)
+
+Title: Merge worktree into main; final build + runtime validation; global install readiness
+
+Summary
+- Merged chore/branch-grouping into main, adopting v0.46.26 changes.
+- Bumped version to 0.46.27.
+- Verified build triggers postbuild background start + /ready self-check.
+- Ensured quick-install runs a runtime verification after global install.
+- Reaffirmed Anthropic GLM path: `/v1/messages` returns Anthropic payload; OpenAI path: `/v1/chat/completions` returns OpenAI payload. No glm-http-provider fallback.
 

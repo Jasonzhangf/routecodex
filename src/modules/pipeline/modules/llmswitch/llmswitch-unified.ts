@@ -72,7 +72,7 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
   /**
    * Process incoming request as DTO
    */
-  async processIncoming<T>(request: T): Promise<T> {
+  async processIncoming(request: SharedPipelineRequest): Promise<SharedPipelineRequest> {
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -87,13 +87,13 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
     const selectedSwitch = protocol === 'anthropic' ? this.anthropicSwitch : this.openaiSwitch;
 
     // 使用选中的转换器处理请求
-    return await selectedSwitch.processIncoming(request) as T;
+    return await selectedSwitch.processIncoming(request) as SharedPipelineRequest;
   }
 
   /**
    * Transform request to target protocol
    */
-  async transformRequest<T>(request: T): Promise<T> {
+  async transformRequest(request: any): Promise<any> {
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -109,7 +109,7 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
   /**
    * Process outgoing response
    */
-  async processOutgoing<T>(response: T): Promise<T> {
+  async processOutgoing(response: any): Promise<any> {
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -139,7 +139,7 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
   /**
    * Transform response from target protocol
    */
-  async transformResponse<T>(response: T): Promise<T> {
+  async transformResponse(response: any): Promise<any> {
     if (!this.isInitialized) {
       await this.initialize();
     }
