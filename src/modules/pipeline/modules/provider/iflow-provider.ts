@@ -12,7 +12,7 @@ import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { createIFlowOAuth, IFlowTokenStorage } from './iflow-oauth.js';
 import { DebugEventBus } from "rcc-debugcenter";
 
-const IFLOW_API_ENDPOINT = 'https://apis.iflow.cn/v1';
+const IFLOW_API_ENDPOINT = 'https://api.iflow.cn/v1';
 
 export class IFlowProvider implements ProviderModule {
   readonly id: string;
@@ -445,7 +445,20 @@ export class IFlowProvider implements ProviderModule {
 
   private getAPIEndpoint(): string {
     const providerConfig = this.config.config as ProviderConfig;
-    return providerConfig.baseUrl || IFLOW_API_ENDPOINT;
+    const raw = providerConfig.baseUrl || '';
+    try {
+      if (!raw) return IFLOW_API_ENDPOINT;
+      const u = new URL(raw);
+      const host = (u.host || '').toLowerCase();
+      const path = u.pathname || '';
+      // Heuristic: if pointing to top-level iflow.cn without versioned API path, use official OpenAI-compatible endpoint
+      if ((host === 'iflow.cn' || host.endsWith('.iflow.cn')) && !host.startsWith('apis.') && !/\/v\d+(\/|$)/.test(path)) {
+        return IFLOW_API_ENDPOINT; // https://apis.iflow.cn/v1
+      }
+      return raw.replace(/\/$/, '');
+    } catch {
+      return IFLOW_API_ENDPOINT;
+    }
   }
 
   private async sendChatRequest(request: Record<string, unknown>): Promise<ProviderResponse> {
