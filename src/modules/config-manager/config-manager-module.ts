@@ -693,8 +693,19 @@ export class ConfigManagerModule extends BaseModule {
               const { providerId, modelId, keyId } = parsed;
               const provCfg = providers[providerId] || {};
               const provTypeRaw = String(provCfg.type || providerId).toLowerCase();
-              if (provTypeRaw !== 'openai') {
-                // 严格模式：不支持非 openai 提供方的本地装配，避免隐式映射或误判
+              // 允许多家族本地装配（openai | lmstudio | qwen | glm | iflow）
+              // 将家族映射为注册的 provider/compatibility 模块
+              const providerModuleType = (() => {
+                if (provTypeRaw === 'openai') return 'openai-provider';
+                if (provTypeRaw === 'lmstudio') return 'lmstudio-http';
+                if (provTypeRaw === 'qwen') return 'qwen-provider';
+                if (provTypeRaw === 'glm' || providerId.toLowerCase() === 'glm') return 'glm-http-provider';
+                if (provTypeRaw === 'iflow') return 'iflow-provider';
+                return '';
+              })();
+
+              if (!providerModuleType) {
+                // 未识别的提供方家族，跳过（保持严格模式，避免误装配）
                 continue;
               }
               const pipelineId = `${providerId}_${keyId}.${modelId}`;
@@ -711,15 +722,24 @@ export class ConfigManagerModule extends BaseModule {
                 } else if (typeof provCfg.apiKey === 'string' && provCfg.apiKey.trim()) {
                   apiKey = String(provCfg.apiKey).trim();
                 }
+                // 兼容模块：按家族选择，未知时退回 field-mapping（尽量无损）
+                const compatibilityModuleType = (() => {
+                  if (provTypeRaw === 'openai') return 'field-mapping';
+                  if (provTypeRaw === 'lmstudio') return 'lmstudio-compatibility';
+                  if (provTypeRaw === 'qwen') return 'qwen-compatibility';
+                  if (provTypeRaw === 'glm' || providerId.toLowerCase() === 'glm') return 'glm-compatibility';
+                  if (provTypeRaw === 'iflow') return 'iflow-compatibility';
+                  return 'field-mapping';
+                })();
 
                 pipelines.push({
                   id: pipelineId,
                   modules: {
                     llmSwitch: { type: 'llmswitch-anthropic-openai', config: {} },
                     workflow: { type: 'streaming-control', config: {} },
-                    compatibility: { type: 'field-mapping', config: {} },
+                    compatibility: { type: compatibilityModuleType, config: {} },
                     provider: {
-                      type: 'openai-provider',
+                      type: providerModuleType,
                       config: {
                         ...(baseUrl ? { baseUrl } : {}),
                         model: modelId,

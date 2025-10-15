@@ -73,6 +73,17 @@ export class LMStudioCompatibility implements CompatibilityModule {
       const requestObj = request as UnknownObject;
       this.logger.logModule(this.id, 'processing-request-start', { hasTools: !!requestObj?.tools, model: requestObj?.model });
 
+      // Normalize LM Studio specific quirks before transformation
+      // - tool_choice must be a string: 'none' | 'auto' | 'required'
+      //   If an OpenAI-style object is provided, force to 'required' to trigger tool call
+      try {
+        const tc = (requestObj as Record<string, unknown>)['tool_choice'];
+        if (tc && typeof tc === 'object' && !Array.isArray(tc)) {
+          (requestObj as Record<string, unknown>)['tool_choice'] = 'required';
+          this.logger.logModule(this.id, 'normalized-tool_choice', { from: 'object', to: 'required' });
+        }
+      } catch { /* ignore normalization errors */ }
+
       // Apply transformation rules to request
       const transformedResult = await this.applyTransformations(
         request,
