@@ -420,7 +420,10 @@ export class IFlowOAuth {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json',
-        'User-Agent': 'RouteCodex-OAuth/1.0'
+        'User-Agent': 'RouteCodex-OAuth/1.0',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Origin': 'https://iflow.cn',
+        'Referer': 'https://iflow.cn/oauth'
       },
       body: formData
     });
@@ -438,7 +441,10 @@ export class IFlowOAuth {
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
             'Accept': 'application/json',
-            'User-Agent': 'RouteCodex-OAuth/1.0'
+            'User-Agent': 'RouteCodex-OAuth/1.0',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Origin': 'https://iflow.cn',
+            'Referer': 'https://iflow.cn/oauth'
           },
           body: formData
         });
@@ -458,7 +464,10 @@ export class IFlowOAuth {
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
             'Accept': 'application/json',
-            'User-Agent': 'RouteCodex-OAuth/1.0'
+            'User-Agent': 'RouteCodex-OAuth/1.0',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Origin': 'https://iflow.cn',
+            'Referer': 'https://iflow.cn/oauth'
           },
           body: formData
         });
@@ -494,7 +503,10 @@ export class IFlowOAuth {
             headers: {
               'Content-Type': 'application/x-www-form-urlencoded',
               'Accept': 'application/json',
-              'User-Agent': 'RouteCodex-OAuth/1.0'
+              'User-Agent': 'RouteCodex-OAuth/1.0',
+              'X-Requested-With': 'XMLHttpRequest',
+              'Origin': 'https://iflow.cn',
+              'Referer': 'https://iflow.cn/oauth'
             },
             body: formData
           });
@@ -510,7 +522,10 @@ export class IFlowOAuth {
               headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Accept': 'application/json',
-                'User-Agent': 'RouteCodex-OAuth/1.0'
+                'User-Agent': 'RouteCodex-OAuth/1.0',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Origin': 'https://iflow.cn',
+                'Referer': 'https://iflow.cn/oauth'
               },
               body: formData
             });
@@ -533,7 +548,10 @@ export class IFlowOAuth {
                 headers: {
                   'Content-Type': 'application/x-www-form-urlencoded',
                   'Accept': 'application/json',
-                  'User-Agent': 'RouteCodex-OAuth/1.0'
+                  'User-Agent': 'RouteCodex-OAuth/1.0',
+                  'X-Requested-With': 'XMLHttpRequest',
+                  'Origin': 'https://iflow.cn',
+                  'Referer': 'https://iflow.cn/oauth'
                 },
                 body: formData
               });
@@ -581,7 +599,10 @@ export class IFlowOAuth {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           'Accept': 'application/json',
-          'User-Agent': 'RouteCodex-OAuth/1.0'
+          'User-Agent': 'RouteCodex-OAuth/1.0',
+          'X-Requested-With': 'XMLHttpRequest',
+          'Origin': 'https://iflow.cn',
+          'Referer': 'https://iflow.cn/oauth'
         },
         body: formData
       });
@@ -602,7 +623,10 @@ export class IFlowOAuth {
               headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Accept': 'application/json',
-                'User-Agent': 'RouteCodex-OAuth/1.0'
+                'User-Agent': 'RouteCodex-OAuth/1.0',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Origin': 'https://iflow.cn',
+                'Referer': 'https://iflow.cn/oauth'
               },
               body: formData
             });
