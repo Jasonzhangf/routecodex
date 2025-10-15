@@ -15,7 +15,7 @@ import OpenAI from 'openai';
 import fs from 'fs/promises';
 import path from 'path';
 import { homedir } from 'os';
-import { createProviderError } from './shared/provider-helpers.js';
+import { createProviderError, buildAuthHeaders } from './shared/provider-helpers.js';
 import crypto from 'crypto';
 
 /**
@@ -48,6 +48,44 @@ export class OpenAIProvider implements ProviderModule {
 
     // Initialize debug enhancements
     this.initializeDebugEnhancements();
+  }
+
+  // ---- Normalization helpers ----
+  private normalizeBaseUrl(u?: string): string | undefined {
+    if (!u) return u;
+    try {
+      let s = String(u).trim();
+      // Drop any explicit endpoint suffix if present
+      s = s.replace(/\/(chat|completions|messages)(\/.*)?$/i, '');
+      // Remove duplicate consecutive slashes (except protocol)
+      s = s.replace(/([^:])\/+/g, '$1/');
+      // If openai.com domain and missing '/v1', add it
+      if (/api\.openai\.com/i.test(s) && !/\/v1\/?$/i.test(s)) {
+        s = s.replace(/\/?$/, '/v1');
+      }
+      // If GLM coding paas path accidentally appends '/v1', drop it
+      if (/open\.bigmodel\.cn/i.test(s) && /\/v1\/?$/i.test(s)) {
+        s = s.replace(/\/v1\/?$/i, '');
+      }
+      return s;
+    } catch { return u; }
+  }
+
+  private resolveApiKey(cfg: ProviderConfig): { key?: string; source: 'config' | 'env' | 'none' } {
+    const isRedacted = (s?: string) => !!s && (/\*/.test(s) || /REDACTED/i.test(s));
+    const pickFromConfig = (): string | undefined => {
+      const direct = (cfg as any)?.auth?.apiKey as string | undefined;
+      if (direct && String(direct).trim() && !isRedacted(direct)) return String(direct).trim();
+      const top = (cfg as any)?.apiKey as unknown;
+      if (Array.isArray(top) && (top as any[])[0] && !isRedacted(String((top as any[])[0]))) return String((top as any[])[0]).trim();
+      if (typeof top === 'string' && (top as string).trim() && !isRedacted(top as string)) return (top as string).trim();
+      return undefined;
+    };
+    const c = pickFromConfig();
+    if (c) return { key: c, source: 'config' };
+    const envKey = String(process.env.GLM_API_KEY || process.env.ROUTECODEX_API_KEY || process.env.OPENAI_API_KEY || '').trim();
+    if (envKey) return { key: envKey, source: 'env' };
+    return { key: undefined, source: 'none' };
   }
 
   // ---- Error normalization helpers (class-local static) ----
@@ -154,12 +192,18 @@ export class OpenAIProvider implements ProviderModule {
         dangerouslyAllowBrowser: true // Allow browser usage for Node.js environments
       };
 
-      if (providerConfig.baseUrl) {
-        openaiConfig.baseURL = providerConfig.baseUrl;
+      // Always prefer config over environment for compatibility providers
+      // Normalize base URL for OpenAI-compatible providers to avoid double '/v1' or stray endpoints
+      const baseUrlNormalized = this.normalizeBaseUrl(providerConfig.baseUrl);
+      if (baseUrlNormalized) {
+        openaiConfig.baseURL = baseUrlNormalized;
       }
 
-      if (providerConfig.auth?.apiKey) {
-        openaiConfig.apiKey = providerConfig.auth.apiKey;
+      const { key: apiKey, source: keySource } = this.resolveApiKey(providerConfig);
+      if (apiKey) {
+        openaiConfig.apiKey = apiKey;
+        // Also project back into providerConfig.auth to align with downstream checks
+        (providerConfig as any).auth = { ...(providerConfig as any).auth, apiKey } as any;
       }
 
       if (providerConfig.auth?.organization) {
@@ -171,14 +215,34 @@ export class OpenAIProvider implements ProviderModule {
         openaiConfig.timeout = providerConfig.compatibility.timeout;
       }
 
+      // Debug: snapshot resolved init params (redacted)
+      try {
+        const mask = (s?: string) => (s && s.length >= 8) ? `${s.slice(0,2)}***${s.slice(-4)}` : (!!s ? '***' : '');
+        this.logger.logModule(this.id, 'init-config-resolved', {
+          baseUrl_from_config: providerConfig.baseUrl || null,
+          baseUrl_normalized: baseUrlNormalized || null,
+          apiKey_present_in_config: !!providerConfig.auth?.apiKey,
+          apiKey_sample: mask(providerConfig.auth?.apiKey as string | undefined),
+          apiKey_source: (apiKey ? keySource : 'none')
+        });
+      } catch { /* ignore */ }
+
       this.openai = new OpenAI(openaiConfig);
       this.client = this.openai;
 
       // Store auth context
       this.authContext = providerConfig.auth || null;
 
-      // Test connection
-      await this.testConnection();
+      // Test connection (skip when dry-run enabled)
+      const providerCfgInit = this.config.config as ProviderConfig;
+      const dryRunEnabled = String(process.env.ROUTECODEX_PROVIDER_DRY_RUN || '').trim() === '1'
+        || (providerConfig as any)?.dryRun === true
+        || (providerCfgInit?.compatibility as any)?.dryRun === true;
+      if (!dryRunEnabled) {
+        await this.testConnection();
+      } else {
+        this.logger.logModule(this.id, 'connection-test-skipped', { reason: 'dry-run-enabled' });
+      }
 
       this.isInitialized = true;
       this.logger.logModule(this.id, 'initialized');
@@ -248,6 +312,35 @@ export class OpenAIProvider implements ProviderModule {
         hasMessages: Array.isArray((request as { messages?: any[] }).messages),
         hasTools: Array.isArray((request as { tools?: any[] }).tools)
       });
+
+      // Preflight param check before network call; ensure '/v1' not duplicated and endpoint path is correct
+      try {
+        const providerConfig = this.config.config as ProviderConfig;
+        const mask = (s?: string) => (s && s.length >= 8) ? `${s.slice(0,2)}***${s.slice(-4)}` : (!!s ? '***' : '');
+        const reqModel = (request as any)?.model;
+        const normalized = this.normalizeBaseUrl(providerConfig.baseUrl);
+        // If normalization changed effective base url, recreate client with corrected base
+        if (normalized && normalized !== providerConfig.baseUrl) {
+          try {
+            const { key: k } = this.resolveApiKey(providerConfig);
+            this.openai = new OpenAI({
+              baseURL: normalized,
+              apiKey: k || (providerConfig as any)?.auth?.apiKey,
+              dangerouslyAllowBrowser: true,
+            });
+            this.client = this.openai;
+            (providerConfig as any).baseUrl = normalized;
+          } catch { /* ignore reinit error */ }
+        }
+        this.logger.logModule(this.id, 'preflight-param-check', {
+          requestId,
+          baseUrl_effective: (this.config.config as any)?.baseUrl || providerConfig.baseUrl || null,
+          apiKey_present: !!providerConfig.auth?.apiKey,
+          apiKey_sample: mask(providerConfig.auth?.apiKey as string | undefined),
+          auth_header_sample: providerConfig.auth?.apiKey ? `Bearer ${mask(providerConfig.auth.apiKey as string)}` : null,
+          request_model: reqModel || null,
+        });
+      } catch { /* ignore */ }
 
       if (this.isDebugEnhanced) {
         this.publishProviderEvent('request-start', {
@@ -328,9 +421,76 @@ export class OpenAIProvider implements ProviderModule {
         }
       } catch { /* noop: optional debug payload save */ void 0; }
 
-      // Send request to OpenAI
-      type ChatCreateArg = Parameters<OpenAI['chat']['completions']['create']>[0];
-      const response = await (localClient || this.openai)!.chat.completions.create(chatRequest as unknown as ChatCreateArg);
+      // Dry-run short-circuit: simulate provider response without network
+      const providerCfgDry = this.config.config as ProviderConfig;
+      const dryRunEnabled = String(process.env.ROUTECODEX_PROVIDER_DRY_RUN || '').trim() === '1'
+        || (providerCfgDry as any)?.dryRun === true
+        || (providerCfgDry?.compatibility as any)?.dryRun === true;
+      let response: any;
+      if (dryRunEnabled) {
+        response = {
+          id: `dryrun-${requestId}`,
+          object: 'chat.completion',
+          created: Math.floor(Date.now() / 1000),
+          model: (chatRequest as any).model || 'simulated-model',
+          choices: [
+            {
+              index: 0,
+              message: { role: 'assistant', content: 'Simulated provider output (dry-run)' },
+              finish_reason: 'stop'
+            }
+          ],
+          usage: { prompt_tokens: 64, completion_tokens: 128, total_tokens: 192 }
+        };
+      } else {
+        // Decide path: real OpenAI SDK for api.openai.com, otherwise compatibility fetch
+        const providerCfg = this.config.config as ProviderConfig;
+        const baseNorm = this.normalizeBaseUrl(providerCfg.baseUrl) || providerCfg.baseUrl || '';
+        const isOpenAIDomain = /api\.openai\.com/i.test(String(baseNorm));
+        if (isOpenAIDomain) {
+          type ChatCreateArg = Parameters<OpenAI['chat']['completions']['create']>[0];
+          response = await (localClient || this.openai)!.chat.completions.create(chatRequest as unknown as ChatCreateArg);
+        } else {
+          // Compatibility fetch for third-party OpenAI-compatible providers (e.g., GLM)
+          const { key: apiKey } = this.resolveApiKey(providerCfg);
+          const join = (a: string, b: string) => a.replace(/\/+$/,'') + '/' + b.replace(/^\/+/, '');
+          const endpoint = join(baseNorm, 'chat/completions');
+          // Log compat preflight (sanitized)
+          try {
+            const mask = (s?: string) => (s && s.length >= 8) ? `${s.slice(0,2)}***${s.slice(-4)}` : (!!s ? '***' : '');
+            this.logger.logModule(this.id, 'compat-preflight', {
+              endpoint,
+              baseUrl_normalized: baseNorm,
+              apiKey_present: !!apiKey,
+              apiKey_sample: mask(apiKey),
+            });
+          } catch { /* ignore */ }
+          const controller = new AbortController();
+          const t = setTimeout(() => { try { controller.abort(); } catch {} }, Math.max(1, Number((providerCfg as any)?.timeout || 300000)));
+          const headersBase: Record<string,string> = { 'Content-Type': 'application/json', 'User-Agent': 'RouteCodex/openai-compat' };
+          const authCtx: any = { type: 'apikey', token: apiKey, credentials: (providerCfg as any)?.auth?.credentials };
+          const headers = buildAuthHeaders(authCtx, headersBase);
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(chatRequest),
+            signal: (controller as any).signal
+          } as any);
+          clearTimeout(t);
+          const text = await res.text();
+          let json: any = null; try { json = JSON.parse(text); } catch { json = null; }
+          if (!res.ok) {
+            const errMsg = json?.error?.message || json?.message || text || `HTTP ${res.status}`;
+            this.logger.logModule(this.id, 'compat-request-error', { status: res.status, endpoint, message: errMsg });
+            const httpErr: any = new Error(errMsg);
+            httpErr.status = res.status;
+            httpErr.details = { upstream: { status: res.status, body: text } };
+            throw createProviderError(httpErr, 'network');
+          }
+          this.logger.logModule(this.id, 'compat-request-success', { endpoint, status: res.status });
+          response = json ?? text;
+        }
+      }
 
       const processingTime = Date.now() - startTime;
       const providerResponse: ProviderResponse = {

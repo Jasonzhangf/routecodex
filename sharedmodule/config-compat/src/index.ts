@@ -9,6 +9,7 @@ import { CompatibilityEngine } from './compatibility-engine.js';
 
 // Main compatibility engine
 export { CompatibilityEngine } from './compatibility-engine.js';
+export { buildPipelineAssemblerConfig } from './exporters/pipeline-assembler-exporter.js';
 
 // Core types
 export type {

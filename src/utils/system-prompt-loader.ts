@@ -77,6 +77,7 @@ export class SystemPromptLoader {
     // Accept shapes: { data: { messages: [...] } } or { body: { messages: [...] } } or { messages: [...] }
     const candidates: unknown[] = [];
     if (j && typeof j === 'object') {
+
       if ((j as Record<string, unknown>).data && typeof (j as Record<string, unknown>).data === 'object') {candidates.push((j as Record<string, unknown>).data);}
       if ((j as Record<string, unknown>).body && typeof (j as Record<string, unknown>).body === 'object') {candidates.push((j as Record<string, unknown>).body);}
       candidates.push(j);
@@ -89,12 +90,13 @@ export class SystemPromptLoader {
           for (const m of msgs) {
             if (m && typeof m === 'object') {
               const mRecord = m as Record<string, unknown>;
-              if (mRecord.role === 'system' &&
-                  typeof mRecord.content === 'string' &&
+              if (mRecord.role === 'system' && 
+                  typeof mRecord.content === 'string' && 
                   mRecord.content.trim().length > 0) {
                 return mRecord.content as string;
               }
             }
+
           }
         }
       }
@@ -106,6 +108,7 @@ export class SystemPromptLoader {
     // Accept shapes: { data: { system: string } } or { body: { system: string } } or { system: string }
     const candidates: unknown[] = [];
     if (j && typeof j === 'object') {
+
       if ((j as Record<string, unknown>).data && typeof (j as Record<string, unknown>).data === 'object') {candidates.push((j as Record<string, unknown>).data);}
       if ((j as Record<string, unknown>).body && typeof (j as Record<string, unknown>).body === 'object') {candidates.push((j as Record<string, unknown>).body);}
       candidates.push(j);
@@ -116,6 +119,7 @@ export class SystemPromptLoader {
         if (typeof objRecord.system === 'string' && objRecord.system.trim().length > 0) {
           return objRecord.system as string;
         }
+
       }
     }
     return null;
@@ -152,7 +156,9 @@ export class SystemPromptLoader {
       const j = await this.readJson(f.full);
       if (!j) {continue;}
       // Ensure it was a /v1/messages request if metadata present
+
       const url = j && typeof j === 'object' ? (j as Record<string, unknown>).metadata && typeof (j as Record<string, unknown>).metadata === 'object' ? ((j as Record<string, unknown>).metadata as Record<string, unknown>).url as string | undefined : undefined : undefined;
+
       if (url && !url.includes('/v1/messages') && !url.includes('/anthropic/messages')) {
         continue;
       }
@@ -183,10 +189,12 @@ export function shouldReplaceSystemPrompt(): Source | null {
 export function replaceSystemInOpenAIMessages(messages: unknown[], systemText: string): unknown[] {
   if (!Array.isArray(messages)) {return messages;}
   const out = [...messages];
+
   const idx = out.findIndex((m) => m && typeof m === 'object' && (m as Record<string, unknown>).role === 'system');
   if (idx >= 0) {
     const m = { ...(out[idx] || {}) };
     (m as Record<string, unknown>).content = systemText;
+
     out[idx] = m;
   } else {
     out.unshift({ role: 'system', content: systemText });

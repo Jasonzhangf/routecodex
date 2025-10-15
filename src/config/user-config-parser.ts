@@ -121,4 +121,3 @@ export class UserConfigParser {
 }
 
 export default UserConfigParser;
-

@@ -460,12 +460,6 @@
         "requestPipeline": {
           "dryRunMode": "partial",
           "nodeConfigs": {
-            "llm-switch": {
-              "enabled": true,
-              "mode": "output-validation",
-              "breakpointBehavior": "continue",
-              "verbosity": "normal"
-            },
             "compatibility": {
               "enabled": false,
               "mode": "output-validation",

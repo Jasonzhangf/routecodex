@@ -88,7 +88,8 @@ program
   .command('code')
   .description('Launch Claude Code interface with RouteCodex as proxy')
   .option('-p, --port <port>', 'RouteCodex server port (overrides config file)')
-  .option('-h, --host <host>', 'RouteCodex server host', 'localhost')
+  // Default to IPv4 localhost to avoid environments where localhost resolves to ::1
+  .option('-h, --host <host>', 'RouteCodex server host', '127.0.0.1')
   .option('-c, --config <config>', 'RouteCodex configuration file path')
   .option('--claude-path <path>', 'Path to Claude Code executable', 'claude')
   .option('--model <model>', 'Model to use with Claude Code')
@@ -131,35 +132,28 @@ program
         spinner.text = 'Checking RouteCodex server status...';
         const normalizeConnectHost = (h: string): string => {
           const v = String(h || '').toLowerCase();
-          if (v === '0.0.0.0') { return '127.0.0.1'; }
-          if (v === '::') { return '::1'; }
+          if (v === '0.0.0.0') return '127.0.0.1';
+          if (v === '::' || v === '::1' || v === 'localhost') return '127.0.0.1';
           return h || '127.0.0.1';
         };
         const connectHost = normalizeConnectHost(actualHost);
         const serverUrl = `http://${connectHost}:${actualPort}`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
-
         try {
-          const response = await fetch(`${serverUrl}/health`, {
-            signal: controller.signal,
-            method: 'GET'
-          } as any);
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3000);
+          const response = await fetch(`${serverUrl}/ready`, { signal: controller.signal, method: 'GET' } as any);
           clearTimeout(timeoutId);
-
-          if (!response.ok) {
-            throw new Error('Server not healthy');
-          }
-
-          spinner.succeed('RouteCodex server is running');
+          if (!response.ok) throw new Error('Server not ready');
+          const j = await response.json().catch(() => ({}));
+          if (j?.status !== 'ready') throw new Error('Server reported not_ready');
+          spinner.succeed('RouteCodex server is ready');
         } catch (error) {
-          clearTimeout(timeoutId);
           spinner.info('RouteCodex server is not running, starting it...');
 
           // Start RouteCodex server in background
           const { spawn } = await import('child_process');
           const modulesConfigPath = path.resolve(__dirname, '../config/modules.json');
-          const serverEntry = path.resolve(__dirname, '..', 'dist', 'index.js');
+          const serverEntry = path.resolve(__dirname, 'index.js');
 
           const serverProcess = spawn(process.execPath, [serverEntry, modulesConfigPath], {
             stdio: 'pipe',
@@ -169,25 +163,21 @@ program
 
           serverProcess.unref();
 
-          // Wait a bit for server to start
-          spinner.text = 'Waiting for RouteCodex server to start...';
-          await sleep(3000);
-
-          // Verify server started
-          try {
-            const healthResponse = await fetch(`${serverUrl}/health`, {
-              method: 'GET',
-              timeout: 2000
-            } as any);
-
-            if (healthResponse.ok) {
-              spinner.succeed('RouteCodex server started successfully');
-            } else {
-              throw new Error('Server health check failed');
-            }
-          } catch (healthError) {
-            spinner.warn('RouteCodex server may not be fully ready, continuing...');
+          // Wait for server to become ready (up to ~30s)
+          spinner.text = 'Waiting for RouteCodex server to become ready...';
+          let ready = false;
+          for (let i = 0; i < 30; i++) {
+            await sleep(1000);
+            try {
+              const res = await fetch(`${serverUrl}/ready`, { method: 'GET' } as any);
+              if (res.ok) {
+                const jr = await res.json().catch(() => ({}));
+                if (jr?.status === 'ready') { ready = true; break; }
+              }
+            } catch { /* ignore */ }
           }
+          if (ready) spinner.succeed('RouteCodex server is ready');
+          else spinner.warn('RouteCodex server may not be fully ready, continuing...');
         }
       }
 
@@ -197,7 +187,7 @@ program
       const resolvedBaseHost = String((() => {
         const v = String(actualHost || '').toLowerCase();
         if (v === '0.0.0.0') return '127.0.0.1';
-        if (v === '::') return '::1';
+        if (v === '::' || v === '::1' || v === 'localhost') return '127.0.0.1';
         return actualHost || '127.0.0.1';
       })());
       const anthropicBase = `http://${resolvedBaseHost}:${actualPort}`;
@@ -208,6 +198,10 @@ program
         ANTHROPIC_API_URL: anthropicBase,
         ANTHROPIC_API_KEY: 'rcc-proxy-key'
       } as NodeJS.ProcessEnv;
+      // Avoid auth conflict: prefer API key routed via RouteCodex; remove shell tokens
+      try { delete (claudeEnv as Record<string, unknown>)['ANTHROPIC_AUTH_TOKEN']; } catch { /* ignore */ }
+      try { delete (claudeEnv as Record<string, unknown>)['ANTHROPIC_TOKEN']; } catch { /* ignore */ }
+      logger.info('Unset ANTHROPIC_AUTH_TOKEN/ANTHROPIC_TOKEN for Claude process to avoid conflicts');
       logger.info(`Setting Anthropic base URL to: ${anthropicBase}`);
 
       // Prepare Claude Code command arguments
@@ -229,7 +223,8 @@ program
       });
 
       spinner.succeed('Claude Code launched with RouteCodex proxy');
-      logger.info(`Using RouteCodex server at: http://${actualHost}:${actualPort}`);
+      // Log normalized IPv4 host to avoid confusion (do not print ::/localhost)
+      logger.info(`Using RouteCodex server at: http://${resolvedBaseHost}:${actualPort}`);
       logger.info('Press Ctrl+C to exit Claude Code');
 
       // Handle graceful shutdown
@@ -254,6 +249,67 @@ program
 
     } catch (error) {
       spinner.fail('Failed to launch Claude Code');
+      logger.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  });
+
+// Env command - Print env exports for Anthropic proxy
+program
+  .command('env')
+  .description('Print environment exports for Anthropic tools to use RouteCodex proxy')
+  .option('-p, --port <port>', 'RouteCodex server port (overrides config file)')
+  .option('-h, --host <host>', 'RouteCodex server host')
+  .option('-c, --config <config>', 'RouteCodex configuration file path')
+  .option('--json', 'Output JSON instead of shell exports')
+  .action(async (options) => {
+    try {
+      let configPath = options.config as string | undefined;
+      if (!configPath) { configPath = path.join(homedir(), '.routecodex', 'config.json'); }
+
+      let host = (options.host as string | undefined) || undefined;
+      let port = options.port ? parseInt(String(options.port), 10) : NaN;
+
+      if (!Number.isFinite(port) || port <= 0) {
+        if (fs.existsSync(configPath)) {
+          try {
+            const raw = fs.readFileSync(configPath, 'utf8');
+            const cfg = JSON.parse(raw);
+            port = (cfg?.httpserver?.port ?? cfg?.server?.port ?? cfg?.port) || port;
+            host = (cfg?.httpserver?.host || cfg?.server?.host || cfg?.host || host);
+          } catch { /* ignore */ }
+        }
+      }
+
+      if (!Number.isFinite(port) || port <= 0) {
+        throw new Error('Missing port. Set via --port or config file');
+      }
+
+      const norm = (h: string | undefined): string => {
+        const v = String(h || '').toLowerCase();
+        if (v === '0.0.0.0' || v === '::' || v === '::1' || v === 'localhost') return '127.0.0.1';
+        return h || '127.0.0.1';
+      };
+      const resolvedHost = norm(host);
+      const base = `http://${resolvedHost}:${port}`;
+
+      if (options.json) {
+        const out = {
+          ANTHROPIC_BASE_URL: base,
+          ANTHROPIC_API_URL: base,
+          ANTHROPIC_API_KEY: 'rcc-proxy-key',
+          UNSET: ['ANTHROPIC_TOKEN', 'ANTHROPIC_AUTH_TOKEN']
+        };
+        console.log(JSON.stringify(out, null, 2));
+      } else {
+        console.log(`export ANTHROPIC_BASE_URL=${base}`);
+        console.log(`export ANTHROPIC_API_URL=${base}`);
+        console.log(`export ANTHROPIC_API_KEY=rcc-proxy-key`);
+        // Ensure conflicting tokens are not picked up by client tools
+        console.log('unset ANTHROPIC_TOKEN');
+        console.log('unset ANTHROPIC_AUTH_TOKEN');
+      }
+    } catch (error) {
       logger.error(error instanceof Error ? error.message : String(error));
       process.exit(1);
     }
@@ -348,17 +404,13 @@ program
 
       // Spawn child Node process to run the server entry; forward signals
       const nodeBin = process.execPath; // current Node
-      const serverEntry = path.resolve(__dirname, '..', 'dist', 'index.js');
+      const serverEntry = path.resolve(__dirname, 'index.js');
       // Use spawn (not spawnSync); import child_process at top already
       const { spawn } = await import('child_process');
 
       const env = { ...process.env } as NodeJS.ProcessEnv;
-
-      // Pass the config path to the server via environment variable
-      if (configPath) {
-        env.RCC4_CONFIG_PATH = configPath;
-      }
-
+      // Ensure server process picks the intended user config path
+      env.ROUTECODEX_CONFIG = configPath;
       const args: string[] = [serverEntry, modulesConfigPath];
 
       const childProc = spawn(nodeBin, args, { stdio: 'inherit', env });
@@ -828,7 +880,7 @@ program
 
       // Delegate to start command behavior with --restart semantics
       const nodeBin = process.execPath;
-      const serverEntry = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'index.js');
+      const serverEntry = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'index.js');
       const { spawn } = await import('child_process');
 
       // Prompt source flags
@@ -845,12 +897,6 @@ program
 
       const modulesConfigPath = getModulesConfigPath();
       const env = { ...process.env } as NodeJS.ProcessEnv;
-
-      // Pass the config path to the server via environment variable
-      if (configPath) {
-        env.RCC4_CONFIG_PATH = configPath;
-      }
-
       const args: string[] = [serverEntry, modulesConfigPath];
       const child = spawn(nodeBin, args, { stdio: 'inherit', env });
       try { fs.writeFileSync(path.join(homedir(), '.routecodex', 'server.cli.pid'), String(child.pid ?? ''), 'utf8'); } catch (error) { /* ignore */ }
@@ -1065,13 +1111,13 @@ program
   });
 
 // Import commands at top level
-// import { createDryRunCommands } from './commands/dry-run.js';
+import { createDryRunCommands } from './commands/dry-run.js';
 // offline-log CLI temporarily disabled to simplify build
 
 // simple-log config helper removed
 
 // Add commands
-// program.addCommand(createDryRunCommands());
+program.addCommand(createDryRunCommands());
 // offline-log command disabled
 // simple-log command removed
 

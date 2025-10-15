@@ -115,25 +115,41 @@ export class PipelineManager implements RCCBaseModule {
       throw new Error('PipelineManager is not initialized');
     }
 
-    const pipelineId = this.generatePipelineId(routeRequest.providerId, routeRequest.modelId);
-    const pipeline = this.pipelines.get(pipelineId);
-
-    if (!pipeline) {
-      throw new Error(`No pipeline found for ${routeRequest.providerId}.${routeRequest.modelId}`);
+    // Strict mode: require explicit pipelineId
+    const directId = (routeRequest as any).pipelineId as string | undefined;
+    if (!directId) {
+      const keys = Array.from(this.pipelines.keys());
+      this.logger.logPipeline('manager', 'pipeline-id-missing', {
+        providerId: routeRequest.providerId,
+        modelId: routeRequest.modelId,
+        availableCount: keys.length,
+        sample: keys.slice(0, 10)
+      });
+      throw new Error('Pipeline ID missing in route; selection by provider/model is disabled');
     }
 
-    this.logger.logPipeline('manager', 'pipeline-selected', {
-      pipelineId,
+    const pipeline = this.pipelines.get(directId);
+    if (!pipeline) {
+      const keys = Array.from(this.pipelines.keys());
+      this.logger.logPipeline('manager', 'pipeline-id-not-found', {
+        pipelineId: directId,
+        availableCount: keys.length,
+        sample: keys.slice(0, 10)
+      });
+      throw new Error(`No pipeline found for id ${directId}`);
+    }
+
+    this.logger.logPipeline('manager', 'pipeline-selected-direct', {
+      pipelineId: directId,
       providerId: routeRequest.providerId,
       modelId: routeRequest.modelId,
-      requestId: routeRequest.requestId,
-      managerEnhanced: this.isEnhanced
+      requestId: routeRequest.requestId
     });
 
     // Publish selection event with enhanced debug info
     if (this.isEnhanced) {
       this.publishManagerEvent('pipeline-selected', {
-        pipelineId,
+        pipelineId: (pipeline as any).pipelineId,
         providerId: routeRequest.providerId,
         modelId: routeRequest.modelId,
         requestId: routeRequest.requestId,
@@ -170,12 +186,14 @@ export class PipelineManager implements RCCBaseModule {
         this.recordManagerMetric('request_start', startTime);
       }
 
-      // Select pipeline based on route information
+      // Select pipeline strictly by explicit pipelineId (if provided)
       const pipeline = this.selectPipeline({
         providerId: request.route.providerId,
         modelId: request.route.modelId,
-        requestId: request.route.requestId
-      });
+        requestId: request.route.requestId,
+        // pass-through for strict selection; tolerated by selectPipeline via structural typing
+        ...(request as any)?.route?.pipelineId ? { pipelineId: (request as any).route.pipelineId as string } : {},
+      } as any);
 
       // Process request with 429 error handling
       const response = await this.processRequestWithPipeline(pipeline, request, retryKey);

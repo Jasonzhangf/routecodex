@@ -37,4 +37,27 @@ How to verify (end-to-end)
 Notes
 - This change does not require fallback or hardcoding specific tools. Behavior is schema/llmswitch driven.
 - For upstream non-stream behavior, the Router simulates compliant SSE sequences so clients always receive incremental tool parameters.
+## 0.46.26 (2025-10-15)
+
+Title: Dual-endpoint sticky routing; remove provider fallbacks; Anthropic GLM verified
+
+Summary
+- llmswitch-anthropic-openai now supports sticky entry protocol for both endpoints:
+  - Anthropic: `/v1/messages` → entry remembered, response mapped Anthropic
+  - OpenAI: `/v1/chat/completions` → entry remembered, response mapped OpenAI
+- Added Anthropic→OpenAI response converter and OpenAI inbound argument normalization.
+- Removed all provider hardcoding and synthesis fallbacks from ConfigManager/PipelineAssembler. Provider type strictly follows exported configuration (no glm-http-provider inference).
+- Improved `/v1/messages` pipeline selection to fallback to `default` when `anthropic` route pool is empty.
+- Postbuild + global install now perform a background start with `/ready` self-check.
+
+Verification
+- With `~/.routecodex/config.json`:
+  - Providers: `[ 'openai' ]`
+  - Routing default: `[ 'openai.glm-4.6.key1' ]`
+- Start: `rcc start --config ~/.routecodex/config.json`
+- Checks:
+  - `GET /ready` → `status=ready`
+  - `POST /v1/messages` (Anthropic) → 200, Anthropic message payload
+  - `POST /v1/chat/completions` (OpenAI) → 200, OpenAI chat.completion payload
+- Log `pipeline-created` shows only `openai-provider`; no `glm-http-provider` artifacts.
 

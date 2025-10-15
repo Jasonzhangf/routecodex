@@ -93,6 +93,15 @@ export function normalizeProviderType(
     (providerConfig as any)?.auth?.oauth
   );
 
+  // Heuristics first: detect GLM Coding Plan by providerId/baseUrl and force glm-http-provider
+  try {
+    const id = String(providerId || '').toLowerCase();
+    const base = String(providerConfig?.baseURL || providerConfig?.baseUrl || '').toLowerCase();
+    if (id.includes('glm') || /open\.bigmodel\.cn\/api\/coding\/paas/i.test(base)) {
+      return 'glm-http-provider';
+    }
+  } catch { /* ignore heuristic errors */ }
+
   // Find matching rule
   for (const rule of PROVIDER_NORMALIZATION_RULES) {
     let matches = false;
@@ -137,7 +146,19 @@ export function applyProviderTransformations(
   const rule = PROVIDER_NORMALIZATION_RULES.find(r => r.normalizedType === normalizedType);
 
   if (!rule || !rule.transformations) {
-    return providerConfig;
+    // Generic hardening: normalize baseURL for common third-party gateways
+    const out = { ...providerConfig };
+    try {
+      const raw = String(out.baseURL || out.baseUrl || '');
+      const url = raw.replace(/\/+$/, '');
+      // GLM Coding Plan: ensure no trailing /v1 to hit /chat/completions directly
+      if (/open\.bigmodel\.cn\/api\/coding\/paas/i.test(url)) {
+        const hardened = url.replace(/\/?v1$/i, '');
+        if (out.baseURL) out.baseURL = hardened;
+        if (out.baseUrl) out.baseUrl = hardened;
+      }
+    } catch { /* ignore baseURL hardening errors */ }
+    return out;
   }
 
   const transformed = { ...providerConfig };

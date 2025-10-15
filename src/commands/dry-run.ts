@@ -294,9 +294,57 @@ function findLatestMergedConfig(): MergedConfig | null {
 }
 
 function chooseRouteAndTarget(input: RouteInput | { data?: unknown }) {
-  const merged = findLatestMergedConfig();
-  const vr = merged?.modules?.virtualrouter?.config || {};
-  const routeTargets: Record<string, RouteTarget[]> = vr.routeTargets || {};
+  const merged: any = findLatestMergedConfig() as any;
+
+  // Resolve routeTargets with compatibility across merged-config layouts
+  // Priority:
+  //  1) top-level virtualrouter.routeTargets (new schema)
+  //  2) pipeline_assembler.config.routePools + routeMeta (single contract)
+  //  3) modules.virtualrouter.config.routeTargets (legacy schema)
+  let routeTargets: Record<string, RouteTarget[]> = {};
+  try {
+    const topVr = merged?.virtualrouter || {};
+    if (topVr && typeof topVr === 'object' && topVr.routeTargets) {
+      routeTargets = topVr.routeTargets as Record<string, RouteTarget[]>;
+    }
+  } catch { /* ignore */ }
+
+  try {
+    if (!routeTargets || Object.keys(routeTargets).length === 0) {
+      const pac = (merged?.pipeline_assembler?.config || {}) as Record<string, any>;
+      // First prefer explicit routeTargets emitted by exporter
+      const pacTargets = pac.routeTargets as Record<string, RouteTarget[]> | undefined;
+      if (pacTargets && Object.keys(pacTargets).length > 0) {
+        routeTargets = pacTargets;
+      } else {
+        // Fallback: reconstruct from routePools/routeMeta if needed
+        const routePools = (pac.routePools || {}) as Record<string, string[]>;
+        const routeMeta = (pac.routeMeta || {}) as Record<string, { providerId: string; modelId: string; keyId: string }>;
+        const rebuilt: Record<string, RouteTarget[]> = {};
+        for (const [routeName, pids] of Object.entries(routePools)) {
+          rebuilt[routeName] = (pids || []).map((pid) => {
+            const meta = routeMeta[pid] || {} as any;
+            return {
+              providerId: String(meta.providerId || 'unknown'),
+              modelId: String(meta.modelId || 'unknown'),
+              keyId: String(meta.keyId || 'key1'),
+              actualKey: meta.keyId || 'key1'
+            } as RouteTarget;
+          });
+        }
+        if (Object.keys(rebuilt).length > 0) {
+          routeTargets = rebuilt;
+        }
+      }
+    }
+  } catch { /* ignore */ }
+
+  try {
+    if (!routeTargets || Object.keys(routeTargets).length === 0) {
+      const legacyVr = merged?.modules?.virtualrouter?.config || {};
+      routeTargets = (legacyVr.routeTargets || {}) as Record<string, RouteTarget[]>;
+    }
+  } catch { /* ignore */ }
   const raw: unknown = (input as { data?: unknown })?.data ?? input;
   const inputModel: string = typeof (raw as { model?: unknown })?.model === 'string' ? (raw as { model: string }).model : 'unknown';
 

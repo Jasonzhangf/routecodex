@@ -268,6 +268,14 @@ verify_installation() {
     else
         log_warning "rcc 命令不可用，但 routecodex 命令工作正常"
     fi
+
+    # 运行一次运行时就绪验证（后台，限时）
+    log_header "🧪 运行时验证 (启动并检查 /ready)"
+    if node scripts/start-verify.mjs --mode bg --timeout 120; then
+        log_success "运行时验证通过 (/ready 就绪)"
+    else
+        log_warning "运行时验证失败。请检查 ~/.routecodex/config.json、端口与密钥配置。"
+    fi
 }
 
 # 清理临时文件

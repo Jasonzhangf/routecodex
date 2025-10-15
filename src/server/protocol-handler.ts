@@ -68,6 +68,7 @@ export class ProtocolHandler extends BaseModule {
   private rrIndex: Map<string, number> = new Map();
   private classifier: ConfigRequestClassifier | null = null;
   private classifierConfig: Record<string, unknown> | null = null;
+  private routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }> | null = null;
 
   // Debug enhancement properties
   private isDebugEnhanced = false;
@@ -131,6 +132,10 @@ export class ProtocolHandler extends BaseModule {
       console.warn('Failed to initialize Protocol Handler debug enhancements:', error);
       this.isDebugEnhanced = false;
     }
+  }
+
+  public attachRouteMeta(routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }>): void {
+    this.routeMeta = routeMeta;
   }
 
   /**
@@ -742,20 +747,10 @@ export class ProtocolHandler extends BaseModule {
       // Pipeline path (streaming unified to non-streaming by workflow). Use RR within category.
       if (this.shouldUsePipeline() && this.routePools) {
         const routeName = await this.decideRouteCategoryAsync(req);
-        let pipelineId = this.pickPipelineId(routeName);
-        // Optional override: x-rc-provider: glm|qwen|iflow|modelscope
-        const preferredVendor = (req.headers['x-rc-provider'] as string | undefined)?.toLowerCase()?.trim();
-        if (preferredVendor && this.routePools[routeName] && this.routePools[routeName].length) {
-          const vendorOf = (pid: string) => {
-            const dot = pid.lastIndexOf('.');
-            const left = dot > 0 ? pid.slice(0, dot) : pid;
-            const und = left.indexOf('_');
-            return und > 0 ? left.slice(0, und) : left;
-          };
-          const override = this.routePools[routeName].find(pid => vendorOf(pid) === preferredVendor);
-          if (override) { pipelineId = override; }
-        }
-        const { providerId, modelId } = this.parsePipelineId(pipelineId);
+        const pipelineId = this.pickPipelineId(routeName);
+        const metaA = this.routeMeta ? this.routeMeta[pipelineId] : null;
+        const providerId = metaA?.providerId || 'unknown';
+        const modelId = metaA?.modelId || 'unknown';
         ctxProviderId = providerId; ctxModelId = modelId;
         // Upstream auth override (disabled by default). Enable only if:
         //  - explicit env RCC_ALLOW_UPSTREAM_OVERRIDE=1, or
@@ -795,6 +790,7 @@ export class ProtocolHandler extends BaseModule {
             modelId,
             requestId,
             timestamp: Date.now(),
+            pipelineId,
           },
           metadata: {
             method: req.method,
@@ -900,21 +896,20 @@ export class ProtocolHandler extends BaseModule {
         });
       }
 
-      this.debugEventBus.publish({
-        sessionId: `session_${Date.now()}`,
-        moduleId: 'protocol-handler',
-        operationId: 'chat_completions_request_end',
-        timestamp: Date.now(),
-        type: 'end',
-        position: 'middle',
-        data: {
-          requestId,
-          duration,
-          status: 200,
-          model: req.body.model,
-          streaming: req.body.stream || false,
-        },
-      });
+      // Reduce noisy end events when no matching start was sent to external DebugCenter
+      try {
+        if (process.env.RCC_ENABLE_DEBUGCENTER === '1') {
+          this.debugEventBus.publish({
+            sessionId: requestId,
+            moduleId: 'protocol-handler',
+            operationId: 'chat_completions_request_end',
+            timestamp: Date.now(),
+            type: 'end',
+            position: 'middle',
+            data: { requestId, duration, status: 200, model: req.body.model, streaming: req.body.stream || false },
+          });
+        }
+      } catch { /* ignore */ }
 
       // Normalize response for OpenAI compatibility and set standard headers
       const normalized = this.normalizeOpenAIResponse(response, 'chat');
@@ -1087,19 +1082,10 @@ export class ProtocolHandler extends BaseModule {
       let response: unknown;
       if (this.shouldUsePipeline() && this.routePools) {
         const routeName = await this.decideRouteCategoryAsync(req);
-        let pipelineId = this.pickPipelineId(routeName);
-        const preferredVendor = (req.headers['x-rc-provider'] as string | undefined)?.toLowerCase()?.trim();
-        if (preferredVendor && this.routePools[routeName] && this.routePools[routeName].length) {
-          const vendorOf = (pid: string) => {
-            const dot = pid.lastIndexOf('.');
-            const left = dot > 0 ? pid.slice(0, dot) : pid;
-            const und = left.indexOf('_');
-            return und > 0 ? left.slice(0, und) : left;
-          };
-          const override = this.routePools[routeName].find(pid => vendorOf(pid) === preferredVendor);
-          if (override) { pipelineId = override; }
-        }
-        const { providerId, modelId } = this.parsePipelineId(pipelineId);
+        const pipelineId = this.pickPipelineId(routeName);
+        const metaB = this.routeMeta ? this.routeMeta[pipelineId] : null;
+        const providerId = metaB?.providerId || 'unknown';
+        const modelId = metaB?.modelId || 'unknown';
         ctxProviderId = providerId; ctxModelId = modelId;
         const authHeader2 = (req.headers['authorization'] || req.headers['Authorization']) as string | undefined;
         const upstreamAuth2 = (req.headers['x-rcc-upstream-authorization'] || req.headers['x-rc-upstream-authorization']) as string | undefined;
@@ -1116,6 +1102,7 @@ export class ProtocolHandler extends BaseModule {
             modelId,
             requestId,
             timestamp: Date.now(),
+            pipelineId,
           },
           metadata: {
             method: req.method,
@@ -1234,20 +1221,10 @@ export class ProtocolHandler extends BaseModule {
       // Pipeline path. Use RR within category.
       if (this.shouldUsePipeline() && this.routePools) {
         const routeName = await this.decideRouteCategoryAsync(req);
-        let pipelineId = this.pickPipelineId(routeName);
-
-      const preferredVendor = (req.headers['x-rc-provider'] as string | undefined)?.toLowerCase()?.trim();
-      if (preferredVendor && this.routePools[routeName] && this.routePools[routeName].length) {
-        const vendorOf = (pid: string) => {
-          const dot = pid.lastIndexOf('.');
-          const left = dot > 0 ? pid.slice(0, dot) : pid;
-          const und = left.indexOf('_');
-          return und > 0 ? left.slice(0, und) : left;
-        };
-        const override = this.routePools[routeName].find(pid => vendorOf(pid) === preferredVendor);
-        if (override) { pipelineId = override; }
-      }
-      const { providerId, modelId } = this.parsePipelineId(pipelineId);
+        const pipelineId = this.pickPipelineId(routeName);
+      const metaC = this.routeMeta ? this.routeMeta[pipelineId] : null;
+      const providerId = metaC?.providerId || 'unknown';
+      const modelId = metaC?.modelId || 'unknown';
       ctxProviderId = providerId; ctxModelId = modelId;
 
       const authHeader = (req.headers['authorization'] || req.headers['Authorization']) as string | undefined;
@@ -1266,6 +1243,7 @@ export class ProtocolHandler extends BaseModule {
           modelId,
           requestId,
           timestamp: Date.now(),
+          pipelineId,
         },
         metadata: {
           method: req.method,
@@ -2174,14 +2152,7 @@ export class ProtocolHandler extends BaseModule {
     return chosen;
   }
 
-  /** Parse providerId and modelId from pipelineId '<providerComposite>.<modelId>' */
-  private parsePipelineId(pipelineId: string): { providerId: string; modelId: string } {
-    const dot = pipelineId.lastIndexOf('.');
-    if (dot === -1) {
-      return { providerId: pipelineId, modelId: 'unknown' };
-    }
-    return { providerId: pipelineId.slice(0, dot), modelId: pipelineId.slice(dot + 1) };
-  }
+  // parsePipelineId removed: selection and metadata use routeMeta and explicit pipelineId only
 
   /**
    * Handle models list

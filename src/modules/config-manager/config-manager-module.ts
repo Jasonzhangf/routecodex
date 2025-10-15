@@ -48,7 +48,8 @@ export class ConfigManagerModule extends BaseModule {
     this.mergedConfigPath = './config/merged-config.json';
 
     this.configParser = new ConfigParser();
-    this.compatibilityEngine = new CompatibilityEngine();
+    // Use non-sanitizing output for runtime so that key mappings retain real values
+    this.compatibilityEngine = new CompatibilityEngine({ sanitizeOutput: false });
     this.authFileResolver = new AuthFileResolver();
 
     // Initialize debug enhancements
@@ -401,9 +402,61 @@ export class ConfigManagerModule extends BaseModule {
             ? (vrNode['providers'] as Record<string, any>)
             : {};
           Object.keys(provs).forEach((pid) => {
-            const family = String(provs[pid]?.type || '').toLowerCase();
-            if (family === 'glm') { provs[pid].type = 'custom'; }
+            const p = provs[pid] || {};
+            const family = String(p?.type || '').toLowerCase();
+            if (family === 'glm') { p.type = 'custom'; }
+            // Provide schema-friendly defaults expected by downstream engines
+            if (!p.id) { p.id = pid; }
+            if (typeof p.enabled === 'undefined') { p.enabled = true; }
+            if (p.baseURL && !p.baseUrl) { p.baseUrl = p.baseURL; }
+            // Normalize apiKey into auth block if needed
+            let apiKeyArr = Array.isArray(p.apiKey) ? p.apiKey : (typeof p.apiKey === 'string' && p.apiKey ? [p.apiKey] : []);
+
+            // API Key inheritance: if provider-level apiKey is empty, inherit from parent levels
+            if (apiKeyArr.length === 0) {
+              // Try to inherit from parent virtualrouter providers level
+              const vrNode = (preNormalized as Record<string, unknown>)?.['virtualrouter'] as Record<string, unknown> | undefined;
+              const parentProviderConfig = (vrNode?.providers as Record<string, any>)?.[pid] as any;
+              if (parentProviderConfig?.apiKey) {
+                const parentKeys = Array.isArray(parentProviderConfig.apiKey)
+                  ? parentProviderConfig.apiKey
+                  : (typeof parentProviderConfig.apiKey === 'string' ? [parentProviderConfig.apiKey] : []);
+                if (parentKeys.length > 0) {
+                  apiKeyArr = parentKeys;
+                  console.log(`🔧 Inherited ${apiKeyArr.length} API keys from parent provider level for ${pid}`);
+                }
+              }
+
+              // If still empty, try to inherit from top-level apiKey
+              if (apiKeyArr.length === 0 && preNormalized.apiKey) {
+                const topLevelKeys = Array.isArray(preNormalized.apiKey)
+                  ? preNormalized.apiKey
+                  : (typeof preNormalized.apiKey === 'string' ? [preNormalized.apiKey] : []);
+                if (topLevelKeys.length > 0) {
+                  apiKeyArr = topLevelKeys;
+                  console.log(`🔧 Inherited ${apiKeyArr.length} API keys from top-level for ${pid}`);
+                }
+              }
+
+              // Update provider config with inherited keys
+              if (apiKeyArr.length > 0) {
+                p.apiKey = apiKeyArr;
+              }
+            }
+
+            if (!p.auth && apiKeyArr.length > 0) {
+              p.auth = { type: 'apikey', apiKey: apiKeyArr[0] };
+              console.log(`🔧 Created auth block for ${pid} with API key: ${apiKeyArr[0].slice(0, 4)}****`);
+            }
+            if (!Array.isArray(p.keyAliases) || p.keyAliases.length === 0) {
+              p.keyAliases = ['key1'];
+            }
+            provs[pid] = p;
           });
+
+          // Note: 不在配置管理层做 provider 定制化的 routing 改写
+          // keyAlias 与 OAuth 兼容统一交由 compatibility 引擎处理
+          // 这里仅保持轻量的 family/type 归一化，避免侵入式回退逻辑
         } catch { /* noop */ }
 
         // 2. 使用CompatibilityEngine处理兼容性（包含引擎内预处理）
@@ -461,7 +514,50 @@ export class ConfigManagerModule extends BaseModule {
 
         // 5. 提取解析后的配置和兼容性配置
         parsedUserConfig = parseResult.normalized || normalizedInput;
-        compatibilityConfig = compatResult.compatibilityConfig;
+        compatibilityConfig = compatResult.compatibilityConfig || {};
+
+        // 严格模式：确保 compatibilityConfig 中包含 routeTargets 与 pipelineConfigs
+        try {
+          const ccAny = compatibilityConfig as Record<string, any>;
+          // pipelineConfigs 映射：优先使用 compatibility 引擎的输出；若缺失，则从用户配置的显式字段映射
+          const userPipelineConfigs = (parsedUserConfig as any)?.pipelineConfigs
+            || (parsedUserConfig as any)?.modules?.virtualrouter?.config?.pipelineConfigs
+            || {};
+          // 如果兼容性引擎没有产生 pipelineConfigs，则直接采用用户的；
+          // 如果已存在（通常只包含 endpoint-based），合并用户的逐目标配置（provider.model.key）
+          const ensureObj = (o: any) => (o && typeof o === 'object') ? o : {};
+          ccAny.pipelineConfigs = ensureObj(ccAny.pipelineConfigs);
+          const upc = ensureObj(userPipelineConfigs);
+          // 仅挑选逐目标键（包含点号的键），避免覆盖 endpoint-based 等分组键
+        // 挑选逐目标键：既支持直接位于 pipelineConfigs 下，也支持位于 endpoint-based 分组内
+        const perTargetEntries: Array<[string, any]> = [
+          ...Object.entries(upc).filter(([k]) => k.includes('.')),
+          ...Object.entries(ensureObj(upc['endpoint-based'] || {})).filter(([k]) => k.includes('.')),
+        ];
+          if (Object.keys(ccAny.pipelineConfigs).length === 0) {
+            // 为空则直接赋值完整用户配置
+            ccAny.pipelineConfigs = upc;
+          } else if (perTargetEntries.length > 0) {
+            for (const [k, v] of perTargetEntries) {
+              ccAny.pipelineConfigs[k] = v;
+            }
+          }
+          // routeTargets 映射：若缺失，从用户配置映射；否则保留（由导出器做兜底合成）
+          const userRouteTargets = (parsedUserConfig as any)?.modules?.virtualrouter?.config?.routeTargets
+            || (parsedUserConfig as any)?.virtualrouter?.config?.routeTargets
+            || {};
+          if (!ccAny.routeTargets || Object.keys(ccAny.routeTargets || {}).length === 0) {
+            if (userRouteTargets && Object.keys(userRouteTargets).length > 0) {
+              ccAny.routeTargets = userRouteTargets;
+            } else {
+              // leave empty; exporter can still build pipelines from provider models if needed
+              ccAny.routeTargets = {};
+            }
+          }
+          compatibilityConfig = ccAny;
+        } catch (strictMapError) {
+          throw strictMapError;
+        }
 
         console.log('✅ Configuration processed successfully with new engine');
         console.log('🔍 Debug: Processed config structure:');
@@ -507,6 +603,151 @@ export class ConfigManagerModule extends BaseModule {
         }
       };
 
+      // 生成 pipeline_assembler.config 作为流水线唯一出口
+      try {
+        const compatModule = await import('routecodex-config-compat');
+        const buildPipelineAssemblerConfig = (compatModule as any).buildPipelineAssemblerConfig;
+
+        if (typeof buildPipelineAssemblerConfig !== 'function') {
+          throw new Error('buildPipelineAssemblerConfig is not available in routecodex-config-compat module');
+        }
+
+        // 合并逐目标 pipelineConfigs（用户提供的）到兼容层，以便导出器能够生成 pipelines
+        const ccAny = compatibilityConfig as Record<string, any>;
+        const userPipelineConfigs = (parsedUserConfig as any)?.pipelineConfigs
+          || (parsedUserConfig as any)?.modules?.virtualrouter?.config?.pipelineConfigs
+          || {};
+        const ensureObj = (o: any) => (o && typeof o === 'object') ? o : {};
+        const ccPc = ensureObj(ccAny.pipelineConfigs);
+        const upc = ensureObj(userPipelineConfigs);
+        const perTargetOnly: Record<string, any> = {};
+        for (const [k, v] of Object.entries(upc)) {
+          if (k.includes('.')) { perTargetOnly[k] = v; }
+        }
+
+
+        const compatForExport = {
+          ...ccAny,
+          pipelineConfigs: { ...ccPc, ...perTargetOnly },
+          // 🔧 确保routeTargets从compatibilityConfig正确传递给buildPipelineAssemblerConfig
+          routeTargets: ccAny.routeTargets || {}
+        } as Record<string, any>;
+        const pac = buildPipelineAssemblerConfig(compatForExport as any);
+
+        // 🔧 修复alias解析：对buildPipelineAssemblerConfig生成的pipelines进行alias解析
+        if (pac.pipelines && Array.isArray(pac.pipelines)) {
+          const keyMappings = ccAny.keyMappings || {};
+          const authMappings = ccAny.authMappings || {};
+
+          for (const pipeline of pac.pipelines) {
+            const modules = pipeline.modules as any;
+            if (modules?.provider?.config?.auth?.alias) {
+              const aliasKey = modules.provider.config.auth.alias;
+              const actualKey = keyMappings.global?.[aliasKey] ||
+                               keyMappings.providers?.[(pipeline as any).providerId || '']?.[aliasKey] ||
+                               authMappings[aliasKey];
+
+              if (actualKey && typeof actualKey === 'string') {
+                modules.provider.config.auth.apiKey = actualKey;
+                delete modules.provider.config.auth.alias;
+              }
+            }
+          }
+        }
+
+        (mergedConfig as any).pipeline_assembler = { config: pac };
+      } catch (e) {
+        // 兼容模块不可用时，使用严格且最小化的本地装配器，仅支持 openai 提供方，且不做任何 provider 猜测/替换。
+        try {
+          const pu = parsedUserConfig as Record<string, any>;
+          const vr = (pu && pu.virtualrouter) ? pu.virtualrouter as Record<string, any> : {};
+          const providers = (vr.providers || {}) as Record<string, any>;
+          const routing = (vr.routing || {}) as Record<string, any>;
+
+          // Helper: parse "provider.model[.keyX]" keeping internal dots in model
+          const parseTarget = (s: string): { providerId: string; modelId: string; keyId: string } | null => {
+            if (typeof s !== 'string' || !s.includes('.')) return null;
+            const firstDot = s.indexOf('.');
+            const providerId = s.slice(0, firstDot).trim();
+            let rest = s.slice(firstDot + 1);
+            let keyId = 'key1';
+            const m = rest.match(/\.key(\d+)$/i);
+            if (m) { keyId = `key${m[1]}`; rest = rest.slice(0, rest.lastIndexOf(m[0])); }
+            const modelId = rest.trim();
+            if (!providerId || !modelId) return null;
+            return { providerId, modelId, keyId };
+          };
+
+          const pipelines: any[] = [];
+          const routePools: Record<string, string[]> = {};
+          const routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }> = {};
+          const ensureArr = (v: any) => Array.isArray(v) ? v : [];
+          const seen = new Set<string>();
+
+          for (const [routeName, arr] of Object.entries(routing)) {
+            const targets = ensureArr(arr);
+            const ids: string[] = [];
+            for (const t of targets) {
+              const parsed = typeof t === 'string' ? parseTarget(t) : null;
+              if (!parsed) { continue; }
+              const { providerId, modelId, keyId } = parsed;
+              const provCfg = providers[providerId] || {};
+              const provTypeRaw = String(provCfg.type || providerId).toLowerCase();
+              if (provTypeRaw !== 'openai') {
+                // 严格模式：不支持非 openai 提供方的本地装配，避免隐式映射或误判
+                continue;
+              }
+              const pipelineId = `${providerId}_${keyId}.${modelId}`;
+              ids.push(pipelineId);
+              if (!seen.has(pipelineId)) {
+                seen.add(pipelineId);
+                // 提取 baseUrl / baseURL 与 apiKey（若存在）
+                const baseUrl = provCfg.baseUrl || provCfg.baseURL;
+                let apiKey: string | undefined;
+                if (provCfg.auth && typeof provCfg.auth === 'object' && provCfg.auth.apiKey) {
+                  apiKey = String(provCfg.auth.apiKey);
+                } else if (Array.isArray(provCfg.apiKey) && provCfg.apiKey[0]) {
+                  apiKey = String(provCfg.apiKey[0]);
+                } else if (typeof provCfg.apiKey === 'string' && provCfg.apiKey.trim()) {
+                  apiKey = String(provCfg.apiKey).trim();
+                }
+
+                pipelines.push({
+                  id: pipelineId,
+                  modules: {
+                    llmSwitch: { type: 'llmswitch-anthropic-openai', config: {} },
+                    workflow: { type: 'streaming-control', config: {} },
+                    compatibility: { type: 'field-mapping', config: {} },
+                    provider: {
+                      type: 'openai-provider',
+                      config: {
+                        ...(baseUrl ? { baseUrl } : {}),
+                        model: modelId,
+                        ...(apiKey ? { auth: { type: 'apikey', apiKey } } : {})
+                      }
+                    }
+                  },
+                  settings: { debugEnabled: true }
+                });
+                routeMeta[pipelineId] = { providerId, modelId, keyId };
+              }
+            }
+            routePools[routeName] = ids;
+          }
+
+          // 最少要有 default 路由；否则视为配置不完整
+          if (!routePools.default || routePools.default.length === 0) {
+            throw new Error('No default route targets available for local assembler');
+          }
+
+          (mergedConfig as any).pipeline_assembler = {
+            config: { pipelines, routePools, routeMeta, routeTargets: routing }
+          };
+        } catch (fallbackError) {
+          throw new Error(`Failed to produce pipeline_assembler.config: ${e instanceof Error ? e.message : String(e)}; local assembler also failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+        }
+      }
+
       // 附加版本元信息（便于宿主断言契约）
       const mergedRec = mergedConfig as Record<string, unknown>;
       mergedRec['schemaVersion'] = '1.0.0';
@@ -545,10 +786,9 @@ export class ConfigManagerModule extends BaseModule {
         });
       }
 
-      // Ensure httpserver.{port,host} translated from user config
+      // Ensure httpserver.port/host is determined by user config if provided
       try {
-        const userAny = (userConfig as Record<string, any>) || {};
-        const uHttp = (userAny.httpserver as Record<string, any>) || {};
+        const uHttp = (userConfig as Record<string, any>)?.httpserver || (parsedUserConfig as Record<string, any>)?.httpserver || {};
         const mergedAny = mergedConfig as Record<string, any>;
         if (!mergedAny.modules) { mergedAny.modules = {}; }
         const mModules = mergedAny.modules as Record<string, any>;
@@ -556,34 +796,12 @@ export class ConfigManagerModule extends BaseModule {
         const mHttp = mModules.httpserver as Record<string, any>;
         if (!mHttp.config) { mHttp.config = {}; }
         const mHttpCfg = mHttp.config as Record<string, any>;
-
-        // 1) Prefer explicit httpserver.port/host from user config
-        let port: number | undefined = (typeof uHttp.port === 'number' && uHttp.port > 0) ? uHttp.port : undefined;
-        let host: string | undefined = (typeof uHttp.host === 'string' && uHttp.host.trim()) ? String(uHttp.host).trim() : undefined;
-
-        // 2) Translate legacy top-level fields if not provided above
-        if (!port && typeof userAny.port === 'number' && userAny.port > 0) {
-          port = userAny.port;
+        // Only project user-provided values; do NOT apply implicit defaults here
+        if (typeof uHttp.port === 'number' && uHttp.port > 0) {
+          mHttpCfg.port = uHttp.port;
         }
-        if (!host && typeof userAny.host === 'string' && userAny.host.trim()) {
-          host = String(userAny.host).trim();
-        }
-
-        // 3) Translate from legacy server block if still missing
-        const uServer = (userAny.server as Record<string, any>) || {};
-        if (!port && typeof uServer.port === 'number' && uServer.port > 0) {
-          port = uServer.port;
-        }
-        if (!host && typeof uServer.host === 'string' && uServer.host.trim()) {
-          host = String(uServer.host).trim();
-        }
-
-        // 4) Project into merged-config if present and not set yet
-        if (port && !(typeof mHttpCfg.port === 'number' && mHttpCfg.port > 0)) {
-          mHttpCfg.port = port;
-        }
-        if (host && !mHttpCfg.host) {
-          mHttpCfg.host = host;
+        if (typeof uHttp.host === 'string' && uHttp.host.trim()) {
+          mHttpCfg.host = uHttp.host.trim();
         }
       } catch { /* ignore normalization errors */ }
 

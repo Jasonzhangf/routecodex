@@ -10,8 +10,22 @@ import { homedir } from 'os';
  * rehydrate credentials when compatibility/merged-config output has
  * redacted secrets.
  */
-export async function resolveInlineApiKey(providerId: string): Promise<string | undefined> {
+function normalizeFamilyId(providerId: string): string {
   const pid = String(providerId || '').toLowerCase();
+  // Normalize known families and common aliases
+  if (pid.includes('qwen') || pid.includes('dashscope') || pid.includes('aliyun')) return 'qwen';
+  if (pid.includes('openai')) return 'openai';
+  if (pid.includes('zhipu') || pid === 'glm' || pid.includes('bigmodel')) return 'glm';
+  if (pid.includes('modelscope')) return 'modelscope';
+  if (pid.includes('lmstudio') || pid.includes('lm-studio')) return 'lmstudio';
+  if (pid.includes('iflow')) return 'iflow';
+  return pid;
+}
+
+export async function resolveInlineApiKey(providerId: string): Promise<string | undefined> {
+  // Deprecated: not used in strict assembly. Kept for potential tooling or diagnostics.
+  const pid = String(providerId || '').toLowerCase();
+  const family = normalizeFamilyId(pid);
 
   // 1) Environment variables by provider family
   const envMap: Record<string, string[]> = {
@@ -23,7 +37,7 @@ export async function resolveInlineApiKey(providerId: string): Promise<string | 
     lmstudio: ['LMSTUDIO_API_KEY'],
   };
 
-  const envCandidates = envMap[pid] || [];
+  const envCandidates = envMap[family] || envMap[pid] || [];
   for (const name of envCandidates) {
     const v = process.env[name];
     if (typeof v === 'string' && v.trim()) {
@@ -37,8 +51,9 @@ export async function resolveInlineApiKey(providerId: string): Promise<string | 
     const raw = await fs.readFile(userCfgPath, 'utf-8');
     const j = JSON.parse(raw);
     const providers = j?.virtualrouter?.providers || {};
-    const prov = providers[providerId] || providers[pid];
-    const key = prov?.apiKey?.[0];
+    const prov = providers[providerId] || providers[pid] || providers[family];
+    const key = (prov?.apiKey && Array.isArray(prov.apiKey) ? prov.apiKey[0] : undefined)
+      || (Array.isArray(prov?.apiKeys) ? (prov as any).apiKeys[0] : undefined);
     if (typeof key === 'string' && key && key !== '***REDACTED***') {
       return key;
     }
@@ -48,4 +63,3 @@ export async function resolveInlineApiKey(providerId: string): Promise<string | 
 
   return undefined;
 }
-

@@ -19,6 +19,7 @@ import { PipelineManager } from '../modules/pipeline/core/pipeline-manager.js';
 import {
   type ServerConfig,
   type HealthStatus,
+  type ProviderHealth,
   type IHttpServer,
   type ServerModuleInfo,
 } from './types.js';
@@ -64,6 +65,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
   private mergedConfig: UnknownObject | null = null;
   private pipelineManager: PipelineManager | null = null;
   private routePools: Record<string, string[]> | null = null;
+  private routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }> | null = null;
   private classifier: ConfigRequestClassifier | null = null;
 
   // Debug enhancement properties
@@ -204,8 +206,14 @@ export class HttpServer extends BaseModule implements IHttpServer {
       resolvedHost = (rootCfg as any).host.trim();
     }
 
-    // Fallback to localhost if no host found
-    resolvedHost = resolvedHost || 'localhost';
+    // Fallback to IPv4 localhost if no host found; avoid IPv6 by default
+    resolvedHost = resolvedHost || '127.0.0.1';
+    // Normalize host to IPv4-friendly values
+    try {
+      const lower = String(resolvedHost).toLowerCase();
+      if (lower === 'localhost') { resolvedHost = '127.0.0.1'; }
+      if (lower === '::' || lower === '::1') { resolvedHost = '127.0.0.1'; }
+    } catch { /* ignore normalization errors */ }
     const resolvedCors = (httpCfg as any)?.cors || (rootCfg as any)?.cors || { origin: '*', credentials: true };
     const resolvedTimeout = (httpCfg as any)?.timeout ?? (rootCfg as any)?.timeout ?? 30000;
     const resolvedBodyLimit = (httpCfg as any)?.bodyLimit ?? (rootCfg as any)?.bodyLimit ?? '10mb';
@@ -388,19 +396,23 @@ export class HttpServer extends BaseModule implements IHttpServer {
 
       this._isInitialized = true;
 
-      this.debugEventBus.publish({
-        sessionId: await this.sessionId('http_server_initialized'),
-        moduleId: 'http-server',
-        operationId: 'http_server_initialized',
-        timestamp: Date.now(),
-        type: 'start',
-        position: 'middle',
-        data: {
-          configPath: './config/modules.json',
-          port: (await this.getServerConfig()).server.port,
-          host: (await this.getServerConfig()).server.host,
-        },
-      });
+      try {
+        if (process.env.RCC_ENABLE_DEBUGCENTER === '1') {
+          this.debugEventBus.publish({
+            sessionId: await this.sessionId('http_server_initialized'),
+            moduleId: 'http-server',
+            operationId: 'http_server_initialized',
+            timestamp: Date.now(),
+            type: 'start',
+            position: 'middle',
+            data: {
+              configPath: './config/modules.json',
+              port: (await this.getServerConfig()).server.port,
+              host: (await this.getServerConfig()).server.host,
+            },
+          });
+        }
+      } catch { /* ignore */ }
     } catch (error) {
       await this.handleError(error as Error, 'initialization');
       throw error;
@@ -432,6 +444,17 @@ export class HttpServer extends BaseModule implements IHttpServer {
       }
     } catch (error) {
       console.error('Failed to attach route pools to OpenAI router:', error);
+    }
+  }
+
+  public attachRouteMeta(routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }>): void {
+    this.routeMeta = routeMeta;
+    try {
+      if (this.protocolHandler && (this.protocolHandler as any).attachRouteMeta) {
+        (this.protocolHandler as any).attachRouteMeta(routeMeta);
+      }
+    } catch (error) {
+      console.error('Failed to attach route meta to OpenAI router:', error);
     }
   }
 
@@ -721,12 +744,13 @@ export class HttpServer extends BaseModule implements IHttpServer {
   public getStatus(): HealthStatus {
     // const config = this.getDefaultServerConfig(); // Reserved for future use
 
+    const providers = this.getUnifiedProvidersHealth();
     return {
       status: this._isRunning ? 'healthy' : 'unhealthy',
       timestamp: new Date().toISOString(),
       uptime: this.getUptime(),
       memory: process.memoryUsage(),
-      providers: this.providerManager.getAllProvidersHealth(),
+      providers,
     };
   }
 
@@ -839,221 +863,6 @@ export class HttpServer extends BaseModule implements IHttpServer {
 
     // Defer mounting OpenAI /v1 catch-all until after Anthropic endpoints to avoid shadowing
 
-    // Anthropic API: minimal /v1/anthropic/messages passthrough into pipeline with unified llmswitch
-    // Allow disabling this alias via config: set anthropicAlias: false at root level
-    const anthropicAliasEnabled = ((this.config as any)?.anthropicAlias !== false);
-    if (anthropicAliasEnabled) {this.app.post('/v1/anthropic/messages', async (req: Request, res: Response) => {
-      try {
-        if (!this.pipelineManager || !this.routePools) {
-          return res.status(503).json({ error: { message: 'Pipeline not ready', code: 'pipeline_not_ready' } });
-        }
-
-        const requestId = `anth_${Date.now()}`;
-        // Simple provider override via header
-        const preferredVendor = (req.headers['x-rc-provider'] as string | undefined)?.toLowerCase()?.trim();
-        const pickPipeline = (routeName: string = 'anthropic', vendor?: string): string | null => {
-          const pools = this.routePools || {};
-          const list = pools[routeName] || pools['default'] || [];
-          if (!list.length) { return null; }
-          if (vendor) {
-            for (const pid of list) {
-              const left = pid.includes('.') ? pid.slice(0, pid.lastIndexOf('.')) : pid;
-              const vendorId = left.includes('_') ? left.slice(0, left.indexOf('_')) : left;
-              if (vendorId.toLowerCase() === vendor) { return pid; }
-            }
-          }
-          // 优先选择带有协议标识的流水线
-          const protocolSpecific = list.find(pid => pid.includes('.anthropic'));
-          return protocolSpecific || list[0];
-        };
-
-        let codexCaptured = false;
-        const maybeCapture = async (payload: UnknownObject): Promise<void> => {
-          if (codexCaptured) { return; }
-          try {
-            const ua = (req.get('user-agent') || '').toLowerCase();
-            if (!(ua.includes('codex') || ua.includes('claude'))) { return; }
-            const baseDir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
-            await fs.mkdir(baseDir, { recursive: true });
-            const sample = {
-              requestId,
-              endpoint: '/v1/anthropic/messages',
-              timestamp: Date.now(),
-              headers: req.headers,
-              data: payload,
-            };
-            await fs.writeFile(`${baseDir}/pipeline-in-${requestId}.json`, JSON.stringify(sample, null, 2));
-            // Also save into dedicated replay subfolder for Anthropic validation
-            try {
-              const subDir = `${baseDir}/anth-replay`;
-              await fs.mkdir(subDir, { recursive: true });
-              await fs.writeFile(`${subDir}/anthropic-request-${requestId}.json`, JSON.stringify(sample, null, 2));
-              // Capture tool_result blocks (if present) as separate snapshot(s)
-              try {
-                const body = (payload || {}) as any;
-                const messages = Array.isArray(body?.messages) ? body.messages : [];
-                const toolResults: any[] = [];
-                for (const m of messages) {
-                  const content = Array.isArray(m?.content) ? m.content : [];
-                  for (const c of content) {
-                    if (c && typeof c === 'object' && c.type === 'tool_result') {
-                      toolResults.push({
-                        tool_use_id: c.tool_use_id,
-                        content: c.content ?? c.output ?? null,
-                        is_error: !!c.is_error,
-                        role: m.role,
-                      });
-                    }
-                  }
-                }
-                if (toolResults.length > 0) {
-                  const toolResCapture = {
-                    requestId,
-                    endpoint: '/v1/anthropic/messages',
-                    timestamp: Date.now(),
-                    count: toolResults.length,
-                    tool_results: toolResults,
-                  };
-                  await fs.writeFile(`${subDir}/anthropic-tool-results-${requestId}.json`, JSON.stringify(toolResCapture, null, 2));
-                }
-              } catch { /* ignore tool_result capture errors */ }
-            } catch { /* ignore */ }
-            codexCaptured = true;
-          } catch { /* ignore */ }
-        };
-
-        await maybeCapture(req.body as UnknownObject);
-
-        const pipelineId = pickPipeline('anthropic', preferredVendor);
-        if (!pipelineId) {
-          return res.status(503).json({ error: { message: 'No pipelines available', code: 'no_pipelines' } });
-        }
-
-        const dot = pipelineId.lastIndexOf('.');
-        const providerId = dot > 0 ? pipelineId.slice(0, dot) : pipelineId;
-        const modelId = dot > 0 ? pipelineId.slice(dot + 1) : 'default';
-
-        // Optional: Replace only system prompt (tools untouched) if selector active
-        try {
-          const { shouldReplaceSystemPrompt, SystemPromptLoader } = await import('../utils/system-prompt-loader.js');
-          const sel = shouldReplaceSystemPrompt();
-          if (sel) {
-            const loader = SystemPromptLoader.getInstance();
-            const sys = await loader.getPrompt(sel);
-            const currentSys = (req.body && typeof req.body === 'object' && (req.body as any).system) ? String((req.body as any).system) : '';
-            const hasMdMarkers = /\bCLAUDE\.md\b|\bAGENT(?:S)?\.md\b/i.test(currentSys);
-            if (sys && req.body && typeof req.body === 'object' && !hasMdMarkers) {
-              req.body = { ...(req.body as Record<string, unknown>), system: sys } as any;
-            }
-          }
-        } catch { /* non-blocking */ }
-
-        const pipelineRequest = {
-          data: req.body,
-          route: {
-            providerId,
-            modelId,
-            requestId,
-            timestamp: Date.now(),
-          },
-          metadata: {
-            method: req.method,
-            url: '/v1/anthropic/messages',
-            headers: req.headers,
-            targetProtocol: 'anthropic',
-            endpoint: '/v1/anthropic/messages'
-          },
-          debug: { enabled: true, stages: { llmSwitch: true, workflow: true, compatibility: true, provider: true } },
-        } as UnknownObject;
-
-        // Pre-SSE heartbeat for anthropic when waiting on pipeline (disabled when RCC_DISABLE_ANTHROPIC_STREAM=1)
-        let preHeartbeat: NodeJS.Timeout | null = null;
-        // Non-stream JSON: do not use chunked heartbeats; return a single JSON frame
-        const jsonHeartbeatEnabled = false;
-        const disableAnthropicStreamA = process.env.RCC_DISABLE_ANTHROPIC_STREAM === '1';
-        const isStreamingRequestA = !disableAnthropicStreamA && (req.body as any)?.stream;
-
-        if (isStreamingRequestA && !res.headersSent) {
-          try {
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.setHeader('Connection', 'keep-alive');
-            res.setHeader('Transfer-Encoding', 'chunked');
-            res.setHeader('x-request-id', requestId);
-            res.setHeader('x-rc-target-protocol', 'anthropic');
-            res.setHeader('anthropic-version', '2023-06-01');
-            const interval = Math.max(5000, Number(process.env.RCC_SSE_HEARTBEAT_MS || 15000));
-            const send = () => {
-              try { res.write(`event: ping\n` + `data: ${JSON.stringify({ type: 'ping', stage: 'pre', requestId, ts: Date.now() })}\n\n`); } catch { /* ignore */ }
-            };
-            send();
-            preHeartbeat = setInterval(send, interval);
-          } catch { /* ignore */ }
-        }
-        // If non-stream requested and JSON heartbeat enabled, start chunked keep-alive
-        // (no JSON heartbeat for non-stream)
-
-        const pipelineResponse = await this.pipelineManager.processRequest(pipelineRequest as any);
-        const data = pipelineResponse?.data ?? pipelineResponse;
-        // Capture final Anthropic JSON response (non-stream) for replay diagnostics
-        const captureAnthropicResponse = async (payload: unknown) => {
-          try {
-            const baseDir = `${process.env.HOME || ''}/.routecodex/codex-samples`;
-            const subDir = `${baseDir}/anth-replay`;
-            await fs.mkdir(subDir, { recursive: true });
-            // Do not store tool_use for backfill; rely on correct parsing and schema
-            const digest = (() => {
-              try {
-                const obj = (payload && typeof payload === 'object') ? payload as any : {};
-                const content = Array.isArray(obj.content) ? obj.content : [];
-                const tools = content.filter((b: any) => b && b.type === 'tool_use');
-                const first = tools.length ? tools[0] : null;
-                return {
-                  tool_use_count: tools.length,
-                  first_tool_use: first ? {
-                    id: first.id || null,
-                    name: first.name || null,
-                    input_keys: first.input && typeof first.input === 'object' ? Object.keys(first.input) : []
-                  } : null,
-                  stop_reason: obj.stop_reason || null
-                };
-              } catch { return { tool_use_count: 0, first_tool_use: null, stop_reason: null }; }
-            })();
-            const out = {
-              requestId,
-              endpoint: '/v1/anthropic/messages',
-              timestamp: Date.now(),
-              response: {
-                status: 200,
-                headers: { 'x-rc-target-protocol': 'anthropic' }
-              },
-              data: payload,
-              mappingDigest: digest,
-            };
-            await fs.writeFile(`${subDir}/anthropic-response-${requestId}.json`, JSON.stringify(out, null, 2));
-          } catch { /* ignore capture errors */ }
-        };
-        if (!disableAnthropicStreamA && (req.body as any)?.stream) {
-          res.status(200);
-          const protocolHandlerAny = this.protocolHandler as unknown as { streamFromPipeline?: (response: unknown, requestId: string, res: Response, model?: string, protocol?: 'openai' | 'anthropic') => Promise<void> };
-          if (protocolHandlerAny?.streamFromPipeline) {
-            try { if (preHeartbeat) { clearInterval(preHeartbeat); preHeartbeat = null; } } catch { /* ignore */ }
-            // no JSON heartbeat cleanup needed
-            await protocolHandlerAny.streamFromPipeline(pipelineResponse, requestId, res, (req.body as any)?.model as string | undefined, 'anthropic');
-            return;
-          }
-        }
-        try { if (preHeartbeat) { clearInterval(preHeartbeat); preHeartbeat = null; } } catch { /* ignore */ }
-        // Return anthropic-like response produced by llmswitch (if configured)
-        try { res.setHeader('x-rc-target-protocol', 'anthropic'); } catch { /* ignore */ }
-        try { res.setHeader('anthropic-version', '2023-06-01'); } catch { /* ignore */ }
-        await captureAnthropicResponse(data);
-        res.status(200).json(data);
-      } catch (err) {
-        res.status(500).json({ error: { message: (err as Error).message || 'Anthropic handler error' } });
-      }
-    });}
-
     // Anthropic API canonical endpoint /v1/messages (Anthropic SDK default)
     this.app.post('/v1/messages', async (req: Request, res: Response) => {
       try {
@@ -1062,19 +871,18 @@ export class HttpServer extends BaseModule implements IHttpServer {
         }
 
         const requestId = `anth_${Date.now()}`;
-        const preferredVendor = (req.headers['x-rc-provider'] as string | undefined)?.toLowerCase()?.trim();
-        const pickVendor = (vendor?: string): string | null => {
-          const pools = this.routePools || {};
-          const list = pools['anthropic'] || pools['default'] || [];
-          if (!list.length) { return null; }
-          if (vendor) {
-            for (const pid of list) {
-              const left = pid.includes('.') ? pid.slice(0, pid.lastIndexOf('.')) : pid;
-              const vendorId = left.includes('_') ? left.slice(0, left.indexOf('_')) : left;
-              if (vendorId.toLowerCase() === vendor) { return pid; }
-            }
+        const pickFirst = (): string | null => {
+          const pools = this.routePools || {} as Record<string, string[]>;
+          // Prefer non-empty anthropic pool; otherwise fallback to default
+          const anth = Array.isArray(pools['anthropic']) ? pools['anthropic'] : [];
+          const def = Array.isArray(pools['default']) ? pools['default'] : [];
+          const list = anth.length > 0 ? anth : def;
+          if (list.length > 0) { return list[0]; }
+          // As a last resort, pick the first pipeline id from any non-empty pool
+          for (const v of Object.values(pools)) {
+            if (Array.isArray(v) && v.length > 0) { return v[0]; }
           }
-          return list[0];
+          return null;
         };
 
         let codexCaptured = false;
@@ -1134,14 +942,18 @@ export class HttpServer extends BaseModule implements IHttpServer {
 
         await maybeCapture(req.body as UnknownObject);
 
-        const pipelineId = pickVendor(preferredVendor);
+        const pipelineId = pickFirst();
         if (!pipelineId) {
           return res.status(503).json({ error: { message: 'No pipelines available', code: 'no_pipelines' } });
         }
 
-        const dot = pipelineId.lastIndexOf('.');
-        const providerId = dot > 0 ? pipelineId.slice(0, dot) : pipelineId;
-        const modelId = dot > 0 ? pipelineId.slice(dot + 1) : 'default';
+        // Use assembler-supplied meta to avoid parsing pipelineId
+        const m = (this.routeMeta && this.routeMeta[pipelineId]) || null;
+        try {
+          console.log('[HTTP] anthropic /v1/messages pick', { pipelineId, hasMeta: !!m });
+        } catch { /* ignore */ }
+        const providerId = m?.providerId || 'unknown';
+        const modelId = m?.modelId || 'unknown';
 
         // Optional: Replace only system prompt (tools untouched) if selector active
         try {
@@ -1165,6 +977,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
             modelId,
             requestId,
             timestamp: Date.now(),
+            pipelineId,
           },
           metadata: {
             method: req.method,
@@ -1180,17 +993,13 @@ export class HttpServer extends BaseModule implements IHttpServer {
         let preHeartbeat: NodeJS.Timeout | null = null;
         const jsonHeartbeatEnabled2 = false;
         const disableAnthropicStreamB = process.env.RCC_DISABLE_ANTHROPIC_STREAM === '1';
-        const isStreamingRequest = !disableAnthropicStreamB && (req.body as any)?.stream;
-
-        if (isStreamingRequest && !res.headersSent) {
+        if (!disableAnthropicStreamB && (req.body as any)?.stream && !res.headersSent) {
           try {
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
             res.setHeader('Transfer-Encoding', 'chunked');
             res.setHeader('x-request-id', requestId);
-            res.setHeader('x-rc-target-protocol', 'anthropic');
-            res.setHeader('anthropic-version', '2023-06-01');
             const interval = Math.max(5000, Number(process.env.RCC_SSE_HEARTBEAT_MS || 15000));
             const send = () => {
               try { res.write(`event: ping\n` + `data: ${JSON.stringify({ type: 'ping', stage: 'pre', requestId, ts: Date.now() })}\n\n`); } catch { /* ignore */ }
@@ -1249,21 +1058,23 @@ export class HttpServer extends BaseModule implements IHttpServer {
           }
         }
         try { if (preHeartbeat) { clearInterval(preHeartbeat); preHeartbeat = null; } } catch { /* ignore */ }
-
-        // Only set headers for non-streaming responses (streaming already has headers set)
-        if (!isStreamingRequest) {
+        if (!res.headersSent) {
           try { res.setHeader('x-rc-target-protocol', 'anthropic'); } catch { /* ignore */ }
           try { res.setHeader('anthropic-version', '2023-06-01'); } catch { /* ignore */ }
         }
-
         await captureAnthropicResponse2(data);
-
-        // For streaming requests, headers are already set and response is handled by protocolHandler
-        if (!isStreamingRequest) {
+        if (!res.headersSent) {
           res.status(200).json(data);
+        } else {
+          try { res.write(typeof data === 'string' ? data : JSON.stringify(data)); } catch { /* ignore */ }
+          try { res.end(); } catch { /* ignore */ }
         }
       } catch (err) {
-        res.status(500).json({ error: { message: (err as Error).message || 'Anthropic handler error' } });
+        if (!res.headersSent) {
+          res.status(500).json({ error: { message: (err as Error).message || 'Anthropic handler error' } });
+        } else {
+          try { res.end(); } catch { /* ignore */ }
+        }
       }
     });
 
@@ -1281,6 +1092,20 @@ export class HttpServer extends BaseModule implements IHttpServer {
     if (basePath !== '/v1') {
       this.app.use('/v1', protocolRouter);
     }
+
+    // Lightweight debug endpoint to inspect routing state
+    this.app.get('/debug/route-pools', async (_req: Request, res: Response) => {
+      try {
+        const ids = this.pipelineManager ? Array.from((this.pipelineManager as any).pipelines?.keys?.() || []) : [];
+        return res.status(200).json({
+          routePools: this.routePools,
+          routeMeta: this.routeMeta ? Object.keys(this.routeMeta) : [],
+          managerPipelines: ids,
+        });
+      } catch (e) {
+        return res.status(500).json({ error: { message: (e as Error).message } });
+      }
+    });
 
     // Status endpoint
     this.app.get('/status', this.handleStatus.bind(this));
@@ -1335,7 +1160,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
           metrics: '/metrics',
           status: '/status',
           openai: '/v1/openai/*',
-          anthropic: '/v1/anthropic/*',
+          anthropic: '/v1/messages',
           config: '/config',
         },
       });
@@ -1472,7 +1297,9 @@ export class HttpServer extends BaseModule implements IHttpServer {
    * Handle readiness check
    */
   private handleReadinessCheck(req: Request, res: Response): void {
-    const isReady = this._isInitialized && this._isRunning;
+    const hasManager = !!this.pipelineManager;
+    const hasRoutePools = !!this.routePools && Object.keys(this.routePools || {}).length > 0;
+    const isReady = this._isInitialized && this._isRunning && hasManager && hasRoutePools;
     const status = isReady ? 'ready' : 'not_ready';
 
     res.status(isReady ? 200 : 503).json({
@@ -1481,9 +1308,43 @@ export class HttpServer extends BaseModule implements IHttpServer {
       checks: {
         initialized: this._isInitialized,
         running: this._isRunning,
-        providers: this.providerManager.getAllProvidersHealth(),
+        pipelineManagerAttached: hasManager,
+        routePoolsAttached: hasRoutePools,
+        routePoolsCount: hasRoutePools ? Object.values(this.routePools || {}).reduce((a:number,b:any)=>a+((b||[]).length),0) : 0,
+        providers: this.getUnifiedProvidersHealth(),
       },
     });
+  }
+
+  /**
+   * Merge provider health from ProviderManager with pipeline-derived provider health
+   * so that /health reflects active pipelines in the new architecture.
+   */
+  private getUnifiedProvidersHealth(): Record<string, ProviderHealth> {
+    const pm = this.providerManager?.getAllProvidersHealth?.() || {};
+    const out: Record<string, ProviderHealth> = { ...pm };
+
+    try {
+      if (this.pipelineManager && typeof (this.pipelineManager as any).getPipelineStatus === 'function') {
+        const statusMap = (this.pipelineManager as any).getPipelineStatus() as Record<string, any>;
+        const meta = (this.routeMeta || {}) as Record<string, { providerId: string; modelId: string; keyId: string }>;
+        for (const [pipelineId, st] of Object.entries(statusMap || {})) {
+          const providerKey = meta[pipelineId]?.providerId || pipelineId;
+          const mod = (st as any)?.modules?.provider as { type?: string; state?: string } | undefined;
+          const ok = (mod?.state || '').toLowerCase() === 'ready';
+          if (!out[providerKey]) {
+            out[providerKey] = {
+              status: ok ? 'healthy' : 'unknown',
+              consecutiveFailures: 0,
+              lastCheck: new Date().toISOString(),
+            };
+          }
+        }
+      }
+    } catch {
+      // non-fatal: keep pm-only map
+    }
+    return out;
   }
 
   /**

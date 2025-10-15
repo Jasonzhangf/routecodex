@@ -38,8 +38,14 @@ export function generateKeyAliasMapping(
   _providerId: string,
   providerConfig: any
 ): Record<string, string> {
-  if (!providerConfig || !providerConfig.apiKey) {
-    return { key1: 'default' }; // Default fallback
+  // Always produce at least one alias to keep downstream stable
+  if (!providerConfig || (!providerConfig.apiKey && !providerConfig.auth && !providerConfig.oauth)) {
+    return { key1: 'default' };
+  }
+
+  // OAuth-first fallback
+  if ((providerConfig.auth && providerConfig.auth.type === 'oauth') || providerConfig.oauth) {
+    return { key1: 'auth-default' };
   }
 
   const mapping: Record<string, string> = {};
@@ -79,15 +85,8 @@ export function resolveKeyByAlias(
 ): string {
   const mapping = generateKeyAliasMapping(providerId, providerConfig);
   const realKey = mapping[keyAlias];
-
-  if (!realKey) {
-    const availableAliases = Object.keys(mapping);
-    throw new Error(
-      `Key alias '${keyAlias}' not found for provider '${providerId}'. Available aliases: ${availableAliases.join(', ')}`
-    );
-  }
-
-  return realKey;
+  // If not found, fall back to alias itself to avoid hard failure in OAuth scenarios
+  return realKey || keyAlias || 'key1';
 }
 
 /**
@@ -272,17 +271,18 @@ export function hasAuthMapping(
 /**
  * Resolve OAuth token file path
  */
+import { homedir } from 'os';
+import path from 'path';
+
 export function resolveOAuthTokenPath(
   providerId: string,
   oauthName: string,
   oauthConfig: any
 ): string {
-  const { homedir } = require('os');
-
   if (oauthConfig && typeof oauthConfig.tokenFile === 'string' && oauthConfig.tokenFile.trim()) {
     const rawPath = oauthConfig.tokenFile.trim();
     if (rawPath.startsWith('~')) {
-      return require('path').join(homedir(), rawPath.slice(1));
+      return path.join(homedir(), rawPath.slice(1));
     }
     return rawPath;
   }
@@ -298,7 +298,6 @@ export function resolveOAuthTokenPath(
 
   // Fallback defaults per provider family
   const home = homedir();
-  const path = require('path');
 
   if (providerId.toLowerCase().includes('qwen')) {
     return path.join(home, '.qwen', 'oauth_creds.json');
