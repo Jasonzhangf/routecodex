@@ -39,15 +39,11 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
   constructor(config: ModuleConfig, dependencies: ModuleDependencies) {
     this.id = `llmswitch-unified-${Date.now()}`;
     this.config = config;
-    const defaults: UnifiedLLMSwitchConfig = {
-      protocolDetection: 'endpoint-based',
-      defaultProtocol: 'openai',
-      endpointMapping: {
-        anthropic: ['/v1/anthropic/messages', '/v1/messages'],
-        openai: ['/v1/chat/completions', '/v1/completions']
-      }
-    };
-    this.switchConfig = { ...defaults, ...(config.config as UnifiedLLMSwitchConfig || {}) };
+    const provided = (config.config as UnifiedLLMSwitchConfig | undefined);
+    if (!provided || !provided.endpointMapping) {
+      throw new Error('llmswitch-unified requires endpointMapping in module config (no defaults in code).');
+    }
+    this.switchConfig = provided;
 
     // 创建两个转换器实例
     this.openaiSwitch = new OpenAINormalizerLLMSwitch(
@@ -208,11 +204,8 @@ export class UnifiedLLMSwitch implements LLMSwitchModule {
     console.log(`[UnifiedLLMSwitch] DEBUG - Endpoint detection: endpoint="${endpoint}"`);
     
     const mapping = this.switchConfig.endpointMapping;
-    console.log(`[UnifiedLLMSwitch] DEBUG - Endpoint mapping:`, mapping);
-    
     if (!mapping) {
-      console.log(`[UnifiedLLMSwitch] DEBUG - No mapping found, using default protocol: ${this.switchConfig.defaultProtocol}`);
-      return this.switchConfig.defaultProtocol;
+      throw new Error('llmswitch-unified endpointMapping missing');
     }
     
     if (mapping.anthropic.some(ep => endpoint.includes(ep))) {

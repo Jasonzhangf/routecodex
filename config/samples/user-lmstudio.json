@@ -1,0 +1,30 @@
+{
+  "version": "1.0.0",
+  "httpserver": { "port": 5521, "host": "0.0.0.0" },
+  "virtualrouter": {
+    "inputProtocol": "openai",
+    "outputProtocol": "openai",
+    "providers": {
+      "lmstudio": {
+        "id": "lmstudio",
+        "enabled": true,
+        "type": "lmstudio",
+        "baseURL": "http://localhost:1234",
+        "apiKey": ["${LMSTUDIO_API_KEY:-}"],
+        "models": {
+          "gpt-oss-20b-mlx": {}
+        }
+      }
+    },
+    "routing": {
+      "default": ["lmstudio.gpt-oss-20b-mlx"],
+      "coding": [],
+      "longcontext": [],
+      "thinking": [],
+      "tools": [],
+      "vision": [],
+      "websearch": [],
+      "background": []
+    }
+  }
+}

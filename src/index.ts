@@ -9,8 +9,17 @@ import path from 'path';
 import { homedir } from 'os';
 import net from 'net';
 import { spawn } from 'child_process';
+import { createRequire } from 'module';
 import { ConfigManagerModule } from './modules/config-manager/config-manager-module.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
+
+// Polyfill CommonJS require for ESM runtime to satisfy dependencies that call require()
+try {
+  const req = createRequire(import.meta.url);
+  if (!(globalThis as any).require) {
+    (globalThis as any).require = req;
+  }
+} catch { /* ignore polyfill errors */ }
 
 /**
  * Default modules configuration path
@@ -103,20 +112,24 @@ class RouteCodexApp {
       await (this.httpServer as any).initializeWithMergedConfig(mergedConfig);
 
       // 5. 按 merged-config 组装流水线并注入（完全配置驱动，无硬编码）
-      try {
-        const { PipelineAssembler } = await import('./modules/pipeline/config/pipeline-assembler.js');
-        const { manager, routePools } = await PipelineAssembler.assemble(mergedConfig);
-        (this.httpServer as any).attachPipelineManager(manager);
-        (this.httpServer as any).attachRoutePools(routePools);
-        // Attach classifier config if present
-        const classifierConfig = mergedConfig?.modules?.virtualrouter?.config?.classificationConfig;
-        if (classifierConfig) {
-          (this.httpServer as any).attachRoutingClassifierConfig(classifierConfig);
-        }
-        console.log('🧩 Pipeline assembled from merged-config and attached to server.');
-      } catch (e) {
-        console.warn('⚠️ Failed to assemble pipeline from merged-config. Router requires pipeline; requests will fail until assembly is provided.', e);
+      const { PipelineAssembler } = await import('./modules/pipeline/config/pipeline-assembler.js');
+      const { manager, routePools, routeMeta } = await PipelineAssembler.assemble(mergedConfig);
+      // 强约束：没有任何流水线则直接失败，避免“假就绪”
+      const poolsCount = Object.values(routePools || {}).reduce((acc, v) => acc + ((v || []).length), 0);
+      if (!poolsCount) {
+        throw new Error('No pipelines assembled from merged-config (strict mode).');
       }
+      (this.httpServer as any).attachPipelineManager(manager);
+      (this.httpServer as any).attachRoutePools(routePools);
+      if (routeMeta) {
+        (this.httpServer as any).attachRouteMeta(routeMeta);
+      }
+      // Attach classifier config if present
+      const classifierConfig = (mergedConfig as any)?.modules?.virtualrouter?.config?.classificationConfig;
+      if (classifierConfig) {
+        (this.httpServer as any).attachRoutingClassifierConfig(classifierConfig);
+      }
+      console.log('🧩 Pipeline assembled from merged-config and attached to server.');
 
       // 6. 启动服务器（若端口被占用，自动释放后重试一次）
       try {

@@ -102,8 +102,9 @@ export class PipelineDebugLogger {
     } = {}
   ) {
     this.options = {
-      enableConsoleLogging: true,
-      enableDebugCenter: true,
+      enableConsoleLogging: (process.env.RCC_ENABLE_CONSOLE_LOGGING ?? '1') !== '0',
+      // Default disable DebugCenter unless explicitly enabled
+      enableDebugCenter: process.env.RCC_ENABLE_DEBUGCENTER === '1',
       maxLogEntries: 1000,
       logLevel: 'detailed',
       ...options
@@ -111,9 +112,8 @@ export class PipelineDebugLogger {
     this.maxLogEntries = this.options.maxLogEntries!;
     // Ensure events also flow into the global DebugEventBus so external DebugCenter listeners can capture session IO
     try {
-      this.eventBus = DebugEventBus.getInstance();
+      this.eventBus = process.env.RCC_ENABLE_DEBUGCENTER === '1' ? DebugEventBus.getInstance() : (undefined as any);
     } catch {
-      // ignore if bus not available at runtime
       this.eventBus = undefined as any;
     }
   }

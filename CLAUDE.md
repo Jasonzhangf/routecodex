@@ -520,3 +520,4 @@ if (levelPriority[level] >= levelPriority[config.logLevel]) {
 ```
 
 This architecture provides a solid foundation for building scalable, maintainable AI service integrations with proper separation of concerns and flexible configuration options.
+你运行进程需要用后台启动的方式，加入&,如果一定要前台运行就要用gtimeout

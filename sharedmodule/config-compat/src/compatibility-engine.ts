@@ -40,6 +40,7 @@ import {
   resolveOAuthTokenPath,
   normalizeOAuthConfig
 } from './normalization/key-alias-normalization.js';
+import { getDefaultLLMSwitchType } from './normalization/provider-normalization.js';
 import {
   DirectApiKeyConfig,
   ConfigValidationResult
@@ -327,11 +328,27 @@ export class CompatibilityEngine {
 
           normalizedConfig.type = normalizedType;
         } else {
-          // Already a valid type, keep as-is
+          // Already a valid type, keep as-is, but allow heuristic overrides (GLM etc.)
           normalizedConfig.type = originalType;
+          try {
+            const base = String((providerConfig as any)?.baseURL || (providerConfig as any)?.baseUrl || '').toLowerCase();
+            const idLower = String(providerId || '').toLowerCase();
+            if (idLower.includes('glm') || /open\.bigmodel\.cn\/api\/coding\/paas/i.test(base)) {
+              if (normalizedConfig.type !== 'glm-http-provider') {
+                warnings.push({
+                  code: 'PROVIDER_TYPE_HEURISTIC_OVERRIDE',
+                  message: `Overriding provider type '${originalType}' to 'glm-http-provider' for provider '${providerId}' based on baseUrl/id heuristics`,
+                  path: `/virtualrouter/providers/${providerId}/type`,
+                  severity: 'info',
+                  details: { originalValue: originalType, normalizedValue: 'glm-http-provider', ruleApplied: 'glm-baseurl-heuristic' }
+                });
+              }
+              normalizedConfig.type = 'glm-http-provider';
+            }
+          } catch { /* ignore heuristic errors */ }
         }
 
-        // Apply provider-specific transformations
+        // Apply provider-specific transformations (run after potential heuristic override)
         const transformedConfig = applyProviderTransformations(
           providerId,
           normalizedConfig.type,
@@ -379,6 +396,9 @@ export class CompatibilityEngine {
           warnings
         );
       }
+
+      // Mirror normalized type to normalizedType field for downstream
+      try { (normalizedConfig as any).normalizedType = normalizedConfig.type; } catch { /* ignore */ }
 
       normalized[providerId] = normalizedConfig;
     }
@@ -578,12 +598,64 @@ export class CompatibilityEngine {
    * Build pipeline configurations
    */
   private buildPipelineConfigs(
-    _config: any,
-    _keyMappings: any
+    config: any,
+    keyMappings: any
   ): PipelineConfigs {
-    // This is a simplified version - the full implementation would mirror
-    // the complex pipeline configuration logic from the original UserConfigParser
-    return {};
+    const pipelines: PipelineConfigs = {};
+
+    const vr = (config?.virtualrouter || {}) as any;
+    const providers = (vr.providers || {}) as Record<string, any>;
+
+    // Helper: pick compatibility by family/type with light defaults
+    const pickCompatibility = (normalizedType: string): { type: string; config: Record<string, any> } => {
+      const t = String(normalizedType || '').toLowerCase();
+      if (t.includes('qwen')) { return { type: 'qwen-compatibility', config: {} }; }
+      if (t.includes('glm')) { return { type: 'glm-compatibility', config: {} }; }
+      if (t.includes('lmstudio')) { return { type: 'lmstudio-compatibility', config: {} }; }
+      if (t.includes('iflow')) { return { type: 'iflow-compatibility', config: {} }; }
+      return { type: 'field-mapping', config: {} };
+    };
+
+    // Build minimal pipelines per provider/model/key alias
+    for (const [providerId, pCfg] of Object.entries(providers)) {
+      const normalizedType = String(pCfg?.normalizedType || pCfg?.type || providerId);
+      const baseURL = pCfg?.baseURL || pCfg?.baseUrl || '';
+      const models = (pCfg?.models || {}) as Record<string, any>;
+      const aliases = (keyMappings?.providers?.[providerId] ? Object.keys(keyMappings.providers[providerId]) : ['key1']) as string[];
+
+      for (const [modelId, mCfg] of Object.entries(models)) {
+        const maxContext = Number((mCfg as any)?.maxContext) || undefined;
+        const maxTokens = Number((mCfg as any)?.maxTokens) || undefined;
+        for (const keyId of aliases) {
+          const cfgKey = `${providerId}.${modelId}.${keyId}`;
+          pipelines[cfgKey] = {
+            provider: {
+              type: normalizedType,
+              baseURL,
+              // auth will be injected later by assembler/engine using alias mapping
+            },
+            model: {
+              maxContext: maxContext ?? 0,
+              maxTokens: maxTokens ?? 0,
+            },
+            keyConfig: {
+              keyId,
+              actualKey: keyMappings.providers?.[providerId]?.[keyId] || keyId,
+              keyType: 'apiKey',
+            },
+            protocols: {
+              input: (vr?.inputProtocol || 'openai'),
+              output: 'openai',
+            },
+            compatibility: pickCompatibility(normalizedType),
+            llmSwitch: { type: getDefaultLLMSwitchType(vr?.inputProtocol || 'openai'), config: {} },
+            workflow: { type: 'streaming-control', config: {} },
+          } as any;
+        }
+      }
+    }
+
+    return pipelines;
   }
 
   /**

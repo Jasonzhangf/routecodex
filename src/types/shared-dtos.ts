@@ -12,6 +12,8 @@ export interface SharedRouteRequest {
   readonly modelId: string;
   readonly requestId: string;
   readonly timestamp?: number;
+  // Optional direct pipeline ID to avoid string parsing/concatenation mismatches
+  readonly pipelineId?: string;
 }
 
 // Pipeline request payload
