@@ -11,6 +11,7 @@ import net from 'net';
 import { spawn } from 'child_process';
 import { createRequire } from 'module';
 import { ConfigManagerModule } from './modules/config-manager/config-manager-module.js';
+import { MonitorConfigUtil } from './modules/monitoring/monitor-config.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 
 // Polyfill CommonJS require for ESM runtime to satisfy dependencies that call require()
@@ -99,10 +100,26 @@ class RouteCodexApp {
         watchInterval: 5000
       };
 
-      await this.configManager.initialize(configManagerConfig);
+      let mergedConfig: any | null = null;
+      let transparentEnabled = false;
+      try {
+        const m = await MonitorConfigUtil.load();
+        transparentEnabled = MonitorConfigUtil.isTransparentEnabled(m);
+      } catch { transparentEnabled = false; }
 
-      // 2. 加载合并后的配置
-      const mergedConfig = await this.loadMergedConfig();
+      try {
+        await this.configManager.initialize(configManagerConfig);
+        // 2. 加载合并后的配置
+        mergedConfig = await this.loadMergedConfig();
+      } catch (e) {
+        if (!transparentEnabled) { throw e; }
+        console.warn('⚠️ Config manager failed, but transparent monitor mode detected. Falling back to minimal config.');
+        mergedConfig = {
+          server: { port, host: '127.0.0.1', timeout: 30000, bodyLimit: '10mb', cors: { origin: '*', credentials: true } },
+          logging: { level: 'info', enableConsole: true, enableFile: false, categories: ['server','api','request','config','error','message'] },
+          modules: { httpserver: { config: { port, host: '127.0.0.1', timeout: 30000, bodyLimit: '10mb', cors: { origin: '*', credentials: true } } }, protocolhandler: { config: {} } }
+        };
+      }
 
       // 3. 初始化HTTP服务器
       const HttpServer = (await import('./server/http-server.js')).HttpServer;
@@ -111,25 +128,35 @@ class RouteCodexApp {
       // 4. 使用合并后的配置初始化服务器
       await (this.httpServer as any).initializeWithMergedConfig(mergedConfig);
 
-      // 5. 按 merged-config 组装流水线并注入（完全配置驱动，无硬编码）
-      const { PipelineAssembler } = await import('./modules/pipeline/config/pipeline-assembler.js');
-      const { manager, routePools, routeMeta } = await PipelineAssembler.assemble(mergedConfig);
-      // 强约束：没有任何流水线则直接失败，避免“假就绪”
-      const poolsCount = Object.values(routePools || {}).reduce((acc, v) => acc + ((v || []).length), 0);
-      if (!poolsCount) {
-        throw new Error('No pipelines assembled from merged-config (strict mode).');
+      // 5. 按 merged-config 组装流水线并注入（完全配置驱动，无硬编码），透明模式下可跳过
+      let pipelinesAttached = false;
+      try {
+        if (!transparentEnabled) {
+          const { PipelineAssembler } = await import('./modules/pipeline/config/pipeline-assembler.js');
+          const { manager, routePools, routeMeta } = await PipelineAssembler.assemble(mergedConfig);
+          const poolsCount = Object.values(routePools || {}).reduce((acc, v) => acc + ((v || []).length), 0);
+          if (!poolsCount) {
+            throw new Error('No pipelines assembled from merged-config (strict mode).');
+          }
+          (this.httpServer as any).attachPipelineManager(manager);
+          (this.httpServer as any).attachRoutePools(routePools);
+          if (routeMeta) {
+            (this.httpServer as any).attachRouteMeta(routeMeta);
+          }
+          // Attach classifier config if present
+          const classifierConfig = (mergedConfig as any)?.modules?.virtualrouter?.config?.classificationConfig;
+          if (classifierConfig) {
+            (this.httpServer as any).attachRoutingClassifierConfig(classifierConfig);
+          }
+          pipelinesAttached = true;
+          console.log('🧩 Pipeline assembled from merged-config and attached to server.');
+        } else {
+          console.log('🔎 Transparent analysis mode: skipping pipeline assembly.');
+        }
+      } catch (e) {
+        if (!transparentEnabled) { throw e; }
+        console.warn('⚠️ Pipeline assembly failed, continuing in transparent analysis mode.');
       }
-      (this.httpServer as any).attachPipelineManager(manager);
-      (this.httpServer as any).attachRoutePools(routePools);
-      if (routeMeta) {
-        (this.httpServer as any).attachRouteMeta(routeMeta);
-      }
-      // Attach classifier config if present
-      const classifierConfig = (mergedConfig as any)?.modules?.virtualrouter?.config?.classificationConfig;
-      if (classifierConfig) {
-        (this.httpServer as any).attachRoutingClassifierConfig(classifierConfig);
-      }
-      console.log('🧩 Pipeline assembled from merged-config and attached to server.');
 
       // 6. 启动服务器（若端口被占用，自动释放后重试一次）
       try {
@@ -160,7 +187,7 @@ class RouteCodexApp {
 
       console.log(`✅ RouteCodex server started successfully!`);
       console.log(`🌐 Server URL: http://${serverConfig.host}:${serverConfig.port}`);
-      console.log(`🗂️ Merged config: ${this.mergedConfigPath}`);
+      if (pipelinesAttached) { console.log(`🗂️ Merged config: ${this.mergedConfigPath}`); } else { console.log('🗂️ Running with transparent analysis (no pipelines).'); }
       console.log(`📊 Health check: http://${serverConfig.host}:${serverConfig.port}/health`);
       console.log(`🔧 Configuration: http://${serverConfig.host}:${serverConfig.port}/config`);
       console.log(`📖 OpenAI API: http://${serverConfig.host}:${serverConfig.port}/v1/openai`);

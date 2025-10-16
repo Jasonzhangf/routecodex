@@ -4,6 +4,7 @@
  */
 
 import express, { type Router, type Request, type Response } from 'express';
+import axios from 'axios';
 import { ErrorHandlingUtils } from '../utils/error-handling-utils.js';
 import fs from 'fs/promises';
 import path from 'path';
@@ -26,6 +27,7 @@ import {
   RouteCodexError,
 } from './types.js';
 import { ConfigRequestClassifier, type ConfigClassifierConfig, type ConfigClassificationInput } from '../modules/virtual-router/classifiers/config-request-classifier.js';
+import { MonitorConfigUtil } from '../modules/monitoring/monitor-config.js';
 
 /**
  * Protocol Handler configuration interface
@@ -76,6 +78,10 @@ export class ProtocolHandler extends BaseModule {
   private requestHistory: unknown[] = [];
   private errorHistory: unknown[] = [];
   private maxHistorySize = 100;
+  // Passive monitoring (design-ready, disabled by default)
+  private monitorEnabled: boolean = process.env.RCC_MONITOR_ENABLED === '1';
+  private monitor: { initialize: () => Promise<void>; onIncoming: (req: unknown, ctx: any) => Promise<void>; onRouteDecision: (reqId: string, decision: unknown, ctx?: any) => Promise<void>; onOutgoing: (res: unknown, ctx: any) => Promise<void>; onStreamChunk: (chunk: unknown, ctx: any) => Promise<void>; finalize: (ctx: any) => Promise<void> } | null = null;
+  private transparentHint: boolean = false;
 
   constructor(
     requestHandler: RequestHandler,
@@ -119,6 +125,23 @@ export class ProtocolHandler extends BaseModule {
 
     // Initialize debug enhancements
     this.initializeDebugEnhancements();
+    // Lazy import monitor module only when explicitly enabled via env flag
+    if (this.monitorEnabled) {
+      (async () => {
+        try {
+          const mod = await import('../modules/monitoring/monitor-module.js');
+          this.monitor = new mod.MonitorModule({ enabled: true });
+          await this.monitor.initialize();
+        } catch (e) {
+          console.warn('Monitor module failed to initialize; continuing without monitoring:', (e as Error)?.message || e);
+          this.monitorEnabled = false;
+        }
+      })().catch(() => { /* ignore */ });
+    }
+    // Snapshot a transparent hint for quick branch check (will still read latest on each request)
+    (async () => {
+      try { const m = await MonitorConfigUtil.load(); this.transparentHint = MonitorConfigUtil.isTransparentEnabled(m); } catch { this.transparentHint = false; }
+    })().catch(() => { /* ignore */ });
   }
 
   /**
@@ -587,6 +610,9 @@ export class ProtocolHandler extends BaseModule {
     // Chat Completions endpoint
     this.router.post('/chat/completions', this.handleChatCompletions.bind(this));
 
+    // OpenAI Responses endpoint (transparent passthrough first)
+    this.router.post('/responses', this.handleResponses.bind(this));
+
     // Completions endpoint
     this.router.post('/completions', this.handleCompletions.bind(this));
 
@@ -689,6 +715,8 @@ export class ProtocolHandler extends BaseModule {
     }
 
     try {
+      // Transparent passthrough branch (OpenAI)
+      if (await this.tryTransparentOpenAI(req, res)) { return; }
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'protocol-handler',
@@ -703,6 +731,21 @@ export class ProtocolHandler extends BaseModule {
           streaming: req.body.stream || false,
         },
       });
+
+      // Monitoring: record incoming request (non-blocking)
+      if (this.monitorEnabled && this.monitor) {
+        const monitorMeta = {
+          reqId: requestId,
+          timestamp: startTime,
+          protocol: 'openai' as const,
+          endpoint: '/v1/chat/completions',
+          userAgent: req.get('user-agent') || undefined,
+          flags: { streaming: !!req.body?.stream, tools: !!req.body?.tools }
+        };
+        try {
+          await this.monitor.onIncoming(req.body, { meta: monitorMeta, summary: { model: req.body?.model, messageCount: Array.isArray(req.body?.messages) ? req.body.messages.length : 0 } });
+        } catch { /* ignore */ }
+      }
 
       // Optionally record Codex CLI inputs as standard samples (redacted)
       try {
@@ -752,6 +795,18 @@ export class ProtocolHandler extends BaseModule {
         const providerId = metaA?.providerId || 'unknown';
         const modelId = metaA?.modelId || 'unknown';
         ctxProviderId = providerId; ctxModelId = modelId;
+
+        // Monitoring: record route decision
+        if (this.monitorEnabled && this.monitor) {
+          const monitorMeta = {
+            reqId: requestId,
+            timestamp: Date.now(),
+            protocol: 'openai' as const,
+            endpoint: '/v1/chat/completions',
+            flags: { streaming: !!req.body?.stream }
+          };
+          try { await this.monitor.onRouteDecision(requestId, { route: routeName, pipelineId, providerId, modelId }, { meta: monitorMeta }); } catch { /* ignore */ }
+        }
         // Upstream auth override (disabled by default). Enable only if:
         //  - explicit env RCC_ALLOW_UPSTREAM_OVERRIDE=1, or
         //  - client uses dedicated header x-rcc-upstream-authorization / x-rc-upstream-authorization
@@ -913,6 +968,10 @@ export class ProtocolHandler extends BaseModule {
 
       // Normalize response for OpenAI compatibility and set standard headers
       const normalized = this.normalizeOpenAIResponse(response, 'chat');
+      if (this.monitorEnabled && this.monitor) {
+        const monitorMeta = { reqId: requestId, timestamp: Date.now(), protocol: 'openai' as const, endpoint: '/v1/chat/completions', flags: { streaming: false } };
+        try { await this.monitor.onOutgoing(normalized, { meta: monitorMeta }); } catch { /* ignore */ }
+      }
       res.setHeader('x-request-id', requestId);
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -1200,6 +1259,8 @@ export class ProtocolHandler extends BaseModule {
     let ctxModelId: string | undefined;
 
     try {
+      // Transparent passthrough branch (Anthropic)
+      if (await this.tryTransparentAnthropic(req, res)) { return; }
       this.debugEventBus.publish({
         sessionId: `session_${Date.now()}`,
         moduleId: 'protocol-handler',
@@ -1362,6 +1423,377 @@ export class ProtocolHandler extends BaseModule {
   }
 
   /**
+   * Handle OpenAI Responses endpoint
+   * Priority: transparent passthrough via monitor.json; otherwise 501 for now
+   */
+  private async handleResponses(req: Request, res: Response): Promise<void> {
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    try {
+      // Monitor incoming (non-blocking)
+      if (this.monitorEnabled && this.monitor) {
+        try {
+          const meta = { reqId: requestId, timestamp: Date.now(), protocol: 'openai' as const, endpoint: '/v1/responses', flags: { streaming: !!req.body?.stream } };
+          await this.monitor.onIncoming(req.body, { meta, summary: { model: req.body?.model, hasInput: !!req.body?.input, hasMessages: Array.isArray(req.body?.messages) } });
+        } catch { /* ignore */ }
+      }
+
+      // Transparent passthrough when enabled
+      const did = await this.tryTransparentResponses(req, res);
+      if (did) { return; }
+
+      // Not implemented without transparent mode or pipeline fallback
+      res.status(501).json({
+        error: {
+          message: 'Responses endpoint not implemented (enable monitor transparent mode)',
+          type: 'not_implemented',
+        },
+      });
+    } catch (error) {
+      const mapped = this.buildErrorPayload(error, requestId);
+      if (!res.headersSent) {
+        try {
+          res.setHeader('x-request-id', requestId);
+          res.setHeader('Cache-Control', 'no-store');
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        } catch { /* ignore */ }
+      }
+      res.status(mapped.status).json(mapped.body);
+    }
+  }
+
+  /**
+   * Transparent passthrough for OpenAI Responses if monitor.json enables it
+   */
+  private async tryTransparentResponses(req: Request, res: Response): Promise<boolean> {
+    try {
+      const monitorCfg = await MonitorConfigUtil.load();
+      const tcfg = MonitorConfigUtil.getTransparent(monitorCfg);
+      const enabled = MonitorConfigUtil.isTransparentEnabled(monitorCfg);
+      if (!enabled) { return false; }
+
+      const hdrUp = (req.headers['x-rc-upstream-url'] as string | undefined) || (req.headers['x-rcc-upstream-url'] as string | undefined);
+      const upstreamBase = hdrUp || tcfg?.endpoints?.openai || (tcfg?.defaultUpstream === 'openai' ? (tcfg?.endpoints?.openai || '') : '');
+      if (!upstreamBase) { return false; }
+      const url = this.joinUrl(upstreamBase, '/responses');
+
+      const overrideAuth = (req.headers['x-rcc-upstream-authorization'] as string | undefined) || (req.headers['x-rc-upstream-authorization'] as string | undefined);
+      const incomingAuth = (req.headers['authorization'] as string | undefined) || (req.headers['Authorization'] as unknown as string | undefined);
+      const envAuth = tcfg?.auth?.openai || undefined;
+      const auth = overrideAuth || envAuth || incomingAuth || undefined;
+      const allowlist = (tcfg?.headerAllowlist || []).map(h => h.toLowerCase());
+      const passHeader = (key: string): boolean => {
+        const k = key.toLowerCase();
+        if (allowlist.includes(k)) { return true; }
+        if (allowlist.some(x => x.endsWith('*') && k.startsWith(x.slice(0, -1)))) { return true; }
+        return false;
+      };
+      const headers: Record<string, string> = {};
+      for (const [k, v] of Object.entries(req.headers)) {
+        if (v === undefined) continue;
+        if (!passHeader(k)) continue;
+        headers[k] = Array.isArray(v) ? v.join(', ') : String(v);
+      }
+      if (auth) { headers['authorization'] = this.normalizeBearerAuth(auth); }
+      // Attach extra headers from monitor config, without overriding Authorization
+      if (tcfg?.extraHeaders) {
+        for (const [ek, ev] of Object.entries(tcfg.extraHeaders)) {
+          if (!ek) continue; if (ek.toLowerCase()==='authorization') continue;
+          headers[ek] = ev;
+        }
+      }
+      // Ensure Beta header for Responses wire
+      try {
+        const lower = Object.fromEntries(Object.entries(headers).map(([k,v]) => [k.toLowerCase(), v]));
+        if (!('openai-beta' in lower)) { headers['OpenAI-Beta'] = 'responses-2024-12-17'; }
+      } catch { /* ignore */ }
+
+      const timeout = tcfg?.timeoutMs ?? 30000;
+      const rawData = req.body || {};
+      const data = (() => {
+        try {
+          if (tcfg?.modelMapping && rawData && typeof rawData === 'object' && typeof (rawData as any).model === 'string') {
+            const m = tcfg.modelMapping[(rawData as any).model];
+            if (m && typeof m === 'string' && m.trim()) {
+              const copy = JSON.parse(JSON.stringify(rawData));
+              copy.model = m;
+              return copy;
+            }
+          }
+        } catch { /* ignore */ }
+        return rawData;
+      })();
+      const isStream = data && (data as any).stream === true;
+
+      if (isStream) {
+        const upstream = await axios.post(url, data, { headers: { ...headers, accept: 'text/event-stream' }, timeout, responseType: 'stream', validateStatus: () => true });
+        // Forward minimal SSE headers; keep upstream headers if possible
+        try {
+          res.status(upstream.status);
+          res.setHeader('Content-Type', upstream.headers['content-type'] || 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.setHeader('Transfer-Encoding', 'chunked');
+        } catch { /* ignore */ }
+        if (this.monitorEnabled && this.monitor) {
+          try {
+            upstream.data.on('data', async (chunk: Buffer) => {
+              try { await this.monitor!.onStreamChunk({ raw: true, bytes: chunk.toString('utf8') }, { meta: { reqId: `responses_${Date.now()}`, timestamp: Date.now(), protocol: 'openai', endpoint: '/v1/responses', flags: { streaming: true } }, type: 'transparent_responses_sse' }); } catch { /* ignore */ }
+            });
+          } catch { /* ignore */ }
+        }
+        upstream.data.on('error', () => { try { res.end(); } catch { /* ignore */ } });
+        upstream.data.pipe(res);
+        return true;
+      } else {
+        const upstream = await axios.post(url, data, { headers: { ...headers, accept: 'application/json' }, timeout, validateStatus: () => true });
+        if (this.monitorEnabled && this.monitor) {
+          try { await this.monitor.onOutgoing(upstream.data, { meta: { reqId: `responses_${Date.now()}`, timestamp: Date.now(), protocol: 'openai', endpoint: '/v1/responses', flags: { streaming: false } } }); } catch { /* ignore */ }
+        }
+        res.status(upstream.status);
+        for (const [k, v] of Object.entries(upstream.headers || {})) {
+          if (k.toLowerCase() === 'content-length') continue;
+          try { res.setHeader(k, String(v)); } catch { /* ignore */ }
+        }
+        res.type('application/json');
+        res.send(upstream.data);
+        return true;
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Transparent passthrough for OpenAI chat/completions if monitor.json enables it.
+   * Returns true if handled.
+   */
+  private async tryTransparentOpenAI(req: Request, res: Response): Promise<boolean> {
+    try {
+      const monitorCfg = await MonitorConfigUtil.load();
+      const tcfg = MonitorConfigUtil.getTransparent(monitorCfg);
+      const enabled = MonitorConfigUtil.isTransparentEnabled(monitorCfg);
+      if (!enabled) { return false; }
+      // Allow per-request override via header
+      const hdrUp = (req.headers['x-rc-upstream-url'] as string | undefined) || (req.headers['x-rcc-upstream-url'] as string | undefined);
+      const upstreamBase = hdrUp || tcfg?.endpoints?.openai || (tcfg?.defaultUpstream === 'openai' ? (tcfg?.endpoints?.openai || '') : '');
+      if (!upstreamBase) { return false; }
+
+      // Prefer Responses wire when configured
+      const preferResponses = (tcfg?.wireApi === 'responses');
+      const url = this.joinUrl(upstreamBase, preferResponses ? '/responses' : '/chat/completions');
+      const overrideAuth = (req.headers['x-rcc-upstream-authorization'] as string | undefined) || (req.headers['x-rc-upstream-authorization'] as string | undefined);
+      const incomingAuth = (req.headers['authorization'] as string | undefined) || (req.headers['Authorization'] as unknown as string | undefined);
+      const envAuth2 = tcfg?.auth?.openai || undefined;
+      const auth = overrideAuth || envAuth2 || incomingAuth || undefined;
+      const allowlist = (tcfg?.headerAllowlist || []).map(h => h.toLowerCase());
+      const passHeader = (key: string): boolean => {
+        const k = key.toLowerCase();
+        if (allowlist.includes(k)) { return true; }
+        if (allowlist.some(x => x.endsWith('*') && k.startsWith(x.slice(0, -1)))) { return true; }
+        return false;
+      };
+      const headers: Record<string, string> = {};
+      for (const [k, v] of Object.entries(req.headers)) {
+        if (v === undefined) continue;
+        if (!passHeader(k)) continue;
+        headers[k] = Array.isArray(v) ? v.join(', ') : String(v);
+      }
+      if (auth) { headers['authorization'] = this.normalizeBearerAuth(auth); }
+      if (tcfg?.extraHeaders) {
+        for (const [ek, ev] of Object.entries(tcfg.extraHeaders)) {
+          if (!ek) continue; if (ek.toLowerCase()==='authorization') continue;
+          headers[ek] = ev;
+        }
+      }
+
+      const timeout = tcfg?.timeoutMs ?? 30000;
+      const rawData = req.body || {};
+      // Optional model remap for upstream compatibility, and minimal Chat->Responses transform when preferred
+      const data = (() => {
+        try {
+          let working: any = rawData;
+          if (tcfg?.modelMapping && working && typeof working === 'object' && typeof (working as any).model === 'string') {
+            const m = tcfg.modelMapping[(rawData as any).model];
+            if (m && typeof m === 'string' && m.trim()) {
+              working = JSON.parse(JSON.stringify(working));
+              working.model = m;
+            }
+          }
+          if (preferResponses) {
+            // Minimal transform: if messages present and no input, join user contents into a single input string
+            if (working && typeof working === 'object' && !('input' in working) && Array.isArray((working as any).messages)) {
+              const msgs = (working as any).messages as Array<any>;
+              const userTexts = msgs
+                .filter(m => m && m.role === 'user' && typeof m.content === 'string')
+                .map(m => String(m.content));
+              if (userTexts.length) {
+                working = JSON.parse(JSON.stringify(working));
+                (working as any).input = userTexts.join('\n');
+                // keep original messages as-is to preserve transparency where upstream accepts it
+              }
+            }
+          }
+          return working;
+        } catch { /* ignore */ }
+        return rawData;
+      })();
+      const isStream = data && data.stream === true;
+
+      if (isStream) {
+        let upstream = await axios.post(url, data, { headers: { ...headers, accept: 'text/event-stream' }, timeout, responseType: 'stream', validateStatus: () => true });
+        // Fallback to /responses if /chat/completions not supported and not already preferring responses
+        if (upstream.status >= 400 && !preferResponses) {
+          try {
+            const altUrl = this.joinUrl(upstreamBase, '/responses');
+            // Minimal messages->input transform already applied above when preferResponses; apply here as well
+            const retry = await axios.post(altUrl, data, { headers: { ...headers, accept: 'text/event-stream' }, timeout, responseType: 'stream', validateStatus: () => true });
+            if (retry.status < 400) { upstream = retry; }
+          } catch { /* ignore */ }
+        }
+        // Forward status + headers (minimal)
+        try {
+          res.status(upstream.status);
+          res.setHeader('Content-Type', upstream.headers['content-type'] || 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.setHeader('Transfer-Encoding', 'chunked');
+        } catch { /* ignore */ }
+        if (this.monitorEnabled && this.monitor) {
+          try {
+            upstream.data.on('data', async (chunk: Buffer) => {
+              try { await this.monitor!.onStreamChunk({ raw: true, bytes: chunk.toString('utf8') }, { meta: { reqId: `openai_${Date.now()}`, timestamp: Date.now(), protocol: 'openai', endpoint: '/v1/chat/completions', flags: { streaming: true } }, type: 'transparent_openai_sse' }); } catch { /* ignore */ }
+            });
+          } catch { /* ignore */ }
+        }
+        upstream.data.on('error', () => { try { res.end(); } catch { /* ignore */ } });
+        upstream.data.pipe(res);
+        return true;
+      } else {
+        let upstream = await axios.post(url, data, { headers: { ...headers, accept: 'application/json' }, timeout, validateStatus: () => true });
+        if (upstream.status >= 400 && !preferResponses) {
+          try {
+            const altUrl = this.joinUrl(upstreamBase, '/responses');
+            const retry = await axios.post(altUrl, data, { headers: { ...headers, accept: 'application/json' }, timeout, validateStatus: () => true });
+            if (retry.status < 400) { upstream = retry; }
+          } catch { /* ignore */ }
+        }
+        res.status(upstream.status);
+        for (const [k, v] of Object.entries(upstream.headers || {})) {
+          if (k.toLowerCase() === 'content-length') continue;
+          try { res.setHeader(k, String(v)); } catch { /* ignore */ }
+        }
+        res.type('application/json');
+        res.send(upstream.data);
+        return true;
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Transparent passthrough for Anthropic messages if monitor.json enables it.
+   * Returns true if handled.
+   */
+  private async tryTransparentAnthropic(req: Request, res: Response): Promise<boolean> {
+    try {
+      const monitorCfg = await MonitorConfigUtil.load();
+      const tcfg = MonitorConfigUtil.getTransparent(monitorCfg);
+      const enabled = MonitorConfigUtil.isTransparentEnabled(monitorCfg);
+      if (!enabled) { return false; }
+      const hdrUp = (req.headers['x-rc-upstream-url'] as string | undefined) || (req.headers['x-rcc-upstream-url'] as string | undefined);
+      const upstreamBase = hdrUp || tcfg?.endpoints?.anthropic || (tcfg?.defaultUpstream === 'anthropic' ? (tcfg?.endpoints?.anthropic || '') : '');
+      if (!upstreamBase) { return false; }
+      const url = this.joinUrl(upstreamBase, '/v1/messages');
+      const overrideAuth = (req.headers['x-rcc-upstream-authorization'] as string | undefined) || (req.headers['x-rc-upstream-authorization'] as string | undefined);
+      const incomingAuth = (req.headers['authorization'] as string | undefined) || (req.headers['Authorization'] as unknown as string | undefined);
+      const envAuth3 = tcfg?.auth?.anthropic || undefined;
+      const auth = overrideAuth || envAuth3 || incomingAuth || undefined;
+      const allowlist = (tcfg?.headerAllowlist || []).map(h => h.toLowerCase());
+      const passHeader = (key: string): boolean => {
+        const k = key.toLowerCase();
+        if (allowlist.includes(k)) { return true; }
+        if (allowlist.some(x => x.endsWith('*') && k.startsWith(x.slice(0, -1)))) { return true; }
+        return false;
+      };
+      const headers: Record<string, string> = {};
+      for (const [k, v] of Object.entries(req.headers)) {
+        if (v === undefined) continue;
+        if (!passHeader(k)) continue;
+        headers[k] = Array.isArray(v) ? v.join(', ') : String(v);
+      }
+      if (!headers['anthropic-version']) { headers['anthropic-version'] = '2023-06-01'; }
+      if (auth) { headers['authorization'] = this.normalizeBearerAuth(auth); }
+      if (tcfg?.extraHeaders) {
+        for (const [ek, ev] of Object.entries(tcfg.extraHeaders)) {
+          if (!ek) continue; if (ek.toLowerCase()==='authorization') continue;
+          headers[ek] = ev;
+        }
+      }
+
+      const timeout = tcfg?.timeoutMs ?? 30000;
+      const rawData = req.body || {};
+      const data = (() => {
+        try {
+          if (tcfg?.modelMapping && rawData && typeof rawData === 'object' && typeof (rawData as any).model === 'string') {
+            const m = tcfg.modelMapping[(rawData as any).model];
+            if (m && typeof m === 'string' && m.trim()) {
+              const copy = JSON.parse(JSON.stringify(rawData));
+              copy.model = m;
+              return copy;
+            }
+          }
+        } catch { /* ignore */ }
+        return rawData;
+      })();
+      const isStream = data && data.stream === true;
+      if (isStream) {
+        const upstream = await axios.post(url, data, { headers: { ...headers, accept: 'text/event-stream' }, timeout, responseType: 'stream', validateStatus: () => true });
+        try {
+          res.status(upstream.status);
+          res.setHeader('Content-Type', upstream.headers['content-type'] || 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.setHeader('Transfer-Encoding', 'chunked');
+          res.setHeader('anthropic-version', headers['anthropic-version']);
+        } catch { /* ignore */ }
+        if (this.monitorEnabled && this.monitor) {
+          try {
+            upstream.data.on('data', async (chunk: Buffer) => {
+              try { await this.monitor!.onStreamChunk({ raw: true, bytes: chunk.toString('utf8') }, { meta: { reqId: `anthropic_${Date.now()}`, timestamp: Date.now(), protocol: 'anthropic', endpoint: '/v1/messages', flags: { streaming: true } }, type: 'transparent_anthropic_sse' }); } catch { /* ignore */ }
+            });
+          } catch { /* ignore */ }
+        }
+        upstream.data.on('error', () => { try { res.end(); } catch { /* ignore */ } });
+        upstream.data.pipe(res);
+        return true;
+      } else {
+        const upstream = await axios.post(url, data, { headers: { ...headers, accept: 'application/json' }, timeout, validateStatus: () => true });
+        res.status(upstream.status);
+        for (const [k, v] of Object.entries(upstream.headers || {})) {
+          if (k.toLowerCase() === 'content-length') continue;
+          try { res.setHeader(k, String(v)); } catch { /* ignore */ }
+        }
+        try { res.setHeader('anthropic-version', headers['anthropic-version']); } catch { /* ignore */ }
+        res.type('application/json');
+        res.send(upstream.data);
+        return true;
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  private joinUrl(base: string, suffix: string): string {
+    try {
+      if (!base) return suffix;
+      const b = String(base).replace(/\/$/, '');
+      const s = String(suffix || '').startsWith('/') ? suffix : `/${suffix}`;
+      return `${b}${s}`;
+    } catch { return `${base}${suffix}`; }
+  }
+
+  /**
    * Normalize provider response to OpenAI-compatible shape.
    * Adds missing standard fields while preserving existing data.
    */
@@ -1487,7 +1919,16 @@ export class ProtocolHandler extends BaseModule {
         heartbeatCounter += 1;
         if (HEARTBEAT_MODE === 'comment') {
           // SSE comment – semantically neutral, most OpenAI-compatible clients ignore comments
-          res.write(`: ping ${heartbeatCounter} pid=${process.pid} req=${requestId}\n\n`);
+          const comment = `: ping ${heartbeatCounter} pid=${process.pid} req=${requestId}`;
+          if (this.monitorEnabled && this.monitor) {
+            try {
+              void this.monitor.onStreamChunk(
+                { event: 'comment', data: comment },
+                { meta: { reqId: requestId, timestamp: Date.now(), protocol: 'openai', endpoint: '/v1/chat/completions', flags: { streaming: true } }, type: 'openai_sse_heartbeat_comment' }
+              );
+            } catch { /* ignore */ }
+          }
+          res.write(`${comment}\n\n`);
           try {
             this.publishDebugEvent('sse_heartbeat_emit', {
               mode: 'comment',
@@ -1518,6 +1959,14 @@ export class ProtocolHandler extends BaseModule {
             model: model || 'unknown',
             choices: [{ index: 0, delta, finish_reason: null }],
           };
+          if (this.monitorEnabled && this.monitor) {
+            try {
+              void this.monitor.onStreamChunk(
+                heartbeatChunk,
+                { meta: { reqId: requestId, timestamp: Date.now(), protocol: 'openai', endpoint: '/v1/chat/completions', flags: { streaming: true } }, type: 'openai_sse_heartbeat' }
+              );
+            } catch { /* ignore */ }
+          }
           res.write(`data: ${JSON.stringify(heartbeatChunk)}\n\n`);
           try {
             this.publishDebugEvent('sse_heartbeat_emit', {
@@ -1564,7 +2013,13 @@ export class ProtocolHandler extends BaseModule {
       }
 
       // Send initial role delta
-      res.write(`data: ${JSON.stringify(makeInitial())}\n\n`);
+      {
+        const initial = makeInitial();
+        if (this.monitorEnabled && this.monitor) {
+          try { await this.monitor.onStreamChunk(initial, { meta: { reqId: requestId, timestamp: Date.now(), protocol: 'openai', endpoint: '/v1/chat/completions', flags: { streaming: true } }, type: 'openai_sse' }); } catch { /* ignore */ }
+        }
+        res.write(`data: ${JSON.stringify(initial)}\n\n`);
+      }
       startHeartbeat();
 
       const normalizeChunk = (obj: unknown) => {
@@ -1626,6 +2081,9 @@ export class ProtocolHandler extends BaseModule {
             // Try to parse JSON string; if fails, wrap into delta
             try {
               const obj = normalizeChunk(JSON.parse(chunk));
+              if (this.monitorEnabled && this.monitor) {
+                try { await this.monitor.onStreamChunk(obj, { meta: { reqId: requestId, timestamp: Date.now(), protocol: 'openai', endpoint: '/v1/chat/completions', flags: { streaming: true } }, type: 'openai_sse' }); } catch { /* ignore */ }
+              }
               res.write(`data: ${JSON.stringify(obj)}\n\n`);
             } catch {
               const delta = {
@@ -1635,11 +2093,17 @@ export class ProtocolHandler extends BaseModule {
                 model: model || 'unknown',
                 choices: [{ index: 0, delta: { content: String(chunk) }, finish_reason: undefined }],
               };
+              if (this.monitorEnabled && this.monitor) {
+                try { await this.monitor.onStreamChunk(delta, { meta: { reqId: requestId, timestamp: Date.now(), protocol: 'openai', endpoint: '/v1/chat/completions', flags: { streaming: true } }, type: 'openai_sse' }); } catch { /* ignore */ }
+              }
               res.write(`data: ${JSON.stringify(delta)}\n\n`);
             }
           } else {
             // Object chunk; normalize and send
             const obj = normalizeChunk(chunk);
+            if (this.monitorEnabled && this.monitor) {
+              try { await this.monitor.onStreamChunk(obj, { meta: { reqId: requestId, timestamp: Date.now(), protocol: 'openai', endpoint: '/v1/chat/completions', flags: { streaming: true } }, type: 'openai_sse' }); } catch { /* ignore */ }
+            }
             res.write(`data: ${JSON.stringify(obj)}\n\n`);
           }
         }
@@ -1726,6 +2190,9 @@ export class ProtocolHandler extends BaseModule {
             model: model || 'unknown',
             choices: [{ index: 0, delta, finish_reason: undefined }],
           });
+          if (this.monitorEnabled && this.monitor) {
+            try { await this.monitor.onStreamChunk(single, { meta: { reqId: requestId, timestamp: Date.now(), protocol: 'openai', endpoint: '/v1/chat/completions', flags: { streaming: true } }, type: 'openai_sse' }); } catch { /* ignore */ }
+          }
           res.write(`data: ${JSON.stringify(single)}\n\n`);
         } catch {
           // If anything goes wrong, at least close the stream properly
@@ -1741,6 +2208,9 @@ export class ProtocolHandler extends BaseModule {
         choices: [{ index: 0, delta: {}, finish_reason: emittedToolCalls ? 'tool_calls' : 'stop' }],
       };
       stopHeartbeat();
+      if (this.monitorEnabled && this.monitor) {
+        try { await this.monitor.onStreamChunk(done, { meta: { reqId: requestId, timestamp: Date.now(), protocol: 'openai', endpoint: '/v1/chat/completions', flags: { streaming: true } }, type: 'openai_sse_done' }); } catch { /* ignore */ }
+      }
       res.write(`data: ${JSON.stringify(done)}\n\n`);
       res.write('data: [DONE]\n\n');
       res.end();
@@ -1755,6 +2225,9 @@ export class ProtocolHandler extends BaseModule {
         choices: [{ index: 0, delta: { content: '' }, finish_reason: 'stop' }],
       };
       stopHeartbeat();
+      if (this.monitorEnabled && this.monitor) {
+        try { await this.monitor.onStreamChunk({ error: true, chunk: errorChunk }, { meta: { reqId: requestId, timestamp: Date.now(), protocol: 'openai', endpoint: '/v1/chat/completions', flags: { streaming: true } }, type: 'openai_sse_error' }); } catch { /* ignore */ }
+      }
       try { res.write(`data: ${JSON.stringify(errorChunk)}\n\n`); } catch (_e) { void 0; }
       try { res.write('data: [DONE]\n\n'); } catch (_e) { void 0; }
       try { res.end(); } catch (_e) { void 0; }
@@ -1795,8 +2268,24 @@ export class ProtocolHandler extends BaseModule {
       try {
         const data = `data: ${JSON.stringify(payload)}\n\n`;
         if (eventType) {
+          if (this.monitorEnabled && this.monitor) {
+            try {
+              void this.monitor.onStreamChunk(
+                { event: eventType, data: payload },
+                { meta: { reqId: requestId, timestamp: Date.now(), protocol: 'anthropic', endpoint: '/v1/messages', flags: { streaming: true } }, type: 'anthropic_sse' }
+              );
+            } catch { /* ignore */ }
+          }
           res.write(`event: ${eventType}\n${data}`);
         } else {
+          if (this.monitorEnabled && this.monitor) {
+            try {
+              void this.monitor.onStreamChunk(
+                { event: '', data: payload },
+                { meta: { reqId: requestId, timestamp: Date.now(), protocol: 'anthropic', endpoint: '/v1/messages', flags: { streaming: true } }, type: 'anthropic_sse' }
+              );
+            } catch { /* ignore */ }
+          }
           res.write(data);
         }
       } catch (_err) {
@@ -2043,6 +2532,18 @@ export class ProtocolHandler extends BaseModule {
       return 'default';
     }
     return categories[0] || 'default';
+  }
+
+  // Normalize Authorization header to Bearer format when needed
+  private normalizeBearerAuth(token: string): string {
+    try {
+      if (!token) return token;
+      const s = String(token).trim();
+      if (/^Bearer\s+/i.test(s)) { return s; }
+      // Avoid double prefix if caller already provided other scheme
+      if (/^[A-Za-z]+\s+/.test(s)) { return s; }
+      return `Bearer ${s}`;
+    } catch { return token; }
   }
 
   /**
