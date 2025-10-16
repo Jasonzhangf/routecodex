@@ -28,10 +28,10 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Setup Node.js
+    - name: Setup Node.js (.nvmrc)
       uses: actions/setup-node@v4
       with:
-        node-version: ${{ env.NODE_VERSION }}
+        node-version-file: '.nvmrc'
         cache: 'npm'
 
     - name: Install dependencies
@@ -71,10 +71,10 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Setup Node.js
+    - name: Setup Node.js (.nvmrc)
       uses: actions/setup-node@v4
       with:
-        node-version: ${{ env.NODE_VERSION }}
+        node-version-file: '.nvmrc'
         cache: 'npm'
 
     - name: Install dependencies
@@ -167,10 +167,10 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Setup Node.js
+    - name: Setup Node.js (.nvmrc)
       uses: actions/setup-node@v4
       with:
-        node-version: ${{ env.NODE_VERSION }}
+        node-version-file: '.nvmrc'
         cache: 'npm'
 
     - name: Install dependencies
@@ -210,10 +210,10 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Setup Node.js
+    - name: Setup Node.js (.nvmrc)
       uses: actions/setup-node@v4
       with:
-        node-version: ${{ env.NODE_VERSION }}
+        node-version-file: '.nvmrc'
         cache: 'npm'
 
     - name: Install dependencies
