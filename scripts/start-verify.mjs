@@ -135,6 +135,12 @@ async function main() {
   let child; let bgLogPath = null; let bgPid = null;
   // Prefer local CLI if present
   const rccBin = fs.existsSync(path.resolve(process.cwd(), 'rcc')) ? path.resolve(process.cwd(), 'rcc') : 'rcc';
+  // Prefer direct local server entry (dist/index.js) to avoid global CLI mismatch
+  const localServerEntry = path.resolve(process.cwd(), 'dist', 'index.js');
+  const localModulesConfig = path.resolve(process.cwd(), 'config', 'modules.json');
+  const hasLocalServer = fs.existsSync(localServerEntry) && fs.existsSync(localModulesConfig);
+  // Ensure server picks intended config path
+  env.ROUTECODEX_CONFIG = cfgPath;
 
   if (args.mode === 'fg') {
     // Foreground via gtimeout; still capture a log via tee for analysis

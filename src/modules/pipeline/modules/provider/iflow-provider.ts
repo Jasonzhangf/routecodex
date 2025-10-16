@@ -12,7 +12,10 @@ import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { createIFlowOAuth, IFlowTokenStorage } from './iflow-oauth.js';
 import { DebugEventBus } from "rcc-debugcenter";
 
+// Default to the same endpoint used by the official iFlow CLI for OpenAI‑compatible REST
 const IFLOW_API_ENDPOINT = 'https://apis.iflow.cn/v1';
+// Use iFlow CLI UA explicitly (no env override per requirement)
+const IFLOW_CLI_UA = 'iflow-cli/2.0';
 
 export class IFlowProvider implements ProviderModule {
   readonly id: string;
@@ -445,7 +448,45 @@ export class IFlowProvider implements ProviderModule {
 
   private getAPIEndpoint(): string {
     const providerConfig = this.config.config as ProviderConfig;
-    return providerConfig.baseUrl || IFLOW_API_ENDPOINT;
+    const raw = providerConfig.baseUrl || '';
+    try {
+      if (!raw) return IFLOW_API_ENDPOINT;
+      const u = new URL(raw);
+      const host = (u.host || '').toLowerCase();
+      const path = (u.pathname || '').replace(/\/$/, '');
+
+      // Preferred host per CLI: apis.iflow.cn
+      if (host === 'apis.iflow.cn') {
+        if (!/\/v\d+(\/|$)/.test(path)) {
+          return 'https://apis.iflow.cn/v1';
+        }
+        return `https://${host}${path}`;
+      }
+
+      // iflow.cn main site often proxies OpenAI under /api/openai/v1
+      if (host === 'iflow.cn') {
+        if (!path || path === '' || path === '/' || path === '/api' || path === '/api/v1' || path === '/v1') {
+          return 'https://iflow.cn/api/openai/v1';
+        }
+        // If already points to /api/openai/vN, keep as-is
+        if (/\/openai\/v\d+(\/|$)/.test(path)) {
+          return `https://${host}${path}`;
+        }
+      }
+
+      // Legacy host: api.iflow.cn → ensure /v1 suffix
+      if (host === 'api.iflow.cn') {
+        if (!/\/v\d+(\/|$)/.test(path)) {
+          return 'https://api.iflow.cn/v1';
+        }
+        return `https://${host}${path}`;
+      }
+
+      // default: use provided, sans trailing slash
+      return raw.replace(/\/$/, '');
+    } catch {
+      return IFLOW_API_ENDPOINT;
+    }
   }
 
   private async sendChatRequest(request: Record<string, unknown>): Promise<ProviderResponse> {
@@ -463,12 +504,34 @@ export class IFlowProvider implements ProviderModule {
 
     try {
       const payload = this.buildIFlowPayload(request);
+      // Allow compatibility layer to inject HTTP headers via `_headers`
+      let headerOverrides: Record<string, string> = {};
+      try {
+        const h = (request as Record<string, unknown>)['_headers'];
+        if (h && typeof h === 'object' && !Array.isArray(h)) {
+          headerOverrides = Object.fromEntries(Object.entries(h as Record<string, unknown>)
+            .filter(([k, v]) => typeof k === 'string' && typeof v === 'string')) as Record<string, string>;
+        }
+      } catch { /* ignore */ }
+      // Normalize tool_choice to string variants expected by some OpenAI-compatible servers
+      try {
+        const tc: unknown = (payload as Record<string, unknown>)['tool_choice'];
+        if (tc && typeof tc === 'object' && !Array.isArray(tc)) {
+          (payload as Record<string, unknown>)['tool_choice'] = 'required';
+        }
+      } catch { /* ignore */ }
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
           'Authorization': this.oauth.getAuthorizationHeader(),
-          'User-Agent': 'RouteCodex/1.0.0'
+          // Use iFlow CLI user agent as requested
+          'User-Agent': IFLOW_CLI_UA,
+          'X-Requested-With': 'XMLHttpRequest',
+          'Origin': 'https://iflow.cn',
+          'Referer': 'https://iflow.cn/chat',
+          ...headerOverrides
         },
         body: JSON.stringify(payload)
       });
@@ -500,8 +563,13 @@ export class IFlowProvider implements ProviderModule {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
+              'Accept': 'application/json',
               'Authorization': this.oauth.getAuthorizationHeader(),
-              'User-Agent': 'RouteCodex/1.0.0'
+              'User-Agent': IFLOW_CLI_UA,
+              'X-Requested-With': 'XMLHttpRequest',
+              'Origin': 'https://iflow.cn',
+              'Referer': 'https://iflow.cn/chat',
+              ...headerOverrides
             },
             body: JSON.stringify(payload)
           });

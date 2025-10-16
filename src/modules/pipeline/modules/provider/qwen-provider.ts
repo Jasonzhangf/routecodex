@@ -569,7 +569,8 @@ export class QwenProvider implements ProviderModule {
    * Validate provider configuration
    */
   private validateConfig(): void {
-    if (!this.config.type || this.config.type !== 'qwen') {
+    // Accept both registry type ('qwen-provider') and family alias ('qwen')
+    if (!this.config.type || (this.config.type !== 'qwen' && this.config.type !== 'qwen-provider')) {
       throw new Error('Invalid Provider type configuration');
     }
 
