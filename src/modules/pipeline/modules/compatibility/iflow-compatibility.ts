@@ -78,6 +78,34 @@ export class iFlowCompatibility implements CompatibilityModule {
       });
 
       const out = transformed.data || transformed;
+      // Heuristic: iFlow vision models (e.g., qwen3-vl-plus) may require a vision-friendly payload
+      try {
+        const modelId = String((out as any)?.model || (request as any)?.model || '').toLowerCase();
+        const maybeMessages = (out as any)?.messages;
+        const hasImage = Array.isArray(maybeMessages)
+          && maybeMessages.some((m: any) => Array.isArray(m?.content)
+            && m.content.some((c: any) => typeof c === 'object' && c && (c.type === 'image_url' || c.type === 'image')));
+        const isVisionModel = /qwen3-vl/.test(modelId);
+        if ((hasImage || isVisionModel) && typeof out === 'object' && out) {
+          // Normalize image item: allow string or object with url
+          const normMsgs = (maybeMessages || []).map((m: any) => {
+            if (!Array.isArray(m?.content)) return m;
+            const content = m.content.map((c: any) => {
+              if (c && typeof c === 'object' && (c.type === 'image_url' || c.type === 'image')) {
+                const url = typeof c.image_url === 'string' ? c.image_url : (c.image_url?.url || c.url || '');
+                return { type: 'image_url', image_url: url };
+              }
+              if (c && typeof c === 'object' && c.type === 'text') return c;
+              if (typeof c === 'string') return { type: 'text', text: c };
+              return c;
+            });
+            return { role: m.role || 'user', content };
+          });
+          // iFlow-compatible alternative field: input
+          (out as any).input = normMsgs;
+          // Keep messages as-is too; provider will send both fields and upstream can accept one.
+        }
+      } catch { /* ignore */ }
       // Inject iFlow-specific HTTP headers to emulate official CLI behavior
       try {
         const headers = {
