@@ -110,6 +110,21 @@ HTTP Request → LLM Switch → Workflow → Compatibility → Provider → AI S
 - **Scope Rule**: Compatibility only handles vendor-specific differences. All “standard OpenAI” normalization lives in the LLM Switch.
 - **Simple String Format**: Supports easy compatibility specification (e.g., `"compatibility": "passthrough"`)
 
+### Passive Monitoring (Design‑Ready, not enabled by default)
+- A passive Monitoring skeleton is included to capture request/response artifacts for OpenAI and Anthropic without changing behavior.
+- Records (when enabled in future) are stored under `~/.routecodex/monitor/sessions/<YYYYMMDD>/<protocol>/<reqId>/` and can be used for:
+  - Offline routing dry‑run (simulate routing decisions from recorded inputs)
+  - Response replay (non‑stream/stream events)
+- See `docs/monitoring/Design.md` for details.
+
+### Virtual Router Dry‑Run (Matrix)
+- Run a local matrix dry‑run against your config (no provider calls):
+
+```bash
+npm run build
+node scripts/virtualrouter-dry-run-matrix.mjs --config ~/.routecodex/config/verified_0.46.32/multi-provider.json
+```
+
 ## 🔧 Compatibility Field Configuration
 
 The compatibility field supports both simple string format and complex object format, providing flexible configuration options for different use cases.

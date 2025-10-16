@@ -149,3 +149,13 @@ Summary
   - Use iFlow CLI User-Agent for API and OAuth; override via env `IFLOW_USER_AGENT`
   - Add Accept + X-Requested-With + Origin/Referer headers to avoid HTML gateways
   - Keep Bearer apiKey preference from OAuth user info
+## 0.46.35 - 2025-10-16
+- protocol: add /v1/responses transparent passthrough + monitoring (off by default; enabled via ~/.routecodex/monitor.json)
+  - monitor.transparent.wireApi: 'responses' | 'chat' (prefer responses when set)
+  - monitor.transparent.modelMapping: minimal model remap (e.g., "glm-4.6" -> "gpt-5-codex")
+  - monitor.transparent.extraHeaders: inject upstream headers (e.g., OpenAI-Beta)
+- auth: upstream Authorization precedence
+  - x-rcc-upstream-authorization > monitor.json Bearer > client Authorization
+  - normalize Bearer prefix for raw tokens
+- responses wire: default header OpenAI-Beta: responses-2024-12-17 on transparent /responses
+- notes: no protocol conversion yet; pure passthrough + recording. Conversion will be sample-driven later.

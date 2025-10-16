@@ -208,15 +208,15 @@ create_rcc_alias() {
     RCC_PATH="$GLOBAL_BIN/rcc"
     ROUTECODEX_PATH="$GLOBAL_BIN/routecodex"
 
-    if [ -f "$ROUTEDEX_PATH" ]; then
+    if [ -f "$ROUTECODEX_PATH" ]; then
         try_create_link() {
             local method=$1
             case $method in
                 "symlink")
-                    ln -sf "$ROUTEDEX_PATH" "$RCC_PATH" 2>/dev/null
+                    ln -sf "$ROUTECODEX_PATH" "$RCC_PATH" 2>/dev/null
                     ;;
                 "copy")
-                    cp "$ROUTEDEX_PATH" "$RCC_PATH" 2>/dev/null
+                    cp "$ROUTECODEX_PATH" "$RCC_PATH" 2>/dev/null
                     ;;
                 "script")
                     cat > "$RCC_PATH" << 'EOF'
