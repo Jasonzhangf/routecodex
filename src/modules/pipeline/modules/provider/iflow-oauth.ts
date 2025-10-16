@@ -171,7 +171,9 @@ export class IFlowOAuth {
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/x-www-form-urlencoded',
-      'Accept': 'application/json'
+      'Accept': 'application/json',
+      // Fixed UA, no env override
+      'User-Agent': 'iflow-cli/2.0'
     };
     if (this.clientSecret) {
       const basic = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
@@ -314,7 +316,8 @@ export class IFlowOAuth {
           const headers: Record<string,string> = {
             'Content-Type': 'application/x-www-form-urlencoded',
             'Accept': 'application/json',
-            'User-Agent': 'RouteCodex-OAuth/1.0'
+            // Fixed iFlow CLI UA
+            'User-Agent': 'iflow-cli/2.0'
           };
           if (this.clientSecret) {
             const basic = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
@@ -425,7 +428,7 @@ export class IFlowOAuth {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json',
-        'User-Agent': 'RouteCodex-OAuth/1.0',
+        'User-Agent': 'iflow-cli/2.0',
         'X-Requested-With': 'XMLHttpRequest',
         'Origin': 'https://iflow.cn',
         'Referer': 'https://iflow.cn/oauth'
@@ -446,7 +449,7 @@ export class IFlowOAuth {
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
             'Accept': 'application/json',
-            'User-Agent': 'RouteCodex-OAuth/1.0',
+            'User-Agent': 'iflow-cli/2.0',
             'X-Requested-With': 'XMLHttpRequest',
             'Origin': 'https://iflow.cn',
             'Referer': 'https://iflow.cn/oauth'
@@ -469,7 +472,7 @@ export class IFlowOAuth {
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
             'Accept': 'application/json',
-            'User-Agent': 'RouteCodex-OAuth/1.0',
+            'User-Agent': 'iflow-cli/2.0',
             'X-Requested-With': 'XMLHttpRequest',
             'Origin': 'https://iflow.cn',
             'Referer': 'https://iflow.cn/oauth'
@@ -508,7 +511,7 @@ export class IFlowOAuth {
             headers: {
               'Content-Type': 'application/x-www-form-urlencoded',
               'Accept': 'application/json',
-              'User-Agent': 'RouteCodex-OAuth/1.0',
+              'User-Agent': 'iflow-cli/2.0',
               'X-Requested-With': 'XMLHttpRequest',
               'Origin': 'https://iflow.cn',
               'Referer': 'https://iflow.cn/oauth'
@@ -527,7 +530,7 @@ export class IFlowOAuth {
               headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Accept': 'application/json',
-                'User-Agent': 'RouteCodex-OAuth/1.0',
+                'User-Agent': process.env.IFLOW_USER_AGENT?.trim() || 'iflow-cli/2.0',
                 'X-Requested-With': 'XMLHttpRequest',
                 'Origin': 'https://iflow.cn',
                 'Referer': 'https://iflow.cn/oauth'
@@ -553,7 +556,7 @@ export class IFlowOAuth {
                 headers: {
                   'Content-Type': 'application/x-www-form-urlencoded',
                   'Accept': 'application/json',
-                  'User-Agent': 'RouteCodex-OAuth/1.0',
+                  'User-Agent': 'iflow-cli/2.0',
                   'X-Requested-With': 'XMLHttpRequest',
                   'Origin': 'https://iflow.cn',
                   'Referer': 'https://iflow.cn/oauth'
@@ -604,7 +607,7 @@ export class IFlowOAuth {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           'Accept': 'application/json',
-          'User-Agent': 'RouteCodex-OAuth/1.0',
+          'User-Agent': 'iflow-cli/2.0',
           'X-Requested-With': 'XMLHttpRequest',
           'Origin': 'https://iflow.cn',
           'Referer': 'https://iflow.cn/oauth'
@@ -628,7 +631,7 @@ export class IFlowOAuth {
               headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Accept': 'application/json',
-                'User-Agent': 'RouteCodex-OAuth/1.0',
+                'User-Agent': 'iflow-cli/2.0',
                 'X-Requested-With': 'XMLHttpRequest',
                 'Origin': 'https://iflow.cn',
                 'Referer': 'https://iflow.cn/oauth'

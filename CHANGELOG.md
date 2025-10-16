@@ -1,3 +1,18 @@
+## 0.46.32 - 2025-10-16
+- iFlow UA moved to compatibility; no env required
+  - iFlowCompatibility injects `_headers` with iFlow CLI UA及相关头
+  - IFlowProvider merges `_headers` into HTTP request headers
+  - OAuth path now hard-codes UA to `iflow-cli/2.0` (no env)
+  - Keeps `https://apis.iflow.cn/v1` default and host heuristics
+
+## 0.46.31 - 2025-10-16
+- iFlow Provider: align with iFlow CLI (fixed UA)
+  - Default base URL `https://apis.iflow.cn/v1` (CLI-preferred)
+  - Heuristics: `iflow.cn` → `/api/openai/v1`, `api.iflow.cn` → `/v1`, preserve `apis.iflow.cn`
+  - Use iFlow CLI User-Agent for API and OAuth
+  - Add Accept + X-Requested-With + Origin/Referer headers to avoid HTML gateways
+  - Keep Bearer apiKey preference from OAuth user info
+
 ## 0.46.30 - 2025-10-15
 - QwenProvider: accept top-level type 'qwen-provider' or 'qwen' in validation to match registry keys.
 - LMStudio Provider: enforce string tool_choice=required for object inputs (double guard).
@@ -127,4 +142,10 @@ Summary
 - Merged feat/new-feature and fix/syntax-errors into main.
 - Bumped version to 0.46.28.
 - Verified build hooks and global install flows.
-
+## 0.46.31 - 2025-10-16
+- iFlow Provider: align with iFlow CLI
+  - Default base URL `https://apis.iflow.cn/v1` (CLI-preferred)
+  - Heuristics: `iflow.cn` → `/api/openai/v1`, `api.iflow.cn` → `/v1`, preserve `apis.iflow.cn`
+  - Use iFlow CLI User-Agent for API and OAuth; override via env `IFLOW_USER_AGENT`
+  - Add Accept + X-Requested-With + Origin/Referer headers to avoid HTML gateways
+  - Keep Bearer apiKey preference from OAuth user info

@@ -40,7 +40,22 @@ async function startServer(config, timeout) {
   const chunks = [];
   await new Promise((resolve) => { p.stdout.on('data', d => chunks.push(String(d))); p.on('close', () => resolve(null)); });
   const text = chunks.join('');
-  let json = null; try { json = JSON.parse(text.split('\n').filter(Boolean).slice(-1)[0]); } catch {}
+  // Robustly parse the last JSON block printed by start-verify (pretty-printed)
+  let json = null;
+  try {
+    // Try direct parse first
+    json = JSON.parse(text);
+  } catch {
+    // Fallback: find the last '{' and parse from there
+    const tryParseFrom = (s) => {
+      for (let i = s.lastIndexOf('{'); i >= 0; i = s.lastIndexOf('{', i - 1)) {
+        const sub = s.slice(i).trim();
+        try { return JSON.parse(sub); } catch {}
+      }
+      return null;
+    };
+    json = tryParseFrom(text) || null;
+  }
   if (!json || json.ok !== true) {
     return { ok: false, raw: text, json };
   }
@@ -113,4 +128,3 @@ async function main() {
 }
 
 main().catch(e => { console.error(JSON.stringify({ ok: false, error: e?.message || String(e) })); process.exit(2); });
-

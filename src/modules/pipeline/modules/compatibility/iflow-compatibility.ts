@@ -78,6 +78,19 @@ export class iFlowCompatibility implements CompatibilityModule {
       });
 
       const out = transformed.data || transformed;
+      // Inject iFlow-specific HTTP headers to emulate official CLI behavior
+      try {
+        const headers = {
+          'User-Agent': 'iflow-cli/2.0',
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+          'Origin': 'https://iflow.cn',
+          'Referer': 'https://iflow.cn/chat'
+        } as Record<string, string>;
+        if (out && typeof out === 'object') {
+          (out as Record<string, unknown>)['_headers'] = headers;
+        }
+      } catch { /* ignore header injection errors */ }
       return isDto ? { ...dto!, data: out } : { data: out, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
 
     } catch (error) {
