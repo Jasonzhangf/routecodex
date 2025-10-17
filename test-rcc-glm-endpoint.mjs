@@ -1,28 +1,28 @@
 #!/usr/bin/env node
 
 /**
- * 测试RCC端点的GLM调用
+ * 测试RouteCodex端点的GLM调用
  */
 
-const RCC_PORT = 5520;
-const RCC_BASE_URL = `http://localhost:${RCC_PORT}`;
+const ROUTECODEX_PORT = 5520;
+const ROUTECODEX_BASE_URL = `http://localhost:${ROUTECODEX_PORT}`;
 
-async function testRCCEndpoint() {
-  console.log('🔍 测试RCC端点的GLM调用\n');
+async function testRouteCodexEndpoint() {
+  console.log('🔍 测试RouteCodex端点的GLM调用\n');
   console.log('===============================\n');
 
   // 测试健康检查
-  console.log('1️⃣ 检查RCC服务状态...');
+  console.log('1️⃣ 检查RouteCodex服务状态...');
   try {
-    const healthResponse = await fetch(`${RCC_BASE_URL}/health`);
+    const healthResponse = await fetch(`${ROUTECODEX_BASE_URL}/health`);
     if (healthResponse.ok) {
-      console.log('✅ RCC服务正常运行');
+      console.log('✅ RouteCodex服务正常运行');
     } else {
-      console.log('❌ RCC服务异常');
+      console.log('❌ RouteCodex服务异常');
       return;
     }
   } catch (error) {
-    console.log('❌ 无法连接到RCC服务:', error.message);
+    console.log('❌ 无法连接到RouteCodex服务:', error.message);
     return;
   }
 
@@ -45,10 +45,10 @@ async function testRCCEndpoint() {
   console.log();
 
   try {
-    console.log('🚀 发送请求到RCC...');
+    console.log('🚀 发送请求到RouteCodex...');
     const startTime = Date.now();
 
-    const response = await fetch(`${RCC_BASE_URL}/v1/chat/completions`, {
+    const response = await fetch(`${ROUTECODEX_BASE_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -125,4 +125,4 @@ async function testRCCEndpoint() {
 }
 
 // 运行测试
-testRCCEndpoint().catch(console.error);
+testRouteCodexEndpoint().catch(console.error);

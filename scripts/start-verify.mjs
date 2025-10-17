@@ -18,11 +18,11 @@ import path from 'path';
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  const out = { config: `${process.env.HOME || ''}/.routecodex/config.json`, timeout: 180, mode: 'bg' };
+  const out = { config: `${process.env.HOME || ''}/.routecodex/config.json`, timeout: 300, mode: 'bg' };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if ((a === '--config' || a === '-c') && args[i+1]) { out.config = args[++i]; continue; }
-    if ((a === '--timeout' || a === '-t') && args[i+1]) { out.timeout = Number(args[++i]) || 180; continue; }
+    if ((a === '--timeout' || a === '-t') && args[i+1]) { out.timeout = Number(args[++i]) || 300; continue; }
     if (a === '--mode' && args[i+1]) { out.mode = String(args[++i]); continue; }
   }
   return out;
@@ -131,7 +131,7 @@ async function main() {
     try { return fs.existsSync(path.resolve(process.cwd(), cmd)) ? path.resolve(process.cwd(), cmd) : cmd; } catch { return cmd; }
   };
 
-  const timeoutSec = Math.max(1, Number(args.timeout) || 180);
+  const timeoutSec = Math.max(1, Number(args.timeout) || 300);
   let child; let bgLogPath = null; let bgPid = null;
   // Prefer local CLI if present
   const rccBin = fs.existsSync(path.resolve(process.cwd(), 'rcc')) ? path.resolve(process.cwd(), 'rcc') : 'rcc';

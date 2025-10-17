@@ -386,7 +386,8 @@ curl -sS \
 - Backward compatibility with non-streaming clients
 
 ### 🔄 Multi-Protocol Support
-- OpenAI-compatible API endpoints
+- OpenAI-compatible API endpoints (`/v1/chat/completions`)
+- OpenAI Responses API support (`/v1/responses`)
 - Native provider protocol support
 - Automatic protocol translation
 - Configuration-driven transformations
@@ -1106,6 +1107,363 @@ curl http://localhost:5506/
 - **错误处理**: 完整的错误恢复机制
 
 这套标准测试方法确保RouteCodex与任何OpenAI兼容客户端的完美集成。
+
+## 🆕 Responses API Support ⭐
+
+RouteCodex now provides comprehensive support for OpenAI's **Responses API** through its 4-layer pipeline architecture, enabling seamless integration with the next-generation AI interface.
+
+### 🎯 Key Features
+- **🔄 Full Protocol Conversion**: Automatic conversion between Responses and Chat formats
+- **🔧 Complete Tool Support**: Full tool calling support in Responses API format
+- **📡 Advanced Streaming**: Complete streaming event support with SSE processing
+- **🏗️ Pipeline Integration**: Seamless integration with existing 4-layer architecture
+- **🧪 Comprehensive Testing**: Extensive test fixtures and regression coverage
+
+### 📡 API Endpoints
+
+**Responses API**: `http://localhost:5506/v1/responses` ⭐
+**Chat Completions**: `http://localhost:5506/v1/chat/completions`
+
+### 🏗️ Architecture Integration
+
+The Responses API integrates seamlessly into RouteCodex's 4-layer pipeline:
+
+```
+Responses Request → LLM Switch → Workflow → Compatibility → Provider → AI Service
+       ↓               ↓          ↓            ↓           ↓
+   Protocol       Format     Flow       Format     Standard
+   Detection      Conversion  Control    Conversion  HTTP Server
+   (responses)   (→ Chat)   (Events)   (→ Chat)   (Chat Format)
+```
+
+**Key Components**:
+- **LLM Switch**: `llmswitch-response-chat` module handles protocol conversion
+- **Workflow**: `responses-streaming-workflow` manages streaming events
+- **Compatibility**: Format adaptation for different providers
+- **Provider**: Standard HTTP communication with AI services
+
+### ⚙️ Configuration
+
+#### Basic Responses API Configuration
+
+```json
+{
+  "virtualrouter": {
+    "inputProtocol": "responses",
+    "outputProtocol": "openai",
+    "providers": {
+      "lmstudio": {
+        "type": "lmstudio",
+        "baseURL": "http://localhost:1234",
+        "apiKey": "your-api-key",
+        "models": {
+          "gpt-4": {
+            "compatibility": { "type": "responses-chat-switch" }
+          }
+        }
+      }
+    },
+    "routing": {
+      "default": ["lmstudio.gpt-4"]
+    }
+  }
+}
+```
+
+#### Advanced Pipeline Configuration
+
+```json
+{
+  "pipeline": {
+    "llmSwitch": {
+      "type": "llmswitch-response-chat",
+      "config": {
+        "enableValidation": true,
+        "enableMetadata": true,
+        "preserveReasoning": true
+      }
+    },
+    "workflow": {
+      "type": "responses-streaming-workflow",
+      "config": {
+        "enableEventProcessing": true,
+        "rebuildCompleteResponse": true
+      }
+    },
+    "compatibility": {
+      "type": "passthrough-compatibility",
+      "config": {}
+    },
+    "provider": {
+      "type": "lmstudio-http",
+      "config": {
+        "baseUrl": "http://localhost:1234",
+        "auth": { "type": "apikey", "apiKey": "your-api-key" }
+      }
+    }
+  }
+}
+```
+
+### 🚀 Usage Examples
+
+#### Basic Responses API Request
+
+```bash
+curl -X POST http://localhost:5506/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key" \
+  -d '{
+    "model": "gpt-4",
+    "instructions": "You are a helpful assistant.",
+    "input": [
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Hello! How can you help me today?"
+          }
+        ]
+      }
+    ],
+    "stream": true
+  }'
+```
+
+#### Responses API with Tool Calling
+
+```bash
+curl -X POST http://localhost:5506/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key" \
+  -d '{
+    "model": "gpt-4",
+    "instructions": "You are a helpful assistant with access to tools.",
+    "input": [
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "What is 15 * 25? Use the calculator tool."
+          }
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "name": "calculate",
+        "description": "Perform mathematical calculations",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "Mathematical expression to evaluate"
+            }
+          },
+          "required": ["expression"]
+        }
+      }
+    ],
+    "stream": true
+  }'
+```
+
+### 📡 Streaming Events
+
+The Responses API supports all standard streaming events with proper SSE formatting:
+
+| Event Type | Description | Example |
+|------------|-------------|---------|
+| `response.created` | Response initialization | `{"type": "response.created", "response": {...}}` |
+| `response.output_item.added` | New output item | `{"type": "response.output_item.added", "item": {...}}` |
+| `response.content_part.added` | Content part added | `{"type": "response.content_part.added", "part": {...}}` |
+| `response.output_text.delta` | Text delta | `{"type": "response.output_text.delta", "delta": "Hello"} ⭐` |
+| `response.tool_call.delta` | Tool call delta | `{"type": "response.tool_call.delta", "delta": {...}}` |
+| `response.output_item.done` | Item completed | `{"type": "response.output_item.done", "item": {...}}` |
+| `response.done` | Response complete | `{"type": "response.done", "response": {...}}` |
+
+### 🔄 Protocol Conversion Details
+
+#### Request Flow: Responses → Chat
+
+1. **Input Processing**: Convert `input[]` array to `messages[]` format
+2. **Instructions Handling**: Convert `instructions` to system message
+3. **Tool Format**: Convert Responses tool format to OpenAI format
+4. **Metadata**: Preserve original protocol information
+
+```typescript
+// Responses Format Input
+{
+  "model": "gpt-4",
+  "instructions": "You are helpful",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [{"type": "input_text", "text": "Hello"}]
+    }
+  ]
+}
+
+// Converted to Chat Format
+{
+  "model": "gpt-4",
+  "messages": [
+    {"role": "system", "content": "You are helpful"},
+    {"role": "user", "content": "Hello"}
+  ]
+}
+```
+
+#### Response Flow: Chat → Responses
+
+1. **Message Reconstruction**: Convert Chat messages back to Responses output format
+2. **Tool Call Conversion**: Convert OpenAI tool_calls to Responses tool format
+3. **Streaming Events**: Generate appropriate SSE events for streaming responses
+4. **Metadata Handling**: Preserve conversion context and protocol information
+
+### 🧪 Testing and Validation
+
+#### Test Fixtures
+
+Comprehensive test fixtures are available in `tests/fixtures/`:
+
+- `responses_1760615123370_request.json` - Complete sample request format
+- `responses_output_text_events.json` - Streaming event samples
+- `responses_tool_call_events.json` - Tool calling event samples
+
+#### Integration Testing
+
+```bash
+# Test Responses API with streaming
+curl -X POST http://localhost:5506/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer test-key" \
+  -d @tests/fixtures/responses_1760615123370_request.json
+
+# Verify streaming events
+# Should see proper SSE formatting with event types and data
+```
+
+### 🔧 Client Configuration
+
+#### Codex CLI Integration
+
+```toml
+[model_providers.rc]
+name = "routecodex"
+base_url = "http://localhost:5506/v1"
+wire_api = "responses"
+api_key = "your-api-key"
+```
+
+#### OpenAI SDK Integration
+
+```typescript
+import OpenAI from 'openai';
+
+const client = new OpenAI({
+  baseURL: 'http://localhost:5506/v1',
+  apiKey: 'your-api-key'
+});
+
+// Use Responses API
+const response = await client.responses.create({
+  model: 'gpt-4',
+  instructions: 'You are a helpful assistant.',
+  input: [
+    {
+      type: 'message',
+      role: 'user',
+      content: [{ type: 'input_text', text: 'Hello!' }]
+    }
+  ]
+});
+```
+
+### 🛡️ Error Handling
+
+The Responses API includes comprehensive error handling:
+
+- **Format Validation**: Validate Requests API request format
+- **Protocol Errors**: Handle conversion errors gracefully
+- **Streaming Errors**: Proper error event streaming
+- **Tool Call Errors**: Detailed tool calling error information
+
+### 📈 Performance Features
+
+- **Event Batching**: Efficient processing of streaming events
+- **Memory Management**: Intelligent buffering for large responses
+- **Async Processing**: Non-blocking event handling
+- **Error Recovery**: Automatic retry and fallback mechanisms
+
+### 🚨 Limitations and Considerations
+
+**Current Limitations**:
+- Some advanced Responses features may still be in development
+- Certain edge cases in tool calling format conversion
+- Complex multimodal content handling
+
+**Best Practices**:
+- Use standard Responses API format for best compatibility
+- Test with provided fixtures before production deployment
+- Monitor streaming event processing for performance optimization
+
+### 🔄 Migration from Chat Completions
+
+#### Easy Migration Path
+
+Existing Chat Completions users can easily migrate:
+
+1. **Update Endpoint**: Change from `/v1/chat/completions` to `/v1/responses`
+2. **Format Conversion**: Convert `messages[]` to `input[]` array format
+3. **Instructions**: Move system messages to `instructions` field
+4. **Tools**: Update tool format to Responses specification
+
+#### Migration Example
+
+```typescript
+// Before (Chat Completions)
+const chatRequest = {
+  model: 'gpt-4',
+  messages: [
+    { role: 'system', content: 'You are helpful' },
+    { role: 'user', content: 'Hello!' }
+  ],
+  tools: [...] // OpenAI tool format
+};
+
+// After (Responses API)
+const responsesRequest = {
+  model: 'gpt-4',
+  instructions: 'You are helpful',
+  input: [
+    {
+      type: 'message',
+      role: 'user',
+      content: [{ type: 'input_text', text: 'Hello!' }]
+    }
+  ],
+  tools: [...] // Responses tool format
+};
+```
+
+### 📚 Documentation and Resources
+
+- **Module Documentation**: See `src/modules/pipeline/modules/llmswitch/README.md`
+- **Architecture Details**: See `docs/llmswitch-responses-plan.md`
+- **Test Examples**: See `tests/fixtures/` directory
+- **Configuration Guide**: See individual module READMEs
+
+---
+
+**Responses API support represents a major enhancement to RouteCodex**, providing next-generation AI interface capabilities while maintaining full backward compatibility with existing Chat Completions workflows.
 
 ## ✅ ModelScope 独立验证通过
 

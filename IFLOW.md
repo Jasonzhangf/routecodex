@@ -130,7 +130,6 @@ scripts/               # 构建和部署脚本
 ### 环境变量
 - `ROUTECODEX_CONFIG_PATH`: 用户配置文件路径
 - `ROUTECODEX_MODULES_CONFIG`: 模块配置文件路径
-- `RCC4_CONFIG_PATH`: 替代配置路径
 
 ### 配置模板
 ```json

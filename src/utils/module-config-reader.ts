@@ -41,7 +41,7 @@ export class ModuleConfigReader {
       this.config = JSON.parse(configContent);
       return this.config;
     } catch (error) {
-      const strict = String(process.env.RCC_STRICT_MODULES_CONFIG || '').trim() === '1' ||
+      const strict = String(process.env.ROUTECODEX_STRICT_MODULES_CONFIG || '').trim() === '1' ||
         String(process.env.NODE_ENV || '').toLowerCase() === 'production';
       const msg = `Failed to load modules config from ${this.configPath}: ${error instanceof Error ? error.message : String(error)}`;
       if (strict) {

@@ -88,6 +88,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       } catch { /* ignore */ }
 
       const transformedRequest = this.convertAnthropicRequestToOpenAI(payload);
+      // Preserve internal RCC override key across conversion
       // IMPORTANT: Do not perform sticky tool backfill/injection.
       // If caller omits tools this turn, we will NOT inject cached tools.
 
@@ -145,6 +146,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
         targetFormat: requestFormat
       }
     } as Record<string, unknown>;
+    // Preserve internal RCC override key in passthrough mode
     const stamped = { ...(passthrough as any), _metadata: { ...(passthrough as any)?._metadata, entryProtocol: entry, targetProtocol: entry } };
     return isDto
       ? { ...dto!, data: stamped }

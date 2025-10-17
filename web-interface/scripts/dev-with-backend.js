@@ -58,7 +58,7 @@ class DevelopmentServer {
     args.push('--port', '5506');
 
     return new Promise((resolve, reject) => {
-      this.backendProcess = spawn('rcc4', args, {
+      this.backendProcess = spawn('routecodex', args, {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env }
       });

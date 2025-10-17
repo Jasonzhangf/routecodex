@@ -89,8 +89,23 @@ class RouteCodexApp {
 
       this.mergedConfigPath = path.join(process.cwd(), 'config', `merged-config.${port}.json`);
 
-      // 确定用户配置文件路径，优先使用RCC4_CONFIG_PATH
-      const userConfigPath = resolveRouteCodexConfigPath();
+      // 确定用户配置文件路径，优先使用环境变量（RCC4_CONFIG_PATH / ROUTECODEX_CONFIG / ROUTECODEX_CONFIG_PATH），否则回退到共享解析
+      function pickUserConfigPath(): string {
+        const envPaths = [
+          process.env.RCC4_CONFIG_PATH,
+          process.env.ROUTECODEX_CONFIG,
+          process.env.ROUTECODEX_CONFIG_PATH,
+        ].filter(Boolean) as string[];
+        for (const p of envPaths) {
+          try {
+            if (p && fsSync.existsSync(p) && fsSync.statSync(p).isFile()) {
+              return p;
+            }
+          } catch { /* ignore */ }
+        }
+        return resolveRouteCodexConfigPath();
+      }
+      const userConfigPath = pickUserConfigPath();
 
       const configManagerConfig = {
         configPath: userConfigPath,
@@ -101,25 +116,20 @@ class RouteCodexApp {
       };
 
       let mergedConfig: any | null = null;
+      // For normal `rcc start`, ignore monitor transparent by default.
+      // Only honor transparent routing when explicitly enabled via env.
+      const honorTransparent = process.env.RCC_MONITOR_TRANSPARENT === '1' || process.env.RCC_TRANSPARENT_ROUTING === '1' || process.env.ROUTECODEX_MONITOR_TRANSPARENT === '1' || process.env.ROUTECODEX_TRANSPARENT_ROUTING === '1';
       let transparentEnabled = false;
-      try {
-        const m = await MonitorConfigUtil.load();
-        transparentEnabled = MonitorConfigUtil.isTransparentEnabled(m);
-      } catch { transparentEnabled = false; }
-
-      try {
-        await this.configManager.initialize(configManagerConfig);
-        // 2. 加载合并后的配置
-        mergedConfig = await this.loadMergedConfig();
-      } catch (e) {
-        if (!transparentEnabled) { throw e; }
-        console.warn('⚠️ Config manager failed, but transparent monitor mode detected. Falling back to minimal config.');
-        mergedConfig = {
-          server: { port, host: '127.0.0.1', timeout: 30000, bodyLimit: '10mb', cors: { origin: '*', credentials: true } },
-          logging: { level: 'info', enableConsole: true, enableFile: false, categories: ['server','api','request','config','error','message'] },
-          modules: { httpserver: { config: { port, host: '127.0.0.1', timeout: 30000, bodyLimit: '10mb', cors: { origin: '*', credentials: true } } }, protocolhandler: { config: {} } }
-        };
+      if (honorTransparent) {
+        try {
+          const m = await MonitorConfigUtil.load();
+          transparentEnabled = MonitorConfigUtil.isTransparentEnabled(m);
+        } catch { transparentEnabled = false; }
       }
+
+      await this.configManager.initialize(configManagerConfig);
+      // 2. 加载合并后的配置
+      mergedConfig = await this.loadMergedConfig();
 
       // 3. 初始化HTTP服务器
       const HttpServer = (await import('./server/http-server.js')).HttpServer;
@@ -130,33 +140,24 @@ class RouteCodexApp {
 
       // 5. 按 merged-config 组装流水线并注入（完全配置驱动，无硬编码），透明模式下可跳过
       let pipelinesAttached = false;
-      try {
-        if (!transparentEnabled) {
-          const { PipelineAssembler } = await import('./modules/pipeline/config/pipeline-assembler.js');
-          const { manager, routePools, routeMeta } = await PipelineAssembler.assemble(mergedConfig);
-          const poolsCount = Object.values(routePools || {}).reduce((acc, v) => acc + ((v || []).length), 0);
-          if (!poolsCount) {
-            throw new Error('No pipelines assembled from merged-config (strict mode).');
-          }
-          (this.httpServer as any).attachPipelineManager(manager);
-          (this.httpServer as any).attachRoutePools(routePools);
-          if (routeMeta) {
-            (this.httpServer as any).attachRouteMeta(routeMeta);
-          }
-          // Attach classifier config if present
-          const classifierConfig = (mergedConfig as any)?.modules?.virtualrouter?.config?.classificationConfig;
-          if (classifierConfig) {
-            (this.httpServer as any).attachRoutingClassifierConfig(classifierConfig);
-          }
-          pipelinesAttached = true;
-          console.log('🧩 Pipeline assembled from merged-config and attached to server.');
-        } else {
-          console.log('🔎 Transparent analysis mode: skipping pipeline assembly.');
-        }
-      } catch (e) {
-        if (!transparentEnabled) { throw e; }
-        console.warn('⚠️ Pipeline assembly failed, continuing in transparent analysis mode.');
+      const { PipelineAssembler } = await import('./modules/pipeline/config/pipeline-assembler.js');
+      const { manager, routePools, routeMeta } = await PipelineAssembler.assemble(mergedConfig);
+      const poolsCount = Object.values(routePools || {}).reduce((acc, v) => acc + ((v || []).length), 0);
+      if (!poolsCount) {
+        throw new Error('No pipelines assembled from merged-config (strict mode).');
       }
+      (this.httpServer as any).attachPipelineManager(manager);
+      (this.httpServer as any).attachRoutePools(routePools);
+      if (routeMeta) {
+        (this.httpServer as any).attachRouteMeta(routeMeta);
+      }
+      // Attach classifier config if present
+      const classifierConfig = (mergedConfig as any)?.modules?.virtualrouter?.config?.classificationConfig;
+      if (classifierConfig) {
+        (this.httpServer as any).attachRoutingClassifierConfig(classifierConfig);
+      }
+      pipelinesAttached = true;
+      console.log('🧩 Pipeline assembled from merged-config and attached to server.');
 
       // 6. 启动服务器（若端口被占用，自动释放后重试一次）
       try {
@@ -270,13 +271,13 @@ class RouteCodexApp {
    */
   private async detectServerPort(_modulesConfigPath: string): Promise<number> {
     try {
-      // 首先检查RCC4_CONFIG_PATH环境变量（当前使用的）
-      if (process.env.RCC4_CONFIG_PATH) {
-        const configPath = process.env.RCC4_CONFIG_PATH;
+      // 首先检查ROUTECODEX_CONFIG_PATH环境变量（当前使用的）
+      if (process.env.ROUTECODEX_CONFIG_PATH) {
+        const configPath = process.env.ROUTECODEX_CONFIG_PATH;
         if (fsSync.existsSync(configPath)) {
           const stats = fsSync.statSync(configPath);
           if (!stats.isFile()) {
-            throw new Error(`RCC4_CONFIG_PATH must point to a file: ${configPath}`);
+            throw new Error(`ROUTECODEX_CONFIG_PATH must point to a file: ${configPath}`);
           }
 
           const raw = await fs.readFile(configPath, 'utf-8');
@@ -285,7 +286,7 @@ class RouteCodexApp {
             ? json.httpserver.port
             : json?.port;
           if (typeof port === 'number' && port > 0) {
-            console.log(`🔧 Using port ${port} from RCC4_CONFIG_PATH: ${configPath}`);
+            console.log(`🔧 Using port ${port} from ROUTECODEX_CONFIG_PATH: ${configPath}`);
             return port;
           }
         }

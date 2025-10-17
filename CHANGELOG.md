@@ -1,3 +1,13 @@
+## 0.46.36 - 2025-10-16
+- Responses API full pipeline support
+  - Implemented complete /v1/responses pipeline routing with protocol conversion
+  - Added llmswitch-response-chat module for automatic Responses ↔ Chat format conversion
+  - Supports streaming events, tool calling, and metadata preservation
+  - Enhanced ProtocolHandler to route Responses requests through 4-layer pipeline
+  - Configuration support: inputProtocol: 'responses' with automatic llmswitch selection
+  - Test fixtures available in tests/fixtures/ for regression coverage
+  - Updated documentation with configuration examples and usage instructions
+
 ## 0.46.32 - 2025-10-16
 - iFlow UA moved to compatibility; no env required
   - iFlowCompatibility injects `_headers` with iFlow CLI UA及相关头
@@ -159,3 +169,39 @@ Summary
   - normalize Bearer prefix for raw tokens
 - responses wire: default header OpenAI-Beta: responses-2024-12-17 on transparent /responses
 - notes: no protocol conversion yet; pure passthrough + recording. Conversion will be sample-driven later.
+## 1.0.0 - 2025-10-17
+- Protocol adapters enforced at handlers
+  - Auto-detect and convert cross-protocol payloads in handlers:
+    - OpenAI endpoints (/v1/chat/completions, /v1/completions, /v1/embeddings) accept Anthropic/Responses-shaped inputs and normalize to OpenAI before validation and pipeline.
+    - Anthropic endpoints (router: /v1/openai/messages, /v1/openai/responses) accept OpenAI-shaped inputs and normalize to Anthropic before validation and pipeline.
+  - Stringify assistant tool_calls.function.arguments during normalization.
+- Streaming bridge remains intact; pipeline chunks are forwarded with synthetic chunking for non-stream payloads.
+- New smoke script covering three endpoints
+  - `npm run smoke:protocol` starts the server (bg) if needed, then exercises:
+    - Anthropic→OpenAI at /v1/chat/completions
+    - OpenAI→Anthropic at /v1/openai/messages
+    - OpenAI embeddings at /v1/embeddings
+- Runtime fixes
+  - Corrected adapter import paths to resolve llmswitch converter and debug logger reliably under ESM/bundler builds.
+- Breaking changes
+  - Major refactor of server protocol entrypoints finalized; version bumped to 1.0.0 to reflect stabilized modular router and adapter behavior.
+## 0.50.0 - 2025-10-17
+- Streaming tool-calling E2E added for three endpoints
+  - Chat(OpenAI) `/v1/chat/completions`: Anthropic-shaped tool_use input → OpenAI tool_calls in pipeline; SSE emits chunks + [DONE].
+  - Messages(Anthropic) `/v1/openai/messages`: OpenAI tool_calls input → Anthropic tool_use in pipeline; SSE emits chunks + [DONE].
+  - Responses(Anthropic) `/v1/openai/responses`: OpenAI tool_calls input → Anthropic tool_use in pipeline; SSE emits chunks + [DONE].
+- Forced adapters hardened (pre-validation conversion + model alignment) across handlers.
+- Smoke script refined; major version bumped reflecting stable streaming + adapters.
+## 0.50.1 - 2025-10-17
+- Build/install iteration with patch bump.
+- Responses endpoint: accept pure Responses-shaped requests (input/instructions) by normalizing to messages[] before validation.
+- Re-verified protocol E2E (non-stream + stream) after install.
+## 0.50.2 - 2025-10-17
+- Responses endpoint: relaxed validation fallback for extended content types (message/reasoning/function_call/function_call_output) and system role, to avoid 400 when upstreams emit enriched blocks.
+- Keep strict errors for unrelated validation failures.
+## 0.51.0 - 2025-10-17
+- Bump minor version and publishable build for global install.
+- Includes recent Responses endpoint normalization and relaxed validation.
+## 0.50.3 - 2025-10-17
+- Patch release to align versioning (0.50.x line).
+- Includes Responses stream completion event (response.completed) and input normalization fixes from recent work.

@@ -126,7 +126,7 @@ export class BackendServiceManager extends EventEmitter {
         '--port', '5506'
       ];
 
-      this.backendProcess = spawn('rcc4', args, {
+      this.backendProcess = spawn('routecodex', args, {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env }
       });
@@ -195,7 +195,7 @@ export class BackendServiceManager extends EventEmitter {
     const possiblePaths = [
       `${process.env.HOME}/.route-claudecode/config/v4/single-provider/lmstudio-v4-5506.json`,
       './config/default.json',
-      './config/rcc4-config.json'
+      './config/routecodex-config.json'
     ];
 
     for (const path of possiblePaths) {

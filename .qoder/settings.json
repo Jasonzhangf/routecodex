@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "ask": [
+      "Read(!/Users/fanzhang/Documents/github/routecodex-worktree/dev/**)",
+      "Edit(!/Users/fanzhang/Documents/github/routecodex-worktree/dev/**)"
+    ],
+    "allow": [
+      "Read(/Users/fanzhang/Documents/github/routecodex-worktree/dev/**)",
+      "Edit(/Users/fanzhang/Documents/github/routecodex-worktree/dev/**)"
+    ]
+  },
+  "memoryImport": {},
+  "monitoring": {}
+}

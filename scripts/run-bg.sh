@@ -28,6 +28,21 @@ if [[ -z "${CMD_STR}" ]]; then
   exit 2
 fi
 
+cleanup_existing_servers() {
+  local killed=0
+  if [[ "${CMD_STR}" == *"dist/index.js"* || "${CMD_STR}" == *"routecodex"* ]]; then
+    echo "[run-bg] ensuring no previous RouteCodex server is running" >&2
+    pkill -f "/opt/homebrew/lib/node_modules/routecodex/dist/index.js" 2>/dev/null && killed=1 || true
+    pkill -f "$(pwd)/dist/index.js" 2>/dev/null && killed=1 || true
+    pkill -f "routecodex/dist/index.js" 2>/dev/null && killed=1 || true
+    if [[ "${killed}" -eq 1 ]]; then
+      sleep 1
+    fi
+  fi
+}
+
+cleanup_existing_servers
+
 ts=$(date +%s)
 log_file="/tmp/routecodex-bg-${ts}.log"
 
@@ -53,4 +68,3 @@ if [[ "${TIMEOUT_SEC}" =~ ^[0-9]+$ && ${TIMEOUT_SEC} -gt 0 ]]; then
 fi
 
 echo "pid=${pid} log=${log_file}"
-

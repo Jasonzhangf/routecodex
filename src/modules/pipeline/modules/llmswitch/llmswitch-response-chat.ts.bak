@@ -1,0 +1,536 @@
+import type { LLMSwitchModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
+import type { SharedPipelineRequest, SharedPipelineResponse } from '../../../../types/shared-dtos.js';
+import type { PipelineDebugLogger } from '../../interfaces/pipeline-interfaces.js';
+
+type ResponseInputItem = {
+  type: string;
+  role?: string;
+  content?: Array<ResponseContentPart> | null;
+  name?: string;
+  arguments?: unknown;
+  call_id?: string;
+  output?: unknown;
+};
+
+type ResponseContentPart = {
+  type: string;
+  text?: string;
+};
+
+type ResponseToolDefinition = {
+  type: string;
+  name?: string;
+  description?: string;
+  strict?: boolean;
+  parameters?: unknown;
+};
+
+interface ResponseRequestContext {
+  requestId?: string;
+  instructions?: string;
+  input?: ResponseInputItem[];
+  include?: unknown;
+  store?: unknown;
+  toolChoice?: unknown;
+  parallelToolCalls?: boolean;
+  metadata?: Record<string, unknown> | undefined;
+  responseFormat?: unknown;
+  stream?: boolean;
+  isChatPayload?: boolean;
+  isResponsesPayload?: boolean;
+}
+
+export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
+  readonly id: string;
+  readonly type = 'llmswitch-response-chat';
+  readonly protocol = 'openai-responses';
+  readonly config: ModuleConfig;
+
+  private isInitialized = false;
+  private logger: PipelineDebugLogger;
+  private requestContext: Map<string, ResponseRequestContext> = new Map();
+
+  constructor(config: ModuleConfig, dependencies: ModuleDependencies) {
+    this.config = config;
+    this.id = `llmswitch-response-chat-${Date.now()}`;
+    this.logger = dependencies.logger;
+  }
+
+  async initialize(): Promise<void> {
+    if (this.isInitialized) {
+      return;
+    }
+    this.isInitialized = true;
+  }
+
+  async processIncoming(requestParam: SharedPipelineRequest | any): Promise<SharedPipelineRequest> {
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+
+    const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam;
+    const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
+    const payload = isDto ? (dto!.data as Record<string, unknown>) : (requestParam as Record<string, unknown>);
+
+    const context = this.captureRequestContext(payload, dto ?? undefined);
+    if (context.requestId) {
+      this.requestContext.set(context.requestId, context);
+    }
+
+    const normalized = this.buildChatRequest(payload, context);
+    const stamped = {
+      ...normalized,
+      _metadata: {
+        ...(normalized._metadata || {}),
+        switchType: this.type,
+        timestamp: Date.now(),
+        entryProtocol: 'responses',
+        targetProtocol: 'openai'
+      }
+    } as Record<string, unknown>;
+
+    this.logger.logTransformation(this.id, 'responses-to-chat-request', payload, stamped);
+
+    if (isDto) {
+      return {
+        ...dto!,
+        data: stamped,
+        metadata: {
+          ...(dto!.metadata || {}),
+          rccResponsesContext: context
+        }
+      };
+    }
+
+    return {
+      data: stamped,
+      route: {
+        providerId: 'unknown',
+        modelId: 'unknown',
+        requestId: context.requestId || `req_${Date.now()}`,
+        timestamp: Date.now()
+      },
+      metadata: { rccResponsesContext: context },
+      debug: { enabled: false, stages: {} }
+    } satisfies SharedPipelineRequest;
+  }
+
+  async processOutgoing(responseParam: SharedPipelineResponse | any): Promise<SharedPipelineResponse | any> {
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+
+    const isDto = responseParam && typeof responseParam === 'object' && 'data' in responseParam && 'metadata' in responseParam;
+    const payload = isDto ? (responseParam as SharedPipelineResponse).data : responseParam;
+
+    const requestId = this.extractRequestId(responseParam);
+    const context = requestId ? this.requestContext.get(requestId) : undefined;
+    if (requestId && context) {
+      this.requestContext.delete(requestId);
+    }
+
+    const converted = context && context.isResponsesPayload
+      ? this.buildResponsesPayload(payload, context)
+      : payload;
+    this.logger.logTransformation(this.id, 'chat-to-responses', payload, converted);
+
+    if (isDto) {
+      const baseMeta = { ...((responseParam as SharedPipelineResponse).metadata || {}) } as Record<string, unknown>;
+      if (context && context.isResponsesPayload) {
+        (baseMeta as any).responsesStatus = (converted as any)?.status || 'completed';
+      }
+      return { ...(responseParam as SharedPipelineResponse), data: converted, metadata: baseMeta as any };
+    }
+
+    return converted;
+  }
+
+  async transformRequest(request: unknown): Promise<unknown> {
+    const dto = await this.processIncoming(request as any);
+    return dto.data;
+  }
+
+  async transformResponse(response: unknown): Promise<unknown> {
+    const converted = this.buildResponsesPayload(response, undefined);
+    return converted;
+  }
+
+  async cleanup(): Promise<void> {
+    this.requestContext.clear();
+    this.isInitialized = false;
+  }
+
+  async dispose(): Promise<void> {
+    await this.cleanup();
+  }
+
+  getStats(): Record<string, unknown> {
+    return {
+      type: this.type,
+      initialized: this.isInitialized,
+      trackedRequests: this.requestContext.size,
+      timestamp: Date.now()
+    };
+  }
+
+  private captureRequestContext(payload: Record<string, unknown>, dto?: SharedPipelineRequest | undefined): ResponseRequestContext {
+    const context: ResponseRequestContext = {
+      requestId: dto?.route?.requestId,
+      instructions: typeof payload.instructions === 'string' ? (payload.instructions as string) : undefined,
+      input: Array.isArray(payload.input) ? (payload.input as ResponseInputItem[]) : undefined,
+      include: payload.include,
+      store: payload.store,
+      toolChoice: payload.tool_choice,
+      parallelToolCalls: typeof payload.parallel_tool_calls === 'boolean' ? (payload.parallel_tool_calls as boolean) : undefined,
+      metadata: (payload.metadata && typeof payload.metadata === 'object') ? (payload.metadata as Record<string, unknown>) : undefined,
+      responseFormat: payload.response_format,
+      stream: payload.stream === true,
+      isChatPayload: Array.isArray(payload.messages)
+    };
+    context.isResponsesPayload = !context.isChatPayload && Array.isArray(context.input);
+    return context;
+  }
+
+  private buildChatRequest(payload: Record<string, unknown>, context: ResponseRequestContext): Record<string, unknown> {
+    if (context.isChatPayload && Array.isArray(payload.messages)) {
+      const cloned = { ...payload } as Record<string, unknown>;
+      cloned._metadata = {
+        ...(cloned._metadata as Record<string, unknown> | undefined),
+        switchType: this.type,
+        timestamp: Date.now(),
+        originalProtocol: 'openai'
+      };
+      return cloned;
+    }
+
+    const messages = this.convertInputToMessages(context.instructions, context.input);
+    const result: Record<string, unknown> = {
+      model: payload.model,
+      messages
+    };
+
+    if (payload.temperature !== undefined) {
+      result.temperature = payload.temperature;
+    }
+    if (payload.top_p !== undefined) {
+      result.top_p = payload.top_p;
+    }
+    if (payload.max_output_tokens !== undefined) {
+      result.max_tokens = payload.max_output_tokens;
+    }
+    if (payload.max_tokens !== undefined) {
+      result.max_tokens = payload.max_tokens;
+    }
+    if (payload.frequency_penalty !== undefined) {
+      result.frequency_penalty = payload.frequency_penalty;
+    }
+    if (payload.presence_penalty !== undefined) {
+      result.presence_penalty = payload.presence_penalty;
+    }
+    if (payload.response_format !== undefined) {
+      result.response_format = payload.response_format;
+    }
+    if (Array.isArray(payload.tools)) {
+      result.tools = this.convertTools(payload.tools as ResponseToolDefinition[]);
+    }
+    if (payload.tool_choice !== undefined) {
+      result.tool_choice = payload.tool_choice;
+    }
+    if (payload.parallel_tool_calls !== undefined) {
+      result.parallel_tool_calls = payload.parallel_tool_calls;
+    }
+    if (payload.user !== undefined) {
+      result.user = payload.user;
+    }
+    if (payload.logit_bias !== undefined) {
+      result.logit_bias = payload.logit_bias;
+    }
+    if (payload.seed !== undefined) {
+      result.seed = payload.seed;
+    }
+    if (payload.stream !== undefined) {
+      result.stream = payload.stream;
+    }
+
+    return result;
+  }
+
+  private convertInputToMessages(instructions?: string, input?: ResponseInputItem[]): Array<Record<string, unknown>> {
+    const messages: Array<Record<string, unknown>> = [];
+    if (instructions && instructions.trim().length) {
+      messages.push({ role: 'system', content: instructions.trim() });
+    }
+
+    if (!input || !Array.isArray(input)) {
+      return messages;
+    }
+
+    for (const item of input) {
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+      // Gracefully handle implicit message items where `type` is omitted but role/content exist
+      if ((item as any).type === undefined && (item as any).role && Array.isArray((item as any).content)) {
+        const role = (item as any).role || 'user';
+        const content = this.convertContentPartsToChat((item as any).content as Array<ResponseContentPart>);
+        messages.push({ role, content });
+        continue;
+      }
+      switch (item.type) {
+        case 'message': {
+          const role = item.role || 'user';
+          const content = this.convertContentPartsToChat(item.content);
+          messages.push({ role, content });
+          break;
+        }
+        case 'function_call': {
+          const name = typeof item.name === 'string' ? item.name : 'tool';
+          const callId = typeof item.call_id === 'string' ? item.call_id : `call_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          const args = this.stringifyMaybeJson(item.arguments);
+          messages.push({
+            role: 'assistant',
+            content: '',
+            tool_calls: [
+              {
+                id: callId,
+                type: 'function',
+                function: { name, arguments: args }
+              }
+            ]
+          });
+          break;
+        }
+        case 'function_call_output': {
+          const callId = typeof item.call_id === 'string' ? item.call_id : undefined;
+          let content: unknown = item.output;
+          if (typeof content !== 'string') {
+            try {
+              content = JSON.stringify(content);
+            } catch {
+              content = String(content);
+            }
+          }
+          const message: Record<string, unknown> = {
+            role: 'tool',
+            content,
+          };
+          if (callId) {
+            message.tool_call_id = callId;
+          }
+          messages.push(message);
+          break;
+        }
+        case 'reasoning': {
+          // Reasoning blocks are not directly representable in chat completions.
+          // Preserve them as an assistant message with reasoning_metadata to avoid loss.
+          messages.push({
+            role: 'assistant',
+            content: '',
+            reasoning_metadata: {
+              type: 'responses_reasoning',
+              summary: Array.isArray((item as any).summary) ? (item as any).summary : [],
+            }
+          });
+          break;
+        }
+        default: {
+          // Fallback: embed unknown blocks as assistant annotations
+          messages.push({
+            role: item.role || 'assistant',
+            content: this.stringifyMaybeJson(item)
+          });
+        }
+      }
+    }
+
+    return messages;
+  }
+
+  private convertContentPartsToChat(content?: Array<ResponseContentPart> | null): string | Array<Record<string, unknown>> {
+    if (!content || !Array.isArray(content) || content.length === 0) {
+      return '';
+    }
+
+    const allText = content.every(part => typeof part?.text === 'string');
+    if (allText) {
+      return content.map(part => part.text || '').join('\n');
+    }
+
+    return content.map(part => ({ type: 'text', text: part?.text ?? '' }));
+  }
+
+  private convertTools(tools: ResponseToolDefinition[]): ResponseToolDefinition[] {
+    return tools.map((tool) => ({
+      type: tool.type || 'function',
+      name: tool.name,
+      description: tool.description,
+      strict: tool.strict,
+      parameters: tool.parameters
+    }));
+  }
+
+  private buildResponsesPayload(payload: unknown, context?: ResponseRequestContext): Record<string, unknown> | unknown {
+    if (!payload || typeof payload !== 'object') {
+      return payload;
+    }
+
+    const response = this.unwrapData(payload as Record<string, unknown>);
+    if (!response || typeof response !== 'object') {
+      return payload;
+    }
+
+    const choices = Array.isArray((response as any).choices) ? (response as any).choices : [];
+    const primaryChoice = choices[0] && typeof choices[0] === 'object' ? (choices[0] as Record<string, unknown>) : undefined;
+    const message = primaryChoice && typeof primaryChoice.message === 'object' ? primaryChoice.message as Record<string, unknown> : undefined;
+    const role = message?.role || 'assistant';
+    const content = message?.content;
+    // GLM/others may return private reasoning text under reasoning_content; persist it into Responses payload
+    const reasoningText = typeof (message as any)?.reasoning_content === 'string' && ((message as any).reasoning_content as string).trim().length
+      ? String((message as any).reasoning_content).trim()
+      : undefined;
+
+    const outputItems: Array<Record<string, unknown>> = [];
+    if (reasoningText) {
+      outputItems.push({
+        type: 'reasoning',
+        summary: [],
+        content: [ { type: 'output_text', text: reasoningText } ]
+      });
+    }
+    const convertedContent = this.convertChatContentToResponses(content);
+    if (convertedContent.length > 0) {
+      outputItems.push({
+        type: 'message',
+        message: {
+          role,
+          content: convertedContent
+        }
+      });
+    }
+
+    const toolCalls = Array.isArray(message?.tool_calls) ? (message!.tool_calls as Array<Record<string, unknown>>) : [];
+    if (toolCalls.length > 0) {
+      for (const call of toolCalls) {
+        outputItems.push({
+          type: 'tool_call',
+          id: typeof call.id === 'string' ? call.id : `call_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          name: call?.function && typeof call.function === 'object' ? (call.function as any).name : undefined,
+          arguments: call?.function && typeof call.function === 'object' ? this.stringifyMaybeJson((call.function as any).arguments) : undefined
+        });
+      }
+    }
+
+    const usage = (response as any).usage;
+    const outputText = this.extractOutputText(convertedContent, toolCalls);
+
+    return {
+      id: (response as any).id || `resp-${Date.now()}`,
+      object: 'response',
+      created: (response as any).created || Math.floor(Date.now() / 1000),
+      model: (response as any).model,
+      status: 'completed',
+      output: outputItems,
+      output_text: outputText,
+      usage,
+      metadata: context?.metadata,
+      instructions: context?.instructions,
+      parallel_tool_calls: context?.parallelToolCalls,
+      tool_choice: context?.toolChoice,
+      include: context?.include,
+      store: context?.store
+    };
+  }
+
+  private unwrapData(value: Record<string, unknown>): Record<string, unknown> {
+    let current: any = value;
+    const seen = new Set<any>();
+    while (current && typeof current === 'object' && !Array.isArray(current) && !seen.has(current)) {
+      seen.add(current);
+      if ('choices' in current || 'message' in current) {
+        break;
+      }
+      if ('data' in current && typeof current.data === 'object') {
+        current = current.data;
+        continue;
+      }
+      break;
+    }
+    return current as Record<string, unknown>;
+  }
+
+  private convertChatContentToResponses(content: unknown): Array<Record<string, unknown>> {
+    if (!content) {
+      return [];
+    }
+    if (typeof content === 'string') {
+      return [{ type: 'output_text', text: content }];
+    }
+    if (Array.isArray(content)) {
+      return (content as Array<any>).map((part) => {
+        if (typeof part === 'string') {
+          return { type: 'output_text', text: part };
+        }
+        if (part && typeof part === 'object') {
+          if (typeof part.text === 'string') {
+            return { type: 'output_text', text: part.text };
+          }
+          return { type: part.type || 'output_text', text: part.text ?? '' };
+        }
+        return { type: 'output_text', text: String(part) };
+      });
+    }
+    if (typeof content === 'object') {
+      try {
+        return [{ type: 'output_text', text: JSON.stringify(content) }];
+      } catch {
+        return [{ type: 'output_text', text: String(content) }];
+      }
+    }
+    return [{ type: 'output_text', text: String(content) }];
+  }
+
+  private extractOutputText(parts: Array<Record<string, unknown>>, toolCalls: Array<Record<string, unknown>>): string {
+    if (parts.length > 0) {
+      const text = parts
+        .filter(part => typeof part.text === 'string')
+        .map(part => part.text as string)
+        .join('\n')
+        .trim();
+      if (text.length) {
+        return text;
+      }
+    }
+    if (toolCalls.length > 0) {
+      return toolCalls
+        .map(call => this.stringifyMaybeJson(call))
+        .join('\n');
+    }
+    return '';
+  }
+
+  private stringifyMaybeJson(value: unknown): string {
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (value === undefined || value === null) {
+      return '';
+    }
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  private extractRequestId(response: SharedPipelineResponse | any): string | undefined {
+    if (response && typeof response === 'object') {
+      if ('metadata' in response && response.metadata && typeof response.metadata === 'object') {
+        const meta = response.metadata as Record<string, unknown>;
+        if (typeof meta.requestId === 'string') {
+          return meta.requestId;
+        }
+      }
+    }
+    return undefined;
+  }
+}

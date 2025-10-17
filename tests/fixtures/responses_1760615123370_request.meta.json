@@ -1,0 +1,9 @@
+{
+  "reqId": "req_1760615118547_ut9i24fxt",
+  "timestamp": 1760615118547,
+  "protocol": "openai",
+  "endpoint": "/v1/responses",
+  "flags": {
+    "streaming": true
+  }
+}

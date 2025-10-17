@@ -64,7 +64,7 @@ export class MonitorConfigUtil {
   }
 
   static isTransparentEnabled(cfg?: MonitorFileConfig | null): boolean {
-    if (process.env.RCC_MONITOR_TRANSPARENT === '1' || process.env.RCC_ANALYSIS_TRANSPARENT === '1') {
+    if (process.env.ROUTECODEX_MONITOR_TRANSPARENT === '1' || process.env.ROUTECODEX_ANALYSIS_TRANSPARENT === '1') {
       return true;
     }
     const c = cfg || null;
@@ -76,8 +76,8 @@ export class MonitorConfigUtil {
 
   static getTransparent(cfg?: MonitorFileConfig | null): TransparentUpstreamConfig | null {
     const c = cfg || null;
-    const envOpenAI = process.env.RCC_TRANSPARENT_OPENAI || process.env.RCC_MONITOR_UPSTREAM_OPENAI;
-    const envAnthropic = process.env.RCC_TRANSPARENT_ANTHROPIC || process.env.RCC_MONITOR_UPSTREAM_ANTHROPIC;
+    const envOpenAI = process.env.ROUTECODEX_TRANSPARENT_OPENAI || process.env.ROUTECODEX_MONITOR_UPSTREAM_OPENAI;
+    const envAnthropic = process.env.ROUTECODEX_TRANSPARENT_ANTHROPIC || process.env.ROUTECODEX_MONITOR_UPSTREAM_ANTHROPIC;
     const base: TransparentUpstreamConfig = {
       enabled: this.isTransparentEnabled(c),
       defaultUpstream: (c?.transparent?.defaultUpstream as any) || undefined,
