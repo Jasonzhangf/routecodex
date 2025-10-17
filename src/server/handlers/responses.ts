@@ -311,14 +311,36 @@ export class ResponsesHandler extends BaseHandler {
 
       const textOut = extractText(response);
       const words = (textOut || '').split(/\s+/g).filter(Boolean);
+
+      // response.created
+      try {
+        const createdEvt = { type: 'response.created', response: { id: `resp_${requestId}`, model: model || 'unknown' } };
+        res.write(`event: response.created\n`);
+        res.write(`data: ${JSON.stringify(createdEvt)}\n\n`);
+      } catch { /* ignore */ }
+
+      // response.in_progress
+      try {
+        const inprog = { type: 'response.in_progress', response: { id: `resp_${requestId}`, model: model || 'unknown' } };
+        res.write(`event: response.in_progress\n`);
+        res.write(`data: ${JSON.stringify(inprog)}\n\n`);
+      } catch { /* ignore */ }
       for (const w of words) {
-        const delta = { type: 'response.delta', delta: { type: 'output_text.delta', text: w + ' ' }, response: { id: `resp_${requestId}`, model: model || 'unknown' } };
-        res.write(`event: response.delta\n`);
+        const delta = { type: 'response.output_text.delta', delta: w + ' ', response: { id: `resp_${requestId}`, model: model || 'unknown' } };
+        res.write(`event: response.output_text.delta\n`);
         res.write(`data: ${JSON.stringify(delta)}\n\n`);
         await new Promise(r => setTimeout(r, 30));
       }
 
-      const completed = { type: 'response.completed', response: { id: `resp_${requestId}`, model: model || 'unknown' } };
+      // response.output_text.done
+      try {
+        const doneEvt = { type: 'response.output_text.done', response: { id: `resp_${requestId}`, model: model || 'unknown' } };
+        res.write(`event: response.output_text.done\n`);
+        res.write(`data: ${JSON.stringify(doneEvt)}\n\n`);
+      } catch { /* ignore */ }
+
+      // response.completed (attach total output_text when available)
+      const completed = { type: 'response.completed', response: { id: `resp_${requestId}`, model: model || 'unknown', output_text: textOut || '' } };
       res.write(`event: response.completed\n`);
       res.write(`data: ${JSON.stringify(completed)}\n\n`);
       res.end();
