@@ -118,11 +118,7 @@ export class GLMHTTPProvider implements ProviderModule {
     // Passthrough payload as-is. Do not sanitize/trim/strip tool_calls.
     const payloadObj: Record<string, unknown> = { ...(request as any) };
 
-    // Allow per-request override
-    const overrideKeyRaw = (request as any)?.__rcc_overrideApiKey as string | undefined;
-    const token = overrideKeyRaw
-      ? (overrideKeyRaw.toLowerCase().startsWith('bearer ') ? overrideKeyRaw.slice(7).trim() : overrideKeyRaw.trim())
-      : this.authContext.token!;
+    const token = this.authContext.token!;
 
     if (this.isDebugEnhanced && this.debugEventBus) {
       this.debugEventBus.publish({

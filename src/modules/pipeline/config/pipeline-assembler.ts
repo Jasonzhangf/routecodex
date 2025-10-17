@@ -46,6 +46,10 @@ export class PipelineAssembler {
   static async assemble(mergedConfig: unknown): Promise<AssembledPipelines> {
     const mc = this.asRecord(mergedConfig);
     const pac = this.asRecord(this.asRecord(mc.pipeline_assembler).config);
+    const compatCfg = this.asRecord(mc.compatibilityConfig || {});
+    const keyMappings = this.asRecord(compatCfg.keyMappings || {});
+    const globalKeys = this.asRecord(keyMappings.global || {});
+    const providerKeys = this.asRecord(keyMappings.providers || {});
     const pipelinesIn = Array.isArray((pac as any).pipelines) ? (pac as any).pipelines as any[] : [];
     if (!pipelinesIn.length) {
       throw new Error('[PipelineAssembler] No pipelines in pipeline_assembler.config. Ensure config-manager generated pipelines.');
@@ -56,6 +60,25 @@ export class PipelineAssembler {
     let routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }> = (pac as any).routeMeta || {};
 
     const seen = new Set<string>();
+    const resolveKey = (provId: string | undefined, keyId: string | undefined): string | undefined => {
+      if (!keyId) { return undefined; }
+      const normalize = (val: unknown): string | undefined => {
+        if (typeof val === 'string' && val.trim()) { return val.trim(); }
+        if (Array.isArray(val)) {
+          for (const item of val) {
+            if (typeof item === 'string' && item.trim()) { return item.trim(); }
+          }
+        }
+        return undefined;
+      };
+
+      const direct = normalize(globalKeys[keyId]);
+      if (direct) { return direct; }
+      const provMap = this.asRecord(provId ? providerKeys[provId] : undefined);
+      const fromProv = normalize(provMap[keyId]);
+      if (fromProv) { return fromProv; }
+      return undefined;
+    };
     for (const p of pipelinesIn) {
       const id = String(p.id || '');
       if (!id || seen.has(id)) { continue; }
@@ -196,6 +219,17 @@ export class PipelineAssembler {
           }
         }
       } catch { /* ignore */ }
+      const metaForId = this.asRecord(routeMeta[id] || (pac as any).routeMeta?.[id] || {});
+      const providerIdForKey = typeof metaForId.providerId === 'string' ? metaForId.providerId : undefined;
+      const keyIdForPipeline = typeof metaForId.keyId === 'string' ? metaForId.keyId : undefined;
+      const actualKey = resolveKey(providerIdForKey, keyIdForPipeline);
+      if (actualKey) {
+        const dstAuth = this.asRecord(provCfg.auth || {});
+        (dstAuth as any).apiKey = actualKey;
+        if (!(dstAuth as any).type) { (dstAuth as any).type = 'apikey'; }
+        provCfg.auth = dstAuth;
+      }
+
       const modBlock: Record<string, unknown> = {
         provider: { type: provider.type, config: provCfg },
         compatibility: { type: compatibility.type, config: compatibility.config || {} },
