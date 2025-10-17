@@ -205,3 +205,5 @@ Summary
 ## 0.50.3 - 2025-10-17
 - Patch release to align versioning (0.50.x line).
 - Includes Responses stream completion event (response.completed) and input normalization fixes from recent work.
+## 0.50.4 - 2025-10-17
+- Patch bump: Responses SSE event sequence refined and packaged for global install.
