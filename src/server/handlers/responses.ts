@@ -642,6 +642,25 @@ export class ResponsesHandler extends BaseHandler {
 
       // Emit tool_call events when present in pipeline response (prefer initial turn)
       try {
+        let nextOutputIndex = 1; // 0 is reserved for assistant message item below
+
+        const addToolCallItem = async (id: string) => {
+          const output_index = nextOutputIndex++;
+          await writeEvt('response.output_item.added', {
+            type: 'response.output_item.added',
+            output_index,
+            item: { id, type: 'tool_call' }
+          } as Record<string, unknown>);
+          await writeEvt('response.content_part.added', {
+            type: 'response.content_part.added',
+            item_id: id,
+            output_index,
+            content_index: 0,
+            part: { type: 'input_json', partial_json: '' }
+          } as Record<string, unknown>);
+          return output_index;
+        };
+
         const emitToolCallsFromResponsesOutput = async (resp: any) => {
           const out = Array.isArray(resp?.output) ? resp.output : [];
           for (const it of out) {
@@ -652,6 +671,7 @@ export class ResponsesHandler extends BaseHandler {
               const name = it.tool_name || it.name || 'tool';
               const argsVal = it.arguments ?? {};
               const args = typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal);
+              await addToolCallItem(id);
               const created = { type: 'response.tool_call.created', tool_call: { id, name }, response: baseResp } as Record<string, unknown>;
               await writeEvt('response.tool_call.created', created);
               // chunk arguments
@@ -674,6 +694,7 @@ export class ResponsesHandler extends BaseHandler {
             const id = tc?.id || `call_${Math.random().toString(36).slice(2)}`;
             const name = tc?.function?.name || 'tool';
             const args = typeof tc?.function?.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc?.function?.arguments || {});
+            await addToolCallItem(id);
 
             const created = { type: 'response.tool_call.created', tool_call: { id, name }, response: baseResp } as Record<string, unknown>;
             await writeEvt('response.tool_call.created', created);
@@ -701,6 +722,7 @@ export class ResponsesHandler extends BaseHandler {
               const name = b.name || 'tool';
               const argsVal = b.input ?? {};
               const args = typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal);
+              await addToolCallItem(id);
               const created = { type: 'response.tool_call.created', tool_call: { id, name }, response: baseResp } as Record<string, unknown>;
               await writeEvt('response.tool_call.created', created);
 
