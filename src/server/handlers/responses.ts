@@ -679,11 +679,13 @@ export class ResponsesHandler extends BaseHandler {
               const step = 128; const parts: string[] = [];
               for (let i = 0; i < s.length; i += step) parts.push(s.slice(i, i + step));
               for (const part of parts) {
-                const delta = { type: 'response.tool_call.delta', tool_call: { id }, delta: { arguments: part }, response: baseResp } as Record<string, unknown>;
+                const delta = { type: 'response.tool_call.delta', tool_call: { id }, delta: { arguments: part, arguments_delta: part }, response: baseResp } as Record<string, unknown>;
                 await writeEvt('response.tool_call.delta', delta);
+                await writeEvt('response.content_part.delta', { type: 'response.content_part.delta', item_id: id, output_index: nextOutputIndex - 1, content_index: 0, delta: { type: 'input_json_delta', partial_json: part } } as Record<string, unknown>);
               }
               const completed = { type: 'response.tool_call.completed', tool_call: { id }, response: baseResp } as Record<string, unknown>;
               await writeEvt('response.tool_call.completed', completed);
+              await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: nextOutputIndex - 1, item: { id, type: 'tool_call' } } as Record<string, unknown>);
             }
           }
         };
@@ -705,11 +707,13 @@ export class ResponsesHandler extends BaseHandler {
             const step = 128;
             for (let i = 0; i < s.length; i += step) chunks.push(s.slice(i, i + step));
             for (const part of chunks) {
-              const delta = { type: 'response.tool_call.delta', tool_call: { id }, delta: { arguments: part }, response: baseResp } as Record<string, unknown>;
+              const delta = { type: 'response.tool_call.delta', tool_call: { id }, delta: { arguments: part, arguments_delta: part }, response: baseResp } as Record<string, unknown>;
               await writeEvt('response.tool_call.delta', delta);
+              await writeEvt('response.content_part.delta', { type: 'response.content_part.delta', item_id: id, output_index: nextOutputIndex - 1, content_index: 0, delta: { type: 'input_json_delta', partial_json: part } } as Record<string, unknown>);
             }
             const completed = { type: 'response.tool_call.completed', tool_call: { id }, response: baseResp } as Record<string, unknown>;
             await writeEvt('response.tool_call.completed', completed);
+            await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: nextOutputIndex - 1, item: { id, type: 'tool_call' } } as Record<string, unknown>);
           }
         };
 
@@ -731,11 +735,13 @@ export class ResponsesHandler extends BaseHandler {
               const step = 128; const parts: string[] = [];
               for (let i = 0; i < s.length; i += step) parts.push(s.slice(i, i + step));
               for (const part of parts) {
-                const delta = { type: 'response.tool_call.delta', tool_call: { id }, delta: { arguments: part }, response: baseResp } as Record<string, unknown>;
+                const delta = { type: 'response.tool_call.delta', tool_call: { id }, delta: { arguments: part, arguments_delta: part }, response: baseResp } as Record<string, unknown>;
                 await writeEvt('response.tool_call.delta', delta);
+                await writeEvt('response.content_part.delta', { type: 'response.content_part.delta', item_id: id, output_index: nextOutputIndex - 1, content_index: 0, delta: { type: 'input_json_delta', partial_json: part } } as Record<string, unknown>);
               }
               const completed = { type: 'response.tool_call.completed', tool_call: { id }, response: baseResp } as Record<string, unknown>;
               await writeEvt('response.tool_call.completed', completed);
+              await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: nextOutputIndex - 1, item: { id, type: 'tool_call' } } as Record<string, unknown>);
             }
           }
         };
