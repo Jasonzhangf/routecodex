@@ -604,12 +604,7 @@ export class ResponsesHandler extends BaseHandler {
 
       const baseResp = { id: `resp_${requestId}`, model: model || 'unknown' } as Record<string, unknown>;
       const now = () => Math.floor(Date.now() / 1000);
-      const textStrictAzure = (() => {
-        try {
-          const v = String(process.env.ROUTECODEX_RESP_TEXT_AZURE || '').trim().toLowerCase();
-          return v === '1' || v === 'true';
-        } catch { return false; }
-      })();
+      // Text strict Azure mode removed per rollback request; keep default text path
 
       // response.created (echo tool definitions to client via metadata)
       try {
@@ -834,9 +829,7 @@ export class ResponsesHandler extends BaseHandler {
           await new Promise(r => setTimeout(r, 30));
         }
         try { await writeEvt('response.output_text.done', { type: 'response.output_text.done', response: baseResp, item_id: msgId, output_index: 0, content_index: 0, text: (textOut || ''), logprobs: [] }); } catch { /* ignore */ }
-      if (textStrictAzure) {
-        try { await writeEvt('response.content_part.done', { type: "response.content_part.done", item_id: msgId, output_index: 0, content_index: 0 } as Record<string, unknown>); } catch { /* ignore */ }
-      }
+
 
         try {
           const item = { id: msgId, type: 'message', status: 'completed', content: [ { type: 'output_text', annotations: [], logprobs: [], text: (textOut || '') } ], role: 'assistant' };
