@@ -211,8 +211,8 @@ export class GLMCompatibility implements CompatibilityModule {
     for (const [key, value] of Object.entries(sanitized)) {
       (payload as UnknownObject)[key] = value as unknown;
     }
-
-    for (const key of ['messages', 'tools', 'tool_choice', 'stream', 'temperature', 'top_p', 'max_tokens']) {
+    // Strict prune: remove any keys not in sanitized set to reduce provider schema errors
+    for (const key of Object.keys(payload as Record<string, unknown>)) {
       if (!assignableKeys.has(key)) {
         delete (payload as UnknownObject)[key];
       }

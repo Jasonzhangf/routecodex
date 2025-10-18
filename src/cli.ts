@@ -1429,7 +1429,9 @@ program
         const monPath = path.join(monDir, 'monitor.json');
         let j: any = {};
         try { j = JSON.parse(fs.readFileSync(monPath, 'utf8')); } catch { j = {}; }
-        j.mode = 'transparent';
+        // Use passive A/B mode by default so live responses stay local,
+        // while upstream is invoked side-by-side for comparison.
+        j.mode = 'passive';
         j.transparent = j.transparent || {};
         j.transparent.enabled = true;
         j.transparent.defaultUpstream = 'openai';
@@ -1438,6 +1440,19 @@ program
         j.transparent.headerAllowlist = j.transparent.headerAllowlist || ['accept','content-type','anthropic-version','x-*'];
         j.transparent.timeoutMs = typeof j.transparent.timeoutMs === 'number' ? j.transparent.timeoutMs : 30000;
         j.transparent.preferClientHeaders = (j.transparent.preferClientHeaders !== false);
+        // Prefer Responses wire and enforce upstream model id if unset
+        if (!j.transparent.wireApi) { j.transparent.wireApi = 'responses'; }
+        // Provide a safe default model mapping for upstream that only supports gpt-5-codex
+        if (!j.transparent.modelMapping || typeof j.transparent.modelMapping !== 'object') {
+          j.transparent.modelMapping = {
+            // common local aliases → upstream id
+            'glm-4': 'gpt-5-codex',
+            'glm-4.6': 'gpt-5-codex',
+            'gpt-4o': 'gpt-5-codex',
+            // fallback
+            '*': 'gpt-5-codex'
+          } as any;
+        }
         // auth: reference env key if provided, else FC_API_KEY
         const envRef = envKey && /^[A-Z0-9_]+$/.test(envKey) ? envKey : 'FC_API_KEY';
         j.transparent.auth = j.transparent.auth || {};
@@ -1507,9 +1522,9 @@ program
         const { spawn } = await import('child_process');
         const env = { ...process.env } as NodeJS.ProcessEnv;
         env.ROUTECODEX_CONFIG = userCfgPath;
-        // Enable runtime monitoring + allow transparent fallback using monitor.json
+        // Enable runtime monitoring in passive A/B mode by default
         env.ROUTECODEX_MONITOR_ENABLED = '1';
-        env.ROUTECODEX_MONITOR_TRANSPARENT = '1';
+        env.ROUTECODEX_MONITOR_AB = '1';
         const child = spawn(nodeBin, [serverEntry, modulesConfigPath], { stdio: 'inherit', env });
         spinner.succeed('RouteCodex (monitor mode) starting');
         console.log(`Config: ${userCfgPath}`);

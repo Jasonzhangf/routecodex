@@ -362,6 +362,31 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       }
     }
 
+    // Helper: recursively flatten nested blocks and collect textual content
+    const flattenTextBlocks = (blocks: any[]): string[] => {
+      const texts: string[] = [];
+      for (const block of blocks) {
+        if (!block || typeof block !== 'object') { continue; }
+        const kind = typeof block.type === 'string' ? String(block.type).toLowerCase() : '';
+        if ((kind === 'text' || kind === 'input_text' || kind === 'output_text') && typeof (block as any).text === 'string') {
+          const t = (block as any).text.trim(); if (t) { texts.push(t); }
+          continue;
+        }
+        if (kind === 'message' && Array.isArray((block as any).content)) {
+          texts.push(...flattenTextBlocks((block as any).content));
+          continue;
+        }
+        if (typeof (block as any).content === 'string') {
+          const t = (block as any).content.trim(); if (t) { texts.push(t); }
+          continue;
+        }
+      }
+      return texts;
+    };
+
+    // Track last appended text per role to avoid duplicate spam (common in captured histories)
+    let lastByRole: Record<string, string> = {};
+
     for (const m of (request.messages || [])) {
       const role = m.role || 'user';
       const blocks = Array.isArray(m.content)
@@ -450,6 +475,9 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
             .join('\n');
           if (text) { msgs.push({ role: 'assistant', content: text }); }
         }
+        // If we also had plain text alongside tool_use, append it after tool_calls as assistant content
+        const trailingText = flattenTextBlocks(blocks).join('\n').trim();
+        if (trailingText) { msgs.push({ role: 'assistant', content: trailingText }); }
         continue;
       }
 
@@ -469,12 +497,14 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
         continue;
       }
 
-      // Plain user/assistant text-only
-      const text = blocks
-        .filter((b: any) => b && b.type === 'text' && typeof b.text === 'string')
-        .map((b: any) => b.text)
-        .join('\n');
-      msgs.push({ role, content: text });
+      // Plain text (flatten nested message/input_text/output_text)
+      const textParts = flattenTextBlocks(blocks);
+      const text = textParts.join('\n');
+      const prev = lastByRole[role] || '';
+      if (text && text !== prev) {
+        msgs.push({ role, content: text });
+        lastByRole[role] = text;
+      }
     }
     transformed.messages = msgs;
     if (request.model) {
@@ -526,6 +556,28 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     const contentMsgs: any[] = [];
     const producedToolIds = new Set<string>();
 
+    // Helper: recursively flatten nested Chat/Responses-like structures into plain text lines
+    const flattenNested = (parts: any[]): string[] => {
+      const texts: string[] = [];
+      for (const p of parts) {
+        if (!p || typeof p !== 'object') { continue; }
+        const kind = typeof (p as any).type === 'string' ? String((p as any).type).toLowerCase() : '';
+        if ((kind === 'text' || kind === 'input_text' || kind === 'output_text') && typeof (p as any).text === 'string') {
+          const t = ((p as any).text as string).trim(); if (t) { texts.push(t); }
+          continue;
+        }
+        if (kind === 'message' && Array.isArray((p as any).content)) {
+          texts.push(...flattenNested((p as any).content));
+          continue;
+        }
+        if (typeof (p as any).content === 'string') {
+          const t = ((p as any).content as string).trim(); if (t) { texts.push(t); }
+          continue;
+        }
+      }
+      return texts;
+    };
+
     // Build a local schema map (from OpenAI request.tools) to normalize arguments
     const reqToolSchemaMap: Map<string, any> | undefined = (() => {
       try {
@@ -575,11 +627,8 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       if (typeof m.content === 'string' && m.content.length > 0) {
         blocks.push({ type: 'text', text: m.content });
       } else if (Array.isArray(m.content)) {
-        for (const part of m.content) {
-          if (part && typeof part === 'object' && typeof (part as any).text === 'string') {
-            blocks.push({ type: 'text', text: (part as any).text });
-          }
-        }
+        const flat = flattenNested(m.content);
+        for (const t of flat) { blocks.push({ type: 'text', text: t }); }
       }
       contentMsgs.push({ role, content: blocks.length ? blocks : [{ type: 'text', text: '' }] });
     }

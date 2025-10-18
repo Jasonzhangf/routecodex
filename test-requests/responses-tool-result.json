@@ -1,0 +1,37 @@
+{
+  "model": "glm-4.6",
+  "stream": true,
+  "input": [
+    {
+      "type": "tool_result",
+      "tool_use_id": "call_-8240985883311396011",
+      "content": "Simulated plan execution result."
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "update_plan",
+      "description": "Updates the task plan.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "plan": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "step": { "type": "string" },
+                "status": { "type": "string" }
+              },
+              "required": [ "step", "status" ]
+            }
+          }
+        },
+        "required": [ "plan" ]
+      }
+    }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": false
+}

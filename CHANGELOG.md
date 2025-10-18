@@ -207,3 +207,78 @@ Summary
 - Includes Responses stream completion event (response.completed) and input normalization fixes from recent work.
 ## 0.50.4 - 2025-10-17
 - Patch bump: Responses SSE event sequence refined and packaged for global install.
+## 0.50.5 - 2025-10-17
+- Patch bump for streaming tool_call SSE improvements and local capture.
+- Ready for global build/install and external streaming validation.
+## 0.50.6 - 2025-10-17
+- Responses SSE: response.completed now includes usage with input_tokens/output_tokens/total_tokens (mapped from prompt/completion/total when needed) to satisfy strict clients.
+## 0.50.7 - 2025-10-17
+- Responses SSE: add tool_call.* emission from Responses output[] (type='tool_call'), in addition to Chat tool_calls and Anthropic tool_use.
+- Improves visibility when upstream triggers tools but no text is returned.
+## 0.50.8 - 2025-10-17
+- Two-turn tool follow-up (方案A): execute whitelisted tools (shell: ls/pwd/cat) and feed results back as tool messages, then run a second generation to produce output_text.*.
+- Keeps SSE tool_call.* events from first turn; emits output_text.delta/done/completed from second turn.
+## 0.50.10 - 2025-10-18
+- Responses streaming: response.completed now emits usage at top level (input_tokens/output_tokens/total_tokens) per Azure/OpenAI Responses clients.
+- Non-stream JSON for /v1/responses returns Responses-shaped payload; prefers second-turn result when tools are used.
+- Pipeline handoff for /v1/responses preserves Anthropic blocks; llmswitch handles provider conversion.
+
+## 0.50.9 - 2025-10-18
+- Responses streaming: emit final output_text from second-turn after tool calls
+  - Prefer `__initial` for tool_call.* events and `__final` for text and usage
+  - Map `response.completed.usage` from final payload when available
+  - Fixes: multi-turn still missing text after tools (e.g., req_1760752783623_9f1t7f2oj)
+## 0.50.11 - 2025-10-18
+- GLM 1214 fix: stricter preflight for GLM
+  - Convert unsupported `tool` role to `user` by default (opt-out: RCC_GLM_USE_TOOL_ROLE=1)
+  - Strip `assistant.tool_calls` from all messages unless RCC_GLM_KEEP_LAST_ASSISTANT_TOOLCALLS=1
+  - Coerce first assistant message to user for GLM safety
+  - Keeps content as string and forces non-stream; Workflow re-streams downstream
+## 0.50.12 - 2025-10-18
+- Responses streaming: emit server-executed tool results per spec-like events
+  - response.tool_result.created/delta/completed for each executed tool
+  - Non-stream JSON merges tool_result items into output and prefixes output_text
+  - Keeps prior behavior: tool_call.* from first turn; output_text.* from second turn
+## 0.50.13 - 2025-10-18
+- Azure/OpenAI Responses SSE alignment
+  - Add sequence_number to all SSE events
+  - Emit output_item.added/content_part.added/output_item.done for assistant text and tool results
+  - Standardize tool_call.delta to carry {arguments} object
+  - Emit response.done sentinel and response.error on failures
+  - Replace custom tool_result.* events with standard output items
+## 0.50.14 - 2025-10-18
+- Tool executor: expand whitelist and add env override
+  - Default allowed: ls, pwd, cat, find, git (read-only subcommands)
+  - Env: ROUTECODEX_TOOL_WHITELIST to customize
+  - Safety: restrict cat/find to HOME/CWD; block shell control operators; restrict git to status/log/show/diff/rev-parse/ls-files
+## 0.50.15 - 2025-10-18
+- Tool executor trust mode by default
+  - Remove internal whitelists and path guards; execute client-defined commands as-is
+  - Add optional ROUTECODEX_TOOL_SAFE_MODE=1 to re-enable minimal operator blocking in constrained envs
+## 0.50.16 - 2025-10-18
+- Tools passthrough to client
+  - Echo request tools/tool_choice/parallel_tool_calls in response.created (metadata)
+  - Non-stream JSON includes metadata.tools/tool_choice/parallel_tool_calls
+  - Default server-side tool execution remains disabled; client fully controls tools
+## 0.50.17 - 2025-10-18
+- Fix Responses→Chat tools conversion in llmswitch
+  - Generate OpenAI Chat function tools: { type: 'function', function: { name, description, parameters } }
+  - Normalize parameters (parse string JSON; fallback to permissive schema)
+  - Preserve tool_choice/parallel_tool_calls unchanged
+## 0.50.19 - 2025-10-18
+- Add SSE contract audit + tools hash metadata
+  - Write per-request SSE audit summary to sse-audit-<requestId>.log (monotonic, tool_call counts, text deltas, first_turn_only)
+  - response.created metadata includes tools_hash and tools_count (and echoed tool_choice/parallel_tool_calls)
+  - Non-stream JSON metadata also includes tools_hash/tools_count
+## 0.50.20 - 2025-10-18
+- Routine patch release: build + global install
+## 0.50.25 - 2025-10-18
+- Responses→Chat conversion fix compiled and enabled
+  - Flatten `input_text`/`output_text` blocks and nested `message` arrays into proper OpenAI Chat `messages`.
+  - Removes empty assistant stubs caused by empty `output_text` blocks.
+  - Prevents premature stop/empty stream by ensuring user text is preserved in Chat payload.
+- Build + background readiness check wired to `npm run start:bg` as per run policy.
+- Anthropic→OpenAI request converter now flattens nested `message` blocks and de-duplicates repeated user prompts; mixed tool_use + text keeps both.
+ - OpenAI→Anthropic request converter now flattens nested Chat `content` arrays that embed Responses-style `message` blocks; extracts `input_text`/`output_text` to text blocks to avoid empty inputs (fixes GLM 1214).
+## 0.50.26 - 2025-10-18
+- Build: version bump. Foreground start path uses `gtimeout` via `npm run start:fg` (script `scripts/run-fg-gtimeout.sh`), background uses `npm run start:bg`.

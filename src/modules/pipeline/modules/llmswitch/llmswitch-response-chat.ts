@@ -192,21 +192,16 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
   }
 
   private buildChatRequest(payload: Record<string, unknown>, context: ResponseRequestContext): Record<string, unknown> {
-    if (context.isChatPayload && Array.isArray(payload.messages)) {
-      const cloned = { ...payload } as Record<string, unknown>;
-      cloned._metadata = {
-        ...(cloned._metadata as Record<string, unknown> | undefined),
-        switchType: this.type,
-        timestamp: Date.now(),
-        originalProtocol: 'openai'
-      };
-      return cloned;
-    }
+    const history = Array.isArray(payload.messages)
+      ? this.convertInputToMessages(undefined, payload.messages as ResponseInputItem[])
+      : [];
 
-    const messages = this.convertInputToMessages(context.instructions, context.input);
+    const current = this.convertInputToMessages(context.instructions, context.input);
+    const combined = [...history, ...current];
+
     const result: Record<string, unknown> = {
       model: payload.model,
-      messages
+      messages: combined
     };
     // Preserve internal override key if carried from protocol layer
 
@@ -266,95 +261,158 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
 
   private convertInputToMessages(instructions?: string, input?: ResponseInputItem[]): Array<Record<string, unknown>> {
     const messages: Array<Record<string, unknown>> = [];
+
+    const pushText = (role: string, value: string | string[] | undefined | null) => {
+      if (value == null) {
+        return;
+      }
+      if (Array.isArray(value)) {
+        const filtered = value.map(v => v.trim()).filter(Boolean);
+        if (filtered.length) {
+          messages.push({ role, content: filtered.map(text => ({ type: 'text', text })) });
+        }
+        return;
+      }
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (trimmed) {
+          messages.push({ role, content: trimmed });
+        }
+      }
+    };
+
+    const pushToolCall = (name: string, args: unknown, callId?: string) => {
+      const serialized = this.stringifyMaybeJson(args).trim();
+      if (!serialized) { return; }
+      messages.push({
+        role: 'assistant',
+        content: '',
+        tool_calls: [{ id: callId || `call_${Math.random().toString(36).slice(2, 6)}`, type: 'function', function: { name, arguments: serialized } }]
+      });
+    };
+
+    const flattenTextBlocks = (blocks: any[]): string[] => {
+      const texts: string[] = [];
+      for (const block of blocks) {
+        if (!block || typeof block !== 'object') { continue; }
+        const kind = typeof block.type === 'string' ? block.type.toLowerCase() : '';
+        if ((kind === 'text' || kind === 'input_text' || kind === 'output_text') && typeof block.text === 'string') {
+          const trimmed = block.text.trim();
+          if (trimmed) { texts.push(trimmed); }
+          continue;
+        }
+        if (kind === 'message' && Array.isArray(block.content)) {
+          texts.push(...flattenTextBlocks(block.content));
+          continue;
+        }
+        if (typeof block.content === 'string') {
+          const trimmed = block.content.trim();
+          if (trimmed) { texts.push(trimmed); }
+        }
+      }
+      return texts;
+    };
+
+    const coerceToolInput = (value: unknown): unknown => {
+      if (value === null || value === undefined) { return {}; }
+      if (typeof value === 'object' && !Array.isArray(value)) { return value; }
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) { return {}; }
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed && typeof parsed === 'object') { return parsed; }
+        } catch { /* ignore */ }
+        return { _raw: trimmed };
+      }
+      if (Array.isArray(value)) {
+        const objects = value.filter(v => v && typeof v === 'object' && !Array.isArray(v));
+        if (objects.length) {
+          return objects.reduce((acc: any, cur: any) => {
+            for (const [k, v] of Object.entries(cur)) {
+              if (!(k in acc)) { acc[k] = v; }
+            }
+            return acc;
+          }, {} as Record<string, unknown>);
+        }
+        const primitives = value
+          .map(v => v == null ? '' : String(v))
+          .filter(v => v.trim().length);
+        if (primitives.length) { return { _raw: primitives.join(' ') }; }
+        return {};
+      }
+      return { _raw: String(value) };
+    };
+
     if (instructions && instructions.trim().length) {
-      messages.push({ role: 'system', content: instructions.trim() });
+      pushText('system', instructions.trim());
     }
 
-    if (!input || !Array.isArray(input)) {
-      return messages;
-    }
-
-    for (const item of input) {
-      if (!item || typeof item !== 'object') {
-        continue;
+    const visit = (node: any) => {
+      if (!node || typeof node !== 'object') { return; }
+      const type = node.type;
+      if (!type) {
+        const role = typeof node.role === 'string' ? node.role : 'user';
+        const content = node.content;
+        if (Array.isArray(content)) {
+          for (const block of content) { visit(block); }
+        } else {
+          pushText(role, content);
+        }
+        return;
       }
-      // Gracefully handle implicit message items where `type` is omitted but role/content exist
-      if ((item as any).type === undefined && (item as any).role && Array.isArray((item as any).content)) {
-        const role = (item as any).role || 'user';
-        const content = this.convertContentPartsToChat((item as any).content as Array<ResponseContentPart>);
-        messages.push({ role, content });
-        continue;
-      }
-      switch (item.type) {
+      switch (type) {
         case 'message': {
-          const role = item.role || 'user';
-          const content = this.convertContentPartsToChat(item.content);
-          messages.push({ role, content });
+          const role = typeof node.role === 'string' ? node.role : 'user';
+          const blocks = Array.isArray(node.content) ? node.content : [];
+          const texts = flattenTextBlocks(blocks);
+          if (texts.length) { pushText(role, texts.join('\n')); }
           break;
         }
         case 'function_call': {
-          const name = typeof item.name === 'string' ? item.name : 'tool';
-          const callId = typeof item.call_id === 'string' ? item.call_id : `call_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-          const args = this.stringifyMaybeJson(item.arguments);
-          messages.push({
-            role: 'assistant',
-            content: '',
-            tool_calls: [
-              {
-                id: callId,
-                type: 'function',
-                function: { name, arguments: args }
-              }
-            ]
-          });
+          const name = typeof node.name === 'string' ? node.name : 'tool';
+          const callId = typeof node.call_id === 'string' ? node.call_id : `call_${Math.random().toString(36).slice(2, 6)}`;
+          pushToolCall(name, node.arguments, callId);
+          break;
+        }
+        case 'tool_use': {
+          const name = typeof node.name === 'string' ? node.name : 'tool';
+          const callId = typeof node.id === 'string' ? node.id : `call_${Math.random().toString(36).slice(2, 6)}`;
+          pushToolCall(name, coerceToolInput(node.input), callId);
           break;
         }
         case 'function_call_output': {
-          const callId = typeof item.call_id === 'string' ? item.call_id : undefined;
-          let content: unknown = item.output;
-          if (typeof content !== 'string') {
-            try {
-              content = JSON.stringify(content);
-            } catch {
-              content = String(content);
-            }
-          }
-          const message: Record<string, unknown> = {
-            role: 'tool',
-            content,
-          };
-          if (callId) {
-            message.tool_call_id = callId;
-          }
-          messages.push(message);
+          const callId = typeof node.call_id === 'string' ? node.call_id : undefined;
+          const text = typeof node.output === 'string' ? node.output : this.stringifyMaybeJson(node.output);
+          pushText('tool', text);
+          if (callId && messages.length) { (messages[messages.length - 1] as any).tool_call_id = callId; }
+          break;
+        }
+        case 'tool_result': {
+          const callId = typeof node.tool_use_id === 'string' ? node.tool_use_id : undefined;
+          const text = typeof node.content === 'string' ? node.content : this.stringifyMaybeJson(node.content);
+          pushText('tool', text);
+          if (callId && messages.length) { (messages[messages.length - 1] as any).tool_call_id = callId; }
           break;
         }
         case 'reasoning': {
-          // Reasoning blocks are not directly representable in chat completions.
-          // Preserve them as an assistant message with reasoning_metadata to avoid loss.
-          messages.push({
-            role: 'assistant',
-            content: '',
-            reasoning_metadata: {
-              type: 'responses_reasoning',
-              summary: Array.isArray((item as any).summary) ? (item as any).summary : [],
-            }
-          });
+          const summary = Array.isArray(node.summary) ? node.summary : [];
+          messages.push({ role: 'assistant', content: '', reasoning_metadata: { type: 'responses_reasoning', summary } });
           break;
         }
         default: {
-          // Fallback: embed unknown blocks as assistant annotations
-          messages.push({
-            role: item.role || 'assistant',
-            content: this.stringifyMaybeJson(item)
-          });
+          const role = typeof node.role === 'string' ? node.role : 'assistant';
+          pushText(role, this.stringifyMaybeJson(node));
         }
       }
+    };
+
+    if (Array.isArray(input)) {
+      for (const item of input) { visit(item); }
     }
 
     return messages;
   }
-
   private convertContentPartsToChat(content?: Array<ResponseContentPart> | null): string | Array<Record<string, unknown>> {
     if (!content || !Array.isArray(content) || content.length === 0) {
       return '';
@@ -362,20 +420,56 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
 
     const allText = content.every(part => typeof part?.text === 'string');
     if (allText) {
-      return content.map(part => part.text || '').join('\n');
+      const merged = content
+        .map(part => (typeof part?.text === 'string' ? part.text.trim() : ''))
+        .filter(part => part.length > 0);
+      return merged.length ? merged.join('\n') : '';
     }
 
-    return content.map(part => ({ type: 'text', text: part?.text ?? '' }));
+    const mapped = content
+      .map(part => {
+        const text = typeof part?.text === 'string' ? part.text.trim() : '';
+        if (!text) {
+          return null;
+        }
+        return { type: 'text', text };
+      })
+      .filter((part): part is { type: string; text: string } => part !== null);
+
+    if (!mapped.length) {
+      return '';
+    }
+
+    return mapped;
   }
 
-  private convertTools(tools: ResponseToolDefinition[]): ResponseToolDefinition[] {
-    return tools.map((tool) => ({
-      type: tool.type || 'function',
-      name: tool.name,
-      description: tool.description,
-      strict: tool.strict,
-      parameters: tool.parameters
-    }));
+  private convertTools(tools: ResponseToolDefinition[]): Array<Record<string, unknown>> {
+    const out: Array<Record<string, unknown>> = [];
+    for (const tool of tools) {
+      const name = typeof (tool as any)?.name === 'string' ? (tool as any).name.trim()
+        : (tool as any)?.function && typeof (tool as any).function.name === 'string' ? (tool as any).function.name.trim()
+        : '';
+      if (!name) { continue; }
+      let params: unknown = (tool as any)?.parameters ?? (tool as any)?.function?.parameters;
+      if (typeof params === 'string') {
+        try { params = JSON.parse(params); } catch { params = undefined; }
+      }
+      if (!params || typeof params !== 'object') {
+        params = { type: 'object', properties: {}, additionalProperties: true };
+      }
+      const desc = typeof (tool as any)?.description === 'string' ? (tool as any).description
+        : (tool as any)?.function && typeof (tool as any).function.description === 'string' ? (tool as any).function.description
+        : undefined;
+      out.push({
+        type: 'function',
+        function: {
+          name,
+          ...(desc ? { description: desc } : {}),
+          parameters: params as Record<string, unknown>
+        }
+      });
+    }
+    return out;
   }
 
   private buildResponsesPayload(payload: unknown, context?: ResponseRequestContext): Record<string, unknown> | unknown {

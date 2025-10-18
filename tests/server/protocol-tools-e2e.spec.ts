@@ -155,7 +155,7 @@ describe('Protocol adapters tool-calling E2E', () => {
     expect(Array.isArray(body?.choices)).toBe(true);
   });
 
-  it('Anthropic responses endpoint accepts OpenAI tool_calls and returns OpenAI-normalized tool_calls', async () => {
+  it('Anthropic responses endpoint accepts OpenAI tool_calls and returns Responses-shaped JSON', async () => {
     const handler = new ResponsesHandler({ enablePipeline: true, enableValidation: true });
     handler.attachRoutePools(routePools);
     handler.attachRouteMeta(routeMeta);
@@ -192,9 +192,10 @@ describe('Protocol adapters tool-calling E2E', () => {
     const hasToolUse = got.messages.some((m: any) => Array.isArray(m.content) && m.content.some((c: any) => c?.type === 'tool_use' && c?.name === 'search'));
     expect(hasToolUse).toBe(true);
 
-    // Response normalized to OpenAI structure
+    // Response should be OpenAI Responses JSON shape
     expect(res.__out.statusCode).toBe(200);
     const body = res.__out.jsonBody;
-    expect(Array.isArray(body?.choices)).toBe(true);
+    expect(body && body.object).toBe('response');
+    expect(typeof body?.output_text === 'string').toBe(true);
   });
 });

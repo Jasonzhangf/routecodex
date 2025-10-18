@@ -22,10 +22,13 @@ export interface PreflightResult {
 }
 
 const ALLOWED_ROLES = new Set(['system', 'user', 'assistant', 'tool']);
+const GLM_USE_TOOL_ROLE = String(process.env.RCC_GLM_USE_TOOL_ROLE || '').trim() === '1';
+const GLM_KEEP_LAST_ASSISTANT_TOOLCALLS = String(process.env.RCC_GLM_KEEP_LAST_ASSISTANT_TOOLCALLS || '').trim() === '1';
 const DEFAULT_GLM_MAX_CONTEXT_TOKENS = Number(process.env.RCC_GLM_MAX_CONTEXT_TOKENS ?? 200000);
 const DEFAULT_GLM_CONTEXT_SAFETY_RATIO = Number(process.env.RCC_GLM_CONTEXT_SAFETY_RATIO ?? 0.85);
 const DISABLE_GLM_CONTEXT_TRIM = String(process.env.RCC_GLM_DISABLE_TRIM || '').trim() === '1';
 const DISABLE_GLM_EMPTY_USER_FILTER = String(process.env.RCC_GLM_DISABLE_EMPTY_USER_FILTER || '').trim() === '1';
+const GLM_ALLOW_THINKING = String(process.env.RCC_GLM_ALLOW_THINKING || '').trim() === '1';
 
 const estimateTokens = (text: string): number => {
   if (!text) {return 0;}
@@ -127,11 +130,20 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
     msg.content = coerceStringContent(c);
 
     // Preserve name for tool role if provided
-    if (role === 'tool' && typeof m?.name === 'string') {
-      msg.name = m.name;
-    }
-    if (role === 'tool' && typeof m?.tool_call_id === 'string') {
-      msg.tool_call_id = m.tool_call_id;
+    if (role === 'tool') {
+      if (targetGLM && !GLM_USE_TOOL_ROLE) {
+        // Convert unsupported 'tool' role to 'user' for GLM safety
+        msg.role = 'user';
+        // Optionally prefix with hint including tool name/id
+        const prefixParts: string[] = [];
+        if (typeof m?.name === 'string' && m.name.trim()) prefixParts.push(`tool:${m.name.trim()}`);
+        if (typeof m?.tool_call_id === 'string' && m.tool_call_id.trim()) prefixParts.push(`id:${m.tool_call_id.trim()}`);
+        const prefix = prefixParts.length ? `[${prefixParts.join(' ')}] ` : '';
+        msg.content = `${prefix}${msg.content || ''}`.trim();
+      } else {
+        if (typeof m?.name === 'string') { msg.name = m.name; }
+        if (typeof m?.tool_call_id === 'string') { msg.tool_call_id = m.tool_call_id; }
+      }
     }
 
     // If assistant tool_calls present, ensure arguments are string; GLM expects content string anyway.
@@ -153,22 +165,33 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
     return msg;
   });
 
-  // GLM compatibility: remove assistant.tool_calls from historical messages (keep only on the last message if present)
-  // Allow override via RCC_DISABLE_GLM_TOOLCALL_STRIP=1 to preserve history for long multi-tool sessions.
+  // GLM compatibility: remove assistant.tool_calls to avoid 1210/1214
+  // - By default strip from ALL assistant messages
+  // - If RCC_GLM_KEEP_LAST_ASSISTANT_TOOLCALLS=1, keep only on the last assistant message
+  // - Allow override via RCC_DISABLE_GLM_TOOLCALL_STRIP=1 to preserve (not recommended)
   try {
     const disableStrip = process.env.RCC_DISABLE_GLM_TOOLCALL_STRIP === '1';
     if (targetGLM && !disableStrip && Array.isArray(mappedMessages) && mappedMessages.length > 0) {
       const n = mappedMessages.length;
-      for (let i = 0; i < n - 1; i++) {
-        const mm: any = mappedMessages[i];
-        if (mm && mm.role === 'assistant' && Array.isArray(mm.tool_calls)) {
-          delete mm.tool_calls;
+      if (GLM_KEEP_LAST_ASSISTANT_TOOLCALLS) {
+        for (let i = 0; i < n - 1; i++) {
+          const mm: any = mappedMessages[i];
+          if (mm && mm.role === 'assistant' && Array.isArray(mm.tool_calls)) {
+            delete mm.tool_calls;
+          }
+        }
+      } else {
+        for (let i = 0; i < n; i++) {
+          const mm: any = mappedMessages[i];
+          if (mm && mm.role === 'assistant' && Array.isArray(mm.tool_calls)) {
+            delete mm.tool_calls;
+          }
         }
       }
     }
   } catch { /* non-blocking */ }
 
-  const messages = mappedMessages.filter((msg: any, idx: number) => {
+  let messages = mappedMessages.filter((msg: any, idx: number) => {
     if (DISABLE_GLM_EMPTY_USER_FILTER) { return true; }
     const text = typeof msg?.content === 'string' ? msg.content.trim() : '';
     if (msg.role === 'user' && text.length === 0) {
@@ -183,12 +206,42 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
     return true;
   });
 
+  // Drop assistant messages with empty content (after tool_calls stripping) except possibly the last
+  if (targetGLM && messages.length) {
+    messages = messages.filter((msg: any, idx: number) => {
+      const isAssistant = msg?.role === 'assistant';
+      const isEmpty = typeof msg?.content === 'string' ? msg.content.trim().length === 0 : true;
+      const isLast = idx === (messages.length - 1);
+      return !(isAssistant && isEmpty && !isLast);
+    });
+  }
+
   if (!messages.length) {
     issues.push({
       level: 'error',
       code: 'messages.none',
       message: 'No messages remain after sanitization; ensure at least one user message has content.'
     });
+  }
+
+  // Ensure first message is not assistant-only; GLM is stricter and prefers user/system leading
+  try {
+    if (targetGLM && messages.length > 0 && messages[0]?.role === 'assistant') {
+      // Downgrade first assistant to user to satisfy parsers
+      (messages[0] as any).role = 'user';
+      issues.push({ level: 'warn', code: 'messages.first.assistant_to_user', message: 'Coerced first assistant to user for GLM' });
+    }
+  } catch { /* ignore */ }
+
+  // Ensure last message is user for GLM safety; coerce empty to a simple prompt
+  if (targetGLM && messages.length > 0) {
+    const last = messages[messages.length - 1] as any;
+    if (last.role !== 'user') {
+      last.role = 'user';
+    }
+    if (typeof last.content !== 'string' || last.content.trim().length === 0) {
+      last.content = (typeof last.content === 'string' ? last.content : '') || 'Continue.';
+    }
   }
 
   if (targetGLM && messages.length && !DISABLE_GLM_CONTEXT_TRIM) {
@@ -244,6 +297,11 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
     }
   }
 
+  // Compact messages for GLM: keep only role + content strings
+  if (targetGLM) {
+    messages = messages.map((m: any) => ({ role: m.role, content: coerceStringContent(m.content) }));
+  }
+
   out.messages = messages;
 
   // Sampling & limits
@@ -251,8 +309,12 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
   if (typeof src.top_p === 'number') {out.top_p = src.top_p;}
   if (typeof src.max_tokens === 'number') {out.max_tokens = src.max_tokens;}
 
-  // Thinking payload passthrough
-  if (src.thinking && typeof src.thinking === 'object') {out.thinking = src.thinking;}
+  // Thinking payload passthrough (GLM opt-in only)
+  if (src.thinking && typeof src.thinking === 'object') {
+    if (!targetGLM || GLM_ALLOW_THINKING) {
+      out.thinking = src.thinking;
+    }
+  }
 
   // Tools
   if (targetGLM) {
