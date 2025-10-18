@@ -755,6 +755,48 @@ export class ResponsesHandler extends BaseHandler {
           else if (toolSource?.choices?.[0]?.message?.tool_calls) { await emitToolCallsFromOpenAI(toolSource); }
           else { await emitToolCallsFromAnthropic(toolSource); }
         }
+        // Emit required_action for clients that expect submit_tool_outputs flow
+        try {
+          const toolCallsList: Array<{ id: string; name: string; arguments: string }> = [];
+          if (Array.isArray(toolSource?.choices?.[0]?.message?.tool_calls)) {
+            for (const tc of (toolSource as any).choices[0].message.tool_calls) {
+              const id = tc?.id || `call_${Math.random().toString(36).slice(2)}`;
+              const name = tc?.function?.name || 'tool';
+              const args = typeof tc?.function?.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc?.function?.arguments || {});
+              toolCallsList.push({ id, name, arguments: String(args) });
+            }
+          } else if (Array.isArray((toolSource as any)?.output)) {
+            for (const it of (toolSource as any).output) {
+              if (it && typeof it === 'object' && it.type === 'tool_call') {
+                const id = it?.id || `call_${Math.random().toString(36).slice(2)}`;
+                const name = it?.tool_name || it?.name || 'tool';
+                const argsVal = it?.arguments ?? {};
+                const args = typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal);
+                toolCallsList.push({ id, name, arguments: String(args) });
+              }
+            }
+          } else if (Array.isArray((toolSource as any)?.content)) {
+            for (const b of (toolSource as any).content) {
+              if (b && typeof b === 'object' && b.type === 'tool_use') {
+                const id = b?.id || `call_${Math.random().toString(36).slice(2)}`;
+                const name = b?.name || 'tool';
+                const argsVal = b?.input ?? {};
+                const args = typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal);
+                toolCallsList.push({ id, name, arguments: String(args) });
+              }
+            }
+          }
+          if (toolCallsList.length > 0) {
+            await writeEvt('response.required_action', {
+              type: 'response.required_action',
+              response: { ...baseResp, created_at: now(), status: 'in_progress' },
+              required_action: {
+                type: 'submit_tool_outputs',
+                submit_tool_outputs: { tool_calls: toolCallsList }
+              }
+            } as Record<string, unknown>);
+          }
+        } catch { /* ignore */ }
         // Emit tool_result.* for executed tools when available (from server-side tool follow-up)
         try {
           const executed = Array.isArray((response as any)?.__tools) ? (response as any).__tools as Array<{ id: string; content: string; error?: string }> : [];
@@ -784,22 +826,23 @@ export class ResponsesHandler extends BaseHandler {
       } catch { /* ignore */ }
       // Assistant message item lifecycle + deltas
       const msgId = `msg_${requestId}`;
-      await writeEvt('response.output_item.added', { type: 'response.output_item.added', output_index: 0, item: { id: msgId, type: 'message', status: 'in_progress', role: 'assistant' } });
-      await writeEvt('response.content_part.added', { type: 'response.content_part.added', item_id: msgId, output_index: 0, content_index: 0, part: { type: 'output_text', text: '' } });
-      for (const w of words) {
-        await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', item_id: msgId, output_index: 0, content_index: 0, delta: w + ' ', logprobs: [] });
-        await new Promise(r => setTimeout(r, 30));
+      const hadToolFirstTurn = (initialResp?.choices?.[0]?.message?.tool_calls?.length || 0) > 0
+        || (Array.isArray(initialResp?.output) && initialResp.output.some((x: any) => x?.type === 'tool_call'))
+        || (Array.isArray(initialResp?.content) && initialResp.content.some((x: any) => x?.type === 'tool_use'));
+      if (words.length > 0 || !hadToolFirstTurn) {
+        await writeEvt('response.output_item.added', { type: 'response.output_item.added', output_index: 0, item: { id: msgId, type: 'message', status: 'in_progress', role: 'assistant' } });
+        await writeEvt('response.content_part.added', { type: 'response.content_part.added', item_id: msgId, output_index: 0, content_index: 0, part: { type: 'output_text', text: '' } });
+        for (const w of words) {
+          await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', item_id: msgId, output_index: 0, content_index: 0, delta: w + ' ', logprobs: [] });
+          await new Promise(r => setTimeout(r, 30));
+        }
+        try { await writeEvt('response.output_text.done', { type: 'response.output_text.done', response: baseResp, item_id: msgId, output_index: 0, content_index: 0, text: (textOut || ''), logprobs: [] }); } catch { /* ignore */ }
+        try {
+          const item = { id: msgId, type: 'message', status: 'completed', content: [ { type: 'output_text', annotations: [], logprobs: [], text: (textOut || '') } ], role: 'assistant' };
+          await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: 0, item });
+        } catch { /* ignore */ }
+        try { await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: 0, item: { id: msgId, type: 'message', status: 'completed' } }); } catch { /* ignore */ }
       }
-
-      // response.output_text.done
-      try { await writeEvt('response.output_text.done', { type: 'response.output_text.done', response: baseResp, item_id: msgId, output_index: 0, content_index: 0, text: (textOut || ''), logprobs: [] }); } catch { /* ignore */ }
-
-      // response.output_item.done for message item to align with upstream
-      try {
-        const item = { id: msgId, type: 'message', status: 'completed', content: [ { type: 'output_text', annotations: [], logprobs: [], text: (textOut || '') } ], role: 'assistant' };
-        await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: 0, item });
-      } catch { /* ignore */ }
-      try { await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: 0, item: { id: msgId, type: 'message', status: 'completed' } }); } catch { /* ignore */ }
 
       // response.completed (attach total output_text when available)
       // Map usage from final turn if available
