@@ -286,6 +286,20 @@ export class ResponsesHandler extends BaseHandler {
    */
   private async streamResponsesSSE(response: any, requestId: string, res: Response, model?: string): Promise<void> {
     try {
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      const home = process.env.HOME || process.env.USERPROFILE || '';
+      const baseDir = path.join(home || '', '.routecodex', 'codex-samples');
+      const subDir = path.join(baseDir, 'anth-replay');
+      const sseFile = path.join(subDir, `sse-events-${requestId}.log`);
+      const ensureDirs = async () => { try { await fs.mkdir(subDir, { recursive: true }); } catch { /* ignore */ } };
+      const capture = async (event: string, data: unknown) => {
+        try {
+          await ensureDirs();
+          const line = JSON.stringify({ ts: Date.now(), requestId, event, data }) + '\n';
+          await fs.appendFile(sseFile, line, 'utf-8');
+        } catch { /* ignore */ }
+      };
       // Headers
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -312,37 +326,118 @@ export class ResponsesHandler extends BaseHandler {
       const textOut = extractText(response);
       const words = (textOut || '').split(/\s+/g).filter(Boolean);
 
+      const baseResp = { id: `resp_${requestId}`, model: model || 'unknown' } as Record<string, unknown>;
+      const now = () => Math.floor(Date.now() / 1000);
+
       // response.created
       try {
-        const createdEvt = { type: 'response.created', response: { id: `resp_${requestId}`, model: model || 'unknown' } };
+        const createdEvt = { type: 'response.created', response: { ...baseResp, created: now(), status: 'in_progress' } };
         res.write(`event: response.created\n`);
         res.write(`data: ${JSON.stringify(createdEvt)}\n\n`);
+        void capture('response.created', createdEvt);
       } catch { /* ignore */ }
 
       // response.in_progress
       try {
-        const inprog = { type: 'response.in_progress', response: { id: `resp_${requestId}`, model: model || 'unknown' } };
+        const inprog = { type: 'response.in_progress', response: { ...baseResp, created: now(), status: 'in_progress' } };
         res.write(`event: response.in_progress\n`);
         res.write(`data: ${JSON.stringify(inprog)}\n\n`);
+        void capture('response.in_progress', inprog);
+      } catch { /* ignore */ }
+
+      // Emit tool_call events when present in pipeline response
+      try {
+        const emitToolCallsFromOpenAI = (resp: any) => {
+          const toolCalls = resp?.choices?.[0]?.message?.tool_calls;
+          if (!Array.isArray(toolCalls)) return;
+          for (const tc of toolCalls) {
+            const id = tc?.id || `call_${Math.random().toString(36).slice(2)}`;
+            const name = tc?.function?.name || 'tool';
+            const args = typeof tc?.function?.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc?.function?.arguments || {});
+
+            const created = { type: 'response.tool_call.created', tool_call: { id, name }, response: baseResp };
+            res.write(`event: response.tool_call.created\n`);
+            res.write(`data: ${JSON.stringify(created)}\n\n`);
+            void capture('response.tool_call.created', created);
+
+            // Chunk arguments into smaller deltas
+            const chunks: string[] = [];
+            const s = String(args);
+            const step = 128;
+            for (let i = 0; i < s.length; i += step) chunks.push(s.slice(i, i + step));
+            for (const part of chunks) {
+              const delta = { type: 'response.tool_call.delta', tool_call: { id }, delta: part, response: baseResp };
+              res.write(`event: response.tool_call.delta\n`);
+              res.write(`data: ${JSON.stringify(delta)}\n\n`);
+              void capture('response.tool_call.delta', delta);
+            }
+            const completed = { type: 'response.tool_call.completed', tool_call: { id }, response: baseResp };
+            res.write(`event: response.tool_call.completed\n`);
+            res.write(`data: ${JSON.stringify(completed)}\n\n`);
+            void capture('response.tool_call.completed', completed);
+          }
+        };
+
+        const emitToolCallsFromAnthropic = (resp: any) => {
+          const content = Array.isArray(resp?.content) ? resp.content : [];
+          for (const b of content) {
+            if (!(b && typeof b === 'object')) continue;
+            if (b.type === 'tool_use') {
+              const id = b.id || `call_${Math.random().toString(36).slice(2)}`;
+              const name = b.name || 'tool';
+              const argsVal = b.input ?? {};
+              const args = typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal);
+              const created = { type: 'response.tool_call.created', tool_call: { id, name }, response: baseResp };
+              res.write(`event: response.tool_call.created\n`);
+              res.write(`data: ${JSON.stringify(created)}\n\n`);
+              void capture('response.tool_call.created', created);
+
+              // chunk input
+              const s = String(args);
+              const step = 128; const parts: string[] = [];
+              for (let i = 0; i < s.length; i += step) parts.push(s.slice(i, i + step));
+              for (const part of parts) {
+                const delta = { type: 'response.tool_call.delta', tool_call: { id }, delta: part, response: baseResp };
+                res.write(`event: response.tool_call.delta\n`);
+                res.write(`data: ${JSON.stringify(delta)}\n\n`);
+                void capture('response.tool_call.delta', delta);
+              }
+              const completed = { type: 'response.tool_call.completed', tool_call: { id }, response: baseResp };
+              res.write(`event: response.tool_call.completed\n`);
+              res.write(`data: ${JSON.stringify(completed)}\n\n`);
+              void capture('response.tool_call.completed', completed);
+            }
+          }
+        };
+
+        // Prefer OpenAI-shaped tool_calls; else infer from Anthropic blocks
+        if (response && typeof response === 'object') {
+          if (response?.choices?.[0]?.message?.tool_calls) emitToolCallsFromOpenAI(response);
+          else emitToolCallsFromAnthropic(response);
+        }
       } catch { /* ignore */ }
       for (const w of words) {
         const delta = { type: 'response.output_text.delta', delta: w + ' ', response: { id: `resp_${requestId}`, model: model || 'unknown' } };
         res.write(`event: response.output_text.delta\n`);
         res.write(`data: ${JSON.stringify(delta)}\n\n`);
+        void capture('response.output_text.delta', delta);
         await new Promise(r => setTimeout(r, 30));
       }
 
       // response.output_text.done
       try {
-        const doneEvt = { type: 'response.output_text.done', response: { id: `resp_${requestId}`, model: model || 'unknown' } };
+        const doneEvt = { type: 'response.output_text.done', response: baseResp };
         res.write(`event: response.output_text.done\n`);
         res.write(`data: ${JSON.stringify(doneEvt)}\n\n`);
+        void capture('response.output_text.done', doneEvt);
       } catch { /* ignore */ }
 
       // response.completed (attach total output_text when available)
-      const completed = { type: 'response.completed', response: { id: `resp_${requestId}`, model: model || 'unknown', output_text: textOut || '' } };
+      const usage = response?.usage ? response.usage : undefined;
+      const completed = { type: 'response.completed', response: { ...baseResp, created: now(), status: 'completed', output_text: textOut || '', ...(usage ? { usage } : {}) } };
       res.write(`event: response.completed\n`);
       res.write(`data: ${JSON.stringify(completed)}\n\n`);
+      void capture('response.completed', completed);
       res.end();
     } catch (err) {
       try {
