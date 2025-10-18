@@ -557,7 +557,7 @@ export class ResponsesHandler extends BaseHandler {
               if (typeof id === 'string') audit.toolCreated.add(id);
               break;
             }
-            case 'response.tool_call.completed': {
+            case 'response.function_call_arguments.done': {
               const id = (payload as any)?.tool_call?.id;
               if (typeof id === 'string') audit.toolCompleted.add(id);
               break;
@@ -604,6 +604,12 @@ export class ResponsesHandler extends BaseHandler {
 
       const baseResp = { id: `resp_${requestId}`, model: model || 'unknown' } as Record<string, unknown>;
       const now = () => Math.floor(Date.now() / 1000);
+      const textStrictAzure = (() => {
+        try {
+          const v = String(process.env.ROUTECODEX_RESP_TEXT_AZURE || '').trim().toLowerCase();
+          return v === '1' || v === 'true';
+        } catch { return false; }
+      })();
 
       // response.created (echo tool definitions to client via metadata)
       try {
@@ -644,12 +650,12 @@ export class ResponsesHandler extends BaseHandler {
       try {
         let nextOutputIndex = 1; // 0 is reserved for assistant message item below
 
-        const addToolCallItem = async (id: string) => {
+        const addFunctionCallItem = async (id: string, name?: string) => {
           const output_index = nextOutputIndex++;
           await writeEvt('response.output_item.added', {
             type: 'response.output_item.added',
             output_index,
-            item: { id, type: 'tool_call' }
+            item: { id, type: 'function_call', ...(name ? { name } : {}) }
           } as Record<string, unknown>);
           await writeEvt('response.content_part.added', {
             type: 'response.content_part.added',
@@ -671,21 +677,18 @@ export class ResponsesHandler extends BaseHandler {
               const name = it.tool_name || it.name || 'tool';
               const argsVal = it.arguments ?? {};
               const args = typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal);
-              await addToolCallItem(id);
-              const created = { type: 'response.tool_call.created', tool_call: { id, name }, response: baseResp } as Record<string, unknown>;
-              await writeEvt('response.tool_call.created', created);
+              const outIndex = await addFunctionCallItem(id, name);
               // chunk arguments
               const s = String(args);
               const step = 128; const parts: string[] = [];
               for (let i = 0; i < s.length; i += step) parts.push(s.slice(i, i + step));
               for (const part of parts) {
-                const delta = { type: 'response.tool_call.delta', tool_call: { id }, delta: { arguments: part, arguments_delta: part }, response: baseResp } as Record<string, unknown>;
-                await writeEvt('response.tool_call.delta', delta);
-                await writeEvt('response.content_part.delta', { type: 'response.content_part.delta', item_id: id, output_index: nextOutputIndex - 1, content_index: 0, delta: { type: 'input_json_delta', partial_json: part } } as Record<string, unknown>);
+                const delta = { type: 'response.function_call_arguments.delta', id, delta: part } as Record<string, unknown>;
+                await writeEvt('response.function_call_arguments.delta', delta);
               }
-              const completed = { type: 'response.tool_call.completed', tool_call: { id }, response: baseResp } as Record<string, unknown>;
-              await writeEvt('response.tool_call.completed', completed);
-              await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: nextOutputIndex - 1, item: { id, type: 'tool_call' } } as Record<string, unknown>);
+              const completed = { type: 'response.function_call_arguments.done', id } as Record<string, unknown>;
+              await writeEvt('response.function_call_arguments.done', completed);
+              await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: outIndex, item: { id, type: 'function_call' } } as Record<string, unknown>);
             }
           }
         };
@@ -696,10 +699,8 @@ export class ResponsesHandler extends BaseHandler {
             const id = tc?.id || `call_${Math.random().toString(36).slice(2)}`;
             const name = tc?.function?.name || 'tool';
             const args = typeof tc?.function?.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc?.function?.arguments || {});
-            await addToolCallItem(id);
+            const outIndex = await addFunctionCallItem(id, name);
 
-            const created = { type: 'response.tool_call.created', tool_call: { id, name }, response: baseResp } as Record<string, unknown>;
-            await writeEvt('response.tool_call.created', created);
 
             // Chunk arguments into smaller deltas
             const chunks: string[] = [];
@@ -707,13 +708,12 @@ export class ResponsesHandler extends BaseHandler {
             const step = 128;
             for (let i = 0; i < s.length; i += step) chunks.push(s.slice(i, i + step));
             for (const part of chunks) {
-              const delta = { type: 'response.tool_call.delta', tool_call: { id }, delta: { arguments: part, arguments_delta: part }, response: baseResp } as Record<string, unknown>;
-              await writeEvt('response.tool_call.delta', delta);
-              await writeEvt('response.content_part.delta', { type: 'response.content_part.delta', item_id: id, output_index: nextOutputIndex - 1, content_index: 0, delta: { type: 'input_json_delta', partial_json: part } } as Record<string, unknown>);
+              const delta = { type: 'response.function_call_arguments.delta', id, delta: part } as Record<string, unknown>;
+              await writeEvt('response.function_call_arguments.delta', delta);
             }
-            const completed = { type: 'response.tool_call.completed', tool_call: { id }, response: baseResp } as Record<string, unknown>;
-            await writeEvt('response.tool_call.completed', completed);
-            await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: nextOutputIndex - 1, item: { id, type: 'tool_call' } } as Record<string, unknown>);
+            const completed = { type: 'response.function_call_arguments.done', id } as Record<string, unknown>;
+            await writeEvt('response.function_call_arguments.done', completed);
+            await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: outIndex, item: { id, type: 'function_call' } } as Record<string, unknown>);
           }
         };
 
@@ -726,22 +726,19 @@ export class ResponsesHandler extends BaseHandler {
               const name = b.name || 'tool';
               const argsVal = b.input ?? {};
               const args = typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal);
-              await addToolCallItem(id);
-              const created = { type: 'response.tool_call.created', tool_call: { id, name }, response: baseResp } as Record<string, unknown>;
-              await writeEvt('response.tool_call.created', created);
+              const outIndex = await addFunctionCallItem(id, name);
 
               // chunk input
               const s = String(args);
               const step = 128; const parts: string[] = [];
               for (let i = 0; i < s.length; i += step) parts.push(s.slice(i, i + step));
               for (const part of parts) {
-                const delta = { type: 'response.tool_call.delta', tool_call: { id }, delta: { arguments: part, arguments_delta: part }, response: baseResp } as Record<string, unknown>;
-                await writeEvt('response.tool_call.delta', delta);
-                await writeEvt('response.content_part.delta', { type: 'response.content_part.delta', item_id: id, output_index: nextOutputIndex - 1, content_index: 0, delta: { type: 'input_json_delta', partial_json: part } } as Record<string, unknown>);
+                const delta = { type: 'response.function_call_arguments.delta', id, delta: part } as Record<string, unknown>;
+                await writeEvt('response.function_call_arguments.delta', delta);
               }
-              const completed = { type: 'response.tool_call.completed', tool_call: { id }, response: baseResp } as Record<string, unknown>;
-              await writeEvt('response.tool_call.completed', completed);
-              await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: nextOutputIndex - 1, item: { id, type: 'tool_call' } } as Record<string, unknown>);
+              const completed = { type: 'response.function_call_arguments.done', id } as Record<string, unknown>;
+              await writeEvt('response.function_call_arguments.done', completed);
+              await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: outIndex, item: { id, type: 'function_call' } } as Record<string, unknown>);
             }
           }
         };
@@ -837,6 +834,10 @@ export class ResponsesHandler extends BaseHandler {
           await new Promise(r => setTimeout(r, 30));
         }
         try { await writeEvt('response.output_text.done', { type: 'response.output_text.done', response: baseResp, item_id: msgId, output_index: 0, content_index: 0, text: (textOut || ''), logprobs: [] }); } catch { /* ignore */ }
+      if (textStrictAzure) {
+        try { await writeEvt('response.content_part.done', { type: "response.content_part.done", item_id: msgId, output_index: 0, content_index: 0 } as Record<string, unknown>); } catch { /* ignore */ }
+      }
+
         try {
           const item = { id: msgId, type: 'message', status: 'completed', content: [ { type: 'output_text', annotations: [], logprobs: [], text: (textOut || '') } ], role: 'assistant' };
           await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: 0, item });
