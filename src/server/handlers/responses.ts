@@ -858,16 +858,12 @@ export class ResponsesHandler extends BaseHandler {
         const total = (typeof u.total_tokens === 'number') ? u.total_tokens : (input + output);
         return { input_tokens: input, output_tokens: output, total_tokens: total } as Record<string, number>;
       };
-      const usage = mapUsage(srcUsage) as Record<string, number> | undefined;
-      const toolTurnOnly = (((initialResp?.choices?.[0]?.message?.tool_calls?.length) || 0) > 0 && (!textOut || textOut.length === 0))
-        || (Array.isArray(initialResp?.output) && initialResp.output.some((x: any) => x?.type === 'tool_call') && (!textOut || textOut.length === 0))
-        || (Array.isArray(initialResp?.content) && initialResp.content.some((x: any) => x?.type === 'tool_use') && (!textOut || textOut.length === 0));
-      if (!toolTurnOnly) {
-        const completed = { type: 'response.completed', response: { ...baseResp, created_at: now(), status: 'completed', output_text: textOut || '' }, ...(usage ? { usage } : {}) } as Record<string, unknown>;
-        if (typeof reqInstructions === 'string' && reqInstructions.trim()) { (completed as any).instructions = reqInstructions; }
-        await writeEvt('response.completed', completed);
-        try { await writeEvt('response.done', { type: 'response.done' }); } catch { /* ignore */ }
-      }
+      let usage = mapUsage(srcUsage) as Record<string, number> | undefined;
+      if (!usage) { usage = { input_tokens: 0, output_tokens: 0, total_tokens: 0 } as any; }
+      const completed = { type: 'response.completed', response: { ...baseResp, created_at: now(), status: 'completed', output_text: textOut || '' }, ...(usage ? { usage } : {}) } as Record<string, unknown>;
+      if (typeof reqInstructions === 'string' && reqInstructions.trim()) { (completed as any).instructions = reqInstructions; }
+      await writeEvt('response.completed', completed);
+      try { await writeEvt('response.done', { type: 'response.done' }); } catch { /* ignore */ }
       try {
         // Write audit summary
         const missing: string[] = []; (audit.toolCreated as Set<string>).forEach((id: string) => { if (!(audit.toolCompleted as Set<string>).has(id)) missing.push(id); });
