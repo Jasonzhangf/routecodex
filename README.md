@@ -77,6 +77,32 @@ Notes
 - Compatibility converts `<invoke …>`, `<function …>`, `<function_call>{…}</function_call>` and `[tool_call:name]{…}` into OpenAI `tool_calls`.
 - Private reasoning blocks `<think>…</think>` are removed from the visible content to keep OpenAI/Codex semantics intact.
 
+## 🧭 Responses Module (Design Overview)
+
+We decouple “conversion” from “streaming” and drive both via JSON configuration.
+
+- Conversion (Requests/Responses)
+  - Requests: Convert OpenAI Responses input (nested `input[]` with `message` + `content[{type,text}]`) into Chat messages. Expansion is recursive and controlled by JSON mapping (no hard-coding).
+  - Responses: Convert provider Chat payloads back to OpenAI Responses JSON (text, tools, usage). llmswitch preferred; fallback mapper based on JSON.
+
+- Streaming (SSE)
+  - SSE only reads normalized Responses objects and emits `response.*` events. Options for message lifecycle, required_action, and heartbeat are configurable.
+
+- Where to configure
+  - Module switches: `config/modules.json` → `responses` section (useLlmswitch, fallback, provider non-stream, SSE lifecycle/required_action/heartbeat)
+  - Field mappings: `config/responses-conversion.json` (wrapper/type/text/blocks keys; allowed content types; text extraction paths; tool args paths)
+  - Env overrides: `ROUTECODEX_RESP_*` variables
+
+- Files
+  - `src/server/config/responses-config.ts` — load module config + mappings
+  - `src/server/conversion/responses-converter.ts` — conversions (Responses↔Chat)
+  - `src/server/handlers/responses.ts` — handler: calls converter, then streams SSE based on config
+
+- Debug artifacts
+  - `~/.routecodex/codex-samples/anth-replay/raw-request_req_<RID>.json`
+  - `~/.routecodex/codex-samples/anth-replay/pre-pipeline_req_<RID>.json`
+  - `~/.routecodex/codex-samples/anth-replay/sse-events-req_<RID>.log`
+
 ## 🏗️ 4-Layer Architecture
 
 RouteCodex implements a sophisticated 4-layer pipeline architecture that provides clean separation of concerns and flexible protocol handling:

@@ -1,0 +1,36 @@
+{
+  "request": {
+    "instructionsPaths": ["instructions"],
+    "inputBlocks": {
+      "wrapperType": "message",
+      "typeKey": "type",
+      "roleKey": "role",
+      "blocksKey": "content",
+      "textKey": "text",
+      "allowedContentTypes": ["input_text", "text", "output_text"],
+      "ignoreRoles": ["system"],
+      "dedupe": true,
+      "dedupeDelimiter": "\n\n"
+    },
+    "fallback": {
+      "useRawMessages": true,
+      "rawMessagesPath": "messages",
+      "pickLastUser": true,
+      "dedupe": true,
+      "dedupeDelimiter": "\n\n"
+    },
+    "systemContentPaths": ["instructions"],
+    "systemJoiner": "\n\n"
+  },
+  "response": {
+    "textPaths": ["output_text", "choices[0].message.content"],
+    "textArrayTextKey": "text",
+    "contentBlocksKey": "content",
+    "messageWrapperType": "message"
+  },
+  "tools": {
+    "toolCallTypes": ["tool_call", "function_call"],
+    "functionArgsPaths": ["arguments", "tool_call.function.arguments"],
+    "emitRequiredAction": true
+  }
+}

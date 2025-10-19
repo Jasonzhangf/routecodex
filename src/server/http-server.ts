@@ -92,7 +92,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
     const moduleInfo: ModuleInfo = {
       id: 'http-server',
       name: 'HttpServer',
-      version: '0.0.1',
+      version: '0.50.1',
       description: 'Express.js HTTP server for RouteCodex',
       type: 'server',
     };

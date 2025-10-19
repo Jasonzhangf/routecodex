@@ -4,6 +4,8 @@
  */
 
 import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 /**
  * Module configuration interface
@@ -37,7 +39,8 @@ export class ModuleConfigReader {
    */
   async load(): Promise<ModulesConfig> {
     try {
-      const configContent = await fs.readFile(this.configPath, 'utf-8');
+      const resolved = await this.resolvePath(this.configPath);
+      const configContent = await fs.readFile(resolved, 'utf-8');
       this.config = JSON.parse(configContent);
       return this.config;
     } catch (error) {
@@ -52,6 +55,42 @@ export class ModuleConfigReader {
       // Return default configuration in non-strict/dev mode
       this.config = this.getDefaultConfig();
       return this.config;
+    }
+  }
+
+  private async resolvePath(p: string): Promise<string> {
+    try {
+      const tryCandidates: string[] = [];
+      const raw = String(p || '').trim();
+      // 1) Home expansion
+      if (raw.startsWith('~')) {
+        const home = process.env.HOME || process.env.USERPROFILE || '';
+        tryCandidates.push(path.join(home, raw.slice(1)));
+      }
+      // 2) Absolute path
+      if (path.isAbsolute(raw)) {
+        tryCandidates.push(raw);
+      }
+      // 3) CWD relative
+      if (!path.isAbsolute(raw)) {
+        tryCandidates.push(path.resolve(process.cwd(), raw));
+      }
+      // 4) Package-root relative (works for global install)
+      const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+      const pkgRoot = path.resolve(moduleDir, '../../');
+      tryCandidates.push(path.join(pkgRoot, raw.replace(/^\.\//, '')));
+      tryCandidates.push(path.join(pkgRoot, 'config', 'modules.json')); // default packaged file
+
+      for (const c of tryCandidates) {
+        try {
+          const stat = await fs.stat(c);
+          if (stat.isFile()) return c;
+        } catch { /* next */ }
+      }
+      // Fallback to original (will error upstream)
+      return raw || './config/modules.json';
+    } catch {
+      return p;
     }
   }
 

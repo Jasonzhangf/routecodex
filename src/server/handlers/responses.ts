@@ -1,6 +1,6 @@
 /**
- * Responses Handler Implementation
- * Handles Anthropic-compatible responses requests
+ * OpenAI Responses Handler
+ * Handles OpenAI /v1/responses endpoint (stream + json)
  */
 
 import express, { type Request, type Response } from 'express';
@@ -9,13 +9,15 @@ import { RouteCodexError } from '../types.js';
 import { RequestValidator } from '../utils/request-validator.js';
 import { ResponseNormalizer } from '../utils/response-normalizer.js';
 import { StreamingManager } from '../utils/streaming-manager.js';
-import { ProtocolDetector } from '../protocol/protocol-detector.js';
-import { AnthropicAdapter } from '../protocol/anthropic-adapter.js';
+import { ResponsesConfigUtil } from '../config/responses-config.js';
+import { ResponsesConverter } from '../conversion/responses-converter.js';
+import { ResponsesMapper } from '../conversion/responses-mapper.js';
+// Protocol conversion is handled downstream by llmswitch (Responses→Chat) for providers.
 import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
 
 /**
  * Responses Handler
- * Handles /v1/messages endpoint (Anthropic responses)
+ * Handles /v1/responses endpoint (OpenAI Responses)
  */
 export class ResponsesHandler extends BaseHandler {
   private requestValidator: RequestValidator;
@@ -33,8 +35,22 @@ export class ResponsesHandler extends BaseHandler {
    * Handle responses request
    */
   async handleRequest(req: Request, res: Response): Promise<void> {
+    const moduleConfig = await ResponsesConfigUtil.load();
     const startTime = Date.now();
     const requestId = this.generateRequestId();
+    // Capture original request body and headers for later diff/debug
+    try {
+      const rawBody = JSON.parse(JSON.stringify((req as any).body || {}));
+      (req as any).__rawBody = rawBody;
+      const fs = await import('fs/promises');
+      const os = await import('os');
+      const path = await import('path');
+      const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'anth-replay');
+      await (fs as any).mkdir(dir, { recursive: true });
+      const rawFile = path.join(dir, `raw-request_${requestId}.json`);
+      const payload = { requestId, method: req.method, url: req.originalUrl || req.url, headers: this.sanitizeHeaders(req.headers), body: rawBody };
+      await (fs as any).writeFile(rawFile, JSON.stringify(payload, null, 2), 'utf-8');
+    } catch { /* ignore capture failures */ }
 
     this.logger.logModule(this.constructor.name, 'request_start', {
       requestId,
@@ -47,60 +63,72 @@ export class ResponsesHandler extends BaseHandler {
     });
 
     try {
-      // Forced adapter preflight: convert OpenAI-shaped payloads to Anthropic Responses format
-      try {
-        const looksOpenAI = Array.isArray(req.body?.messages) && (req.body.messages as any[]).some((m: any) => typeof m?.content === 'string');
-        const detector = new ProtocolDetector();
-        const det = detector.detectFromRequest(req);
-        if (looksOpenAI || det.protocol === 'openai') {
-          const adapter = new AnthropicAdapter();
-          req.body = adapter.convertFromProtocol(req.body, 'openai') as any;
-          try { res.setHeader('x-rc-adapter', 'openai->anthropic'); } catch { /* ignore */ }
-        }
-      } catch { /* non-blocking */ }
-
-      // Normalize pure Responses-shaped payload (no messages[] but has input/instructions)
+      // Enforce Responses-shaped input: convert Chat/Anthropic to Responses fields and drop foreign fields
       try {
         const b: any = req.body || {};
-        const hasMessages = Array.isArray(b.messages);
-        const hasResponsesShape = !hasMessages && (typeof b.input !== 'undefined' || typeof b.instructions !== 'undefined');
-        if (hasResponsesShape) {
-          const input = b.input;
-          const contentBlocks = Array.isArray(input)
-            ? input
-            : (typeof input === 'string' && input.trim().length > 0
-                ? [{ type: 'text', text: String(input) }]
-                : []);
-          const sys = b.instructions;
-          const messages = [] as any[];
-          if (typeof sys === 'string' && sys.trim()) {
-            messages.push({ role: 'system', content: sys });
+        const out: any = {};
+        // model / stream passthrough
+        if (typeof b.model === 'string') out.model = b.model; else out.model = 'unknown';
+        // Prefer explicit boolean; otherwise infer from Accept header
+        const inferred = ResponsesConverter.inferStreamingFlag(b, req);
+        if (typeof inferred === 'boolean') out.stream = inferred;
+        if (typeof b.tools !== 'undefined') out.tools = b.tools;
+        if (typeof b.tool_choice !== 'undefined') out.tool_choice = b.tool_choice;
+        if (typeof b.parallel_tool_calls !== 'undefined') out.parallel_tool_calls = b.parallel_tool_calls;
+
+        // Prefer existing Responses fields
+        if (typeof b.instructions === 'string') out.instructions = b.instructions;
+        if (typeof b.input !== 'undefined') out.input = b.input;
+
+        // If Chat messages present, derive instructions/input
+        if (Array.isArray(b.messages)) {
+          let sys: string[] = [];
+          let userTexts: string[] = [];
+          for (const m of b.messages) {
+            if (!m || typeof m !== 'object') continue;
+            const role = (m as any).role;
+            const content = (m as any).content;
+            if (role === 'system' && typeof content === 'string' && content.trim()) sys.push(content.trim());
+            if (role === 'user' && typeof content === 'string' && content.trim()) userTexts.push(content.trim());
+            if (role === 'user' && Array.isArray(content)) {
+              for (const part of content) {
+                if (part && typeof part === 'object' && typeof (part as any).text === 'string' && (part as any).text.trim()) {
+                  userTexts.push((part as any).text.trim());
+                }
+              }
+            }
           }
-          messages.push({ role: 'user', content: contentBlocks.length ? contentBlocks : [{ type: 'text', text: '' }] });
-          req.body = { ...b, messages } as any;
-          try { res.setHeader('x-rc-adapter', 'responses->messages'); } catch { /* ignore */ }
+          if (sys.length && !out.instructions) out.instructions = sys.join('\n\n');
+          if (userTexts.length && typeof out.input === 'undefined') out.input = userTexts.join('\n');
         }
+
+        // If still no input but Anthropic content exists, flatten to input
+        if (typeof out.input === 'undefined' && Array.isArray(b.content)) {
+          const texts: string[] = [];
+          for (const c of b.content) {
+            if (c && typeof c === 'object' && (c.type === 'text' || c.type === 'output_text') && typeof c.text === 'string' && c.text.trim()) {
+              texts.push(c.text.trim());
+            }
+          }
+          if (texts.length) out.input = texts.join('\n');
+        }
+
+        // Finalize: drop foreign fields
+        req.body = out;
+        try { res.setHeader('x-rc-adapter', 'normalized:chat|anthropic->responses'); } catch { /* ignore */ }
       } catch { /* non-blocking */ }
 
-      // Validate request (relaxed fallback for extended Responses content types)
-      const validation = this.requestValidator.validateAnthropicResponse(req.body);
-      if (!validation.isValid) {
-        const errors = validation.errors || [];
-        const allowed = [
-          /invalid role:\s*system/i,
-          /invalid type:\s*message/i,
-          /invalid type:\s*reasoning/i,
-          /invalid type:\s*function_call/i,
-          /invalid type:\s*function_call_output/i,
-        ];
-        const lenient = errors.length > 0 && errors.every(e => allowed.some(p => p.test(String(e))));
-        if (!lenient) {
-          throw new RouteCodexError(
-            `Request validation failed: ${validation.errors.join(', ')}`,
-            'validation_error',
-            400
-          );
+      // Minimal validation for Responses-shaped request
+      try {
+        const b: any = req.body || {};
+        if (!b.model || typeof b.model !== 'string') {
+          throw new RouteCodexError('model field is required and must be a string', 'validation_error', 400);
         }
+        if (typeof b.input === 'undefined' && typeof b.instructions === 'undefined') {
+          throw new RouteCodexError('input or instructions is required for /v1/responses', 'validation_error', 400);
+        }
+      } catch (e) {
+        throw e;
       }
 
       // Process request through pipeline
@@ -164,6 +192,7 @@ export class ResponsesHandler extends BaseHandler {
     const providerId = meta?.providerId ?? 'unknown';
     const modelId = meta?.modelId ?? 'unknown';
 
+    const respConfig = await ResponsesConfigUtil.load();
     let normalizedData: any = { ...(req.body as any || {}), ...(modelId ? { model: modelId } : {}) };
 
     // Hard normalize OpenAI chat payload to GLM-safe format: ensure messages[].content is string
@@ -229,66 +258,17 @@ export class ResponsesHandler extends BaseHandler {
 
     // Always synthesize a clean Chat request from Responses payload to tolerate arbitrary client shapes
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { ResponsesToChatLLMSwitch } = require('../../modules/pipeline/modules/llmswitch/llmswitch-response-chat.js');
-      const logger = new PipelineDebugLogger(null, { enableConsoleLogging: false, enableDebugCenter: false });
-      const deps = { errorHandlingCenter: {}, debugCenter: {}, logger };
-      const conv = new ResponsesToChatLLMSwitch({ type: 'llmswitch-response-chat', config: {} }, deps);
-      if (typeof conv.initialize === 'function') { await conv.initialize(); }
-      const rebuilt = await conv.transformRequest({ ...(req.body as any) });
-      if (rebuilt && typeof rebuilt === 'object') {
-        const keep: any = {};
-        if (typeof (req.body as any)?.tools !== 'undefined') keep.tools = (req.body as any).tools;
-        if (typeof (req.body as any)?.tool_choice !== 'undefined') keep.tool_choice = (req.body as any).tool_choice;
-        if (typeof (req.body as any)?.parallel_tool_calls !== 'undefined') keep.parallel_tool_calls = (req.body as any).parallel_tool_calls;
-        normalizedData = { ...(rebuilt as any), ...(modelId ? { model: modelId } : {}), ...keep };
-      }
-    } catch { /* ignore */ }
+      // Strictly use mapping (no llmswitch, no fallback)
+      const rebuilt = await ResponsesMapper.toChatRequestFromMapping({ ...(req.body as any) }, req as any, modelId);
+      normalizedData = { ...(rebuilt as any) };
+    } catch (err) {
+      const e = err as any;
+      const rc = new RouteCodexError(e?.message || 'Invalid request', 'validation_error', typeof e?.status === 'number' ? e.status : 400);
+      throw rc;
+    }
 
-    // Last-resort normalizer: if仍然存在嵌套Responses历史或消息为空，直接从原始req.body.messages提取纯文本user消息
-    try {
-      const hasNested = Array.isArray((normalizedData as any)?.messages) && (normalizedData as any).messages.some((m: any) => Array.isArray(m?.content) && (m.content as any[]).some((b: any) => b && typeof b === 'object' && b.type === 'message'));
-      const missingMsgs = !Array.isArray((normalizedData as any)?.messages) || (normalizedData as any).messages.length === 0;
-      if (hasNested || missingMsgs) {
-        const srcMsgs: any[] = Array.isArray((req.body as any)?.messages) ? (req.body as any).messages : [];
-        const flatten = (parts: any[]): string[] => {
-          const texts: string[] = [];
-          for (const p of parts) {
-            if (!p || typeof p !== 'object') continue;
-            const kind = typeof p.type === 'string' ? String(p.type).toLowerCase() : '';
-            if ((kind === 'text' || kind === 'input_text' || kind === 'output_text') && typeof (p as any).text === 'string') {
-              const t = ((p as any).text as string).trim(); if (t) texts.push(t);
-              continue;
-            }
-            if (kind === 'message' && Array.isArray((p as any).content)) {
-              texts.push(...flatten((p as any).content));
-              continue;
-            }
-            if (typeof (p as any).content === 'string') {
-              const t = ((p as any).content as string).trim(); if (t) texts.push(t);
-            }
-          }
-          return texts;
-        };
-        const out: any[] = [];
-        for (const m of srcMsgs) {
-          if (!m || typeof m !== 'object') continue;
-          if (m.role === 'system' && typeof m.content === 'string' && m.content.trim()) {
-            out.push({ role: 'system', content: m.content });
-            continue;
-          }
-          if (Array.isArray(m.content)) {
-            const text = flatten(m.content).join('\n');
-            if (text) { out.push({ role: 'user', content: text }); }
-          } else if (typeof m.content === 'string' && m.content.trim()) {
-            out.push({ role: m.role || 'user', content: m.content });
-          }
-        }
-        if (out.length) {
-          (normalizedData as any).messages = out;
-        }
-      }
-    } catch { /* ignore */ }
+    // Strict mapping only; no fallback or re-synthesis here
+
     const pipelineRequest = {
       data: normalizedData,
       route: {
@@ -302,8 +282,8 @@ export class ResponsesHandler extends BaseHandler {
         method: req.method,
         url: req.url,
         headers: this.sanitizeHeaders(req.headers),
-        // Let pipeline know this originated from Responses endpoint; llmswitch-response-chat will adapt
-        targetProtocol: 'responses',
+        // Send OpenAI Chat to provider after local synth; targetProtocol=openai for safety
+        targetProtocol: 'openai',
         endpoint: `${req.baseUrl || ''}${req.url || ''}`,
       },
       debug: {
@@ -336,6 +316,17 @@ export class ResponsesHandler extends BaseHandler {
     const firstResp = (pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse)
       ? (pipelineResponse as Record<string, unknown>).data
       : pipelineResponse;
+
+    // Debug: persist provider response for offline analysis
+    try {
+      const fs = await import('fs/promises');
+      const os = await import('os');
+      const path = await import('path');
+      const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'anth-replay');
+      await (fs as any).mkdir(dir, { recursive: true });
+      const file = path.join(dir, `provider-response_${requestId}.json`);
+      await (fs as any).writeFile(file, JSON.stringify(firstResp, null, 2), 'utf-8');
+    } catch { /* ignore */ }
 
     // Tool-followup (方案A): if enabled, execute tools server-side and run second round
     try {
@@ -490,9 +481,9 @@ export class ResponsesHandler extends BaseHandler {
           await fs.appendFile(sseFile, line, 'utf-8');
         } catch { /* ignore */ }
       };
-      const startHeartbeat = () => {
-        const raw = process.env.ROUTECODEX_RESPONSES_HEARTBEAT_MS;
-        const intervalMs = raw ? Number(raw) : 5000;
+      const startHeartbeat = async () => {
+        const cfg = await ResponsesConfigUtil.load();
+        const intervalMs = cfg.sse.heartbeatMs;
         if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
           return;
         }
@@ -520,7 +511,7 @@ export class ResponsesHandler extends BaseHandler {
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('x-request-id', requestId);
-      startHeartbeat();
+      await startHeartbeat();
 
       // Minimal writer (OpenAI Responses standard; no Azure sequence/parts)
       const writeEvt = async (event: string, data: Record<string, unknown>) => {
@@ -530,8 +521,23 @@ export class ResponsesHandler extends BaseHandler {
       };
 
       // If tool-followup is present, prefer __initial for tool events and __final for text/usage
-      const initialResp = (response && typeof response === 'object' && response.__initial) ? (response as any).__initial : response;
-      const finalResp = (response && typeof response === 'object' && response.__final) ? (response as any).__final : response;
+      const rawInitial = (response && typeof response === 'object' && (response as any).__initial) ? (response as any).__initial : response;
+      const rawFinal = (response && typeof response === 'object' && (response as any).__final) ? (response as any).__final : response;
+
+      // Normalize both initial/final payloads into OpenAI Responses JSON via llmswitch
+      const toResponsesShape = async (payload: any) => await ResponsesMapper.chatToResponsesFromMapping(payload);
+      const initialResp = await toResponsesShape(rawInitial);
+      const finalResp = await toResponsesShape(rawFinal);
+
+      try {
+        const fs = await import('fs/promises');
+        const os = await import('os');
+        const path = await import('path');
+        const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'anth-replay');
+        await (fs as any).mkdir(dir, { recursive: true });
+        await (fs as any).writeFile(path.join(dir, `responses-initial_${requestId}.json`), JSON.stringify(initialResp, null, 2), 'utf-8');
+        await (fs as any).writeFile(path.join(dir, `responses-final_${requestId}.json`), JSON.stringify(finalResp, null, 2), 'utf-8');
+      } catch { /* ignore */ }
 
       const extractText = (resp: any): string => {
         const texts: string[] = [];
@@ -549,7 +555,18 @@ export class ResponsesHandler extends BaseHandler {
           if (resp && typeof resp.output_text === 'string') push(resp.output_text);
           if (resp && Array.isArray(resp.output)) walkBlocks(resp.output);
           if (resp && Array.isArray(resp.content)) walkBlocks(resp.content);
-          const chat = resp?.choices?.[0]?.message?.content; if (typeof chat === 'string') push(chat);
+          // Support Chat content as string or array-of-parts
+          const chat = resp?.choices?.[0]?.message?.content;
+          if (typeof chat === 'string') {
+            push(chat);
+          } else if (Array.isArray(chat)) {
+            for (const part of chat) {
+              if (part && typeof part === 'object') {
+                if (typeof (part as any).text === 'string') { push((part as any).text); }
+                else if (typeof (part as any).content === 'string') { push((part as any).content); }
+              } else if (typeof part === 'string') { push(part); }
+            }
+          }
         } catch { /* ignore */ }
         return texts.join(' ');
       };
@@ -562,54 +579,54 @@ export class ResponsesHandler extends BaseHandler {
       const now = () => Math.floor(Date.now() / 1000);
       // Text strict Azure mode removed per rollback request; keep default text path
 
-      // response.created / in_progress (minimal OpenAI Responses)
-      await writeEvt('response.created', { type: 'response.created', response: { id: baseResp.id, model: baseResp.model } });
-      await writeEvt('response.in_progress', { type: 'response.in_progress', response: { id: baseResp.id, model: baseResp.model } });
+      // response.created / in_progress (OpenAI Responses shape)
+      const createdTs = now();
+      await writeEvt('response.created', {
+        type: 'response.created',
+        response: { id: baseResp.id, object: 'response', created: createdTs, model: baseResp.model, status: 'in_progress' }
+      });
+      await writeEvt('response.in_progress', {
+        type: 'response.in_progress',
+        response: { id: baseResp.id, object: 'response', created: createdTs, model: baseResp.model, status: 'in_progress' }
+      });
 
-      // Emit tool_call events when present in pipeline response (prefer initial turn)
+      // Emit tool/function_call events when present in normalized Responses output
       try {
-        // Remove Azure output_item/content_part & function_call_arguments streaming
+        const emitToolCallsFromResponsesOutput = async (resp: any) => {
+          const out = Array.isArray(resp?.output) ? resp.output : [];
+          for (const it of out) {
+            if (!it || typeof it !== 'object') continue;
+            if ((it as any).type === 'tool_call' || (it as any).type === 'function_call') {
+              const id = (it as any).id || `call_${Math.random().toString(36).slice(2)}`;
+              const name = (it as any).tool_name || (it as any).name || 'tool';
+              const argsVal = (it as any).arguments ?? (it as any)?.tool_call?.function?.arguments ?? {};
+              const args = typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal);
+              // output_item.added(function_call)
+              await writeEvt('response.output_item.added', { type: 'response.output_item.added', output_index: 1, item: { id, type: 'function_call', name } });
+              // content_part.added(input_json)
+              await writeEvt('response.content_part.added', { type: 'response.content_part.added', item_id: id, output_index: 1, content_index: 0, part: { type: 'input_json', partial_json: '' } });
+              // arguments delta (single chunk for now)
+              await writeEvt('response.function_call_arguments.delta', { type: 'response.function_call_arguments.delta', id, delta: String(args) });
+              await writeEvt('response.function_call_arguments.done', { type: 'response.function_call_arguments.done', id });
+              await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: 1, item: { id, type: 'function_call' } });
+            }
+          }
+        };
 
-        const emitToolCallsFromResponsesOutput = async (_resp: any) => { /* no-op */ };
-        const emitToolCallsFromOpenAI = async (_resp: any) => { /* no-op */ };
-
-        const emitToolCallsFromAnthropic = async (_resp: any) => { /* no-op */ };
-
-        // Prefer OpenAI-shaped tool_calls; else infer from Anthropic blocks
-        const toolSource = (response && typeof response === 'object' && (response as any).__initial)
-          ? (response as any).__initial
-          : response;
-        if (toolSource && typeof toolSource === 'object') {
-          if (toolSource?.output) { await emitToolCallsFromResponsesOutput(toolSource); }
-          else if (toolSource?.choices?.[0]?.message?.tool_calls) { await emitToolCallsFromOpenAI(toolSource); }
-          else { await emitToolCallsFromAnthropic(toolSource); }
-        }
+        const toolSource = finalResp && typeof finalResp === 'object' ? finalResp : {};
+        await emitToolCallsFromResponsesOutput(toolSource);
         // Emit required_action for clients that expect submit_tool_outputs flow
         try {
+          const cfg = await ResponsesConfigUtil.load();
+          const emitRequired = !!cfg.mappings.tools.emitRequiredAction; // mapping-driven
+          if (!emitRequired) { /* skip */ return; }
           const toolCallsList: Array<{ id: string; name: string; arguments: string }> = [];
-          if (Array.isArray(toolSource?.choices?.[0]?.message?.tool_calls)) {
-            for (const tc of (toolSource as any).choices[0].message.tool_calls) {
-              const id = tc?.id || `call_${Math.random().toString(36).slice(2)}`;
-              const name = tc?.function?.name || 'tool';
-              const args = typeof tc?.function?.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc?.function?.arguments || {});
-              toolCallsList.push({ id, name, arguments: String(args) });
-            }
-          } else if (Array.isArray((toolSource as any)?.output)) {
+          if (Array.isArray((toolSource as any)?.output)) {
             for (const it of (toolSource as any).output) {
               if (it && typeof it === 'object' && it.type === 'tool_call') {
                 const id = it?.id || `call_${Math.random().toString(36).slice(2)}`;
                 const name = it?.tool_name || it?.name || 'tool';
                 const argsVal = it?.arguments ?? {};
-                const args = typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal);
-                toolCallsList.push({ id, name, arguments: String(args) });
-              }
-            }
-          } else if (Array.isArray((toolSource as any)?.content)) {
-            for (const b of (toolSource as any).content) {
-              if (b && typeof b === 'object' && b.type === 'tool_use') {
-                const id = b?.id || `call_${Math.random().toString(36).slice(2)}`;
-                const name = b?.name || 'tool';
-                const argsVal = b?.input ?? {};
                 const args = typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal);
                 toolCallsList.push({ id, name, arguments: String(args) });
               }
@@ -628,16 +645,30 @@ export class ResponsesHandler extends BaseHandler {
         } catch { /* ignore */ }
         // Do not emit server-side tool_result streaming; client manages tools
       } catch { /* ignore */ }
-      // Assistant text deltas (no output_item/content_part)
-      const hadToolFirstTurn = (initialResp?.choices?.[0]?.message?.tool_calls?.length || 0) > 0
-        || (Array.isArray(initialResp?.output) && initialResp.output.some((x: any) => x?.type === 'tool_call'))
-        || (Array.isArray(initialResp?.content) && initialResp.content.some((x: any) => x?.type === 'tool_use'));
+      // Assistant text deltas
+      const hadToolFirstTurn = (Array.isArray((initialResp as any)?.output) && (initialResp as any).output.some((x: any) => x?.type === 'tool_call'))
+        || (Array.isArray((initialResp as any)?.content) && (initialResp as any).content.some((x: any) => x?.type === 'tool_use'));
       if (words.length > 0 || !hadToolFirstTurn) {
-        for (const w of words) {
-          await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', delta: w + ' ', response: baseResp });
-          await new Promise(r => setTimeout(r, 20));
+        // Emit item lifecycle gated by config
+        const cfg = await ResponsesConfigUtil.load();
+        if (cfg.sse.emitTextItemLifecycle) {
+          const msgId = `msg_${requestId}`;
+          await writeEvt('response.output_item.added', { type: 'response.output_item.added', output_index: 0, item: { id: msgId, type: 'message', role: 'assistant', status: 'in_progress', content: [] } });
+          await writeEvt('response.content_part.added', { type: 'response.content_part.added', item_id: msgId, output_index: 0, content_index: 0, part: { type: 'output_text', text: '' } });
+          for (const w of words) {
+            await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', output_index: 0, delta: w + ' ' });
+            await new Promise(r => setTimeout(r, 12));
+          }
+          await writeEvt('response.output_text.done', { type: 'response.output_text.done', output_index: 0 });
+          await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: 0, item: { id: msgId, type: 'message', status: 'completed' } });
+        } else {
+          // Minimal text-only delta/done
+          for (const w of words) {
+            await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', output_index: 0, delta: w + ' ' });
+            await new Promise(r => setTimeout(r, 12));
+          }
+          await writeEvt('response.output_text.done', { type: 'response.output_text.done', output_index: 0 });
         }
-        await writeEvt('response.output_text.done', { type: 'response.output_text.done', response: baseResp });
       }
 
       // response.completed (attach total output_text when available)
@@ -656,7 +687,7 @@ export class ResponsesHandler extends BaseHandler {
       };
       let usage = mapUsage(srcUsage) as Record<string, number> | undefined;
       if (!usage) { usage = { input_tokens: 0, output_tokens: 0, total_tokens: 0 } as any; }
-      const completed = { type: 'response.completed', response: { ...baseResp, created_at: now(), status: 'completed', output_text: textOut || '' }, ...(usage ? { usage } : {}) } as Record<string, unknown>;
+      const completed = { type: 'response.completed', response: { id: baseResp.id, object: 'response', created: createdTs, model: baseResp.model, status: 'completed', output_text: textOut || '' }, ...(usage ? { usage } : {}) } as Record<string, unknown>;
       if (typeof reqInstructions === 'string' && reqInstructions.trim()) { (completed as any).instructions = reqInstructions; }
       await writeEvt('response.completed', completed);
       try { await writeEvt('response.done', { type: 'response.done' }); } catch { /* ignore */ }
@@ -671,6 +702,9 @@ export class ResponsesHandler extends BaseHandler {
         const e = { type: 'response.error', error: { message: (err as Error).message || 'stream error', type: 'streaming_error', code: 'STREAM_FAILED' }, requestId } as Record<string, unknown>;
         res.write(`event: response.error\n`);
         res.write(`data: ${JSON.stringify(e)}\n\n`);
+        // Always send done sentinel on error to satisfy clients expecting a terminator
+        res.write(`event: response.done\n`);
+        res.write(`data: {"type":"response.done"}\n\n`);
       } catch { /* ignore */ }
       try { res.end(); } catch { /* ignore */ }
       if (heartbeatTimer) {

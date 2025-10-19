@@ -19,11 +19,80 @@ HTTP 服务器模块是 RouteCodex 系统的核心组件，负责处理所有传
 - **功能**: 标准聊天对话，支持流式响应、工具调用、多轮对话
 - **流水线**: `llmswitch-openai-openai` → `streaming-control` → `compatibility` → `provider`
 
-### 🆕 Responses API ⭐
+### 🆕 Responses API ⭐（配置驱动的转换 + 解耦的流式）
 - **端点**: `POST /v1/responses`
 - **协议**: OpenAI Responses API
-- **功能**: 新一代对话接口，支持指令式交互、复杂工具调用、流式事件
-- **流水线**: `llmswitch-response-chat` → `responses-streaming-workflow` → `compatibility` → `provider`
+- **能力**:
+  - 请求侧：按配置将 Responses 形状（instructions + input[] 的嵌套 message/content 块）合成为 OpenAI Chat messages（非扁平展开，递归解析）
+  - 响应侧：Provider 的 Chat 响应按配置回转为 Responses JSON（文本、工具调用、usage）
+  - 流式：SSE 仅读取已规范化的 Responses 对象发事件（可选消息生命周期/required_action/心跳），与转换逻辑彻底解耦
+- **流水线**: `llmswitch-response-chat`（可配） → Provider（默认非流） → Responses 正规化 → SSE 重放
+- **配置文件**:
+  - `config/modules.json` → `responses` 模块（总开关）
+  - `config/responses-conversion.json`（字段映射与展开规则）
+  - 环境变量覆盖：`ROUTECODEX_RESP_*`
+
+#### 配置要点
+- `config/modules.json` 示例（节选）
+```json
+{
+  "modules": {
+    "responses": {
+      "enabled": true,
+      "config": {
+        "moduleType": "responses",
+        "conversion": {
+          "useLlmswitch": true,
+          "fallbackEnabled": true,
+          "forceProviderStream": true
+        },
+        "sse": {
+          "heartbeatMs": 5000,
+          "emitTextItemLifecycle": true,
+          "emitRequiredAction": true
+        }
+      }
+    }
+  }
+}
+```
+
+- `config/responses-conversion.json` 控制“非扁平展开”和“文本/工具提取”：
+```json
+{
+  "request": {
+    "instructionsPaths": ["instructions"],
+    "inputBlocks": {
+      "wrapperType": "message",
+      "typeKey": "type",
+      "roleKey": "role",
+      "blocksKey": "content",
+      "textKey": "text",
+      "allowedContentTypes": ["input_text", "text", "output_text"]
+    },
+    "fallback": { "useRawMessages": true, "rawMessagesPath": "messages", "pickLastUser": true }
+  },
+  "response": {
+    "textPaths": ["output_text", "choices[0].message.content"],
+    "textArrayTextKey": "text",
+    "contentBlocksKey": "content",
+    "messageWrapperType": "message"
+  },
+  "tools": {
+    "toolCallTypes": ["tool_call", "function_call"],
+    "functionArgsPaths": ["arguments", "tool_call.function.arguments"],
+    "emitRequiredAction": true
+  }
+}
+```
+
+#### 行为覆盖的环境变量
+- `ROUTECODEX_RESP_CONVERT_LLMSWITCH=1|0`：启用/关闭 llmswitch 转换
+- `ROUTECODEX_RESP_CONVERT_FALLBACK=1|0`：启用/关闭兜底转换
+- `ROUTECODEX_RESP_PROVIDER_NONSTREAM=1|0`：Provider 侧强制非流（默认 1）
+- `ROUTECODEX_RESP_SSE_LIFECYCLE=1|0`：是否发送 output_item.added/content_part.added/item.done（默认 1）
+- `ROUTECODEX_RESP_SSE_REQUIRED_ACTION=1|0`：是否发 required_action（默认 1）
+- `ROUTECODEX_RESPONSES_HEARTBEAT_MS=0|N`：SSE 心跳（0 关闭）
 
 ### 🔧 其他兼容端点
 - **端点**: `POST /v1/completions`

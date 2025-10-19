@@ -123,6 +123,22 @@
         }
       }
     },
+    "responses": {
+      "enabled": true,
+      "config": {
+        "moduleType": "responses",
+        "conversion": {
+          "useLlmswitch": true,
+          "fallbackEnabled": true,
+          "forceProviderStream": true
+        },
+        "sse": {
+          "heartbeatMs": 5000,
+          "emitTextItemLifecycle": true,
+          "emitRequiredAction": true
+        }
+      }
+    },
     "unimplementedmodule": {
       "enabled": true,
       "config": {

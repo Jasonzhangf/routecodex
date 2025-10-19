@@ -282,3 +282,9 @@ Summary
  - OpenAI→Anthropic request converter now flattens nested Chat `content` arrays that embed Responses-style `message` blocks; extracts `input_text`/`output_text` to text blocks to avoid empty inputs (fixes GLM 1214).
 ## 0.50.26 - 2025-10-18
 - Build: version bump. Foreground start path uses `gtimeout` via `npm run start:fg` (script `scripts/run-fg-gtimeout.sh`), background uses `npm run start:bg`.
+## 0.50.6
+- Responses module refactor: conversion and SSE decoupled, fully config‑driven.
+- Added `config/responses-conversion.json` for field mappings (non‑flat expansion of nested input blocks; response text/tool extraction).
+- Responses behavior is controlled via `config/modules.json` (`responses` module) and `ROUTECODEX_RESP_*` env vars.
+- Handler now captures raw request and pre‑pipeline snapshots for each requestId.
+- Fixed pure‑text “early stop” by ensuring user text is synthesized from nested `input[]` message/content blocks.

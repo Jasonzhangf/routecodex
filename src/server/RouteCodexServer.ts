@@ -72,7 +72,7 @@ export class RouteCodexServer extends BaseModule {
     const moduleInfo: ModuleInfo = {
       id: 'routecodex-server',
       name: 'RouteCodexServer',
-      version: '0.0.1',
+      version: '0.50.1',
       description: 'Multi-provider OpenAI proxy server',
       type: 'server',
     };
