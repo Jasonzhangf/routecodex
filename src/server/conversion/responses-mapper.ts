@@ -31,12 +31,21 @@ export class ResponsesMapper {
       if (dedupe) seen.add(key);
       out.push({ role: role as string, content: t });
     };
+    const pushSystem = (text: string) => {
+      const t = String(text || '').trim();
+      if (!t) return;
+      const key = `system|${t}`;
+      if (dedupe && seen.has(key)) return;
+      if (dedupe) seen.add(key);
+      out.push({ role: 'system', content: t });
+    };
 
     // 1) instructions → system
     if (Array.isArray(map.instructionsPaths)) {
       for (const p of map.instructionsPaths) {
         if (p === 'instructions' && typeof body?.instructions === 'string') {
-          pushMsg('system', body.instructions);
+          // system 指令不受 ignoreRoles 影响
+          pushSystem(body.instructions);
         }
       }
     }
@@ -58,17 +67,25 @@ export class ResponsesMapper {
     };
 
     if (Array.isArray(body?.input)) {
-      for (const item of (body.input as any[])) {
-        if (!item || typeof item !== 'object') continue;
-        const itType = String((item as any)[typeKey] || '').toLowerCase();
-        if (itType === wrapperType) {
-          const role = typeof (item as any)[roleKey] === 'string' ? (item as any)[roleKey] : 'user';
-          const blocks = Array.isArray((item as any)[blocksKey]) ? (item as any)[blocksKey] : [];
-          const texts = collectTexts(blocks);
-          if (texts.length) pushMsg(role, texts.join(joiner));
-        } else if (allowed.has(itType) && typeof (item as any)[textKey] === 'string') {
-          pushMsg('user', (item as any)[textKey]);
+      // 仅取本轮输入：选择最后一个 wrapperType='message' 的项作为用户消息
+      const arr = body.input as any[];
+      let lastMsg: any | null = null;
+      for (let i = arr.length - 1; i >= 0; i--) {
+        const it = arr[i];
+        if (it && typeof it === 'object') {
+          const itType = String((it as any)[typeKey] || '').toLowerCase();
+          if (itType === wrapperType) { lastMsg = it; break; }
         }
+      }
+      if (lastMsg) {
+        const role = typeof (lastMsg as any)[roleKey] === 'string' ? (lastMsg as any)[roleKey] : 'user';
+        const blocks = Array.isArray((lastMsg as any)[blocksKey]) ? (lastMsg as any)[blocksKey] : [];
+        const texts = collectTexts(blocks);
+        if (texts.length) pushMsg(role, texts.join(joiner));
+      } else {
+        // 如没有 message 包装，退化为把整个 input 展开为一条 user 文本
+        const texts = collectTexts(arr);
+        if (texts.length) pushMsg('user', texts.join(joiner));
       }
     }
 
@@ -147,4 +164,3 @@ export class ResponsesMapper {
     return resp;
   }
 }
-

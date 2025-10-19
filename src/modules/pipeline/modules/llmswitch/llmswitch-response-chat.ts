@@ -38,6 +38,9 @@ interface ResponseRequestContext {
   stream?: boolean;
   isChatPayload?: boolean;
   isResponsesPayload?: boolean;
+  // Decoupled history snapshot (not sent to provider)
+  historyMessages?: Array<{ role: string; content: string }>;
+  currentMessage?: { role: string; content: string } | null;
 }
 
 export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
@@ -49,6 +52,9 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
   private isInitialized = false;
   private logger: PipelineDebugLogger;
   private requestContext: Map<string, ResponseRequestContext> = new Map();
+  // Runtime validators (built in initialize)
+  private chatReqValidator: ((v: unknown) => boolean) | null = null;
+  private responsesValidator: ((v: unknown) => boolean) | null = null;
 
   constructor(config: ModuleConfig, dependencies: ModuleDependencies) {
     this.config = config;
@@ -61,6 +67,45 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
       return;
     }
     this.isInitialized = true;
+    // Build lightweight AJV validators to sanity-check shapes
+    try {
+      const AjvMod: any = await import('ajv');
+      const ajv = new AjvMod.default({ allErrors: true, strict: false });
+      const chatSchema = {
+        type: 'object',
+        required: ['model', 'messages'],
+        additionalProperties: true,
+        properties: {
+          model: { type: 'string', minLength: 1 },
+          stream: { type: 'boolean' },
+          messages: {
+            type: 'array', minItems: 1,
+            items: {
+              type: 'object', required: ['role'], additionalProperties: true,
+              properties: {
+                role: { enum: ['system','user','assistant','tool'] },
+                content: { anyOf: [ { type: 'string' }, { type: 'null' }, { type: 'object' }, { type: 'array' } ] },
+                tool_calls: { type: 'array' }
+              }
+            }
+          },
+          tools: { type: 'array' }
+        }
+      } as const;
+      const responsesSchema = {
+        type: 'object', required: ['object','model','output'], additionalProperties: true,
+        properties: {
+          object: { const: 'response' },
+          model: { type: 'string' },
+          status: { enum: ['in_progress','completed'] },
+          output_text: { type: 'string' },
+          output: { type: 'array' },
+          required_action: { type: 'object' }
+        }
+      } as const;
+      this.chatReqValidator = ajv.compile(chatSchema);
+      this.responsesValidator = ajv.compile(responsesSchema);
+    } catch { /* optional */ }
   }
 
   async processIncoming(requestParam: SharedPipelineRequest | any): Promise<SharedPipelineRequest> {
@@ -192,12 +237,60 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
   }
 
   private buildChatRequest(payload: Record<string, unknown>, context: ResponseRequestContext): Record<string, unknown> {
-    const history = Array.isArray(payload.messages)
-      ? this.convertInputToMessages(undefined, payload.messages as ResponseInputItem[])
-      : [];
-
+    // Build provider-bound messages only from current turn (+system)
     const current = this.convertInputToMessages(context.instructions, context.input);
-    const combined = [...history, ...current];
+    const combined = [...current];
+
+    // Produce a normalized history snapshot from input[] (all message wrappers except the last)
+    try {
+      const ib = Array.isArray(context.input) ? (context.input as ResponseInputItem[]) : [];
+      let lastIdx = -1;
+      for (let i = ib.length - 1; i >= 0; i--) {
+        const it: any = ib[i];
+        if (it && typeof it === 'object' && it.type === 'message') { lastIdx = i; break; }
+      }
+      const history: Array<{ role: string; content: string }> = [];
+      const flattenTextBlocks = (blocks: any[]): string[] => {
+        const texts: string[] = [];
+        for (const block of blocks || []) {
+          if (!block || typeof block !== 'object') { continue; }
+          const kind = typeof (block as any).type === 'string' ? String((block as any).type).toLowerCase() : '';
+          if ((kind === 'text' || kind === 'input_text' || kind === 'output_text') && typeof (block as any).text === 'string') {
+            const t = (block as any).text.trim(); if (t) { texts.push(t); }
+            continue;
+          }
+          if (kind === 'message' && Array.isArray((block as any).content)) {
+            texts.push(...flattenTextBlocks((block as any).content));
+            continue;
+          }
+          if (typeof (block as any).content === 'string') {
+            const t = (block as any).content.trim(); if (t) { texts.push(t); }
+          }
+        }
+        return texts;
+      };
+      for (let i = 0; i < ib.length; i++) {
+        if (i === lastIdx) { continue; }
+        const it: any = ib[i];
+        if (it && typeof it === 'object' && it.type === 'message') {
+          const role = typeof it.role === 'string' ? it.role : 'user';
+          const blocks = Array.isArray(it.content) ? it.content : [];
+          const texts = flattenTextBlocks(blocks).join('\n').trim();
+          if (texts) { history.push({ role, content: texts }); }
+        }
+      }
+      context.historyMessages = history;
+      // Capture current message snapshot (if present)
+      try {
+        if (lastIdx >= 0) {
+          const it: any = ib[lastIdx];
+          const role = typeof it?.role === 'string' ? it.role : 'user';
+          const blocks = Array.isArray(it?.content) ? it.content : [];
+          const text = flattenTextBlocks(blocks).join('\n').trim();
+          context.currentMessage = text ? { role, content: text } : null;
+        } else { context.currentMessage = null; }
+      } catch { context.currentMessage = null; }
+    } catch { /* ignore history snapshot errors */ }
 
     const result: Record<string, unknown> = {
       model: payload.model,
@@ -256,6 +349,12 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
       result.stream = payload.stream;
     }
 
+    // Validate Chat request (best-effort)
+    try {
+      if (this.chatReqValidator && !this.chatReqValidator(result)) {
+        throw new Error('Responses→Chat produced invalid Chat request');
+      }
+    } catch { /* soft */ }
     return result;
   }
 
@@ -284,9 +383,9 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
     const pushToolCall = (name: string, args: unknown, callId?: string) => {
       const serialized = this.stringifyMaybeJson(args).trim();
       if (!serialized) { return; }
+      // Omit empty content to avoid blank assistant messages
       messages.push({
         role: 'assistant',
-        content: '',
         tool_calls: [{ id: callId || `call_${Math.random().toString(36).slice(2, 6)}`, type: 'function', function: { name, arguments: serialized } }]
       });
     };
@@ -348,67 +447,25 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
       pushText('system', instructions.trim());
     }
 
-    const visit = (node: any) => {
-      if (!node || typeof node !== 'object') { return; }
-      const type = node.type;
-      if (!type) {
-        const role = typeof node.role === 'string' ? node.role : 'user';
-        const content = node.content;
-        if (Array.isArray(content)) {
-          for (const block of content) { visit(block); }
-        } else {
-          pushText(role, content);
-        }
-        return;
-      }
-      switch (type) {
-        case 'message': {
-          const role = typeof node.role === 'string' ? node.role : 'user';
-          const blocks = Array.isArray(node.content) ? node.content : [];
-          const texts = flattenTextBlocks(blocks);
-          if (texts.length) { pushText(role, texts.join('\n')); }
-          break;
-        }
-        case 'function_call': {
-          const name = typeof node.name === 'string' ? node.name : 'tool';
-          const callId = typeof node.call_id === 'string' ? node.call_id : `call_${Math.random().toString(36).slice(2, 6)}`;
-          pushToolCall(name, node.arguments, callId);
-          break;
-        }
-        case 'tool_use': {
-          const name = typeof node.name === 'string' ? node.name : 'tool';
-          const callId = typeof node.id === 'string' ? node.id : `call_${Math.random().toString(36).slice(2, 6)}`;
-          pushToolCall(name, coerceToolInput(node.input), callId);
-          break;
-        }
-        case 'function_call_output': {
-          const callId = typeof node.call_id === 'string' ? node.call_id : undefined;
-          const text = typeof node.output === 'string' ? node.output : this.stringifyMaybeJson(node.output);
-          pushText('tool', text);
-          if (callId && messages.length) { (messages[messages.length - 1] as any).tool_call_id = callId; }
-          break;
-        }
-        case 'tool_result': {
-          const callId = typeof node.tool_use_id === 'string' ? node.tool_use_id : undefined;
-          const text = typeof node.content === 'string' ? node.content : this.stringifyMaybeJson(node.content);
-          pushText('tool', text);
-          if (callId && messages.length) { (messages[messages.length - 1] as any).tool_call_id = callId; }
-          break;
-        }
-        case 'reasoning': {
-          const summary = Array.isArray(node.summary) ? node.summary : [];
-          messages.push({ role: 'assistant', content: '', reasoning_metadata: { type: 'responses_reasoning', summary } });
-          break;
-        }
-        default: {
-          const role = typeof node.role === 'string' ? node.role : 'assistant';
-          pushText(role, this.stringifyMaybeJson(node));
-        }
-      }
-    };
-
+    // Only use current-turn content: pick the last 'message' item in input as the user turn.
+    // Do not replay historical messages or prior assistant/tool events to provider.
+    let lastMsg: any | null = null;
     if (Array.isArray(input)) {
-      for (const item of input) { visit(item); }
+      for (let i = input.length - 1; i >= 0; i--) {
+        const it = input[i];
+        if (it && typeof it === 'object' && (it as any).type === 'message') { lastMsg = it; break; }
+      }
+    }
+
+    if (lastMsg) {
+      const role = typeof (lastMsg as any).role === 'string' ? (lastMsg as any).role : 'user';
+      const blocks = Array.isArray((lastMsg as any).content) ? (lastMsg as any).content : [];
+      const texts = flattenTextBlocks(blocks);
+      if (texts.length) { pushText(role, texts.join('\n')); }
+    } else if (Array.isArray(input)) {
+      // Fallback: if no explicit message wrapper, attempt to flatten entire tail as a single user prompt
+      const texts = flattenTextBlocks(input as any);
+      if (texts.length) { pushText('user', texts.join('\n')); }
     }
 
     return messages;
@@ -545,15 +602,19 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
     const usage = (response as any).usage;
     const outputText = this.extractOutputText(convertedContent, toolCalls);
 
-    return {
+    const finishReason = (Array.isArray((response as any)?.choices) && (response as any).choices[0]?.finish_reason) || undefined;
+    const hasToolCalls = toolCalls.length > 0;
+    const status = hasToolCalls && !outputText ? 'in_progress' : 'completed';
+
+    const out: any = {
       id: (response as any).id || `resp-${Date.now()}`,
       object: 'response',
       created: (response as any).created || Math.floor(Date.now() / 1000),
       model: (response as any).model,
-      status: 'completed',
+      status,
       output: outputItems,
-      output_text: outputText,
-      usage,
+      output_text: outputText || '',
+      ...(usage ? { usage } : {}),
       metadata: context?.metadata,
       instructions: context?.instructions,
       parallel_tool_calls: context?.parallelToolCalls,
@@ -561,6 +622,28 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
       include: context?.include,
       store: context?.store
     };
+    if (typeof finishReason === 'string') {
+      out.stop_reason = finishReason === 'tool_calls' ? 'requires_action' : finishReason;
+    }
+    if (hasToolCalls) {
+      out.required_action = {
+        type: 'submit_tool_outputs',
+        submit_tool_outputs: {
+          tool_calls: toolCalls.map((tc: any) => ({
+            id: typeof tc?.id === 'string' ? tc.id : `call_${Math.random().toString(36).slice(2,8)}`,
+            name: String(tc?.function?.name || 'tool'),
+            arguments: typeof tc?.function?.arguments === 'string' ? tc.function.arguments : this.stringifyMaybeJson(tc?.function?.arguments || {})
+          }))
+        }
+      };
+    }
+    // Validate Responses payload (best-effort)
+    try {
+      if (this.responsesValidator && !this.responsesValidator(out)) {
+        throw new Error('Chat→Responses produced invalid Responses payload');
+      }
+    } catch { /* soft */ }
+    return out;
   }
 
   private unwrapData(value: Record<string, unknown>): Record<string, unknown> {
