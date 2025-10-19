@@ -522,59 +522,11 @@ export class ResponsesHandler extends BaseHandler {
       res.setHeader('x-request-id', requestId);
       startHeartbeat();
 
-      // sequence_number helper and unified writer
-      // Align with upstream: first event uses sequence_number 0
-      let __seq = 0;
-      const nextSeq = () => { const v = __seq; __seq += 1; return v; };
-      // SSE contract audit aggregator
-      const audit = {
-        total: 0,
-        seqLast: 0,
-        monotonic: true,
-        toolCreated: new Set<string>(),
-        toolCompleted: new Set<string>(),
-        textDeltas: 0,
-        contentParts: 0,
-        outputItems: 0,
-        completed: false,
-        done: false,
-      } as any;
-
+      // Minimal writer (OpenAI Responses standard; no Azure sequence/parts)
       const writeEvt = async (event: string, data: Record<string, unknown>) => {
-        const payload = { ...data, sequence_number: nextSeq() } as Record<string, unknown>;
         res.write(`event: ${event}\n`);
-        res.write(`data: ${JSON.stringify(payload)}\n\n`);
-        audit.total += 1;
-        const seq = (payload as any).sequence_number;
-        if (typeof seq === 'number') {
-          if (seq <= audit.seqLast) audit.monotonic = false;
-          audit.seqLast = seq;
-        }
-        try {
-          switch (event) {
-            case 'response.tool_call.created': {
-              const id = (payload as any)?.tool_call?.id;
-              if (typeof id === 'string') audit.toolCreated.add(id);
-              break;
-            }
-            case 'response.function_call_arguments.done': {
-              const id = (payload as any)?.tool_call?.id;
-              if (typeof id === 'string') audit.toolCompleted.add(id);
-              break;
-            }
-            case 'response.output_text.delta':
-              audit.textDeltas += 1; break;
-            case 'response.content_part.added':
-              audit.contentParts += 1; break;
-            case 'response.output_item.added':
-              audit.outputItems += 1; break;
-            case 'response.completed':
-              audit.completed = true; break;
-            case 'response.done':
-              audit.done = true; break;
-          }
-        } catch { /* ignore */ }
-        await capture(event, payload);
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+        try { await capture(event, data); } catch { /* ignore */ }
       };
 
       // If tool-followup is present, prefer __initial for tool events and __final for text/usage
@@ -582,20 +534,24 @@ export class ResponsesHandler extends BaseHandler {
       const finalResp = (response && typeof response === 'object' && response.__final) ? (response as any).__final : response;
 
       const extractText = (resp: any): string => {
-        try {
-          // Anthropic-style
-          if (resp && Array.isArray(resp.content)) {
-            const parts: string[] = [];
-            for (const b of resp.content) {
-              if (b && typeof b === 'object' && b.type === 'text' && typeof b.text === 'string') parts.push(b.text);
-            }
-            return parts.join(' ');
+        const texts: string[] = [];
+        const push = (s?: string) => { if (typeof s === 'string') { const t = s.trim(); if (t) texts.push(t); } };
+        const walkBlocks = (blocks: any[]): void => {
+          for (const b of blocks || []) {
+            if (!b || typeof b !== 'object') continue;
+            const t = (b as any).type;
+            if ((t === 'text' || t === 'output_text') && typeof (b as any).text === 'string') { push((b as any).text); continue; }
+            if (t === 'message' && Array.isArray((b as any).content)) { walkBlocks((b as any).content); continue; }
+            if (Array.isArray((b as any).content)) { walkBlocks((b as any).content); }
           }
-          // OpenAI-style
-          const text = resp?.choices?.[0]?.message?.content;
-          if (typeof text === 'string') return text;
+        };
+        try {
+          if (resp && typeof resp.output_text === 'string') push(resp.output_text);
+          if (resp && Array.isArray(resp.output)) walkBlocks(resp.output);
+          if (resp && Array.isArray(resp.content)) walkBlocks(resp.content);
+          const chat = resp?.choices?.[0]?.message?.content; if (typeof chat === 'string') push(chat);
         } catch { /* ignore */ }
-        return '';
+        return texts.join(' ');
       };
 
       // Use final response text if available; fallback to initial
@@ -606,137 +562,18 @@ export class ResponsesHandler extends BaseHandler {
       const now = () => Math.floor(Date.now() / 1000);
       // Text strict Azure mode removed per rollback request; keep default text path
 
-      // response.created (echo tool definitions to client via metadata)
-      try {
-        const createdPayload: Record<string, unknown> = {
-          type: 'response.created',
-          response: { ...baseResp, created_at: now(), status: 'in_progress' },
-        };
-        if (typeof reqInstructions === 'string' && reqInstructions.trim()) {
-          (createdPayload as any).instructions = reqInstructions;
-        }
-        if (typeof reqTools !== 'undefined' || typeof reqToolChoice !== 'undefined' || typeof reqParallel !== 'undefined') {
-          const meta: Record<string, unknown> = {};
-          if (typeof reqTools !== 'undefined') {
-            meta.tools = reqTools;
-            try {
-              const crypto = await import('crypto');
-              const str = JSON.stringify(reqTools);
-              const hash = crypto.createHash('sha256').update(str).digest('hex');
-              (meta as any).tools_hash = hash;
-              if (Array.isArray(reqTools)) (meta as any).tools_count = (reqTools as any[]).length;
-            } catch { /* ignore */ }
-          }
-          if (typeof reqToolChoice !== 'undefined') meta.tool_choice = reqToolChoice;
-          if (typeof reqParallel !== 'undefined') meta.parallel_tool_calls = reqParallel;
-          (createdPayload as any).metadata = meta;
-        }
-        await writeEvt('response.created', createdPayload);
-      } catch { /* ignore */ }
-
-      // response.in_progress
-      try {
-        const inprog: Record<string, unknown> = { type: 'response.in_progress', response: { ...baseResp, created_at: now(), status: 'in_progress' } };
-        if (typeof reqInstructions === 'string' && reqInstructions.trim()) { (inprog as any).instructions = reqInstructions; }
-        await writeEvt('response.in_progress', inprog);
-      } catch { /* ignore */ }
+      // response.created / in_progress (minimal OpenAI Responses)
+      await writeEvt('response.created', { type: 'response.created', response: { id: baseResp.id, model: baseResp.model } });
+      await writeEvt('response.in_progress', { type: 'response.in_progress', response: { id: baseResp.id, model: baseResp.model } });
 
       // Emit tool_call events when present in pipeline response (prefer initial turn)
       try {
-        let nextOutputIndex = 1; // 0 is reserved for assistant message item below
+        // Remove Azure output_item/content_part & function_call_arguments streaming
 
-        const addFunctionCallItem = async (id: string, name?: string) => {
-          const output_index = nextOutputIndex++;
-          await writeEvt('response.output_item.added', {
-            type: 'response.output_item.added',
-            output_index,
-            item: { id, type: 'function_call', ...(name ? { name } : {}) }
-          } as Record<string, unknown>);
-          await writeEvt('response.content_part.added', {
-            type: 'response.content_part.added',
-            item_id: id,
-            output_index,
-            content_index: 0,
-            part: { type: 'input_json', partial_json: '' }
-          } as Record<string, unknown>);
-          return output_index;
-        };
+        const emitToolCallsFromResponsesOutput = async (_resp: any) => { /* no-op */ };
+        const emitToolCallsFromOpenAI = async (_resp: any) => { /* no-op */ };
 
-        const emitToolCallsFromResponsesOutput = async (resp: any) => {
-          const out = Array.isArray(resp?.output) ? resp.output : [];
-          for (const it of out) {
-            if (!it || typeof it !== 'object') continue;
-            // OpenAI Responses: { type: 'tool_call', tool_name|name, arguments }
-            if (it.type === 'tool_call') {
-              const id = it.id || `call_${Math.random().toString(36).slice(2)}`;
-              const name = it.tool_name || it.name || 'tool';
-              const argsVal = it.arguments ?? {};
-              const args = typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal);
-              const outIndex = await addFunctionCallItem(id, name);
-              // chunk arguments
-              const s = String(args);
-              const step = 128; const parts: string[] = [];
-              for (let i = 0; i < s.length; i += step) parts.push(s.slice(i, i + step));
-              for (const part of parts) {
-                const delta = { type: 'response.function_call_arguments.delta', id, delta: part } as Record<string, unknown>;
-                await writeEvt('response.function_call_arguments.delta', delta);
-              }
-              const completed = { type: 'response.function_call_arguments.done', id } as Record<string, unknown>;
-              await writeEvt('response.function_call_arguments.done', completed);
-              await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: outIndex, item: { id, type: 'function_call' } } as Record<string, unknown>);
-            }
-          }
-        };
-        const emitToolCallsFromOpenAI = async (resp: any) => {
-          const toolCalls = resp?.choices?.[0]?.message?.tool_calls;
-          if (!Array.isArray(toolCalls)) return;
-          for (const tc of toolCalls) {
-            const id = tc?.id || `call_${Math.random().toString(36).slice(2)}`;
-            const name = tc?.function?.name || 'tool';
-            const args = typeof tc?.function?.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc?.function?.arguments || {});
-            const outIndex = await addFunctionCallItem(id, name);
-
-
-            // Chunk arguments into smaller deltas
-            const chunks: string[] = [];
-            const s = String(args);
-            const step = 128;
-            for (let i = 0; i < s.length; i += step) chunks.push(s.slice(i, i + step));
-            for (const part of chunks) {
-              const delta = { type: 'response.function_call_arguments.delta', id, delta: part } as Record<string, unknown>;
-              await writeEvt('response.function_call_arguments.delta', delta);
-            }
-            const completed = { type: 'response.function_call_arguments.done', id } as Record<string, unknown>;
-            await writeEvt('response.function_call_arguments.done', completed);
-            await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: outIndex, item: { id, type: 'function_call' } } as Record<string, unknown>);
-          }
-        };
-
-        const emitToolCallsFromAnthropic = async (resp: any) => {
-          const content = Array.isArray(resp?.content) ? resp.content : [];
-          for (const b of content) {
-            if (!(b && typeof b === 'object')) continue;
-            if (b.type === 'tool_use') {
-              const id = b.id || `call_${Math.random().toString(36).slice(2)}`;
-              const name = b.name || 'tool';
-              const argsVal = b.input ?? {};
-              const args = typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal);
-              const outIndex = await addFunctionCallItem(id, name);
-
-              // chunk input
-              const s = String(args);
-              const step = 128; const parts: string[] = [];
-              for (let i = 0; i < s.length; i += step) parts.push(s.slice(i, i + step));
-              for (const part of parts) {
-                const delta = { type: 'response.function_call_arguments.delta', id, delta: part } as Record<string, unknown>;
-                await writeEvt('response.function_call_arguments.delta', delta);
-              }
-              const completed = { type: 'response.function_call_arguments.done', id } as Record<string, unknown>;
-              await writeEvt('response.function_call_arguments.done', completed);
-              await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: outIndex, item: { id, type: 'function_call' } } as Record<string, unknown>);
-            }
-          }
-        };
+        const emitToolCallsFromAnthropic = async (_resp: any) => { /* no-op */ };
 
         // Prefer OpenAI-shaped tool_calls; else infer from Anthropic blocks
         const toolSource = (response && typeof response === 'object' && (response as any).__initial)
@@ -781,7 +618,7 @@ export class ResponsesHandler extends BaseHandler {
           if (toolCallsList.length > 0) {
             await writeEvt('response.required_action', {
               type: 'response.required_action',
-              response: { ...baseResp, created_at: now(), status: 'in_progress' },
+              response: { id: baseResp.id, model: baseResp.model },
               required_action: {
                 type: 'submit_tool_outputs',
                 submit_tool_outputs: { tool_calls: toolCallsList }
@@ -789,53 +626,18 @@ export class ResponsesHandler extends BaseHandler {
             } as Record<string, unknown>);
           }
         } catch { /* ignore */ }
-        // Emit tool_result.* for executed tools when available (from server-side tool follow-up)
-        try {
-          const executed = Array.isArray((response as any)?.__tools) ? (response as any).__tools as Array<{ id: string; content: string; error?: string }> : [];
-          // Represent tool results as output items
-          let baseIdx = 1;
-          try {
-            const tc1 = toolSource?.choices?.[0]?.message?.tool_calls;
-            const tc2 = Array.isArray(toolSource?.output) ? toolSource.output.filter((x: any) => x?.type === 'tool_call') : [];
-            const tc3 = Array.isArray(toolSource?.content) ? toolSource.content.filter((x: any) => x?.type === 'tool_use') : [];
-            baseIdx = 1 + ((Array.isArray(tc1) ? tc1.length : 0) + (Array.isArray(tc2) ? tc2.length : 0) + (Array.isArray(tc3) ? tc3.length : 0));
-          } catch { baseIdx = 1; }
-          for (let i = 0; i < executed.length; i++) {
-            const r = executed[i];
-            const id = r.id || `res_${Math.random().toString(36).slice(2)}`;
-            const output_index = baseIdx + i;
-            await writeEvt('response.output_item.added', { type: 'response.output_item.added', output_index, item: { id, type: 'tool_result' } });
-            await writeEvt('response.content_part.added', { type: 'response.content_part.added', item_id: id, output_index, content_index: 0, part: { type: 'output_text', text: '' } });
-            const s = String(r.content || '');
-            const step = 128; const parts: string[] = [];
-            for (let j = 0; j < s.length; j += step) parts.push(s.slice(j, j + step));
-            for (const part of parts) {
-              await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', item_id: id, output_index, content_index: 0, delta: part });
-            }
-            await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index, item: { id, type: 'tool_result' } });
-          }
-        } catch { /* ignore */ }
+        // Do not emit server-side tool_result streaming; client manages tools
       } catch { /* ignore */ }
-      // Assistant message item lifecycle + deltas
-      const msgId = `msg_${requestId}`;
+      // Assistant text deltas (no output_item/content_part)
       const hadToolFirstTurn = (initialResp?.choices?.[0]?.message?.tool_calls?.length || 0) > 0
         || (Array.isArray(initialResp?.output) && initialResp.output.some((x: any) => x?.type === 'tool_call'))
         || (Array.isArray(initialResp?.content) && initialResp.content.some((x: any) => x?.type === 'tool_use'));
       if (words.length > 0 || !hadToolFirstTurn) {
-        await writeEvt('response.output_item.added', { type: 'response.output_item.added', output_index: 0, item: { id: msgId, type: 'message', status: 'in_progress', role: 'assistant' } });
-        await writeEvt('response.content_part.added', { type: 'response.content_part.added', item_id: msgId, output_index: 0, content_index: 0, part: { type: 'output_text', text: '' } });
         for (const w of words) {
-          await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', item_id: msgId, output_index: 0, content_index: 0, delta: w + ' ', logprobs: [] });
-          await new Promise(r => setTimeout(r, 30));
+          await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', delta: w + ' ', response: baseResp });
+          await new Promise(r => setTimeout(r, 20));
         }
-        try { await writeEvt('response.output_text.done', { type: 'response.output_text.done', response: baseResp, item_id: msgId, output_index: 0, content_index: 0, text: (textOut || ''), logprobs: [] }); } catch { /* ignore */ }
-
-
-        try {
-          const item = { id: msgId, type: 'message', status: 'completed', content: [ { type: 'output_text', annotations: [], logprobs: [], text: (textOut || '') } ], role: 'assistant' };
-          await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: 0, item });
-        } catch { /* ignore */ }
-        try { await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: 0, item: { id: msgId, type: 'message', status: 'completed' } }); } catch { /* ignore */ }
+        await writeEvt('response.output_text.done', { type: 'response.output_text.done', response: baseResp });
       }
 
       // response.completed (attach total output_text when available)
@@ -858,27 +660,7 @@ export class ResponsesHandler extends BaseHandler {
       if (typeof reqInstructions === 'string' && reqInstructions.trim()) { (completed as any).instructions = reqInstructions; }
       await writeEvt('response.completed', completed);
       try { await writeEvt('response.done', { type: 'response.done' }); } catch { /* ignore */ }
-      try {
-        // Write audit summary
-        const missing: string[] = []; (audit.toolCreated as Set<string>).forEach((id: string) => { if (!(audit.toolCompleted as Set<string>).has(id)) missing.push(id); });
-        const hadToolCalls = (audit.toolCreated as Set<string>).size > 0;
-        const summary = {
-          requestId,
-          total_events: audit.total,
-          monotonic_sequence: audit.monotonic,
-          tool_calls: {
-            created: (audit.toolCreated as Set<string>).size,
-            completed: (audit.toolCompleted as Set<string>).size,
-            missing_completed: missing,
-          },
-          text: { deltas: audit.textDeltas },
-          items: { output_item_added: audit.outputItems, content_part_added: audit.contentParts },
-          ended: { completed: audit.completed, done: audit.done },
-          first_turn_only: hadToolCalls && audit.textDeltas === 0,
-          timestamp: Date.now(),
-        };
-        await (await import('fs/promises')).writeFile(sseAuditFile, JSON.stringify(summary, null, 2), 'utf-8');
-      } catch { /* ignore */ }
+      // no SSE audit summary when Azure artifacts removed
       try { res.end(); } catch { /* ignore */ }
       if (heartbeatTimer) {
         clearInterval(heartbeatTimer);
@@ -888,7 +670,7 @@ export class ResponsesHandler extends BaseHandler {
       try {
         const e = { type: 'response.error', error: { message: (err as Error).message || 'stream error', type: 'streaming_error', code: 'STREAM_FAILED' }, requestId } as Record<string, unknown>;
         res.write(`event: response.error\n`);
-        res.write(`data: ${JSON.stringify({ ...e, sequence_number: 0 })}\n\n`);
+        res.write(`data: ${JSON.stringify(e)}\n\n`);
       } catch { /* ignore */ }
       try { res.end(); } catch { /* ignore */ }
       if (heartbeatTimer) {
