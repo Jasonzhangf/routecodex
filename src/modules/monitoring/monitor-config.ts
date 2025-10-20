@@ -10,6 +10,7 @@ export interface TransparentUpstreamConfig {
   defaultUpstream?: 'openai' | 'anthropic';
   endpoints?: { openai?: string; anthropic?: string };
   auth?: { openai?: string; anthropic?: string };
+  authorization?: string;
   headerAllowlist?: string[];
   timeoutMs?: number;
   preferClientHeaders?: boolean;
@@ -78,17 +79,18 @@ export class MonitorConfigUtil {
     const c = cfg || null;
     const envOpenAI = process.env.ROUTECODEX_TRANSPARENT_OPENAI || process.env.ROUTECODEX_MONITOR_UPSTREAM_OPENAI;
     const envAnthropic = process.env.ROUTECODEX_TRANSPARENT_ANTHROPIC || process.env.ROUTECODEX_MONITOR_UPSTREAM_ANTHROPIC;
-    const base: TransparentUpstreamConfig = {
-      enabled: this.isTransparentEnabled(c),
-      defaultUpstream: (c?.transparent?.defaultUpstream as any) || undefined,
-      endpoints: {
-        openai: c?.transparent?.endpoints?.openai || envOpenAI || undefined,
-        anthropic: c?.transparent?.endpoints?.anthropic || envAnthropic || undefined,
-      },
-      auth: {
-        openai: parseMaybeEnv(c?.transparent?.auth?.openai),
-        anthropic: parseMaybeEnv(c?.transparent?.auth?.anthropic),
-      },
+  const base: TransparentUpstreamConfig = {
+    enabled: this.isTransparentEnabled(c),
+    defaultUpstream: (c?.transparent?.defaultUpstream as any) || undefined,
+    endpoints: {
+      openai: c?.transparent?.endpoints?.openai || envOpenAI || undefined,
+      anthropic: c?.transparent?.endpoints?.anthropic || envAnthropic || undefined,
+    },
+    auth: {
+      openai: parseMaybeEnv(c?.transparent?.auth?.openai),
+      anthropic: parseMaybeEnv(c?.transparent?.auth?.anthropic),
+    },
+    authorization: parseMaybeEnv(c?.transparent?.authorization),
       headerAllowlist: c?.transparent?.headerAllowlist || ['accept','content-type','anthropic-version','x-*'],
       timeoutMs: typeof c?.transparent?.timeoutMs === 'number' ? c!.transparent!.timeoutMs : 30000,
       preferClientHeaders: c?.transparent?.preferClientHeaders !== false,

@@ -292,6 +292,7 @@ export interface TransparentConfig {
   defaultUpstream?: 'openai' | 'anthropic';
   endpoints?: { openai?: string; anthropic?: string };
   auth?: { openai?: string; anthropic?: string };
+  authorization?: string;
   headerAllowlist?: string[];
   timeoutMs?: number;
   preferClientHeaders?: boolean;
@@ -355,8 +356,12 @@ ProtocolHandler.prototype.tryTransparentOpenAI = async function tryTransparentOp
       if (!s) return s;
       return /^bearer\s+/i.test(s) ? s : `Bearer ${s}`;
     };
-    const finalAuth = overrideAuth || envAuth || incomingAuth || undefined;
-    if (finalAuth) { headers['authorization'] = normalizeBearerAuth(finalAuth); }
+    const finalAuth = overrideAuth || envAuth || incomingAuth || tcfg.authorization || undefined;
+    if (finalAuth) {
+      const bearer = normalizeBearerAuth(finalAuth);
+      headers['authorization'] = bearer;
+      headers['Authorization'] = bearer;
+    }
     // Attach extra headers (do not override Authorization)
     if (tcfg.extraHeaders) {
       for (const [ek, ev] of Object.entries(tcfg.extraHeaders)) {
@@ -378,15 +383,23 @@ ProtocolHandler.prototype.tryTransparentOpenAI = async function tryTransparentOp
     const working = JSON.parse(JSON.stringify(rawData));
     try {
       const mm = tcfg.modelMapping || {};
-      const inputModel = String(working.model || '').trim();
+      const normalizeModel = (model: string): string => {
+        const trimmed = String(model || '').trim();
+        if (!trimmed) return trimmed;
+        if (/gpt-5(?:-codex)?$/i.test(trimmed)) return 'gpt-5';
+        if (/glm-4\.6/i.test(trimmed)) return 'gpt-5';
+        if (/-codex$/i.test(trimmed)) return trimmed.replace(/-codex$/i, '');
+        return trimmed;
+      };
+      const inputModel = normalizeModel(working.model ?? '');
       let mapped = inputModel && mm[inputModel];
       if (!mapped && mm['*']) mapped = mm['*'];
       if (!mapped && mm['default']) mapped = mm['default'];
       if (!mapped && preferWire === 'responses') {
-        // Fallback per environment requirement: upstream only supports gpt-5-codex
-        mapped = 'gpt-5-codex';
+        mapped = 'gpt-5';
       }
-      if (mapped) working.model = mapped;
+      if (mapped) working.model = normalizeModel(mapped);
+      else working.model = inputModel || working.model;
     } catch { /* ignore mapping errors */ }
 
     const isStream = !!working?.stream;
@@ -476,6 +489,10 @@ export interface ProtocolHandler {
 }
 
 ProtocolHandler.prototype.fireMonitorAB = async function fireMonitorAB(this: ProtocolHandler, req: Request, wire: 'chat' | 'responses'): Promise<void> {
+  const home = (process.env.HOME || process.env.USERPROFILE || '') as string;
+  const baseDir = `${home}/.routecodex/codex-samples/monitor-ab`;
+  let captureDir: string | null = null;
+  let captureRid: string | null = null;
   try {
     const monitorCfg = await MonitorConfigUtil.load();
     const mode = (monitorCfg as any)?.mode;
@@ -492,7 +509,7 @@ ProtocolHandler.prototype.fireMonitorAB = async function fireMonitorAB(this: Pro
 
     const headers: Record<string,string> = {};
     // Authorization: prefer explicit embedded token
-    const auth = (tcfg as any)?.auth?.openai || (tcfg as any)?.authorization || '';
+    const auth = tcfg.authorization || tcfg.auth?.openai || '';
     if (auth) { headers['Authorization'] = /^Bearer\s+/i.test(String(auth)) ? String(auth) : `Bearer ${String(auth)}`; }
     // Responses Beta header if needed
     if (wire === 'responses') { headers['OpenAI-Beta'] = 'responses-2024-12-17'; }
@@ -501,39 +518,104 @@ ProtocolHandler.prototype.fireMonitorAB = async function fireMonitorAB(this: Pro
 
     // Clone original body before any handler mutation
     const rawBody: any = (req as any).body ? JSON.parse(JSON.stringify((req as any).body)) : {};
+    const normalizeModel = (model: string): string => {
+      const val = String(model || '').trim();
+      if (!val) return val;
+      if (/gpt-5(?:-codex)?$/i.test(val)) return 'gpt-5';
+      if (/glm-4\.6/i.test(val)) return 'gpt-5';
+      if (/-codex$/i.test(val)) return val.replace(/-codex$/i, '');
+      return val;
+    };
     // Apply model mapping only to upstream clone (does not affect local)
     try {
       if (rawBody && typeof rawBody === 'object' && typeof rawBody.model === 'string') {
         const mm = tcfg.modelMapping || {};
-        const src = rawBody.model;
-        const mapped = mm[src] || mm['*'] || mm['default'] || null;
-        if (mapped) rawBody.model = mapped;
+        const src = normalizeModel(rawBody.model);
+        let mapped = mm[src] || mm['*'] || mm['default'] || null;
+        if (!mapped) mapped = src;
+        rawBody.model = normalizeModel(mapped);
       }
     } catch { /* ignore */ }
 
     // Determine capture dir and files
-    const rid = `ab_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
-    const home = (process.env.HOME || process.env.USERPROFILE || '') as string;
-    const dir = `${home}/.routecodex/codex-samples/monitor-ab/${rid}`;
-    const { mkdir, writeFile } = await import('fs/promises');
-    await mkdir(dir, { recursive: true });
-    await writeFile(`${dir}/request.json`, JSON.stringify({ url, headers, body: rawBody, wire }, null, 2), 'utf-8');
+    const startedAt = new Date();
+    const fsPromises = await import('fs/promises');
+    const { mkdir, writeFile } = fsPromises;
+    await mkdir(baseDir, { recursive: true });
+    captureRid = `ab_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+    captureDir = `${baseDir}/${captureRid}`;
+    await mkdir(captureDir, { recursive: true });
+    const requestPayload = {
+      url,
+      wire,
+      requested_at: startedAt.toISOString(),
+      headers,
+      body: rawBody
+    };
+    await writeFile(`${captureDir}/request.json`, JSON.stringify(requestPayload, null, 2), 'utf-8');
+
+    const normalizeHeaders = (h: Record<string, unknown>): Record<string, string> => {
+      const out: Record<string, string> = {};
+      for (const [hk, hv] of Object.entries(h || {})) {
+        if (hv === undefined || hv === null) continue;
+        out[hk] = Array.isArray(hv) ? hv.map(v => String(v)).join(', ') : String(hv);
+      }
+      return out;
+    };
 
     const isStream = !!rawBody?.stream;
     if (isStream) {
       const resp = await axios.post(url, rawBody, { headers: { ...headers, Accept: 'text/event-stream', 'Content-Type': 'application/json' }, responseType: 'stream', validateStatus: () => true, timeout: tcfg.timeoutMs || 30000 });
+      const responseMeta = {
+        status: resp.status,
+        statusText: resp.statusText,
+        headers: normalizeHeaders(resp.headers || {}),
+        received_at: new Date().toISOString()
+      };
+      await writeFile(`${captureDir}/response-meta.json`, JSON.stringify(responseMeta, null, 2), 'utf-8');
       await new Promise<void>((resolve) => {
         const fs = require('fs');
-        const w = fs.createWriteStream(`${dir}/upstream.sse`, { encoding: 'utf-8' });
-        resp.data.on('error', () => { try { w.end(); } catch { /* ignore */ } resolve(); });
+        const w = fs.createWriteStream(`${captureDir}/upstream.sse`, { encoding: 'utf-8' });
+        resp.data.on('error', (error: unknown) => {
+          try { w.end(); } catch { /* ignore */ }
+          const errPayload = { message: 'stream error', error: error instanceof Error ? error.message : error };
+          if (captureDir) {
+            writeFile(`${captureDir}/response-error.json`, JSON.stringify(errPayload, null, 2), 'utf-8').catch(() => { /* ignore */ });
+          }
+          resolve();
+        });
         resp.data.on('end', () => { try { w.end(); } catch { /* ignore */ } resolve(); });
         resp.data.pipe(w);
       });
     } else {
       const resp = await axios.post(url, rawBody, { headers: { ...headers, Accept: 'application/json', 'Content-Type': 'application/json' }, validateStatus: () => true, timeout: tcfg.timeoutMs || 30000 });
-      await writeFile(`${dir}/upstream.json`, typeof resp.data === 'string' ? resp.data : JSON.stringify(resp.data, null, 2), 'utf-8');
+      const responseMeta = {
+        status: resp.status,
+        statusText: resp.statusText,
+        headers: normalizeHeaders(resp.headers || {}),
+        received_at: new Date().toISOString()
+      };
+      await writeFile(`${captureDir}/response-meta.json`, JSON.stringify(responseMeta, null, 2), 'utf-8');
+      await writeFile(`${captureDir}/upstream.json`, typeof resp.data === 'string' ? resp.data : JSON.stringify(resp.data, null, 2), 'utf-8');
     }
-  } catch {
+  } catch (err) {
+    try {
+      const fsPromises = await import('fs/promises');
+      const { mkdir, writeFile } = fsPromises;
+      await mkdir(baseDir, { recursive: true });
+      let dir = captureDir;
+      if (!dir) {
+        captureRid = `ab_err_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+        dir = `${baseDir}/${captureRid}`;
+        await mkdir(dir, { recursive: true });
+      }
+      const errorPayload = {
+        message: 'monitor AB capture failed',
+        rid: captureRid,
+        error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : err
+      };
+      await writeFile(`${dir}/error.json`, JSON.stringify(errorPayload, null, 2), 'utf-8');
+    } catch { /* ignore secondary errors */ }
     // swallow errors (AB capture must be non-intrusive)
   }
 };
@@ -568,9 +650,20 @@ ProtocolHandler.prototype.tryBridgeResponsesToChat = async function tryBridgeRes
     // Apply model mapping only to upstream
     try {
       const mm = tcfg.modelMapping || {};
-      const src = chatReq?.model;
-      const mapped = (typeof src === 'string') ? (mm[src] || mm['*'] || mm['default'] || null) : null;
-      if (mapped) chatReq.model = mapped;
+      const normalizeModel = (model: string): string => {
+        const val = String(model || '').trim();
+        if (!val) return val;
+        if (/gpt-5(?:-codex)?$/i.test(val)) return 'gpt-5-high';
+        if (/glm-4\.6/i.test(val)) return 'gpt-5-high';
+        if (/-codex$/i.test(val)) return val.replace(/-codex$/i, '');
+        return val;
+      };
+      const src = normalizeModel(chatReq?.model ?? '');
+      let mapped = src && mm[src];
+      if (!mapped && mm['*']) mapped = mm['*'];
+      if (!mapped && mm['default']) mapped = mm['default'];
+      if (!mapped) mapped = src;
+      chatReq.model = normalizeModel(mapped);
     } catch { /* ignore */ }
 
     // Force non-stream upstream for simpler conversion back
