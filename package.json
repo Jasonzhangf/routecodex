@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.52.38",
+  "version": "0.52.53",
   "description": "Multi-provider OpenAI proxy server with native dry-run capabilities",
   "type": "module",
   "main": "dist/index.js",
@@ -22,6 +22,9 @@
     "rcc",
     "README.md",
     "LICENSE"
+  ],
+  "bundledDependencies": [
+    "routecodex-config-compat"
   ],
   "engines": {
     "node": ">=20 <21"
@@ -112,7 +115,7 @@
     "rcc-basemodule": "^0.2.7",
     "rcc-debugcenter": "^0.1.6",
     "rcc-errorhandling": "^1.0.10",
-    "routecodex-config-compat": "^0.1.0",
+    "routecodex-config-compat": "^0.1.4",
     "routecodex-config-engine": "^0.1.0",
     "socket.io": "^4.8.1"
   },

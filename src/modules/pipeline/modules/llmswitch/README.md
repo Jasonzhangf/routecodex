@@ -37,6 +37,7 @@ LLMSwitch 模块是流水线架构的第 1 层（协议转换层），负责处�
   - **流式事件**: 支持 Responses API 的所有 SSE 事件
   - **元数据保持**: 保留原始请求上下文和协议信息
   - **智能处理**: 自动处理 reasoning、function_call 等特殊内容
+  - **统一入口**: 在最新架构下，所有流水线实例都挂载 `llmswitch-conversion-router`，并依靠 `entryEndpoint` 自动匹配对应 codec（OpenAI / Anthropic / Responses），无需额外的手工配置。
 
 ### 🔄 统一协议转换器
 - **实现文件**: `llmswitch-unified.ts`

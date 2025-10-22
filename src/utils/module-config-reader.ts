@@ -44,14 +44,19 @@ export class ModuleConfigReader {
       this.config = JSON.parse(configContent);
       return this.config;
     } catch (error) {
+      const msg = `Failed to load modules config from ${this.configPath}: ${error instanceof Error ? error.message : String(error)}`;
+
+      // 检查是否禁用了配置fallback
+      const disableFallback = String(process.env.ROUTECODEX_DISABLE_CONFIG_FALLBACK || '').trim() === '1';
       const strict = String(process.env.ROUTECODEX_STRICT_MODULES_CONFIG || '').trim() === '1' ||
         String(process.env.NODE_ENV || '').toLowerCase() === 'production';
-      const msg = `Failed to load modules config from ${this.configPath}: ${error instanceof Error ? error.message : String(error)}`;
-      if (strict) {
-        // In production/strict mode, do not silently fall back
-        throw new Error(`${msg}. Strict mode is enabled; aborting without default fallback.`);
+
+      if (strict || disableFallback) {
+        // 严格模式或禁用fallback时，直接抛出错误
+        throw new Error(`${msg}. Configuration fallback is disabled.`);
       }
-      console.warn(`${msg}. Using development fallback defaults (non-strict mode).`);
+
+      console.warn(`${msg}. Using development fallback defaults (non-strict mode). Consider setting ROUTECODEX_DISABLE_CONFIG_FALLBACK=1 to fail fast.`);
       // Return default configuration in non-strict/dev mode
       this.config = this.getDefaultConfig();
       return this.config;

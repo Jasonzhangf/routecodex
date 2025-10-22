@@ -9,9 +9,45 @@ export class AnthropicOpenAIConversionCodec implements ConversionCodec {
   private initialized = false;
 
   constructor(private readonly dependencies: ModuleDependencies) {
+    // 传递成熟的配置给 AnthropicOpenAIConverter，确保与历史版本行为完全一致
+    // 创建完整的 dependencies 对象，确保包含所有必需的方法
+    const fullDependencies = {
+      ...dependencies,
+      logger: {
+        ...dependencies.logger,
+        // 确保 logModule 方法存在，这是 AnthropicOpenAIConverter 需要的
+        logModule: (moduleId: string, action: string, data?: any) => {
+          if (dependencies.logger && typeof dependencies.logger.logModule === 'function') {
+            dependencies.logger.logModule(moduleId, action, data);
+          }
+        },
+        // 保留其他可能需要的日志方法
+        logTransformation: (id: string, type: string, input: any, output: any) => {
+          if (dependencies.logger && typeof dependencies.logger.logTransformation === 'function') {
+            dependencies.logger.logTransformation(id, type, input, output);
+          }
+        }
+      }
+    };
+
     this.converter = new AnthropicOpenAIConverter(
-      { type: 'llmswitch-anthropic-openai', config: {} },
-      dependencies
+      {
+        type: 'llmswitch-anthropic-openai',
+        config: {
+          enableStreaming: true,        // 启用流式转换
+          enableTools: true,           // 启用工具转换
+          trustSchema: true,           // 信任提供的 schema，与历史版本一致
+          conversionMappings: {       // 保留原有的转换映射配置
+            request: {
+              mappings: []
+            },
+            response: {
+              mappings: []
+            }
+          }
+        }
+      },
+      fullDependencies
     );
   }
 

@@ -15,12 +15,29 @@ import { MonitorConfigUtil } from './modules/monitoring/monitor-config.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 
 // Polyfill CommonJS require for ESM runtime to satisfy dependencies that call require()
+let moduleRequire: ((moduleId: string) => unknown) | null = null;
 try {
-  const req = createRequire(import.meta.url);
+  moduleRequire = createRequire(import.meta.url);
   if (!(globalThis as any).require) {
-    (globalThis as any).require = req;
+    (globalThis as any).require = moduleRequire;
   }
-} catch { /* ignore polyfill errors */ }
+} catch {
+  moduleRequire = null;
+}
+
+if (!process.env.ROUTECODEX_VERSION) {
+  let resolvedVersion = 'dev';
+  try {
+    const pkg = moduleRequire ? (moduleRequire('../package.json') as { version?: unknown }) : undefined;
+    const maybeVersion = pkg?.version;
+    if (typeof maybeVersion === 'string') {
+      resolvedVersion = maybeVersion;
+    }
+  } catch {
+    resolvedVersion = 'dev';
+  }
+  process.env.ROUTECODEX_VERSION = resolvedVersion;
+}
 
 /**
  * Default modules configuration path

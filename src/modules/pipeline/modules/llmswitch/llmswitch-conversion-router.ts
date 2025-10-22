@@ -4,7 +4,7 @@ import { SwitchOrchestrator } from './conversion/switch-orchestrator.js';
 import type { ConversionContext } from './conversion/types.js';
 
 export interface ConversionRouterConfig {
-  profilesPath: string;
+  profilesPath?: string;
   defaultProfile?: string;
 }
 
@@ -18,12 +18,9 @@ export class ConversionRouterLLMSwitch implements LLMSwitchModule {
   private initialized = false;
 
   constructor(config: ModuleConfig, dependencies: ModuleDependencies) {
-    if (!config.config || !(config.config as ConversionRouterConfig).profilesPath) {
-      throw new Error('llmswitch-conversion-router requires config.profilesPath');
-    }
     this.id = `llmswitch-conversion-router-${Date.now()}`;
     this.config = config;
-    const routerConfig = config.config as ConversionRouterConfig;
+    const routerConfig = (config.config as ConversionRouterConfig) || {};
     this.orchestrator = new SwitchOrchestrator(dependencies, routerConfig);
   }
 

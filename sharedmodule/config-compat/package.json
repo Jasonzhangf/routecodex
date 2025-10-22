@@ -1,6 +1,6 @@
 {
   "name": "routecodex-config-compat",
-  "version": "0.1.1",
+  "version": "0.1.4",
   "description": "RouteCodex Configuration Compatibility Layer - Existing logic preservation and normalization",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

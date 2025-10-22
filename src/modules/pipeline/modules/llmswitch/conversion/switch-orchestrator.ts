@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import type { ModuleDependencies } from '../../../interfaces/pipeline-interfaces.js';
 import type { ConversionConfigFile, ConversionContext, ConversionProfile, ConversionResult } from './types.js';
 import { CodecRegistry } from './codec-registry.js';
@@ -7,13 +8,18 @@ import { getDefaultCodecFactories } from './codecs/index.js';
 import { SchemaValidator } from './schema-validator.js';
 
 interface SwitchOrchestratorOptions {
-  profilesPath: string;
+  profilesPath?: string;
   defaultProfile?: string;
 }
 
 interface RequestBinding {
   profileId: string;
 }
+
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const PACKAGE_ROOT = path.resolve(MODULE_DIR, '../../../../../..');
+const DEFAULT_PROFILES_RELATIVE = 'config/conversion/llmswitch-profiles.json';
+const DEFAULT_PROFILES_PATH = path.resolve(PACKAGE_ROOT, DEFAULT_PROFILES_RELATIVE);
 
 export class SwitchOrchestrator {
   private readonly dependencies: ModuleDependencies;
@@ -30,7 +36,7 @@ export class SwitchOrchestrator {
     this.dependencies = dependencies;
     this.options = options;
     this.codecRegistry = new CodecRegistry(dependencies);
-    this.schemaValidator = new SchemaValidator();
+    this.schemaValidator = new SchemaValidator(PACKAGE_ROOT);
 
     const factories = getDefaultCodecFactories();
     for (const [id, factory] of Object.entries(factories)) {
@@ -43,9 +49,7 @@ export class SwitchOrchestrator {
       return;
     }
 
-    const profilesPath = path.isAbsolute(this.options.profilesPath)
-      ? this.options.profilesPath
-      : path.resolve(process.cwd(), this.options.profilesPath);
+    const profilesPath = await this.resolveProfilesPath(this.options.profilesPath);
 
     const raw = await fs.readFile(profilesPath, 'utf-8');
     const parsed: ConversionConfigFile = JSON.parse(raw);
@@ -67,6 +71,24 @@ export class SwitchOrchestrator {
 
     this.defaultProfileId = this.options.defaultProfile ?? profileEntries[0]?.[0];
     this.initialized = true;
+  }
+
+  private async resolveProfilesPath(configuredPath?: string): Promise<string> {
+    const candidate = configuredPath
+      ? (path.isAbsolute(configuredPath)
+        ? configuredPath
+        : path.resolve(PACKAGE_ROOT, configuredPath))
+      : DEFAULT_PROFILES_PATH;
+
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch {
+      const message = configuredPath
+        ? `Unable to locate llmswitch profiles file at '${candidate}'.`
+        : `Unable to locate default llmswitch profiles file at '${candidate}'.`;
+      throw new Error(message);
+    }
   }
 
   async prepareIncoming(payload: any, context: ConversionContext): Promise<ConversionResult> {
@@ -98,13 +120,10 @@ export class SwitchOrchestrator {
       throw new Error(`Unable to resolve conversion profile for request ${requestId}`);
     }
 
-    if (profile.canonicalResponseSchema) {
-      await this.schemaValidator.validate(profile.canonicalResponseSchema, payload, `${profile.id}:canonical-response`);
-    }
-
     const codec = await this.codecRegistry.resolve(profile.codec);
     const converted = await codec.convertResponse(payload, profile, { ...context, requestId });
 
+    // Schema validation should happen AFTER conversion, not before
     if (profile.clientResponseSchema) {
       await this.schemaValidator.validate(profile.clientResponseSchema, converted, `${profile.id}:client-response`);
     }

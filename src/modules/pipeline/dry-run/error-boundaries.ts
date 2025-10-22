@@ -432,33 +432,12 @@ export class ErrorBoundaryManager {
   }
 
   /**
-   * 执行降级策略
+   * 执行降级策略 - 已移除占位符实现
+   * @deprecated 不再使用占位符fallback，直接抛出错误
    */
   private async executeFallback(error: SystemError, fallbackType: string): Promise<ErrorHandlerResult> {
-    try {
-      // 这里应该执行降级策略
-      // 由于这是一个通用的实现，我们返回成功结果
-      return {
-        success: true,
-        resolved: true,
-        action: `fallback-${fallbackType}`,
-        strategy: fallbackType === 'primary' ? RecoveryStrategy.FALLBACK_PRIMARY : RecoveryStrategy.FALLBACK_SECONDARY,
-        result: { fallback: true, type: fallbackType }
-      };
-    } catch (fallbackError) {
-      return {
-        success: false,
-        resolved: false,
-        action: `fallback-${fallbackType}-failed`,
-        error: {
-          ...error,
-          errorId: `fallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          message: `Fallback ${fallbackType} failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`,
-          timestamp: Date.now()
-        },
-        recommendations: [`Fallback ${fallbackType} strategy failed`]
-      };
-    }
+    // 移除占位符fallback实现，直接抛出错误以避免掩盖问题
+    throw new Error(`Fallback strategy '${fallbackType}' is not implemented. Error: ${error.message}`);
   }
 
   /**

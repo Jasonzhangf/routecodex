@@ -353,21 +353,22 @@ export class PipelineErrorIntegration {
   }
 
   /**
-   * Execute fallback strategy
+   * Execute fallback strategy - 已移除占位符实现
+   * @deprecated 不再使用占位符fallback，直接抛出错误
    */
   private async executeFallbackStrategy(error: PipelineError, context: ErrorContext): Promise<void> {
+    // 移除占位符fallback实现，记录错误并抛出异常
     await this.errorHandlingCenter.handleError({
-      type: 'fallback-executed',
+      type: 'fallback-attempted',
       timestamp: Date.now(),
       pipelineId: context.pipelineId,
       requestId: context.requestId,
       stage: context.stage,
       originalError: error.code,
-      fallbackAction: 'using_default_response'
+      message: 'Fallback strategy not implemented - failing fast'
     });
 
-    // Would implement actual fallback logic here
-    // For example: return cached response, use alternative provider, etc.
+    throw new Error(`Fallback strategy not implemented for error: ${error.message} at stage: ${context.stage}`);
   }
 
   /**

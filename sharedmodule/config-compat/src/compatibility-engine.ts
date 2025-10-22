@@ -375,6 +375,21 @@ export class CompatibilityEngine {
         );
       }
 
+      // Ensure required identifier fields exist for downstream consumers
+      if (!normalizedConfig.id) {
+        normalizedConfig.id = providerId;
+      }
+      if (typeof normalizedConfig.enabled !== 'boolean') {
+        normalizedConfig.enabled = true;
+      }
+
+      // Keep baseUrl/baseURL in sync to accommodate legacy readers
+      if (normalizedConfig.baseURL && !normalizedConfig.baseUrl) {
+        normalizedConfig.baseUrl = normalizedConfig.baseURL;
+      } else if (normalizedConfig.baseUrl && !normalizedConfig.baseURL) {
+        normalizedConfig.baseURL = normalizedConfig.baseUrl;
+      }
+
       // Normalize LLM switch configurations
       if (normalizedConfig.llmSwitch) {
         normalizedConfig.llmSwitch = this.normalizeProviderLLMSwitch(
@@ -575,20 +590,29 @@ export class CompatibilityEngine {
     const keyMappings = buildKeyMappings(providers);
 
     for (const [routeName, targets] of Object.entries(routing)) {
-      routeTargets[routeName] = [];
+      const expanded: any[] = [];
 
-      // Process targets in batch for better performance
-      const processedTargets = targets.map((target: string) => {
+      for (const target of targets) {
         try {
-          return this.processRouteTarget(target, providers, keyMappings);
+          const processed = this.processRouteTarget(target, providers, keyMappings);
+          if (!processed) {
+            continue;
+          }
+          if (Array.isArray(processed)) {
+            for (const entry of processed) {
+              if (entry) {
+                expanded.push(entry);
+              }
+            }
+          } else {
+            expanded.push(processed);
+          }
         } catch (error) {
           console.warn(`Skipping invalid route target '${target}':`, error);
-          return null;
         }
-      }).filter(Boolean); // Remove null entries
+      }
 
-      // Add all processed targets
-      routeTargets[routeName].push(...processedTargets);
+      routeTargets[routeName] = expanded;
     }
 
     return routeTargets;
@@ -616,6 +640,21 @@ export class CompatibilityEngine {
       return { type: 'field-mapping', config: {} };
     };
 
+    const pickLlmswitchConfig = (llmSwitchType: string, existing?: Record<string, unknown>): Record<string, unknown> => {
+      if (existing && Object.keys(existing).length > 0) {
+        return existing;
+      }
+      switch (llmSwitchType) {
+        case 'llmswitch-conversion-router':
+          return {
+            profilesPath: 'config/conversion/llmswitch-profiles.json',
+            defaultProfile: 'openai-chat'
+          };
+        default:
+          return {};
+      }
+    };
+
     // Build minimal pipelines per provider/model/key alias
     for (const [providerId, pCfg] of Object.entries(providers)) {
       const normalizedType = String(pCfg?.normalizedType || pCfg?.type || providerId);
@@ -628,6 +667,8 @@ export class CompatibilityEngine {
         const maxTokens = Number((mCfg as any)?.maxTokens) || undefined;
         for (const keyId of aliases) {
           const cfgKey = `${providerId}.${modelId}.${keyId}`;
+          const inputProtocol = vr?.inputProtocol || 'openai';
+          const llmSwitchType = getDefaultLLMSwitchType(inputProtocol);
           pipelines[cfgKey] = {
             provider: {
               type: normalizedType,
@@ -644,11 +685,11 @@ export class CompatibilityEngine {
               keyType: 'apiKey',
             },
             protocols: {
-              input: (vr?.inputProtocol || 'openai'),
+              input: inputProtocol,
               output: 'openai',
             },
             compatibility: pickCompatibility(normalizedType),
-            llmSwitch: { type: getDefaultLLMSwitchType(vr?.inputProtocol || 'openai'), config: {} },
+            llmSwitch: { type: llmSwitchType, config: pickLlmswitchConfig(llmSwitchType) },
             workflow: { type: 'streaming-control', config: {} },
           } as any;
         }
@@ -901,6 +942,24 @@ export class CompatibilityEngine {
 
     console.log('- After: config.providers keys:', Object.keys(preprocessed.providers || {}));
     console.log('- After: config.virtualrouter.providers keys:', Object.keys(preprocessed.virtualrouter?.providers || {}));
+
+    // Ensure minimal required fields exist for config-engine validation
+    if (preprocessed.virtualrouter?.providers) {
+      for (const [providerId, providerConfig] of Object.entries(preprocessed.virtualrouter.providers)) {
+        const cfg = providerConfig as Record<string, unknown>;
+        if (!cfg.id) {
+          cfg.id = providerId;
+        }
+        if (typeof cfg.enabled !== 'boolean') {
+          cfg.enabled = true;
+        }
+        if (cfg.baseURL && !cfg.baseUrl) {
+          cfg.baseUrl = cfg.baseURL;
+        } else if (cfg.baseUrl && !cfg.baseURL) {
+          cfg.baseURL = cfg.baseUrl;
+        }
+      }
+    }
 
     return preprocessed;
   }
