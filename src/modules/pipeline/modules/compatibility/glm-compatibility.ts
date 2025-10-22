@@ -89,8 +89,14 @@ export class GLMCompatibility implements CompatibilityModule {
 
   async processOutgoing(response: any): Promise<unknown> {
     if (!this.isInitialized) { throw new Error('GLM Compatibility module is not initialized'); }
-    // Revert to passthrough behavior as requested
-    return response;
+    // Normalize GLM responses to OpenAI Chat Completions shape when needed
+    const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
+    const payload = isDto ? (response as any).data : response;
+    const out = this.normalizeResponse(payload);
+    if (isDto) {
+      return { ...(response as any), data: out };
+    }
+    return out;
   }
 
   async cleanup(): Promise<void> {
@@ -217,6 +223,54 @@ export class GLMCompatibility implements CompatibilityModule {
         delete (payload as UnknownObject)[key];
       }
     }
+  }
+
+  private normalizeResponse(resp: any): any {
+    if (!resp || typeof resp !== 'object') return resp;
+    // Already OpenAI chat completion
+    if ('choices' in resp) {
+      const r = { ...resp } as Record<string, unknown>;
+      if (!('object' in r)) {
+        r.object = 'chat.completion';
+      }
+      return r;
+    }
+    // GLM often returns Anthropic-style message { type, role, content, stop_reason, usage, id, model, created }
+    if ((resp as any).type === 'message' && Array.isArray((resp as any).content)) {
+      const content = this.flattenAnthropicContent((resp as any).content).join('\n');
+      const stop = (resp as any).stop_reason || undefined;
+      const finish = stop === 'max_tokens' ? 'length' : (stop || 'stop');
+      const message = { role: 'assistant', content } as Record<string, unknown>;
+      const openai = {
+        id: (resp as any).id || `chatcmpl_${Math.random().toString(36).slice(2)}`,
+        object: 'chat.completion',
+        created: (resp as any).created || Math.floor(Date.now()/1000),
+        model: (resp as any).model || 'unknown',
+        choices: [ { index: 0, message, finish_reason: finish } ],
+        usage: (resp as any).usage || undefined
+      } as Record<string, unknown>;
+      return openai;
+    }
+    return resp;
+  }
+
+  private flattenAnthropicContent(blocks: any[]): string[] {
+    const texts: string[] = [];
+    for (const block of blocks) {
+      if (!block) continue;
+      if (typeof block === 'string') { const t = block.trim(); if (t) texts.push(t); continue; }
+      if (typeof block === 'object') {
+        const type = String((block as any).type || '').toLowerCase();
+        if ((type === 'text' || type === 'input_text' || type === 'output_text') && typeof (block as any).text === 'string') {
+          const t = (block as any).text.trim(); if (t) texts.push(t); continue; }
+        if (Array.isArray((block as any).content)) {
+          texts.push(...this.flattenAnthropicContent((block as any).content));
+          continue;
+        }
+        if (typeof (block as any).content === 'string') { const t = (block as any).content.trim(); if (t) texts.push(t); continue; }
+      }
+    }
+    return texts;
   }
 
 

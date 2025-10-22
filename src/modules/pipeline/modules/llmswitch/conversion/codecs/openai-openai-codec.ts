@@ -48,8 +48,22 @@ export class OpenAIOpenAIConversionCodec implements ConversionCodec {
 
   async convertResponse(payload: any, profile: ConversionProfile, context: ConversionContext): Promise<any> {
     await this.ensureInit();
+    // unwrap nested { data: {...} } wrappers until we reach an object
+    // that contains OpenAI chat response fields (e.g., choices)
+    const unwrap = (obj: any): any => {
+      let cur = obj;
+      const guard = new Set<any>();
+      while (cur && typeof cur === 'object' && !Array.isArray(cur) && !guard.has(cur)) {
+        guard.add(cur);
+        if ('choices' in cur || 'id' in cur || 'object' in cur) { break; }
+        if ('data' in cur && cur.data && typeof cur.data === 'object') { cur = cur.data; continue; }
+        break;
+      }
+      return cur;
+    };
+    const unwrapped = unwrap(payload);
     const dto: SharedPipelineResponse = {
-      data: payload,
+      data: unwrapped,
       metadata: {
         requestId: context.requestId ?? `req_${Date.now()}`,
         pipelineId: context.metadata?.pipelineId as string ?? 'conversion-router',

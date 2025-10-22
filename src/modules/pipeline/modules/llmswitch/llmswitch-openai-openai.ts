@@ -52,7 +52,14 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
   }
 
   async processOutgoing(response: any): Promise<any> {
-    return response; // passthrough
+    // Accept either raw payload or DTO { data, metadata }
+    const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
+    const payload = isDto ? (response as any).data : response;
+    const normalized = this.normalizeOpenAIResponse(payload);
+    if (isDto) {
+      return { ...(response as any), data: normalized };
+    }
+    return normalized;
   }
 
   async transformRequest(request: any): Promise<any> {
@@ -79,6 +86,50 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
     }
 
     return normalized;
+  }
+
+  private normalizeOpenAIResponse(res: any): any {
+    if (!res || typeof res !== 'object') {
+      return res;
+    }
+    const out = { ...res };
+    if (Array.isArray(out.choices)) {
+      out.choices = out.choices.map((c: any) => {
+        const choice = { ...c };
+        const msg = choice.message && typeof choice.message === 'object' ? { ...choice.message } : choice.message;
+        if (msg && typeof msg === 'object') {
+          // Ensure tool_calls arguments are stringified and content empty when tool_calls exist
+          if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+            msg.tool_calls = msg.tool_calls.map((tc: any) => {
+              if (!tc || typeof tc !== 'object') return tc;
+              const t = { ...tc };
+              if (t.function && typeof t.function === 'object') {
+                const fn = { ...t.function };
+                if (fn.arguments !== undefined && typeof fn.arguments !== 'string') {
+                  try { fn.arguments = JSON.stringify(fn.arguments); } catch { fn.arguments = String(fn.arguments); }
+                }
+                t.function = fn;
+              }
+              return t;
+            });
+            // OpenAI expects content to be a string when tool_calls are present; set to empty string
+            msg.content = typeof msg.content === 'string' ? msg.content : '';
+          } else if (Array.isArray(msg.content)) {
+            // If providers returned array content (non-standard for chat.completions),
+            // join textual parts into a single string for compatibility
+            const parts = msg.content
+              .map((p: any) => (typeof p === 'string' ? p : (p && typeof p.text === 'string' ? p.text : '')))
+              .filter((s: string) => !!s.trim());
+            msg.content = parts.join('\n');
+          } else if (msg.content === undefined || msg.content === null) {
+            msg.content = '';
+          }
+          choice.message = msg;
+        }
+        return choice;
+      });
+    }
+    return out;
   }
 
   private normalizeMessage(message: any): any {
