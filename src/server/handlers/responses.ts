@@ -194,23 +194,8 @@ export class ResponsesHandler extends BaseHandler {
     const providerId = meta?.providerId ?? 'unknown';
     const modelId = meta?.modelId ?? 'unknown';
 
-    let normalizedData: any = { ...(req.body as any || {}), ...(modelId ? { model: modelId } : {}) };
-
-    // Always synthesize a clean Chat request from Responses payload to tolerate arbitrary client shapes
-    try {
-      // Strictly use mapping (no llmswitch, no fallback)
-      const rebuilt = await ResponsesMapper.toChatRequestFromMapping({ ...(req.body as any) }, req as any, modelId);
-      normalizedData = { ...(rebuilt as any) };
-    } catch (err) {
-      const e = err as any;
-      const rc = new RouteCodexError(e?.message || 'Invalid request', 'validation_error', typeof e?.status === 'number' ? e.status : 400);
-      throw rc;
-    }
-
-    // Strict mapping only; no fallback or re-synthesis here
-
     const pipelineRequest = {
-      data: normalizedData,
+      data: { ...(req.body as any || {}), ...(modelId ? { model: modelId } : {}) },
       route: {
         providerId,
         modelId,
@@ -246,7 +231,7 @@ export class ResponsesHandler extends BaseHandler {
       const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'responses-replay');
       await (fs as any).mkdir(dir, { recursive: true });
       const file = path.join(dir, `pre-pipeline_${requestId}.json`);
-      await (fs as any).writeFile(file, JSON.stringify({ requestId, normalizedData }, null, 2), 'utf-8');
+      await (fs as any).writeFile(file, JSON.stringify({ requestId, payload: pipelineRequest.data }, null, 2), 'utf-8');
     } catch { /* ignore */ }
 
     const pipelineTimeoutMs = Number(process.env.ROUTECODEX_PIPELINE_MAX_WAIT_MS || 300000);

@@ -824,6 +824,7 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('llmswitch-openai-openai', this.createOpenAINormalizerModule);
     this.registry.registerModule('llmswitch-anthropic-openai', this.createAnthropicOpenAIConverterModule);
     this.registry.registerModule('llmswitch-response-chat', this.createResponsesChatLLMSwitchModule);
+    this.registry.registerModule('llmswitch-conversion-router', this.createConversionRouterModule);
     this.registry.registerModule('llmswitch-unified', this.createUnifiedLLMSwitchModule);
     // Aliases for backward compatibility (merged-config may still emit these)
     this.registry.registerModule('openai-normalizer', this.createOpenAINormalizerModule);
@@ -1062,6 +1063,11 @@ export class PipelineManager implements RCCBaseModule {
   private createResponsesChatLLMSwitchModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { ResponsesToChatLLMSwitch } = await import('../modules/llmswitch/llmswitch-response-chat.js');
     return new ResponsesToChatLLMSwitch(config, dependencies);
+  };
+
+  private createConversionRouterModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { ConversionRouterLLMSwitch } = await import('../modules/llmswitch/llmswitch-conversion-router.js');
+    return new ConversionRouterLLMSwitch(config, dependencies);
   };
 
   private createUnifiedLLMSwitchModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {

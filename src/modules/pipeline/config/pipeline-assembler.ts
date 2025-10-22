@@ -239,6 +239,7 @@ export class PipelineAssembler {
         'llmswitch-anthropic-openai',
         'llmswitch-openai-openai',
         'llmswitch-response-chat',
+        'llmswitch-conversion-router',
       ]);
 
       if (llmSwitch?.type) {
