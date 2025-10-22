@@ -84,10 +84,13 @@ export class EmbeddingsHandler extends BaseHandler {
       }
 
       // Process request
-      const response = await this.processEmbeddingsRequest(req, requestId);
+      const pipelineResponse = await this.processEmbeddingsRequest(req, requestId);
 
       // Return JSON response
-      const normalized = this.normalizeEmbeddingResponse(response);
+      const payload = pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
+        ? (pipelineResponse as Record<string, unknown>).data
+        : pipelineResponse;
+      const normalized = this.normalizeEmbeddingResponse(payload);
       this.sendJsonResponse(res, normalized, requestId);
 
       this.logCompletion(requestId, startTime, true);
@@ -100,20 +103,18 @@ export class EmbeddingsHandler extends BaseHandler {
   /**
    * Process embeddings request
    */
-  private async processEmbeddingsRequest(req: Request, requestId: string): Promise<EmbeddingResponse> {
-    // Use pipeline manager if available
+  private async processEmbeddingsRequest(req: Request, requestId: string): Promise<any> {
     if (this.shouldUsePipeline() && this.getRoutePools()) {
       return await this.processWithPipeline(req, requestId);
     }
 
-    // Fallback implementation
-    return this.createSimulatedResponse(req);
+    throw new RouteCodexError('Embeddings pipeline unavailable', 'pipeline_unavailable', 503);
   }
 
   /**
    * Process request through pipeline
    */
-  private async processWithPipeline(req: Request, requestId: string): Promise<EmbeddingResponse> {
+  private async processWithPipeline(req: Request, requestId: string): Promise<any> {
     const routeName = await this.decideRouteCategoryAsync(req, '/v1/embeddings');
     const pipelineId = this.pickPipelineId(routeName);
     const routeMeta = this.getRouteMeta();
@@ -161,37 +162,17 @@ export class EmbeddingsHandler extends BaseHandler {
     ]);
 
     // Align returned payload's model with route meta if set
-    const out = pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
-      ? (pipelineResponse as Record<string, unknown>).data as EmbeddingResponse
-      : pipelineResponse as EmbeddingResponse;
-    if (out && typeof out === 'object' && modelId) {
-      try { (out as any).model = modelId; } catch { /* ignore */ }
+    if (
+      modelId &&
+      pipelineResponse &&
+      typeof pipelineResponse === 'object' &&
+      'data' in pipelineResponse &&
+      (pipelineResponse as any).data &&
+      typeof (pipelineResponse as any).data === 'object'
+    ) {
+      try { (pipelineResponse as any).data.model = modelId; } catch { /* ignore */ }
     }
-    return out;
-  }
-
-  /**
-   * Create simulated response for fallback
-   */
-  private createSimulatedResponse(req: Pick<Request, 'body'>): EmbeddingResponse {
-    const inputs = Array.isArray(req.body.input) ? req.body.input : [req.body.input];
-    const dimensions = req.body.dimensions || 1536;
-
-    const embeddings: EmbeddingData[] = inputs.map((input: any, index: number) => ({
-      object: 'embedding',
-      embedding: this.generateMockEmbedding(dimensions),
-      index,
-    }));
-
-    return {
-      object: 'list',
-      data: embeddings,
-      model: req.body.model || 'text-embedding-3-small',
-      usage: {
-        prompt_tokens: this.estimateTokens(inputs),
-        total_tokens: this.estimateTokens(inputs),
-      },
-    };
+    return pipelineResponse;
   }
 
   private normalizeEmbeddingResponse(response: any): EmbeddingResponse {
@@ -211,40 +192,7 @@ export class EmbeddingsHandler extends BaseHandler {
       }
     }
 
-    return this.createSimulatedResponse({ body: {
-      model: response?.model ?? 'text-embedding-3-small',
-      input: Array.isArray(response?.input) ? response.input : [response?.input ?? ''],
-      dimensions: response?.dimensions
-    } } as Pick<Request, 'body'>);
-  }
-
-  /**
-   * Generate mock embedding vector
-   */
-  private generateMockEmbedding(dimensions: number): number[] {
-    const embedding: number[] = [];
-    for (let i = 0; i < dimensions; i++) {
-      // Generate realistic-looking embedding values
-      embedding.push(Math.random() * 2 - 1); // Random values between -1 and 1
-    }
-
-    // Normalize the embedding
-    const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
-    return embedding.map(val => val / magnitude);
-  }
-
-  /**
-   * Estimate token count (rough approximation)
-   */
-  private estimateTokens(inputs: any[]): number {
-    let totalChars = 0;
-    for (const input of inputs) {
-      if (typeof input === 'string') {
-        totalChars += input.length;
-      }
-    }
-    // Rough estimate: ~4 characters per token
-    return Math.ceil(totalChars / 4);
+    throw new RouteCodexError('Invalid embedding response payload', 'invalid_pipeline_response', 502);
   }
 
   /**

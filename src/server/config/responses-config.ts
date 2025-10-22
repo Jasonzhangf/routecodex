@@ -41,6 +41,8 @@ export interface ResponsesConversionMapping {
     textArrayTextKey: string;    // e.g., 'text'
     contentBlocksKey: string;    // e.g., 'content'
     messageWrapperType: string;  // e.g., 'message'
+    passthroughFields?: string[]; // additional fields to copy from provider to response
+    defaultValues?: Record<string, unknown>;
   };
   tools: {
     toolCallTypes: string[];     // e.g., ['tool_call','function_call']
@@ -77,7 +79,52 @@ const DEFAULT_MAPPING: ResponsesConversionMapping = {
     textPaths: ['output_text', 'choices[0].message.content'],
     textArrayTextKey: 'text',
     contentBlocksKey: 'content',
-    messageWrapperType: 'message'
+    messageWrapperType: 'message',
+    passthroughFields: [
+      'background',
+      'error',
+      'incomplete_details',
+      'instructions',
+      'reasoning',
+      'tool_choice',
+      'tools',
+      'parallel_tool_calls',
+      'max_output_tokens',
+      'max_tool_calls',
+      'previous_response_id',
+      'prompt_cache_key',
+      'safety_identifier',
+      'service_tier',
+      'store',
+      'temperature',
+      'top_p',
+      'top_logprobs',
+      'truncation',
+      'metadata',
+      'user',
+      'text',
+      'usage'
+    ],
+    defaultValues: {
+      background: false,
+      error: null,
+      incomplete_details: null,
+      service_tier: 'default',
+      store: false,
+      temperature: 1,
+      top_p: 1,
+      top_logprobs: 0,
+      truncation: 'disabled',
+      metadata: {},
+      user: null,
+      text: { format: { type: 'text' }, verbosity: 'medium' },
+      max_output_tokens: null,
+      max_tool_calls: null,
+      previous_response_id: null,
+      prompt_cache_key: null,
+      reasoning: null,
+      safety_identifier: null
+    }
   },
   tools: {
     toolCallTypes: ['tool_call', 'function_call'],

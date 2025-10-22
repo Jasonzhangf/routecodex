@@ -24,28 +24,6 @@ import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import { DebugEventBus } from "rcc-debugcenter";
 import { buildAuthHeaders, createProviderError } from './shared/provider-helpers.js';
 
-// Simulated response types for development path
-interface SimulatedChoice {
-  index: number;
-  message: { role: string; content: string };
-  finish_reason: string;
-}
-
-interface SimulatedProviderData {
-  id: string;
-  object: string;
-  created: number;
-  model: string;
-  choices: SimulatedChoice[];
-  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
-}
-
-interface SimulatedHttpResponse {
-  data: SimulatedProviderData;
-  status: number;
-  headers: Record<string, string>;
-}
-
 /**
  * Generic HTTP Provider Module
  */
@@ -504,21 +482,7 @@ export class GenericHTTPProvider implements ProviderModule {
       // Prepare headers with authentication
       const headers = this.prepareHeaders();
 
-      // Would make actual HTTP request here
-      const response = await this.simulateHttpRequest(endpoint, request, headers);
-
-      const processingTime = Date.now() - startTime;
-
-      return {
-        data: response.data,
-        status: response.status,
-        headers: response.headers,
-        metadata: {
-          requestId: `req-${Date.now()}`,
-          processingTime,
-          model: (request as { model?: string }).model || 'unknown'
-        }
-      };
+      throw new Error('Generic HTTP Provider transport is not implemented; simulation disabled');
 
     } catch (error) {
       throw createProviderError(error, 'network');
@@ -614,47 +578,6 @@ export class GenericHTTPProvider implements ProviderModule {
    * Create provider error
    */
   // Provider error logic centralized in shared helpers
-
-  /**
-   * Simulate HTTP request (for development)
-   */
-  private async simulateHttpRequest(
-    endpoint: string,
-    request: UnknownObject,
-    _headers: Record<string, string>
-  ): Promise<SimulatedHttpResponse> {
-    // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 50));
-
-    return {
-      data: {
-        id: `chat-${Date.now()}`,
-        object: 'chat.completion',
-        created: Math.floor(Date.now() / 1000),
-        model: (request as { model?: string }).model || 'unknown',
-        choices: [
-          {
-            index: 0,
-            message: {
-              role: 'assistant',
-              content: `This is a simulated response from ${this.providerType} provider.`
-            },
-            finish_reason: 'stop'
-          }
-        ],
-        usage: {
-          prompt_tokens: 10,
-          completion_tokens: 10,
-          total_tokens: 20
-        }
-      },
-      status: 200,
-      headers: {
-        'content-type': 'application/json',
-        'x-request-id': `req-${Date.now()}`
-      }
-    };
-  }
 
   /**
    * Close HTTP client

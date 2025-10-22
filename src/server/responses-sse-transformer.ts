@@ -109,8 +109,10 @@ export class ResponsesSSETransformer {
   public finalize(): ResponsesEvent[] {
     const events: ResponsesEvent[] = [];
 
-    for (const [, acc] of this.toolCalls.entries()) {
-      events.push({ event: 'response.output_item.done', data: { type: 'response.output_item.done', output_index: 0, item: { id: acc.id, type: 'tool_call' }, sequence_number: this.nextSeq() } });
+    for (const [index, acc] of this.toolCalls.entries()) {
+      // Close each tool_call item using its correct output_index (tool indexes start at 1)
+      const outIdx = Number(index) + 1;
+      events.push({ event: 'response.output_item.done', data: { type: 'response.output_item.done', output_index: outIdx, item: { id: acc.id, type: 'tool_call' }, sequence_number: this.nextSeq() } });
     }
 
     if (this.textItemId) {

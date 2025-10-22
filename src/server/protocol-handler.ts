@@ -93,8 +93,9 @@ export class ProtocolHandler extends BaseModule {
     this.serviceContainer = ServiceContainer.getInstance();
     initializeDefaultServices(this.serviceContainer);
 
+    // Enable pipeline specifically for Chat endpoint to route via llmswitch → OpenAI
     this.handlers = {
-      chat: new ChatCompletionsHandler(this.config),
+      chat: new ChatCompletionsHandler({ ...this.config, enablePipeline: true }),
       completions: new CompletionsHandler(this.config),
       embeddings: new EmbeddingsHandler(this.config),
       models: new ModelsHandler(this.config),
@@ -269,7 +270,11 @@ export class ProtocolHandler extends BaseModule {
     });
 
     this.router.post('/messages', (req: Request, res: Response) => {
-      void this.handlers.messages.handleRequest(req, res);
+      (async () => {
+        // Try transparent passthrough for Anthropic /v1/messages when enabled via monitor config
+        if (await (this as unknown as ProtocolHandler).tryTransparentAnthropic?.(req, res)) { return; }
+        void this.handlers.messages.handleRequest(req, res);
+      })().catch(() => { void this.handlers.messages.handleRequest(req, res); });
     });
 
     this.router.post('/responses', async (req: Request, res: Response) => {
@@ -307,6 +312,7 @@ export interface MonitorLikeConfig { mode?: string; transparent?: TransparentCon
 export interface ProtocolHandler {
   tryTransparentOpenAI(req: Request, res: Response, wire: 'chat' | 'responses'): Promise<boolean>;
   tryBridgeResponsesToChat(req: Request, res: Response): Promise<boolean>;
+  tryTransparentAnthropic(req: Request, res: Response): Promise<boolean>;
 }
 
 ProtocolHandler.prototype.tryTransparentOpenAI = async function tryTransparentOpenAI(this: ProtocolHandler, req: Request, res: Response, wire: 'chat' | 'responses'): Promise<boolean> {
@@ -477,6 +483,106 @@ ProtocolHandler.prototype.tryTransparentOpenAI = async function tryTransparentOp
   }
 };
 
+// Transparent passthrough for Anthropic /v1/messages using monitor.json
+ProtocolHandler.prototype.tryTransparentAnthropic = async function tryTransparentAnthropic(this: ProtocolHandler, req: Request, res: Response): Promise<boolean> {
+  try {
+    // Only active when transparent routing is explicitly enabled (env or monitor.json)
+    const envTransparent = (
+      process.env.ROUTECODEX_MONITOR_TRANSPARENT === '1' ||
+      process.env.ROUTECODEX_TRANSPARENT_ROUTING === '1' ||
+      process.env.RCC_MONITOR_TRANSPARENT === '1' ||
+      process.env.RCC_TRANSPARENT_ROUTING === '1'
+    );
+    const monitorCfg = await MonitorConfigUtil.load();
+    const enabled = envTransparent || MonitorConfigUtil.isTransparentEnabled(monitorCfg);
+    if (!enabled) return false;
+
+    const tcfg = MonitorConfigUtil.getTransparent(monitorCfg as any) as TransparentConfig | null;
+    if (!tcfg || !tcfg.endpoints?.anthropic) return false;
+
+    const upstreamBase = tcfg.endpoints.anthropic;
+    const url = joinUrl(upstreamBase, '/messages');
+
+    // Compose headers
+    const headers: TransparentHeaders = {};
+    // Prefer incoming Authorization, then configured authorization/auth.anthropic
+    const overrideAuth = (req.headers['x-rc-upstream-authorization'] as string | undefined) || (req.headers['x-rcc-upstream-authorization'] as string | undefined);
+    const incomingAuth = (req.headers['authorization'] as string | undefined) || (req.headers['Authorization'] as unknown as string | undefined);
+    const envAuth = tcfg.auth?.anthropic || undefined;
+    const finalAuth = overrideAuth || envAuth || incomingAuth || tcfg.authorization || undefined;
+    if (finalAuth) {
+      const s = String(finalAuth).trim();
+      const bearer = /^bearer\s+/i.test(s) ? s : `Bearer ${s}`;
+      headers['authorization'] = bearer;
+      headers['Authorization'] = bearer;
+    }
+    // Anthropic-Version default
+    const lower = Object.fromEntries(Object.entries(req.headers).map(([k,v]) => [k.toLowerCase(), v]));
+    const av = (lower['anthropic-version'] as string | undefined) || '2023-06-01';
+    headers['Anthropic-Version'] = av;
+    // Pass through common headers (content-type/accept)
+    headers['content-type'] = 'application/json';
+
+    const working = JSON.parse(JSON.stringify(req.body || {}));
+    const isStream = !!working?.stream;
+    const timeout = typeof tcfg.timeoutMs === 'number' ? tcfg.timeoutMs! : 30000;
+
+    if (isStream) {
+      const upstream = await axios.post(url, working, { headers: { ...headers, Accept: 'text/event-stream' }, timeout, responseType: 'stream', validateStatus: () => true });
+      try {
+        res.status(upstream.status);
+        res.setHeader('Content-Type', upstream.headers['content-type'] || 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('Transfer-Encoding', 'chunked');
+      } catch { /* ignore */ }
+      // Capture SSE to file while piping to client
+      try {
+        const fs = await import('fs');
+        const fsp = await import('fs/promises');
+        const home = process.env.HOME || process.env.USERPROFILE || '';
+        const dirSSE = `${home}/.routecodex/codex-samples/upstream-anth-sse`;
+        const dirReq = `${home}/.routecodex/codex-samples/upstream-anth-requests`;
+        try { await fsp.mkdir(dirSSE, { recursive: true }); } catch {}
+        try { await fsp.mkdir(dirReq, { recursive: true }); } catch {}
+        const rid = `anth_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+        try { await fsp.writeFile(`${dirReq}/req-${rid}.json`, JSON.stringify(working, null, 2), 'utf-8'); } catch {}
+        const w = fs.createWriteStream(`${dirSSE}/sse-${rid}.log`, { encoding: 'utf-8' });
+        upstream.data.on('data', (chunk: any) => { try { w.write(chunk); } catch {} });
+        upstream.data.on('end', () => { try { w.end(); } catch {} });
+      } catch { /* ignore */ }
+      upstream.data.on('error', () => { try { res.end(); } catch {} });
+      upstream.data.pipe(res);
+      return true;
+    } else {
+      const upstream = await axios.post(url, working, { headers: { ...headers, Accept: 'application/json' }, timeout, validateStatus: () => true });
+      try {
+        res.status(upstream.status);
+        for (const [k, v] of Object.entries(upstream.headers || {})) {
+          if (k.toLowerCase() === 'content-length') continue;
+          try { res.setHeader(k, String(v)); } catch {}
+        }
+        res.type('application/json');
+        // Capture
+        try {
+          const { writeFile, mkdir } = await import('fs/promises');
+          const home = process.env.HOME || process.env.USERPROFILE || '';
+          const dir = `${home}/.routecodex/codex-samples/upstream-anth-json`;
+          await mkdir(dir, { recursive: true });
+          const rid = `anth_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+          await writeFile(`${dir}/json-${rid}.json`, typeof upstream.data === 'string' ? upstream.data : JSON.stringify(upstream.data, null, 2), 'utf-8');
+        } catch { /* ignore */ }
+        res.send(upstream.data);
+      } catch {
+        try { res.status(502).json({ error: { message: 'Upstream passthrough failed', type: 'bad_gateway' } }); } catch {}
+      }
+      return true;
+    }
+  } catch {
+    return false;
+  }
+};
+
 function joinUrl(base: string, path: string): string {
   try {
     return `${base.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
@@ -508,34 +614,20 @@ ProtocolHandler.prototype.fireMonitorAB = async function fireMonitorAB(this: Pro
     const url = joinUrl(upstreamBase, pathPart);
 
     const headers: Record<string,string> = {};
-    // Authorization: prefer explicit embedded token
-    const auth = tcfg.authorization || tcfg.auth?.openai || '';
+    // Authorization: prefer explicit embedded token, otherwise reuse client header
+    const incomingAuthHeader = (req.headers['authorization'] as string | undefined) || (req.headers['Authorization'] as unknown as string | undefined);
+    const auth = tcfg.authorization || tcfg.auth?.openai || incomingAuthHeader || '';
     if (auth) { headers['Authorization'] = /^Bearer\s+/i.test(String(auth)) ? String(auth) : `Bearer ${String(auth)}`; }
     // Responses Beta header if needed
     if (wire === 'responses') { headers['OpenAI-Beta'] = 'responses-2024-12-17'; }
     // Extra headers
     if (tcfg.extraHeaders) { for (const [k,v] of Object.entries(tcfg.extraHeaders)) { if (k.toLowerCase()!=='authorization') headers[k]=v; } }
 
-    // Clone original body before any handler mutation
-    const rawBody: any = (req as any).body ? JSON.parse(JSON.stringify((req as any).body)) : {};
-    const normalizeModel = (model: string): string => {
-      const val = String(model || '').trim();
-      if (!val) return val;
-      if (/gpt-5(?:-codex)?$/i.test(val)) return 'gpt-5';
-      if (/glm-4\.6/i.test(val)) return 'gpt-5';
-      if (/-codex$/i.test(val)) return val.replace(/-codex$/i, '');
-      return val;
-    };
-    // Apply model mapping only to upstream clone (does not affect local)
-    try {
-      if (rawBody && typeof rawBody === 'object' && typeof rawBody.model === 'string') {
-        const mm = tcfg.modelMapping || {};
-        const src = normalizeModel(rawBody.model);
-        let mapped = mm[src] || mm['*'] || mm['default'] || null;
-        if (!mapped) mapped = src;
-        rawBody.model = normalizeModel(mapped);
-      }
-    } catch { /* ignore */ }
+    // Clone original body before any handler mutation (prefer raw capture)
+    const sourceBody: any = (req as any).__rawBody !== undefined ? (req as any).__rawBody : (req as any).body;
+    const rawBody: any = sourceBody ? JSON.parse(JSON.stringify(sourceBody)) : {};
+    const mappedBody: any = JSON.parse(JSON.stringify(rawBody));
+
 
     // Determine capture dir and files
     const startedAt = new Date();
@@ -550,7 +642,8 @@ ProtocolHandler.prototype.fireMonitorAB = async function fireMonitorAB(this: Pro
       wire,
       requested_at: startedAt.toISOString(),
       headers,
-      body: rawBody
+      raw_body: rawBody,
+      mapped_body: mappedBody
     };
     await writeFile(`${captureDir}/request.json`, JSON.stringify(requestPayload, null, 2), 'utf-8');
 
@@ -563,9 +656,9 @@ ProtocolHandler.prototype.fireMonitorAB = async function fireMonitorAB(this: Pro
       return out;
     };
 
-    const isStream = !!rawBody?.stream;
+    const isStream = !!mappedBody?.stream;
     if (isStream) {
-      const resp = await axios.post(url, rawBody, { headers: { ...headers, Accept: 'text/event-stream', 'Content-Type': 'application/json' }, responseType: 'stream', validateStatus: () => true, timeout: tcfg.timeoutMs || 30000 });
+      const resp = await axios.post(url, mappedBody, { headers: { ...headers, Accept: 'text/event-stream', 'Content-Type': 'application/json' }, responseType: 'stream', validateStatus: () => true, timeout: tcfg.timeoutMs || 30000 });
       const responseMeta = {
         status: resp.status,
         statusText: resp.statusText,
@@ -588,7 +681,7 @@ ProtocolHandler.prototype.fireMonitorAB = async function fireMonitorAB(this: Pro
         resp.data.pipe(w);
       });
     } else {
-      const resp = await axios.post(url, rawBody, { headers: { ...headers, Accept: 'application/json', 'Content-Type': 'application/json' }, validateStatus: () => true, timeout: tcfg.timeoutMs || 30000 });
+      const resp = await axios.post(url, mappedBody, { headers: { ...headers, Accept: 'application/json', 'Content-Type': 'application/json' }, validateStatus: () => true, timeout: tcfg.timeoutMs || 30000 });
       const responseMeta = {
         status: resp.status,
         statusText: resp.statusText,

@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.50.13",
+  "version": "0.52.38",
   "description": "Multi-provider OpenAI proxy server with native dry-run capabilities",
   "type": "module",
   "main": "dist/index.js",
@@ -33,7 +33,7 @@
   ],
   "scripts": {
     "build": "npm run clean && tsc",
-    "postbuild": "chmod +x dist/cli.js || true && node scripts/start-verify.mjs --mode bg --timeout 120 || true",
+    "postbuild": "chmod +x dist/cli.js || true",
     "build:watch": "tsc --watch",
     "start": "npm run -s start:bg",
     "dev": "tsx watch src/index.ts",
@@ -84,6 +84,9 @@
     "secrets:check": "echo 'Secrets check temporarily disabled'",
     "format:check": "prettier --check src/**/*.{ts,js,json}",
     "format:fix": "prettier --write src/**/*.{ts,js,json}",
+    "verify:split-args": "node scripts/verify-toolcall-arg-splitting.mjs",
+    "verify:pairing": "node scripts/verify-tool-pairing.mjs",
+    "verify:tools:offline": "node scripts/verify-tools-offline.mjs",
     "depcheck": "depcheck",
     "license:check": "echo 'license check temporarily disabled'",
     "ncu:check": "ncu --errorLevel 2",

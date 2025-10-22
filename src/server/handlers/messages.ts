@@ -69,16 +69,22 @@ export class MessagesHandler extends BaseHandler {
       }
 
       // Process request
-      const response = await this.processMessagesRequest(req, requestId);
+      const pipelineResponse = await this.processMessagesRequest(req, requestId);
 
       // Handle streaming vs non-streaming response
       if (req.body.stream) {
-        await this.streamingManager.streamAnthropicResponse(response, requestId, res, req.body.model);
+        const streamModel = (pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse)
+          ? ((pipelineResponse as any).data?.model ?? req.body.model)
+          : req.body.model;
+        await this.streamingManager.streamAnthropicResponse(pipelineResponse, requestId, res, streamModel);
         return;
       }
 
       // Return JSON response
-      const normalized = this.responseNormalizer.normalizeAnthropicResponse(response);
+      const payload = pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
+        ? (pipelineResponse as Record<string, unknown>).data
+        : pipelineResponse;
+      const normalized = this.responseNormalizer.normalizeAnthropicResponse(payload);
       this.sendJsonResponse(res, normalized, requestId);
 
       this.logCompletion(requestId, startTime, true);
@@ -92,13 +98,11 @@ export class MessagesHandler extends BaseHandler {
    * Process messages request
    */
   private async processMessagesRequest(req: Request, requestId: string): Promise<any> {
-    // Use pipeline manager if available
     if (this.shouldUsePipeline() && this.getRoutePools()) {
       return await this.processWithPipeline(req, requestId);
     }
 
-    // Fallback implementation
-    return this.createSimulatedResponse(req);
+    throw new RouteCodexError('Messages pipeline unavailable', 'pipeline_unavailable', 503);
   }
 
   /**
@@ -129,6 +133,7 @@ export class MessagesHandler extends BaseHandler {
         headers: this.sanitizeHeaders(req.headers),
         targetProtocol: 'anthropic',
         endpoint: `${req.baseUrl || ''}${req.url || ''}`,
+        entryEndpoint: '/v1/messages',
       },
       debug: {
         enabled: this.config.enableMetrics ?? true,
@@ -147,30 +152,6 @@ export class MessagesHandler extends BaseHandler {
       new Promise((_, reject) => setTimeout(() => reject(new Error(`Pipeline timeout after ${pipelineTimeoutMs}ms`)), Math.max(1, pipelineTimeoutMs)))
     ]);
 
-    return pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
-      ? (pipelineResponse as Record<string, unknown>).data
-      : pipelineResponse;
-  }
-
-  /**
-   * Create simulated response for fallback
-   */
-  private createSimulatedResponse(req: Request): any {
-    return {
-      id: `msg_${Date.now()}`,
-      type: 'message',
-      role: 'assistant',
-      content: [{
-        type: 'text',
-        text: 'This is a simulated response from MessagesHandler'
-      }],
-      model: req.body.model || 'claude-3-5-sonnet-20241022',
-      stop_reason: 'end_turn',
-      stop_sequence: null,
-      usage: {
-        input_tokens: 0,
-        output_tokens: 0,
-      }
-    };
+    return pipelineResponse;
   }
 }

@@ -13,7 +13,9 @@ import { StreamingManager } from '../utils/streaming-manager.js';
 import { ProtocolDetector } from '../protocol/protocol-detector.js';
 import { OpenAIAdapter } from '../protocol/openai-adapter.js';
 import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
-import { ResponsesToChatLLMSwitch } from '../../modules/pipeline/modules/llmswitch/llmswitch-response-chat.js';
+import { OpenAINormalizerLLMSwitch } from '../../modules/pipeline/modules/llmswitch/llmswitch-openai-openai.js';
+import os from 'os';
+import path from 'path';
 
 /**
  * Chat Completions Handler
@@ -33,10 +35,27 @@ export class ChatCompletionsHandler extends BaseHandler {
 
   /**
    * Handle chat completions request
-   */
+  */
   async handleRequest(req: Request, res: Response): Promise<void> {
     const startTime = Date.now();
     const requestId = this.generateRequestId();
+    // Capture raw request for debugging
+    try {
+      const rawBody = JSON.parse(JSON.stringify((req as any).body || {}));
+      (req as any).__rawBody = rawBody;
+      const fs = await import('fs/promises');
+      const dir = path.join(os.homedir(), '.routecodex', 'codex-samples', 'chat-replay');
+      await (fs as any).mkdir(dir, { recursive: true });
+      const rawFile = path.join(dir, `raw-request_${requestId}.json`);
+      const payload = {
+        requestId,
+        method: req.method,
+        url: req.originalUrl || req.url,
+        headers: this.sanitizeHeaders(req.headers),
+        body: rawBody,
+      };
+      await (fs as any).writeFile(rawFile, JSON.stringify(payload, null, 2), 'utf-8');
+    } catch { /* ignore capture failures */ }
 
     this.logModule('ChatCompletionsHandler', 'request_start', {
       requestId,
@@ -88,16 +107,22 @@ export class ChatCompletionsHandler extends BaseHandler {
       }
 
       // Process request through pipeline
-      const response = await this.processChatRequest(req, requestId);
+      const pipelineResponse = await this.processChatRequest(req, requestId);
 
       // Handle streaming vs non-streaming response
       if (req.body.stream) {
-        await this.streamingManager.streamResponse(response, requestId, res, req.body.model);
+        const streamModel = (pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse)
+          ? ((pipelineResponse as any).data?.model ?? req.body.model)
+          : req.body.model;
+        await this.streamingManager.streamResponse(pipelineResponse, requestId, res, streamModel);
         return;
       }
 
       // Return JSON response
-      const normalized = this.responseNormalizer.normalizeOpenAIResponse(response, 'chat');
+      const payload = pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
+        ? (pipelineResponse as Record<string, unknown>).data
+        : pipelineResponse;
+      const normalized = this.responseNormalizer.normalizeOpenAIResponse(payload, 'chat');
       this.sendJsonResponse(res, normalized, requestId);
 
       this.logCompletion(requestId, startTime, true);
@@ -111,13 +136,11 @@ export class ChatCompletionsHandler extends BaseHandler {
    * Process chat completion request
    */
   private async processChatRequest(req: Request, requestId: string): Promise<any> {
-    // Use pipeline manager if available
+    // Use pipeline manager only; no fallback allowed
     if (this.shouldUsePipeline() && this.getRoutePools()) {
       return await this.processWithPipeline(req, requestId);
     }
-
-    // Fallback implementation
-    return this.createSimulatedResponse(req);
+    throw new RouteCodexError('Chat pipeline unavailable (no route pools or pipeline manager)', 'pipeline_unavailable', 503);
   }
 
   /**
@@ -136,18 +159,21 @@ export class ChatCompletionsHandler extends BaseHandler {
     try {
       const logger = new PipelineDebugLogger({} as any, { enableConsoleLogging: false, enableDebugCenter: false });
       const deps = { errorHandlingCenter: {}, debugCenter: {}, logger } as any;
-      const respSwitch = new ResponsesToChatLLMSwitch({ type: 'llmswitch-response-chat', config: {} } as any, deps as any);
+      const normalizer = new OpenAINormalizerLLMSwitch({ type: 'llmswitch-openai-openai', config: {} } as any, deps as any);
 
-      if (typeof respSwitch.initialize === 'function') {
-        await respSwitch.initialize();
+      if (typeof normalizer.initialize === 'function') {
+        await normalizer.initialize();
       }
 
-      const transformed = await respSwitch.transformRequest(req.body);
+      const transformed = await normalizer.transformRequest(req.body);
       if (transformed && typeof transformed === 'object') {
-        chatPayload = transformed as Record<string, unknown>;
+        const dto = transformed as any;
+        chatPayload = dto?.data && typeof dto.data === 'object'
+          ? { ...(dto.data as Record<string, unknown>) }
+          : (transformed as Record<string, unknown>);
       }
     } catch {
-      // Non-blocking: use original payload if transformation fails
+      // Non-blocking: use original payload if normalization fails
     }
 
     // Ensure payload model aligns with selected route meta
@@ -168,6 +194,7 @@ export class ChatCompletionsHandler extends BaseHandler {
         headers: this.sanitizeHeaders(req.headers),
         targetProtocol: 'openai',
         endpoint: `${req.baseUrl || ''}${req.url || ''}`,
+        entryEndpoint: '/v1/chat/completions',
       },
       debug: {
         enabled: this.config.enableMetrics ?? true,
@@ -186,34 +213,7 @@ export class ChatCompletionsHandler extends BaseHandler {
       new Promise((_, reject) => setTimeout(() => reject(new Error(`Pipeline timeout after ${pipelineTimeoutMs}ms`)), Math.max(1, pipelineTimeoutMs)))
     ]);
 
-    return pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
-      ? (pipelineResponse as Record<string, unknown>).data
-      : pipelineResponse;
-  }
-
-  /**
-   * Create simulated response for fallback
-   */
-  private createSimulatedResponse(req: Request): any {
-    return {
-      id: `chatcmpl-${Date.now()}`,
-      object: 'chat.completion',
-      created: Math.floor(Date.now() / 1000),
-      model: req.body.model || 'unknown',
-      choices: [{
-        index: 0,
-        message: {
-          role: 'assistant',
-          content: 'This is a simulated response from ChatCompletionsHandler'
-        },
-        finish_reason: 'stop'
-      }],
-      usage: {
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        total_tokens: 0,
-      }
-    };
+    return pipelineResponse;
   }
 
 }

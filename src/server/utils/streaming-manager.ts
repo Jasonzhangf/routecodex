@@ -53,11 +53,11 @@ export class StreamingManager {
       res.setHeader('x-request-id', requestId);
 
       // Start streaming
-      if (this.shouldStreamFromPipeline()) {
-        await this.streamFromPipeline(response, requestId, res, model);
-      } else {
-        await this.streamSimulated(response, requestId, res, model);
+      if (!this.shouldStreamFromPipeline()) {
+        throw new Error('Streaming pipeline is disabled for this endpoint');
       }
+
+      await this.streamFromPipeline(response, requestId, res, model);
 
     } catch (error) {
       this.logger.logModule('StreamingManager', 'stream_error', {
@@ -105,12 +105,11 @@ export class StreamingManager {
     }
 
     // Handle streaming response data
-    if (response && typeof response === 'object' && response.data) {
-      await this.processStreamingData(response.data, requestId, res, model);
-    } else {
-      // Fallback to simulated streaming
-      await this.streamSimulated(response, requestId, res, model);
+    if (!response || typeof response !== 'object' || !('data' in response)) {
+      throw new Error('Streaming pipeline response is missing data payload');
     }
+
+    await this.processStreamingData((response as Record<string, unknown>).data, requestId, res, model);
   }
 
   /**
@@ -122,57 +121,96 @@ export class StreamingManager {
     res: Response,
     model: string
   ): Promise<void> {
+    const finishReasons: string[] = [];
+
+    const pushChunk = async (raw: any) => {
+      const normalized = this.normalizeChunk(raw, model, finishReasons);
+      await this.sendChunk(res, normalized, requestId, model);
+      await this.delay(10);
+    };
+
     if (Array.isArray(data)) {
-      // Process array of chunks
       for (const chunk of data) {
-        await this.sendChunk(res, chunk, requestId, model);
-        await this.delay(10); // Small delay between chunks
+        await pushChunk(chunk);
       }
-    } else if (typeof data === 'object') {
-      // Process single chunk object
-      await this.sendChunk(res, data, requestId, model);
+    } else if (typeof data === 'object' && data !== null) {
+      await pushChunk(data);
     }
 
-    // Send final chunk
-    this.sendFinalChunk(res, requestId, model);
+    const finalReason = finishReasons.length ? finishReasons[finishReasons.length - 1] : undefined;
+    this.sendFinalChunk(res, requestId, model, finalReason);
   }
 
   /**
-   * Stream simulated response
+   * Normalize chunk into OpenAI streaming shape
    */
-  private async streamSimulated(
-    response: any,
-    requestId: string,
-    res: Response,
-    model: string
-  ): Promise<void> {
-    // Simulate streaming with chunks
-    const content = response?.choices?.[0]?.message?.content || 'This is a simulated response';
-    const words = content.split(' ');
-
-    let accumulatedContent = '';
-
-    for (let i = 0; i < words.length; i++) {
-      accumulatedContent += (i > 0 ? ' ' : '') + words[i];
-
-      const chunk: StreamingChunk = {
-        id: `chatcmpl-${Date.now()}-${i}`,
-        object: 'chat.completion.chunk',
-        created: Math.floor(Date.now() / 1000),
-        model,
-        choices: [{
-          index: 0,
-          delta: { content: words[i] + (i < words.length - 1 ? ' ' : '') },
-          finish_reason: i === words.length - 1 ? 'stop' : null
-        }]
-      };
-
-      await this.sendChunk(res, chunk, requestId, model);
-      await this.delay(50); // Simulate processing delay
+  private normalizeChunk(chunk: any, model: string, finishReasons: string[]): any {
+    if (!chunk || typeof chunk !== 'object') {
+      return chunk;
     }
 
-    // Send final chunk
-    this.sendFinalChunk(res, requestId, model);
+    const hasDelta =
+      chunk.object === 'chat.completion.chunk' ||
+      (Array.isArray(chunk.choices) && chunk.choices.some((choice: any) => choice?.delta));
+
+    if (hasDelta) {
+      this.captureFinishReason(chunk, finishReasons);
+      return chunk;
+    }
+
+    if (!Array.isArray(chunk.choices)) {
+      return chunk;
+    }
+
+    const normalizedChoices = chunk.choices.map((choice: any, index: number) => {
+      const message = choice?.message || {};
+      const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : undefined;
+      const delta: Record<string, unknown> = {};
+      if (message.role && typeof message.role === 'string') {
+        delta.role = message.role;
+      }
+      if (typeof message.content === 'string') {
+        delta.content = message.content;
+      }
+      if (toolCalls) {
+        delta.tool_calls = toolCalls;
+      }
+      if (typeof choice.content === 'string' && !delta.content) {
+        delta.content = choice.content;
+      }
+
+      const finishReason = choice?.finish_reason ?? (message?.finish_reason as string | undefined);
+      if (finishReason) {
+        finishReasons.push(finishReason);
+      }
+
+      return {
+        index: choice?.index ?? index,
+        delta,
+        finish_reason: null
+      };
+    });
+
+    return {
+      id: chunk.id ?? `chatcmpl-${Date.now()}`,
+      object: 'chat.completion.chunk',
+      created: chunk.created ?? Math.floor(Date.now() / 1000),
+      model: chunk.model ?? model,
+      choices: normalizedChoices
+    };
+  }
+
+  private captureFinishReason(chunk: any, finishReasons: string[]): void {
+    if (!chunk || typeof chunk !== 'object') {
+      return;
+    }
+    const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
+    for (const choice of choices) {
+      const reason = choice?.finish_reason;
+      if (typeof reason === 'string' && reason.length > 0) {
+        finishReasons.push(reason);
+      }
+    }
   }
 
   /**
@@ -209,7 +247,7 @@ export class StreamingManager {
   /**
    * Send final chunk
    */
-  private sendFinalChunk(res: Response, requestId: string, model: string): void {
+  private sendFinalChunk(res: Response, requestId: string, model: string, finishReason?: string): void {
     const finalChunk = {
       id: `chatcmpl-${Date.now()}`,
       object: 'chat.completion.chunk',
@@ -218,7 +256,7 @@ export class StreamingManager {
       choices: [{
         index: 0,
         delta: {},
-        finish_reason: 'stop'
+        finish_reason: finishReason ?? 'stop'
       }]
     };
 

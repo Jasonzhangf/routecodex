@@ -288,3 +288,55 @@ Summary
 - Responses behavior is controlled via `config/modules.json` (`responses` module) and `ROUTECODEX_RESP_*` env vars.
 - Handler now captures raw request and pre‑pipeline snapshots for each requestId.
 - Fixed pure‑text “early stop” by ensuring user text is synthesized from nested `input[]` message/content blocks.
+## 0.52.0 - 2025-10-21
+- 首次 Responses 接口工作（/v1/responses）
+  - 全量对齐 OpenAI Responses 流式规范：sequence_number 自 0 起、created_at、标准事件族
+  - function_call 事件完整（output_item.added → arguments.delta/done → output_item.done），字段含 id/call_id/name/status/arguments
+  - message 文本事件含 content_part.added/done、output_text.delta/done，携带 item_id/output_index/content_index/logprobs
+  - reasoning 事件族（reasoning_summary_part.added/done + reasoning_summary_text.delta/done），保序输出
+  - completed.response 输出聚合 reasoning/message/function_call，并补齐 usage.input_tokens/output_tokens/total_tokens
+  - 移除非规范事件（不再发送 response.required_action）
+  - 禁止服务端工具执行，工具完全由客户端执行
+  - 修复“工具优先轮次误发空消息”导致客户端重发的问题（仅在有文本时发送 message 生命周期；识别 function_call/tool_call/tool_use）
+## 0.52.1 - 2025-10-21
+- 增强 SSE 全链路追踪
+  - 本地向客户端发送的每一条 SSE 事件均落盘：`~/.routecodex/codex-samples/anth-replay/sse-audit-<requestId>.log`
+  - 写入精确的 `event:`/`data:` 行，带时间戳与 `sequence_number`（与客户端实际接收一致）
+  - 发生错误或连接结束也写入 `SSE_ERROR`/`SSE_END` 标记
+  - 继续支持上游透传 A/B 的原始 SSE 捕获：`~/.routecodex/codex-samples/monitor-ab/ab_*/upstream.sse`
+  - 修正 completed 快照：仅在存在文本时包含 message 项；function_call 项不再带 status 字段，顺序统一为 [reasoning, (message?), function_call]
+## 0.52.2 - 2025-10-21
+- 版本维护：重建、打包并全局安装，配合新增的 SSE 审计用于本轮复测
+## 0.52.3 - 2025-10-21
+- Responses→Chat 完整映射（不清洗）：
+  - input[] 全量历史保序映射为 Chat messages，保留 assistant.tool_calls 与 tool 角色消息；工具输出块映射为 role:'tool' 文本
+  - tools 形态兼容：支持 Responses 顶层 name/parameters 与 Chat 嵌套 function 形态，统一输出 Chat 形态，避免空的 function 体
+- GLM 预处理默认保真：
+  - 不再默认 strip assistant.tool_calls；仅显式 `RCC_GLM_FORCE_TOOLCALL_STRIP=1` 时剥离
+  - 允许 tool 角色（`RCC_GLM_USE_TOOL_ROLE` 非 0）
+  - 默认关闭上下文截断（`RCC_GLM_DISABLE_TRIM=1`）以避免历史丢失
+## 0.52.4 - 2025-10-21
+- 版本维护：小版本升级，确保以修复后的构建运行（Responses.completed 中 function_call 状态规范为 completed；完整历史映射与工具形态兼容已启用）。
+## 0.52.5 - 2025-10-21
+- Responses SSE：当已流式输出 function_call 事件时，不再在 response.completed 中包含 function_call 条目，避免客户端将 completed 视为再次触发工具的信号；其余输出（reasoning/message/usage）保留。
+## 0.52.6 - 2025-10-21
+- Responses→Chat 工具序列补齐：
+  - function_call 块生成的 assistant.tool_calls 记录稳定 id/call_id，并缓存 lastFunctionCallId
+  - function_call_output/tool_result/tool_message 块合成为 role:'tool' 消息，带 tool_call_id（优先块内 id/call_id，否则回退 lastFunctionCallId）
+  - 目的：让 provider 在下一轮能“吃到”工具结果，停止重复的 function_call 循环
+## 0.52.7 - 2025-10-21
+- 工具 Schema 归一化（形态级，非工具名特化）：
+  - 新增 utils `tool-schema-normalizer`，将任意来源的工具定义归一化为 OpenAI Chat 形态：{ type:'function', function:{ name, description?, parameters } }
+  - `llmswitch-response-chat.ts` 的 convertTools 改为使用该归一化；
+  - `llmswitch-anthropic-openai.ts` 的工具映射复用该归一化，确保 Responses→Chat 与 Anthropic→OpenAI 一致。
+## 0.52.8 - 2025-10-21
+- Arguments 形态规范化（按工具 JSON Schema）：
+  - 新增 utils `arguments-normalizer`（将 function.arguments 字符串解析→按 schema 做最小类型包裹/拆包→再 stringify）
+  - 在 llmswitch 出站（buildResponsesPayload）对 function_call.arguments 做规范化；
+  - 在 SSE 流（streamResponsesSSE）对 function_call_arguments.delta/done 使用规范化后的 arguments，保证客户端解析与执行成功。
+## 0.52.9 - 2025-10-21
+- Arguments 规范化接入 tools 归一化：
+  - 在 Responses SSE 层对 arguments 正规化前，先 normalizeTools(req.tools)，再按 schema normalize arguments；
+  - 在 llmswitch captureRequestContext 捕获 tools，便于出站映射时使用 schema 做 arguments 形态规范化。
+## 0.52.10 - 2025-10-21
+- 修复 SSE 归一化路径：更正 responses.ts 中对 `arguments-normalizer` 与 `tool-schema-normalizer` 的 require 路径，确保运行时命中归一化逻辑（之前因路径错误未生效）。

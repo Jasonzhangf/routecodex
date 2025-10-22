@@ -45,7 +45,7 @@ export class ResponsesHandler extends BaseHandler {
       const fs = await import('fs/promises');
       const os = await import('os');
       const path = await import('path');
-      const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'anth-replay');
+      const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'responses-replay');
       await (fs as any).mkdir(dir, { recursive: true });
       const rawFile = path.join(dir, `raw-request_${requestId}.json`);
       const payload = { requestId, method: req.method, url: req.originalUrl || req.url, headers: this.sanitizeHeaders(req.headers), body: rawBody };
@@ -131,6 +131,9 @@ export class ResponsesHandler extends BaseHandler {
         throw e;
       }
 
+      // Preserve original normalized request before pipeline mutates it
+      const originalRequestSnapshot = JSON.parse(JSON.stringify(req.body || {}));
+
       // Process request through pipeline
       const response = await this.processResponseRequest(req, requestId);
 
@@ -144,7 +147,8 @@ export class ResponsesHandler extends BaseHandler {
           (req.body as any)?.tools,
           (req.body as any)?.tool_choice,
           (req.body as any)?.parallel_tool_calls,
-          (req.body as any)?.instructions
+          (req.body as any)?.instructions,
+          originalRequestSnapshot
         );
         return;
       }
@@ -172,13 +176,11 @@ export class ResponsesHandler extends BaseHandler {
    * Process response request
    */
   private async processResponseRequest(req: Request, requestId: string): Promise<any> {
-    // Use pipeline manager if available
     if (this.shouldUsePipeline() && this.getRoutePools()) {
       return await this.processWithPipeline(req, requestId);
     }
 
-    // Fallback implementation
-    return this.createSimulatedResponse(req);
+    throw new RouteCodexError('Responses pipeline unavailable', 'pipeline_unavailable', 503);
   }
 
   /**
@@ -192,69 +194,7 @@ export class ResponsesHandler extends BaseHandler {
     const providerId = meta?.providerId ?? 'unknown';
     const modelId = meta?.modelId ?? 'unknown';
 
-    const respConfig = await ResponsesConfigUtil.load();
     let normalizedData: any = { ...(req.body as any || {}), ...(modelId ? { model: modelId } : {}) };
-
-    // Hard normalize OpenAI chat payload to GLM-safe format: ensure messages[].content is string
-    try {
-      if (Array.isArray(normalizedData?.messages)) {
-        const anthropicBlocks = (normalizedData.messages as any[]).some((m: any) => Array.isArray(m?.content));
-        if (anthropicBlocks) {
-          // Keep Anthropic blocks intact for Responses routing; downstream llmswitch will handle conversion
-          // Also drop any Responses-specific top-level fields if present
-          delete normalizedData.input;
-          delete normalizedData.instructions;
-          delete normalizedData.response_format;
-        } else {
-        const stringify = (v: unknown): string => {
-          if (v == null) return '';
-          if (typeof v === 'string') return v;
-          try { return JSON.stringify(v); } catch { return String(v); }
-        };
-        const blocksToText = (arr: any[]): string => {
-          const parts: string[] = [];
-          for (const b of arr) {
-            if (!b || typeof b !== 'object') { continue; }
-            if (typeof b.text === 'string') { parts.push(b.text); continue; }
-            if (typeof b.output === 'string') { parts.push(b.output); continue; }
-            if (typeof b.name === 'string' && (b.arguments || b.args)) {
-              parts.push(`Function ${b.name}(${typeof b.arguments==='string'?b.arguments:stringify(b.arguments||b.args)})`);
-              continue;
-            }
-            // Fallback: serialize whole block
-            parts.push(stringify(b));
-          }
-          return parts.join('\n');
-        };
-        normalizedData.messages = (normalizedData.messages as any[]).map((m: any) => {
-          const out = { ...m };
-          if (Array.isArray(out.content)) {
-            out.content = blocksToText(out.content);
-          } else if (typeof out.content !== 'string') {
-            out.content = stringify(out.content);
-          }
-          // tool role must have string content
-          if (out.role === 'tool' && typeof out.content !== 'string') {
-            out.content = stringify(out.content);
-          }
-          // ensure assistant.tool_calls.function.arguments is string
-          if (out.role === 'assistant' && Array.isArray(out.tool_calls)) {
-            out.tool_calls = out.tool_calls.map((tc: any) => {
-              if (tc && tc.function && typeof tc.function === 'object' && typeof tc.function.arguments !== 'string') {
-                try { tc.function.arguments = JSON.stringify(tc.function.arguments); } catch { tc.function.arguments = String(tc.function.arguments); }
-              }
-              return tc;
-            });
-          }
-          return out;
-        });
-        // Remove Responses-specific fields that may upset providers
-        delete normalizedData.input;
-        delete normalizedData.instructions;
-        delete normalizedData.response_format;
-        }
-      }
-    } catch { /* ignore */ }
 
     // Always synthesize a clean Chat request from Responses payload to tolerate arbitrary client shapes
     try {
@@ -285,6 +225,7 @@ export class ResponsesHandler extends BaseHandler {
         // Send OpenAI Chat to provider after local synth; targetProtocol=openai for safety
         targetProtocol: 'openai',
         endpoint: `${req.baseUrl || ''}${req.url || ''}`,
+        entryEndpoint: '/v1/responses',
       },
       debug: {
         enabled: this.config.enableMetrics ?? true,
@@ -302,7 +243,7 @@ export class ResponsesHandler extends BaseHandler {
       const fs = await import('fs/promises');
       const os = await import('os');
       const path = await import('path');
-      const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'anth-replay');
+      const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'responses-replay');
       await (fs as any).mkdir(dir, { recursive: true });
       const file = path.join(dir, `pre-pipeline_${requestId}.json`);
       await (fs as any).writeFile(file, JSON.stringify({ requestId, normalizedData }, null, 2), 'utf-8');
@@ -322,133 +263,15 @@ export class ResponsesHandler extends BaseHandler {
       const fs = await import('fs/promises');
       const os = await import('os');
       const path = await import('path');
-      const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'anth-replay');
+      const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'responses-replay');
       await (fs as any).mkdir(dir, { recursive: true });
       const file = path.join(dir, `provider-response_${requestId}.json`);
       await (fs as any).writeFile(file, JSON.stringify(firstResp, null, 2), 'utf-8');
     } catch { /* ignore */ }
 
-    // Tool-followup (方案A): if enabled, execute tools server-side and run second round
-    try {
-      const execEnabled = (() => {
-        const v = String(process.env.ROUTECODEX_TOOL_SERVER_EXEC || '').trim().toLowerCase();
-        return v === '1' || v === 'true' || v === 'yes';
-      })();
-      const toolCalls: Array<{ id: string; name: string; args: unknown }> = [];
-      // OpenAI Chat tool_calls
-      try {
-        const tcs = (firstResp as any)?.choices?.[0]?.message?.tool_calls;
-        if (Array.isArray(tcs)) {
-          for (const tc of tcs) {
-            const id = tc?.id || `call_${Math.random().toString(36).slice(2)}`;
-            const name = tc?.function?.name || 'tool';
-            const args = tc?.function?.arguments || '{}';
-            toolCalls.push({ id, name, args });
-          }
-        }
-      } catch { /* ignore */ }
-      // Anthropic tool_use blocks
-      try {
-        const content = Array.isArray((firstResp as any)?.content) ? (firstResp as any).content : [];
-        for (const b of content) {
-          if (b && typeof b === 'object' && b.type === 'tool_use') {
-            const id = b?.id || `call_${Math.random().toString(36).slice(2)}`;
-            const name = b?.name || 'tool';
-            const args = b?.input || {};
-            toolCalls.push({ id, name, args });
-          }
-        }
-      } catch { /* ignore */ }
-      // Responses output tool_call
-      try {
-        const out = Array.isArray((firstResp as any)?.output) ? (firstResp as any).output : [];
-        for (const it of out) {
-          if (it && typeof it === 'object' && it.type === 'tool_call') {
-            const id = it?.id || `call_${Math.random().toString(36).slice(2)}`;
-            const name = it?.tool_name || it?.name || 'tool';
-            const args = it?.arguments || {};
-            toolCalls.push({ id, name, args });
-          }
-        }
-      } catch { /* ignore */ }
-
-      if (execEnabled && toolCalls.length > 0) {
-        // Execute tools (whitelisted) and build second-turn messages
-        const { executeTool } = await import('../utils/tool-executor.js');
-        const results: Array<{ id: string; content: string; error?: string }> = [];
-        for (const spec of toolCalls) {
-          try {
-            const r = await executeTool({ id: spec.id, name: spec.name, args: spec.args });
-            const content = r.error ? `Tool ${r.name} error: ${r.error}` : (r.output || '(no output)');
-            results.push({ id: spec.id, content, ...(r.error ? { error: r.error } : {}) });
-          } catch (e: any) {
-            results.push({ id: spec.id, content: `Tool ${spec.name} failed: ${e?.message || String(e)}` });
-          }
-        }
-
-        // Build second request in OpenAI chat shape: append tool messages
-        const secondData = {
-          ...normalizedData,
-          stream: false,
-          messages: [
-            ...((normalizedData as any)?.messages || []),
-            ...results.map(r => ({ role: 'tool', content: r.content, tool_call_id: r.id }))
-          ]
-        };
-
-        const secondReq = {
-          data: secondData,
-          route: {
-            providerId,
-            modelId,
-            requestId,
-            timestamp: Date.now(),
-            pipelineId,
-          },
-          metadata: {
-            method: 'POST',
-            url: '/v1/responses',
-            headers: this.sanitizeHeaders(req.headers),
-            targetProtocol: 'openai',
-            endpoint: '/v1/responses'
-          },
-          debug: { enabled: true, stages: { llmSwitch: true, workflow: true, compatibility: true, provider: true } }
-        };
-
-        const second = await Promise.race([
-          this.getPipelineManager()?.processRequest?.(secondReq) || Promise.reject(new Error('Pipeline manager not available')),
-          new Promise((_, reject) => setTimeout(() => reject(new Error(`Pipeline timeout after ${pipelineTimeoutMs}ms`)), Math.max(1, pipelineTimeoutMs)))
-        ]);
-        const secondResp = (second && typeof second === 'object' && 'data' in second) ? (second as any).data : second;
-        return { __initial: firstResp, __final: secondResp, __tools: results };
-      }
-    } catch { /* ignore tool follow-up errors, fallback to first response */ }
+    // 工具调用仅由客户端执行；服务端不再尝试本地执行或发起第二轮。
 
     return firstResp;
-  }
-
-  /**
-   * Create simulated response for fallback
-   */
-  private createSimulatedResponse(req: Request): any {
-    return {
-      id: `msg_${Date.now()}`,
-      type: 'message',
-      role: 'assistant',
-      content: [
-        {
-          type: 'text',
-          text: 'This is a simulated response from ResponsesHandler'
-        }
-      ],
-      model: req.body.model || 'claude-3-sonnet-20240229',
-      stop_reason: 'end_turn',
-      stop_sequence: null,
-      usage: {
-        input_tokens: 0,
-        output_tokens: 0
-      }
-    };
   }
 
   /**
@@ -462,15 +285,19 @@ export class ResponsesHandler extends BaseHandler {
     reqTools?: unknown,
     reqToolChoice?: unknown,
     reqParallel?: unknown,
-    reqInstructions?: unknown
+    reqInstructions?: unknown,
+    reqMeta?: Record<string, unknown>
   ): Promise<void> {
     let heartbeatTimer: NodeJS.Timeout | null = null;
+    let streamAborted = false;
+    // audit writer stub (initialized after fs paths are ready)
+    let auditWrite: (kind: 'event' | 'meta' | 'end' | 'error', payload: Record<string, unknown>) => Promise<void> = async () => Promise.resolve();
     try {
       const fs = await import('fs/promises');
       const path = await import('path');
       const home = process.env.HOME || process.env.USERPROFILE || '';
       const baseDir = path.join(home || '', '.routecodex', 'codex-samples');
-      const subDir = path.join(baseDir, 'anth-replay');
+      const subDir = path.join(baseDir, 'responses-replay');
       const sseFile = path.join(subDir, `sse-events-${requestId}.log`);
       const sseAuditFile = path.join(subDir, `sse-audit-${requestId}.log`);
       const ensureDirs = async () => { try { await fs.mkdir(subDir, { recursive: true }); } catch { /* ignore */ } };
@@ -479,6 +306,29 @@ export class ResponsesHandler extends BaseHandler {
           await ensureDirs();
           const line = JSON.stringify({ ts: Date.now(), requestId, event, data }) + '\n';
           await fs.appendFile(sseFile, line, 'utf-8');
+        } catch { /* ignore */ }
+      };
+      auditWrite = async (kind: 'event' | 'meta' | 'end' | 'error', payload: Record<string, unknown>) => {
+        try {
+          await ensureDirs();
+          const now = new Date().toISOString();
+          if (kind === 'event') {
+            const ev = String((payload as any).event || 'unknown');
+            const data = (payload as any).data !== undefined ? JSON.stringify((payload as any).data) : '{}';
+            const chunk = `# ${now} requestId=${requestId}\n` +
+                         `event: ${ev}\n` +
+                         `data: ${data}\n\n`;
+            await fs.appendFile(sseAuditFile, chunk, 'utf-8');
+          } else if (kind === 'meta') {
+            const chunk = `# ${now} requestId=${requestId} META ${JSON.stringify(payload)}\n`;
+            await fs.appendFile(sseAuditFile, chunk, 'utf-8');
+          } else if (kind === 'end') {
+            const chunk = `# ${now} requestId=${requestId} SSE_END ${JSON.stringify(payload)}\n`;
+            await fs.appendFile(sseAuditFile, chunk, 'utf-8');
+          } else if (kind === 'error') {
+            const chunk = `# ${now} requestId=${requestId} SSE_ERROR ${JSON.stringify(payload)}\n`;
+            await fs.appendFile(sseAuditFile, chunk, 'utf-8');
+          }
         } catch { /* ignore */ }
       };
       const startHeartbeat = async () => {
@@ -511,15 +361,29 @@ export class ResponsesHandler extends BaseHandler {
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('x-request-id', requestId);
+      await auditWrite('meta', { phase: 'headers', headers: {
+        'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'x-request-id': requestId
+      }});
       await startHeartbeat();
 
-      // Minimal writer (OpenAI Responses standard; no Azure sequence/parts)
+      // Minimal writer (OpenAI Responses standard) with sequence_number (start at 0)
+      let seq = 0;
       const writeEvt = async (event: string, data: Record<string, unknown>) => {
+        const payload = { ...(data || {}), sequence_number: seq++ } as Record<string, unknown>;
         res.write(`event: ${event}\n`);
-        res.write(`data: ${JSON.stringify(data)}\n\n`);
-        try { await capture(event, data); } catch { /* ignore */ }
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        try { await capture(event, payload); } catch { /* ignore */ }
+        try { await auditWrite('event', { event, data: payload }); } catch { /* ignore */ }
       };
 
+      const requestMeta = { ...(reqMeta ?? {}) } as Record<string, unknown>;
+      const requestInstructions = typeof reqInstructions === 'string' ? reqInstructions : undefined;
+      if (requestInstructions && !requestMeta.instructions) {
+        requestMeta.instructions = requestInstructions;
+      }
+      if (reqTools !== undefined && requestMeta.tools === undefined) requestMeta.tools = reqTools;
+      if (reqToolChoice !== undefined && requestMeta.tool_choice === undefined) requestMeta.tool_choice = reqToolChoice;
+      if (reqParallel !== undefined && requestMeta.parallel_tool_calls === undefined) requestMeta.parallel_tool_calls = reqParallel;
       // If tool-followup is present, prefer __initial for tool events and __final for text/usage
       const rawInitial = (response && typeof response === 'object' && (response as any).__initial) ? (response as any).__initial : response;
       const rawFinal = (response && typeof response === 'object' && (response as any).__final) ? (response as any).__final : response;
@@ -533,7 +397,7 @@ export class ResponsesHandler extends BaseHandler {
         const fs = await import('fs/promises');
         const os = await import('os');
         const path = await import('path');
-        const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'anth-replay');
+        const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'responses-replay');
         await (fs as any).mkdir(dir, { recursive: true });
         await (fs as any).writeFile(path.join(dir, `responses-initial_${requestId}.json`), JSON.stringify(initialResp, null, 2), 'utf-8');
         await (fs as any).writeFile(path.join(dir, `responses-final_${requestId}.json`), JSON.stringify(finalResp, null, 2), 'utf-8');
@@ -575,22 +439,174 @@ export class ResponsesHandler extends BaseHandler {
       const textOut = extractText(finalResp) || extractText(initialResp);
       const words = (textOut || '').split(/\s+/g).filter(Boolean);
 
-      const baseResp = { id: `resp_${requestId}`, model: model || 'unknown' } as Record<string, unknown>;
+      const toCleanObject = (obj: Record<string, unknown>) => {
+        for (const key of Object.keys(obj)) {
+          if (obj[key] === undefined) delete obj[key];
+        }
+        return obj;
+      };
+
+      const assembleSnapshot = (): Record<string, unknown> => {
+        const snap: Record<string, unknown> = { ...(finalResp || {}) };
+        snap.id = snap.id || finalResp?.id || `resp_${requestId}`;
+        snap.object = snap.object || 'response';
+        const createdAt = (typeof snap.created_at === 'number' ? snap.created_at : undefined)
+          ?? (typeof (snap as any).created === 'number' ? (snap as any).created : undefined)
+          ?? Math.floor(Date.now() / 1000);
+        snap.created_at = createdAt;
+        delete (snap as any).created;
+        snap.status = snap.status || 'completed';
+        if (!('background' in snap)) snap.background = false;
+        if (!('error' in snap)) snap.error = null;
+        if (!('incomplete_details' in snap)) snap.incomplete_details = null;
+        if (requestMeta.instructions && !snap.instructions) snap.instructions = requestMeta.instructions;
+        if (requestMeta.reasoning && !snap.reasoning) snap.reasoning = requestMeta.reasoning;
+        if (requestMeta.tool_choice && !snap.tool_choice) snap.tool_choice = requestMeta.tool_choice;
+        if (requestMeta.parallel_tool_calls !== undefined && !snap.parallel_tool_calls) snap.parallel_tool_calls = requestMeta.parallel_tool_calls;
+        if (requestMeta.tools && !snap.tools) snap.tools = requestMeta.tools;
+        if (requestMeta.store !== undefined && !snap.store) snap.store = requestMeta.store;
+        if (requestMeta.include && !snap.include) snap.include = requestMeta.include;
+        if (requestMeta.prompt_cache_key && !snap.prompt_cache_key) snap.prompt_cache_key = requestMeta.prompt_cache_key;
+        snap.model = model || snap.model || 'unknown';
+        if (!snap.metadata) snap.metadata = {};
+        if (!Array.isArray(snap.output) && Array.isArray(finalResp?.output)) snap.output = finalResp?.output;
+        if (!('output_text' in snap)) snap.output_text = finalResp?.output_text ?? textOut ?? '';
+        if (finalResp?.usage && !snap.usage) snap.usage = finalResp.usage;
+        return toCleanObject(snap);
+      };
+
+      const baseSnapshot = assembleSnapshot();
+      const baseResp = await ResponsesMapper.enrichResponsePayload(baseSnapshot, finalResp as Record<string, unknown>, requestMeta);
       const now = () => Math.floor(Date.now() / 1000);
       // Text strict Azure mode removed per rollback request; keep default text path
 
       // response.created / in_progress (OpenAI Responses shape)
       const createdTs = now();
+      const inProgressResp = (() => {
+        const snap = { ...baseResp, status: 'in_progress' } as Record<string, unknown>;
+        delete snap.output;
+        delete snap.output_text;
+        delete snap.usage;
+        delete snap.required_action;
+        return toCleanObject(snap);
+      })();
+
       await writeEvt('response.created', {
         type: 'response.created',
-        response: { id: baseResp.id, object: 'response', created: createdTs, model: baseResp.model, status: 'in_progress' }
+        response: { ...inProgressResp, created_at: createdTs }
       });
       await writeEvt('response.in_progress', {
         type: 'response.in_progress',
-        response: { id: baseResp.id, object: 'response', created: createdTs, model: baseResp.model, status: 'in_progress' }
+        response: { ...inProgressResp, created_at: createdTs }
       });
 
-      // Emit tool/function_call events when present in normalized Responses output
+      // Emit reasoning item + summary parts (two summaries) to align with upstream shape
+      try {
+        const reasoningId = `rs_${requestId.replace(/[^a-zA-Z0-9]/g,'')}`;
+        const randB64 = (len = 32) => {
+          try { const c = require('crypto'); return c.randomBytes(len).toString('base64'); } catch { return Buffer.from(String(Date.now())).toString('base64'); }
+        };
+        // output_item.added(reasoning)
+        await writeEvt('response.output_item.added', {
+          type: 'response.output_item.added',
+          output_index: 0,
+          item: { id: reasoningId, type: 'reasoning', encrypted_content: randB64(96), summary: [] }
+        });
+        const makeSummary = (seed?: string): string => {
+          const s = (typeof seed === 'string' && seed.trim()) ? seed.trim() : 'Summarizing reasoning for the current turn.';
+          return s.length > 480 ? s.slice(0, 480) : s;
+        };
+        const summary0 = makeSummary(typeof requestMeta?.instructions === 'string' ? String(requestMeta?.instructions) : undefined);
+        const summary1 = makeSummary('Planning tool invocation and response formatting.');
+        const chunk = async (text: string, summaryIndex: number) => {
+          // part.added
+          await writeEvt('response.reasoning_summary_part.added', {
+            type: 'response.reasoning_summary_part.added',
+            item_id: reasoningId,
+            output_index: 0,
+            summary_index: summaryIndex,
+            part: { type: 'summary_text', text: '' }
+          });
+          // deltas with obfuscation placeholder
+          const words = text.split(/\s+/g).filter(Boolean);
+          let acc = '';
+          for (const w of words) {
+            acc += (acc ? ' ' : '') + w;
+            if (acc.length >= 24) {
+              await writeEvt('response.reasoning_summary_text.delta', {
+                type: 'response.reasoning_summary_text.delta',
+                item_id: reasoningId,
+                output_index: 0,
+                summary_index: summaryIndex,
+                delta: acc,
+                obfuscation: randB64(6)
+              });
+              acc = '';
+            }
+          }
+          if (acc) {
+            await writeEvt('response.reasoning_summary_text.delta', {
+              type: 'response.reasoning_summary_text.delta',
+              item_id: reasoningId,
+              output_index: 0,
+              summary_index: summaryIndex,
+              delta: acc,
+              obfuscation: randB64(6)
+            });
+          }
+          // text.done
+          await writeEvt('response.reasoning_summary_text.done', {
+            type: 'response.reasoning_summary_text.done',
+            item_id: reasoningId,
+            output_index: 0,
+            summary_index: summaryIndex,
+            text
+          });
+          // part.done with final text
+          await writeEvt('response.reasoning_summary_part.done', {
+            type: 'response.reasoning_summary_part.done',
+            item_id: reasoningId,
+            output_index: 0,
+            summary_index: summaryIndex,
+            part: { type: 'summary_text', text }
+          });
+        };
+        await chunk(summary0, 0);
+        await chunk(summary1, 1);
+      } catch { /* ignore reasoning stream synthesis */ }
+
+      // Emit tool/function_call events after message, with output_index = 2
+      // Assistant text deltas
+      const hadToolFirstTurn = (
+        (Array.isArray((initialResp as any)?.output) && (initialResp as any).output.some((x: any) => x && (x.type === 'tool_call' || x.type === 'function_call')))
+        || (Array.isArray((initialResp as any)?.content) && (initialResp as any).content.some((x: any) => x?.type === 'tool_use'))
+      );
+      // 仅当确有文本时才发送 message 文本生命周期，避免空消息导致客户端误判重试
+      if (words.length > 0) {
+        // Emit item lifecycle gated by config
+        const cfg = await ResponsesConfigUtil.load();
+        if (cfg.sse.emitTextItemLifecycle) {
+          const msgId = `msg_${requestId}`;
+          await writeEvt('response.output_item.added', { type: 'response.output_item.added', output_index: 1, item: { id: msgId, type: 'message', role: 'assistant', status: 'in_progress', content: [] } });
+          await writeEvt('response.content_part.added', { type: 'response.content_part.added', item_id: msgId, output_index: 1, content_index: 0, part: { type: 'output_text', annotations: [], logprobs: [], text: '' } });
+          for (const w of words) {
+            await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', item_id: msgId, output_index: 1, content_index: 0, delta: w + ' ', logprobs: [] });
+            await new Promise(r => setTimeout(r, 12));
+          }
+          await writeEvt('response.output_text.done', { type: 'response.output_text.done', item_id: msgId, output_index: 1, content_index: 0, logprobs: [] });
+          await writeEvt('response.content_part.done', { type: 'response.content_part.done', item_id: msgId, output_index: 1, content_index: 0 });
+          await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: 1, item: { id: msgId, type: 'message', status: 'completed' } });
+        } else {
+          // Minimal text-only delta/done
+          for (const w of words) {
+            await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', output_index: 1, item_id: `msg_${requestId}`, content_index: 0, delta: w + ' ', logprobs: [] });
+            await new Promise(r => setTimeout(r, 12));
+          }
+          await writeEvt('response.output_text.done', { type: 'response.output_text.done', output_index: 1, item_id: `msg_${requestId}`, content_index: 0, logprobs: [] });
+        }
+      }
+
+      // After text/message, emit function_call stream if present (output_index = 2)
       try {
         const emitToolCallsFromResponsesOutput = async (resp: any) => {
           const out = Array.isArray(resp?.output) ? resp.output : [];
@@ -598,78 +614,75 @@ export class ResponsesHandler extends BaseHandler {
             if (!it || typeof it !== 'object') continue;
             if ((it as any).type === 'tool_call' || (it as any).type === 'function_call') {
               const id = (it as any).id || `call_${Math.random().toString(36).slice(2)}`;
+              const call_id = (it as any).call_id || id;
               const name = (it as any).tool_name || (it as any).name || 'tool';
               const argsVal = (it as any).arguments ?? (it as any)?.tool_call?.function?.arguments ?? {};
-              const args = typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal);
+              let argsStr = typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal);
+              // Strict validation: do NOT normalize or fixup; if invalid vs schema, stream error and stop
+              try {
+                const error400 = (m: string) => { const e: any = new Error(m); (e as any).status = 400; (e as any).code = 'validation_error'; return e; };
+                const ensureObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+                // eslint-disable-next-line @typescript-eslint/no-var-requires
+                const { normalizeTools } = require('../../modules/pipeline/modules/llmswitch/utils/tool-schema-normalizer.js');
+                const toolsNorm = Array.isArray(reqTools) ? normalizeTools(reqTools) : [];
+                const findSchema = (fnName?: string): Record<string, unknown> | undefined => {
+                  if (!fnName || !Array.isArray(toolsNorm)) return undefined;
+                  for (const t of toolsNorm) { const f: any = (t as any).function; if (f?.name === fnName) return f.parameters as Record<string, unknown>; }
+                  return undefined;
+                };
+                const getKind = (schema: any, key: string): 'string'|'arrayString'|'object'|'any' => {
+                  try {
+                    const s = schema?.properties?.[key];
+                    const t = s?.type; if (t === 'string') return 'string'; if (t === 'object') return 'object'; if (t === 'array' && s?.items?.type === 'string') return 'arrayString';
+                  } catch {}
+                  return 'any';
+                };
+                // Must be JSON string and object
+                let parsed: any; try { parsed = JSON.parse(argsStr); } catch { throw error400('Tool call arguments must be valid JSON'); }
+                if (!ensureObj(parsed)) throw error400('Tool call arguments must be a JSON object');
+                const schema = findSchema(typeof name === 'string' ? name : undefined);
+                if (schema && ensureObj((schema as any).properties)) {
+                  const reqd: string[] = Array.isArray((schema as any).required) ? (schema as any).required as string[] : [];
+                  for (const k of reqd) { if (!(k in parsed)) throw error400(`Missing required argument: ${k}`); }
+                  for (const k of Object.keys((schema as any).properties)) {
+                    if (!(k in parsed)) continue;
+                    const kind = getKind(schema, k);
+                    const val = (parsed as any)[k];
+                    if (kind === 'string' && typeof val !== 'string') throw error400(`Invalid type for ${k}: expected string`);
+                    if (kind === 'object' && !ensureObj(val)) throw error400(`Invalid type for ${k}: expected object`);
+                    if (kind === 'arrayString' && (!Array.isArray(val) || !val.every((x: any) => typeof x === 'string'))) throw error400(`Invalid type for ${k}: expected array<string>`);
+                  }
+                }
+              } catch (e) {
+                const errMsg = (e as Error).message || 'Invalid tool call arguments';
+                await writeEvt('response.error', { type: 'response.error', error: { message: errMsg, type: 'validation_error', code: 'ARGS_INVALID' }, requestId });
+                await auditWrite('error', { phase: 'args_validation', message: errMsg, item_id: id, call_id, name });
+                try { res.end(); } catch { /* ignore */ }
+                if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+                streamAborted = true;
+                return;
+              }
               // output_item.added(function_call)
-              await writeEvt('response.output_item.added', { type: 'response.output_item.added', output_index: 1, item: { id, type: 'function_call', name } });
-              // content_part.added(input_json)
-              await writeEvt('response.content_part.added', { type: 'response.content_part.added', item_id: id, output_index: 1, content_index: 0, part: { type: 'input_json', partial_json: '' } });
-              // arguments delta (single chunk for now)
-              await writeEvt('response.function_call_arguments.delta', { type: 'response.function_call_arguments.delta', id, delta: String(args) });
-              await writeEvt('response.function_call_arguments.done', { type: 'response.function_call_arguments.done', id });
-              await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: 1, item: { id, type: 'function_call' } });
+              await writeEvt('response.output_item.added', { type: 'response.output_item.added', output_index: 2, item: { id, type: 'function_call', status: 'in_progress', arguments: '', call_id, name } });
+              await writeEvt('response.content_part.added', { type: 'response.content_part.added', item_id: id, output_index: 2, content_index: 0, part: { type: 'input_json', partial_json: '' } });
+              // chunk arguments
+              const step = Math.max(1, Math.floor(String(argsStr).length / 3));
+              for (let i = 0; i < String(argsStr).length; i += step) {
+                const d = String(argsStr).slice(i, i + step);
+                await writeEvt('response.function_call_arguments.delta', { type: 'response.function_call_arguments.delta', item_id: id, output_index: 2, delta: d });
+              }
+              await writeEvt('response.function_call_arguments.done', { type: 'response.function_call_arguments.done', item_id: id, output_index: 2, arguments: String(argsStr), name });
+              await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: 2, item: { id, type: 'function_call', status: 'completed', arguments: String(argsStr), call_id, name } });
             }
           }
         };
-
         const toolSource = finalResp && typeof finalResp === 'object' ? finalResp : {};
         await emitToolCallsFromResponsesOutput(toolSource);
-        // Emit required_action for clients that expect submit_tool_outputs flow
-        try {
-          const cfg = await ResponsesConfigUtil.load();
-          const emitRequired = !!cfg.mappings.tools.emitRequiredAction; // mapping-driven
-          if (!emitRequired) { /* skip */ return; }
-          const toolCallsList: Array<{ id: string; name: string; arguments: string }> = [];
-          if (Array.isArray((toolSource as any)?.output)) {
-            for (const it of (toolSource as any).output) {
-              if (it && typeof it === 'object' && it.type === 'tool_call') {
-                const id = it?.id || `call_${Math.random().toString(36).slice(2)}`;
-                const name = it?.tool_name || it?.name || 'tool';
-                const argsVal = it?.arguments ?? {};
-                const args = typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal);
-                toolCallsList.push({ id, name, arguments: String(args) });
-              }
-            }
-          }
-          if (toolCallsList.length > 0) {
-            await writeEvt('response.required_action', {
-              type: 'response.required_action',
-              response: { id: baseResp.id, model: baseResp.model },
-              required_action: {
-                type: 'submit_tool_outputs',
-                submit_tool_outputs: { tool_calls: toolCallsList }
-              }
-            } as Record<string, unknown>);
-          }
-        } catch { /* ignore */ }
-        // Do not emit server-side tool_result streaming; client manages tools
-      } catch { /* ignore */ }
-      // Assistant text deltas
-      const hadToolFirstTurn = (Array.isArray((initialResp as any)?.output) && (initialResp as any).output.some((x: any) => x?.type === 'tool_call'))
-        || (Array.isArray((initialResp as any)?.content) && (initialResp as any).content.some((x: any) => x?.type === 'tool_use'));
-      if (words.length > 0 || !hadToolFirstTurn) {
-        // Emit item lifecycle gated by config
-        const cfg = await ResponsesConfigUtil.load();
-        if (cfg.sse.emitTextItemLifecycle) {
-          const msgId = `msg_${requestId}`;
-          await writeEvt('response.output_item.added', { type: 'response.output_item.added', output_index: 0, item: { id: msgId, type: 'message', role: 'assistant', status: 'in_progress', content: [] } });
-          await writeEvt('response.content_part.added', { type: 'response.content_part.added', item_id: msgId, output_index: 0, content_index: 0, part: { type: 'output_text', text: '' } });
-          for (const w of words) {
-            await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', output_index: 0, delta: w + ' ' });
-            await new Promise(r => setTimeout(r, 12));
-          }
-          await writeEvt('response.output_text.done', { type: 'response.output_text.done', output_index: 0 });
-          await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: 0, item: { id: msgId, type: 'message', status: 'completed' } });
-        } else {
-          // Minimal text-only delta/done
-          for (const w of words) {
-            await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', output_index: 0, delta: w + ' ' });
-            await new Promise(r => setTimeout(r, 12));
-          }
-          await writeEvt('response.output_text.done', { type: 'response.output_text.done', output_index: 0 });
+        if (streamAborted) {
+          // Tool args invalid and stream closed; stop further writes
+          return;
         }
-      }
+      } catch { /* ignore */ }
 
       // response.completed (attach total output_text when available)
       // Map usage from final turn if available
@@ -685,14 +698,73 @@ export class ResponsesHandler extends BaseHandler {
         const total = (typeof u.total_tokens === 'number') ? u.total_tokens : (input + output);
         return { input_tokens: input, output_tokens: output, total_tokens: total } as Record<string, number>;
       };
-      let usage = mapUsage(srcUsage) as Record<string, number> | undefined;
-      if (!usage) { usage = { input_tokens: 0, output_tokens: 0, total_tokens: 0 } as any; }
-      const completed = { type: 'response.completed', response: { id: baseResp.id, object: 'response', created: createdTs, model: baseResp.model, status: 'completed', output_text: textOut || '' }, ...(usage ? { usage } : {}) } as Record<string, unknown>;
-      if (typeof reqInstructions === 'string' && reqInstructions.trim()) { (completed as any).instructions = reqInstructions; }
+      const usage = mapUsage(srcUsage) as Record<string, number> | undefined;
+      const completedSnapshot = { ...baseResp, status: 'completed' } as Record<string, unknown>;
+      completedSnapshot.created_at = completedSnapshot.created_at ?? createdTs;
+      if (!('output_text' in completedSnapshot) && textOut) {
+        completedSnapshot.output_text = textOut;
+      }
+      if (!textOut) {
+        delete completedSnapshot.output_text;
+      }
+      if (usage) completedSnapshot.usage = usage;
+      // Ensure completed.output includes reasoning/message(function optional)/function_call in order
+      try {
+        const ensureCompletedOutput = () => {
+          const list = Array.isArray((completedSnapshot as any).output) ? ((completedSnapshot as any).output as any[]) : [];
+          const hasType = (t: string) => list.some(x => x && typeof x === 'object' && x.type === t);
+          // seed reasoning summaries from earlier
+          const reasoningItem = { type: 'reasoning', content: [ { type: 'summary_text', text: 'Summarizing reasoning for the current turn.' }, { type: 'summary_text', text: 'Planning tool invocation and response formatting.' } ] } as any;
+          if (!hasType('reasoning')) list.unshift(reasoningItem);
+          // message item from aggregated text (only when non-empty)
+          if (textOut && textOut.trim()) {
+            const msgItem = { type: 'message', message: { role: 'assistant', content: [ { type: 'output_text', text: textOut } ] } } as any;
+            if (!hasType('message')) list.push(msgItem);
+          }
+          // function_call item exists from finalResp mapping; if missing, try to derive from finalResp (no status in completed snapshot)
+          const addFunc = () => {
+            const out = Array.isArray((finalResp as any)?.output) ? (finalResp as any).output : [];
+            const it = out.find((x: any) => x && (x.type === 'function_call' || x.type === 'tool_call'));
+            if (it) {
+              list.push({
+                type: 'function_call',
+                id: it.id || `call_${Math.random().toString(36).slice(2,8)}`,
+                call_id: it.call_id || it.id,
+                name: it.name || it.tool_name || 'tool',
+                arguments: typeof it.arguments === 'string' ? it.arguments : JSON.stringify(it.arguments || {})
+              });
+            }
+          };
+          if (!hasType('function_call')) addFunc();
+          // If本轮已流式输出了 function_call.* 事件，则在 completed 快照中去掉 function_call 条目，避免客户端重复判定需要继续执行工具
+          try {
+            const toolStreamed = hadToolFirstTurn === true;
+            if (toolStreamed) {
+              const kept: any[] = [];
+              for (const it of list) {
+                if (it && typeof it === 'object' && it.type === 'function_call') continue;
+                kept.push(it);
+              }
+              (completedSnapshot as any).output = kept;
+              return;
+            }
+          } catch { /* ignore */ }
+          // Normalize function_call items in completed snapshot: force status to 'completed' (or remove)
+          for (const it of list) {
+            if (it && typeof it === 'object' && (it.type === 'function_call')) {
+              if (it.status && it.status !== 'completed') it.status = 'completed';
+            }
+          }
+          (completedSnapshot as any).output = list;
+        };
+        ensureCompletedOutput();
+      } catch { /* ignore */ }
+      const completed = { type: 'response.completed', response: toCleanObject(completedSnapshot) } as Record<string, unknown>;
+      if (streamAborted) { return; }
       await writeEvt('response.completed', completed);
-      try { await writeEvt('response.done', { type: 'response.done' }); } catch { /* ignore */ }
       // no SSE audit summary when Azure artifacts removed
       try { res.end(); } catch { /* ignore */ }
+      await auditWrite('end', { phase: 'completed' });
       if (heartbeatTimer) {
         clearInterval(heartbeatTimer);
         heartbeatTimer = null;
@@ -702,10 +774,8 @@ export class ResponsesHandler extends BaseHandler {
         const e = { type: 'response.error', error: { message: (err as Error).message || 'stream error', type: 'streaming_error', code: 'STREAM_FAILED' }, requestId } as Record<string, unknown>;
         res.write(`event: response.error\n`);
         res.write(`data: ${JSON.stringify(e)}\n\n`);
-        // Always send done sentinel on error to satisfy clients expecting a terminator
-        res.write(`event: response.done\n`);
-        res.write(`data: {"type":"response.done"}\n\n`);
       } catch { /* ignore */ }
+      await auditWrite('error', { message: (err as Error).message || String(err) });
       try { res.end(); } catch { /* ignore */ }
       if (heartbeatTimer) {
         clearInterval(heartbeatTimer);
@@ -726,34 +796,7 @@ export class ResponsesHandler extends BaseHandler {
     try {
       if (payload && typeof payload === 'object') {
         if (payload.object === 'response' || Array.isArray((payload as any).output) || typeof (payload as any).output_text === 'string') {
-          // If executed tool results exist on wrapper, merge them into output as tool_result items
-          try {
-            const wrapper: any = raw || {};
-            const executed = Array.isArray(wrapper.__tools) ? wrapper.__tools as Array<{ id: string; content: string; error?: string }> : [];
-            if (executed.length && payload && typeof payload === 'object') {
-              const base: any = { ...(payload as any) };
-              base.output = Array.isArray(base.output) ? base.output.slice() : [];
-              for (const r of executed) {
-                base.output.push({ type: 'tool_result', id: r.id, content: r.content, is_error: !!r.error });
-              }
-              // Also aggregate output_text to include tool results as prefix
-              try {
-                const prefix = executed.map(x => `[tool_result ${x.id}]\n${x.content}`).join('\n\n');
-                base.output_text = (prefix ? `${prefix}\n\n` : '') + (base.output_text || '');
-              } catch { /* ignore */ }
-              // Echo requested tools to client (透传)
-              if (reqMeta && typeof reqMeta === 'object') {
-                base.metadata = {
-                  ...(base.metadata || {}),
-                  ...(typeof reqMeta.tools !== 'undefined' ? { tools: reqMeta.tools } : {}),
-                  ...(typeof reqMeta.tool_choice !== 'undefined' ? { tool_choice: reqMeta.tool_choice } : {}),
-                  ...(typeof reqMeta.parallel_tool_calls !== 'undefined' ? { parallel_tool_calls: reqMeta.parallel_tool_calls } : {}),
-                };
-              }
-              return base;
-            }
-          } catch { /* ignore */ }
-          // No server-executed tool results; still echo tools if present
+          // 不合并任何服务器端工具结果；仅透传请求工具定义到 metadata
           if (reqMeta && typeof reqMeta === 'object' && payload && typeof payload === 'object') {
             const base: any = { ...(payload as any) };
             const meta: Record<string, unknown> = { ...(base.metadata || {}) };
@@ -770,24 +813,80 @@ export class ResponsesHandler extends BaseHandler {
             if (typeof reqMeta.tool_choice !== 'undefined') meta.tool_choice = reqMeta.tool_choice;
             if (typeof reqMeta.parallel_tool_calls !== 'undefined') meta.parallel_tool_calls = reqMeta.parallel_tool_calls;
             base.metadata = meta;
-            return base;
+            return await ResponsesMapper.enrichResponsePayload(base, payload as Record<string, unknown>, reqMeta as Record<string, unknown>);
           }
-          return payload;
+          return await ResponsesMapper.enrichResponsePayload(payload as Record<string, unknown>, payload as Record<string, unknown>, reqMeta as Record<string, unknown>);
         }
       }
     } catch { /* ignore */ }
     try {
-      // lazy import via require to avoid ESM type friction
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { ResponsesToChatLLMSwitch } = require('../../modules/pipeline/modules/llmswitch/llmswitch-response-chat.js');
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { PipelineDebugLogger } = require('../../modules/pipeline/utils/debug-logger.js');
-      const logger = new PipelineDebugLogger(null, { enableConsoleLogging: false, enableDebugCenter: false });
-      const deps = { errorHandlingCenter: {}, debugCenter: {}, logger } as any;
-      const conv = new ResponsesToChatLLMSwitch({ type: 'llmswitch-response-chat', config: {} }, deps);
-      if (typeof conv.initialize === 'function') { await conv.initialize(); }
-      const converted = await conv.transformResponse(payload);
-      return converted;
+      // Unified conversion: Chat JSON → Responses JSON via ResponsesMapper
+      const converted = await ResponsesMapper.chatToResponsesFromMapping(payload);
+      // Strict validation (no fallback): arguments must match declared tools schema
+      const toolCallsPath = (converted as any)?.required_action?.submit_tool_outputs?.tool_calls;
+      const reqTools = reqMeta?.tools as unknown;
+      if (Array.isArray(toolCallsPath)) {
+        const error400 = (m: string) => { const e: any = new Error(m); e.status = 400; e.code = 'validation_error'; return e; };
+        const ensureObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+        // Optionally validate against provided tools schema when available
+        let toolsNorm: Array<Record<string, unknown>> = [];
+        if (Array.isArray(reqTools)) {
+          try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { normalizeTools } = require('../../modules/pipeline/modules/llmswitch/utils/tool-schema-normalizer.js');
+            toolsNorm = normalizeTools(reqTools as any[]);
+          } catch { /* ignore tool schema load */ }
+        }
+        const findSchema = (fnName?: string): Record<string, unknown> | undefined => {
+          if (!fnName || !toolsNorm.length) return undefined;
+          for (const t of toolsNorm) {
+            const f: any = (t as any).function;
+            if (f && typeof f.name === 'string' && f.name === fnName) return f.parameters as Record<string, unknown>;
+          }
+          return undefined;
+        };
+        const getPropType = (schema: any, key: string): 'string'|'arrayString'|'object'|'any' => {
+          try {
+            const s = schema?.properties?.[key];
+            const t = s?.type;
+            if (t === 'string') return 'string';
+            if (t === 'object') return 'object';
+            if (t === 'array') {
+              const it = s?.items?.type;
+              if (it === 'string') return 'arrayString';
+            }
+          } catch { /* ignore */ }
+          return 'any';
+        };
+        for (const tc of toolCallsPath) {
+          if (!tc || typeof tc !== 'object' || !ensureObject((tc as any).function)) continue;
+          const fn: any = (tc as any).function;
+          const fnName = typeof fn.name === 'string' ? fn.name : undefined;
+          if (typeof fn.arguments !== 'string') throw error400('Tool call arguments must be a JSON string');
+          let argsObj: any;
+          try { argsObj = JSON.parse(fn.arguments); } catch { throw error400('Tool call arguments must be valid JSON'); }
+          if (!ensureObject(argsObj)) throw error400('Tool call arguments must be a JSON object');
+          const schema = findSchema(fnName);
+          if (schema && ensureObject(schema?.properties)) {
+            // Enforce required keys when declared
+            const required: string[] = Array.isArray((schema as any).required) ? (schema as any).required as string[] : [];
+            for (const key of required) {
+              if (!(key in argsObj)) throw error400(`Missing required argument: ${key}`);
+            }
+            for (const key of Object.keys((schema as any).properties)) {
+              if (!(key in argsObj)) continue; // optional keys
+              const kind = getPropType(schema, key);
+              const val = argsObj[key];
+              if (kind === 'string' && typeof val !== 'string') throw error400(`Invalid type for ${key}: expected string`);
+              if (kind === 'object' && (!ensureObject(val))) throw error400(`Invalid type for ${key}: expected object`);
+              if (kind === 'arrayString') {
+                if (!Array.isArray(val) || !val.every((x: any) => typeof x === 'string')) throw error400(`Invalid type for ${key}: expected array<string>`);
+              }
+            }
+          }
+        }
+      }
+      return await ResponsesMapper.enrichResponsePayload(converted as Record<string, unknown>, payload as Record<string, unknown>, reqMeta as Record<string, unknown>);
     } catch {
       // Fallback minimal Responses wrapper
       const model = (payload && (payload as any).model) || 'unknown';
@@ -795,7 +894,8 @@ export class ResponsesHandler extends BaseHandler {
       const text = (payload && (payload as any).choices && (payload as any).choices[0] && (payload as any).choices[0].message && typeof (payload as any).choices[0].message.content === 'string')
         ? (payload as any).choices[0].message.content
         : '';
-      return { id, object: 'response', created: Math.floor(Date.now()/1000), model, status: 'completed', output: [], output_text: text };
+      const base = { id, object: 'response', created: Math.floor(Date.now()/1000), model, status: 'completed', output: [], output_text: text };
+      return await ResponsesMapper.enrichResponsePayload(base, payload as Record<string, unknown>, reqMeta as Record<string, unknown>);
     }
   }
 }

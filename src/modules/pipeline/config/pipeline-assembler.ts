@@ -234,13 +234,21 @@ export class PipelineAssembler {
         provider: { type: provider.type, config: provCfg },
         compatibility: { type: compatibility.type, config: compatibility.config || {} },
       };
-      // Always ensure llmSwitch exists. If user omitted or provided legacy, default to llmswitch-anthropic-openai
+
+      const allowedSwitches = new Set([
+        'llmswitch-anthropic-openai',
+        'llmswitch-openai-openai',
+        'llmswitch-response-chat',
+      ]);
+
       if (llmSwitch?.type) {
-        const t = String(llmSwitch.type).toLowerCase();
-        if (t === 'llmswitch-anthropic-openai') {
-          modBlock.llmSwitch = { type: 'llmswitch-anthropic-openai', config: llmSwitch.config || {} };
+        const normalizedType = String(llmSwitch.type).toLowerCase();
+        if (allowedSwitches.has(normalizedType)) {
+          modBlock.llmSwitch = {
+            type: llmSwitch.type,
+            config: llmSwitch.config || {},
+          };
         } else {
-          // Replace legacy llmswitch types transparently
           modBlock.llmSwitch = { type: 'llmswitch-anthropic-openai', config: {} };
         }
       } else {

@@ -1,6 +1,8 @@
 import type { LLMSwitchModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest, SharedPipelineResponse } from '../../../../types/shared-dtos.js';
 import type { PipelineDebugLogger } from '../../interfaces/pipeline-interfaces.js';
+import { normalizeArgumentsBySchema } from './utils/arguments-normalizer.js';
+import { normalizeTools } from './utils/tool-schema-normalizer.js';
 
 type ResponseInputItem = {
   type: string;
@@ -232,14 +234,21 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
       stream: payload.stream === true,
       isChatPayload: Array.isArray(payload.messages)
     };
+    // Capture tools for later arguments normalization (shape-level)
+    try {
+      if (Array.isArray((payload as any).tools)) {
+        (context as any).tools = (payload as any).tools;
+      }
+    } catch { /* ignore */ }
     context.isResponsesPayload = !context.isChatPayload && Array.isArray(context.input);
     return context;
   }
 
   private buildChatRequest(payload: Record<string, unknown>, context: ResponseRequestContext): Record<string, unknown> {
-    // Build provider-bound messages only from current turn (+system)
-    const current = this.convertInputToMessages(context.instructions, context.input);
-    const combined = [...current];
+    // Normalize tools for schema-aware argument shaping
+    const toolsNormalized = Array.isArray(payload.tools) ? this.convertTools(payload.tools as any) : undefined;
+    // Build provider-bound messages from full history (+system)
+    const combined = this.convertAllInputToMessages(context.instructions, context.input, toolsNormalized as any);
 
     // Produce a normalized history snapshot from input[] (all message wrappers except the last)
     try {
@@ -328,9 +337,12 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
       result.response_format = payload.response_format;
     }
     if (Array.isArray(payload.tools)) {
-      result.tools = this.convertTools(payload.tools as ResponseToolDefinition[]);
+      result.tools = toolsNormalized;
     }
-    if (payload.tool_choice !== undefined) {
+    // If current request contains any tool results, avoid forcing tool_choice (prevents re-trigger loops)
+    const hasToolResult = Array.isArray(context.input)
+      && (context.input as any[]).some((it: any) => it && typeof it === 'object' && ['function_call_output','tool_result','tool_message'].includes(String(it.type || '').toLowerCase()));
+    if (!hasToolResult && payload.tool_choice !== undefined) {
       result.tool_choice = payload.tool_choice;
     }
     if (payload.parallel_tool_calls !== undefined) {
@@ -358,7 +370,261 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
     return result;
   }
 
-  private convertInputToMessages(instructions?: string, input?: ResponseInputItem[]): Array<Record<string, unknown>> {
+  // Map full Responses input[] history into OpenAI Chat messages (preserve tool calls and tool outputs)
+  private convertAllInputToMessages(instructions?: string, input?: ResponseInputItem[], toolsNormalized?: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+    const messages: Array<Record<string, unknown>> = [];
+
+    const pushText = (role: string, value: string | string[] | undefined | null) => {
+      if (value == null) return;
+      if (Array.isArray(value)) {
+        const filtered = value.map(v => v.trim()).filter(Boolean);
+        if (filtered.length) messages.push({ role, content: filtered.map(text => ({ type: 'text', text })) });
+        return;
+      }
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (trimmed) messages.push({ role, content: trimmed });
+      }
+    };
+
+    // Track last function_call id for associating subsequent tool outputs when explicit id is missing
+    let lastFunctionCallId: string | null = null;
+    const toolNameById: Record<string, string> = {};
+
+    const normalizeShellArgsObject = (obj: any): any => {
+      try {
+        if (!obj || typeof obj !== 'object') return obj;
+        if (!('command' in obj)) return obj;
+        const v = (obj as any).command;
+        const splitShell = (s: string): string[] => {
+          const out: string[] = [];
+          let cur = '';
+          let quote: null | 'single' | 'double' = null;
+          let esc = false;
+          for (const ch of String(s)) {
+            if (esc) { cur += ch; esc = false; continue; }
+            if (ch === '\\') { esc = true; continue; }
+            if (quote === 'single') { if (ch === '\'') { quote = null; } else { cur += ch; } continue; }
+            if (quote === 'double') { if (ch === '"') { quote = null; } else { cur += ch; } continue; }
+            if (ch === '\'') { quote = 'single'; continue; }
+            if (ch === '"') { quote = 'double'; continue; }
+            if (/\s/.test(ch)) { if (cur) { out.push(cur); cur = ''; } continue; }
+            cur += ch;
+          }
+          if (cur) out.push(cur);
+          return out.filter(Boolean);
+        };
+        if (typeof v === 'string') {
+          (obj as any).command = splitShell(v);
+          return obj;
+        }
+        if (Array.isArray(v) && v.length === 1 && typeof v[0] === 'string' && v[0].includes(' ')) {
+          (obj as any).command = splitShell(v[0]);
+          return obj;
+        }
+        return obj;
+      } catch { return obj; }
+    };
+
+    const isJsonish = (s: string): boolean => /^\s*[\[{]/.test(s || '');
+    const formatJsonOutputStrict = (raw: string): string => {
+      const val = JSON.parse(String(raw));
+      const pickFromObject = (o: any): string => {
+        if (!o || typeof o !== 'object' || Array.isArray(o)) throw new Error('tool_result JSON must be object');
+        if (typeof o.text === 'string') return o.text;
+        if (typeof o.content === 'string') return o.content;
+        if (typeof o.output === 'string') return o.output;
+        const listKeys = ['resources','items','results','files','lines'];
+        for (const k of listKeys) {
+          if (Array.isArray((o as any)[k])) {
+            const arr = (o as any)[k] as any[];
+            if (arr.length === 0) return `${k}: 0`;
+            const lines = arr.map((it) => {
+              if (typeof it === 'string') return it;
+              if (it && typeof it === 'object') {
+                if (typeof (it as any).uri === 'string') return String((it as any).uri);
+                if (typeof (it as any).path === 'string') return String((it as any).path);
+                if (typeof (it as any).name === 'string') return String((it as any).name);
+                if (typeof (it as any).id === 'string') return String((it as any).id);
+                if (typeof (it as any).text === 'string') return String((it as any).text);
+                if (typeof (it as any).content === 'string') return String((it as any).content);
+              }
+              throw new Error('tool_result item has unsupported structure');
+            });
+            return lines.join('\n');
+          }
+        }
+        throw new Error('tool_result object has no supported keys');
+      };
+      if (Array.isArray(val)) {
+        if (val.length === 0) return '[]';
+        const lines = val.map((it) => {
+          if (typeof it === 'string') return it;
+          if (it && typeof it === 'object') return pickFromObject(it);
+          throw new Error('tool_result array contains unsupported element');
+        });
+        return lines.join('\n');
+      }
+      if (typeof val === 'object') return pickFromObject(val);
+      throw new Error('tool_result JSON must be object or array');
+    };
+
+    const pushAssistantToolCall = (name: string | undefined, args: unknown, callId?: string) => {
+      const fnName = (typeof name === 'string' && name.trim()) ? name.trim() : 'tool';
+      const serialized = this.serializeArgsStrict(args, fnName, toolsNormalized).trim();
+      const toolId = callId || `call_${Math.random().toString(36).slice(2, 6)}`;
+      lastFunctionCallId = toolId;
+      const tc = { id: toolId, type: 'function', function: { name: fnName, arguments: serialized } } as Record<string, unknown>;
+      toolNameById[toolId] = fnName;
+      messages.push({ role: 'assistant', tool_calls: [tc] });
+    };
+
+    const flattenTextBlocks = (blocks: any[]): string[] => {
+      const texts: string[] = [];
+      for (const block of blocks || []) {
+        if (!block || typeof block !== 'object') continue;
+        const kind = typeof (block as any).type === 'string' ? String((block as any).type).toLowerCase() : '';
+        if ((kind === 'text' || kind === 'input_text' || kind === 'output_text') && typeof (block as any).text === 'string') {
+          const t = (block as any).text.trim(); if (t) texts.push(t);
+          continue;
+        }
+        if (kind === 'message' && Array.isArray((block as any).content)) {
+          texts.push(...flattenTextBlocks((block as any).content));
+          continue;
+        }
+        if (typeof (block as any).content === 'string') {
+          const t = (block as any).content.trim(); if (t) texts.push(t);
+        }
+      }
+      return texts;
+    };
+
+    const coerceObject = (val: unknown): unknown => {
+      if (val === null || val === undefined) return {};
+      if (typeof val === 'object') return val;
+      if (typeof val === 'string') {
+        const s = val.trim();
+        if (!s) return {};
+        try { const p = JSON.parse(s); if (p && typeof p === 'object') return p; } catch { /* ignore */ }
+        return { _raw: s };
+      }
+      return { _raw: String(val) };
+    };
+
+    // 1) system instructions
+    if (instructions && instructions.trim().length) {
+      pushText('system', instructions.trim());
+    }
+
+    // 2) full input history
+    if (Array.isArray(input)) {
+      for (const it of input) {
+        if (!it || typeof it !== 'object') continue;
+        const itType = String((it as any).type || '').toLowerCase();
+
+        // Top-level assistant tool calls
+        if (itType === 'function_call' || itType === 'tool_call') {
+          const name = (it as any).name || (it as any)?.function?.name;
+          const args = (it as any).arguments ?? (it as any)?.function?.arguments ?? {};
+          const id = (it as any).id || (it as any).call_id;
+          // Reuse unified helper which applies schema-aware normalization and double-JSON parsing
+          pushAssistantToolCall(typeof name === 'string' ? name : undefined, args, typeof id === 'string' ? id : undefined);
+          continue;
+        }
+
+        // Top-level tool results
+        if (itType === 'function_call_output' || itType === 'tool_result' || itType === 'tool_message') {
+          // Follow Anthropic->OpenAI: prefer string content; otherwise JSON-stringify structured content
+          let outContent = '';
+          if (typeof (it as any).text === 'string') {
+            const s = (it as any).text.trim(); if (s) outContent = s;
+          } else if (typeof (it as any).content === 'string') {
+            const s = (it as any).content.trim(); if (s) outContent = s;
+          } else if (Array.isArray((it as any).content)) {
+            try { outContent = JSON.stringify((it as any).content); } catch { /* ignore */ }
+          } else if ((it as any).output !== undefined) {
+            const out = (it as any).output;
+            if (typeof out === 'string') { const s = out.trim(); if (s) outContent = s; }
+            else if (out && typeof out === 'object') { try { outContent = JSON.stringify(out); } catch { /* ignore */ } }
+          }
+          if (outContent) {
+            const explicitId = (typeof (it as any).id === 'string' ? (it as any).id
+              : (typeof (it as any).call_id === 'string' ? (it as any).call_id
+                : (typeof (it as any).tool_call_id === 'string' ? (it as any).tool_call_id
+                  : (typeof (it as any).tool_use_id === 'string' ? (it as any).tool_use_id : undefined))));
+            const tool_call_id = explicitId || lastFunctionCallId || undefined;
+            const toolMsg: Record<string, unknown> = tool_call_id ? { role: 'tool', content: outContent, tool_call_id } : { role: 'tool', content: outContent };
+            messages.push(toolMsg);
+          }
+          continue;
+        }
+
+        // Nested message with blocks
+        if ((it as any).type !== 'message') continue;
+        const role = typeof (it as any).role === 'string' ? (it as any).role : 'user';
+        const blocks = Array.isArray((it as any).content) ? ((it as any).content as any[]) : [];
+
+        const localToolCalls: Array<Record<string, unknown>> = [];
+        const localToolMsgs: Array<Record<string, unknown>> = [];
+
+        for (const b of blocks) {
+          if (!b || typeof b !== 'object') continue;
+          const t = String((b as any).type || '').toLowerCase();
+          if (t === 'function_call' || t === 'tool_call') {
+            const name = (b as any).name || (b as any)?.function?.name;
+            let args = (b as any).arguments ?? (b as any)?.function?.arguments ?? {};
+            try { if (typeof args === 'string') args = JSON.parse(args); } catch { /* keep string */ }
+            const id = (b as any).id || (b as any).call_id;
+            const fnName = typeof name === 'string' && name.trim() ? name.trim() : 'tool';
+            const serialized = this.serializeArgsStrict(args, fnName, toolsNormalized).trim();
+            const toolId = typeof id === 'string' ? id : `call_${Math.random().toString(36).slice(2, 6)}`;
+            lastFunctionCallId = toolId;
+            toolNameById[toolId] = fnName;
+            localToolCalls.push({ id: toolId, type: 'function', function: { name: fnName, arguments: serialized } });
+            continue;
+          }
+          if (t === 'function_call_output' || t === 'tool_result' || t === 'tool_message') {
+            // Follow Anthropic->OpenAI practice
+            let outContent = '';
+            if (typeof (b as any).text === 'string') {
+              const s = (b as any).text.trim(); if (s) outContent = s;
+            } else if (typeof (b as any).content === 'string') {
+              const s = (b as any).content.trim(); if (s) outContent = s;
+            } else if (Array.isArray((b as any).content)) {
+              try { outContent = JSON.stringify((b as any).content); } catch { /* ignore */ }
+            } else if ((b as any).output !== undefined) {
+              const out = (b as any).output;
+              if (typeof out === 'string') { const s = out.trim(); if (s) outContent = s; }
+              else if (out && typeof out === 'object') { try { outContent = JSON.stringify(out); } catch { /* ignore */ } }
+            }
+            if (outContent) {
+              const explicitId = (typeof (b as any).id === 'string' ? (b as any).id
+                : (typeof (b as any).call_id === 'string' ? (b as any).call_id
+                  : (typeof (b as any).tool_call_id === 'string' ? (b as any).tool_call_id
+                    : (typeof (b as any).tool_use_id === 'string' ? (b as any).tool_use_id : undefined))));
+              const tool_call_id = explicitId || lastFunctionCallId || undefined;
+              const toolMsg: Record<string, unknown> = tool_call_id ? { role: 'tool', content: outContent, tool_call_id } : { role: 'tool', content: outContent };
+              localToolMsgs.push(toolMsg);
+            }
+            continue;
+          }
+        }
+
+        if (localToolCalls.length > 0) {
+          messages.push({ role: 'assistant', content: '', tool_calls: localToolCalls });
+        }
+        if (localToolMsgs.length > 0) {
+          for (const tm of localToolMsgs) messages.push(tm);
+        }
+        const texts = flattenTextBlocks(blocks);
+        if (texts.length) pushText(role, texts.join('\n'));
+      }
+    }
+
+    return messages;
+  }
+
+  private convertInputToMessages(instructions?: string, input?: ResponseInputItem[], toolsNormalized?: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
     const messages: Array<Record<string, unknown>> = [];
 
     const pushText = (role: string, value: string | string[] | undefined | null) => {
@@ -381,8 +647,7 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
     };
 
     const pushToolCall = (name: string, args: unknown, callId?: string) => {
-      const serialized = this.stringifyMaybeJson(args).trim();
-      if (!serialized) { return; }
+      const serialized = this.serializeArgsStrict(args, name, toolsNormalized).trim();
       // Omit empty content to avoid blank assistant messages
       messages.push({
         role: 'assistant',
@@ -501,32 +766,8 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
   }
 
   private convertTools(tools: ResponseToolDefinition[]): Array<Record<string, unknown>> {
-    const out: Array<Record<string, unknown>> = [];
-    for (const tool of tools) {
-      const name = typeof (tool as any)?.name === 'string' ? (tool as any).name.trim()
-        : (tool as any)?.function && typeof (tool as any).function.name === 'string' ? (tool as any).function.name.trim()
-        : '';
-      if (!name) { continue; }
-      let params: unknown = (tool as any)?.parameters ?? (tool as any)?.function?.parameters;
-      if (typeof params === 'string') {
-        try { params = JSON.parse(params); } catch { params = undefined; }
-      }
-      if (!params || typeof params !== 'object') {
-        params = { type: 'object', properties: {}, additionalProperties: true };
-      }
-      const desc = typeof (tool as any)?.description === 'string' ? (tool as any).description
-        : (tool as any)?.function && typeof (tool as any).function.description === 'string' ? (tool as any).function.description
-        : undefined;
-      out.push({
-        type: 'function',
-        function: {
-          name,
-          ...(desc ? { description: desc } : {}),
-          parameters: params as Record<string, unknown>
-        }
-      });
-    }
-    return out;
+    // Normalize tools using shared normalizer (shape-level, provider-agnostic)
+    return normalizeTools(tools) as Array<Record<string, unknown>>;
   }
 
   private buildResponsesPayload(payload: unknown, context?: ResponseRequestContext): Record<string, unknown> | unknown {
@@ -575,26 +816,23 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
 
     const toolCalls = Array.isArray(message?.tool_calls) ? (message!.tool_calls as Array<Record<string, unknown>>) : [];
     if (toolCalls.length > 0) {
+      // normalize arguments by schema (shape-level)
+      const toolsNorm = normalizeTools(((context as any)?.tools || (context as any)?.metadata?.tools || []));
       for (const call of toolCalls) {
         const toolId = typeof call.id === 'string' ? call.id : `call_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
         const fn = (call && typeof call.function === 'object') ? (call.function as Record<string, unknown>) : undefined;
         const fnName = typeof fn?.name === 'string' ? (fn.name as string) : undefined;
         const rawArgs = fn?.arguments;
-        const serializedArgs = typeof rawArgs === 'string' ? rawArgs : (rawArgs ? this.stringifyMaybeJson(rawArgs) : '');
+        const serializedArgsRaw = typeof rawArgs === 'string' ? rawArgs : (rawArgs && typeof rawArgs === 'object' ? JSON.stringify(rawArgs) : '');
+        const serializedArgs = normalizeArgumentsBySchema(serializedArgsRaw, fnName, toolsNorm);
 
         outputItems.push({
-          type: 'tool_call',
+          type: 'function_call',
           id: toolId,
+          call_id: toolId,
           name: fnName,
           arguments: serializedArgs,
-          tool_call: {
-            id: toolId,
-            type: 'function',
-            function: {
-              name: fnName,
-              arguments: serializedArgs
-            }
-          }
+          status: 'in_progress'
         });
       }
     }
@@ -609,7 +847,7 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
     const out: any = {
       id: (response as any).id || `resp-${Date.now()}`,
       object: 'response',
-      created: (response as any).created || Math.floor(Date.now() / 1000),
+      created_at: (response as any).created_at || (response as any).created || Math.floor(Date.now() / 1000),
       model: (response as any).model,
       status,
       output: outputItems,
@@ -622,21 +860,7 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
       include: context?.include,
       store: context?.store
     };
-    if (typeof finishReason === 'string') {
-      out.stop_reason = finishReason === 'tool_calls' ? 'requires_action' : finishReason;
-    }
-    if (hasToolCalls) {
-      out.required_action = {
-        type: 'submit_tool_outputs',
-        submit_tool_outputs: {
-          tool_calls: toolCalls.map((tc: any) => ({
-            id: typeof tc?.id === 'string' ? tc.id : `call_${Math.random().toString(36).slice(2,8)}`,
-            name: String(tc?.function?.name || 'tool'),
-            arguments: typeof tc?.function?.arguments === 'string' ? tc.function.arguments : this.stringifyMaybeJson(tc?.function?.arguments || {})
-          }))
-        }
-      };
-    }
+    // Do not emit required_action in Responses payload; handled by client flows
     // Validate Responses payload (best-effort)
     try {
       if (this.responsesValidator && !this.responsesValidator(out)) {
@@ -705,26 +929,55 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
         return text;
       }
     }
-    if (toolCalls.length > 0) {
-      return toolCalls
-        .map(call => this.stringifyMaybeJson(call))
-        .join('\n');
-    }
+    // When only tool calls are present, keep output_text empty; do not serialize tool calls into text
     return '';
   }
 
   private stringifyMaybeJson(value: unknown): string {
-    if (typeof value === 'string') {
-      return value;
+    // Deprecated: no fallback stringify in strict mode
+    throw new Error('stringifyMaybeJson is not allowed in strict mode');
+  }
+
+  private serializeArgsStrict(raw: unknown, fnName?: string, toolsNormalized?: Array<Record<string, unknown>>): string {
+    if (raw === null || raw === undefined) throw new Error('tool_call.arguments missing');
+    const normalizeBySchema = (obj: any): any => {
+      try {
+        if (!fnName || !Array.isArray(toolsNormalized)) return obj;
+        const entry = (toolsNormalized as any[]).find(t => t && typeof t === 'object' && t.function && t.function.name === fnName);
+        const params = entry?.function?.parameters;
+        const cmdDef = params?.properties?.command;
+        if (!cmdDef) return obj;
+        // If schema expects array<string> but we have string → split? We do not split heuristically. Enforce types; otherwise throw.
+        if (cmdDef.type === 'array' && cmdDef.items && cmdDef.items.type === 'string') {
+          if (Array.isArray(obj.command)) return obj;
+          if (typeof obj.command === 'string') throw new Error('command must be array<string> per schema');
+          return obj;
+        }
+        if (cmdDef.type === 'string') {
+          if (Array.isArray(obj.command)) {
+            // Join deterministically with spaces; quoting is assumed preserved in tokens
+            obj.command = obj.command.join(' ');
+          } else if (typeof obj.command !== 'string') {
+            obj.command = String(obj.command ?? '');
+          }
+          return obj;
+        }
+        return obj;
+      } catch { return obj; }
+    };
+
+    if (typeof raw === 'string') {
+      const s = raw.trim();
+      const obj = JSON.parse(s);
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('tool_call.arguments must be JSON object');
+      const shaped = normalizeBySchema(obj);
+      return JSON.stringify(shaped);
     }
-    if (value === undefined || value === null) {
-      return '';
+    if (typeof raw === 'object' && !Array.isArray(raw)) {
+      const shaped = normalizeBySchema(raw as any);
+      return JSON.stringify(shaped);
     }
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
+    throw new Error('tool_call.arguments must be object or JSON string');
   }
 
   private extractRequestId(response: SharedPipelineResponse | any): string | undefined {

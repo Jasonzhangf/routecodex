@@ -10,6 +10,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { normalizeArgsBySchema } from '../../utils/schema-arg-normalizer.js';
+import { normalizeTools } from './utils/tool-schema-normalizer.js';
 import {
   DEFAULT_CONVERSION_CONFIG,
   detectRequestFormat,
@@ -484,8 +485,36 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       // Tool result -> OpenAI tool role message
       const toolResults = blocks.filter((b: any) => b && b.type === 'tool_result');
       if (toolResults.length > 0) {
+        const flattenParts = (v: any): string[] => {
+          const texts: string[] = [];
+          const push = (s?: string) => { if (typeof s === 'string') { const t = s.trim(); if (t) texts.push(t); } };
+          if (Array.isArray(v)) {
+            for (const p of v) {
+              if (!p) continue;
+              if (typeof p === 'string') { push(p); continue; }
+              if (typeof p === 'object') {
+                if (typeof (p as any).text === 'string') { push((p as any).text); continue; }
+                if (typeof (p as any).content === 'string') { push((p as any).content); continue; }
+                if (Array.isArray((p as any).content)) { texts.push(...flattenParts((p as any).content)); continue; }
+              }
+            }
+          }
+          return texts;
+        };
         for (const tr of toolResults) {
-          const content = typeof tr.content === 'string' ? tr.content : safeStringify(tr.content || {});
+          let content = '';
+          if (typeof tr.content === 'string') {
+            content = tr.content;
+          } else if (Array.isArray(tr.content)) {
+            content = flattenParts(tr.content).join('\n');
+          } else if (tr.content && typeof tr.content === 'object') {
+            if (typeof (tr.content as any).text === 'string') content = String((tr.content as any).text);
+            else if (typeof (tr.content as any).content === 'string') content = String((tr.content as any).content);
+            else content = safeStringify(tr.content);
+          } else {
+            content = '';
+          }
+        
           msgs.push({ role: 'tool', content, tool_call_id: tr.tool_use_id || tr.id || '' });
         }
         // Also append any user/assistant text blocks in same message
@@ -866,7 +895,10 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
 
   private convertAnthropicToolsToOpenAI(tools: any[]): any[] {
     if (!tools) {return [];}
-    return tools.map(tool => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.input_schema } }));
+    // Normalize via shared normalizer for consistency across paths
+    // Map Anthropic tool schema to tentative OpenAI-like shape before normalization
+    const prelim = tools.map(t => ({ type: 'function', name: t?.name, description: t?.description, parameters: t?.input_schema }));
+    return normalizeTools(prelim) as any[];
   }
 
   private convertOpenAIToolCallsToAnthropic(toolCalls: any[], toolSchemaMap?: Map<string, any>): any[] {

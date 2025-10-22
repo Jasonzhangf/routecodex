@@ -283,6 +283,65 @@ curl -X POST http://localhost:5506/v1/responses \
   }'
 ```
 
+### Responses SSE 实现细节（关键约定）
+- 事件顺序（工具优先常见路径）：
+  1) `response.created` → 2) `response.in_progress`
+  3) `response.output_item.added`(reasoning, `output_index=0`)
+  4) `response.reasoning_summary_part.added`(summary_index=0)
+  5) 多个 `response.reasoning_summary_text.delta`（含 `obfuscation` 占位）
+  6) `response.reasoning_summary_text.done` → `response.reasoning_summary_part.done`
+  7) 重复 4–6（summary_index=1）
+  8) `response.output_item.added`(function_call, `output_index=2`)
+  9) `response.content_part.added`(input_json)
+  10) 多个 `response.function_call_arguments.delta`
+  11) `response.function_call_arguments.done`
+  12) `response.output_item.done`(function_call)
+  13) `response.completed`
+
+- 事件顺序（文本优先）：在 reasoning 之后、function_call 之前插入 message 文本生命周期：
+  - `response.output_item.added`(message, `output_index=1`) → `response.content_part.added` → 多个 `response.output_text.delta` → `response.output_text.done` → `response.content_part.done` → `response.output_item.done`(message)
+
+- 必备字段与索引（与上游对齐）：
+  - 全事件携带 `sequence_number`，从 0 起每次 +1。
+  - `created_at`（秒）用于 `response.{created|in_progress|completed}.response.created_at`。
+  - `output_index` 固定映射：`0=reasoning`、`1=message`、`2=function_call`。`content_index` 目前恒为 0。
+  - reasoning：
+    - `response.output_item.added`(reasoning) → `item` 含 `{ id, type: "reasoning", encrypted_content, summary: [] }`。
+    - `response.reasoning_summary_part.added/done`、`response.reasoning_summary_text.delta/done`：均含 `item_id/output_index/summary_index`；`delta` 伴随 `obfuscation`（占位即可）。
+  - message：
+    - `response.output_item.added`(message) → `item` 含 `{ id, type: "message", role: "assistant", status: "in_progress", content: [] }`。
+    - `response.content_part.added`(message) → `part: { type: "output_text", annotations: [], logprobs: [], text: "" }`。
+    - `response.output_text.delta/done` 必带 `item_id/output_index/content_index/logprobs`（空数组可接受）。
+  - function_call：
+    - `response.output_item.added`(function_call) → `item` 含 `{ id, type: "function_call", call_id, name, status: "in_progress", arguments: "" }`。
+    - `response.content_part.added`(function_call) → `part: { type: "input_json", partial_json: "" }`。
+    - `response.function_call_arguments.delta` → `item_id/output_index/delta`；`done` → `item_id/output_index/arguments/name`。
+    - `response.output_item.done`(function_call) → 回填 `{ status: "completed", arguments, call_id, name }`。
+  - `response.completed`：`response` 内包含 `output` 数组（按顺序聚合 reasoning/message/function_call）与 `usage.input_tokens|output_tokens|total_tokens`。无顶层 usage/required_action。
+
+- 文本生命周期的发送策略（防止“空消息重发”）：
+  - 仅当确有文本增量时才发送 message 文本生命周期（有 `output_text.delta` 才会出现 message 的 added/done）。
+  - 工具优先判定同时识别 `function_call/tool_call/tool_use`，避免漏判导致“空消息骨架”。
+
+- 不发送的事件：
+  - 不发送 `response.required_action`（Responses SSE 中不使用该事件）。
+
+- 工具执行策略：
+  - 服务器端不执行任何工具；工具由客户端执行并决定是否发起下一轮请求。
+
+- 心跳：
+  - 可通过 `responses.sse.heartbeatMs`（或 `ROUTECODEX_RESPONSES_HEARTBEAT_MS`）配置。>0 时以 SSE 注释方式发送心跳保持连接；默认 5000ms。
+
+- 映射与配置：
+  - 请求映射：`responses` → `chat` 由 `llmswitch-response-chat` 与 `config/responses-conversion.json` 驱动，做 instructions→system、input[] 非扁平展开与工具萃取。
+  - 响应映射：`chat` → `responses` 统一输出 `created_at`、`function_call`，并在 SSE 层按上述事件族规范化重放。
+  - 相关实现位置：
+    - 事件重放：`src/server/handlers/responses.ts`
+    - 请求/响应映射：`src/modules/pipeline/modules/llmswitch/llmswitch-response-chat.ts`、`src/server/conversion/responses-mapper.ts`
+    - 配置：`config/responses-conversion.json`、`src/server/config/responses-config.ts`
+
+> 提示：若迁移旧客户端，务必检查其是否依赖 `response.required_action` 或非 0 起始的 `sequence_number`。本实现严格按 Responses 规范与上游抓包对齐。
+
 ## 📊 监控与调试
 
 ### 请求追踪

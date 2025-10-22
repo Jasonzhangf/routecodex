@@ -68,16 +68,22 @@ export class CompletionsHandler extends BaseHandler {
       }
 
       // Process request through pipeline
-      const response = await this.processCompletionRequest(req, requestId);
+      const pipelineResponse = await this.processCompletionRequest(req, requestId);
 
       // Handle streaming vs non-streaming response
       if (req.body.stream) {
-        await this.streamingManager.streamResponse(response, requestId, res, req.body.model);
+        const streamModel = (pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse)
+          ? ((pipelineResponse as any).data?.model ?? req.body.model)
+          : req.body.model;
+        await this.streamingManager.streamResponse(pipelineResponse, requestId, res, streamModel);
         return;
       }
 
       // Return JSON response
-      const normalized = this.responseNormalizer.normalizeOpenAIResponse(response, 'completion');
+      const payload = pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
+        ? (pipelineResponse as Record<string, unknown>).data
+        : pipelineResponse;
+      const normalized = this.responseNormalizer.normalizeOpenAIResponse(payload, 'completion');
       this.sendJsonResponse(res, normalized, requestId);
 
       this.logCompletion(requestId, startTime, true);
@@ -91,13 +97,11 @@ export class CompletionsHandler extends BaseHandler {
    * Process completion request
    */
   private async processCompletionRequest(req: Request, requestId: string): Promise<any> {
-    // Use pipeline manager if available
     if (this.config.enablePipeline && this.shouldUsePipeline()) {
       return await this.processWithPipeline(req, requestId);
     }
 
-    // Fallback implementation
-    return this.createSimulatedResponse(req);
+    throw new RouteCodexError('Completions pipeline unavailable', 'pipeline_unavailable', 503);
   }
 
   /**
@@ -156,9 +160,7 @@ export class CompletionsHandler extends BaseHandler {
       )
     ]);
 
-    return pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
-      ? (pipelineResponse as Record<string, unknown>).data
-      : pipelineResponse;
+    return pipelineResponse;
   }
 
   /**
@@ -168,50 +170,26 @@ export class CompletionsHandler extends BaseHandler {
     try {
       const pipelineManager = this.getPipelineManager();
 
-      if (pipelineManager && typeof pipelineManager.processRequest === 'function') {
-        // Align requested model with selected route meta if available
-        if (this.getRouteMeta) {
-          try {
-            const routeMeta = this.getRouteMeta();
-            const pid = request?.route?.pipelineId as string;
-            const meta = pid && routeMeta ? routeMeta[pid] : undefined;
-            if (meta?.modelId) {
-              request.data = { ...(request.data || {}), model: meta.modelId };
-            }
-          } catch { /* ignore */ }
-        }
-        return await pipelineManager.processRequest(request);
+      if (!pipelineManager || typeof pipelineManager.processRequest !== 'function') {
+        throw new RouteCodexError('Pipeline manager not available', 'pipeline_unavailable', 503);
       }
 
-      // Fallback to mock response
-      return Promise.resolve(this.createSimulatedResponse({ body: request.data } as Pick<Request, 'body'>));
+      // Align requested model with selected route meta if available
+      if (this.getRouteMeta) {
+        try {
+          const routeMeta = this.getRouteMeta();
+          const pid = request?.route?.pipelineId as string;
+          const meta = pid && routeMeta ? routeMeta[pid] : undefined;
+          if (meta?.modelId) {
+            request.data = { ...(request.data || {}), model: meta.modelId };
+          }
+        } catch { /* ignore */ }
+      }
+      return await pipelineManager.processRequest(request);
     } catch (error) {
       this.logError(error, { context: 'executePipelineRequest' });
-      return Promise.resolve(this.createSimulatedResponse({ body: request.data } as Pick<Request, 'body'>));
+      throw error;
     }
-  }
-
-  /**
-   * Create simulated response for fallback
-   */
-  private createSimulatedResponse(req: Pick<Request, 'body'>): any {
-    return {
-      id: `cmpl-${Date.now()}`,
-      object: 'text_completion',
-      created: Math.floor(Date.now() / 1000),
-      model: req.body.model || 'unknown',
-      choices: [{
-        text: 'This is a simulated response from CompletionsHandler',
-        index: 0,
-        logprobs: null,
-        finish_reason: 'stop'
-      }],
-      usage: {
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        total_tokens: 0,
-      }
-    };
   }
 
   /**

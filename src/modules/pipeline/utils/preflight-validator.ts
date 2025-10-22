@@ -22,11 +22,12 @@ export interface PreflightResult {
 }
 
 const ALLOWED_ROLES = new Set(['system', 'user', 'assistant', 'tool']);
-const GLM_USE_TOOL_ROLE = String(process.env.RCC_GLM_USE_TOOL_ROLE || '').trim() === '1';
+// Defaults bias toward preserving information (no destructive cleanups)
+const GLM_USE_TOOL_ROLE = String(process.env.RCC_GLM_USE_TOOL_ROLE || '').trim() !== '0';
 const GLM_KEEP_LAST_ASSISTANT_TOOLCALLS = String(process.env.RCC_GLM_KEEP_LAST_ASSISTANT_TOOLCALLS || '').trim() === '1';
 const DEFAULT_GLM_MAX_CONTEXT_TOKENS = Number(process.env.RCC_GLM_MAX_CONTEXT_TOKENS ?? 200000);
 const DEFAULT_GLM_CONTEXT_SAFETY_RATIO = Number(process.env.RCC_GLM_CONTEXT_SAFETY_RATIO ?? 0.85);
-const DISABLE_GLM_CONTEXT_TRIM = String(process.env.RCC_GLM_DISABLE_TRIM || '').trim() === '1';
+const DISABLE_GLM_CONTEXT_TRIM = String(process.env.RCC_GLM_DISABLE_TRIM || '1').trim() === '1';
 const DISABLE_GLM_EMPTY_USER_FILTER = String(process.env.RCC_GLM_DISABLE_EMPTY_USER_FILTER || '').trim() === '1';
 const GLM_ALLOW_THINKING = String(process.env.RCC_GLM_ALLOW_THINKING || '').trim() === '1';
 
@@ -85,11 +86,15 @@ function mapToolsForGLM(raw: any, issues: PreflightResult['issues']): any[] | un
   for (let i = 0; i < raw.length; i++) {
     const t = raw[i] as any;
     if (!t || typeof t !== 'object') {continue;}
-    if (t.type === 'function' || (!t.type && t.function)) {
-      const fn = t.function || {};
-      const name = typeof fn?.name === 'string' ? fn.name : undefined;
-      const desc = typeof fn?.description === 'string' ? fn.description : undefined;
-      let params = fn?.parameters;
+    if (t.type === 'function' || (!t.type && t.function) || (t.name || t.parameters)) {
+      // Support both Chat-shape (function:{...}) and Responses-shape (top-level name/parameters)
+      const fnRaw = t.function || {};
+      const topName = typeof t?.name === 'string' ? t.name : undefined;
+      const topDesc = typeof t?.description === 'string' ? t.description : undefined;
+      const topParams = t?.parameters;
+      const name = typeof fnRaw?.name === 'string' ? fnRaw.name : topName;
+      const desc = typeof fnRaw?.description === 'string' ? fnRaw.description : topDesc;
+      let params = (fnRaw?.parameters !== undefined ? fnRaw.parameters : topParams);
       if (typeof params === 'string') {
         try { params = JSON.parse(params); } catch { issues.push({ level:'warn', code:'tools.parameters.parse', message:'parameters not valid JSON, passing as-is', path:`tools[${i}].function.parameters` }); }
       }
@@ -165,27 +170,20 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
     return msg;
   });
 
-  // GLM compatibility: remove assistant.tool_calls to avoid 1210/1214
-  // - By default strip from ALL assistant messages
-  // - If RCC_GLM_KEEP_LAST_ASSISTANT_TOOLCALLS=1, keep only on the last assistant message
-  // - Allow override via RCC_DISABLE_GLM_TOOLCALL_STRIP=1 to preserve (not recommended)
+  // Preserve assistant.tool_calls by default; only strip when explicitly forced
   try {
-    const disableStrip = process.env.RCC_DISABLE_GLM_TOOLCALL_STRIP === '1';
-    if (targetGLM && !disableStrip && Array.isArray(mappedMessages) && mappedMessages.length > 0) {
+    const forceStrip = process.env.RCC_GLM_FORCE_TOOLCALL_STRIP === '1';
+    if (targetGLM && forceStrip && Array.isArray(mappedMessages) && mappedMessages.length > 0) {
       const n = mappedMessages.length;
       if (GLM_KEEP_LAST_ASSISTANT_TOOLCALLS) {
         for (let i = 0; i < n - 1; i++) {
           const mm: any = mappedMessages[i];
-          if (mm && mm.role === 'assistant' && Array.isArray(mm.tool_calls)) {
-            delete mm.tool_calls;
-          }
+          if (mm && mm.role === 'assistant' && Array.isArray(mm.tool_calls)) delete mm.tool_calls;
         }
       } else {
         for (let i = 0; i < n; i++) {
           const mm: any = mappedMessages[i];
-          if (mm && mm.role === 'assistant' && Array.isArray(mm.tool_calls)) {
-            delete mm.tool_calls;
-          }
+          if (mm && mm.role === 'assistant' && Array.isArray(mm.tool_calls)) delete mm.tool_calls;
         }
       }
     }

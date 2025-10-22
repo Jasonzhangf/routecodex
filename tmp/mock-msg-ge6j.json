@@ -1,0 +1,23 @@
+{
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "call_-8231888214863412293",
+      "name": "shell",
+      "input": {
+        "command": "ls -la"
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "usage": {
+    "input_tokens": 6808,
+    "output_tokens": 19,
+    "total_tokens": 6827
+  },
+  "id": "20251021135451ffdcda2c37454822",
+  "model": "glm-4.6",
+  "created": 1761026091
+}

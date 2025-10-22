@@ -49,7 +49,9 @@
         "textPaths": { "type": "array", "items": { "type": "string" } },
         "textArrayTextKey": { "type": "string" },
         "contentBlocksKey": { "type": "string" },
-        "messageWrapperType": { "type": "string" }
+        "messageWrapperType": { "type": "string" },
+        "passthroughFields": { "type": "array", "items": { "type": "string" } },
+        "defaultValues": { "type": "object" }
       },
       "additionalProperties": false
     },
@@ -66,4 +68,3 @@
   },
   "additionalProperties": false
 }
-
