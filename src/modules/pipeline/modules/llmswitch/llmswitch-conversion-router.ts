@@ -1,7 +1,9 @@
 import type { LLMSwitchModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest, SharedPipelineResponse } from '../../../../types/shared-dtos.js';
-import { SwitchOrchestrator } from './conversion/switch-orchestrator.js';
+import { SwitchOrchestrator } from '@routecodex/llmswitch-core/conversion/switch-orchestrator';
 import type { ConversionContext } from './conversion/types.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 export interface ConversionRouterConfig {
   profilesPath?: string;
@@ -21,7 +23,40 @@ export class ConversionRouterLLMSwitch implements LLMSwitchModule {
     this.id = `llmswitch-conversion-router-${Date.now()}`;
     this.config = config;
     const routerConfig = (config.config as ConversionRouterConfig) || {};
-    this.orchestrator = new SwitchOrchestrator(dependencies, routerConfig);
+
+    // Deterministically supply baseDir (routecodex package root) and a relative profilesPath.
+    // No fallback: orchestrator will resolve relative to baseDir only, and throw if missing.
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    // climb up to 'dist' directory
+    let cursor = here;
+    let distRoot: string | null = null;
+    for (let i = 0; i < 8; i++) { // bounded climb
+      if (path.basename(cursor) === 'dist') { distRoot = cursor; break; }
+      const parent = path.dirname(cursor);
+      if (parent === cursor) break;
+      cursor = parent;
+    }
+    const packageRoot = distRoot ? path.dirname(distRoot) : path.resolve(here, '../../../../../..');
+    routerConfig.profilesPath = routerConfig.profilesPath || 'config/conversion/llmswitch-profiles.json';
+    (routerConfig as any).baseDir = packageRoot;
+    this.orchestrator = new SwitchOrchestrator(dependencies, routerConfig as any);
+
+    // Register in-repo codecs to the core orchestrator (thin integration layer)
+    const deps = dependencies;
+    this.orchestrator.registerFactories({
+      'openai-openai': async () => {
+        const { OpenAIOpenAIConversionCodec } = await import('./conversion/codecs/openai-openai-codec.js');
+        return new OpenAIOpenAIConversionCodec(deps);
+      },
+      'anthropic-openai': async () => {
+        const { AnthropicOpenAIConversionCodec } = await import('./conversion/codecs/anthropic-openai-codec.js');
+        return new AnthropicOpenAIConversionCodec(deps);
+      },
+      'responses-openai': async () => {
+        const { ResponsesOpenAIConversionCodec } = await import('./conversion/codecs/responses-openai-codec.js');
+        return new ResponsesOpenAIConversionCodec(deps);
+      }
+    });
   }
 
   async initialize(): Promise<void> {

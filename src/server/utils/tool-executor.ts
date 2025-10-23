@@ -34,7 +34,21 @@ export async function executeTool(spec: ToolCallSpec): Promise<ToolResult> {
   let command = '';
   try {
     const args = typeof spec.args === 'string' ? JSON.parse(spec.args) : (spec.args as Record<string, unknown>);
-    command = String((args as any)?.command || '').trim();
+    const cmd = (args as any)?.command;
+    if (Array.isArray(cmd)) {
+      // Join tokens into a shell-safe string (no guessing/splitting elsewhere)
+      const quote = (s: string) => {
+        if (s === '') return "''";
+        // If contains whitespace or shell metachars, single-quote and escape inner quotes
+        if (/[^A-Za-z0-9_\.\-\/:]/.test(s)) {
+          return "'" + s.replace(/'/g, "'\\''") + "'";
+        }
+        return s;
+      };
+      command = cmd.map((x) => quote(String(x))).join(' ').trim();
+    } else {
+      command = String(cmd || '').trim();
+    }
   } catch {
     return { id: spec.id, name, output: '', error: 'invalid arguments' };
   }

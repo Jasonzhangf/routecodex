@@ -1,29 +1,16 @@
 import type { ModuleDependencies } from '../../../../interfaces/pipeline-interfaces.js';
 import type { ConversionCodec, ConversionContext, ConversionProfile } from '../types.js';
 import type { SharedPipelineRequest, SharedPipelineResponse } from '../../../../../../types/shared-dtos.js';
-import { OpenAINormalizerLLMSwitch } from '../../llmswitch-openai-openai.js';
+import { normalizeChatRequest, normalizeChatResponse } from '@routecodex/llmswitch-core/conversion';
 
 export class OpenAIOpenAIConversionCodec implements ConversionCodec {
   readonly id = 'openai-openai';
-  private readonly normalizer: OpenAINormalizerLLMSwitch;
   private initialized = false;
 
-  constructor(private readonly dependencies: ModuleDependencies) {
-    this.normalizer = new OpenAINormalizerLLMSwitch(
-      { type: 'llmswitch-openai-openai', config: {} },
-      dependencies
-    );
-  }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  constructor(private readonly dependencies: ModuleDependencies) {}
 
-  async initialize(): Promise<void> {
-    if (this.initialized) {
-      return;
-    }
-    if (typeof this.normalizer.initialize === 'function') {
-      await this.normalizer.initialize();
-    }
-    this.initialized = true;
-  }
+  async initialize(): Promise<void> { this.initialized = true; }
 
   async convertRequest(payload: any, profile: ConversionProfile, context: ConversionContext): Promise<any> {
     await this.ensureInit();
@@ -42,8 +29,8 @@ export class OpenAIOpenAIConversionCodec implements ConversionCodec {
       },
       debug: { enabled: false, stages: {} }
     };
-    const transformed = await this.normalizer.processIncoming(dto);
-    return transformed.data;
+    // Return normalized OpenAI Chat request
+    return normalizeChatRequest(dto.data);
   }
 
   async convertResponse(payload: any, profile: ConversionProfile, context: ConversionContext): Promise<any> {
@@ -71,11 +58,8 @@ export class OpenAIOpenAIConversionCodec implements ConversionCodec {
         stages: []
       }
     } as SharedPipelineResponse;
-    const transformed = await this.normalizer.processOutgoing(dto);
-    if (transformed && typeof transformed === 'object' && 'data' in transformed) {
-      return (transformed as SharedPipelineResponse).data;
-    }
-    return transformed;
+    // Normalize response to OpenAI Chat completion shape
+    return normalizeChatResponse(dto.data);
   }
 
   private async ensureInit(): Promise<void> {
