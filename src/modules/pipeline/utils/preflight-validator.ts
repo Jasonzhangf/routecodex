@@ -10,6 +10,7 @@
  */
 
 import type { UnknownObject } from '../../../types/common-types.js';
+import { extractToolText as extractToolTextShared } from './tool-result-text.js';
 
 export interface PreflightOptions {
   target: 'glm' | 'openai' | 'generic';
@@ -25,7 +26,8 @@ const ALLOWED_ROLES = new Set(['system', 'user', 'assistant', 'tool']);
 // Defaults bias toward preserving information (no destructive cleanups)
 // Defaults:
 // - Prefer converting tool role to user for broader GLM compatibility unless explicitly enabled
-const GLM_USE_TOOL_ROLE = String(process.env.RCC_GLM_USE_TOOL_ROLE || '0').trim() !== '0';
+// 默认开启 tool 角色支持，避免将 tool 压扁为 user 文本导致上下文缺失
+const GLM_USE_TOOL_ROLE = String(process.env.RCC_GLM_USE_TOOL_ROLE || '1').trim() !== '0';
 // - Keep only last assistant.tool_calls by default when stripping history
 const GLM_KEEP_LAST_ASSISTANT_TOOLCALLS = String(process.env.RCC_GLM_KEEP_LAST_ASSISTANT_TOOLCALLS ?? '1').trim() === '1';
 const DEFAULT_GLM_MAX_CONTEXT_TOKENS = Number(process.env.RCC_GLM_MAX_CONTEXT_TOKENS ?? 200000);
@@ -75,6 +77,26 @@ function coerceStringContent(value: any): string {
   }
   if (value === null || value === undefined) {return '';}
   return String(value);
+}
+
+// Extract human-readable text from a tool result-like payload.
+// Preference order: output -> text -> content (string) -> flattened parts -> ''
+const extractToolText = extractToolTextShared;
+
+// Remove hidden-thinking markup and tool markup hints from plain string content
+function stripThinkingAndToolMarkup(text: string): string {
+  if (typeof text !== 'string' || !text) return '' + (text ?? '');
+  let out = text;
+  try {
+    // Remove <think>...</think> blocks (single or multiline)
+    out = out.replace(/<think>[\s\S]*?<\/think>/g, '');
+    // Remove stray <think> or </think> tokens if unmatched
+    out = out.replace(/<\/?think>/g, '');
+    // Remove inline <tool_call>…</tool_call> blocks that some clients embed in prompts
+    out = out.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '');
+    out = out.replace(/<\/?tool_call>/g, '');
+  } catch { /* non-blocking */ }
+  return out;
 }
 
 function stringifyFunctionArguments(args: any): string {
@@ -135,7 +157,13 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
 
     // content must be string for GLM
     const c = m?.content;
-    msg.content = coerceStringContent(c);
+    if (role === 'tool') {
+      msg.content = extractToolText(c);
+    } else {
+      // Normalize to string then strip hidden-thinking/tool markup in compatibility layer
+      const raw = coerceStringContent(c);
+      msg.content = stripThinkingAndToolMarkup(raw);
+    }
 
     // Preserve name for tool role if provided
     if (role === 'tool') {
@@ -299,9 +327,31 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
     }
   }
 
-  // Compact messages for GLM: keep only role + content strings
+  // GLM 消息压缩：仅规范 content 为字符串，但保留工具相关字段（tool/tool_calls）
   if (targetGLM) {
-    messages = messages.map((m: any) => ({ role: m.role, content: coerceStringContent(m.content) }));
+    messages = messages.map((m: any) => {
+      const base: any = { role: m.role, content: coerceStringContent(m.content) };
+      // 保留 tool 角色的 name 与 tool_call_id
+      if (m?.role === 'tool') {
+        if (typeof m?.name === 'string') { base.name = m.name; }
+        if (typeof m?.tool_call_id === 'string') { base.tool_call_id = m.tool_call_id; }
+      }
+      // 保留 assistant 的 tool_calls（仅在存在时）
+      if (m?.role === 'assistant' && Array.isArray(m?.tool_calls) && m.tool_calls.length) {
+        try {
+          base.tool_calls = m.tool_calls.map((tc: any) => {
+            const fn = tc?.function || {};
+            const name = typeof fn?.name === 'string' ? fn.name : undefined;
+            const args = stringifyFunctionArguments(fn?.arguments);
+            const out: any = { type: 'function', function: { arguments: args } };
+            if (tc?.id) out.id = tc.id;
+            if (name) (out.function as any).name = name;
+            return out;
+          });
+        } catch { /* 保守处理：如异常则忽略 tool_calls */ }
+      }
+      return base;
+    });
   }
 
   out.messages = messages;

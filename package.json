@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.53.33",
+  "version": "0.54.0",
   "description": "Multi-provider OpenAI proxy server with native dry-run capabilities",
   "type": "module",
   "main": "dist/index.js",
@@ -62,6 +62,7 @@
     "install:quick": "./scripts/quick-install.sh",
     "install:skip-tests": "./scripts/quick-install.sh --skip-tests",
     "install:simple": "./scripts/simple-install.sh",
+    "audit:tool-text": "node scripts/audit-tool-text.mjs",
     "start:bg": "bash scripts/run-bg.sh -- 'node dist/index.js'",
     "start:fg": "bash scripts/run-fg-gtimeout.sh 12 -- 'node dist/index.js'",
     "start:verify": "node scripts/start-verify.mjs --mode bg --timeout 180",
