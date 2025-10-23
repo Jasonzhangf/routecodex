@@ -9,7 +9,7 @@ LLMSwitch 模块是流水线架构的第 1 层（协议转换层），负责处�
 ## 🔄 支持的协议转换
 
 ### 🔧 OpenAI 规范化转换器
-- **实现文件**: `openai-normalizer.ts` / `llmswitch-openai-openai.ts`
+- 实现文件: `llmswitch-openai-openai.ts`
 - **功能**: OpenAI 协议规范化，保持请求结构一致
 - **特性**:
   - 完整的 OpenAI 协议支持
@@ -39,14 +39,9 @@ LLMSwitch 模块是流水线架构的第 1 层（协议转换层），负责处�
   - **智能处理**: 自动处理 reasoning、function_call 等特殊内容
   - **统一入口**: 在最新架构下，所有流水线实例都挂载 `llmswitch-conversion-router`，并依靠 `entryEndpoint` 自动匹配对应 codec（OpenAI / Anthropic / Responses），无需额外的手工配置。
 
-### 🔄 统一协议转换器
-- **实现文件**: `llmswitch-unified.ts`
-- **功能**: 多协议智能转换和路由
-- **特性**:
-  - 自动协议检测
-  - 智能转换策略选择
-  - 多协议支持
-  - 统一错误处理
+### ⛔ 已废弃：统一协议转换器
+- 旧实现文件: `llmswitch-unified.ts`（已弃用）
+- 说明: 统一路由现由 `llmswitch-conversion-router` + `conversion/switch-orchestrator` + `conversion/codecs/*` 负责，请勿再使用旧统一模块。
 
 ## 🌟 核心功能
 
@@ -146,12 +141,12 @@ private validateProtocol(request: any, protocol: string): void {
 
 ```
 src/modules/pipeline/modules/llmswitch/
-├── openai-normalizer.ts              # OpenAI 规范化实现
+├── (已移除) openai-normalizer.ts     # 旧的 OpenAI 规范化实现，逻辑收敛到 codecs
 ├── llmswitch-openai-openai.ts        # OpenAI → OpenAI 转换器
 ├── llmswitch-anthropic-openai.ts    # Anthropic ↔ OpenAI 转换器
 ├── llmswitch-response-chat.ts        # Responses ↔ Chat 转换器 ⭐
-├── llmswitch-unified.ts              # 统一协议转换器
-├── anthropic-openai-converter.ts    # Anthropic 转换器工具
+├── (弃用) llmswitch-unified.ts       # 统一协议转换器（弃用）
+├── anthropic-openai-converter.ts    # Anthropic 转换器工具（逐步收敛到 codecs）
 ├── anthropic-openai-config.ts        # Anthropic 转换配置
 └── README.md                         # 本文档
 ```
