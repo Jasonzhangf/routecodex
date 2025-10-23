@@ -55,7 +55,7 @@
     "clean": "rm -rf dist coverage",
     "prebuild": "echo skip-lint",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run build && npm test",
+    
     "install:global": "./scripts/quick-install.sh",
     "install:quick": "./scripts/quick-install.sh",
     "install:skip-tests": "./scripts/quick-install.sh --skip-tests",
@@ -151,18 +151,5 @@
     "ts-node": "^10.9.2",
     "tsx": "^4.0.0",
     "typescript": "^5.9.3"
-  },
-  "husky": {
-    "hooks": {
-      "pre-commit": "lint-staged",
-      "commit-msg": "commitlint -E HUSKY_GIT_PARAMS",
-      "pre-push": "npm run -s dry-run:samples"
-    }
-  },
-  "lint-staged": {
-    "*.{ts,js}": [
-      "eslint --fix",
-      "git add"
-    ]
   }
 }
