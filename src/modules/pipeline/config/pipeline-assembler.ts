@@ -240,6 +240,7 @@ export class PipelineAssembler {
         'llmswitch-openai-openai',
         'llmswitch-response-chat',
         'llmswitch-conversion-router',
+        'llmswitch-responses-passthrough',
       ]);
 
       if (llmSwitch?.type) {

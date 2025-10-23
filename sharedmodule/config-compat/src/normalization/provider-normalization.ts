@@ -10,6 +10,11 @@ import { ProviderNormalizationRule } from '../types/compatibility-types.js';
  * Provider type normalization rules extracted from existing UserConfigParser
  */
 export const PROVIDER_NORMALIZATION_RULES: ProviderNormalizationRule[] = [
+  // Generic Responses provider → generic-responses (OpenAI Responses passthrough)
+  {
+    inputPattern: 'generic_responses',
+    normalizedType: 'generic-responses',
+  },
   // GLM provider always maps to glm-http-provider
   {
     inputPattern: 'glm',
@@ -259,6 +264,9 @@ export function normalizeLLMSwitchType(type?: string): string | undefined {
  */
 export function getDefaultLLMSwitchType(inputProtocol: string): string {
   const normalizedProtocol = inputProtocol.toLowerCase();
+  if (normalizedProtocol === 'responses' || normalizedProtocol === 'openai.responses') {
+    return 'llmswitch-responses-passthrough';
+  }
   if (normalizedProtocol === 'anthropic' || normalizedProtocol === 'anthropic.messages') {
     return 'llmswitch-anthropic-openai';
   }
