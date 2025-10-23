@@ -844,6 +844,7 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('llmswitch-anthropic-openai', this.createAnthropicOpenAIConverterModule);
     this.registry.registerModule('llmswitch-response-chat', this.createResponsesChatLLMSwitchModule);
     this.registry.registerModule('llmswitch-conversion-router', this.createConversionRouterModule);
+    this.registry.registerModule('llmswitch-responses-passthrough', this.createResponsesPassthroughLLMSwitchModule);
     // unified switch removed; use llmswitch-conversion-router instead
     // Aliases for backward compatibility (merged-config may still emit these)
     this.registry.registerModule('openai-normalizer', this.createOpenAINormalizerModule);
@@ -864,6 +865,7 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('generic-http', this.createGenericHTTPModule);
     this.registry.registerModule('lmstudio-http', this.createLMStudioHTTPModule);
     this.registry.registerModule('openai-provider', this.createOpenAIProviderModule);
+    this.registry.registerModule('generic-responses', this.createGenericResponsesProviderModule);
 
     // Register LM Studio module factories
     this.registry.registerModule('lmstudio-compatibility', this.createLMStudioCompatibilityModule);
@@ -1089,6 +1091,11 @@ export class PipelineManager implements RCCBaseModule {
     return new ResponsesToChatLLMSwitch(config, dependencies);
   };
 
+  private createResponsesPassthroughLLMSwitchModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { ResponsesPassthroughLLMSwitch } = await import('../modules/llmswitch/llmswitch-responses-passthrough.js');
+    return new ResponsesPassthroughLLMSwitch(config, dependencies);
+  };
+
   private createConversionRouterModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { ConversionRouterLLMSwitch } = await import('../modules/llmswitch/llmswitch-conversion-router.js');
     return new ConversionRouterLLMSwitch(config, dependencies);
@@ -1144,6 +1151,11 @@ export class PipelineManager implements RCCBaseModule {
   private createOpenAIProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { OpenAIProvider } = await import('../modules/provider/openai-provider.js');
     return new OpenAIProvider(config, dependencies);
+  };
+
+  private createGenericResponsesProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { GenericResponsesProvider } = await import('../modules/provider/generic-responses.js');
+    return new GenericResponsesProvider(config, dependencies);
   };
 
   private createLMStudioCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
