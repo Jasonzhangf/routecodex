@@ -215,13 +215,11 @@ export function buildChatRequestFromResponses(payload: Record<string, unknown>, 
     ? normalizeTools((payload as any).tools as ResponsesToolDefinition[])
     : undefined;
 
-  let messages = mapResponsesInputToChat({
+  const messages = mapResponsesInputToChat({
     instructions: context.instructions,
     input: context.input,
     toolsNormalized
   });
-  // Second pass compaction: coalesce adjacent messages when safe (same role or tool_call_id)
-  messages = compactMessages(messages);
   if (!messages.length) {
     throw new Error('Responses payload produced no chat messages');
   }
@@ -300,14 +298,6 @@ export function buildResponsesPayloadFromChat(payload: unknown, context?: Respon
 function mapResponsesInputToChat(options: { instructions?: string; input?: ResponsesInputItem[]; toolsNormalized?: Array<Record<string, unknown>>; }): Array<Record<string, unknown>> {
   const { instructions, input, toolsNormalized } = options;
   const messages: Array<Record<string, unknown>> = [];
-  // Aggregate consecutive function calls into a single assistant message
-  let pendingToolCalls: Array<Record<string, unknown>> = [];
-  const flushToolCalls = () => {
-    if (pendingToolCalls.length) {
-      messages.push({ role: 'assistant', tool_calls: pendingToolCalls });
-      pendingToolCalls = [];
-    }
-  };
   if (typeof instructions === 'string') {
     const trimmed = instructions.trim();
     if (trimmed.length) messages.push({ role: 'system', content: trimmed });
@@ -326,14 +316,12 @@ function mapResponsesInputToChat(options: { instructions?: string; input?: Respo
       const fnName = name ?? 'tool';
       const serialized = normalizeArgumentsBySchema(parsedArgs, fnName, toolsNormalized).trim();
       toolNameById.set(callId, fnName);
-      pendingToolCalls.push({ id: callId, type: 'function', function: { name: fnName, arguments: serialized } });
+      messages.push({ role: 'assistant', tool_calls: [{ id: callId, type: 'function', function: { name: fnName, arguments: serialized } }] });
       lastToolCallId = callId;
       continue;
     }
 
     if (entryType === 'function_call_output' || entryType === 'tool_result' || entryType === 'tool_message') {
-      // Before emitting tool result, flush accumulated assistant tool calls
-      flushToolCalls();
       const toolCallId = (entry as any).tool_call_id || (entry as any).call_id || (entry as any).tool_use_id || (entry as any).id || lastToolCallId;
       const output = normalizeToolOutput(entry);
       if (toolCallId && output) {
@@ -344,59 +332,13 @@ function mapResponsesInputToChat(options: { instructions?: string; input?: Respo
     }
 
     const { text, toolCalls, toolMessages, lastCallId } = processMessageBlocks(Array.isArray((entry as any).content) ? (entry as any).content : [], toolsNormalized, toolNameById, lastToolCallId);
-    if (toolCalls.length) {
-      pendingToolCalls.push(...toolCalls);
-    }
+    if (toolCalls.length) messages.push({ role: 'assistant', tool_calls: toolCalls });
     for (const msg of toolMessages) messages.push(msg);
     const normalizedRole = normalizeResponseRole((entry as any).role);
-    if (text) {
-      // Boundary before a text message
-      flushToolCalls();
-      messages.push({ role: normalizedRole, content: text });
-    }
+    if (text) messages.push({ role: normalizedRole, content: text });
     lastToolCallId = lastCallId;
   }
-  // Flush any trailing tool calls
-  flushToolCalls();
   return messages;
-}
-
-function compactMessages(messages: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
-  const out: Array<Record<string, unknown>> = [];
-  for (const m of messages) {
-    const prev = out[out.length - 1];
-    if (!prev) { out.push(m); continue; }
-    // Merge assistant tool_calls blocks
-    if ((prev as any).role === 'assistant' && Array.isArray((prev as any).tool_calls)
-      && (m as any).role === 'assistant' && Array.isArray((m as any).tool_calls)) {
-      (prev as any).tool_calls = [ ...(prev as any).tool_calls, ...((m as any).tool_calls as any[]) ];
-      continue;
-    }
-    // Merge consecutive tool messages with same tool_call_id
-    if ((prev as any).role === 'tool' && (m as any).role === 'tool'
-      && typeof (prev as any).tool_call_id === 'string'
-      && (prev as any).tool_call_id === (m as any).tool_call_id) {
-      const a = typeof (prev as any).content === 'string' ? (prev as any).content : String((prev as any).content ?? '');
-      const b = typeof (m as any).content === 'string' ? (m as any).content : String((m as any).content ?? '');
-      (prev as any).content = a && b ? (a + '\n' + b) : (a || b);
-      continue;
-    }
-    // Merge adjacent user text messages
-    if ((prev as any).role === 'user' && (m as any).role === 'user'
-      && typeof (prev as any).content === 'string' && typeof (m as any).content === 'string') {
-      (prev as any).content = ((prev as any).content as string) + '\n' + ((m as any).content as string);
-      continue;
-    }
-    // Merge adjacent assistant text messages (no tool_calls)
-    if ((prev as any).role === 'assistant' && (m as any).role === 'assistant'
-      && !Array.isArray((prev as any).tool_calls) && !Array.isArray((m as any).tool_calls)
-      && typeof (prev as any).content === 'string' && typeof (m as any).content === 'string') {
-      (prev as any).content = ((prev as any).content as string) + '\n' + ((m as any).content as string);
-      continue;
-    }
-    out.push(m);
-  }
-  return out;
 }
 
 function normalizeResponseRole(role: unknown): string {
