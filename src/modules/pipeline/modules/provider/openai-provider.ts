@@ -411,6 +411,35 @@ export class OpenAIProvider implements ProviderModule {
         (chatRequest as any).messages = compacted;
       } catch { /* no-op on compaction errors */ }
 
+      // Canonicalize dotted tool names (e.g., "filesystem.read_mcp_resource") by injecting server into arguments
+      try {
+        const msgs = Array.isArray((chatRequest as any).messages) ? ((chatRequest as any).messages as any[]) : [];
+        const whitelist = new Set(['read_mcp_resource', 'list_mcp_resources', 'list_mcp_resource_templates']);
+        const canonOne = (tc: any) => {
+          if (!tc || !tc.function || typeof tc.function !== 'object') return tc;
+          const nm = typeof tc.function.name === 'string' ? tc.function.name : '';
+          const dot = nm.indexOf('.');
+          if (dot <= 0) return tc;
+          const prefix = nm.slice(0, dot).trim();
+          const base = nm.slice(dot + 1).trim();
+          if (!prefix || !whitelist.has(base)) return tc;
+          let argsStr = typeof tc.function.arguments === 'string' ? tc.function.arguments : (tc.function.arguments ? JSON.stringify(tc.function.arguments) : '{}');
+          let obj: any;
+          try { obj = JSON.parse(argsStr || '{}'); } catch { obj = {}; }
+          if (!obj || typeof obj !== 'object' || Array.isArray(obj)) obj = {};
+          if (obj.server == null || obj.server === '') obj.server = prefix;
+          tc.function.name = base;
+          tc.function.arguments = JSON.stringify(obj);
+          return tc;
+        };
+        for (const m of msgs) {
+          if (m && m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+            m.tool_calls = m.tool_calls.map(canonOne);
+          }
+        }
+        (chatRequest as any).messages = msgs;
+      } catch { /* ignore canonicalization errors */ }
+
       // Add tools if provided (non-GLM or already preflighted)
       {
         const tools = (request as { tools?: any[] }).tools;

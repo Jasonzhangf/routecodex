@@ -384,7 +384,8 @@ export class ResponsesHandler extends BaseHandler {
         if (payload && typeof payload === 'object' && (payload as any).object === 'response') {
           return payload as Record<string, unknown>;
         }
-        return await ResponsesMapper.chatToResponsesFromMapping(payload);
+        // Use core codec to avoid duplicate mapping logic
+        return buildResponsesPayloadFromChat(payload, undefined) as Record<string, unknown>;
       };
       const initialResp = await toResponsesShape(rawInitial);
       const finalResp = await toResponsesShape(rawFinal);
