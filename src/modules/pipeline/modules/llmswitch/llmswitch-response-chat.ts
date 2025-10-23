@@ -6,8 +6,10 @@ import {
   buildResponsesPayloadFromChat,
   captureResponsesContext,
   extractRequestIdFromResponse,
+  normalizeTools,
   type ResponsesRequestContext
 } from 'rcc-llmswitch-core/conversion';
+import { extractToolText } from '../../utils/tool-result-text.js';
 
 export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
   readonly id: string;
@@ -46,6 +48,46 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
 
     const context = captureResponsesContext(payload, dto ?? undefined);
     const { request: chatRequest, toolsNormalized } = buildChatRequestFromResponses(payload, context);
+    // Normalize tool message content to text (align with Anthropic→OpenAI)
+    try {
+      const msgs = Array.isArray((chatRequest as any).messages) ? ((chatRequest as any).messages as any[]) : [];
+      const push = (arr: string[], s?: string) => { if (typeof s === 'string') { const t = s.trim(); if (t) arr.push(t); } };
+      const flattenParts = (v: any): string[] => {
+        const texts: string[] = [];
+        if (Array.isArray(v)) {
+          for (const p of v) {
+            if (!p) continue;
+            if (typeof p === 'string') { push(texts, p); continue; }
+            if (typeof p === 'object') {
+              if (typeof (p as any).text === 'string') { push(texts, (p as any).text); continue; }
+              if (typeof (p as any).content === 'string') { push(texts, (p as any).content); continue; }
+              if (Array.isArray((p as any).content)) { texts.push(...flattenParts((p as any).content)); continue; }
+            }
+          }
+        }
+        return texts;
+      };
+      for (const m of msgs) {
+        if (m && m.role === 'tool' && m.content !== undefined) {
+          if (typeof m.content !== 'string') {
+            m.content = extractToolText(m.content);
+          }
+        }
+      }
+      (chatRequest as any).messages = msgs;
+    } catch { /* ignore content normalization errors */ }
+    // Align tools declaration: normalize + strict=true
+    try {
+      if (Array.isArray((chatRequest as any).tools)) {
+        const nt = normalizeTools((chatRequest as any).tools as any[]);
+        (chatRequest as any).tools = (nt as any[]).map((t: any) => {
+          if (t && t.type === 'function' && t.function && typeof t.function === 'object') {
+            return { ...t, function: { ...t.function, strict: true } };
+          }
+          return t;
+        });
+      }
+    } catch { /* ignore normalize errors */ }
     if (toolsNormalized) {
       context.toolsNormalized = toolsNormalized;
     }

@@ -12,7 +12,7 @@ import { StreamingManager } from '../utils/streaming-manager.js';
 import { ResponsesConfigUtil } from '../config/responses-config.js';
 import { ResponsesConverter } from '../conversion/responses-converter.js';
 import { ResponsesMapper } from '../conversion/responses-mapper.js';
-import { buildResponsesPayloadFromChat } from 'rcc-llmswitch-core/conversion';
+import { buildResponsesPayloadFromChat, normalizeTools } from 'rcc-llmswitch-core/conversion';
 // Protocol conversion is handled downstream by llmswitch (Responses→Chat) for providers.
 import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
 
@@ -368,6 +368,14 @@ export class ResponsesHandler extends BaseHandler {
       };
 
       const requestMeta = { ...(reqMeta ?? {}) } as Record<string, unknown>;
+      // Normalize tools declaration for Responses SSE metadata (align with other routes)
+      try {
+        const rawTools = (requestMeta as any).tools;
+        if (Array.isArray(rawTools)) {
+          const nt = normalizeTools(rawTools as any[]);
+          (requestMeta as any).tools = (nt as any[]).map((t: any) => (t && t.type === 'function' && t.function && typeof t.function === 'object') ? { ...t, function: { ...t.function, strict: true } } : t);
+        }
+      } catch { /* ignore tools normalize errors */ }
       const requestInstructions = typeof reqInstructions === 'string' ? reqInstructions : undefined;
       if (requestInstructions && !requestMeta.instructions) {
         requestMeta.instructions = requestInstructions;
@@ -670,13 +678,19 @@ export class ResponsesHandler extends BaseHandler {
             const base: any = { ...(payload as any) };
             const meta: Record<string, unknown> = { ...(base.metadata || {}) };
             if (typeof reqMeta.tools !== 'undefined') {
-              meta.tools = reqMeta.tools;
+              try {
+                const nt = Array.isArray((reqMeta as any).tools) ? normalizeTools((reqMeta as any).tools as any[]) : (reqMeta as any).tools;
+                const toolsStrict = Array.isArray(nt) ? (nt as any[]).map((t: any) => (t && t.type === 'function' && t.function && typeof t.function === 'object') ? { ...t, function: { ...t.function, strict: true } } : t) : nt;
+                meta.tools = toolsStrict;
+              } catch {
+                meta.tools = reqMeta.tools as unknown as any[];
+              }
               try {
                 const crypto = await import('crypto');
-                const str = JSON.stringify(reqMeta.tools);
+                const str = JSON.stringify(meta.tools);
                 const hash = crypto.createHash('sha256').update(str).digest('hex');
                 (meta as any).tools_hash = hash;
-                if (Array.isArray(reqMeta.tools)) (meta as any).tools_count = (reqMeta.tools as any[]).length;
+                if (Array.isArray(meta.tools)) (meta as any).tools_count = (meta.tools as any[]).length;
               } catch { /* ignore */ }
             }
             if (typeof reqMeta.tool_choice !== 'undefined') meta.tool_choice = reqMeta.tool_choice;
