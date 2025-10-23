@@ -162,6 +162,11 @@ export class OpenAIProvider implements ProviderModule {
    * Initialize debug enhancements
    */
   private initializeDebugEnhancements(): void {
+    if (String(process.env.ROUTECODEX_ENABLE_DEBUGCENTER || '0') !== '1') {
+      this.debugEventBus = null;
+      this.isDebugEnhanced = false;
+      return;
+    }
     try {
       this.debugEventBus = DebugEventBus.getInstance();
       this.isDebugEnhanced = true;
@@ -367,6 +372,44 @@ export class OpenAIProvider implements ProviderModule {
         presence_penalty: (request as { presence_penalty?: number }).presence_penalty,
         stream: (request as { stream?: boolean }).stream ?? false
       };
+
+      // Safe compaction: merge consecutive assistant tool_calls blocks and coalesce consecutive tool messages
+      try {
+        const msgs = Array.isArray((chatRequest as any).messages) ? ((chatRequest as any).messages as any[]) : [];
+        const compacted: any[] = [];
+        let pendingToolCalls: any[] = [];
+        const flushToolCalls = () => {
+          if (pendingToolCalls.length) {
+            compacted.push({ role: 'assistant', tool_calls: pendingToolCalls });
+            pendingToolCalls = [];
+          }
+        };
+        for (const m of msgs) {
+          if (!m || typeof m !== 'object') { flushToolCalls(); compacted.push(m); continue; }
+          if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+            pendingToolCalls.push(...m.tool_calls);
+            continue;
+          }
+          if (m.role === 'tool') {
+            // flush any pending assistant tool_calls before tool messages
+            flushToolCalls();
+            const prev = compacted[compacted.length - 1];
+            if (prev && prev.role === 'tool' && typeof prev.tool_call_id === 'string' && prev.tool_call_id === m.tool_call_id) {
+              const a = typeof prev.content === 'string' ? prev.content : String(prev.content ?? '');
+              const b = typeof m.content === 'string' ? m.content : String(m.content ?? '');
+              prev.content = a && b ? (a + '\n' + b) : (a || b);
+              continue;
+            }
+            compacted.push(m);
+            continue;
+          }
+          // for normal text or other roles, flush pending and pass through
+          flushToolCalls();
+          compacted.push(m);
+        }
+        flushToolCalls();
+        (chatRequest as any).messages = compacted;
+      } catch { /* no-op on compaction errors */ }
 
       // Add tools if provided (non-GLM or already preflighted)
       {
