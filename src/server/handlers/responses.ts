@@ -427,12 +427,14 @@ export class ResponsesHandler extends BaseHandler {
             }
           }
         } catch { /* ignore */ }
-        return texts.join(' ');
+        // Preserve paragraph/line breaks when aggregating text parts
+        return texts.join('\n');
       };
 
       // Use final response text if available; fallback to initial
       const textOut = extractText(finalResp) || extractText(initialResp);
-      const words = (textOut || '').split(/\s+/g).filter(Boolean);
+      // Preserve newlines during streaming by splitting into newline-aware segments
+      const words = (textOut || '').split(/(\n+)/g).filter((s: string) => s.length > 0);
 
       const toCleanObject = (obj: Record<string, unknown>) => {
         for (const key of Object.keys(obj)) {
@@ -578,7 +580,7 @@ export class ResponsesHandler extends BaseHandler {
       // 文本直出：仅输出 output_text.delta/done（不做额外 reasoning/message 合成）
       if (words.length > 0) {
         for (const w of words) {
-          await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: w + ' ', logprobs: [] });
+          await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: w, logprobs: [] });
           await new Promise(r => setTimeout(r, 12));
         }
         await writeEvt('response.output_text.done', { type: 'response.output_text.done', output_index: 0, content_index: 0, logprobs: [] });
