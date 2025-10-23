@@ -298,6 +298,14 @@ export function buildResponsesPayloadFromChat(payload: unknown, context?: Respon
 function mapResponsesInputToChat(options: { instructions?: string; input?: ResponsesInputItem[]; toolsNormalized?: Array<Record<string, unknown>>; }): Array<Record<string, unknown>> {
   const { instructions, input, toolsNormalized } = options;
   const messages: Array<Record<string, unknown>> = [];
+  // Aggregate consecutive function calls into a single assistant message
+  let pendingToolCalls: Array<Record<string, unknown>> = [];
+  const flushToolCalls = () => {
+    if (pendingToolCalls.length) {
+      messages.push({ role: 'assistant', tool_calls: pendingToolCalls });
+      pendingToolCalls = [];
+    }
+  };
   if (typeof instructions === 'string') {
     const trimmed = instructions.trim();
     if (trimmed.length) messages.push({ role: 'system', content: trimmed });
@@ -316,12 +324,14 @@ function mapResponsesInputToChat(options: { instructions?: string; input?: Respo
       const fnName = name ?? 'tool';
       const serialized = normalizeArgumentsBySchema(parsedArgs, fnName, toolsNormalized).trim();
       toolNameById.set(callId, fnName);
-      messages.push({ role: 'assistant', tool_calls: [{ id: callId, type: 'function', function: { name: fnName, arguments: serialized } }] });
+      pendingToolCalls.push({ id: callId, type: 'function', function: { name: fnName, arguments: serialized } });
       lastToolCallId = callId;
       continue;
     }
 
     if (entryType === 'function_call_output' || entryType === 'tool_result' || entryType === 'tool_message') {
+      // Before emitting tool result, flush accumulated assistant tool calls
+      flushToolCalls();
       const toolCallId = (entry as any).tool_call_id || (entry as any).call_id || (entry as any).tool_use_id || (entry as any).id || lastToolCallId;
       const output = normalizeToolOutput(entry);
       if (toolCallId && output) {
@@ -332,12 +342,20 @@ function mapResponsesInputToChat(options: { instructions?: string; input?: Respo
     }
 
     const { text, toolCalls, toolMessages, lastCallId } = processMessageBlocks(Array.isArray((entry as any).content) ? (entry as any).content : [], toolsNormalized, toolNameById, lastToolCallId);
-    if (toolCalls.length) messages.push({ role: 'assistant', tool_calls: toolCalls });
+    if (toolCalls.length) {
+      pendingToolCalls.push(...toolCalls);
+    }
     for (const msg of toolMessages) messages.push(msg);
     const normalizedRole = normalizeResponseRole((entry as any).role);
-    if (text) messages.push({ role: normalizedRole, content: text });
+    if (text) {
+      // Boundary before a text message
+      flushToolCalls();
+      messages.push({ role: normalizedRole, content: text });
+    }
     lastToolCallId = lastCallId;
   }
+  // Flush any trailing tool calls
+  flushToolCalls();
   return messages;
 }
 
@@ -440,4 +458,3 @@ export function extractRequestIdFromResponse(response: any): string | undefined 
   }
   return undefined;
 }
-
