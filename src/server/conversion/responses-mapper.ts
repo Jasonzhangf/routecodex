@@ -260,120 +260,15 @@ export class ResponsesMapper {
   }
 
   static async chatToResponsesFromMapping(payload: any): Promise<Record<string, unknown>> {
-    const { mappings } = await ResponsesConfigUtil.load();
-    const toolEmitRequired = !!mappings.tools.emitRequiredAction;
-    const passthrough = mappings.response.passthroughFields || [];
-    const defaults = mappings.response.defaultValues || {};
-
-    const model = payload?.model || 'unknown';
-    const id = payload?.id || `resp_${Date.now()}`;
-    const created_at = Math.floor(Date.now() / 1000);
-
-    // Extract text
-    const text = (() => {
-      const s = payload?.choices?.[0]?.message?.content;
-      if (typeof s === 'string') return s.trim();
-      if (Array.isArray(s)) {
-        const t = s.map((p: any) => (p && typeof p.text === 'string') ? p.text : (typeof p === 'string' ? p : ''))
-                   .filter(Boolean).join(' ').trim();
-        return t;
-      }
-      return '';
-    })();
-
-    // Helper: canonicalize server.method → canonical function name + inject server param
-    const canonicalizeTool = (name: string | undefined, argsStr: string): { name: string; args: string } => {
-      const whitelist = new Set(['read_mcp_resource', 'list_mcp_resources', 'list_mcp_resource_templates']);
-      if (!name || typeof name !== 'string') return { name: 'tool', args: argsStr };
-      const dot = name.indexOf('.');
-      if (dot <= 0) return { name, args: argsStr };
-      const prefix = name.slice(0, dot).trim();
-      const base = name.slice(dot + 1).trim();
-      if (!whitelist.has(base)) return { name, args: argsStr };
-      let obj: any;
-      try { obj = JSON.parse(argsStr || '{}'); } catch { throw new Error('Tool call arguments must be valid JSON'); }
-      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('Tool call arguments must be a JSON object');
-      if (obj.server == null || obj.server === '') obj.server = prefix;
-      return { name: base, args: JSON.stringify(obj) };
-    };
-
-    // Extract tool calls (OpenAI Chat)
-    const toolCalls = Array.isArray(payload?.choices?.[0]?.message?.tool_calls)
-      ? payload.choices[0].message.tool_calls as any[] : [];
-
-    const output: any[] = [];
-    // Map provider Chat reasoning_content (if present) into a reasoning output item
-    const reasoningText = (() => {
-      try {
-        const rc = payload?.choices?.[0]?.message?.reasoning_content;
-        if (typeof rc === 'string') {
-          const t = rc.trim();
-          return t.length ? t : '';
-        }
-      } catch { /* ignore */ }
-      return '';
-    })();
-    if (reasoningText) {
-      output.push({ type: 'reasoning', content: [{ type: 'output_text', text: reasoningText }] });
+    // Thin wrapper to core codec to avoid duplicate mapping logic; required_action 合成由调用方按需处理
+    try {
+      const core = await import('@routecodex/llmswitch-core/conversion');
+      return (core as any).buildResponsesPayloadFromChat(payload, undefined) as Record<string, unknown>;
+    } catch (e) {
+      const err: any = new Error((e as Error)?.message || 'Chat→Responses mapping failed');
+      err.code = 'conversion_error';
+      throw err;
     }
-    if (text) {
-      output.push({ type: 'message', message: { role: 'assistant', content: [{ type: 'output_text', text }] } });
-    }
-    for (const tc of toolCalls) {
-      const callId = typeof tc?.id === 'string' ? tc.id : `call_${Math.random().toString(36).slice(2,8)}`;
-      const fn = (tc && typeof tc.function === 'object') ? tc.function : undefined;
-      const fnNameRaw = typeof fn?.name === 'string' ? fn.name : 'tool';
-      const argsRaw = typeof fn?.arguments === 'string' ? fn.arguments : (fn?.arguments ? JSON.stringify(fn.arguments) : '{}');
-      const { name: fnName, args } = canonicalizeTool(fnNameRaw, argsRaw);
-      // OpenAI Responses spec uses function_call item
-      output.push({ type: 'function_call', id: callId, call_id: callId, name: fnName, arguments: args, status: 'in_progress' });
-    }
-
-    const usage = (() => {
-      const u = payload?.usage;
-      if (!u || typeof u !== 'object') return undefined;
-      const input = typeof u.input_tokens === 'number' ? u.input_tokens : (typeof u.prompt_tokens === 'number' ? u.prompt_tokens : 0);
-      const outputTokens = typeof u.output_tokens === 'number' ? u.output_tokens : (typeof u.completion_tokens === 'number' ? u.completion_tokens : 0);
-      const total = typeof u.total_tokens === 'number' ? u.total_tokens : (input + outputTokens);
-      return { input_tokens: input, output_tokens: outputTokens, total_tokens: total };
-    })();
-
-    const hasToolCalls = toolCalls.length > 0;
-    const resp: any = {
-      id,
-      object: 'response',
-      created_at,
-      model,
-      status: hasToolCalls ? 'in_progress' : 'completed',
-      output,
-      output_text: text,
-      ...(usage ? { usage } : {})
-    };
-    // When tool calls are present, request client to submit tool outputs
-    if (hasToolCalls) {
-      resp.required_action = {
-        type: 'submit_tool_outputs',
-        submit_tool_outputs: {
-          tool_calls: toolCalls.map((tc: any) => ({
-            id: typeof tc?.id === 'string' ? tc.id : `call_${Math.random().toString(36).slice(2,8)}`,
-            type: 'function',
-            function: {
-              name: String(tc?.function?.name || 'tool'),
-              arguments: typeof tc?.function?.arguments === 'string'
-                ? tc.function.arguments
-                : (tc?.function?.arguments ? JSON.stringify(tc.function.arguments) : '{}')
-            }
-          }))
-        }
-      };
-    }
-    // Note: SSE path composes events; required_action emitted for non-stream JSON only
-    for (const field of passthrough) {
-      if (resp[field] === undefined && defaults[field] !== undefined) {
-        resp[field] = defaults[field];
-      }
-    }
-    return resp;
   }
 
   static async enrichResponsePayload(payload: Record<string, unknown>, source?: Record<string, unknown>, requestMeta?: Record<string, unknown>): Promise<Record<string, unknown>> {
