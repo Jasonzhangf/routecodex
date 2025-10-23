@@ -10,6 +10,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { normalizeArgsBySchema } from '../../utils/schema-arg-normalizer.js';
+import { normalizeTools } from './utils/tool-schema-normalizer.js';
 import {
   DEFAULT_CONVERSION_CONFIG,
   detectRequestFormat,
@@ -88,6 +89,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       } catch { /* ignore */ }
 
       const transformedRequest = this.convertAnthropicRequestToOpenAI(payload);
+      // Preserve internal RCC override key across conversion
       // IMPORTANT: Do not perform sticky tool backfill/injection.
       // If caller omits tools this turn, we will NOT inject cached tools.
 
@@ -145,6 +147,7 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
         targetFormat: requestFormat
       }
     } as Record<string, unknown>;
+    // Preserve internal RCC override key in passthrough mode
     const stamped = { ...(passthrough as any), _metadata: { ...(passthrough as any)?._metadata, entryProtocol: entry, targetProtocol: entry } };
     return isDto
       ? { ...dto!, data: stamped }
@@ -360,6 +363,31 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       }
     }
 
+    // Helper: recursively flatten nested blocks and collect textual content
+    const flattenTextBlocks = (blocks: any[]): string[] => {
+      const texts: string[] = [];
+      for (const block of blocks) {
+        if (!block || typeof block !== 'object') { continue; }
+        const kind = typeof block.type === 'string' ? String(block.type).toLowerCase() : '';
+        if ((kind === 'text' || kind === 'input_text' || kind === 'output_text') && typeof (block as any).text === 'string') {
+          const t = (block as any).text.trim(); if (t) { texts.push(t); }
+          continue;
+        }
+        if (kind === 'message' && Array.isArray((block as any).content)) {
+          texts.push(...flattenTextBlocks((block as any).content));
+          continue;
+        }
+        if (typeof (block as any).content === 'string') {
+          const t = (block as any).content.trim(); if (t) { texts.push(t); }
+          continue;
+        }
+      }
+      return texts;
+    };
+
+    // Track last appended text per role to avoid duplicate spam (common in captured histories)
+    let lastByRole: Record<string, string> = {};
+
     for (const m of (request.messages || [])) {
       const role = m.role || 'user';
       const blocks = Array.isArray(m.content)
@@ -448,14 +476,45 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
             .join('\n');
           if (text) { msgs.push({ role: 'assistant', content: text }); }
         }
+        // If we also had plain text alongside tool_use, append it after tool_calls as assistant content
+        const trailingText = flattenTextBlocks(blocks).join('\n').trim();
+        if (trailingText) { msgs.push({ role: 'assistant', content: trailingText }); }
         continue;
       }
 
       // Tool result -> OpenAI tool role message
       const toolResults = blocks.filter((b: any) => b && b.type === 'tool_result');
       if (toolResults.length > 0) {
+        const flattenParts = (v: any): string[] => {
+          const texts: string[] = [];
+          const push = (s?: string) => { if (typeof s === 'string') { const t = s.trim(); if (t) texts.push(t); } };
+          if (Array.isArray(v)) {
+            for (const p of v) {
+              if (!p) continue;
+              if (typeof p === 'string') { push(p); continue; }
+              if (typeof p === 'object') {
+                if (typeof (p as any).text === 'string') { push((p as any).text); continue; }
+                if (typeof (p as any).content === 'string') { push((p as any).content); continue; }
+                if (Array.isArray((p as any).content)) { texts.push(...flattenParts((p as any).content)); continue; }
+              }
+            }
+          }
+          return texts;
+        };
         for (const tr of toolResults) {
-          const content = typeof tr.content === 'string' ? tr.content : safeStringify(tr.content || {});
+          let content = '';
+          if (typeof tr.content === 'string') {
+            content = tr.content;
+          } else if (Array.isArray(tr.content)) {
+            content = flattenParts(tr.content).join('\n');
+          } else if (tr.content && typeof tr.content === 'object') {
+            if (typeof (tr.content as any).text === 'string') content = String((tr.content as any).text);
+            else if (typeof (tr.content as any).content === 'string') content = String((tr.content as any).content);
+            else content = safeStringify(tr.content);
+          } else {
+            content = '';
+          }
+        
           msgs.push({ role: 'tool', content, tool_call_id: tr.tool_use_id || tr.id || '' });
         }
         // Also append any user/assistant text blocks in same message
@@ -467,12 +526,14 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
         continue;
       }
 
-      // Plain user/assistant text-only
-      const text = blocks
-        .filter((b: any) => b && b.type === 'text' && typeof b.text === 'string')
-        .map((b: any) => b.text)
-        .join('\n');
-      msgs.push({ role, content: text });
+      // Plain text (flatten nested message/input_text/output_text)
+      const textParts = flattenTextBlocks(blocks);
+      const text = textParts.join('\n');
+      const prev = lastByRole[role] || '';
+      if (text && text !== prev) {
+        msgs.push({ role, content: text });
+        lastByRole[role] = text;
+      }
     }
     transformed.messages = msgs;
     if (request.model) {
@@ -524,6 +585,28 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     const contentMsgs: any[] = [];
     const producedToolIds = new Set<string>();
 
+    // Helper: recursively flatten nested Chat/Responses-like structures into plain text lines
+    const flattenNested = (parts: any[]): string[] => {
+      const texts: string[] = [];
+      for (const p of parts) {
+        if (!p || typeof p !== 'object') { continue; }
+        const kind = typeof (p as any).type === 'string' ? String((p as any).type).toLowerCase() : '';
+        if ((kind === 'text' || kind === 'input_text' || kind === 'output_text') && typeof (p as any).text === 'string') {
+          const t = ((p as any).text as string).trim(); if (t) { texts.push(t); }
+          continue;
+        }
+        if (kind === 'message' && Array.isArray((p as any).content)) {
+          texts.push(...flattenNested((p as any).content));
+          continue;
+        }
+        if (typeof (p as any).content === 'string') {
+          const t = ((p as any).content as string).trim(); if (t) { texts.push(t); }
+          continue;
+        }
+      }
+      return texts;
+    };
+
     // Build a local schema map (from OpenAI request.tools) to normalize arguments
     const reqToolSchemaMap: Map<string, any> | undefined = (() => {
       try {
@@ -573,11 +656,8 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
       if (typeof m.content === 'string' && m.content.length > 0) {
         blocks.push({ type: 'text', text: m.content });
       } else if (Array.isArray(m.content)) {
-        for (const part of m.content) {
-          if (part && typeof part === 'object' && typeof (part as any).text === 'string') {
-            blocks.push({ type: 'text', text: (part as any).text });
-          }
-        }
+        const flat = flattenNested(m.content);
+        for (const t of flat) { blocks.push({ type: 'text', text: t }); }
       }
       contentMsgs.push({ role, content: blocks.length ? blocks : [{ type: 'text', text: '' }] });
     }
@@ -815,7 +895,10 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
 
   private convertAnthropicToolsToOpenAI(tools: any[]): any[] {
     if (!tools) {return [];}
-    return tools.map(tool => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.input_schema } }));
+    // Normalize via shared normalizer for consistency across paths
+    // Map Anthropic tool schema to tentative OpenAI-like shape before normalization
+    const prelim = tools.map(t => ({ type: 'function', name: t?.name, description: t?.description, parameters: t?.input_schema }));
+    return normalizeTools(prelim) as any[];
   }
 
   private convertOpenAIToolCallsToAnthropic(toolCalls: any[], toolSchemaMap?: Map<string, any>): any[] {

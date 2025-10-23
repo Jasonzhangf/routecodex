@@ -91,9 +91,10 @@ export class PipelineDebugLogger {
   private providerLogs: ProviderRequestLogEntry[] = [];
   private maxLogEntries = 1000;
   private eventBus?: DebugEventBus;
+  private debugCenter: DebugCenter | null;
 
   constructor(
-    private debugCenter: DebugCenter,
+    debugCenter: DebugCenter | null = null,
     private options: {
       enableConsoleLogging?: boolean;
       enableDebugCenter?: boolean;
@@ -101,10 +102,11 @@ export class PipelineDebugLogger {
       logLevel?: 'none' | 'basic' | 'detailed' | 'verbose';
     } = {}
   ) {
+    this.debugCenter = debugCenter ?? null;
     this.options = {
-      enableConsoleLogging: (process.env.RCC_ENABLE_CONSOLE_LOGGING ?? '1') !== '0',
+      enableConsoleLogging: (process.env.ROUTECODEX_ENABLE_CONSOLE_LOGGING ?? '1') !== '0',
       // Default disable DebugCenter unless explicitly enabled
-      enableDebugCenter: process.env.RCC_ENABLE_DEBUGCENTER === '1',
+      enableDebugCenter: process.env.ROUTECODEX_ENABLE_DEBUGCENTER === '1',
       maxLogEntries: 1000,
       logLevel: 'detailed',
       ...options
@@ -112,7 +114,7 @@ export class PipelineDebugLogger {
     this.maxLogEntries = this.options.maxLogEntries!;
     // Ensure events also flow into the global DebugEventBus so external DebugCenter listeners can capture session IO
     try {
-      this.eventBus = process.env.RCC_ENABLE_DEBUGCENTER === '1' ? DebugEventBus.getInstance() : (undefined as any);
+      this.eventBus = process.env.ROUTECODEX_ENABLE_DEBUGCENTER === '1' ? DebugEventBus.getInstance() : (undefined as any);
     } catch {
       this.eventBus = undefined as any;
     }
@@ -582,7 +584,15 @@ export class PipelineDebugLogger {
    * Log to DebugCenter
    */
   private logToDebugCenter(entry: DebugLogEntry): void {
+    if (!this.options.enableDebugCenter) {
+      return;
+    }
+
     try {
+      if (!this.debugCenter || typeof this.debugCenter.processDebugEvent !== 'function') {
+        return;
+      }
+
       this.debugCenter.processDebugEvent({
         sessionId: entry.requestId || 'unknown',
         moduleId: entry.pipelineId || 'unknown',

@@ -1,0 +1,15 @@
+[
+  {
+    "event": "response.output_text.delta",
+    "data": {
+      "type": "response.output_text.delta",
+      "sequence_number": 6,
+      "item_id": "msg_04c90850fea150500168f0dad3426081968b42688619d32a5b",
+      "output_index": 1,
+      "content_index": 0,
+      "delta": "晨",
+      "logprobs": [],
+      "obfuscation": "9WZQBzq80X9dqhs"
+    }
+  }
+]

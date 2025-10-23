@@ -161,7 +161,7 @@ npm run test:e2e
 
 - GLM 1210 兼容：在发往 GLM 的最终载荷中，移除“非最后一条”消息的 `assistant.tool_calls` 字段，避免上游 400/1210。工具功能不受影响，`tools` 与 `tool` 角色消息仍保留。
 - 流式错误可见性：在 SSE 开始之前（`headersSent=false`）优先返回 JSON 错误（4xx/5xx）；若已开始 SSE，则输出包含错误信息的 SSE 块后 `[DONE]`，避免“静默停止”。
-- 预心跳优化：增加预心跳延迟窗口 `RCC_PRE_SSE_HEARTBEAT_DELAY_MS`（默认 800ms），提升早期错误的可见性。
+- 预心跳优化：增加预心跳延迟窗口 `ROUTECODEX_PRE_SSE_HEARTBEAT_DELAY_MS`（默认 800ms），提升早期错误的可见性。
 - Anthropic 工具调用对齐：默认“信任 schema”，不更改工具名与参数字段（trustSchema=true）。OpenAI `tool_calls` → Anthropic `tool_use` 时，原样透传 `function.name/arguments`，确保与 Claude Code Router 等客户端的正确工具调用流程（`stop_reason=tool_use`）。
 - [架构文档](../../docs/)
 - [API 文档](../../docs/api/)

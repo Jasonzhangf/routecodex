@@ -1,0 +1,13 @@
+{
+  "model": "gpt-5-codex",
+  "stream": true,
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "input_text", "text": "请用一句话问好，并计算 2+2。" }
+      ]
+    }
+  ]
+}
+

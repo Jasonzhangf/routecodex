@@ -509,21 +509,12 @@ export class InputSimulator {
   }
 
   /**
-   * 创建兜底输入
+   * 创建兜底输入 - 已移除低质量合成实现
+   * @deprecated 不再使用低质量合成数据，直接抛出错误
    */
   private createFallbackInput(input: any, nodeType: string): SimulatedInput {
-    return {
-      source: 'rule-based',
-      data: this.generateByRules(nodeType, input),
-      quality: 0.3,
-      confidence: 0.2,
-      strategy: 'fallback',
-      metadata: {
-        generationTime: Date.now(),
-        rulesApplied: ['fallback-generation'],
-        inferenceSteps: ['emergency-fallback']
-      }
-    };
+    // 移除低质量合成数据实现，直接抛出错误
+    throw new Error(`Fallback input generation not implemented for node type: ${nodeType}. Input simulation failed.`);
   }
 
   /**

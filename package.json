@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.46.35",
+  "version": "0.53.2",
   "description": "Multi-provider OpenAI proxy server with native dry-run capabilities",
   "type": "module",
   "main": "dist/index.js",
@@ -23,6 +23,9 @@
     "README.md",
     "LICENSE"
   ],
+  "bundledDependencies": [
+    "routecodex-config-compat"
+  ],
   "engines": {
     "node": ">=20 <21"
   },
@@ -33,7 +36,7 @@
   ],
   "scripts": {
     "build": "npm run clean && tsc",
-    "postbuild": "chmod +x dist/cli.js || true && node scripts/start-verify.mjs --mode bg --timeout 120 || true",
+    "postbuild": "chmod +x dist/cli.js || true",
     "build:watch": "tsc --watch",
     "start": "npm run -s start:bg",
     "dev": "tsx watch src/index.ts",
@@ -43,6 +46,7 @@
     "test:integration": "jest --testPathPattern=integration",
     "test:e2e": "jest --testPathPattern=e2e",
     "test:performance": "jest --testPathPattern=performance",
+    "test:protocol": "jest --testPathPattern=protocol-tools-e2e.spec.ts --runInBand --detectOpenHandles --forceExit",
     "test:dry-run": "node tests/basic-dry-run.mjs",
     "test:lmstudio-dryrun": "node tests/lmstudio-tools-bidir-dry-run.mjs",
     "lint": "eslint --no-eslintrc -c .eslintrc.json src --ext .ts --no-cache",
@@ -60,6 +64,11 @@
     "start:fg": "bash scripts/run-fg-gtimeout.sh 12 -- 'node dist/index.js'",
     "start:verify": "node scripts/start-verify.mjs --mode bg --timeout 180",
     "build:verify": "npm run build && npm run -s start:verify",
+    "smoke:protocol": "node scripts/protocol-smoke.mjs",
+    "monitor:diff": "node scripts/monitor-diff.mjs",
+    "monitor:capture:responses": "node scripts/upstream-multiturn-capture.mjs",
+    "monitor:embed": "node scripts/monitor-embed-keys.mjs",
+    "build:smoke": "npm run build && node scripts/protocol-smoke.mjs",
     "start:verify:fg": "node scripts/start-verify.mjs --mode fg --timeout 90",
     "dry-run": "node scripts/dry-run-cli.mjs",
     "dry-run:samples": "tsx scripts/samples-dry-run.mjs",
@@ -78,12 +87,16 @@
     "secrets:check": "echo 'Secrets check temporarily disabled'",
     "format:check": "prettier --check src/**/*.{ts,js,json}",
     "format:fix": "prettier --write src/**/*.{ts,js,json}",
+    "verify:split-args": "node scripts/verify-toolcall-arg-splitting.mjs",
+    "verify:pairing": "node scripts/verify-tool-pairing.mjs",
+    "verify:tools:offline": "node scripts/verify-tools-offline.mjs",
     "depcheck": "depcheck",
     "license:check": "echo 'license check temporarily disabled'",
     "ncu:check": "ncu --errorLevel 2",
     "package:validate": "npx package-json-validator"
   },
   "dependencies": {
+    "ajv": "^8.17.1",
     "@anthropic-ai/sdk": "^0.65.0",
     "@lmstudio/sdk": "^1.5.0",
     "@radix-ui/react-switch": "^1.2.6",
@@ -102,7 +115,7 @@
     "rcc-basemodule": "^0.2.7",
     "rcc-debugcenter": "^0.1.6",
     "rcc-errorhandling": "^1.0.10",
-    "routecodex-config-compat": "^0.1.0",
+    "routecodex-config-compat": "^0.1.4",
     "routecodex-config-engine": "^0.1.0",
     "socket.io": "^4.8.1"
   },

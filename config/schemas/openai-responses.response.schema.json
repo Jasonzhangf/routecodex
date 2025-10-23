@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OpenAI Responses Response",
+  "type": "object",
+  "required": ["id", "object", "model", "output"],
+  "additionalProperties": true,
+  "properties": {
+    "id": { "type": "string" },
+    "object": { "const": "response" },
+    "model": { "type": "string" },
+    "status": { "type": "string" },
+    "output_text": { "type": ["string", "null"] },
+    "output": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "required_action": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    }
+  }
+}

@@ -324,6 +324,7 @@ program
   .option('--codex', 'Use Codex system prompt (tools unchanged)')
   .option('--claude', 'Use Claude system prompt (tools unchanged)')
   .option('--restart', 'Restart if an instance is already running')
+  .option('--exclusive', 'Always take over the port (kill existing listeners)')
   .action(async (options) => {
     const spinner = ora('Starting RouteCodex server...').start();
 
@@ -388,8 +389,8 @@ program
 
       const resolvedPort = port;
 
-      // Ensure port state aligns with requested behavior (no implicit self-stop)
-      await ensurePortAvailable(resolvedPort, spinner, { restart: !!options.restart });
+      // Ensure port state aligns with requested behavior (always take over to avoid duplicates)
+      await ensurePortAvailable(resolvedPort, spinner, { restart: true });
 
       // simple-log application removed
 
@@ -1428,7 +1429,9 @@ program
         const monPath = path.join(monDir, 'monitor.json');
         let j: any = {};
         try { j = JSON.parse(fs.readFileSync(monPath, 'utf8')); } catch { j = {}; }
-        j.mode = 'transparent';
+        // Use passive A/B mode by default so live responses stay local,
+        // while upstream is invoked side-by-side for comparison.
+        j.mode = 'passive';
         j.transparent = j.transparent || {};
         j.transparent.enabled = true;
         j.transparent.defaultUpstream = 'openai';
@@ -1437,6 +1440,19 @@ program
         j.transparent.headerAllowlist = j.transparent.headerAllowlist || ['accept','content-type','anthropic-version','x-*'];
         j.transparent.timeoutMs = typeof j.transparent.timeoutMs === 'number' ? j.transparent.timeoutMs : 30000;
         j.transparent.preferClientHeaders = (j.transparent.preferClientHeaders !== false);
+        // Prefer Responses wire and enforce upstream model id if unset
+        if (!j.transparent.wireApi) { j.transparent.wireApi = 'responses'; }
+        // Provide a safe default model mapping for upstream that only supports gpt-5-codex
+        if (!j.transparent.modelMapping || typeof j.transparent.modelMapping !== 'object') {
+          j.transparent.modelMapping = {
+            // common local aliases → upstream id
+            'glm-4': 'gpt-5-codex',
+            'glm-4.6': 'gpt-5-codex',
+            'gpt-4o': 'gpt-5-codex',
+            // fallback
+            '*': 'gpt-5-codex'
+          } as any;
+        }
         // auth: reference env key if provided, else FC_API_KEY
         const envRef = envKey && /^[A-Z0-9_]+$/.test(envKey) ? envKey : 'FC_API_KEY';
         j.transparent.auth = j.transparent.auth || {};
@@ -1506,9 +1522,9 @@ program
         const { spawn } = await import('child_process');
         const env = { ...process.env } as NodeJS.ProcessEnv;
         env.ROUTECODEX_CONFIG = userCfgPath;
-        // Enable runtime monitoring + allow transparent fallback using monitor.json
-        env.RCC_MONITOR_ENABLED = '1';
-        env.RCC_MONITOR_TRANSPARENT = '1';
+        // Enable runtime monitoring in passive A/B mode by default
+        env.ROUTECODEX_MONITOR_ENABLED = '1';
+        env.ROUTECODEX_MONITOR_AB = '1';
         const child = spawn(nodeBin, [serverEntry, modulesConfigPath], { stdio: 'inherit', env });
         spinner.succeed('RouteCodex (monitor mode) starting');
         console.log(`Config: ${userCfgPath}`);
@@ -1532,6 +1548,72 @@ program
 
     console.error(chalk.red('Unknown subcommand. Use: rcc monitor start | rcc monitor status'));
     process.exit(2);
+  });
+
+// Port utilities: doctor
+program
+  .command('port')
+  .description('Port utilities (doctor)')
+  .argument('<sub>', 'Subcommand: doctor')
+  .argument('[port]', 'Port number (e.g., 5520)')
+  .option('--kill', 'Kill all listeners on the port')
+  .action(async (sub: string, portArg: string | undefined, opts: { kill?: boolean }) => {
+    if ((sub || '').toLowerCase() !== 'doctor') {
+      console.error(chalk.red("Unknown subcommand. Use: rcc port doctor [port] [--kill]"));
+      process.exit(2);
+    }
+    const spinner = ora('Inspecting port...').start();
+    try {
+      let port = Number(portArg || 0);
+      if (!Number.isFinite(port) || port <= 0) {
+        // fallback to user config
+        const cfgPath = path.join(homedir(), '.routecodex', 'config.json');
+        if (fs.existsSync(cfgPath)) {
+          try {
+            const raw = fs.readFileSync(cfgPath, 'utf8');
+            const cfg = JSON.parse(raw);
+            port = (cfg?.httpserver?.port ?? cfg?.server?.port ?? cfg?.port) || port;
+          } catch { /* ignore */ }
+        }
+      }
+      if (!Number.isFinite(port) || port <= 0) {
+        spinner.fail('Missing port. Provide an explicit port or set it in ~/.routecodex/config.json');
+        process.exit(1);
+      }
+
+      const pids = findListeningPids(port);
+      spinner.stop();
+      console.log(chalk.cyan(`Port ${port} listeners:`));
+      if (!pids.length) {
+        console.log('  (none)');
+      } else {
+        for (const pid of pids) {
+          let cmd = '';
+          try { cmd = spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim(); } catch {}
+          const origin = /node\s+.*routecodex-worktree/.test(cmd) ? 'local-dev' : (/node\s+.*lib\/node_modules\/routecodex/.test(cmd) ? 'global' : 'unknown');
+          console.log(`  PID ${pid} [${origin}] ${cmd}`);
+        }
+      }
+
+      if (opts.kill && pids.length) {
+        const ksp = ora(`Killing ${pids.length} listener(s) on ${port}...`).start();
+        for (const pid of pids) {
+          try { process.kill(pid, 'SIGKILL'); } catch (e) { ksp.warn(`Failed to kill ${pid}: ${(e as Error).message}`); }
+        }
+        // brief wait
+        await sleep(300);
+        const remain = findListeningPids(port);
+        if (remain.length) {
+          ksp.fail(`Some listeners remain: ${remain.join(', ')}`);
+          process.exit(1);
+        }
+        ksp.succeed(`Port ${port} is now free.`);
+      }
+    } catch (e) {
+      spinner.fail('Port inspection failed');
+      console.error(e instanceof Error ? e.message : String(e));
+      process.exit(1);
+    }
   });
 
 // Parse command line arguments (must be last)

@@ -259,7 +259,8 @@ export function normalizeLLMSwitchType(type?: string): string | undefined {
  */
 export function getDefaultLLMSwitchType(inputProtocol: string): string {
   const normalizedProtocol = inputProtocol.toLowerCase();
-  return normalizedProtocol === 'anthropic'
-    ? 'llmswitch-anthropic-openai'
-    : 'llmswitch-openai-openai';
+  if (normalizedProtocol === 'anthropic' || normalizedProtocol === 'anthropic.messages') {
+    return 'llmswitch-anthropic-openai';
+  }
+  return 'llmswitch-conversion-router';
 }

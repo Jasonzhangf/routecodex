@@ -191,8 +191,17 @@ export function parseRouteTarget(
       // No key part, entire remaining is model
       modelId = remaining;
     } else {
-      modelId = remaining.substring(0, lastDotIndex);
-      keyAlias = remaining.substring(lastDotIndex + 1);
+      const potentialModel = remaining.substring(0, lastDotIndex);
+      const possibleKeyAlias = remaining.substring(lastDotIndex + 1);
+
+      if (/^key\d+$/.test(possibleKeyAlias)) {
+        modelId = potentialModel;
+        keyAlias = possibleKeyAlias;
+      } else {
+        // Treat entire remaining string as model when suffix is not a key alias
+        modelId = remaining;
+        keyAlias = '';
+      }
     }
   }
 

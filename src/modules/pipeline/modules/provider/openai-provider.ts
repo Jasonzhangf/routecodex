@@ -350,28 +350,6 @@ export class OpenAIProvider implements ProviderModule {
         });
       }
 
-      // Allow per-request API key override via hidden field (e.g., injected from router headers)
-      // This does not log secrets and only affects this call.
-      let localClient: OpenAI | null = null;
-      const overrideKeyRaw = (request as any)?.__rcc_overrideApiKey as string | undefined;
-      if (overrideKeyRaw && typeof overrideKeyRaw === 'string') {
-        try {
-          const key = overrideKeyRaw.toLowerCase().startsWith('bearer ')
-            ? overrideKeyRaw.slice(7).trim()
-            : overrideKeyRaw.trim();
-          const providerConfig = this.config.config as ProviderConfig;
-          const cfg: any = {
-            dangerouslyAllowBrowser: true,
-            apiKey: key,
-          };
-          if (providerConfig.baseUrl) { cfg.baseURL = providerConfig.baseUrl; }
-          localClient = new OpenAI(cfg);
-        } catch {
-          // Ignore override errors; fall back to default client
-          localClient = null;
-        }
-      }
-
       // Build chat completion request (use pipeline-assembled provider model; do NOT trust inbound request.model)
       const providerCfg = this.config?.config as ProviderConfig;
       const configuredModel = (providerCfg as any)?.model as string | undefined;
@@ -449,7 +427,7 @@ export class OpenAIProvider implements ProviderModule {
         const isOpenAIDomain = /api\.openai\.com/i.test(String(baseNorm));
         if (isOpenAIDomain) {
           type ChatCreateArg = Parameters<OpenAI['chat']['completions']['create']>[0];
-          response = await (localClient || this.openai)!.chat.completions.create(chatRequest as unknown as ChatCreateArg);
+          response = await this.openai!.chat.completions.create(chatRequest as unknown as ChatCreateArg);
         } else {
           // Compatibility fetch for third-party OpenAI-compatible providers (e.g., GLM)
           const { key: apiKey } = this.resolveApiKey(providerCfg);

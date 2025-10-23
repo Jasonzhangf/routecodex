@@ -1,4 +1,5 @@
 import type { CompatibilityConfig } from '../types/compatibility-types.js';
+import { getDefaultLLMSwitchType } from '../normalization/provider-normalization.js';
 
 export interface PipelineAssemblerModuleConfig {
   type: string;
@@ -92,7 +93,25 @@ export function buildPipelineAssemblerConfig(compat: CompatibilityConfig): Pipel
     if (providerBaseUrl) { (providerConfig as any).config.baseUrl = providerBaseUrl; }
     (providerConfig as any).config.model = modelId;
 
-    const llmSwitch = cfg?.llmSwitch?.type ? { type: cfg.llmSwitch.type, config: cfg.llmSwitch.config || {} } : { type: 'llmswitch-openai-openai', config: {} };
+    const deriveLlmswitchConfig = (type: string, existing?: Record<string, unknown>): Record<string, unknown> => {
+      if (existing && Object.keys(existing).length > 0) {
+        return existing;
+      }
+      if (type === 'llmswitch-conversion-router') {
+        return {
+          profilesPath: 'config/conversion/llmswitch-profiles.json',
+          defaultProfile: 'openai-chat'
+        };
+      }
+      return {};
+    };
+    const llmSwitchType = cfg?.llmSwitch?.type
+      ? cfg.llmSwitch.type
+      : getDefaultLLMSwitchType(String(cfg?.protocols?.input || 'openai'));
+    const llmSwitch = {
+      type: llmSwitchType,
+      config: deriveLlmswitchConfig(llmSwitchType, cfg?.llmSwitch?.config)
+    };
     const workflow = cfg?.workflow?.type ? { type: cfg.workflow.type, config: cfg.workflow.config || {}, enabled: cfg.workflow.enabled !== false } : { type: 'streaming-control', config: {} };
     const compatibility = cfg?.compatibility?.type ? { type: cfg.compatibility.type, config: cfg.compatibility.config || {} } : { type: 'field-mapping', config: {} };
 
@@ -105,70 +124,24 @@ export function buildPipelineAssemblerConfig(compat: CompatibilityConfig): Pipel
     routeMeta[pipelineId] = { providerId, modelId, keyId };
   };
 
-  if (Object.keys(pc).length > 0) {
-    let pushed = 0;
-    for (const [key, cfg] of Object.entries(pc)) {
-      // Accept providerId.modelId or providerId.modelId.keyId (keyId defaults to key1)
-      const parts = String(key).split('.');
-      if (parts.length < 2) { continue; }
-      const providerId = parts.shift() as string;
-      const keyId = (parts.length >= 2) ? (parts.pop() as string) : 'key1';
-      const modelId = parts.join('.');
-      if (!providerId || !modelId || !keyId) continue;
-      pushPipeline(providerId, modelId, keyId, cfg);
-      pushed += 1;
-    }
-    // If nothing was pushed due to malformed keys, synthesize from routeTargets/providers
-    if (pushed === 0) {
-      // fall through to synthesis
-    } else {
-      // normal case handled; skip synthesis
-      // 3) routePools will be built below from routeTargets regardless
-      // return value continues
-    }
-  } else {
-    // If routeTargets missing/empty, synthesize defaults from providers (keys or oauth aliases)
-    const providers = providersNorm;
-    const km = (compat.keyMappings?.providers || {}) as Record<string, Record<string, string>>;
-    const ensureDefaultArray = (obj: Record<string, any>, key: string) => { if (!Array.isArray(obj[key])) obj[key] = []; };
-    let anyTarget = false;
-    for (const [pid, pCfg] of Object.entries(providers)) {
-      const models = Object.keys(pCfg?.models || {});
-      const keyAliases = Object.keys(km[pid] || {});
-      // Build oauth aliases from provider.oauth definitions if present
-      const oauthCfg = (pCfg?.oauth && typeof pCfg.oauth === 'object') ? pCfg.oauth as Record<string, any> : {};
-      const oauthNames = Object.keys(oauthCfg);
-      const oauthAliases = oauthNames.map((_, i) => `oauth${i + 1}`);
-      for (const mid of models) {
-        if (keyAliases.length > 0) {
-          for (const keyId of keyAliases) {
-            ensureDefaultArray(routeTargets, 'default');
-            routeTargets['default'].push({ providerId: pid, modelId: mid, keyId });
-            pushPipeline(pid, mid, keyId, {});
-            anyTarget = true;
-          }
-        } else if (oauthAliases.length > 0) {
-          for (const alias of oauthAliases) {
-            ensureDefaultArray(routeTargets, 'default');
-            routeTargets['default'].push({ providerId: pid, modelId: mid, keyId: alias });
-            pushPipeline(pid, mid, alias, {});
-            anyTarget = true;
-          }
-        } else {
-          // OAuth-only or no keys: synthesize with keyId='key1' placeholder and alias omitted in provider.auth
-          ensureDefaultArray(routeTargets, 'default');
-          routeTargets['default'].push({ providerId: pid, modelId: mid, keyId: 'oauth1' });
-          pushPipeline(pid, mid, 'oauth1', {});
-          anyTarget = true;
-        }
-      }
-    }
-    if (!anyTarget) {
-      // Fallback: use existing (possibly empty) routeTargets to synthesize
-      for (const targets of Object.values(routeTargets)) {
-        for (const t of targets) pushPipeline(t.providerId, t.modelId, t.keyId, {});
-      }
-    }
+  if (Object.keys(pc).length === 0) {
+    throw new Error('compatibility-exporter: pipelineConfigs is empty. Provide explicit pipeline definitions.');
+  }
+
+  let pushed = 0;
+  for (const [key, cfg] of Object.entries(pc)) {
+    const parts = String(key).split('.');
+    if (parts.length < 2) { continue; }
+    const providerId = parts.shift() as string;
+    const keyId = (parts.length >= 2) ? (parts.pop() as string) : 'key1';
+    const modelId = parts.join('.');
+    if (!providerId || !modelId || !keyId) continue;
+    pushPipeline(providerId, modelId, keyId, cfg);
+    pushed += 1;
+  }
+
+  if (pushed === 0) {
+    throw new Error('compatibility-exporter: no valid pipeline definitions were processed. Check pipelineConfigs keys.');
   }
 
   // 3) routePools from routeTargets
@@ -176,24 +149,20 @@ export function buildPipelineAssemblerConfig(compat: CompatibilityConfig): Pipel
     routePools[routeName] = (targets || []).map(t => `${t.providerId}_${t.keyId}.${t.modelId}`);
   }
 
-  // Fallback synthesis: if routeTargets produced no usable targets (e.g., invalid key aliases),
-  // populate routePools using all assembled pipelines to avoid an empty routing table.
-  try {
-    const totalAssigned = Object.values(routePools).reduce((acc, arr) => acc + ((arr || []).length), 0);
-    if (totalAssigned === 0 && pipelines.length > 0) {
-      // If we have explicit route names from compat.routeTargets, mirror them; otherwise create a default route.
-      const routeNames = Object.keys(routeTargets || {});
-      const ids = pipelines.map(p => p.id);
-      if (routeNames.length > 0) {
-        for (const rn of routeNames) {
-          routePools[rn] = [...ids];
-        }
-      } else {
-        routePools['default'] = [...ids];
+  const totalAssigned = Object.values(routePools).reduce((acc, arr) => acc + ((arr || []).length), 0);
+  if (totalAssigned === 0) {
+    throw new Error('compatibility-exporter: routePools empty after processing. Ensure routeTargets align with pipelineConfigs.');
+  }
+
+  // Ensure every pipeline referenced in routePools exists
+  const knownIds = new Set(pipelines.map(p => p.id));
+  for (const [routeName, ids] of Object.entries(routePools)) {
+    for (const id of ids) {
+      if (!knownIds.has(id)) {
+        throw new Error(`compatibility-exporter: route "${routeName}" references unknown pipeline "${id}".`);
       }
     }
-  } catch { /* ignore synthesis errors */ }
-
+  }
   // 4) authMappings - flatten from keyMappings (apikey aliases) and oauth token files (if present)
   const authMappings: Record<string, string> = {};
   try {

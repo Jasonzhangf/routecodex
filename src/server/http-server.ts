@@ -26,6 +26,7 @@ import {
 import type { UnknownObject } from '../types/common-types.js';
 import { DebugFileLogger } from '../debug/debug-file-logger.js';
 import { ConfigRequestClassifier } from '../modules/virtual-router/classifiers/config-request-classifier.js';
+import { ServiceContainer, ServiceTokens } from './core/service-container.js';
 
 /**
  * HTTP Server configuration interface
@@ -67,6 +68,8 @@ export class HttpServer extends BaseModule implements IHttpServer {
   private routePools: Record<string, string[]> | null = null;
   private routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }> | null = null;
   private classifier: ConfigRequestClassifier | null = null;
+  private classifierConfig: UnknownObject | null = null;
+  private serviceContainer: ServiceContainer;
 
   // Debug enhancement properties
   private isDebugEnhanced = false;
@@ -89,7 +92,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
     const moduleInfo: ModuleInfo = {
       id: 'http-server',
       name: 'HttpServer',
-      version: '0.0.1',
+      version: '0.50.1',
       description: 'Express.js HTTP server for RouteCodex',
       type: 'server',
     };
@@ -105,6 +108,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
     this.debugEventBus = DebugEventBus.getInstance();
     this.errorUtils = ErrorHandlingUtils.createModuleErrorHandler('http-server');
     this.app = express();
+    this.serviceContainer = ServiceContainer.getInstance();
     this.startupTime = Date.now();
 
     // Initialize health status
@@ -213,6 +217,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       const lower = String(resolvedHost).toLowerCase();
       if (lower === 'localhost') { resolvedHost = '127.0.0.1'; }
       if (lower === '::' || lower === '::1') { resolvedHost = '127.0.0.1'; }
+      if (lower === '0.0.0.0') { resolvedHost = '127.0.0.1'; }
     } catch { /* ignore normalization errors */ }
     const resolvedCors = (httpCfg as any)?.cors || (rootCfg as any)?.cors || { origin: '*', credentials: true };
     const resolvedTimeout = (httpCfg as any)?.timeout ?? (rootCfg as any)?.timeout ?? 30000;
@@ -275,6 +280,24 @@ export class HttpServer extends BaseModule implements IHttpServer {
       await this.initialize();
 
       console.log('✅ HTTP server initialized with merged configuration successfully');
+
+      // Attach authMappings to protocol handler if available in merged config
+      try {
+        const pac = (this.mergedConfig as any)?.pipeline_assembler?.config;
+        let authMappings = pac?.authMappings as Record<string, string> | undefined;
+        // Fallback: derive from compatibilityConfig.keyMappings.global when assembler does not expose authMappings
+        if (!authMappings) {
+          const cc = (this.mergedConfig as any)?.compatibilityConfig;
+          const km = cc?.keyMappings;
+          const globalMap = km && typeof km === 'object' ? (km as any).global : undefined;
+          if (globalMap && typeof globalMap === 'object') {
+            authMappings = { ...globalMap } as Record<string, string>;
+          }
+        }
+        if (authMappings && this.protocolHandler && typeof (this.protocolHandler as any).attachAuthMappings === 'function') {
+          (this.protocolHandler as any).attachAuthMappings(authMappings);
+        }
+      } catch { /* ignore */ }
     } catch (error) {
       console.error('❌ Failed to initialize HTTP server with merged configuration:', error);
       throw error;
@@ -397,7 +420,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       this._isInitialized = true;
 
       try {
-        if (process.env.RCC_ENABLE_DEBUGCENTER === '1') {
+        if (process.env.ROUTECODEX_ENABLE_DEBUGCENTER === '1') {
           this.debugEventBus.publish({
             sessionId: await this.sessionId('http_server_initialized'),
             moduleId: 'http-server',
@@ -425,6 +448,9 @@ export class HttpServer extends BaseModule implements IHttpServer {
   public attachPipelineManager(pipelineManager: PipelineManager): void {
     this.pipelineManager = pipelineManager as PipelineManager;
     try {
+      this.serviceContainer.registerInstance(ServiceTokens.PIPELINE_MANAGER, pipelineManager);
+    } catch { /* ignore registration errors */ }
+    try {
       if (this.protocolHandler && (this.protocolHandler as any).attachPipelineManager) {
         (this.protocolHandler as any).attachPipelineManager(pipelineManager);
       }
@@ -439,6 +465,9 @@ export class HttpServer extends BaseModule implements IHttpServer {
   public attachRoutePools(routePools: Record<string, string[]>): void {
     this.routePools = routePools;
     try {
+      this.serviceContainer.registerInstance(ServiceTokens.ROUTE_POOLS, routePools);
+    } catch { /* ignore registration errors */ }
+    try {
       if (this.protocolHandler && (this.protocolHandler as any).attachRoutePools) {
         (this.protocolHandler as any).attachRoutePools(routePools);
       }
@@ -450,6 +479,9 @@ export class HttpServer extends BaseModule implements IHttpServer {
   public attachRouteMeta(routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }>): void {
     this.routeMeta = routeMeta;
     try {
+      this.serviceContainer.registerInstance(ServiceTokens.ROUTE_META, routeMeta);
+    } catch { /* ignore */ }
+    try {
       if (this.protocolHandler && (this.protocolHandler as any).attachRouteMeta) {
         (this.protocolHandler as any).attachRouteMeta(routeMeta);
       }
@@ -460,13 +492,20 @@ export class HttpServer extends BaseModule implements IHttpServer {
 
   /** Attach classification config to router */
   public attachRoutingClassifierConfig(classifierConfig: UnknownObject): void {
+    this.classifierConfig = classifierConfig;
     try {
       if (this.protocolHandler && (this.protocolHandler as any).attachRoutingClassifierConfig) {
-      (this.protocolHandler as any).attachRoutingClassifierConfig(classifierConfig);
+        (this.protocolHandler as any).attachRoutingClassifierConfig(classifierConfig);
       }
     } catch (error) {
       console.error('Failed to attach classifier config to OpenAI router:', error);
     }
+
+    try {
+      if (this.classifier) {
+        this.serviceContainer.registerInstance(ServiceTokens.ROUTING_CLASSIFIER, this.classifier);
+      }
+    } catch { /* ignore */ }
   }
 
   /**
@@ -989,10 +1028,10 @@ export class HttpServer extends BaseModule implements IHttpServer {
           debug: { enabled: true, stages: { llmSwitch: true, workflow: true, compatibility: true, provider: true } },
         } as UnknownObject;
 
-        // Pre-SSE heartbeat for anthropic when waiting on pipeline (disabled when RCC_DISABLE_ANTHROPIC_STREAM=1)
+        // Pre-SSE heartbeat for anthropic when waiting on pipeline (disabled when ROUTECODEX_DISABLE_ANTHROPIC_STREAM=1)
         let preHeartbeat: NodeJS.Timeout | null = null;
         const jsonHeartbeatEnabled2 = false;
-        const disableAnthropicStreamB = process.env.RCC_DISABLE_ANTHROPIC_STREAM === '1';
+        const disableAnthropicStreamB = process.env.ROUTECODEX_DISABLE_ANTHROPIC_STREAM === '1';
         if (!disableAnthropicStreamB && (req.body as any)?.stream && !res.headersSent) {
           try {
             res.setHeader('Content-Type', 'text/event-stream');
@@ -1000,7 +1039,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
             res.setHeader('Connection', 'keep-alive');
             res.setHeader('Transfer-Encoding', 'chunked');
             res.setHeader('x-request-id', requestId);
-            const interval = Math.max(5000, Number(process.env.RCC_SSE_HEARTBEAT_MS || 15000));
+            const interval = Math.max(5000, Number(process.env.ROUTECODEX_SSE_HEARTBEAT_MS || 15000));
             const send = () => {
               try { res.write(`event: ping\n` + `data: ${JSON.stringify({ type: 'ping', stage: 'pre', requestId, ts: Date.now() })}\n\n`); } catch { /* ignore */ }
             };

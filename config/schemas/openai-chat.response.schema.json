@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OpenAI Chat Response",
+  "type": "object",
+  "required": ["id", "object", "model", "choices"],
+  "additionalProperties": true,
+  "properties": {
+    "id": { "type": "string" },
+    "object": { "enum": ["chat.completion", "chat.completion.chunk"] },
+    "model": { "type": "string" },
+    "choices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

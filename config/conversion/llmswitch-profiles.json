@@ -1,0 +1,38 @@
+{
+  "profiles": {
+    "anthropic-messages": {
+      "incomingProtocol": "anthropic.messages",
+      "outgoingProtocol": "openai.chat",
+      "codec": "anthropic-openai",
+      "inputSchema": "config/schemas/anthropic-messages.request.schema.json",
+      "canonicalRequestSchema": "config/schemas/openai-chat.request.schema.json",
+      "canonicalResponseSchema": "config/schemas/anthropic-messages.response.schema.json",
+      "clientResponseSchema": "config/schemas/anthropic-messages.response.schema.json",
+      "trace": true
+    },
+    "openai-chat": {
+      "incomingProtocol": "openai.chat",
+      "outgoingProtocol": "openai.chat",
+      "codec": "openai-openai",
+      "inputSchema": "config/schemas/openai-chat.request.schema.json",
+      "canonicalRequestSchema": "config/schemas/openai-chat.request.schema.json",
+      "canonicalResponseSchema": "config/schemas/openai-chat.response.schema.json",
+      "clientResponseSchema": "config/schemas/openai-chat.response.schema.json"
+    },
+    "responses-chat": {
+      "incomingProtocol": "openai.responses",
+      "outgoingProtocol": "openai.chat",
+      "codec": "responses-openai",
+      "inputSchema": "config/schemas/openai-responses.request.schema.json",
+      "canonicalRequestSchema": "config/schemas/openai-chat.request.schema.json",
+      "canonicalResponseSchema": "config/schemas/openai-chat.response.schema.json",
+      "clientResponseSchema": "config/schemas/openai-responses.response.schema.json",
+      "trace": true
+    }
+  },
+  "endpointBindings": {
+    "/v1/messages": "anthropic-messages",
+    "/v1/chat/completions": "openai-chat",
+    "/v1/responses": "responses-chat"
+  }
+}

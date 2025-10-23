@@ -9,7 +9,7 @@
 export type AnthropicEvent = { event: string; data: Record<string, unknown> };
 
 export class AnthropicSSESimulator {
-  constructor(private jsonChunkBytes: number = Math.max(128, Math.min(4096, Number(process.env.RCC_SSE_JSON_CHUNK || 1024)))) {}
+  constructor(private jsonChunkBytes: number = Math.max(128, Math.min(4096, Number(process.env.ROUTECODEX_SSE_JSON_CHUNK || 1024)))) {}
 
   /**
    * Build SSE events sequence from a complete Anthropic message object.

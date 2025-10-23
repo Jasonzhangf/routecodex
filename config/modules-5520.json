@@ -1,0 +1,54 @@
+{
+  "modules": {
+    "httpserver": {
+      "enabled": true,
+      "config": {
+        "moduleType": "http-server",
+        "host": "localhost",
+        "port": 5520,
+        "cors": { "origin": "*", "credentials": true },
+        "timeout": 300000,
+        "bodyLimit": "10mb",
+        "enableMetrics": true,
+        "enableHealthChecks": true
+      }
+    },
+    "protocolhandler": {
+      "enabled": true,
+      "config": {
+        "moduleType": "protocol-handler",
+        "enableStreaming": true,
+        "enablePipeline": true
+      }
+    },
+    "configmanager": {
+      "enabled": true,
+      "config": {
+        "moduleType": "config-manager",
+        "configPath": "./routecodex.json",
+        "watchMode": true
+      }
+    },
+    "providermanager": {
+      "enabled": true,
+      "config": {
+        "moduleType": "provider-manager",
+        "healthCheckInterval": 30000,
+        "maxRetries": 3
+      }
+    },
+    "virtualrouter": {
+      "enabled": true,
+      "config": {
+        "moduleType": "virtual-router",
+        "routeTargets": {},
+        "pipelineConfigs": {},
+        "authMappings": {},
+        "inputProtocol": "responses",
+        "outputProtocol": "openai",
+        "timeout": 300000
+      }
+    }
+  }
+}
+

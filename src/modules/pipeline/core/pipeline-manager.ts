@@ -26,6 +26,8 @@ import { ModuleEnhancementFactory } from '../../enhancement/module-enhancement-f
 import { Key429Tracker, /* type Key429ErrorRecord */ } from '../../../utils/key-429-tracker.js';
 import { PipelineHealthManager } from '../../../utils/pipeline-health-manager.js';
 
+const APP_VERSION = String(process.env.ROUTECODEX_VERSION || 'dev');
+
 /**
  * Pipeline Manager
  */
@@ -63,7 +65,7 @@ export class PipelineManager implements RCCBaseModule {
   ) {
     this.id = 'pipeline-manager';
     this.type = 'manager';
-    this.version = '1.0.0';
+    this.version = APP_VERSION;
     this.config = config;
     this.logger = new PipelineDebugLogger(debugCenter);
     this.registry = new PipelineModuleRegistryImpl();
@@ -134,8 +136,16 @@ export class PipelineManager implements RCCBaseModule {
       this.logger.logPipeline('manager', 'pipeline-id-not-found', {
         pipelineId: directId,
         availableCount: keys.length,
-        sample: keys.slice(0, 10)
+        sample: keys.slice(0, 10),
+        version: APP_VERSION
       });
+      try {
+        console.error('[PipelineManager] pipeline-id-not-found', {
+          requested: directId,
+          known: keys,
+          version: APP_VERSION
+        });
+      } catch { /* non-blocking logging */ }
       throw new Error(`No pipeline found for id ${directId}`);
     }
 
@@ -811,8 +821,17 @@ export class PipelineManager implements RCCBaseModule {
     this.logger.logPipeline('manager', 'all-pipelines-created', {
       count: this.pipelines.size,
       created,
-      failed
+      failed,
+      version: APP_VERSION
     });
+
+    try {
+      console.log('[PipelineManager] pipelines-initialized', {
+        total: this.pipelines.size,
+        ids: Array.from(this.pipelines.keys()),
+        version: APP_VERSION
+      });
+    } catch { /* ignore console errors */ }
   }
 
   /**
@@ -823,10 +842,13 @@ export class PipelineManager implements RCCBaseModule {
     // Canonical LLMSwitch names
     this.registry.registerModule('llmswitch-openai-openai', this.createOpenAINormalizerModule);
     this.registry.registerModule('llmswitch-anthropic-openai', this.createAnthropicOpenAIConverterModule);
+    this.registry.registerModule('llmswitch-response-chat', this.createResponsesChatLLMSwitchModule);
+    this.registry.registerModule('llmswitch-conversion-router', this.createConversionRouterModule);
     this.registry.registerModule('llmswitch-unified', this.createUnifiedLLMSwitchModule);
     // Aliases for backward compatibility (merged-config may still emit these)
     this.registry.registerModule('openai-normalizer', this.createOpenAINormalizerModule);
     this.registry.registerModule('anthropic-openai-converter', this.createAnthropicOpenAIConverterModule);
+    this.registry.registerModule('responses-chat-switch', this.createResponsesChatLLMSwitchModule);
     this.registry.registerModule('streaming-control', this.createStreamingControlModule);
     this.registry.registerModule('field-mapping', this.createFieldMappingModule);
     this.registry.registerModule('qwen-compatibility', this.createQwenCompatibilityModule);
@@ -1055,6 +1077,16 @@ export class PipelineManager implements RCCBaseModule {
   private createAnthropicOpenAIConverterModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { AnthropicOpenAIConverter } = await import('../modules/llmswitch/anthropic-openai-converter.js');
     return new AnthropicOpenAIConverter(config, dependencies);
+  };
+
+  private createResponsesChatLLMSwitchModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { ResponsesToChatLLMSwitch } = await import('../modules/llmswitch/llmswitch-response-chat.js');
+    return new ResponsesToChatLLMSwitch(config, dependencies);
+  };
+
+  private createConversionRouterModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { ConversionRouterLLMSwitch } = await import('../modules/llmswitch/llmswitch-conversion-router.js');
+    return new ConversionRouterLLMSwitch(config, dependencies);
   };
 
   private createUnifiedLLMSwitchModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {

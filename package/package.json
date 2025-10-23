@@ -1,0 +1,81 @@
+{
+  "name": "@qoder-ai/qodercli",
+  "version": "0.1.1",
+  "description": "qodercli - npm installer",
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "qodercli": "./bin/qodercli"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "keywords": [
+    "qoder",
+    "ai",
+    "cli"
+  ],
+  "author": "Qoder AI",
+  "license": "SEE LICENSE IN README.md",
+  "homepage": "https://qoder.com",
+  "files": [
+    "scripts/",
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=14"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.10",
+    "tar": "^4.4.19"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "preferGlobal": true,
+  "binaries": {
+    "version": "0.1.1",
+    "files": [
+      {
+        "os": "linux",
+        "arch": "amd64",
+        "url": "https://download.qoder.com/qodercli/releases/0.1.1/qodercli_0.1.1_linux_amd64.tar.gz",
+        "sha256": "9a476f87a856e7a9530c2b91484f929c412905bacb34d61631fab535898af1d7"
+      },
+      {
+        "os": "linux",
+        "arch": "arm64",
+        "url": "https://download.qoder.com/qodercli/releases/0.1.1/qodercli_0.1.1_linux_arm64.tar.gz",
+        "sha256": "79067bd5fdee0234b46c096c95a884dad53961f58d32e913d11c42b314ec1fe4"
+      },
+      {
+        "os": "darwin",
+        "arch": "amd64",
+        "url": "https://download.qoder.com/qodercli/releases/0.1.1/qodercli_0.1.1_darwin_amd64.zip",
+        "sha256": "f8ca8a28a204dd57c345568c5378d19633c1c9ae1a3df981e06dd91551b0d683"
+      },
+      {
+        "os": "darwin",
+        "arch": "arm64",
+        "url": "https://download.qoder.com/qodercli/releases/0.1.1/qodercli_0.1.1_darwin_arm64.zip",
+        "sha256": "22449dde853ec8d5c2d5a926b9176b9594af99d8b49c28fb3bfbbbadeba74f7f"
+      },
+      {
+        "os": "windows",
+        "arch": "amd64",
+        "url": "https://download.qoder.com/qodercli/releases/0.1.1/qodercli_0.1.1_windows_amd64.zip",
+        "sha256": "1042b02e5e2542b308edd3c0bec312b7fd4efa28805b9766de7fa2e717fdbfd4"
+      }
+    ]
+  }
+}

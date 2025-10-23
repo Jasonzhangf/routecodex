@@ -1,12 +1,18 @@
 # Compatibility 模块
 
-Compatibility 模块提供协议格式转换功能，将不同供应商的API格式进行相互转换，支持工具调用、字段映射和响应格式适配。
+Compatibility 模块提供协议格式转换功能，将不同供应商的API格式进行相互转换，支持工具调用、字段映射和响应格式适配。作为流水线架构的第 3 层，它专注于处理供应商特定的格式差异。
 
-## 模块概述
+## 🎯 模块概述
 
-Compatibility 模块是流水线架构的第 2 层，负责处理请求和响应的格式转换。它基于 JSON 配置文件驱动，支持灵活的转换规则定义，确保不同供应商之间的协议兼容性。
+Compatibility 模块是流水线架构的第 3 层，负责处理请求和响应的格式转换。它专注于处理供应商特定的格式差异，确保不同供应商之间的协议兼容性。
 
-## 支持的兼容性模块
+### 📋 核心职责
+- **格式转换**: 供应商特定的请求/响应格式转换
+- **工具适配**: 工具调用格式的标准化处理
+- **字段映射**: 字段名称和结构的映射转换
+- **参数适配**: 供应商特定参数的标准化
+
+## 🔄 支持的兼容性模块
 
 ### 🔧 字段映射兼容性
 - **实现文件**: `field-mapping.ts`
@@ -18,7 +24,7 @@ Compatibility 模块是流水线架构的第 2 层，负责处理请求和响应
   - 错误处理和回退机制
   - 性能监控和统计
 
-### 🎨 LM Studio 兼容性
+### 🏠 LM Studio 兼容性
 - **实现文件**: `lmstudio-compatibility.ts`
 - **功能**: LM Studio 特定的格式转换
 - **特性**:
@@ -28,7 +34,7 @@ Compatibility 模块是流水线架构的第 2 层，负责处理请求和响应
   - 模型名称映射
   - 参数适配
 
-### 🔗 Qwen 兼容性
+### 🔍 Qwen 兼容性
 - **实现文件**: `qwen-compatibility.ts`
 - **功能**: Qwen 特定的格式转换
 - **特性**:
@@ -37,8 +43,19 @@ Compatibility 模块是流水线架构的第 2 层，负责处理请求和响应
   - 工具调用格式转换
   - 响应格式标准化
   - 错误码映射
+  - 思考内容处理
 
-### 🌐 iFlow 兼容性
+### 🟢 GLM 兼容性
+- **实现文件**: `glm-compatibility.ts`
+- **功能**: GLM 特定的格式转换
+- **特性**:
+  - OpenAI 格式 ↔ GLM 格式转换
+  - 思考内容（thinking）处理
+  - 工具调用兼容性优化
+  - 模型参数适配
+  - 1210 错误兼容性
+
+### 🌊 iFlow 兼容性
 - **实现文件**: `iflow-compatibility.ts`
 - **功能**: iFlow 特定的格式转换
 - **特性**:
@@ -46,8 +63,17 @@ Compatibility 模块是流水线架构的第 2 层，负责处理请求和响应
   - 温度参数映射
   - 最大 token 数映射
   - 响应结构适配
+  - 用户代理头注入
 
-## 核心功能
+### 🔄 Passthrough 兼容性
+- **实现文件**: `passthrough-compatibility.ts`
+- **功能**: 直接透传，无格式转换
+- **特性**:
+  - 保持原始请求/响应格式不变
+  - 最小的性能开销
+  - 适用于格式完全兼容的场景
+
+## 🌟 核心功能
 
 ### 🔄 转换类型支持
 ```typescript
@@ -62,6 +88,8 @@ type TransformType =
   | 'function'                  // 自定义函数
   | 'lmstudio-tools'            // LM Studio工具调用转换
   | 'lmstudio-response'         // LM Studio响应格式转换
+  | 'glm-thinking'              // GLM 思考内容处理
+  | 'iflow-headers'             // iFlow 请求头注入
 ```
 
 ### 📋 配置驱动的转换
@@ -112,22 +140,20 @@ console.log({
 });
 ```
 
-## 文件结构
+## 📁 文件结构
 
 ```
 src/modules/pipeline/modules/compatibility/
 ├── field-mapping.ts              # 通用字段映射实现
 ├── lmstudio-compatibility.ts     # LM Studio 兼容性实现
- 
-## 更新（0.41.1）
-
-- 与路由层配合，Anthropic 端点的流式输出已对齐规范：当上游为 OpenAI 形态时，路由层会合成标准 SSE 事件顺序（包含 tool_use 输入），避免客户端在累积阶段出现空参数工具调用。
+├── glm-compatibility.ts          # GLM 兼容性实现
 ├── qwen-compatibility.ts         # Qwen 兼容性实现
 ├── iflow-compatibility.ts        # iFlow 兼容性实现
+├── passthrough-compatibility.ts   # Passthrough 兼容性实现
 └── README.md                     # 本文档
 ```
 
-## 使用示例
+## 🚀 使用示例
 
 ### 基本字段映射
 ```typescript
@@ -189,6 +215,35 @@ const transformed = await compatibility.processIncoming({
 // 结果: 转换为 LM Studio 兼容的工具格式
 ```
 
+### GLM 思考内容处理
+```typescript
+import { GLMCompatibility } from './glm-compatibility.js';
+
+const compatibility = new GLMCompatibility({
+  type: 'glm-compatibility',
+  config: {
+    forceDisableThinking: false,
+    useMappingConfig: true
+  }
+}, dependencies);
+
+await compatibility.initialize();
+
+// 处理包含思考内容的请求
+const transformed = await compatibility.processIncoming({
+  model: 'glm-4',
+  messages: [
+    { role: 'system', content: 'You are a helpful assistant.' },
+    {
+      role: 'assistant',
+      content: '',
+      reasoning_content: 'Let me think about this step by step...'
+    },
+    { role: 'user', content: 'Calculate 15 * 25' }
+  ]
+});
+```
+
 ### Qwen 响应格式转换
 ```typescript
 import { QwenCompatibility } from './qwen-compatibility.js';
@@ -206,7 +261,7 @@ const finalResponse = await compatibility.processOutgoing(providerResponse);
 // 结果: 转换回 OpenAI 响应格式
 ```
 
-## 转换规则详解
+## 🔄 转换规则详解
 
 ### 1. 直接映射 (Direct Mapping)
 ```typescript
@@ -263,22 +318,31 @@ const finalResponse = await compatibility.processOutgoing(providerResponse);
 }
 ```
 
-### 5. LM Studio 工具转换
+### 5. GLM 思考内容转换
 ```typescript
 {
-  id: 'lmstudio-tools',
-  transform: 'lmstudio-tools',
-  sourcePath: 'tools',
-  targetPath: 'tools',
-  condition: {
-    field: 'tools',
-    operator: 'exists',
-    value: null
+  id: 'glm-thinking-extraction',
+  transform: 'glm-thinking',
+  sourcePath: 'messages',
+  targetPath: 'messages',
+  preserveThinking: true
+}
+```
+
+### 6. iFlow 请求头注入
+```typescript
+{
+  id: 'iflow-headers',
+  transform: 'iflow-headers',
+  headers: {
+    'User-Agent': 'iflow-cli/2.0',
+    'Accept': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest'
   }
 }
 ```
 
-## 配置选项
+## ⚙️ 配置选项
 
 ### 字段映射配置
 ```typescript
@@ -309,7 +373,85 @@ interface QwenCompatibilityConfig {
 }
 ```
 
-## 错误处理
+### GLM 兼容性配置
+```typescript
+interface GLMCompatibilityConfig {
+  forceDisableThinking?: boolean;   // 强制禁用思考功能
+  useMappingConfig?: boolean;       // 使用映射配置
+}
+```
+
+### iFlow 兼容性配置
+```typescript
+interface iFlowCompatibilityConfig {
+  injectHeaders?: boolean;          // 注入请求头
+  customHeaders?: Record<string, string>; // 自定义请求头
+  temperatureMapping?: Record<number, number>; // 温度映射
+}
+```
+
+## 🔄 工具调用转换
+
+### OpenAI → LM Studio 工具格式
+```typescript
+// OpenAI 格式
+{
+  "type": "function",
+  "function": {
+    "name": "calculate",
+    "description": "Perform mathematical calculations",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "expression": { "type": "string" }
+      }
+    }
+  }
+}
+
+// 转换为 LM Studio 格式
+{
+  "type": "function",
+  "name": "calculate",
+  "description": "Perform mathematical calculations",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "expression": { "type": "string" }
+    }
+  }
+}
+```
+
+### 工具调用响应转换
+```typescript
+// Chat 格式响应
+{
+  "choices": [{
+    "message": {
+      "tool_calls": [{
+        "id": "call_123",
+        "type": "function",
+        "function": {
+          "name": "calculate",
+          "arguments": "{\"expression\":\"15*25\"}"
+        }
+      }]
+    }
+  }]
+}
+
+// 转换为标准化格式
+const standardizedResponse = {
+  tool_calls: [{
+    id: "call_123",
+    name: "calculate",
+    arguments: "{\"expression\":\"15*25\"}"
+  }]
+};
+```
+
+## 🛡️ 错误处理
 
 ### 转换错误类型
 ```typescript
@@ -340,7 +482,7 @@ if (config.continueOnError) {
 }
 ```
 
-## 性能优化
+## 📊 性能优化
 
 ### 缓存机制
 ```typescript
@@ -356,13 +498,13 @@ await this.transformationEngine.initialize({
 ```typescript
 // 批量转换支持
 const results = await Promise.all(
-  requests.map(request => 
+  requests.map(request =>
     compatibility.processIncoming(request)
   )
 );
 ```
 
-## 调试支持
+## 🔍 调试支持
 
 ### 转换日志
 ```typescript
@@ -382,7 +524,24 @@ console.log({
 });
 ```
 
-## 扩展性
+## 🌐 API 协议支持
+
+### OpenAI 协议
+- **请求格式**: `/v1/chat/completions`
+- **响应格式**: 标准化 OpenAI 响应
+- **工具调用**: 支持所有 OpenAI 工具调用格式
+
+### OpenAI 兼容协议
+- **Provider**: LM Studio, Qwen, GLM, iFlow
+- **请求转换**: 通过 Compatibility 层进行格式适配
+- **响应转换**: 转换回标准 OpenAI 格式
+
+### Responses 协议
+- **请求路径**: `/v1/responses` → LLM Switch → Chat → Compatibility
+- **响应路径**: Chat → Compatibility → Responses
+- **格式支持**: 通过多层转换实现完整兼容
+
+## 🔧 扩展性
 
 ### 添加新的转换类型
 ```typescript
@@ -398,37 +557,94 @@ this.transformationEngine.registerTransformer('custom-transform', {
 ### 添加新的兼容性模块
 ```typescript
 class NewCompatibility implements CompatibilityModule {
+  readonly type = 'new-compatibility';
+  readonly protocol = 'new-protocol';
+
   async processIncoming(request: any): Promise<any> {
     // 实现请求转换逻辑
+    const transformed = this.transformRequest(request);
+    return {
+      ...transformed,
+      _metadata: {
+        compatibilityType: this.type,
+        timestamp: Date.now(),
+        originalProtocol: this.detectProtocol(request),
+        targetProtocol: 'openai'
+      }
+    };
   }
 
   async processOutgoing(response: any): Promise<any> {
     // 实现响应转换逻辑
+    return this.transformResponse(response);
+  }
+
+  private transformRequest(request: any): any {
+    // 自定义请求转换逻辑
+  }
+
+  private transformResponse(response: any): any {
+    // 自定义响应转换逻辑
   }
 }
 ```
 
-## 已知限制
+## 📈 版本信息
 
-### ❌ 当前限制
+- **当前版本**: 2.0.0
+- **新增特性**: GLM 兼容性增强、Responses 支持
+- **兼容性**: RouteCodex Pipeline >= 2.0.0
+- **TypeScript**: >= 5.0.0
+- **Node.js**: >= 18.0.0
+
+## 🔗 依赖关系
+
+- **rcc-debugcenter**: 调试中心集成
+- **PipelineDebugLogger**: 模块日志记录
+- **ErrorHandlingCenter**: 错误处理集成
+- **BaseModule**: 基础模块接口
+
+## 🚨 已知限制
+
+### 当前限制
 1. **嵌套转换性能** - 深层嵌套的 JSON 路径转换可能影响性能
 2. **循环引用** - 不支持循环引用的数据结构转换
 3. **大文件处理** - 大型 JSON 数据的内存处理限制
 4. **实时转换** - 不支持流式数据的实时转换
 
-### 🔄 计划改进
+### 计划改进
 1. **流式转换** - 支持大型 JSON 文件的流式处理
 2. **并行转换** - 多个转换规则的并行执行
 3. **智能缓存** - 基于数据特征的智能缓存策略
 4. **增量转换** - 支持部分数据的增量转换
 
-## 版本信息
+## 🔄 更新日志
 
-- **当前版本**: 1.0.0
-- **兼容性**: RouteCodex Pipeline >= 1.0.0
-- **TypeScript**: >= 5.0.0
-- **Node.js**: >= 18.0.0
+### v2.0.0 (2025-10-17)
+- ✨ 新增 GLM 兼容性完整支持
+- 🌐 完善 Responses API 转换路径文档
+- 🔄 增强的工具调用转换支持
+- 📊 详细的性能监控和调试功能
+- 🛡️ 改进的错误处理和恢复机制
 
-## 最后更新
+### v1.5.0 (2025-01-22)
+- 🔧 完善字段映射和转换规则
+- 📊 性能监控功能增强
+- 🛡️ 错误处理机制优化
 
-2025-01-22 - 完善转换规则文档和性能优化说明
+### v1.0.0 (2025-01-22)
+- 🎯 初始版本发布
+- 🔄 基础的字段映射功能
+- 📊 配置驱动的转换引擎
+
+## 📞 技术支持
+
+如有问题或建议，请：
+1. 检查转换规则配置是否正确
+2. 验证输入数据格式是否符合预期
+3. 查看转换日志了解详细信息
+4. 检查目标 Provider 的 API 文档
+
+---
+
+**最后更新**: 2025-10-17 - 全面更新 Compatibility 模块文档，新增 GLM 和 Responses 支持

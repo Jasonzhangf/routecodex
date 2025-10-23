@@ -1,0 +1,29 @@
+{
+  "model": "gpt-5-codex",
+  "stream": false,
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "input_text", "text": "调用一个函数：echo 'hello' 并把输出返回。" }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "shell",
+      "description": "Runs a shell command and returns its output.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string" }
+        },
+        "required": ["command"]
+      }
+    }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": false
+}
+
