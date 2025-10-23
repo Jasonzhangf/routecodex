@@ -100,7 +100,7 @@
     "package:validate": "npx package-json-validator"
   },
   "dependencies": {
-    "@routecodex/llmswitch-core": "0.1.0",
+    "@routecodex/llmswitch-core": "^0.1.1",
     "ajv": "^8.17.1",
     "@anthropic-ai/sdk": "^0.65.0",
     "@lmstudio/sdk": "^1.5.0",
