@@ -18,8 +18,7 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
   private isInitialized = false;
   private logger: PipelineDebugLogger;
   private requestContext: Map<string, ResponsesRequestContext> = new Map();
-  private chatReqValidator: ((v: unknown) => boolean) | null = null;
-  private responsesValidator: ((v: unknown) => boolean) | null = null;
+  // Thin adapter: no runtime schema validation here (conversion path validates by orchestrator when needed)
 
   constructor(config: ModuleConfig, dependencies: ModuleDependencies) {
     this.config = config;
@@ -33,51 +32,7 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
     }
     this.isInitialized = true;
 
-    try {
-      const AjvMod: any = await import('ajv');
-      const ajv = new AjvMod.default({ allErrors: true, strict: false });
-      const chatSchema = {
-        type: 'object',
-        required: ['model', 'messages'],
-        additionalProperties: true,
-        properties: {
-          model: { type: 'string', minLength: 1 },
-          stream: { type: 'boolean' },
-          messages: {
-            type: 'array',
-            minItems: 1,
-            items: {
-              type: 'object',
-              required: ['role'],
-              additionalProperties: true,
-              properties: {
-                role: { enum: ['system', 'user', 'assistant', 'tool'] },
-                content: { anyOf: [{ type: 'string' }, { type: 'null' }, { type: 'object' }, { type: 'array' }] },
-                tool_calls: { type: 'array' }
-              }
-            }
-          },
-          tools: { type: 'array' }
-        }
-      } as const;
-      const responsesSchema = {
-        type: 'object',
-        required: ['object', 'model', 'output'],
-        additionalProperties: true,
-        properties: {
-          object: { const: 'response' },
-          model: { type: 'string' },
-          status: { enum: ['in_progress', 'completed'] },
-          output_text: { type: 'string' },
-          output: { type: 'array' },
-          required_action: { type: 'object' }
-        }
-      } as const;
-      this.chatReqValidator = ajv.compile(chatSchema);
-      this.responsesValidator = ajv.compile(responsesSchema);
-    } catch {
-      /* optional runtime validation */
-    }
+    // no-op: validation handled by orchestrator conversion schemas when configured
   }
 
   async processIncoming(requestParam: SharedPipelineRequest | any): Promise<SharedPipelineRequest> {
@@ -98,13 +53,7 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
       this.requestContext.set(context.requestId, context);
     }
 
-    try {
-      if (this.chatReqValidator && !this.chatReqValidator(chatRequest)) {
-        throw new Error('Responses→Chat produced invalid Chat request');
-      }
-    } catch {
-      /* soft validation */
-    }
+    // No runtime validation here; orchestrator can validate canonical schemas if configured
 
     const stamped = {
       ...chatRequest,
@@ -160,13 +109,7 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
     let converted = payload;
     if (context && context.isResponsesPayload) {
       converted = buildResponsesPayloadFromChat(payload, context);
-      try {
-        if (this.responsesValidator && !this.responsesValidator(converted)) {
-          throw new Error('Chat→Responses produced invalid Responses payload');
-        }
-      } catch {
-        /* soft validation */
-      }
+      // No runtime validation here
     }
 
     this.logger.logTransformation(this.id, 'chat-to-responses', payload, converted);
@@ -188,15 +131,7 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
   }
 
   async transformResponse(response: unknown): Promise<unknown> {
-    const converted = buildResponsesPayloadFromChat(response, undefined);
-    try {
-      if (this.responsesValidator && !this.responsesValidator(converted)) {
-        throw new Error('Chat→Responses produced invalid Responses payload');
-      }
-    } catch {
-      /* soft validation */
-    }
-    return converted;
+    return buildResponsesPayloadFromChat(response, undefined);
   }
 
   async cleanup(): Promise<void> {

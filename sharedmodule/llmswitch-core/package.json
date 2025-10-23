@@ -1,0 +1,22 @@
+{
+  "name": "@routecodex/llmswitch-core",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./conversion": {
+      "import": "./dist/conversion/index.js",
+      "types": "./dist/conversion/index.d.ts"
+    },
+    "./conversion/switch-orchestrator": {
+      "import": "./dist/conversion/switch-orchestrator.js",
+      "types": "./dist/conversion/switch-orchestrator.d.ts"
+    }
+  }
+}
