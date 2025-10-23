@@ -98,7 +98,9 @@ export class RequestHandler extends BaseModule {
 
     this.providerManager = providerManager;
     this.config = config;
-    this.debugEventBus = DebugEventBus.getInstance();
+    try {
+      this.debugEventBus = (String(process.env.ROUTECODEX_ENABLE_DEBUGCENTER || '0') === '1') ? DebugEventBus.getInstance() : (null as any);
+    } catch { this.debugEventBus = null as any; }
     this.errorHandling = new ErrorHandlingCenter();
     this.errorUtils = ErrorHandlingUtils.createModuleErrorHandler('request-handler');
 
@@ -115,6 +117,16 @@ export class RequestHandler extends BaseModule {
 
     // Initialize debug enhancements
     this.initializeDebugEnhancements();
+  }
+
+  /** Safe publish wrapper to avoid null DebugEventBus */
+  private publishEvent(evt: unknown): void {
+    try {
+      const bus: any = this.debugEventBus as any;
+      if (bus && typeof bus.publish === 'function') {
+        bus.publish(evt);
+      }
+    } catch { /* no-op */ }
   }
 
   /**
@@ -183,7 +195,7 @@ export class RequestHandler extends BaseModule {
         'Handle AI provider processing errors'
       );
 
-      this.debugEventBus.publish({
+      this.publishEvent({
         sessionId: `session_${Date.now()}`,
         moduleId: 'request-handler',
         operationId: 'request_handler_initialized',
@@ -212,7 +224,7 @@ export class RequestHandler extends BaseModule {
     const startTime = Date.now();
 
     try {
-      this.debugEventBus.publish({
+      this.publishEvent({
         sessionId: `session_${Date.now()}`,
         moduleId: 'request-handler',
         operationId: 'chat_completion_request_start',
@@ -291,7 +303,7 @@ export class RequestHandler extends BaseModule {
         // omit providerId/modelId/usage enrichment to keep types tight under strict mode
       };
 
-      this.debugEventBus.publish({
+      this.publishEvent({
         sessionId: `session_${Date.now()}`,
         moduleId: 'request-handler',
         operationId: 'chat_completion_request_end',

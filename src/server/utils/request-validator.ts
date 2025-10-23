@@ -30,7 +30,8 @@ export interface ValidationOptions {
 const DEFAULT_OPTIONS: ValidationOptions = {
   strictMode: true,
   allowUnknownFields: false,
-  maxMessageCount: 100,
+  // Do not enforce a hard cap in the proxy; upstream provider should decide.
+  maxMessageCount: undefined,
   maxTokens: 32768,
 };
 
@@ -125,7 +126,7 @@ export class RequestValidator {
       errors.push('messages array cannot be empty');
     }
 
-    if (messages.length > this.options.maxMessageCount!) {
+    if (typeof this.options.maxMessageCount === 'number' && messages.length > this.options.maxMessageCount) {
       errors.push(`messages array cannot exceed ${this.options.maxMessageCount} items`);
     }
 
@@ -451,7 +452,7 @@ export class RequestValidator {
         errors.push('messages array cannot be empty');
       }
 
-      if (req.messages.length > this.options.maxMessageCount!) {
+      if (typeof this.options.maxMessageCount === 'number' && req.messages.length > this.options.maxMessageCount) {
         errors.push(`messages array cannot exceed ${this.options.maxMessageCount} items`);
       }
 

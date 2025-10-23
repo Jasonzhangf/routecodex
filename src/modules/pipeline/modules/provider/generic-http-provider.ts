@@ -591,11 +591,15 @@ export class GenericHTTPProvider implements ProviderModule {
    */
   private initializeDebugEnhancements(): void {
     try {
-      this.debugEventBus = DebugEventBus.getInstance();
-      this.isDebugEnhanced = true;
-      console.log('Generic HTTP Provider debug enhancements initialized');
-    } catch (error) {
-      console.warn('Failed to initialize Generic HTTP Provider debug enhancements:', error);
+      if (String(process.env.ROUTECODEX_ENABLE_DEBUGCENTER || '0') === '1') {
+        this.debugEventBus = DebugEventBus.getInstance();
+        this.isDebugEnhanced = true;
+      } else {
+        this.debugEventBus = null;
+        this.isDebugEnhanced = false;
+      }
+    } catch {
+      this.debugEventBus = null;
       this.isDebugEnhanced = false;
     }
   }
@@ -763,4 +767,5 @@ export class GenericHTTPProvider implements ProviderModule {
     }
     return Array.isArray((request as { messages?: unknown[] })?.messages);
   }
+  
 }

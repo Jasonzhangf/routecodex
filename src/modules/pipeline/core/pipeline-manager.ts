@@ -844,7 +844,7 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('llmswitch-anthropic-openai', this.createAnthropicOpenAIConverterModule);
     this.registry.registerModule('llmswitch-response-chat', this.createResponsesChatLLMSwitchModule);
     this.registry.registerModule('llmswitch-conversion-router', this.createConversionRouterModule);
-    this.registry.registerModule('llmswitch-unified', this.createUnifiedLLMSwitchModule);
+    // unified switch removed; use llmswitch-conversion-router instead
     // Aliases for backward compatibility (merged-config may still emit these)
     this.registry.registerModule('openai-normalizer', this.createOpenAINormalizerModule);
     this.registry.registerModule('anthropic-openai-converter', this.createAnthropicOpenAIConverterModule);
@@ -880,6 +880,11 @@ export class PipelineManager implements RCCBaseModule {
    * Initialize debug enhancements
    */
   private initializeDebugEnhancements(): void {
+    // Allow disabling DebugCenter enhancements via env (default off)
+    if (String(process.env.ROUTECODEX_ENABLE_DEBUGCENTER || '0') !== '1') {
+      this.isEnhanced = false;
+      return;
+    }
     try {
       this.debugEventBus = DebugEventBus.getInstance();
 
@@ -1089,10 +1094,7 @@ export class PipelineManager implements RCCBaseModule {
     return new ConversionRouterLLMSwitch(config, dependencies);
   };
 
-  private createUnifiedLLMSwitchModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { UnifiedLLMSwitch } = await import('../modules/llmswitch/llmswitch-unified.js');
-    return new UnifiedLLMSwitch(config, dependencies);
-  };
+  // unified switch factory removed
 
   private createStreamingControlModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { StreamingControlWorkflow } = await import('../modules/workflow/streaming-control.js');
