@@ -12,6 +12,7 @@ import { StreamingManager } from '../utils/streaming-manager.js';
 import { ResponsesConfigUtil } from '../config/responses-config.js';
 import { ResponsesConverter } from '../conversion/responses-converter.js';
 import { ResponsesMapper } from '../conversion/responses-mapper.js';
+import { buildResponsesPayloadFromChat } from '@routecodex/llmswitch-core/conversion';
 // Protocol conversion is handled downstream by llmswitch (Responses→Chat) for providers.
 import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
 
@@ -687,22 +688,27 @@ export class ResponsesHandler extends BaseHandler {
       }
     } catch { /* ignore */ }
     try {
-      // Unified conversion: Chat JSON → Responses JSON via ResponsesMapper
-      const converted = await ResponsesMapper.chatToResponsesFromMapping(payload);
-      // Strict validation (no fallback): arguments must match declared tools schema
-      const toolCallsPath = (converted as any)?.required_action?.submit_tool_outputs?.tool_calls;
-      const reqTools = reqMeta?.tools as unknown;
-      if (Array.isArray(toolCallsPath)) {
-        const error400 = (m: string) => { const e: any = new Error(m); e.status = 400; e.code = 'validation_error'; return e; };
-        const ensureObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-        // Optionally validate against provided tools schema when available (via core)
+      // Core codec: Chat JSON → Responses JSON (strict,无兜底)
+      const converted0 = buildResponsesPayloadFromChat(payload, undefined) as Record<string, unknown>;
+
+      // Synthesize required_action for non-stream JSON when存在 function_call 输出
+      const outputs = Array.isArray((converted0 as any)?.output) ? ((converted0 as any).output as any[]) : [];
+      const funcCalls = outputs.filter(it => it && (it.type === 'function_call' || it.type === 'tool_call'));
+      let converted = converted0;
+      if (funcCalls.length > 0) {
+        const toStringJson = (v: unknown): string => {
+          if (typeof v === 'string') return v;
+          try { return JSON.stringify(v ?? {}); } catch { return '{}'; }
+        };
+        // Schema-aware validation (no fallback)
+        const reqTools = reqMeta?.tools as unknown;
         let toolsNorm: Array<Record<string, unknown>> = [];
         if (Array.isArray(reqTools)) {
           try {
             const mod = await import('@routecodex/llmswitch-core/conversion');
             const fn = (mod as any).normalizeTools as ((t: any[]) => Array<Record<string, unknown>>);
             if (typeof fn === 'function') toolsNorm = fn(reqTools as any[]);
-          } catch { /* ignore tool schema load */ }
+          } catch { /* ignore */ }
         }
         const findSchema = (fnName?: string): Record<string, unknown> | undefined => {
           if (!fnName || !toolsNorm.length) return undefined;
@@ -712,6 +718,7 @@ export class ResponsesHandler extends BaseHandler {
           }
           return undefined;
         };
+        const ensureObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
         const getPropType = (schema: any, key: string): 'string'|'arrayString'|'object'|'any' => {
           try {
             const s = schema?.properties?.[key];
@@ -725,34 +732,41 @@ export class ResponsesHandler extends BaseHandler {
           } catch { /* ignore */ }
           return 'any';
         };
-        for (const tc of toolCallsPath) {
-          if (!tc || typeof tc !== 'object' || !ensureObject((tc as any).function)) continue;
-          const fn: any = (tc as any).function;
-          const fnName = typeof fn.name === 'string' ? fn.name : undefined;
-          if (typeof fn.arguments !== 'string') throw error400('Tool call arguments must be a JSON string');
-          let argsObj: any;
-          try { argsObj = JSON.parse(fn.arguments); } catch { throw error400('Tool call arguments must be valid JSON'); }
-          if (!ensureObject(argsObj)) throw error400('Tool call arguments must be a JSON object');
-          const schema = findSchema(fnName);
-          if (schema && ensureObject(schema?.properties)) {
-            // Enforce required keys when declared
-            const required: string[] = Array.isArray((schema as any).required) ? (schema as any).required as string[] : [];
-            for (const key of required) {
-              if (!(key in argsObj)) throw error400(`Missing required argument: ${key}`);
-            }
-            for (const key of Object.keys((schema as any).properties)) {
-              if (!(key in argsObj)) continue; // optional keys
-              const kind = getPropType(schema, key);
-              const val = argsObj[key];
-              if (kind === 'string' && typeof val !== 'string') throw error400(`Invalid type for ${key}: expected string`);
-              if (kind === 'object' && (!ensureObject(val))) throw error400(`Invalid type for ${key}: expected object`);
-              if (kind === 'arrayString') {
-                if (!Array.isArray(val) || !val.every((x: any) => typeof x === 'string')) throw error400(`Invalid type for ${key}: expected array<string>`);
+        const error400 = (m: string) => { const e: any = new Error(m); e.status = 400; e.code = 'validation_error'; return e; };
+
+        const calls = funcCalls.map((it: any) => {
+          const id = typeof it.id === 'string' ? it.id : (typeof it.call_id === 'string' ? it.call_id : `call_${Math.random().toString(36).slice(2,8)}`);
+          const nm = typeof it.name === 'string' ? it.name : (typeof it?.function?.name === 'string' ? it.function.name : 'tool');
+          const rawArgs = it.arguments ?? it?.function?.arguments ?? {};
+          const argsStr = toStringJson(rawArgs);
+          // Validate
+          if (toolsNorm.length > 0) {
+            const schema = findSchema(nm);
+            if (schema && ensureObject(schema?.properties)) {
+              let argsObj: any;
+              try { argsObj = JSON.parse(argsStr); } catch { throw error400('Tool call arguments must be valid JSON'); }
+              if (!ensureObject(argsObj)) throw error400('Tool call arguments must be a JSON object');
+              const required: string[] = Array.isArray((schema as any).required) ? (schema as any).required as string[] : [];
+              for (const key of required) {
+                if (!(key in argsObj)) throw error400(`Missing required argument: ${key}`);
+              }
+              for (const key of Object.keys((schema as any).properties)) {
+                if (!(key in argsObj)) continue;
+                const kind = getPropType(schema, key);
+                const val = argsObj[key];
+                if (kind === 'string' && typeof val !== 'string') throw error400(`Invalid type for ${key}: expected string`);
+                if (kind === 'object' && (!ensureObject(val))) throw error400(`Invalid type for ${key}: expected object`);
+                if (kind === 'arrayString') {
+                  if (!Array.isArray(val) || !val.every((x: any) => typeof x === 'string')) throw error400(`Invalid type for ${key}: expected array<string>`);
+                }
               }
             }
           }
-        }
+          return { id, type: 'function', function: { name: String(nm), arguments: String(argsStr) } };
+        });
+        converted = { ...(converted0 as any), required_action: { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: calls } } };
       }
+
       return await ResponsesMapper.enrichResponsePayload(converted as Record<string, unknown>, payload as Record<string, unknown>, reqMeta as Record<string, unknown>);
     } catch (e) {
       // 不允许 fallback：严格报错，便于定位转换问题
