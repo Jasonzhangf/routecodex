@@ -162,6 +162,11 @@ export class OpenAIProvider implements ProviderModule {
    * Initialize debug enhancements
    */
   private initializeDebugEnhancements(): void {
+    if (String(process.env.ROUTECODEX_ENABLE_DEBUGCENTER || '0') !== '1') {
+      this.debugEventBus = null;
+      this.isDebugEnhanced = false;
+      return;
+    }
     try {
       this.debugEventBus = DebugEventBus.getInstance();
       this.isDebugEnhanced = true;
@@ -368,6 +373,77 @@ export class OpenAIProvider implements ProviderModule {
         stream: (request as { stream?: boolean }).stream ?? false
       };
 
+      // Tool role content normalization is handled in llmswitch-openai-openai; provider must not transform messages.
+
+      // Safe compaction: merge consecutive assistant tool_calls blocks and coalesce consecutive tool messages
+      try {
+        const msgs = Array.isArray((chatRequest as any).messages) ? ((chatRequest as any).messages as any[]) : [];
+        const compacted: any[] = [];
+        let pendingToolCalls: any[] = [];
+        const flushToolCalls = () => {
+          if (pendingToolCalls.length) {
+            compacted.push({ role: 'assistant', tool_calls: pendingToolCalls });
+            pendingToolCalls = [];
+          }
+        };
+        for (const m of msgs) {
+          if (!m || typeof m !== 'object') { flushToolCalls(); compacted.push(m); continue; }
+          if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+            pendingToolCalls.push(...m.tool_calls);
+            continue;
+          }
+          if (m.role === 'tool') {
+            // flush any pending assistant tool_calls before tool messages
+            flushToolCalls();
+            const prev = compacted[compacted.length - 1];
+            if (prev && prev.role === 'tool' && typeof prev.tool_call_id === 'string' && prev.tool_call_id === m.tool_call_id) {
+              const a = typeof prev.content === 'string' ? prev.content : String(prev.content ?? '');
+              const b = typeof m.content === 'string' ? m.content : String(m.content ?? '');
+              prev.content = a && b ? (a + '\n' + b) : (a || b);
+              continue;
+            }
+            compacted.push(m);
+            continue;
+          }
+          // for normal text or other roles, flush pending and pass through
+          flushToolCalls();
+          compacted.push(m);
+        }
+        flushToolCalls();
+        (chatRequest as any).messages = compacted;
+      } catch { /* no-op on compaction errors */ }
+
+      // Canonicalize dotted tool names is disabled by default; enable only with RCC_CANONICALIZE_DOTTED_TOOL_NAMES=1
+      if (String(process.env.RCC_CANONICALIZE_DOTTED_TOOL_NAMES || '0') === '1') {
+        try {
+          const msgs = Array.isArray((chatRequest as any).messages) ? ((chatRequest as any).messages as any[]) : [];
+          const whitelist = new Set(['read_mcp_resource', 'list_mcp_resources', 'list_mcp_resource_templates']);
+          const canonOne = (tc: any) => {
+            if (!tc || !tc.function || typeof tc.function !== 'object') return tc;
+            const nm = typeof tc.function.name === 'string' ? tc.function.name : '';
+            const dot = nm.indexOf('.');
+            if (dot <= 0) return tc;
+            const prefix = nm.slice(0, dot).trim();
+            const base = nm.slice(dot + 1).trim();
+            if (!prefix || !whitelist.has(base)) return tc;
+            let argsStr = typeof tc.function.arguments === 'string' ? tc.function.arguments : (tc.function.arguments ? JSON.stringify(tc.function.arguments) : '{}');
+            let obj: any;
+            try { obj = JSON.parse(argsStr || '{}'); } catch { obj = {}; }
+            if (!obj || typeof obj !== 'object' || Array.isArray(obj)) obj = {};
+            if (obj.server == null || obj.server === '') obj.server = prefix;
+            tc.function.name = base;
+            tc.function.arguments = JSON.stringify(obj);
+            return tc;
+          };
+          for (const m of msgs) {
+            if (m && m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+              m.tool_calls = m.tool_calls.map(canonOne);
+            }
+          }
+          (chatRequest as any).messages = msgs;
+        } catch { /* ignore canonicalization errors */ }
+      }
+
       // Add tools if provided (non-GLM or already preflighted)
       {
         const tools = (request as { tools?: any[] }).tools;
@@ -468,6 +544,84 @@ export class OpenAIProvider implements ProviderModule {
           this.logger.logModule(this.id, 'compat-request-success', { endpoint, status: res.status });
           response = json ?? text;
         }
+      }
+
+      // Validate provider tool_calls against declared tool schemas (strict, no fallback)
+      try {
+        const extractSchemas = (): Record<string, any> => {
+          const map: Record<string, any> = {};
+          try {
+            const tools = (chatRequest as any)?.tools;
+            if (Array.isArray(tools)) {
+              for (const t of tools) {
+                const name = t?.function?.name;
+                const params = t?.function?.parameters;
+                if (typeof name === 'string' && params && typeof params === 'object' && !Array.isArray(params)) {
+                  map[name] = params;
+                }
+              }
+            }
+          } catch { /* ignore */ }
+          return map;
+        };
+        const ensureObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+        const getPropType = (schema: any, key: string): 'string'|'arrayString'|'object'|'any' => {
+          try {
+            const s = schema?.properties?.[key];
+            const t = s?.type;
+            if (t === 'string') return 'string';
+            if (t === 'object') return 'object';
+            if (t === 'array') {
+              const it = s?.items?.type;
+              if (it === 'string') return 'arrayString';
+            }
+          } catch { /* ignore */ }
+          return 'any';
+        };
+        const schemas = extractSchemas();
+        const choices = Array.isArray(response?.choices) ? (response.choices as any[]) : [];
+        for (const ch of choices) {
+          const msg = ch?.message;
+          const tcs = Array.isArray(msg?.tool_calls) ? (msg.tool_calls as any[]) : [];
+          for (const tc of tcs) {
+            const nm = tc?.function?.name;
+            const argsStr = typeof tc?.function?.arguments === 'string' ? tc.function.arguments : (tc?.function?.arguments ? JSON.stringify(tc.function.arguments) : '{}');
+            const schema = nm && schemas[nm] ? schemas[nm] : undefined;
+            if (!schema) {
+              // Unknown tool or missing schema → strict mode: reject
+              const e: any = new Error(`Tool schema not found for function: ${String(nm || 'unknown')}`);
+              e.status = 400; throw e;
+            }
+            let argsObj: any;
+            try { argsObj = JSON.parse(argsStr); } catch { const e: any = new Error('Tool call arguments must be valid JSON'); e.status = 400; throw e; }
+            if (!ensureObject(argsObj)) { const e: any = new Error('Tool call arguments must be a JSON object'); e.status = 400; throw e; }
+            // required keys
+            const required: string[] = Array.isArray(schema.required) ? (schema.required as string[]) : [];
+            for (const key of required) {
+              if (!(key in argsObj)) { const e: any = new Error(`Missing required argument: ${key}`); e.status = 400; throw e; }
+            }
+            // type checks for present keys; unknown keys are not allowed (strict)
+            const allowedKeys = schema?.properties ? Object.keys(schema.properties) : [];
+            for (const key of Object.keys(argsObj)) {
+              if (!allowedKeys.includes(key)) { const e: any = new Error(`Unknown argument: ${key}`); e.status = 400; throw e; }
+              const kind = getPropType(schema, key);
+              const val = (argsObj as any)[key];
+              if (kind === 'string' && typeof val !== 'string') { const e: any = new Error(`Invalid type for ${key}: expected string`); e.status = 400; throw e; }
+              if (kind === 'object' && !ensureObject(val)) { const e: any = new Error(`Invalid type for ${key}: expected object`); e.status = 400; throw e; }
+              if (kind === 'arrayString') {
+                if (!Array.isArray(val) || !val.every((x: any) => typeof x === 'string')) { const e: any = new Error(`Invalid type for ${key}: expected array<string>`); e.status = 400; throw e; }
+                const minItems = typeof schema?.properties?.[key]?.minItems === 'number' ? schema.properties[key].minItems : undefined;
+                if (typeof minItems === 'number' && val.length < minItems) { const e: any = new Error(`Invalid value for ${key}: expected at least ${minItems} items`); e.status = 400; throw e; }
+              }
+            }
+          }
+        }
+      } catch (ve) {
+        // Map validation error to ProviderError 400, avoid sending broken tool_calls downstream
+        const httpErr: any = new Error((ve as Error)?.message || 'Tool call validation failed');
+        httpErr.status = (ve as any)?.status || 400;
+        httpErr.details = { stage: 'provider-output-validation', provider: 'openai-compat' };
+        throw createProviderError(httpErr, 'server');
       }
 
       const processingTime = Date.now() - startTime;

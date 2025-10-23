@@ -96,7 +96,9 @@ export class ResponseHandler extends BaseModule {
     super(moduleInfo);
 
     this.config = config;
-    this.debugEventBus = DebugEventBus.getInstance();
+    try {
+      this.debugEventBus = (String(process.env.ROUTECODEX_ENABLE_DEBUGCENTER || '0') === '1') ? DebugEventBus.getInstance() : (null as any);
+    } catch { this.debugEventBus = null as any; }
     this.errorHandling = new ErrorHandlingCenter();
 
     // Add debug properties
@@ -132,7 +134,7 @@ export class ResponseHandler extends BaseModule {
       await this.errorHandling.initialize();
       this._isInitialized = true;
 
-      this.debugEventBus.publish({
+      (this.debugEventBus as any)?.publish?.({
         sessionId: `session_${Date.now()}`,
         moduleId: this.id,
         operationId: 'response_handler_initialized',
@@ -158,7 +160,7 @@ export class ResponseHandler extends BaseModule {
     const startTime = Date.now();
 
     try {
-      this.debugEventBus.publish({
+      (this.debugEventBus as any)?.publish?.({
         sessionId: `session_${Date.now()}`,
         moduleId: this.id,
         operationId: 'success_response_start',

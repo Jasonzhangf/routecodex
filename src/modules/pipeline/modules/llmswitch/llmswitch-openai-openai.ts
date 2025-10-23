@@ -5,6 +5,8 @@
 
 import type { LLMSwitchModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
+import { normalizeChatResponse, normalizeTools } from 'rcc-llmswitch-core/conversion';
+import { extractToolText } from '../../utils/tool-result-text.js';
 
 /**
  * OpenAI Normalizer LLM Switch Module
@@ -38,12 +40,196 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
     const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
     const payload = isDto ? (dto!.data as any) : (requestParam as any);
 
-    const normalized = this.normalizeOpenAIRequest(payload);
+    // Default: passthrough chat payload with STRICT validation (no fallback/guessing)
+    // - assistant.tool_calls.function.arguments MUST be JSON string
+    // - function.name MUST be one of declared tools[].function.name
+    // - If schema declares parameters.command as array<string>, enforce array<string>
+    // - tool role content is textified (extractToolText)
+    const normalizedPayload = (() => {
+      try {
+        const out: any = { ...(payload || {}) };
+        const msgs = Array.isArray(out.messages) ? (out.messages as any[]) : [];
+        if (!msgs.length) return out;
+
+        // Build declared tool name -> schema map
+        const toolSchemas = new Map<string, any>();
+        try {
+          const tools = Array.isArray(out.tools) ? out.tools : [];
+          for (const t of tools) {
+            const fn = t && (t.function || t);
+            const name = fn && typeof fn.name === 'string' ? fn.name : undefined;
+            const params = fn ? (fn.parameters as any) : undefined;
+            if (name) { toolSchemas.set(name, params && typeof params === 'object' ? params : undefined); }
+          }
+        } catch { /* ignore tools parse */ }
+
+        // Ensure tools normalized and tools[].function.strict = true (align anthropic→openai)
+        try {
+          if (Array.isArray(out.tools)) {
+            const nt = normalizeTools(out.tools as any[]);
+            out.tools = (nt as any[]).map((t: any) => {
+              if (t && t.type === 'function' && t.function && typeof t.function === 'object') {
+                return { ...t, function: { ...t.function, strict: true } };
+              }
+              return t;
+            });
+          }
+        } catch { /* ignore */ }
+
+        // 1) STRICT: validate assistant.tool_calls names and arguments
+        for (const m of msgs) {
+          if (m && m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+            m.tool_calls = m.tool_calls.map((tc: any, idx: number) => {
+              if (!tc || typeof tc !== 'object') return tc;
+              const fn = { ...(tc.function || {}) };
+              const name = typeof fn.name === 'string' ? fn.name : undefined;
+              if (!name || !toolSchemas.has(name)) {
+                const e: any = new Error(`Invalid tool name at assistant.tool_calls[${idx}]`);
+                e.status = 400; throw e;
+              }
+              // arguments must be a JSON string
+              if (fn.arguments === undefined || typeof fn.arguments !== 'string') {
+                const e: any = new Error(`Invalid arguments type for tool '${name}': must be JSON string`);
+                e.status = 400; throw e;
+              }
+              // parse and validate minimal schema for common fields
+              try {
+                const schema = toolSchemas.get(name);
+                let parsed: any;
+                try {
+                  parsed = JSON.parse(fn.arguments);
+                } catch (jsonErr) {
+                  // Limited, schema-gated repair: handle {"command":pwd} → {"command":"pwd"}
+                  // Do NOT attempt generic repairs; only fix a single bare token for 'command'
+                  const s = String(fn.arguments);
+                  const m = s.match(/^\s*\{\s*"command"\s*:\s*([A-Za-z0-9._\-\/]+)\s*\}\s*$/);
+                  if (m && schema && (schema as any)?.properties?.command) {
+                    parsed = { command: m[1] };
+                  } else {
+                    throw jsonErr;
+                  }
+                }
+                if (!parsed || typeof parsed !== 'object') {
+                  const e: any = new Error(`Invalid arguments for tool '${name}': must be JSON object string`);
+                  e.status = 400; throw e;
+                }
+                // If schema indicates command: array<string>, allow limited normalization:
+                // - command as string JSON array (e.g. "[\"cat\",\"file\"]") → parse to array
+                // - command as single string (e.g. "pwd" or "ls -la") → [string] (no space splitting)
+                const cmdSchema = schema && typeof schema === 'object' ? (schema as any).properties?.command : undefined;
+                if (cmdSchema && (cmdSchema.type === 'array' || Array.isArray(cmdSchema.type))) {
+                  const val = (parsed as any).command;
+                  if (Array.isArray(val)) {
+                    // ok; will verify element types below
+                  } else if (typeof val === 'string') {
+                    const s = val.trim();
+                    if ((s.startsWith('[') && s.endsWith(']'))) {
+                      try {
+                        const arr = JSON.parse(s);
+                        if (Array.isArray(arr)) {
+                          (parsed as any).command = arr;
+                        } else {
+                          (parsed as any).command = [s];
+                        }
+                      } catch {
+                        (parsed as any).command = [s];
+                      }
+                    } else {
+                      (parsed as any).command = [s];
+                    }
+                  }
+                  const finalCmd = (parsed as any).command;
+                  const isArr = Array.isArray(finalCmd) && finalCmd.every((x: any) => typeof x === 'string');
+                  if (!isArr) {
+                    const e: any = new Error(`Invalid 'command' for tool '${name}': expected array<string>`);
+                    e.status = 400; throw e;
+                  }
+                }
+                // Persist possibly-normalized arguments
+                fn.arguments = JSON.stringify(parsed);
+              } catch (err) {
+                if ((err as any)?.status) { throw err; }
+                const e: any = new Error(`Invalid JSON in arguments for tool '${name || 'unknown'}'`);
+                e.status = 400; throw e;
+              }
+              return { ...tc, function: fn };
+            });
+            // OpenAI 规范：当包含 tool_calls 时，assistant.content 为空串
+            if (Array.isArray(m.tool_calls) && m.tool_calls.length) {
+              if (m.content === null || typeof m.content !== 'string') { m.content = ''; }
+            }
+          }
+        }
+
+        // 2) Pair tool results with the latest assistant.tool_calls and textify content
+        //    Build a FIFO queue of pending call_ids from the last assistant with tool_calls
+        let pending: string[] = [];
+        for (let i = 0; i < msgs.length; i++) {
+          const m = msgs[i];
+          if (!m || typeof m !== 'object') continue;
+          if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+            // Push call ids in order
+            for (const tc of m.tool_calls) {
+              const id = typeof tc?.id === 'string' ? tc.id : undefined;
+              if (id) pending.push(id);
+            }
+            continue;
+          }
+          if (m.role === 'tool') {
+            // Textify content
+            if (m.content !== undefined && typeof m.content !== 'string') {
+              m.content = extractToolText(m.content);
+            } else if (typeof m.content === 'string') {
+              // Try to parse stringified JSON and extract text
+              const s = (m.content as string).trim();
+              if ((s.startsWith('{') && s.endsWith('}')) || (s.startsWith('[') && s.endsWith(']'))) {
+                try {
+                  const parsed = JSON.parse(s);
+                  m.content = extractToolText(parsed);
+                } catch { /* keep original */ }
+              }
+            }
+            // Pair tool_call_id if missing
+            if (!m.tool_call_id || typeof m.tool_call_id !== 'string') {
+              if (pending.length === 0) {
+                // No available call id to pair; strict mode: throw
+                const e: any = new Error('Unpaired tool result: missing tool_call_id and no pending assistant.tool_calls');
+                e.status = 400;
+                throw e;
+              }
+              m.tool_call_id = pending.shift();
+            } else {
+              // If present but not in pending, accept as-is (could be from older turn)
+              // Optionally we could realign, but strict pairing beyond this might be too aggressive here.
+              // No-op
+            }
+          }
+        }
+
+        return { ...out, messages: msgs };
+      } catch (e) {
+        // Strict fail-fast
+        const err: any = new Error((e as Error).message || 'Chat request normalization failed');
+        err.status = (e as any)?.status || 400;
+        throw err;
+      }
+    })();
+
+    const stamped = {
+      ...normalizedPayload,
+      _metadata: {
+        ...(normalizedPayload as any)?._metadata || {},
+        switchType: 'llmswitch-openai-openai',
+        timestamp: Date.now(),
+        originalProtocol: 'openai',
+        targetProtocol: 'openai'
+      }
+    } as Record<string, unknown>;
 
     const outDto: SharedPipelineRequest = isDto
-      ? { ...dto!, data: { ...normalized, _metadata: { switchType: 'llmswitch-openai-openai', timestamp: Date.now(), originalProtocol: 'openai', targetProtocol: 'openai' } } }
+      ? { ...dto!, data: stamped }
       : {
-          data: { ...normalized, _metadata: { switchType: 'llmswitch-openai-openai', timestamp: Date.now(), originalProtocol: 'openai', targetProtocol: 'openai' } },
+          data: stamped,
           route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() },
           metadata: {},
           debug: { enabled: false, stages: {} }
@@ -52,10 +238,10 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
   }
 
   async processOutgoing(response: any): Promise<any> {
-    // Accept either raw payload or DTO { data, metadata }
+    // Accept either raw payload or DTO { data, metadata }. Outbound: no extra normalization beyond shape.
     const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
     const payload = isDto ? (response as any).data : response;
-    const normalized = this.normalizeOpenAIResponse(payload);
+    const normalized = normalizeChatResponse(payload);
     if (isDto) {
       return { ...(response as any), data: normalized };
     }
@@ -70,139 +256,7 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
     return response;
   }
 
-  private normalizeOpenAIRequest(request: any): any {
-    if (!request || typeof request !== 'object') {
-      return request;
-    }
-
-    const normalized = { ...request };
-
-    if (Array.isArray(normalized.messages)) {
-      normalized.messages = normalized.messages.map((msg: any) => this.normalizeMessage(msg));
-    }
-
-    if (Array.isArray(normalized.tools)) {
-      normalized.tools = normalized.tools.map((tool: any) => this.normalizeTool(tool));
-    }
-
-    return normalized;
-  }
-
-  private normalizeOpenAIResponse(res: any): any {
-    if (!res || typeof res !== 'object') {
-      return res;
-    }
-    const out = { ...res };
-    if (Array.isArray(out.choices)) {
-      out.choices = out.choices.map((c: any) => {
-        const choice = { ...c };
-        const msg = choice.message && typeof choice.message === 'object' ? { ...choice.message } : choice.message;
-        if (msg && typeof msg === 'object') {
-          // Ensure tool_calls arguments are stringified and content empty when tool_calls exist
-          if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-            msg.tool_calls = msg.tool_calls.map((tc: any) => {
-              if (!tc || typeof tc !== 'object') return tc;
-              const t = { ...tc };
-              if (t.function && typeof t.function === 'object') {
-                const fn = { ...t.function };
-                if (fn.arguments !== undefined && typeof fn.arguments !== 'string') {
-                  try { fn.arguments = JSON.stringify(fn.arguments); } catch { fn.arguments = String(fn.arguments); }
-                }
-                t.function = fn;
-              }
-              return t;
-            });
-            // OpenAI expects content to be a string when tool_calls are present; set to empty string
-            msg.content = typeof msg.content === 'string' ? msg.content : '';
-          } else if (Array.isArray(msg.content)) {
-            // If providers returned array content (non-standard for chat.completions),
-            // join textual parts into a single string for compatibility
-            const parts = msg.content
-              .map((p: any) => (typeof p === 'string' ? p : (p && typeof p.text === 'string' ? p.text : '')))
-              .filter((s: string) => !!s.trim());
-            msg.content = parts.join('\n');
-          } else if (msg.content === undefined || msg.content === null) {
-            msg.content = '';
-          }
-          choice.message = msg;
-        }
-        return choice;
-      });
-    }
-    return out;
-  }
-
-  private normalizeMessage(message: any): any {
-    if (!message || typeof message !== 'object') {
-      return message;
-    }
-
-    const normalizedMessage = { ...message };
-
-    if (normalizedMessage.content === undefined || normalizedMessage.content === null) {
-      normalizedMessage.content = '';
-    } else if (typeof normalizedMessage.content === 'string') {
-      // already string, nothing to do
-    } else if (Array.isArray(normalizedMessage.content)) {
-      // structured content, preserve as-is
-    } else if (typeof normalizedMessage.content === 'object') {
-      // keep structured object payloads intact
-    } else {
-      normalizedMessage.content = String(normalizedMessage.content);
-    }
-
-    if (
-      normalizedMessage.role === 'assistant' &&
-      Array.isArray(normalizedMessage.tool_calls)
-    ) {
-      normalizedMessage.tool_calls = normalizedMessage.tool_calls.map((toolCall: any) => {
-        if (!toolCall || typeof toolCall !== 'object') {
-          return toolCall;
-        }
-
-        const normalizedToolCall = { ...toolCall };
-        if (
-          normalizedToolCall.function &&
-          typeof normalizedToolCall.function === 'object'
-        ) {
-          const fn = { ...normalizedToolCall.function };
-          if (fn.arguments !== undefined && typeof fn.arguments !== 'string') {
-            try {
-              fn.arguments = JSON.stringify(fn.arguments);
-            } catch {
-              fn.arguments = String(fn.arguments);
-            }
-          }
-          normalizedToolCall.function = fn;
-        }
-        return normalizedToolCall;
-      });
-    }
-
-    return normalizedMessage;
-  }
-
-  private normalizeTool(tool: any): any {
-    if (!tool || typeof tool !== 'object') {
-      return tool;
-    }
-
-    const normalizedTool = { ...tool };
-
-    if (normalizedTool.type === 'function' && normalizedTool.function) {
-      const fn = { ...normalizedTool.function };
-      if (fn.parameters && typeof fn.parameters !== 'object') {
-        try {
-          fn.parameters = JSON.parse(String(fn.parameters));
-        } catch {
-          fn.parameters = {};
-        }
-      }
-      normalizedTool.function = fn;
-    }
-
-    return normalizedTool;
-  }
+  // normalization moved to sharedmodule/llmswitch-core
 
   async dispose(): Promise<void> {
     this.isInitialized = false;

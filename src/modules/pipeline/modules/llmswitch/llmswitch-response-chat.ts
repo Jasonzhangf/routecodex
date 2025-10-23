@@ -6,8 +6,10 @@ import {
   buildResponsesPayloadFromChat,
   captureResponsesContext,
   extractRequestIdFromResponse,
+  normalizeTools,
   type ResponsesRequestContext
-} from './conversion/responses/responses-openai-bridge.js';
+} from 'rcc-llmswitch-core/conversion';
+import { extractToolText } from '../../utils/tool-result-text.js';
 
 export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
   readonly id: string;
@@ -18,8 +20,7 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
   private isInitialized = false;
   private logger: PipelineDebugLogger;
   private requestContext: Map<string, ResponsesRequestContext> = new Map();
-  private chatReqValidator: ((v: unknown) => boolean) | null = null;
-  private responsesValidator: ((v: unknown) => boolean) | null = null;
+  // Thin adapter: no runtime schema validation here (conversion path validates by orchestrator when needed)
 
   constructor(config: ModuleConfig, dependencies: ModuleDependencies) {
     this.config = config;
@@ -33,51 +34,7 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
     }
     this.isInitialized = true;
 
-    try {
-      const AjvMod: any = await import('ajv');
-      const ajv = new AjvMod.default({ allErrors: true, strict: false });
-      const chatSchema = {
-        type: 'object',
-        required: ['model', 'messages'],
-        additionalProperties: true,
-        properties: {
-          model: { type: 'string', minLength: 1 },
-          stream: { type: 'boolean' },
-          messages: {
-            type: 'array',
-            minItems: 1,
-            items: {
-              type: 'object',
-              required: ['role'],
-              additionalProperties: true,
-              properties: {
-                role: { enum: ['system', 'user', 'assistant', 'tool'] },
-                content: { anyOf: [{ type: 'string' }, { type: 'null' }, { type: 'object' }, { type: 'array' }] },
-                tool_calls: { type: 'array' }
-              }
-            }
-          },
-          tools: { type: 'array' }
-        }
-      } as const;
-      const responsesSchema = {
-        type: 'object',
-        required: ['object', 'model', 'output'],
-        additionalProperties: true,
-        properties: {
-          object: { const: 'response' },
-          model: { type: 'string' },
-          status: { enum: ['in_progress', 'completed'] },
-          output_text: { type: 'string' },
-          output: { type: 'array' },
-          required_action: { type: 'object' }
-        }
-      } as const;
-      this.chatReqValidator = ajv.compile(chatSchema);
-      this.responsesValidator = ajv.compile(responsesSchema);
-    } catch {
-      /* optional runtime validation */
-    }
+    // no-op: validation handled by orchestrator conversion schemas when configured
   }
 
   async processIncoming(requestParam: SharedPipelineRequest | any): Promise<SharedPipelineRequest> {
@@ -91,6 +48,46 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
 
     const context = captureResponsesContext(payload, dto ?? undefined);
     const { request: chatRequest, toolsNormalized } = buildChatRequestFromResponses(payload, context);
+    // Normalize tool message content to text (align with Anthropic→OpenAI)
+    try {
+      const msgs = Array.isArray((chatRequest as any).messages) ? ((chatRequest as any).messages as any[]) : [];
+      const push = (arr: string[], s?: string) => { if (typeof s === 'string') { const t = s.trim(); if (t) arr.push(t); } };
+      const flattenParts = (v: any): string[] => {
+        const texts: string[] = [];
+        if (Array.isArray(v)) {
+          for (const p of v) {
+            if (!p) continue;
+            if (typeof p === 'string') { push(texts, p); continue; }
+            if (typeof p === 'object') {
+              if (typeof (p as any).text === 'string') { push(texts, (p as any).text); continue; }
+              if (typeof (p as any).content === 'string') { push(texts, (p as any).content); continue; }
+              if (Array.isArray((p as any).content)) { texts.push(...flattenParts((p as any).content)); continue; }
+            }
+          }
+        }
+        return texts;
+      };
+      for (const m of msgs) {
+        if (m && m.role === 'tool' && m.content !== undefined) {
+          if (typeof m.content !== 'string') {
+            m.content = extractToolText(m.content);
+          }
+        }
+      }
+      (chatRequest as any).messages = msgs;
+    } catch { /* ignore content normalization errors */ }
+    // Align tools declaration: normalize + strict=true
+    try {
+      if (Array.isArray((chatRequest as any).tools)) {
+        const nt = normalizeTools((chatRequest as any).tools as any[]);
+        (chatRequest as any).tools = (nt as any[]).map((t: any) => {
+          if (t && t.type === 'function' && t.function && typeof t.function === 'object') {
+            return { ...t, function: { ...t.function, strict: true } };
+          }
+          return t;
+        });
+      }
+    } catch { /* ignore normalize errors */ }
     if (toolsNormalized) {
       context.toolsNormalized = toolsNormalized;
     }
@@ -98,13 +95,7 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
       this.requestContext.set(context.requestId, context);
     }
 
-    try {
-      if (this.chatReqValidator && !this.chatReqValidator(chatRequest)) {
-        throw new Error('Responses→Chat produced invalid Chat request');
-      }
-    } catch {
-      /* soft validation */
-    }
+    // No runtime validation here; orchestrator can validate canonical schemas if configured
 
     const stamped = {
       ...chatRequest,
@@ -160,13 +151,7 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
     let converted = payload;
     if (context && context.isResponsesPayload) {
       converted = buildResponsesPayloadFromChat(payload, context);
-      try {
-        if (this.responsesValidator && !this.responsesValidator(converted)) {
-          throw new Error('Chat→Responses produced invalid Responses payload');
-        }
-      } catch {
-        /* soft validation */
-      }
+      // No runtime validation here
     }
 
     this.logger.logTransformation(this.id, 'chat-to-responses', payload, converted);
@@ -188,15 +173,7 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
   }
 
   async transformResponse(response: unknown): Promise<unknown> {
-    const converted = buildResponsesPayloadFromChat(response, undefined);
-    try {
-      if (this.responsesValidator && !this.responsesValidator(converted)) {
-        throw new Error('Chat→Responses produced invalid Responses payload');
-      }
-    } catch {
-      /* soft validation */
-    }
-    return converted;
+    return buildResponsesPayloadFromChat(response, undefined);
   }
 
   async cleanup(): Promise<void> {

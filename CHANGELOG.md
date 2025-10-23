@@ -347,3 +347,16 @@ Summary
   - 保留 provider 回包的 model/字段，不做二次转换；转换链路无 fallback，失败显式报错
 - 请求侧：Chat/Anthropic → Responses 为“无损转换”，仅补全 model/stream/instructions/input
 - 修正：当 provider 已返回 Responses 形状时，跳过 Chat 逆转换，避免丢失 function_call
+## 0.54.0 - 2025-10-23
+- OpenAI Chat tool-calling normalization aligned with Anthropic path
+  - Strict schema for assistant.tool_calls with limited, deterministic fixes:
+    - `function.arguments` must be JSON string; reject otherwise
+    - For `command: array<string>`: JSON-array string → parse; plain string → wrap as single token (no space-splitting)
+  - Tools declaration normalized and `function.strict=true` enforced (Chat path)
+  - Thinking markup sanitized in compatibility layer (`<think>…</think>`, `<tool_call>…</tool_call>`) prior to llmswitch
+  - Tool result flattening fixed to avoid empty content:
+    - Prefer `text` → `content` (string/array) → non-empty `output`
+    - If still no text, synthesize deterministic summary from metadata (exit_code/duration)
+    - Never return empty string after normalization
+- Responses ↔ Chat path kept consistent; no fallback heuristics; unknown shapes return 400
+- Regression: last 20 chat samples show 0 empty tool outputs after normalization

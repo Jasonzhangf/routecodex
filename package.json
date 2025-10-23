@@ -32,10 +32,13 @@
   "workspaces": [
     "sharedmodule/config-engine",
     "sharedmodule/config-compat",
-    "sharedmodule/config-testkit"
+    "sharedmodule/config-testkit",
+    "sharedmodule/llmswitch-core"
   ],
   "scripts": {
     "build": "npm run clean && tsc",
+    "build:dev": "npm run clean && tsc && npm -w sharedmodule/llmswitch-core run build",
+    "prepack": "echo skip-prepack",
     "postbuild": "chmod +x dist/cli.js || true",
     "build:watch": "tsc --watch",
     "start": "npm run -s start:bg",
@@ -55,11 +58,11 @@
     "clean": "rm -rf dist coverage",
     "prebuild": "echo skip-lint",
     "prepare": "npm run build",
-    
     "install:global": "./scripts/quick-install.sh",
     "install:quick": "./scripts/quick-install.sh",
     "install:skip-tests": "./scripts/quick-install.sh --skip-tests",
     "install:simple": "./scripts/simple-install.sh",
+    "audit:tool-text": "node scripts/audit-tool-text.mjs",
     "start:bg": "bash scripts/run-bg.sh -- 'node dist/index.js'",
     "start:fg": "bash scripts/run-fg-gtimeout.sh 12 -- 'node dist/index.js'",
     "start:verify": "node scripts/start-verify.mjs --mode bg --timeout 180",
@@ -96,6 +99,7 @@
     "package:validate": "npx package-json-validator"
   },
   "dependencies": {
+    "rcc-llmswitch-core": "^0.1.1",
     "ajv": "^8.17.1",
     "@anthropic-ai/sdk": "^0.65.0",
     "@lmstudio/sdk": "^1.5.0",

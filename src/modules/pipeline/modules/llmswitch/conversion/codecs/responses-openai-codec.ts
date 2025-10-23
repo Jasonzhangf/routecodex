@@ -1,27 +1,17 @@
 import type { ModuleDependencies } from '../../../../interfaces/pipeline-interfaces.js';
 import type { ConversionCodec, ConversionContext, ConversionProfile } from '../types.js';
 import type { SharedPipelineRequest, SharedPipelineResponse } from '../../../../../../types/shared-dtos.js';
-import { ResponsesToChatLLMSwitch } from '../../llmswitch-response-chat.js';
+import { captureResponsesContext, buildChatRequestFromResponses, buildResponsesPayloadFromChat } from 'rcc-llmswitch-core/conversion';
 
 export class ResponsesOpenAIConversionCodec implements ConversionCodec {
   readonly id = 'responses-openai';
-  private readonly adapter: ResponsesToChatLLMSwitch;
   private initialized = false;
+  private ctxMap: Map<string, any> = new Map();
 
-  constructor(private readonly dependencies: ModuleDependencies) {
-    this.adapter = new ResponsesToChatLLMSwitch(
-      { type: 'llmswitch-response-chat', config: {} },
-      dependencies
-    );
-  }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  constructor(private readonly dependencies: ModuleDependencies) {}
 
-  async initialize(): Promise<void> {
-    if (this.initialized) {
-      return;
-    }
-    await this.adapter.initialize();
-    this.initialized = true;
-  }
+  async initialize(): Promise<void> { this.initialized = true; }
 
   async convertRequest(payload: any, profile: ConversionProfile, context: ConversionContext): Promise<any> {
     await this.ensureInit();
@@ -40,8 +30,12 @@ export class ResponsesOpenAIConversionCodec implements ConversionCodec {
       },
       debug: { enabled: false, stages: {} }
     };
-    const transformed = await this.adapter.processIncoming(dto);
-    return transformed.data;
+    // Build context and convert to OpenAI Chat request
+    const ctx = captureResponsesContext(dto.data as any, dto);
+    const { request: chatRequest, toolsNormalized } = buildChatRequestFromResponses(dto.data as any, ctx);
+    if (toolsNormalized) ctx.toolsNormalized = toolsNormalized;
+    if (context.requestId) this.ctxMap.set(context.requestId, ctx);
+    return chatRequest;
   }
 
   async convertResponse(payload: any, profile: ConversionProfile, context: ConversionContext): Promise<any> {
@@ -55,11 +49,10 @@ export class ResponsesOpenAIConversionCodec implements ConversionCodec {
         stages: []
       }
     } as SharedPipelineResponse;
-    const transformed = await this.adapter.processOutgoing(dto);
-    if (transformed && typeof transformed === 'object' && 'data' in transformed) {
-      return (transformed as SharedPipelineResponse).data;
-    }
-    return transformed;
+    const ctx = context.requestId ? this.ctxMap.get(context.requestId) : undefined;
+    if (context.requestId) this.ctxMap.delete(context.requestId);
+    // Convert provider chat response back to Responses payload using captured context
+    return buildResponsesPayloadFromChat(dto.data, ctx);
   }
 
   private async ensureInit(): Promise<void> {

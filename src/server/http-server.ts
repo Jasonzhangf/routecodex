@@ -105,7 +105,9 @@ export class HttpServer extends BaseModule implements IHttpServer {
 
     this.moduleConfigReader = new ModuleConfigReader(modulesConfigPath);
     this.errorHandling = new ErrorHandlingCenter();
-    this.debugEventBus = DebugEventBus.getInstance();
+    try {
+      this.debugEventBus = (String(process.env.ROUTECODEX_ENABLE_DEBUGCENTER || '0') === '1') ? DebugEventBus.getInstance() : (null as any);
+    } catch { this.debugEventBus = null as any; }
     this.errorUtils = ErrorHandlingUtils.createModuleErrorHandler('http-server');
     this.app = express();
     this.serviceContainer = ServiceContainer.getInstance();
@@ -522,6 +524,19 @@ export class HttpServer extends BaseModule implements IHttpServer {
   }
 
   /**
+   * Safely publish a DebugCenter event when enabled
+   */
+  private safePublishDebug(event: UnknownObject): void {
+    try {
+      if (String(process.env.ROUTECODEX_ENABLE_DEBUGCENTER || '0') === '1' && this.debugEventBus && typeof (this.debugEventBus as any).publish === 'function') {
+        this.debugEventBus.publish(event as any);
+      }
+    } catch {
+      // no-op when DebugCenter is disabled or unavailable
+    }
+  }
+
+  /**
    * Record server metric
    */
   private recordServerMetric(operation: string, data: UnknownObject): void {
@@ -690,17 +705,15 @@ export class HttpServer extends BaseModule implements IHttpServer {
         this.startupTime = Date.now();
         this.servers.push(srv);
         if (!this.server) { this.server = srv; }
-        try {
-          this.debugEventBus.publish({
-            sessionId: `p${config.server.port}_http_server_started_${Date.now()}`,
-            moduleId: 'http-server',
-            operationId: 'http_server_started',
-            timestamp: Date.now(),
-            type: 'start',
-            position: 'middle',
-            data: { port: config.server.port, host, uptime: this.getUptime() },
-          });
-        } catch { /* ignore */ }
+        this.safePublishDebug({
+          sessionId: `p${config.server.port}_http_server_started_${Date.now()}`,
+          moduleId: 'http-server',
+          operationId: 'http_server_started',
+          timestamp: Date.now(),
+          type: 'start',
+          position: 'middle',
+          data: { port: config.server.port, host, uptime: this.getUptime() },
+        });
         console.log(`🚀 RouteCodex HTTP Server started on http://${host}:${config.server.port}`);
         if (successes === 1) { resolve(); }
       };
@@ -756,7 +769,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
         // Config manager doesn't need to be closed in new architecture
         await this.errorHandling.destroy();
 
-        this.debugEventBus.publish({
+        this.safePublishDebug({
           sessionId: `session_${Date.now()}`,
           moduleId: 'http-server',
           operationId: 'http_server_stopped',
@@ -851,7 +864,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
       res.on('finish', () => {
         const duration = Date.now() - start;
 
-        this.debugEventBus.publish({
+        this.safePublishDebug({
           sessionId: `session_${Date.now()}`,
           moduleId: 'http-server',
           operationId: 'request_completed',

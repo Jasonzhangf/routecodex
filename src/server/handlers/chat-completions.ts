@@ -156,24 +156,26 @@ export class ChatCompletionsHandler extends BaseHandler {
 
     // Pre-convert OpenAI Responses payload to OpenAI Chat payload
     let chatPayload = { ...(req.body || {}) } as Record<string, unknown>;
-    try {
+    // Strict: normalize Chat request via llmswitch; if normalization fails, do not fallback
+    {
       const logger = new PipelineDebugLogger({} as any, { enableConsoleLogging: false, enableDebugCenter: false });
       const deps = { errorHandlingCenter: {}, debugCenter: {}, logger } as any;
       const normalizer = new OpenAINormalizerLLMSwitch({ type: 'llmswitch-openai-openai', config: {} } as any, deps as any);
 
-      if (typeof normalizer.initialize === 'function') {
-        await normalizer.initialize();
+      try {
+        if (typeof normalizer.initialize === 'function') {
+          await normalizer.initialize();
+        }
+        const transformed = await normalizer.transformRequest(req.body);
+        if (transformed && typeof transformed === 'object') {
+          const dto = transformed as any;
+          chatPayload = dto?.data && typeof dto.data === 'object'
+            ? { ...(dto.data as Record<string, unknown>) }
+            : (transformed as Record<string, unknown>);
+        }
+      } catch (e) {
+        throw new RouteCodexError((e as Error)?.message || 'chat normalization failed', 'conversion_error', 400);
       }
-
-      const transformed = await normalizer.transformRequest(req.body);
-      if (transformed && typeof transformed === 'object') {
-        const dto = transformed as any;
-        chatPayload = dto?.data && typeof dto.data === 'object'
-          ? { ...(dto.data as Record<string, unknown>) }
-          : (transformed as Record<string, unknown>);
-      }
-    } catch {
-      // Non-blocking: use original payload if normalization fails
     }
 
     // Ensure payload model aligns with selected route meta

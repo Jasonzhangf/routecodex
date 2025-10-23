@@ -107,7 +107,7 @@ export class PipelineAssembler {
             } catch { /* ignore */ }
           }
           if (Object.keys(lsCfg).length > 0) {
-            llmSwitch = { type: String((llmSwitch as any).type || 'llmswitch-unified'), config: lsCfg } as any;
+            llmSwitch = { type: String((llmSwitch as any).type || 'llmswitch-conversion-router'), config: lsCfg } as any;
           }
         } catch { /* ignore enrichment errors */ }
       }

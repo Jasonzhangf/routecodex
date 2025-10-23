@@ -26,9 +26,12 @@ const ErrorHandlingCenterClass: new () => {
   };
 
 // Check if DebugEventBus exists, fallback to mock if not
+const USE_DEBUGCENTER = String(process.env.ROUTECODEX_ENABLE_DEBUGCENTER || '0') === '1';
 const DEB = (debugcenter as Record<string, unknown>).DebugEventBus as { getInstance: () => { publish: (evt: unknown) => void } } | undefined;
 const DebugEventBusClass: { getInstance: () => { publish: (evt: unknown) => void } } =
-  DEB ?? { getInstance: () => ({ publish: (_evt: unknown) => {} }) };
+  (USE_DEBUGCENTER && DEB)
+    ? DEB
+    : { getInstance: () => ({ publish: (_evt: unknown) => {} }) };
 
 // Define ErrorContext interface locally
 interface ErrorContext {
