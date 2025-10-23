@@ -1,6 +1,6 @@
 import type { LLMSwitchModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest, SharedPipelineResponse } from '../../../../types/shared-dtos.js';
-import { SwitchOrchestrator } from '@routecodex/llmswitch-core/conversion/switch-orchestrator';
+import { SwitchOrchestrator } from 'rcc-llmswitch-core/conversion/switch-orchestrator';
 import type { ConversionContext } from './conversion/types.js';
 import path from 'path';
 import { fileURLToPath } from 'url';

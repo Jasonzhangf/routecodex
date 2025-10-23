@@ -7,7 +7,7 @@ import {
   captureResponsesContext,
   extractRequestIdFromResponse,
   type ResponsesRequestContext
-} from '@routecodex/llmswitch-core/conversion';
+} from 'rcc-llmswitch-core/conversion';
 
 export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
   readonly id: string;

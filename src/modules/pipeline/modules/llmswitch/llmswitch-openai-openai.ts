@@ -5,7 +5,7 @@
 
 import type { LLMSwitchModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
-import { normalizeChatRequest, normalizeChatResponse } from '@routecodex/llmswitch-core/conversion';
+import { normalizeChatRequest, normalizeChatResponse } from 'rcc-llmswitch-core/conversion';
 
 /**
  * OpenAI Normalizer LLM Switch Module

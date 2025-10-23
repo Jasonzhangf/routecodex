@@ -12,7 +12,7 @@ import { StreamingManager } from '../utils/streaming-manager.js';
 import { ResponsesConfigUtil } from '../config/responses-config.js';
 import { ResponsesConverter } from '../conversion/responses-converter.js';
 import { ResponsesMapper } from '../conversion/responses-mapper.js';
-import { buildResponsesPayloadFromChat } from '@routecodex/llmswitch-core/conversion';
+import { buildResponsesPayloadFromChat } from 'rcc-llmswitch-core/conversion';
 // Protocol conversion is handled downstream by llmswitch (Responses→Chat) for providers.
 import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
 
@@ -706,7 +706,7 @@ export class ResponsesHandler extends BaseHandler {
         let toolsNorm: Array<Record<string, unknown>> = [];
         if (Array.isArray(reqTools)) {
           try {
-            const mod = await import('@routecodex/llmswitch-core/conversion');
+            const mod = await import('rcc-llmswitch-core/conversion');
             const fn = (mod as any).normalizeTools as ((t: any[]) => Array<Record<string, unknown>>);
             if (typeof fn === 'function') toolsNorm = fn(reqTools as any[]);
           } catch { /* ignore */ }
