@@ -608,16 +608,11 @@ export class ConfigManagerModule extends BaseModule {
         const compatModule = await import('routecodex-config-compat');
         const buildPipelineAssemblerConfig = (compatModule as any).buildPipelineAssemblerConfig;
 
-        if (typeof buildPipelineAssemblerConfig !== 'function') {
-          throw new Error('buildPipelineAssemblerConfig is not available in routecodex-config-compat module');
-        }
-
-        // 合并逐目标 pipelineConfigs（用户提供的）到兼容层，以便导出器能够生成 pipelines
-        const ccAny = compatibilityConfig as Record<string, any>;
+        const ensureObj = (o: any) => (o && typeof o === 'object') ? o : {};
+        const ccAny = ensureObj(compatibilityConfig) as Record<string, any>;
         const userPipelineConfigs = (parsedUserConfig as any)?.pipelineConfigs
           || (parsedUserConfig as any)?.modules?.virtualrouter?.config?.pipelineConfigs
           || {};
-        const ensureObj = (o: any) => (o && typeof o === 'object') ? o : {};
         const ccPc = ensureObj(ccAny.pipelineConfigs);
         const upc = ensureObj(userPipelineConfigs);
         const perTargetOnly: Record<string, any> = {};
@@ -625,17 +620,22 @@ export class ConfigManagerModule extends BaseModule {
           if (k.includes('.')) { perTargetOnly[k] = v; }
         }
 
-
         const compatForExport = {
           ...ccAny,
           pipelineConfigs: { ...ccPc, ...perTargetOnly },
-          // 🔧 确保routeTargets从compatibilityConfig正确传递给buildPipelineAssemblerConfig
           routeTargets: ccAny.routeTargets || {}
         } as Record<string, any>;
-        const pac = buildPipelineAssemblerConfig(compatForExport as any);
+
+        let pac: any | null = null;
+        if (typeof buildPipelineAssemblerConfig === 'function') {
+          pac = buildPipelineAssemblerConfig(compatForExport as any);
+        } else {
+          // 内置最小构造器（无 compat 导出时）
+          pac = this.buildMinimalAssemblerConfig(parsedUserConfig as any, compatibilityConfig as any);
+        }
 
         // 🔧 修复alias解析：对buildPipelineAssemblerConfig生成的pipelines进行alias解析
-        if (pac.pipelines && Array.isArray(pac.pipelines)) {
+        if (pac && pac.pipelines && Array.isArray(pac.pipelines)) {
           const keyMappings = ccAny.keyMappings || {};
           const authMappings = ccAny.authMappings || {};
 
@@ -643,9 +643,9 @@ export class ConfigManagerModule extends BaseModule {
             const modules = pipeline.modules as any;
             if (modules?.provider?.config?.auth?.alias) {
               const aliasKey = modules.provider.config.auth.alias;
-              const actualKey = keyMappings.global?.[aliasKey] ||
-                               keyMappings.providers?.[(pipeline as any).providerId || '']?.[aliasKey] ||
-                               authMappings[aliasKey];
+              const actualKey = keyMappings.global?.[aliasKey]
+                || (keyMappings.providers?.[(pipeline as any).providerId || ''] || {})[aliasKey]
+                || authMappings[aliasKey];
 
               if (actualKey && typeof actualKey === 'string') {
                 modules.provider.config.auth.apiKey = actualKey;
@@ -657,7 +657,13 @@ export class ConfigManagerModule extends BaseModule {
 
         (mergedConfig as any).pipeline_assembler = { config: pac };
       } catch (e) {
-        throw new Error(`Failed to produce pipeline_assembler.config via compatibility module: ${e instanceof Error ? e.message : String(e)}. Provide explicit pipeline definitions.`);
+        // 尝试使用内置最小构造器作为兜底（配置生成层可兜底，不涉及协议推断）
+        try {
+          const pac = this.buildMinimalAssemblerConfig(parsedUserConfig as any, compatibilityConfig as any);
+          (mergedConfig as any).pipeline_assembler = { config: pac };
+        } catch (ee) {
+          throw new Error(`Failed to produce pipeline_assembler.config via compatibility module: ${e instanceof Error ? e.message : String(e)}. Provide explicit pipeline definitions.`);
+        }
       }
 
       // 附加版本元信息（便于宿主断言契约）
@@ -773,6 +779,66 @@ export class ConfigManagerModule extends BaseModule {
       console.error('❌ Failed to generate merged configuration:', error);
       throw error;
     }
+  }
+
+  /**
+   * 内置最小 pipeline_assembler.config 构造：
+   * - 从 parsedUserConfig.routeTargets / pipelineConfigs 生成 pipelines
+   * - 为 provider.type=glm 使用 'glm-compatibility'，其它使用 'passthrough-compatibility'
+   * - llmSwitch 固定使用 'llmswitch-conversion-router'
+   */
+  private buildMinimalAssemblerConfig(parsed: any, compat: any): Record<string, unknown> {
+    const ensureObj = (o: any) => (o && typeof o === 'object') ? o : {};
+    const routeTargets: Record<string, Array<any>> = ensureObj(parsed?.routeTargets);
+    const pipelineConfigs: Record<string, any> = ensureObj(parsed?.pipelineConfigs);
+    const pipelines: any[] = [];
+    const routePools: Record<string, string[]> = {};
+    const routeMeta: Record<string, { providerId: string; modelId: string; keyId?: string }> = {};
+
+    const addPipeline = (providerId: string, modelId: string, keyId?: string) => {
+      const key = [providerId, modelId, keyId].filter(Boolean).join('.');
+      const pc = ensureObj(pipelineConfigs[key]);
+      const provType = String(pc?.provider?.type || providerId || 'openai');
+      const compatType = provType === 'glm' ? 'glm-compatibility' : 'passthrough-compatibility';
+      const pid = keyId ? `${providerId}_${keyId}.${modelId}` : `${providerId}.${modelId}`;
+      const providerCfg: Record<string, unknown> = { type: provType, config: { ...(pc?.provider || {}) } } as any;
+      const compatibilityCfg = { type: compatType, config: { ...(pc?.compatibility?.config || {}) } } as any;
+      const llmSwitchCfg = { type: 'llmswitch-conversion-router', config: {} };
+      const workflowCfg = { type: 'streaming-control', config: {} };
+
+      pipelines.push({ id: pid, modules: { provider: providerCfg, compatibility: compatibilityCfg, llmSwitch: llmSwitchCfg, workflow: workflowCfg } });
+      routeMeta[pid] = { providerId, modelId, keyId } as any;
+      return pid;
+    };
+
+    for (const [routeName, targets] of Object.entries(routeTargets)) {
+      routePools[routeName] = [];
+      for (const t of (targets as any[])) {
+        const providerId = String(t.providerId || 'openai');
+        const modelId = String(t.modelId || 'gpt-4');
+        const keyId = t.keyId ? String(t.keyId) : undefined;
+        const pid = addPipeline(providerId, modelId, keyId);
+        routePools[routeName].push(pid);
+      }
+    }
+
+    // 如无 routeTargets，尝试从 parsed.virtualrouter.routing 重建 default 路由
+    if (Object.keys(routePools).length === 0 && parsed?.virtualrouter?.routing) {
+      const routing = ensureObj(parsed.virtualrouter.routing) as Record<string, string[]>;
+      for (const [routeName, refs] of Object.entries(routing)) {
+        routePools[routeName] = [];
+        for (const ref of refs || []) {
+          const segs = String(ref).split('.');
+          const providerId = segs[0];
+          const modelId = segs[1] || 'gpt-4';
+          const keyId = segs[2];
+          const pid = addPipeline(providerId, modelId, keyId);
+          routePools[routeName].push(pid);
+        }
+      }
+    }
+
+    return { pipelines, routePools, routeMeta } as Record<string, unknown>;
   }
 
   
