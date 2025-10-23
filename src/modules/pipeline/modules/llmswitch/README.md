@@ -40,9 +40,8 @@ LLMSwitch 模块是流水线架构的第 1 层（协议转换层），负责处�
 - **统一入口**: 在最新架构下，所有流水线实例都挂载 `llmswitch-conversion-router`，并依靠 `entryEndpoint` 自动匹配对应 codec（OpenAI / Anthropic / Responses），无需额外的手工配置。
 - **核心实现收敛**: 具体的转换逻辑（Responses↔Chat、OpenAI 规范化等）已迁移到 `@routecodex/llmswitch-core`，此处适配器仅做委派，避免重复实现。
 
-### ⛔ 已废弃：统一协议转换器
-- 旧实现文件: `llmswitch-unified.ts`（已弃用）
-- 说明: 统一路由现由 `llmswitch-conversion-router` + `@routecodex/llmswitch-core` 的 `switch-orchestrator` + `codecs/*` 负责，请勿再使用旧统一模块。
+### ⛔ 统一协议转换器
+该实现已移除。统一路由由 `llmswitch-conversion-router` + `rcc-llmswitch-core` 的 `switch-orchestrator` + `codecs/*` 提供，请使用 conversion-router 作为入口。
 
 ## 🌟 核心功能
 
@@ -146,7 +145,6 @@ src/modules/pipeline/modules/llmswitch/
 ├── llmswitch-openai-openai.ts        # OpenAI → OpenAI 转换器
 ├── llmswitch-anthropic-openai.ts    # Anthropic ↔ OpenAI 转换器
 ├── llmswitch-response-chat.ts        # Responses ↔ Chat 转换器 ⭐
-├── (弃用) llmswitch-unified.ts       # 统一协议转换器（弃用）
 ├── anthropic-openai-converter.ts    # Anthropic 转换器工具（逐步收敛到 codecs）
 ├── anthropic-openai-config.ts        # Anthropic 转换配置
 └── README.md                         # 本文档
