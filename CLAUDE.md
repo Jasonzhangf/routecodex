@@ -1,5 +1,19 @@
 # RouteCodex 4-Layer Pipeline Architecture Documentation
 
+
+你运行进程需要用后台启动的方式，加入&,如果一定要前台运行就要用gtimeout
+
+运行规范
+- 后台运行（推荐）：`npm run start:bg`
+- 前台限时（必须）：`npm run start:fg`
+
+脚本
+- `scripts/run-bg.sh`：后台 + 可选超时守护
+- `scripts/run-fg-gtimeout.sh`：前台 + `gtimeout`（或降级 watcher）
+
+不需要ipv6支持，需要ipv4的本地  127.0.0.1,localhost能被支持，这是刚性要求
+
+
 ## Overview
 
 The RouteCodex system implements a sophisticated 4-layer pipeline architecture that provides clean separation of concerns, modular design, and flexible protocol handling. This architecture enables seamless integration with multiple AI providers while maintaining consistent interfaces and proper workflow management.
