@@ -144,7 +144,7 @@ export interface RouteCodexConfig {
 // Zod schemas for validation
 export const ProviderConfigSchema = z.object({
   id: z.string(),
-  type: z.enum(['openai', 'anthropic', 'qwen', 'lmstudio', 'iflow', 'glm', 'custom']),
+  type: z.enum(['openai', 'anthropic', 'qwen', 'lmstudio', 'iflow', 'glm', 'generic_responses', 'custom']),
   enabled: z.boolean(),
   baseURL: z.string().url().optional(),
   apiKey: z.union([z.string(), z.array(z.string())]).optional(),
