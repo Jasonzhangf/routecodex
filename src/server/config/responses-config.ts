@@ -136,7 +136,7 @@ const DEFAULT_MAPPING: ResponsesConversionMapping = {
 const DEFAULTS: ResponsesModuleConfig = {
   conversion: {
     useLlmswitch: true,
-    fallbackEnabled: true,
+    fallbackEnabled: false,
     forceProviderStream: true // default: provider non-stream, server re-stream
   },
   sse: {

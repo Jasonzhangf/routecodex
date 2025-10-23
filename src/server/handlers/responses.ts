@@ -63,59 +63,64 @@ export class ResponsesHandler extends BaseHandler {
     });
 
     try {
-      // Enforce Responses-shaped input: convert Chat/Anthropic to Responses fields and drop foreign fields
+      // 仅改变格式，不清洗/丢弃字段：基于原始请求体派生 Responses 关键字段并回写，保留全部原字段
       try {
         const b: any = req.body || {};
-        const out: any = {};
-        // model / stream passthrough
-        if (typeof b.model === 'string') out.model = b.model; else out.model = 'unknown';
-        // Prefer explicit boolean; otherwise infer from Accept header
-        const inferred = ResponsesConverter.inferStreamingFlag(b, req);
-        if (typeof inferred === 'boolean') out.stream = inferred;
-        if (typeof b.tools !== 'undefined') out.tools = b.tools;
-        if (typeof b.tool_choice !== 'undefined') out.tool_choice = b.tool_choice;
-        if (typeof b.parallel_tool_calls !== 'undefined') out.parallel_tool_calls = b.parallel_tool_calls;
-
-        // Prefer existing Responses fields
-        if (typeof b.instructions === 'string') out.instructions = b.instructions;
-        if (typeof b.input !== 'undefined') out.input = b.input;
-
-        // If Chat messages present, derive instructions/input
-        if (Array.isArray(b.messages)) {
-          let sys: string[] = [];
-          let userTexts: string[] = [];
-          for (const m of b.messages) {
-            if (!m || typeof m !== 'object') continue;
-            const role = (m as any).role;
-            const content = (m as any).content;
-            if (role === 'system' && typeof content === 'string' && content.trim()) sys.push(content.trim());
-            if (role === 'user' && typeof content === 'string' && content.trim()) userTexts.push(content.trim());
-            if (role === 'user' && Array.isArray(content)) {
-              for (const part of content) {
-                if (part && typeof part === 'object' && typeof (part as any).text === 'string' && (part as any).text.trim()) {
-                  userTexts.push((part as any).text.trim());
+        const merged: any = { ...b };
+        // model：如缺失则置为 unknown（不强行覆盖已有值）
+        if (typeof merged.model !== 'string' || !merged.model) {
+          merged.model = 'unknown';
+        }
+        // stream：仅当未显式给出时，按 Accept 头推断
+        if (typeof merged.stream !== 'boolean') {
+          const inferred = ResponsesConverter.inferStreamingFlag(b, req);
+          if (typeof inferred === 'boolean') merged.stream = inferred;
+        }
+        // 若原本没有 instructions/input，则尝试从 Chat 形状派生
+        if (typeof merged.instructions !== 'string' || merged.instructions.trim() === '') {
+          if (Array.isArray(b.messages)) {
+            const sys: string[] = [];
+            for (const m of b.messages) {
+              if (!m || typeof m !== 'object') continue;
+              const role = (m as any).role;
+              const content = (m as any).content;
+              if (role === 'system' && typeof content === 'string' && content.trim()) sys.push(content.trim());
+            }
+            if (sys.length) merged.instructions = sys.join('\n\n');
+          }
+        }
+        if (typeof merged.input === 'undefined' || (typeof merged.input === 'string' && merged.input.trim() === '')) {
+          if (Array.isArray(b.messages)) {
+            const userTexts: string[] = [];
+            for (const m of b.messages) {
+              if (!m || typeof m !== 'object') continue;
+              const role = (m as any).role;
+              const content = (m as any).content;
+              if (role === 'user' && typeof content === 'string' && content.trim()) userTexts.push(content.trim());
+              if (role === 'user' && Array.isArray(content)) {
+                for (const part of content) {
+                  if (part && typeof part === 'object' && typeof (part as any).text === 'string' && (part as any).text.trim()) {
+                    userTexts.push((part as any).text.trim());
+                  }
                 }
               }
             }
+            if (userTexts.length) merged.input = userTexts.join('\n');
           }
-          if (sys.length && !out.instructions) out.instructions = sys.join('\n\n');
-          if (userTexts.length && typeof out.input === 'undefined') out.input = userTexts.join('\n');
-        }
-
-        // If still no input but Anthropic content exists, flatten to input
-        if (typeof out.input === 'undefined' && Array.isArray(b.content)) {
-          const texts: string[] = [];
-          for (const c of b.content) {
-            if (c && typeof c === 'object' && (c.type === 'text' || c.type === 'output_text') && typeof c.text === 'string' && c.text.trim()) {
-              texts.push(c.text.trim());
+          // Anthropic content 兼容
+          if (typeof merged.input === 'undefined' && Array.isArray(b.content)) {
+            const texts: string[] = [];
+            for (const c of b.content) {
+              if (c && typeof c === 'object' && (c.type === 'text' || c.type === 'output_text') && typeof c.text === 'string' && c.text.trim()) {
+                texts.push(c.text.trim());
+              }
             }
+            if (texts.length) merged.input = texts.join('\n');
           }
-          if (texts.length) out.input = texts.join('\n');
         }
 
-        // Finalize: drop foreign fields
-        req.body = out;
-        try { res.setHeader('x-rc-adapter', 'normalized:chat|anthropic->responses'); } catch { /* ignore */ }
+        req.body = merged; // 不移除任何原字段
+        try { res.setHeader('x-rc-adapter', 'normalized:chat|anthropic->responses:non-lossy'); } catch { /* ignore */ }
       } catch { /* non-blocking */ }
 
       // Minimal validation for Responses-shaped request
@@ -373,8 +378,13 @@ export class ResponsesHandler extends BaseHandler {
       const rawInitial = (response && typeof response === 'object' && (response as any).__initial) ? (response as any).__initial : response;
       const rawFinal = (response && typeof response === 'object' && (response as any).__final) ? (response as any).__final : response;
 
-      // Normalize both initial/final payloads into OpenAI Responses JSON via llmswitch
-      const toResponsesShape = async (payload: any) => await ResponsesMapper.chatToResponsesFromMapping(payload);
+      // Normalize both initial/final payloads into OpenAI Responses JSON (passthrough if already Responses)
+      const toResponsesShape = async (payload: any) => {
+        if (payload && typeof payload === 'object' && (payload as any).object === 'response') {
+          return payload as Record<string, unknown>;
+        }
+        return await ResponsesMapper.chatToResponsesFromMapping(payload);
+      };
       const initialResp = await toResponsesShape(rawInitial);
       const finalResp = await toResponsesShape(rawFinal);
 
@@ -452,7 +462,8 @@ export class ResponsesHandler extends BaseHandler {
         if (requestMeta.store !== undefined && !snap.store) snap.store = requestMeta.store;
         if (requestMeta.include && !snap.include) snap.include = requestMeta.include;
         if (requestMeta.prompt_cache_key && !snap.prompt_cache_key) snap.prompt_cache_key = requestMeta.prompt_cache_key;
-        snap.model = model || snap.model || 'unknown';
+        // Prefer provider-reported model; only fallback to request model when missing
+        snap.model = (snap.model as string) || (model as string) || 'unknown';
         if (!snap.metadata) snap.metadata = {};
         if (!Array.isArray(snap.output) && Array.isArray(finalResp?.output)) snap.output = finalResp?.output;
         if (!('output_text' in snap)) snap.output_text = finalResp?.output_text ?? textOut ?? '';
@@ -485,189 +496,93 @@ export class ResponsesHandler extends BaseHandler {
         response: { ...inProgressResp, created_at: createdTs }
       });
 
-      // Emit reasoning item + summary parts (two summaries) to align with upstream shape
-      try {
-        const reasoningId = `rs_${requestId.replace(/[^a-zA-Z0-9]/g,'')}`;
-        const randB64 = (len = 32) => {
-          try { const c = require('crypto'); return c.randomBytes(len).toString('base64'); } catch { return Buffer.from(String(Date.now())).toString('base64'); }
+      // 如果是工具调用场景：按透传方式流 function_call 参数增量并最终发送 completed（SSE 不发送 required_action）
+      const raExisting = (initialResp as any)?.required_action || (finalResp as any)?.required_action;
+      const getFunctionCalls = (resp: any): any[] => {
+        const out = Array.isArray(resp?.output) ? resp.output : [];
+        return out.filter((it: any) => it && (it.type === 'function_call' || it.type === 'tool_call'));
+      };
+      const deriveRequiredAction = (funcCalls: any[]): Record<string, unknown> | null => {
+        if (!Array.isArray(funcCalls) || funcCalls.length === 0) return null;
+        const toStringArgs = (v: any): string => {
+          if (typeof v === 'string') return v;
+          try { return JSON.stringify(v ?? {}); } catch { return '{}'; }
         };
-        // output_item.added(reasoning)
-        await writeEvt('response.output_item.added', {
-          type: 'response.output_item.added',
-          output_index: 0,
-          item: { id: reasoningId, type: 'reasoning', encrypted_content: randB64(96), summary: [] }
+        const calls = funcCalls.map((it: any) => {
+          const id = typeof it.id === 'string' ? it.id : (typeof it.call_id === 'string' ? it.call_id : `call_${Math.random().toString(36).slice(2,8)}`);
+          const name = typeof it.name === 'string' ? it.name : (typeof it.tool_name === 'string' ? it.tool_name : (it?.function?.name || 'tool'));
+          const argsVal = it.arguments ?? it?.function?.arguments ?? {};
+          const argsStr = toStringArgs(argsVal);
+          return { id, type: 'function', function: { name: String(name), arguments: String(argsStr) } };
         });
-        const makeSummary = (seed?: string): string => {
-          const s = (typeof seed === 'string' && seed.trim()) ? seed.trim() : 'Summarizing reasoning for the current turn.';
-          return s.length > 480 ? s.slice(0, 480) : s;
+        return { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: calls } } as Record<string, unknown>;
+      };
+      const funcCalls = getFunctionCalls(finalResp) as any[];
+      if (Array.isArray(funcCalls) && funcCalls.length > 0) {
+        // Stream function_call lifecycle and arguments deltas
+        const toArgsStr = (v: any) => (typeof v === 'string' ? v : (() => { try { return JSON.stringify(v ?? {}); } catch { return '{}'; } })());
+        const canonicalizeTool = (name: string | undefined, argsStr: string): { name: string; args: string } => {
+          const whitelist = new Set(['read_mcp_resource', 'list_mcp_resources', 'list_mcp_resource_templates']);
+          if (!name || typeof name !== 'string') return { name: 'tool', args: argsStr };
+          const dot = name.indexOf('.');
+          if (dot <= 0) return { name, args: argsStr };
+          const prefix = name.slice(0, dot).trim();
+          const base = name.slice(dot + 1).trim();
+          if (!whitelist.has(base)) return { name, args: argsStr };
+          let obj: any;
+          try { obj = JSON.parse(argsStr || '{}'); } catch { obj = {}; }
+          if (!obj || typeof obj !== 'object' || Array.isArray(obj)) obj = {};
+          if (obj.server == null || obj.server === '') obj.server = prefix;
+          return { name: base, args: JSON.stringify(obj) };
         };
-        const summary0 = makeSummary(typeof requestMeta?.instructions === 'string' ? String(requestMeta?.instructions) : undefined);
-        const summary1 = makeSummary('Planning tool invocation and response formatting.');
-        const chunk = async (text: string, summaryIndex: number) => {
-          // part.added
-          await writeEvt('response.reasoning_summary_part.added', {
-            type: 'response.reasoning_summary_part.added',
-            item_id: reasoningId,
-            output_index: 0,
-            summary_index: summaryIndex,
-            part: { type: 'summary_text', text: '' }
-          });
-          // deltas with obfuscation placeholder
-          const words = text.split(/\s+/g).filter(Boolean);
-          let acc = '';
-          for (const w of words) {
-            acc += (acc ? ' ' : '') + w;
-            if (acc.length >= 24) {
-              await writeEvt('response.reasoning_summary_text.delta', {
-                type: 'response.reasoning_summary_text.delta',
-                item_id: reasoningId,
-                output_index: 0,
-                summary_index: summaryIndex,
-                delta: acc,
-                obfuscation: randB64(6)
-              });
-              acc = '';
-            }
+        let outIndex = 0;
+        for (const it of funcCalls) {
+          const id = typeof it.id === 'string' ? it.id : (typeof it.call_id === 'string' ? it.call_id : `call_${Math.random().toString(36).slice(2, 8)}`);
+          const call_id = typeof it.call_id === 'string' ? it.call_id : id;
+          const rawName = typeof it.name === 'string' ? it.name : (typeof it.tool_name === 'string' ? it.tool_name : (it?.function?.name || 'tool'));
+          const rawArgs = toArgsStr(it.arguments ?? it?.function?.arguments ?? {});
+          const { name, args: argsStr } = canonicalizeTool(rawName, rawArgs);
+          await writeEvt('response.output_item.added', { type: 'response.output_item.added', output_index: outIndex, item: { id, type: 'function_call', status: 'in_progress', arguments: '', call_id, name } });
+          await writeEvt('response.content_part.added', { type: 'response.content_part.added', item_id: id, output_index: outIndex, content_index: 0, part: { type: 'input_json', partial_json: '' } });
+          // arguments deltas
+          const parts = Math.max(3, Math.min(12, Math.ceil(argsStr.length / 8)));
+          const step = Math.max(1, Math.ceil(argsStr.length / parts));
+          for (let i = 0; i < argsStr.length; i += step) {
+            const d = argsStr.slice(i, i + step);
+            await writeEvt('response.function_call_arguments.delta', { type: 'response.function_call_arguments.delta', item_id: id, output_index: outIndex, delta: d });
           }
-          if (acc) {
-            await writeEvt('response.reasoning_summary_text.delta', {
-              type: 'response.reasoning_summary_text.delta',
-              item_id: reasoningId,
-              output_index: 0,
-              summary_index: summaryIndex,
-              delta: acc,
-              obfuscation: randB64(6)
-            });
-          }
-          // text.done
-          await writeEvt('response.reasoning_summary_text.done', {
-            type: 'response.reasoning_summary_text.done',
-            item_id: reasoningId,
-            output_index: 0,
-            summary_index: summaryIndex,
-            text
-          });
-          // part.done with final text
-          await writeEvt('response.reasoning_summary_part.done', {
-            type: 'response.reasoning_summary_part.done',
-            item_id: reasoningId,
-            output_index: 0,
-            summary_index: summaryIndex,
-            part: { type: 'summary_text', text }
-          });
-        };
-        await chunk(summary0, 0);
-        await chunk(summary1, 1);
-      } catch { /* ignore reasoning stream synthesis */ }
-
-      // Emit tool/function_call events after message, with output_index = 2
-      // Assistant text deltas
-      const hadToolFirstTurn = (
-        (Array.isArray((initialResp as any)?.output) && (initialResp as any).output.some((x: any) => x && (x.type === 'tool_call' || x.type === 'function_call')))
-        || (Array.isArray((initialResp as any)?.content) && (initialResp as any).content.some((x: any) => x?.type === 'tool_use'))
-      );
-      // 仅当确有文本时才发送 message 文本生命周期，避免空消息导致客户端误判重试
-      if (words.length > 0) {
-        // Emit item lifecycle gated by config
-        const cfg = await ResponsesConfigUtil.load();
-        if (cfg.sse.emitTextItemLifecycle) {
-          const msgId = `msg_${requestId}`;
-          await writeEvt('response.output_item.added', { type: 'response.output_item.added', output_index: 1, item: { id: msgId, type: 'message', role: 'assistant', status: 'in_progress', content: [] } });
-          await writeEvt('response.content_part.added', { type: 'response.content_part.added', item_id: msgId, output_index: 1, content_index: 0, part: { type: 'output_text', annotations: [], logprobs: [], text: '' } });
-          for (const w of words) {
-            await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', item_id: msgId, output_index: 1, content_index: 0, delta: w + ' ', logprobs: [] });
-            await new Promise(r => setTimeout(r, 12));
-          }
-          await writeEvt('response.output_text.done', { type: 'response.output_text.done', item_id: msgId, output_index: 1, content_index: 0, logprobs: [] });
-          await writeEvt('response.content_part.done', { type: 'response.content_part.done', item_id: msgId, output_index: 1, content_index: 0 });
-          await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: 1, item: { id: msgId, type: 'message', status: 'completed' } });
-        } else {
-          // Minimal text-only delta/done
-          for (const w of words) {
-            await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', output_index: 1, item_id: `msg_${requestId}`, content_index: 0, delta: w + ' ', logprobs: [] });
-            await new Promise(r => setTimeout(r, 12));
-          }
-          await writeEvt('response.output_text.done', { type: 'response.output_text.done', output_index: 1, item_id: `msg_${requestId}`, content_index: 0, logprobs: [] });
+          await writeEvt('response.function_call_arguments.done', { type: 'response.function_call_arguments.done', item_id: id, output_index: outIndex, arguments: String(argsStr) });
+          await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: outIndex, item: { id, type: 'function_call', status: 'completed', arguments: String(argsStr), call_id, name } });
+          outIndex += 1;
         }
+        // After function_call streaming, emit completed and close
+        const srcUsage2 = finalResp?.usage ? finalResp.usage : (initialResp?.usage ? initialResp.usage : undefined);
+        const usage2 = (() => {
+          if (!srcUsage2 || typeof srcUsage2 !== 'object') return undefined as unknown as Record<string, number> | undefined;
+          const input = (typeof (srcUsage2 as any).input_tokens === 'number') ? (srcUsage2 as any).input_tokens : (typeof (srcUsage2 as any).prompt_tokens === 'number' ? (srcUsage2 as any).prompt_tokens : 0);
+          const output = (typeof (srcUsage2 as any).output_tokens === 'number') ? (srcUsage2 as any).output_tokens : (typeof (srcUsage2 as any).completion_tokens === 'number' ? (srcUsage2 as any).completion_tokens : 0);
+          const total = (typeof (srcUsage2 as any).total_tokens === 'number') ? (srcUsage2 as any).total_tokens : (input + output);
+          return { input_tokens: input, output_tokens: output, total_tokens: total } as Record<string, number>;
+        })();
+        const completedSnapshot2 = { ...baseResp, status: 'completed' } as Record<string, unknown>;
+        completedSnapshot2.created_at = completedSnapshot2.created_at ?? createdTs;
+        if (usage2) completedSnapshot2.usage = usage2;
+        const completed2 = { type: 'response.completed', response: toCleanObject(completedSnapshot2) } as Record<string, unknown>;
+        await writeEvt('response.completed', completed2);
+        try { res.end(); } catch { /* ignore */ }
+        await auditWrite('end', { phase: 'completed_after_function_call' });
+        if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+        return;
       }
 
-      // After text/message, emit function_call stream if present (output_index = 2)
-      try {
-        const emitToolCallsFromResponsesOutput = async (resp: any) => {
-          const out = Array.isArray(resp?.output) ? resp.output : [];
-          for (const it of out) {
-            if (!it || typeof it !== 'object') continue;
-            if ((it as any).type === 'tool_call' || (it as any).type === 'function_call') {
-              const id = (it as any).id || `call_${Math.random().toString(36).slice(2)}`;
-              const call_id = (it as any).call_id || id;
-              const name = (it as any).tool_name || (it as any).name || 'tool';
-              const argsVal = (it as any).arguments ?? (it as any)?.tool_call?.function?.arguments ?? {};
-              let argsStr = typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal);
-              // Strict validation: do NOT normalize or fixup; if invalid vs schema, stream error and stop
-              try {
-                const error400 = (m: string) => { const e: any = new Error(m); (e as any).status = 400; (e as any).code = 'validation_error'; return e; };
-                const ensureObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-                // eslint-disable-next-line @typescript-eslint/no-var-requires
-                const { normalizeTools } = require('../../modules/pipeline/modules/llmswitch/utils/tool-schema-normalizer.js');
-                const toolsNorm = Array.isArray(reqTools) ? normalizeTools(reqTools) : [];
-                const findSchema = (fnName?: string): Record<string, unknown> | undefined => {
-                  if (!fnName || !Array.isArray(toolsNorm)) return undefined;
-                  for (const t of toolsNorm) { const f: any = (t as any).function; if (f?.name === fnName) return f.parameters as Record<string, unknown>; }
-                  return undefined;
-                };
-                const getKind = (schema: any, key: string): 'string'|'arrayString'|'object'|'any' => {
-                  try {
-                    const s = schema?.properties?.[key];
-                    const t = s?.type; if (t === 'string') return 'string'; if (t === 'object') return 'object'; if (t === 'array' && s?.items?.type === 'string') return 'arrayString';
-                  } catch {}
-                  return 'any';
-                };
-                // Must be JSON string and object
-                let parsed: any; try { parsed = JSON.parse(argsStr); } catch { throw error400('Tool call arguments must be valid JSON'); }
-                if (!ensureObj(parsed)) throw error400('Tool call arguments must be a JSON object');
-                const schema = findSchema(typeof name === 'string' ? name : undefined);
-                if (schema && ensureObj((schema as any).properties)) {
-                  const reqd: string[] = Array.isArray((schema as any).required) ? (schema as any).required as string[] : [];
-                  for (const k of reqd) { if (!(k in parsed)) throw error400(`Missing required argument: ${k}`); }
-                  for (const k of Object.keys((schema as any).properties)) {
-                    if (!(k in parsed)) continue;
-                    const kind = getKind(schema, k);
-                    const val = (parsed as any)[k];
-                    if (kind === 'string' && typeof val !== 'string') throw error400(`Invalid type for ${k}: expected string`);
-                    if (kind === 'object' && !ensureObj(val)) throw error400(`Invalid type for ${k}: expected object`);
-                    if (kind === 'arrayString' && (!Array.isArray(val) || !val.every((x: any) => typeof x === 'string'))) throw error400(`Invalid type for ${k}: expected array<string>`);
-                  }
-                }
-              } catch (e) {
-                const errMsg = (e as Error).message || 'Invalid tool call arguments';
-                await writeEvt('response.error', { type: 'response.error', error: { message: errMsg, type: 'validation_error', code: 'ARGS_INVALID' }, requestId });
-                await auditWrite('error', { phase: 'args_validation', message: errMsg, item_id: id, call_id, name });
-                try { res.end(); } catch { /* ignore */ }
-                if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-                streamAborted = true;
-                return;
-              }
-              // output_item.added(function_call)
-              await writeEvt('response.output_item.added', { type: 'response.output_item.added', output_index: 2, item: { id, type: 'function_call', status: 'in_progress', arguments: '', call_id, name } });
-              await writeEvt('response.content_part.added', { type: 'response.content_part.added', item_id: id, output_index: 2, content_index: 0, part: { type: 'input_json', partial_json: '' } });
-              // chunk arguments
-              const step = Math.max(1, Math.floor(String(argsStr).length / 3));
-              for (let i = 0; i < String(argsStr).length; i += step) {
-                const d = String(argsStr).slice(i, i + step);
-                await writeEvt('response.function_call_arguments.delta', { type: 'response.function_call_arguments.delta', item_id: id, output_index: 2, delta: d });
-              }
-              await writeEvt('response.function_call_arguments.done', { type: 'response.function_call_arguments.done', item_id: id, output_index: 2, arguments: String(argsStr), name });
-              await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: 2, item: { id, type: 'function_call', status: 'completed', arguments: String(argsStr), call_id, name } });
-            }
-          }
-        };
-        const toolSource = finalResp && typeof finalResp === 'object' ? finalResp : {};
-        await emitToolCallsFromResponsesOutput(toolSource);
-        if (streamAborted) {
-          // Tool args invalid and stream closed; stop further writes
-          return;
+      // 文本直出：仅输出 output_text.delta/done（不做额外 reasoning/message 合成）
+      if (words.length > 0) {
+        for (const w of words) {
+          await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: w + ' ', logprobs: [] });
+          await new Promise(r => setTimeout(r, 12));
         }
-      } catch { /* ignore */ }
+        await writeEvt('response.output_text.done', { type: 'response.output_text.done', output_index: 0, content_index: 0, logprobs: [] });
+      }
 
       // response.completed (attach total output_text when available)
       // Map usage from final turn if available
@@ -693,56 +608,13 @@ export class ResponsesHandler extends BaseHandler {
         delete completedSnapshot.output_text;
       }
       if (usage) completedSnapshot.usage = usage;
-      // Ensure completed.output includes reasoning/message(function optional)/function_call in order
+      // Ensure completed.output 仅包含聚合文本（如存在）；不注入 reasoning/function_call 条目
       try {
-        const ensureCompletedOutput = () => {
-          const list = Array.isArray((completedSnapshot as any).output) ? ((completedSnapshot as any).output as any[]) : [];
-          const hasType = (t: string) => list.some(x => x && typeof x === 'object' && x.type === t);
-          // seed reasoning summaries from earlier
-          const reasoningItem = { type: 'reasoning', content: [ { type: 'summary_text', text: 'Summarizing reasoning for the current turn.' }, { type: 'summary_text', text: 'Planning tool invocation and response formatting.' } ] } as any;
-          if (!hasType('reasoning')) list.unshift(reasoningItem);
-          // message item from aggregated text (only when non-empty)
-          if (textOut && textOut.trim()) {
-            const msgItem = { type: 'message', message: { role: 'assistant', content: [ { type: 'output_text', text: textOut } ] } } as any;
-            if (!hasType('message')) list.push(msgItem);
-          }
-          // function_call item exists from finalResp mapping; if missing, try to derive from finalResp (no status in completed snapshot)
-          const addFunc = () => {
-            const out = Array.isArray((finalResp as any)?.output) ? (finalResp as any).output : [];
-            const it = out.find((x: any) => x && (x.type === 'function_call' || x.type === 'tool_call'));
-            if (it) {
-              list.push({
-                type: 'function_call',
-                id: it.id || `call_${Math.random().toString(36).slice(2,8)}`,
-                call_id: it.call_id || it.id,
-                name: it.name || it.tool_name || 'tool',
-                arguments: typeof it.arguments === 'string' ? it.arguments : JSON.stringify(it.arguments || {})
-              });
-            }
-          };
-          if (!hasType('function_call')) addFunc();
-          // If本轮已流式输出了 function_call.* 事件，则在 completed 快照中去掉 function_call 条目，避免客户端重复判定需要继续执行工具
-          try {
-            const toolStreamed = hadToolFirstTurn === true;
-            if (toolStreamed) {
-              const kept: any[] = [];
-              for (const it of list) {
-                if (it && typeof it === 'object' && it.type === 'function_call') continue;
-                kept.push(it);
-              }
-              (completedSnapshot as any).output = kept;
-              return;
-            }
-          } catch { /* ignore */ }
-          // Normalize function_call items in completed snapshot: force status to 'completed' (or remove)
-          for (const it of list) {
-            if (it && typeof it === 'object' && (it.type === 'function_call')) {
-              if (it.status && it.status !== 'completed') it.status = 'completed';
-            }
-          }
-          (completedSnapshot as any).output = list;
-        };
-        ensureCompletedOutput();
+        const list: any[] = [];
+        if (textOut && textOut.trim()) {
+          list.push({ type: 'message', message: { role: 'assistant', content: [ { type: 'output_text', text: textOut } ] } });
+        }
+        (completedSnapshot as any).output = list;
       } catch { /* ignore */ }
       const completed = { type: 'response.completed', response: toCleanObject(completedSnapshot) } as Record<string, unknown>;
       if (streamAborted) { return; }
@@ -872,15 +744,11 @@ export class ResponsesHandler extends BaseHandler {
         }
       }
       return await ResponsesMapper.enrichResponsePayload(converted as Record<string, unknown>, payload as Record<string, unknown>, reqMeta as Record<string, unknown>);
-    } catch {
-      // Fallback minimal Responses wrapper
-      const model = (payload && (payload as any).model) || 'unknown';
-      const id = (payload && (payload as any).id) || `resp_${Date.now()}`;
-      const text = (payload && (payload as any).choices && (payload as any).choices[0] && (payload as any).choices[0].message && typeof (payload as any).choices[0].message.content === 'string')
-        ? (payload as any).choices[0].message.content
-        : '';
-      const base = { id, object: 'response', created: Math.floor(Date.now()/1000), model, status: 'completed', output: [], output_text: text };
-      return await ResponsesMapper.enrichResponsePayload(base, payload as Record<string, unknown>, reqMeta as Record<string, unknown>);
+    } catch (e) {
+      // 不允许 fallback：严格报错，便于定位转换问题
+      const msg = (e as Error)?.message || 'Responses conversion failed (Chat→Responses)';
+      const err = new RouteCodexError(msg, 'conversion_error', 400);
+      throw err;
     }
   }
 }

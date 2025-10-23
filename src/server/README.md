@@ -324,7 +324,7 @@ curl -X POST http://localhost:5506/v1/responses \
   - 工具优先判定同时识别 `function_call/tool_call/tool_use`，避免漏判导致“空消息骨架”。
 
 - 不发送的事件：
-  - 不发送 `response.required_action`（Responses SSE 中不使用该事件）。
+  - 当需要工具调用时发送 `response.required_action`，并在该事件后结束本轮流（不发送 `response.completed`）。
 
 - 工具执行策略：
   - 服务器端不执行任何工具；工具由客户端执行并决定是否发起下一轮请求。

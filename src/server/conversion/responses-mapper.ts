@@ -281,19 +281,50 @@ export class ResponsesMapper {
       return '';
     })();
 
+    // Helper: canonicalize server.method → canonical function name + inject server param
+    const canonicalizeTool = (name: string | undefined, argsStr: string): { name: string; args: string } => {
+      const whitelist = new Set(['read_mcp_resource', 'list_mcp_resources', 'list_mcp_resource_templates']);
+      if (!name || typeof name !== 'string') return { name: 'tool', args: argsStr };
+      const dot = name.indexOf('.');
+      if (dot <= 0) return { name, args: argsStr };
+      const prefix = name.slice(0, dot).trim();
+      const base = name.slice(dot + 1).trim();
+      if (!whitelist.has(base)) return { name, args: argsStr };
+      let obj: any;
+      try { obj = JSON.parse(argsStr || '{}'); } catch { throw new Error('Tool call arguments must be valid JSON'); }
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('Tool call arguments must be a JSON object');
+      if (obj.server == null || obj.server === '') obj.server = prefix;
+      return { name: base, args: JSON.stringify(obj) };
+    };
+
     // Extract tool calls (OpenAI Chat)
     const toolCalls = Array.isArray(payload?.choices?.[0]?.message?.tool_calls)
       ? payload.choices[0].message.tool_calls as any[] : [];
 
     const output: any[] = [];
+    // Map provider Chat reasoning_content (if present) into a reasoning output item
+    const reasoningText = (() => {
+      try {
+        const rc = payload?.choices?.[0]?.message?.reasoning_content;
+        if (typeof rc === 'string') {
+          const t = rc.trim();
+          return t.length ? t : '';
+        }
+      } catch { /* ignore */ }
+      return '';
+    })();
+    if (reasoningText) {
+      output.push({ type: 'reasoning', content: [{ type: 'output_text', text: reasoningText }] });
+    }
     if (text) {
       output.push({ type: 'message', message: { role: 'assistant', content: [{ type: 'output_text', text }] } });
     }
     for (const tc of toolCalls) {
       const callId = typeof tc?.id === 'string' ? tc.id : `call_${Math.random().toString(36).slice(2,8)}`;
       const fn = (tc && typeof tc.function === 'object') ? tc.function : undefined;
-      const fnName = typeof fn?.name === 'string' ? fn.name : 'tool';
-      const args = typeof fn?.arguments === 'string' ? fn.arguments : (fn?.arguments ? JSON.stringify(fn.arguments) : '');
+      const fnNameRaw = typeof fn?.name === 'string' ? fn.name : 'tool';
+      const argsRaw = typeof fn?.arguments === 'string' ? fn.arguments : (fn?.arguments ? JSON.stringify(fn.arguments) : '{}');
+      const { name: fnName, args } = canonicalizeTool(fnNameRaw, argsRaw);
       // OpenAI Responses spec uses function_call item
       output.push({ type: 'function_call', id: callId, call_id: callId, name: fnName, arguments: args, status: 'in_progress' });
     }

@@ -340,3 +340,10 @@ Summary
   - 在 llmswitch captureRequestContext 捕获 tools，便于出站映射时使用 schema 做 arguments 形态规范化。
 ## 0.52.10 - 2025-10-21
 - 修复 SSE 归一化路径：更正 responses.ts 中对 `arguments-normalizer` 与 `tool-schema-normalizer` 的 require 路径，确保运行时命中归一化逻辑（之前因路径错误未生效）。
+## 0.53.0 - 2025-10-23
+- Responses: 第一轮流式对齐透传行为（工具调用场景）
+  - 流式输出 function_call 生命周期（output_item.added → content_part.added → function_call_arguments.delta/done → output_item.done）
+  - 以 response.completed 作为终止事件；SSE 不再发送 response.required_action
+  - 保留 provider 回包的 model/字段，不做二次转换；转换链路无 fallback，失败显式报错
+- 请求侧：Chat/Anthropic → Responses 为“无损转换”，仅补全 model/stream/instructions/input
+- 修正：当 provider 已返回 Responses 形状时，跳过 Chat 逆转换，避免丢失 function_call

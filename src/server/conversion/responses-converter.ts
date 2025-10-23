@@ -6,6 +6,7 @@
  */
 
 import type { Request } from 'express';
+import { RouteCodexError } from '../types.js';
 
 export interface NormalizedResponsesRequest {
   model: string;
@@ -95,36 +96,13 @@ export class ResponsesConverter {
         ...(typeof result.parallel_tool_calls !== 'undefined' ? { parallel_tool_calls: result.parallel_tool_calls } : {})
       };
       return chat;
-    } catch {
-      // Fallback minimal conversion
-      const messages: Array<Record<string, unknown>> = [];
-      const pushText = (role: string, value: unknown) => {
-        if (value == null) return;
-        if (typeof value === 'string') {
-          const t = value.trim();
-          if (t) messages.push({ role, content: t });
-          return;
-        }
-        if (Array.isArray(value)) {
-          const texts = (value as Array<any>)
-            .map((v) => (v && typeof v.text === 'string') ? v.text.trim() : '')
-            .filter(Boolean);
-          if (texts.length) messages.push({ role, content: texts.join('\n') });
-          return;
-        }
-        try { messages.push({ role, content: JSON.stringify(value) }); } catch { messages.push({ role, content: String(value) }); }
-      };
-      if (payload?.instructions) pushText('system', payload.instructions);
-      if (payload?.input !== undefined) pushText('user', payload.input);
-      return {
-        model: String(modelOverride || payload?.model || 'unknown'),
-        stream: false,
-        messages,
-        ...(typeof payload?.tools !== 'undefined' ? { tools: payload.tools } : {}),
-        ...(typeof payload?.tool_choice !== 'undefined' ? { tool_choice: payload.tool_choice } : {}),
-        ...(typeof payload?.parallel_tool_calls !== 'undefined' ? { parallel_tool_calls: payload.parallel_tool_calls } : {})
-      } as ChatRequestPayload;
+    } catch (e) {
+      // 不允许 fallback：严格报错
+      const msg = (e as Error)?.message || 'Responses→Chat conversion failed';
+      throw new RouteCodexError(msg, 'conversion_error', 400);
     }
+    // 理论上不可达：上面的 try 要么 return，要么抛错
+    throw new RouteCodexError('Responses→Chat conversion returned no result', 'conversion_error', 500);
   }
 
   /** Convert provider Chat payload to Responses JSON (non-stream) */
@@ -148,31 +126,11 @@ export class ResponsesConverter {
         }
         return converted as Record<string, unknown>;
       }
-    } catch { /* ignore */ }
-
-    // Fallback minimal mapping (text only)
-    const text = (() => {
-      try {
-        const s = (payload as any)?.choices?.[0]?.message?.content;
-        if (typeof s === 'string') return s;
-        if (Array.isArray(s)) {
-          const t = s.map((p: any) => (p && typeof p.text === 'string') ? p.text : (typeof p === 'string' ? p : '')).filter(Boolean).join(' ');
-          return t;
-        }
-      } catch { /* ignore */ }
-      return '';
-    })();
-    const model = (payload as any)?.model || 'unknown';
-    return {
-      id: (payload as any)?.id || `resp_${Date.now()}`,
-      object: 'response',
-      created: Math.floor(Date.now() / 1000),
-      model,
-      status: 'completed',
-      output: text ? [{ type: 'message', message: { role: 'assistant', content: [{ type: 'output_text', text }] } }] : [],
-      output_text: text,
-      ...(context?.instructions ? { instructions: context.instructions } : {})
-    } as Record<string, unknown>;
+      throw new RouteCodexError('Provider→Responses produced non-Responses payload', 'conversion_error', 502);
+    } catch (e) {
+      const msg = (e as Error)?.message || 'Provider→Responses conversion failed';
+      throw new RouteCodexError(msg, 'conversion_error', 502);
+    }
   }
 
   static mapUsage(u: any): { input_tokens: number; output_tokens: number; total_tokens: number } | undefined {
@@ -185,4 +143,3 @@ export class ResponsesConverter {
     return { input_tokens: input, output_tokens: output, total_tokens: total };
   }
 }
-
