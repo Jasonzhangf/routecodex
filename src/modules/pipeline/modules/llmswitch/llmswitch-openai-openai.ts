@@ -48,6 +48,8 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
     const normalizedPayload = (() => {
       try {
         const out: any = { ...(payload || {}) };
+        // Gate thinking at llmswitch (requests must not carry thinking)
+        try { if ('thinking' in out) { delete out.thinking; } } catch { /* ignore */ }
         const msgs = Array.isArray(out.messages) ? (out.messages as any[]) : [];
         if (!msgs.length) return out;
 
@@ -154,10 +156,7 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
               }
               return { ...tc, function: fn };
             });
-            // OpenAI 规范：当包含 tool_calls 时，assistant.content 为空串
-            if (Array.isArray(m.tool_calls) && m.tool_calls.length) {
-              if (m.content === null || typeof m.content !== 'string') { m.content = ''; }
-            }
+            // 保留 content 与 tool_calls 并存（不强制清空 content）
           }
         }
 
