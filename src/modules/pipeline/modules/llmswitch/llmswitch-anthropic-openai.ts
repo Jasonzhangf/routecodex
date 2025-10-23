@@ -61,6 +61,8 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
     const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
     const payload = isDto ? (dto!.data as any) : (requestParam as unknown as any);
     const requestFormat = detectRequestFormat(payload);
+    // Gate thinking at llmswitch: drop top-level 'thinking' on requests
+    try { if (payload && typeof payload === 'object' && 'thinking' in payload) { delete (payload as any).thinking; } } catch { /* ignore */ }
 
     // Determine entry protocol from metadata/url first; fallback to format detection
     const reqId = dto?.route?.requestId;
