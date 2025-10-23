@@ -215,11 +215,13 @@ export function buildChatRequestFromResponses(payload: Record<string, unknown>, 
     ? normalizeTools((payload as any).tools as ResponsesToolDefinition[])
     : undefined;
 
-  const messages = mapResponsesInputToChat({
+  let messages = mapResponsesInputToChat({
     instructions: context.instructions,
     input: context.input,
     toolsNormalized
   });
+  // Second pass compaction: coalesce adjacent messages when safe (same role or tool_call_id)
+  messages = compactMessages(messages);
   if (!messages.length) {
     throw new Error('Responses payload produced no chat messages');
   }
@@ -357,6 +359,44 @@ function mapResponsesInputToChat(options: { instructions?: string; input?: Respo
   // Flush any trailing tool calls
   flushToolCalls();
   return messages;
+}
+
+function compactMessages(messages: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  for (const m of messages) {
+    const prev = out[out.length - 1];
+    if (!prev) { out.push(m); continue; }
+    // Merge assistant tool_calls blocks
+    if ((prev as any).role === 'assistant' && Array.isArray((prev as any).tool_calls)
+      && (m as any).role === 'assistant' && Array.isArray((m as any).tool_calls)) {
+      (prev as any).tool_calls = [ ...(prev as any).tool_calls, ...((m as any).tool_calls as any[]) ];
+      continue;
+    }
+    // Merge consecutive tool messages with same tool_call_id
+    if ((prev as any).role === 'tool' && (m as any).role === 'tool'
+      && typeof (prev as any).tool_call_id === 'string'
+      && (prev as any).tool_call_id === (m as any).tool_call_id) {
+      const a = typeof (prev as any).content === 'string' ? (prev as any).content : String((prev as any).content ?? '');
+      const b = typeof (m as any).content === 'string' ? (m as any).content : String((m as any).content ?? '');
+      (prev as any).content = a && b ? (a + '\n' + b) : (a || b);
+      continue;
+    }
+    // Merge adjacent user text messages
+    if ((prev as any).role === 'user' && (m as any).role === 'user'
+      && typeof (prev as any).content === 'string' && typeof (m as any).content === 'string') {
+      (prev as any).content = ((prev as any).content as string) + '\n' + ((m as any).content as string);
+      continue;
+    }
+    // Merge adjacent assistant text messages (no tool_calls)
+    if ((prev as any).role === 'assistant' && (m as any).role === 'assistant'
+      && !Array.isArray((prev as any).tool_calls) && !Array.isArray((m as any).tool_calls)
+      && typeof (prev as any).content === 'string' && typeof (m as any).content === 'string') {
+      (prev as any).content = ((prev as any).content as string) + '\n' + ((m as any).content as string);
+      continue;
+    }
+    out.push(m);
+  }
+  return out;
 }
 
 function normalizeResponseRole(role: unknown): string {
