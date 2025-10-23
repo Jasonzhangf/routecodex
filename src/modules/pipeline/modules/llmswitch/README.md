@@ -28,7 +28,7 @@ LLMSwitch 模块是流水线架构的第 1 层（协议转换层），负责处�
   - 推理内容处理
   - 响应格式标准化
 
-### 🆕 Responses-Chat 转换器
+### 🆕 Responses-Chat 转换器（经由 core codecs）
 - **实现文件**: `llmswitch-response-chat.ts`
 - **功能**: OpenAI Responses API 与 Chat Completions API 互转
 - **特性**:
@@ -37,11 +37,12 @@ LLMSwitch 模块是流水线架构的第 1 层（协议转换层），负责处�
   - **流式事件**: 支持 Responses API 的所有 SSE 事件
   - **元数据保持**: 保留原始请求上下文和协议信息
   - **智能处理**: 自动处理 reasoning、function_call 等特殊内容
-  - **统一入口**: 在最新架构下，所有流水线实例都挂载 `llmswitch-conversion-router`，并依靠 `entryEndpoint` 自动匹配对应 codec（OpenAI / Anthropic / Responses），无需额外的手工配置。
+- **统一入口**: 在最新架构下，所有流水线实例都挂载 `llmswitch-conversion-router`，并依靠 `entryEndpoint` 自动匹配对应 codec（OpenAI / Anthropic / Responses），无需额外的手工配置。
+- **核心实现收敛**: 具体的转换逻辑（Responses↔Chat、OpenAI 规范化等）已迁移到 `@routecodex/llmswitch-core`，此处适配器仅做委派，避免重复实现。
 
 ### ⛔ 已废弃：统一协议转换器
 - 旧实现文件: `llmswitch-unified.ts`（已弃用）
-- 说明: 统一路由现由 `llmswitch-conversion-router` + `conversion/switch-orchestrator` + `conversion/codecs/*` 负责，请勿再使用旧统一模块。
+- 说明: 统一路由现由 `llmswitch-conversion-router` + `@routecodex/llmswitch-core` 的 `switch-orchestrator` + `codecs/*` 负责，请勿再使用旧统一模块。
 
 ## 🌟 核心功能
 
@@ -141,7 +142,7 @@ private validateProtocol(request: any, protocol: string): void {
 
 ```
 src/modules/pipeline/modules/llmswitch/
-├── (已移除) openai-normalizer.ts     # 旧的 OpenAI 规范化实现，逻辑收敛到 codecs
+├── (兼容保留) openai-normalizer.ts   # 旧的 OpenAI 规范化实现，逻辑已收敛到 core/codecs，文件仅兼容，勿再直接引用
 ├── llmswitch-openai-openai.ts        # OpenAI → OpenAI 转换器
 ├── llmswitch-anthropic-openai.ts    # Anthropic ↔ OpenAI 转换器
 ├── llmswitch-response-chat.ts        # Responses ↔ Chat 转换器 ⭐
@@ -195,16 +196,17 @@ const chatRequest = await responsesSwitch.processIncoming({
 });
 ```
 
-### 在流水线配置中使用
+### 在流水线配置中使用（通过 conversion-router）
 ```typescript
 const pipelineConfig = {
   modules: {
     llmSwitch: {
-      type: 'llmswitch-response-chat',  // Responses 支持
+      type: 'llmswitch-conversion-router',  // 统一入口（根据 entryEndpoint 自动选择 codec）
       config: {
-        enableValidation: true,
-        enablePerformanceTracking: true,
-        preserveOriginalContext: true
+        // 由主包在运行时提供：
+        // baseDir 指向包根（包含 config/），profilesPath 相对该目录
+        baseDir: "<auto>",
+        profilesPath: "config/conversion/llmswitch-profiles.json"
       }
     }
   }
