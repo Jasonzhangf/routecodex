@@ -615,6 +615,29 @@ export class CompatibilityEngine {
       routeTargets[routeName] = expanded;
     }
 
+    // Inject Responses route pool if generic-responses provider present
+    try {
+      const hasGenericResponses = Object.entries(providers || {}).some(([, p]) => {
+        const t = String((p as any)?.normalizedType || (p as any)?.type || '').toLowerCase();
+        return t === 'generic-responses' || t === 'generic_responses';
+      });
+      if (hasGenericResponses) {
+        const keyMappings = buildKeyMappings(providers);
+        const expanded: any[] = [];
+        for (const [providerId, p] of Object.entries(providers || {})) {
+          const t = String((p as any)?.normalizedType || (p as any)?.type || '').toLowerCase();
+          if (!(t === 'generic-responses' || t === 'generic_responses')) continue;
+          const aliases = (keyMappings?.providers?.[providerId] ? Object.keys(keyMappings.providers[providerId]) : ['key1']) as string[];
+          for (const keyId of aliases) {
+            expanded.push({ providerId, modelId: 'responses', keyId });
+          }
+        }
+        if (expanded.length) {
+          routeTargets['/v1/responses'] = expanded;
+        }
+      }
+    } catch { /* ignore */ }
+
     return routeTargets;
   }
 
@@ -661,6 +684,36 @@ export class CompatibilityEngine {
       const baseURL = pCfg?.baseURL || pCfg?.baseUrl || '';
       const models = (pCfg?.models || {}) as Record<string, any>;
       const aliases = (keyMappings?.providers?.[providerId] ? Object.keys(keyMappings.providers[providerId]) : ['key1']) as string[];
+
+      // Special-case: generic-responses provider → synthesize a 'responses' model
+      if (normalizedType.toLowerCase() === 'generic-responses' || normalizedType.toLowerCase() === 'generic_responses') {
+        for (const keyId of aliases) {
+          const cfgKey = `${providerId}.responses.${keyId}`;
+          const inputProtocol = 'responses';
+          const llmSwitchType = 'llmswitch-responses-passthrough';
+          pipelines[cfgKey] = {
+            provider: {
+              type: normalizedType,
+              baseURL,
+            },
+            model: {},
+            keyConfig: {
+              keyId,
+              actualKey: keyMappings.providers?.[providerId]?.[keyId] || keyId,
+              keyType: 'apiKey',
+            },
+            protocols: {
+              input: inputProtocol,
+              output: 'responses',
+            },
+            compatibility: { type: 'passthrough-compatibility', config: {} },
+            llmSwitch: { type: llmSwitchType, config: {} },
+            workflow: { type: 'streaming-control', config: {} },
+          } as any;
+        }
+        // Skip normal model loop for this provider
+        continue;
+      }
 
       for (const [modelId, mCfg] of Object.entries(models)) {
         const maxContext = Number((mCfg as any)?.maxContext) || undefined;
