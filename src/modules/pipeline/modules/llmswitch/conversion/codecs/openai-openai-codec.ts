@@ -1,7 +1,7 @@
 import type { ModuleDependencies } from '../../../../interfaces/pipeline-interfaces.js';
 import type { ConversionCodec, ConversionContext, ConversionProfile } from '../types.js';
 import type { SharedPipelineRequest, SharedPipelineResponse } from '../../../../../../types/shared-dtos.js';
-import { normalizeChatRequest, normalizeChatResponse } from '@routecodex/llmswitch-core/conversion';
+import { normalizeChatRequest, normalizeChatResponse } from 'rcc-llmswitch-core/conversion';
 
 export class OpenAIOpenAIConversionCodec implements ConversionCodec {
   readonly id = 'openai-openai';

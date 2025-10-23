@@ -262,7 +262,7 @@ export class ResponsesMapper {
   static async chatToResponsesFromMapping(payload: any): Promise<Record<string, unknown>> {
     // Thin wrapper to core codec to avoid duplicate mapping logic; required_action 合成由调用方按需处理
     try {
-      const core = await import('@routecodex/llmswitch-core/conversion');
+      const core = await import('rcc-llmswitch-core/conversion');
       return (core as any).buildResponsesPayloadFromChat(payload, undefined) as Record<string, unknown>;
     } catch (e) {
       const err: any = new Error((e as Error)?.message || 'Chat→Responses mapping failed');

@@ -24,8 +24,7 @@
     "LICENSE"
   ],
   "bundledDependencies": [
-    "routecodex-config-compat",
-    "@routecodex/llmswitch-core"
+    "routecodex-config-compat"
   ],
   "engines": {
     "node": ">=20 <21"
@@ -37,10 +36,9 @@
     "sharedmodule/llmswitch-core"
   ],
   "scripts": {
-    "bundle:core": "node scripts/bundle-core.mjs",
-    "build": "npm run clean && npm run bundle:core && tsc",
+    "build": "npm run clean && tsc",
     "build:dev": "npm run clean && tsc && npm -w sharedmodule/llmswitch-core run build",
-    "prepack": "node scripts/bundle-core.mjs",
+    "prepack": "echo skip-prepack",
     "postbuild": "chmod +x dist/cli.js || true",
     "build:watch": "tsc --watch",
     "start": "npm run -s start:bg",
@@ -100,7 +98,7 @@
     "package:validate": "npx package-json-validator"
   },
   "dependencies": {
-    "@routecodex/llmswitch-core": "^0.1.1",
+    "rcc-llmswitch-core": "^0.1.1",
     "ajv": "^8.17.1",
     "@anthropic-ai/sdk": "^0.65.0",
     "@lmstudio/sdk": "^1.5.0",
