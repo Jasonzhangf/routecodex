@@ -23,8 +23,11 @@ export interface PreflightResult {
 
 const ALLOWED_ROLES = new Set(['system', 'user', 'assistant', 'tool']);
 // Defaults bias toward preserving information (no destructive cleanups)
-const GLM_USE_TOOL_ROLE = String(process.env.RCC_GLM_USE_TOOL_ROLE || '').trim() !== '0';
-const GLM_KEEP_LAST_ASSISTANT_TOOLCALLS = String(process.env.RCC_GLM_KEEP_LAST_ASSISTANT_TOOLCALLS || '').trim() === '1';
+// Defaults:
+// - Prefer converting tool role to user for broader GLM compatibility unless explicitly enabled
+const GLM_USE_TOOL_ROLE = String(process.env.RCC_GLM_USE_TOOL_ROLE || '0').trim() !== '0';
+// - Keep only last assistant.tool_calls by default when stripping history
+const GLM_KEEP_LAST_ASSISTANT_TOOLCALLS = String(process.env.RCC_GLM_KEEP_LAST_ASSISTANT_TOOLCALLS ?? '1').trim() === '1';
 const DEFAULT_GLM_MAX_CONTEXT_TOKENS = Number(process.env.RCC_GLM_MAX_CONTEXT_TOKENS ?? 200000);
 const DEFAULT_GLM_CONTEXT_SAFETY_RATIO = Number(process.env.RCC_GLM_CONTEXT_SAFETY_RATIO ?? 0.85);
 const DISABLE_GLM_CONTEXT_TRIM = String(process.env.RCC_GLM_DISABLE_TRIM || '1').trim() === '1';
@@ -172,7 +175,8 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
 
   // Preserve assistant.tool_calls by default; only strip when explicitly forced
   try {
-    const forceStrip = process.env.RCC_GLM_FORCE_TOOLCALL_STRIP === '1';
+    // By default, strip assistant.tool_calls from historical messages to avoid GLM 1210
+    const forceStrip = (process.env.RCC_GLM_FORCE_TOOLCALL_STRIP === '1') || (process.env.RCC_GLM_FORCE_TOOLCALL_STRIP === undefined);
     if (targetGLM && forceStrip && Array.isArray(mappedMessages) && mappedMessages.length > 0) {
       const n = mappedMessages.length;
       if (GLM_KEEP_LAST_ASSISTANT_TOOLCALLS) {
