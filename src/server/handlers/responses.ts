@@ -432,9 +432,16 @@ export class ResponsesHandler extends BaseHandler {
       };
 
       // Use final response text if available; fallback to initial
-      const textOut = extractText(finalResp) || extractText(initialResp);
+      let textOut = extractText(finalResp) || extractText(initialResp);
+      // Collapse excessive consecutive newlines to at most two (paragraph break)
+      if (typeof textOut === 'string') {
+        textOut = textOut.replace(/\n{3,}/g, '\n\n');
+      }
       // Preserve newlines during streaming by splitting into newline-aware segments
-      const words = (textOut || '').split(/(\n+)/g).filter((s: string) => s.length > 0);
+      const words = (textOut || '')
+        .split(/(\n+)/g)
+        .map((s: string) => (/^\n+$/.test(s) ? '\n' : s))
+        .filter((s: string) => s.length > 0);
 
       const toCleanObject = (obj: Record<string, unknown>) => {
         for (const key of Object.keys(obj)) {
@@ -580,7 +587,8 @@ export class ResponsesHandler extends BaseHandler {
       // 文本直出：仅输出 output_text.delta/done（不做额外 reasoning/message 合成）
       if (words.length > 0) {
         for (const w of words) {
-          await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: w, logprobs: [] });
+          const delta = /^\n+$/.test(w) ? '\n' : w;
+          await writeEvt('response.output_text.delta', { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta, logprobs: [] });
           await new Promise(r => setTimeout(r, 12));
         }
         await writeEvt('response.output_text.done', { type: 'response.output_text.done', output_index: 0, content_index: 0, logprobs: [] });
@@ -687,13 +695,13 @@ export class ResponsesHandler extends BaseHandler {
       if (Array.isArray(toolCallsPath)) {
         const error400 = (m: string) => { const e: any = new Error(m); e.status = 400; e.code = 'validation_error'; return e; };
         const ensureObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-        // Optionally validate against provided tools schema when available
+        // Optionally validate against provided tools schema when available (via core)
         let toolsNorm: Array<Record<string, unknown>> = [];
         if (Array.isArray(reqTools)) {
           try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { normalizeTools } = require('../../modules/pipeline/modules/llmswitch/utils/tool-schema-normalizer.js');
-            toolsNorm = normalizeTools(reqTools as any[]);
+            const mod = await import('@routecodex/llmswitch-core/conversion');
+            const fn = (mod as any).normalizeTools as ((t: any[]) => Array<Record<string, unknown>>);
+            if (typeof fn === 'function') toolsNorm = fn(reqTools as any[]);
           } catch { /* ignore tool schema load */ }
         }
         const findSchema = (fnName?: string): Record<string, unknown> | undefined => {

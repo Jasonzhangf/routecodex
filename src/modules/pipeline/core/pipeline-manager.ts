@@ -880,6 +880,11 @@ export class PipelineManager implements RCCBaseModule {
    * Initialize debug enhancements
    */
   private initializeDebugEnhancements(): void {
+    // Allow disabling DebugCenter enhancements via env (default off)
+    if (String(process.env.ROUTECODEX_ENABLE_DEBUGCENTER || '0') !== '1') {
+      this.isEnhanced = false;
+      return;
+    }
     try {
       this.debugEventBus = DebugEventBus.getInstance();
 
