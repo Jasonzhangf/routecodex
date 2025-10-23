@@ -58,12 +58,22 @@ export class ResponseNormalizer {
         choices: this.normalizeChoices(response.choices || []),
       };
 
-      // Normalize usage information
+      // Normalize usage information (fallback to input/output tokens for compat providers)
       if (response.usage) {
+        const u = response.usage as Record<string, unknown>;
+        const prompt = (typeof u.prompt_tokens === 'number')
+          ? (u.prompt_tokens as number)
+          : (typeof u.input_tokens === 'number' ? (u.input_tokens as number) : 0);
+        const completion = (typeof u.completion_tokens === 'number')
+          ? (u.completion_tokens as number)
+          : (typeof u.output_tokens === 'number' ? (u.output_tokens as number) : 0);
+        const total = (typeof u.total_tokens === 'number')
+          ? (u.total_tokens as number)
+          : (prompt + completion);
         normalized.usage = {
-          prompt_tokens: response.usage.prompt_tokens || 0,
-          completion_tokens: response.usage.completion_tokens || 0,
-          total_tokens: response.usage.total_tokens || 0,
+          prompt_tokens: prompt,
+          completion_tokens: completion,
+          total_tokens: total,
         };
       }
 
