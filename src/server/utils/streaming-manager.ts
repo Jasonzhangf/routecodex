@@ -37,7 +37,7 @@ export class StreamingManager {
     this.config = config;
     this.logger = new PipelineDebugLogger(null, {
       enableConsoleLogging: config.enableMetrics ?? true,
-      enableDebugCenter: true,
+      enableDebugCenter: false,
     });
   }
 

@@ -9,8 +9,7 @@ import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { normalizeArgsBySchema } from '../../utils/schema-arg-normalizer.js';
-import { normalizeTools } from './utils/tool-schema-normalizer.js';
+import { normalizeArgsBySchema, normalizeTools } from '@routecodex/llmswitch-core/conversion';
 import {
   DEFAULT_CONVERSION_CONFIG,
   detectRequestFormat,

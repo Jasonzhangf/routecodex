@@ -37,12 +37,12 @@ const DEFAULT_CONFIG: ServiceConfig = {
     logLevel: 'info'
   },
   debugEventBus: {
-    enableMetrics: true,
+    enableMetrics: false,
     bufferSize: 1000
   },
   pipelineLogger: {
     enableConsoleLogging: true,
-    enableDebugCenter: true,
+    enableDebugCenter: false,
     logLevel: 'detailed'
   }
 };

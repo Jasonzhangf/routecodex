@@ -1,7 +1,7 @@
 // Core Responses↔OpenAI Chat bridge (strict, no fallback guessing)
 // This file is self-contained to avoid cross-package imports.
 
-export type Unknown = Record<string, unknown>;
+type Unknown = Record<string, unknown>;
 
 export type ResponsesContentPart = {
   type: string;
@@ -70,7 +70,7 @@ function tryParseJson(s: unknown): unknown {
 
 function defaultObjectSchema() { return { type: 'object', properties: {}, additionalProperties: true }; }
 
-export function normalizeTools(tools: any[]): Unknown[] {
+function normalizeTools(tools: any[]): Unknown[] {
   if (!Array.isArray(tools)) return [];
   const out: Unknown[] = [];
   for (const t of tools) {
