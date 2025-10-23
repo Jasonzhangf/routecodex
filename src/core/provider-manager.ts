@@ -69,7 +69,9 @@ export class ProviderManager extends BaseModule {
     super(moduleInfo);
 
     this.config = config;
-    this.debugEventBus = DebugEventBus.getInstance();
+    try {
+      this.debugEventBus = (String(process.env.ROUTECODEX_ENABLE_DEBUGCENTER || '0') === '1') ? DebugEventBus.getInstance() : (null as any);
+    } catch { this.debugEventBus = null as any; }
     this.errorHandling = new ErrorHandlingCenter();
     this.errorUtils = ErrorHandlingUtils.createModuleErrorHandler('provider-manager');
 

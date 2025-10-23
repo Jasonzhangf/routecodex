@@ -35,9 +35,15 @@ export class GLMHTTPProvider implements ProviderModule {
     this.logger = dependencies.logger as PipelineDebugLogger;
 
     try {
-      this.debugEventBus = DebugEventBus.getInstance();
-      this.isDebugEnhanced = true;
+      if (String(process.env.ROUTECODEX_ENABLE_DEBUGCENTER || '0') === '1') {
+        this.debugEventBus = DebugEventBus.getInstance();
+        this.isDebugEnhanced = true;
+      } else {
+        this.debugEventBus = null;
+        this.isDebugEnhanced = false;
+      }
     } catch {
+      this.debugEventBus = null;
       this.isDebugEnhanced = false;
     }
   }

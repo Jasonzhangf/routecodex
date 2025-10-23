@@ -438,15 +438,27 @@ export class ResponsesMapper {
         continue;
       }
       if (t === 'function_call_output' || t === 'tool_result' || t === 'tool_message') {
-        // Extract textual content deterministically
+        // Extract textual content deterministically（无启发式，仅支持已知结构）
         let content = '';
-        if (typeof (it as any).text === 'string') content = (it as any).text.trim();
-        else if (typeof (it as any).content === 'string') content = (it as any).content.trim();
-        else if (Array.isArray((it as any).content)) { content = getTextFromContentArray((it as any).content).trim(); }
-        else if ((it as any).output !== undefined) {
-          const out = (it as any).output;
+        const anyIt = it as any;
+        if (typeof anyIt.text === 'string') {
+          content = anyIt.text.trim();
+        } else if (typeof anyIt.content === 'string') {
+          content = anyIt.content.trim();
+        } else if (Array.isArray(anyIt.content)) {
+          content = getTextFromContentArray(anyIt.content).trim();
+        } else if (anyIt.output !== undefined) {
+          const out = anyIt.output;
           if (typeof out === 'string') content = out.trim();
           else if (out && typeof out === 'object') { try { content = JSON.stringify(out); } catch { content = ''; } }
+        } else if (anyIt.content && typeof anyIt.content === 'object' && !Array.isArray(anyIt.content)) {
+          // 常见工具返回形态：{ content: { output: string, metadata: {...} } }
+          const c = anyIt.content as Record<string, unknown>;
+          if (typeof c.output === 'string') {
+            content = (c.output as string).trim();
+          } else if (c.output && typeof c.output === 'object') {
+            try { content = JSON.stringify(c.output); } catch { content = ''; }
+          }
         }
         const callId = (typeof (it as any).call_id === 'string' ? (it as any).call_id
           : (typeof (it as any).id === 'string' ? (it as any).id : undefined));
