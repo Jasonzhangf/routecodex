@@ -6,6 +6,7 @@
 import { type Response } from 'express';
 import type { ProtocolHandlerConfig } from '../handlers/base-handler.js';
 import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
+import { stripThinkingTags } from './text-filters.js';
 
 /**
  * Streaming chunk interface
@@ -95,12 +96,12 @@ export class StreamingManager {
     res: Response,
     model: string
   ): Promise<void> {
-    // If response is already a stream, pipe it
-    if (response && typeof response.pipe === 'function') {
+    // If top-level response is already a stream, pipe it
+    if (response && typeof (response as any).pipe === 'function') {
       return new Promise((resolve, reject) => {
-        response.pipe(res);
-        response.on('end', resolve);
-        response.on('error', reject);
+        (response as any).pipe(res);
+        (response as any).on('end', resolve);
+        (response as any).on('error', reject);
       });
     }
 
@@ -108,8 +109,16 @@ export class StreamingManager {
     if (!response || typeof response !== 'object' || !('data' in response)) {
       throw new Error('Streaming pipeline response is missing data payload');
     }
-
-    await this.processStreamingData((response as Record<string, unknown>).data, requestId, res, model);
+    const data = (response as Record<string, unknown>).data as any;
+    // If nested data is a stream, pipe it transparently (provider passthrough)
+    if (data && typeof data.pipe === 'function') {
+      return new Promise((resolve, reject) => {
+        (data as any).pipe(res);
+        (data as any).on('end', resolve);
+        (data as any).on('error', reject);
+      });
+    }
+    await this.processStreamingData(data, requestId, res, model);
   }
 
   /**
@@ -122,6 +131,64 @@ export class StreamingManager {
     model: string
   ): Promise<void> {
     const finishReasons: string[] = [];
+    let sawToolCalls = false;
+    const genCallId = (index: number) => `call_${requestId}_${index}_${Math.random().toString(36).slice(2, 8)}`;
+
+    // Helper: synthesize OpenAI-style streaming chunks from a non-stream JSON response
+    const synthesizeFromResponse = (resp: any) => {
+      const chunks: any[] = [];
+      try {
+        const msg = resp?.choices?.[0]?.message || {};
+        const role = typeof msg?.role === 'string' ? msg.role : 'assistant';
+        const content = typeof msg?.content === 'string' ? msg.content : '';
+        const toolCallsFromArray = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
+        const fnCall = (msg as any)?.function_call || null;
+        const toolCalls = (() => {
+          if (toolCallsFromArray.length) return toolCallsFromArray;
+          if (fnCall && typeof fnCall === 'object') {
+            const name = typeof fnCall.name === 'string' ? fnCall.name : undefined;
+            const args = typeof fnCall.arguments === 'string' ? fnCall.arguments : (fnCall.arguments != null ? JSON.stringify(fnCall.arguments) : undefined);
+            if (name || args) {
+              return [{ id: undefined, type: 'function', function: { ...(name?{name}:{ }), ...(args?{arguments: args}:{ }) } }];
+            }
+          }
+          return [] as any[];
+        })();
+
+        // Emit initial role delta to satisfy some clients' expectations
+        chunks.push({ role });
+
+        // Emit content as-is (preserve newlines)
+        if (content.length > 0) {
+          chunks.push({ content });
+        }
+
+        // Emit tool_calls as delta blocks: name then arguments (single shot)
+        if (toolCalls.length > 0) {
+          sawToolCalls = true;
+          for (let i = 0; i < toolCalls.length; i++) {
+            const tc = toolCalls[i] || {};
+            const fn = tc.function || {};
+            const id = typeof tc.id === 'string' && tc.id.trim() ? tc.id : genCallId(i);
+            const name = typeof fn.name === 'string' ? fn.name : undefined;
+            const args = typeof fn.arguments === 'string' ? fn.arguments : (fn.arguments != null ? JSON.stringify(fn.arguments) : undefined);
+            if (name) {
+              chunks.push({ tool_calls: [{ index: i, id, type: 'function', function: { name } }] });
+            }
+            if (typeof args === 'string' && args.length > 0) {
+              chunks.push({ tool_calls: [{ index: i, id, type: 'function', function: { arguments: args } }] });
+            }
+          }
+        }
+
+        const finish = toolCalls.length > 0
+          ? 'tool_calls'
+          : (resp?.choices?.[0]?.finish_reason || resp?.finish_reason || 'stop');
+        return { chunks, finish };
+      } catch {
+        return { chunks, finish: 'stop' };
+      }
+    };
 
     const pushChunk = async (raw: any) => {
       const normalized = this.normalizeChunk(raw, model, finishReasons);
@@ -130,15 +197,45 @@ export class StreamingManager {
     };
 
     if (Array.isArray(data)) {
+      // If array of chunks, stream as-is. Ensure the first delta carries role=assistant
+      try {
+        const first = data[0];
+        if (first) {
+          const preview = this.normalizeChunk(first, model, []);
+          const hasRole = !!(preview?.choices && preview.choices[0]?.delta && typeof preview.choices[0].delta.role === 'string');
+          if (!hasRole) {
+            await this.sendChunk(res, { role: 'assistant' }, requestId, model);
+            await this.delay(10);
+          }
+        }
+      } catch { /* ignore */ }
+
       for (const chunk of data) {
         await pushChunk(chunk);
       }
-    } else if (typeof data === 'object' && data !== null) {
-      await pushChunk(data);
+      let finalReason = finishReasons.length ? finishReasons[finishReasons.length - 1] : undefined;
+      if (!finalReason && sawToolCalls) { finalReason = 'tool_calls'; }
+      this.sendFinalChunk(res, requestId, model, finalReason);
+      return;
     }
 
-    const finalReason = finishReasons.length ? finishReasons[finishReasons.length - 1] : undefined;
-    this.sendFinalChunk(res, requestId, model, finalReason);
+    if (typeof data === 'object' && data !== null) {
+      // Non-stream JSON response: synthesize delta stream when choices[].message exists
+      if (Array.isArray((data as any).choices) && (data as any).choices.length > 0 && (data as any).choices[0]?.message) {
+        const { chunks, finish } = synthesizeFromResponse(data);
+        for (const c of chunks) {
+          await this.sendChunk(res, c, requestId, model);
+          await this.delay(10);
+        }
+        this.sendFinalChunk(res, requestId, model, finish);
+        return;
+      }
+      // Fallback: treat as single chunk
+      await pushChunk(data);
+      const finalReason = finishReasons.length ? finishReasons[finishReasons.length - 1] : undefined;
+      this.sendFinalChunk(res, requestId, model, finalReason);
+      return;
+    }
   }
 
   /**
@@ -154,6 +251,23 @@ export class StreamingManager {
       (Array.isArray(chunk.choices) && chunk.choices.some((choice: any) => choice?.delta));
 
     if (hasDelta) {
+      // Map delta.function_call -> delta.tool_calls for OpenAI older shape
+      try {
+        const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
+        for (const c of choices) {
+          const d = c?.delta || {};
+          const fc = d?.function_call;
+          if (fc && typeof fc === 'object') {
+            const name = typeof fc.name === 'string' ? fc.name : undefined;
+            const args = typeof fc.arguments === 'string' ? fc.arguments : (fc.arguments != null ? JSON.stringify(fc.arguments) : undefined);
+            const tc: any = { index: 0, type: 'function', function: {} as any };
+            if (name) { (tc.function as any).name = name; }
+            if (typeof args === 'string') { (tc.function as any).arguments = args; }
+            if (!Array.isArray(d.tool_calls)) { d.tool_calls = []; }
+            (d.tool_calls as any[]).push(tc);
+          }
+        }
+      } catch { /* ignore */ }
       this.captureFinishReason(chunk, finishReasons);
       return chunk;
     }
@@ -164,7 +278,19 @@ export class StreamingManager {
 
     const normalizedChoices = chunk.choices.map((choice: any, index: number) => {
       const message = choice?.message || {};
-      const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : undefined;
+      const toolCallsArr = Array.isArray(message.tool_calls) ? message.tool_calls : undefined;
+      const fnCall = (message as any)?.function_call || null;
+      const toolCalls = (() => {
+        if (toolCallsArr && toolCallsArr.length) return toolCallsArr;
+        if (fnCall && typeof fnCall === 'object') {
+          const name = typeof fnCall.name === 'string' ? fnCall.name : undefined;
+          const args = typeof fnCall.arguments === 'string' ? fnCall.arguments : (fnCall.arguments != null ? JSON.stringify(fnCall.arguments) : undefined);
+          if (name || args) {
+            return [{ id: undefined, type: 'function', function: { ...(name?{name}:{ }), ...(args?{arguments: args}:{ }) } }];
+          }
+        }
+        return undefined;
+      })();
       const delta: Record<string, unknown> = {};
       if (message.role && typeof message.role === 'string') {
         delta.role = message.role;
@@ -222,7 +348,32 @@ export class StreamingManager {
     requestId: string,
     model: string
   ): Promise<void> {
-    const chunkData = typeof chunk === 'object' && chunk.id ? chunk : {
+    // Clean reasoning/thinking tags in content fields (delta.content and message.content)
+    const cleanse = (obj: any) => {
+      try {
+        if (!obj || typeof obj !== 'object') return obj;
+        const choices = Array.isArray(obj.choices) ? obj.choices : [];
+        for (const c of choices) {
+          if (c && typeof c === 'object') {
+            const d = c.delta || {};
+            if (typeof d.content === 'string') { d.content = stripThinkingTags(d.content); }
+            if (c.message && typeof c.message === 'object' && typeof c.message.content === 'string') {
+              c.message.content = stripThinkingTags(c.message.content);
+            }
+          }
+        }
+      } catch { /* ignore */ }
+      return obj;
+    };
+
+    // If passing a light delta object (e.g., { role }, { content }, { tool_calls }), clean its content
+    if (chunk && typeof chunk === 'object' && !('id' in chunk)) {
+      if (typeof (chunk as any).content === 'string') {
+        (chunk as any).content = stripThinkingTags((chunk as any).content);
+      }
+    }
+
+    const chunkData = typeof chunk === 'object' && chunk.id ? cleanse(chunk) : {
       id: `chatcmpl-${Date.now()}`,
       object: 'chat.completion.chunk',
       created: Math.floor(Date.now() / 1000),

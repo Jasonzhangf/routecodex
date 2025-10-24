@@ -188,15 +188,51 @@ export class ProtocolHandler extends BaseModule {
     const makeOpenAIChunks = (resp: any) => {
       const chunks: any[] = [];
       try {
-        const content = resp?.choices?.[0]?.message?.content || '';
-        if (typeof content === 'string' && content.length > 0) {
-          const words = content.split(/\s+/g);
-          for (const w of words) {
-            chunks.push({ metadata: { model: options.model }, content: w + ' ', done: false });
+        const msg = resp?.choices?.[0]?.message || {};
+        const content = typeof msg?.content === 'string' ? msg.content : '';
+        const toolCalls = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
+
+        // 1) Emit content as-is to preserve newlines
+        if (content.length > 0) {
+          chunks.push({ metadata: { model: options.model }, content, done: false });
+        }
+
+        // 2) Emit tool_calls as OpenAI-style delta.tool_calls
+        if (toolCalls.length > 0) {
+          for (let i = 0; i < toolCalls.length; i++) {
+            const tc = toolCalls[i] || {};
+            const fn = tc.function || {};
+            const id = typeof tc.id === 'string' ? tc.id : undefined;
+            const name = typeof fn.name === 'string' ? fn.name : undefined;
+            const args = typeof fn.arguments === 'string' ? fn.arguments : (fn.arguments != null ? JSON.stringify(fn.arguments) : undefined);
+
+            // Emit name delta (optional, but helps some clients)
+            if (name) {
+              chunks.push({
+                metadata: { model: options.model },
+                content: '',
+                tool_calls: [{ index: i, id, type: 'function', function: { name } }],
+                done: false,
+              });
+            }
+            // Emit arguments delta as a single chunk (clients accumulate string)
+            if (args) {
+              chunks.push({
+                metadata: { model: options.model },
+                content: '',
+                tool_calls: [{ index: i, id, type: 'function', function: { arguments: args } }],
+                done: false,
+              });
+            }
           }
         }
       } catch { /* ignore */ }
-      chunks.push({ metadata: { model: options.model, usage: resp?.usage }, content: '', done: true });
+
+      // 3) Final chunk with usage and finish_reason
+      const finish = (resp?.choices?.[0]?.message?.tool_calls?.length || 0) > 0
+        ? 'tool_calls'
+        : (resp?.choices?.[0]?.finish_reason || resp?.finish_reason || 'stop');
+      chunks.push({ metadata: { model: options.model, usage: resp?.usage, finish_reason: finish }, content: '', done: true });
       return chunks;
     };
 

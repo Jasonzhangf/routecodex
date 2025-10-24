@@ -149,11 +149,13 @@ export class GLMHTTPProvider implements ProviderModule {
       }
     } catch { /* noop: optional debug payload save */ void 0; }
 
+    const wantsStream = Boolean((payloadObj as any)?.stream === true);
     const timeoutMs = Number(process.env.GLM_HTTP_TIMEOUT_MS || process.env.RCC_UPSTREAM_TIMEOUT_MS || 300000);
     const controller = new AbortController();
+    // For streaming, avoid premature abort; use a generous timeout if configured
     const t = setTimeout(() => {
       try { controller.abort(); } catch { /* ignore */ }
-    }, Math.max(1, timeoutMs));
+    }, Math.max(1, wantsStream ? (timeoutMs || 300000) : timeoutMs));
 
     let res: Response;
     try {
@@ -231,9 +233,30 @@ export class GLMHTTPProvider implements ProviderModule {
       throw err;
     }
 
+    // Streaming passthrough: return Node.js readable for SSE
+    if (wantsStream && res.body) {
+      try {
+        // Convert web ReadableStream to Node Readable
+        const { Readable } = await import('stream');
+        const nodeStream = (Readable as any).fromWeb ? (Readable as any).fromWeb(res.body as any) : (res as any).body;
+        if (this.isDebugEnhanced && this.debugEventBus) {
+          this.debugEventBus.publish({ sessionId: 'system', moduleId: this.id, operationId: 'glm_http_request_success', timestamp: Date.now(), type: 'end', position: 'middle', data: { status: res.status, elapsed, streaming: true } });
+        }
+        return {
+          data: nodeStream,
+          status: res.status,
+          headers: Object.fromEntries(res.headers.entries()),
+          metadata: { requestId: `glm-${Date.now()}`, processingTime: elapsed, model: (request as any)?.model }
+        };
+      } catch {
+        // Fallback to buffered read if conversion fails
+      }
+    }
+
+    // Non-stream JSON response
     const data = await res.json();
     if (this.isDebugEnhanced && this.debugEventBus) {
-      this.debugEventBus.publish({ sessionId: 'system', moduleId: this.id, operationId: 'glm_http_request_success', timestamp: Date.now(), type: 'end', position: 'middle', data: { status: res.status, elapsed } });
+      this.debugEventBus.publish({ sessionId: 'system', moduleId: this.id, operationId: 'glm_http_request_success', timestamp: Date.now(), type: 'end', position: 'middle', data: { status: res.status, elapsed, streaming: false } });
     }
 
     return {

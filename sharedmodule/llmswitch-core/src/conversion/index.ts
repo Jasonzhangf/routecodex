@@ -7,3 +7,4 @@ export * from './shared/tool-mapping.js';
 export * from './shared/reasoning-mapping.js';
 export * from './shared/args-mapping.js';
 export * from './responses/responses-openai-bridge.js';
+export * from './streaming/openai-to-anthropic-transformer.js';

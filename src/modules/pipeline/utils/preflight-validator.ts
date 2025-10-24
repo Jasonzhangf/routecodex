@@ -387,8 +387,8 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
         }
       }
     }
-    // Always force non-stream to avoid upstream SSE differences; Workflow re-streams.
-    (out as any).stream = false;
+    // Streaming support for GLM: preserve client's stream flag (default false)
+    (out as any).stream = typeof src.stream === 'boolean' ? Boolean(src.stream) : false;
   } else {
     // For non-GLM targets, preserve stream flag if provided
     if (typeof src.stream === 'boolean') {(out as any).stream = src.stream;}
