@@ -48,8 +48,6 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
     const normalizedPayload = (() => {
       try {
         const out: any = { ...(payload || {}) };
-        // Gate thinking at llmswitch (requests must not carry thinking)
-        try { if ('thinking' in out) { delete out.thinking; } } catch { /* ignore */ }
         const msgs = Array.isArray(out.messages) ? (out.messages as any[]) : [];
         if (!msgs.length) return out;
 
@@ -78,6 +76,15 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
           }
         } catch { /* ignore */ }
 
+        // Pre-scan: collect all completed tool_call_ids from history (role:'tool')
+        const completedIds = new Set<string>();
+        for (const m of msgs) {
+          if (m && m.role === 'tool') {
+            const cid = typeof m.tool_call_id === 'string' ? m.tool_call_id : undefined;
+            if (cid) completedIds.add(cid);
+          }
+        }
+
         // 1) STRICT: validate assistant.tool_calls names and arguments
         for (const m of msgs) {
           if (m && m.role === 'assistant' && Array.isArray(m.tool_calls)) {
@@ -85,6 +92,15 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
               if (!tc || typeof tc !== 'object') return tc;
               const fn = { ...(tc.function || {}) };
               const name = typeof fn.name === 'string' ? fn.name : undefined;
+              const isHistorical = typeof tc.id === 'string' && completedIds.has(tc.id);
+              if (isHistorical) {
+                if (fn.arguments !== undefined && typeof fn.arguments !== 'string') {
+                  try { fn.arguments = JSON.stringify(fn.arguments); } catch { fn.arguments = '""'; }
+                } else if (fn.arguments === undefined) {
+                  fn.arguments = '""';
+                }
+                return { ...tc, function: fn };
+              }
               if (!name || !toolSchemas.has(name)) {
                 const e: any = new Error(`Invalid tool name at assistant.tool_calls[${idx}]`);
                 e.status = 400; throw e;
@@ -128,16 +144,17 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
                     if ((s.startsWith('[') && s.endsWith(']'))) {
                       try {
                         const arr = JSON.parse(s);
-                        if (Array.isArray(arr)) {
-                          (parsed as any).command = arr;
-                        } else {
-                          (parsed as any).command = [s];
-                        }
+                        (parsed as any).command = Array.isArray(arr) ? arr : [s];
                       } catch {
                         (parsed as any).command = [s];
                       }
                     } else {
-                      (parsed as any).command = [s];
+                      // Predictable tokenization: if single token contains whitespace and no quotes, split by whitespace
+                      if (/\s/.test(s) && !/["'\\]/.test(s)) {
+                        (parsed as any).command = s.split(/\s+/).filter(Boolean);
+                      } else {
+                        (parsed as any).command = [s];
+                      }
                     }
                   }
                   const finalCmd = (parsed as any).command;
@@ -239,7 +256,53 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
   async processOutgoing(response: any): Promise<any> {
     // Accept either raw payload or DTO { data, metadata }. Outbound: no extra normalization beyond shape.
     const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
-    const payload = isDto ? (response as any).data : response;
+    let payload = isDto ? (response as any).data : response;
+    // Normalize tool_calls arguments in provider responses as well (schema-driven minimal shaping)
+    try {
+      const p: any = payload && typeof payload === 'object' ? { ...(payload as any) } : payload;
+      const choices = Array.isArray(p?.choices) ? p.choices : [];
+      // Build declared tool name -> schema map from request context if present
+      const toolSchemas = new Map<string, any>();
+      // Not always available here; keep map empty to only enforce generic command shaping
+      for (const c of choices) {
+        const msg = c?.message || {};
+        if (Array.isArray(msg?.tool_calls)) {
+          msg.tool_calls = msg.tool_calls.map((tc: any) => {
+            if (!tc || typeof tc !== 'object') return tc;
+            const fn = { ...(tc.function || {}) };
+            if (typeof fn.arguments === 'string') {
+              try {
+                const schema = toolSchemas.get(String(fn.name||'').trim());
+                const parsed = JSON.parse(fn.arguments);
+                if (parsed && typeof parsed === 'object') {
+                  const cmdSchema = schema && typeof schema === 'object' ? (schema as any).properties?.command : { type: 'array' };
+                  if (cmdSchema && (cmdSchema.type === 'array' || Array.isArray(cmdSchema.type))) {
+                    const val = (parsed as any).command;
+                    if (Array.isArray(val)) {
+                      // ok
+                    } else if (typeof val === 'string') {
+                      const s = val.trim();
+                      if (s.startsWith('[') && s.endsWith(']')) {
+                        try { const arr = JSON.parse(s); if (Array.isArray(arr)) (parsed as any).command = arr; else (parsed as any).command = [s]; } catch { (parsed as any).command = [s]; }
+                      } else {
+                        if (/\s/.test(s) && !/["'\\]/.test(s)) {
+                          (parsed as any).command = s.split(/\s+/).filter(Boolean);
+                        } else {
+                          (parsed as any).command = [s];
+                        }
+                      }
+                    }
+                  }
+                  fn.arguments = JSON.stringify(parsed);
+                }
+              } catch { /* keep original */ }
+            }
+            return { ...tc, function: fn };
+          });
+        }
+      }
+      payload = p;
+    } catch { /* ignore normalization errors */ }
     const normalized = normalizeChatResponse(payload);
     if (isDto) {
       return { ...(response as any), data: normalized };

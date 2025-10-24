@@ -14,6 +14,7 @@ import { loadToolMappings } from '../../../../config/tool-mapping-loader.js';
 import { ToolMappingExecutor } from '../../utils/tool-mapping-executor.js';
 import type { UnknownObject, /* LogData */ } from '../../../../types/common-types.js';
 import { sanitizeAndValidateOpenAIChat } from '../../utils/preflight-validator.js';
+import { stripThinkingTags } from '../../../../server/utils/text-filters.js';
 
 export class GLMCompatibility implements CompatibilityModule {
   readonly id: string;
@@ -230,17 +231,54 @@ export class GLMCompatibility implements CompatibilityModule {
     // Already OpenAI chat completion
     if ('choices' in resp) {
       const r = { ...resp } as Record<string, unknown>;
+      // Strip thinking segments from assistant message content (Chat 端口不外泄思考)
+      try {
+        const choices = Array.isArray((r as any).choices) ? (r as any).choices : [];
+        for (const c of choices) {
+          const msg = c?.message || {};
+          if (typeof msg?.content === 'string') {
+            msg.content = this.stripThinking(String(msg.content));
+          }
+        }
+      } catch { /* ignore */ }
       if (!('object' in r)) {
         r.object = 'chat.completion';
       }
       return r;
     }
-    // GLM often returns Anthropic-style message { type, role, content, stop_reason, usage, id, model, created }
+    // GLM often returns Anthropic-style message { type, role, content[], stop_reason, usage, id, model, created }
     if ((resp as any).type === 'message' && Array.isArray((resp as any).content)) {
-      const content = this.flattenAnthropicContent((resp as any).content).join('\n');
+      const blocks = ((resp as any).content as any[]);
+      // Collect text blocks into assistant content (after stripping thinking)
+      const content = this.flattenAnthropicContent(blocks).map(t => this.stripThinking(t)).join('\n');
+      // Map tool_use blocks back to OpenAI tool_calls
+      const toolCalls: any[] = [];
+      try {
+        for (const b of blocks) {
+          if (!b || typeof b !== 'object') continue;
+          const type = String((b as any).type || '').toLowerCase();
+          if (type === 'tool_use') {
+            const name = typeof (b as any).name === 'string' ? (b as any).name : undefined;
+            // In Anthropic format, input holds the function arguments object
+            const input = (b as any).input ?? {};
+            if (name) {
+              let args = '{}';
+              try { args = JSON.stringify(input ?? {}); } catch { args = '{}'; }
+              const id = typeof (b as any).id === 'string' && (b as any).id.trim()
+                ? (b as any).id
+                : `call_${Math.random().toString(36).slice(2, 10)}`;
+              toolCalls.push({ id, type: 'function', function: { name, arguments: args } });
+            }
+          }
+        }
+      } catch { /* ignore tool_use mapping errors and keep text-only */ }
+
       const stop = (resp as any).stop_reason || undefined;
-      const finish = stop === 'max_tokens' ? 'length' : (stop || 'stop');
-      const message = { role: 'assistant', content } as Record<string, unknown>;
+      const finish = stop === 'max_tokens' ? 'length' : (stop || (toolCalls.length ? 'tool_calls' : 'stop'));
+      const message: Record<string, unknown> = { role: 'assistant', content };
+      if (toolCalls.length) {
+        (message as any).tool_calls = toolCalls;
+      }
       const openai = {
         id: (resp as any).id || `chatcmpl_${Math.random().toString(36).slice(2)}`,
         object: 'chat.completion',
@@ -271,6 +309,11 @@ export class GLMCompatibility implements CompatibilityModule {
       }
     }
     return texts;
+  }
+
+  // Remove <think>...</think> blocks and stray <think> tags
+  private stripThinking(text: string): string {
+    return stripThinkingTags(String(text));
   }
 
 

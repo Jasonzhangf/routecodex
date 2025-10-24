@@ -360,3 +360,10 @@ Summary
     - Never return empty string after normalization
 - Responses ↔ Chat path kept consistent; no fallback heuristics; unknown shapes return 400
 - Regression: last 20 chat samples show 0 empty tool outputs after normalization
+## 0.55.0 - 2025-10-24
+- Chat/Anthropic LLMSwitch 真流式支持（默认开启）
+  - 新增 llmswitch-core streaming 转换器：OpenAI /chat/completions SSE → Anthropic /v1/messages SSE
+  - /v1/messages 流路径接入：当上游返回可读流时启用真流式转换
+  - 开关：`RCC_O2A_STREAM`（默认开启，设为 `0`/`false` 关闭）；聚合窗口 `RCC_O2A_COALESCE_MS=1000` ms
+  - 文本 stripThinking 仅作用于文本，不影响工具结构；finish_reason/usage 映射对齐非流式
+  - 保持 Provider 只负责 IO，转换在 llmswitch/compatibility 层实现

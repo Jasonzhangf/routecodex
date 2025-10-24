@@ -859,6 +859,7 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('iflow-compatibility', this.createIFlowCompatibilityModule);
     this.registry.registerModule('iflow-provider', this.createIFlowProviderModule);
     this.registry.registerModule('glm-http-provider', this.createGLMHTTPProviderModule);
+    this.registry.registerModule('generic-openai-provider', this.createGenericOpenAIProviderModule);
     this.registry.registerModule('qwen-provider', this.createQwenProviderModule);
     // Add alias for configuration compatibility
     this.registry.registerModule('qwen', this.createQwenProviderModule);
@@ -1136,6 +1137,11 @@ export class PipelineManager implements RCCBaseModule {
   private createGLMHTTPProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { GLMHTTPProvider } = await import('../modules/provider/glm-http-provider.js');
     return new GLMHTTPProvider(config, dependencies);
+  };
+
+  private createGenericOpenAIProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { GenericOpenAIProvider } = await import('../modules/provider/generic-openai-provider.js');
+    return new GenericOpenAIProvider(config, dependencies);
   };
 
   private createGenericHTTPModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
