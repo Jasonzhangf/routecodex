@@ -145,6 +145,21 @@ export class ResponsesHandler extends BaseHandler {
 
       // Handle streaming vs non-streaming response
       if (req.body.stream) {
+        // Prefer true streaming bridge when upstream returns a Readable and RCC_R2C_STREAM is enabled (default on)
+        try {
+          const _flag = process.env.RCC_R2C_STREAM;
+          const useBridge = (_flag === undefined) || _flag === '1' || (_flag?.toLowerCase?.() === 'true');
+          const topReadable = response && typeof (response as any).pipe === 'function' ? (response as any) : null;
+          const nestedReadable = (!topReadable && response && typeof (response as any).data?.pipe === 'function') ? (response as any).data : null;
+          const readable = topReadable || nestedReadable;
+          if (useBridge && readable) {
+            const core = await import('rcc-llmswitch-core/conversion');
+            const windowMs = Number(process.env.RCC_R2C_COALESCE_MS || 1000) || 1000;
+            await (core as any).transformOpenAIStreamToResponses(readable, res, { requestId, model: req.body.model, windowMs });
+            return;
+          }
+        } catch { /* fall through to synthetic SSE */ }
+
         await this.streamResponsesSSE(
           response,
           requestId,
