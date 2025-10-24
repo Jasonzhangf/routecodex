@@ -367,3 +367,10 @@ Summary
   - 开关：`RCC_O2A_STREAM`（默认开启，设为 `0`/`false` 关闭）；聚合窗口 `RCC_O2A_COALESCE_MS=1000` ms
   - 文本 stripThinking 仅作用于文本，不影响工具结构；finish_reason/usage 映射对齐非流式
   - 保持 Provider 只负责 IO，转换在 llmswitch/compatibility 层实现
+
+## 0.55.1 - 2025-10-24
+- Responses 真流式桥接（默认开启）
+  - 新增 llmswitch-core 转换器：OpenAI Chat SSE → OpenAI Responses SSE（增量）
+  - /v1/responses 流路径接入：可读流时直接桥接；否则回退为合成流
+  - 开关：`RCC_R2C_STREAM`（默认开启，设为 `0`/`false` 关闭）；窗口 `RCC_R2C_COALESCE_MS=1000` ms
+  - 事件对齐：response.created / output_text.delta|done / output_item.added|done / function_call_arguments.delta|done / completed / error
