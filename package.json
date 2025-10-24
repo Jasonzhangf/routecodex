@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.54.1",
+  "version": "0.55.0",
   "description": "Multi-provider OpenAI proxy server with native dry-run capabilities",
   "type": "module",
   "main": "dist/index.js",
@@ -76,6 +76,8 @@
     "dry-run": "node scripts/dry-run-cli.mjs",
     "dry-run:samples": "tsx scripts/samples-dry-run.mjs",
     "rc-config": "node scripts/rc-config.mjs",
+    "config:validate:providers": "node scripts/validate-config-providers.mjs",
+    "config:update:providers": "node scripts/update-config-providers.mjs",
     "config:use-local": "node scripts/switch-config-deps.mjs local && npm i",
     "config:use-published": "node scripts/switch-config-deps.mjs published && npm i",
     "test:modelscope": "node scripts/test-modelscope.mjs",

@@ -6,6 +6,13 @@ import { type Response } from 'express';
 export interface StreamChunk {
   content?: string;
   done?: boolean;
+  // For OpenAI Chat SSE: include tool_calls delta when present
+  tool_calls?: Array<{
+    index: number;
+    id?: string;
+    type?: 'function';
+    function?: { name?: string; arguments?: string };
+  }>;
   metadata?: {
     model?: string;
     usage?: {
@@ -244,6 +251,15 @@ export abstract class BaseStreamer {
         index: 0,
         delta: {
           content: chunk.content ?? '',
+          // Attach tool_calls delta if present
+          ...(Array.isArray(chunk.tool_calls) && chunk.tool_calls.length
+            ? { tool_calls: chunk.tool_calls.map((tc) => ({
+                index: tc.index,
+                id: tc.id,
+                type: tc.type || 'function',
+                function: tc.function || {}
+              })) }
+            : {})
         },
         finish_reason: chunk.done ? chunk.metadata?.finish_reason || 'stop' : null,
       }],

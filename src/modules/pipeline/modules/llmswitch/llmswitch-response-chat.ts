@@ -45,8 +45,6 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
     const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam;
     const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
     const payload = isDto ? (dto!.data as Record<string, unknown>) : (requestParam as Record<string, unknown>);
-    // Gate thinking at llmswitch (requests): drop top-level 'thinking' if present
-    try { if (payload && typeof payload === 'object' && 'thinking' in payload) { delete (payload as any).thinking; } } catch { /* ignore */ }
 
     const context = captureResponsesContext(payload, dto ?? undefined);
     const { request: chatRequest, toolsNormalized } = buildChatRequestFromResponses(payload, context);
