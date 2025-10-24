@@ -76,6 +76,25 @@ export class MessagesHandler extends BaseHandler {
         const streamModel = (pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse)
           ? ((pipelineResponse as any).data?.model ?? req.body.model)
           : req.body.model;
+
+        // 默认开启真流式：未设置时视为启用；仅当显式为 '0' 或 'false' 时关闭
+        const _flag = process.env.RCC_O2A_STREAM;
+        const useO2AStream = (_flag === undefined) || _flag === '1' || (_flag?.toLowerCase?.() === 'true');
+        try {
+          // Prefer true streaming conversion when upstream is a Readable and RCC_O2A_STREAM=1
+          const topReadable = pipelineResponse && typeof (pipelineResponse as any).pipe === 'function' ? (pipelineResponse as any) : null;
+          const nestedReadable = (!topReadable && pipelineResponse && typeof (pipelineResponse as any).data?.pipe === 'function') ? (pipelineResponse as any).data : null;
+          const readable = topReadable || nestedReadable;
+          if (useO2AStream && readable) {
+            const core = await import('rcc-llmswitch-core/conversion');
+            const windowMs = Number(process.env.RCC_O2A_COALESCE_MS || 1000) || 1000;
+            await (core as any).transformOpenAIStreamToAnthropic(readable, res, { requestId, model: streamModel, windowMs, useEventHeaders: true });
+            return;
+          }
+        } catch {
+          // fall through to generic streamer on failure
+        }
+
         await this.streamingManager.streamAnthropicResponse(pipelineResponse, requestId, res, streamModel);
         return;
       }

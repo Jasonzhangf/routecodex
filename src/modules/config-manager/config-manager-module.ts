@@ -478,6 +478,7 @@ export class ConfigManagerModule extends BaseModule {
         const familyTypeMap: Record<string, string> = {
           'glm-http-provider': 'glm',
           'openai-provider': 'openai',
+          'generic-openai-provider': 'openai',
           'lmstudio-http': 'lmstudio',
           'qwen-provider': 'qwen',
           'iflow-provider': 'iflow',
