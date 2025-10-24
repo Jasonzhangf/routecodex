@@ -15,6 +15,7 @@ interface Options {
   requestId: string;
   model: string;
   windowMs?: number; // default 1000ms
+  tools?: unknown; // optional: OpenAI tools declaration for schema-driven normalization
 }
 
 /**
@@ -73,6 +74,20 @@ export async function transformOpenAIStreamToResponses(
     }
     return acc;
   };
+
+  // Tool schema map for normalization at 'done'
+  const toolSchemaByName: Map<string, any> = new Map();
+  try {
+    const raw = opts.tools as any;
+    if (Array.isArray(raw)) {
+      for (const t of raw) {
+        const fn = t && (t.function || t);
+        const name = fn && typeof fn.name === 'string' ? fn.name : undefined;
+        const params = fn ? (fn.parameters as any) : undefined;
+        if (name) toolSchemaByName.set(name, (params && typeof params === 'object') ? params : undefined);
+      }
+    }
+  } catch { /* ignore */ }
 
   // Finish/use
   let finishReason: string | null = null;
@@ -165,10 +180,34 @@ export async function transformOpenAIStreamToResponses(
         // Close all tool items
         for (const [idx, acc] of tools.entries()) {
           if (!acc.done) {
-            if (acc.args.length > 0) {
-              writeEvt('response.function_call_arguments.done', { type: 'response.function_call_arguments.done', item_id: acc.id, output_index: idx, arguments: acc.args });
+            let finalArgs = acc.args;
+            // Schema-driven normalization: if function.parameters.properties.command is array<string>, coerce string→[string]
+            try {
+              const name = acc.name;
+              const schema = name ? toolSchemaByName.get(name) : undefined;
+              if (schema && typeof schema === 'object') {
+                const props = (schema as any).properties;
+                const cmd = props && typeof props === 'object' ? (props as any).command : undefined;
+                const expectArray = !!(cmd && ((cmd.type === 'array') || (Array.isArray(cmd.type) && (cmd.type as any[]).includes('array'))));
+                if (expectArray && typeof finalArgs === 'string' && finalArgs.trim().length) {
+                  try {
+                    const obj = JSON.parse(finalArgs);
+                    if (obj && typeof obj === 'object') {
+                      const v = (obj as any).command;
+                      if (typeof v === 'string') {
+                        (obj as any).command = v.length ? [v] : [];
+                        finalArgs = JSON.stringify(obj);
+                      }
+                    }
+                  } catch { /* keep original */ }
+                }
+              }
+            } catch { /* ignore */ }
+
+            if (finalArgs.length > 0) {
+              writeEvt('response.function_call_arguments.done', { type: 'response.function_call_arguments.done', item_id: acc.id, output_index: idx, arguments: finalArgs });
             }
-            writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: idx, item: { id: acc.id, type: 'function_call', status: 'completed', call_id: acc.id, name: acc.name, arguments: acc.args } });
+            writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: idx, item: { id: acc.id, type: 'function_call', status: 'completed', call_id: acc.id, name: acc.name, arguments: finalArgs } });
             acc.done = true;
           }
         }
@@ -195,4 +234,3 @@ export async function transformOpenAIStreamToResponses(
 
   parser.start();
 }
-

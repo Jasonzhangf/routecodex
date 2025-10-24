@@ -155,7 +155,7 @@ export class ResponsesHandler extends BaseHandler {
           if (useBridge && readable) {
             const core = await import('rcc-llmswitch-core/conversion');
             const windowMs = Number(process.env.RCC_R2C_COALESCE_MS || 1000) || 1000;
-            await (core as any).transformOpenAIStreamToResponses(readable, res, { requestId, model: req.body.model, windowMs });
+            await (core as any).transformOpenAIStreamToResponses(readable, res, { requestId, model: req.body.model, windowMs, tools: (req.body as any)?.tools });
             return;
           }
         } catch { /* fall through to synthetic SSE */ }
