@@ -1,17 +1,38 @@
 # LLMSwitch 模块
 
-LLMSwitch 模块提供协议转换功能，将不同的大语言模型API协议进行相互转换，支持 OpenAI、Anthropic Claude、Responses API 等多种协议的双向转换。
+LLMSwitch 模块提供协议转换功能，专注于不同大语言模型API协议之间的转换，支持 OpenAI Chat、Anthropic Claude、Responses API 等多种协议的双向转换。
 
 ## 🎯 模块概述
 
-LLMSwitch 模块是流水线架构的第 1 层（协议转换层），负责处理进入流水线的第一个协议转换步骤。它分析传入请求的协议类型，并将其转换为目标供应商所期望的协议格式。
+LLMSwitch 模块是 RouteCodex 4层流水线架构的第 1 层（协议转换层），负责协议格式转换。注意：**动态路由分类现在由独立的Virtual Router模块处理**。
 
 ### 📋 核心职责
-- **协议识别**: 自动检测请求协议类型（OpenAI Chat、Responses、Anthropic）
-- **双向转换**: 支持多种协议之间的双向转换
-- **格式规范化**: 确保请求格式符合目标协议要求
-- **元数据注入**: 添加转换追踪和调试信息
+- **协议转换**: 在不同AI服务提供商协议间进行格式转换
+- **双向支持**: 支持请求和响应的双向转换
+- **格式标准化**: 确保请求符合目标协议的规范要求
+- **元数据增强**: 为转换过程添加追踪和调试信息
 - **工具调用适配**: 处理不同协议的工具调用格式差异
+- **协议规范化**: 验证和标准化输入的协议格式
+
+### 🏗️ 架构定位
+```
+┌─────────────────────────────────────────────────────────────┐
+│                RouteCodex 4-Layer Pipeline            │
+├─────────────────────────────────────────────────────────────┤
+│ HTTP Request → Virtual Router → LLMSwitch → Compatibility → Provider → AI Service │
+│     ↓             ↓                ↓            ↓            ↓           ↓          │
+│  Request      Dynamic          Protocol      Format       Standard     Response    │
+│  Analysis      Routing           Conversion     Transformation HTTP Server   Processing   │
+└─────────────────────────────────────────────────────────────┘
+
+                    ↑
+              LLMSwitch 在此层工作
+```
+
+### 🔗 与其他模块的协作
+- **Virtual Router**: 接收路由分类后的请求，负责协议转换
+- **Compatibility**: 接收LLMSwitch转换后的请求，进行供应商特定适配
+- **Provider**: 最终执行层，与外部AI服务通信
 
 ## 🔄 支持的协议转换
 
@@ -176,32 +197,6 @@ const anthropicRequest = {
 const openAIRequest = await converter.processIncoming(anthropicRequest);
 ```
 
-### Responses API 转换
-```typescript
-import { ResponsesToChatLLMSwitch } from './llmswitch-response-chat.js';
-
-const responsesConverter = new ResponsesToChatLLMSwitch({
-  type: 'llmswitch-response-chat',
-  config: {
-    // 配置选项
-  }
-}, dependencies);
-
-await responsesConverter.initialize();
-
-// Responses API 格式请求
-const responsesRequest = {
-  model: 'gpt-4-turbo',
-  input: [
-    { role: 'user', content: 'Hello!' }
-  ],
-  tools: [ /* Responses 工具格式 */ ]
-};
-
-// 转换为 Chat Completions 格式
-const chatRequest = await responsesConverter.processIncoming(responsesRequest);
-```
-
 ## ⚙️ 配置选项
 
 ### OpenAI 规范化配置
@@ -226,19 +221,11 @@ interface AnthropicOpenAIConfig {
 }
 ```
 
-### Responses 转换配置
-```typescript
-interface ResponsesChatConfig {
-  autoMode?: boolean;              // 自动模式检测
-  preserveResponsesFormat?: boolean; // 保持 Responses 格式
-}
-```
-
 ## 🔄 转换流程
 
-### 协议检测和路由
+### 协议检测和转换
 ```typescript
-// 自动协议检测
+// 自动协议检测（注意：动态路由由Virtual Router处理）
 function detectProtocol(request: any): 'openai' | 'anthropic' | 'responses' {
   if (request.messages) return 'openai';
   if (request.input) return 'responses';
@@ -246,8 +233,7 @@ function detectProtocol(request: any): 'openai' | 'anthropic' | 'responses' {
   return 'openai'; // 默认
 }
 
-// 转换路由
-const converter = selectConverter(detectProtocol(request), targetProtocol);
+// 协议转换
 const converted = await converter.processIncoming(request);
 ```
 
@@ -265,67 +251,6 @@ const enhancedRequest = {
     conversionContext: { /* 转换上下文 */ }
   }
 };
-```
-
-## 🛡️ 错误处理
-
-### 协议验证错误
-```typescript
-// OpenAI 格式验证
-if (!request.messages && !request.prompt) {
-  throw new Error('Invalid OpenAI protocol: missing messages or prompt');
-}
-
-// 工具调用验证
-if (request.tool_calls) {
-  for (const toolCall of request.tool_calls) {
-    if (toolCall.function && typeof toolCall.function.arguments !== 'string') {
-      throw new Error('Tool function.arguments must be a JSON string');
-    }
-  }
-}
-```
-
-### 转换错误处理
-```typescript
-// 转换失败时的处理
-try {
-  const converted = await this.convertRequest(request);
-} catch (error) {
-  this.logger.logModule(this.id, 'conversion-error', {
-    error: error.message,
-    entryProtocol: this.detectedProtocol,
-    targetProtocol: this.targetProtocol
-  });
-  throw new Error(`Protocol conversion failed: ${error.message}`);
-}
-```
-
-## 📊 性能监控
-
-### 转换性能追踪
-```typescript
-// 性能元数据
-const performanceMetadata = {
-  conversionTime: Date.now() - startTime,
-  entryProtocol: detectedProtocol,
-  targetProtocol: targetProtocol,
-  conversionRules: appliedRules.length,
-  hasTools: !!request.tools,
-  messageCount: request.messages?.length || 0
-};
-```
-
-### 转换统计
-```typescript
-// 转换统计信息
-const stats = await llmSwitch.getConversionStats();
-console.log({
-  totalConversions: stats.totalConversions,
-  successRate: stats.successRate,
-  averageConversionTime: stats.averageTime,
-  protocolDistribution: stats.protocolDistribution
-});
 ```
 
 ## 🌐 API 协议支持
@@ -388,33 +313,6 @@ class NewProtocolConverter implements LLMSwitchModule {
 }
 ```
 
-### 自定义转换规则
-```typescript
-// 在 anthropic-openai-config.ts 中添加自定义映射
-const customMappings = {
-  requestMappings: [
-    {
-      sourcePath: 'max_tokens',
-      targetPath: 'max_tokens',
-      transform: 'direct'
-    },
-    {
-      sourcePath: 'temperature',
-      targetPath: 'temperature',
-      transform: 'mapping',
-      mapping: {
-        0: 0,
-        1: 1,
-        2: 2  // Anthropic 0-2 映射到 OpenAI 0-2
-      }
-    }
-  ],
-  responseMappings: [
-    // 响应映射规则
-  ]
-};
-```
-
 ## 📈 版本信息
 
 - **当前版本**: 3.0.0
@@ -423,6 +321,7 @@ const customMappings = {
   - Anthropic 双向转换
   - 智能转换路由
   - 基于 `rcc-llmswitch-core` 的标准化转换
+  - 与Virtual Router模块集成
 - **兼容性**: RouteCodex Pipeline >= 3.0.0
 - **TypeScript**: >= 5.0.0
 - **Node.js**: >= 18.0.0
@@ -433,6 +332,7 @@ const customMappings = {
 - **PipelineDebugLogger**: 模块日志记录
 - **BaseModule**: 基础模块接口
 - **SharedPipelineRequest/Response**: 共享数据传输对象
+- **Virtual Router**: 动态路由分类模块（上游）
 
 ## 🚨 已知限制
 
@@ -445,15 +345,16 @@ const customMappings = {
 ### 未来计划
 1. **更多协议支持** - Google Gemini、Cohere 等
 2. **实时流式转换** - 零延迟流式协议转换
-3. **智能协议检测** - 基于内容特征的自动协议识别
+3. **智能协议检测** - 与Virtual Router更深度的集成
 4. **转换规则学习** - 基于使用模式的智能优化
 
 ## 🔄 更新日志
 
 ### v3.0.0 (2025-10-24)
+- ✨ 重构为4层流水线架构的第1层
+- ✨ 与Virtual Router模块分离，专注协议转换
 - ✨ 新增 Responses API 完整支持
 - ✨ 新增 Anthropic ↔ OpenAI 双向转换
-- ✨ 新增智能转换路由器
 - 🔄 基于 `rcc-llmswitch-core` 的标准化重构
 - 🛡️ 增强的工具调用验证和转换
 - 📊 完善的性能监控和调试支持
@@ -475,610 +376,8 @@ const customMappings = {
 2. 验证转换配置是否正确
 3. 查看转换日志了解详细信息
 4. 检查目标协议的官方文档
+5. 确认与Virtual Router的集成配置正确
 
 ---
 
-**最后更新**: 2025-10-24 - 全面更新 LLMSwitch 模块文档，新增 Responses API 和 Anthropic 支持
-
-LLMSwitch 模块提供多协议转换功能，将不同的大语言模型API协议进行相互转换，支持 OpenAI、Anthropic、Responses 等多种协议格式。
-
-## 🎯 模块概述
-
-LLMSwitch 模块是流水线架构的第 1 层（协议转换层），负责处理进入流水线的第一个协议转换步骤。它分析传入请求的协议类型，并将其转换为目标供应商所期望的协议格式。
-
-## 🔄 支持的协议转换
-
-### 🔧 OpenAI 规范化转换器
-- 实现文件: `llmswitch-openai-openai.ts`
-- **功能**: OpenAI 协议规范化，保持请求结构一致
-- **特性**:
-  - 完整的 OpenAI 协议支持
-  - 请求/响应元数据添加
-  - 性能监控和调试信息
-  - 协议验证和标准化
-  - 错误上下文增强
-
-### 🤖 Anthropic-OpenAI 双向转换器
-- **实现文件**: `llmswitch-anthropic-openai.ts`
-- **功能**: Anthropic 协议与 OpenAI 协议互转
-- **特性**:
-  - 消息格式转换
-  - 工具调用适配
-  - 流式响应处理
-  - 推理内容处理
-  - 响应格式标准化
-
-### 🆕 Responses-Chat 转换器（经由 core codecs）
-- **实现文件**: `llmswitch-response-chat.ts`
-- **功能**: OpenAI Responses API 与 Chat Completions API 互转
-- **特性**:
-  - **双向转换**: Responses ↔ Chat 格式完全支持
-  - **工具调用**: 完整的工具调用格式转换
-  - **流式事件**: 支持 Responses API 的所有 SSE 事件
-  - **元数据保持**: 保留原始请求上下文和协议信息
-  - **智能处理**: 自动处理 reasoning、function_call 等特殊内容
-- **统一入口**: 在最新架构下，所有流水线实例都挂载 `llmswitch-conversion-router`，并依靠 `entryEndpoint` 自动匹配对应 codec（OpenAI / Anthropic / Responses），无需额外的手工配置。
-- **核心实现收敛**: 具体的转换逻辑（Responses↔Chat、OpenAI 规范化等）已迁移到 `@routecodex/llmswitch-core`，此处适配器仅做委派，避免重复实现。
-
-### ⛔ 统一协议转换器
-该实现已移除。统一路由由 `llmswitch-conversion-router` + `rcc-llmswitch-core` 的 `switch-orchestrator` + `codecs/*` 提供，请使用 conversion-router 作为入口。
-
-## 🌟 核心功能
-
-### 📊 协议检测与路由
-```typescript
-// 自动协议检测
-private detectProtocol(request: any): 'openai' | 'anthropic' | 'responses' | 'unknown' {
-  if (request.input && Array.isArray(request.input)) {
-    return 'responses';
-  } else if (request.messages) {
-    return 'openai';
-  } else if (this.hasAnthropicFormat(request)) {
-    return 'anthropic';
-  }
-  return 'unknown';
-}
-```
-
-### 🔄 Responses 转换示例
-```typescript
-// Responses → Chat 转换
-const responsesToChat = new ResponsesToChatLLMSwitch(config, dependencies);
-
-// 输入：Responses API 格式
-const responsesRequest = {
-  model: 'gpt-4',
-  instructions: 'You are a helpful assistant.',
-  input: [
-    {
-      type: 'message',
-      role: 'user',
-      content: [{ type: 'input_text', text: 'Hello!' }]
-    }
-  ],
-  tools: [/* 工具定义 */],
-  stream: true
-};
-
-// 输出：Chat Completions 格式
-const chatRequest = await responsesToChat.processIncoming(responsesRequest);
-// {
-//   model: 'gpt-4',
-//   messages: [
-//     { role: 'system', content: 'You are a helpful assistant.' },
-//     { role: 'user', content: 'Hello!' }
-//   ],
-//   tools: [/* 转换后的工具定义 */],
-//   stream: true,
-//   _metadata: {
-//     switchType: 'llmswitch-response-chat',
-//     entryProtocol: 'responses',
-//     targetProtocol: 'openai'
-//   }
-// }
-```
-
-### 📋 元数据增强
-```typescript
-// 请求元数据提取
-private extractRequestMetadata(request: any, protocol: string): Record<string, any> {
-  return {
-    timestamp: Date.now(),
-    protocol,
-    entryProtocol: protocol,
-    targetProtocol: this.getTargetProtocol(protocol),
-    hasModel: !!request.model,
-    hasTools: !!request.tools,
-    hasStream: !!request.stream,
-    messageCount: this.getMessageCount(request),
-    toolCount: request.tools?.length || 0,
-    requestType: this.inferRequestType(request, protocol)
-  };
-}
-```
-
-### 🛡️ 协议验证
-```typescript
-// 协议验证
-private validateProtocol(request: any, protocol: string): void {
-  switch (protocol) {
-    case 'openai':
-      this.validateOpenAIProtocol(request);
-      break;
-    case 'anthropic':
-      this.validateAnthropicProtocol(request);
-      break;
-    case 'responses':
-      this.validateResponsesProtocol(request);
-      break;
-    default:
-      throw new Error(`Unsupported protocol: ${protocol}`);
-  }
-}
-```
-
-## 📁 文件结构
-
-```
-src/modules/pipeline/modules/llmswitch/
-├── (兼容保留) openai-normalizer.ts   # 旧的 OpenAI 规范化实现，逻辑已收敛到 core/codecs，文件仅兼容，勿再直接引用
-├── llmswitch-openai-openai.ts        # OpenAI → OpenAI 转换器
-├── llmswitch-anthropic-openai.ts    # Anthropic ↔ OpenAI 转换器
-├── llmswitch-response-chat.ts        # Responses ↔ Chat 转换器 ⭐
-├── anthropic-openai-converter.ts    # Anthropic 转换器工具（逐步收敛到 codecs）
-├── anthropic-openai-config.ts        # Anthropic 转换配置
-└── README.md                         # 本文档
-```
-
-## 🚀 使用示例
-
-### Responses API 转换
-```typescript
-import { ResponsesToChatLLMSwitch } from './llmswitch-response-chat.js';
-
-const responsesSwitch = new ResponsesToChatLLMSwitch({
-  type: 'llmswitch-response-chat',
-  config: {
-    enableValidation: true,
-    enableMetadata: true,
-    preserveReasoning: true
-  }
-}, dependencies);
-
-await responsesSwitch.initialize();
-
-// 处理 Responses API 请求
-const chatRequest = await responsesSwitch.processIncoming({
-  model: 'gpt-4',
-  instructions: 'You are a helpful assistant.',
-  input: [
-    {
-      type: 'message',
-      role: 'user',
-      content: [{ type: 'input_text', text: 'Calculate 15 * 25' }]
-    }
-  ],
-  tools: [
-    {
-      type: 'function',
-      name: 'calculate',
-      description: 'Perform mathematical calculations',
-      parameters: {
-        type: 'object',
-        properties: {
-          expression: { type: 'string' }
-        }
-      }
-    }
-  ]
-});
-```
-
-### 在流水线配置中使用（通过 conversion-router）
-```typescript
-const pipelineConfig = {
-  modules: {
-    llmSwitch: {
-      type: 'llmswitch-conversion-router',  // 统一入口（根据 entryEndpoint 自动选择 codec）
-      config: {
-        // 由主包在运行时提供：
-        // baseDir 指向包根（包含 config/），profilesPath 相对该目录
-        baseDir: "<auto>",
-        profilesPath: "config/conversion/llmswitch-profiles.json"
-      }
-    }
-  }
-};
-```
-
-### 配置示例
-```json
-{
-  "virtualrouter": {
-    "inputProtocol": "responses",
-    "outputProtocol": "openai",
-    "providers": {
-      "lmstudio": {
-        "type": "lmstudio",
-        "baseURL": "http://localhost:1234",
-        "apiKey": "your-api-key",
-        "models": {
-          "gpt-4": {
-            "compatibility": {
-              "type": "responses-chat-switch"
-            }
-          }
-        }
-      }
-    },
-    "routing": {
-      "default": ["lmstudio.gpt-4"]
-    }
-  }
-}
-```
-
-## ⚙️ 配置选项
-
-### Responses-Chat 转换配置
-```typescript
-interface ResponsesChatConfig {
-  enableValidation?: boolean;           // 启用协议验证
-  enableMetadata?: boolean;             // 启用元数据增强
-  preserveReasoning?: boolean;          // 保留推理内容
-  enableToolMapping?: boolean;          // 启用工具映射
-  maxLogEntries?: number;               // 最大日志条目数
-  streamingChunkSize?: number;          // 流式响应块大小
-}
-```
-
-### OpenAI 透传配置
-```typescript
-interface OpenAIPassthroughConfig {
-  enableValidation?: boolean;           // 启用协议验证
-  enableMetadata?: boolean;             // 启用元数据增强
-  enablePerformanceTracking?: boolean;  // 启用性能跟踪
-  maxLogEntries?: number;               // 最大日志条目数
-}
-```
-
-### Anthropic-OpenAI 转换配置
-```typescript
-interface AnthropicOpenAIConfig {
-  direction: 'anthropic-to-openai' | 'openai-to-anthropic';
-  enableTools?: boolean;                 // 启用工具转换
-  enableStreaming?: boolean;             // 启用流式转换
-  preserveReasoning?: boolean;           // 保留推理内容
-  modelMappings?: Record<string, string>; // 模型映射
-}
-```
-
-## 🔄 支持的转换映射
-
-### Responses ↔ Chat 转换
-| Responses 字段 | Chat 字段 | 说明 |
-|----------------|------------|------|
-| `instructions` | `messages[0].content` (system role) | 系统指令 |
-| `input[].content[]` | `messages[].content` | 消息内容 |
-| `tools[]` | `tools[]` | 工具定义 |
-| `tool_choice` | `tool_choice` | 工具选择 |
-| `max_output_tokens` | `max_tokens` | 最大令牌数 |
-| `stream` | `stream` | 流式控制 |
-
-### 工具调用转换
-```typescript
-// Responses 格式工具调用
-{
-  "type": "function_call",
-  "name": "calculate",
-  "arguments": "{\"expression\":\"15*25\"}",
-  "call_id": "call_123"
-}
-
-// 转换为 Chat 格式
-{
-  "tool_calls": [{
-    "id": "call_123",
-    "type": "function",
-    "function": {
-      "name": "calculate",
-      "arguments": "{\"expression\":\"15*25\"}"
-    }
-  }]
-}
-```
-
-## 🎛️ 请求类型推断
-
-### 支持的请求类型
-```typescript
-type RequestType =
-  | 'chat'           // 聊天完成 (OpenAI)
-  | 'messages'       // 消息格式 (Anthropic)
-  | 'responses'      // Responses API
-  | 'completion'     // 文本完成
-  | 'embedding'      // 文本嵌入
-  | 'tool'           // 工具调用
-  | 'unknown';       // 未知类型
-```
-
-### 协议自动检测
-```typescript
-private detectProtocol(request: any): ProtocolType {
-  // Responses API 检测
-  if (request.input && Array.isArray(request.input)) {
-    return 'responses';
-  }
-
-  // OpenAI Chat 检测
-  if (request.messages && Array.isArray(request.messages)) {
-    return 'openai';
-  }
-
-  // Anthropic Messages 检测
-  if (this.hasAnthropicFormat(request)) {
-    return 'anthropic';
-  }
-
-  return 'unknown';
-}
-```
-
-## 📊 性能跟踪
-
-### 性能元数据
-```typescript
-private addPerformanceMetadata(data: any, operation: string): any {
-  return {
-    ...data,
-    _performance: {
-      ...(data._performance || {}),
-      [operation]: {
-        timestamp: Date.now(),
-        operation,
-        moduleId: this.id,
-        protocol: data._metadata?.originalProtocol
-      }
-    }
-  };
-}
-```
-
-### 转换性能监控
-```typescript
-// 转换性能统计
-const conversionStats = {
-  conversionTime: endTime - startTime,
-  inputSize: JSON.stringify(request).length,
-  outputSize: JSON.stringify(transformed).length,
-  protocol: detectedProtocol,
-  hasTools: !!request.tools,
-  messageCount: this.getMessageCount(request)
-};
-```
-
-## 🚨 错误处理
-
-### 协议验证错误
-```typescript
-// Responses API 验证
-if (protocol === 'responses') {
-  if (!request.input || !Array.isArray(request.input)) {
-    throw new Error('Invalid Responses protocol: input must be an array');
-  }
-}
-
-// 工具格式验证
-if (request.tools && !this.validateTools(request.tools)) {
-  throw new Error('Invalid tool format in request');
-}
-```
-
-### 转换错误处理
-```typescript
-// 转换错误记录和恢复
-try {
-  const transformed = await this.transformRequest(request, protocol);
-} catch (error) {
-  this.logger.logModule(this.id, 'transform-error', {
-    error: error instanceof Error ? error.message : String(error),
-    protocol,
-    requestType: this.inferRequestType(request, protocol)
-  });
-
-  // 尝试降级处理
-  return this.handleTransformError(request, error);
-}
-```
-
-## 🔍 调试支持
-
-### 详细日志记录
-```typescript
-// 请求转换日志
-this.logger.logTransformation(this.id, 'responses-to-chat', request, transformed);
-
-// 响应转换日志
-this.logger.logTransformation(this.id, 'chat-to-responses', response, converted);
-
-// 流式事件日志
-this.logger.logModule(this.id, 'stream-event', {
-  eventType: event.type,
-  itemId: event.data.item_id,
-  sequenceNumber: event.data.sequence_number
-});
-```
-
-### 调试信息
-```typescript
-// 完整的调试上下文
-const debugInfo = {
-  sessionId: request._metadata?.sessionId,
-  moduleId: this.id,
-  operationId: 'llmswitch_transform',
-  timestamp: Date.now(),
-  type: 'transform',
-  position: 'middle',
-  data: {
-    original: request,
-    transformed: transformed,
-    metadata: transformed._metadata,
-    protocol: detectedProtocol,
-    conversionStats
-  }
-};
-```
-
-## 🌐 API 端点支持
-
-### 支持的端点
-- **`/v1/chat/completions`** - OpenAI Chat Completions API
-- **`/v1/responses`** - OpenAI Responses API ⭐
-- **`/v1/messages`** - Anthropic Messages API
-- **`/v1/completions`** - OpenAI Completions API
-
-### 端点映射
-```typescript
-const endpointMappings = {
-  '/v1/responses': {
-    entryProtocol: 'responses',
-    switchType: 'llmswitch-response-chat',
-    targetProtocol: 'openai'
-  },
-  '/v1/chat/completions': {
-    entryProtocol: 'openai',
-    switchType: 'llmswitch-openai-openai',
-    targetProtocol: 'openai'
-  },
-  '/v1/messages': {
-    entryProtocol: 'anthropic',
-    switchType: 'llmswitch-anthropic-openai',
-    targetProtocol: 'openai'
-  }
-};
-```
-
-## 🔧 扩展性
-
-### 添加新的 LLMSwitch 实现
-```typescript
-class NewProtocolLLMSwitch implements LLMSwitchModule {
-  readonly type = 'llmswitch-new-protocol';
-  readonly protocol = 'new-protocol';
-
-  async processIncoming(request: any): Promise<any> {
-    const context = this.captureRequestContext(request);
-    const transformed = this.transformRequest(request, context);
-
-    return {
-      ...transformed,
-      _metadata: {
-        switchType: this.type,
-        timestamp: Date.now(),
-        entryProtocol: this.protocol,
-        targetProtocol: 'openai',
-        ...context
-      }
-    };
-  }
-
-  async processOutgoing(response: any): Promise<any> {
-    const context = this.extractResponseContext(response);
-    return this.transformResponse(response, context);
-  }
-}
-```
-
-### 自定义协议转换器
-```typescript
-class CustomProtocolConverter {
-  async convertRequest(request: any, targetProtocol: string): Promise<any> {
-    // 自定义请求转换逻辑
-    switch (targetProtocol) {
-      case 'openai':
-        return this.convertToOpenAI(request);
-      case 'anthropic':
-        return this.convertToAnthropic(request);
-      case 'responses':
-        return this.convertToResponses(request);
-      default:
-        throw new Error(`Unsupported target protocol: ${targetProtocol}`);
-    }
-  }
-}
-```
-
-## 📈 版本信息
-
-- **当前版本**: 2.0.0
-- **新增特性**: Responses API 完整支持
-- **兼容性**: RouteCodex Pipeline >= 2.0.0
-- **TypeScript**: >= 5.0.0
-- **Node.js**: >= 18.0.0
-
-## 🔗 依赖关系
-
-- **rcc-debugcenter**: 调试中心集成
-- **PipelineDebugLogger**: 模块日志记录
-- **ErrorHandlingCenter**: 错误处理集成
-- **DebugEventBus**: 事件总线通信
-- **BaseModule**: 基础模块接口
-
-## ✨ 新特性 (v2.0.0)
-
-### 🆕 Responses API 支持
-- 完整的 Responses ↔ Chat 格式转换
-- 支持所有 Responses API 字段和功能
-- 工具调用完整支持
-- 流式事件处理
-
-### 🔧 增强的协议检测
-- 自动检测输入协议类型
-- 智能转换策略选择
-- 错误恢复机制
-
-### 📊 改进的调试功能
-- 详细的转换日志
-- 性能统计
-- 协议转换可视化
-
-## 🚀 更新日志
-
-### v2.0.0 (2025-10-17)
-- ✨ 新增 `llmswitch-response-chat` 转换器
-- 🔄 完整的 Responses API 支持
-- 📊 改进的性能跟踪和调试功能
-- 🛡️ 增强的协议验证和错误处理
-- 📚 完整的文档更新
-
-### v1.5.0 (2025-01-22)
-- 🔧 完善 Anthropic-OpenAI 转换
-- 📊 新增性能跟踪功能
-- 🛡️ 改进错误处理机制
-- 📚 完善文档和调试支持说明
-
-## 🔮 未来计划
-
-### v2.1.0 计划
-- 🤖 Google Gemini 协议支持
-- 🔄 实时流式协议转换
-- 📊 协议转换性能优化
-- 🧪 更多的协议测试覆盖
-
-### 长期规划
-- 🌐 更多协议支持 (Cohere, Mistral 等)
-- 🔄 协议版本管理
-- 🧠 智能协议转换策略
-- 📊 协议转换分析和报告
-
-## 📞 技术支持
-
-如有问题或建议，请：
-1. 查看调试日志了解详细信息
-2. 检查协议格式是否符合规范
-3. 验证配置文件设置
-4. 参考本文档的使用示例
-
----
-
-**最后更新**: 2025-10-17 - 新增 Responses API 支持文档
+**最后更新**: 2025-10-24 - 适配4层流水线架构，专注协议转换职责
