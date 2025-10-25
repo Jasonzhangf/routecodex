@@ -225,6 +225,8 @@ export class StreamingManager {
     }
 
     if (typeof data === 'object' && data !== null) {
+      // No cross-protocol fallbacks here. Only handle Chat JSON below.
+
       // Non-stream JSON response: synthesize delta stream when choices[].message exists
       if (Array.isArray((data as any).choices) && (data as any).choices.length > 0 && (data as any).choices[0]?.message) {
         const { chunks, finish } = synthesizeFromResponse(data);

@@ -10,8 +10,8 @@ import { RouteCodexError } from '../types.js';
 import { RequestValidator } from '../utils/request-validator.js';
 import { ResponseNormalizer } from '../utils/response-normalizer.js';
 import { StreamingManager } from '../utils/streaming-manager.js';
-import { ProtocolDetector } from '../protocol/protocol-detector.js';
-import { OpenAIAdapter } from '../protocol/openai-adapter.js';
+import { emitOpenAIChatSSE } from '../utils/openai-chunk-emitter.js';
+// Protocol conversion is owned by llmswitch modules. Handler must not pre-convert.
 import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
 import { OpenAINormalizerLLMSwitch } from '../../modules/pipeline/modules/llmswitch/llmswitch-openai-openai.js';
 import os from 'os';
@@ -67,54 +67,36 @@ export class ChatCompletionsHandler extends BaseHandler {
     });
 
     try {
-      // Forced adapter preflight: convert Anthropic/Responses-shaped payloads to OpenAI
+      // Validate only when payload already looks like OpenAI Chat; protocol conversion belongs to llmswitch
       try {
-        const looksAnthropicContent = Array.isArray(req.body?.messages) && (req.body.messages as any[]).some((m: any) => Array.isArray(m?.content) && m.content.some((c: any) => c && typeof c === 'object' && c.type));
-        const detector = new ProtocolDetector();
-        const det = detector.detectFromRequest(req);
-        if (looksAnthropicContent || det.protocol === 'anthropic' || det.protocol === 'responses') {
-          const adapter = new OpenAIAdapter();
-          let converted = adapter.convertFromProtocol(req.body, 'anthropic') as any;
-          // Fallback normalization: ensure messages[].content is string
-          if (Array.isArray(converted?.messages)) {
-            converted = {
-              ...converted,
-              messages: (converted.messages as any[]).map((m: any) => {
-                if (Array.isArray(m?.content)) {
-                  const text = m.content
-                    .filter((c: any) => c && typeof c === 'object' && c.type === 'text' && typeof c.text === 'string')
-                    .map((c: any) => c.text)
-                    .join('\n');
-                  return { ...m, content: text };
-                }
-                return m;
-              })
-            };
+        const looksChat = Array.isArray((req.body as any)?.messages) && typeof (req.body as any)?.model === 'string';
+        if (looksChat) {
+          const validation = this.requestValidator.validateChatCompletion(req.body);
+          if (!validation.isValid) {
+            throw new RouteCodexError(
+              `Request validation failed: ${validation.errors.join(', ')}`,
+              'validation_error',
+              400
+            );
           }
-          req.body = converted;
-          try { res.setHeader('x-rc-adapter', 'anthropic->openai'); } catch { /* ignore */ }
         }
-      } catch { /* non-blocking */ }
-
-      // Validate request
-      const validation = this.requestValidator.validateChatCompletion(req.body);
-      if (!validation.isValid) {
-        throw new RouteCodexError(
-          `Request validation failed: ${validation.errors.join(', ')}`,
-          'validation_error',
-          400
-        );
-      }
+      } catch { /* keep handler permissive; conversion/strict validation occurs in llmswitch */ }
 
       // Process request through pipeline
       const pipelineResponse = await this.processChatRequest(req, requestId);
 
       // Handle streaming vs non-streaming response
       if (req.body.stream) {
-        const streamModel = (pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse)
-          ? ((pipelineResponse as any).data?.model ?? req.body.model)
-          : req.body.model;
-        await this.streamingManager.streamResponse(pipelineResponse, requestId, res, streamModel);
+        // Phase 2: stream emission via workflow-owned emitter (Chat-only)
+        try { res.setHeader('Content-Type', 'text/event-stream'); } catch { /* ignore */ }
+        try { res.setHeader('Cache-Control', 'no-cache'); } catch { /* ignore */ }
+        try { res.setHeader('Connection', 'keep-alive'); } catch { /* ignore */ }
+        try { res.setHeader('x-request-id', requestId); } catch { /* ignore */ }
+        const payload = pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
+          ? (pipelineResponse as Record<string, unknown>).data
+          : pipelineResponse;
+        const streamModel = (payload as any)?.model ?? req.body.model;
+        await emitOpenAIChatSSE(res, payload, requestId, streamModel);
         return;
       }
 
@@ -154,32 +136,9 @@ export class ChatCompletionsHandler extends BaseHandler {
     const providerId = meta?.providerId ?? 'unknown';
     const modelId = meta?.modelId ?? 'unknown';
 
-    // Pre-convert OpenAI Responses payload to OpenAI Chat payload
-    let chatPayload = { ...(req.body || {}) } as Record<string, unknown>;
-    // Strict: normalize Chat request via llmswitch; if normalization fails, do not fallback
-    {
-      const logger = new PipelineDebugLogger({} as any, { enableConsoleLogging: false, enableDebugCenter: false });
-      const deps = { errorHandlingCenter: {}, debugCenter: {}, logger } as any;
-      const normalizer = new OpenAINormalizerLLMSwitch({ type: 'llmswitch-openai-openai', config: {} } as any, deps as any);
-
-      try {
-        if (typeof normalizer.initialize === 'function') {
-          await normalizer.initialize();
-        }
-        const transformed = await normalizer.transformRequest(req.body);
-        if (transformed && typeof transformed === 'object') {
-          const dto = transformed as any;
-          chatPayload = dto?.data && typeof dto.data === 'object'
-            ? { ...(dto.data as Record<string, unknown>) }
-            : (transformed as Record<string, unknown>);
-        }
-      } catch (e) {
-        throw new RouteCodexError((e as Error)?.message || 'chat normalization failed', 'conversion_error', 400);
-      }
-    }
-
-    // Ensure payload model aligns with selected route meta
-    const normalizedPayload = { ...chatPayload, ...(modelId ? { model: modelId } : {}) };
+    // Do not perform protocol conversion here; delegate to llmswitch inside pipeline.
+    // Ensure payload carries route-selected model for downstream modules when applicable.
+    const normalizedPayload = { ...(req.body || {}), ...(modelId ? { model: modelId } : {}) } as Record<string, unknown>;
 
     const pipelineRequest = {
       data: normalizedPayload,

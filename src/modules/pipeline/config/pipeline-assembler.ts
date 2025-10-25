@@ -230,11 +230,8 @@ export class PipelineAssembler {
         provCfg.auth = dstAuth;
       }
 
-      const modBlock: Record<string, unknown> = {
-        provider: { type: provider.type, config: provCfg },
-        compatibility: { type: compatibility.type, config: compatibility.config || {} },
-      };
-
+      // Build modules in strict execution order for requests:
+      // llmSwitch -> workflow -> compatibility -> provider
       const allowedSwitches = new Set([
         'llmswitch-anthropic-openai',
         'llmswitch-openai-openai',
@@ -243,21 +240,30 @@ export class PipelineAssembler {
         'llmswitch-responses-passthrough',
       ]);
 
+      const modulesOrdered: Record<string, unknown> = {};
+      // llmSwitch (required)
       if (llmSwitch?.type) {
         const normalizedType = String(llmSwitch.type).toLowerCase();
         if (allowedSwitches.has(normalizedType)) {
-          modBlock.llmSwitch = {
-            type: llmSwitch.type,
-            config: llmSwitch.config || {},
-          };
+          modulesOrdered.llmSwitch = { type: llmSwitch.type, config: llmSwitch.config || {} };
         } else {
-          modBlock.llmSwitch = { type: 'llmswitch-anthropic-openai', config: {} };
+          // Fallback to conversion router to centralize protocol handling to OpenAI Chat
+          modulesOrdered.llmSwitch = { type: 'llmswitch-conversion-router', config: {} };
         }
       } else {
-        modBlock.llmSwitch = { type: 'llmswitch-anthropic-openai', config: {} };
+        // Default to conversion router so all endpoints unify to OpenAI Chat before workflow
+        modulesOrdered.llmSwitch = { type: 'llmswitch-conversion-router', config: {} };
       }
-      if (workflow?.type) { modBlock.workflow = { type: workflow.type, config: workflow.config || {} }; }
-      pipelines.push({ id, provider: { type: provider.type }, modules: modBlock, settings: { debugEnabled: true } } as PipelineConfig);
+      // workflow (optional)
+      if (workflow?.type) {
+        modulesOrdered.workflow = { type: workflow.type, config: workflow.config || {} };
+      }
+      // compatibility (optional)
+      modulesOrdered.compatibility = { type: compatibility.type, config: compatibility.config || {} };
+      // provider (required)
+      modulesOrdered.provider = { type: provider.type, config: provCfg };
+
+      pipelines.push({ id, provider: { type: provider.type }, modules: modulesOrdered, settings: { debugEnabled: true } } as PipelineConfig);
       seen.add(id);
     }
 
