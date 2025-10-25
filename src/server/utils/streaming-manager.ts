@@ -96,28 +96,11 @@ export class StreamingManager {
     res: Response,
     model: string
   ): Promise<void> {
-    // If top-level response is already a stream, pipe it
-    if (response && typeof (response as any).pipe === 'function') {
-      return new Promise((resolve, reject) => {
-        (response as any).pipe(res);
-        (response as any).on('end', resolve);
-        (response as any).on('error', reject);
-      });
-    }
-
-    // Handle streaming response data
+    // Always synthesize streaming from non-stream JSON
     if (!response || typeof response !== 'object' || !('data' in response)) {
       throw new Error('Streaming pipeline response is missing data payload');
     }
     const data = (response as Record<string, unknown>).data as any;
-    // If nested data is a stream, pipe it transparently (provider passthrough)
-    if (data && typeof data.pipe === 'function') {
-      return new Promise((resolve, reject) => {
-        (data as any).pipe(res);
-        (data as any).on('end', resolve);
-        (data as any).on('error', reject);
-      });
-    }
     await this.processStreamingData(data, requestId, res, model);
   }
 

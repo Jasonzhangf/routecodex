@@ -233,25 +233,7 @@ export class GLMHTTPProvider implements ProviderModule {
       throw err;
     }
 
-    // Streaming passthrough: return Node.js readable for SSE
-    if (wantsStream && res.body) {
-      try {
-        // Convert web ReadableStream to Node Readable
-        const { Readable } = await import('stream');
-        const nodeStream = (Readable as any).fromWeb ? (Readable as any).fromWeb(res.body as any) : (res as any).body;
-        if (this.isDebugEnhanced && this.debugEventBus) {
-          this.debugEventBus.publish({ sessionId: 'system', moduleId: this.id, operationId: 'glm_http_request_success', timestamp: Date.now(), type: 'end', position: 'middle', data: { status: res.status, elapsed, streaming: true } });
-        }
-        return {
-          data: nodeStream,
-          status: res.status,
-          headers: Object.fromEntries(res.headers.entries()),
-          metadata: { requestId: `glm-${Date.now()}`, processingTime: elapsed, model: (request as any)?.model }
-        };
-      } catch {
-        // Fallback to buffered read if conversion fails
-      }
-    }
+    // Always treat upstream as non-stream JSON; local streaming (if any) is synthesized later.
 
     // Non-stream JSON response
     const data = await res.json();
