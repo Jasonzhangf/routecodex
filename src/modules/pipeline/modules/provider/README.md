@@ -72,6 +72,18 @@ Provider 模块作为流水线的最终执行层，专注于：
   - 1210 兼容性处理
   - 诊断和调试支持
 
+### 🌐 Generic Responses Provider
+- **实现文件**: `generic-responses.ts`
+- **协议**: OpenAI Responses API
+- **认证**: Bearer Token
+- **特性**:
+  - OpenAI Responses API 原生支持
+  - 标准化的 HTTP 请求处理
+  - 错误状态码处理
+  - Beta 头部自动添加（`OpenAI-Beta: responses-2024-12-17`）
+  - 灵活的 baseUrl 和认证配置
+  - 完整的错误响应处理
+
 ## 🏗️ 模块架构
 
 ### 核心接口
@@ -261,6 +273,23 @@ interface ProviderConfig {
 }
 ```
 
+#### Generic Responses 配置
+```json
+{
+  "type": "generic-responses",
+  "config": {
+    "baseUrl": "https://api.openai.com",
+    "auth": {
+      "type": "apikey",
+      "apiKey": "sk-your-openai-api-key"
+    },
+    "timeout": 60000,
+    "maxRetries": 3,
+    "enableHealthCheck": true
+  }
+}
+```
+
 ## 🚀 使用示例
 
 ### 基本 Provider 使用
@@ -395,10 +424,17 @@ async healthCheck(): Promise<HealthStatus> {
 - **认证**: Bearer Token / OAuth 2.0
 - **支持**: 流式响应、工具调用（兼容性处理）
 
-### Responses 协议
+### OpenAI Responses 协议
+- **Provider**: Generic Responses Provider
 - **端点**: `/v1/responses`
 - **认证**: Bearer Token
-- **支持**: 通过 LLM Switch 转换为 Chat 格式
+- **特性**:
+  - 新一代 OpenAI API 原生支持
+  - 自动 Beta 头部注入（`responses-2024-12-17`）
+  - 简化的请求格式（`input` 替代 `messages`）
+  - 原生工具调用支持
+  - 完整的错误状态码处理
+- **转换路径**: 可通过 LLM Switch 转换为 Chat 格式或直接透传
 
 ## 🛠️ 调试和诊断
 
