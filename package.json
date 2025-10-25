@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.55.0",
+  "version": "0.55.2",
   "description": "Multi-provider OpenAI proxy server with native dry-run capabilities",
   "type": "module",
   "main": "dist/index.js",
@@ -24,17 +24,16 @@
     "LICENSE"
   ],
   "bundledDependencies": [
-    "routecodex-config-compat"
+    "ajv",
+    "zod",
+    "routecodex-config-engine",
+    "routecodex-config-compat",
+    "rcc-llmswitch-core"
   ],
   "engines": {
     "node": ">=20 <21"
   },
-  "workspaces": [
-    "sharedmodule/config-engine",
-    "sharedmodule/config-compat",
-    "sharedmodule/config-testkit",
-    "sharedmodule/llmswitch-core"
-  ],
+  
   "scripts": {
     "build": "npm run clean && tsc",
     "build:dev": "npm run clean && tsc && npm -w sharedmodule/llmswitch-core run build",
@@ -101,7 +100,8 @@
     "package:validate": "npx package-json-validator"
   },
   "dependencies": {
-    "rcc-llmswitch-core": "^0.1.1",
+    "zod": "^3.23.8",
+    "rcc-llmswitch-core": "^0.1.2",
     "ajv": "^8.17.1",
     "@anthropic-ai/sdk": "^0.65.0",
     "@lmstudio/sdk": "^1.5.0",
