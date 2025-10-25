@@ -1,13 +1,38 @@
 # Provider 模块
 
-Provider 模块是流水线架构的第 4 层（最终层），负责与 AI 服务提供商进行 HTTP 通信。它接收来自 Compatibility 层的标准化请求，发送给对应的 AI 服务，并将原始响应返回给上层处理。
+Provider 模块是 RouteCodex 4层流水线架构的第 3 层（标准HTTP服务器层），负责与外部 AI 服务提供商进行 HTTP 通信。它接收来自 Compatibility 层的标准化请求，发送给对应的 AI 服务，并将原始响应返回给上层处理。
 
 ## 🎯 模块概述
 
-Provider 模块作为流水线的最终执行层，专注于：
+Provider 模块作为流水线的标准HTTP服务器层，专注于：
 - **HTTP 通信**: 标准的 HTTP 请求/响应处理
 - **认证管理**: 多种认证方式支持（API Key、OAuth 2.0 等）
 - **错误处理**: 统一的错误处理和重试机制
+- **性能监控**: 请求性能统计和健康检查
+
+### 🏗️ 架构定位
+```
+┌─────────────────────────────────────────────────────────┐
+│                RouteCodex 4-Layer Pipeline            │
+├─────────────────────────────────────────────────────────────┤
+│ HTTP Request → Virtual Router → LLMSwitch → Compatibility → Provider → AI Service │
+│     ↓             ↓                ↓            ↓            ↓           ↓          │
+│  Request      Dynamic          Protocol      Format       Standard     Response    │
+│  Analysis      Routing           Conversion     Transformation HTTP Server   Processing   │
+└─────────────────────────────────────────────────────────────┘
+
+                                        ↑
+                                  Provider 在此层工作
+```
+
+### 🔗 与其他模块的协作
+- **Compatibility**: 接收供应商特定格式适配后的请求
+- **AI Service**: 外部AI服务提供商（OpenAI、Anthropic、Qwen等）
+- **LLMSwitch**: 提供协议转换支持
+- **Virtual Router**: 提供动态路由分类（上游）
+
+### 🎯 设计原则
+**重要**: Provider 模块**不执行任何格式转换**，只负责标准HTTP通信。所有格式转换都由 Compatibility 层处理。
 - **性能监控**: 请求性能统计和健康检查
 
 ## 📁 支持的 Provider

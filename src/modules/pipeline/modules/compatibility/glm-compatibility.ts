@@ -93,7 +93,41 @@ export class GLMCompatibility implements CompatibilityModule {
     // Normalize GLM responses to OpenAI Chat Completions shape when needed
     const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
     const payload = isDto ? (response as any).data : response;
+
+    // Optional capture (single env switch): RCC_DEBUG_CAPTURE
+    // Default ON; disable with RCC_DEBUG_CAPTURE=0|false
+    try {
+      const cap = String(process.env.RCC_DEBUG_CAPTURE || '1').toLowerCase();
+      const enabled = !(cap === '0' || cap === 'false');
+      if (enabled) {
+        const fs = await import('fs/promises');
+        const path = await import('path');
+        const home = process.env.HOME || process.env.USERPROFILE || '';
+        const dir = path.join(home || '', '.routecodex', 'codex-samples', 'chat-replay');
+        await fs.mkdir(dir, { recursive: true });
+        const reqId = (isDto && (response as any).metadata?.requestId) ? String((response as any).metadata.requestId) : `req_${Date.now()}`;
+        const inPath = path.join(dir, `provider-in_${reqId}.json`);
+        await fs.writeFile(inPath, JSON.stringify(payload, null, 2), 'utf-8');
+      }
+    } catch { /* ignore capture errors */ }
+
     const out = this.normalizeResponse(payload);
+
+    try {
+      const cap = String(process.env.RCC_DEBUG_CAPTURE || '1').toLowerCase();
+      const enabled = !(cap === '0' || cap === 'false');
+      if (enabled) {
+        const fs = await import('fs/promises');
+        const path = await import('path');
+        const home = process.env.HOME || process.env.USERPROFILE || '';
+        const dir = path.join(home || '', '.routecodex', 'codex-samples', 'chat-replay');
+        await fs.mkdir(dir, { recursive: true });
+        const reqId = (isDto && (response as any).metadata?.requestId) ? String((response as any).metadata.requestId) : `req_${Date.now()}`;
+        const outPath = path.join(dir, `compat-out_${reqId}.json`);
+        await fs.writeFile(outPath, JSON.stringify(out, null, 2), 'utf-8');
+      }
+    } catch { /* ignore capture errors */ }
+
     if (isDto) {
       return { ...(response as any), data: out };
     }
@@ -231,18 +265,26 @@ export class GLMCompatibility implements CompatibilityModule {
     // Already OpenAI chat completion
     if ('choices' in resp) {
       const r = { ...resp } as Record<string, unknown>;
-      // Strip thinking segments from assistant message content (Chat 端口不外泄思考)
+      // Normalize GLM Chat shape:
+      // - If message.content is empty but reasoning_content exists, use reasoning_content
+      // - Always strip <think> blocks from any textual content
       try {
         const choices = Array.isArray((r as any).choices) ? (r as any).choices : [];
         for (const c of choices) {
-          const msg = c?.message || {};
-          if (typeof msg?.content === 'string') {
-            msg.content = this.stripThinking(String(msg.content));
+          const msg = (c && typeof c === 'object') ? (c as any).message || {} : {};
+          const contentStr = typeof msg?.content === 'string' ? msg.content : '';
+          const hasContent = typeof contentStr === 'string' && contentStr.trim().length > 0;
+          const reasoningStr = typeof (msg as any)?.reasoning_content === 'string' ? String((msg as any).reasoning_content) : '';
+          if (!hasContent && reasoningStr.trim().length > 0) {
+            (msg as any).content = reasoningStr;
+          }
+          if (typeof (msg as any).content === 'string') {
+            (msg as any).content = this.stripThinking(String((msg as any).content));
           }
         }
       } catch { /* ignore */ }
       if (!('object' in r)) {
-        r.object = 'chat.completion';
+        (r as any).object = 'chat.completion';
       }
       return r;
     }
