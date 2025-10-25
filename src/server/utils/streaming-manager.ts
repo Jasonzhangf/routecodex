@@ -96,11 +96,33 @@ export class StreamingManager {
     res: Response,
     model: string
   ): Promise<void> {
-    // Always synthesize streaming from non-stream JSON
+    // Always synthesize streaming from non-stream JSON, but support passthrough
+    // for provider upstreams that return a Readable stream (SSE).
     if (!response || typeof response !== 'object' || !('data' in response)) {
       throw new Error('Streaming pipeline response is missing data payload');
     }
     const data = (response as Record<string, unknown>).data as any;
+
+    // If provider returned a Node.js Readable stream (or Web ReadableStream), passthrough SSE
+    try {
+      const looksNodeReadable = data && typeof data === 'object' && typeof (data as any).on === 'function' && typeof (data as any).pipe === 'function';
+      const looksWebReadable = data && typeof (data as any).getReader === 'function' && typeof (data as any)[Symbol.asyncIterator] === 'function';
+      if (looksNodeReadable) {
+        await this.pipeReadableSSE(data, requestId, res);
+        return;
+      }
+      if (looksWebReadable) {
+        try {
+          const { Readable } = await import('stream');
+          const nodeStream = (Readable as any)?.fromWeb ? (Readable as any).fromWeb(data) : null;
+          if (nodeStream) {
+            await this.pipeReadableSSE(nodeStream, requestId, res);
+            return;
+          }
+        } catch { /* fall through to synthetic handling */ }
+      }
+    } catch { /* ignore detection errors and fall through */ }
+
     await this.processStreamingData(data, requestId, res, model);
   }
 
@@ -219,6 +241,63 @@ export class StreamingManager {
       this.sendFinalChunk(res, requestId, model, finalReason);
       return;
     }
+  }
+
+  /**
+   * Passthrough SSE from a readable stream directly to the client.
+   * This preserves upstream OpenAI chat/completions SSE formatting, avoiding
+   * mis-serialization of Readable objects into empty deltas.
+   */
+  private async pipeReadableSSE(readable: any, requestId: string, res: Response): Promise<void> {
+    await new Promise<void>((resolve) => {
+      const onData = (chunk: any) => {
+        try {
+          if (!res.writableEnded) {
+            // chunk is already formatted as SSE from upstream
+            res.write(chunk);
+          }
+        } catch {
+          // ignore write errors; end handled by 'error'
+        }
+      };
+      const onEnd = () => {
+        try { if (!res.writableEnded) res.end(); } catch { /* ignore */ }
+        cleanup();
+        resolve();
+      };
+      const onError = (err: any) => {
+        try {
+          if (!res.writableEnded) {
+            this.sendErrorChunk(res, err, requestId);
+            res.end();
+          }
+        } catch { /* ignore */ }
+        cleanup();
+        resolve();
+      };
+      const cleanup = () => {
+        try {
+          if (typeof readable.off === 'function') {
+            readable.off('data', onData);
+            readable.off('end', onEnd);
+            readable.off('error', onError);
+          } else if (typeof readable.removeListener === 'function') {
+            readable.removeListener('data', onData);
+            readable.removeListener('end', onEnd);
+            readable.removeListener('error', onError);
+          }
+        } catch { /* ignore */ }
+      };
+
+      try {
+        readable.on('data', onData);
+        readable.once('end', onEnd);
+        readable.once('error', onError);
+      } catch {
+        // If listener attachment fails, fall back to error chunk
+        onError(new Error('Failed to attach stream listeners'));
+      }
+    });
   }
 
   /**
