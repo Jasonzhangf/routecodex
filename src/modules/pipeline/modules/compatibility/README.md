@@ -1,10 +1,36 @@
 # Compatibility 模块
 
-Compatibility 模块提供协议格式转换功能，将不同供应商的API格式进行相互转换，支持工具调用、字段映射和响应格式适配。作为流水线架构的第 3 层，它专注于处理供应商特定的格式差异。
+Compatibility 模块提供协议格式转换功能，将不同供应商的API格式进行相互转换，支持工具调用、字段映射和响应格式适配。作为 RouteCodex 4层流水线架构的第 2 层，它专注于处理供应商特定的格式差异。
 
 ## 🎯 模块概述
 
-Compatibility 模块是流水线架构的第 3 层，负责处理请求和响应的格式转换。它专注于处理供应商特定的格式差异，确保不同供应商之间的协议兼容性。
+Compatibility 模块是流水线架构的第 2 层（格式转换层），负责处理请求和响应的格式转换。它专注于处理供应商特定的格式差异，确保不同供应商之间的协议兼容性。
+
+### 🏗️ 架构定位
+```
+┌─────────────────────────────────────────────────────────┐
+│                RouteCodex 4-Layer Pipeline            │
+├─────────────────────────────────────────────────────────────┤
+│ HTTP Request → Virtual Router → LLMSwitch → Compatibility → Provider → AI Service │
+│     ↓             ↓                ↓            ↓            ↓           ↓          │
+│  Request      Dynamic          Protocol      Format       Standard     Response    │
+│  Analysis      Routing           Conversion     Transformation HTTP Server   Processing   │
+└─────────────────────────────────────────────────────────────┘
+
+                              ↑
+                        Compatibility 在此层工作
+```
+
+### 🔗 与其他模块的协作
+- **LLMSwitch**: 接收协议转换后的请求，进行供应商特定格式适配
+- **Provider**: 接收格式标准化后的请求，发送给外部AI服务
+- **Virtual Router**: 提供动态路由分类（上游）
+- **AI Service**: 外部AI服务提供商（目标转换对象）
+
+### 🎯 设计原则
+- **专注格式转换**: 只处理供应商特定的格式差异，不负责协议转换
+- **配置驱动**: 基于 JSON 配置的转换规则
+- **模块化设计**: 每个供应商有独立的 Compatibility 实现
 
 ### 📋 核心职责
 - **格式转换**: 供应商特定的请求/响应格式转换

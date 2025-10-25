@@ -1,9 +1,9 @@
 /**
  * Streaming Control Workflow Implementation
  *
- * Handles streaming/non-streaming request conversion and response processing.
- * Converts streaming requests to non-streaming for provider compatibility,
- * then leaves responses as non-streaming (no mock streaming back).
+ * Enforces OpenAI Chat standard validation and stream control across the pipeline.
+ * - Request: validate OpenAI Chat request, persist originalStream, force provider-side stream=false
+ * - Response: validate OpenAI Chat response (non-stream JSON); streaming emission remains handler's job for now
  */
 
 import type { WorkflowModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
@@ -62,17 +62,14 @@ export class StreamingControlWorkflow implements WorkflowModule {
       const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
       const payload = isDto ? (dto!.data as any) : (requestParam as any);
 
-      const originalStream = payload?.stream;
-      let transformedPayload = { ...(payload || {}) };
+      // Validate OpenAI Chat request (strict)
+      this.validateOpenAIChatRequest(payload);
 
-      // If streaming request, convert to non-streaming for provider
-      if (originalStream === true) {
-        transformedPayload = this.convertStreamingToNonStreaming(payload);
+      const originalStream = payload?.stream === true;
+      // Force provider-side non-stream while preserving client intent
+      const transformedPayload = this.convertStreamingToNonStreaming(payload);
+      if (originalStream) {
         this.logger.logTransformation(dto?.route?.requestId || 'unknown', 'streaming-to-non-streaming', payload, transformedPayload);
-      } else {
-        this.logger.logModule(this.id, 'non-streaming-request', {
-          hasStream: originalStream
-        });
       }
 
       return isDto
@@ -96,10 +93,9 @@ export class StreamingControlWorkflow implements WorkflowModule {
     try {
       const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
       const payload = isDto ? (response as any).data : response;
-      // Always return non-streaming response. No mock streaming conversion.
-      this.logger.logModule(this.id, 'return-non-streaming-response', {
-        note: 'Streaming responses are not implemented; unified to non-streaming.'
-      });
+      // Validate OpenAI Chat response (non-stream JSON)
+      this.validateOpenAIChatResponse(payload);
+      // For Phase 1, return non-stream JSON; handler handles streaming.
       return isDto ? response : payload;
 
     } catch (error) {
@@ -248,5 +244,65 @@ export class StreamingControlWorkflow implements WorkflowModule {
 
     // Re-throw with additional context
     throw new Error(`Streaming error in ${context}: ${error.message}`);
+  }
+
+  /**
+   * Validate OpenAI Chat request shape (strict minimal set)
+   */
+  private validateOpenAIChatRequest(req: any): void {
+    if (!req || typeof req !== 'object') {
+      throw new Error('Invalid request payload: expected object');
+    }
+    if (typeof req.model !== 'string' || !req.model.trim()) {
+      throw new Error('Invalid request: model must be a non-empty string');
+    }
+    if (!Array.isArray(req.messages) || req.messages.length === 0) {
+      throw new Error('Invalid request: messages must be a non-empty array');
+    }
+    const roles = new Set(['system','user','assistant','tool']);
+    for (const m of req.messages) {
+      if (!m || typeof m !== 'object') throw new Error('Invalid request: message must be object');
+      if (!roles.has(String(m.role))) throw new Error(`Invalid message role: ${String(m.role)}`);
+      if (m.role === 'tool') {
+        if (typeof m.tool_call_id !== 'string' || !m.tool_call_id) throw new Error('Invalid tool message: missing tool_call_id');
+        if (typeof m.content !== 'string') throw new Error('Invalid tool message: content must be string');
+      }
+      if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+        for (const tc of m.tool_calls) {
+          if (!tc || typeof tc !== 'object') throw new Error('Invalid assistant.tool_calls item');
+          const fn = (tc as any).function;
+          if (!fn || typeof fn !== 'object') throw new Error('Invalid tool_calls.function');
+          if (typeof fn.name !== 'string' || !fn.name) throw new Error('Invalid tool_calls.function.name');
+          // Accept any string for arguments at request stage; normalization happens in llmswitch/compatibility.
+          if (typeof fn.arguments !== 'string') throw new Error('Invalid tool_calls.function.arguments: must be string');
+        }
+      }
+    }
+  }
+
+  /**
+   * Validate OpenAI Chat response shape (strict minimal set)
+   */
+  private validateOpenAIChatResponse(resp: any): void {
+    if (!resp || typeof resp !== 'object') {
+      throw new Error('Invalid response payload: expected object');
+    }
+    if (!Array.isArray(resp.choices) || resp.choices.length === 0) {
+      throw new Error('Invalid response: choices must be a non-empty array');
+    }
+    for (const ch of resp.choices) {
+      const msg = ch?.message;
+      if (!msg || typeof msg !== 'object') throw new Error('Invalid response: choice.message missing');
+      if (msg.role && msg.role !== 'assistant') throw new Error('Invalid response: message.role must be assistant when present');
+      if (Array.isArray(msg.tool_calls)) {
+        for (const tc of msg.tool_calls) {
+          const fn = tc?.function;
+          if (!fn || typeof fn !== 'object') throw new Error('Invalid response: tool_calls.function missing');
+          if (typeof fn.name !== 'string' || !fn.name) throw new Error('Invalid response: tool_calls.function.name');
+          // Accept any string; upstream may choose to provide either a JSON string or plain string; do not block here.
+          if (typeof fn.arguments !== 'string') throw new Error('Invalid response: tool_calls.function.arguments must be string');
+        }
+      }
+    }
   }
 }
