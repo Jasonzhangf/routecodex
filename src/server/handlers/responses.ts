@@ -550,6 +550,33 @@ export class ResponsesHandler extends BaseHandler {
         return { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: calls } } as Record<string, unknown>;
       };
       const funcCalls = getFunctionCalls(finalResp) as any[];
+
+      // Build known MCP servers (env + discovered from original request snapshot)
+      const knownServers = (() => {
+        const set = new Set<string>();
+        try {
+          const serversRaw = String(process.env.ROUTECODEX_MCP_SERVERS || '').trim();
+          if (serversRaw) { for (const s of serversRaw.split(',').map(x => x.trim()).filter(Boolean)) set.add(s); }
+          const snap = (reqMeta && typeof reqMeta === 'object') ? reqMeta : {};
+          const messages = Array.isArray((snap as any).messages) ? ((snap as any).messages as any[]) : [];
+          for (const m of messages) {
+            try {
+              if (m && m.role === 'tool' && typeof m.content === 'string') {
+                const o = JSON.parse(m.content); const sv = o?.arguments?.server; if (typeof sv === 'string' && sv.trim()) set.add(sv.trim());
+              }
+              if (m && m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+                for (const tc of m.tool_calls) {
+                  const fname = String(tc?.function?.name || ''); const dot = fname.indexOf('.');
+                  if (dot > 0) { const prefix = fname.slice(0, dot).trim(); if (prefix) set.add(prefix); }
+                  const argStr = String(tc?.function?.arguments ?? '');
+                  try { const parsed = JSON.parse(argStr); const sv = parsed?.server; if (typeof sv === 'string' && sv.trim()) set.add(sv.trim()); } catch {}
+                }
+              }
+            } catch { /* ignore */ }
+          }
+        } catch { /* ignore */ }
+        return set;
+      })();
       if (Array.isArray(funcCalls) && funcCalls.length > 0) {
         // Stream function_call lifecycle and arguments deltas
         const toArgsStr = (v: any) => (typeof v === 'string' ? v : (() => { try { return JSON.stringify(v ?? {}); } catch { return '{}'; } })());
@@ -561,6 +588,8 @@ export class ResponsesHandler extends BaseHandler {
           const prefix = name.slice(0, dot).trim();
           const base = name.slice(dot + 1).trim();
           if (!whitelist.has(base)) return { name, args: argsStr };
+          // Only canonicalize dotted-name when server prefix is already known
+          if (!knownServers.has(prefix)) return { name, args: argsStr };
           let obj: any;
           try { obj = JSON.parse(argsStr || '{}'); } catch { obj = {}; }
           if (!obj || typeof obj !== 'object' || Array.isArray(obj)) obj = {};

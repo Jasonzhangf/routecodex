@@ -115,9 +115,12 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
                 const envServers = serversRaw ? serversRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
                 const merged = Array.from(new Set([ ...envServers, ...Array.from(knownMcpServers) ]));
                 const serverProp = merged.length ? { type: 'string', enum: merged } : { type: 'string' };
+                // 初始阶段（未知 server）只暴露 list_mcp_resources；当存在已知 server 后再暴露全部 MCP 工具
                 addTool({ type: 'function', function: { name: 'list_mcp_resources', strict: true, description: 'List resources from a given MCP server (arguments.server = server label).', parameters: obj({ server: serverProp, filter: { type: 'string' }, root: { type: 'string' } }, ['server']) } });
-                addTool({ type: 'function', function: { name: 'read_mcp_resource', strict: true, description: 'Read a resource via MCP server.', parameters: obj({ server: serverProp, uri: { type: 'string' } }, ['server','uri']) } });
-                addTool({ type: 'function', function: { name: 'list_mcp_resource_templates', strict: true, description: 'List resource templates via MCP server.', parameters: obj({ server: serverProp }, ['server']) } });
+                if (merged.length > 0) {
+                  addTool({ type: 'function', function: { name: 'read_mcp_resource', strict: true, description: 'Read a resource via MCP server.', parameters: obj({ server: serverProp, uri: { type: 'string' } }, ['server','uri']) } });
+                  addTool({ type: 'function', function: { name: 'list_mcp_resource_templates', strict: true, description: 'List resource templates via MCP server.', parameters: obj({ server: serverProp }, ['server']) } });
+                }
               }
             } catch { /* ignore mcp injection errors */ }
           }
