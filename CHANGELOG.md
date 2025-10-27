@@ -428,3 +428,22 @@ Summary
   - 避免双重注入与环境变量合并导致的“默认 server 泄露”。
   - 仅从 arguments.server 发现已知 server；不从 dotted 前缀推断。
   - 注入与提示的分阶段逻辑以 core 为准。
+## 0.70.7 - 2025-10-27
+- 去除系统提示中的 MCP 文案（仅 OpenAI Chat 与 Responses），避免任何阶段泄露 read_mcp_resource 等名称。
+- 保留分阶段工具注入与过滤（未知 server 仅 list_mcp_resources；发现 server 后再暴露 read_mcp_resource/list_mcp_resource_templates，并以枚举约束 server）。
+- dotted-name 统一在核心层“去前缀”，不从前缀推断 server。
+## 0.70.9 - 2025-10-27
+- OpenAI Chat/Responses tool-call arguments aligned with Anthropic/CCR
+  - Lenient parse + unwrap (input/args/arguments/parameters/data/payload)
+  - Merge array-of-objects to single object; preserve _raw when needed
+  - Schema-driven normalization via shared normalizeArgsBySchema
+  - Shell: string command → argv tokens; handle leading `cd` to extract workdir
+  - New: append extra non-reserved keys as argv tokens (e.g. `{"command":"find ... -name","ts":"type f"}` → `{"command":["find ... -name","ts","type f"]}`)
+- MCP tooling gating (CCR-style) in Chat/Responses
+  - Start with list_mcp_resources only; enable read/templates only for discovered servers
+  - Strip dotted tool prefixes (filesystem.read_mcp_resource → read_mcp_resource)
+- Tool results: flattened JSON for role:tool content across Chat/Responses
+  - Include tool_call_id, tool_name, arguments, command, stdout/stderr, exit_code, duration_seconds, success, output
+- Captures: openai-chat flattened file naming retained
+- AGENTS.md: add build guideline for sharedmodule
+- Bump: 0.70.9; codex+chat sanity tested OK on recent 20 calls (argv shape stable; residual -name missing pattern is model-side)
