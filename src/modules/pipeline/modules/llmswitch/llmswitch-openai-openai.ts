@@ -5,7 +5,7 @@
 
 import type { LLMSwitchModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
-import { normalizeChatResponse, normalizeTools } from 'rcc-llmswitch-core/conversion';
+import { normalizeChatRequest, normalizeChatResponse, normalizeTools } from 'rcc-llmswitch-core/conversion';
 import { extractToolText } from '../../utils/tool-result-text.js';
 
 /**
@@ -47,7 +47,9 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
     // - tool role content is textified (extractToolText)
     const normalizedPayload = (() => {
       try {
-        const out: any = { ...(payload || {}) };
+        let out: any = { ...(payload || {}) };
+        // Delegate core normalization (tools/dotted-name/MCP injection + phased tips) to shared llmswitch-core
+        try { out = normalizeChatRequest(out); } catch { /* keep original on failure */ }
         const msgs = Array.isArray(out.messages) ? (out.messages as any[]) : [];
         if (!msgs.length) return out;
 
@@ -271,23 +273,7 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
           }
         }
 
-        // Append optional MCP server hint in system message (from env + discovered)
-        try {
-          const serversRaw = String(process.env.ROUTECODEX_MCP_SERVERS || '').trim();
-          const enableMcp = String(process.env.ROUTECODEX_MCP_ENABLE ?? '1') !== '0';
-          if (enableMcp) {
-            const envServers = serversRaw ? serversRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
-            const merged = Array.from(new Set([ ...envServers, ...Array.from(knownMcpServers) ]));
-            if (merged.length > 0) {
-              const listStr = JSON.stringify(merged);
-              const tip = `MCP usage: allowed functions: list_mcp_resources, read_mcp_resource, list_mcp_resource_templates. arguments.server must be one of ${listStr}. Avoid dotted tool names (server.fn).`;
-              msgs.push({ role: 'system', content: tip });
-            } else {
-              const tip = 'MCP usage: no known MCP servers yet. Only use list_mcp_resources to discover available servers. Do not call other MCP functions or use dotted tool names (server.fn) until a server_label is discovered.';
-              msgs.push({ role: 'system', content: tip });
-            }
-          }
-        } catch { /* ignore */ }
+        // MCP system hints are appended by shared llmswitch-core; no hints here.
 
         return { ...out, messages: msgs };
       } catch (e) {
