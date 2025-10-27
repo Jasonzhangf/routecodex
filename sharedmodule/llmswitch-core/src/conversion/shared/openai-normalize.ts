@@ -43,24 +43,53 @@ export function normalizeChatRequest(request: any): any {
         if (!Array.isArray((normalized as any).tools)) (normalized as any).tools = [] as any[];
       };
 
-      // Phase injection: unknown -> only list, known -> list + read + templates
+      // Phase filter + injection: unknown -> only list, known -> list + read + templates
       ensureToolsArray();
-      const have = new Set(((normalized as any).tools as any[]).map((t: any) => (t?.function?.name || '').toString()));
-      const addTool = (def: any) => { if (!have.has(def.function.name)) { ((normalized as any).tools as any[]).push(def); have.add(def.function.name); } };
-      addTool({ type: 'function', function: { name: 'list_mcp_resources', strict: true, description: 'List resources from a given MCP server (arguments.server = server label).', parameters: objSchema({ server: serverProp, filter: { type: 'string' }, root: { type: 'string' } }, ['server']) } });
-      if (serverList.length > 0) {
-        addTool({ type: 'function', function: { name: 'read_mcp_resource', strict: true, description: 'Read a resource via MCP server.', parameters: objSchema({ server: serverProp, uri: { type: 'string' } }, ['server','uri']) } });
-        addTool({ type: 'function', function: { name: 'list_mcp_resource_templates', strict: true, description: 'List resource templates via MCP server.', parameters: objSchema({ server: serverProp }, ['server']) } });
-      }
-
-      // Phase system tip: avoid seeding non-exposed names when servers unknown
-      const tip = (() => {
-        if (serverList.length > 0) {
-          return `MCP usage: allowed functions: list_mcp_resources, read_mcp_resource, list_mcp_resource_templates. arguments.server must be one of ${JSON.stringify(serverList)}. Avoid dotted tool names (server.fn).`;
+      const currentTools: any[] = ((normalized as any).tools as any[]);
+      const outTools: any[] = [];
+      const keepNames = new Set<string>();
+      for (const t of currentTools) {
+        const name = t && t.function && typeof t.function.name === 'string' ? String(t.function.name) : '';
+        const lower = name.toLowerCase();
+        if (!name) { outTools.push(t); continue; }
+        if (lower === 'list_mcp_resources') {
+          // Keep list; ensure parameters shape (server optional)
+          const def = { type: 'function', function: { name: 'list_mcp_resources', strict: true, description: t.function?.description || 'List resources from a given MCP server.', parameters: objSchema({ server: serverProp, filter: { type: 'string' }, root: { type: 'string' } }, [] /* server optional */) } };
+          outTools.push(def); keepNames.add('list_mcp_resources');
+          continue;
         }
-        return 'MCP usage: no known MCP servers yet. Only use list_mcp_resources to discover available servers. Do not call other MCP functions or use dotted tool names (server.fn) until a server_label is discovered.';
-      })();
-      try { ((normalized as any).messages as any[]).push({ role: 'system', content: tip }); } catch { /* ignore */ }
+        if (lower === 'read_mcp_resource' || lower === 'list_mcp_resource_templates') {
+          if (serverList.length > 0) {
+            // Keep only when servers known; normalize parameters
+            if (lower === 'read_mcp_resource') {
+              const def = { type: 'function', function: { name: 'read_mcp_resource', strict: true, description: t.function?.description || 'Read a resource via MCP server.', parameters: objSchema({ server: serverProp, uri: { type: 'string' } }, ['server','uri']) } };
+              outTools.push(def); keepNames.add('read_mcp_resource');
+            } else {
+              const def = { type: 'function', function: { name: 'list_mcp_resource_templates', strict: true, description: t.function?.description || 'List resource templates via MCP server.', parameters: objSchema({ server: serverProp }, ['server']) } };
+              outTools.push(def); keepNames.add('list_mcp_resource_templates');
+            }
+          }
+          continue;
+        }
+        // Non-MCP tools: keep as-is
+        outTools.push(t);
+      }
+      // Ensure list exists at least once
+      if (!keepNames.has('list_mcp_resources')) {
+        outTools.push({ type: 'function', function: { name: 'list_mcp_resources', strict: true, description: 'List resources from a given MCP server (arguments.server = server label).', parameters: objSchema({ server: serverProp, filter: { type: 'string' }, root: { type: 'string' } }, [] /* server optional */) } });
+      }
+      // When servers known, ensure read/templates exist
+      if (serverList.length > 0) {
+        if (!keepNames.has('read_mcp_resource')) {
+          outTools.push({ type: 'function', function: { name: 'read_mcp_resource', strict: true, description: 'Read a resource via MCP server.', parameters: objSchema({ server: serverProp, uri: { type: 'string' } }, ['server','uri']) } });
+        }
+        if (!keepNames.has('list_mcp_resource_templates')) {
+          outTools.push({ type: 'function', function: { name: 'list_mcp_resource_templates', strict: true, description: 'List resource templates via MCP server.', parameters: objSchema({ server: serverProp }, ['server']) } });
+        }
+      }
+      (normalized as any).tools = outTools;
+
+      // No system tips for MCP on OpenAI Chat path (avoid leaking tool names)
     }
   } catch { /* ignore MCP injection */ }
 

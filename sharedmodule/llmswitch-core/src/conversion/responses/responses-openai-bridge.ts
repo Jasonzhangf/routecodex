@@ -68,6 +68,30 @@ function tryParseJson(s: unknown): unknown {
   try { return JSON.parse(s); } catch { return s; }
 }
 
+function splitCommandString(input: string): string[] {
+  const s = input.trim();
+  if (!s) return [];
+  const out: string[] = [];
+  let cur = '';
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inSingle) { if (ch === "'") { inSingle = false; } else { cur += ch; } continue; }
+    if (inDouble) {
+      if (ch === '"') { inDouble = false; continue; }
+      if (ch === '\\' && i + 1 < s.length) { i++; cur += s[i]; continue; }
+      cur += ch; continue;
+    }
+    if (ch === "'") { inSingle = true; continue; }
+    if (ch === '"') { inDouble = true; continue; }
+    if (/\s/.test(ch)) { if (cur) { out.push(cur); cur = ''; } continue; }
+    cur += ch;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
 // Lenient JSON-ish parsing for tool arguments (align with OpenAI→Anthropic robustness)
 function parseLenient(value: unknown): unknown {
   if (value === undefined || value === null) return {};
@@ -214,8 +238,13 @@ function normalizeArgumentsBySchema(argsStringOrObj: unknown, functionName: stri
           if (Array.isArray(v)) {
             // keep
           } else if (typeof v === 'string') {
-            // do not split heuristically — keep as single token if schema demands array
-            (argsObj as any)[key] = v.length ? [v] : [];
+            // For shell.command allow argv tokenization; otherwise wrap
+            if (String(functionName || '').toLowerCase() === 'shell' && key === 'command') {
+              const tokens = splitCommandString(v);
+              (argsObj as any)[key] = tokens.length ? tokens : [];
+            } else {
+              (argsObj as any)[key] = v.length ? [v] : [];
+            }
           } else {
             (argsObj as any)[key] = [toJsonString(v)];
           }
@@ -227,6 +256,44 @@ function normalizeArgumentsBySchema(argsStringOrObj: unknown, functionName: stri
       }
     }
   }
+
+  // Post-fixups for shell: append extra keys as argv tokens if present
+  try {
+    if (String(functionName || '').toLowerCase() === 'shell') {
+      const reserved = new Set(['command','workdir','timeout_ms','with_escalated_permissions','justification']);
+      const extrasTokens: string[] = [];
+      for (const k of Object.keys(argsObj)) {
+        if (!reserved.has(k)) {
+          extrasTokens.push(String(k));
+          const v: any = (argsObj as any)[k];
+          if (v !== undefined && v !== null) {
+            if (typeof v === 'string') extrasTokens.push(v);
+            else if (typeof v === 'number' || typeof v === 'boolean') extrasTokens.push(String(v));
+            else { try { extrasTokens.push(JSON.stringify(v)); } catch { /* ignore */ } }
+          }
+          delete (argsObj as any)[k];
+        }
+      }
+      if (extrasTokens.length > 0) {
+        const cmdVal: any = (argsObj as any).command;
+        if (Array.isArray(cmdVal)) (argsObj as any).command = [...cmdVal, ...extrasTokens];
+        else if (typeof cmdVal === 'string') (argsObj as any).command = [cmdVal, ...extrasTokens];
+        else (argsObj as any).command = [...extrasTokens];
+      }
+    }
+  } catch { /* ignore */ }
+
+  // Post-fixups for shell: handle leading 'cd' to extract workdir
+  try {
+    if (String(functionName || '').toLowerCase() === 'shell') {
+      const cmd = (argsObj as any).command;
+      if (Array.isArray(cmd) && cmd.length >= 2 && String(cmd[0]) === 'cd' && typeof cmd[1] === 'string' && cmd[1]) {
+        if (!(argsObj as any).workdir) (argsObj as any).workdir = cmd[1];
+        const rest = cmd.slice(2).map((x: any) => String(x));
+        (argsObj as any).command = rest.length ? rest : ['pwd'];
+      }
+    }
+  } catch { /* ignore */ }
 
   return toJsonString(argsObj);
 }
@@ -323,28 +390,7 @@ export function buildChatRequestFromResponses(payload: Record<string, unknown>, 
     input: context.input,
     toolsNormalized
   });
-  try {
-    const enableMcp = String((process as any).env?.ROUTECODEX_MCP_ENABLE ?? '1') !== '0';
-    if (enableMcp) {
-      // recompute merged server list for prompt hint (env + discovered)
-      const serversRaw = String((process as any).env?.ROUTECODEX_MCP_SERVERS || '').trim();
-      const envServers = serversRaw ? serversRaw.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
-      const discovered = new Set<string>();
-      for (const m of messages as any[]) {
-        if (m && m.role === 'tool' && typeof m.content === 'string') {
-          try { const o = JSON.parse(m.content); const sv = o?.arguments?.server; if (typeof sv === 'string' && sv.trim()) discovered.add(sv.trim()); } catch { /* ignore */ }
-        }
-      }
-      const merged = Array.from(new Set([ ...envServers, ...Array.from(discovered) ]));
-      if (merged.length > 0) {
-        const tip = `MCP usage: allowed functions: list_mcp_resources, read_mcp_resource, list_mcp_resource_templates. arguments.server must be one of ${JSON.stringify(merged)}. Avoid dotted tool names (server.fn).`;
-        messages.push({ role: 'system', content: tip } as any);
-      } else {
-        const tip = 'MCP usage: no known MCP servers yet. Only use list_mcp_resources to discover available servers. Do not call other MCP functions or use dotted tool names (server.fn) until a server_label is discovered.';
-        messages.push({ role: 'system', content: tip } as any);
-      }
-    }
-  } catch { /* ignore */ }
+  // No system tips for MCP on OpenAI Responses path (avoid leaking tool names)
   if (!messages.length) {
     throw new Error('Responses payload produced no chat messages');
   }
