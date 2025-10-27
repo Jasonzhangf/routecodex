@@ -345,12 +345,13 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
           if (enableMcp) {
             const envServers = serversRaw ? serversRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
             const merged = Array.from(new Set([ ...envServers, ...Array.from(knownMcpServers) ]));
-            const listStr = JSON.stringify(merged);
-            const baseTip = 'MCP usage: Use only list_mcp_resources, read_mcp_resource, list_mcp_resource_templates. Do not use dotted tool names like server.fn; always call the base function.';
             if (merged.length > 0) {
-              msgs.push({ role: 'system', content: `${baseTip} arguments.server must be one of ${listStr}.` });
+              const listStr = JSON.stringify(merged);
+              const tip = `MCP usage: allowed functions: list_mcp_resources, read_mcp_resource, list_mcp_resource_templates. arguments.server must be one of ${listStr}. Avoid dotted tool names (server.fn).`;
+              msgs.push({ role: 'system', content: tip });
             } else {
-              msgs.push({ role: 'system', content: `${baseTip} Currently there are no known MCP servers; do not call MCP until a server_label is discovered via successful calls.` });
+              const tip = 'MCP usage: no known MCP servers yet. Only use list_mcp_resources to discover available servers. Do not call other MCP functions or use dotted tool names (server.fn) until a server_label is discovered.';
+              msgs.push({ role: 'system', content: tip });
             }
           }
         } catch { /* ignore */ }
