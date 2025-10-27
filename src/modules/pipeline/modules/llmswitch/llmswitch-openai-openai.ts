@@ -5,7 +5,7 @@
 
 import type { LLMSwitchModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
-import { normalizeChatRequest, normalizeChatResponse, normalizeTools } from 'rcc-llmswitch-core/conversion';
+import { normalizeChatRequest, normalizeChatResponse, normalizeTools, normalizeArgsBySchema, packShellArgs } from 'rcc-llmswitch-core/conversion';
 import { extractToolText } from '../../utils/tool-result-text.js';
 
 /**
@@ -108,66 +108,98 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
               if (fn.arguments === undefined || typeof fn.arguments !== 'string') {
                 try { fn.arguments = JSON.stringify(fn.arguments ?? {}); } catch { fn.arguments = '""'; }
               }
-              // parse and validate minimal schema for common fields
+              // CCR-style lenient parse + unwrap + array-merge + schema-normalize + shell pack
               try {
                 const schema = toolSchemas.get(name);
-                let parsed: any;
-                try {
-                  parsed = JSON.parse(fn.arguments);
-                } catch (jsonErr) {
-                  // Limited, schema-gated repair: handle {"command":pwd} → {"command":"pwd"}
-                  // Do NOT attempt generic repairs; only fix a single bare token for 'command'
-                  const s = String(fn.arguments);
-                  const m = s.match(/^\s*\{\s*"command"\s*:\s*([A-Za-z0-9._\-\/]+)\s*\}\s*$/);
-                  if (m && schema && (schema as any)?.properties?.command) {
-                    parsed = { command: m[1] };
+                const coerce = (raw: any): any => {
+                  if (raw === undefined || raw === null) return {};
+                  if (typeof raw === 'object') return raw;
+                  if (typeof raw !== 'string') return { _raw: String(raw) };
+                  const s0 = raw.trim(); if (!s0) return {};
+                  try { return JSON.parse(s0); } catch { /* continue */ }
+                  const fence = s0.match(/```(?:json)?\s*([\s\S]*?)\s*```/i); const cand = fence ? fence[1] : s0;
+                  const obj = cand.match(/\{[\s\S]*\}/); if (obj) { try { return JSON.parse(obj[0]); } catch { /* ignore */ } }
+                  const arr = cand.match(/\[[\s\S]*\]/); if (arr) { try { return JSON.parse(arr[0]); } catch { /* ignore */ } }
+                  let t = cand.replace(/'([^']*)'/g, '"$1"');
+                  t = t.replace(/([{,\s])([A-Za-z_][A-Za-z0-9_-]*)\s*:/g, '$1"$2":');
+                  try { return JSON.parse(t); } catch { /* ignore */ }
+                  const obj2: Record<string, any> = {};
+                  const parts = cand.split(/[\n,]+/).map(p => p.trim()).filter(Boolean);
+                  for (const p of parts) {
+                    const m2 = p.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*[:=]\s*(.+)$/);
+                    if (!m2) continue; const k = m2[1]; let v = m2[2].trim();
+                    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+                    try { obj2[k] = JSON.parse(v); continue; } catch { /* ignore */ }
+                    if (/^(true|false)$/i.test(v)) { obj2[k] = /^true$/i.test(v); continue; }
+                    if (/^-?\d+(?:\.\d+)?$/.test(v)) { obj2[k] = Number(v); continue; }
+                    obj2[k] = v;
+                  }
+                  return Object.keys(obj2).length ? obj2 : { _raw: s0 };
+                };
+                const unwrap = (o: any): any => {
+                  let cur = o; const seen = new Set<any>();
+                  const keys = ['input','args','arguments','parameters','data','payload'];
+                  while (cur && typeof cur === 'object' && !Array.isArray(cur) && !seen.has(cur)) {
+                    seen.add(cur);
+                    const ks = Object.keys(cur);
+                    if (ks.length === 1 && keys.includes(ks[0])) {
+                      const inner = (cur as any)[ks[0]];
+                      cur = (typeof inner === 'string' || typeof inner === 'number' || typeof inner === 'boolean') ? coerce(String(inner)) : inner;
+                      continue;
+                    }
+                    break;
+                  }
+                  return cur;
+                };
+                let parsed: any = coerce(fn.arguments);
+                parsed = unwrap(parsed);
+                if (Array.isArray(parsed)) {
+                  const objs = parsed.filter((x: any) => x && typeof x === 'object' && !Array.isArray(x));
+                  if (objs.length) {
+                    parsed = objs.reduce((acc: any, cur: any) => { for (const [k, v] of Object.entries(cur)) { if (!(k in acc)) acc[k] = v; } return acc; }, {} as Record<string, unknown>);
                   } else {
-                    throw jsonErr;
+                    const prim = parsed.find((x: any) => x != null && (typeof x === 'string' || typeof x === 'number' || typeof x === 'boolean'));
+                    parsed = prim != null ? { _raw: String(prim) } : {};
                   }
                 }
-                if (!parsed || typeof parsed !== 'object') {
-                  const e: any = new Error(`Invalid arguments for tool '${name}': must be JSON object string`);
-                  e.status = 400; throw e;
+                if (schema && typeof schema === 'object') {
+                  const norm = normalizeArgsBySchema(parsed, schema as any);
+                  if (norm && norm.ok && norm.value && typeof norm.value === 'object') parsed = norm.value as Record<string, unknown>;
                 }
-                // MCP dotted-name canonicalization: "server.base" -> base, inject {server}
-                // dotted-name handling moved to core (sharedmodule)
-                // If schema indicates command: array<string>, allow limited normalization:
-                // - command as string JSON array (e.g. "[\"cat\",\"file\"]") → parse to array
-                // - command as single string (e.g. "pwd" or "ls -la") → [string] (no space splitting)
-                const cmdSchema = schema && typeof schema === 'object' ? (schema as any).properties?.command : undefined;
-                if (cmdSchema && (cmdSchema.type === 'array' || Array.isArray(cmdSchema.type))) {
-                  const val = (parsed as any).command;
-                  if (Array.isArray(val)) {
-                    // ok; will verify element types below
-                  } else if (typeof val === 'string') {
-                    const s = val.trim();
-                    if ((s.startsWith('[') && s.endsWith(']'))) {
-                      try {
-                        const arr = JSON.parse(s);
-                        (parsed as any).command = Array.isArray(arr) ? arr : [s];
-                      } catch {
-                        (parsed as any).command = [s];
-                      }
-                    } else {
-                      // Predictable tokenization: if single token contains whitespace and no quotes, split by whitespace
-                      if (/\s/.test(s) && !/["'\\]/.test(s)) {
-                        (parsed as any).command = s.split(/\s+/).filter(Boolean);
-                      } else {
-                        (parsed as any).command = [s];
+                if (String(name || '').toLowerCase() === 'shell' && parsed && typeof parsed === 'object') {
+                  try {
+                    const reserved = new Set(['command','workdir','timeout_ms','with_escalated_permissions','justification']);
+                    const extrasTokens: string[] = [];
+                    for (const k of Object.keys(parsed)) {
+                      if (!reserved.has(k)) {
+                        extrasTokens.push(String(k));
+                        const v: any = (parsed as any)[k];
+                        if (v !== undefined && v !== null) {
+                          if (typeof v === 'string') extrasTokens.push(v);
+                          else if (typeof v === 'number' || typeof v === 'boolean') extrasTokens.push(String(v));
+                          else {
+                            try { extrasTokens.push(JSON.stringify(v)); } catch { /* ignore */ }
+                          }
+                        }
+                        delete (parsed as any)[k];
                       }
                     }
-                  }
-                  const finalCmd = (parsed as any).command;
-                  const isArr = Array.isArray(finalCmd) && finalCmd.every((x: any) => typeof x === 'string');
-                  if (!isArr) {
-                    // Coerce to array<string> non-destructively instead of rejecting
-                    (parsed as any).command = [ String(finalCmd) ];
-                  }
+                    if (extrasTokens.length > 0) {
+                      const cmdVal: any = (parsed as any).command;
+                      if (Array.isArray(cmdVal)) {
+                        (parsed as any).command = [...cmdVal, ...extrasTokens];
+                      } else if (typeof cmdVal === 'string') {
+                        (parsed as any).command = [cmdVal, ...extrasTokens];
+                      } else {
+                        (parsed as any).command = [...extrasTokens];
+                      }
+                    }
+                    parsed = packShellArgs(parsed as any);
+                  } catch { /* ignore */ }
                 }
-                // Persist possibly-normalized arguments
-                fn.arguments = JSON.stringify(parsed);
-              } catch (err) {
-                // Do not throw on parse/coerce errors; preserve original arguments to avoid data loss
+                fn.arguments = JSON.stringify(parsed ?? {});
+              } catch {
+                // non-blocking
               }
               return { ...tc, function: fn };
             });
@@ -343,6 +375,29 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
                         } else {
                           (parsed as any).command = [s];
                         }
+                      }
+                    }
+                    // Append extra keys as argv tokens for shell
+                    if (String(fn.name||'').toLowerCase() === 'shell') {
+                      const reserved = new Set(['command','workdir','timeout_ms','with_escalated_permissions','justification']);
+                      const extrasTokens: string[] = [];
+                      for (const k of Object.keys(parsed)) {
+                        if (!reserved.has(k)) {
+                          extrasTokens.push(String(k));
+                          const v: any = (parsed as any)[k];
+                          if (v !== undefined && v !== null) {
+                            if (typeof v === 'string') extrasTokens.push(v);
+                            else if (typeof v === 'number' || typeof v === 'boolean') extrasTokens.push(String(v));
+                            else { try { extrasTokens.push(JSON.stringify(v)); } catch { /* ignore */ } }
+                          }
+                          delete (parsed as any)[k];
+                        }
+                      }
+                      if (extrasTokens.length > 0) {
+                        const cmdVal: any = (parsed as any).command;
+                        if (Array.isArray(cmdVal)) (parsed as any).command = [...cmdVal, ...extrasTokens];
+                        else if (typeof cmdVal === 'string') (parsed as any).command = [cmdVal, ...extrasTokens];
+                        else (parsed as any).command = [...extrasTokens];
                       }
                     }
                   }
