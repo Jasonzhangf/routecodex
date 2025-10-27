@@ -566,8 +566,6 @@ export class ResponsesHandler extends BaseHandler {
               }
               if (m && m.role === 'assistant' && Array.isArray(m.tool_calls)) {
                 for (const tc of m.tool_calls) {
-                  const fname = String(tc?.function?.name || ''); const dot = fname.indexOf('.');
-                  if (dot > 0) { const prefix = fname.slice(0, dot).trim(); if (prefix) set.add(prefix); }
                   const argStr = String(tc?.function?.arguments ?? '');
                   try { const parsed = JSON.parse(argStr); const sv = parsed?.server; if (typeof sv === 'string' && sv.trim()) set.add(sv.trim()); } catch {}
                 }
