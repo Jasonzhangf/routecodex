@@ -44,9 +44,9 @@ export class ChatCompletionsHandler extends BaseHandler {
       const rawBody = JSON.parse(JSON.stringify((req as any).body || {}));
       (req as any).__rawBody = rawBody;
       const fs = await import('fs/promises');
-      const dir = path.join(os.homedir(), '.routecodex', 'codex-samples', 'chat-replay');
+      const dir = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
       await (fs as any).mkdir(dir, { recursive: true });
-      const rawFile = path.join(dir, `raw-request_${requestId}.json`);
+      const rawFile = path.join(dir, `${requestId}_raw-request.json`);
       const payload = {
         requestId,
         method: req.method,
@@ -96,15 +96,7 @@ export class ChatCompletionsHandler extends BaseHandler {
         }
       } catch { /* non-blocking */ }
 
-      // Validate request
-      const validation = this.requestValidator.validateChatCompletion(req.body);
-      if (!validation.isValid) {
-        throw new RouteCodexError(
-          `Request validation failed: ${validation.errors.join(', ')}`,
-          'validation_error',
-          400
-        );
-      }
+      // Skip strict request validation (preserve raw inputs)
 
       // Process request through pipeline
       const pipelineResponse = await this.processChatRequest(req, requestId);
@@ -179,7 +171,14 @@ export class ChatCompletionsHandler extends BaseHandler {
     }
 
     // Ensure payload model aligns with selected route meta
-    const normalizedPayload = { ...chatPayload, ...(modelId ? { model: modelId } : {}) };
+    const normalizedPayload = { ...chatPayload, ...(modelId ? { model: modelId } : {}) } as Record<string, unknown>;
+    // Inject route.requestId into payload metadata for downstream providers (capture + pairing)
+    try {
+      const meta = (normalizedPayload as any)._metadata && typeof (normalizedPayload as any)._metadata === 'object'
+        ? { ...(normalizedPayload as any)._metadata }
+        : {};
+      (normalizedPayload as any)._metadata = { ...meta, requestId };
+    } catch { /* non-blocking */ }
 
     const pipelineRequest = {
       data: normalizedPayload,

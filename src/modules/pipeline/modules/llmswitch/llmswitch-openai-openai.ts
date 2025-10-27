@@ -63,6 +63,37 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
           }
         } catch { /* ignore tools parse */ }
 
+        // Collect known MCP servers from history (tool results and prior calls)
+        const knownMcpServers = new Set<string>();
+        try {
+          for (const m of msgs) {
+            if (!m || typeof m !== 'object') continue;
+            if ((m as any).role === 'tool' && typeof (m as any).content === 'string') {
+              try {
+                const o = JSON.parse(String((m as any).content));
+                const args = (o && typeof o === 'object') ? (o as any).arguments : undefined;
+                const sv = args && typeof args === 'object' ? (args as any).server : undefined;
+                if (typeof sv === 'string' && sv.trim()) knownMcpServers.add(sv.trim());
+              } catch { /* ignore */ }
+            }
+            if ((m as any).role === 'assistant' && Array.isArray((m as any).tool_calls)) {
+              for (const tc of ((m as any).tool_calls as any[])) {
+                try {
+                  const fname = String(tc?.function?.name || '');
+                  const dot = fname.indexOf('.');
+                  if (dot > 0) {
+                    const prefix = fname.slice(0, dot).trim(); if (prefix) knownMcpServers.add(prefix);
+                  }
+                  const argStr = String(tc?.function?.arguments ?? '');
+                  const parsed = JSON.parse(argStr);
+                  const sv = parsed && typeof parsed === 'object' ? parsed.server : undefined;
+                  if (typeof sv === 'string' && sv.trim()) knownMcpServers.add(sv.trim());
+                } catch { /* ignore */ }
+              }
+            }
+          }
+        } catch { /* ignore */ }
+
         // Ensure tools normalized and tools[].function.strict = true (align anthropic→openai)
         try {
           if (Array.isArray(out.tools)) {
@@ -73,6 +104,22 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
               }
               return t;
             });
+            // MCP tools injection (CCR style): list_mcp_resources, read_mcp_resource, list_mcp_resource_templates
+            try {
+              const enableMcp = String(process.env.ROUTECODEX_MCP_ENABLE ?? '1') !== '0';
+              if (enableMcp) {
+                const have = new Set((out.tools as any[]).map((t: any) => (t?.function?.name || '').toString()));
+                const addTool = (def: any) => { if (!have.has(def.function.name)) { (out.tools as any[]).push(def); have.add(def.function.name); } };
+                const obj = (props: any, req: string[]) => ({ type: 'object', properties: props, required: req, additionalProperties: false });
+                const serversRaw = String(process.env.ROUTECODEX_MCP_SERVERS || '').trim();
+                const envServers = serversRaw ? serversRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+                const merged = Array.from(new Set([ ...envServers, ...Array.from(knownMcpServers) ]));
+                const serverProp = merged.length ? { type: 'string', enum: merged } : { type: 'string' };
+                addTool({ type: 'function', function: { name: 'list_mcp_resources', strict: true, description: 'List resources from a given MCP server (arguments.server = server label).', parameters: obj({ server: serverProp, filter: { type: 'string' }, root: { type: 'string' } }, ['server']) } });
+                addTool({ type: 'function', function: { name: 'read_mcp_resource', strict: true, description: 'Read a resource via MCP server.', parameters: obj({ server: serverProp, uri: { type: 'string' } }, ['server','uri']) } });
+                addTool({ type: 'function', function: { name: 'list_mcp_resource_templates', strict: true, description: 'List resource templates via MCP server.', parameters: obj({ server: serverProp }, ['server']) } });
+              }
+            } catch { /* ignore mcp injection errors */ }
           }
         } catch { /* ignore */ }
 
@@ -101,14 +148,10 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
                 }
                 return { ...tc, function: fn };
               }
-              if (!name || !toolSchemas.has(name)) {
-                const e: any = new Error(`Invalid tool name at assistant.tool_calls[${idx}]`);
-                e.status = 400; throw e;
-              }
-              // arguments must be a JSON string
+              // Do not reject unknown tool names; passthrough
+              // Ensure arguments is a JSON string (stringify when needed)
               if (fn.arguments === undefined || typeof fn.arguments !== 'string') {
-                const e: any = new Error(`Invalid arguments type for tool '${name}': must be JSON string`);
-                e.status = 400; throw e;
+                try { fn.arguments = JSON.stringify(fn.arguments ?? {}); } catch { fn.arguments = '""'; }
               }
               // parse and validate minimal schema for common fields
               try {
@@ -131,6 +174,25 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
                   const e: any = new Error(`Invalid arguments for tool '${name}': must be JSON object string`);
                   e.status = 400; throw e;
                 }
+                // MCP dotted-name canonicalization: "server.base" -> base, inject {server}
+                try {
+                  const enableMcp = String(process.env.ROUTECODEX_MCP_ENABLE ?? '1') !== '0';
+                  if (enableMcp && typeof name === 'string' && name.includes('.')) {
+                    const dot = name.indexOf('.');
+                    const prefix = name.slice(0, dot).trim();
+                    const base = name.slice(dot + 1).trim();
+                    const allowed = new Set(['list_mcp_resources','read_mcp_resource','list_mcp_resource_templates']);
+                    // Only canonicalize dotted-name if the server prefix is already known (discovered earlier)
+                    if (allowed.has(base) && prefix && (/* known servers only */ true)) {
+                      // known set defined above: knownMcpServers
+                      if (knownMcpServers.has(prefix)) {
+                        if (!parsed || typeof parsed !== 'object') parsed = {};
+                        if (!parsed.server || String(parsed.server).trim() === '') parsed.server = prefix;
+                        (fn as any).name = base;
+                      }
+                    }
+                  }
+                } catch { /* ignore */ }
                 // If schema indicates command: array<string>, allow limited normalization:
                 // - command as string JSON array (e.g. "[\"cat\",\"file\"]") → parse to array
                 // - command as single string (e.g. "pwd" or "ls -la") → [string] (no space splitting)
@@ -160,16 +222,14 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
                   const finalCmd = (parsed as any).command;
                   const isArr = Array.isArray(finalCmd) && finalCmd.every((x: any) => typeof x === 'string');
                   if (!isArr) {
-                    const e: any = new Error(`Invalid 'command' for tool '${name}': expected array<string>`);
-                    e.status = 400; throw e;
+                    // Coerce to array<string> non-destructively instead of rejecting
+                    (parsed as any).command = [ String(finalCmd) ];
                   }
                 }
                 // Persist possibly-normalized arguments
                 fn.arguments = JSON.stringify(parsed);
               } catch (err) {
-                if ((err as any)?.status) { throw err; }
-                const e: any = new Error(`Invalid JSON in arguments for tool '${name || 'unknown'}'`);
-                e.status = 400; throw e;
+                // Do not throw on parse/coerce errors; preserve original arguments to avoid data loss
               }
               return { ...tc, function: fn };
             });
@@ -177,9 +237,10 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
           }
         }
 
-        // 2) Pair tool results with the latest assistant.tool_calls and textify content
-        //    Build a FIFO queue of pending call_ids from the last assistant with tool_calls
+        // 2) Pair tool results with the latest assistant.tool_calls
+        //    Maintain a FIFO queue and an id->tool_call map for structured echo
         let pending: string[] = [];
+        const callById: Record<string, any> = {};
         for (let i = 0; i < msgs.length; i++) {
           const m = msgs[i];
           if (!m || typeof m !== 'object') continue;
@@ -188,32 +249,84 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
             for (const tc of m.tool_calls) {
               const id = typeof tc?.id === 'string' ? tc.id : undefined;
               if (id) pending.push(id);
+              if (id) callById[id] = tc;
             }
             continue;
           }
           if (m.role === 'tool') {
-            // Textify content
-            if (m.content !== undefined && typeof m.content !== 'string') {
-              m.content = extractToolText(m.content);
-            } else if (typeof m.content === 'string') {
-              // Try to parse stringified JSON and extract text
-              const s = (m.content as string).trim();
-              if ((s.startsWith('{') && s.endsWith('}')) || (s.startsWith('[') && s.endsWith(']'))) {
-                try {
-                  const parsed = JSON.parse(s);
-                  m.content = extractToolText(parsed);
-                } catch { /* keep original */ }
+            // Decide output strategy: structured echo (default) or legacy textify
+            const structuredDefaultOn = String(process.env.ROUTECODEX_TOOL_STRUCTURED || process.env.RCC_TOOL_STRUCTURED || '1') !== '0';
+            const toLenientObj = (v: any): any => {
+              if (v && typeof v === 'object') return v;
+              if (typeof v !== 'string') return v;
+              const s = v.trim();
+              try { return JSON.parse(s); } catch { /* try fenced */ }
+              const fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+              if (fence) { try { return JSON.parse(fence[1]); } catch { /* ignore */ } }
+              return s;
+            };
+            if (structuredDefaultOn) {
+              try {
+                const callId = typeof (m as any).tool_call_id === 'string' ? (m as any).tool_call_id : undefined;
+                const tc = callId ? (callById[callId] || {}) : {};
+                const fn = (tc && typeof tc === 'object') ? (tc.function || {}) : {};
+                const name = typeof fn?.name === 'string' ? fn.name : undefined;
+                const argStr = typeof fn?.arguments === 'string' ? fn.arguments
+                  : (fn?.arguments != null ? JSON.stringify(fn.arguments) : undefined);
+                let argsObj: any;
+                try { argsObj = argStr ? JSON.parse(argStr) : undefined; } catch { argsObj = undefined; }
+                // Build flattened, model-friendly JSON (no raw wrapper)
+                const body = toLenientObj((m as any).content);
+                const argsOut = (argsObj && typeof argsObj === 'object') ? argsObj : (argStr ? { _raw: argStr } : {});
+                const cmd = (argsOut && typeof argsOut === 'object') ? (argsOut as any).command : undefined;
+                const workdir = (argsOut && typeof argsOut === 'object') ? (argsOut as any).workdir : undefined;
+                const flatten = (b: any) => {
+                  const out: any = {
+                    tool_call_id: callId || '',
+                    tool_name: name || 'tool',
+                    arguments: argsOut,
+                    command: Array.isArray(cmd) ? cmd : (typeof cmd === 'string' && cmd.length ? [cmd] : []),
+                    ...(typeof workdir === 'string' && workdir ? { workdir } : {})
+                  };
+                  if (b && typeof b === 'object') {
+                    const meta: any = (b.metadata || b.meta || {});
+                    const exitCode = (typeof b.exit_code === 'number') ? b.exit_code
+                      : (typeof meta.exit_code === 'number' ? meta.exit_code : undefined);
+                    const duration = (typeof b.duration_seconds === 'number') ? b.duration_seconds
+                      : (typeof meta.duration_seconds === 'number' ? meta.duration_seconds : undefined);
+                    if (typeof exitCode === 'number') out.exit_code = exitCode;
+                    if (typeof duration === 'number') out.duration_seconds = duration;
+                    if (typeof (b as any).stdout === 'string') out.stdout = (b as any).stdout;
+                    if (typeof (b as any).stderr === 'string') out.stderr = (b as any).stderr;
+                    if (typeof (b as any).error === 'string' && out.stderr === undefined) out.stderr = (b as any).error;
+                    if (typeof (b as any).success === 'boolean') out.success = (b as any).success;
+                    if ((b as any).output !== undefined) out.output = (b as any).output;
+                    else if ((b as any).result !== undefined) out.output = (b as any).result;
+                    else out.output = b; // preserve full object under output
+                    return out;
+                  }
+                  // string/primitive: keep as output text
+                  out.output = b;
+                  return out;
+                };
+                (m as any).content = JSON.stringify(flatten(body));
+              } catch {
+                // Fallback: keep original as stringified JSON without extraction
+                if (m.content !== undefined && typeof m.content !== 'string') {
+                  try { (m as any).content = JSON.stringify(m.content); } catch { (m as any).content = String(m.content); }
+                }
+              }
+            } else {
+              // Legacy-off path: keep original value serialized (no heuristic extraction)
+              if (m.content !== undefined && typeof m.content !== 'string') {
+                try { (m as any).content = JSON.stringify(m.content); } catch { (m as any).content = String(m.content); }
               }
             }
-            // Pair tool_call_id if missing
+            // Pair tool_call_id if possible; do not throw if missing
             if (!m.tool_call_id || typeof m.tool_call_id !== 'string') {
-              if (pending.length === 0) {
-                // No available call id to pair; strict mode: throw
-                const e: any = new Error('Unpaired tool result: missing tool_call_id and no pending assistant.tool_calls');
-                e.status = 400;
-                throw e;
+              if (pending.length > 0) {
+                m.tool_call_id = pending.shift();
               }
-              m.tool_call_id = pending.shift();
             } else {
               // If present but not in pending, accept as-is (could be from older turn)
               // Optionally we could realign, but strict pairing beyond this might be too aggressive here.
@@ -221,6 +334,23 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
             }
           }
         }
+
+        // Append optional MCP server hint in system message (from env + discovered)
+        try {
+          const serversRaw = String(process.env.ROUTECODEX_MCP_SERVERS || '').trim();
+          const enableMcp = String(process.env.ROUTECODEX_MCP_ENABLE ?? '1') !== '0';
+          if (enableMcp) {
+            const envServers = serversRaw ? serversRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+            const merged = Array.from(new Set([ ...envServers, ...Array.from(knownMcpServers) ]));
+            const listStr = JSON.stringify(merged);
+            const baseTip = 'MCP usage: Use only list_mcp_resources, read_mcp_resource, list_mcp_resource_templates. Do not use dotted tool names like server.fn; always call the base function.';
+            if (merged.length > 0) {
+              msgs.push({ role: 'system', content: `${baseTip} arguments.server must be one of ${listStr}.` });
+            } else {
+              msgs.push({ role: 'system', content: `${baseTip} Currently there are no known MCP servers; do not call MCP until a server_label is discovered via successful calls.` });
+            }
+          }
+        } catch { /* ignore */ }
 
         return { ...out, messages: msgs };
       } catch (e) {

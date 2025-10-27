@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.56.0",
+  "version": "0.70.0",
   "description": "Multi-provider OpenAI proxy server with native dry-run capabilities",
   "type": "module",
   "main": "dist/index.js",
@@ -100,7 +100,7 @@
   },
   "dependencies": {
     "zod": "^3.23.8",
-    "rcc-llmswitch-core": "^0.1.2",
+    "rcc-llmswitch-core": "file:sharedmodule/llmswitch-core",
     "ajv": "^8.17.1",
     "@anthropic-ai/sdk": "^0.65.0",
     "@lmstudio/sdk": "^1.5.0",

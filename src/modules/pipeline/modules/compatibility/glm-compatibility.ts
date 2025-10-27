@@ -10,8 +10,6 @@ import type { CompatibilityModule, ModuleConfig, ModuleDependencies } from '../.
 import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 import type { TransformationRule } from '../../interfaces/pipeline-interfaces.js';
 import type { PipelineDebugLogger as PipelineDebugLoggerInterface } from '../../interfaces/pipeline-interfaces.js';
-import { loadToolMappings } from '../../../../config/tool-mapping-loader.js';
-import { ToolMappingExecutor } from '../../utils/tool-mapping-executor.js';
 import type { UnknownObject, /* LogData */ } from '../../../../types/common-types.js';
 import { sanitizeAndValidateOpenAIChat } from '../../utils/preflight-validator.js';
 import { stripThinkingTags } from '../../../../server/utils/text-filters.js';
@@ -25,15 +23,13 @@ export class GLMCompatibility implements CompatibilityModule {
   private isInitialized = false;
   private logger: PipelineDebugLoggerInterface;
   private readonly forceDisableThinking: boolean;
-  private readonly useMappingConfig: boolean;
-  private mappingExecutor: ToolMappingExecutor | null = null;
+  // Mapping config removed: router layer must not parse/reshape tool arguments.
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
     this.logger = dependencies.logger;
     this.id = `compatibility-glm-${Date.now()}`;
     this.config = config;
     this.forceDisableThinking = process.env.RCC_GLM_DISABLE_THINKING === '1';
-    this.useMappingConfig = process.env.RCC_GLM_USE_MAPPING_CONFIG === '1';
     this.thinkingDefaults = this.normalizeThinkingConfig(this.config?.config?.thinking);
   }
 
@@ -41,14 +37,7 @@ export class GLMCompatibility implements CompatibilityModule {
     try {
       this.logger.logModule(this.id, 'initializing', { config: this.config });
       this.validateConfig();
-      // Minimal mode: do not load tool-mapping by default. Respect explicit opt-in via env only.
-      if (this.useMappingConfig) {
-        const cfg = loadToolMappings('glm');
-        if (cfg) {
-          this.mappingExecutor = new ToolMappingExecutor(cfg);
-          this.logger.logModule(this.id, 'tool-mapping-config-loaded', { tools: Object.keys(cfg.tools || {}) });
-        }
-      }
+      // Tool-mapping disabled: follow CCR approach (no router-level semantic parsing of tool arguments)
       this.isInitialized = true;
       this.logger.logModule(this.id, 'initialized');
     } catch (error) {
@@ -213,16 +202,9 @@ export class GLMCompatibility implements CompatibilityModule {
     }
 
     const sanitized = result.payload;
-
-    const assignableKeys = new Set(Object.keys(sanitized));
+    // Light-touch: overlay sanitized fields but do NOT prune unknown keys
     for (const [key, value] of Object.entries(sanitized)) {
       (payload as UnknownObject)[key] = value as unknown;
-    }
-    // Strict prune: remove any keys not in sanitized set to reduce provider schema errors
-    for (const key of Object.keys(payload as Record<string, unknown>)) {
-      if (!assignableKeys.has(key)) {
-        delete (payload as UnknownObject)[key];
-      }
     }
   }
 

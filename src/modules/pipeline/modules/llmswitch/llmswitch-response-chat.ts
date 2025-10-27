@@ -9,7 +9,7 @@ import {
   normalizeTools,
   type ResponsesRequestContext
 } from 'rcc-llmswitch-core/conversion';
-import { extractToolText } from '../../utils/tool-result-text.js';
+// No heuristic text extraction; preserve tool content as JSON string when possible
 
 export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
   readonly id: string;
@@ -48,29 +48,13 @@ export class ResponsesToChatLLMSwitch implements LLMSwitchModule {
 
     const context = captureResponsesContext(payload, dto ?? undefined);
     const { request: chatRequest, toolsNormalized } = buildChatRequestFromResponses(payload, context);
-    // Normalize tool message content to text (align with Anthropic→OpenAI)
+    // Normalize tool message content to a JSON string (faithful, no extraction)
     try {
       const msgs = Array.isArray((chatRequest as any).messages) ? ((chatRequest as any).messages as any[]) : [];
-      const push = (arr: string[], s?: string) => { if (typeof s === 'string') { const t = s.trim(); if (t) arr.push(t); } };
-      const flattenParts = (v: any): string[] => {
-        const texts: string[] = [];
-        if (Array.isArray(v)) {
-          for (const p of v) {
-            if (!p) continue;
-            if (typeof p === 'string') { push(texts, p); continue; }
-            if (typeof p === 'object') {
-              if (typeof (p as any).text === 'string') { push(texts, (p as any).text); continue; }
-              if (typeof (p as any).content === 'string') { push(texts, (p as any).content); continue; }
-              if (Array.isArray((p as any).content)) { texts.push(...flattenParts((p as any).content)); continue; }
-            }
-          }
-        }
-        return texts;
-      };
       for (const m of msgs) {
         if (m && m.role === 'tool' && m.content !== undefined) {
           if (typeof m.content !== 'string') {
-            m.content = extractToolText(m.content);
+            try { m.content = JSON.stringify(m.content); } catch { m.content = String(m.content); }
           }
         }
       }

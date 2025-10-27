@@ -1,0 +1,24 @@
+{
+  "model": "gpt-4o-mini",
+  "input": [
+    { "type": "message", "role": "user", "content": [ { "type": "input_text", "text": "Search codebase" } ] },
+    { "type": "function_call", "name": "shell", "arguments": { "command": "cd src && rg -n 'openai' | head -3" }, "id": "call_r1" },
+    { "type": "function_call_output", "id": "call_r1", "output": "ok" }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "shell",
+      "description": "Execute shell command",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string" },
+          "workdir": { "type": "string" }
+        },
+        "required": ["command"]
+      }
+    }
+  ]
+}
+

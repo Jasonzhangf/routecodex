@@ -145,6 +145,18 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
 
   // model
   if (typeof src.model === 'string') {out.model = src.model;}
+  // Preserve common top-level fields for GLM/openai targets
+  if (Array.isArray(src.tools)) { out.tools = src.tools; }
+  if (src.tool_choice !== undefined) { out.tool_choice = src.tool_choice; }
+  if (src.response_format && typeof src.response_format === 'object' && typeof src.response_format.type === 'string') {
+    out.response_format = src.response_format;
+  }
+  if (typeof src.temperature === 'number') { out.temperature = src.temperature; }
+  if (typeof src.top_p === 'number') { out.top_p = src.top_p; }
+  if (typeof src.presence_penalty === 'number') { out.presence_penalty = src.presence_penalty; }
+  if (typeof src.frequency_penalty === 'number') { out.frequency_penalty = src.frequency_penalty; }
+  if (typeof src.max_tokens === 'number') { out.max_tokens = src.max_tokens; }
+  if (typeof src.stream === 'boolean') { out.stream = src.stream; }
 
   // messages
   const rawMessages = Array.isArray(src.messages) ? src.messages : [];

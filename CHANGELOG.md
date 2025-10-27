@@ -374,3 +374,36 @@ Summary
   - /v1/responses 流路径接入：可读流时直接桥接；否则回退为合成流
   - 开关：`RCC_R2C_STREAM`（默认开启，设为 `0`/`false` 关闭）；窗口 `RCC_R2C_COALESCE_MS=1000` ms
   - 事件对齐：response.created / output_text.delta|done / output_item.added|done / function_call_arguments.delta|done / completed / error
+## 0.61.1 - 2025-10-27
+- Align tool guidance with CCR approach (no router-level semantic parsing):
+  - Augment `shell` tool description to instruct models to put all flags/paths/patterns into `command` argv tokens only; forbid extra keys. Applied in Chat + Responses paths.
+  - Force `function.strict=true` and `parameters.additionalProperties=false` for `shell` to reduce off‑schema keys (e.g., `md`, `node_modules/*`).
+  - Keep execution semantics in tool handlers (client side); server only normalizes shapes and preserves arguments.
+  - Keep flattened JSON for tool outputs (no `result.raw`).
+## 0.61.5 - 2025-10-27
+- Tool schema hardening confirmed on both Chat and Responses entries:
+  - `shell` tool enforces argv-only: parameters.command is array<string>, strict=true, additionalProperties=false.
+  - Guidance appended in descriptions to prevent free-form keys.
+- Provider requestId unification (req_*) and capture alignment:
+  - Pipeline injects route.requestId into payload `_metadata.requestId` before provider dispatch (Chat and Responses).
+  - OpenAI / Generic-OpenAI / GLM providers extract that id and use it for:
+    - response.metadata.requestId and `x-request-id` headers
+    - all provider capture filenames (`*_provider-request.json`, `*_provider-in.json`, `*_provider-response.json`, `*_provider-pair.json`)
+  - Removed `openai-`/`glm-` fallbacks; consistent `req_...` fallback used when absent.
+  - Providers strip local `metadata`/`_metadata` before sending payload upstream.
+## 0.70.0 - 2025-10-27
+- Chat 工具调用 Schema 全面梳理与对齐（基本完成）
+  - shell 工具强制 argv-only（parameters.command: array<string> + strict + additionalProperties=false），避免自由键与类型漂移。
+  - assistant.tool_calls 入参严格 JSON 字符串化；保留历史内容但不再做破坏性清洗。
+  - Responses 与 Chat 路径保持一致的工具处理与输出归一（tool 输出扁平 JSON，保留必要元数据）。
+- 输入与执行约束
+  - OpenAI Chat 请求在 llmswitch 层进行最小必要规范化，拒绝破坏性变形；结构化回显可配置（默认开启）。
+  - 统一注入 route.requestId 到 Provider（捕获与 x-request-id、一致的 req_* 命名）。
+- MCP 约束（CCR 风格）
+  - 注入 3 个标准 MCP 函数工具：list_mcp_resources、read_mcp_resource、list_mcp_resource_templates（严格 schema）。
+  - 动态发现可用 server_label（基于历史对话中的 tool 调用与结果），作为枚举约束注入到 parameters.server；未发现时不预置，系统提示要求先读取再使用。
+  - Chat 出站规范化：仅在“已知 server”前提下将 dotted-name（server.fn）规范为基础函数名并注入 arguments.server；禁止乱拼。
+  - 系统提示根据“已知/未知” server 动态给出引导，避免模型在 server 未知时调用 MCP。
+- GLM 兼容通过测试
+  - 请求/响应映射在 Provider 兼容层显式启用；SSE 仍保持标准 OpenAI 协议实现。
+  - 工具参数、用法统计、created/created_at 等字段映射稳定，流式与非流式路径一致。
