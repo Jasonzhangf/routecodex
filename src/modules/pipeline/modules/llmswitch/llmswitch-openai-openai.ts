@@ -182,17 +182,11 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
                   const enableMcp = String(process.env.ROUTECODEX_MCP_ENABLE ?? '1') !== '0';
                   if (enableMcp && typeof name === 'string' && name.includes('.')) {
                     const dot = name.indexOf('.');
-                    const prefix = name.slice(0, dot).trim();
                     const base = name.slice(dot + 1).trim();
                     const allowed = new Set(['list_mcp_resources','read_mcp_resource','list_mcp_resource_templates']);
-                    // Only canonicalize dotted-name if the server prefix is already known (discovered earlier)
-                    if (allowed.has(base) && prefix && (/* known servers only */ true)) {
-                      // known set defined above: knownMcpServers
-                      if (knownMcpServers.has(prefix)) {
-                        if (!parsed || typeof parsed !== 'object') parsed = {};
-                        if (!parsed.server || String(parsed.server).trim() === '') parsed.server = prefix;
-                        (fn as any).name = base;
-                      }
+                    // Drop the dotted prefix unconditionally and keep the base function name; do not inject server from prefix
+                    if (allowed.has(base)) {
+                      (fn as any).name = base;
                     }
                   }
                 } catch { /* ignore */ }
