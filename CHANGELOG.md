@@ -407,3 +407,9 @@ Summary
 - GLM 兼容通过测试
   - 请求/响应映射在 Provider 兼容层显式启用；SSE 仍保持标准 OpenAI 协议实现。
   - 工具参数、用法统计、created/created_at 等字段映射稳定，流式与非流式路径一致。
+## 0.70.1 - 2025-10-27
+- MCP 暴露策略收紧（先读后用）：
+  - 初始（无已知 server）仅注入 list_mcp_resources；不暴露 read_mcp_resource、list_mcp_resource_templates。
+  - 仅当对话历史中出现有效 server_label 后，才注入其余 MCP 工具，并以枚举约束 parameters.server。
+  - Chat 与 Responses SSE 路径统一：dotted-name 仅在“已知 server”前提下 canonicalize 为基础函数名并注入 arguments.server。
+- 目的：避免模型在 server 未知时频繁猜测（filesystem/unknown 等）导致空转；严格落实“先读取后使用”的流程。
