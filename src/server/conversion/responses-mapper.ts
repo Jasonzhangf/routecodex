@@ -150,29 +150,38 @@ export class ResponsesMapper {
       return v;
     };
     const ensureStringArray = (arr: unknown): arr is string[] => Array.isArray(arr) && arr.every(x => typeof x === 'string');
-    const error400 = (msg: string) => { const e: any = new Error(msg); e.status = 400; e.code = 'validation_error'; return e; };
     const serializeArgsStrictBySchema = (name: string | undefined, rawArgs: unknown): string => {
+      // Relaxed: best-effort coercion, never throw; keep incoming as much as possible
       const toolName = (typeof name === 'string' && name.trim()) ? String(name) : undefined;
       const schema = toolName ? toolsMap[toolName] : undefined;
-      if (!schema) throw error400(`Missing tool schema for function: ${toolName || 'unknown'}`);
       const v0 = parseMaybeDoubleJSON(rawArgs);
-      if (!v0 || typeof v0 !== 'object') throw error400('Tool arguments must be a JSON object (stringified)');
-      const v: any = { ...(v0 as any) };
-      if (isCommandArraySchema(schema)) {
-        if (!ensureStringArray(v.command)) throw error400('Invalid command: expected array<string>');
-      } else if (isCommandStringSchema(schema)) {
-        if (Array.isArray(v.command)) {
-          if (!ensureStringArray(v.command)) throw error400('Invalid command array: must be array<string>');
-          v.command = (v.command as string[]).join(' ');
-        } else if (typeof v.command !== 'string') {
-          throw error400('Invalid command: expected string');
+      let v: any = (v0 && typeof v0 === 'object') ? { ...(v0 as any) } : {};
+      try {
+        if (schema) {
+          if (isCommandArraySchema(schema)) {
+            // Expect array<string>
+            if (Array.isArray(v.command)) {
+              v.command = ensureStringArray(v.command) ? v.command : String(v.command || '').split(/\s+/).filter(Boolean);
+            } else if (typeof v.command === 'string') {
+              v.command = v.command.trim() ? [v.command.trim()] : [];
+            } else if (v.command != null) {
+              v.command = [String(v.command)];
+            }
+          } else if (isCommandStringSchema(schema)) {
+            // Expect string
+            if (Array.isArray(v.command)) {
+              v.command = ensureStringArray(v.command) ? (v.command as string[]).join(' ') : String(v.command || '');
+            } else if (typeof v.command !== 'string') {
+              v.command = String(v.command ?? '');
+            }
+          }
         }
-      }
-      try { return JSON.stringify(v); } catch { throw error400('Failed to serialize tool arguments'); }
+      } catch { /* ignore coercion issues */ }
+      try { return JSON.stringify(v); } catch { return String(v); }
     };
 
     const pushAssistantToolCall = (name: string | undefined, args: unknown, callId?: string) => {
-      const serialized = serializeArgsStrictBySchema(name, args).trim();
+          const serialized = serializeArgsStrictBySchema(name, args).trim();
       const toolId = callId && String(callId).trim() ? String(callId).trim() : `call_${Math.random().toString(36).slice(2, 8)}`;
       lastFunctionCallId = toolId;
       const fnName = (typeof name === 'string' && name.trim()) ? name.trim() : 'tool';
@@ -192,13 +201,13 @@ export class ResponsesMapper {
         }
           if (itType === 'function_call_output' || itType === 'tool_result' || itType === 'tool_message') {
             const text = extractToolOutput(it);
-            if (!text) { throw error400(`Invalid tool result payload: empty output for ${itType}`); }
+            // Relax: accept empty text (some tools return only metadata); avoid throwing
             const explicitId = (typeof (it as any).id === 'string' ? (it as any).id
               : (typeof (it as any).call_id === 'string' ? (it as any).call_id
                 : (typeof (it as any).tool_call_id === 'string' ? (it as any).tool_call_id
                   : (typeof (it as any).tool_use_id === 'string' ? (it as any).tool_use_id : undefined))));
             const tool_call_id = explicitId || lastFunctionCallId || undefined;
-            const msg: Record<string, unknown> = tool_call_id ? { role: 'tool', content: text, tool_call_id } : { role: 'tool', content: text };
+            const msg: Record<string, unknown> = tool_call_id ? { role: 'tool', content: text || '', tool_call_id } : { role: 'tool', content: text || '' };
             messagesOut.push(msg);
             continue;
           }

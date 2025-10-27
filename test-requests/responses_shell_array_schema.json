@@ -1,0 +1,24 @@
+{
+  "model": "gpt-4o-mini",
+  "input": [
+    { "type": "message", "role": "user", "content": [ { "type": "input_text", "text": "Echo and list via array" } ] },
+    { "type": "function_call", "name": "shell", "arguments": { "command": ["bash","-lc","echo ok && ls | head -1"] }, "id": "call_r2" },
+    { "type": "function_call_output", "id": "call_r2", "output": "done" }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "shell",
+      "description": "Execute shell (argv)",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "array", "items": { "type": "string" } },
+          "workdir": { "type": "string" }
+        },
+        "required": ["command"]
+      }
+    }
+  ]
+}
+

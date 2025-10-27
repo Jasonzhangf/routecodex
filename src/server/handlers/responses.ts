@@ -124,18 +124,7 @@ export class ResponsesHandler extends BaseHandler {
         try { res.setHeader('x-rc-adapter', 'normalized:chat|anthropic->responses:non-lossy'); } catch { /* ignore */ }
       } catch { /* non-blocking */ }
 
-      // Minimal validation for Responses-shaped request
-      try {
-        const b: any = req.body || {};
-        if (!b.model || typeof b.model !== 'string') {
-          throw new RouteCodexError('model field is required and must be a string', 'validation_error', 400);
-        }
-        if (typeof b.input === 'undefined' && typeof b.instructions === 'undefined') {
-          throw new RouteCodexError('input or instructions is required for /v1/responses', 'validation_error', 400);
-        }
-      } catch (e) {
-        throw e;
-      }
+      // Remove strict request validation for Responses-shaped requests (preserve raw body)
 
       // Preserve original normalized request before pipeline mutates it
       const originalRequestSnapshot = JSON.parse(JSON.stringify(req.body || {}));
@@ -242,16 +231,25 @@ export class ResponsesHandler extends BaseHandler {
           provider: true,
         },
       },
-    };
+    } as any;
+
+    // Inject route.requestId into payload metadata for downstream providers (capture + pairing)
+    try {
+      const dataObj = pipelineRequest.data as Record<string, unknown>;
+      const meta = (dataObj as any)._metadata && typeof (dataObj as any)._metadata === 'object'
+        ? { ...(dataObj as any)._metadata }
+        : {};
+      (dataObj as any)._metadata = { ...meta, requestId };
+    } catch { /* ignore */ }
 
     // Debug: capture final request payload before entering pipeline (to diagnose client tolerance issues)
     try {
       const fs = await import('fs/promises');
       const os = await import('os');
       const path = await import('path');
-      const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'responses-replay');
+      const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'openai-responses');
       await (fs as any).mkdir(dir, { recursive: true });
-      const file = path.join(dir, `pre-pipeline_${requestId}.json`);
+      const file = path.join(dir, `${requestId}_pre-pipeline.json`);
       await (fs as any).writeFile(file, JSON.stringify({ requestId, payload: pipelineRequest.data }, null, 2), 'utf-8');
     } catch { /* ignore */ }
 
@@ -269,9 +267,9 @@ export class ResponsesHandler extends BaseHandler {
       const fs = await import('fs/promises');
       const os = await import('os');
       const path = await import('path');
-      const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'responses-replay');
+      const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'openai-responses');
       await (fs as any).mkdir(dir, { recursive: true });
-      const file = path.join(dir, `provider-response_${requestId}.json`);
+      const file = path.join(dir, `${requestId}_provider-response.json`);
       await (fs as any).writeFile(file, JSON.stringify(firstResp, null, 2), 'utf-8');
     } catch { /* ignore */ }
 
@@ -303,9 +301,9 @@ export class ResponsesHandler extends BaseHandler {
       const path = await import('path');
       const home = process.env.HOME || process.env.USERPROFILE || '';
       const baseDir = path.join(home || '', '.routecodex', 'codex-samples');
-      const subDir = path.join(baseDir, 'responses-replay');
-      const sseFile = path.join(subDir, `sse-events-${requestId}.log`);
-      const sseAuditFile = path.join(subDir, `sse-audit-${requestId}.log`);
+      const subDir = path.join(baseDir, 'openai-responses');
+      const sseFile = path.join(subDir, `${requestId}_sse-events.log`);
+      const sseAuditFile = path.join(subDir, `${requestId}_sse-audit.log`);
       const ensureDirs = async () => { try { await fs.mkdir(subDir, { recursive: true }); } catch { /* ignore */ } };
       const capture = async (event: string, data: unknown) => {
         try {
@@ -417,10 +415,10 @@ export class ResponsesHandler extends BaseHandler {
         const fs = await import('fs/promises');
         const os = await import('os');
         const path = await import('path');
-        const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'responses-replay');
-        await (fs as any).mkdir(dir, { recursive: true });
-        await (fs as any).writeFile(path.join(dir, `responses-initial_${requestId}.json`), JSON.stringify(initialResp, null, 2), 'utf-8');
-        await (fs as any).writeFile(path.join(dir, `responses-final_${requestId}.json`), JSON.stringify(finalResp, null, 2), 'utf-8');
+      const dir = path.join((os as any).homedir(), '.routecodex', 'codex-samples', 'openai-responses');
+      await (fs as any).mkdir(dir, { recursive: true });
+      await (fs as any).writeFile(path.join(dir, `${requestId}_responses-initial.json`), JSON.stringify(initialResp, null, 2), 'utf-8');
+      await (fs as any).writeFile(path.join(dir, `${requestId}_responses-final.json`), JSON.stringify(finalResp, null, 2), 'utf-8');
       } catch { /* ignore */ }
 
       const extractText = (resp: any): string => {
@@ -718,8 +716,20 @@ export class ResponsesHandler extends BaseHandler {
       }
     } catch { /* ignore */ }
     try {
-      // Core codec: Chat JSON → Responses JSON (strict,无兜底)
-      const converted0 = buildResponsesPayloadFromChat(payload, undefined) as Record<string, unknown>;
+      // Core codec: Chat JSON → Responses JSON（严格、按 schema 归一），并传入请求工具上下文以统一出参行为
+      let toolsNorm: Array<Record<string, unknown>> = [];
+      const reqTools = reqMeta?.tools as unknown;
+      if (Array.isArray(reqTools)) {
+        try { toolsNorm = normalizeTools(reqTools as any[]); } catch { /* ignore */ }
+      }
+      const ctx = {
+        metadata: toolsNorm.length ? { tools: toolsNorm } : undefined,
+        toolsRaw: Array.isArray(reqTools) ? (reqTools as any[]) : undefined,
+        toolsNormalized: toolsNorm,
+        toolChoice: (reqMeta as any)?.tool_choice,
+        parallelToolCalls: (reqMeta as any)?.parallel_tool_calls,
+      } as any;
+      const converted0 = buildResponsesPayloadFromChat(payload, ctx) as Record<string, unknown>;
 
       // Synthesize required_action for non-stream JSON when存在 function_call 输出
       const outputs = Array.isArray((converted0 as any)?.output) ? ((converted0 as any).output as any[]) : [];
@@ -730,68 +740,11 @@ export class ResponsesHandler extends BaseHandler {
           if (typeof v === 'string') return v;
           try { return JSON.stringify(v ?? {}); } catch { return '{}'; }
         };
-        // Schema-aware validation (no fallback)
-        const reqTools = reqMeta?.tools as unknown;
-        let toolsNorm: Array<Record<string, unknown>> = [];
-        if (Array.isArray(reqTools)) {
-          try {
-            const mod = await import('rcc-llmswitch-core/conversion');
-            const fn = (mod as any).normalizeTools as ((t: any[]) => Array<Record<string, unknown>>);
-            if (typeof fn === 'function') toolsNorm = fn(reqTools as any[]);
-          } catch { /* ignore */ }
-        }
-        const findSchema = (fnName?: string): Record<string, unknown> | undefined => {
-          if (!fnName || !toolsNorm.length) return undefined;
-          for (const t of toolsNorm) {
-            const f: any = (t as any).function;
-            if (f && typeof f.name === 'string' && f.name === fnName) return f.parameters as Record<string, unknown>;
-          }
-          return undefined;
-        };
-        const ensureObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-        const getPropType = (schema: any, key: string): 'string'|'arrayString'|'object'|'any' => {
-          try {
-            const s = schema?.properties?.[key];
-            const t = s?.type;
-            if (t === 'string') return 'string';
-            if (t === 'object') return 'object';
-            if (t === 'array') {
-              const it = s?.items?.type;
-              if (it === 'string') return 'arrayString';
-            }
-          } catch { /* ignore */ }
-          return 'any';
-        };
-        const error400 = (m: string) => { const e: any = new Error(m); e.status = 400; e.code = 'validation_error'; return e; };
-
         const calls = funcCalls.map((it: any) => {
           const id = typeof it.id === 'string' ? it.id : (typeof it.call_id === 'string' ? it.call_id : `call_${Math.random().toString(36).slice(2,8)}`);
           const nm = typeof it.name === 'string' ? it.name : (typeof it?.function?.name === 'string' ? it.function.name : 'tool');
           const rawArgs = it.arguments ?? it?.function?.arguments ?? {};
           const argsStr = toStringJson(rawArgs);
-          // Validate
-          if (toolsNorm.length > 0) {
-            const schema = findSchema(nm);
-            if (schema && ensureObject(schema?.properties)) {
-              let argsObj: any;
-              try { argsObj = JSON.parse(argsStr); } catch { throw error400('Tool call arguments must be valid JSON'); }
-              if (!ensureObject(argsObj)) throw error400('Tool call arguments must be a JSON object');
-              const required: string[] = Array.isArray((schema as any).required) ? (schema as any).required as string[] : [];
-              for (const key of required) {
-                if (!(key in argsObj)) throw error400(`Missing required argument: ${key}`);
-              }
-              for (const key of Object.keys((schema as any).properties)) {
-                if (!(key in argsObj)) continue;
-                const kind = getPropType(schema, key);
-                const val = argsObj[key];
-                if (kind === 'string' && typeof val !== 'string') throw error400(`Invalid type for ${key}: expected string`);
-                if (kind === 'object' && (!ensureObject(val))) throw error400(`Invalid type for ${key}: expected object`);
-                if (kind === 'arrayString') {
-                  if (!Array.isArray(val) || !val.every((x: any) => typeof x === 'string')) throw error400(`Invalid type for ${key}: expected array<string>`);
-                }
-              }
-            }
-          }
           return { id, type: 'function', function: { name: String(nm), arguments: String(argsStr) } };
         });
         converted = { ...(converted0 as any), required_action: { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: calls } } };

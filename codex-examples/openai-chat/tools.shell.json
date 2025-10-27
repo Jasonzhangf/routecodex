@@ -1,0 +1,23 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "shell",
+      "description": "Execute shell commands. Place ALL flags, paths and patterns into the `command` array as argv tokens. Do NOT add extra keys beyond the schema.\nExamples:\n- [\"find\",\".\",\"-type\",\"f\",\"-name\",\"*.ts\"]\n- [\"find\",\".\",\"-type\",\"f\",\"-not\",\"-path\",\"*/node_modules/*\",\"-name\",\"*.ts\"]\n- [\"find\",\".\",\"-type\",\"f\",\"-name\",\"*.ts\",\"-exec\",\"head\",\"-20\",\"{}\",\"+\"]\n中文：所有参数写入 command 数组，不要使用额外键名（如 md 或 node_modules/*）。",
+      "strict": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "The command to execute as argv tokens"
+          }
+        },
+        "required": ["command"],
+        "additionalProperties": false
+      }
+    }
+  }
+]
+

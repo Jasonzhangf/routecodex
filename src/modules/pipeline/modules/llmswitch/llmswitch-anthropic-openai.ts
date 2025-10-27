@@ -9,7 +9,7 @@ import { PipelineDebugLogger } from '../../utils/debug-logger.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { normalizeArgsBySchema, normalizeTools } from 'rcc-llmswitch-core/conversion';
+import { normalizeArgsBySchema, normalizeTools, packShellArgs } from 'rcc-llmswitch-core/conversion';
 import {
   DEFAULT_CONVERSION_CONFIG,
   detectRequestFormat,
@@ -958,106 +958,17 @@ export class AnthropicOpenAIConverter implements LLMSwitchModule {
    * to normalize standard tools independent of provider quirks.
    */
   private normalizeStandardToolCall(rawName: any, rawArgs: any): { name: string; args: Record<string, unknown> } {
+    // Minimal adaptation only: do not rename or reshape tools except 'shell'.
     const name0 = typeof rawName === 'string' ? rawName : '';
     const lower = name0.toLowerCase();
-    const argsIn = (rawArgs && typeof rawArgs === 'object') ? rawArgs as Record<string, unknown> : {};
+    const argsIn = (rawArgs && typeof rawArgs === 'object') ? (rawArgs as Record<string, unknown>) : ({} as Record<string, unknown>);
 
-    // Helper coercers
-    const toStr = (v: any, d = '') => (typeof v === 'string' ? v : (v == null ? d : String(v)));
-    const toBool = (v: any, d = false) => (typeof v === 'boolean' ? v : (v == null ? d : String(v).toLowerCase() === 'true'));
-    const toInt = (v: any, d = 1) => { const n = Number.parseInt(String(v), 10); return Number.isFinite(n) && n > 0 ? n : d; };
-
-    // Canonicalize common coding-agent tools similar to Claude Code Router
-    // apply_patch => ensure argument { input: string }
-    if (lower === 'apply_patch' || lower === 'applypatch') {
-      let input = '';
-      if (typeof (argsIn as any).input === 'string' && (argsIn as any).input.trim()) { input = (argsIn as any).input; }
-      else if (typeof (argsIn as any).patch === 'string' && (argsIn as any).patch.trim()) { input = (argsIn as any).patch; }
-      else if (typeof (argsIn as any).diff === 'string' && (argsIn as any).diff.trim()) { input = (argsIn as any).diff; }
-      else if (typeof (argsIn as any)._raw === 'string' && (argsIn as any)._raw.includes('*** Begin Patch')) { input = (argsIn as any)._raw; }
-      else if (Array.isArray((argsIn as any).command) && String((argsIn as any).command[0]) === 'apply_patch') {
-        input = String((argsIn as any).command.slice(1).join(' '));
-      }
-      return { name: 'apply_patch', args: { input } };
-    }
-
-    // update_plan => ensure { explanation?: string, plan: [] }
-    if (lower === 'update_plan') {
-      const plan = Array.isArray((argsIn as any).plan) ? (argsIn as any).plan : [];
-      const explanation = typeof (argsIn as any).explanation === 'string' ? (argsIn as any).explanation : '';
-      return { name: 'update_plan', args: { explanation, plan } };
-    }
-
-    // shell => ensure { command: string[] }
     if (lower === 'shell') {
-      const cmd = (argsIn as any).command;
-      const tryParseArray = (s: string): string[] | null => { try { const a = JSON.parse(s); return Array.isArray(a) ? a.map(String) : null; } catch { return null; } };
-      if (typeof cmd === 'string') {
-        const parsed = tryParseArray(cmd);
-        return { name: 'shell', args: { command: parsed || ['bash','-lc',cmd] } };
-      } else if (Array.isArray(cmd)) {
-        return { name: 'shell', args: { command: cmd.map(String) } };
-      }
-      return { name: 'shell', args: { ...(argsIn as any) } };
+      const packed = packShellArgs(argsIn as any);
+      return { name: 'shell', args: packed };
     }
 
-    // Read: canonical name 'Read', arguments must use { file_path }
-    if (['read', 'read_file', 'readfile', 'mcp__read__read', 'mcp__read-file__readfile', 'readfileexact', 'read_file_exact'].includes(lower)) {
-      // Handle empty args by inferring common defaults based on context
-      if (!argsIn || typeof argsIn !== 'object' || Object.keys(argsIn).length === 0) {
-        // For empty Read args, provide common defaults to prevent validation errors
-        return { name: 'Read', args: { file_path: 'README.md' } };
-      }
-      
-      const file_path = toStr(
-        (argsIn as any)['file_path'] ??
-        (argsIn as any)['filepath'] ??
-        (argsIn as any)['file'] ??
-        (argsIn as any)['path'] ??
-        ((Array.isArray((argsIn as any)['paths']) && (argsIn as any)['paths'][0]) ? String((argsIn as any)['paths'][0]) : '') ??
-        (argsIn as any)['_raw']
-      );
-      const offset = (argsIn as any)['offset'];
-      const limit = (argsIn as any)['limit'];
-      const out: Record<string, unknown> = { file_path };
-      if (offset !== undefined) {out.offset = offset;}
-      if (limit !== undefined) {out.limit = limit;}
-      return { name: 'Read', args: out };
-    }
-
-    // Search: canonical name 'Search', arguments { pattern, path?, glob? }
-    if (['search', 'search_files', 'searchfiles', 'grep', 'mcp__search__search', 'ripgrep', 'rg'].includes(lower)) {
-      const pattern = toStr(argsIn['pattern'] ?? (argsIn as any)['query'] ?? (argsIn as any)['regex'] ?? (argsIn as any)['_raw']);
-      const basePath = toStr(argsIn['path'] ?? (argsIn as any)['dir'] ?? '');
-      const glob = toStr((argsIn as any)['glob'] ?? (argsIn as any)['include'] ?? '');
-      const out: Record<string, unknown> = { pattern };
-      if (basePath) { out.path = basePath; }
-      if (glob) { out.glob = glob; }
-      return { name: 'Search', args: out };
-    }
-
-    // Glob: canonical name 'Glob', arguments { pattern }
-    if (['glob', 'mcp__glob__glob'].includes(lower)) {
-      const pattern = toStr((argsIn as any)['pattern'] ?? (argsIn as any)['glob'] ?? (argsIn as any)['_raw']);
-      return { name: 'Glob', args: { pattern } };
-    }
-
-    // Sequential thinking: canonical name 'sequential-thinking', coerce fields
-    if (lower.includes('sequential-thinking') || lower === 'sequentialthinking' || lower === 'mcp__sequential-thinking__sequentialthinking') {
-      const thought = toStr(argsIn['thought'] ?? (argsIn as any)['text'] ?? (argsIn as any)['message'] ?? (argsIn as any)['_raw']);
-      const nextThoughtNeeded = toBool(argsIn['nextThoughtNeeded'] ?? (argsIn as any)['next_thought_needed'] ?? (argsIn as any)['next'], true);
-      const thoughtNumber = toInt(argsIn['thoughtNumber'] ?? (argsIn as any)['thought_number'] ?? 1, 1);
-      const totalThoughts = toInt(argsIn['totalThoughts'] ?? (argsIn as any)['total_thoughts'] ?? (argsIn as any)['total'] ?? Math.max(1, Number(thoughtNumber)), 1);
-      const mapped: Record<string, unknown> = { thought, nextThoughtNeeded, thoughtNumber, totalThoughts };
-      if ('isRevision' in argsIn) { mapped.isRevision = toBool((argsIn as any)['isRevision']); }
-      if ('revisesThought' in argsIn) { mapped.revisesThought = toInt((argsIn as any)['revisesThought'], 1); }
-      if ('branchFromThought' in argsIn) { mapped.branchFromThought = toInt((argsIn as any)['branchFromThought'], 1); }
-      if (typeof (argsIn as any)['branchId'] === 'string') { mapped.branchId = (argsIn as any)['branchId']; }
-      if ('needsMoreThoughts' in argsIn) { mapped.needsMoreThoughts = toBool((argsIn as any)['needsMoreThoughts']); }
-      return { name: 'sequential-thinking', args: mapped };
-    }
-
-    // Default: keep as-is
+    // Default: pass-through without coercion (keep arguments object as-is)
     return { name: name0, args: argsIn };
   }
 

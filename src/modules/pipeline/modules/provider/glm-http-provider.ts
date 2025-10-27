@@ -120,6 +120,15 @@ export class GLMHTTPProvider implements ProviderModule {
     }
 
     const start = Date.now();
+    const requestId = (() => {
+      try {
+        const raw: any = request as any;
+        const fromMeta = raw?._metadata && typeof raw._metadata === 'object' ? raw._metadata.requestId : undefined;
+        const fromTop = raw?.metadata && typeof raw.metadata === 'object' ? raw.metadata.requestId : undefined;
+        const picked = typeof fromMeta === 'string' ? fromMeta : (typeof fromTop === 'string' ? fromTop : undefined);
+        return picked && picked.startsWith('req_') ? picked : `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      } catch { return `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`; }
+    })();
     const endpoint = `${this.getBaseUrl()}/chat/completions`;
     // Passthrough payload as-is. Do not sanitize/trim/strip tool_calls.
     const payloadObj: Record<string, unknown> = { ...(request as any) };
@@ -138,16 +147,31 @@ export class GLMHTTPProvider implements ProviderModule {
       });
     }
 
-    // Persist final payload snapshot
+    // Persist final payload snapshot (categorized path)
     try {
-      const dir = path.join(homedir(), '.routecodex', 'codex-samples');
-      await fs.mkdir(dir, { recursive: true });
-      const outPath = path.join(dir, `provider-out-glm_${Date.now()}_${Math.random().toString(36).slice(2,8)}.json`);
-      await fs.writeFile(outPath, JSON.stringify(payloadObj, null, 2), 'utf-8');
+      const baseDir = path.join(homedir(), '.routecodex', 'codex-samples');
+      const effectiveId = requestId;
+      const entry = (request as any)?.metadata?.entryEndpoint || '';
+      const entryFolder = /\/v1\/responses/i.test(String(entry))
+        ? 'openai-responses'
+        : (/\/v1\/messages/i.test(String(entry)) ? 'anthropic-messages' : 'openai-chat');
+      const entryDir = path.join(baseDir, entryFolder);
+      await fs.mkdir(entryDir, { recursive: true });
+      const directReqPath = path.join(entryDir, `${effectiveId}_provider-request.json`);
+      await fs.writeFile(directReqPath, JSON.stringify(payloadObj, null, 2), 'utf-8');
+      const wrapped = {
+        requestId: effectiveId,
+        timestamp: Date.now(),
+        model: (payloadObj as any)?.model,
+        toolsCount: Array.isArray((payloadObj as any)?.tools) ? (payloadObj as any).tools.length : 0,
+        messagesCount: Array.isArray((payloadObj as any)?.messages) ? (payloadObj as any).messages.length : 0,
+        request: payloadObj
+      };
+      await fs.writeFile(path.join(entryDir, `${effectiveId}_provider-in.json`), JSON.stringify(wrapped, null, 2), 'utf-8');
       if (this.isDebugEnhanced && this.debugEventBus) {
-        this.debugEventBus.publish({ sessionId: 'system', moduleId: this.id, operationId: 'glm_http_request_payload_saved', timestamp: Date.now(), type: 'start', position: 'middle', data: { path: outPath, model: (payloadObj as any).model, hasTools: Array.isArray((payloadObj as any).tools) } });
+        this.debugEventBus.publish({ sessionId: 'system', moduleId: this.id, operationId: 'glm_http_request_payload_saved', timestamp: Date.now(), type: 'start', position: 'middle', data: { path: directReqPath, model: (payloadObj as any).model, hasTools: Array.isArray((payloadObj as any).tools) } });
       }
-    } catch { /* noop: optional debug payload save */ void 0; }
+    } catch { /* noop */ void 0; }
 
     const wantsStream = Boolean((payloadObj as any)?.stream === true);
     const timeoutMs = Number(process.env.GLM_HTTP_TIMEOUT_MS || process.env.RCC_UPSTREAM_TIMEOUT_MS || 300000);
@@ -159,6 +183,8 @@ export class GLMHTTPProvider implements ProviderModule {
 
     let res: Response;
     try {
+      // Strip internal metadata before sending upstream
+      const wirePayload = (() => { const p = { ...(payloadObj as any) } as Record<string, unknown>; delete (p as any)._metadata; delete (p as any).metadata; return p; })();
       res = await fetch(endpoint, {
         method: 'POST',
         headers: {
@@ -166,7 +192,7 @@ export class GLMHTTPProvider implements ProviderModule {
           'Authorization': `Bearer ${token}`,
           'User-Agent': 'RouteCodex/GLMHTTPProvider'
         },
-        body: JSON.stringify(payloadObj),
+        body: JSON.stringify(wirePayload),
         signal: (controller as any).signal
       } as any);
     } catch (e: any) {
@@ -237,6 +263,27 @@ export class GLMHTTPProvider implements ProviderModule {
 
     // Non-stream JSON response
     const data = await res.json();
+    // Persist response snapshot (categorized under entrypoint)
+    try {
+      const baseDir = path.join(homedir(), '.routecodex', 'codex-samples');
+      const effectiveId = requestId;
+      const entry = (request as any)?.metadata?.entryEndpoint || '';
+      const entryFolder = /\/v1\/responses/i.test(String(entry))
+        ? 'openai-responses'
+        : (/\/v1\/messages/i.test(String(entry)) ? 'anthropic-messages' : 'openai-chat');
+      const entryDir = path.join(baseDir, entryFolder);
+      await fs.mkdir(entryDir, { recursive: true });
+      await fs.writeFile(path.join(entryDir, `${effectiveId}_provider-response.json`), JSON.stringify(data, null, 2), 'utf-8');
+      const pair = {
+        type: 'glm-provider-pair',
+        requestId: effectiveId,
+        timestamp: Date.now(),
+        meta: { provider: 'glm', baseURL: this.getBaseUrl() },
+        request: (request as any),
+        response: data
+      };
+      await fs.writeFile(path.join(entryDir, `${effectiveId}_provider-pair.json`), JSON.stringify(pair, null, 2), 'utf-8');
+    } catch { /* ignore */ }
     if (this.isDebugEnhanced && this.debugEventBus) {
       this.debugEventBus.publish({ sessionId: 'system', moduleId: this.id, operationId: 'glm_http_request_success', timestamp: Date.now(), type: 'end', position: 'middle', data: { status: res.status, elapsed, streaming: false } });
     }
@@ -245,7 +292,7 @@ export class GLMHTTPProvider implements ProviderModule {
       data,
       status: res.status,
       headers: Object.fromEntries(res.headers.entries()),
-      metadata: { requestId: `glm-${Date.now()}`, processingTime: elapsed, model: (request as any)?.model }
+      metadata: { requestId, processingTime: elapsed, model: (request as any)?.model }
     };
   }
 }

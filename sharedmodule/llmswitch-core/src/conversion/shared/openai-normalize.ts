@@ -22,8 +22,19 @@ export function normalizeChatResponse(res: any): any {
       const msg = choice.message && typeof choice.message === 'object' ? { ...choice.message } : choice.message;
       if (msg && typeof msg === 'object') {
         if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+          // Always normalize tool_calls
           msg.tool_calls = msg.tool_calls.map((tc: any) => normalizeToolCall(tc));
-          msg.content = typeof msg.content === 'string' ? msg.content : '';
+          // Preserve assistant textual content when present (flatten arrays), instead of forcing empty
+          if (typeof msg.content === 'string') {
+            // keep as-is
+          } else if (Array.isArray(msg.content)) {
+            const parts = (msg.content as any[])
+              .map((p: any) => (typeof p === 'string' ? p : (p && typeof p.text === 'string' ? p.text : '')))
+              .filter((s: string) => !!s.trim());
+            msg.content = parts.join('\n');
+          } else if (msg.content === undefined || msg.content === null) {
+            msg.content = '';
+          }
         } else if (Array.isArray(msg.content)) {
           const parts = msg.content
             .map((p: any) => (typeof p === 'string' ? p : (p && typeof p.text === 'string' ? p.text : '')))
@@ -88,4 +99,3 @@ function normalizeToolCall(tc: any): any {
   }
   return t;
 }
-

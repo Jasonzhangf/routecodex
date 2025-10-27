@@ -68,6 +68,43 @@ function tryParseJson(s: unknown): unknown {
   try { return JSON.parse(s); } catch { return s; }
 }
 
+// Lenient JSON-ish parsing for tool arguments (align with OpenAI→Anthropic robustness)
+function parseLenient(value: unknown): unknown {
+  if (value === undefined || value === null) return {};
+  if (typeof value === 'object') return value;
+  if (typeof value !== 'string') return { _raw: String(value) };
+  const s0 = value.trim();
+  if (!s0) return {};
+  // 1) strict JSON
+  try { return JSON.parse(s0); } catch { /* continue */ }
+  // 2) fenced ```json ... ``` or ``` ... ```
+  const fence = s0.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  const candidate = fence ? fence[1] : s0;
+  // 3) object substring
+  const objMatch = candidate.match(/\{[\s\S]*\}/);
+  if (objMatch) { try { return JSON.parse(objMatch[0]); } catch { /* ignore */ } }
+  // 4) array substring
+  const arrMatch = candidate.match(/\[[\s\S]*\]/);
+  if (arrMatch) { try { return JSON.parse(arrMatch[0]); } catch { /* ignore */ } }
+  // 5) single quotes → double; unquoted keys → quoted
+  let t = candidate.replace(/'([^']*)'/g, '"$1"');
+  t = t.replace(/([{,\s])([A-Za-z_][A-Za-z0-9_-]*)\s*:/g, '$1"$2":');
+  try { return JSON.parse(t); } catch { /* ignore */ }
+  // 6) key=value fallback across lines/commas
+  const obj: Record<string, any> = {};
+  const parts = candidate.split(/[\n,]+/).map(p => p.trim()).filter(Boolean);
+  for (const p of parts) {
+    const m = p.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*[:=]\s*(.+)$/);
+    if (!m) continue; const k = m[1]; let v = m[2].trim();
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+    try { const pv = JSON.parse(v); obj[k] = pv; continue; } catch { /* fallthrough */ }
+    if (/^(true|false)$/i.test(v)) { obj[k] = /^true$/i.test(v); continue; }
+    if (/^-?\d+(?:\.\d+)?$/.test(v)) { obj[k] = Number(v); continue; }
+    obj[k] = v;
+  }
+  return Object.keys(obj).length ? obj : { _raw: s0 };
+}
+
 function defaultObjectSchema() { return { type: 'object', properties: {}, additionalProperties: true }; }
 
 function normalizeTools(tools: any[]): Unknown[] {
@@ -84,6 +121,30 @@ function normalizeTools(tools: any[]): Unknown[] {
     let params = (fn?.parameters !== undefined ? fn.parameters : topParams);
     params = tryParseJson(params);
     if (!isObject(params)) params = defaultObjectSchema();
+    // Augment shell tool description to nudge the model to put all intent into argv tokens only (CCR-style)
+    try {
+      if (String(name || '').trim() === 'shell') {
+        if (!isObject((params as any).properties)) (params as any).properties = {} as Unknown;
+        const props = (params as any).properties as Unknown;
+        if (!isObject((props as any).command)) {
+          (props as any).command = { type: 'array', items: { type: 'string' }, description: 'The command to execute as argv tokens' } as Unknown;
+        }
+        (params as any).additionalProperties = false;
+        const guidance = [
+          'Execute shell commands. Place ALL flags, paths and patterns into the `command` array as argv tokens.',
+          'Do NOT add extra keys beyond the schema. Examples:',
+          '- ["find",".","-type","f","-name","*.ts"]',
+          '- ["find",".","-type","f","-not","-path","*/node_modules/*","-name","*.ts"]',
+          '- ["find",".","-type","f","-name","*.ts","-exec","head","-20","{}","+"]',
+          '中文：所有参数写入 command 数组，不要使用额外键名（如 md 或 node_modules/*）。'
+        ].join('\n');
+        const d0 = typeof desc === 'string' ? desc : '';
+        const descOut = d0 && !/Place ALL flags/i.test(d0) ? `${d0}\n\n${guidance}` : (d0 || guidance);
+        const norm: Unknown = { type: 'function', function: { name, description: descOut, parameters: params as Unknown, strict: true } };
+        if ((norm as any).function?.name) out.push(norm);
+        continue;
+      }
+    } catch { /* ignore augmentation errors */ }
     const norm: Unknown = { type: 'function', function: { name, ...(desc ? { description: desc } : {}), parameters: params as Unknown } };
     if ((norm as any).function?.name) out.push(norm);
   }
@@ -117,7 +178,7 @@ function normalizeArgumentsBySchema(argsStringOrObj: unknown, functionName: stri
     try { return JSON.parse(s); } catch { return s; }
   };
 
-  const raw = tryParseJsonString(argsStringOrObj);
+  const raw = parseLenient(argsStringOrObj);
   const argsObj: Unknown = isObject(raw) ? (raw as Unknown) : {};
 
   // Find function schema in provided tools (OpenAI Chat normalized shape)
@@ -211,15 +272,77 @@ export function captureResponsesContext(payload: Record<string, unknown>, dto?: 
 }
 
 export function buildChatRequestFromResponses(payload: Record<string, unknown>, context: ResponsesRequestContext): BuildChatRequestResult {
-  const toolsNormalized = Array.isArray((payload as any).tools)
+  let toolsNormalized = Array.isArray((payload as any).tools)
     ? normalizeTools((payload as any).tools as ResponsesToolDefinition[])
     : undefined;
+  // Inject MCP tools (CCR style) if enabled
+  try {
+    const enableMcp = String((process as any).env?.ROUTECODEX_MCP_ENABLE ?? '1') !== '0';
+    if (enableMcp) {
+      // Discover servers from prior inputs if present (best-effort; depends on client payload)
+      const discovered = new Set<string>();
+      try {
+        const input = Array.isArray((payload as any).input) ? ((payload as any).input as any[]) : [];
+        for (const it of input) {
+          const t = (it && typeof it === 'object') ? (it as any) : {};
+          const isToolCall = (t.type === 'function_call' || t.type === 'tool_call');
+          const isToolMsg = (t.type === 'tool_message' || t.type === 'tool_result');
+          if (isToolCall) {
+            const args = typeof t.arguments === 'string' ? (() => { try { return JSON.parse(t.arguments); } catch { return {}; } })() : (t.arguments || {});
+            const sv = (args && typeof args === 'object') ? (args as any).server : undefined;
+            if (typeof sv === 'string' && sv.trim()) discovered.add(sv.trim());
+            const nm = typeof t.name === 'string' ? t.name : undefined;
+            if (nm && nm.includes('.')) { const p = nm.split('.')[0]?.trim(); if (p) discovered.add(p); }
+          } else if (isToolMsg) {
+            const output = t?.output;
+            const val = (typeof output === 'string') ? (() => { try { return JSON.parse(output); } catch { return null; } })() : (output || null);
+            const args = (val && typeof val === 'object') ? (val as any).arguments : undefined;
+            const sv = (args && typeof args === 'object') ? (args as any).server : undefined;
+            if (typeof sv === 'string' && sv.trim()) discovered.add(sv.trim());
+          }
+        }
+      } catch { /* ignore */ }
+      const list = toolsNormalized && Array.isArray(toolsNormalized) ? toolsNormalized as Array<Record<string, unknown>> : [];
+      const have = new Set(list.map((t: any) => (t?.function?.name || '').toString())) as Set<string>;
+      const addTool = (def: any) => { if (!have.has(def.function.name)) { list.push(def); have.add(def.function.name); } };
+      const obj = (props: any, req: string[]) => ({ type: 'object', properties: props, required: req, additionalProperties: false });
+      const serversRaw = String((process as any).env?.ROUTECODEX_MCP_SERVERS || '').trim();
+      const envServers = serversRaw ? serversRaw.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+      const merged = Array.from(new Set([ ...envServers, ...Array.from(discovered) ]));
+      const serverProp = merged.length ? { type: 'string', enum: merged } : { type: 'string' };
+      addTool({ type: 'function', function: { name: 'list_mcp_resources', strict: true, description: 'List resources from a given MCP server (arguments.server = server label).', parameters: obj({ server: serverProp, filter: { type: 'string' }, root: { type: 'string' } }, ['server']) } });
+      addTool({ type: 'function', function: { name: 'read_mcp_resource', strict: true, description: 'Read a resource via MCP server.', parameters: obj({ server: serverProp, uri: { type: 'string' } }, ['server','uri']) } });
+      addTool({ type: 'function', function: { name: 'list_mcp_resource_templates', strict: true, description: 'List resource templates via MCP server.', parameters: obj({ server: serverProp }, ['server']) } });
+      toolsNormalized = list;
+    }
+  } catch { /* ignore MCP injection */ }
 
   const messages = mapResponsesInputToChat({
     instructions: context.instructions,
     input: context.input,
     toolsNormalized
   });
+  try {
+    const enableMcp = String((process as any).env?.ROUTECODEX_MCP_ENABLE ?? '1') !== '0';
+    if (enableMcp) {
+      // recompute merged server list for prompt hint (env + discovered)
+      const serversRaw = String((process as any).env?.ROUTECODEX_MCP_SERVERS || '').trim();
+      const envServers = serversRaw ? serversRaw.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+      const discovered = new Set<string>();
+      for (const m of messages as any[]) {
+        if (m && m.role === 'tool' && typeof m.content === 'string') {
+          try { const o = JSON.parse(m.content); const sv = o?.arguments?.server; if (typeof sv === 'string' && sv.trim()) discovered.add(sv.trim()); } catch { /* ignore */ }
+        }
+      }
+      const merged = Array.from(new Set([ ...envServers, ...Array.from(discovered) ]));
+      const baseTip = 'MCP usage: Use only list_mcp_resources, read_mcp_resource, list_mcp_resource_templates. Do not use dotted tool names like server.fn; always call the base function.';
+      if (merged.length > 0) {
+        messages.push({ role: 'system', content: `${baseTip} arguments.server must be one of ${JSON.stringify(merged)}.` } as any);
+      } else {
+        messages.push({ role: 'system', content: `${baseTip} Currently there are no known MCP servers; do not call MCP until a server_label is discovered via successful calls.` } as any);
+      }
+    }
+  } catch { /* ignore */ }
   if (!messages.length) {
     throw new Error('Responses payload produced no chat messages');
   }
@@ -304,6 +427,7 @@ function mapResponsesInputToChat(options: { instructions?: string; input?: Respo
   }
   if (!Array.isArray(input)) return messages;
   const toolNameById = new Map<string, string>();
+  const toolArgsById = new Map<string, string>();
   let lastToolCallId: string | null = null;
   for (const entry of input) {
     if (!entry || typeof entry !== 'object') continue;
@@ -316,6 +440,7 @@ function mapResponsesInputToChat(options: { instructions?: string; input?: Respo
       const fnName = name ?? 'tool';
       const serialized = normalizeArgumentsBySchema(parsedArgs, fnName, toolsNormalized).trim();
       toolNameById.set(callId, fnName);
+      toolArgsById.set(callId, serialized);
       messages.push({ role: 'assistant', tool_calls: [{ id: callId, type: 'function', function: { name: fnName, arguments: serialized } }] });
       lastToolCallId = callId;
       continue;
@@ -324,14 +449,59 @@ function mapResponsesInputToChat(options: { instructions?: string; input?: Respo
     if (entryType === 'function_call_output' || entryType === 'tool_result' || entryType === 'tool_message') {
       const toolCallId = (entry as any).tool_call_id || (entry as any).call_id || (entry as any).tool_use_id || (entry as any).id || lastToolCallId;
       const output = normalizeToolOutput(entry);
-      if (toolCallId && output) {
-        messages.push({ role: 'tool', tool_call_id: String(toolCallId), content: output });
+      if (toolCallId) {
+        try {
+          const name = toolNameById.get(String(toolCallId)) || 'tool';
+          const argStr = toolArgsById.get(String(toolCallId));
+          let argsObj: any = {};
+          if (argStr) { try { argsObj = JSON.parse(argStr); } catch { argsObj = { _raw: argStr }; } }
+          const raw = output !== null ? tryParseJson(output) : null;
+          const cmd = (argsObj && typeof argsObj === 'object') ? (argsObj as any).command : undefined;
+          const workdir = (argsObj && typeof argsObj === 'object') ? (argsObj as any).workdir : undefined;
+          const flattened = (() => {
+            const out: any = {
+              tool_call_id: String(toolCallId),
+              tool_name: name,
+              arguments: argsObj,
+              command: Array.isArray(cmd) ? cmd : (typeof cmd === 'string' && cmd.length ? [cmd] : [])
+            };
+            if (typeof workdir === 'string' && workdir) out.workdir = workdir;
+            if (raw && typeof raw === 'object') {
+              const meta: any = (raw as any).metadata || (raw as any).meta || {};
+              const exitCode = (typeof (raw as any).exit_code === 'number') ? (raw as any).exit_code
+                : (typeof meta.exit_code === 'number' ? meta.exit_code : undefined);
+              const duration = (typeof (raw as any).duration_seconds === 'number') ? (raw as any).duration_seconds
+                : (typeof meta.duration_seconds === 'number' ? meta.duration_seconds : undefined);
+              if (typeof exitCode === 'number') out.exit_code = exitCode;
+              if (typeof duration === 'number') out.duration_seconds = duration;
+              if (typeof (raw as any).stdout === 'string') out.stdout = (raw as any).stdout;
+              if (typeof (raw as any).stderr === 'string') out.stderr = (raw as any).stderr;
+              if (typeof (raw as any).error === 'string' && out.stderr === undefined) out.stderr = (raw as any).error;
+              if (typeof (raw as any).success === 'boolean') out.success = (raw as any).success;
+              if ((raw as any).output !== undefined) out.output = (raw as any).output;
+              else if ((raw as any).result !== undefined) out.output = (raw as any).result;
+              else out.output = raw;
+            } else {
+              out.output = raw; // string or null
+            }
+            return out;
+          })();
+          messages.push({ role: 'tool', tool_call_id: String(toolCallId), content: JSON.stringify(flattened) });
+        } catch {
+          const fallback = (output ?? '');
+          messages.push({ role: 'tool', tool_call_id: String(toolCallId), content: String(fallback) });
+        }
         lastToolCallId = null;
       }
       continue;
     }
 
-    const { text, toolCalls, toolMessages, lastCallId } = processMessageBlocks(Array.isArray((entry as any).content) ? (entry as any).content : [], toolsNormalized, toolNameById, lastToolCallId);
+    const { text, toolCalls, toolMessages, lastCallId } = processMessageBlocks(
+      Array.isArray((entry as any).content) ? (entry as any).content : [],
+      toolsNormalized,
+      toolNameById,
+      lastToolCallId
+    );
     if (toolCalls.length) messages.push({ role: 'assistant', tool_calls: toolCalls });
     for (const msg of toolMessages) messages.push(msg);
     const normalizedRole = normalizeResponseRole((entry as any).role);
@@ -354,6 +524,7 @@ function processMessageBlocks(blocks: any[], toolsNormalized: Array<Record<strin
   const toolCalls: Array<Record<string, unknown>> = [];
   const toolMessages: Array<Record<string, unknown>> = [];
   let currentLastCall = lastToolCallId;
+  const toolArgsByIdLocal = new Map<string, string>();
   for (const block of blocks) {
     if (!block || typeof block !== 'object') continue;
     const type = typeof (block as any).type === 'string' ? (block as any).type.toLowerCase() : '';
@@ -377,6 +548,7 @@ function processMessageBlocks(blocks: any[], toolsNormalized: Array<Record<strin
       const callId = typeof (block as any).id === 'string' ? (block as any).id : (typeof (block as any).call_id === 'string' ? (block as any).call_id : `call_${Math.random().toString(36).slice(2, 8)}`);
       const serialized = normalizeArgumentsBySchema(parsedArgs, name, toolsNormalized).trim();
       toolNameById.set(callId, name);
+      toolArgsByIdLocal.set(callId, serialized);
       toolCalls.push({ id: callId, type: 'function', function: { name, arguments: serialized } });
       currentLastCall = callId;
       continue;
@@ -384,8 +556,48 @@ function processMessageBlocks(blocks: any[], toolsNormalized: Array<Record<strin
     if (type === 'function_call_output' || type === 'tool_result' || type === 'tool_message') {
       const toolCallId = (block as any).tool_call_id || (block as any).call_id || (block as any).tool_use_id || (block as any).id || currentLastCall;
       const output = normalizeToolOutput(block as any);
-      if (toolCallId && output) {
-        toolMessages.push({ role: 'tool', tool_call_id: String(toolCallId), content: output });
+      if (toolCallId) {
+        try {
+          const name = toolNameById.get(String(toolCallId)) || 'tool';
+          const argStr = toolArgsByIdLocal.get(String(toolCallId));
+          let argsObj: any = {};
+          if (argStr) { try { argsObj = JSON.parse(argStr); } catch { argsObj = { _raw: argStr }; } }
+          const raw = output !== null ? tryParseJson(output) : null;
+          const cmd = (argsObj && typeof argsObj === 'object') ? (argsObj as any).command : undefined;
+          const workdir = (argsObj && typeof argsObj === 'object') ? (argsObj as any).workdir : undefined;
+          const flattened = (() => {
+            const out: any = {
+              tool_call_id: String(toolCallId),
+              tool_name: name,
+              arguments: argsObj,
+              command: Array.isArray(cmd) ? cmd : (typeof cmd === 'string' && cmd.length ? [cmd] : [])
+            };
+            if (typeof workdir === 'string' && workdir) out.workdir = workdir;
+            if (raw && typeof raw === 'object') {
+              const meta: any = (raw as any).metadata || (raw as any).meta || {};
+              const exitCode = (typeof (raw as any).exit_code === 'number') ? (raw as any).exit_code
+                : (typeof meta.exit_code === 'number' ? meta.exit_code : undefined);
+              const duration = (typeof (raw as any).duration_seconds === 'number') ? (raw as any).duration_seconds
+                : (typeof meta.duration_seconds === 'number' ? meta.duration_seconds : undefined);
+              if (typeof exitCode === 'number') out.exit_code = exitCode;
+              if (typeof duration === 'number') out.duration_seconds = duration;
+              if (typeof (raw as any).stdout === 'string') out.stdout = (raw as any).stdout;
+              if (typeof (raw as any).stderr === 'string') out.stderr = (raw as any).stderr;
+              if (typeof (raw as any).error === 'string' && out.stderr === undefined) out.stderr = (raw as any).error;
+              if (typeof (raw as any).success === 'boolean') out.success = (raw as any).success;
+              if ((raw as any).output !== undefined) out.output = (raw as any).output;
+              else if ((raw as any).result !== undefined) out.output = (raw as any).result;
+              else out.output = raw;
+            } else {
+              out.output = raw; // string or null
+            }
+            return out;
+          })();
+          toolMessages.push({ role: 'tool', tool_call_id: String(toolCallId), content: JSON.stringify(flattened) });
+        } catch {
+          const fallback = (output ?? '');
+          toolMessages.push({ role: 'tool', tool_call_id: String(toolCallId), content: String(fallback) });
+        }
         currentLastCall = null;
       }
       continue;

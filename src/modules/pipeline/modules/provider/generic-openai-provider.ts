@@ -94,14 +94,28 @@ export class GenericOpenAIProvider implements ProviderModule {
     const start = Date.now();
     const endpoint = `${this.getBaseUrl()}/chat/completions`;
     const payload: Record<string, unknown> = { ...(request as any) };
+    const requestId = (() => {
+      try {
+        const raw: any = payload as any;
+        const fromMeta = raw?._metadata && typeof raw._metadata === 'object' ? raw._metadata.requestId : undefined;
+        const fromTop = raw?.metadata && typeof raw.metadata === 'object' ? raw.metadata.requestId : undefined;
+        const picked = typeof fromMeta === 'string' ? fromMeta : (typeof fromTop === 'string' ? fromTop : undefined);
+        return picked && picked.startsWith('req_') ? picked : `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      } catch { return `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`; }
+    })();
     const wantsStream = Boolean((payload as any)?.stream === true);
 
-    // Persist outgoing payload for debugging
+    // Persist outgoing payload for debugging (categorized path)
     try {
-      const dir = path.join(homedir(), '.routecodex', 'codex-samples');
-      await fs.mkdir(dir, { recursive: true });
-      const outPath = path.join(dir, `provider-out-openai_${Date.now()}_${Math.random().toString(36).slice(2,8)}.json`);
-      await fs.writeFile(outPath, JSON.stringify(payload, null, 2), 'utf-8');
+      const baseDir = path.join(homedir(), '.routecodex', 'codex-samples');
+      const effectiveId = requestId;
+      const entry = (request as any)?.metadata?.entryEndpoint || '';
+      const entryFolder = /\/v1\/responses/i.test(String(entry))
+        ? 'openai-responses'
+        : (/\/v1\/messages/i.test(String(entry)) ? 'anthropic-messages' : 'openai-chat');
+      const entryDir = path.join(baseDir, entryFolder);
+      await fs.mkdir(entryDir, { recursive: true });
+      await fs.writeFile(path.join(entryDir, `${effectiveId}_provider-request.json`), JSON.stringify(payload, null, 2), 'utf-8');
     } catch { /* ignore */ }
 
     const headers = buildAuthHeaders(this.authContext || { type: 'none' } as any, { 'Content-Type': 'application/json', 'User-Agent': 'RouteCodex/GenericOpenAIProvider' });
@@ -111,7 +125,9 @@ export class GenericOpenAIProvider implements ProviderModule {
 
     let res: Response;
     try {
-      res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(payload), signal: (controller as any).signal } as any);
+      // Strip internal metadata fields before sending upstream
+      const wirePayload = (() => { const p = { ...(payload as any) } as Record<string, unknown>; delete (p as any)._metadata; delete (p as any).metadata; return p; })();
+      res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(wirePayload), signal: (controller as any).signal } as any);
     } finally {
       clearTimeout(t);
     }
@@ -129,16 +145,26 @@ export class GenericOpenAIProvider implements ProviderModule {
       try {
         const { Readable } = await import('stream');
         const nodeStream = (Readable as any).fromWeb ? (Readable as any).fromWeb(res.body as any) : (res as any).body;
-        return { data: nodeStream, status: res.status, headers: Object.fromEntries(res.headers.entries()), metadata: { requestId: `openai-${Date.now()}`, processingTime: elapsed, model: (request as any)?.model } };
+        return { data: nodeStream, status: res.status, headers: Object.fromEntries(res.headers.entries()), metadata: { requestId, processingTime: elapsed, model: (request as any)?.model } };
       } catch {
         // fallthrough to buffered json
       }
     }
 
     const data = await res.json();
-    return { data, status: res.status, headers: Object.fromEntries(res.headers.entries()), metadata: { requestId: `openai-${Date.now()}`, processingTime: elapsed, model: (request as any)?.model } };
+    try {
+      const baseDir = path.join(homedir(), '.routecodex', 'codex-samples');
+      const effectiveId = requestId;
+      const entry = (request as any)?.metadata?.entryEndpoint || '';
+      const entryFolder = /\/v1\/responses/i.test(String(entry))
+        ? 'openai-responses'
+        : (/\/v1\/messages/i.test(String(entry)) ? 'anthropic-messages' : 'openai-chat');
+      const entryDir = path.join(baseDir, entryFolder);
+      await fs.mkdir(entryDir, { recursive: true });
+      await fs.writeFile(path.join(entryDir, `${effectiveId}_provider-response.json`), JSON.stringify(data, null, 2), 'utf-8');
+    } catch { /* ignore */ }
+    return { data, status: res.status, headers: Object.fromEntries(res.headers.entries()), metadata: { requestId, processingTime: elapsed, model: (request as any)?.model } };
   }
 }
 
 export default GenericOpenAIProvider;
-

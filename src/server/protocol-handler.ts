@@ -429,7 +429,6 @@ ProtocolHandler.prototype.tryTransparentOpenAI = async function tryTransparentOp
         const trimmed = String(model || '').trim();
         if (!trimmed) return trimmed;
         if (/gpt-5(?:-codex)?$/i.test(trimmed)) return 'gpt-5';
-        if (/glm-4\.6/i.test(trimmed)) return 'gpt-5';
         if (/-codex$/i.test(trimmed)) return trimmed.replace(/-codex$/i, '');
         return trimmed;
       };
@@ -783,7 +782,6 @@ ProtocolHandler.prototype.tryBridgeResponsesToChat = async function tryBridgeRes
         const val = String(model || '').trim();
         if (!val) return val;
         if (/gpt-5(?:-codex)?$/i.test(val)) return 'gpt-5-high';
-        if (/glm-4\.6/i.test(val)) return 'gpt-5-high';
         if (/-codex$/i.test(val)) return val.replace(/-codex$/i, '');
         return val;
       };

@@ -63,10 +63,6 @@ export class OpenAIProvider implements ProviderModule {
       if (/api\.openai\.com/i.test(s) && !/\/v1\/?$/i.test(s)) {
         s = s.replace(/\/?$/, '/v1');
       }
-      // If GLM coding paas path accidentally appends '/v1', drop it
-      if (/open\.bigmodel\.cn/i.test(s) && /\/v1\/?$/i.test(s)) {
-        s = s.replace(/\/v1\/?$/i, '');
-      }
       return s;
     } catch { return u; }
   }
@@ -83,7 +79,7 @@ export class OpenAIProvider implements ProviderModule {
     };
     const c = pickFromConfig();
     if (c) return { key: c, source: 'config' };
-    const envKey = String(process.env.GLM_API_KEY || process.env.ROUTECODEX_API_KEY || process.env.OPENAI_API_KEY || '').trim();
+    const envKey = String(process.env.ROUTECODEX_API_KEY || process.env.OPENAI_API_KEY || '').trim();
     if (envKey) return { key: envKey, source: 'env' };
     return { key: undefined, source: 'none' };
   }
@@ -308,7 +304,16 @@ export class OpenAIProvider implements ProviderModule {
     }
 
     const startTime = Date.now();
-    const requestId = this.generateRequestId();
+    // Use pipeline-injected requestId when available to keep captures unified
+    const requestId = (() => {
+      try {
+        const raw: any = request as any;
+        const fromMeta = raw?._metadata && typeof raw._metadata === 'object' ? raw._metadata.requestId : undefined;
+        const fromTop = raw?.metadata && typeof raw.metadata === 'object' ? raw.metadata.requestId : undefined;
+        const picked = typeof fromMeta === 'string' ? fromMeta : (typeof fromTop === 'string' ? fromTop : undefined);
+        return picked && picked.startsWith('req_') ? picked : `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      } catch { return `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`; }
+    })();
 
     try {
       this.logger.logModule(this.id, 'sending-request-start', {
@@ -413,36 +418,8 @@ export class OpenAIProvider implements ProviderModule {
         (chatRequest as any).messages = compacted;
       } catch { /* no-op on compaction errors */ }
 
-      // Canonicalize dotted tool names is disabled by default; enable only with RCC_CANONICALIZE_DOTTED_TOOL_NAMES=1
-      if (String(process.env.RCC_CANONICALIZE_DOTTED_TOOL_NAMES || '0') === '1') {
-        try {
-          const msgs = Array.isArray((chatRequest as any).messages) ? ((chatRequest as any).messages as any[]) : [];
-          const whitelist = new Set(['read_mcp_resource', 'list_mcp_resources', 'list_mcp_resource_templates']);
-          const canonOne = (tc: any) => {
-            if (!tc || !tc.function || typeof tc.function !== 'object') return tc;
-            const nm = typeof tc.function.name === 'string' ? tc.function.name : '';
-            const dot = nm.indexOf('.');
-            if (dot <= 0) return tc;
-            const prefix = nm.slice(0, dot).trim();
-            const base = nm.slice(dot + 1).trim();
-            if (!prefix || !whitelist.has(base)) return tc;
-            let argsStr = typeof tc.function.arguments === 'string' ? tc.function.arguments : (tc.function.arguments ? JSON.stringify(tc.function.arguments) : '{}');
-            let obj: any;
-            try { obj = JSON.parse(argsStr || '{}'); } catch { obj = {}; }
-            if (!obj || typeof obj !== 'object' || Array.isArray(obj)) obj = {};
-            if (obj.server == null || obj.server === '') obj.server = prefix;
-            tc.function.name = base;
-            tc.function.arguments = JSON.stringify(obj);
-            return tc;
-          };
-          for (const m of msgs) {
-            if (m && m.role === 'assistant' && Array.isArray(m.tool_calls)) {
-              m.tool_calls = m.tool_calls.map(canonOne);
-            }
-          }
-          (chatRequest as any).messages = msgs;
-        } catch { /* ignore canonicalization errors */ }
-      }
+      // Removed provider-level dotted tool name canonicalization to keep
+      // transformation responsibilities within LLMSwitch conversion layer.
 
       // Add tools if provided (non-GLM or already preflighted)
       {
@@ -458,22 +435,40 @@ export class OpenAIProvider implements ProviderModule {
         chatRequest.response_format = (request as { response_format?: any }).response_format;
       }
 
-      // Persist final payload snapshot when debug is enabled
+      // Persist final payload snapshots for observability
       try {
-        const dir = path.join(homedir(), '.routecodex', 'codex-samples');
-        await fs.mkdir(dir, { recursive: true });
-        const outPath = path.join(dir, `provider-out-openai_${Date.now()}_${Math.random().toString(36).slice(2,8)}.json`);
-        await fs.writeFile(outPath, JSON.stringify(chatRequest, null, 2), 'utf-8');
+        const baseDir = path.join(homedir(), '.routecodex', 'codex-samples');
+        const effectiveId = requestId;
+        const entry = (request as any)?.metadata?.entryEndpoint || '';
+        const entryFolder = /\/v1\/responses/i.test(String(entry))
+          ? 'openai-responses'
+          : (/\/v1\/messages/i.test(String(entry)) ? 'anthropic-messages' : 'openai-chat');
+        const entryDir = path.join(baseDir, entryFolder);
+        await fs.mkdir(entryDir, { recursive: true });
+        // Save normalized provider request payloads (flat files)
+        const directReqPath = path.join(entryDir, `${effectiveId}_provider-request.json`);
+        await fs.writeFile(directReqPath, JSON.stringify(chatRequest, null, 2), 'utf-8');
+        const wrapped = {
+          requestId: effectiveId,
+          timestamp: Date.now(),
+          model: (request as { model?: string }).model,
+          toolsCount: Array.isArray((chatRequest as any).tools) ? (chatRequest as any).tools.length : 0,
+          messagesCount: Array.isArray((chatRequest as any).messages) ? (chatRequest as any).messages.length : 0,
+          request: chatRequest
+        };
+        const wrappedPath = path.join(entryDir, `${effectiveId}_provider-in.json`);
+        await fs.writeFile(wrappedPath, JSON.stringify(wrapped, null, 2), 'utf-8');
+
         if (this.isDebugEnhanced) {
           this.publishProviderEvent('request-payload-saved', {
             requestId,
-            path: outPath,
+            path: directReqPath,
             model: (request as { model?: string }).model,
             hasTools: Array.isArray((chatRequest as any).tools),
             vendorBase: (this.config.config as ProviderConfig)?.baseUrl
           });
         }
-      } catch { /* noop: optional debug payload save */ void 0; }
+      } catch { /* optional debug payload save */ void 0; }
 
       // Dry-run short-circuit: simulate provider response without network
       const providerCfgDry = this.config.config as ProviderConfig;
@@ -481,12 +476,14 @@ export class OpenAIProvider implements ProviderModule {
         || (providerCfgDry as any)?.dryRun === true
         || (providerCfgDry?.compatibility as any)?.dryRun === true;
       let response: any;
+      // Strip internal metadata before sending over the wire
+      const wirePayload = (() => { const p = { ...(chatRequest as any) } as Record<string, unknown>; delete (p as any)._metadata; delete (p as any).metadata; return p; })();
       if (dryRunEnabled) {
         response = {
           id: `dryrun-${requestId}`,
           object: 'chat.completion',
           created: Math.floor(Date.now() / 1000),
-          model: (chatRequest as any).model || 'simulated-model',
+          model: (wirePayload as any).model || 'simulated-model',
           choices: [
             {
               index: 0,
@@ -503,12 +500,17 @@ export class OpenAIProvider implements ProviderModule {
         const isOpenAIDomain = /api\.openai\.com/i.test(String(baseNorm));
         if (isOpenAIDomain) {
           type ChatCreateArg = Parameters<OpenAI['chat']['completions']['create']>[0];
-          response = await this.openai!.chat.completions.create(chatRequest as unknown as ChatCreateArg);
+          response = await this.openai!.chat.completions.create(wirePayload as unknown as ChatCreateArg);
         } else {
           // Compatibility fetch for third-party OpenAI-compatible providers (e.g., GLM)
           const { key: apiKey } = this.resolveApiKey(providerCfg);
           const join = (a: string, b: string) => a.replace(/\/+$/,'') + '/' + b.replace(/^\/+/, '');
-          const endpoint = join(baseNorm, 'chat/completions');
+          // GLM compatibility must be explicitly enabled via config.compatibility.provider==='glm'
+          const compatProvider = String((providerCfg as any)?.compatibility?.provider || '').toLowerCase();
+          const isGLM = compatProvider === 'glm';
+          // Resolve endpoint strictly by explicit compat flag
+          const endpoint = isGLM ? this.glmCompatResolveEndpoint(baseNorm) : join(baseNorm, 'chat/completions');
+          const payloadOut = isGLM ? this.glmCompatMapOpenAIToGLMRequest(wirePayload) : wirePayload;
           // Log compat preflight (sanitized)
           try {
             const mask = (s?: string) => (s && s.length >= 8) ? `${s.slice(0,2)}***${s.slice(-4)}` : (!!s ? '***' : '');
@@ -527,7 +529,7 @@ export class OpenAIProvider implements ProviderModule {
           const res = await fetch(endpoint, {
             method: 'POST',
             headers,
-            body: JSON.stringify(chatRequest),
+            body: JSON.stringify(payloadOut),
             signal: (controller as any).signal
           } as any);
           clearTimeout(t);
@@ -542,87 +544,11 @@ export class OpenAIProvider implements ProviderModule {
             throw createProviderError(httpErr, 'network');
           }
           this.logger.logModule(this.id, 'compat-request-success', { endpoint, status: res.status });
-          response = json ?? text;
+          response = isGLM ? this.glmCompatMapGLMToOpenAIResponse(json ?? {}) : (json ?? text);
         }
       }
 
-      // Validate provider tool_calls against declared tool schemas (strict, no fallback)
-      try {
-        const extractSchemas = (): Record<string, any> => {
-          const map: Record<string, any> = {};
-          try {
-            const tools = (chatRequest as any)?.tools;
-            if (Array.isArray(tools)) {
-              for (const t of tools) {
-                const name = t?.function?.name;
-                const params = t?.function?.parameters;
-                if (typeof name === 'string' && params && typeof params === 'object' && !Array.isArray(params)) {
-                  map[name] = params;
-                }
-              }
-            }
-          } catch { /* ignore */ }
-          return map;
-        };
-        const ensureObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-        const getPropType = (schema: any, key: string): 'string'|'arrayString'|'object'|'any' => {
-          try {
-            const s = schema?.properties?.[key];
-            const t = s?.type;
-            if (t === 'string') return 'string';
-            if (t === 'object') return 'object';
-            if (t === 'array') {
-              const it = s?.items?.type;
-              if (it === 'string') return 'arrayString';
-            }
-          } catch { /* ignore */ }
-          return 'any';
-        };
-        const schemas = extractSchemas();
-        const choices = Array.isArray(response?.choices) ? (response.choices as any[]) : [];
-        for (const ch of choices) {
-          const msg = ch?.message;
-          const tcs = Array.isArray(msg?.tool_calls) ? (msg.tool_calls as any[]) : [];
-          for (const tc of tcs) {
-            const nm = tc?.function?.name;
-            const argsStr = typeof tc?.function?.arguments === 'string' ? tc.function.arguments : (tc?.function?.arguments ? JSON.stringify(tc.function.arguments) : '{}');
-            const schema = nm && schemas[nm] ? schemas[nm] : undefined;
-            if (!schema) {
-              // Unknown tool or missing schema → strict mode: reject
-              const e: any = new Error(`Tool schema not found for function: ${String(nm || 'unknown')}`);
-              e.status = 400; throw e;
-            }
-            let argsObj: any;
-            try { argsObj = JSON.parse(argsStr); } catch { const e: any = new Error('Tool call arguments must be valid JSON'); e.status = 400; throw e; }
-            if (!ensureObject(argsObj)) { const e: any = new Error('Tool call arguments must be a JSON object'); e.status = 400; throw e; }
-            // required keys
-            const required: string[] = Array.isArray(schema.required) ? (schema.required as string[]) : [];
-            for (const key of required) {
-              if (!(key in argsObj)) { const e: any = new Error(`Missing required argument: ${key}`); e.status = 400; throw e; }
-            }
-            // type checks for present keys; unknown keys are not allowed (strict)
-            const allowedKeys = schema?.properties ? Object.keys(schema.properties) : [];
-            for (const key of Object.keys(argsObj)) {
-              if (!allowedKeys.includes(key)) { const e: any = new Error(`Unknown argument: ${key}`); e.status = 400; throw e; }
-              const kind = getPropType(schema, key);
-              const val = (argsObj as any)[key];
-              if (kind === 'string' && typeof val !== 'string') { const e: any = new Error(`Invalid type for ${key}: expected string`); e.status = 400; throw e; }
-              if (kind === 'object' && !ensureObject(val)) { const e: any = new Error(`Invalid type for ${key}: expected object`); e.status = 400; throw e; }
-              if (kind === 'arrayString') {
-                if (!Array.isArray(val) || !val.every((x: any) => typeof x === 'string')) { const e: any = new Error(`Invalid type for ${key}: expected array<string>`); e.status = 400; throw e; }
-                const minItems = typeof schema?.properties?.[key]?.minItems === 'number' ? schema.properties[key].minItems : undefined;
-                if (typeof minItems === 'number' && val.length < minItems) { const e: any = new Error(`Invalid value for ${key}: expected at least ${minItems} items`); e.status = 400; throw e; }
-              }
-            }
-          }
-        }
-      } catch (ve) {
-        // Map validation error to ProviderError 400, avoid sending broken tool_calls downstream
-        const httpErr: any = new Error((ve as Error)?.message || 'Tool call validation failed');
-        httpErr.status = (ve as any)?.status || 400;
-        httpErr.details = { stage: 'provider-output-validation', provider: 'openai-compat' };
-        throw createProviderError(httpErr, 'server');
-      }
+      // Skip strict provider output validation to preserve upstream outputs
 
       const processingTime = Date.now() - startTime;
       const providerResponse: ProviderResponse = {
@@ -642,12 +568,14 @@ export class OpenAIProvider implements ProviderModule {
       // Capture provider request+response pair for Anthropic-schema replay validation
       try {
         const baseDir = path.join(homedir(), '.routecodex', 'codex-samples');
-        const subDir = path.join(baseDir, 'anth-replay');
-        await fs.mkdir(subDir, { recursive: true });
-        const filePath = path.join(
-          subDir,
-          `openai-provider-pair_${Date.now()}_${Math.random().toString(36).slice(2,8)}.json`
-        );
+        const effectiveId = requestId;
+        const entry = (request as any)?.metadata?.entryEndpoint || '';
+        const entryFolder = /\/v1\/responses/i.test(String(entry))
+          ? 'openai-responses'
+          : (/\/v1\/messages/i.test(String(entry)) ? 'anthropic-messages' : 'openai-chat');
+        const entryDir = path.join(baseDir, entryFolder);
+        await fs.mkdir(entryDir, { recursive: true });
+        const filePath = path.join(entryDir, `${effectiveId}_provider-pair.json`);
         const pair = {
           type: 'openai-provider-pair',
           requestId,
@@ -751,6 +679,82 @@ export class OpenAIProvider implements ProviderModule {
       }
       throw providerErr;
     }
+  }
+
+  // ------ GLM compatibility: delegated to compat module (explicit opt-in only) ------
+  private glmCompatResolveEndpoint(baseUrl: string): string {
+    const join = (a: string, b: string) => a.replace(/\/+$/,'') + '/' + b.replace(/^\/+/, '');
+    return join(baseUrl, 'paas/v4/chat/completions');
+  }
+  private glmCompatMapOpenAIToGLMRequest(req: Record<string, unknown>): Record<string, unknown> {
+    // Thin proxy to keep provider core clean; actual shaping lives here to avoid polluting standard logic
+    const clone = JSON.parse(JSON.stringify(req || {}));
+    if (Array.isArray(clone.messages)) {
+      clone.messages = (clone.messages as any[]).map((m) => {
+        const msg = { ...(m || {}) } as any;
+        const role = typeof msg.role === 'string' ? msg.role : 'user';
+        if (role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length) {
+          msg.content = null;
+        } else if (Array.isArray(msg.content)) {
+          const parts = (msg.content as any[]).map((p) => typeof p === 'string' ? p : (p && typeof p.text === 'string' ? p.text : '')).filter((s) => !!s.trim());
+          msg.content = parts.join('\n');
+        } else if (msg.content === undefined) {
+          msg.content = '';
+        }
+        return msg;
+      });
+    }
+    const out: any = {
+      model: clone.model,
+      messages: clone.messages,
+      stream: clone.stream === true,
+      temperature: clone.temperature,
+      top_p: clone.top_p,
+      max_tokens: clone.max_tokens,
+      tools: clone.tools,
+      tool_choice: clone.tool_choice,
+      stop: clone.stop,
+      response_format: clone.response_format,
+      request_id: (clone as any).request_id,
+      user_id: (clone as any).user_id,
+    };
+    return out;
+  }
+  private glmCompatMapGLMToOpenAIResponse(resp: Record<string, unknown>): Record<string, unknown> {
+    const out: any = { ...(resp || {}) };
+    if (typeof out.created_at === 'number' && out.created === undefined) out.created = out.created_at;
+    if (Array.isArray(out.choices)) {
+      out.choices = out.choices.map((c: any) => {
+        const choice = { ...(c || {}) };
+        const msg = choice.message && typeof choice.message === 'object' ? { ...choice.message } : choice.message;
+        if (msg && typeof msg === 'object') {
+          if (Array.isArray(msg.tool_calls)) {
+            msg.tool_calls = msg.tool_calls.map((tc: any) => {
+              const t = { ...(tc || {}) };
+              if (t.function && typeof t.function === 'object') {
+                const fn = { ...t.function };
+                if (fn.arguments !== undefined && typeof fn.arguments !== 'string') {
+                  try { fn.arguments = JSON.stringify(fn.arguments); } catch { fn.arguments = String(fn.arguments); }
+                }
+                t.function = fn;
+              }
+              return t;
+            });
+          }
+          if (Array.isArray(msg.tool_calls) && msg.tool_calls.length && msg.content === undefined) {
+            msg.content = null;
+          }
+          choice.message = msg;
+        }
+        return choice;
+      });
+    }
+    if (out.usage && typeof out.usage === 'object') {
+      const u: any = { ...out.usage };
+      if (u.output_tokens !== undefined && u.completion_tokens === undefined) u.completion_tokens = u.output_tokens;
+      out.usage = u;
+    }
+    return out;
   }
 
   /**

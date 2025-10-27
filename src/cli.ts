@@ -1444,14 +1444,8 @@ program
         if (!j.transparent.wireApi) { j.transparent.wireApi = 'responses'; }
         // Provide a safe default model mapping for upstream that only supports gpt-5-codex
         if (!j.transparent.modelMapping || typeof j.transparent.modelMapping !== 'object') {
-          j.transparent.modelMapping = {
-            // common local aliases → upstream id
-            'glm-4': 'gpt-5-codex',
-            'glm-4.6': 'gpt-5-codex',
-            'gpt-4o': 'gpt-5-codex',
-            // fallback
-            '*': 'gpt-5-codex'
-          } as any;
+          // Do not inject default GLM mappings. Leave empty by default.
+          j.transparent.modelMapping = {} as any;
         }
         // auth: reference env key if provided, else FC_API_KEY
         const envRef = envKey && /^[A-Z0-9_]+$/.test(envKey) ? envKey : 'FC_API_KEY';

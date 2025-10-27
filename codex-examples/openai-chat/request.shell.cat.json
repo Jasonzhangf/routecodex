@@ -1,0 +1,29 @@
+{
+  "model": "glm-4.6",
+  "stream": false,
+  "parallel_tool_calls": false,
+  "messages": [
+    { "role": "system", "content": "You are a coding agent. Represent all flags/paths as argv tokens in command array. Do not add extra keys." },
+    { "role": "user", "content": "Print codex-local/README.md." }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "shell",
+        "description": "Execute shell commands. Put ALL flags/paths into `command` argv tokens only.",
+        "strict": true,
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": { "type": "array", "items": { "type": "string" }, "description": "argv tokens" }
+          },
+          "required": ["command"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "tool_choice": { "type": "function", "function": { "name": "shell" } }
+}
+

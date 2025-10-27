@@ -1,7 +1,11 @@
 import type { ModuleDependencies } from '../../../../interfaces/pipeline-interfaces.js';
 import type { ConversionCodec, ConversionContext, ConversionProfile } from '../types.js';
 import type { SharedPipelineRequest, SharedPipelineResponse } from '../../../../../../types/shared-dtos.js';
-import { normalizeChatRequest, normalizeChatResponse } from 'rcc-llmswitch-core/conversion';
+import { normalizeChatRequest, normalizeChatResponse, normalizeTools } from 'rcc-llmswitch-core/conversion';
+
+// Note: tool normalization follows the same post-conversion strategy used in
+// Anthropic→OpenAI path: trust schema, minimally normalize tool definitions via
+// normalizeTools, and ensure function.arguments is a JSON string.
 
 export class OpenAIOpenAIConversionCodec implements ConversionCodec {
   readonly id = 'openai-openai';
@@ -29,8 +33,30 @@ export class OpenAIOpenAIConversionCodec implements ConversionCodec {
       },
       debug: { enabled: false, stages: {} }
     };
-    // Return normalized OpenAI Chat request
-    return normalizeChatRequest(dto.data);
+    // Normalize OpenAI Chat request; unify tool definitions using core normalizeTools
+    const normalized = normalizeChatRequest(dto.data);
+    try {
+      const tools = (normalized as any)?.tools;
+      if (Array.isArray(tools)) {
+        (normalized as any).tools = normalizeTools(tools as any[]);
+      }
+    } catch { /* ignore */ }
+    try {
+      const msgs = Array.isArray((normalized as any)?.messages) ? (normalized as any).messages : [];
+      for (const m of msgs) {
+        if (!m || m.role !== 'assistant' || !Array.isArray(m.tool_calls)) continue;
+        m.tool_calls = m.tool_calls.map((tc: any) => {
+          if (!tc || typeof tc !== 'object') return tc;
+          const fn = tc.function || {};
+          // Ensure arguments is a JSON string without reshaping; trust schema
+          if (fn && typeof fn === 'object' && fn.arguments !== undefined && typeof fn.arguments !== 'string') {
+            try { fn.arguments = JSON.stringify(fn.arguments); } catch { fn.arguments = '""'; }
+          }
+          return { ...tc, function: fn };
+        });
+      }
+    } catch { /* ignore */ }
+    return normalized;
   }
 
   async convertResponse(payload: any, profile: ConversionProfile, context: ConversionContext): Promise<any> {
@@ -58,7 +84,7 @@ export class OpenAIOpenAIConversionCodec implements ConversionCodec {
         stages: []
       }
     } as SharedPipelineResponse;
-    // Normalize response to OpenAI Chat completion shape
+    // Minimal response normalization: do not reshape tool_calls; only ensure final shape
     return normalizeChatResponse(dto.data);
   }
 
