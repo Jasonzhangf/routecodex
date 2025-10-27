@@ -376,7 +376,8 @@ export function buildChatRequestFromResponses(payload: Record<string, unknown>, 
       const merged = Array.from(new Set([ ...envServers, ...Array.from(discovered) ]));
       const serverProp = merged.length ? { type: 'string', enum: merged } : { type: 'string' };
       // 初始仅注入 list_mcp_resources；有已知 server 后再注入其余 MCP 工具
-      addTool({ type: 'function', function: { name: 'list_mcp_resources', strict: true, description: 'List resources from a given MCP server (arguments.server = server label).', parameters: obj({ server: serverProp, filter: { type: 'string' }, root: { type: 'string' } }, ['server']) } });
+      // 与 Chat 路径保持一致：server 可选（不强制要求）
+      addTool({ type: 'function', function: { name: 'list_mcp_resources', strict: true, description: 'List resources from a given MCP server (arguments.server = server label).', parameters: obj({ server: serverProp, filter: { type: 'string' }, root: { type: 'string' } }, [] /* server optional */) } });
       if (merged.length > 0) {
         addTool({ type: 'function', function: { name: 'read_mcp_resource', strict: true, description: 'Read a resource via MCP server.', parameters: obj({ server: serverProp, uri: { type: 'string' } }, ['server','uri']) } });
         addTool({ type: 'function', function: { name: 'list_mcp_resource_templates', strict: true, description: 'List resource templates via MCP server.', parameters: obj({ server: serverProp }, ['server']) } });
@@ -481,11 +482,12 @@ function mapResponsesInputToChat(options: { instructions?: string; input?: Respo
     if (!entry || typeof entry !== 'object') continue;
     const entryType = typeof entry.type === 'string' ? entry.type.toLowerCase() : 'message';
     if (entryType === 'function_call' || entryType === 'tool_call') {
-      const name = typeof entry.name === 'string' ? entry.name : (typeof entry?.function?.name === 'string' ? (entry.function as any).name : undefined);
+      const rawName = typeof entry.name === 'string' ? entry.name : (typeof entry?.function?.name === 'string' ? (entry.function as any).name : undefined);
+      const name = (typeof rawName === 'string' && rawName.includes('.')) ? rawName.slice(rawName.indexOf('.') + 1).trim() : rawName;
       const args = (entry as any).arguments ?? (entry as any)?.function?.arguments ?? {};
       const parsedArgs = parseFunctionArguments(args);
       const callId = typeof entry.id === 'string' ? entry.id : (typeof entry.call_id === 'string' ? entry.call_id : `call_${Math.random().toString(36).slice(2, 8)}`);
-      const fnName = name ?? 'tool';
+      const fnName = (name && name.length ? name : 'tool');
       const serialized = normalizeArgumentsBySchema(parsedArgs, fnName, toolsNormalized).trim();
       toolNameById.set(callId, fnName);
       toolArgsById.set(callId, serialized);
@@ -590,7 +592,8 @@ function processMessageBlocks(blocks: any[], toolsNormalized: Array<Record<strin
       continue;
     }
     if (type === 'function_call') {
-      const name = typeof (block as any).name === 'string' ? (block as any).name : (typeof (block as any)?.function?.name === 'string' ? (block as any).function.name : 'tool');
+      const rawName = typeof (block as any).name === 'string' ? (block as any).name : (typeof (block as any)?.function?.name === 'string' ? (block as any).function.name : 'tool');
+      const name = (typeof rawName === 'string' && rawName.includes('.')) ? rawName.slice(rawName.indexOf('.') + 1).trim() : rawName;
       const args = (block as any).arguments ?? (block as any)?.function?.arguments ?? {};
       const parsedArgs = parseFunctionArguments(args);
       const callId = typeof (block as any).id === 'string' ? (block as any).id : (typeof (block as any).call_id === 'string' ? (block as any).call_id : `call_${Math.random().toString(36).slice(2, 8)}`);
