@@ -72,6 +72,27 @@ export class GLMCompatibility implements CompatibilityModule {
       }
     }
 
+    // Map OpenAI Chat → GLM request nuances (content flattening; assistant tool_calls → content=null)
+    try {
+      if (Array.isArray((outbound as any).messages)) {
+        (outbound as any).messages = ((outbound as any).messages as any[]).map((m: any) => {
+          const msg = { ...(m || {}) };
+          const role = typeof msg.role === 'string' ? msg.role : 'user';
+          if (role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length) {
+            msg.content = null;
+          } else if (Array.isArray(msg.content)) {
+            const parts = (msg.content as any[])
+              .map((p: any) => (typeof p === 'string' ? p : (p && typeof p.text === 'string' ? p.text : '')))
+              .filter((s: string) => !!s.trim());
+            msg.content = parts.join('\n');
+          } else if (msg.content === undefined) {
+            msg.content = '';
+          }
+          return msg;
+        });
+      }
+    } catch { /* keep original on failure */ }
+
     this.sanitizeRequest(outbound);
 
     return isDto ? { ...dto!, data: outbound } : { data: outbound, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
