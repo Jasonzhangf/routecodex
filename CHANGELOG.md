@@ -413,3 +413,8 @@ Summary
   - 仅当对话历史中出现有效 server_label 后，才注入其余 MCP 工具，并以枚举约束 parameters.server。
   - Chat 与 Responses SSE 路径统一：dotted-name 仅在“已知 server”前提下 canonicalize 为基础函数名并注入 arguments.server。
 - 目的：避免模型在 server 未知时频繁猜测（filesystem/unknown 等）导致空转；严格落实“先读取后使用”的流程。
+## 0.70.2 - 2025-10-27
+- 系统提示分阶段去敏：
+  - 未发现 MCP server 时，不再在提示词中提及 read_mcp_resource / list_mcp_resource_templates，避免模型被“教”出未开放函数名。
+  - 仅提示：先使用 list_mcp_resources 发现可用 server；禁止 dotted-name（server.fn）。
+  - 当已知 server 出现后，再在提示中允许使用 read_mcp_resource / list_mcp_resource_templates，并要求 arguments.server 取自枚举。
