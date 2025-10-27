@@ -585,16 +585,10 @@ export class ResponsesHandler extends BaseHandler {
           if (!name || typeof name !== 'string') return { name: 'tool', args: argsStr };
           const dot = name.indexOf('.');
           if (dot <= 0) return { name, args: argsStr };
-          const prefix = name.slice(0, dot).trim();
           const base = name.slice(dot + 1).trim();
           if (!whitelist.has(base)) return { name, args: argsStr };
-          // Only canonicalize dotted-name when server prefix is already known
-          if (!knownServers.has(prefix)) return { name, args: argsStr };
-          let obj: any;
-          try { obj = JSON.parse(argsStr || '{}'); } catch { obj = {}; }
-          if (!obj || typeof obj !== 'object' || Array.isArray(obj)) obj = {};
-          if (obj.server == null || obj.server === '') obj.server = prefix;
-          return { name: base, args: JSON.stringify(obj) };
+          // Drop the dotted prefix unconditionally; do not inject server from prefix
+          return { name: base, args: argsStr };
         };
         let outIndex = 0;
         for (const it of funcCalls) {

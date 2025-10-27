@@ -418,3 +418,8 @@ Summary
   - 未发现 MCP server 时，不再在提示词中提及 read_mcp_resource / list_mcp_resource_templates，避免模型被“教”出未开放函数名。
   - 仅提示：先使用 list_mcp_resources 发现可用 server；禁止 dotted-name（server.fn）。
   - 当已知 server 出现后，再在提示中允许使用 read_mcp_resource / list_mcp_resource_templates，并要求 arguments.server 取自枚举。
+## 0.70.3 - 2025-10-27
+- MCP dotted-name 解析：统一“去前缀”策略
+  - 对于 filesystem.read_mcp_resource 这类 dotted-name，直接丢弃 '.' 之前的前缀，仅保留基础函数名（read_mcp_resource）。
+  - 不再从前缀推断/注入 arguments.server；arguments 保持模型提供的内容。
+  - Chat 与 Responses SSE 两条路径保持一致。
