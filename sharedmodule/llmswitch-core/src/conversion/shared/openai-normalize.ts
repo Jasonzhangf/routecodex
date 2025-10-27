@@ -10,6 +10,60 @@ export function normalizeChatRequest(request: any): any {
     normalized.tools = normalized.tools.map((tool: any) => normalizeTool(tool));
   }
 
+  // MCP injection (CCR style) moved into core so both Chat/Responses paths stay consistent.
+  try {
+    const enableMcp = String((process as any)?.env?.ROUTECODEX_MCP_ENABLE ?? '1') !== '0';
+    if (enableMcp) {
+      const known = new Set<string>();
+      // Discover only from explicit arguments.server in history (do NOT infer from dotted prefix)
+      try {
+        const msgs = Array.isArray((normalized as any).messages) ? ((normalized as any).messages as any[]) : [];
+        for (const m of msgs) {
+          if (!m || typeof m !== 'object') continue;
+          if ((m as any).role === 'tool' && typeof (m as any).content === 'string') {
+            try { const obj = JSON.parse((m as any).content); const sv = obj?.arguments?.server; if (typeof sv === 'string' && sv.trim()) known.add(sv.trim()); } catch { /* ignore */ }
+          }
+          if ((m as any).role === 'assistant' && Array.isArray((m as any).tool_calls)) {
+            for (const tc of ((m as any).tool_calls as any[])) {
+              try { const argStr = String(tc?.function?.arguments ?? ''); const parsed = JSON.parse(argStr); const sv = parsed?.server; if (typeof sv === 'string' && sv.trim()) known.add(sv.trim()); } catch { /* ignore */ }
+            }
+          }
+        }
+      } catch { /* ignore */ }
+
+      // Merge env-provided servers if any
+      const serversRaw = String((process as any)?.env?.ROUTECODEX_MCP_SERVERS || '').trim();
+      if (serversRaw) { for (const s of serversRaw.split(',').map((x: string) => x.trim()).filter(Boolean)) known.add(s); }
+
+      const serverList = Array.from(known);
+      const serverProp = serverList.length ? { type: 'string', enum: serverList } : { type: 'string' };
+      const objSchema = (props: any, req: string[]) => ({ type: 'object', properties: props, required: req, additionalProperties: false });
+
+      const ensureToolsArray = () => {
+        if (!Array.isArray((normalized as any).tools)) (normalized as any).tools = [] as any[];
+      };
+
+      // Phase injection: unknown -> only list, known -> list + read + templates
+      ensureToolsArray();
+      const have = new Set(((normalized as any).tools as any[]).map((t: any) => (t?.function?.name || '').toString()));
+      const addTool = (def: any) => { if (!have.has(def.function.name)) { ((normalized as any).tools as any[]).push(def); have.add(def.function.name); } };
+      addTool({ type: 'function', function: { name: 'list_mcp_resources', strict: true, description: 'List resources from a given MCP server (arguments.server = server label).', parameters: objSchema({ server: serverProp, filter: { type: 'string' }, root: { type: 'string' } }, ['server']) } });
+      if (serverList.length > 0) {
+        addTool({ type: 'function', function: { name: 'read_mcp_resource', strict: true, description: 'Read a resource via MCP server.', parameters: objSchema({ server: serverProp, uri: { type: 'string' } }, ['server','uri']) } });
+        addTool({ type: 'function', function: { name: 'list_mcp_resource_templates', strict: true, description: 'List resource templates via MCP server.', parameters: objSchema({ server: serverProp }, ['server']) } });
+      }
+
+      // Phase system tip: avoid seeding non-exposed names when servers unknown
+      const tip = (() => {
+        if (serverList.length > 0) {
+          return `MCP usage: allowed functions: list_mcp_resources, read_mcp_resource, list_mcp_resource_templates. arguments.server must be one of ${JSON.stringify(serverList)}. Avoid dotted tool names (server.fn).`;
+        }
+        return 'MCP usage: no known MCP servers yet. Only use list_mcp_resources to discover available servers. Do not call other MCP functions or use dotted tool names (server.fn) until a server_label is discovered.';
+      })();
+      try { ((normalized as any).messages as any[]).push({ role: 'system', content: tip }); } catch { /* ignore */ }
+    }
+  } catch { /* ignore MCP injection */ }
+
   return normalized;
 }
 
@@ -92,6 +146,11 @@ function normalizeToolCall(tc: any): any {
   const t = { ...tc };
   if (t.function && typeof t.function === 'object') {
     const fn = { ...t.function };
+    // Drop dotted-name prefix unconditionally; keep only base function name
+    if (typeof fn.name === 'string' && fn.name.includes('.')) {
+      const dot = fn.name.indexOf('.');
+      fn.name = fn.name.slice(dot + 1).trim();
+    }
     if (fn.arguments !== undefined && typeof fn.arguments !== 'string') {
       try { fn.arguments = JSON.stringify(fn.arguments); } catch { fn.arguments = String(fn.arguments); }
     }

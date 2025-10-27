@@ -291,8 +291,6 @@ export function buildChatRequestFromResponses(payload: Record<string, unknown>, 
             const args = typeof t.arguments === 'string' ? (() => { try { return JSON.parse(t.arguments); } catch { return {}; } })() : (t.arguments || {});
             const sv = (args && typeof args === 'object') ? (args as any).server : undefined;
             if (typeof sv === 'string' && sv.trim()) discovered.add(sv.trim());
-            const nm = typeof t.name === 'string' ? t.name : undefined;
-            if (nm && nm.includes('.')) { const p = nm.split('.')[0]?.trim(); if (p) discovered.add(p); }
           } else if (isToolMsg) {
             const output = t?.output;
             const val = (typeof output === 'string') ? (() => { try { return JSON.parse(output); } catch { return null; } })() : (output || null);

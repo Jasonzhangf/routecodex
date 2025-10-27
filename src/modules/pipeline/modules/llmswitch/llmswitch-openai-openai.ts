@@ -63,37 +63,6 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
           }
         } catch { /* ignore tools parse */ }
 
-        // Collect known MCP servers from history (tool results and prior calls)
-        const knownMcpServers = new Set<string>();
-        try {
-          for (const m of msgs) {
-            if (!m || typeof m !== 'object') continue;
-            if ((m as any).role === 'tool' && typeof (m as any).content === 'string') {
-              try {
-                const o = JSON.parse(String((m as any).content));
-                const args = (o && typeof o === 'object') ? (o as any).arguments : undefined;
-                const sv = args && typeof args === 'object' ? (args as any).server : undefined;
-                if (typeof sv === 'string' && sv.trim()) knownMcpServers.add(sv.trim());
-              } catch { /* ignore */ }
-            }
-            if ((m as any).role === 'assistant' && Array.isArray((m as any).tool_calls)) {
-              for (const tc of ((m as any).tool_calls as any[])) {
-                try {
-                  const fname = String(tc?.function?.name || '');
-                  const dot = fname.indexOf('.');
-                  if (dot > 0) {
-                    const prefix = fname.slice(0, dot).trim(); if (prefix) knownMcpServers.add(prefix);
-                  }
-                  const argStr = String(tc?.function?.arguments ?? '');
-                  const parsed = JSON.parse(argStr);
-                  const sv = parsed && typeof parsed === 'object' ? parsed.server : undefined;
-                  if (typeof sv === 'string' && sv.trim()) knownMcpServers.add(sv.trim());
-                } catch { /* ignore */ }
-              }
-            }
-          }
-        } catch { /* ignore */ }
-
         // Ensure tools normalized and tools[].function.strict = true (align anthropic→openai)
         try {
           if (Array.isArray(out.tools)) {
@@ -104,25 +73,6 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
               }
               return t;
             });
-            // MCP tools injection (CCR style): list_mcp_resources, read_mcp_resource, list_mcp_resource_templates
-            try {
-              const enableMcp = String(process.env.ROUTECODEX_MCP_ENABLE ?? '1') !== '0';
-              if (enableMcp) {
-                const have = new Set((out.tools as any[]).map((t: any) => (t?.function?.name || '').toString()));
-                const addTool = (def: any) => { if (!have.has(def.function.name)) { (out.tools as any[]).push(def); have.add(def.function.name); } };
-                const obj = (props: any, req: string[]) => ({ type: 'object', properties: props, required: req, additionalProperties: false });
-                const serversRaw = String(process.env.ROUTECODEX_MCP_SERVERS || '').trim();
-                const envServers = serversRaw ? serversRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
-                const merged = Array.from(new Set([ ...envServers, ...Array.from(knownMcpServers) ]));
-                const serverProp = merged.length ? { type: 'string', enum: merged } : { type: 'string' };
-                // 初始阶段（未知 server）只暴露 list_mcp_resources；当存在已知 server 后再暴露全部 MCP 工具
-                addTool({ type: 'function', function: { name: 'list_mcp_resources', strict: true, description: 'List resources from a given MCP server (arguments.server = server label).', parameters: obj({ server: serverProp, filter: { type: 'string' }, root: { type: 'string' } }, ['server']) } });
-                if (merged.length > 0) {
-                  addTool({ type: 'function', function: { name: 'read_mcp_resource', strict: true, description: 'Read a resource via MCP server.', parameters: obj({ server: serverProp, uri: { type: 'string' } }, ['server','uri']) } });
-                  addTool({ type: 'function', function: { name: 'list_mcp_resource_templates', strict: true, description: 'List resource templates via MCP server.', parameters: obj({ server: serverProp }, ['server']) } });
-                }
-              }
-            } catch { /* ignore mcp injection errors */ }
           }
         } catch { /* ignore */ }
 
@@ -178,18 +128,7 @@ export class OpenAINormalizerLLMSwitch implements LLMSwitchModule {
                   e.status = 400; throw e;
                 }
                 // MCP dotted-name canonicalization: "server.base" -> base, inject {server}
-                try {
-                  const enableMcp = String(process.env.ROUTECODEX_MCP_ENABLE ?? '1') !== '0';
-                  if (enableMcp && typeof name === 'string' && name.includes('.')) {
-                    const dot = name.indexOf('.');
-                    const base = name.slice(dot + 1).trim();
-                    const allowed = new Set(['list_mcp_resources','read_mcp_resource','list_mcp_resource_templates']);
-                    // Drop the dotted prefix unconditionally and keep the base function name; do not inject server from prefix
-                    if (allowed.has(base)) {
-                      (fn as any).name = base;
-                    }
-                  }
-                } catch { /* ignore */ }
+                // dotted-name handling moved to core (sharedmodule)
                 // If schema indicates command: array<string>, allow limited normalization:
                 // - command as string JSON array (e.g. "[\"cat\",\"file\"]") → parse to array
                 // - command as single string (e.g. "pwd" or "ls -la") → [string] (no space splitting)

@@ -423,3 +423,8 @@ Summary
   - 对于 filesystem.read_mcp_resource 这类 dotted-name，直接丢弃 '.' 之前的前缀，仅保留基础函数名（read_mcp_resource）。
   - 不再从前缀推断/注入 arguments.server；arguments 保持模型提供的内容。
   - Chat 与 Responses SSE 两条路径保持一致。
+## 0.70.5 - 2025-10-27
+- 移除 pipeline 层（src/modules/.../llmswitch-openai-openai.ts）的 MCP 注入与 dotted-name 处理，全部下放到 sharedmodule/llmswitch-core：
+  - 避免双重注入与环境变量合并导致的“默认 server 泄露”。
+  - 仅从 arguments.server 发现已知 server；不从 dotted 前缀推断。
+  - 注入与提示的分阶段逻辑以 core 为准。
