@@ -371,11 +371,16 @@ export class StreamingManager {
     const sseData = `data: ${JSON.stringify(chunkData)}\n\n`;
     res.write(sseData);
 
-    this.logger.logModule('StreamingManager', 'chunk_sent', {
-      requestId,
-      chunkId: chunkData.id,
-      model,
-    });
+    try {
+      const LOG = String(process.env.ROUTECODEX_LOG_STREAM_CHUNKS || process.env.RCC_LOG_STREAM_CHUNKS || '0') === '1';
+      if (LOG) {
+        this.logger.logModule('StreamingManager', 'chunk_sent', {
+          requestId,
+          chunkId: chunkData.id,
+          model,
+        });
+      }
+    } catch { /* no-op */ }
   }
 
   /**
@@ -398,10 +403,15 @@ export class StreamingManager {
     res.write(finalData);
     res.end();
 
-    this.logger.logModule('StreamingManager', 'stream_complete', {
-      requestId,
-      model,
-    });
+    try {
+      const LOG = String(process.env.ROUTECODEX_LOG_STREAM_CHUNKS || process.env.RCC_LOG_STREAM_CHUNKS || '0') === '1';
+      if (LOG) {
+        this.logger.logModule('StreamingManager', 'stream_complete', {
+          requestId,
+          model,
+        });
+      }
+    } catch { /* no-op */ }
   }
 
   /**

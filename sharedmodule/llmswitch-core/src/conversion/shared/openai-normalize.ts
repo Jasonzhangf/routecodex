@@ -122,7 +122,8 @@ export function normalizeChatRequest(request: any): any {
       general.push(bullet('If you need redirection/pipes/heredoc, wrap in bash -lc. / 需要重定向/管道/heredoc 时，必须包在 bash -lc 中。'));
       general.push('  e.g. {"command":["bash","-lc","cat > codex-local/docs/WRITING_GUIDE.md <<\'EOF\'\\n内容…\\nEOF"]}');
       general.push('update_plan: {"explanation":"...","plan":[{"step":"...","status":"in_progress"},{"step":"...","status":"pending"}]}');
-      general.push('view_image: {"path":"/absolute/or/relative/path/to/image.png"}');
+      general.push('view_image: {"path":"/absolute/or/relative/path/to/image.png"} (only images: .png .jpg .jpeg .gif .webp .bmp .svg)');
+      general.push(bullet('Do not call view_image for text files (e.g., .md/.txt). Use shell to read text. / 文本文件不要用 view_image，使用 shell 查看文本。'));
 
       // File editing efficiency / 文件编辑效率
       general.push('File editing efficiency / 文件编辑效率');
@@ -240,6 +241,54 @@ export function normalizeChatRequest(request: any): any {
     if (msgs.length) {
       const pending: string[] = [];
       const callById: Record<string, any> = {};
+      const isImagePath = (p: any): boolean => {
+        try {
+          const s = String(p || '').toLowerCase();
+          return /\.(png|jpg|jpeg|gif|webp|bmp|svg|tiff?|ico|heic|jxl)$/.test(s);
+        } catch { return false; }
+      };
+      const buildRepairMessage = (name: string | undefined, args: any, body: any): string => {
+        const allowed = ['shell','update_plan','view_image','list_mcp_resources'];
+        const argStr = (() => { try { return JSON.stringify(args); } catch { return String(args); } })();
+        const bodyText = typeof body === 'string' ? body : (() => { try { return JSON.stringify(body); } catch { return String(body); } })();
+        const suggestions: string[] = [];
+        // Missing or unknown tool name
+        if (!name || name === 'tool' || name.trim() === '') {
+          suggestions.push(
+            'function.name 为空或未知。请选择以下之一: shell, update_plan, view_image, list_mcp_resources。'
+          );
+          // Heuristics
+          if (args && typeof args === 'object' && ('command' in args)) {
+            suggestions.push('检测到 arguments.command：你可能想调用 shell。');
+          }
+          if (args && typeof args === 'object' && ('plan' in args)) {
+            suggestions.push('检测到 arguments.plan：你可能想调用 update_plan。');
+          }
+          if (args && typeof args === 'object' && isImagePath((args as any).path)) {
+            suggestions.push('检测到图片路径：你可能想调用 view_image。');
+          }
+        }
+        // view_image misuse
+        if (name === 'view_image' && args && typeof args === 'object' && !isImagePath((args as any).path)) {
+          suggestions.push('view_image 仅用于图片文件（png/jpg/gif/webp/svg/...）。当前路径看起来不是图片，请改用 shell: {"command":["cat","<path>"]} 来读取文本/markdown。');
+        }
+        // Common argument parse failures
+        if (typeof bodyText === 'string' && /failed to parse function arguments|invalid type: string|expected a sequence/i.test(bodyText)) {
+          suggestions.push('arguments 需要是单个 JSON 字符串。');
+          suggestions.push('shell 推荐：数组 argv 或 bash -lc 字符串二选一。例如：');
+          suggestions.push('  {"command":["find",".","-type","f","-name","*.md"]}');
+          suggestions.push('  或 {"command":"bash -lc \"find . -type f -name \\\"*.md\\\" | head -20\""}');
+        }
+        // Always include quick examples
+        suggestions.push('示例：shell 读取文件 → {"command":["cat","codex-local/docs/design.md"]}');
+        suggestions.push('示例：update_plan → {"explanation":"...","plan":[{"step":"...","status":"in_progress"}]}');
+        suggestions.push('示例：view_image → {"path":"/path/to/image.png"}');
+        const header = '工具调用不可用（可自修复提示）';
+        const why = `问题: ${bodyText}`;
+        const given = `arguments: ${argStr}`;
+        const allow = `允许工具: ${allowed.join(', ')}`;
+        return [header, allow, given, ...suggestions, why].join('\n');
+      };
       for (const m of msgs) {
         if (m && m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
           for (const tc of m.tool_calls) {
@@ -259,6 +308,12 @@ export function normalizeChatRequest(request: any): any {
         return s;
       };
       const toArray = (x: any): string[] => Array.isArray(x) ? x.map((t) => String(t)) : (typeof x === 'string' && x.length ? [x] : []);
+      const trunc = (val: any, n = 800) => {
+        try {
+          const s = typeof val === 'string' ? val : JSON.stringify(val);
+          return s.length > n ? s.slice(0, n) + '...(truncated)' : s;
+        } catch { return String(val); }
+      };
       for (const m of msgs) {
         if (!m || m.role !== 'tool') continue;
         const callId = typeof (m as any).tool_call_id === 'string' ? (m as any).tool_call_id : (pending.length ? pending.shift() : undefined);
@@ -269,12 +324,14 @@ export function normalizeChatRequest(request: any): any {
         const argStr = typeof fn?.arguments === 'string' ? fn.arguments : (fn?.arguments != null ? JSON.stringify(fn.arguments) : undefined);
         let argsOut: any = {};
         try { argsOut = argStr ? JSON.parse(argStr) : {}; } catch { argsOut = argStr ? { _raw: argStr } : {}; }
-        const body = toLenientObj((m as any).content);
+        const rawContent = (m as any).content;
+        const body = toLenientObj(rawContent);
         // If already conforms to rcc.tool.v1, keep
         if (body && typeof body === 'object' && (body as any).version === 'rcc.tool.v1' && (body as any).tool && (body as any).result) {
           // Ensure tool_call_id is set
           (m as any).tool_call_id = callId;
           if (typeof (m as any).content !== 'string') { try { (m as any).content = JSON.stringify(body); } catch { (m as any).content = String((m as any).content); } }
+          try { console.log('[LLMSWITCH][tool-output][before-kept]', { callId, name, content: trunc(rawContent) }); } catch {}
           continue;
         }
         const cmd = (argsOut && typeof argsOut === 'object') ? (argsOut as any).command : undefined;
@@ -287,10 +344,21 @@ export function normalizeChatRequest(request: any): any {
         const stdout = (body && typeof (body as any).stdout === 'string') ? (body as any).stdout : undefined;
         let stderr = (body && typeof (body as any).stderr === 'string') ? (body as any).stderr
           : ((body && typeof (body as any).error === 'string') ? (body as any).error : undefined);
-        const unsupportedStr = (typeof body === 'string') && /^unsupported call/i.test(body.trim());
-        let success = (body && typeof (body as any).success === 'boolean') ? (body as any).success
+        let bodyLocal: any = body;
+        const unsupportedStr = (typeof bodyLocal === 'string') && /^unsupported call/i.test(bodyLocal.trim());
+        let success = (bodyLocal && typeof (bodyLocal as any).success === 'boolean') ? (bodyLocal as any).success
           : (typeof exitCode === 'number' ? exitCode === 0 : undefined);
-        if (unsupportedStr) { success = false; if (!stderr) stderr = String(body); }
+        // Structured self-repair hint on failures
+        const missingName = !name || !String(name).trim() || name === 'tool';
+        const parseFail = (typeof bodyLocal === 'string') && /failed to parse function arguments|invalid type: string|expected a sequence/i.test(String(bodyLocal));
+        const misuseViewImage = name === 'view_image' && (argsOut && typeof argsOut === 'object') && !isImagePath((argsOut as any).path);
+        if (unsupportedStr || missingName || parseFail || misuseViewImage) {
+          success = false;
+          const hint = buildRepairMessage(name, argsOut, bodyLocal);
+          stderr = hint;
+          // Also override body so downstream minimal mappers can surface detailed hint
+          try { bodyLocal = { error: 'tool_call_invalid', hint }; } catch { /* ignore */ }
+        }
         const envelope: any = {
           version: 'rcc.tool.v1',
           tool: { name, call_id: callId },
@@ -302,9 +370,23 @@ export function normalizeChatRequest(request: any): any {
             ...(typeof duration === 'number' ? { duration_seconds: duration } : {}),
             ...(typeof stdout === 'string' ? { stdout } : {}),
             ...(typeof stderr === 'string' ? { stderr } : {}),
-            output: body
+            output: bodyLocal
           }
         };
+        try {
+          console.log('[LLMSWITCH][tool-output][before]', { callId, name, content: trunc(rawContent) });
+          console.log('[LLMSWITCH][tool-output][after]', {
+            callId,
+            name,
+            result: {
+              success: !!envelope.result?.success,
+              exit_code: envelope.result?.exit_code,
+              duration_seconds: envelope.result?.duration_seconds,
+              stdout: trunc(envelope.result?.stdout),
+              stderr: trunc(envelope.result?.stderr),
+            }
+          });
+        } catch {}
         try { (m as any).content = JSON.stringify(envelope); } catch { (m as any).content = String((m as any).content || ''); }
         (m as any).tool_call_id = callId;
       }

@@ -68,16 +68,18 @@ export class OpenAINormalizerLLMSwitch {
     if (!message || typeof message !== 'object') return message;
     const normalizedMessage: any = { ...message };
 
-    if (normalizedMessage.content === undefined || normalizedMessage.content === null) {
-      normalizedMessage.content = '';
-    } else if (typeof normalizedMessage.content === 'string') {
+    // 保持原样：content 允许为 undefined/null（例如 assistant 命中 tool_calls 的场景）
+    if (typeof normalizedMessage.content === 'string') {
       // ok
     } else if (Array.isArray(normalizedMessage.content)) {
       // structured content allowed
     } else if (typeof normalizedMessage.content === 'object') {
       // keep object
     } else {
-      normalizedMessage.content = String(normalizedMessage.content);
+      // 对非字符串的基本类型做字符串化；undefined/null 保持原样
+      if (normalizedMessage.content !== undefined && normalizedMessage.content !== null) {
+        normalizedMessage.content = String(normalizedMessage.content);
+      }
     }
 
     if (normalizedMessage.role === 'assistant' && Array.isArray(normalizedMessage.tool_calls)) {
@@ -114,4 +116,3 @@ export class OpenAINormalizerLLMSwitch {
   async cleanup(): Promise<void> { await this.dispose(); }
   getStats(): any { return { type: this.type, initialized: this.isInitialized, timestamp: Date.now() }; }
 }
-
