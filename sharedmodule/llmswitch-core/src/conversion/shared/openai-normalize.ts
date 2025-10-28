@@ -109,6 +109,8 @@ export function normalizeChatRequest(request: any): any {
       general.push('Tool usage guidance (OpenAI tool_calls) / 工具使用指引（OpenAI 标准）');
       general.push(bullet('Always use assistant.tool_calls[].function.{name,arguments}; never embed tool calls in plain text. / 一律通过 tool_calls 调用工具，不要把工具调用写进普通文本。'));
       general.push(bullet('function.arguments must be a single JSON string. / arguments 必须是单个 JSON 字符串。'));
+      general.push(bullet('function.name is required and must be non-empty (e.g., shell/update_plan/view_image). Empty names are invalid. / 函数名必须非空（如 shell/update_plan/view_image），禁止留空。'));
+      general.push(bullet('For shell, put ALL intent into the command argv array only; do not invent extra keys. / shell 所有意图写入 command 数组，不要添加额外键名。'));
       if (unique.length) {
         general.push(bullet(`Available tools（非 MCP）: ${unique.slice(0, 8).join(', ')}`));
       }
@@ -125,12 +127,14 @@ export function normalizeChatRequest(request: any): any {
       // File editing efficiency / 文件编辑效率
       general.push('File editing efficiency / 文件编辑效率');
       general.push(bullet('Avoid line-by-line echo; use single-shot writes. / 避免逐行 echo，使用一次性写入。'));
+      general.push(bullet('Do NOT use bare "cat > <path>" without stdin; use heredoc to provide content. / 禁止裸用 "cat > <path>" 且无输入，使用 heredoc 提供内容。'));
       general.push(bullet('Overwrite file: cat > <path> <<\'EOF\' ... EOF / 覆盖写入：cat > <path> <<\'EOF\' ... EOF'));
       general.push(bullet('Append: cat >> <path> <<\'EOF\' ... EOF / 追加：cat >> <path> <<\'EOF\' ... EOF'));
       general.push(bullet('Atomic write: mkdir -p "$(dirname <path>)"; tmp="$(mktemp)"; cat > "$tmp" <<\'EOF\' ... EOF; mv "$tmp" <path> / 原子写入，防止半写入状态。'));
       general.push(bullet('macOS sed in-place: sed -i "" "s|<OLD>|<NEW>|g" <path> / macOS 用 -i ""，Linux 用 -i。'));
       general.push(bullet('Block replace/insert: use ed -s for multi-line edits. / 多行替换可用 ed -s。'));
       general.push(bullet('Prefer unified diff patches for batch edits; apply once. / 批量修改优先用统一 diff，一次性应用。'));
+      general.push(bullet('If a tool completes with no text output, explicitly say "no output" in your next assistant message and continue. / 工具执行无文本输出时，请在后续助手回复明确说明“无输出”，继续下一步。'));
       general.push('Examples:');
       general.push('  cat > codex-local/docs/design.md <<\'EOF\'\n  ...内容...\n  EOF');
       general.push('  ed -s codex-local/src/index.ts <<\'ED\'\n  ,$g/^BEGIN:SECTION$/,/^END:SECTION$/s//BEGIN:SECTION\\\n新内容…\\\nEND:SECTION/\n  w\n  q\n  ED');
@@ -211,7 +215,7 @@ export function normalizeChatRequest(request: any): any {
         let argsObj: any = {};
         try { argsObj = JSON.parse(argStr); } catch { argsObj = {}; }
         const cmd = argsObj && typeof argsObj === 'object' ? (argsObj as any).command : undefined;
-        if (Array.isArray(cmd) && !alreadyBashLc(cmd) && hasMeta(cmd)) {
+        if (false) {
           // Special-case: cat > file / cat >> file with no content → create/append empty file via ':'
           let script = joinTokens(cmd);
           if (cmd.length === 3 && String(cmd[0]) === 'cat' && (String(cmd[1]) === '>' || String(cmd[1]) === '>>')) {
@@ -281,10 +285,12 @@ export function normalizeChatRequest(request: any): any {
         const duration = (body && typeof (body as any).duration_seconds === 'number') ? (body as any).duration_seconds
           : (typeof meta.duration_seconds === 'number' ? meta.duration_seconds : undefined);
         const stdout = (body && typeof (body as any).stdout === 'string') ? (body as any).stdout : undefined;
-        const stderr = (body && typeof (body as any).stderr === 'string') ? (body as any).stderr
+        let stderr = (body && typeof (body as any).stderr === 'string') ? (body as any).stderr
           : ((body && typeof (body as any).error === 'string') ? (body as any).error : undefined);
-        const success = (body && typeof (body as any).success === 'boolean') ? (body as any).success
+        const unsupportedStr = (typeof body === 'string') && /^unsupported call/i.test(body.trim());
+        let success = (body && typeof (body as any).success === 'boolean') ? (body as any).success
           : (typeof exitCode === 'number' ? exitCode === 0 : undefined);
+        if (unsupportedStr) { success = false; if (!stderr) stderr = String(body); }
         const envelope: any = {
           version: 'rcc.tool.v1',
           tool: { name, call_id: callId },
@@ -388,14 +394,59 @@ function normalizeToolCall(tc: any): any {
   const t = { ...tc };
   if (t.function && typeof t.function === 'object') {
     const fn = { ...t.function };
+    const argStrIn = typeof fn.arguments === 'string' ? fn.arguments : (fn.arguments != null ? JSON.stringify(fn.arguments) : '{}');
+    let argsObj: any = {};
+    try { argsObj = JSON.parse(argStrIn); } catch { argsObj = {}; }
+
     // Drop dotted-name prefix unconditionally; keep only base function name
     if (typeof fn.name === 'string' && fn.name.includes('.')) {
       const dot = fn.name.indexOf('.');
       fn.name = fn.name.slice(dot + 1).trim();
     }
-    if (fn.arguments !== undefined && typeof fn.arguments !== 'string') {
-      try { fn.arguments = JSON.stringify(fn.arguments); } catch { fn.arguments = String(fn.arguments); }
+
+    // Do not infer missing/empty function name; preserve as-is for client to correct
+
+    // Shell command coercion (generic, no command-specific behavior):
+    // - If command is string and contains shell metacharacters (>, >>, <, <<, |, ;, &&, ||), wrap with bash -lc
+    // - Otherwise, split into argv tokens safely and avoid bash -lc to prevent quoting issues
+    if (String(fn.name || '').toLowerCase() === 'shell') {
+      const cmdVal: any = (argsObj as any)?.command;
+      if (typeof cmdVal === 'string' && cmdVal.trim().length > 0) {
+        const s = cmdVal.trim();
+        const hasMeta = /[<>|;&]/.test(s) || s.includes('&&') || s.includes('||') || s.includes('<<');
+        const splitCommandString = (input: string): string[] => {
+          const str = input.trim();
+          if (!str) return [];
+          const out: string[] = [];
+          let cur = '';
+          let inSingle = false;
+          let inDouble = false;
+          for (let i = 0; i < str.length; i++) {
+            const ch = str[i];
+            if (inSingle) { if (ch === "'") { inSingle = false; } else { cur += ch; } continue; }
+            if (inDouble) {
+              if (ch === '"') { inDouble = false; continue; }
+              if (ch === '\\' && i + 1 < str.length) { i++; cur += str[i]; continue; }
+              cur += ch; continue;
+            }
+            if (ch === "'") { inSingle = true; continue; }
+            if (ch === '"') { inDouble = true; continue; }
+            if (/\s/.test(ch)) { if (cur) { out.push(cur); cur = ''; } continue; }
+            cur += ch;
+          }
+          if (cur) out.push(cur);
+          return out;
+        };
+        if (hasMeta) {
+          (argsObj as any).command = ['bash', '-lc', s];
+        } else {
+          (argsObj as any).command = splitCommandString(s);
+        }
+      }
     }
+
+    // Ensure arguments is a JSON string per OpenAI schema
+    try { fn.arguments = JSON.stringify(argsObj); } catch { fn.arguments = argStrIn; }
     t.function = fn;
   }
   return t;

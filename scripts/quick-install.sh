@@ -102,8 +102,17 @@ build_project() {
     # 清理构建目录
     npm run clean 2>/dev/null || rm -rf dist
 
-    # 构建项目
-    log_info "编译 TypeScript..."
+    # 先构建 sharedmodule/llmswitch-core，再构建根包
+    log_info "先编译 sharedmodule/llmswitch-core..."
+    if npm -w sharedmodule/llmswitch-core run build; then
+        log_success "sharedmodule/llmswitch-core 构建成功"
+    else
+        log_error "sharedmodule/llmswitch-core 构建失败"
+        exit 1
+    fi
+
+    # 构建根项目
+    log_info "编译 routecodex 根包..."
     if npm run build; then
         log_success "项目构建成功"
     else

@@ -519,7 +519,11 @@ export class OpenAIProvider implements ProviderModule {
             });
           } catch { /* ignore */ }
           const controller = new AbortController();
-          const t = setTimeout(() => { try { controller.abort(); } catch {} }, Math.max(1, Number((providerCfg as any)?.timeout || 300000)));
+          const unifiedTimeout = Number(process.env.ROUTECODEX_TIMEOUT_MS || process.env.RCC_TIMEOUT_MS || NaN);
+          const timeoutMs = !Number.isNaN(unifiedTimeout)
+            ? unifiedTimeout
+            : Math.max(1, Number((providerCfg as any)?.timeout || 300000));
+          const t = setTimeout(() => { try { controller.abort(); } catch {} }, timeoutMs);
           const headersBase: Record<string,string> = { 'Content-Type': 'application/json', 'User-Agent': 'RouteCodex/openai-compat' };
           const authCtx: any = { type: 'apikey', token: apiKey, credentials: (providerCfg as any)?.auth?.credentials };
           const headers = buildAuthHeaders(authCtx, headersBase);

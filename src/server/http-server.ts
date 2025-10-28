@@ -222,7 +222,11 @@ export class HttpServer extends BaseModule implements IHttpServer {
       if (lower === '0.0.0.0') { resolvedHost = '127.0.0.1'; }
     } catch { /* ignore normalization errors */ }
     const resolvedCors = (httpCfg as any)?.cors || (rootCfg as any)?.cors || { origin: '*', credentials: true };
-    const resolvedTimeout = (httpCfg as any)?.timeout ?? (rootCfg as any)?.timeout ?? 30000;
+    // Unified timeout override via env (in ms)
+    const unifiedTimeout = Number(process.env.ROUTECODEX_TIMEOUT_MS || process.env.RCC_TIMEOUT_MS || NaN);
+    const resolvedTimeout = !Number.isNaN(unifiedTimeout)
+      ? unifiedTimeout
+      : ((httpCfg as any)?.timeout ?? (rootCfg as any)?.timeout ?? 300000);
     const resolvedBodyLimit = (httpCfg as any)?.bodyLimit ?? (rootCfg as any)?.bodyLimit ?? '10mb';
 
     const logging = (rootCfg.logging as UnknownObject) || {};

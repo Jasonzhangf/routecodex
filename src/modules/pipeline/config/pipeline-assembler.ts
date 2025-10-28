@@ -321,6 +321,25 @@ export class PipelineAssembler {
     const dummyDebugCenter: any = { logDebug: () => {}, logError: () => {}, logModule: () => {}, processDebugEvent: () => {}, getLogs: () => [] };
     const manager = new PipelineManager(managerConfig, dummyErrorCenter, dummyDebugCenter);
     await manager.initialize();
+
+    // Reconcile routePools against actually initialized pipelines (defensive):
+    try {
+      const mgrAny: any = manager as any;
+      const presentIds: string[] = Array.from(mgrAny?.pipelines?.keys?.() || []);
+      if (presentIds.length > 0) {
+        const present = new Set<string>(presentIds);
+        const filtered: Record<string, string[]> = {};
+        for (const [route, ids] of Object.entries(routePools || {})) {
+          const keep = (ids || []).filter(id => present.has(id));
+          if (keep.length) filtered[route] = keep;
+        }
+        if (!filtered.default || filtered.default.length === 0) {
+          filtered.default = presentIds;
+        }
+        routePools = filtered;
+      }
+    } catch { /* best-effort; keep original pools if inspection fails */ }
+
     return { manager, routePools, routeMeta };
   }
 }

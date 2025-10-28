@@ -283,39 +283,7 @@ function normalizeArgumentsBySchema(argsStringOrObj: unknown, functionName: stri
     }
   } catch { /* ignore */ }
 
-  // Post-fixups for shell: handle leading 'cd' to extract workdir
-  try {
-    if (String(functionName || '').toLowerCase() === 'shell') {
-      const cmd = (argsObj as any).command;
-      if (Array.isArray(cmd) && cmd.length >= 2 && String(cmd[0]) === 'cd' && typeof cmd[1] === 'string' && cmd[1]) {
-        if (!(argsObj as any).workdir) (argsObj as any).workdir = cmd[1];
-        const rest = cmd.slice(2).map((x: any) => String(x));
-        (argsObj as any).command = rest.length ? rest : ['pwd'];
-      }
-      // If argv contains shell metacharacters, wrap into bash -lc to enable redirection/pipes/heredoc
-      const hasMeta = (tokens: any[]): boolean => {
-        const metas = new Set(['>', '>>', '<', '<<', '|', ';', '&&', '||']);
-        return tokens.some((t: any) => {
-          const s = String(t);
-          if (metas.has(s)) return true;
-          return /[<>|;&]{1,2}/.test(s);
-        });
-      };
-      const alreadyBashLc = (tokens: any[]): boolean => Array.isArray(tokens) && tokens.length >= 2 && String(tokens[0]) === 'bash' && String(tokens[1]) === '-lc';
-      const cmdTokens: any[] = Array.isArray((argsObj as any).command) ? (argsObj as any).command : [];
-      if (Array.isArray(cmdTokens) && !alreadyBashLc(cmdTokens) && hasMeta(cmdTokens)) {
-        // Special-case: cat > file / cat >> file with no content → create/append empty file via ':'
-        let script = cmdTokens.map((x: any) => String(x)).join(' ');
-        if (cmdTokens.length === 3 && String(cmdTokens[0]) === 'cat' && (String(cmdTokens[1]) === '>' || String(cmdTokens[1]) === '>>')) {
-          const op = String(cmdTokens[1]);
-          const f = String(cmdTokens[2]);
-          const q = (s: string) => `'` + s.replace(/'/g, `\'`) + `'`;
-          script = `: ${op} ${q(f)}`;
-        }
-        (argsObj as any).command = ['bash', '-lc', script];
-      }
-    }
-  } catch { /* ignore */ }
+  // No command-level post-fixups here; preserve arguments as provided by model
 
   return toJsonString(argsObj);
 }
@@ -428,6 +396,8 @@ export function buildChatRequestFromResponses(payload: Record<string, unknown>, 
       general.push('Tool usage guidance (OpenAI tool_calls) / 工具使用指引（OpenAI 标准）');
       general.push(bullet('Always use assistant.tool_calls[].function.{name,arguments}; never embed tool calls in plain text. / 一律通过 tool_calls 调用工具，不要把工具调用写进普通文本。'));
       general.push(bullet('function.arguments must be a single JSON string. / arguments 必须是单个 JSON 字符串。'));
+      general.push(bullet('function.name is required and must be non-empty (e.g., shell/update_plan/view_image). Empty names are invalid. / 函数名必须非空（如 shell/update_plan/view_image），禁止留空。'));
+      general.push(bullet('For shell, put ALL intent into the command argv array only; do not invent extra keys. / shell 所有意图写入 command 数组，不要添加额外键名。'));
       if (uniq.length) general.push(bullet(`Available tools（非 MCP）: ${uniq.slice(0, 8).join(', ')}`));
       general.push('Examples / 示例:');
       general.push('shell: {"command":["find",".","-type","f","-name","*.ts"]}');
@@ -441,12 +411,14 @@ export function buildChatRequestFromResponses(payload: Record<string, unknown>, 
       // File editing efficiency / 文件编辑效率
       general.push('File editing efficiency / 文件编辑效率');
       general.push(bullet('Avoid line-by-line echo; use single-shot writes. / 避免逐行 echo，使用一次性写入。'));
+      general.push(bullet('Do NOT use bare "cat > <path>" without stdin; use heredoc to provide content. / 禁止裸用 "cat > <path>" 且无输入，使用 heredoc 提供内容。'));
       general.push(bullet('Overwrite: cat > <path> <<\'EOF\' ... EOF / 覆盖写入。'));
       general.push(bullet('Append: cat >> <path> <<\'EOF\' ... EOF / 追加写入。'));
       general.push(bullet('Atomic write: mkdir -p "$(dirname <path>)"; tmp="$(mktemp)"; cat > "$tmp" <<\'EOF\' ... EOF; mv "$tmp" <path> / 原子写入。'));
       general.push(bullet('macOS sed in-place: sed -i "" "s|<OLD>|<NEW>|g" <path> / macOS 用 -i ""，Linux 用 -i。'));
       general.push(bullet('Use ed -s for multi-line insert/replace. / 多行替换用 ed -s。'));
       general.push(bullet('Prefer unified diff patches for batch edits; apply once. / 批量修改优先统一 diff 一次性应用。'));
+      general.push(bullet('If a tool completes with no text output, explicitly say "no output" in your next assistant message and continue. / 工具执行无文本输出时，请在后续助手回复明确说明“无输出”，继续下一步。'));
       general.push('Examples:');
       general.push('  cat > codex-local/docs/design.md <<\'EOF\'\n  ...内容...\n  EOF');
       general.push('  ed -s codex-local/src/index.ts <<\'ED\'\n  ,$g/^BEGIN:SECTION$/,/^END:SECTION$/s//BEGIN:SECTION\\\n新内容…\\\nEND:SECTION/\n  w\n  q\n  ED');

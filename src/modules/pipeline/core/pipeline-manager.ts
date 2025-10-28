@@ -1078,27 +1078,27 @@ export class PipelineManager implements RCCBaseModule {
    * Module factory functions
    */
   private createOpenAINormalizerModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { OpenAINormalizerLLMSwitch } = await import('../modules/llmswitch/openai-normalizer.js');
+    const { OpenAINormalizerLLMSwitch } = await import('rcc-llmswitch-core/llmswitch/openai-normalizer');
     return new OpenAINormalizerLLMSwitch(config, dependencies);
   };
 
   private createAnthropicOpenAIConverterModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { AnthropicOpenAIConverter } = await import('../modules/llmswitch/anthropic-openai-converter.js');
+    const { AnthropicOpenAIConverter } = await import('rcc-llmswitch-core/llmswitch/anthropic-openai-converter');
     return new AnthropicOpenAIConverter(config, dependencies);
   };
 
   private createResponsesChatLLMSwitchModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { ResponsesToChatLLMSwitch } = await import('../modules/llmswitch/llmswitch-response-chat.js');
+    const { ResponsesToChatLLMSwitch } = await import('rcc-llmswitch-core/llmswitch/llmswitch-response-chat');
     return new ResponsesToChatLLMSwitch(config, dependencies);
   };
 
   private createResponsesPassthroughLLMSwitchModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { ResponsesPassthroughLLMSwitch } = await import('../modules/llmswitch/llmswitch-responses-passthrough.js');
+    const { ResponsesPassthroughLLMSwitch } = await import('rcc-llmswitch-core/llmswitch/llmswitch-responses-passthrough');
     return new ResponsesPassthroughLLMSwitch(config, dependencies);
   };
 
   private createConversionRouterModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { ConversionRouterLLMSwitch } = await import('../modules/llmswitch/llmswitch-conversion-router.js');
+    const { ConversionRouterLLMSwitch } = await import('rcc-llmswitch-core/llmswitch/llmswitch-conversion-router');
     return new ConversionRouterLLMSwitch(config, dependencies);
   };
 

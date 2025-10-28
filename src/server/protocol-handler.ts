@@ -766,7 +766,7 @@ ProtocolHandler.prototype.tryBridgeResponsesToChat = async function tryBridgeRes
 
     // Convert incoming Responses payload to Chat
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { ResponsesToChatLLMSwitch } = require('../modules/llmswitch/llmswitch-response-chat.js');
+    const { ResponsesToChatLLMSwitch } = await import('rcc-llmswitch-core/llmswitch/llmswitch-response-chat');
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { PipelineDebugLogger } = require('../utils/debug-logger.js');
     const logger = new PipelineDebugLogger(null, { enableConsoleLogging: false, enableDebugCenter: false });

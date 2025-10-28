@@ -78,7 +78,7 @@ export class ResponsesConverter {
     // Prefer llmswitch if available
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { ResponsesToChatLLMSwitch } = require('../../modules/pipeline/modules/llmswitch/llmswitch-response-chat.js');
+      const { ResponsesToChatLLMSwitch } = await import('rcc-llmswitch-core/llmswitch/llmswitch-response-chat');
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { PipelineDebugLogger } = require('../../modules/pipeline/utils/debug-logger.js');
       const logger = new PipelineDebugLogger(null, { enableConsoleLogging: false, enableDebugCenter: false });
@@ -109,7 +109,7 @@ export class ResponsesConverter {
   static async fromProviderToResponses(payload: unknown, context?: { instructions?: string; metadata?: Record<string, unknown> }): Promise<Record<string, unknown>> {
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { ResponsesToChatLLMSwitch } = require('../../modules/pipeline/modules/llmswitch/llmswitch-response-chat.js');
+      const { ResponsesToChatLLMSwitch } = await import('rcc-llmswitch-core/llmswitch/llmswitch-response-chat');
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { PipelineDebugLogger } = require('../../modules/pipeline/utils/debug-logger.js');
       const logger = new PipelineDebugLogger(null, { enableConsoleLogging: false, enableDebugCenter: false });
