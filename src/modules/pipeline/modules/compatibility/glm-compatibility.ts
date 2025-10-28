@@ -74,6 +74,20 @@ export class GLMCompatibility implements CompatibilityModule {
 
     this.sanitizeRequest(outbound);
 
+    // 方案B：若在最小清理后上下文有效消息为空，则不向上游发送，直接中止并交由上层返回错误
+    try {
+      const msgs: any[] = Array.isArray((outbound as any).messages) ? ((outbound as any).messages as any[]) : [];
+      const nonSystem = msgs.filter((m: any) => m && typeof m === 'object' && String(m.role || '').toLowerCase() !== 'system');
+      if (nonSystem.length === 0) {
+        const err = new Error('empty_prompt_after_cleanup');
+        (err as any).code = 'empty_prompt_after_cleanup';
+        (err as any).details = { reason: 'All messages removed by GLM minimal cleanup (empty or invalid)', stage: 'glm-compatibility' };
+        throw err;
+      }
+    } catch (e) {
+      throw e;
+    }
+
     return isDto ? { ...dto!, data: outbound } : { data: outbound, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
   }
 
