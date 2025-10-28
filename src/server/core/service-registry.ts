@@ -116,25 +116,33 @@ export class ServiceRegistry {
   public registerConverterServices(converterType: string, config?: any): void {
     const servicePrefix = converterType.toLowerCase().replace('converter', '');
 
-    // Register tool registry
-    this.container.register(
-      `${servicePrefix}ToolRegistry`,
-      () => {
-        const { ToolRegistry } = require('../../modules/pipeline/modules/llmswitch/utils/tool-registry.js');
-        return new ToolRegistry(config);
-      },
-      ServiceLifetime.Singleton
-    );
+    // LLMSwitch 本地工具已收敛到 core；若保留旧实现，允许通过可选依赖注册。
+    try {
+      const LOCAL_UTILS = String(process.env.ROUTECODEX_LLMSWITCH_LOCAL_UTILS || '').trim() === '1';
+      if (LOCAL_UTILS) {
+        // Register tool registry (optional)
+        this.container.register(
+          `${servicePrefix}ToolRegistry`,
+          () => {
+            const { ToolRegistry } = require('../../modules/pipeline/modules/llmswitch/utils/tool-registry.js');
+            return new ToolRegistry(config);
+          },
+          ServiceLifetime.Singleton
+        );
 
-    // Register schema normalizer
-    this.container.register(
-      `${servicePrefix}SchemaNormalizer`,
-      () => {
-        const { SchemaNormalizer } = require('../../modules/pipeline/modules/llmswitch/utils/schema-normalizer.js');
-        return new SchemaNormalizer();
-      },
-      ServiceLifetime.Singleton
-    );
+        // Register schema normalizer (optional)
+        this.container.register(
+          `${servicePrefix}SchemaNormalizer`,
+          () => {
+            const { SchemaNormalizer } = require('../../modules/pipeline/modules/llmswitch/utils/schema-normalizer.js');
+            return new SchemaNormalizer();
+          },
+          ServiceLifetime.Singleton
+        );
+      }
+    } catch {
+      // 忽略可选依赖缺失
+    }
   }
 
   /**
