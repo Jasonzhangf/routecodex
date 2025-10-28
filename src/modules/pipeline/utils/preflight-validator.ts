@@ -52,8 +52,9 @@ function getGLMPolicy(): GLMPolicy {
   if (mode === 'compat') {
     return {
       keepToolRole: true,
-      stripHistoricalAssistantToolCalls: false,
-      keepOnlyLastAssistantToolCalls: false,
+      // 在 GLM 目标下默认剥离历史工具调用，仅保留最近一轮（避免 1210 参数错误）
+      stripHistoricalAssistantToolCalls: true,
+      keepOnlyLastAssistantToolCalls: true,
       dropEmptyAssistant: true,
       convertUserEchoToTool: true,
       repairPairing: true,
@@ -67,8 +68,9 @@ function getGLMPolicy(): GLMPolicy {
   // default: preserve
   return {
     keepToolRole: true,
-    stripHistoricalAssistantToolCalls: false,
-    keepOnlyLastAssistantToolCalls: false,
+    // 默认也开启历史工具调用剥离，仅保留最近一轮
+    stripHistoricalAssistantToolCalls: true,
+    keepOnlyLastAssistantToolCalls: true,
     dropEmptyAssistant: false,
     convertUserEchoToTool: true,
     repairPairing: true,
@@ -234,6 +236,67 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
   const src: any = input || {};
   const targetGLM = opts.target === 'glm';
 
+  // Hard-disable input validations and coercions by default as requested.
+  // Set RCC_DISABLE_INPUT_VALIDATION=0 to re-enable the previous sanitizer.
+  try {
+    const DISABLE = String(process.env.RCC_DISABLE_INPUT_VALIDATION ?? '1') !== '0';
+    if (DISABLE) {
+      // Minimal GLM compatibility still applies to avoid upstream 1210:
+      //  - Strip historical assistant.tool_calls（仅保留最近一条消息中的 tool_calls）
+      //  - 清理空的/无效的 tool_calls（function.name 为空的项）
+      // 其它内容保持原样透传，不做改写/校验
+      let passthrough: any = {};
+      try { passthrough = JSON.parse(JSON.stringify(src)); } catch { passthrough = src; }
+      if (targetGLM && Array.isArray(passthrough?.messages)) {
+        try {
+          const msgs: any[] = passthrough.messages as any[];
+          // 找到最后一条包含 tool_calls 的 assistant 消息索引
+          let lastAssistantWithCalls = -1;
+          for (let i = msgs.length - 1; i >= 0; i--) {
+            const m = msgs[i];
+            if (m && m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+              lastAssistantWithCalls = i; break;
+            }
+          }
+          // 处理所有 assistant 消息：
+          for (let i = 0; i < msgs.length; i++) {
+            const m = msgs[i];
+            if (!m || m.role !== 'assistant') continue;
+            if (!Array.isArray(m.tool_calls)) continue;
+            // 过滤无效的 tool_calls（name 为空/缺失）
+            m.tool_calls = m.tool_calls.filter((tc: any) => {
+              const nm = (tc?.function?.name ?? '').toString().trim();
+              return nm.length > 0;
+            });
+            // 非最后一条包含调用的 assistant，清理其剩余的 tool_calls
+            if (i !== lastAssistantWithCalls && m.tool_calls.length) {
+              delete m.tool_calls;
+            }
+            // 若清理后变成空数组，则直接删除该字段（避免发送空数组触发上游 500/1210）
+            if (Array.isArray(m.tool_calls) && m.tool_calls.length === 0) {
+              delete m.tool_calls;
+            }
+          }
+          // 删除空的 user/assistant 消息（content 为空或仅空白，且无 tool_calls）
+          const filtered: any[] = [];
+          for (const m of msgs) {
+            if (!m || typeof m !== 'object') continue;
+            const role = String(m.role || '').toLowerCase();
+            const hasCalls = Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
+            const contentStr = (typeof m.content === 'string') ? m.content.trim() : '';
+            if ((role === 'user' || role === 'assistant') && !hasCalls && contentStr.length === 0) {
+              // drop
+              continue;
+            }
+            filtered.push(m);
+          }
+          (passthrough as any).messages = filtered;
+        } catch { /* 保守处理，出错则完全透传 */ }
+      }
+      return { payload: passthrough as Record<string, unknown>, issues: [] };
+    }
+  } catch { /* non-blocking */ }
+
   const out: Record<string, unknown> = {};
 
   // model
@@ -287,17 +350,43 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
       }
     }
 
-    // If assistant tool_calls present, ensure arguments are string; GLM expects content string anyway.
+    // If assistant tool_calls present
     if (role === 'assistant' && Array.isArray(m?.tool_calls) && m.tool_calls.length) {
       try {
-        msg.tool_calls = m.tool_calls.map((tc: any, j: number) => {
+        // GLM 目标需要 arguments 为 JSON 对象；其它目标保持 OpenAI 字符串
+        const parseArgumentsObject = (input: any): any => {
+          if (input === null || input === undefined) return {};
+          if (typeof input === 'object') return input;
+          if (typeof input === 'string') {
+            try { return JSON.parse(input); } catch { return {}; }
+          }
+          return {};
+        };
+
+        const mapped: any[] = [];
+        m.tool_calls.forEach((tc: any, j: number) => {
           const fn = tc?.function || {};
-          const name = typeof fn?.name === 'string' ? fn.name : undefined;
-          const args = stringifyFunctionArguments(fn?.arguments);
-          if (!name) {issues.push({ level:'warn', code:'tool_calls.missing_name', message:'assistant.tool_calls missing function.name', path:`messages[${idx}].tool_calls[${j}]` });}
-          return { id: tc?.id, type: 'function', function: { ...(name?{name}:{ }), arguments: args } };
+          const name = typeof fn?.name === 'string' && fn.name.trim() ? fn.name.trim() : undefined;
+          if (!name) {
+            issues.push({ level:'warn', code:'tool_calls.missing_name', message:'assistant.tool_calls missing function.name', path:`messages[${idx}].tool_calls[${j}]` });
+            // GLM 目标：丢弃无效的 tool_call，避免上游 500
+            if (targetGLM) { return; }
+          }
+          const argsValue = targetGLM ? parseArgumentsObject(fn?.arguments) : stringifyFunctionArguments(fn?.arguments);
+          const out: any = { id: tc?.id, type: 'function', function: { arguments: argsValue } };
+          if (name) { out.function.name = name; }
+          mapped.push(out);
         });
-        // GLM request schema for messages does not require tool_calls on assistant history; keep but safe-typed
+        if (mapped.length > 0) {
+          msg.tool_calls = mapped;
+          if (targetGLM) { msg.content = null; }
+        } else {
+          // 无有效 tool_calls，保留/恢复文本 content
+          delete msg.tool_calls;
+          if (targetGLM && (msg.content === null)) {
+            msg.content = '';
+          }
+        }
       } catch (e) {
         issues.push({ level:'warn', code:'tool_calls.normalize_failed', message:String((e as Error).message || e) });
       }
@@ -453,26 +542,51 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
           base.content = JSON.stringify(envelope);
         } catch { /* 若封装失败则保留原字符串 */ }
       }
-      // 保留 assistant 的 tool_calls（仅在存在时）
+      // 保留 assistant 的 tool_calls（仅在存在时）；GLM 目标下 arguments 为对象，且 content=null
       if (m?.role === 'assistant' && Array.isArray(m?.tool_calls) && m.tool_calls.length) {
         try {
+          const isImagePath = (p: any): boolean => {
+            const s = typeof p === 'string' ? p : '';
+            return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(s);
+          };
           base.tool_calls = m.tool_calls.map((tc: any) => {
             const fn = tc?.function || {};
             const name = typeof fn?.name === 'string' ? fn.name : undefined;
-            const args = stringifyFunctionArguments(fn?.arguments);
+            const args = targetGLM
+              ? ((): any => {
+                  if (fn?.arguments === null || fn?.arguments === undefined) return {};
+                  if (typeof fn?.arguments === 'object') return fn.arguments;
+                  if (typeof fn?.arguments === 'string') {
+                    try { return JSON.parse(fn.arguments); } catch { return {}; }
+                  }
+                  return {};
+                })()
+              : stringifyFunctionArguments(fn?.arguments);
             const out: any = { type: 'function', function: { arguments: args } };
             if (tc?.id) out.id = tc.id;
             if (name) (out.function as any).name = name;
             return out;
+          }).filter((entry: any) => {
+            // Guard: drop view_image for non-image paths to avoid misclassification
+            try {
+              if (entry?.function?.name === 'view_image') {
+                const a = entry?.function?.arguments;
+                const pathVal = (targetGLM ? a?.path : ((): any => { try { return JSON.parse(a).path; } catch { return undefined; } })());
+                if (!isImagePath(pathVal)) return false;
+              }
+            } catch { /* ignore */ }
+            return true;
           });
+          if (targetGLM) { base.content = null; }
         } catch { /* 保守处理：如异常则忽略 tool_calls */ }
       }
       return base;
     });
 
-    // 配对修复：若存在 tool 消息但缺少对应的 assistant.tool_calls，则在其前插入一条合成的 assistant 调用（策略: repairPairing）
+    // 配对修复：若存在 tool 消息但缺少对应的 assistant.tool_calls，则在其前插入一条合成的 assistant 调用
+    // GLM 目标下禁用该修复，避免生成 name 占位且 arguments 字符串的非法调用
     try {
-      if (!getGLMPolicy().repairPairing) { /* skip */ } else {
+      if (targetGLM || !getGLMPolicy().repairPairing) { /* skip on GLM */ } else {
         const paired = new Set<string>();
         const hasAssistantCall = (id: string): boolean => messages.some((x: any) => x?.role === 'assistant' && Array.isArray(x?.tool_calls) && x.tool_calls.some((tc: any) => String(tc?.id || '') === id));
         for (let i = 0; i < messages.length; i++) {
@@ -503,7 +617,25 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
     } catch { /* non-blocking */ }
   }
 
-  out.messages = messages;
+  // 过滤无意义的空消息（GLM 目标下）：content 为空/空串且无 tool_calls 的 assistant/user
+  const filteredMessages = (() => {
+    if (!targetGLM) return messages;
+    try {
+      return (messages as any[]).filter((mm: any) => {
+        if (!mm || typeof mm !== 'object') return false;
+        const role = mm.role;
+        const hasToolCalls = Array.isArray(mm.tool_calls) && mm.tool_calls.length > 0;
+        if (role === 'assistant' || role === 'user') {
+          const c = mm.content;
+          const emptyText = (c === '' || c === undefined || c === null);
+          if (emptyText && !hasToolCalls) return false;
+        }
+        return true;
+      });
+    } catch { return messages; }
+  })();
+
+  out.messages = filteredMessages;
 
   // Sampling & limits
   if (typeof src.temperature === 'number') {out.temperature = src.temperature;}

@@ -235,6 +235,11 @@ export class PipelineAssembler {
         compatibility: { type: compatibility.type, config: compatibility.config || {} },
       };
 
+      // Compatibility 判定只来源于配置；若未指定，则显式默认为透传（passthrough-compatibility）
+      if (!compatibility?.type) {
+        modBlock.compatibility = { type: 'passthrough-compatibility', config: {} };
+      }
+
       const allowedSwitches = new Set([
         'llmswitch-anthropic-openai',
         'llmswitch-openai-openai',
