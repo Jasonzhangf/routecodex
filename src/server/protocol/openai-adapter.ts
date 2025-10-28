@@ -56,33 +56,30 @@ export class OpenAIAdapter implements IProtocolAdapter {
   // Convert Anthropic → OpenAI (sourceProtocol='anthropic')
   convertFromProtocol(request: unknown, sourceProtocol: string): unknown {
     if (sourceProtocol !== 'anthropic') return this.normalizeRequest(request);
-    try {
-      const { AnthropicOpenAIConverter } = require('../../modules/pipeline/modules/llmswitch/llmswitch-anthropic-openai.js');
-      const { PipelineDebugLogger } = require('../../modules/pipeline/utils/debug-logger.js');
-      const logger = new PipelineDebugLogger(null, { enableConsoleLogging: false, enableDebugCenter: false });
-      const deps = { errorHandlingCenter: {}, debugCenter: {}, logger } as any;
-      const conv = new AnthropicOpenAIConverter({ type: 'llmswitch-anthropic-openai', config: {} }, deps);
-      if (typeof conv.initialize === 'function') { (conv as any).initialize(); }
-      // call private conversion via any to avoid heavy DTO wrapping
-      return (conv as any).convertAnthropicRequestToOpenAI(request);
-    } catch {
-      return this.normalizeRequest(request);
+    const r = (request && typeof request === 'object') ? (request as Record<string, unknown>) : {};
+    const out: any = { ...r };
+    if (Array.isArray(out.messages)) {
+      out.messages = (out.messages as any[]).map((m: any) => {
+        if (!m || typeof m !== 'object') return m;
+        const role = typeof m.role === 'string' ? m.role : 'user';
+        const c = (m as any).content;
+        if (Array.isArray(c)) {
+          const text = c
+            .map((p: any) => (p && typeof p === 'object' && typeof p.text === 'string') ? p.text : (typeof p === 'string' ? p : ''))
+            .filter((s: string) => !!String(s).trim())
+            .join('\n');
+          return { role, content: text };
+        }
+        return m;
+      });
     }
+    return this.normalizeRequest(out);
   }
 
   // Convert OpenAI → Anthropic (targetProtocol='anthropic')
   convertToProtocol(request: unknown, targetProtocol: string): unknown {
     if (targetProtocol !== 'anthropic') return this.normalizeRequest(request);
-    try {
-      const { AnthropicOpenAIConverter } = require('../../modules/pipeline/modules/llmswitch/llmswitch-anthropic-openai.js');
-      const { PipelineDebugLogger } = require('../../modules/pipeline/utils/debug-logger.js');
-      const logger = new PipelineDebugLogger(null, { enableConsoleLogging: false, enableDebugCenter: false });
-      const deps = { errorHandlingCenter: {}, debugCenter: {}, logger } as any;
-      const conv = new AnthropicOpenAIConverter({ type: 'llmswitch-anthropic-openai', config: {} }, deps);
-      if (typeof conv.initialize === 'function') { (conv as any).initialize(); }
-      return (conv as any).convertOpenAIRequestToAnthropic(request);
-    } catch {
-      return this.normalizeRequest(request);
-    }
+    // Minimal passthrough: no-op since we primarily consume OpenAI Chat internally
+    return this.normalizeRequest(request);
   }
 }

@@ -13,7 +13,7 @@ import { StreamingManager } from '../utils/streaming-manager.js';
 import { ProtocolDetector } from '../protocol/protocol-detector.js';
 import { OpenAIAdapter } from '../protocol/openai-adapter.js';
 import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
-import { OpenAINormalizerLLMSwitch } from '../../modules/pipeline/modules/llmswitch/llmswitch-openai-openai.js';
+import { OpenAINormalizerLLMSwitch } from '../../modules/pipeline/modules/llmswitch/openai-normalizer.js';
 import os from 'os';
 import path from 'path';
 

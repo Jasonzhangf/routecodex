@@ -295,9 +295,9 @@ export class CompatibilityLogger {
   };
 
   error = (message: string, ...args: unknown[]): void => {
-    const error = args.find(arg => arg instanceof Error);
-    const data = error ? { args: args.filter(arg => arg !== error) } : { args };
-    this.logger.error(message, error, data);
+    const maybeError = args.find((arg): arg is Error => arg instanceof Error);
+    const data = maybeError ? { args: args.filter(arg => arg !== maybeError) } : { args };
+    this.logger.error(message, maybeError, data);
   };
 
   debug = (message: string, ...args: unknown[]): void => {

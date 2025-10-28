@@ -219,17 +219,68 @@ export class GLMCompatibility implements CompatibilityModule {
         for (const c of choices) {
           const msg = c?.message || {};
           if (typeof msg?.content === 'string') {
-            msg.content = this.stripThinking(String(msg.content));
+            const text = this.stripThinking(String(msg.content));
+            // Try to extract tool calls from textual markup (e.g., <tool_call><arg_key>..)</tool_call>)
+            const extracted = this.extractToolCallsFromText(text);
+            if (extracted && extracted.length) {
+              const toolCalls = extracted.map((call) => ({
+                id: call.id,
+                type: 'function',
+                function: { name: call.name, arguments: call.args }
+              }));
+              msg.tool_calls = Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : toolCalls;
+              msg.content = '';
+            } else {
+              msg.content = text;
+            }
           }
+          // Ensure tool_calls.function.arguments are strings for downstream OpenAI consumers
+          if (Array.isArray(msg?.tool_calls)) {
+            try {
+              msg.tool_calls = msg.tool_calls.map((tc: any) => {
+                const t = { ...(tc || {}) };
+                if (t.function && typeof t.function === 'object') {
+                  const fn = { ...t.function };
+                  if (fn.arguments !== undefined && typeof fn.arguments !== 'string') {
+                    try { fn.arguments = JSON.stringify(fn.arguments); } catch { fn.arguments = String(fn.arguments); }
+                  }
+                  t.function = fn;
+                }
+                return t;
+              });
+            } catch { /* ignore */ }
+            if (msg.tool_calls.length && (msg.content === undefined)) {
+              msg.content = null;
+            }
+          } else if (Array.isArray(msg?.content)) {
+            // Flatten content arrays to string when no tool_calls present
+            const parts = (msg.content as any[])
+              .map((p: any) => (typeof p === 'string' ? p : (p && typeof p.text === 'string' ? p.text : '')))
+              .filter((s: string) => !!s.trim());
+            msg.content = parts.join('\n');
+          } else if (msg.content === undefined || msg.content === null) {
+            msg.content = '';
+          }
+        }
+      } catch { /* ignore */ }
+      // created_at -> created if needed
+      if ((r as any).created === undefined && typeof (r as any).created_at === 'number') {
+        (r as any).created = (r as any).created_at;
+      }
+      // usage.output_tokens -> usage.completion_tokens if missing
+      try {
+        const u = (r as any).usage;
+        if (u && typeof u === 'object' && u.output_tokens !== undefined && u.completion_tokens === undefined) {
+          u.completion_tokens = u.output_tokens;
         }
       } catch { /* ignore */ }
       if (!('object' in r)) {
         r.object = 'chat.completion';
       }
       return r;
-    }
-    // GLM often returns Anthropic-style message { type, role, content[], stop_reason, usage, id, model, created }
-    if ((resp as any).type === 'message' && Array.isArray((resp as any).content)) {
+      }
+      // GLM often returns Anthropic-style message { type, role, content[], stop_reason, usage, id, model, created }
+      if ((resp as any).type === 'message' && Array.isArray((resp as any).content)) {
       const blocks = ((resp as any).content as any[]);
       // Collect text blocks into assistant content (after stripping thinking)
       const content = this.flattenAnthropicContent(blocks).map(t => this.stripThinking(t)).join('\n');
@@ -272,6 +323,48 @@ export class GLMCompatibility implements CompatibilityModule {
       return openai;
     }
     return resp;
+  }
+
+  // Extracts function tool calls from textual markup produced by some models
+  // Supports patterns:
+  // - <tool_call> ... <arg_key>command</arg_key><arg_value>["ls","-la"]</arg_value> ... </tool_call>
+  // - Plain segments containing 'shell' and arg_key/arg_value pairs
+  private extractToolCallsFromText(text: string): Array<{ id: string; name: string; args: string }> | null {
+    try {
+      const calls: Array<{ id: string; name: string; args: string }> = [];
+      const toolBlocks: string[] = [];
+      const toolCallRegex = /<tool_call[\s\S]*?>[\s\S]*?<\/tool_call>/gi;
+      let m: RegExpExecArray | null;
+      while ((m = toolCallRegex.exec(text)) !== null) {
+        toolBlocks.push(m[0]);
+      }
+      const sources = toolBlocks.length ? toolBlocks : [text];
+      const keyValRe = /<arg_key>([\s\S]*?)<\/arg_key>\s*<arg_value>([\s\S]*?)<\/arg_value>/gi;
+      for (const block of sources) {
+        const nameMatch = block.match(/<tool_name>([\s\S]*?)<\/tool_name>/i);
+        let name = (nameMatch && nameMatch[1] && String(nameMatch[1]).trim()) || (block.includes('shell') ? 'shell' : 'tool');
+        const argsObj: Record<string, any> = {};
+        let kv: RegExpExecArray | null;
+        let anyKV = false;
+        while ((kv = keyValRe.exec(block)) !== null) {
+          const k = String(kv[1] || '').trim();
+          let vRaw = String(kv[2] || '').trim();
+          if (!k) continue;
+          anyKV = true;
+          // Attempt to parse JSON (array/object/primitive)
+          let val: any = vRaw;
+          try { val = JSON.parse(vRaw); } catch { /* keep string */ }
+          argsObj[k] = val;
+        }
+        if (anyKV) {
+          let argsStr = '{}';
+          try { argsStr = JSON.stringify(argsObj); } catch { argsStr = '{}'; }
+          const id = `call_${Math.random().toString(36).slice(2, 10)}`;
+          calls.push({ id, name, args: argsStr });
+        }
+      }
+      return calls.length ? calls : null;
+    } catch { return null; }
   }
 
   private flattenAnthropicContent(blocks: any[]): string[] {

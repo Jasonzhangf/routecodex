@@ -81,9 +81,12 @@ cleanup_old() {
 
 # 安装依赖
 install_dependencies() {
+    if [ "$FAST_MODE" = "true" ]; then
+        log_warning "跳过依赖安装 (--fast)"
+        return
+    fi
     log_header "📦 安装项目依赖"
-
-    log_info "安装 npm 依赖..."
+    log_info "安装 npm 依赖 (优先 ci)..."
     if npm ci --prefer-offline --no-audit 2>/dev/null; then
         log_success "依赖安装成功"
     else
@@ -177,8 +180,8 @@ uninstall_old() {
 install_new() {
     log_header "🔧 安装新版本"
 
-    log_info "安装 routecodex 全局包..."
-    if npm install -g "$PACKAGE_FILE"; then
+    log_info "安装 routecodex 全局包 (pack + install -g)..."
+    if npm install -g "$PACKAGE_FILE" --omit=dev; then
         log_success "routecodex 安装成功"
     else
         log_error "routecodex 安装失败"
@@ -327,6 +330,7 @@ main() {
     # 解析命令行参数
     SKIP_TESTS="false"
     BUILD_ONLY="false"
+    FAST_MODE=false
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -338,12 +342,17 @@ main() {
                 BUILD_ONLY="true"
                 shift
                 ;;
+            --fast)
+                FAST_MODE=true
+                shift
+                ;;
             --help|-h)
                 echo "用法: $0 [选项]"
                 echo
                 echo "选项:"
                 echo "  --skip-tests    跳过测试"
                 echo "  --build-only    仅构建，不安装"
+                echo "  --fast          跳过依赖安装 (仅适用于已安装依赖的环境)"
                 echo "  --help, -h      显示帮助"
                 echo
                 exit 0
