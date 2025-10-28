@@ -59,8 +59,8 @@ src/modules/pipeline/
 │   ├── compatibility-module.ts       # Compatibility接口
 │   └── provider-module.ts           # Provider接口
 ├── modules/                          # 具体模块实现
-│   ├── llm-switch/                   # LLMSwitch实现
-│   │   └── llmswitch-openai-openai.ts      # OpenAI→OpenAI 规范化实现
+│   ├── llm-switch/                   # LLMSwitch（实现由 rcc-llmswitch-core 提供）
+│   │   └── README.md                 # 使用说明与引入方式
 │   ├── workflow/                     # Workflow实现
 │   │   └── streaming-control.ts      # 流式控制实现
 │   ├── compatibility/                # Compatibility实现
@@ -294,7 +294,19 @@ interface PipelineConfig {
   provider: ProviderConfig;                // Provider配置
   modules: {
     llmSwitch: {
-      type: 'llmswitch-openai-openai';     // LLMSwitch类型
+      type: 'llmswitch-openai-openai';     // LLMSwitch类型（实现来源 rcc-llmswitch-core）
+
+## 构建顺序（重要）
+
+涉及 `sharedmodule/` 下的修改，需要遵循“先模块、后整包”的构建顺序：
+
+- 先编译共享模块（例如：`sharedmodule/llmswitch-core`）：
+  - `npm run --workspace sharedmodule/llmswitch-core build`
+- 再编译根包并进行安装或发布：
+  - `npm run build`
+  - 如需全局安装：`npm pack && npm i -g ./routecodex-<version>.tgz`
+
+这样可确保 rcc-llmswitch-core 的最新改动被根包正确引用，避免“旧实现或未生效”的问题。
       config?: any;                        // 额外配置
     };
     workflow: {
