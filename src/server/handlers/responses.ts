@@ -253,7 +253,12 @@ export class ResponsesHandler extends BaseHandler {
       await (fs as any).writeFile(file, JSON.stringify({ requestId, payload: pipelineRequest.data }, null, 2), 'utf-8');
     } catch { /* ignore */ }
 
-    const pipelineTimeoutMs = Number(process.env.ROUTECODEX_PIPELINE_MAX_WAIT_MS || 300000);
+    const pipelineTimeoutMs = Number(
+      process.env.ROUTECODEX_TIMEOUT_MS ||
+      process.env.RCC_TIMEOUT_MS ||
+      process.env.ROUTECODEX_PIPELINE_MAX_WAIT_MS ||
+      300000
+    );
     const pipelineResponse = await Promise.race([
       this.getPipelineManager()?.processRequest?.(pipelineRequest) || Promise.reject(new Error('Pipeline manager not available')),
       new Promise((_, reject) => setTimeout(() => reject(new Error(`Pipeline timeout after ${pipelineTimeoutMs}ms`)), Math.max(1, pipelineTimeoutMs)))

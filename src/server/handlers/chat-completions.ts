@@ -13,7 +13,7 @@ import { StreamingManager } from '../utils/streaming-manager.js';
 import { ProtocolDetector } from '../protocol/protocol-detector.js';
 import { OpenAIAdapter } from '../protocol/openai-adapter.js';
 import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
-import { OpenAINormalizerLLMSwitch } from '../../modules/pipeline/modules/llmswitch/openai-normalizer.js';
+import { OpenAINormalizerLLMSwitch } from 'rcc-llmswitch-core/llmswitch/openai-normalizer';
 import os from 'os';
 import path from 'path';
 
@@ -208,7 +208,12 @@ export class ChatCompletionsHandler extends BaseHandler {
       },
     };
 
-    const pipelineTimeoutMs = Number(process.env.ROUTECODEX_PIPELINE_MAX_WAIT_MS || 300000);
+    const pipelineTimeoutMs = Number(
+      process.env.ROUTECODEX_TIMEOUT_MS ||
+      process.env.RCC_TIMEOUT_MS ||
+      process.env.ROUTECODEX_PIPELINE_MAX_WAIT_MS ||
+      300000
+    );
     const pipelineResponse = await Promise.race([
       this.getPipelineManager()?.processRequest?.(pipelineRequest) || Promise.reject(new Error('Pipeline manager not available')),
       new Promise((_, reject) => setTimeout(() => reject(new Error(`Pipeline timeout after ${pipelineTimeoutMs}ms`)), Math.max(1, pipelineTimeoutMs)))

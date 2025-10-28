@@ -39,7 +39,7 @@ export class AnthropicAdapter implements IProtocolAdapter {
   convertFromProtocol(request: unknown, sourceProtocol: string): unknown {
     if (sourceProtocol !== 'openai') return this.normalizeRequest(request);
     try {
-      const { AnthropicOpenAIConverter } = require('../../modules/pipeline/modules/llmswitch/llmswitch-anthropic-openai.js');
+      const { AnthropicOpenAIConverter } = require('rcc-llmswitch-core/llmswitch/anthropic-openai-converter');
       const { PipelineDebugLogger } = require('../../modules/pipeline/utils/debug-logger.js');
       const logger = new PipelineDebugLogger(null, { enableConsoleLogging: false, enableDebugCenter: false });
       const deps = { errorHandlingCenter: {}, debugCenter: {}, logger } as any;
@@ -55,7 +55,7 @@ export class AnthropicAdapter implements IProtocolAdapter {
   convertToProtocol(request: unknown, targetProtocol: string): unknown {
     if (targetProtocol !== 'openai') return this.normalizeRequest(request);
     try {
-      const { AnthropicOpenAIConverter } = require('../../modules/pipeline/modules/llmswitch/llmswitch-anthropic-openai.js');
+      const { AnthropicOpenAIConverter } = require('rcc-llmswitch-core/llmswitch/anthropic-openai-converter');
       const { PipelineDebugLogger } = require('../../modules/pipeline/utils/debug-logger.js');
       const logger = new PipelineDebugLogger(null, { enableConsoleLogging: false, enableDebugCenter: false });
       const deps = { errorHandlingCenter: {}, debugCenter: {}, logger } as any;

@@ -82,7 +82,8 @@ export class GLMCompatibility implements CompatibilityModule {
     // Normalize GLM responses to OpenAI Chat Completions shape when needed
     const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
     const payload = isDto ? (response as any).data : response;
-    const out = this.normalizeResponse(payload);
+    const meta = isDto ? (response as any).metadata : undefined;
+    const out = this.normalizeResponse(payload, meta);
     if (isDto) {
       return { ...(response as any), data: out };
     }
@@ -208,12 +209,14 @@ export class GLMCompatibility implements CompatibilityModule {
     }
   }
 
-  private normalizeResponse(resp: any): any {
+  private normalizeResponse(resp: any, metadata?: any): any {
     if (!resp || typeof resp !== 'object') return resp;
+    const entryEndpoint = metadata?.entryEndpoint || metadata?.endpoint || '';
+    const reasoningPolicy = this.resolveReasoningPolicy(entryEndpoint);
     // Already OpenAI chat completion
     if ('choices' in resp) {
       const r = { ...resp } as Record<string, unknown>;
-      // Strip thinking segments from assistant message content (Chat 端口不外泄思考)
+      // Strip thinking segments from assistant message content (Chat/Anthropic 端口不外泄思考)
       try {
         const choices = Array.isArray((r as any).choices) ? (r as any).choices : [];
         for (const c of choices) {
@@ -233,6 +236,10 @@ export class GLMCompatibility implements CompatibilityModule {
             } else {
               msg.content = text;
             }
+          }
+          // Reasoning content handling by endpoint policy
+          if (reasoningPolicy === 'strip') {
+            if ('reasoning_content' in msg) { delete (msg as any).reasoning_content; }
           }
           // Ensure tool_calls.function.arguments are strings for downstream OpenAI consumers
           if (Array.isArray(msg?.tool_calls)) {
@@ -323,6 +330,19 @@ export class GLMCompatibility implements CompatibilityModule {
       return openai;
     }
     return resp;
+  }
+
+  // Decide how to handle reasoning content based on endpoint or env policy
+  private resolveReasoningPolicy(entryEndpointRaw: string): 'strip' | 'preserve' {
+    const policy = String(process.env.RCC_REASONING_POLICY || 'auto').trim().toLowerCase();
+    const ep = String(entryEndpointRaw || '').toLowerCase();
+    if (policy === 'strip') return 'strip';
+    if (policy === 'preserve') return 'preserve';
+    // auto: chat/messages strip; responses preserve
+    if (ep.includes('/v1/responses')) return 'preserve';
+    if (ep.includes('/v1/chat/completions')) return 'strip';
+    if (ep.includes('/v1/messages')) return 'strip';
+    return 'strip';
   }
 
   // Extracts function tool calls from textual markup produced by some models

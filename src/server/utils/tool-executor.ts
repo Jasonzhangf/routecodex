@@ -64,7 +64,8 @@ export async function executeTool(spec: ToolCallSpec): Promise<ToolResult> {
   }
 
   try {
-    const { stdout, stderr } = await exec(command, { timeout: 5000, maxBuffer: 1024 * 1024 });
+    const unifiedTimeout = Number(process.env.ROUTECODEX_TIMEOUT_MS || process.env.RCC_TIMEOUT_MS || 300000);
+    const { stdout, stderr } = await exec(command, { timeout: unifiedTimeout, maxBuffer: 1024 * 1024 });
     const out = stdout?.toString()?.trim() || '';
     const err = stderr?.toString()?.trim() || '';
     const merged = [out, err].filter(Boolean).join('\n');
