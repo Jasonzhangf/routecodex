@@ -502,15 +502,12 @@ export class OpenAIProvider implements ProviderModule {
           type ChatCreateArg = Parameters<OpenAI['chat']['completions']['create']>[0];
           response = await this.openai!.chat.completions.create(wirePayload as unknown as ChatCreateArg);
         } else {
-          // Compatibility fetch for third-party OpenAI-compatible providers (e.g., GLM)
+          // Generic OpenAI-compatible fetch (endpoint and payload kept standard).
+          // Any vendor-specific shaping must be handled in compatibility modules.
           const { key: apiKey } = this.resolveApiKey(providerCfg);
           const join = (a: string, b: string) => a.replace(/\/+$/,'') + '/' + b.replace(/^\/+/, '');
-          // GLM compatibility must be explicitly enabled via config.compatibility.provider==='glm'
-          const compatProvider = String((providerCfg as any)?.compatibility?.provider || '').toLowerCase();
-          const isGLM = compatProvider === 'glm';
-          // Resolve endpoint strictly by explicit compat flag
-          const endpoint = isGLM ? this.glmCompatResolveEndpoint(baseNorm) : join(baseNorm, 'chat/completions');
-          const payloadOut = isGLM ? this.glmCompatMapOpenAIToGLMRequest(wirePayload) : wirePayload;
+          const endpoint = join(baseNorm, 'chat/completions');
+          const payloadOut = wirePayload;
           // Log compat preflight (sanitized)
           try {
             const mask = (s?: string) => (s && s.length >= 8) ? `${s.slice(0,2)}***${s.slice(-4)}` : (!!s ? '***' : '');
@@ -544,7 +541,7 @@ export class OpenAIProvider implements ProviderModule {
             throw createProviderError(httpErr, 'network');
           }
           this.logger.logModule(this.id, 'compat-request-success', { endpoint, status: res.status });
-          response = isGLM ? this.glmCompatMapGLMToOpenAIResponse(json ?? {}) : (json ?? text);
+          response = (json ?? text);
         }
       }
 
@@ -681,81 +678,7 @@ export class OpenAIProvider implements ProviderModule {
     }
   }
 
-  // ------ GLM compatibility: delegated to compat module (explicit opt-in only) ------
-  private glmCompatResolveEndpoint(baseUrl: string): string {
-    const join = (a: string, b: string) => a.replace(/\/+$/,'') + '/' + b.replace(/^\/+/, '');
-    return join(baseUrl, 'paas/v4/chat/completions');
-  }
-  private glmCompatMapOpenAIToGLMRequest(req: Record<string, unknown>): Record<string, unknown> {
-    // Thin proxy to keep provider core clean; actual shaping lives here to avoid polluting standard logic
-    const clone = JSON.parse(JSON.stringify(req || {}));
-    if (Array.isArray(clone.messages)) {
-      clone.messages = (clone.messages as any[]).map((m) => {
-        const msg = { ...(m || {}) } as any;
-        const role = typeof msg.role === 'string' ? msg.role : 'user';
-        if (role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length) {
-          msg.content = null;
-        } else if (Array.isArray(msg.content)) {
-          const parts = (msg.content as any[]).map((p) => typeof p === 'string' ? p : (p && typeof p.text === 'string' ? p.text : '')).filter((s) => !!s.trim());
-          msg.content = parts.join('\n');
-        } else if (msg.content === undefined) {
-          msg.content = '';
-        }
-        return msg;
-      });
-    }
-    const out: any = {
-      model: clone.model,
-      messages: clone.messages,
-      stream: clone.stream === true,
-      temperature: clone.temperature,
-      top_p: clone.top_p,
-      max_tokens: clone.max_tokens,
-      tools: clone.tools,
-      tool_choice: clone.tool_choice,
-      stop: clone.stop,
-      response_format: clone.response_format,
-      request_id: (clone as any).request_id,
-      user_id: (clone as any).user_id,
-    };
-    return out;
-  }
-  private glmCompatMapGLMToOpenAIResponse(resp: Record<string, unknown>): Record<string, unknown> {
-    const out: any = { ...(resp || {}) };
-    if (typeof out.created_at === 'number' && out.created === undefined) out.created = out.created_at;
-    if (Array.isArray(out.choices)) {
-      out.choices = out.choices.map((c: any) => {
-        const choice = { ...(c || {}) };
-        const msg = choice.message && typeof choice.message === 'object' ? { ...choice.message } : choice.message;
-        if (msg && typeof msg === 'object') {
-          if (Array.isArray(msg.tool_calls)) {
-            msg.tool_calls = msg.tool_calls.map((tc: any) => {
-              const t = { ...(tc || {}) };
-              if (t.function && typeof t.function === 'object') {
-                const fn = { ...t.function };
-                if (fn.arguments !== undefined && typeof fn.arguments !== 'string') {
-                  try { fn.arguments = JSON.stringify(fn.arguments); } catch { fn.arguments = String(fn.arguments); }
-                }
-                t.function = fn;
-              }
-              return t;
-            });
-          }
-          if (Array.isArray(msg.tool_calls) && msg.tool_calls.length && msg.content === undefined) {
-            msg.content = null;
-          }
-          choice.message = msg;
-        }
-        return choice;
-      });
-    }
-    if (out.usage && typeof out.usage === 'object') {
-      const u: any = { ...out.usage };
-      if (u.output_tokens !== undefined && u.completion_tokens === undefined) u.completion_tokens = u.output_tokens;
-      out.usage = u;
-    }
-    return out;
-  }
+  // ------ GLM compatibility mapping removed from provider; handled by compatibility module ------
 
   /**
    * Check provider health

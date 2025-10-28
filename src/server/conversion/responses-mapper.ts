@@ -117,6 +117,8 @@ export class ResponsesMapper {
     // 先扫一遍，构造 Chat 消息（包含顶层 function_call / function_call_output）
     const messagesOut: Array<Record<string, unknown>> = [];
     let lastFunctionCallId: string | null = null;
+    const toolNameById = new Map<string, string>();
+    const toolArgsById = new Map<string, string>();
 
     // Build tools schema map for normalization by declared parameters
     const toolsArray: any[] = Array.isArray(body?.tools) ? (body.tools as any[]) : [];
@@ -181,10 +183,12 @@ export class ResponsesMapper {
     };
 
     const pushAssistantToolCall = (name: string | undefined, args: unknown, callId?: string) => {
-          const serialized = serializeArgsStrictBySchema(name, args).trim();
+      const serialized = serializeArgsStrictBySchema(name, args).trim();
       const toolId = callId && String(callId).trim() ? String(callId).trim() : `call_${Math.random().toString(36).slice(2, 8)}`;
       lastFunctionCallId = toolId;
       const fnName = (typeof name === 'string' && name.trim()) ? name.trim() : 'tool';
+      toolNameById.set(toolId, fnName);
+      toolArgsById.set(toolId, serialized);
       messagesOut.push({ role: 'assistant', tool_calls: [{ id: toolId, type: 'function', function: { name: fnName, arguments: serialized } }] });
     };
 
@@ -199,18 +203,57 @@ export class ResponsesMapper {
           pushAssistantToolCall(typeof nm === 'string' ? nm : undefined, args, typeof id === 'string' ? id : undefined);
           continue;
         }
-          if (itType === 'function_call_output' || itType === 'tool_result' || itType === 'tool_message') {
-            const text = extractToolOutput(it);
-            // Relax: accept empty text (some tools return only metadata); avoid throwing
-            const explicitId = (typeof (it as any).id === 'string' ? (it as any).id
-              : (typeof (it as any).call_id === 'string' ? (it as any).call_id
-                : (typeof (it as any).tool_call_id === 'string' ? (it as any).tool_call_id
-                  : (typeof (it as any).tool_use_id === 'string' ? (it as any).tool_use_id : undefined))));
-            const tool_call_id = explicitId || lastFunctionCallId || undefined;
-            const msg: Record<string, unknown> = tool_call_id ? { role: 'tool', content: text || '', tool_call_id } : { role: 'tool', content: text || '' };
-            messagesOut.push(msg);
-            continue;
-          }
+        if (itType === 'function_call_output' || itType === 'tool_result' || itType === 'tool_message') {
+          // Build structured JSON tool result content for Chat tool message
+          const explicitId = (typeof (it as any).id === 'string' ? (it as any).id
+            : (typeof (it as any).call_id === 'string' ? (it as any).call_id
+              : (typeof (it as any).tool_call_id === 'string' ? (it as any).tool_call_id
+                : (typeof (it as any).tool_use_id === 'string' ? (it as any).tool_use_id : undefined))));
+          const tool_call_id = explicitId || lastFunctionCallId || undefined;
+          const name = tool_call_id ? (toolNameById.get(String(tool_call_id)) || 'tool') : 'tool';
+          const argStr = tool_call_id ? (toolArgsById.get(String(tool_call_id)) || '{}') : '{}';
+          let argsObj: any = {};
+          try { argsObj = JSON.parse(argStr); } catch { argsObj = {}; }
+          const outputRaw = (it as any).output !== undefined ? (it as any).output : (it as any).content;
+          const tryParse = (v: any): any => {
+            if (v == null) return null;
+            if (typeof v === 'string') { try { return JSON.parse(v); } catch { return v; } }
+            return v;
+          };
+          const rawParsed = tryParse(outputRaw);
+          const meta = (rawParsed && typeof rawParsed === 'object') ? ((rawParsed as any).metadata || (rawParsed as any).meta || {}) : {};
+          const exitCode = (rawParsed && typeof rawParsed === 'object' && typeof (rawParsed as any).exit_code === 'number') ? (rawParsed as any).exit_code
+            : (typeof (meta as any).exit_code === 'number' ? (meta as any).exit_code : undefined);
+          const duration = (rawParsed && typeof rawParsed === 'object' && typeof (rawParsed as any).duration_seconds === 'number') ? (rawParsed as any).duration_seconds
+            : (typeof (meta as any).duration_seconds === 'number' ? (meta as any).duration_seconds : undefined);
+          const stdout = (rawParsed && typeof rawParsed === 'object' && typeof (rawParsed as any).stdout === 'string') ? (rawParsed as any).stdout : undefined;
+          const stderr = (rawParsed && typeof rawParsed === 'object' && typeof (rawParsed as any).stderr === 'string') ? (rawParsed as any).stderr
+            : ((rawParsed && typeof rawParsed === 'object' && typeof (rawParsed as any).error === 'string') ? (rawParsed as any).error : undefined);
+          const success = (rawParsed && typeof rawParsed === 'object' && typeof (rawParsed as any).success === 'boolean') ? (rawParsed as any).success
+            : (typeof exitCode === 'number' ? (exitCode === 0) : undefined);
+          const command = Array.isArray((argsObj as any).command) ? (argsObj as any).command
+            : (typeof (argsObj as any).command === 'string' ? [(argsObj as any).command] : []);
+          const workdir = typeof (argsObj as any).workdir === 'string' ? (argsObj as any).workdir : undefined;
+          const envelope: any = {
+            version: 'rcc.tool.v1',
+            tool: { name, call_id: tool_call_id || null },
+            arguments: argsObj,
+            executed: { command, ...(workdir ? { workdir } : {}) },
+            result: {
+              ...(typeof success === 'boolean' ? { success } : {}),
+              ...(typeof exitCode === 'number' ? { exit_code: exitCode } : {}),
+              ...(typeof duration === 'number' ? { duration_seconds: duration } : {}),
+              ...(typeof stdout === 'string' ? { stdout } : {}),
+              ...(typeof stderr === 'string' ? { stderr } : {}),
+              output: (rawParsed && typeof rawParsed !== 'string') ? rawParsed : (typeof outputRaw === 'string' ? outputRaw : null)
+            }
+          };
+          let content = '';
+          try { content = JSON.stringify(envelope); } catch { content = String(extractToolOutput(it) || ''); }
+          const msg: Record<string, unknown> = tool_call_id ? { role: 'tool', content, tool_call_id } : { role: 'tool', content };
+          messagesOut.push(msg);
+          continue;
+        }
         
         // 常规 message（文本）
         if (itType === String(wrapperType)) {

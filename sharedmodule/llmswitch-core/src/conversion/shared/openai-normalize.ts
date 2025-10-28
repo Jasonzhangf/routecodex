@@ -93,6 +93,219 @@ export function normalizeChatRequest(request: any): any {
     }
   } catch { /* ignore MCP injection */ }
 
+  // Inject comprehensive tool usage guidance (non-MCP + phased MCP), if tools are present and guidance not already present
+  try {
+    const msgs = Array.isArray((normalized as any).messages) ? ((normalized as any).messages as any[]) : [];
+    const tools = Array.isArray((normalized as any).tools) ? ((normalized as any).tools as any[]) : [];
+    const hasGuidance = msgs.some((m: any) => m && m.role === 'system' && typeof m.content === 'string' && /Use OpenAI tool_calls|Tool usage guidance/i.test(m.content));
+    if (!hasGuidance && tools.length > 0) {
+      const toolNames = tools
+        .map((t: any) => (t && t.function && typeof t.function.name === 'string') ? String(t.function.name) : '')
+        .filter((n: string) => !!n && !/^list_mcp_resources$|^read_mcp_resource$|^list_mcp_resource_templates$/i.test(n));
+      const unique = Array.from(new Set(toolNames));
+      const bullet = (s: string) => `- ${s}`;
+
+      const general: string[] = [];
+      general.push('Tool usage guidance (OpenAI tool_calls) / 工具使用指引（OpenAI 标准）');
+      general.push(bullet('Always use assistant.tool_calls[].function.{name,arguments}; never embed tool calls in plain text. / 一律通过 tool_calls 调用工具，不要把工具调用写进普通文本。'));
+      general.push(bullet('function.arguments must be a single JSON string. / arguments 必须是单个 JSON 字符串。'));
+      if (unique.length) {
+        general.push(bullet(`Available tools（非 MCP）: ${unique.slice(0, 8).join(', ')}`));
+      }
+      // Examples: shell / update_plan / view_image
+      general.push('Examples / 示例:');
+      general.push('shell: {"command":["find",".","-type","f","-name","*.ts"]}');
+      general.push('  - Good / 正例: {"command":["head","-50","codex-local/src/index.ts"]}');
+      general.push('  - Bad / 反例: {"js":"head -20"}, {"command":"find . -name *.ts"}, pseudo-XML (<arg_key>/<arg_value>)');
+      general.push(bullet('If you need redirection/pipes/heredoc, wrap in bash -lc. / 需要重定向/管道/heredoc 时，必须包在 bash -lc 中。'));
+      general.push('  e.g. {"command":["bash","-lc","cat > codex-local/docs/WRITING_GUIDE.md <<\'EOF\'\\n内容…\\nEOF"]}');
+      general.push('update_plan: {"explanation":"...","plan":[{"step":"...","status":"in_progress"},{"step":"...","status":"pending"}]}');
+      general.push('view_image: {"path":"/absolute/or/relative/path/to/image.png"}');
+
+      // File editing efficiency / 文件编辑效率
+      general.push('File editing efficiency / 文件编辑效率');
+      general.push(bullet('Avoid line-by-line echo; use single-shot writes. / 避免逐行 echo，使用一次性写入。'));
+      general.push(bullet('Overwrite file: cat > <path> <<\'EOF\' ... EOF / 覆盖写入：cat > <path> <<\'EOF\' ... EOF'));
+      general.push(bullet('Append: cat >> <path> <<\'EOF\' ... EOF / 追加：cat >> <path> <<\'EOF\' ... EOF'));
+      general.push(bullet('Atomic write: mkdir -p "$(dirname <path>)"; tmp="$(mktemp)"; cat > "$tmp" <<\'EOF\' ... EOF; mv "$tmp" <path> / 原子写入，防止半写入状态。'));
+      general.push(bullet('macOS sed in-place: sed -i "" "s|<OLD>|<NEW>|g" <path> / macOS 用 -i ""，Linux 用 -i。'));
+      general.push(bullet('Block replace/insert: use ed -s for multi-line edits. / 多行替换可用 ed -s。'));
+      general.push(bullet('Prefer unified diff patches for batch edits; apply once. / 批量修改优先用统一 diff，一次性应用。'));
+      general.push('Examples:');
+      general.push('  cat > codex-local/docs/design.md <<\'EOF\'\n  ...内容...\n  EOF');
+      general.push('  ed -s codex-local/src/index.ts <<\'ED\'\n  ,$g/^BEGIN:SECTION$/,/^END:SECTION$/s//BEGIN:SECTION\\\n新内容…\\\nEND:SECTION/\n  w\n  q\n  ED');
+      general.push('  cat > /tmp/patch.diff <<\'PATCH\'\n  *** Begin Patch\n  *** Update File: codex-local/src/index.ts\n  @@\n  -old line\n  +new line\n  *** End Patch\n  PATCH\n  git apply /tmp/patch.diff');
+
+      // MCP phased guidance
+      const mcp: string[] = [];
+      const enableMcp = String((process as any)?.env?.ROUTECODEX_MCP_ENABLE ?? '1') !== '0';
+      if (enableMcp) {
+        const mcpHeader = 'MCP tool usage (phased) / MCP 工具使用（分阶段）';
+        // Reuse known serverList from above MCP injection block by recomputing (safe)
+        const knownServers = (() => {
+          const set = new Set<string>();
+          try {
+            for (const m of msgs) {
+              if (!m || typeof m !== 'object') continue;
+              if ((m as any).role === 'tool' && typeof (m as any).content === 'string') {
+                try { const obj = JSON.parse((m as any).content); const sv = obj?.arguments?.server; if (typeof sv === 'string' && sv.trim()) set.add(sv.trim()); } catch {}
+              }
+              if ((m as any).role === 'assistant' && Array.isArray((m as any).tool_calls)) {
+                for (const tc of ((m as any).tool_calls as any[])) {
+                  try { const argStr = String(tc?.function?.arguments ?? ''); const parsed = JSON.parse(argStr); const sv = parsed?.server; if (typeof sv === 'string' && sv.trim()) set.add(sv.trim()); } catch {}
+                }
+              }
+            }
+          } catch {}
+          const serversRaw = String((process as any)?.env?.ROUTECODEX_MCP_SERVERS || '').trim();
+          if (serversRaw) { for (const s of serversRaw.split(',').map((x: string) => x.trim()).filter(Boolean)) set.add(s); }
+          return Array.from(set);
+        })();
+
+        mcp.push(mcpHeader);
+        if (!knownServers.length) {
+          mcp.push(bullet('Start with list_mcp_resources; arguments.server is optional. / 首先调用 list_mcp_resources，server 可选。'));
+          mcp.push(bullet('Do NOT use dotted tool names (e.g., filesystem.read_mcp_resource). / 禁止使用带点的工具名。'));
+          mcp.push(bullet('Example / 示例: list_mcp_resources {"filter":"*.md","root":"./codex-local"}'));
+          mcp.push(bullet('Discover server labels from results; use them in subsequent calls. / 先从结果里发现 server_label，再在后续调用中使用。'));
+        } else {
+          mcp.push(bullet('You may call read_mcp_resource and list_mcp_resource_templates now. / 现在可以调用 read_mcp_resource 和 list_mcp_resource_templates。'));
+          mcp.push(bullet(`server must be one of: ${knownServers.join(', ')} / server 必须从该列表中选择`));
+          mcp.push(bullet('Examples / 示例:'));
+          mcp.push('  read_mcp_resource {"server":"<one_of_known>","uri":"./codex-local/README.md"}');
+          mcp.push('  list_mcp_resource_templates {"server":"<one_of_known>"}');
+          mcp.push(bullet('Do NOT infer server from dotted prefixes. / 不要从带点前缀推断 server。'));
+        }
+      }
+
+      const guidance = [...general, ...(mcp.length ? ['','',...mcp] : [])].join('\n');
+      (normalized as any).messages = [
+        { role: 'system', content: guidance },
+        ...msgs
+      ];
+    }
+  } catch { /* ignore guidance injection */ }
+
+  // Fix-up assistant.tool_calls for shell redirection/pipes: wrap argv into bash -lc when metachars present
+  try {
+    const msgs: any[] = Array.isArray((normalized as any).messages) ? ((normalized as any).messages as any[]) : [];
+    const hasMeta = (tokens: any): boolean => {
+      if (!Array.isArray(tokens)) return false;
+      const metas = new Set(['>', '>>', '<', '<<', '|', ';', '&&', '||']);
+      return tokens.some((t: any) => {
+        const s = String(t);
+        if (metas.has(s)) return true;
+        return /[<>|;&]{1,2}/.test(s);
+      });
+    };
+    const alreadyBashLc = (tokens: any): boolean => Array.isArray(tokens) && tokens.length >= 2 && String(tokens[0]) === 'bash' && String(tokens[1]) === '-lc';
+    const joinTokens = (tokens: any[]): string => tokens.map((t) => String(t)).join(' ');
+    for (const m of msgs) {
+      if (!m || m.role !== 'assistant' || !Array.isArray(m.tool_calls)) continue;
+      m.tool_calls = m.tool_calls.map((tc: any) => {
+        if (!tc || typeof tc !== 'object') return tc;
+        const fn = tc.function || {};
+        const name = typeof fn?.name === 'string' ? fn.name.toLowerCase() : undefined;
+        if (name !== 'shell') return tc;
+        const argStr = typeof fn?.arguments === 'string' ? fn.arguments : (fn?.arguments != null ? JSON.stringify(fn.arguments) : '{}');
+        let argsObj: any = {};
+        try { argsObj = JSON.parse(argStr); } catch { argsObj = {}; }
+        const cmd = argsObj && typeof argsObj === 'object' ? (argsObj as any).command : undefined;
+        if (Array.isArray(cmd) && !alreadyBashLc(cmd) && hasMeta(cmd)) {
+          // Special-case: cat > file / cat >> file with no content → create/append empty file via ':'
+          let script = joinTokens(cmd);
+          if (cmd.length === 3 && String(cmd[0]) === 'cat' && (String(cmd[1]) === '>' || String(cmd[1]) === '>>')) {
+            const op = String(cmd[1]);
+            const f = String(cmd[2]);
+            const q = (s: string) => `'` + s.replace(/'/g, `\'`) + `'`;
+            script = `: ${op} ${q(f)}`;
+          }
+          (argsObj as any).command = ['bash', '-lc', script];
+          try { fn.arguments = JSON.stringify(argsObj); } catch { fn.arguments = argStr; }
+          return { ...tc, function: fn };
+        }
+        return tc;
+      });
+    }
+    (normalized as any).messages = msgs;
+  } catch { /* ignore shell fixups */ }
+
+  // Unify tool result packaging for Chat path: ensure role:"tool" messages carry rcc.tool.v1 envelope
+  try {
+    const msgs: any[] = Array.isArray((normalized as any).messages) ? ((normalized as any).messages as any[]) : [];
+    if (msgs.length) {
+      const pending: string[] = [];
+      const callById: Record<string, any> = {};
+      for (const m of msgs) {
+        if (m && m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+          for (const tc of m.tool_calls) {
+            const id = typeof tc?.id === 'string' ? tc.id : undefined;
+            if (id) { pending.push(id); callById[id] = tc; }
+          }
+        }
+      }
+      const toLenientObj = (v: any): any => {
+        if (v && typeof v === 'object') return v;
+        if (typeof v !== 'string') return v;
+        const s = v.trim();
+        if (!s) return '';
+        try { return JSON.parse(s); } catch { /* try fenced */ }
+        const fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+        if (fence) { try { return JSON.parse(fence[1]); } catch { /* ignore */ } }
+        return s;
+      };
+      const toArray = (x: any): string[] => Array.isArray(x) ? x.map((t) => String(t)) : (typeof x === 'string' && x.length ? [x] : []);
+      for (const m of msgs) {
+        if (!m || m.role !== 'tool') continue;
+        const callId = typeof (m as any).tool_call_id === 'string' ? (m as any).tool_call_id : (pending.length ? pending.shift() : undefined);
+        if (!callId) continue;
+        const tc = callById[callId] || {};
+        const fn = (tc && typeof tc === 'object') ? (tc.function || {}) : {};
+        const name = typeof fn?.name === 'string' ? fn.name : 'tool';
+        const argStr = typeof fn?.arguments === 'string' ? fn.arguments : (fn?.arguments != null ? JSON.stringify(fn.arguments) : undefined);
+        let argsOut: any = {};
+        try { argsOut = argStr ? JSON.parse(argStr) : {}; } catch { argsOut = argStr ? { _raw: argStr } : {}; }
+        const body = toLenientObj((m as any).content);
+        // If already conforms to rcc.tool.v1, keep
+        if (body && typeof body === 'object' && (body as any).version === 'rcc.tool.v1' && (body as any).tool && (body as any).result) {
+          // Ensure tool_call_id is set
+          (m as any).tool_call_id = callId;
+          if (typeof (m as any).content !== 'string') { try { (m as any).content = JSON.stringify(body); } catch { (m as any).content = String((m as any).content); } }
+          continue;
+        }
+        const cmd = (argsOut && typeof argsOut === 'object') ? (argsOut as any).command : undefined;
+        const workdir = (argsOut && typeof argsOut === 'object') ? (argsOut as any).workdir : undefined;
+        const meta: any = (body && typeof body === 'object') ? ((body as any).metadata || (body as any).meta || {}) : {};
+        const exitCode = (body && typeof (body as any).exit_code === 'number') ? (body as any).exit_code
+          : (typeof meta.exit_code === 'number' ? meta.exit_code : undefined);
+        const duration = (body && typeof (body as any).duration_seconds === 'number') ? (body as any).duration_seconds
+          : (typeof meta.duration_seconds === 'number' ? meta.duration_seconds : undefined);
+        const stdout = (body && typeof (body as any).stdout === 'string') ? (body as any).stdout : undefined;
+        const stderr = (body && typeof (body as any).stderr === 'string') ? (body as any).stderr
+          : ((body && typeof (body as any).error === 'string') ? (body as any).error : undefined);
+        const success = (body && typeof (body as any).success === 'boolean') ? (body as any).success
+          : (typeof exitCode === 'number' ? exitCode === 0 : undefined);
+        const envelope: any = {
+          version: 'rcc.tool.v1',
+          tool: { name, call_id: callId },
+          arguments: argsOut,
+          executed: { command: toArray(cmd), ...(typeof workdir === 'string' && workdir ? { workdir } : {}) },
+          result: {
+            ...(typeof success === 'boolean' ? { success } : {}),
+            ...(typeof exitCode === 'number' ? { exit_code: exitCode } : {}),
+            ...(typeof duration === 'number' ? { duration_seconds: duration } : {}),
+            ...(typeof stdout === 'string' ? { stdout } : {}),
+            ...(typeof stderr === 'string' ? { stderr } : {}),
+            output: body
+          }
+        };
+        try { (m as any).content = JSON.stringify(envelope); } catch { (m as any).content = String((m as any).content || ''); }
+        (m as any).tool_call_id = callId;
+      }
+      (normalized as any).messages = msgs;
+    }
+  } catch { /* ignore tool message packaging errors */ }
+
   return normalized;
 }
 
