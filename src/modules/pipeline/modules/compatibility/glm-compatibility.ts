@@ -237,18 +237,37 @@ export class GLMCompatibility implements CompatibilityModule {
           const msg = c?.message || {};
           if (typeof msg?.content === 'string') {
             const text = this.stripThinking(String(msg.content));
-            // Try to extract tool calls from textual markup (e.g., <tool_call><arg_key>..)</tool_call>)
-            const extracted = this.extractToolCallsFromText(text);
-            if (extracted && extracted.length) {
-              const toolCalls = extracted.map((call) => ({
-                id: call.id,
-                type: 'function',
-                function: { name: call.name, arguments: call.args }
-              }));
-              msg.tool_calls = Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : toolCalls;
-              msg.content = '';
-            } else {
-              msg.content = text;
+            // 1) 优先从文本中提取 rcc.tool.v1 包装（模型把工具调用写进了文本）
+            let handled = false;
+            try {
+              const rcc = this.extractRCCToolCallsFromText(text);
+              if (rcc && rcc.length) {
+                const toolCalls = rcc.map((call) => ({
+                  id: call.id,
+                  type: 'function',
+                  function: { name: call.name, arguments: call.args }
+                }));
+                msg.tool_calls = Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : toolCalls;
+                msg.content = '';
+                handled = true;
+              }
+            } catch { /* ignore */ }
+
+            // 2) 其次尝试旧的 <tool_call> 文本标记提取
+            if (!handled) {
+              const extracted = this.extractToolCallsFromText(text);
+              if (extracted && extracted.length) {
+                const toolCalls = extracted.map((call) => ({
+                  id: call.id,
+                  type: 'function',
+                  function: { name: call.name, arguments: call.args }
+                }));
+                msg.tool_calls = Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : toolCalls;
+                msg.content = '';
+                handled = true;
+              } else {
+                msg.content = text;
+              }
             }
           }
           // Reasoning content handling by endpoint policy
@@ -423,6 +442,66 @@ export class GLMCompatibility implements CompatibilityModule {
   // Remove <think>...</think> blocks and stray <think> tags
   private stripThinking(text: string): string {
     return stripThinkingTags(String(text));
+  }
+
+  // 尝试从普通文本中提取 rcc.tool.v1 工具调用包装，并转换为 OpenAI tool_calls
+  private extractRCCToolCallsFromText(text: string): Array<{ id?: string; name: string; args: string }> | null {
+    try {
+      if (typeof text !== 'string' || !text) return null;
+      const out: Array<{ id?: string; name: string; args: string }> = [];
+      const marker = /rcc\.tool\.v1/gi;
+      let m: RegExpExecArray | null;
+      while ((m = marker.exec(text)) !== null) {
+        // 从命中的位置向左回溯到最近的 '{'
+        let start = -1;
+        for (let i = m.index; i >= 0; i--) {
+          const ch = text[i];
+          if (ch === '{') { start = i; break; }
+          // 小优化：跨越太多字符放弃（避免 O(n^2)），但默认给足 4KB 回溯窗口
+          if (m.index - i > 4096) break;
+        }
+        if (start < 0) continue;
+
+        // 自左向右做“引号感知”的大括号配对，找到 JSON 末尾
+        let depth = 0;
+        let end = -1;
+        let inStr = false;
+        let quote: string | null = null;
+        let esc = false;
+        for (let j = start; j < text.length; j++) {
+          const ch = text[j];
+          if (inStr) {
+            if (esc) { esc = false; continue; }
+            if (ch === '\\') { esc = true; continue; }
+            if (ch === quote) { inStr = false; quote = null; continue; }
+            continue;
+          } else {
+            if (ch === '"' || ch === '\'') { inStr = true; quote = ch; continue; }
+            if (ch === '{') { depth++; }
+            else if (ch === '}') { depth--; if (depth === 0) { end = j; break; } }
+          }
+        }
+        if (end < 0) continue;
+
+        const jsonStr = text.slice(start, end + 1);
+        let obj: any = null;
+        try { obj = JSON.parse(jsonStr); } catch { obj = null; }
+        if (!obj || typeof obj !== 'object') continue;
+        if (String(obj.version || '').toLowerCase() !== 'rcc.tool.v1') continue;
+        const tool = obj.tool || {};
+        const name = typeof tool.name === 'string' && tool.name.trim() ? tool.name.trim() : undefined;
+        if (!name) continue;
+        const callId = typeof tool.call_id === 'string' && tool.call_id.trim() ? tool.call_id.trim() : undefined;
+        const argsObj = (obj.arguments !== undefined ? obj.arguments : {});
+        let argsStr = '{}';
+        try { argsStr = JSON.stringify(argsObj ?? {}); } catch { argsStr = '{}'; }
+        out.push({ id: callId, name, args: argsStr });
+
+        // 移动游标，避免重复命中同一段落
+        marker.lastIndex = end + 1;
+      }
+      return out.length ? out : null;
+    } catch { return null; }
   }
 
 
