@@ -314,6 +314,13 @@ export function normalizeChatRequest(request: any): any {
           return s.length > n ? s.slice(0, n) + '...(truncated)' : s;
         } catch { return String(val); }
       };
+      const getReqId = (): string | null => {
+        try {
+          const meta = (normalized as any)._metadata || {};
+          if (typeof meta?.requestId === 'string') return meta.requestId;
+        } catch { /* ignore */ }
+        return null;
+      };
       for (const m of msgs) {
         if (!m || m.role !== 'tool') continue;
         const callId = typeof (m as any).tool_call_id === 'string' ? (m as any).tool_call_id : (pending.length ? pending.shift() : undefined);
@@ -359,19 +366,22 @@ export function normalizeChatRequest(request: any): any {
           // Also override body so downstream minimal mappers can surface detailed hint
           try { bodyLocal = { error: 'tool_call_invalid', hint }; } catch { /* ignore */ }
         }
+        const reqId = getReqId();
+        const successBool = (typeof success === 'boolean') ? success : (typeof exitCode === 'number' ? exitCode === 0 : false);
         const envelope: any = {
           version: 'rcc.tool.v1',
           tool: { name, call_id: callId },
           arguments: argsOut,
           executed: { command: toArray(cmd), ...(typeof workdir === 'string' && workdir ? { workdir } : {}) },
           result: {
-            ...(typeof success === 'boolean' ? { success } : {}),
+            success: successBool,
             ...(typeof exitCode === 'number' ? { exit_code: exitCode } : {}),
             ...(typeof duration === 'number' ? { duration_seconds: duration } : {}),
             ...(typeof stdout === 'string' ? { stdout } : {}),
             ...(typeof stderr === 'string' ? { stderr } : {}),
             output: bodyLocal
-          }
+          },
+          ...(reqId ? { meta: { request_id: reqId, ts: Date.now() } } : { meta: { ts: Date.now() } })
         };
         try {
           console.log('[LLMSWITCH][tool-output][before]', { callId, name, content: trunc(rawContent) });

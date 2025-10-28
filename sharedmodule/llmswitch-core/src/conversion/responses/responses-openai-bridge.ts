@@ -634,19 +634,21 @@ function mapResponsesInputToChat(options: { instructions?: string; input?: Respo
             stderr = hint;
             try { raw = { error: 'tool_call_invalid', hint }; } catch { /* keep raw as-is */ }
           }
+          const successBool = (typeof success === 'boolean') ? success : (typeof exitCode === 'number' ? exitCode === 0 : false);
           const envelope: any = {
             version: 'rcc.tool.v1',
             tool: { name, call_id: toolCallId },
             arguments: argsObj,
             executed: { command: Array.isArray(cmd) ? cmd : (typeof cmd === 'string' && cmd.length ? [cmd] : []), ...(typeof workdir === 'string' && workdir ? { workdir } : {}) },
             result: {
-              ...(typeof success === 'boolean' ? { success } : {}),
+              success: successBool,
               ...(typeof exitCode === 'number' ? { exit_code: exitCode } : {}),
               ...(typeof duration === 'number' ? { duration_seconds: duration } : {}),
               ...(typeof stdout === 'string' ? { stdout } : {}),
               ...(typeof stderr === 'string' ? { stderr } : {}),
               output: raw
-            }
+            },
+            meta: { call_id: String(toolCallId), ts: Date.now() }
           };
           try {
             const trunc = (val: any, n = 800) => { try { const s = typeof val==='string'?val: JSON.stringify(val); return s.length>n? s.slice(0,n)+'...(truncated)': s; } catch { return String(val);} };
@@ -759,19 +761,21 @@ function processMessageBlocks(blocks: any[], toolsNormalized: Array<Record<strin
             stderr = hint;
             try { raw = { error: 'tool_call_invalid', hint }; } catch { /* keep raw as-is */ }
           }
+          const successBool2 = (typeof success === 'boolean') ? success : (typeof exitCode === 'number' ? exitCode === 0 : false);
           const envelope: any = {
             version: 'rcc.tool.v1',
             tool: { name, call_id: toolCallId },
             arguments: argsObj,
             executed: { command: Array.isArray(cmd) ? cmd : (typeof cmd === 'string' && cmd.length ? [cmd] : []), ...(typeof workdir === 'string' && workdir ? { workdir } : {}) },
             result: {
-              ...(typeof success === 'boolean' ? { success } : {}),
+              success: successBool2,
               ...(typeof exitCode === 'number' ? { exit_code: exitCode } : {}),
               ...(typeof duration === 'number' ? { duration_seconds: duration } : {}),
               ...(typeof stdout === 'string' ? { stdout } : {}),
               ...(typeof stderr === 'string' ? { stderr } : {}),
               output: raw
-            }
+            },
+            meta: { call_id: String(toolCallId), ts: Date.now() }
           };
           try {
             const trunc = (val: any, n = 800) => { try { const s = typeof val==='string'?val: JSON.stringify(val); return s.length>n? s.slice(0,n)+'...(truncated)': s; } catch { return String(val);} };

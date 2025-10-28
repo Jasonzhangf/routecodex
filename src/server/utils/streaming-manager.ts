@@ -33,6 +33,7 @@ export interface StreamingChunk {
 export class StreamingManager {
   private config: ProtocolHandlerConfig;
   private logger: PipelineDebugLogger;
+  private heartbeatTimers: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(config: ProtocolHandlerConfig) {
     this.config = config;
@@ -58,6 +59,9 @@ export class StreamingManager {
         throw new Error('Streaming pipeline is disabled for this endpoint');
       }
 
+      // Start SSE heartbeats (pre-heartbeat + periodic)
+      this.startHeartbeat(res, requestId, model);
+
       await this.streamFromPipeline(response, requestId, res, model);
 
     } catch (error) {
@@ -69,6 +73,7 @@ export class StreamingManager {
 
       // Send error chunk and close
       this.sendErrorChunk(res, error, requestId);
+      this.stopHeartbeat(requestId);
       res.end();
     }
   }
@@ -401,6 +406,7 @@ export class StreamingManager {
 
     const finalData = `data: ${JSON.stringify(finalChunk)}\n\ndata: [DONE]\n\n`;
     res.write(finalData);
+    this.stopHeartbeat(requestId);
     res.end();
 
     try {
@@ -434,6 +440,7 @@ export class StreamingManager {
 
     const errorData = `data: ${JSON.stringify(errorChunk)}\n\ndata: [DONE]\n\n`;
     res.write(errorData);
+    this.stopHeartbeat(requestId);
   }
 
   /**
@@ -441,6 +448,31 @@ export class StreamingManager {
    */
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // Heartbeat helpers
+  private startHeartbeat(res: Response, requestId: string, model: string): void {
+    try {
+      const iv = Math.max(1000, Number(process.env.ROUTECODEX_STREAM_HEARTBEAT_MS || process.env.RCC_STREAM_HEARTBEAT_MS || 15000));
+      const pre = String(process.env.ROUTECODEX_STREAM_PRE_HEARTBEAT || process.env.RCC_STREAM_PRE_HEARTBEAT || '1') === '1';
+      const writeBeat = () => {
+        try {
+          const payload = { type: 'heartbeat', ts: Date.now(), model };
+          res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        } catch { /* ignore */ }
+      };
+      if (pre) writeBeat();
+      const timer = setInterval(writeBeat, iv);
+      this.heartbeatTimers.set(requestId, timer);
+      try { res.on('close', () => this.stopHeartbeat(requestId)); } catch { /* ignore */ }
+    } catch { /* ignore */ }
+  }
+
+  private stopHeartbeat(requestId: string): void {
+    try {
+      const t = this.heartbeatTimers.get(requestId);
+      if (t) { clearInterval(t); this.heartbeatTimers.delete(requestId); }
+    } catch { /* ignore */ }
   }
 
   /**
