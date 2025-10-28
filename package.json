@@ -31,7 +31,7 @@
     "rcc-llmswitch-core"
   ],
   "engines": {
-    "node": ">=20 <21"
+    "node": ">=20 <26"
   },
   "scripts": {
     "build": "npm run clean && tsc",
