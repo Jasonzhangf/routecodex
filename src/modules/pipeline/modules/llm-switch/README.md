@@ -9,7 +9,8 @@ LLMSwitch 模块是流水线架构的第 0 层（入口层），负责处理进�
 ## 支持的协议转换
 
 ### 🔧 OpenAI → OpenAI 规范化
-- **实现文件**: `llmswitch-openai-openai.ts`
+- **实现来源**: rcc-llmswitch-core（包内实现）
+- **导入路径**: `rcc-llmswitch-core/llmswitch/openai-normalizer`
 - **功能**: OpenAI 协议规范化，保持请求结构一致
 - **特性**:
   - 完整的 OpenAI 协议支持
@@ -19,7 +20,8 @@ LLMSwitch 模块是流水线架构的第 0 层（入口层），负责处理进�
   - 错误上下文增强
 
 ### 🔄 Anthropic-OpenAI 转换器
-- **实现文件**: `anthropic-openai-converter.ts`
+- **实现来源**: rcc-llmswitch-core（包内实现）
+- **导入路径**: `rcc-llmswitch-core/llmswitch/anthropic-openai-converter`
 - **功能**: Anthropic 协议与 OpenAI 协议互转
 - **特性**:
   - 消息格式转换
@@ -83,9 +85,8 @@ private validateProtocol(request: any): void {
 
 ```
 src/modules/pipeline/modules/llm-switch/
-├── llmswitch-openai-openai.ts    # OpenAI → OpenAI 规范化实现
-├── anthropic-openai-converter.ts # Anthropic → OpenAI 转换器
-├── anthropic-openai-config.ts    # 转换配置
+├── (实现由 rcc-llmswitch-core 提供)
+├── anthropic-openai-config.ts    # （如需覆盖的）转换配置
 └── README.md                     # 本文档
 ```
 
@@ -93,7 +94,7 @@ src/modules/pipeline/modules/llm-switch/
 
 ### 基本使用
 ```typescript
-import { OpenAINormalizerLLMSwitch } from './llmswitch-openai-openai.js';
+import { OpenAINormalizerLLMSwitch } from 'rcc-llmswitch-core/llmswitch/openai-normalizer';
 
 const llmSwitch = new OpenAINormalizerLLMSwitch({
   type: 'llmswitch-openai-openai',
@@ -147,7 +148,7 @@ const enhancedRequest = await llmSwitch.processIncoming(request);
 ### 协议转换示例
 ```typescript
 // Anthropic 到 OpenAI 转换
-import { AnthropicOpenAIConverter } from './anthropic-openai-converter.js';
+import { AnthropicOpenAIConverter } from 'rcc-llmswitch-core/llmswitch/anthropic-openai-converter';
 
 const converter = new AnthropicOpenAIConverter({
   type: 'llmswitch-anthropic-openai',

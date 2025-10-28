@@ -337,7 +337,7 @@ curl -X POST http://localhost:5506/v1/responses \
   - 响应映射：`chat` → `responses` 统一输出 `created_at`、`function_call`，并在 SSE 层按上述事件族规范化重放。
   - 相关实现位置：
     - 事件重放：`src/server/handlers/responses.ts`
-    - 请求/响应映射：`src/modules/pipeline/modules/llmswitch/llmswitch-response-chat.ts`、`src/server/conversion/responses-mapper.ts`
+    - 请求/响应映射：`rcc-llmswitch-core/llmswitch/llmswitch-response-chat`、`src/server/conversion/responses-mapper.ts`
     - 配置：`config/responses-conversion.json`、`src/server/config/responses-config.ts`
 
 > 提示：若迁移旧客户端，务必检查其是否依赖 `response.required_action` 或非 0 起始的 `sequence_number`。本实现严格按 Responses 规范与上游抓包对齐。

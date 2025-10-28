@@ -16,7 +16,8 @@ LLMSwitch 模块是流水线架构的第 1 层（协议转换层），负责处�
 ## 🔄 支持的协议转换
 
 ### 🔧 OpenAI → OpenAI 规范化
-- **实现文件**: `llmswitch-openai-openai.ts`
+- **实现来源**: rcc-llmswitch-core（包内实现）
+- **导入路径**: `rcc-llmswitch-core/llmswitch/openai-normalizer`
 - **类型**: `llmswitch-openai-openai`
 - **协议**: `openai` → `openai`
 - **功能**: OpenAI 协议规范化和验证
@@ -30,7 +31,8 @@ LLMSwitch 模块是流水线架构的第 1 层（协议转换层），负责处�
   - 调试和性能监控
 
 ### 🔄 Anthropic ↔ OpenAI 双向转换
-- **实现文件**: `llmswitch-anthropic-openai.ts`
+- **实现来源**: rcc-llmswitch-core（包内实现）
+- **导入路径**: `rcc-llmswitch-core/llmswitch/anthropic-openai-converter`
 - **类型**: `llmswitch-anthropic-openai`
 - **协议**: `anthropic` ↔ `openai`
 - **功能**: Anthropic Claude API 与 OpenAI Chat API 互转
@@ -45,7 +47,8 @@ LLMSwitch 模块是流水线架构的第 1 层（协议转换层），负责处�
   - 严格模式和信任模式（trustSchema）
 
 ### 🌐 Responses → Chat 转换
-- **实现文件**: `llmswitch-response-chat.ts`
+- **实现来源**: rcc-llmswitch-core（包内实现）
+- **导入路径**: `rcc-llmswitch-core/llmswitch/llmswitch-response-chat`
 - **类型**: `llmswitch-response-chat`
 - **协议**: `openai-responses` → `openai`
 - **功能**: OpenAI Responses API 转换为 Chat Completions 格式
@@ -57,7 +60,8 @@ LLMSwitch 模块是流水线架构的第 1 层（协议转换层），负责处�
   - 自动模式检测（自动选择最佳转换策略）
 
 ### 🔄 Responses Passthrough
-- **实现文件**: `llmswitch-responses-passthrough.ts`
+- **实现来源**: rcc-llmswitch-core（包内实现）
+- **导入路径**: `rcc-llmswitch-core/llmswitch/llmswitch-responses-passthrough`
 - **类型**: `llmswitch-responses-passthrough`
 - **协议**: `openai-responses` → `openai-responses`
 - **功能**: Responses API 直接透传，最小转换开销
@@ -82,29 +86,21 @@ LLMSwitch 模块是流水线架构的第 1 层（协议转换层），负责处�
 
 ```
 src/modules/pipeline/modules/llmswitch/
-├── conversion/                     # 转换规则和配置
-│   ├── anthropic-openai-config.ts   # Anthropic-OpenAI 转换配置
+├── conversion/                     # （如需覆盖的）转换规则/配置
+│   ├── anthropic-openai-config.ts
 │   └── ...
-├── converters/                     # 转换器实现
+├── utils/
 │   └── ...
-├── utils/                         # 工具函数
-│   └── ...
-├── llmswitch-openai-openai.ts      # OpenAI 规范化实现
-├── llmswitch-anthropic-openai.ts   # Anthropic-OpenAI 双向转换
-├── llmswitch-response-chat.ts       # Responses → Chat 转换
-├── llmswitch-responses-passthrough.ts # Responses 透传
-├── llmswitch-conversion-router.ts   # 转换路由器
-├── openai-normalizer.ts            # OpenAI 规范化工具
-├── anthropic-openai-config.ts      # Anthropic 配置
-├── anthropic-openai-converter.ts    # Anthropic 转换器
-└── README.md                      # 本文档
+├── (核心实现由 rcc-llmswitch-core 提供)
+├── llmswitch-conversion-router.ts   # 路由器（如保留）
+└── README.md                        # 本文档
 ```
 
 ## 🚀 使用示例
 
 ### OpenAI 规范化使用
 ```typescript
-import { OpenAINormalizerLLMSwitch } from './llmswitch-openai-openai.js';
+import { OpenAINormalizerLLMSwitch } from 'rcc-llmswitch-core/llmswitch/openai-normalizer';
 
 const llmSwitch = new OpenAINormalizerLLMSwitch({
   type: 'llmswitch-openai-openai',
@@ -144,7 +140,7 @@ const normalizedRequest = await llmSwitch.processIncoming({
 
 ### Anthropic-OpenAI 双向转换
 ```typescript
-import { AnthropicOpenAIConverter } from './llmswitch-anthropic-openai.js';
+import { AnthropicOpenAIConverter } from 'rcc-llmswitch-core/llmswitch/anthropic-openai-converter';
 
 const converter = new AnthropicOpenAIConverter({
   type: 'llmswitch-anthropic-openai',
@@ -178,7 +174,16 @@ const openAIRequest = await converter.processIncoming(anthropicRequest);
 
 ### Responses API 转换
 ```typescript
-import { ResponsesToChatLLMSwitch } from './llmswitch-response-chat.js';
+import { ResponsesToChatLLMSwitch } from 'rcc-llmswitch-core/llmswitch/llmswitch-response-chat';
+
+## 构建顺序（重要）
+
+涉及 `sharedmodule/` 下的修改，请遵循“先模块、后整包”的构建顺序：
+
+- 构建共享模块：`npm run --workspace sharedmodule/llmswitch-core build`
+- 构建根包：`npm run build`
+
+确保 core 改动优先生效，避免引用旧构件导致的不一致。
 
 const responsesConverter = new ResponsesToChatLLMSwitch({
   type: 'llmswitch-response-chat',
@@ -489,7 +494,8 @@ LLMSwitch 模块是流水线架构的第 1 层（协议转换层），负责处�
 ## 🔄 支持的协议转换
 
 ### 🔧 OpenAI 规范化转换器
-- 实现文件: `llmswitch-openai-openai.ts`
+- 实现来源: rcc-llmswitch-core（包内实现）
+- 导入路径: `rcc-llmswitch-core/llmswitch/openai-normalizer`
 - **功能**: OpenAI 协议规范化，保持请求结构一致
 - **特性**:
   - 完整的 OpenAI 协议支持
@@ -499,7 +505,8 @@ LLMSwitch 模块是流水线架构的第 1 层（协议转换层），负责处�
   - 错误上下文增强
 
 ### 🤖 Anthropic-OpenAI 双向转换器
-- **实现文件**: `llmswitch-anthropic-openai.ts`
+- 实现来源: rcc-llmswitch-core（包内实现）
+- 导入路径: `rcc-llmswitch-core/llmswitch/anthropic-openai-converter`
 - **功能**: Anthropic 协议与 OpenAI 协议互转
 - **特性**:
   - 消息格式转换
@@ -509,7 +516,8 @@ LLMSwitch 模块是流水线架构的第 1 层（协议转换层），负责处�
   - 响应格式标准化
 
 ### 🆕 Responses-Chat 转换器（经由 core codecs）
-- **实现文件**: `llmswitch-response-chat.ts`
+- 实现来源: rcc-llmswitch-core（包内实现）
+- 导入路径: `rcc-llmswitch-core/llmswitch/llmswitch-response-chat`
 - **功能**: OpenAI Responses API 与 Chat Completions API 互转
 - **特性**:
   - **双向转换**: Responses ↔ Chat 格式完全支持
@@ -621,12 +629,9 @@ private validateProtocol(request: any, protocol: string): void {
 
 ```
 src/modules/pipeline/modules/llmswitch/
-├── (兼容保留) openai-normalizer.ts   # 旧的 OpenAI 规范化实现，逻辑已收敛到 core/codecs，文件仅兼容，勿再直接引用
-├── llmswitch-openai-openai.ts        # OpenAI → OpenAI 转换器
-├── llmswitch-anthropic-openai.ts    # Anthropic ↔ OpenAI 转换器
-├── llmswitch-response-chat.ts        # Responses ↔ Chat 转换器 ⭐
-├── anthropic-openai-converter.ts    # Anthropic 转换器工具（逐步收敛到 codecs）
-├── anthropic-openai-config.ts        # Anthropic 转换配置
+├── (兼容保留) openai-normalizer.ts   # 旧本地实现（已由 core 提供统一实现）
+├── (核心实现由 rcc-llmswitch-core 提供)
+├── anthropic-openai-config.ts        # （如需覆盖）Anthropic 转换配置
 └── README.md                         # 本文档
 ```
 
@@ -634,7 +639,7 @@ src/modules/pipeline/modules/llmswitch/
 
 ### Responses API 转换
 ```typescript
-import { ResponsesToChatLLMSwitch } from './llmswitch-response-chat.js';
+import { ResponsesToChatLLMSwitch } from 'rcc-llmswitch-core/llmswitch/llmswitch-response-chat';
 
 const responsesSwitch = new ResponsesToChatLLMSwitch({
   type: 'llmswitch-response-chat',
