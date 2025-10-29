@@ -178,6 +178,28 @@ export class ResponsesHandler extends BaseHandler {
       this.logCompletion(requestId, startTime, true);
     } catch (error) {
       this.logCompletion(requestId, startTime, false);
+      // If client requested SSE, emit SSE error and close the stream instead of JSON
+      try {
+        const accept = String(req.headers['accept'] || '').toLowerCase();
+        const wantsSSE = (accept.includes('text/event-stream') || req.body?.stream === true);
+        if (wantsSSE && !res.writableEnded) {
+          try {
+            if (!res.headersSent) {
+              res.setHeader('Content-Type', 'text/event-stream');
+              res.setHeader('Cache-Control', 'no-cache');
+              res.setHeader('Connection', 'keep-alive');
+              res.setHeader('x-request-id', requestId);
+            }
+            const errMsg = (error instanceof Error ? error.message : String(error)) || 'stream error';
+            const evt = { type: 'response.error', error: { message: errMsg, type: 'streaming_error', code: 'STREAM_FAILED' }, requestId } as Record<string, unknown>;
+            res.write(`event: response.error\n`);
+            res.write(`data: ${JSON.stringify(evt)}\n\n`);
+          } catch { /* ignore */ }
+          try { res.end(); } catch { /* ignore */ }
+          return;
+        }
+      } catch { /* ignore */ }
+
       await this.handleError(error as Error, res, requestId);
     }
   }
