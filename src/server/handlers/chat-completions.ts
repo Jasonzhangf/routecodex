@@ -120,6 +120,35 @@ export class ChatCompletionsHandler extends BaseHandler {
       this.logCompletion(requestId, startTime, true);
     } catch (error) {
       this.logCompletion(requestId, startTime, false);
+      // If the client requested SSE streaming, emit an SSE error and end the stream
+      try {
+        const accept = String(req.headers['accept'] || '').toLowerCase();
+        const wantsSSE = (accept.includes('text/event-stream') || req.body?.stream === true);
+        if (wantsSSE && !res.writableEnded) {
+          try {
+            if (!res.headersSent) {
+              res.setHeader('Content-Type', 'text/event-stream');
+              res.setHeader('Cache-Control', 'no-cache');
+              res.setHeader('Connection', 'keep-alive');
+              res.setHeader('x-request-id', requestId);
+            }
+            const model = typeof req.body?.model === 'string' ? req.body.model : 'unknown';
+            const errMsg = (error instanceof Error ? error.message : String(error)) || 'stream error';
+            const errChunk = {
+              id: `chatcmpl-${Date.now()}`,
+              object: 'chat.completion.chunk',
+              created: Math.floor(Date.now() / 1000),
+              model,
+              choices: [{ index: 0, delta: { content: `Error: ${errMsg}` }, finish_reason: 'error' }]
+            } as any;
+            res.write(`data: ${JSON.stringify(errChunk)}\n\n`);
+            res.write(`data: [DONE]\n\n`);
+          } catch { /* ignore */ }
+          try { res.end(); } catch { /* ignore */ }
+          return;
+        }
+      } catch { /* ignore */ }
+
       await this.handleError(error as Error, res, requestId);
     }
   }
