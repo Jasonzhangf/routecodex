@@ -275,8 +275,15 @@ function normalizeArgumentsBySchema(argsStringOrObj: unknown, functionName: stri
           } else if (typeof v === 'string') {
             // For shell.command allow argv tokenization; otherwise wrap
             if (String(functionName || '').toLowerCase() === 'shell' && key === 'command') {
-              const tokens = splitCommandString(v);
-              (argsObj as any)[key] = tokens.length ? tokens : [];
+              // Robust tokenization for comma/bracket lists from models
+              const rawTokens = splitCommandString(v);
+              const flattenByComma = (arr: string[]): string[] => arr.flatMap((t) => String(t).split(',').map(s => s.trim()).filter(Boolean));
+              const stripBracketsAndCommas = (arr: string[]): string[] => arr
+                .map((t) => t.replace(/^\[+/, '').replace(/\]+$/, ''))
+                .map((t) => t.endsWith(',') ? t.slice(0, -1) : t)
+                .filter((t) => t !== ',' && t.length > 0);
+              const cleaned = stripBracketsAndCommas(flattenByComma(rawTokens));
+              (argsObj as any)[key] = cleaned.length ? cleaned : [];
             } else {
               (argsObj as any)[key] = v.length ? [v] : [];
             }
@@ -315,6 +322,28 @@ function normalizeArgumentsBySchema(argsStringOrObj: unknown, functionName: stri
         else if (typeof cmdVal === 'string') (argsObj as any).command = [cmdVal, ...extrasTokens];
         else (argsObj as any).command = [...extrasTokens];
       }
+
+      // Meta-operators handling: if command is argv and contains pipes/redirection/heredoc/and/or,
+      // collapse into ['bash','-lc','<script>'] so downstream executors (that do not spawn a shell)
+      // can still interpret the meta within bash. This mirrors Chat path behavior.
+      try {
+        const metas = new Set(['|','>','>>','<','<<',';','&&','||']);
+        const hasMetaToken = (arr: string[]) => arr.some(t => metas.has(t) || /[|<>;&]/.test(String(t)) || String(t).includes('&&') || String(t).includes('||') || String(t).includes('<<'));
+        const isBashLc = (arr: string[]) => arr.length >= 2 && arr[0] === 'bash' && arr[1] === '-lc';
+        const cmdVal: any = (argsObj as any).command;
+        if (Array.isArray(cmdVal)) {
+          const tokens = cmdVal.map((x: any) => String(x));
+          if (!isBashLc(tokens) && hasMetaToken(tokens)) {
+            (argsObj as any).command = ['bash','-lc', tokens.join(' ')];
+          }
+        } else if (typeof cmdVal === 'string') {
+          const s = cmdVal.trim();
+          const hasMeta = /[|<>;&]/.test(s) || s.includes('&&') || s.includes('||') || s.includes('<<');
+          if (hasMeta && !/^\s*bash\s+-lc\s+/.test(s)) {
+            (argsObj as any).command = ['bash','-lc', s];
+          }
+        }
+      } catch { /* ignore meta wrapping errors */ }
     }
   } catch { /* ignore */ }
 

@@ -415,6 +415,131 @@ export function normalizeChatResponse(res: any): any {
       const choice = { ...c };
       const msg = choice.message && typeof choice.message === 'object' ? { ...choice.message } : choice.message;
       if (msg && typeof msg === 'object') {
+        // 先从 assistant 文本中提取可能的工具调用（rcc.tool.v1 / *** Begin Patch ... *** End Patch）
+        try {
+          const hasNoToolCalls = (!(Array.isArray((msg as any).tool_calls)) || !(msg as any).tool_calls.length);
+          if (typeof (msg as any).content === 'string' && hasNoToolCalls) {
+            const text = String((msg as any).content);
+
+            const extractRCCToolCallsFromText = (s: string): Array<{ id?: string; name: string; args: string }> | null => {
+              try {
+                if (typeof s !== 'string' || !s) return null;
+                const out: Array<{ id?: string; name: string; args: string }> = [];
+                const marker = /rcc\.tool\.v1/gi;
+                let m: RegExpExecArray | null;
+                while ((m = marker.exec(s)) !== null) {
+                  let start = -1;
+                  for (let i = m.index; i >= 0; i--) {
+                    const ch = s[i];
+                    if (ch === '{') { start = i; break; }
+                    if (m.index - i > 4096) break;
+                  }
+                  if (start < 0) continue;
+                  let depth = 0, end = -1; let inStr = false; let quote: string | null = null; let esc = false;
+                  for (let j = start; j < s.length; j++) {
+                    const ch = s[j];
+                    if (inStr) {
+                      if (esc) { esc = false; continue; }
+                      if (ch === '\\') { esc = true; continue; }
+                      if (ch === quote) { inStr = false; quote = null; continue; }
+                      continue;
+                    } else {
+                      if (ch === '"' || ch === '\'') { inStr = true; quote = ch; continue; }
+                      if (ch === '{') { depth++; }
+                      else if (ch === '}') { depth--; if (depth === 0) { end = j; break; } }
+                    }
+                  }
+                  if (end < 0) continue;
+                  const jsonStr = s.slice(start, end + 1);
+                  let obj: any = null; try { obj = JSON.parse(jsonStr); } catch { obj = null; }
+                  if (!obj || typeof obj !== 'object') continue;
+                  if (String(obj.version || '').toLowerCase() !== 'rcc.tool.v1') continue;
+                  const tool = obj.tool || {};
+                  const name = typeof tool.name === 'string' && tool.name.trim() ? tool.name.trim() : undefined;
+                  if (!name) continue;
+                  const callId = typeof tool.call_id === 'string' && tool.call_id.trim() ? tool.call_id.trim() : undefined;
+                  const argsObj = (obj.arguments !== undefined ? obj.arguments : {});
+                  let argsStr = '{}'; try { argsStr = JSON.stringify(argsObj ?? {}); } catch { argsStr = '{}'; }
+                  out.push({ id: callId, name, args: argsStr });
+                  marker.lastIndex = end + 1;
+                }
+                return out.length ? out : null;
+              } catch { return null; }
+            };
+
+            const extractApplyPatchCallsFromText = (s: string): Array<{ id?: string; name: string; args: string }> | null => {
+              try {
+                if (typeof s !== 'string' || !s) return null;
+                const out: Array<{ id?: string; name: string; args: string }> = [];
+                const candidates: string[] = [];
+                const fenceRe = /```(?:patch)?\s*([\s\S]*?)\s*```/gi; let fm: RegExpExecArray | null;
+                while ((fm = fenceRe.exec(s)) !== null) {
+                  const body = fm[1] || '';
+                  if (/\*\*\*\s+Begin Patch[\s\S]*?\*\*\*\s+End Patch/.test(body)) candidates.push(body);
+                }
+                if (/\*\*\*\s+Begin Patch[\s\S]*?\*\*\*\s+End Patch/.test(s)) candidates.push(s);
+                const genId = () => `call_${Math.random().toString(36).slice(2, 10)}`;
+                for (const src of candidates) {
+                  const pg = /\*\*\*\s+Begin Patch[\s\S]*?\*\*\*\s+End Patch/gm; let pm: RegExpExecArray | null;
+                  while ((pm = pg.exec(src)) !== null) {
+                    const patch = pm[0]; if (!patch || patch.length < 32) continue;
+                    let argsStr = '{}'; try { argsStr = JSON.stringify({ patch }); } catch { argsStr = '{"patch":""}'; }
+                    out.push({ id: genId(), name: 'apply_patch', args: argsStr });
+                  }
+                }
+                return out.length ? out : null;
+              } catch { return null; }
+            };
+
+            const extractWriteFileCallsFromText = (s: string): Array<{ id?: string; name: string; args: string }> | null => {
+              try {
+                if (typeof s !== 'string' || !s) return null;
+                const out: Array<{ id?: string; name: string; args: string }> = [];
+                // Tolerant regex for <write_file><path>...</path><content>...</content></write_file>
+                const re = /<write_file>\s*<path>([\s\S]*?)<\/path>\s*<content>([\s\S]*?)<\/content>\s*<\/write_file>/gi;
+                let m: RegExpExecArray | null;
+                while ((m = re.exec(s)) !== null) {
+                  const rawPath = (m[1] || '').trim();
+                  const rawContent = (m[2] || '');
+                  if (!rawPath) continue;
+                  const q = (x: string) => `'` + String(x).replace(/'/g, `\'`) + `'`;
+                  const script = `cat > ${q(rawPath)} <<'EOF'\n${rawContent}\nEOF`;
+                  const argsObj = { command: ['bash','-lc', script] } as any;
+                  let argsStr = '{}'; try { argsStr = JSON.stringify(argsObj); } catch { argsStr = '{"command":["bash","-lc","true"]}'; }
+                  out.push({ id: undefined, name: 'shell', args: argsStr });
+                }
+                return out.length ? out : null;
+              } catch { return null; }
+            };
+
+            let handled = false;
+            const rcc = extractRCCToolCallsFromText(text);
+            if (rcc && rcc.length) {
+              (msg as any).tool_calls = rcc.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.args } }));
+              (msg as any).content = '';
+              handled = true;
+            }
+            if (!handled) {
+              const patches = extractApplyPatchCallsFromText(text);
+              if (patches && patches.length) {
+                (msg as any).tool_calls = patches.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.args } }));
+                (msg as any).content = '';
+                handled = true;
+              }
+            }
+            if (!handled) {
+              const writes = extractWriteFileCallsFromText(text);
+              if (writes && writes.length) {
+                (msg as any).tool_calls = writes.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.args } }));
+                (msg as any).content = '';
+                handled = true;
+              }
+            }
+          }
+
+          // 不在此处从 reasoning_content 做工具提取；该逻辑由 GLM 兼容层（glm-compatibility）负责
+        } catch { /* ignore extraction errors */ }
+
         if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
           // Always normalize tool_calls
           msg.tool_calls = msg.tool_calls.map((tc: any) => normalizeToolCall(tc));

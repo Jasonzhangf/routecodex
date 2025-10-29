@@ -286,6 +286,40 @@ export class GLMCompatibility implements CompatibilityModule {
                 msg.content = text;
               }
             }
+
+            // 2.5) 若仍未命中，从 reasoning_content 中提取工具意图（处理 GLM 把工具写在思考里的情况）
+            if (!handled) {
+              try {
+                const rtext = typeof (msg as any).reasoning_content === 'string' ? String((msg as any).reasoning_content) : '';
+                if (rtext && rtext.trim()) {
+                  const r1 = this.extractRCCToolCallsFromText(rtext);
+                  if (r1 && r1.length) {
+                    const toolCalls = r1.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.args } }));
+                    msg.tool_calls = Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : toolCalls;
+                    msg.content = '';
+                    handled = true;
+                  }
+                  if (!handled) {
+                    const r2 = this.extractApplyPatchCallsFromText(rtext);
+                    if (r2 && r2.length) {
+                      const toolCalls = r2.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.args } }));
+                      msg.tool_calls = Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : toolCalls;
+                      msg.content = '';
+                      handled = true;
+                    }
+                  }
+                  if (!handled) {
+                    const r3 = this.extractToolCallsFromText(rtext);
+                    if (r3 && r3.length) {
+                      const toolCalls = r3.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.args } }));
+                      msg.tool_calls = Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : toolCalls;
+                      msg.content = '';
+                      handled = true;
+                    }
+                  }
+                }
+              } catch { /* ignore */ }
+            }
           }
           // Reasoning content handling by endpoint policy
           if (reasoningPolicy === 'strip') {

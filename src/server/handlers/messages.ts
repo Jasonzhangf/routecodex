@@ -58,15 +58,21 @@ export class MessagesHandler extends BaseHandler {
         }
       } catch { /* non-blocking */ }
 
-      // Validate request
-      const validation = this.requestValidator.validateMessages(req.body);
-      if (!validation.isValid) {
-        throw new RouteCodexError(
-          `Request validation failed: ${validation.errors.join(', ')}`,
-          'validation_error',
-          400
-        );
-      }
+      // 对齐 OpenAI 通路：跳过严格校验，保留原始入参，避免丢参/误拒
+      // 如需启用严格校验，设置 RCC_ENABLE_MSG_VALIDATION=1
+      try {
+        const enableValidation = String(process.env.RCC_ENABLE_MSG_VALIDATION || '').trim() === '1';
+        if (enableValidation) {
+          const validation = this.requestValidator.validateMessages(req.body);
+          if (!validation.isValid) {
+            throw new RouteCodexError(
+              `Request validation failed: ${validation.errors.join(', ')}`,
+              'validation_error',
+              400
+            );
+          }
+        }
+      } catch { /* keep going on validator errors */ }
 
       // Process request
       const pipelineResponse = await this.processMessagesRequest(req, requestId);
@@ -78,8 +84,9 @@ export class MessagesHandler extends BaseHandler {
           : req.body.model;
 
         // 默认开启真流式：未设置时视为启用；仅当显式为 '0' 或 'false' 时关闭
+        // 与 OpenAI 通路保持一致：默认不用特定 O2A 流转换，除非显式开启
         const _flag = process.env.RCC_O2A_STREAM;
-        const useO2AStream = (_flag === undefined) || _flag === '1' || (_flag?.toLowerCase?.() === 'true');
+        const useO2AStream = (_flag === '1') || (_flag?.toLowerCase?.() === 'true');
         try {
           // Prefer true streaming conversion when upstream is a Readable and RCC_O2A_STREAM=1
           const topReadable = pipelineResponse && typeof (pipelineResponse as any).pipe === 'function' ? (pipelineResponse as any) : null;

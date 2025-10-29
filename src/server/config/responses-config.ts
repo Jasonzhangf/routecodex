@@ -149,49 +149,84 @@ const DEFAULTS: ResponsesModuleConfig = {
 
 export class ResponsesConfigUtil {
   static async load(): Promise<ResponsesModuleConfig> {
-    // First try modules.json
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const { fileURLToPath } = await import('url');
+    const fallbackDisabled = String(process.env.ROUTECODEX_DISABLE_CONFIG_FALLBACK || process.env.RCC_DISABLE_CONFIG_FALLBACK || '0') === '1';
+
+    // Helper: ascend from a starting dir to locate the package root (directory containing package.json)
+    const findPackageRoot = async (startDir: string): Promise<string> => {
+      let dir = startDir;
+      for (let i = 0; i < 6; i++) {
+        try {
+          const cand = path.join(dir, 'package.json');
+          const stat = await fs.stat(cand).catch(() => null as any);
+          if (stat && stat.isFile()) return dir;
+        } catch { /* continue */ }
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+      }
+      return startDir; // best effort
+    };
+
+    // Resolve default mapping/schema paths relative to package root
+    const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+    const pkgRoot = await findPackageRoot(moduleDir);
+    const defaultMappingPath = path.join(pkgRoot, 'config', 'responses-conversion.json');
+    const defaultSchemaPath = path.join(pkgRoot, 'config', 'schemas', 'responses-conversion.schema.json');
+
+    // First: try to load modules.json (optional). If missing and fallback allowed, continue with defaults.
+    let withEnv: ResponsesModuleConfig = DEFAULTS;
+    let mappingsPathFromConfig: string | null = null;
     try {
       const reader = new ModuleConfigReader('./config/modules.json');
       const cfg = await reader.load();
       const mod = reader.getModuleConfigValue<ResponsesModuleConfig>('responses', DEFAULTS) || DEFAULTS;
-      const withEnv = this.mergeWithEnv(mod);
-      // Load external mappings if configured
-      const mappingsPath = (cfg as any)?.modules?.responses?.config?.conversion?.mappingsPath || null;
-      try {
-        const fs = await import('fs/promises');
-        const path = await import('path');
-        const { fileURLToPath } = await import('url');
-        const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-        const pkgRoot = path.resolve(moduleDir, '../../../');
-
-        const resolvePath = (p: string | null): string => {
-          if (!p || p.trim() === '') return path.join(pkgRoot, 'config', 'responses-conversion.json');
-          const raw = p.trim();
-          if (raw.startsWith('~')) {
-            const home = process.env.HOME || process.env.USERPROFILE || '';
-            return path.join(home, raw.slice(1));
-          }
-          if (path.isAbsolute(raw)) return raw;
-          // treat as package-relative
-          return path.join(pkgRoot, raw.replace(/^\.\//, ''));
-        };
-
-        const mappingFile = resolvePath(mappingsPath);
-        const content = await fs.readFile(mappingFile, 'utf-8');
-        const parsed = JSON.parse(content);
-        // Validate mapping JSON against schema (AJV)
-        const schemaPath = path.join(pkgRoot, 'config', 'schemas', 'responses-conversion.schema.json');
-        const { SchemaValidator } = await import('./schema-validator.js');
-        await SchemaValidator.validateMapping(parsed, schemaPath);
-        withEnv.mappings = { ...(DEFAULT_MAPPING as any), ...(parsed as any) } as ResponsesConversionMapping;
-      } catch (e) {
-        // No fallback allowed: mapping must be present and valid
-        throw e;
+      withEnv = this.mergeWithEnv(mod);
+      mappingsPathFromConfig = (cfg as any)?.modules?.responses?.config?.conversion?.mappingsPath || null;
+    } catch (e) {
+      if (fallbackDisabled) {
+        throw new Error('Failed to load responses module or mapping configuration.');
       }
+      // Use DEFAULTS with env overrides
+      withEnv = this.mergeWithEnv(DEFAULTS);
+    }
+
+    // Env override for mappings path
+    const envMappingPath = (process.env.ROUTECODEX_RESP_MAPPINGS_PATH || process.env.RCC_RESP_MAPPINGS_PATH || '').trim();
+    const preferPath = envMappingPath || (mappingsPathFromConfig || '').trim();
+
+    // Resolve final mapping file path
+    const resolveMappingPath = (p: string | null): string => {
+      const raw = (p || '').trim();
+      if (!raw) return defaultMappingPath;
+      if (raw.startsWith('~')) {
+        const home = process.env.HOME || process.env.USERPROFILE || '';
+        return path.join(home, raw.slice(1));
+      }
+      if (path.isAbsolute(raw)) return raw;
+      // Treat as package-root relative or process CWD relative depending on prefix
+      if (raw.startsWith('./') || raw.startsWith('config/')) return path.join(pkgRoot, raw.replace(/^\.\//, ''));
+      return path.join(pkgRoot, raw);
+    };
+
+    // Load and validate mapping; if fails, fallback to DEFAULT_MAPPING when allowed
+    try {
+      const mappingFile = resolveMappingPath(preferPath || null);
+      const content = await fs.readFile(mappingFile, 'utf-8');
+      const parsed = JSON.parse(content);
+      const { SchemaValidator } = await import('./schema-validator.js');
+      await SchemaValidator.validateMapping(parsed, defaultSchemaPath);
+      withEnv.mappings = { ...(DEFAULT_MAPPING as any), ...(parsed as any) } as ResponsesConversionMapping;
       return withEnv;
-    } catch {
-      // No fallback allowed per requirement
-      throw new Error('Failed to load responses module or mapping configuration.');
+    } catch (e) {
+      if (fallbackDisabled) {
+        throw new Error('Failed to load responses module or mapping configuration.');
+      }
+      // Fallback to DEFAULT_MAPPING embedded
+      withEnv.mappings = DEFAULT_MAPPING;
+      return withEnv;
     }
   }
 
