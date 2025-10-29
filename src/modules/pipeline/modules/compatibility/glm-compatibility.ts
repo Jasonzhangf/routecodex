@@ -341,18 +341,7 @@ export class GLMCompatibility implements CompatibilityModule {
                 msg.content = '';
                 handled = true;
               } else {
-                // 2.2) 尝试 <function=execute><parameter=command>...</parameter></function>
-                try {
-                  const execCalls = this.extractExecuteBlocksFromText(text);
-                  if (execCalls && execCalls.length) {
-                    const toolCalls = execCalls.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.args } }));
-                    msg.tool_calls = Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : toolCalls;
-                    msg.content = '';
-                    handled = true;
-                  } else {
-                    msg.content = text;
-                  }
-                } catch { msg.content = text; }
+                msg.content = text;
               }
             }
 
@@ -624,63 +613,8 @@ export class GLMCompatibility implements CompatibilityModule {
     } catch { return null; }
   }
 
-  // 从文本中提取统一 diff 补丁块（*** Begin Patch ... *** End Patch），并映射为 apply_patch 工具调用
-  private extractApplyPatchCallsFromText(text: string): Array<{ id?: string; name: string; args: string }> | null {
-    try {
-      if (typeof text !== 'string' || !text) return null;
-      const out: Array<{ id?: string; name: string; args: string }> = [];
-
-      // 支持代码围栏 ```patch ... ``` 或普通文本中直接出现补丁
-      const candidates: string[] = [];
-      const fenceRe = /```(?:patch)?\s*([\s\S]*?)\s*```/gi;
-      let fm: RegExpExecArray | null;
-      while ((fm = fenceRe.exec(text)) !== null) {
-        const body = fm[1] || '';
-        if (/\*\*\*\s+Begin Patch[\s\S]*?\*\*\*\s+End Patch/.test(body)) {
-          candidates.push(body);
-        }
-      }
-      // 非围栏：直接在整段文本中检测
-      if (/\*\*\*\s+Begin Patch[\s\S]*?\*\*\*\s+End Patch/.test(text)) {
-        candidates.push(text);
-      }
-
-      const genId = () => `call_${Math.random().toString(36).slice(2, 10)}`;
-
-      for (const src of candidates) {
-        // 可能存在多个补丁块，逐个提取
-        const pg = /\*\*\*\s+Begin Patch[\s\S]*?\*\*\*\s+End Patch/gm;
-        let pm: RegExpExecArray | null;
-        while ((pm = pg.exec(src)) !== null) {
-          const patch = pm[0];
-          if (!patch || patch.length < 32) continue;
-          let argsStr = '{}';
-          try { argsStr = JSON.stringify({ patch }); } catch { argsStr = '{"patch":""}'; }
-          out.push({ id: genId(), name: 'apply_patch', args: argsStr });
-        }
-      }
-
-      return out.length ? out : null;
-    } catch { return null; }
-  }
-
-  // Extract <function=execute><parameter=command>...</parameter></function> into a shell tool call
-  private extractExecuteBlocksFromText(text: string): Array<{ id?: string; name: string; args: string }> | null {
-    try {
-      if (typeof text !== 'string' || !text) return null;
-      const re = /<function=execute>\s*<parameter=command>([\s\S]*?)<\/parameter>\s*<\/function>/gi;
-      const out: Array<{ id?: string; name: string; args: string }> = [];
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(text)) !== null) {
-        const commandRaw = (m[1] || '').trim();
-        if (!commandRaw) continue;
-        let args = '{}';
-        try { args = JSON.stringify({ command: commandRaw }); } catch { args = '{"command":""}'; }
-        out.push({ id: `call_${Math.random().toString(36).slice(2, 10)}`, name: 'shell', args });
-      }
-      return out.length ? out : null;
-    } catch { return null; }
-  }
+  // 从文本中提取统一 diff 补丁块（*** Begin Patch ... *** End Patch），并映射为 apply_patch 工具调用（迁移至 llmswitch-core 通用层）
+  private extractApplyPatchCallsFromText(_text: string): Array<{ id?: string; name: string; args: string }> | null { return null; }
 
 
   private extractModelConfig(modelId: string | null): ThinkingModelConfig | null {

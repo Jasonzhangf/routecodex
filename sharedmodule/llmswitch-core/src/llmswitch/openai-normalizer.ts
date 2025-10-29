@@ -60,9 +60,11 @@ export class OpenAINormalizerLLMSwitch {
     }
     if (Array.isArray(normalized.tools)) {
       normalized.tools = normalized.tools.map((tool: any) => this.normalizeTool(tool));
-      try { normalized.tools = augmentOpenAITools(normalized.tools as any[]) as any[]; } catch { /* ignore augmentation */ }
     }
-    return normalized;
+    try {
+      const { applyOpenAIToolingStage } = await import('../conversion/shared/openai-tooling-stage.js');
+      return applyOpenAIToolingStage(normalized as any) as any;
+    } catch { return normalized; }
   }
 
   private normalizeMessage(message: any): any {

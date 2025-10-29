@@ -95,7 +95,7 @@ export function normalizeChatRequest(request: any): any {
 
   // Inject minimal system tool guidance when enabled
   try {
-    const sysGuideEnabled = String(process.env.RCC_SYSTEM_TOOL_GUIDANCE || '').trim() === '1';
+    const sysGuideEnabled = String(process.env.RCC_SYSTEM_TOOL_GUIDANCE ?? '1').trim() !== '0';
     const msgs = Array.isArray((normalized as any).messages) ? ((normalized as any).messages as any[]) : [];
     const tools = Array.isArray((normalized as any).tools) ? ((normalized as any).tools as any[]) : [];
     const hasGuidance = msgs.some((m: any) => m && m.role === 'system' && typeof m.content === 'string' && /Use OpenAI tool_calls|Tool usage guidance/i.test(m.content));

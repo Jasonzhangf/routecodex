@@ -58,6 +58,9 @@ export interface BuildChatRequestResult {
 }
 
 // --- Utilities (ported strictly) ---
+import { applyOpenAIToolingStage } from '../shared/openai-tooling-stage.js';
+import { normalizeAssistantTextToToolCalls } from '../shared/text-markup-normalizer.js';
+import { buildSystemToolGuidance } from '../../guidance/index.js';
 
 function isObject(v: unknown): v is Unknown {
   return !!v && typeof v === 'object' && !Array.isArray(v);
@@ -421,9 +424,16 @@ export function buildChatRequestFromResponses(payload: Record<string, unknown>, 
     input: context.input,
     toolsNormalized
   });
+  // Apply unified OpenAI tooling stage on the built Chat request
+  {
+    const chat = applyOpenAIToolingStage({ model: (payload as any).model, messages, tools: toolsNormalized } as any) as any;
+    const msgNew = Array.isArray(chat?.messages) ? chat.messages as Array<Record<string, unknown>> : messages;
+    messages.length = 0; for (const m of msgNew) messages.push(m);
+    toolsNormalized = Array.isArray(chat?.tools) ? chat.tools as Array<Record<string, unknown>> : toolsNormalized;
+  }
   // Inject comprehensive tool usage guidance (non-MCP + phased MCP) into system, once, when tools present (if enabled)
   try {
-    const sysGuideEnabled = String(process.env.RCC_SYSTEM_TOOL_GUIDANCE || '').trim() === '1';
+    const sysGuideEnabled = String(process.env.RCC_SYSTEM_TOOL_GUIDANCE ?? '1').trim() !== '0';
     const toolsList = Array.isArray(toolsNormalized) ? (toolsNormalized as any[]) : (Array.isArray((payload as any).tools) ? ((payload as any).tools as any[]) : []);
     const hasGuidance = messages.some((m: any) => m && m.role === 'system' && typeof m.content === 'string' && /Use OpenAI tool_calls|Tool usage guidance/i.test(m.content));
     if (sysGuideEnabled && !hasGuidance && toolsList.length > 0) {
@@ -453,7 +463,14 @@ export function buildResponsesPayloadFromChat(payload: unknown, context?: Respon
 
   const choices = Array.isArray((response as any).choices) ? (response as any).choices : [];
   const primaryChoice = choices[0] && typeof choices[0] === 'object' ? (choices[0] as Record<string, unknown>) : undefined;
-  const message = primaryChoice && typeof primaryChoice.message === 'object' ? primaryChoice.message as Record<string, unknown> : undefined;
+  let message = primaryChoice && typeof primaryChoice.message === 'object' ? primaryChoice.message as Record<string, unknown> : undefined;
+  // Normalize textual tool markup into tool_calls (gated)
+  if (message && typeof message === 'object') {
+    try { message = normalizeAssistantTextToToolCalls(message as any) as any; } catch { /* ignore */ }
+    if (primaryChoice && typeof primaryChoice === 'object') {
+      (primaryChoice as any).message = message;
+    }
+  }
   const role = (message as any)?.role || 'assistant';
   const content = (message as any)?.content;
   const reasoningText = typeof (message as any)?.reasoning_content === 'string' && ((message as any).reasoning_content as string).trim().length
@@ -868,4 +885,4 @@ export function extractRequestIdFromResponse(response: any): string | undefined 
   }
   return undefined;
 }
-import { buildSystemToolGuidance } from '../../guidance/index.js';
+// (imports moved to top)

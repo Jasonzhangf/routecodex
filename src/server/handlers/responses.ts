@@ -149,22 +149,7 @@ export class ResponsesHandler extends BaseHandler {
         try { res.setHeader('x-rc-adapter', 'normalized:chat|anthropic->responses:non-lossy'); } catch { /* ignore */ }
       } catch { /* non-blocking */ }
 
-      // Augment tool descriptions with Codex CLI guidance (OpenAI tool shape)
-      try {
-        const { augmentOpenAITools } = await import('rcc-llmswitch-core/guidance');
-        if (Array.isArray((req.body as any)?.tools)) {
-          (req.body as any).tools = augmentOpenAITools((req.body as any).tools as any[]);
-        }
-      } catch { /* best effort */ }
-
-      // Refine existing instructions if used as system-like guidance in Responses
-      try {
-        const refineEnabled = String(process.env.RCC_SYSTEM_TOOL_GUIDANCE || '').trim() === '1';
-        if (refineEnabled && typeof (req.body as any)?.instructions === 'string') {
-          const { refineSystemToolGuidance } = await import('rcc-llmswitch-core/guidance');
-          (req.body as any).instructions = refineSystemToolGuidance(String((req.body as any).instructions));
-        }
-      } catch { /* ignore */ }
+      // Tool guidance and normalization are handled in llmswitch-core (openai tooling stage)
 
       // Remove strict request validation for Responses-shaped requests (preserve raw body)
 
