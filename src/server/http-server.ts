@@ -1025,21 +1025,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
               try { res.setHeader('x-rc-system-prompt-source', sel); } catch { /* ignore */ }
             }
           }
-          // If a system prompt exists, refine its tool guidance minimally (unless disabled)
-          try {
-            const refineEnabled = String(process.env.RCC_SYSTEM_TOOL_GUIDANCE || '').trim() === '1';
-            if (refineEnabled && req.body && typeof req.body === 'object' && typeof (req.body as any).system === 'string') {
-              const { refineSystemToolGuidance } = await import('rcc-llmswitch-core/guidance');
-              (req.body as any).system = refineSystemToolGuidance(String((req.body as any).system));
-            }
-          } catch { /* ignore */ }
-          // Augment Anthropic tools with Codex CLI guidance
-          try {
-            const { augmentAnthropicTools } = await import('rcc-llmswitch-core/guidance');
-            if (Array.isArray((req.body as any)?.tools)) {
-              (req.body as any).tools = augmentAnthropicTools((req.body as any).tools as any[]);
-            }
-          } catch { /* best effort */ }
+          // Tool guidance and normalization are handled downstream in llmswitch-core
         } catch { /* non-blocking */ }
 
         const pipelineRequest = {

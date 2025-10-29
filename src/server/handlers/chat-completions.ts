@@ -87,18 +87,6 @@ export class ChatCompletionsHandler extends BaseHandler {
           }
         }
       } catch { /* non-blocking */ }
-      // Refine existing system prompt tool guidance (minimal, idempotent)
-      try {
-        const refineEnabled = String(process.env.RCC_SYSTEM_TOOL_GUIDANCE || '').trim() === '1';
-        if (refineEnabled && Array.isArray((req.body as any)?.messages)) {
-          const msgs: any[] = (req.body as any).messages;
-          if (msgs.length && msgs[0]?.role === 'system' && typeof msgs[0].content === 'string') {
-            const { refineSystemToolGuidance } = await import('rcc-llmswitch-core/guidance');
-            msgs[0].content = refineSystemToolGuidance(String(msgs[0].content));
-            (req.body as any).messages = msgs;
-          }
-        }
-      } catch { /* ignore */ }
 
       // Forced adapter preflight: convert Anthropic/Responses-shaped payloads to OpenAI
       try {
@@ -129,13 +117,7 @@ export class ChatCompletionsHandler extends BaseHandler {
         }
       } catch { /* non-blocking */ }
 
-      // Augment tool descriptions with Codex CLI guidance (OpenAI tool shape)
-      try {
-        const { augmentOpenAITools } = await import('rcc-llmswitch-core/guidance');
-        if (Array.isArray((req.body as any)?.tools)) {
-          (req.body as any).tools = augmentOpenAITools((req.body as any).tools as any[]);
-        }
-      } catch { /* best effort */ }
+      // Tool guidance and normalization are handled in llmswitch-core (openai tooling stage)
 
       // Skip strict request validation (preserve raw inputs)
 
