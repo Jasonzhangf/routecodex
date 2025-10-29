@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.73.55",
+  "version": "0.73.62",
   "description": "Multi-provider OpenAI proxy server with native dry-run capabilities",
   "type": "module",
   "main": "dist/index.js",
@@ -35,7 +35,7 @@
   },
   "scripts": {
     "build": "npm run clean && tsc",
-    "build:dev": "npm run clean && tsc && npm -w sharedmodule/llmswitch-core run build",
+    "build:dev": "npm run clean && tsc && npm --prefix sharedmodule/llmswitch-core run build",
     "prepack": "echo skip-prepack",
     "postbuild": "chmod +x dist/cli.js || true",
     "build:watch": "tsc --watch",

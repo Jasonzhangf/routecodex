@@ -415,12 +415,14 @@ export class ResponsesHandler extends BaseHandler {
         }, intervalMs);
       };
       // Headers
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
       res.setHeader('Connection', 'keep-alive');
+      try { res.setHeader('X-Accel-Buffering', 'no'); } catch { /* ignore */ }
       res.setHeader('x-request-id', requestId);
+      try { (res as any).flushHeaders?.(); } catch { /* ignore */ }
       await auditWrite('meta', { phase: 'headers', headers: {
-        'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'x-request-id': requestId
+        'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no', 'x-request-id': requestId
       }});
       await startHeartbeat();
 
@@ -676,6 +678,8 @@ export class ResponsesHandler extends BaseHandler {
         if (usage2) completedSnapshot2.usage = usage2;
         const completed2 = { type: 'response.completed', response: toCleanObject(completedSnapshot2) } as Record<string, unknown>;
         await writeEvt('response.completed', completed2);
+        // Emit terminal done event to signal clients to stop reconnecting
+        await writeEvt('response.done', { type: 'response.done' } as unknown as Record<string, unknown>);
         try { res.end(); } catch { /* ignore */ }
         await auditWrite('end', { phase: 'completed_after_function_call' });
         if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
@@ -727,6 +731,7 @@ export class ResponsesHandler extends BaseHandler {
       const completed = { type: 'response.completed', response: toCleanObject(completedSnapshot) } as Record<string, unknown>;
       if (streamAborted) { return; }
       await writeEvt('response.completed', completed);
+      await writeEvt('response.done', { type: 'response.done' } as unknown as Record<string, unknown>);
       // no SSE audit summary when Azure artifacts removed
       try { res.end(); } catch { /* ignore */ }
       await auditWrite('end', { phase: 'completed' });

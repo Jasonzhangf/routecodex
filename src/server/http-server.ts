@@ -24,7 +24,7 @@ import {
   type ServerModuleInfo,
 } from './types.js';
 import type { UnknownObject } from '../types/common-types.js';
-import { DebugFileLogger } from '../debug/debug-file-logger.js';
+import { DebugFileLogger } from '../modules/debug/debug-file-logger.js';
 import { ConfigRequestClassifier } from '../modules/virtual-router/classifiers/config-request-classifier.js';
 import { ServiceContainer, ServiceTokens } from './core/service-container.js';
 

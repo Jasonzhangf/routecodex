@@ -221,7 +221,7 @@ RouteCodex的`glm-compatibility`模块处理以下兼容性问题：
 ### 消息清理
 - **空消息删除**: 删除无内容且无工具调用的消息
 - **系统消息**: 保留系统消息用于行为设定
-- **工具历史**: 支持工具调用历史的清理
+- **工具历史**: 仅在“发送前”保留最近一轮的 `assistant.tool_calls`，并将该条 `content=null`；不清理 `role:tool` 历史、不删除早期助手消息（仅移除其 `tool_calls` 字段）。该规范为默认策略，无需任何开关。
 
 ### 响应标准化
 - **格式转换**: GLM响应格式 → OpenAI标准格式
@@ -282,22 +282,18 @@ RouteCodex的`glm-compatibility`模块处理以下兼容性问题：
 
 ## 🔧 环境变量
 
-RouteCodex支持以下环境变量进行GLM兼容性配置：
+RouteCodex 支持有限的兼容性环境变量；与“工具历史清理”相关的开关已废弃：
 
 ```bash
-# 强制禁用思考功能
+# 强制禁用思考功能（可选）
 export RCC_GLM_DISABLE_THINKING=1
 
-# 启用工具历史清理
-export RCC_GLM_TRIM_TOOL_HISTORY=1
+# 已废弃：历史工具清理相关开关（不再需要）
+# export RCC_GLM_TRIM_TOOL_HISTORY=1
+# export RCC_GLM_TRIM_TOOL_KEEP_LAST_TOOL=3
+# export RCC_GLM_TRIM_TOOL_KEEP_LAST_ASSIST=1
 
-# 保留最近工具调用数量（默认3）
-export RCC_GLM_TRIM_TOOL_KEEP_LAST_TOOL=3
-
-# 保留最近助手消息数量（默认1）
-export RCC_GLM_TRIM_TOOL_KEEP_LAST_ASSIST=1
-
-# 推理内容策略：auto|strip|preserve
+# 推理内容策略：auto|strip|preserve（保留，用于响应侧思考内容策略）
 export RCC_REASONING_POLICY=auto
 ```
 
