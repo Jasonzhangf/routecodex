@@ -93,6 +93,8 @@ export function extractToolText(value: unknown): string {
     let exitCode: number | undefined = undefined;
     let duration: number | undefined = undefined;
     let executedLine: string | undefined = undefined;
+    let executedTokens: string[] | null = null;
+    let toolName: string | undefined = undefined;
 
     // Exit/metadata
     try {
@@ -105,11 +107,23 @@ export function extractToolText(value: unknown): string {
 
     // Executed/command echo
     try {
-      const cmdRaw = obj.command ?? obj.argv ?? obj.executed ?? obj.cmd;
-      if (Array.isArray(cmdRaw)) {
-        executedLine = `Executed: ${cmdRaw.map((x: any) => String(x)).join(' ')}`;
-      } else if (typeof cmdRaw === 'string') {
-        executedLine = `Executed: ${cmdRaw}`;
+      // Prefer nested executed.command (our rcc.tool.v1 envelope), then fallbacks
+      const exec = obj.executed;
+      if (exec && typeof exec === 'object' && Array.isArray(exec.command)) {
+        executedTokens = (exec.command as any[]).map((x) => String(x));
+        executedLine = `Executed: ${executedTokens.join(' ')}`;
+      } else {
+        const cmdRaw = obj.command ?? obj.argv ?? obj.cmd;
+        if (Array.isArray(cmdRaw)) {
+          executedTokens = (cmdRaw as any[]).map((x) => String(x));
+          executedLine = `Executed: ${executedTokens.join(' ')}`;
+        } else if (typeof cmdRaw === 'string') {
+          executedLine = `Executed: ${cmdRaw}`;
+        }
+      }
+      if (!toolName && obj.tool && typeof obj.tool === 'object') {
+        const tn = (obj.tool as any).name;
+        if (typeof tn === 'string' && tn.trim()) toolName = tn.trim();
       }
     } catch { /* ignore */ }
 
@@ -172,10 +186,58 @@ export function extractToolText(value: unknown): string {
     const errMerged = uniqMerge(errors).trim();
     if (errMerged) return errMerged;
 
-    // If the command succeeded with no output, emit a clear success marker to avoid agent retry loops
+    // If the command succeeded with no output, emit a clear success marker (with write summary when possible)
     if (exitCode === 0) {
-      if (executedLine) return `${executedLine}\nCommand succeeded (no output).`;
-      return 'Command succeeded (no output).';
+      const summarize = (): string | null => {
+        // Detect heredoc/redirect writes inside bash -lc scripts
+        const script = (() => {
+          if (executedTokens && executedTokens.length >= 3 && executedTokens[0] === 'bash' && executedTokens[1] === '-lc') {
+            return String(executedTokens[2] || '');
+          }
+          return '';
+        })();
+        const detectWriteTarget = (s: string): string | null => {
+          try {
+            // cat > path << 'EOF' ...
+            const m1 = s.match(/cat\s*>\s*([^\s]+)\s*<<\s*['\"]?EOF['\"]?/i);
+            if (m1 && m1[1]) return m1[1];
+            // generic redirect: > path or >> path
+            const m2 = s.match(/[>]{1,2}\s*([^\s;&|]+)/);
+            if (m2 && m2[1]) return m2[1];
+          } catch { /* ignore */ }
+          return null;
+        };
+        const detectSedEdit = (s: string): string | null => {
+          try {
+            // naive: last non-flag token as path when sed -i present
+            if (!/\bsed\b[^\n]*\-i\b/i.test(s)) return null;
+            const parts = s.split(/\s+/).filter(Boolean);
+            let path: string | null = null;
+            for (let i = parts.length - 1; i >= 0; i--) {
+              const t = parts[i];
+              if (/^-/.test(t)) continue;
+              path = t; break;
+            }
+            return path;
+          } catch { return null; }
+        };
+        const writePath = script ? detectWriteTarget(script) : null;
+        const sedPath = script ? detectSedEdit(script) : null;
+
+        if ((toolName && toolName === 'apply_patch')) {
+          return '补丁应用成功\n建议继续使用 apply_patch 进行文件编辑。';
+        }
+        if (writePath) {
+          return `写入成功: ${writePath}\n建议改用 apply_patch 工具进行文件编辑，避免 heredoc/重定向。`;
+        }
+        if (sedPath) {
+          return `修改成功: ${sedPath}\n建议改用 apply_patch 工具进行文件编辑，避免就地编辑。`;
+        }
+        return 'Command succeeded (no output).\n建议改用 apply_patch 工具进行文件编辑。';
+      };
+      const msg = summarize();
+      if (executedLine) return msg ? `${msg}\n${executedLine}` : executedLine;
+      return msg || 'Command succeeded (no output).';
     }
 
     // Fallbacks: minimal metadata or faithful JSON when requested

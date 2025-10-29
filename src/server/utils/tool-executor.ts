@@ -2,6 +2,7 @@ import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import os from 'node:os';
+import fs from 'node:fs';
 
 const exec = promisify(execCb);
 
@@ -165,7 +166,67 @@ export async function executeTool(spec: ToolCallSpec): Promise<ToolResult> {
     const { stdout, stderr } = await exec(command, { timeout: unifiedTimeout, maxBuffer: 1024 * 1024 });
     const out = stdout?.toString()?.trim() || '';
     const err = stderr?.toString()?.trim() || '';
-    const merged = [out, err].filter(Boolean).join('\n');
+    let merged = [out, err].filter(Boolean).join('\n');
+
+    // If command succeeded but produced no output, synthesize a short success summary
+    if (!merged) {
+      const summarizeWrite = (cmd: string): string | null => {
+        try {
+          // Extract bash -lc 'script'
+          let script = '';
+          const m = cmd.match(/\bbash\b\s+-lc\s+'([\s\S]*)'$/);
+          if (m && m[1]) {
+            script = m[1];
+          }
+          // Detect heredoc write: cat > path << 'EOF'
+          const detectWriteTarget = (s: string): string | null => {
+            const m1 = s.match(/cat\s*>\s*([^\s]+)\s*<<\s*['\"]?EOF['\"]?/i);
+            if (m1 && m1[1]) return m1[1];
+            const m2 = s.match(/[>]{1,2}\s*([^\s;&|]+)/);
+            if (m2 && m2[1]) return m2[1];
+            return null;
+          };
+          const detectSedEdit = (s: string): string | null => {
+            if (!/\bsed\b[^\n]*\-i\b/i.test(s)) return null;
+            const parts = s.split(/\s+/).filter(Boolean);
+            for (let i = parts.length - 1; i >= 0; i--) {
+              const t = parts[i];
+              if (!t.startsWith('-')) return t;
+            }
+            return null;
+          };
+          const p = script ? (detectWriteTarget(script) || detectSedEdit(script)) : null;
+          if (p) {
+            let filePath = p;
+            // Strip surrounding quotes if any
+            if ((filePath.startsWith("'") && filePath.endsWith("'")) || (filePath.startsWith('"') && filePath.endsWith('"'))) {
+              filePath = filePath.slice(1, -1);
+            }
+            // Resolve relative path for stat
+            const resolved = path.resolve(process.cwd(), filePath);
+            try {
+              const stat = fs.statSync(resolved);
+              let lines: number | null = null;
+              if (stat.isFile() && stat.size <= 2_000_000) {
+                try { const buf = fs.readFileSync(resolved, 'utf8'); lines = (buf.match(/\n/g) || []).length + (buf.endsWith('\n') ? 0 : 1); } catch { lines = null; }
+              }
+              const sizePart = `大小: ${stat.size} bytes`;
+              const linePart = lines != null ? `，行数: ${lines}` : '';
+              const verb = /sed\b/i.test(script) ? '修改成功' : '写入成功';
+              return `${verb}: ${filePath}（${sizePart}${linePart}）`;
+            } catch {
+              // File may be temporary or moved; still return generic success
+              const verb = /sed\b/i.test(script) ? '修改成功' : '写入成功';
+              return `${verb}: ${filePath}`;
+            }
+          }
+        } catch { /* ignore */ }
+        return null;
+      };
+      const summary = summarizeWrite(command);
+      merged = summary || 'Command succeeded (no output).';
+    }
+
     return { id: spec.id, name, output: merged };
   } catch (e: any) {
     const msg = e?.message || String(e);

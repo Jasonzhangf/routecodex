@@ -61,6 +61,8 @@ export interface BuildChatRequestResult {
 import { applyOpenAIToolingStage } from '../shared/openai-tooling-stage.js';
 import { normalizeAssistantTextToToolCalls } from '../shared/text-markup-normalizer.js';
 import { buildSystemToolGuidance } from '../../guidance/index.js';
+import { splitCommandString } from '../shared/tooling.js';
+import { normalizeTools } from '../shared/args-mapping.js';
 
 function isObject(v: unknown): v is Unknown {
   return !!v && typeof v === 'object' && !Array.isArray(v);
@@ -71,29 +73,7 @@ function tryParseJson(s: unknown): unknown {
   try { return JSON.parse(s); } catch { return s; }
 }
 
-function splitCommandString(input: string): string[] {
-  const s = input.trim();
-  if (!s) return [];
-  const out: string[] = [];
-  let cur = '';
-  let inSingle = false;
-  let inDouble = false;
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (inSingle) { if (ch === "'") { inSingle = false; } else { cur += ch; } continue; }
-    if (inDouble) {
-      if (ch === '"') { inDouble = false; continue; }
-      if (ch === '\\' && i + 1 < s.length) { i++; cur += s[i]; continue; }
-      cur += ch; continue;
-    }
-    if (ch === "'") { inSingle = true; continue; }
-    if (ch === '"') { inDouble = true; continue; }
-    if (/\s/.test(ch)) { if (cur) { out.push(cur); cur = ''; } continue; }
-    cur += ch;
-  }
-  if (cur) out.push(cur);
-  return out;
-}
+// splitCommandString now unified in ../shared/tooling.ts
 
 // Lenient JSON-ish parsing for tool arguments (align with OpenAI→Anthropic robustness)
 function parseLenient(value: unknown): unknown {
@@ -134,49 +114,7 @@ function parseLenient(value: unknown): unknown {
 
 function defaultObjectSchema() { return { type: 'object', properties: {}, additionalProperties: true }; }
 
-function normalizeTools(tools: any[]): Unknown[] {
-  if (!Array.isArray(tools)) return [];
-  const out: Unknown[] = [];
-  for (const t of tools) {
-    if (!t || typeof t !== 'object') continue;
-    const fn = (t as any).function || {};
-    const topName = typeof (t as any).name === 'string' ? (t as any).name : undefined;
-    const topDesc = typeof (t as any).description === 'string' ? (t as any).description : undefined;
-    const topParams = (t as any).parameters;
-    const name = typeof fn?.name === 'string' ? fn.name : topName;
-    const desc = typeof fn?.description === 'string' ? fn.description : topDesc;
-    let params = (fn?.parameters !== undefined ? fn.parameters : topParams);
-    params = tryParseJson(params);
-    if (!isObject(params)) params = defaultObjectSchema();
-    // Augment shell tool description to nudge the model to put all intent into argv tokens only (CCR-style)
-    try {
-      if (String(name || '').trim() === 'shell') {
-        if (!isObject((params as any).properties)) (params as any).properties = {} as Unknown;
-        const props = (params as any).properties as Unknown;
-        if (!isObject((props as any).command)) {
-          (props as any).command = { type: 'array', items: { type: 'string' }, description: 'The command to execute as argv tokens' } as Unknown;
-        }
-        (params as any).additionalProperties = false;
-        const guidance = [
-          'Execute shell commands. Place ALL flags, paths and patterns into the `command` array as argv tokens.',
-          'Do NOT add extra keys beyond the schema. Examples:',
-          '- ["find",".","-type","f","-name","*.ts"]',
-          '- ["find",".","-type","f","-not","-path","*/node_modules/*","-name","*.ts"]',
-          '- ["find",".","-type","f","-name","*.ts","-exec","head","-20","{}","+"]',
-          '中文：所有参数写入 command 数组，不要使用额外键名（如 md 或 node_modules/*）。'
-        ].join('\n');
-        const d0 = typeof desc === 'string' ? desc : '';
-        const descOut = d0 && !/Place ALL flags/i.test(d0) ? `${d0}\n\n${guidance}` : (d0 || guidance);
-        const norm: Unknown = { type: 'function', function: { name, description: descOut, parameters: params as Unknown, strict: true } };
-        if ((norm as any).function?.name) out.push(norm);
-        continue;
-      }
-    } catch { /* ignore augmentation errors */ }
-    const norm: Unknown = { type: 'function', function: { name, ...(desc ? { description: desc } : {}), parameters: params as Unknown } };
-    if ((norm as any).function?.name) out.push(norm);
-  }
-  return out;
-}
+// normalizeTools unified in ../shared/args-mapping.ts
 
 // --- Structured self-repair helpers for tool failures (Responses path) ---
 function isImagePathCompat(p: any): boolean {

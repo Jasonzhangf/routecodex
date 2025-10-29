@@ -26,7 +26,7 @@ function augmentShell(fn: Unknown): void {
   const guidance = [
     marker,
     'Execute shell commands. Place ALL flags, paths and patterns into the `command` array as argv tokens.',
-    'Do not invent extra keys. Do not use shell redirection or here-doc for file writes.'
+    'Do not invent extra keys. Do not use shell redirection or here-doc for file writes; use apply_patch for editing files.'
   ].join('\n');
 
   const params = ensureObjectSchema((fn as any).parameters);
@@ -44,7 +44,14 @@ function augmentApplyPatch(fn: Unknown): void {
   const marker = '[Codex ApplyPatch Guidance]';
   const guidance = [
     marker,
-    'Edit files by applying a unified diff patch. Return ONLY the patch text with *** Begin Patch/*** End Patch blocks.'
+    'Edit files by applying a unified diff patch. Return ONLY the patch text with *** Begin Patch/*** End Patch blocks.',
+    'Example:',
+    '*** Begin Patch',
+    '*** Update File: path/to/file.ts',
+    '@@',
+    '- old line',
+    '+ new line',
+    '*** End Patch'
   ].join('\n');
 
   const params = ensureObjectSchema((fn as any).parameters);
@@ -176,6 +183,7 @@ export function buildSystemToolGuidance(): string {
   lines.push(bullet('Always use assistant.tool_calls[].function.{name,arguments}; never embed tool calls in plain text. / 一律通过 tool_calls 调用工具，不要把工具调用写进普通文本。'));
   lines.push(bullet('function.arguments must be a single JSON string. / arguments 必须是单个 JSON 字符串。'));
   lines.push(bullet('shell: Place ALL intent into the command argv array only; do not invent extra keys. / shell 所有意图写入 command 数组，不要添加额外键名。'));
+  lines.push(bullet('shell: Do NOT use redirection or here-doc for file writes; use apply_patch. / shell 禁止使用重定向/heredoc 写文件，使用 apply_patch。'));
   lines.push(bullet('apply_patch: Provide a unified diff patch with *** Begin Patch/*** End Patch only. / 仅输出统一 diff 补丁。'));
   lines.push(bullet('update_plan: Keep exactly one step in_progress; others pending/completed. / 仅一个 in_progress 步骤。'));
   lines.push(bullet('view_image: Path must be an image file (.png .jpg .jpeg .gif .webp .bmp .svg). / 仅图片路径。'));
@@ -202,4 +210,3 @@ export function refineSystemToolGuidance(systemText: string): string {
     return cleaned ? `${block}\n\n${cleaned}` : block;
   } catch { return systemText; }
 }
-

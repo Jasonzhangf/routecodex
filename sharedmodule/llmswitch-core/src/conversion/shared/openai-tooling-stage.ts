@@ -47,9 +47,28 @@ export function applyOpenAIToolingStage(payload: OpenAIChatPayload): OpenAIChatP
       const last = out.messages[out.messages.length - 1];
       if (isObject(last) && String((last as any).role || '').toLowerCase() === 'assistant') {
         const normalized = normalizeAssistantTextToToolCalls(last as any);
-        if (normalized !== last) {
-          out.messages = [...out.messages.slice(0, -1), normalized];
-        }
+        const msg = (normalized !== last) ? normalized : last;
+        // Adjacent duplicate tool_call dedupe (same function.name + arguments)
+        try {
+          const calls = Array.isArray((msg as any).tool_calls) ? ((msg as any).tool_calls as any[]) : [];
+          if (calls.length > 1) {
+            const filtered: any[] = [];
+            const sameKey = (a: any, b: any) => {
+              const an = String(a?.function?.name || '').trim();
+              const bn = String(b?.function?.name || '').trim();
+              const aa = typeof a?.function?.arguments === 'string' ? a.function.arguments : JSON.stringify(a?.function?.arguments ?? '');
+              const ba = typeof b?.function?.arguments === 'string' ? b.function.arguments : JSON.stringify(b?.function?.arguments ?? '');
+              return an === bn && aa === ba;
+            };
+            for (const c of calls) {
+              const prev = filtered.length ? filtered[filtered.length - 1] : null;
+              if (prev && sameKey(prev, c)) { continue; }
+              filtered.push(c);
+            }
+            (msg as any).tool_calls = filtered;
+          }
+        } catch { /* ignore dedupe errors */ }
+        out.messages = [...out.messages.slice(0, -1), msg];
       }
     }
   } catch { /* ignore */ }

@@ -22,7 +22,7 @@ function toStringArray(v: unknown): string[] {
   return [String(v)];
 }
 
-function splitCommandString(input: string): string[] {
+export function splitCommandString(input: string): string[] {
   const s = input.trim();
   if (!s) return [];
   const out: string[] = [];
