@@ -31,6 +31,10 @@ export class SystemPromptLoader {
     } catch {
       value = null;
     }
+    // Fallback to built-in minimal prompt (ensures tool guidance is always available)
+    if (!value) {
+      value = this.getBuiltInPrompt(source);
+    }
     this.cache.set(source, value);
     this.lastScanAt = now;
     return value;
@@ -174,6 +178,39 @@ export class SystemPromptLoader {
       if (sys && /claude|anthropic/i.test(sys)) {
         return sys;
       }
+    }
+    return null;
+  }
+
+  // Built-in fallback system prompts with tool guidance
+  private getBuiltInPrompt(source: Source): string | null {
+    if (source === 'codex') {
+      return (
+        [
+          'You are a coding agent running in the Codex CLI.',
+          'Be concise, precise, and helpful. Use active voice.',
+          '',
+          'Use the provided tool descriptions as the source of truth.',
+          'Follow repository AGENTS.md and environment policies.',
+          '',
+          'Content rules: prefer bullets, avoid heavy formatting unless requested.',
+          'When referencing files, include clickable paths (path:line).',
+          '',
+          'Safety and scope: do not modify unrelated code or add licenses.'
+        ].join('\n')
+      );
+    }
+    if (source === 'claude') {
+      return (
+        [
+          'You are a precise coding assistant integrated with Codex CLI.',
+          'Default to brevity and actionable guidance.',
+          '',
+          'Use tool descriptions for exact behavior; do not assume extra fields.',
+          'Keep formatting minimal; include file paths with :line when referencing.',
+          'Obey AGENTS.md. For sharedmodule changes, build modules first, then the root package.',
+        ].join('\n')
+      );
     }
     return null;
   }

@@ -221,6 +221,64 @@ export class GLMCompatibility implements CompatibilityModule {
     for (const [key, value] of Object.entries(sanitized)) {
       (payload as UnknownObject)[key] = value as unknown;
     }
+
+    // Optional: aggressively trim historical tool calls for GLM stability
+    try {
+      const ENABLE = String(process.env.RCC_GLM_TRIM_TOOL_HISTORY || '').trim() === '1';
+      if (!ENABLE) return;
+      const keepTool = Math.max(0, Number(process.env.RCC_GLM_TRIM_TOOL_KEEP_LAST_TOOL || 3));
+      const keepAssist = Math.max(0, Number(process.env.RCC_GLM_TRIM_TOOL_KEEP_LAST_ASSIST || 1));
+      const msgs = Array.isArray((payload as any).messages) ? ((payload as any).messages as any[]) : [];
+      if (!msgs.length) return;
+
+      const toolIdx: number[] = [];
+      const assistToolIdx: number[] = [];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        if (!m || typeof m !== 'object') continue;
+        const role = String(m.role || '').toLowerCase();
+        if (role === 'tool') {
+          toolIdx.push(i);
+        } else if (role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+          assistToolIdx.push(i);
+        }
+      }
+      const keepToolSet = new Set<number>(toolIdx.slice(0, keepTool));
+      const keepAssistSet = new Set<number>(assistToolIdx.slice(0, keepAssist));
+
+      const trimmed: any[] = [];
+      for (let i = 0; i < msgs.length; i++) {
+        const m = msgs[i];
+        if (!m || typeof m !== 'object') { trimmed.push(m); continue; }
+        const role = String(m.role || '').toLowerCase();
+        if (role === 'tool') {
+          if (keepToolSet.has(i)) { trimmed.push(m); }
+          else {
+            // drop old role:tool message entirely
+          }
+          continue;
+        }
+        if (role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+          if (keepAssistSet.has(i)) { trimmed.push(m); }
+          else {
+            // 如果该 assistant 同时含有可读文本，则保留文本但移除 tool_calls
+            const content = (m as any).content;
+            const hasText = typeof content === 'string' ? content.trim().length > 0 : false;
+            if (hasText) {
+              const copy = { ...m };
+              try { delete (copy as any).tool_calls; } catch { /* ignore */ }
+              trimmed.push(copy);
+            } else {
+              // 丢弃该条仅工具调用的历史 assistant 消息
+            }
+          }
+          continue;
+        }
+        trimmed.push(m);
+      }
+
+      (payload as any).messages = trimmed;
+    } catch { /* ignore trimming errors */ }
   }
 
   private normalizeResponse(resp: any, metadata?: any): any {

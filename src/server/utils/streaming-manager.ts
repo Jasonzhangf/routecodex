@@ -146,8 +146,10 @@ export class StreamingManager {
         // Emit initial role delta to satisfy some clients' expectations
         chunks.push({ role });
 
-        // Emit content as-is (preserve newlines)
-        if (content.length > 0) {
+        // Emit content when it不是工具JSON/补丁块回显
+        const isLikelyToolJson = (s: string): boolean => /"version"\s*:\s*"rcc\.tool\.v1"/i.test(s) || /rcc\.tool\.v1/i.test(s);
+        const isPatchBlock = (s: string): boolean => /\*\*\*\s*Begin\s*Patch/i.test(s);
+        if (content.length > 0 && !isLikelyToolJson(content) && !isPatchBlock(content)) {
           chunks.push({ content });
         }
 
@@ -242,6 +244,14 @@ export class StreamingManager {
       // Map delta.function_call -> delta.tool_calls for OpenAI older shape
       try {
         const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
+        const isImagePath = (p: any): boolean => {
+          try { const s = String(p || '').toLowerCase(); return /\.(png|jpg|jpeg|gif|webp|bmp|svg|tiff?|ico|heic|jxl)$/.test(s); } catch { return false; }
+        };
+        const parseArgs = (args: any): any => {
+          if (typeof args === 'string') { try { return JSON.parse(args); } catch { return {}; } }
+          if (args && typeof args === 'object') return args;
+          return {};
+        };
         for (const c of choices) {
           const d = c?.delta || {};
           const fc = d?.function_call;
@@ -253,6 +263,32 @@ export class StreamingManager {
             if (typeof args === 'string') { (tc.function as any).arguments = args; }
             if (!Array.isArray(d.tool_calls)) { d.tool_calls = []; }
             (d.tool_calls as any[]).push(tc);
+          }
+          // Filter invalid view_image tool_calls where path is not an image
+          if (Array.isArray(d.tool_calls)) {
+            const kept: any[] = [];
+            for (const tc of d.tool_calls as any[]) {
+              try {
+                const fn = tc?.function || {};
+                const nm = typeof fn?.name === 'string' ? fn.name : undefined;
+                if (nm === 'view_image') {
+                  const a = parseArgs(fn?.arguments);
+                  const p = (a && typeof a === 'object') ? (a as any).path : undefined;
+                  if (!isImagePath(p)) {
+                    // Replace with a brief hint in content; drop this tool_call
+                    const hint = typeof p === 'string' && p ? `提示：${p} 不是图片，请改用 shell: {"command":["cat","${p}"]}` : '提示：路径不是图片，请改用 shell: {"command":["cat","<path>"]}';
+                    if (typeof d.content === 'string' && d.content.length > 0) {
+                      d.content += `\n${hint}`;
+                    } else {
+                      d.content = hint;
+                    }
+                    continue;
+                  }
+                }
+                kept.push(tc);
+              } catch { kept.push(tc); }
+            }
+            d.tool_calls = kept;
           }
         }
       } catch { /* ignore */ }
@@ -268,6 +304,14 @@ export class StreamingManager {
       const message = choice?.message || {};
       const toolCallsArr = Array.isArray(message.tool_calls) ? message.tool_calls : undefined;
       const fnCall = (message as any)?.function_call || null;
+      const isImagePath = (p: any): boolean => {
+        try { const s = String(p || '').toLowerCase(); return /\.(png|jpg|jpeg|gif|webp|bmp|svg|tiff?|ico|heic|jxl)$/.test(s); } catch { return false; }
+      };
+      const parseArgs = (args: any): any => {
+        if (typeof args === 'string') { try { return JSON.parse(args); } catch { return {}; } }
+        if (args && typeof args === 'object') return args;
+        return {};
+      };
       const toolCalls = (() => {
         if (toolCallsArr && toolCallsArr.length) return toolCallsArr;
         if (fnCall && typeof fnCall === 'object') {
@@ -279,15 +323,46 @@ export class StreamingManager {
         }
         return undefined;
       })();
+      // Filter invalid view_image tool_calls when arguments contain a non-image path
+      const filteredToolCalls = (() => {
+        if (!Array.isArray(toolCalls)) return toolCalls;
+        const kept: any[] = [];
+        for (const tc of toolCalls) {
+          try {
+            const fn = (tc as any)?.function || {};
+            const nm = typeof fn?.name === 'string' ? fn.name : undefined;
+            if (nm === 'view_image') {
+              const a = parseArgs((fn as any).arguments);
+              const p = (a && typeof a === 'object') ? (a as any).path : undefined;
+              if (!isImagePath(p)) {
+                const hint = typeof p === 'string' && p ? `提示：${p} 不是图片，请改用 shell: {"command":["cat","${p}"]}` : '提示：路径不是图片，请改用 shell: {"command":["cat","<path>"]}';
+                if (typeof message.content === 'string' && message.content.length > 0) {
+                  message.content += `\n${hint}`;
+                } else {
+                  (message as any).content = hint;
+                }
+                continue;
+              }
+            }
+            kept.push(tc);
+          } catch { kept.push(tc); }
+        }
+        return kept;
+      })();
       const delta: Record<string, unknown> = {};
       if (message.role && typeof message.role === 'string') {
         delta.role = message.role;
       }
       if (typeof message.content === 'string') {
-        delta.content = message.content;
+        const s = message.content as string;
+        const looksToolJson = /"version"\s*:\s*"rcc\.tool\.v1"/i.test(s) || /rcc\.tool\.v1/i.test(s);
+        const looksPatch = /\*\*\*\s*Begin\s*Patch/i.test(s);
+        if (!looksToolJson && !looksPatch) {
+          delta.content = s;
+        }
       }
-      if (toolCalls) {
-        delta.tool_calls = toolCalls;
+      if (filteredToolCalls) {
+        delta.tool_calls = filteredToolCalls;
       }
       if (typeof choice.content === 'string' && !delta.content) {
         delta.content = choice.content;
