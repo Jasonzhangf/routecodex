@@ -34,6 +34,8 @@ export class StreamingManager {
   private config: ProtocolHandlerConfig;
   private logger: PipelineDebugLogger;
   private heartbeatTimers: Map<string, NodeJS.Timeout> = new Map();
+  // Track last tool_call signature per request to drop adjacent duplicates across chunks
+  private lastToolCallKey: Map<string, string> = new Map();
 
   constructor(config: ProtocolHandlerConfig) {
     this.config = config;
@@ -170,7 +172,13 @@ export class StreamingManager {
               chunks.push({ tool_calls: [{ index: i, id, type: 'function', function: { name } }] });
             }
             if (typeof args === 'string' && args.length > 0) {
-              chunks.push({ tool_calls: [{ index: i, id, type: 'function', function: { arguments: args } }] });
+              // Split arguments into deltas to align with Responses-style streaming
+              const parts = Math.max(3, Math.min(12, Math.ceil(args.length / 12)));
+              const step = Math.max(1, Math.ceil(args.length / parts));
+              for (let p = 0; p < args.length; p += step) {
+                const d = args.slice(p, p + step);
+                chunks.push({ tool_calls: [{ index: i, id, type: 'function', function: { arguments: d } }] });
+              }
             }
           }
         }
@@ -452,6 +460,35 @@ export class StreamingManager {
       }]
     };
 
+    // Adjacent duplicate tool_call dedupe (per request, across chunks)
+    try {
+      const choices = Array.isArray((chunkData as any).choices) ? (chunkData as any).choices : [];
+      for (const c of choices) {
+        const d = c?.delta || {};
+        if (Array.isArray(d.tool_calls) && d.tool_calls.length > 0) {
+          const kept: any[] = [];
+          for (const tc of d.tool_calls as any[]) {
+            try {
+              const fn = tc?.function || {};
+              const name = typeof fn?.name === 'string' ? fn.name : '';
+              const args = fn?.arguments;
+              const argsStr = typeof args === 'string' ? args : (args != null ? JSON.stringify(args) : '');
+              const key = `${name}\n${argsStr}`;
+              const prev = this.lastToolCallKey.get(requestId);
+              // Only drop when both name and arguments are present and identical to last
+              const hasBoth = name && argsStr;
+              if (hasBoth && prev === key) {
+                continue;
+              }
+              kept.push(tc);
+              if (hasBoth) this.lastToolCallKey.set(requestId, key);
+            } catch { kept.push(tc); }
+          }
+          d.tool_calls = kept;
+        }
+      }
+    } catch { /* ignore dedupe errors */ }
+
     const sseData = `data: ${JSON.stringify(chunkData)}\n\n`;
     res.write(sseData);
 
@@ -487,6 +524,8 @@ export class StreamingManager {
     res.write(finalData);
     this.stopHeartbeat(requestId);
     res.end();
+    // Reset last tool_call signature for this request
+    try { this.lastToolCallKey.delete(requestId); } catch { /* ignore */ }
 
     try {
       const LOG = String(process.env.ROUTECODEX_LOG_STREAM_CHUNKS || process.env.RCC_LOG_STREAM_CHUNKS || '0') === '1';
