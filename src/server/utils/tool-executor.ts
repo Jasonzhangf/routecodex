@@ -100,7 +100,7 @@ export async function executeTool(spec: ToolCallSpec): Promise<ToolResult> {
 
     if (isArray(rawCmd)) {
       command = normalizeFromArray(rawCmd);
-    } else if (isString(rawCmd)) {
+  } else if (isString(rawCmd)) {
       const s = String(rawCmd).trim();
       if (!s) {
         command = '';
@@ -108,7 +108,31 @@ export async function executeTool(spec: ToolCallSpec): Promise<ToolResult> {
         const inner = tryParseJsonArray(s);
         command = inner ? normalizeFromArray(inner) : (hasMeta(s) ? normalizeBashLc(s) : s);
       } else {
-        command = hasMeta(s) ? normalizeBashLc(s) : s;
+        // Handle patterns like: ["find", ".", "-name", "README.md"] | grep "codex-"
+        const firstMetaIndex = (() => {
+          const metas = ['|', '&&', '||', ';', '<<', '>>', '>', '<'];
+          let idx = -1;
+          for (const m of metas) {
+            const i = s.indexOf(m);
+            if (i >= 0) idx = (idx === -1) ? i : Math.min(idx, i);
+          }
+          return idx;
+        })();
+        if (s.startsWith('[')) {
+          const bound = firstMetaIndex >= 0 ? firstMetaIndex : s.length;
+          const arrPart = s.slice(0, bound).trim();
+          const rest = firstMetaIndex >= 0 ? s.slice(bound).trim() : '';
+          let parsed: any[] | null = null;
+          try { if (arrPart.endsWith(']')) { const v = JSON.parse(arrPart); if (Array.isArray(v)) parsed = v; } } catch { parsed = null; }
+          if (parsed && parsed.length) {
+            const script = parsed.map(String).join(' ') + (rest ? (' ' + rest) : '');
+            command = normalizeBashLc(script);
+          } else {
+            command = hasMeta(s) ? normalizeBashLc(s) : s;
+          }
+        } else {
+          command = hasMeta(s) ? normalizeBashLc(s) : s;
+        }
       }
     } else {
       command = '';

@@ -67,6 +67,39 @@ export class ChatCompletionsHandler extends BaseHandler {
     });
 
     try {
+      // Optional: Replace/Inject system prompt into OpenAI Chat messages (mirrors Anthropic injection)
+      try {
+        const { shouldReplaceSystemPrompt, SystemPromptLoader, replaceSystemInOpenAIMessages } = await import('../../utils/system-prompt-loader.js');
+        const sel = shouldReplaceSystemPrompt();
+        if (sel) {
+          const loader = SystemPromptLoader.getInstance();
+          const sys = await loader.getPrompt(sel);
+          const currentSys = (() => {
+            try {
+              const m = Array.isArray((req.body as any)?.messages) ? (req.body as any).messages[0] : null;
+              return (m && typeof m === 'object' && (m as any).role === 'system' && typeof (m as any).content === 'string') ? String((m as any).content) : '';
+            } catch { return ''; }
+          })();
+          const hasMdMarkers = /\bCLAUDE\.md\b|\bAGENT(?:S)?\.md\b/i.test(currentSys);
+          if (sys && Array.isArray((req.body as any)?.messages) && !hasMdMarkers) {
+            (req.body as any).messages = replaceSystemInOpenAIMessages((req.body as any).messages, sys) as any[];
+            try { res.setHeader('x-rc-system-prompt-source', sel); } catch { /* ignore */ }
+          }
+        }
+      } catch { /* non-blocking */ }
+      // Refine existing system prompt tool guidance (minimal, idempotent)
+      try {
+        const refineEnabled = String(process.env.RCC_SYSTEM_TOOL_GUIDANCE || '').trim() === '1';
+        if (refineEnabled && Array.isArray((req.body as any)?.messages)) {
+          const msgs: any[] = (req.body as any).messages;
+          if (msgs.length && msgs[0]?.role === 'system' && typeof msgs[0].content === 'string') {
+            const { refineSystemToolGuidance } = await import('rcc-llmswitch-core/guidance');
+            msgs[0].content = refineSystemToolGuidance(String(msgs[0].content));
+            (req.body as any).messages = msgs;
+          }
+        }
+      } catch { /* ignore */ }
+
       // Forced adapter preflight: convert Anthropic/Responses-shaped payloads to OpenAI
       try {
         const looksAnthropicContent = Array.isArray(req.body?.messages) && (req.body.messages as any[]).some((m: any) => Array.isArray(m?.content) && m.content.some((c: any) => c && typeof c === 'object' && c.type));
@@ -95,6 +128,14 @@ export class ChatCompletionsHandler extends BaseHandler {
           try { res.setHeader('x-rc-adapter', 'anthropic->openai'); } catch { /* ignore */ }
         }
       } catch { /* non-blocking */ }
+
+      // Augment tool descriptions with Codex CLI guidance (OpenAI tool shape)
+      try {
+        const { augmentOpenAITools } = await import('rcc-llmswitch-core/guidance');
+        if (Array.isArray((req.body as any)?.tools)) {
+          (req.body as any).tools = augmentOpenAITools((req.body as any).tools as any[]);
+        }
+      } catch { /* best effort */ }
 
       // Skip strict request validation (preserve raw inputs)
 

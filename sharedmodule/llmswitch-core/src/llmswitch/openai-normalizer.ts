@@ -26,7 +26,7 @@ export class OpenAINormalizerLLMSwitch {
     const dto = isDto ? (requestParam as any) : null;
     const payload = isDto ? (dto!.data as any) : (requestParam as any);
 
-    const normalized = this.normalizeOpenAIRequest(payload);
+    const normalized = await this.normalizeOpenAIRequest(payload);
 
     const outDto = isDto
       ? { ...dto!, data: { ...normalized, _metadata: { switchType: 'llmswitch-openai-openai', timestamp: Date.now(), originalProtocol: 'openai', targetProtocol: 'openai' } } }
@@ -51,7 +51,7 @@ export class OpenAINormalizerLLMSwitch {
     return response;
   }
 
-  private normalizeOpenAIRequest(request: any): any {
+  private async normalizeOpenAIRequest(request: any): Promise<any> {
     if (!request || typeof request !== 'object') return request;
     const normalized: any = { ...request };
 
@@ -60,6 +60,7 @@ export class OpenAINormalizerLLMSwitch {
     }
     if (Array.isArray(normalized.tools)) {
       normalized.tools = normalized.tools.map((tool: any) => this.normalizeTool(tool));
+      try { normalized.tools = augmentOpenAITools(normalized.tools as any[]) as any[]; } catch { /* ignore augmentation */ }
     }
     return normalized;
   }
@@ -116,3 +117,4 @@ export class OpenAINormalizerLLMSwitch {
   async cleanup(): Promise<void> { await this.dispose(); }
   getStats(): any { return { type: this.type, initialized: this.isInitialized, timestamp: Date.now() }; }
 }
+import { augmentOpenAITools } from '../guidance/index.js';

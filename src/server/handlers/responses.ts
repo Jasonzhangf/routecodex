@@ -64,6 +64,31 @@ export class ResponsesHandler extends BaseHandler {
     });
 
     try {
+      // Optional: Replace/Inject system prompt for OpenAI Responses (prefer instructions field)
+      try {
+        const { shouldReplaceSystemPrompt, SystemPromptLoader } = await import('../../utils/system-prompt-loader.js');
+        const sel = shouldReplaceSystemPrompt();
+        if (sel) {
+          const loader = SystemPromptLoader.getInstance();
+          const sys = await loader.getPrompt(sel);
+          const currentSys = (() => {
+            try {
+              const txt = typeof (req.body as any)?.instructions === 'string' ? String((req.body as any).instructions) : '';
+              return txt;
+            } catch { return ''; }
+          })();
+          const hasMdMarkers = /\bCLAUDE\.md\b|\bAGENT(?:S)?\.md\b/i.test(currentSys);
+          if (sys && !hasMdMarkers) {
+            // Only set when empty or whitespace to avoid clobbering explicit instructions
+            const instr = typeof (req.body as any)?.instructions === 'string' ? String((req.body as any).instructions) : '';
+            if (!instr || !instr.trim()) {
+              (req.body as any).instructions = sys;
+              try { res.setHeader('x-rc-system-prompt-source', sel); } catch { /* ignore */ }
+            }
+          }
+        }
+      } catch { /* non-blocking */ }
+
       // 仅改变格式，不清洗/丢弃字段：基于原始请求体派生 Responses 关键字段并回写，保留全部原字段
       try {
         const b: any = req.body || {};
@@ -123,6 +148,23 @@ export class ResponsesHandler extends BaseHandler {
         req.body = merged; // 不移除任何原字段
         try { res.setHeader('x-rc-adapter', 'normalized:chat|anthropic->responses:non-lossy'); } catch { /* ignore */ }
       } catch { /* non-blocking */ }
+
+      // Augment tool descriptions with Codex CLI guidance (OpenAI tool shape)
+      try {
+        const { augmentOpenAITools } = await import('rcc-llmswitch-core/guidance');
+        if (Array.isArray((req.body as any)?.tools)) {
+          (req.body as any).tools = augmentOpenAITools((req.body as any).tools as any[]);
+        }
+      } catch { /* best effort */ }
+
+      // Refine existing instructions if used as system-like guidance in Responses
+      try {
+        const refineEnabled = String(process.env.RCC_SYSTEM_TOOL_GUIDANCE || '').trim() === '1';
+        if (refineEnabled && typeof (req.body as any)?.instructions === 'string') {
+          const { refineSystemToolGuidance } = await import('rcc-llmswitch-core/guidance');
+          (req.body as any).instructions = refineSystemToolGuidance(String((req.body as any).instructions));
+        }
+      } catch { /* ignore */ }
 
       // Remove strict request validation for Responses-shaped requests (preserve raw body)
 

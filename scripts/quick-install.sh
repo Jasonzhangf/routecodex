@@ -104,11 +104,16 @@ build_project() {
 
     # 先构建 sharedmodule/llmswitch-core，再构建根包
     log_info "先编译 sharedmodule/llmswitch-core..."
-    if npm -w sharedmodule/llmswitch-core run build; then
-        log_success "sharedmodule/llmswitch-core 构建成功"
+    if npm -w sharedmodule/llmswitch-core run build 2>/dev/null; then
+        log_success "sharedmodule/llmswitch-core 构建成功 (workspace)"
     else
-        log_error "sharedmodule/llmswitch-core 构建失败"
-        exit 1
+        log_warning "workspace 构建失败，尝试目录内构建"
+        if (cd sharedmodule/llmswitch-core && npm run build); then
+            log_success "sharedmodule/llmswitch-core 构建成功 (cd)"
+        else
+            log_error "sharedmodule/llmswitch-core 构建失败"
+            exit 1
+        fi
     fi
 
     # 构建根项目

@@ -50,6 +50,15 @@ export async function transformOpenAIStreamToResponses(
   let responseId = `resp_${Date.now()}`;
   let createdAt = Math.floor(Date.now() / 1000);
   let createdEmitted = false;
+  // Abort upstream when client disconnects to avoid dangling work
+  try {
+    (res as any).on?.('close', () => {
+      try { writeEvt('response.error', { type: 'response.error', error: { message: 'client closed connection', type: 'streaming_error', code: 'CLIENT_CLOSED' }, requestId }); } catch { /* ignore */ }
+      try { readable.destroy(new Error('client closed')); } catch { /* ignore */ }
+    });
+  } catch { /* ignore */ }
+  // Client close tracking (for diagnostics)
+  try { (res as any).on?.('close', () => { try { writeEvt('response.error', { type: 'response.error', error: { message: 'client closed connection', type: 'streaming_error', code: 'CLIENT_CLOSED' }, requestId }); } catch { /* ignore */ } }); } catch { /* ignore */ }
 
   // Text coalescing
   let textBuffer = '';
@@ -211,6 +220,24 @@ export async function transformOpenAIStreamToResponses(
             acc.done = true;
           }
         }
+        // Optional: emit required_action for clients that expect it
+        try {
+          const emitRA = String(process.env.ROUTECODEX_RESP_SSE_REQUIRED_ACTION || process.env.RCC_RESP_SSE_REQUIRED_ACTION || '0') === '1';
+          if (emitRA && tools.size > 0) {
+            const tool_calls = Array.from(tools.values()).map(acc => ({ id: acc.id, type: 'function', function: { name: acc.name || 'tool', arguments: acc.args || '' } }));
+            writeEvt('response.required_action', { type: 'response.required_action', required_action: { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls } } });
+          }
+        } catch { /* ignore */ }
+
+        // Optional: emit required_action so clients can continue tool flow deterministically
+        try {
+          const emitRA = String(process.env.ROUTECODEX_RESP_SSE_REQUIRED_ACTION || process.env.RCC_RESP_SSE_REQUIRED_ACTION || '0') === '1';
+          if (emitRA && tools.size > 0) {
+            const tool_calls = Array.from(tools.values()).map(acc => ({ id: acc.id, type: 'function', function: { name: acc.name || 'tool', arguments: acc.args || '' } }));
+            writeEvt('response.required_action', { type: 'response.required_action', required_action: { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls } } });
+          }
+        } catch { /* ignore */ }
+
         // Final output_text.done if we ever sent text deltas but not .done
         writeEvt('response.output_text.done', { type: 'response.output_text.done', output_index: 0, content_index: 0, logprobs: [] });
 

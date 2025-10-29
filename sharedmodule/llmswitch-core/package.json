@@ -1,6 +1,6 @@
 {
   "name": "rcc-llmswitch-core",
-  "version": "0.1.15",
+  "version": "0.1.24",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -40,6 +40,10 @@
     "./llmswitch/anthropic-openai-converter": {
       "import": "./dist/llmswitch/anthropic-openai-converter.js",
       "types": "./dist/llmswitch/anthropic-openai-converter.d.ts"
+    },
+    "./guidance": {
+      "import": "./dist/guidance/index.js",
+      "types": "./dist/guidance/index.d.ts"
     }
   }
 }

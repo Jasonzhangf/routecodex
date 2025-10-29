@@ -4,6 +4,7 @@ export * from './codec-registry.js';
 export * from './switch-orchestrator.js';
 export * from './shared/openai-normalize.js';
 export * from './shared/tooling.js';
+export * from '../guidance/index.js';
 export * from './shared/tool-mapping.js';
 export * from './shared/reasoning-mapping.js';
 export * from './shared/args-mapping.js';

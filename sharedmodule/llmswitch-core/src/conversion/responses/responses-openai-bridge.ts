@@ -299,53 +299,29 @@ function normalizeArgumentsBySchema(argsStringOrObj: unknown, functionName: stri
     }
   }
 
-  // Post-fixups for shell: append extra keys as argv tokens if present
+  // Post-fixups for shell: do NOT append extra unknown keys into argv.
+  // 保留除保留字段以外的扩展键，但不拼接到 command，避免把大段文本/代码污染命令行。
   try {
     if (String(functionName || '').toLowerCase() === 'shell') {
-      const reserved = new Set(['command','workdir','timeout_ms','with_escalated_permissions','justification']);
-      const extrasTokens: string[] = [];
-      for (const k of Object.keys(argsObj)) {
-        if (!reserved.has(k)) {
-          extrasTokens.push(String(k));
-          const v: any = (argsObj as any)[k];
-          if (v !== undefined && v !== null) {
-            if (typeof v === 'string') extrasTokens.push(v);
-            else if (typeof v === 'number' || typeof v === 'boolean') extrasTokens.push(String(v));
-            else { try { extrasTokens.push(JSON.stringify(v)); } catch { /* ignore */ } }
-          }
-          delete (argsObj as any)[k];
+      // 仅做元字符检测：当 command 是 argv 且包含管道/重定向/heredoc/与或时，折叠为 ['bash','-lc','<script>']。
+      const metas = new Set(['|','>','>>','<','<<',';','&&','||']);
+      const hasMetaToken = (arr: string[]) => arr.some(t => metas.has(t) || /[|<>;&]/.test(String(t)) || String(t).includes('&&') || String(t).includes('||') || String(t).includes('<<'));
+      const isBashLc = (arr: string[]) => arr.length >= 2 && arr[0] === 'bash' && arr[1] === '-lc';
+      const cmdVal: any = (argsObj as any).command;
+      if (Array.isArray(cmdVal)) {
+        const tokens = cmdVal.map((x: any) => String(x));
+        if (!isBashLc(tokens) && hasMetaToken(tokens)) {
+          (argsObj as any).command = ['bash','-lc', tokens.join(' ')];
+        }
+      } else if (typeof cmdVal === 'string') {
+        const s = cmdVal.trim();
+        const hasMeta = /[|<>;&]/.test(s) || s.includes('&&') || s.includes('||') || s.includes('<<');
+        if (hasMeta && !/^\s*bash\s+-lc\s+/.test(s)) {
+          (argsObj as any).command = ['bash','-lc', s];
         }
       }
-      if (extrasTokens.length > 0) {
-        const cmdVal: any = (argsObj as any).command;
-        if (Array.isArray(cmdVal)) (argsObj as any).command = [...cmdVal, ...extrasTokens];
-        else if (typeof cmdVal === 'string') (argsObj as any).command = [cmdVal, ...extrasTokens];
-        else (argsObj as any).command = [...extrasTokens];
-      }
-
-      // Meta-operators handling: if command is argv and contains pipes/redirection/heredoc/and/or,
-      // collapse into ['bash','-lc','<script>'] so downstream executors (that do not spawn a shell)
-      // can still interpret the meta within bash. This mirrors Chat path behavior.
-      try {
-        const metas = new Set(['|','>','>>','<','<<',';','&&','||']);
-        const hasMetaToken = (arr: string[]) => arr.some(t => metas.has(t) || /[|<>;&]/.test(String(t)) || String(t).includes('&&') || String(t).includes('||') || String(t).includes('<<'));
-        const isBashLc = (arr: string[]) => arr.length >= 2 && arr[0] === 'bash' && arr[1] === '-lc';
-        const cmdVal: any = (argsObj as any).command;
-        if (Array.isArray(cmdVal)) {
-          const tokens = cmdVal.map((x: any) => String(x));
-          if (!isBashLc(tokens) && hasMetaToken(tokens)) {
-            (argsObj as any).command = ['bash','-lc', tokens.join(' ')];
-          }
-        } else if (typeof cmdVal === 'string') {
-          const s = cmdVal.trim();
-          const hasMeta = /[|<>;&]/.test(s) || s.includes('&&') || s.includes('||') || s.includes('<<');
-          if (hasMeta && !/^\s*bash\s+-lc\s+/.test(s)) {
-            (argsObj as any).command = ['bash','-lc', s];
-          }
-        }
-      } catch { /* ignore meta wrapping errors */ }
     }
-  } catch { /* ignore */ }
+  } catch { /* ignore meta wrapping errors */ }
 
   // No command-level post-fixups here; preserve arguments as provided by model
 
@@ -445,82 +421,13 @@ export function buildChatRequestFromResponses(payload: Record<string, unknown>, 
     input: context.input,
     toolsNormalized
   });
-  // Inject comprehensive tool usage guidance (non-MCP + phased MCP) into system, once, when tools present
+  // Inject comprehensive tool usage guidance (non-MCP + phased MCP) into system, once, when tools present (if enabled)
   try {
-    const tools = Array.isArray((payload as any).tools) ? ((payload as any).tools as any[]) : [];
+    const sysGuideEnabled = String(process.env.RCC_SYSTEM_TOOL_GUIDANCE || '').trim() === '1';
+    const toolsList = Array.isArray(toolsNormalized) ? (toolsNormalized as any[]) : (Array.isArray((payload as any).tools) ? ((payload as any).tools as any[]) : []);
     const hasGuidance = messages.some((m: any) => m && m.role === 'system' && typeof m.content === 'string' && /Use OpenAI tool_calls|Tool usage guidance/i.test(m.content));
-    if (!hasGuidance && tools.length > 0) {
-      const names = tools
-        .map((t: any) => (t && t.function && typeof t.function.name === 'string') ? String(t.function.name) : '')
-        .filter((n: string) => !!n && !/^list_mcp_resources$|^read_mcp_resource$|^list_mcp_resource_templates$/i.test(n));
-      const uniq = Array.from(new Set(names));
-
-      const bullet = (s: string) => `- ${s}`;
-      const general: string[] = [];
-      general.push('Tool usage guidance (OpenAI tool_calls) / 工具使用指引（OpenAI 标准）');
-      general.push(bullet('Always use assistant.tool_calls[].function.{name,arguments}; never embed tool calls in plain text. / 一律通过 tool_calls 调用工具，不要把工具调用写进普通文本。'));
-      general.push(bullet('function.arguments must be a single JSON string. / arguments 必须是单个 JSON 字符串。'));
-      general.push(bullet('function.name is required and must be non-empty (e.g., shell/update_plan/view_image). Empty names are invalid. / 函数名必须非空（如 shell/update_plan/view_image），禁止留空。'));
-      general.push(bullet('For shell, put ALL intent into the command argv array only; do not invent extra keys. / shell 所有意图写入 command 数组，不要添加额外键名。'));
-      if (uniq.length) general.push(bullet(`Available tools（非 MCP）: ${uniq.slice(0, 8).join(', ')}`));
-      general.push('Examples / 示例:');
-      general.push('shell: {"command":["find",".","-type","f","-name","*.ts"]}');
-      general.push('  - Good / 正例: {"command":["head","-50","codex-local/src/index.ts"]}');
-      general.push('  - Bad / 反例: {"js":"head -20"}, {"command":"find . -name *.ts"}, pseudo-XML (<arg_key>/<arg_value>)');
-      general.push(bullet('If you need redirection/pipes/heredoc, wrap in bash -lc. / 需要重定向/管道/heredoc 时，必须包在 bash -lc 中。'));
-      general.push('  e.g. {"command":["bash","-lc","cat > codex-local/docs/WRITING_GUIDE.md <<\'EOF\'\\n内容…\\nEOF"]}');
-      general.push('update_plan: {"explanation":"...","plan":[{"step":"...","status":"in_progress"},{"step":"...","status":"pending"}]}');
-      general.push('view_image: {"path":"/absolute/or/relative/path/to/image.png"} (only images: .png .jpg .jpeg .gif .webp .bmp .svg)');
-      general.push(bullet('Do not call view_image for text files (e.g., .md/.txt). Use shell to read text. / 文本文件不要用 view_image，使用 shell 查看文本。'));
-
-      // File editing efficiency / 文件编辑效率
-      general.push('File editing efficiency / 文件编辑效率');
-      general.push(bullet('Avoid line-by-line echo; use single-shot writes. / 避免逐行 echo，使用一次性写入。'));
-      general.push(bullet('Do NOT use bare "cat > <path>" without stdin; use heredoc to provide content. / 禁止裸用 "cat > <path>" 且无输入，使用 heredoc 提供内容。'));
-      general.push(bullet('Overwrite: cat > <path> <<\'EOF\' ... EOF / 覆盖写入。'));
-      general.push(bullet('Append: cat >> <path> <<\'EOF\' ... EOF / 追加写入。'));
-      general.push(bullet('Atomic write: mkdir -p "$(dirname <path>)"; tmp="$(mktemp)"; cat > "$tmp" <<\'EOF\' ... EOF; mv "$tmp" <path> / 原子写入。'));
-      general.push(bullet('macOS sed in-place: sed -i "" "s|<OLD>|<NEW>|g" <path> / macOS 用 -i ""，Linux 用 -i。'));
-      general.push(bullet('Use ed -s for multi-line insert/replace. / 多行替换用 ed -s。'));
-      general.push(bullet('Prefer unified diff patches for batch edits; apply once. / 批量修改优先统一 diff 一次性应用。'));
-      general.push(bullet('If a tool completes with no text output, explicitly say "no output" in your next assistant message and continue. / 工具执行无文本输出时，请在后续助手回复明确说明“无输出”，继续下一步。'));
-      general.push('Examples:');
-      general.push('  cat > codex-local/docs/design.md <<\'EOF\'\n  ...内容...\n  EOF');
-      general.push('  ed -s codex-local/src/index.ts <<\'ED\'\n  ,$g/^BEGIN:SECTION$/,/^END:SECTION$/s//BEGIN:SECTION\\\n新内容…\\\nEND:SECTION/\n  w\n  q\n  ED');
-      general.push('  cat > /tmp/patch.diff <<\'PATCH\'\n  *** Begin Patch\n  *** Update File: codex-local/src/index.ts\n  @@\n  -old line\n  +new line\n  *** End Patch\n  PATCH\n  git apply /tmp/patch.diff');
-
-      // MCP phased guidance
-      const enableMcp = String((process as any)?.env?.ROUTECODEX_MCP_ENABLE ?? '1') !== '0';
-      const mcp: string[] = [];
-      if (enableMcp) {
-        // Heuristic: if toolsNormalized contains read_mcp_resource with parameters.server.enum, treat as known servers
-        const toolsNorm = Array.isArray(context?.toolsNormalized) ? (context!.toolsNormalized as any[]) : [];
-        const serverEnum: string[] = (() => {
-          try {
-            const read = toolsNorm.find((t: any) => t?.function?.name === 'read_mcp_resource');
-            const prop = read?.function?.parameters?.properties?.server;
-            const en = Array.isArray(prop?.enum) ? prop.enum as string[] : [];
-            return en.filter((s: string) => typeof s === 'string' && s.trim());
-          } catch { return []; }
-        })();
-        const mcpHeader = 'MCP tool usage (phased) / MCP 工具使用（分阶段）';
-        mcp.push(mcpHeader);
-        if (!serverEnum.length) {
-          mcp.push(bullet('Start with list_mcp_resources; arguments.server is optional. / 首先调用 list_mcp_resources，server 可选。'));
-          mcp.push(bullet('Do NOT use dotted tool names (e.g., filesystem.read_mcp_resource). / 禁止使用带点的工具名。'));
-          mcp.push(bullet('Example / 示例: list_mcp_resources {"filter":"*.md","root":"./codex-local"}'));
-          mcp.push(bullet('Discover server labels from results; use them in subsequent calls. / 先从结果里发现 server_label，再在后续调用中使用。'));
-        } else {
-          mcp.push(bullet('You may call read_mcp_resource and list_mcp_resource_templates now. / 现在可以调用 read_mcp_resource 和 list_mcp_resource_templates。'));
-          mcp.push(bullet(`server must be one of: ${serverEnum.join(', ')} / server 必须从该列表中选择`));
-          mcp.push(bullet('Examples / 示例:'));
-          mcp.push('  read_mcp_resource {"server":"<one_of_known>","uri":"./codex-local/README.md"}');
-          mcp.push('  list_mcp_resource_templates {"server":"<one_of_known>"}');
-          mcp.push(bullet('Do NOT infer server from dotted prefixes. / 不要从带点前缀推断 server。'));
-        }
-      }
-
-      const guidance = [...general, ...(mcp.length ? ['','',...mcp] : [])].join('\n');
+    if (sysGuideEnabled && !hasGuidance && toolsList.length > 0) {
+      const guidance = buildSystemToolGuidance();
       messages.unshift({ role: 'system', content: guidance });
     }
   } catch { /* ignore guidance injection */ }
@@ -664,7 +571,7 @@ function mapResponsesInputToChat(options: { instructions?: string; input?: Respo
             try { raw = { error: 'tool_call_invalid', hint }; } catch { /* keep raw as-is */ }
           }
           const successBool = (typeof success === 'boolean') ? success : (typeof exitCode === 'number' ? exitCode === 0 : false);
-          const envelope: any = {
+          let envelope: any = {
             version: 'rcc.tool.v1',
             tool: { name, call_id: toolCallId },
             arguments: argsObj,
@@ -679,6 +586,42 @@ function mapResponsesInputToChat(options: { instructions?: string; input?: Respo
             },
             meta: { call_id: String(toolCallId), ts: Date.now() }
           };
+          // Sanitize oversized outputs and remove write echoes entirely
+          try {
+            const LIM = Math.max(1, Number((process as any)?.env?.ROUTECODEX_TOOL_OUTPUT_LIMIT || (process as any)?.env?.RCC_TOOL_OUTPUT_LIMIT || 1000));
+            const trunc = (s: string): string => (typeof s === 'string' && s.length > LIM) ? (s.slice(0, LIM) + '...(truncated)') : s;
+            const isWrite = (() => {
+              try {
+                const ec = (envelope as any)?.executed?.command as any;
+                if (Array.isArray(ec) && ec.length >= 1) {
+                  const t0 = String(ec[0] || '').toLowerCase();
+                  if (t0 === 'bash' && String(ec[1] || '').toLowerCase() === '-lc') {
+                    const sc = String(ec[2] || '').toLowerCase();
+                    return (sc.includes('cat >') && sc.includes('<<')) || sc.includes('*** begin patch');
+                  }
+                  const tokens = ec.map((x: any) => String(x).toLowerCase());
+                  return (tokens.includes('cat') && (tokens.includes('>') || tokens.includes('>>'))) || tokens.includes('ed');
+                }
+                return false;
+              } catch { return false; }
+            })();
+            if (isWrite) {
+              // Do not echo write scripts: drop executed/arguments command payload
+              try { if ((envelope as any)?.executed) (envelope as any).executed.command = []; } catch {}
+              try { if ((envelope as any)?.arguments && typeof (envelope as any).arguments === 'object') delete (envelope as any).arguments.command; } catch {}
+              const r = (envelope as any).result as any;
+              r.output = '';
+              if (typeof r.stdout === 'string') r.stdout = trunc(r.stdout);
+              if (typeof r.stderr === 'string') r.stderr = trunc(r.stderr);
+              if ('truncated' in r) delete r.truncated;
+            } else {
+              const r = (envelope as any).result as any;
+              if (typeof r.stdout === 'string') r.stdout = trunc(r.stdout);
+              if (typeof r.stderr === 'string') r.stderr = trunc(r.stderr);
+              if (typeof r.output === 'string') r.output = trunc(r.output);
+              else if (r.output && typeof r.output === 'object' && typeof r.output.output === 'string') r.output.output = trunc(r.output.output);
+            }
+          } catch { /* ignore */ }
           try {
             const trunc = (val: any, n = 800) => { try { const s = typeof val==='string'?val: JSON.stringify(val); return s.length>n? s.slice(0,n)+'...(truncated)': s; } catch { return String(val);} };
             console.log('[LLMSWITCH][responses][tool-output][before]', { callId: String(toolCallId), name, content: trunc(output) });
@@ -791,7 +734,7 @@ function processMessageBlocks(blocks: any[], toolsNormalized: Array<Record<strin
             try { raw = { error: 'tool_call_invalid', hint }; } catch { /* keep raw as-is */ }
           }
           const successBool2 = (typeof success === 'boolean') ? success : (typeof exitCode === 'number' ? exitCode === 0 : false);
-          const envelope: any = {
+          let envelope: any = {
             version: 'rcc.tool.v1',
             tool: { name, call_id: toolCallId },
             arguments: argsObj,
@@ -806,6 +749,57 @@ function processMessageBlocks(blocks: any[], toolsNormalized: Array<Record<strin
             },
             meta: { call_id: String(toolCallId), ts: Date.now() }
           };
+          // Sanitize again for nested tool_message path
+          try {
+            const LIM = Math.max(1, Number((process as any)?.env?.ROUTECODEX_TOOL_OUTPUT_LIMIT || (process as any)?.env?.RCC_TOOL_OUTPUT_LIMIT || 1000));
+            const trunc = (s: string): string => (typeof s === 'string' && s.length > LIM) ? (s.slice(0, LIM) + '...(truncated)') : s;
+            const isWrite = (() => {
+              try {
+                const ec = (envelope as any)?.executed?.command as any;
+                if (Array.isArray(ec) && ec.length >= 1) {
+                  const t0 = String(ec[0] || '').toLowerCase();
+                  if (t0 === 'bash' && String(ec[1] || '').toLowerCase() === '-lc') {
+                    const sc = String(ec[2] || '').toLowerCase();
+                    return (sc.includes('cat >') && sc.includes('<<')) || sc.includes('*** begin patch');
+                  }
+                  const tokens = ec.map((x: any) => String(x).toLowerCase());
+                  return (tokens.includes('cat') && (tokens.includes('>') || tokens.includes('>>'))) || tokens.includes('ed');
+                }
+                return false;
+              } catch { return false; }
+            })();
+            if (isWrite) {
+              try {
+                const ec = (envelope as any)?.executed?.command as any;
+                if (Array.isArray(ec) && ec.length >= 3 && String(ec[0]).toLowerCase() === 'bash' && String(ec[1]).toLowerCase() === '-lc') {
+                  const script = String(ec[2] || '');
+                  if (script.length > LIM || /<<|\*\*\* Begin Patch/i.test(script)) (envelope as any).executed.command[2] = `[heredoc/patch script suppressed: ~${script.length} chars]`;
+                }
+              } catch { /* ignore */ }
+              try {
+                const a = (envelope as any)?.arguments as any;
+                const cv = a && typeof a === 'object' ? a.command : undefined;
+                if (typeof cv === 'string') {
+                  if (cv.length > LIM || /<<|\*\*\* Begin Patch/i.test(cv)) (a as any).command = `[heredoc/patch script suppressed: ~${cv.length} chars]`;
+                } else if (Array.isArray(cv) && cv.length >= 3 && String(cv[0]).toLowerCase() === 'bash' && String(cv[1]).toLowerCase() === '-lc') {
+                  const sc2 = String(cv[2] || '');
+                  if (sc2.length > LIM || /<<|\*\*\* Begin Patch/i.test(sc2)) (a as any).command[2] = `[heredoc/patch script suppressed: ~${sc2.length} chars]`;
+                }
+              } catch { /* ignore */ }
+              const r = (envelope as any).result as any;
+              let size = 0; if (typeof r.output === 'string') size = r.output.length; else if (r.output && typeof r.output === 'object' && typeof r.output.output === 'string') size = r.output.output.length;
+              r.output = `write operation output suppressed${size ? ` (~${size} chars)` : ''}`;
+              r.truncated = true;
+              if (typeof r.stdout === 'string') r.stdout = trunc(r.stdout);
+              if (typeof r.stderr === 'string') r.stderr = trunc(r.stderr);
+            } else {
+              const r = (envelope as any).result as any;
+              if (typeof r.stdout === 'string') r.stdout = trunc(r.stdout);
+              if (typeof r.stderr === 'string') r.stderr = trunc(r.stderr);
+              if (typeof r.output === 'string') r.output = trunc(r.output);
+              else if (r.output && typeof r.output === 'object' && typeof r.output.output === 'string') r.output.output = trunc(r.output.output);
+            }
+          } catch { /* ignore */ }
           try {
             const trunc = (val: any, n = 800) => { try { const s = typeof val==='string'?val: JSON.stringify(val); return s.length>n? s.slice(0,n)+'...(truncated)': s; } catch { return String(val);} };
             console.log('[LLMSWITCH][responses][tool-output][before]', { callId: String(toolCallId), name, content: trunc(output) });
@@ -874,3 +868,4 @@ export function extractRequestIdFromResponse(response: any): string | undefined 
   }
   return undefined;
 }
+import { buildSystemToolGuidance } from '../../guidance/index.js';

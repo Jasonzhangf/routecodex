@@ -93,143 +93,139 @@ export function normalizeChatRequest(request: any): any {
     }
   } catch { /* ignore MCP injection */ }
 
-  // Inject comprehensive tool usage guidance (non-MCP + phased MCP), if tools are present and guidance not already present
+  // Inject minimal system tool guidance when enabled
   try {
+    const sysGuideEnabled = String(process.env.RCC_SYSTEM_TOOL_GUIDANCE || '').trim() === '1';
     const msgs = Array.isArray((normalized as any).messages) ? ((normalized as any).messages as any[]) : [];
     const tools = Array.isArray((normalized as any).tools) ? ((normalized as any).tools as any[]) : [];
     const hasGuidance = msgs.some((m: any) => m && m.role === 'system' && typeof m.content === 'string' && /Use OpenAI tool_calls|Tool usage guidance/i.test(m.content));
-    if (!hasGuidance && tools.length > 0) {
-      const toolNames = tools
-        .map((t: any) => (t && t.function && typeof t.function.name === 'string') ? String(t.function.name) : '')
-        .filter((n: string) => !!n && !/^list_mcp_resources$|^read_mcp_resource$|^list_mcp_resource_templates$/i.test(n));
-      const unique = Array.from(new Set(toolNames));
-      const bullet = (s: string) => `- ${s}`;
-
-      const general: string[] = [];
-      general.push('Tool usage guidance (OpenAI tool_calls) / 工具使用指引（OpenAI 标准）');
-      general.push(bullet('Always use assistant.tool_calls[].function.{name,arguments}; never embed tool calls in plain text. / 一律通过 tool_calls 调用工具，不要把工具调用写进普通文本。'));
-      general.push(bullet('function.arguments must be a single JSON string. / arguments 必须是单个 JSON 字符串。'));
-      general.push(bullet('function.name is required and must be non-empty (e.g., shell/update_plan/view_image). Empty names are invalid. / 函数名必须非空（如 shell/update_plan/view_image），禁止留空。'));
-      general.push(bullet('For shell, put ALL intent into the command argv array only; do not invent extra keys. / shell 所有意图写入 command 数组，不要添加额外键名。'));
-      if (unique.length) {
-        general.push(bullet(`Available tools（非 MCP）: ${unique.slice(0, 8).join(', ')}`));
-      }
-      // Examples: shell / update_plan / view_image
-      general.push('Examples / 示例:');
-      general.push('shell: {"command":["find",".","-type","f","-name","*.ts"]}');
-      general.push('  - Good / 正例: {"command":["head","-50","codex-local/src/index.ts"]}');
-      general.push('  - Bad / 反例: {"js":"head -20"}, {"command":"find . -name *.ts"}, pseudo-XML (<arg_key>/<arg_value>)');
-      general.push(bullet('If you need redirection/pipes/heredoc, wrap in bash -lc. / 需要重定向/管道/heredoc 时，必须包在 bash -lc 中。'));
-      general.push('  e.g. {"command":["bash","-lc","cat > codex-local/docs/WRITING_GUIDE.md <<\'EOF\'\\n内容…\\nEOF"]}');
-      general.push('update_plan: {"explanation":"...","plan":[{"step":"...","status":"in_progress"},{"step":"...","status":"pending"}]}');
-      general.push('view_image: {"path":"/absolute/or/relative/path/to/image.png"} (only images: .png .jpg .jpeg .gif .webp .bmp .svg)');
-      general.push(bullet('Do not call view_image for text files (e.g., .md/.txt). Use shell to read text. / 文本文件不要用 view_image，使用 shell 查看文本。'));
-
-      // File editing efficiency / 文件编辑效率
-      general.push('File editing efficiency / 文件编辑效率');
-      general.push(bullet('Avoid line-by-line echo; use single-shot writes. / 避免逐行 echo，使用一次性写入。'));
-      general.push(bullet('Do NOT use bare "cat > <path>" without stdin; use heredoc to provide content. / 禁止裸用 "cat > <path>" 且无输入，使用 heredoc 提供内容。'));
-      general.push(bullet('Overwrite file: cat > <path> <<\'EOF\' ... EOF / 覆盖写入：cat > <path> <<\'EOF\' ... EOF'));
-      general.push(bullet('Append: cat >> <path> <<\'EOF\' ... EOF / 追加：cat >> <path> <<\'EOF\' ... EOF'));
-      general.push(bullet('Atomic write: mkdir -p "$(dirname <path>)"; tmp="$(mktemp)"; cat > "$tmp" <<\'EOF\' ... EOF; mv "$tmp" <path> / 原子写入，防止半写入状态。'));
-      general.push(bullet('macOS sed in-place: sed -i "" "s|<OLD>|<NEW>|g" <path> / macOS 用 -i ""，Linux 用 -i。'));
-      general.push(bullet('Block replace/insert: use ed -s for multi-line edits. / 多行替换可用 ed -s。'));
-      general.push(bullet('Prefer unified diff patches for batch edits; apply once. / 批量修改优先用统一 diff，一次性应用。'));
-      general.push(bullet('If a tool completes with no text output, explicitly say "no output" in your next assistant message and continue. / 工具执行无文本输出时，请在后续助手回复明确说明“无输出”，继续下一步。'));
-      general.push('Examples:');
-      general.push('  cat > codex-local/docs/design.md <<\'EOF\'\n  ...内容...\n  EOF');
-      general.push('  ed -s codex-local/src/index.ts <<\'ED\'\n  ,$g/^BEGIN:SECTION$/,/^END:SECTION$/s//BEGIN:SECTION\\\n新内容…\\\nEND:SECTION/\n  w\n  q\n  ED');
-      general.push('  cat > /tmp/patch.diff <<\'PATCH\'\n  *** Begin Patch\n  *** Update File: codex-local/src/index.ts\n  @@\n  -old line\n  +new line\n  *** End Patch\n  PATCH\n  git apply /tmp/patch.diff');
-
-      // MCP phased guidance
-      const mcp: string[] = [];
-      const enableMcp = String((process as any)?.env?.ROUTECODEX_MCP_ENABLE ?? '1') !== '0';
-      if (enableMcp) {
-        const mcpHeader = 'MCP tool usage (phased) / MCP 工具使用（分阶段）';
-        // Reuse known serverList from above MCP injection block by recomputing (safe)
-        const knownServers = (() => {
-          const set = new Set<string>();
-          try {
-            for (const m of msgs) {
-              if (!m || typeof m !== 'object') continue;
-              if ((m as any).role === 'tool' && typeof (m as any).content === 'string') {
-                try { const obj = JSON.parse((m as any).content); const sv = obj?.arguments?.server; if (typeof sv === 'string' && sv.trim()) set.add(sv.trim()); } catch {}
-              }
-              if ((m as any).role === 'assistant' && Array.isArray((m as any).tool_calls)) {
-                for (const tc of ((m as any).tool_calls as any[])) {
-                  try { const argStr = String(tc?.function?.arguments ?? ''); const parsed = JSON.parse(argStr); const sv = parsed?.server; if (typeof sv === 'string' && sv.trim()) set.add(sv.trim()); } catch {}
-                }
-              }
-            }
-          } catch {}
-          const serversRaw = String((process as any)?.env?.ROUTECODEX_MCP_SERVERS || '').trim();
-          if (serversRaw) { for (const s of serversRaw.split(',').map((x: string) => x.trim()).filter(Boolean)) set.add(s); }
-          return Array.from(set);
-        })();
-
-        mcp.push(mcpHeader);
-        if (!knownServers.length) {
-          mcp.push(bullet('Start with list_mcp_resources; arguments.server is optional. / 首先调用 list_mcp_resources，server 可选。'));
-          mcp.push(bullet('Do NOT use dotted tool names (e.g., filesystem.read_mcp_resource). / 禁止使用带点的工具名。'));
-          mcp.push(bullet('Example / 示例: list_mcp_resources {"filter":"*.md","root":"./codex-local"}'));
-          mcp.push(bullet('Discover server labels from results; use them in subsequent calls. / 先从结果里发现 server_label，再在后续调用中使用。'));
-        } else {
-          mcp.push(bullet('You may call read_mcp_resource and list_mcp_resource_templates now. / 现在可以调用 read_mcp_resource 和 list_mcp_resource_templates。'));
-          mcp.push(bullet(`server must be one of: ${knownServers.join(', ')} / server 必须从该列表中选择`));
-          mcp.push(bullet('Examples / 示例:'));
-          mcp.push('  read_mcp_resource {"server":"<one_of_known>","uri":"./codex-local/README.md"}');
-          mcp.push('  list_mcp_resource_templates {"server":"<one_of_known>"}');
-          mcp.push(bullet('Do NOT infer server from dotted prefixes. / 不要从带点前缀推断 server。'));
-        }
-      }
-
-      const guidance = [...general, ...(mcp.length ? ['','',...mcp] : [])].join('\n');
-      (normalized as any).messages = [
-        { role: 'system', content: guidance },
-        ...msgs
-      ];
+    if (sysGuideEnabled && !hasGuidance && tools.length > 0) {
+      const sys = buildSystemToolGuidance();
+      (normalized as any).messages = [ { role: 'system', content: sys }, ...msgs ];
     }
   } catch { /* ignore guidance injection */ }
 
   // Fix-up assistant.tool_calls for shell redirection/pipes: wrap argv into bash -lc when metachars present
   try {
     const msgs: any[] = Array.isArray((normalized as any).messages) ? ((normalized as any).messages as any[]) : [];
-    const hasMeta = (tokens: any): boolean => {
-      if (!Array.isArray(tokens)) return false;
-      const metas = new Set(['>', '>>', '<', '<<', '|', ';', '&&', '||']);
-      return tokens.some((t: any) => {
-        const s = String(t);
-        if (metas.has(s)) return true;
-        return /[<>|;&]{1,2}/.test(s);
-      });
+    const hasMetaToken = (arr: string[] | any): boolean => {
+      const metas = new Set(['|','>','>>','<','<<',';','&&','||']);
+      if (!Array.isArray(arr)) return false;
+      return (arr as any[]).some((t) => metas.has(String(t)) || /[|<>;&]/.test(String(t)) || String(t).includes('&&') || String(t).includes('||') || String(t).includes('<<'));
     };
-    const alreadyBashLc = (tokens: any): boolean => Array.isArray(tokens) && tokens.length >= 2 && String(tokens[0]) === 'bash' && String(tokens[1]) === '-lc';
+    const alreadyBashLc = (arr: any): boolean => Array.isArray(arr) && arr.length >= 2 && String(arr[0]) === 'bash' && String(arr[1]) === '-lc';
     const joinTokens = (tokens: any[]): string => tokens.map((t) => String(t)).join(' ');
+    const splitCommandString = (input: string): string[] => {
+      const s = String(input || '').trim();
+      if (!s) return [];
+      const out: string[] = [];
+      let cur = '';
+      let inSingle = false;
+      let inDouble = false;
+      for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (inSingle) { if (ch === "'") { inSingle = false; } else { cur += ch; } continue; }
+        if (inDouble) { if (ch === '"') { inDouble = false; continue; } if (ch === '\\' && i + 1 < s.length) { i++; cur += s[i]; continue; } cur += ch; continue; }
+        if (ch === "'") { inSingle = true; continue; }
+        if (ch === '"') { inDouble = true; continue; }
+        if (/\s/.test(ch)) { if (cur) { out.push(cur); cur=''; } continue; }
+        cur += ch;
+      }
+      if (cur) out.push(cur);
+      return out;
+    };
+    const flattenByComma = (arr: string[]): string[] => arr.flatMap((t) => String(t).split(',').map(s => s.trim()).filter(Boolean));
+    const parseArrayPrefixToScript = (s: string): string | null => {
+      try {
+        const str = String(s || '').trim();
+        if (!str.startsWith('[')) return null;
+        let i = 0, depth = 0, inS = false, inD = false, esc = false, end = -1;
+        for (; i < str.length; i++) {
+          const ch = str[i];
+          if (inS) { if (esc) { esc = false; continue; } if (ch === '\\') { esc = true; continue; } if (ch === "'") { inS = false; } continue; }
+          if (inD) { if (esc) { esc = false; continue; } if (ch === '\\') { esc = true; continue; } if (ch === '"') { inD = false; } continue; }
+          if (ch === "'") { inS = true; continue; }
+          if (ch === '"') { inD = true; continue; }
+          if (ch === '[') { depth++; continue; }
+          if (ch === ']' && depth > 0) { depth--; if (depth === 0) { end = i; break; } continue; }
+        }
+        if (end < 0) return null;
+        const arrPart = str.slice(0, end + 1);
+        const rest = str.slice(end + 1).trim();
+        let argv: any = null; try { argv = JSON.parse(arrPart); } catch { argv = null; }
+        if (!Array.isArray(argv)) return null;
+        const left = argv.map((x: any) => String(x)).join(' ');
+        const script = left + (rest ? (' ' + rest) : '');
+        return script.trim();
+      } catch { return null; }
+    };
+    const stripBracketsAndCommas = (arr: string[]): string[] => arr
+      .map((t) => t.replace(/^\[+/, '').replace(/\]+$/, ''))
+      .map((t) => t.endsWith(',') ? t.slice(0, -1) : t)
+      .filter((t) => t !== ',' && t.length > 0);
+    const parseLenient = (value: any): any => {
+      if (value === undefined || value === null) return {};
+      if (typeof value === 'object') return value;
+      if (typeof value !== 'string') return { _raw: String(value) };
+      const s0 = value.trim();
+      if (!s0) return {};
+      try { return JSON.parse(s0); } catch { /* continue */ }
+      const fence = s0.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+      const candidate = fence ? fence[1] : s0;
+      const objMatch = candidate.match(/\{[\s\S]*\}/);
+      if (objMatch) { try { return JSON.parse(objMatch[0]); } catch { /* ignore */ } }
+      const arrMatch = candidate.match(/\[[\s\S]*\]/);
+      if (arrMatch) { try { return JSON.parse(arrMatch[0]); } catch { /* ignore */ } }
+      let t = candidate.replace(/'([^']*)'/g, '"$1"');
+      t = t.replace(/([{,\s])([A-Za-z_][A-Za-z0-9_-]*)\s*:/g, '$1"$2":');
+      try { return JSON.parse(t); } catch { /* ignore */ }
+      const obj: Record<string, any> = {};
+      const parts = candidate.split(/[\n,]+/).map(p => p.trim()).filter(Boolean);
+      for (const p of parts) {
+        const m = p.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*[:=]\s*(.+)$/);
+        if (!m) continue; const k = m[1]; let v = m[2].trim();
+        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+        try { const pv = JSON.parse(v); obj[k] = pv; continue; } catch { /* fallthrough */ }
+        if (/^(true|false)$/i.test(v)) { obj[k] = /^true$/i.test(v); continue; }
+        if (/^-?\d+(?:\.\d+)?$/.test(v)) { obj[k] = Number(v); continue; }
+        obj[k] = v;
+      }
+      return obj;
+    };
     for (const m of msgs) {
       if (!m || m.role !== 'assistant' || !Array.isArray(m.tool_calls)) continue;
       m.tool_calls = m.tool_calls.map((tc: any) => {
         if (!tc || typeof tc !== 'object') return tc;
         const fn = tc.function || {};
         const name = typeof fn?.name === 'string' ? fn.name.toLowerCase() : undefined;
-        if (name !== 'shell') return tc;
-        const argStr = typeof fn?.arguments === 'string' ? fn.arguments : (fn?.arguments != null ? JSON.stringify(fn.arguments) : '{}');
+        const argStrIn = typeof fn?.arguments === 'string' ? fn.arguments : (fn?.arguments != null ? JSON.stringify(fn.arguments) : '{}');
         let argsObj: any = {};
-        try { argsObj = JSON.parse(argStr); } catch { argsObj = {}; }
-        const cmd = argsObj && typeof argsObj === 'object' ? (argsObj as any).command : undefined;
-        if (false) {
-          // Special-case: cat > file / cat >> file with no content → create/append empty file via ':'
-          let script = joinTokens(cmd);
-          if (cmd.length === 3 && String(cmd[0]) === 'cat' && (String(cmd[1]) === '>' || String(cmd[1]) === '>>')) {
-            const op = String(cmd[1]);
-            const f = String(cmd[2]);
-            const q = (s: string) => `'` + s.replace(/'/g, `\'`) + `'`;
-            script = `: ${op} ${q(f)}`;
-          }
-          (argsObj as any).command = ['bash', '-lc', script];
-          try { fn.arguments = JSON.stringify(argsObj); } catch { fn.arguments = argStr; }
-          return { ...tc, function: fn };
+        try { argsObj = parseLenient(argStrIn); } catch { argsObj = {}; }
+        if (name === 'shell') {
+          try {
+            const cmdVal: any = (argsObj as any).command;
+            if (typeof cmdVal === 'string') {
+              const s = cmdVal.trim();
+              const arrScript = parseArrayPrefixToScript(s);
+              if (arrScript) {
+                (argsObj as any).command = ['bash','-lc', arrScript];
+              } else {
+                const tokens = stripBracketsAndCommas(flattenByComma(splitCommandString(s)));
+                if (tokens.length) {
+                  if (hasMetaToken(tokens)) (argsObj as any).command = ['bash','-lc', tokens.join(' ')];
+                  else (argsObj as any).command = tokens;
+                } else {
+                  (argsObj as any).command = [];
+                }
+              }
+            } else if (Array.isArray(cmdVal)) {
+              const toks = cmdVal.map((x: any) => String(x));
+              if (!alreadyBashLc(toks) && hasMetaToken(toks)) (argsObj as any).command = ['bash','-lc', toks.join(' ')];
+            }
+          } catch { /* ignore */ }
         }
-        return tc;
+        try { fn.arguments = JSON.stringify(argsObj ?? {}); } catch { fn.arguments = argStrIn; }
+        return { ...tc, function: fn };
       });
     }
     (normalized as any).messages = msgs;
@@ -302,9 +298,23 @@ export function normalizeChatRequest(request: any): any {
         if (typeof v !== 'string') return v;
         const s = v.trim();
         if (!s) return '';
+        // First, try strict JSON
         try { return JSON.parse(s); } catch { /* try fenced */ }
         const fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-        if (fence) { try { return JSON.parse(fence[1]); } catch { /* ignore */ } }
+        if (fence) { try { return JSON.parse(fence[1]); } catch { /* continue */ } }
+        // Heuristic repair: common JSON-ish issues seen from model outputs
+        try {
+          let t = s;
+          // 1) Replace single quotes with double quotes (non-greedy, content-safe best-effort)
+          t = t.replace(/'([^']*)'/g, '"$1"');
+          // 2) Quote unquoted keys (foo: bar -> "foo": bar)
+          t = t.replace(/([{,\s])([A-Za-z_][A-Za-z0-9_-]*)\s*:/g, '$1"$2":');
+          // 3) Quote bare request_id/call_id values (request_id: req_123 -> request_id: "req_123")
+          t = t.replace(/("(?:request_id|call_id)"\s*:\s*)(req_[A-Za-z0-9_-]+)/g, '$1"$2"');
+          // 4) Remove trailing commas before closing braces/brackets
+          t = t.replace(/,\s*([}\]])/g, '$1');
+          return JSON.parse(t);
+        } catch { /* fallthrough */ }
         return s;
       };
       const toArray = (x: any): string[] => Array.isArray(x) ? x.map((t) => String(t)) : (typeof x === 'string' && x.length ? [x] : []);
@@ -333,8 +343,98 @@ export function normalizeChatRequest(request: any): any {
         try { argsOut = argStr ? JSON.parse(argStr) : {}; } catch { argsOut = argStr ? { _raw: argStr } : {}; }
         const rawContent = (m as any).content;
         const body = toLenientObj(rawContent);
-        // If already conforms to rcc.tool.v1, keep
+        // Helper: sanitize oversized outputs and redact heredoc writes
+        const sanitizeEnvelope = (env: any): any => {
+          try {
+            const LIM = Math.max(1, Number((process as any)?.env?.ROUTECODEX_TOOL_OUTPUT_LIMIT || (process as any)?.env?.RCC_TOOL_OUTPUT_LIMIT || 1000));
+            const trunc = (s: string): string => (typeof s === 'string' && s.length > LIM) ? (s.slice(0, LIM) + '...(truncated)') : s;
+            const isWriteOp = (): boolean => {
+              try {
+                const cmd = (env?.executed?.command) as any;
+                if (Array.isArray(cmd) && cmd.length >= 1) {
+                  const t0 = String(cmd[0] || '').toLowerCase();
+                  if (t0 === 'bash' && String(cmd[1] || '').toLowerCase() === '-lc') {
+                    const script = String(cmd[2] || '');
+                    const low = script.toLowerCase();
+                    return (low.includes('cat >') && low.includes('<<')) || low.includes('*** begin patch');
+                  }
+                  const tokens = cmd.map((x: any) => String(x).toLowerCase());
+                  return (tokens.includes('cat') && (tokens.includes('>') || tokens.includes('>>'))) || tokens.includes('ed');
+                }
+                return false;
+              } catch { return false; }
+            };
+            const redactHeredocInCommand = (): void => {
+              try {
+                const cmd = (env?.executed?.command) as any;
+                if (Array.isArray(cmd) && cmd.length >= 3 && String(cmd[0]).toLowerCase() === 'bash' && String(cmd[1]).toLowerCase() === '-lc') {
+                  const script = String(cmd[2] || '');
+                  if (script.length > LIM || /<<|\*\*\* Begin Patch/i.test(script)) {
+                    (env.executed as any).command[2] = `[heredoc/patch script suppressed: ~${script.length} chars]`;
+                  }
+                }
+              } catch { /* ignore */ }
+            };
+            const sanitizeResult = (): void => {
+              try {
+                if (!env.result || typeof env.result !== 'object') return;
+                const r = env.result as any;
+                if (typeof r.stdout === 'string') r.stdout = trunc(r.stdout);
+                if (typeof r.stderr === 'string') r.stderr = trunc(r.stderr);
+                if (typeof r.output === 'string') {
+                  r.output = trunc(r.output);
+                } else if (r.output && typeof r.output === 'object') {
+                  const o = r.output as any;
+                  if (typeof o.output === 'string') o.output = trunc(o.output);
+                }
+              } catch { /* ignore */ }
+            };
+
+            if (isWriteOp()) {
+              // Do not echo write scripts or bodies at all
+              try {
+                // executed: drop command tokens to avoid being mimicked by the model
+                if (env.executed && typeof env.executed === 'object') {
+                  try { (env.executed as any).command = []; } catch { /* ignore */ }
+                }
+                // arguments: remove command field from tool result envelope to avoid echo
+                if (env.arguments && typeof env.arguments === 'object') {
+                  try { delete (env.arguments as any).command; } catch { /* ignore */ }
+                }
+                // result: clear output; keep stderr/stdout snippets for diagnostics
+                if (env.result && typeof env.result === 'object') {
+                  const r = env.result as any;
+                  r.output = '';
+                  // keep exit_code/duration; limit stdout/stderr length
+                  if (typeof r.stdout === 'string') r.stdout = trunc(r.stdout);
+                  if (typeof r.stderr === 'string') r.stderr = trunc(r.stderr);
+                  if ('truncated' in r) delete r.truncated;
+                }
+              } catch { /* ignore */ }
+            } else {
+              sanitizeResult();
+            }
+          } catch { /* ignore all */ }
+          return env;
+        };
+
+        // If already conforms to rcc.tool.v1, normalize minor field variants then keep
         if (body && typeof body === 'object' && (body as any).version === 'rcc.tool.v1' && (body as any).tool && (body as any).result) {
+          try { sanitizeEnvelope(body); } catch { /* ignore */ }
+          try {
+            // Normalize common typos/variants: execed -> executed
+            if ((body as any).execed && !(body as any).executed) {
+              (body as any).executed = (body as any).execed;
+              delete (body as any).execed;
+            }
+            // Ensure meta.request_id is a string when present
+            if ((body as any).meta && typeof (body as any).meta === 'object' && (body as any).meta.request_id != null) {
+              const rid = (body as any).meta.request_id;
+              if (typeof rid !== 'string') {
+                try { (body as any).meta.request_id = String(rid); } catch { /* ignore */ }
+              }
+            }
+          } catch { /* ignore */ }
           // Ensure tool_call_id is set
           (m as any).tool_call_id = callId;
           if (typeof (m as any).content !== 'string') { try { (m as any).content = JSON.stringify(body); } catch { (m as any).content = String((m as any).content); } }
@@ -368,7 +468,7 @@ export function normalizeChatRequest(request: any): any {
         }
         const reqId = getReqId();
         const successBool = (typeof success === 'boolean') ? success : (typeof exitCode === 'number' ? exitCode === 0 : false);
-        const envelope: any = {
+        let envelope: any = {
           version: 'rcc.tool.v1',
           tool: { name, call_id: callId },
           arguments: argsOut,
@@ -383,6 +483,7 @@ export function normalizeChatRequest(request: any): any {
           },
           ...(reqId ? { meta: { request_id: reqId, ts: Date.now() } } : { meta: { ts: Date.now() } })
         };
+        try { envelope = sanitizeEnvelope(envelope); } catch { /* ignore */ }
         try {
           console.log('[LLMSWITCH][tool-output][before]', { callId, name, content: trunc(rawContent) });
           console.log('[LLMSWITCH][tool-output][after]', {
@@ -668,3 +769,4 @@ function normalizeToolCall(tc: any): any {
   }
   return t;
 }
+import { buildSystemToolGuidance } from '../../guidance/index.js';
