@@ -124,8 +124,10 @@ export class ChatCompletionsHandler extends BaseHandler {
       // Process request through pipeline
       const pipelineResponse = await this.processChatRequest(req, requestId);
 
-      // Handle streaming vs non-streaming response
-      if (req.body.stream) {
+      // Handle streaming vs non-streaming response (also honor Accept: text/event-stream)
+      const accept = String(req.headers['accept'] || '').toLowerCase();
+      const wantsSSE = (accept.includes('text/event-stream') || req.body?.stream === true);
+      if (wantsSSE) {
         const streamModel = (pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse)
           ? ((pipelineResponse as any).data?.model ?? req.body.model)
           : req.body.model;
@@ -150,10 +152,12 @@ export class ChatCompletionsHandler extends BaseHandler {
         if (wantsSSE && !res.writableEnded) {
           try {
             if (!res.headersSent) {
-              res.setHeader('Content-Type', 'text/event-stream');
-              res.setHeader('Cache-Control', 'no-cache');
+              res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+              res.setHeader('Cache-Control', 'no-cache, no-transform');
               res.setHeader('Connection', 'keep-alive');
+              try { res.setHeader('X-Accel-Buffering', 'no'); } catch { /* ignore */ }
               res.setHeader('x-request-id', requestId);
+              try { (res as any).flushHeaders?.(); } catch { /* ignore */ }
             }
             const model = typeof req.body?.model === 'string' ? req.body.model : 'unknown';
             const errMsg = (error instanceof Error ? error.message : String(error)) || 'stream error';

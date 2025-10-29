@@ -18,6 +18,8 @@ Request Mapping (OpenAI → GLM)
   - Ensure content is string or null.
   - If role === 'assistant' and message has tool_calls → set content = null (GLM expects null on tool call turns).
   - If content is array → flatten textual parts and join with newlines.
+  - Strip assistant.tool_calls from all assistant messages except the last one. Keep only the most recent assistant tool_calls to avoid GLM 1210/1213/1214.
+  - Do NOT delete historical role:tool messages or earlier assistant turns; only remove their tool_calls field. This is a send-time normalization (no global history purge, no switches).
 - passthrough
   - model, stream, temperature, top_p, max_tokens
   - tools, tool_choice, stop, response_format

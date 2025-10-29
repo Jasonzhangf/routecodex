@@ -7,8 +7,6 @@ import { BaseModule, type ModuleInfo } from './base-module.js';
 import { DebugEventBus } from 'rcc-debugcenter';
 import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import { ErrorHandlingUtils } from '../utils/error-handling-utils.js';
-import { BaseProvider } from '../providers/base-provider.js';
-import { OpenAIProvider } from '../providers/openai-provider.js';
 import {
   type ProviderConfig,
   type ProviderHealth,
@@ -33,7 +31,7 @@ export interface ProviderManagerOptions {
  * Provider instance with metadata
  */
 interface ProviderInstance {
-  provider: BaseProvider;
+  provider: any;
   config: ProviderConfig;
   lastHealthCheck: number;
   isActive: boolean;
@@ -197,77 +195,18 @@ export class ProviderManager extends BaseModule {
    * Initialize all configured providers
    */
   private async initializeProviders(): Promise<void> {
-    for (const [providerId, providerConfig] of Object.entries(this.config.providers)) {
-      if (providerConfig.enabled) {
-        try {
-          await this.addProvider(providerId, providerConfig as unknown as ProviderConfig);
-        } catch (error) {
-          console.error(`Failed to initialize provider ${providerId}:`, error);
-          await this.handleError(error as Error, 'provider_initialization');
-        }
-      }
-    }
+    // In pipeline-first architecture, providers are managed by PipelineManager.
+    // Keep no-op to preserve legacy initialization flow without side effects.
+    return;
   }
 
   /**
    * Add a new provider
    */
   public async addProvider(providerId: string, config: ProviderConfig): Promise<void> {
-    try {
-      let provider: BaseProvider;
-
-      // Create provider based on type
-      switch (config.type.toLowerCase()) {
-        case 'openai':
-          provider = new OpenAIProvider(config);
-          break;
-        // pass-through provider removed; only supported providers remain
-        default:
-          throw new RouteCodexError(
-            `Unsupported provider type: ${config.type}`,
-            'unsupported_provider_type',
-            400
-          );
-      }
-
-      await provider.initialize();
-
-      const providerInstance: ProviderInstance = {
-        provider,
-        config,
-        lastHealthCheck: 0,
-        isActive: true,
-        consecutiveFailures: 0,
-        stats: provider.getStats(),
-      };
-
-      this.providers.set(providerId, providerInstance);
-
-      (this.debugEventBus as any)?.publish({
-        sessionId: `session_${Date.now()}`,
-        moduleId: 'provider-manager',
-        operationId: 'provider_added',
-        timestamp: Date.now(),
-        type: 'start',
-        position: 'middle',
-        data: {
-          providerId,
-          providerType: config.type,
-          modelCount: Object.keys(config.models).length,
-        },
-      } as unknown);
-
-      // Record provider addition metric
-      this.recordModuleMetric('provider_added', {
-        providerId,
-        providerType: config.type,
-        modelCount: Object.keys(config.models).length,
-        totalProviders: this.providers.size,
-      });
-    } catch (error) {
-      await this.handleError(error as Error, 'add_provider');
-      throw error;
-    }
+    // Deprecated in pipeline-first mode. Keep silent no-op for backward compatibility.
+    void providerId; void config;
+    return;
   }
 
   /**
@@ -303,7 +242,7 @@ export class ProviderManager extends BaseModule {
   /**
    * Get provider by ID
    */
-  public getProvider(providerId: string): BaseProvider | null {
+  public getProvider(providerId: string): any | null {
     const providerInstance = this.providers.get(providerId);
     return providerInstance?.provider || null;
   }
@@ -311,8 +250,8 @@ export class ProviderManager extends BaseModule {
   /**
    * Get all active providers
    */
-  public getActiveProviders(): BaseProvider[] {
-    const activeProviders: BaseProvider[] = [];
+  public getActiveProviders(): any[] {
+    const activeProviders: any[] = [];
 
     for (const [_providerId, providerInstance] of this.providers.entries()) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (providerInstance.isActive) {
@@ -340,11 +279,7 @@ export class ProviderManager extends BaseModule {
    */
   public getAllProvidersHealth(): Record<string, ProviderHealth> {
     const healthStatus: Record<string, ProviderHealth> = {};
-
-    for (const [providerId, providerInstance] of this.providers.entries()) {
-      healthStatus[providerId] = providerInstance.provider.getHealth();
-    }
-
+    // Providers are managed by pipelines; legacy map may be empty.
     return healthStatus;
   }
 
@@ -369,7 +304,7 @@ export class ProviderManager extends BaseModule {
    */
   private async performHealthChecks(): Promise<void> {
     this.metrics.totalHealthChecks++;
-
+    if (this.providers.size === 0) { return; }
     const healthCheckPromises = Array.from(this.providers.entries()).map(
       async ([_providerId, providerInstance]) => {
         try {
@@ -560,7 +495,7 @@ export class ProviderManager extends BaseModule {
   public getBestProviderForRequest(
     modelId?: string,
     _requestType: 'chat' | 'completion' | 'embedding' = 'chat'
-  ): BaseProvider | null {
+  ): any | null {
     const activeProviders = this.getActiveProviders();
     if (activeProviders.length === 0) {
       return null;
@@ -585,7 +520,7 @@ export class ProviderManager extends BaseModule {
   /**
    * Select provider using configured strategy
    */
-  private selectProviderByStrategy(providers: BaseProvider[]): BaseProvider {
+  private selectProviderByStrategy(providers: any[]): any {
     // Default strategy: round-robin with health consideration
     const healthyProviders = providers.filter(p => p.getHealth().status === 'healthy');
 
@@ -622,8 +557,8 @@ export class ProviderManager extends BaseModule {
     // const oneMinuteAgo = now - 60000; // Reserved for future use
 
     for (const [providerId, providerInstance] of this.providers.entries()) {
-      const providerStats = providerInstance.stats;
-      const health = providerInstance.provider.getHealth();
+      const providerStats = providerInstance.stats || { averageResponseTime: 0, totalRequests: 0 } as any;
+      const health = providerInstance.provider?.getHealth?.() || { status: 'unknown' } as any;
 
       // Calculate requests per minute (simplified)
       const requestsPerMinute = providerStats.totalRequests; // This could be enhanced with time-based tracking
@@ -650,7 +585,7 @@ export class ProviderManager extends BaseModule {
    * Execute provider request with failover
    */
   public async executeWithFailover<T>(
-    operation: (provider: BaseProvider) => Promise<T>,
+    operation: (provider: any) => Promise<T>,
     options: {
       modelId?: string;
       requestType?: 'chat' | 'completion' | 'embedding';
@@ -727,98 +662,9 @@ export class ProviderManager extends BaseModule {
       healthCheck?: boolean;
     } = {}
   ): Promise<{ success: boolean; message?: string; health?: ProviderHealth }> {
-    try {
-      const { validateOnly = false, healthCheck = true } = options;
-
-      // Check if provider already exists
-      if (this.providers.has(providerId)) {
-        return {
-          success: false,
-          message: `Provider ${providerId} already exists`,
-        };
-      }
-
-      // Validate configuration
-      let provider: BaseProvider;
-      switch (config.type.toLowerCase()) {
-        case 'openai':
-          provider = new OpenAIProvider(config);
-          break;
-        // pass-through provider removed; only supported providers remain
-        default:
-          return {
-            success: false,
-            message: `Unsupported provider type: ${config.type}`,
-          };
-      }
-
-      // Validate configuration without initializing
-      if (validateOnly) {
-        try {
-          // Initialize for validation (this will call validateConfiguration internally)
-          await provider.initialize();
-          await provider.destroy(); // Clean up after validation
-          return {
-            success: true,
-            message: `Provider ${providerId} configuration is valid`,
-          };
-        } catch (validationError) {
-          return {
-            success: false,
-            message: `Configuration validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}`,
-          };
-        }
-      }
-
-      // Initialize and add provider
-      await provider.initialize();
-      const providerInstance: ProviderInstance = {
-        provider,
-        config,
-        lastHealthCheck: 0,
-        isActive: true,
-        consecutiveFailures: 0,
-        stats: provider.getStats(),
-      };
-
-      this.providers.set(providerId, providerInstance);
-
-      // Perform health check if requested
-      let health: ProviderHealth | undefined;
-      if (healthCheck) {
-        health = await provider.healthCheck();
-      }
-
-      (this.debugEventBus as any)?.publish({
-        sessionId: `session_${Date.now()}`,
-        moduleId: 'provider-manager',
-        operationId: 'dynamic_provider_added',
-        timestamp: Date.now(),
-        type: 'start',
-        position: 'middle',
-        data: {
-          providerId,
-          providerType: config.type,
-          modelCount: Object.keys(config.models).length,
-          healthCheck: !!healthCheck,
-          healthStatus: health?.status,
-        },
-      } as unknown);
-
-      return {
-        success: true,
-        message: `Provider ${providerId} added successfully`,
-        health,
-      };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      await this.handleError(new Error(errorMessage), 'add_dynamic_provider');
-
-      return {
-        success: false,
-        message: `Failed to add provider ${providerId}: ${errorMessage}`,
-      };
-    }
+    // Dynamic providers are disabled in pipeline-first mode
+    void providerId; void config; void options;
+    return { success: false, message: 'Dynamic providers are disabled (pipeline-managed providers only)' };
   }
 
   /**
@@ -930,8 +776,11 @@ export class ProviderManager extends BaseModule {
     };
 
     for (const [_providerId, providerInstance] of this.providers.entries()) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      const health = providerInstance.provider.getHealth();
-      status[health.status]++;
+      try {
+        const h = providerInstance.provider?.getHealth?.();
+        const key = (h?.status === 'healthy' || h?.status === 'unhealthy' || h?.status === 'unknown') ? h.status : 'unknown';
+        (status as any)[key] = ((status as any)[key] || 0) + 1;
+      } catch { /* ignore */ }
     }
 
     return status;

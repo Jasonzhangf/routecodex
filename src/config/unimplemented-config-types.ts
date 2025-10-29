@@ -5,7 +5,8 @@
 
 import { type ProviderConfig } from '../server/types.js';
 import { type UnimplementedModuleConfig } from '../modules/unimplemented-module.js';
-import { type UnimplementedProviderConfig } from '../providers/unimplemented-provider.js';
+// UnimplementedProviderConfig dependency removed; use generic shape to avoid tight coupling
+type UnimplementedProviderConfig = Record<string, unknown>;
 
 /**
  * Module configuration types

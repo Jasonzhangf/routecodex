@@ -116,33 +116,8 @@ export class ServiceRegistry {
   public registerConverterServices(converterType: string, config?: any): void {
     const servicePrefix = converterType.toLowerCase().replace('converter', '');
 
-    // LLMSwitch 本地工具已收敛到 core；若保留旧实现，允许通过可选依赖注册。
-    try {
-      const LOCAL_UTILS = String(process.env.ROUTECODEX_LLMSWITCH_LOCAL_UTILS || '').trim() === '1';
-      if (LOCAL_UTILS) {
-        // Register tool registry (optional)
-        this.container.register(
-          `${servicePrefix}ToolRegistry`,
-          () => {
-            const { ToolRegistry } = require('../../modules/pipeline/modules/llmswitch/utils/tool-registry.js');
-            return new ToolRegistry(config);
-          },
-          ServiceLifetime.Singleton
-        );
-
-        // Register schema normalizer (optional)
-        this.container.register(
-          `${servicePrefix}SchemaNormalizer`,
-          () => {
-            const { SchemaNormalizer } = require('../../modules/pipeline/modules/llmswitch/utils/schema-normalizer.js');
-            return new SchemaNormalizer();
-          },
-          ServiceLifetime.Singleton
-        );
-      }
-    } catch {
-      // 忽略可选依赖缺失
-    }
+    // 统一改为使用 sharedmodule/llmswitch-core，移除本地可选 utils 注册以避免重复实现。
+    // 如需额外的工具注册与 schema 归一化，请在 rcc-llmswitch-core 内扩展并从此处通过 core 进行接入。
   }
 
   /**

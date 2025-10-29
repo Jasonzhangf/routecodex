@@ -172,6 +172,12 @@ export function extractToolText(value: unknown): string {
     const errMerged = uniqMerge(errors).trim();
     if (errMerged) return errMerged;
 
+    // If the command succeeded with no output, emit a clear success marker to avoid agent retry loops
+    if (exitCode === 0) {
+      if (executedLine) return `${executedLine}\nCommand succeeded (no output).`;
+      return 'Command succeeded (no output).';
+    }
+
     // Fallbacks: minimal metadata or faithful JSON when requested
     if (FAITHFUL) {
       try {

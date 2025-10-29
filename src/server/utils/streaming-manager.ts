@@ -49,10 +49,14 @@ export class StreamingManager {
   async streamResponse(response: any, requestId: string, res: Response, model: string): Promise<void> {
     try {
       // Set appropriate headers for streaming
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
       res.setHeader('Connection', 'keep-alive');
+      // Disable proxy buffering for Nginx/Cloudflare style proxies to avoid stuck streams
+      try { res.setHeader('X-Accel-Buffering', 'no'); } catch { /* ignore */ }
       res.setHeader('x-request-id', requestId);
+      // Flush headers to start the SSE stream immediately
+      try { (res as any).flushHeaders?.(); } catch { /* ignore */ }
 
       // Start streaming
       if (!this.shouldStreamFromPipeline()) {

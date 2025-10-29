@@ -222,63 +222,10 @@ export class GLMCompatibility implements CompatibilityModule {
       (payload as UnknownObject)[key] = value as unknown;
     }
 
-    // Optional: aggressively trim historical tool calls for GLM stability
-    try {
-      const ENABLE = String(process.env.RCC_GLM_TRIM_TOOL_HISTORY || '').trim() === '1';
-      if (!ENABLE) return;
-      const keepTool = Math.max(0, Number(process.env.RCC_GLM_TRIM_TOOL_KEEP_LAST_TOOL || 3));
-      const keepAssist = Math.max(0, Number(process.env.RCC_GLM_TRIM_TOOL_KEEP_LAST_ASSIST || 1));
-      const msgs = Array.isArray((payload as any).messages) ? ((payload as any).messages as any[]) : [];
-      if (!msgs.length) return;
-
-      const toolIdx: number[] = [];
-      const assistToolIdx: number[] = [];
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        const m = msgs[i];
-        if (!m || typeof m !== 'object') continue;
-        const role = String(m.role || '').toLowerCase();
-        if (role === 'tool') {
-          toolIdx.push(i);
-        } else if (role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
-          assistToolIdx.push(i);
-        }
-      }
-      const keepToolSet = new Set<number>(toolIdx.slice(0, keepTool));
-      const keepAssistSet = new Set<number>(assistToolIdx.slice(0, keepAssist));
-
-      const trimmed: any[] = [];
-      for (let i = 0; i < msgs.length; i++) {
-        const m = msgs[i];
-        if (!m || typeof m !== 'object') { trimmed.push(m); continue; }
-        const role = String(m.role || '').toLowerCase();
-        if (role === 'tool') {
-          if (keepToolSet.has(i)) { trimmed.push(m); }
-          else {
-            // drop old role:tool message entirely
-          }
-          continue;
-        }
-        if (role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
-          if (keepAssistSet.has(i)) { trimmed.push(m); }
-          else {
-            // 如果该 assistant 同时含有可读文本，则保留文本但移除 tool_calls
-            const content = (m as any).content;
-            const hasText = typeof content === 'string' ? content.trim().length > 0 : false;
-            if (hasText) {
-              const copy = { ...m };
-              try { delete (copy as any).tool_calls; } catch { /* ignore */ }
-              trimmed.push(copy);
-            } else {
-              // 丢弃该条仅工具调用的历史 assistant 消息
-            }
-          }
-          continue;
-        }
-        trimmed.push(m);
-      }
-
-      (payload as any).messages = trimmed;
-    } catch { /* ignore trimming errors */ }
+    // 按规范：不再进行“历史工具调用”级别的裁剪（避免模型遗忘与重复调用）。
+    // 最小化的 GLM 兼容处理（例如仅保留最后一条 assistant.tool_calls、将该条 content 置为 null、参数规范化）
+    // 已在 preflight 阶段完成：sanitizeAndValidateOpenAIChat(payload, { target: 'glm' })。
+    // 这里无需再对历史进行删除或裁剪。
   }
 
   private normalizeResponse(resp: any, metadata?: any): any {
@@ -294,90 +241,8 @@ export class GLMCompatibility implements CompatibilityModule {
         for (const c of choices) {
           const msg = c?.message || {};
           if (typeof msg?.content === 'string') {
-            const text = this.stripThinking(String(msg.content));
-            // 1) 优先从文本中提取 rcc.tool.v1 包装（模型把工具调用写进了文本）
-            let handled = false;
-            try {
-              const rcc = this.extractRCCToolCallsFromText(text);
-              if (rcc && rcc.length) {
-                const toolCalls = rcc.map((call) => ({
-                  id: call.id,
-                  type: 'function',
-                  function: { name: call.name, arguments: call.args }
-                }));
-                msg.tool_calls = Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : toolCalls;
-                msg.content = '';
-                handled = true;
-              }
-            } catch { /* ignore */ }
-
-            // 1.5) 其次尝试提取 apply_patch 统一 diff（*** Begin Patch ... *** End Patch）
-            if (!handled) {
-              try {
-                const patches = this.extractApplyPatchCallsFromText(text);
-                if (patches && patches.length) {
-                  const toolCalls = patches.map((call) => ({
-                    id: call.id,
-                    type: 'function',
-                    function: { name: call.name, arguments: call.args }
-                  }));
-                  msg.tool_calls = Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : toolCalls;
-                  msg.content = '';
-                  handled = true;
-                }
-              } catch { /* ignore */ }
-            }
-
-            // 2) 其次尝试旧的 <tool_call> 文本标记提取
-            if (!handled) {
-              const extracted = this.extractToolCallsFromText(text);
-              if (extracted && extracted.length) {
-                const toolCalls = extracted.map((call) => ({
-                  id: call.id,
-                  type: 'function',
-                  function: { name: call.name, arguments: call.args }
-                }));
-                msg.tool_calls = Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : toolCalls;
-                msg.content = '';
-                handled = true;
-              } else {
-                msg.content = text;
-              }
-            }
-
-            // 2.5) 若仍未命中，从 reasoning_content 中提取工具意图（处理 GLM 把工具写在思考里的情况）
-            if (!handled) {
-              try {
-                const rtext = typeof (msg as any).reasoning_content === 'string' ? String((msg as any).reasoning_content) : '';
-                if (rtext && rtext.trim()) {
-                  const r1 = this.extractRCCToolCallsFromText(rtext);
-                  if (r1 && r1.length) {
-                    const toolCalls = r1.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.args } }));
-                    msg.tool_calls = Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : toolCalls;
-                    msg.content = '';
-                    handled = true;
-                  }
-                  if (!handled) {
-                    const r2 = this.extractApplyPatchCallsFromText(rtext);
-                    if (r2 && r2.length) {
-                      const toolCalls = r2.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.args } }));
-                      msg.tool_calls = Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : toolCalls;
-                      msg.content = '';
-                      handled = true;
-                    }
-                  }
-                  if (!handled) {
-                    const r3 = this.extractToolCallsFromText(rtext);
-                    if (r3 && r3.length) {
-                      const toolCalls = r3.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.args } }));
-                      msg.tool_calls = Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : toolCalls;
-                      msg.content = '';
-                      handled = true;
-                    }
-                  }
-                }
-              } catch { /* ignore */ }
-            }
+            const text = stripThinkingTags(String(msg.content));
+            (msg as any).content = text;
           }
           // Reasoning content handling by endpoint policy
           if (reasoningPolicy === 'strip') {
@@ -487,47 +352,7 @@ export class GLMCompatibility implements CompatibilityModule {
     return 'strip';
   }
 
-  // Extracts function tool calls from textual markup produced by some models
-  // Supports patterns:
-  // - <tool_call> ... <arg_key>command</arg_key><arg_value>["ls","-la"]</arg_value> ... </tool_call>
-  // - Plain segments containing 'shell' and arg_key/arg_value pairs
-  private extractToolCallsFromText(text: string): Array<{ id: string; name: string; args: string }> | null {
-    try {
-      const calls: Array<{ id: string; name: string; args: string }> = [];
-      const toolBlocks: string[] = [];
-      const toolCallRegex = /<tool_call[\s\S]*?>[\s\S]*?<\/tool_call>/gi;
-      let m: RegExpExecArray | null;
-      while ((m = toolCallRegex.exec(text)) !== null) {
-        toolBlocks.push(m[0]);
-      }
-      const sources = toolBlocks.length ? toolBlocks : [text];
-      const keyValRe = /<arg_key>([\s\S]*?)<\/arg_key>\s*<arg_value>([\s\S]*?)<\/arg_value>/gi;
-      for (const block of sources) {
-        const nameMatch = block.match(/<tool_name>([\s\S]*?)<\/tool_name>/i);
-        let name = (nameMatch && nameMatch[1] && String(nameMatch[1]).trim()) || (block.includes('shell') ? 'shell' : 'tool');
-        const argsObj: Record<string, any> = {};
-        let kv: RegExpExecArray | null;
-        let anyKV = false;
-        while ((kv = keyValRe.exec(block)) !== null) {
-          const k = String(kv[1] || '').trim();
-          let vRaw = String(kv[2] || '').trim();
-          if (!k) continue;
-          anyKV = true;
-          // Attempt to parse JSON (array/object/primitive)
-          let val: any = vRaw;
-          try { val = JSON.parse(vRaw); } catch { /* keep string */ }
-          argsObj[k] = val;
-        }
-        if (anyKV) {
-          let argsStr = '{}';
-          try { argsStr = JSON.stringify(argsObj); } catch { argsStr = '{}'; }
-          const id = `call_${Math.random().toString(36).slice(2, 10)}`;
-          calls.push({ id, name, args: argsStr });
-        }
-      }
-      return calls.length ? calls : null;
-    } catch { return null; }
-  }
+  // No text-based tool-call extraction in GLM layer (handled in llmswitch-core OpenAI stage)
 
   private flattenAnthropicContent(blocks: any[]): string[] {
     const texts: string[] = [];
@@ -554,64 +379,7 @@ export class GLMCompatibility implements CompatibilityModule {
   }
 
   // 尝试从普通文本中提取 rcc.tool.v1 工具调用包装，并转换为 OpenAI tool_calls
-  private extractRCCToolCallsFromText(text: string): Array<{ id?: string; name: string; args: string }> | null {
-    try {
-      if (typeof text !== 'string' || !text) return null;
-      const out: Array<{ id?: string; name: string; args: string }> = [];
-      const marker = /rcc\.tool\.v1/gi;
-      let m: RegExpExecArray | null;
-      while ((m = marker.exec(text)) !== null) {
-        // 从命中的位置向左回溯到最近的 '{'
-        let start = -1;
-        for (let i = m.index; i >= 0; i--) {
-          const ch = text[i];
-          if (ch === '{') { start = i; break; }
-          // 小优化：跨越太多字符放弃（避免 O(n^2)），但默认给足 4KB 回溯窗口
-          if (m.index - i > 4096) break;
-        }
-        if (start < 0) continue;
-
-        // 自左向右做“引号感知”的大括号配对，找到 JSON 末尾
-        let depth = 0;
-        let end = -1;
-        let inStr = false;
-        let quote: string | null = null;
-        let esc = false;
-        for (let j = start; j < text.length; j++) {
-          const ch = text[j];
-          if (inStr) {
-            if (esc) { esc = false; continue; }
-            if (ch === '\\') { esc = true; continue; }
-            if (ch === quote) { inStr = false; quote = null; continue; }
-            continue;
-          } else {
-            if (ch === '"' || ch === '\'') { inStr = true; quote = ch; continue; }
-            if (ch === '{') { depth++; }
-            else if (ch === '}') { depth--; if (depth === 0) { end = j; break; } }
-          }
-        }
-        if (end < 0) continue;
-
-        const jsonStr = text.slice(start, end + 1);
-        let obj: any = null;
-        try { obj = JSON.parse(jsonStr); } catch { obj = null; }
-        if (!obj || typeof obj !== 'object') continue;
-        if (String(obj.version || '').toLowerCase() !== 'rcc.tool.v1') continue;
-        const tool = obj.tool || {};
-        const name = typeof tool.name === 'string' && tool.name.trim() ? tool.name.trim() : undefined;
-        if (!name) continue;
-        const callId = typeof tool.call_id === 'string' && tool.call_id.trim() ? tool.call_id.trim() : undefined;
-        const argsObj = (obj.arguments !== undefined ? obj.arguments : {});
-        let argsStr = '{}';
-        try { argsStr = JSON.stringify(argsObj ?? {}); } catch { argsStr = '{}'; }
-        out.push({ id: callId, name, args: argsStr });
-
-        // 移动游标，避免重复命中同一段落
-        marker.lastIndex = end + 1;
-      }
-      return out.length ? out : null;
-    } catch { return null; }
-  }
+  private extractRCCToolCallsFromText(_text: string): Array<{ id?: string; name: string; args: string }> | null { return null; }
 
   // 从文本中提取统一 diff 补丁块（*** Begin Patch ... *** End Patch），并映射为 apply_patch 工具调用（迁移至 llmswitch-core 通用层）
   private extractApplyPatchCallsFromText(_text: string): Array<{ id?: string; name: string; args: string }> | null { return null; }
