@@ -341,7 +341,18 @@ export class GLMCompatibility implements CompatibilityModule {
                 msg.content = '';
                 handled = true;
               } else {
-                msg.content = text;
+                // 2.2) 尝试 <function=execute><parameter=command>...</parameter></function>
+                try {
+                  const execCalls = this.extractExecuteBlocksFromText(text);
+                  if (execCalls && execCalls.length) {
+                    const toolCalls = execCalls.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.args } }));
+                    msg.tool_calls = Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : toolCalls;
+                    msg.content = '';
+                    handled = true;
+                  } else {
+                    msg.content = text;
+                  }
+                } catch { msg.content = text; }
               }
             }
 
@@ -649,6 +660,24 @@ export class GLMCompatibility implements CompatibilityModule {
         }
       }
 
+      return out.length ? out : null;
+    } catch { return null; }
+  }
+
+  // Extract <function=execute><parameter=command>...</parameter></function> into a shell tool call
+  private extractExecuteBlocksFromText(text: string): Array<{ id?: string; name: string; args: string }> | null {
+    try {
+      if (typeof text !== 'string' || !text) return null;
+      const re = /<function=execute>\s*<parameter=command>([\s\S]*?)<\/parameter>\s*<\/function>/gi;
+      const out: Array<{ id?: string; name: string; args: string }> = [];
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(text)) !== null) {
+        const commandRaw = (m[1] || '').trim();
+        if (!commandRaw) continue;
+        let args = '{}';
+        try { args = JSON.stringify({ command: commandRaw }); } catch { args = '{"command":""}'; }
+        out.push({ id: `call_${Math.random().toString(36).slice(2, 10)}`, name: 'shell', args });
+      }
       return out.length ? out : null;
     } catch { return null; }
   }
