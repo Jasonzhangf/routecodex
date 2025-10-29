@@ -7,7 +7,7 @@
       "inputSchema": "config/schemas/anthropic-messages.request.schema.json",
       "canonicalRequestSchema": "config/schemas/openai-chat.request.schema.json",
       "canonicalResponseSchema": "config/schemas/anthropic-messages.response.schema.json",
-      "clientResponseSchema": "config/schemas/anthropic-messages.response.schema.json",
+      
       "trace": true
     },
     "openai-chat": {

@@ -112,12 +112,16 @@ export abstract class BaseStreamer {
    * Set up streaming response headers
    */
   protected setupStreamingHeaders(res: Response, requestId: string): void {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Headers', 'Cache-Control');
-    res.setHeader('x-request-id', requestId);
+    // Avoid "ERR_HTTP_HEADERS_SENT" if a pre-heartbeat or another layer already set headers
+    if (res.headersSent) {
+      return;
+    }
+    try { res.setHeader('Content-Type', 'text/event-stream'); } catch { /* ignore */ }
+    try { res.setHeader('Cache-Control', 'no-cache'); } catch { /* ignore */ }
+    try { res.setHeader('Connection', 'keep-alive'); } catch { /* ignore */ }
+    try { res.setHeader('Access-Control-Allow-Origin', '*'); } catch { /* ignore */ }
+    try { res.setHeader('Access-Control-Allow-Headers', 'Cache-Control'); } catch { /* ignore */ }
+    try { res.setHeader('x-request-id', requestId); } catch { /* ignore */ }
   }
 
   /**

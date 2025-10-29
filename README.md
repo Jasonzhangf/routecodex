@@ -6,6 +6,8 @@
 
 A sophisticated AI service routing and transformation system that provides seamless integration with multiple AI providers through a clean, modular architecture.
 
+Note: Node.js engines updated — requires Node >=20 and <26. Global installs on Node 24 are supported.
+
 Release 0.41.1
 - Fix: Anthropic streaming compliance for tool_use. RouteCodex now emits standard SSE events for tool inputs so Claude Code correctly accumulates parameters during streaming tool calls.
 

@@ -23,6 +23,8 @@ export class ResponsesSSETransformer {
   private finishReason: string | null = null;
   private usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null = null;
   private toolCalls: Map<number, ToolAccumulator> = new Map();
+  private requiredActionMode = String(process.env.ROUTECODEX_RESP_SSE_REQUIRED_ACTION || process.env.RCC_RESP_SSE_REQUIRED_ACTION || '0').toLowerCase() === '1' || String(process.env.ROUTECODEX_RESP_SSE_REQUIRED_ACTION || process.env.RCC_RESP_SSE_REQUIRED_ACTION || '0') === 'true';
+  private requiredActionEmitted = false;
 
   constructor(private chunkSize: number = Math.max(32, Math.min(1024, Number(process.env.ROUTECODEX_RESPONSES_TOOLCALL_DELTA_CHUNK || 256)))) {}
 
@@ -78,6 +80,22 @@ export class ResponsesSSETransformer {
         const name = typeof tc?.function?.name === 'string' ? tc.function.name : 'tool';
         acc = { id, name, buffer: '', started: false };
         this.toolCalls.set(index, acc);
+        // Optional CCR-style required_action envelope
+        if (this.requiredActionMode && !this.requiredActionEmitted) {
+          this.requiredActionEmitted = true;
+          events.push({
+            event: 'response.required_action',
+            data: {
+              type: 'response.required_action',
+              response: { id: this.responseId },
+              required_action: {
+                type: 'tool_calls',
+                tool_calls: [ { id, type: 'function', name } ]
+              },
+              sequence_number: this.nextSeq()
+            }
+          });
+        }
         events.push({ event: 'response.output_item.added', data: { type: 'response.output_item.added', output_index: index + 1, item: { id, type: 'tool_call', name }, sequence_number: this.nextSeq() } });
       }
       const args = typeof tc?.function?.arguments === 'string' ? tc.function.arguments : '';
@@ -85,6 +103,9 @@ export class ResponsesSSETransformer {
         acc.buffer += args;
         for (const part of this.chunkString(args, this.chunkSize)) {
           events.push({ event: 'response.tool_call.delta', data: { type: 'response.tool_call.delta', item_id: acc.id, output_index: index + 1, delta: { arguments: part }, sequence_number: this.nextSeq() } });
+          if (this.requiredActionMode) {
+            events.push({ event: 'response.function_call_arguments.delta', data: { type: 'response.function_call_arguments.delta', id: acc.id, delta: part, sequence_number: this.nextSeq() } });
+          }
         }
       }
     }
@@ -113,6 +134,9 @@ export class ResponsesSSETransformer {
       // Close each tool_call item using its correct output_index (tool indexes start at 1)
       const outIdx = Number(index) + 1;
       events.push({ event: 'response.output_item.done', data: { type: 'response.output_item.done', output_index: outIdx, item: { id: acc.id, type: 'tool_call' }, sequence_number: this.nextSeq() } });
+      if (this.requiredActionMode) {
+        events.push({ event: 'response.function_call_arguments.done', data: { type: 'response.function_call_arguments.done', id: acc.id, sequence_number: this.nextSeq() } });
+      }
     }
 
     if (this.textItemId) {

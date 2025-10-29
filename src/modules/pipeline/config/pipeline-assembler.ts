@@ -256,10 +256,12 @@ export class PipelineAssembler {
             config: llmSwitch.config || {},
           };
         } else {
-          modBlock.llmSwitch = { type: 'llmswitch-anthropic-openai', config: {} };
+          // 默认使用转换路由器（内部根据端点自动选择 codec），对齐 CCR
+          modBlock.llmSwitch = { type: 'llmswitch-conversion-router', config: {} };
         }
       } else {
-        modBlock.llmSwitch = { type: 'llmswitch-anthropic-openai', config: {} };
+        // 未指定 llmSwitch 时，使用转换路由器
+        modBlock.llmSwitch = { type: 'llmswitch-conversion-router', config: {} };
       }
       if (workflow?.type) { modBlock.workflow = { type: workflow.type, config: workflow.config || {} }; }
       pipelines.push({ id, provider: { type: provider.type }, modules: modBlock, settings: { debugEnabled: true } } as PipelineConfig);

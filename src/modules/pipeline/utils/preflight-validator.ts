@@ -293,6 +293,24 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
           (passthrough as any).messages = filtered;
         } catch { /* 保守处理，出错则完全透传 */ }
       }
+      // GLM 目标下，最小兼容：tools 也需要映射为 OpenAI function 形状，避免上游 1214
+      try {
+        if (targetGLM) {
+          const mapped = mapToolsForGLM((passthrough as any).tools, issues);
+          if (mapped && mapped.length) {
+            (passthrough as any).tools = mapped;
+            // GLM 仅支持 auto，工具存在时统一设置为 auto（若未显式提供）
+            const choiceRaw = (passthrough as any).tool_choice;
+            if (typeof choiceRaw === 'undefined') {
+              (passthrough as any).tool_choice = 'auto';
+            } else if (String(choiceRaw) !== 'auto') {
+              (passthrough as any).tool_choice = 'auto';
+            }
+          } else {
+            delete (passthrough as any).tools;
+          }
+        }
+      } catch { /* ignore tools mapping errors in minimal mode */ }
       return { payload: passthrough as Record<string, unknown>, issues: [] };
     }
   } catch { /* non-blocking */ }

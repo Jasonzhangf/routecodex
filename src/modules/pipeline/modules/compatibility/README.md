@@ -49,11 +49,12 @@ Compatibility 模块是流水线架构的第 3 层，负责处理请求和响应
 - **实现文件**: `glm-compatibility.ts`
 - **功能**: GLM 特定的格式转换
 - **特性**:
-  - OpenAI 格式 ↔ GLM 格式转换
-  - 思考内容（thinking）处理
-  - 工具调用兼容性优化
-  - 模型参数适配
-  - 1210 错误兼容性
+  - OpenAI 格式 ↔ GLM 格式转换（最小清理）
+  - 思考内容（thinking）处理（私有 <think>…</think> 清理）
+  - 工具调用兼容性（仅保留最近一轮 `assistant.tool_calls`，空数组字段删除）
+  - 过滤 `view_image` 的非图片路径调用（仅允许常见图片后缀）
+  - 删除空的 user/assistant 消息（无 content 且无 tool_calls）
+  - 1210/1214 错误兼容：严格不伪造工具配对，删除非法调用；默认 `tool_choice=auto`
 
 ### 🌊 iFlow 兼容性
 - **实现文件**: `iflow-compatibility.ts`

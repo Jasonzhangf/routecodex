@@ -29,6 +29,16 @@ LLMSwitch 模块是流水线架构的第 0 层（入口层），负责处理进�
   - 工具调用适配
   - 响应格式标准化
 
+## 🆕 最新状态（对齐 CCR）
+
+- 默认入口推荐 `llmswitch-conversion-router`（自动按端点选择 codec）。
+- 工具名与参数规范：映射为 OpenAI function 工具；
+  - 名称仅允许 `[a-zA-Z0-9_-]`（长度≤64），不合法字符替换为 `_`；
+  - `parameters` 来自 `input_schema`，去除 `$schema` 等 meta 字段；
+  - 未指定 `tool_choice` 时默认 `auto`。
+- 工具白名单与限流：默认仅保留 `shell, update_plan, view_image, list_mcp_resources, read_mcp_resource, list_mcp_resource_templates`；
+  - 通过 `RCC_ALLOWED_TOOLS` 扩展，`RCC_TOOL_LIMIT` 控制数量（默认 32）。
+
 ## 核心功能
 
 ### 🎯 协议透传

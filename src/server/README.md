@@ -101,6 +101,25 @@ HTTP 服务器模块是 RouteCodex 系统的核心组件，负责处理所有传
 
 ## 🌟 核心功能
 
+## 🆕 Anthropic 通路说明（对齐 CCR）
+
+- 入口 `/v1/messages` 仅作为“协议入口”，在 llmswitch 阶段自动转换为 OpenAI Chat 形状后进入下游 Provider（例如 GLM 的 OpenAI 兼容端）。
+- 请求侧：
+  - 注入 `system` 为首条 `{role:'system', content}`；
+  - `content[]` 合并文本；`tool_use` → `assistant.tool_calls`（arguments 单一 JSON 字符串）；
+  - `tools` 从 `{name,description,input_schema}` 映射为 OpenAI function 工具；工具名仅 `[a-zA-Z0-9_-]`，参数移除 `$schema`；若未设置 `tool_choice` 则默认 `auto`；
+  - 工具白名单与限流：默认仅保留 `shell, update_plan, view_image, list_mcp_resources, read_mcp_resource, list_mcp_resource_templates`，可用 `RCC_ALLOWED_TOOLS` 扩展；`RCC_TOOL_LIMIT` 控制数量（默认 32）。
+- 响应侧：
+  - 返回给客户端可采用 OpenAI Chat 形状（与 OpenAI 通路对齐）；
+  - 或在转换阶段将 `tool_calls` 回写为 Anthropic `tool_use` 并生成 `stop_reason`；
+  - 默认校验与严格性对齐 OpenAI 通路：关闭入参强校验（`RCC_ENABLE_MSG_VALIDATION=1` 可开启）。
+
+### 行为覆盖的环境变量（Anthropic）
+- `RCC_ENABLE_MSG_VALIDATION=1`：开启 /v1/messages 严格校验（默认关闭）。
+- `RCC_O2A_STREAM=1`：开启 OpenAI→Anthropic 专用流转换（默认关闭，统一 StreamingManager）。
+- `RCC_ALLOWED_TOOLS`：允许的函数工具白名单（逗号分隔）。
+- `RCC_TOOL_LIMIT=32`：工具最大保留数量。
+
 ### 🔄 协议检测与路由
 ```typescript
 // 自动协议检测和路由选择

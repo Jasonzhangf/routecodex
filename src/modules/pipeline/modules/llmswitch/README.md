@@ -13,6 +13,29 @@ LLMSwitch 模块是流水线架构的第 1 层（协议转换层），负责处�
 - **元数据注入**: 添加转换追踪和调试信息
 - **工具调用适配**: 处理不同协议的工具调用格式差异
 
+## 🆕 最新状态（对齐 CCR）
+
+- 默认入口使用 `llmswitch-conversion-router`（按端点自动选择 codec）。
+- Anthropic → OpenAI（请求入站）
+  - 注入 `system` 为首条 `{ role:'system', content }` 消息。
+  - `content[]` 合并文本；`tool_use` → `assistant.tool_calls`（arguments 串化为单个 JSON 字符串）。
+  - `tools` 从 `{name,description,input_schema}` 映射为 OpenAI function 工具：`{ type:'function', function:{ name, description?, parameters } }`；
+    工具名仅允许 `[a-zA-Z0-9_-]`，其它替换为 `_`，长度≤64；`parameters` 去除 `$schema` 等 meta 字段。
+  - 若定义了工具且未指定 `tool_choice`，默认 `auto`。
+  - 白名单与限流：默认仅保留 `shell, update_plan, view_image, list_mcp_resources, read_mcp_resource, list_mcp_resource_templates`；
+    - 通过 `RCC_ALLOWED_TOOLS=tool1,tool2` 追加；`RCC_TOOL_LIMIT=32` 控制最多保留数量。
+- OpenAI → Anthropic（响应出站）
+  - 生成 `{ type:'message', role:'assistant', content: [text/tool_use…], stop_reason }`；
+  - `tool_calls` → `tool_use`，`finish_reason`：tool_calls→tool_use，stop→end_turn，length→max_tokens；
+  - `usage`：prompt/completion → input/output tokens。
+- GLM 兼容（由 compatibility 层最小清理）：删除空的 user/assistant 消息；仅保留最近一轮 `assistant.tool_calls`；空数组字段删除；过滤 `view_image` 非图片路径。
+
+### 环境变量
+- `RCC_ALLOWED_TOOLS`：额外允许的函数工具（逗号分隔）。
+- `RCC_TOOL_LIMIT`：工具最大保留数量（默认 32）。
+- `RCC_ENABLE_MSG_VALIDATION=1`：在 /v1/messages 入口启用严格校验（默认关闭）。
+- `RCC_O2A_STREAM=1`：开启 OpenAI→Anthropic 专用流转换（默认关闭，走统一 StreamingManager）。
+
 ## 🔄 支持的协议转换
 
 ### 🔧 OpenAI → OpenAI 规范化
