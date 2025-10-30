@@ -231,6 +231,31 @@ export function normalizeChatRequest(request: any): any {
     (normalized as any).messages = msgs;
   } catch { /* ignore shell fixups */ }
 
+  // Optionally embed tool role messages as assistant text to improve upstream compatibility
+  try {
+    const ENABLE = String((process as any)?.env?.RCC_EMBED_TOOL_RESULTS_AS_TEXT ?? '1').trim() !== '0';
+    if (ENABLE && Array.isArray((normalized as any).messages)) {
+      const LIMIT = Math.max(512, Number((process as any)?.env?.RCC_TOOL_EMBED_LIMIT || 8192));
+      const msgs: any[] = (normalized as any).messages as any[];
+      const rewritten: any[] = [];
+      for (const m of msgs) {
+        if (m && typeof m === 'object' && String((m as any).role || '').toLowerCase() === 'tool') {
+          const text = (() => {
+            try {
+              if (typeof (m as any).content === 'string') return (m as any).content;
+              return JSON.stringify((m as any).content ?? {});
+            } catch { return String((m as any).content ?? ''); }
+          })();
+          const out = text.length > LIMIT ? (text.slice(0, LIMIT) + '...(truncated)') : text;
+          rewritten.push({ role: 'assistant', content: out });
+        } else {
+          rewritten.push(m);
+        }
+      }
+      (normalized as any).messages = rewritten;
+    }
+  } catch { /* ignore tool->assistant embedding errors */ }
+
   // Unify tool result packaging for Chat path: ensure role:"tool" messages carry rcc.tool.v1 envelope
   try {
     const msgs: any[] = Array.isArray((normalized as any).messages) ? ((normalized as any).messages as any[]) : [];
@@ -732,29 +757,7 @@ function normalizeToolCall(tc: any): any {
       if (typeof cmdVal === 'string' && cmdVal.trim().length > 0) {
         const s = cmdVal.trim();
         const hasMeta = /[<>|;&]/.test(s) || s.includes('&&') || s.includes('||') || s.includes('<<');
-        const splitCommandString = (input: string): string[] => {
-          const str = input.trim();
-          if (!str) return [];
-          const out: string[] = [];
-          let cur = '';
-          let inSingle = false;
-          let inDouble = false;
-          for (let i = 0; i < str.length; i++) {
-            const ch = str[i];
-            if (inSingle) { if (ch === "'") { inSingle = false; } else { cur += ch; } continue; }
-            if (inDouble) {
-              if (ch === '"') { inDouble = false; continue; }
-              if (ch === '\\' && i + 1 < str.length) { i++; cur += str[i]; continue; }
-              cur += ch; continue;
-            }
-            if (ch === "'") { inSingle = true; continue; }
-            if (ch === '"') { inDouble = true; continue; }
-            if (/\s/.test(ch)) { if (cur) { out.push(cur); cur = ''; } continue; }
-            cur += ch;
-          }
-          if (cur) out.push(cur);
-          return out;
-        };
+        // use shared splitCommandString
         if (hasMeta) {
           (argsObj as any).command = ['bash', '-lc', s];
         } else {
@@ -770,3 +773,5 @@ function normalizeToolCall(tc: any): any {
   return t;
 }
 import { buildSystemToolGuidance } from '../../guidance/index.js';
+import { splitCommandString, flattenByComma } from './tooling.js';
+import { parseLenient } from './jsonish.js';

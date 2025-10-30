@@ -140,6 +140,25 @@ export class ChatCompletionsHandler extends BaseHandler {
         ? (pipelineResponse as Record<string, unknown>).data
         : pipelineResponse;
       const normalized = this.responseNormalizer.normalizeOpenAIResponse(payload, 'chat');
+      // Optional: include required_action for function_call paths (Chat JSON parity with Responses)
+      try {
+        const enable = String(process.env.ROUTECODEX_CHAT_REQUIRED_ACTION || process.env.RCC_CHAT_REQUIRED_ACTION || '1').toLowerCase() !== '0';
+        if (enable && normalized && typeof normalized === 'object' && Array.isArray((normalized as any).choices) && (normalized as any).choices.length > 0) {
+          const msg = (normalized as any).choices[0]?.message;
+          const tcs: any[] = Array.isArray(msg?.tool_calls) ? (msg.tool_calls as any[]) : [];
+          if (tcs.length > 0) {
+            const tool_calls = tcs.map((tc: any) => {
+              const id = (tc && typeof tc.id === 'string' && tc.id) ? tc.id : `call_${Math.random().toString(36).slice(2,8)}`;
+              const fn = (tc && typeof tc.function === 'object') ? tc.function : {};
+              const name = typeof (fn as any).name === 'string' ? (fn as any).name : 'tool';
+              const argsRaw = (fn as any).arguments;
+              const args = typeof argsRaw === 'string' ? argsRaw : (() => { try { return JSON.stringify(argsRaw ?? {}); } catch { return '{}'; } })();
+              return { id, type: 'function', function: { name, arguments: args } };
+            });
+            (normalized as any).required_action = { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls } };
+          }
+        }
+      } catch { /* ignore */ }
       this.sendJsonResponse(res, normalized, requestId);
 
       this.logCompletion(requestId, startTime, true);

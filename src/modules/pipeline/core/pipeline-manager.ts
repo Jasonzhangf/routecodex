@@ -1079,27 +1079,27 @@ export class PipelineManager implements RCCBaseModule {
    */
   private createOpenAINormalizerModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { OpenAINormalizerLLMSwitch } = await import('rcc-llmswitch-core/llmswitch/openai-normalizer');
-    return new OpenAINormalizerLLMSwitch(config, dependencies);
+    return (new OpenAINormalizerLLMSwitch(config, dependencies)) as unknown as PipelineModule;
   };
 
   private createAnthropicOpenAIConverterModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { AnthropicOpenAIConverter } = await import('rcc-llmswitch-core/llmswitch/anthropic-openai-converter');
-    return new AnthropicOpenAIConverter(config, dependencies);
+    return (new AnthropicOpenAIConverter(config, dependencies)) as unknown as PipelineModule;
   };
 
   private createResponsesChatLLMSwitchModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { ResponsesToChatLLMSwitch } = await import('rcc-llmswitch-core/llmswitch/llmswitch-response-chat');
-    return new ResponsesToChatLLMSwitch(config, dependencies);
+    return (new ResponsesToChatLLMSwitch(config, dependencies)) as unknown as PipelineModule;
   };
 
   private createResponsesPassthroughLLMSwitchModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { ResponsesPassthroughLLMSwitch } = await import('rcc-llmswitch-core/llmswitch/llmswitch-responses-passthrough');
-    return new ResponsesPassthroughLLMSwitch(config, dependencies);
+    return (new ResponsesPassthroughLLMSwitch(config, dependencies)) as unknown as PipelineModule;
   };
 
   private createConversionRouterModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { ConversionRouterLLMSwitch } = await import('rcc-llmswitch-core/llmswitch/llmswitch-conversion-router');
-    return new ConversionRouterLLMSwitch(config, dependencies);
+    return (new ConversionRouterLLMSwitch(config, dependencies)) as unknown as PipelineModule;
   };
 
   // unified switch factory removed

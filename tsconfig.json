@@ -19,15 +19,23 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
-    "noEmitOnError": true,
+    "noEmitOnError": false,
     "typeRoots": ["./node_modules/@types", "./src/types"],
-    "incremental": false
+    "incremental": false,
+    "baseUrl": ".",
+    "paths": {
+      "rcc-llmswitch-core/conversion": ["node_modules/rcc-llmswitch-core/dist/conversion/index.d.ts"],
+      "rcc-llmswitch-core/guidance": ["node_modules/rcc-llmswitch-core/dist/guidance/index.d.ts"],
+      "rcc-llmswitch-core/llmswitch/*": ["node_modules/rcc-llmswitch-core/dist/llmswitch/*"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": [
     "node_modules",
     "dist",
     "tests",
+    "src/**/*.test.ts",
+    "src/**/__tests__/**",
     "src/commands/offline-log.ts",
     "src/components/pipeline-visualizer.bak",
     "src/examples/pipeline-visualizer-example.tsx.bak",

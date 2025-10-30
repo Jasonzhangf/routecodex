@@ -62,64 +62,26 @@ import { applyOpenAIToolingStage } from '../shared/openai-tooling-stage.js';
 import { normalizeAssistantTextToToolCalls } from '../shared/text-markup-normalizer.js';
 import { buildSystemToolGuidance } from '../../guidance/index.js';
 import { splitCommandString } from '../shared/tooling.js';
+import { tryParseJson, parseLenient } from '../shared/jsonish.js';
+import { isImagePath } from '../shared/media.js';
 import { normalizeTools } from '../shared/args-mapping.js';
 
 function isObject(v: unknown): v is Unknown {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
-function tryParseJson(s: unknown): unknown {
-  if (typeof s !== 'string') return s;
-  try { return JSON.parse(s); } catch { return s; }
-}
+// tryParseJson now shared in ../shared/jsonish.ts
 
 // splitCommandString now unified in ../shared/tooling.ts
 
-// Lenient JSON-ish parsing for tool arguments (align with OpenAI→Anthropic robustness)
-function parseLenient(value: unknown): unknown {
-  if (value === undefined || value === null) return {};
-  if (typeof value === 'object') return value;
-  if (typeof value !== 'string') return { _raw: String(value) };
-  const s0 = value.trim();
-  if (!s0) return {};
-  // 1) strict JSON
-  try { return JSON.parse(s0); } catch { /* continue */ }
-  // 2) fenced ```json ... ``` or ``` ... ```
-  const fence = s0.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  const candidate = fence ? fence[1] : s0;
-  // 3) object substring
-  const objMatch = candidate.match(/\{[\s\S]*\}/);
-  if (objMatch) { try { return JSON.parse(objMatch[0]); } catch { /* ignore */ } }
-  // 4) array substring
-  const arrMatch = candidate.match(/\[[\s\S]*\]/);
-  if (arrMatch) { try { return JSON.parse(arrMatch[0]); } catch { /* ignore */ } }
-  // 5) single quotes → double; unquoted keys → quoted
-  let t = candidate.replace(/'([^']*)'/g, '"$1"');
-  t = t.replace(/([{,\s])([A-Za-z_][A-Za-z0-9_-]*)\s*:/g, '$1"$2":');
-  try { return JSON.parse(t); } catch { /* ignore */ }
-  // 6) key=value fallback across lines/commas
-  const obj: Record<string, any> = {};
-  const parts = candidate.split(/[\n,]+/).map(p => p.trim()).filter(Boolean);
-  for (const p of parts) {
-    const m = p.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*[:=]\s*(.+)$/);
-    if (!m) continue; const k = m[1]; let v = m[2].trim();
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
-    try { const pv = JSON.parse(v); obj[k] = pv; continue; } catch { /* fallthrough */ }
-    if (/^(true|false)$/i.test(v)) { obj[k] = /^true$/i.test(v); continue; }
-    if (/^-?\d+(?:\.\d+)?$/.test(v)) { obj[k] = Number(v); continue; }
-    obj[k] = v;
-  }
-  return Object.keys(obj).length ? obj : { _raw: s0 };
-}
+// parseLenient now shared in ../shared/jsonish.ts
 
 function defaultObjectSchema() { return { type: 'object', properties: {}, additionalProperties: true }; }
 
 // normalizeTools unified in ../shared/args-mapping.ts
 
 // --- Structured self-repair helpers for tool failures (Responses path) ---
-function isImagePathCompat(p: any): boolean {
-  try { const s = String(p || '').toLowerCase(); return /\.(png|jpg|jpeg|gif|webp|bmp|svg|tiff?|ico|heic|jxl)$/.test(s); } catch { return false; }
-}
+// use shared isImagePath
 
 function buildRepairMessageCompat(name: string | undefined, args: any, body: any): string {
   const allowed = ['shell','update_plan','view_image','list_mcp_resources'];
@@ -130,9 +92,9 @@ function buildRepairMessageCompat(name: string | undefined, args: any, body: any
     suggestions.push('function.name 为空或未知。请选择以下之一: shell, update_plan, view_image, list_mcp_resources。');
     if (args && typeof args === 'object' && ('command' in args)) suggestions.push('检测到 arguments.command：你可能想调用 shell。');
     if (args && typeof args === 'object' && ('plan' in args)) suggestions.push('检测到 arguments.plan：你可能想调用 update_plan。');
-    if (args && typeof args === 'object' && isImagePathCompat((args as any).path)) suggestions.push('检测到图片路径：你可能想调用 view_image。');
+    if (args && typeof args === 'object' && isImagePath((args as any).path)) suggestions.push('检测到图片路径：你可能想调用 view_image。');
   }
-  if (name === 'view_image' && args && typeof args === 'object' && !isImagePathCompat((args as any).path)) {
+  if (name === 'view_image' && args && typeof args === 'object' && !isImagePath((args as any).path)) {
     suggestions.push('view_image 仅用于图片文件（png/jpg/gif/webp/svg/...）。当前路径看起来不是图片，请改用 shell: {"command":["cat","<path>"]} 来读取文本/markdown。');
   }
   if (typeof bodyText === 'string' && /failed to parse function arguments|invalid type: string|expected a sequence/i.test(bodyText)) {
@@ -518,7 +480,7 @@ function mapResponsesInputToChat(options: { instructions?: string; input?: Respo
           const unsupported = typeof bodyText === 'string' && /^unsupported call/i.test(bodyText.trim());
           const missingName = !name || name === 'tool' || String(name).trim() === '';
           const parseFail = /failed to parse function arguments|invalid type: string|expected a sequence/i.test(bodyText);
-          const misuseViewImage = name === 'view_image' && argsObj && typeof argsObj === 'object' && !isImagePathCompat((argsObj as any).path);
+          const misuseViewImage = name === 'view_image' && argsObj && typeof argsObj === 'object' && !isImagePath((argsObj as any).path);
           if (unsupported || missingName || parseFail || misuseViewImage) {
             success = false;
             const hint = buildRepairMessageCompat(name, argsObj, bodyText);
@@ -681,7 +643,7 @@ function processMessageBlocks(blocks: any[], toolsNormalized: Array<Record<strin
           const unsupported = typeof bodyText === 'string' && /^unsupported call/i.test(bodyText.trim());
           const missingName = !name || name === 'tool' || String(name).trim() === '';
           const parseFail = /failed to parse function arguments|invalid type: string|expected a sequence/i.test(bodyText);
-          const misuseViewImage = name === 'view_image' && argsObj && typeof argsObj === 'object' && !isImagePathCompat((argsObj as any).path);
+          const misuseViewImage = name === 'view_image' && argsObj && typeof argsObj === 'object' && !isImagePath((argsObj as any).path);
           if (unsupported || missingName || parseFail || misuseViewImage) {
             success = false;
             const hint = buildRepairMessageCompat(name, argsObj, bodyText);

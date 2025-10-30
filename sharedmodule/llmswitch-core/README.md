@@ -2,6 +2,17 @@
 
 RouteCodex LLMSwitch 核心模块，提供 AI 服务提供商之间的协议转换和标准化功能。
 
+## 🧩 构建顺序（重要）
+
+当修改到 `sharedmodule/` 下的代码（本模块属于该目录）时，请严格遵循“先模块、后整包”的构建与安装顺序：
+
+- 先在本目录构建并产出 `dist/`：
+  - `npm --prefix sharedmodule/llmswitch-core run build`
+- 再回到仓库根目录进行构建/发布/安装：
+  - `npm run build`（或项目既定脚本）
+
+该顺序可避免根包引用到旧版本构建产物，已在仓库根 `AGENTS.md` 明确。
+
 ## 🏗️ 架构概览
 
 本模块采用分层架构设计：

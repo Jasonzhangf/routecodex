@@ -111,3 +111,17 @@ export function packShellArgs(input: Record<string, unknown>): Record<string, un
   if (typeof workdir === 'string' && workdir) out.workdir = workdir;
   return out;
 }
+
+export function flattenByComma(arr: string[]): string[] {
+  return arr.flatMap((t) => String(t).split(',').map(s => s.trim()).filter(Boolean));
+}
+
+// Helper to chunk a long string into N parts (bounded)
+export function chunkString(s: string, minParts = 3, maxParts = 12, targetChunk = 12): string[] {
+  if (typeof s !== 'string' || !s.length) return [];
+  const parts = Math.max(minParts, Math.min(maxParts, Math.ceil(s.length / targetChunk)));
+  const step = Math.max(1, Math.ceil(s.length / parts));
+  const out: string[] = [];
+  for (let i = 0; i < s.length; i += step) out.push(s.slice(i, i + step));
+  return out;
+}
