@@ -131,6 +131,32 @@ build_project() {
       ./node_modules/.bin/tsc -p sharedmodule/llmswitch-core/tsconfig.json --outDir sharedmodule/llmswitch-core/dist || true
     fi
 
+    # 为 dist 目录生成最小 package.json，便于作为 file: 依赖引用
+    if [ -d sharedmodule/llmswitch-core/dist ]; then
+      log_info "为 llmswitch-core/dist 生成 package.json (本地依赖)"
+      cat > sharedmodule/llmswitch-core/dist/package.json << 'EOF'
+{
+  "name": "rcc-llmswitch-core",
+  "version": "0.0.0-local",
+  "type": "module",
+  "main": "index.js",
+  "module": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": { "import": "./index.js", "types": "./index.d.ts" },
+    "./conversion": { "import": "./conversion/index.js", "types": "./conversion/index.d.ts" },
+    "./conversion/switch-orchestrator": { "import": "./conversion/switch-orchestrator.js", "types": "./conversion/switch-orchestrator.d.ts" },
+    "./llmswitch/llmswitch-conversion-router": { "import": "./llmswitch/llmswitch-conversion-router.js", "types": "./llmswitch/llmswitch-conversion-router.d.ts" },
+    "./llmswitch/openai-normalizer": { "import": "./llmswitch/openai-normalizer.js", "types": "./llmswitch/openai-normalizer.d.ts" },
+    "./llmswitch/llmswitch-response-chat": { "import": "./llmswitch/llmswitch-response-chat.js", "types": "./llmswitch/llmswitch-response-chat.d.ts" },
+    "./llmswitch/llmswitch-responses-passthrough": { "import": "./llmswitch/llmswitch-responses-passthrough.js", "types": "./llmswitch/llmswitch-responses-passthrough.d.ts" },
+    "./llmswitch/anthropic-openai-converter": { "import": "./llmswitch/anthropic-openai-converter.js", "types": "./llmswitch/anthropic-openai-converter.d.ts" },
+    "./guidance": { "import": "./guidance/index.js", "types": "./guidance/index.d.ts" }
+  }
+}
+EOF
+    fi
+
     # 总是构建根项目，避免沿用过期的 dist 产物
     log_info "编译 routecodex 根包..."
     if npm run build; then
@@ -234,6 +260,9 @@ install_new() {
 
     # 创建 rcc 命令的符号链接
     create_rcc_alias
+
+    # 额外补丁：将本地构建的 llmswitch-core 覆盖到全局安装（修复 npm pack 丢失 dist 的问题）
+    patch_global_llmswitch_core || true
 }
 
 # 创建 rcc 别名
@@ -340,6 +369,58 @@ verify_installation() {
     # 运行时就绪验证移除：不在安装阶段拉起服务，避免 120s 看门狗误杀
     log_header "🧪 跳过运行时就绪验证"
     log_info "已跳过自动启动与超时看门狗；请用 'npm run start:bg' 或 'npm run start:fg' 手动启动。"
+}
+
+# 将本地 sharedmodule/llmswitch-core/dist 强制拷贝到全局 routecodex 的 node_modules/rcc-llmswitch-core
+patch_global_llmswitch_core() {
+    log_header "🩹 修补全局 rcc-llmswitch-core（拷贝 dist）"
+    local GLOBAL_PREFIX GLOBAL_LIB RC_DIR TARGET
+    GLOBAL_PREFIX=$(npm config get prefix)
+    GLOBAL_LIB="$GLOBAL_PREFIX/lib/node_modules"
+    RC_DIR="$GLOBAL_LIB/routecodex"
+    TARGET="$RC_DIR/node_modules/rcc-llmswitch-core"
+    if [ ! -d "$RC_DIR" ]; then
+        log_warning "未找到全局 routecodex 目录，跳过补丁"
+        return 0
+    fi
+    if [ ! -d "sharedmodule/llmswitch-core/dist" ]; then
+        log_warning "本地缺少 sharedmodule/llmswitch-core/dist，跳过补丁"
+        return 0
+    fi
+    mkdir -p "$TARGET"
+    rsync -a --delete "sharedmodule/llmswitch-core/dist/" "$TARGET/dist/" 2>/dev/null || cp -R "sharedmodule/llmswitch-core/dist" "$TARGET/" || true
+    # 拷贝本地 dist/package.json 到全局（包含完整 exports 子路径映射）
+    if [ -f "sharedmodule/llmswitch-core/dist/package.json" ]; then
+      cp "sharedmodule/llmswitch-core/dist/package.json" "$TARGET/package.json" 2>/dev/null || true
+    else
+      # 兜底：写入带有 exports 的 package.json（映射到 dist/*）
+      cat > "$TARGET/package.json" << 'EOF'
+{
+  "name": "rcc-llmswitch-core",
+  "version": "0.0.0-local",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" },
+    "./conversion": { "import": "./dist/conversion/index.js", "types": "./dist/conversion/index.d.ts" },
+    "./conversion/switch-orchestrator": { "import": "./dist/conversion/switch-orchestrator.js", "types": "./dist/conversion/switch-orchestrator.d.ts" },
+    "./llmswitch/llmswitch-conversion-router": { "import": "./dist/llmswitch/llmswitch-conversion-router.js", "types": "./dist/llmswitch/llmswitch-conversion-router.d.ts" },
+    "./llmswitch/openai-normalizer": { "import": "./dist/llmswitch/openai-normalizer.js", "types": "./dist/llmswitch/openai-normalizer.d.ts" },
+    "./llmswitch/llmswitch-response-chat": { "import": "./dist/llmswitch/llmswitch-response-chat.js", "types": "./dist/llmswitch/llmswitch-response-chat.d.ts" },
+    "./llmswitch/llmswitch-responses-passthrough": { "import": "./dist/llmswitch/llmswitch-responses-passthrough.js", "types": "./dist/llmswitch/llmswitch-responses-passthrough.d.ts" },
+    "./llmswitch/anthropic-openai-converter": { "import": "./dist/llmswitch/anthropic-openai-converter.js", "types": "./dist/llmswitch/anthropic-openai-converter.d.ts" },
+    "./guidance": { "import": "./dist/guidance/index.js", "types": "./dist/guidance/index.d.ts" }
+  }
+}
+EOF
+    fi
+    if [ -f "$TARGET/dist/llmswitch/openai-normalizer.js" ]; then
+        log_success "全局 rcc-llmswitch-core 修补完成"
+    else
+        log_warning "补丁后仍未找到 openai-normalizer.js，请手动检查 $TARGET"
+    fi
 }
 
 # 清理临时文件

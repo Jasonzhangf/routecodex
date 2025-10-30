@@ -88,36 +88,21 @@ export class ChatCompletionsHandler extends BaseHandler {
         }
       } catch { /* non-blocking */ }
 
-      // Forced adapter preflight: convert Anthropic/Responses-shaped payloads to OpenAI
+      // Strict protocol separation: Chat endpoint only accepts OpenAI Chat payload.
+      // Do NOT auto-convert Anthropic/Responses-shaped payloads here to avoid cross-path pollution.
       try {
-        const looksAnthropicContent = Array.isArray(req.body?.messages) && (req.body.messages as any[]).some((m: any) => Array.isArray(m?.content) && m.content.some((c: any) => c && typeof c === 'object' && c.type));
         const detector = new ProtocolDetector();
         const det = detector.detectFromRequest(req);
-        if (looksAnthropicContent || det.protocol === 'anthropic' || det.protocol === 'responses') {
-          const adapter = new OpenAIAdapter();
-          let converted = adapter.convertFromProtocol(req.body, 'anthropic') as any;
-          // Fallback normalization: ensure messages[].content is string
-          if (Array.isArray(converted?.messages)) {
-            converted = {
-              ...converted,
-              messages: (converted.messages as any[]).map((m: any) => {
-                if (Array.isArray(m?.content)) {
-                  const text = m.content
-                    .filter((c: any) => c && typeof c === 'object' && c.type === 'text' && typeof c.text === 'string')
-                    .map((c: any) => c.text)
-                    .join('\n');
-                  return { ...m, content: text };
-                }
-                return m;
-              })
-            };
-          }
-          req.body = converted;
-          try { res.setHeader('x-rc-adapter', 'anthropic->openai'); } catch { /* ignore */ }
+        const looksAnthropicContent = Array.isArray(req.body?.messages) && (req.body.messages as any[]).some((m: any) => Array.isArray(m?.content) && m.content.some((c: any) => c && typeof c === 'object' && typeof c.type === 'string'));
+        if (det.protocol === 'anthropic' || det.protocol === 'responses' || looksAnthropicContent) {
+          throw new RouteCodexError('Chat endpoint only accepts OpenAI Chat payload (messages: string or OpenAI content parts). Use the Responses endpoint for Responses-shaped payloads.', 'invalid_protocol', 400);
         }
-      } catch { /* non-blocking */ }
+      } catch (e) {
+        if (e instanceof RouteCodexError) throw e;
+      }
 
-      // Tool guidance and normalization are handled in llmswitch-core (openai tooling stage)
+      // Tool guidance和归一化在 llmswitch-core 的 OpenAI 工具阶段统一处理
+      try { res.setHeader('x-rc-conversion-profile', 'openai-openai'); } catch { /* ignore */ }
 
       // Skip strict request validation (preserve raw inputs)
 
@@ -140,25 +125,7 @@ export class ChatCompletionsHandler extends BaseHandler {
         ? (pipelineResponse as Record<string, unknown>).data
         : pipelineResponse;
       const normalized = this.responseNormalizer.normalizeOpenAIResponse(payload, 'chat');
-      // Optional: include required_action for function_call paths (Chat JSON parity with Responses)
-      try {
-        const enable = String(process.env.ROUTECODEX_CHAT_REQUIRED_ACTION || process.env.RCC_CHAT_REQUIRED_ACTION || '1').toLowerCase() !== '0';
-        if (enable && normalized && typeof normalized === 'object' && Array.isArray((normalized as any).choices) && (normalized as any).choices.length > 0) {
-          const msg = (normalized as any).choices[0]?.message;
-          const tcs: any[] = Array.isArray(msg?.tool_calls) ? (msg.tool_calls as any[]) : [];
-          if (tcs.length > 0) {
-            const tool_calls = tcs.map((tc: any) => {
-              const id = (tc && typeof tc.id === 'string' && tc.id) ? tc.id : `call_${Math.random().toString(36).slice(2,8)}`;
-              const fn = (tc && typeof tc.function === 'object') ? tc.function : {};
-              const name = typeof (fn as any).name === 'string' ? (fn as any).name : 'tool';
-              const argsRaw = (fn as any).arguments;
-              const args = typeof argsRaw === 'string' ? argsRaw : (() => { try { return JSON.stringify(argsRaw ?? {}); } catch { return '{}'; } })();
-              return { id, type: 'function', function: { name, arguments: args } };
-            });
-            (normalized as any).required_action = { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls } };
-          }
-        }
-      } catch { /* ignore */ }
+      // Chat 路径不注入 Responses 的 required_action 结构，保持协议纯净
       this.sendJsonResponse(res, normalized, requestId);
 
       this.logCompletion(requestId, startTime, true);
@@ -223,6 +190,35 @@ export class ChatCompletionsHandler extends BaseHandler {
 
     // Pre-convert OpenAI Responses payload to OpenAI Chat payload
     let chatPayload = { ...(req.body || {}) } as Record<string, unknown>;
+    // 不在入口做跨路径的内容过滤；路径隔离在转换路由与编码器中保证。
+    // 角色分布快照（llmswitch 前/后），便于诊断“tool 历史泄露”等问题
+    const snapshotDir = (() => {
+      try {
+        const os = require('os'); const path = require('path'); const fs = require('fs');
+        const dir = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
+        fs.mkdirSync(dir, { recursive: true });
+        return dir;
+      } catch { return null; }
+    })();
+    const roleCounts = (msgs: any[]): Record<string, number> => {
+      const c: Record<string, number> = { system: 0, user: 0, assistant: 0, tool: 0, unknown: 0 };
+      for (const m of Array.isArray(msgs) ? msgs : []) {
+        const r = String(m?.role || '').toLowerCase();
+        if (r === 'system' || r === 'user' || r === 'assistant' || r === 'tool') c[r] += 1; else c.unknown += 1;
+      }
+      return c;
+    };
+    const writeSnapshot = (kind: 'pre-llmswitch' | 'post-llmswitch', payload: any) => {
+      try {
+        if (!snapshotDir) return;
+        const fs = require('fs'); const path = require('path');
+        const file = path.join(snapshotDir, `${requestId}_${kind}.json`);
+        const msgs = Array.isArray(payload?.messages) ? payload.messages : [];
+        const stats = { kind, counts: roleCounts(msgs), total: msgs.length };
+        fs.writeFileSync(file, JSON.stringify({ requestId, stats }, null, 2), 'utf-8');
+      } catch { /* ignore */ }
+    };
+    try { writeSnapshot('pre-llmswitch', chatPayload); } catch { /* ignore */ }
     // Strict: normalize Chat request via llmswitch; if normalization fails, do not fallback
     {
       const logger = new PipelineDebugLogger({} as any, { enableConsoleLogging: false, enableDebugCenter: false });
@@ -244,6 +240,7 @@ export class ChatCompletionsHandler extends BaseHandler {
         throw new RouteCodexError((e as Error)?.message || 'chat normalization failed', 'conversion_error', 400);
       }
     }
+    try { writeSnapshot('post-llmswitch', chatPayload); } catch { /* ignore */ }
 
     // Ensure payload model aligns with selected route meta
     const normalizedPayload = { ...chatPayload, ...(modelId ? { model: modelId } : {}) } as Record<string, unknown>;
