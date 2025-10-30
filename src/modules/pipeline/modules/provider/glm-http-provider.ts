@@ -248,13 +248,70 @@ export class GLMHTTPProvider implements ProviderModule {
     const elapsed = Date.now() - start;
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      const err: any = new Error(`GLM API error: ${res.status} ${res.statusText} - ${text}`);
+      // Try to parse GLM error shape: { error:{ code, message } }
+      let errorCode: string | number | undefined;
+      let errorMessage: string | undefined;
+      try {
+        const obj = JSON.parse(text);
+        const e = obj?.error;
+        errorCode = (typeof e?.code === 'string' || typeof e?.code === 'number') ? e.code : undefined;
+        errorMessage = typeof e?.message === 'string' ? e.message : undefined;
+      } catch { /* keep undefined */ }
+
+      // Build a structured report based on GLM API guide (HTTP + business code)
+      const httpStatus = res.status;
+      const httpReason = res.statusText || '';
+      const bizCode = errorCode;
+      const bizMsg = errorMessage || undefined;
+      const recommend = (() => {
+        const tips: string[] = [];
+        // HTTP first
+        switch (httpStatus) {
+          case 400: tips.push('参数错误/文件异常：检查参数与 jsonl 内容。'); break;
+          case 401: tips.push('鉴权失败：确认 API KEY 与 Token 是否正确且未过期。'); break;
+          case 404: tips.push('API/资源未开放或不存在：确认功能是否开通与 ID 正确。'); break;
+          case 429: tips.push('频率/并发/余额限制：降低频率、增加并发配额或充值。'); break;
+          case 500: tips.push('服务器错误：稍后重试或联系客服。'); break;
+        }
+        // Business code
+        const c = String(bizCode ?? '');
+        if (c === '1210') tips.push('业务码1210：参数有误，请检查文档与必填字段。');
+        if (c === '1213') tips.push('业务码1213：缺少必填字段，请补齐。');
+        if (c === '1214') tips.push('业务码1214：字段非法，请按文档修正。');
+        if (c === '1302') tips.push('业务码1302：并发过高，降低并发或申请扩容。');
+        if (c === '1303') tips.push('业务码1303：频率过高，降低调用频率或申请扩容。');
+        if (c === '1304') tips.push('业务码1304：今日调用次数用尽，次日重置或购买配额。');
+        if (c === '1113') tips.push('业务码1113：账户欠费，请充值后重试。');
+        if (c === '1112') tips.push('业务码1112：账户被锁定，请联系客服解锁。');
+        if (!tips.length) tips.push('参考 GLM API 指引：校验鉴权、配额与参数格式。');
+        return tips;
+      })();
+
+      const report = {
+        http: { status: httpStatus, reason: httpReason },
+        business: (bizCode !== undefined || bizMsg) ? { code: bizCode, message: bizMsg } : undefined,
+        recommendation: recommend
+      } as Record<string, unknown>;
+
+      // Persist upstream error snapshot for diagnostics
+      try {
+        const baseDir = path.join(homedir(), '.routecodex', 'codex-samples');
+        const entry = (request as any)?.metadata?.entryEndpoint || '';
+        const entryFolder = /\/v1\/responses/i.test(String(entry)) ? 'openai-responses' : (/\/v1\/messages/i.test(String(entry)) ? 'anthropic-messages' : 'openai-chat');
+        const entryDir = path.join(baseDir, entryFolder);
+        await fs.mkdir(entryDir, { recursive: true });
+        const errorFile = path.join(entryDir, `${requestId}_provider-error.json`);
+        const payload: any = { id: requestId, model: (request as any)?.model, error: { http_status: httpStatus, http_reason: httpReason, body: text || null, business_code: bizCode ?? null, business_message: bizMsg ?? null, report } };
+        await fs.writeFile(errorFile, JSON.stringify(payload, null, 2), 'utf-8');
+      } catch { /* ignore persist errors */ }
+
+      const err: any = new Error(`GLM API error: ${httpStatus} ${httpReason}${bizMsg ? ` - ${bizMsg}` : ''}`);
       err.type = 'server';
-      err.statusCode = res.status;
-      err.details = { upstream: text ? { text } : undefined, provider: { vendor: 'glm', baseUrl: this.getBaseUrl(), moduleType: this.type } };
-      err.retryable = res.status >= 500 || res.status === 429;
+      err.statusCode = httpStatus;
+      err.details = { upstream: text ? { text } : undefined, provider: { vendor: 'glm', baseUrl: this.getBaseUrl(), moduleType: this.type }, report };
+      err.retryable = httpStatus >= 500 || httpStatus === 429;
       if (this.isDebugEnhanced && this.debugEventBus) {
-        this.debugEventBus.publish({ sessionId: 'system', moduleId: this.id, operationId: 'glm_http_request_error', timestamp: Date.now(), type: 'error', position: 'middle', data: { status: res.status, elapsed } });
+        this.debugEventBus.publish({ sessionId: 'system', moduleId: this.id, operationId: 'glm_http_request_error', timestamp: Date.now(), type: 'error', position: 'middle', data: { status: httpStatus, elapsed, business_code: bizCode } });
       }
       throw err;
     }

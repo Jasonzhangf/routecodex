@@ -7,6 +7,10 @@ import { type Response } from 'express';
 import type { ProtocolHandlerConfig } from '../handlers/base-handler.js';
 import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
 import { stripThinkingTags } from './text-filters.js';
+import { chunkString } from 'rcc-llmswitch-core/conversion';
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
 
 /**
  * Streaming chunk interface
@@ -36,6 +40,8 @@ export class StreamingManager {
   private heartbeatTimers: Map<string, NodeJS.Timeout> = new Map();
   // Track last tool_call signature per request to drop adjacent duplicates across chunks
   private lastToolCallKey: Map<string, string> = new Map();
+  // Per-request SSE event logs
+  private sseLogWriters: Map<string, fs.WriteStream> = new Map();
 
   constructor(config: ProtocolHandlerConfig) {
     this.config = config;
@@ -68,6 +74,16 @@ export class StreamingManager {
       // Start SSE heartbeats (pre-heartbeat + periodic)
       this.startHeartbeat(res, requestId, model);
 
+      // Open SSE event log file for Chat
+      try {
+        const base = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
+        fs.mkdirSync(base, { recursive: true });
+        const file = path.join(base, `${requestId}_sse-events.log`);
+        const ws = fs.createWriteStream(file, { flags: 'a' });
+        this.sseLogWriters.set(requestId, ws);
+        this.writeSSELog(requestId, 'stream.start', { requestId, model });
+      } catch { /* ignore */ }
+
       await this.streamFromPipeline(response, requestId, res, model);
 
     } catch (error) {
@@ -81,6 +97,8 @@ export class StreamingManager {
       this.sendErrorChunk(res, error, requestId);
       this.stopHeartbeat(requestId);
       res.end();
+      try { this.writeSSELog(requestId, 'stream.error', { message: (error as any)?.message || String(error) }); } catch { /* ignore */ }
+      try { this.closeSSELog(requestId); } catch { /* ignore */ }
     }
   }
 
@@ -126,6 +144,29 @@ export class StreamingManager {
   ): Promise<void> {
     const finishReasons: string[] = [];
     let sawToolCalls = false;
+    const emitChatRequiredAction = (msg: any) => {
+      try {
+        const enable = String(process.env.ROUTECODEX_CHAT_REQUIRED_ACTION || process.env.RCC_CHAT_REQUIRED_ACTION || '1').toLowerCase() !== '0';
+        if (!enable || !msg || typeof msg !== 'object') return;
+        const tcs: any[] = Array.isArray((msg as any).tool_calls) ? ((msg as any).tool_calls as any[]) : [];
+        if (!tcs.length) return;
+        const tool_calls = tcs.map((tc: any) => {
+          const id = (tc && typeof tc.id === 'string' && tc.id) ? tc.id : `call_${Math.random().toString(36).slice(2,8)}`;
+          const fn = (tc && typeof tc.function === 'object') ? tc.function : {};
+          const name = typeof (fn as any).name === 'string' ? (fn as any).name : 'tool';
+          const argsRaw = (fn as any).arguments;
+          const args = typeof argsRaw === 'string' ? argsRaw : (() => { try { return JSON.stringify(argsRaw ?? {}); } catch { return '{}'; } })();
+          return { id, type: 'function', function: { name, arguments: args } };
+        });
+        const evt = {
+          type: 'response.required_action',
+          required_action: { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls } }
+        } as any;
+        res.write(`event: response.required_action\n`);
+        res.write(`data: ${JSON.stringify(evt)}\n\n`);
+      } catch { /* ignore */ }
+    };
+    // Removed user-visible tool hint delta to avoid confusing client UIs.
     const genCallId = (index: number) => `call_${requestId}_${index}_${Math.random().toString(36).slice(2, 8)}`;
 
     // Helper: synthesize OpenAI-style streaming chunks from a non-stream JSON response
@@ -172,11 +213,7 @@ export class StreamingManager {
               chunks.push({ tool_calls: [{ index: i, id, type: 'function', function: { name } }] });
             }
             if (typeof args === 'string' && args.length > 0) {
-              // Split arguments into deltas to align with Responses-style streaming
-              const parts = Math.max(3, Math.min(12, Math.ceil(args.length / 12)));
-              const step = Math.max(1, Math.ceil(args.length / parts));
-              for (let p = 0; p < args.length; p += step) {
-                const d = args.slice(p, p + step);
+              for (const d of chunkString(args)) {
                 chunks.push({ tool_calls: [{ index: i, id, type: 'function', function: { arguments: d } }] });
               }
             }
@@ -217,6 +254,7 @@ export class StreamingManager {
       }
       let finalReason = finishReasons.length ? finishReasons[finishReasons.length - 1] : undefined;
       if (!finalReason && sawToolCalls) { finalReason = 'tool_calls'; }
+      // Removed hint delta to avoid confusing client UIs
       this.sendFinalChunk(res, requestId, model, finalReason);
       return;
     }
@@ -229,6 +267,7 @@ export class StreamingManager {
           await this.sendChunk(res, c, requestId, model);
           await this.delay(10);
         }
+        try { emitChatRequiredAction((data as any).choices[0]?.message); } catch { /* ignore */ }
         this.sendFinalChunk(res, requestId, model, finish);
         return;
       }
@@ -491,6 +530,7 @@ export class StreamingManager {
 
     const sseData = `data: ${JSON.stringify(chunkData)}\n\n`;
     res.write(sseData);
+    try { this.writeSSELog(requestId, 'chunk', chunkData); } catch { /* ignore */ }
 
     try {
       const LOG = String(process.env.ROUTECODEX_LOG_STREAM_CHUNKS || process.env.RCC_LOG_STREAM_CHUNKS || '0') === '1';
@@ -520,12 +560,23 @@ export class StreamingManager {
       }]
     };
 
+    // Compatibility: emit a Responses-style done event for clients that await it
+    try {
+      const evt = { type: 'response.done' } as Record<string, unknown>;
+      res.write(`event: response.done\n`);
+      res.write(`data: ${JSON.stringify(evt)}\n\n`);
+    } catch { /* ignore */ }
     const finalData = `data: ${JSON.stringify(finalChunk)}\n\ndata: [DONE]\n\n`;
     res.write(finalData);
     this.stopHeartbeat(requestId);
     res.end();
     // Reset last tool_call signature for this request
     try { this.lastToolCallKey.delete(requestId); } catch { /* ignore */ }
+    try {
+      this.writeSSELog(requestId, 'chunk.final', finalChunk);
+      this.writeSSELog(requestId, 'done', { requestId });
+      this.closeSSELog(requestId);
+    } catch { /* ignore */ }
 
     try {
       const LOG = String(process.env.ROUTECODEX_LOG_STREAM_CHUNKS || process.env.RCC_LOG_STREAM_CHUNKS || '0') === '1';
@@ -556,9 +607,38 @@ export class StreamingManager {
       }]
     };
 
+    try {
+      const evt = { type: 'response.done' } as Record<string, unknown>;
+      res.write(`event: response.done\n`);
+      res.write(`data: ${JSON.stringify(evt)}\n\n`);
+    } catch { /* ignore */ }
     const errorData = `data: ${JSON.stringify(errorChunk)}\n\ndata: [DONE]\n\n`;
     res.write(errorData);
     this.stopHeartbeat(requestId);
+    try {
+      this.writeSSELog(requestId, 'error', errorChunk);
+      this.writeSSELog(requestId, 'done', { requestId });
+      this.closeSSELog(requestId);
+    } catch { /* ignore */ }
+  }
+
+  // Write one SSE log record line
+  private writeSSELog(requestId: string, event: string, data: any): void {
+    try {
+      const ws = this.sseLogWriters.get(requestId);
+      if (!ws) return;
+      ws.write(JSON.stringify({ ts: Date.now(), requestId, event, data }) + '\n');
+    } catch { /* ignore */ }
+  }
+
+  private closeSSELog(requestId: string): void {
+    try {
+      const ws = this.sseLogWriters.get(requestId);
+      if (ws) {
+        try { ws.end(); } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+    finally { this.sseLogWriters.delete(requestId); }
   }
 
   /**

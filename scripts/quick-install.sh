@@ -71,8 +71,8 @@ cleanup_old() {
     # 进入项目根目录
     cd "$(dirname "$0")/.."
 
-    log_info "清理构建目录..."
-    rm -rf dist
+    log_info "清理构建与打包产物..."
+    npm run -s clean 2>/dev/null || rm -rf dist
     rm -f routecodex-*.tgz
     rm -f *.tar.gz
 
@@ -86,6 +86,18 @@ install_dependencies() {
         return
     fi
     log_header "📦 安装项目依赖"
+    # 先编译本地 sharedmodule，避免 root 的 prepare 阶段因缺少本地依赖 dist 而失败
+    log_info "预编译 sharedmodule/llmswitch-core 以满足 prepare..."
+    if npm -w sharedmodule/llmswitch-core run build 2>/dev/null; then
+        log_success "llmswitch-core 预编译完成"
+    else
+        log_warning "workspace 预编译失败，尝试目录内构建"
+        (cd sharedmodule/llmswitch-core && npm run build) || true
+        if [ ! -d sharedmodule/llmswitch-core/dist ]; then
+          log_warning "fallback: tsc 显式编译 dist"
+          ./node_modules/.bin/tsc -p sharedmodule/llmswitch-core/tsconfig.json --outDir sharedmodule/llmswitch-core/dist || true
+        fi
+    fi
     log_info "安装 npm 依赖 (优先 ci)..."
     if npm ci --prefer-offline --no-audit 2>/dev/null; then
         log_success "依赖安装成功"
@@ -99,8 +111,7 @@ install_dependencies() {
 build_project() {
     log_header "🔨 构建 TypeScript 项目"
 
-    # 清理构建目录
-    npm run clean 2>/dev/null || rm -rf dist
+    # 若根包已存在 dist 则保留，用于跳过重构建
 
     # 先构建 sharedmodule/llmswitch-core，再构建根包
     log_info "先编译 sharedmodule/llmswitch-core..."
@@ -115,8 +126,12 @@ build_project() {
             exit 1
         fi
     fi
+    if [ ! -d sharedmodule/llmswitch-core/dist ]; then
+      log_warning "fallback: tsc 显式编译 dist"
+      ./node_modules/.bin/tsc -p sharedmodule/llmswitch-core/tsconfig.json --outDir sharedmodule/llmswitch-core/dist || true
+    fi
 
-    # 构建根项目
+    # 总是构建根项目，避免沿用过期的 dist 产物
     log_info "编译 routecodex 根包..."
     if npm run build; then
         log_success "项目构建成功"
@@ -188,6 +203,16 @@ uninstall_old() {
             log_warning "无法移除 rcc 命令 (权限不足)"
         fi
     fi
+
+    # 额外：清理全局 bin 中可能残留的 routecodex，以避免 EEXIST
+    GLOBAL_BIN=$(npm config get prefix)/bin
+    if [ ! -d "$GLOBAL_BIN" ]; then
+        GLOBAL_BIN=$(npm root -g)/../bin
+    fi
+    if [ -d "$GLOBAL_BIN" ] && [ -f "$GLOBAL_BIN/routecodex" ]; then
+        log_info "清理全局 routecodex 二进制: $GLOBAL_BIN/routecodex"
+        rm -f "$GLOBAL_BIN/routecodex"
+    fi
 }
 
 # 安装新版本
@@ -195,11 +220,16 @@ install_new() {
     log_header "🔧 安装新版本"
 
     log_info "安装 routecodex 全局包 (pack + install -g)..."
-    if npm install -g "$PACKAGE_FILE" --omit=dev; then
-        log_success "routecodex 安装成功"
+    # 优先忽略脚本，避免安装阶段二次构建
+    if npm_config_ignore_scripts=true npm install -g "$PACKAGE_FILE" --omit=dev 2>/dev/null; then
+        log_success "routecodex 安装成功 (ignore_scripts)"
     else
-        log_error "routecodex 安装失败"
-        exit 1
+        log_warning "npm install -g 失败，尝试回退到全局软链安装（非 npm link）"
+        create_global_symlink || {
+          log_error "全局软链安装失败"
+          exit 1
+        }
+        log_success "已回退为全局软链安装"
     fi
 
     # 创建 rcc 命令的符号链接
@@ -257,6 +287,27 @@ EOF
     else
         log_warning "routecodex 命令未找到，无法创建 rcc 别名"
     fi
+}
+
+# 回退：直接将 dist/cli.js 软链到全局 bin（不使用 npm link）
+create_global_symlink() {
+    log_header "🔗 创建全局软链 (fallback)"
+    local GLOBAL_BIN
+    GLOBAL_BIN=$(npm config get prefix)/bin
+    if [ ! -d "$GLOBAL_BIN" ]; then
+        GLOBAL_BIN=$(npm root -g)/../bin
+    fi
+    if [ ! -d "$GLOBAL_BIN" ]; then
+        log_error "无法确定全局 bin 目录"
+        return 1
+    fi
+    if [ ! -f "dist/cli.js" ]; then
+        log_error "缺少 dist/cli.js，请先构建"
+        return 1
+    fi
+    ln -sf "$(pwd)/dist/cli.js" "$GLOBAL_BIN/routecodex" 2>/dev/null || return 1
+    chmod +x "$GLOBAL_BIN/routecodex" 2>/dev/null || true
+    # rcc 在 create_rcc_alias 中创建
 }
 
 # 验证安装

@@ -13,6 +13,8 @@ import type { PipelineDebugLogger as PipelineDebugLoggerInterface } from '../../
 import type { UnknownObject, /* LogData */ } from '../../../../types/common-types.js';
 import { sanitizeAndValidateOpenAIChat } from '../../utils/preflight-validator.js';
 import { stripThinkingTags } from '../../../../server/utils/text-filters.js';
+// Reuse llmswitch-core textual tool-call extractor for reasoning_content rescue
+import { extractRCCToolCallsFromText, extractApplyPatchCallsFromText, extractExecuteBlocksFromText } from 'rcc-llmswitch-core/conversion';
 
 export class GLMCompatibility implements CompatibilityModule {
   readonly id: string;
@@ -244,6 +246,32 @@ export class GLMCompatibility implements CompatibilityModule {
             const text = stripThinkingTags(String(msg.content));
             (msg as any).content = text;
           }
+          // Reasoning rescue: if GLM puts rcc.tool.v1 / patch / execute blocks into reasoning_content, convert to tool_calls before stripping
+          try {
+            const rc = (msg as any).reasoning_content;
+            const hasNoCalls = !Array.isArray((msg as any).tool_calls) || (msg as any).tool_calls.length === 0;
+            if (hasNoCalls && typeof rc === 'string' && rc.trim().length) {
+              const text = String(rc);
+              const calls = extractRCCToolCallsFromText(text) || extractApplyPatchCallsFromText(text) || extractExecuteBlocksFromText(text);
+              if (Array.isArray(calls) && calls.length) {
+                (msg as any).tool_calls = calls.map((c: any) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args } }));
+                if ((msg as any).content === undefined) (msg as any).content = '';
+              }
+            }
+          } catch { /* ignore rescue errors */ }
+          // If GLM placed visible text in reasoning_content and content is empty, promote it into content (after stripping thinking tags)
+          try {
+            // 仅在 chat/completions（strip 策略）下，将 reasoning_content 的可见文本提升为 content；
+            // Responses 路径（preserve 策略）保持现状，避免改变原始结构。
+            if (reasoningPolicy === 'strip') {
+              const rcText = (msg as any).reasoning_content;
+              const hasCalls = Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length > 0;
+              const contentStr = typeof (msg as any).content === 'string' ? String((msg as any).content) : '';
+              if (!hasCalls && typeof rcText === 'string' && rcText.trim().length > 0 && (!contentStr || !contentStr.trim().length)) {
+                (msg as any).content = stripThinkingTags(String(rcText));
+              }
+            }
+          } catch { /* ignore promote errors */ }
           // Reasoning content handling by endpoint policy
           if (reasoningPolicy === 'strip') {
             if ('reasoning_content' in msg) { delete (msg as any).reasoning_content; }
@@ -297,7 +325,7 @@ export class GLMCompatibility implements CompatibilityModule {
       if ((resp as any).type === 'message' && Array.isArray((resp as any).content)) {
       const blocks = ((resp as any).content as any[]);
       // Collect text blocks into assistant content (after stripping thinking)
-      const content = this.flattenAnthropicContent(blocks).map(t => this.stripThinking(t)).join('\n');
+      const content = this.flattenAnthropicContent(blocks).map(t => stripThinkingTags(String(t))).join('\n');
       // Map tool_use blocks back to OpenAI tool_calls
       const toolCalls: any[] = [];
       try {
@@ -373,16 +401,7 @@ export class GLMCompatibility implements CompatibilityModule {
     return texts;
   }
 
-  // Remove <think>...</think> blocks and stray <think> tags
-  private stripThinking(text: string): string {
-    return stripThinkingTags(String(text));
-  }
-
-  // 尝试从普通文本中提取 rcc.tool.v1 工具调用包装，并转换为 OpenAI tool_calls
-  private extractRCCToolCallsFromText(_text: string): Array<{ id?: string; name: string; args: string }> | null { return null; }
-
-  // 从文本中提取统一 diff 补丁块（*** Begin Patch ... *** End Patch），并映射为 apply_patch 工具调用（迁移至 llmswitch-core 通用层）
-  private extractApplyPatchCallsFromText(_text: string): Array<{ id?: string; name: string; args: string }> | null { return null; }
+  // 文本工具提取逻辑已迁移到 llmswitch-core 的 OpenAI 工具阶段；此处不再保留重复实现
 
 
   private extractModelConfig(modelId: string | null): ThinkingModelConfig | null {

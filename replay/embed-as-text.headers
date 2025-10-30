@@ -1,0 +1,14 @@
+HTTP/2 200 
+date: Thu, 30 Oct 2025 04:01:36 GMT
+content-type: application/json; charset=UTF-8
+set-cookie: acw_tc=ac11000117617968778607219ed6a214c1766663acdcb6e1fce5308ad6784a;path=/;HttpOnly;Max-Age=1800
+vary: Accept-Encoding
+vary: Origin
+vary: Access-Control-Request-Method
+vary: Access-Control-Request-Headers
+x-log-id: 20251030120118d87e87618ddd4203
+vary: Origin
+vary: Access-Control-Request-Method
+vary: Access-Control-Request-Headers
+strict-transport-security: max-age=31536000; includeSubDomains
+

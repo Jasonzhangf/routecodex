@@ -645,12 +645,20 @@ export class ResponsesHandler extends BaseHandler {
           return { name: base, args: argsStr };
         };
         let outIndex = 0;
+        // Deduplicate adjacent identical function_call (name + arguments)
+        let lastKey: string | null = null;
         for (const it of funcCalls) {
           const id = typeof it.id === 'string' ? it.id : (typeof it.call_id === 'string' ? it.call_id : `call_${Math.random().toString(36).slice(2, 8)}`);
           const call_id = typeof it.call_id === 'string' ? it.call_id : id;
           const rawName = typeof it.name === 'string' ? it.name : (typeof it.tool_name === 'string' ? it.tool_name : (it?.function?.name || 'tool'));
           const rawArgs = toArgsStr(it.arguments ?? it?.function?.arguments ?? {});
           const { name, args: argsStr } = canonicalizeTool(rawName, rawArgs);
+          const currKey = `${String(name || '')}\n${String(argsStr || '')}`;
+          if (lastKey && currKey === lastKey) {
+            // Skip adjacent duplicate
+            continue;
+          }
+          lastKey = currKey;
           await writeEvt('response.output_item.added', { type: 'response.output_item.added', output_index: outIndex, item: { id, type: 'function_call', status: 'in_progress', arguments: '', call_id, name } });
           await writeEvt('response.content_part.added', { type: 'response.content_part.added', item_id: id, output_index: outIndex, content_index: 0, part: { type: 'input_json', partial_json: '' } });
           // arguments deltas
@@ -745,6 +753,12 @@ export class ResponsesHandler extends BaseHandler {
         res.write(`event: response.error\n`);
         res.write(`data: ${JSON.stringify(e)}\n\n`);
       } catch { /* ignore */ }
+      // Ensure clients always receive a terminal event
+      try {
+        const doneEvt = { type: 'response.done' } as Record<string, unknown>;
+        res.write(`event: response.done\n`);
+        res.write(`data: ${JSON.stringify(doneEvt)}\n\n`);
+      } catch { /* ignore */ }
       await auditWrite('error', { message: (err as Error).message || String(err) });
       try { res.end(); } catch { /* ignore */ }
       if (heartbeatTimer) {
@@ -827,7 +841,44 @@ export class ResponsesHandler extends BaseHandler {
           const argsStr = toStringJson(rawArgs);
           return { id, type: 'function', function: { name: String(nm), arguments: String(argsStr) } };
         });
-        converted = { ...(converted0 as any), required_action: { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: calls } } };
+        // Validation warnings for unsafe write redirection (cat > without heredoc)
+        const warnings: Array<Record<string, unknown>> = [];
+        const detectWriteRedirection = (name: string | undefined, args: string): boolean => {
+          try {
+            if (!name || name.toLowerCase() !== 'shell') return false;
+            const obj = JSON.parse(args);
+            const cmd = obj?.command;
+            const getScript = (): string => {
+              if (typeof cmd === 'string') return cmd;
+              if (Array.isArray(cmd)) return cmd.map((x: any) => String(x)).join(' ');
+              return '';
+            };
+            const s = getScript().toLowerCase();
+            if (!s) return false;
+            const hasBash = /\bbash\b\s+-lc\b/.test(s);
+            const hasCatWrite = /cat\s*>\s*[^\s<]+/.test(s);
+            const hasHeredoc = /<</.test(s);
+            return hasBash && hasCatWrite && !hasHeredoc;
+          } catch { return false; }
+        };
+        for (const c of calls) {
+          try {
+            const nm = (c as any)?.function?.name as string | undefined;
+            const argStr = (c as any)?.function?.arguments as string || '{}';
+            if (detectWriteRedirection(nm, argStr)) {
+              warnings.push({
+                call_id: (c as any)?.id,
+                name: nm || 'tool',
+                kind: 'write_redirection_without_heredoc',
+                message: '禁止使用 cat 重定向写文件，请改用 apply_patch。',
+                suggestion: '使用统一 diff 补丁：\n*** Begin Patch\n*** Update File: path/to/file\n@@\n- old line\n+ new line\n*** End Patch'
+              });
+            }
+          } catch { /* ignore */ }
+        }
+        const required_action: any = { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: calls } };
+        if (warnings.length) (required_action as any).validation = { warnings };
+        converted = { ...(converted0 as any), required_action };
       }
 
       return await ResponsesMapper.enrichResponsePayload(converted as Record<string, unknown>, payload as Record<string, unknown>, reqMeta as Record<string, unknown>);
