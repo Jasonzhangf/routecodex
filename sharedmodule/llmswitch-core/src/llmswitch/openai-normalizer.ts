@@ -53,67 +53,20 @@ export class OpenAINormalizerLLMSwitch {
 
   private async normalizeOpenAIRequest(request: any): Promise<any> {
     if (!request || typeof request !== 'object') return request;
-    const normalized: any = { ...request };
-
-    if (Array.isArray(normalized.messages)) {
-      normalized.messages = normalized.messages.map((msg: any) => this.normalizeMessage(msg));
-    }
-    if (Array.isArray(normalized.tools)) {
-      normalized.tools = normalized.tools.map((tool: any) => this.normalizeTool(tool));
-    }
     try {
-      const { applyOpenAIToolingStage } = await import('../conversion/shared/openai-tooling-stage.js');
-      return applyOpenAIToolingStage(normalized as any) as any;
-    } catch { return normalized; }
+      // Use unified OpenAI normalization (includes tool->assistant embedding, shell arg fixups, MCP hints)
+      const { normalizeChatRequest } = await import('../conversion/shared/openai-normalize.js');
+      return normalizeChatRequest(request);
+    } catch {
+      // Fallback to minimal tooling stage if shared normalize is unavailable
+      try {
+        const { applyOpenAIToolingStage } = await import('../conversion/shared/openai-tooling-stage.js');
+        return applyOpenAIToolingStage({ ...(request as any) } as any) as any;
+      } catch { return request; }
+    }
   }
 
-  private normalizeMessage(message: any): any {
-    if (!message || typeof message !== 'object') return message;
-    const normalizedMessage: any = { ...message };
-
-    // 保持原样：content 允许为 undefined/null（例如 assistant 命中 tool_calls 的场景）
-    if (typeof normalizedMessage.content === 'string') {
-      // ok
-    } else if (Array.isArray(normalizedMessage.content)) {
-      // structured content allowed
-    } else if (typeof normalizedMessage.content === 'object') {
-      // keep object
-    } else {
-      // 对非字符串的基本类型做字符串化；undefined/null 保持原样
-      if (normalizedMessage.content !== undefined && normalizedMessage.content !== null) {
-        normalizedMessage.content = String(normalizedMessage.content);
-      }
-    }
-
-    if (normalizedMessage.role === 'assistant' && Array.isArray(normalizedMessage.tool_calls)) {
-      normalizedMessage.tool_calls = normalizedMessage.tool_calls.map((toolCall: any) => {
-        if (!toolCall || typeof toolCall !== 'object') return toolCall;
-        const normalizedToolCall: any = { ...toolCall };
-        if (normalizedToolCall.function && typeof normalizedToolCall.function === 'object') {
-          const fn: any = { ...normalizedToolCall.function };
-          if (fn.arguments !== undefined && typeof fn.arguments !== 'string') {
-            try { fn.arguments = JSON.stringify(fn.arguments); } catch { fn.arguments = String(fn.arguments); }
-          }
-          normalizedToolCall.function = fn;
-        }
-        return normalizedToolCall;
-      });
-    }
-    return normalizedMessage;
-  }
-
-  private normalizeTool(tool: any): any {
-    if (!tool || typeof tool !== 'object') return tool;
-    const normalizedTool: any = { ...tool };
-    if (normalizedTool.type === 'function' && normalizedTool.function) {
-      const fn: any = { ...normalizedTool.function };
-      if (fn.parameters && typeof fn.parameters !== 'object') {
-        try { fn.parameters = JSON.parse(String(fn.parameters)); } catch { fn.parameters = {}; }
-      }
-      normalizedTool.function = fn;
-    }
-    return normalizedTool;
-  }
+  // Legacy local normalizers removed; rely on shared normalizeChatRequest/Response
 
   async dispose(): Promise<void> { this.isInitialized = false; }
   async cleanup(): Promise<void> { await this.dispose(); }

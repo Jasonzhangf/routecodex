@@ -38,8 +38,8 @@ export class StreamingManager {
   private config: ProtocolHandlerConfig;
   private logger: PipelineDebugLogger;
   private heartbeatTimers: Map<string, NodeJS.Timeout> = new Map();
-  // Track last tool_call signature per request to drop adjacent duplicates across chunks
-  private lastToolCallKey: Map<string, string> = new Map();
+  // Track a short window of recent tool_call signatures per request to drop short-range duplicates across chunks
+  private lastToolCallKeys: Map<string, { set: Set<string>; order: string[] }> = new Map();
   // Per-request SSE event logs
   private sseLogWriters: Map<string, fs.WriteStream> = new Map();
 
@@ -499,13 +499,15 @@ export class StreamingManager {
       }]
     };
 
-    // Adjacent duplicate tool_call dedupe (per request, across chunks)
+    // Short-window duplicate tool_call dedupe (per request, across chunks)
     try {
       const choices = Array.isArray((chunkData as any).choices) ? (chunkData as any).choices : [];
       for (const c of choices) {
         const d = c?.delta || {};
         if (Array.isArray(d.tool_calls) && d.tool_calls.length > 0) {
           const kept: any[] = [];
+          const WINDOW = Math.max(1, Math.min(16, Number(process.env.ROUTECODEX_TOOL_CALL_DEDUPE_WINDOW || 4)));
+          const bucket = this.lastToolCallKeys.get(requestId) || { set: new Set<string>(), order: [] };
           for (const tc of d.tool_calls as any[]) {
             try {
               const fn = tc?.function || {};
@@ -513,17 +515,21 @@ export class StreamingManager {
               const args = fn?.arguments;
               const argsStr = typeof args === 'string' ? args : (args != null ? JSON.stringify(args) : '');
               const key = `${name}\n${argsStr}`;
-              const prev = this.lastToolCallKey.get(requestId);
-              // Only drop when both name and arguments are present and identical to last
               const hasBoth = name && argsStr;
-              if (hasBoth && prev === key) {
-                continue;
-              }
+              if (hasBoth && bucket.set.has(key)) { continue; }
               kept.push(tc);
-              if (hasBoth) this.lastToolCallKey.set(requestId, key);
+              if (hasBoth) {
+                bucket.set.add(key);
+                bucket.order.push(key);
+                if (bucket.order.length > WINDOW) {
+                  const old = bucket.order.shift();
+                  if (old) bucket.set.delete(old);
+                }
+              }
             } catch { kept.push(tc); }
           }
           d.tool_calls = kept;
+          this.lastToolCallKeys.set(requestId, bucket);
         }
       }
     } catch { /* ignore dedupe errors */ }
@@ -560,18 +566,21 @@ export class StreamingManager {
       }]
     };
 
-    // Compatibility: emit a Responses-style done event for clients that await it
+    // 可选：发出 Responses 风格的 done 事件（默认关闭，以避免跨协议混用）
     try {
-      const evt = { type: 'response.done' } as Record<string, unknown>;
-      res.write(`event: response.done\n`);
-      res.write(`data: ${JSON.stringify(evt)}\n\n`);
+      const EMIT_RESP_DONE = String(process.env.ROUTECODEX_CHAT_RESP_DONE || '0') === '1';
+      if (EMIT_RESP_DONE) {
+        const evt = { type: 'response.done' } as Record<string, unknown>;
+        res.write(`event: response.done\n`);
+        res.write(`data: ${JSON.stringify(evt)}\n\n`);
+      }
     } catch { /* ignore */ }
     const finalData = `data: ${JSON.stringify(finalChunk)}\n\ndata: [DONE]\n\n`;
     res.write(finalData);
     this.stopHeartbeat(requestId);
     res.end();
-    // Reset last tool_call signature for this request
-    try { this.lastToolCallKey.delete(requestId); } catch { /* ignore */ }
+    // Reset short-window cache for this request
+    try { this.lastToolCallKeys.delete(requestId); } catch { /* ignore */ }
     try {
       this.writeSSELog(requestId, 'chunk.final', finalChunk);
       this.writeSSELog(requestId, 'done', { requestId });

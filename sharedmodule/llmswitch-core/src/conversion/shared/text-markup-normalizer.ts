@@ -99,6 +99,66 @@ export function extractExecuteBlocksFromText(text: string): ToolCallLite[] | nul
   } catch { return null; }
 }
 
+// Extract XML-like <tool_call> blocks used by some agents:
+// Example:
+//   <tool_call>
+//     shell
+//     <arg_key>command</arg_key>
+//     <arg_value>["cat","codex-protocol/README.md"]</arg_value>
+//   </tool_call>
+export function extractXMLToolCallsFromText(text: string): ToolCallLite[] | null {
+  try {
+    if (typeof text !== 'string' || !text) return null;
+    const out: ToolCallLite[] = [];
+    const blockRe = /<tool_call[\s\S]*?>([\s\S]*?)<\/tool_call>/gi;
+    let bm: RegExpExecArray | null;
+    while ((bm = blockRe.exec(text)) !== null) {
+      const inner = (bm[1] || '').trim();
+      if (!inner) continue;
+      // 1) try function/name tags
+      let name = '';
+      const fnTag = inner.match(/<\s*(?:function|name)\s*>\s*([a-zA-Z0-9_\-\.]+)\s*<\/(?:function|name)\s*>/i);
+      if (fnTag && fnTag[1]) {
+        name = String(fnTag[1]).trim();
+      } else {
+        // 2) else pick the first non-empty line without tags as the name
+        const lines = inner.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+        const candidate = lines.find(l => !l.startsWith('<') && /^[a-zA-Z0-9_\-\.]+$/.test(l));
+        if (candidate) name = candidate;
+      }
+      if (!name) continue;
+
+      // Collect arg_key/arg_value pairs
+      const argRe = /<\s*arg_key\s*>\s*([^<]+?)\s*<\/(?:arg_key)\s*>\s*<\s*arg_value\s*>\s*([\s\S]*?)\s*<\/(?:arg_value)\s*>/gi;
+      let am: RegExpExecArray | null;
+      const argsObj: Record<string, unknown> = {};
+      while ((am = argRe.exec(inner)) !== null) {
+        const k = (am[1] || '').trim();
+        let vRaw = (am[2] || '').trim();
+        if (!k) continue;
+        // If value looks like JSON array/object, parse; else keep as string
+        let v: unknown = vRaw;
+        if ((vRaw.startsWith('[') && vRaw.endsWith(']')) || (vRaw.startsWith('{') && vRaw.endsWith('}'))) {
+          try { v = JSON.parse(vRaw); } catch { v = vRaw; }
+        }
+        (argsObj as any)[k] = v;
+      }
+      // If no args collected but inner contains JSON object, try as whole arguments
+      const hasAnyArg = Object.keys(argsObj).length > 0;
+      if (!hasAnyArg) {
+        const jsonMatch = inner.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+        if (jsonMatch) {
+          try { const val = JSON.parse(jsonMatch[0]); (argsObj as any).arguments = val; } catch { /* ignore */ }
+        }
+      }
+      let argsStr = '{}';
+      try { argsStr = JSON.stringify(argsObj); } catch { argsStr = '{}'; }
+      out.push({ id: `call_${Math.random().toString(36).slice(2, 10)}`, name, args: argsStr });
+    }
+    return out.length ? out : null;
+  } catch { return null; }
+}
+
 export function normalizeAssistantTextToToolCalls(message: Record<string, any>): Record<string, any> {
   if (!enabled()) return message;
   try {
@@ -107,9 +167,10 @@ export function normalizeAssistantTextToToolCalls(message: Record<string, any>):
     const content = (message as any).content;
     const text = typeof content === 'string' ? content : null;
     if (!text) return message;
-    // Order: rcc.wrapper → apply_patch → execute blocks
+    // Order: rcc.wrapper → xml-like tool_call → apply_patch → execute blocks
     const calls = (
       extractRCCToolCallsFromText(text) ||
+      extractXMLToolCallsFromText(text) ||
       extractApplyPatchCallsFromText(text) ||
       extractExecuteBlocksFromText(text)
     );

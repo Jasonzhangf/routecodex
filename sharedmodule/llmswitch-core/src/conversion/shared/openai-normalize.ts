@@ -1,3 +1,5 @@
+import { applyOpenAIToolingStage } from './openai-tooling-stage.js';
+
 export function normalizeChatRequest(request: any): any {
   if (!request || typeof request !== 'object') return request;
   const normalized = { ...request };
@@ -9,6 +11,31 @@ export function normalizeChatRequest(request: any): any {
   if (Array.isArray(normalized.tools)) {
     normalized.tools = normalized.tools.map((tool: any) => normalizeTool(tool));
   }
+
+  // Limit excessive text without breaking structure (GLM 1214 friendly):
+  // - Do not remove messages; only truncate long assistant content.
+  try {
+    const msgs: any[] = Array.isArray((normalized as any).messages) ? ((normalized as any).messages as any[]) : [];
+    if (msgs.length) {
+      const asstLimitRaw = (process as any)?.env?.RCC_ASSISTANT_TEXT_LIMIT;
+      const ASST_LIMIT = (asstLimitRaw === '0') ? 0 : Math.max(0, Number(asstLimitRaw ?? 8192));
+      const clamp = (s: any, n: number) => {
+        try { const t = String(s); return (n>0 && t.length>n) ? (t.slice(0,n) + '...(truncated)') : t; } catch { return s; }
+      };
+      for (let i=0;i<msgs.length;i++){
+        const m = msgs[i]; if (!m || typeof m !== 'object') continue;
+        const role = String((m as any).role||'').toLowerCase();
+        if (role === 'assistant') {
+          if (ASST_LIMIT > 0) {
+            if (typeof (m as any).content === 'string') (m as any).content = clamp((m as any).content, ASST_LIMIT);
+            else if (Array.isArray((m as any).content)) {
+              (m as any).content = (m as any).content.map((p: any)=> (p && typeof p.text==='string')? { ...p, text: clamp(p.text, ASST_LIMIT)}: p);
+            }
+          }
+        }
+      }
+    }
+  } catch { /* ignore limit errors */ }
 
   // MCP injection (CCR style) moved into core so both Chat/Responses paths stay consistent.
   try {
@@ -233,7 +260,12 @@ export function normalizeChatRequest(request: any): any {
 
   // Optionally embed tool role messages as assistant text to improve upstream compatibility
   try {
-    const ENABLE = String((process as any)?.env?.RCC_EMBED_TOOL_RESULTS_AS_TEXT ?? '1').trim() !== '0';
+    const ENABLE_BASE = String((process as any)?.env?.RCC_EMBED_TOOL_RESULTS_AS_TEXT ?? '1').trim() !== '0';
+    // 仅在 GLM 模型下启用默认嵌入；非 GLM 需显式开启 RCC_EMBED_TOOL_RESULTS_FORCE=1
+    const MODEL = String((normalized as any)?.model || '').toLowerCase();
+    const IS_GLM = /\bglm\b|zhipu|bigmodel/.test(MODEL);
+    const FORCE = String((process as any)?.env?.RCC_EMBED_TOOL_RESULTS_FORCE || '0') === '1';
+    const ENABLE = ENABLE_BASE && (IS_GLM || FORCE);
     if (ENABLE && Array.isArray((normalized as any).messages)) {
       const LIMIT = Math.max(512, Number((process as any)?.env?.RCC_TOOL_EMBED_LIMIT || 8192));
       const msgs: any[] = (normalized as any).messages as any[];
@@ -257,7 +289,10 @@ export function normalizeChatRequest(request: any): any {
   } catch { /* ignore tool->assistant embedding errors */ }
 
   // Unify tool result packaging for Chat path: ensure role:"tool" messages carry rcc.tool.v1 envelope
+  // 默认关闭，避免与 Responses 语义混用；可通过 RCC_CHAT_TOOL_ENVELOPE=1 打开
   try {
+    const ENABLE_ENVELOPE = String((process as any)?.env?.RCC_CHAT_TOOL_ENVELOPE || '0') === '1';
+    if (!ENABLE_ENVELOPE) { /* skip packaging */ return normalized; }
     const msgs: any[] = Array.isArray((normalized as any).messages) ? ((normalized as any).messages as any[]) : [];
     if (msgs.length) {
       const pending: string[] = [];
@@ -530,10 +565,13 @@ export function normalizeChatRequest(request: any): any {
     }
   } catch { /* ignore tool message packaging errors */ }
 
-  return normalized;
+  try { return applyOpenAIToolingStage(normalized as any); } catch { return normalized; }
 }
 
 export function normalizeChatResponse(res: any): any {
+  // deprecated: pass-through to avoid duplicate normalization in openai-openai
+  return res;
+  if (false) { // legacy logic retained below (never executed)
   if (!res || typeof res !== 'object') return res;
   const out = { ...res };
   if (Array.isArray(out.choices)) {
@@ -694,6 +732,7 @@ export function normalizeChatResponse(res: any): any {
     });
   }
   return out;
+  }
 }
 
 function normalizeMessage(message: any): any {

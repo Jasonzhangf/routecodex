@@ -1,5 +1,5 @@
 import type { ConversionCodec, ConversionContext, ConversionProfile } from '../types.js';
-import { normalizeChatRequest, normalizeChatResponse, normalizeTools } from '../index.js';
+import { normalizeChatRequest, normalizeTools } from '../index.js';
 
 // Ported from root package (no behavior changes). Types relaxed to avoid root coupling.
 export class OpenAIOpenAIConversionCodec implements ConversionCodec {
@@ -78,10 +78,9 @@ export class OpenAIOpenAIConversionCodec implements ConversionCodec {
         stages: []
       }
     };
-    // Minimal response normalization: ensure final shape; do not reshape tool_calls
-    return normalizeChatResponse(dto.data);
+    // Chat 响应不再二次归一，避免与统一 tooling/extractor 重复；按原样返回
+    return dto.data;
   }
 
   private async ensureInit(): Promise<void> { if (!this.initialized) await this.initialize(); }
 }
-

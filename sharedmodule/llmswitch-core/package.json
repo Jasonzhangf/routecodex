@@ -1,12 +1,12 @@
 {
   "name": "rcc-llmswitch-core",
-  "version": "0.1.36",
+  "version": "0.1.41",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
-    "dist",
+    "dist/**/*",
     "README.md",
     "package.json"
   ],

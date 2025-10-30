@@ -80,9 +80,8 @@ import { SwitchOrchestrator } from 'rcc-llmswitch-core/conversion/switch-orchest
 ### 使用示例
 
 ```typescript
-// OpenAI 规范化
+// OpenAI 请求规范化（响应侧按原样返回，避免重复归一）
 const normalizedRequest = normalizeChatRequest(openaiRequest);
-const normalizedResponse = normalizeChatResponse(openaiResponse);
 
 // Anthropic↔OpenAI 转换
 const converter = new AnthropicOpenAIConversionCodec();

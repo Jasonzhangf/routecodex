@@ -64,6 +64,7 @@ export class ResponsesHandler extends BaseHandler {
     });
 
     try {
+      try { res.setHeader('x-rc-conversion-profile', 'responses-openai'); } catch { /* ignore */ }
       // Optional: Replace/Inject system prompt for OpenAI Responses (prefer instructions field)
       try {
         const { shouldReplaceSystemPrompt, SystemPromptLoader } = await import('../../utils/system-prompt-loader.js');
@@ -645,8 +646,10 @@ export class ResponsesHandler extends BaseHandler {
           return { name: base, args: argsStr };
         };
         let outIndex = 0;
-        // Deduplicate adjacent identical function_call (name + arguments)
-        let lastKey: string | null = null;
+        // Deduplicate short-window identical function_call (name + arguments)
+        const WINDOW = Math.max(1, Math.min(16, Number(process.env.ROUTECODEX_TOOL_CALL_DEDUPE_WINDOW || 4)));
+        const lastKeys: string[] = [];
+        const lastSet = new Set<string>();
         for (const it of funcCalls) {
           const id = typeof it.id === 'string' ? it.id : (typeof it.call_id === 'string' ? it.call_id : `call_${Math.random().toString(36).slice(2, 8)}`);
           const call_id = typeof it.call_id === 'string' ? it.call_id : id;
@@ -654,11 +657,13 @@ export class ResponsesHandler extends BaseHandler {
           const rawArgs = toArgsStr(it.arguments ?? it?.function?.arguments ?? {});
           const { name, args: argsStr } = canonicalizeTool(rawName, rawArgs);
           const currKey = `${String(name || '')}\n${String(argsStr || '')}`;
-          if (lastKey && currKey === lastKey) {
-            // Skip adjacent duplicate
-            continue;
+          if (lastSet.has(currKey)) { continue; }
+          lastSet.add(currKey);
+          lastKeys.push(currKey);
+          if (lastKeys.length > WINDOW) {
+            const old = lastKeys.shift();
+            if (old) lastSet.delete(old);
           }
-          lastKey = currKey;
           await writeEvt('response.output_item.added', { type: 'response.output_item.added', output_index: outIndex, item: { id, type: 'function_call', status: 'in_progress', arguments: '', call_id, name } });
           await writeEvt('response.content_part.added', { type: 'response.content_part.added', item_id: id, output_index: outIndex, content_index: 0, part: { type: 'input_json', partial_json: '' } });
           // arguments deltas

@@ -109,10 +109,14 @@ export class SwitchOrchestrator {
       : undefined;
     if (explicit && this.profiles.has(explicit)) return this.profiles.get(explicit)!;
     const endpoint = context.entryEndpoint ?? context.endpoint;
-    if (endpoint && this.endpointBindings.has(endpoint)) {
+    if (endpoint) {
+      if (!this.endpointBindings.has(endpoint)) {
+        throw new Error(`llmswitch-core: no conversion profile bound to endpoint '${endpoint}'`);
+      }
       const profileId = this.endpointBindings.get(endpoint)!;
       const prof = this.profiles.get(profileId);
-      if (prof) return prof;
+      if (!prof) throw new Error(`llmswitch-core: bound profile '${profileId}' for endpoint '${endpoint}' not found`);
+      return prof;
     }
     if (this.defaultProfileId && this.profiles.has(this.defaultProfileId)) return this.profiles.get(this.defaultProfileId)!;
     const [first] = this.profiles.values();

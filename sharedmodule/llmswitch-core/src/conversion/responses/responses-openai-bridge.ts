@@ -416,6 +416,56 @@ export function buildResponsesPayloadFromChat(payload: unknown, context?: Respon
     output_text: outputText || ''
   };
   if (usage) out.usage = usage;
+  // Synthesize required_action for non-stream JSON when tool_calls exist
+  try {
+    if (toolCalls.length > 0) {
+      const toStringJson = (v: unknown): string => { if (typeof v === 'string') return v; try { return JSON.stringify(v ?? {}); } catch { return '{}'; } };
+      const calls = toolCalls.map((it: any) => {
+        const id = typeof it.id === 'string' ? it.id : (typeof it.call_id === 'string' ? it.call_id : `call_${Math.random().toString(36).slice(2,8)}`);
+        const nm = typeof it?.function?.name === 'string' ? it.function.name : (typeof it.name === 'string' ? it.name : 'tool');
+        const rawArgs = it?.function?.arguments ?? it.arguments ?? {};
+        const argsStr = toStringJson(rawArgs);
+        return { id, type: 'function', function: { name: String(nm), arguments: String(argsStr) } };
+      });
+      const warnings: Array<Record<string, unknown>> = [];
+      const detectWriteRedirection = (name: string | undefined, args: string): boolean => {
+        try {
+          if (!name || name.toLowerCase() !== 'shell') return false;
+          const obj = JSON.parse(args);
+          const cmd = obj?.command;
+          const toScript = (): string => {
+            if (typeof cmd === 'string') return cmd;
+            if (Array.isArray(cmd)) return cmd.map((x: any) => String(x)).join(' ');
+            return '';
+          };
+          const s = toScript().toLowerCase();
+          if (!s) return false;
+          const hasBash = /\bbash\b\s+-lc\b/.test(s);
+          const hasCatWrite = /cat\s*>\s*[^\s<]+/.test(s);
+          const hasHeredoc = /<</.test(s);
+          return hasBash && hasCatWrite && !hasHeredoc;
+        } catch { return false; }
+      };
+      for (const c of calls) {
+        try {
+          const nm = (c as any)?.function?.name as string | undefined;
+          const argStr = (c as any)?.function?.arguments as string || '{}';
+          if (detectWriteRedirection(nm, argStr)) {
+            warnings.push({
+              call_id: (c as any)?.id,
+              name: nm || 'tool',
+              kind: 'write_redirection_without_heredoc',
+              message: '禁止使用 cat 重定向写文件，请改用 apply_patch。',
+              suggestion: '使用统一 diff 补丁：\n*** Begin Patch\n*** Update File: path/to/file\n@@\n- old line\n+ new line\n*** End Patch'
+            });
+          }
+        } catch { /* ignore */ }
+      }
+      const required_action: any = { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: calls } };
+      if (warnings.length) (required_action as any).validation = { warnings };
+      (out as any).required_action = required_action;
+    }
+  } catch { /* ignore */ }
   if (context) {
     for (const k of ['metadata','instructions','parallel_tool_calls','tool_choice','include','store'] as const) {
       if ((context as any)[k] !== undefined) (out as any)[k] = (context as any)[k];

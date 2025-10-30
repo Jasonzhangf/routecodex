@@ -131,7 +131,20 @@ export class GLMHTTPProvider implements ProviderModule {
     })();
     const endpoint = `${this.getBaseUrl()}/chat/completions`;
     // Passthrough payload as-is. Do not sanitize/trim/strip tool_calls.
-    const payloadObj: Record<string, unknown> = { ...(request as any) };
+    // Normalize to OpenAI Chat request shape (embed tool history, clamp overly long assistant text)
+    let payloadObj: Record<string, unknown> = { ...(request as any) } as Record<string, unknown>;
+    try {
+      const core = await import('rcc-llmswitch-core/conversion');
+      if (payloadObj && typeof payloadObj === 'object') {
+        const normalized = (core as any).normalizeChatRequest?.(payloadObj) || payloadObj;
+        // Ensure result is an object with messages/tools fields preserved
+        if (normalized && typeof normalized === 'object') {
+          payloadObj = { ...(normalized as Record<string, unknown>) };
+        }
+      }
+    } catch {
+      // best-effort; if core unavailable, continue with original payload
+    }
 
     const token = this.authContext.token!;
 

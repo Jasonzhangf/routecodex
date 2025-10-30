@@ -115,7 +115,13 @@ export class AnthropicOpenAIConversionCodec implements ConversionCodec {
       }
     } catch { /* ignore */ }
 
-    return out;
+    // Run unified OpenAI tooling stage to normalize/optimize tools once
+    try {
+      const { applyOpenAIToolingStage } = await import('../shared/openai-tooling-stage.js');
+      return applyOpenAIToolingStage(out as any);
+    } catch {
+      return out;
+    }
   }
 
   async convertResponse(payload: any, _profile: ConversionProfile, _context: ConversionContext): Promise<any> {

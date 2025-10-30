@@ -432,20 +432,9 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
     }
   } catch { /* non-blocking */ }
 
-  // Convert user-side tool echo texts into proper tool messages to preserve history without polluting user turns
-  let normalizedMessages: any[] = [];
-  for (let i = 0; i < mappedMessages.length; i++) {
-    const msg = mappedMessages[i];
-    if (msg?.role === 'user' && typeof msg?.content === 'string' && isToolEchoUserText(msg.content)) {
-      const converted = convertToolEchoUserToToolMessage(msg.content);
-      if (converted) {
-        issues.push({ level: 'info', code: 'messages.user.toolecho_converted', message: 'Converted user tool echo to tool message', path: `messages[${i}]` });
-        normalizedMessages.push(converted);
-        continue;
-      }
-    }
-    normalizedMessages.push(msg);
-  }
+  // Chat 路径不应在预检阶段将“用户文本”转换为工具消息；该语义应由 Responses 桥接负责
+  // 因此，这里不再进行“用户文本→tool 消息”的转换，原样保留 mappedMessages 顺序
+  let normalizedMessages: any[] = [...mappedMessages];
 
   let messages = normalizedMessages.filter((msg: any, idx: number) => {
     const text = typeof msg?.content === 'string' ? msg.content.trim() : '';

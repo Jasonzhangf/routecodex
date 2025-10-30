@@ -183,8 +183,9 @@ export function buildSystemToolGuidance(): string {
   lines.push(bullet('Always use assistant.tool_calls[].function.{name,arguments}; never embed tool calls in plain text. / 一律通过 tool_calls 调用工具，不要把工具调用写进普通文本。'));
   lines.push(bullet('function.arguments must be a single JSON string. / arguments 必须是单个 JSON 字符串。'));
   lines.push(bullet('shell: Place ALL intent into the command argv array only; do not invent extra keys. / shell 所有意图写入 command 数组，不要添加额外键名。'));
-  lines.push(bullet('shell: Do NOT use redirection or here-doc for file writes; use apply_patch. / shell 禁止使用重定向/heredoc 写文件，使用 apply_patch。'));
+  lines.push(bullet('File writes are FORBIDDEN via shell (no redirection, no here-doc, no sed -i, no ed -s, no tee). Use apply_patch ONLY. / 通过 shell 写文件一律禁止（不得使用重定向、heredoc、sed -i、ed -s、tee）；必须使用 apply_patch。'));
   lines.push(bullet('apply_patch: Provide a unified diff patch with *** Begin Patch/*** End Patch only. / 仅输出统一 diff 补丁。'));
+  lines.push(bullet('apply_patch example / 示例：\n*** Begin Patch\n*** Update File: path/to/file.ts\n@@\n- old line\n+ new line\n*** End Patch'));
   lines.push(bullet('update_plan: Keep exactly one step in_progress; others pending/completed. / 仅一个 in_progress 步骤。'));
   lines.push(bullet('view_image: Path must be an image file (.png .jpg .jpeg .gif .webp .bmp .svg). / 仅图片路径。'));
   lines.push(bullet('Do not narrate tool intent (e.g., “工具调用已生成，请执行工具并继续。”); emit tool_calls directly. / 不要输出“准备调用工具/工具调用已生成”等提示，直接生成 tool_calls。'));
