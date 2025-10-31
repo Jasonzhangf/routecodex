@@ -14,6 +14,7 @@ import { ProtocolDetector } from '../protocol/protocol-detector.js';
 import { OpenAIAdapter } from '../protocol/openai-adapter.js';
 import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
 import { OpenAINormalizerLLMSwitch } from 'rcc-llmswitch-core/llmswitch/openai-normalizer';
+import { ErrorContextBuilder, EnhancedRouteCodexError, type ErrorContext } from '../utils/error-context.js';
 import os from 'os';
 import path from 'path';
 
@@ -39,6 +40,9 @@ export class ChatCompletionsHandler extends BaseHandler {
   async handleRequest(req: Request, res: Response): Promise<void> {
     const startTime = Date.now();
     const requestId = this.generateRequestId();
+
+    // 记录开始时间用于错误上下文
+    (req as any).__startTime = startTime;
     // Capture raw request for debugging
     try {
       const rawBody = JSON.parse(JSON.stringify((req as any).body || {}));
@@ -55,7 +59,24 @@ export class ChatCompletionsHandler extends BaseHandler {
         body: rawBody,
       };
       await (fs as any).writeFile(rawFile, JSON.stringify(payload, null, 2), 'utf-8');
-    } catch { /* ignore capture failures */ }
+    } catch (error) {
+      // 快速死亡原则 - 暴露捕获失败的原因
+      throw new EnhancedRouteCodexError(error as Error, {
+        module: 'ChatCompletionsHandler',
+        file: 'src/server/handlers/chat-completions.ts',
+        function: 'handleRequest',
+        line: 58,
+        requestId,
+        additional: {
+          operation: 'raw-request-capture',
+          payload: ErrorContextBuilder.safeStringify({
+            requestId,
+            method: req.method,
+            url: req.originalUrl || req.url
+          }, 500)
+        }
+      });
+    }
 
     this.logModule('ChatCompletionsHandler', 'request_start', {
       requestId,
@@ -83,10 +104,36 @@ export class ChatCompletionsHandler extends BaseHandler {
           const hasMdMarkers = /\bCLAUDE\.md\b|\bAGENT(?:S)?\.md\b/i.test(currentSys);
           if (sys && Array.isArray((req.body as any)?.messages) && !hasMdMarkers) {
             (req.body as any).messages = replaceSystemInOpenAIMessages((req.body as any).messages, sys) as any[];
-            try { res.setHeader('x-rc-system-prompt-source', sel); } catch { /* ignore */ }
+            try { res.setHeader('x-rc-system-prompt-source', sel); } catch (error) {
+              // 快速死亡原则 - 暴露响应头设置失败
+              throw new EnhancedRouteCodexError(error as Error, {
+                module: 'ChatCompletionsHandler',
+                file: 'src/server/handlers/chat-completions.ts',
+                function: 'handleRequest',
+                line: 100,
+                requestId,
+                additional: {
+                  operation: 'system-prompt-header',
+                  promptSource: sel
+                }
+              });
+            }
           }
         }
-      } catch { /* non-blocking */ }
+      } catch (error) {
+        // 快速死亡原则 - 暴露系统提示加载失败
+        throw new EnhancedRouteCodexError(error as Error, {
+          module: 'ChatCompletionsHandler',
+          file: 'src/server/handlers/chat-completions.ts',
+          function: 'handleRequest',
+          line: 103,
+          requestId,
+          additional: {
+            operation: 'system-prompt-replacement',
+            error: 'System prompt loader failure'
+          }
+        });
+      }
 
       // Strict protocol separation: Chat endpoint only accepts OpenAI Chat payload.
       // Do NOT auto-convert Anthropic/Responses-shaped payloads here to avoid cross-path pollution.
@@ -124,21 +171,7 @@ export class ChatCompletionsHandler extends BaseHandler {
       let payload = pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
         ? (pipelineResponse as Record<string, unknown>).data
         : pipelineResponse;
-      // 修复：将助手文本里的工具标记转换为 tool_calls，避免 shell 被当作文字
-      try {
-        const core = await import('rcc-llmswitch-core/conversion');
-        const choices = Array.isArray((payload as any)?.choices) ? (payload as any).choices : [];
-        if (choices.length > 0 && choices[0]?.message && typeof (core as any).normalizeAssistantTextToToolCalls === 'function') {
-          const msg0 = choices[0].message;
-          const fixed = (core as any).normalizeAssistantTextToToolCalls(msg0) || msg0;
-          if (fixed !== msg0) {
-            const copy = { ...(payload as any) };
-            copy.choices = [...choices];
-            copy.choices[0] = { ...copy.choices[0], message: fixed };
-            payload = copy;
-          }
-        }
-      } catch { /* ignore */ }
+      // 工具文本→tool_calls 的归一化已在 llmswitch-core (openai-openai codec) 统一完成，这里不再做重复处理
       const normalized = this.responseNormalizer.normalizeOpenAIResponse(payload, 'chat');
       // Chat 路径不注入 Responses 的 required_action 结构，保持协议纯净
       this.sendJsonResponse(res, normalized, requestId);
@@ -177,7 +210,77 @@ export class ChatCompletionsHandler extends BaseHandler {
         }
       } catch { /* ignore */ }
 
-      await this.handleError(error as Error, res, requestId);
+      await this.handleEnhancedError(error as Error, res, requestId, req);
+    }
+  }
+
+  /**
+   * 增强的错误处理函数 - 符合9大架构原则
+   * 实现快速死亡和暴露问题原则
+   */
+  private async handleEnhancedError(error: Error, res: Response, requestId: string, req: Request): Promise<void> {
+    // 构建详细的错误上下文
+    const context: ErrorContext = {
+      module: 'ChatCompletionsHandler',
+      file: 'src/server/handlers/chat-completions.ts',
+      function: 'handleRequest',
+      line: ErrorContextBuilder.extractLineNumber(error),
+      requestId,
+      additional: {
+        endpoint: '/v1/chat/completions',
+        method: req.method,
+        url: req.url,
+        model: req.body?.model,
+        messageCount: req.body?.messages?.length,
+        hasTools: !!req.body?.tools,
+        streaming: req.body?.stream,
+        processingTime: Date.now() - (req as any).__startTime || Date.now(),
+        userAgent: req.headers['user-agent'],
+        contentType: req.headers['content-type']
+      }
+    };
+
+    // 如果错误已经是EnhancedRouteCodexError，直接使用
+    if (error instanceof EnhancedRouteCodexError) {
+      this.sendDetailedErrorResponse(res, error.detailedError);
+      return;
+    }
+
+    // 否则创建增强错误
+    const enhancedError = new EnhancedRouteCodexError(error, context);
+    this.sendDetailedErrorResponse(res, enhancedError.detailedError);
+  }
+
+  /**
+   * 发送详细的错误响应
+   * 符合暴露问题原则，提供完整调试信息
+   */
+  private sendDetailedErrorResponse(res: Response, detailedError: any): void {
+    try {
+      // 设置状态码和响应头
+      res.status(500).set({
+        'Content-Type': 'application/json',
+        'x-request-id': detailedError.error.context.requestId,
+        'x-error-source': detailedError.source,
+        'x-error-code': detailedError.error.code
+      });
+
+      // 发送详细的错误响应
+      res.json(detailedError);
+    } catch (responseError) {
+      // 如果连错误响应都失败了，返回最基本的错误信息
+      res.status(500).json({
+        error: {
+          code: 'CRITICAL_ERROR_RESPONSE_FAILURE',
+          message: '系统发生严重错误，无法提供详细错误信息',
+          type: 'CriticalError'
+        },
+        source: 'RouteCodex-Critical',
+        remediation: {
+          immediate: '检查服务器日志和系统状态',
+          support: '联系技术支持团队'
+        }
+      });
     }
   }
 

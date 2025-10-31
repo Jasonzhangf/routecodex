@@ -1,5 +1,42 @@
 # RouteCodex Pipeline Module Documentation
 
+RouteCodex流水线模块是4层管道架构的核心组件，负责将路由后的请求通过可组合的处理流水线转换为Provider可处理的格式。支持动态路由分类、格式转换、流式控制和Provider适配。
+
+## 🚨 核心架构原则
+
+### **llmswitch-core工具调用唯一入口**
+Pipeline模块严格遵循"工具调用唯一入口"原则：
+- **LLMSwitch层**: 不处理工具调用转换，直接透传给llmswitch-core
+- **Compatibility层**: 仅处理provider特定字段标准化，不涉及工具转换
+- **Provider层**: 纯HTTP通信，不处理数据格式转换
+- **统一处理**: 所有工具调用逻辑集中在llmswitch-core
+
+### **兼容层最小化处理**
+```typescript
+// ✅ 正确：兼容层只做字段标准化
+export class GLMCompatibility {
+  processOutgoing(response) {
+    // 仅处理provider特有字段
+    if (response.reasoning_content) {
+      // 提取工具意图到reasoning_content，不生成tool_calls
+      const { blocks } = harvestRccBlocksFromText(response.reasoning_content);
+      response.reasoning_content = blocks.join('\n');
+    }
+    return response;
+  }
+}
+
+// ❌ 错误：兼容层不应处理工具转换
+export class BadCompatibility {
+  processOutgoing(response) {
+    // 不要在此处处理工具调用转换！
+    if (response.content.includes('tool')) {
+      response.tool_calls = parseToolCalls(response.content);
+    }
+  }
+}
+```
+
 ## 目录
 
 - [架构概述](./ARCHITECTURE.md)

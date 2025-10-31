@@ -35,7 +35,9 @@ export function extractToolText(value: unknown): string {
       if (total.length >= limitChars) break;
     }
     let text = out.join('\n');
-    if (text.length > limitChars) text = text.slice(0, limitChars - 12) + '\n...(truncated)';
+    if (text.length > limitChars) {
+      text = `[输出已截断至 ${limitChars} 字符]\n` + text.slice(0, limitChars - 12) + '\n...(truncated)';
+    }
     return text;
   };
   const flattenParts = (v: unknown): string[] => {
@@ -77,7 +79,10 @@ export function extractToolText(value: unknown): string {
     if (FAITHFUL) {
       try {
         const txt = JSON.stringify(value);
-        return txt.length > MAX_CHARS ? (txt.slice(0, MAX_CHARS - 12) + '\n...(truncated)') : txt;
+        if (txt.length > MAX_CHARS) {
+          return `[输出已截断至 ${MAX_CHARS} 字符]\n` + txt.slice(0, MAX_CHARS - 12) + '\n...(truncated)';
+        }
+        return txt;
       } catch { /* ignore */ }
     }
     return '';

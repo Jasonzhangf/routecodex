@@ -8,6 +8,7 @@ import type { ProtocolHandlerConfig } from '../handlers/base-handler.js';
 import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
 import { stripThinkingTags } from './text-filters.js';
 import { chunkString } from 'rcc-llmswitch-core/conversion';
+import { ErrorContextBuilder, EnhancedRouteCodexError, type ErrorContext } from './error-context.js';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -61,10 +62,36 @@ export class StreamingManager {
       res.setHeader('Cache-Control', 'no-cache, no-transform');
       res.setHeader('Connection', 'keep-alive');
       // Disable proxy buffering for Nginx/Cloudflare style proxies to avoid stuck streams
-      try { res.setHeader('X-Accel-Buffering', 'no'); } catch { /* ignore */ }
+      try { res.setHeader('X-Accel-Buffering', 'no'); } catch (error) {
+        // 快速死亡原则 - 暴露SSE响应头设置错误
+        throw new EnhancedRouteCodexError(error as Error, {
+          module: 'StreamingManager',
+          file: 'src/server/utils/streaming-manager.ts',
+          function: 'streamResponse',
+          line: ErrorContextBuilder.extractLineNumber(error as Error),
+          additional: {
+            operation: 'sse-buffering-header',
+            requestId,
+            model
+          }
+        });
+      }
       res.setHeader('x-request-id', requestId);
       // Flush headers to start the SSE stream immediately
-      try { (res as any).flushHeaders?.(); } catch { /* ignore */ }
+      try { (res as any).flushHeaders?.(); } catch (error) {
+        // 快速死亡原则 - 暴露SSE响应头刷新错误
+        throw new EnhancedRouteCodexError(error as Error, {
+          module: 'StreamingManager',
+          file: 'src/server/utils/streaming-manager.ts',
+          function: 'streamResponse',
+          line: ErrorContextBuilder.extractLineNumber(error as Error),
+          additional: {
+            operation: 'sse-header-flush',
+            requestId,
+            model
+          }
+        });
+      }
 
       // Start streaming
       if (!this.shouldStreamFromPipeline()) {
@@ -82,7 +109,21 @@ export class StreamingManager {
         const ws = fs.createWriteStream(file, { flags: 'a' });
         this.sseLogWriters.set(requestId, ws);
         this.writeSSELog(requestId, 'stream.start', { requestId, model });
-      } catch { /* ignore */ }
+      } catch (error) {
+        // 快速死亡原则 - 暴露SSE日志初始化错误
+        throw new EnhancedRouteCodexError(error as Error, {
+          module: 'StreamingManager',
+          file: 'src/server/utils/streaming-manager.ts',
+          function: 'streamResponse',
+          line: ErrorContextBuilder.extractLineNumber(error as Error),
+          additional: {
+            operation: 'sse-log-initialization',
+            requestId,
+            model,
+            logDirectory: path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-chat')
+          }
+        });
+      }
 
       await this.streamFromPipeline(response, requestId, res, model);
 
@@ -97,8 +138,37 @@ export class StreamingManager {
       this.sendErrorChunk(res, error, requestId);
       this.stopHeartbeat(requestId);
       res.end();
-      try { this.writeSSELog(requestId, 'stream.error', { message: (error as any)?.message || String(error) }); } catch { /* ignore */ }
-      try { this.closeSSELog(requestId); } catch { /* ignore */ }
+      try {
+        this.writeSSELog(requestId, 'stream.error', { message: (error as any)?.message || String(error) });
+      } catch (logError) {
+        // 快速死亡原则 - 暴露SSE错误日志写入失败
+        throw new EnhancedRouteCodexError(logError instanceof Error ? logError : new Error(String(logError)), {
+          module: 'StreamingManager',
+          file: 'src/server/utils/streaming-manager.ts',
+          function: 'streamResponse',
+          line: ErrorContextBuilder.extractLineNumber((logError instanceof Error ? logError : new Error(String(logError))) as Error),
+          additional: {
+            operation: 'sse-error-log-write',
+            requestId,
+            originalError: (error as any)?.message || String(error)
+          }
+        });
+      }
+      try {
+        this.closeSSELog(requestId);
+      } catch (logCloseError) {
+        // 快速死亡原则 - 暴露SSE日志关闭失败
+        throw new EnhancedRouteCodexError(logCloseError instanceof Error ? logCloseError : new Error(String(logCloseError)), {
+          module: 'StreamingManager',
+          file: 'src/server/utils/streaming-manager.ts',
+          function: 'streamResponse',
+          line: ErrorContextBuilder.extractLineNumber((logCloseError instanceof Error ? logCloseError : new Error(String(logCloseError))) as Error),
+          additional: {
+            operation: 'sse-log-close',
+            requestId
+          }
+        });
+      }
     }
   }
 
@@ -144,28 +214,7 @@ export class StreamingManager {
   ): Promise<void> {
     const finishReasons: string[] = [];
     let sawToolCalls = false;
-    const emitChatRequiredAction = (msg: any) => {
-      try {
-        const enable = String(process.env.ROUTECODEX_CHAT_REQUIRED_ACTION || process.env.RCC_CHAT_REQUIRED_ACTION || '1').toLowerCase() !== '0';
-        if (!enable || !msg || typeof msg !== 'object') return;
-        const tcs: any[] = Array.isArray((msg as any).tool_calls) ? ((msg as any).tool_calls as any[]) : [];
-        if (!tcs.length) return;
-        const tool_calls = tcs.map((tc: any) => {
-          const id = (tc && typeof tc.id === 'string' && tc.id) ? tc.id : `call_${Math.random().toString(36).slice(2,8)}`;
-          const fn = (tc && typeof tc.function === 'object') ? tc.function : {};
-          const name = typeof (fn as any).name === 'string' ? (fn as any).name : 'tool';
-          const argsRaw = (fn as any).arguments;
-          const args = typeof argsRaw === 'string' ? argsRaw : (() => { try { return JSON.stringify(argsRaw ?? {}); } catch { return '{}'; } })();
-          return { id, type: 'function', function: { name, arguments: args } };
-        });
-        const evt = {
-          type: 'response.required_action',
-          required_action: { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls } }
-        } as any;
-        res.write(`event: response.required_action\n`);
-        res.write(`data: ${JSON.stringify(evt)}\n\n`);
-      } catch { /* ignore */ }
-    };
+    const emitChatRequiredAction = (_msg: any) => { /* removed Responses semantics from Chat SSE */ };
     // Removed user-visible tool hint delta to avoid confusing client UIs.
     const genCallId = (index: number) => `call_${requestId}_${index}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -174,13 +223,7 @@ export class StreamingManager {
       const chunks: any[] = [];
       try {
         let msg = resp?.choices?.[0]?.message || {};
-        // Convert textual tool markup in assistant content to tool_calls (e.g., <tool_call> ...)
-        try {
-          const core = await import('rcc-llmswitch-core/conversion');
-          if (core && typeof (core as any).normalizeAssistantTextToToolCalls === 'function') {
-            msg = (core as any).normalizeAssistantTextToToolCalls(msg) || msg;
-          }
-        } catch { /* keep original msg */ }
+        // 文本→工具归一化已在 llmswitch-core 的 openai-openai codec 处理，这里不重复
         const role = typeof msg?.role === 'string' ? msg.role : 'assistant';
         const content = typeof msg?.content === 'string' ? msg.content : '';
         const toolCallsFromArray = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];

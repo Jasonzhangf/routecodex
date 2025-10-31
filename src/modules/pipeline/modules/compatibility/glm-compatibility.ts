@@ -13,8 +13,9 @@ import type { PipelineDebugLogger as PipelineDebugLoggerInterface } from '../../
 import type { UnknownObject, /* LogData */ } from '../../../../types/common-types.js';
 import { sanitizeAndValidateOpenAIChat } from '../../utils/preflight-validator.js';
 import { stripThinkingTags } from '../../../../server/utils/text-filters.js';
+import { ErrorContextBuilder, EnhancedRouteCodexError, type ErrorContext } from '../../../../server/utils/error-context.js';
 // GLM 专用：从 reasoning_content 文本中提取工具调用
-import { harvestToolCallsFromText } from './glm-utils/text-to-toolcalls.js';
+import { harvestRccBlocksFromText } from './glm-utils/text-to-toolcalls.js';
 
 export class GLMCompatibility implements CompatibilityModule {
   readonly id: string;
@@ -224,10 +225,63 @@ export class GLMCompatibility implements CompatibilityModule {
       (payload as UnknownObject)[key] = value as unknown;
     }
 
-    // 按规范：不再进行“历史工具调用”级别的裁剪（避免模型遗忘与重复调用）。
-    // 最小化的 GLM 兼容处理（例如仅保留最后一条 assistant.tool_calls、将该条 content 置为 null、参数规范化）
-    // 已在 preflight 阶段完成：sanitizeAndValidateOpenAIChat(payload, { target: 'glm' })。
-    // 这里无需再对历史进行删除或裁剪。
+    // 工具文本化规范化由 llmswitch-core 统一处理；GLM 层不再收割 assistant.content，避免重复处理
+    // 但为避免 GLM 500（上游对超大/非结构化工具结果文本敏感），做“尾部最小化清理”：
+    // 仅针对“最后一对：assistant.tool_calls + 紧随的回合”，在以下场景清理：
+    //  - 紧随回合是 assistant 且 content 为工具结果的非结构化文本（包含 rcc.result/exit_code/stdout 等特征），或文本异常膨胀
+    try {
+      const msgs: any[] = Array.isArray((payload as any).messages) ? ((payload as any).messages as any[]) : [];
+      if (msgs.length >= 2) {
+        // 查找最后一个含 tool_calls 的 assistant
+        let idx = -1;
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          const m = msgs[i];
+          if (!m || typeof m !== 'object') continue;
+          if (String(m.role || '').toLowerCase() !== 'assistant') continue;
+          if (Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0) { idx = i; break; }
+        }
+        if (idx >= 0 && idx + 1 < msgs.length) {
+          // 只观察紧随的一个回合
+          const next = msgs[idx + 1];
+          const isToolRole = next && typeof next === 'object' && String(next.role || '').toLowerCase() === 'tool';
+          if (!isToolRole) {
+            // 非结构化工具结果常见于 assistant.content 文本
+            const shouldTrim = (v: unknown): boolean => {
+              try {
+                if (typeof v !== 'string') return false;
+                const s = String(v);
+                const big = s.length > 8000; // 明显膨胀
+                const looksResult = /(\bexit_code\b|\bduration_seconds\b|\bstdout\b|\bstderr\b)/i.test(s)
+                  || /\bresult\b\s*:\s*\{/i.test(s)
+                  || /\bexecuted\b\s*:\s*\{/i.test(s)
+                  || /\bmetadata\b\s*:\s*\{/i.test(s)
+                  || /\b\"version\"\s*:\s*\"rcc\.tool\.v1\"/i.test(s);
+                return big || looksResult;
+              } catch { return false; }
+            };
+            if (next && typeof next === 'object' && typeof (next as any).content === 'string' && shouldTrim((next as any).content)) {
+              (next as any).content = '';
+              this.logger.logModule(this.id, 'glm-minimal-tail-clean', { action: 'clear-next-assistant-content', index: idx + 1 });
+            }
+            // 某些情况下，工具结果被附着在含 tool_calls 的 assistant.content 末尾，也一并清理
+            const cur = msgs[idx];
+            if (cur && typeof cur === 'object' && typeof (cur as any).content === 'string' && shouldTrim((cur as any).content)) {
+              (cur as any).content = '';
+              this.logger.logModule(this.id, 'glm-minimal-tail-clean', { action: 'clear-current-assistant-content', index: idx });
+            }
+          }
+        }
+      }
+    } catch (error) {
+      // 快速死亡原则 - 暴露GLM tail清理错误（避免引用未定义变量）
+      throw new EnhancedRouteCodexError(error as Error, {
+        module: 'GLMCompatibility',
+        file: 'src/modules/pipeline/modules/compatibility/glm-compatibility.ts',
+        function: 'performMinimalTailCleanup',
+        line: ErrorContextBuilder.extractLineNumber(error as Error),
+        additional: { operation: 'glm-tail-cleanup' }
+      });
+    }
   }
 
   private normalizeResponse(resp: any, metadata?: any): any {
@@ -246,48 +300,37 @@ export class GLMCompatibility implements CompatibilityModule {
             const text = stripThinkingTags(String(msg.content));
             (msg as any).content = text;
           }
-          // 在 GLM 兼容层针对 reasoning_content 进行供应商专用的工具提取：
-          // 若 message.tool_calls 为空且 reasoning_content 是文本，则抽取其中的工具意图，
-          // 将其规范化为 OpenAI tool_calls；剩余文本（去除思考标签后）仅在 content 为空时回填。
+          // 标准化：将文本化工具意图统一搬运到 reasoning_content（不生成 tool_calls）
           try {
-            const hasCalls = Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length > 0;
-            const rcText = (msg as any).reasoning_content;
-            const contentStr = typeof (msg as any).content === 'string' ? String((msg as any).content) : '';
-            if (!hasCalls && typeof rcText === 'string' && rcText.trim().length > 0) {
-              const { toolCalls, remainder } = harvestToolCallsFromText(String(rcText));
-              if (toolCalls.length > 0) {
-                // 规范化为 OpenAI tool_calls 结构（arguments 必须为字符串）
-                (msg as any).tool_calls = toolCalls.map(tc => ({
-                  id: tc.id && String(tc.id).trim() ? String(tc.id) : `call_${Math.random().toString(36).slice(2, 10)}`,
-                  type: 'function',
-                  function: { name: tc.name, arguments: typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args ?? {}) }
-                }));
-                // 若 content 为空，则用余下文本（剔除思考标签）回填；否则保留现有 content
-                if (!contentStr || !contentStr.trim().length) {
-                  (msg as any).content = stripThinkingTags(String(remainder || ''));
-                }
-                // 统一标记 finish_reason 为 tool_calls（覆盖不一致的 'stop' 等值）
-                (c as any).finish_reason = 'tool_calls';
-              }
+            const parts: string[] = [];
+            // 1) 从 content 中抽取意图块并清理剩余可见文本
+            if (typeof (msg as any).content === 'string' && (msg as any).content.trim().length > 0) {
+              const { blocks, remainder } = harvestRccBlocksFromText(String((msg as any).content));
+              if (blocks.length) parts.push(...blocks);
+              (msg as any).content = stripThinkingTags(String(remainder || ''));
             }
-          } catch { /* ignore harvest errors */ }
-          // If GLM placed visible text in reasoning_content and content is empty, promote it into content (after stripping thinking tags)
-          try {
-            // 仅在 chat/completions（strip 策略）下，将 reasoning_content 的可见文本提升为 content；
-            // Responses 路径（preserve 策略）保持现状，避免改变原始结构。
-            if (reasoningPolicy === 'strip') {
-              const rcText = (msg as any).reasoning_content;
-              const hasCalls = Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length > 0;
-              const contentStr = typeof (msg as any).content === 'string' ? String((msg as any).content) : '';
-              if (!hasCalls && typeof rcText === 'string' && rcText.trim().length > 0 && (!contentStr || !contentStr.trim().length)) {
-                (msg as any).content = stripThinkingTags(String(rcText));
-              }
+            // 2) 从 reasoning_content 中抽取并规范化为 rcc.tool.v1，再与剩余 reasoning 文本合并
+            if (typeof (msg as any).reasoning_content === 'string' && (msg as any).reasoning_content.trim().length > 0) {
+              const { blocks, remainder } = harvestRccBlocksFromText(String((msg as any).reasoning_content));
+              if (blocks.length) parts.push(...blocks);
+              const rest = String(remainder || '').trim();
+              if (rest.length) parts.push(stripThinkingTags(rest));
             }
-          } catch { /* ignore promote errors */ }
-          // Reasoning content handling by endpoint policy
-          if (reasoningPolicy === 'strip') {
-            if ('reasoning_content' in msg) { delete (msg as any).reasoning_content; }
-          }
+            if (parts.length) {
+              (msg as any).reasoning_content = parts.join('\n');
+            }
+            // 不在 GLM 层生成 tool_calls；统一由 llmswitch 收割
+          } catch (error) {
+              // 快速死亡原则 - 暴露GLM工具意图收割错误（避免引用未定义局部变量）
+              throw new EnhancedRouteCodexError(error as Error, {
+                module: 'GLMCompatibility',
+                file: 'src/modules/pipeline/modules/compatibility/glm-compatibility.ts',
+                function: 'normalizeResponse',
+                line: ErrorContextBuilder.extractLineNumber(error as Error),
+                additional: { operation: 'glm-tool-intent-harvest' }
+              });
+            }
+          // 不在 GLM 层删除 reasoning_content；由端点/llmswitch 决定展示策略（Chat/Anthropic 移除，Responses 保留）
           // Ensure tool_calls.function.arguments are strings for downstream OpenAI consumers
           if (Array.isArray(msg?.tool_calls)) {
             try {
@@ -302,7 +345,16 @@ export class GLMCompatibility implements CompatibilityModule {
                 }
                 return t;
               });
-            } catch { /* ignore */ }
+            } catch (error) {
+              // 快速死亡原则 - 暴露GLM工具调用参数序列化错误（避免引用未定义局部变量）
+              throw new EnhancedRouteCodexError(error as Error, {
+                module: 'GLMCompatibility',
+                file: 'src/modules/pipeline/modules/compatibility/glm-compatibility.ts',
+                function: 'normalizeResponse',
+                line: ErrorContextBuilder.extractLineNumber(error as Error),
+                additional: { operation: 'glm-tool-calls-serialization' }
+              });
+            }
             if (msg.tool_calls.length && (msg.content === undefined)) {
               msg.content = null;
             }
@@ -316,7 +368,16 @@ export class GLMCompatibility implements CompatibilityModule {
             msg.content = '';
           }
         }
-      } catch { /* ignore */ }
+      } catch (error) {
+        // 快速死亡原则 - 暴露GLM消息标准化错误（避免引用未定义局部变量）
+        throw new EnhancedRouteCodexError(error as Error, {
+          module: 'GLMCompatibility',
+          file: 'src/modules/pipeline/modules/compatibility/glm-compatibility.ts',
+          function: 'normalizeResponse',
+          line: ErrorContextBuilder.extractLineNumber(error as Error),
+          additional: { operation: 'glm-message-normalization' }
+        });
+      }
       // created_at -> created if needed
       if ((r as any).created === undefined && typeof (r as any).created_at === 'number') {
         (r as any).created = (r as any).created_at;
@@ -327,7 +388,16 @@ export class GLMCompatibility implements CompatibilityModule {
         if (u && typeof u === 'object' && u.output_tokens !== undefined && u.completion_tokens === undefined) {
           u.completion_tokens = u.output_tokens;
         }
-      } catch { /* ignore */ }
+      } catch (error) {
+        // 快速死亡原则 - 暴露GLM usage字段标准化错误
+        throw new EnhancedRouteCodexError(error as Error, {
+          module: 'GLMCompatibility',
+          file: 'src/modules/pipeline/modules/compatibility/glm-compatibility.ts',
+          function: 'normalizeResponse',
+          line: ErrorContextBuilder.extractLineNumber(error as Error),
+          additional: { operation: 'glm-usage-normalization' }
+        });
+      }
       if (!('object' in r)) {
         r.object = 'chat.completion';
       }
@@ -358,7 +428,20 @@ export class GLMCompatibility implements CompatibilityModule {
             }
           }
         }
-      } catch { /* ignore tool_use mapping errors and keep text-only */ }
+      } catch (error) {
+        // 快速死亡原则 - 暴露GLM tool_use映射错误
+        throw new EnhancedRouteCodexError(error as Error, {
+          module: 'GLMCompatibility',
+          file: 'src/modules/pipeline/modules/compatibility/glm-compatibility.ts',
+          function: 'normalizeResponse',
+          line: ErrorContextBuilder.extractLineNumber(error as Error),
+          additional: {
+            operation: 'glm-tool-use-mapping',
+            blocksCount: blocks.length,
+            responseType: 'anthropic-message'
+          }
+        });
+      }
 
       const stop = (resp as any).stop_reason || undefined;
       const finish = stop === 'max_tokens' ? 'length' : (stop || (toolCalls.length ? 'tool_calls' : 'stop'));
