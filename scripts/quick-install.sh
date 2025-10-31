@@ -258,6 +258,16 @@ install_new() {
         log_success "已回退为全局软链安装"
     fi
 
+    # 如果全局未发现 routecodex，可回退为创建全局软链
+    if ! command -v routecodex &> /dev/null; then
+        log_warning "routecodex 命令未出现在 PATH，尝试创建全局软链"
+        if create_global_symlink; then
+            log_success "已创建全局软链 routecodex -> dist/cli.js"
+        else
+            log_error "创建全局软链失败"
+        fi
+    fi
+
     # 创建 rcc 命令的符号链接
     create_rcc_alias
 

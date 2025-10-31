@@ -459,10 +459,7 @@ export class ResponsesHandler extends BaseHandler {
 
       // Normalize both initial/final payloads into OpenAI Responses JSON (passthrough if already Responses)
       const toResponsesShape = async (payload: any) => {
-        if (payload && typeof payload === 'object' && (payload as any).object === 'response') {
-          return payload as Record<string, unknown>;
-        }
-        // Use core codec to avoid duplicate mapping logic
+        // Always use core bridge to ensure canonical sanitation (e.g., strip tool result envelopes)
         return buildResponsesPayloadFromChat(payload, undefined) as Record<string, unknown>;
       };
       const initialResp = await toResponsesShape(rawInitial);
@@ -606,7 +603,34 @@ export class ResponsesHandler extends BaseHandler {
         });
         return { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: calls } } as Record<string, unknown>;
       };
-      const funcCalls = getFunctionCalls(finalResp) as any[];
+      // 主动“按优先级”提取工具调用：
+      // 1) final.output 中的 function_call/tool_call
+      // 2) initial.output 中的 function_call/tool_call
+      // 3) final.required_action.submit_tool_outputs.tool_calls
+      // 4) initial.required_action.submit_tool_outputs.tool_calls
+      const getFuncCallsFromRequiredAction = (resp: any): any[] => {
+        try {
+          const ra = resp?.required_action;
+          const arr = (ra && ra.type === 'submit_tool_outputs') ? (ra.submit_tool_outputs?.tool_calls || []) : [];
+          if (!Array.isArray(arr) || !arr.length) return [];
+          return arr.map((c: any) => ({
+            type: 'function_call',
+            id: c?.id,
+            call_id: c?.id || c?.call_id,
+            name: c?.name || c?.function?.name,
+            arguments: c?.arguments || c?.function?.arguments || '{}',
+            status: 'in_progress'
+          }));
+        } catch { return []; }
+      };
+      const pickFuncCalls = (): any[] => {
+        const f1 = getFunctionCalls(finalResp); if (Array.isArray(f1) && f1.length) return f1;
+        const f2 = getFunctionCalls(initialResp); if (Array.isArray(f2) && f2.length) return f2;
+        const f3 = getFuncCallsFromRequiredAction(finalResp); if (Array.isArray(f3) && f3.length) return f3;
+        const f4 = getFuncCallsFromRequiredAction(initialResp); if (Array.isArray(f4) && f4.length) return f4;
+        return [];
+      };
+      let funcCalls = pickFuncCalls();
 
       // Build known MCP servers (env + discovered from original request snapshot)
       const knownServers = (() => {

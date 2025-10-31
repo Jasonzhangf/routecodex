@@ -35,8 +35,8 @@ const ALLOWED_ROLES = new Set(['system', 'user', 'assistant', 'tool']);
 
 type GLMPolicy = {
   keepToolRole: boolean;
-  stripHistoricalAssistantToolCalls: boolean;
-  keepOnlyLastAssistantToolCalls: boolean;
+  stripHistoricalAssistantToolCalls: boolean; // deprecated (no-op)
+  keepOnlyLastAssistantToolCalls: boolean; // deprecated (no-op)
   dropEmptyAssistant: boolean;
   convertUserEchoToTool: boolean;
   repairPairing: boolean;
@@ -53,8 +53,8 @@ function getGLMPolicy(): GLMPolicy {
     return {
       keepToolRole: true,
       // 在 GLM 目标下默认剥离历史工具调用，仅保留最近一轮（避免 1210 参数错误）
-      stripHistoricalAssistantToolCalls: true,
-      keepOnlyLastAssistantToolCalls: true,
+      stripHistoricalAssistantToolCalls: false,
+      keepOnlyLastAssistantToolCalls: false,
       dropEmptyAssistant: true,
       convertUserEchoToTool: true,
       repairPairing: true,
@@ -68,9 +68,9 @@ function getGLMPolicy(): GLMPolicy {
   // default: preserve
   return {
     keepToolRole: true,
-    // 默认也开启历史工具调用剥离，仅保留最近一轮
-    stripHistoricalAssistantToolCalls: true,
-    keepOnlyLastAssistantToolCalls: true,
+    // 默认不剥离历史工具调用，保留全部历史（避免模型遗忘/循环）
+    stripHistoricalAssistantToolCalls: false,
+    keepOnlyLastAssistantToolCalls: false,
     dropEmptyAssistant: false,
     convertUserEchoToTool: true,
     repairPairing: true,
@@ -153,52 +153,7 @@ function stringifyFunctionArguments(args: any): string {
   try { return JSON.stringify(args); } catch { return String(args); }
 }
 
-// Detect user-side tool echo that was injected as plain text (should not be sent upstream to GLM)
-function isToolEchoUserText(text: string): boolean {
-  try {
-    if (typeof text !== 'string') return false;
-    const t = text.trim();
-    if (t.startsWith('[id:call_')) return true; // treat any explicit call-id echo as tool echo
-    const lower = t.toLowerCase();
-    // Typical parse error echo
-    if (lower.includes('failed to parse function arguments')) return true;
-    // Heuristic for ls -la style listing echoed as user content
-    // Look for a leading [id:call_*] followed by common listing tokens
-    const body = t.includes(']') ? t.slice(t.indexOf(']') + 1) : t;
-    const hasTotal = /\btotal\s+\d+/i.test(body);
-    const hasPermLine = /^(drwx|\-rw\-|\-rwx|\-r--|\-rw\+|drwxr)/mi.test(body);
-    if (hasTotal || hasPermLine) return true;
-  } catch { /* ignore */ }
-  return false;
-}
-
-function convertToolEchoUserToToolMessage(text: string): { role: 'tool'; content: string; tool_call_id?: string } | null {
-  try {
-    const t = String(text || '').trim();
-    let callId: string | undefined;
-    let body = t;
-  const m = t.match(/^\s*\[id:([^\]]+)\]\s*(.*)$/);
-    if (m) {
-      callId = m[1].trim();
-      body = m[2] || '';
-    }
-  // Produce unified rcc.tool.v1 envelope (best-effort; only output text available here)
-  const envelope = {
-      version: 'rcc.tool.v1',
-      tool: { name: 'tool', call_id: callId || null },
-      arguments: {},
-      executed: { command: [] as string[] },
-      result: { output: body }
-    } as Record<string, unknown>;
-    let content = '';
-    try { content = JSON.stringify(envelope); } catch { content = body; }
-    const msg: any = { role: 'tool', content };
-    if (callId) msg.tool_call_id = callId;
-    return msg;
-  } catch {
-    return null;
-  }
-}
+// 取消“用户侧工具回显→role:'tool'”的转换逻辑；保持原始角色，不再注入 rcc.tool.v1 包装
 
 function mapToolsForGLM(raw: any, issues: PreflightResult['issues']): any[] | undefined {
   if (!Array.isArray(raw) || raw.length === 0) {return undefined;}
@@ -247,52 +202,7 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
       // 其它内容保持原样透传，不做改写/校验
       let passthrough: any = {};
       try { passthrough = JSON.parse(JSON.stringify(src)); } catch { passthrough = src; }
-      if (targetGLM && Array.isArray(passthrough?.messages)) {
-        try {
-          const msgs: any[] = passthrough.messages as any[];
-          // 找到最后一条包含 tool_calls 的 assistant 消息索引
-          let lastAssistantWithCalls = -1;
-          for (let i = msgs.length - 1; i >= 0; i--) {
-            const m = msgs[i];
-            if (m && m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-              lastAssistantWithCalls = i; break;
-            }
-          }
-          // 处理所有 assistant 消息：
-          for (let i = 0; i < msgs.length; i++) {
-            const m = msgs[i];
-            if (!m || m.role !== 'assistant') continue;
-            if (!Array.isArray(m.tool_calls)) continue;
-            // 过滤无效的 tool_calls（name 为空/缺失）
-            m.tool_calls = m.tool_calls.filter((tc: any) => {
-              const nm = (tc?.function?.name ?? '').toString().trim();
-              return nm.length > 0;
-            });
-            // 非最后一条包含调用的 assistant，清理其剩余的 tool_calls
-            if (i !== lastAssistantWithCalls && m.tool_calls.length) {
-              delete m.tool_calls;
-            }
-            // 若清理后变成空数组，则直接删除该字段（避免发送空数组触发上游 500/1210）
-            if (Array.isArray(m.tool_calls) && m.tool_calls.length === 0) {
-              delete m.tool_calls;
-            }
-          }
-          // 删除空的 user/assistant 消息（content 为空或仅空白，且无 tool_calls）
-          const filtered: any[] = [];
-          for (const m of msgs) {
-            if (!m || typeof m !== 'object') continue;
-            const role = String(m.role || '').toLowerCase();
-            const hasCalls = Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
-            const contentStr = (typeof m.content === 'string') ? m.content.trim() : '';
-            if ((role === 'user' || role === 'assistant') && !hasCalls && contentStr.length === 0) {
-              // drop
-              continue;
-            }
-            filtered.push(m);
-          }
-          (passthrough as any).messages = filtered;
-        } catch { /* 保守处理，出错则完全透传 */ }
-      }
+      // GLM 目标下：不再修改历史工具调用（避免记忆缺失）。保持原样透传。
       // GLM 目标下，最小兼容：tools 也需要映射为 OpenAI function 形状，避免上游 1214
       try {
         if (targetGLM) {
@@ -353,19 +263,9 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
 
     // Preserve name for tool role if provided
     if (role === 'tool') {
-      if (targetGLM && !getGLMPolicy().keepToolRole) {
-        // Convert unsupported 'tool' role to 'user' for GLM safety
-        msg.role = 'user';
-        // Optionally prefix with hint including tool name/id
-        const prefixParts: string[] = [];
-        if (typeof m?.name === 'string' && m.name.trim()) prefixParts.push(`tool:${m.name.trim()}`);
-        if (typeof m?.tool_call_id === 'string' && m.tool_call_id.trim()) prefixParts.push(`id:${m.tool_call_id.trim()}`);
-        const prefix = prefixParts.length ? `[${prefixParts.join(' ')}] ` : '';
-        msg.content = `${prefix}${msg.content || ''}`.trim();
-      } else {
-        if (typeof m?.name === 'string') { msg.name = m.name; }
-        if (typeof m?.tool_call_id === 'string') { msg.tool_call_id = m.tool_call_id; }
-      }
+      // 保持工具角色，不做降级改写；仅保留 name 与 tool_call_id
+      if (typeof m?.name === 'string') { msg.name = m.name; }
+      if (typeof m?.tool_call_id === 'string') { msg.tool_call_id = m.tool_call_id; }
     }
 
     // If assistant tool_calls present
@@ -413,24 +313,7 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
     return msg;
   });
 
-  // Preserve assistant.tool_calls by default; only strip when explicitly forced
-  try {
-    const policy = getGLMPolicy();
-    if (targetGLM && policy.stripHistoricalAssistantToolCalls && Array.isArray(mappedMessages) && mappedMessages.length > 0) {
-      const n = mappedMessages.length;
-      if (policy.keepOnlyLastAssistantToolCalls) {
-        for (let i = 0; i < n - 1; i++) {
-          const mm: any = mappedMessages[i];
-          if (mm && mm.role === 'assistant' && Array.isArray(mm.tool_calls)) delete mm.tool_calls;
-        }
-      } else {
-        for (let i = 0; i < n; i++) {
-          const mm: any = mappedMessages[i];
-          if (mm && mm.role === 'assistant' && Array.isArray(mm.tool_calls)) delete mm.tool_calls;
-        }
-      }
-    }
-  } catch { /* non-blocking */ }
+  // 不再清理历史工具调用（避免记忆缺失）；保持 mappedMessages 原样
 
   // Chat 路径不应在预检阶段将“用户文本”转换为工具消息；该语义应由 Responses 桥接负责
   // 因此，这里不再进行“用户文本→tool 消息”的转换，原样保留 mappedMessages 顺序
@@ -524,30 +407,15 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
 
   // GLM 消息压缩：规范 content 为字符串，按策略保留/降级 tool 角色、处理 tool_calls
   if (targetGLM) {
-    // 过滤掉 tool 角色（策略: keepToolRole=false）
-    if (!getGLMPolicy().keepToolRole) {
-      messages = messages.filter((m: any) => m?.role !== 'tool');
-    }
+    // 不再过滤 role:'tool'（避免破坏工具配对与记忆）
     messages = messages.map((m: any) => {
       const base: any = { role: m.role, content: coerceStringContent(m.content) };
       // 保留 tool 角色的 name 与 tool_call_id
       if (m?.role === 'tool') {
         if (typeof m?.name === 'string') { base.name = m.name; }
         if (typeof m?.tool_call_id === 'string') { base.tool_call_id = m.tool_call_id; }
-        // 规范化工具结果为 JSON 字符串内容
-        try {
-          const raw = coerceStringContent(m.content);
-          let parsed: any = null;
-          try { parsed = JSON.parse(raw); } catch { parsed = null; }
-          const envelope = parsed && typeof parsed === 'object'
-            ? parsed
-            : {
-                version: 'rcc.tool.v1',
-                tool: { name: base.name || null, call_id: base.tool_call_id || null },
-                result: { output: raw }
-              };
-          base.content = JSON.stringify(envelope);
-        } catch { /* 若封装失败则保留原字符串 */ }
+        // 不再封装为 rcc.tool.v1，保持纯文本结果，避免污染与放大上下文
+        base.content = coerceStringContent(m.content);
       }
       // 保留 assistant 的 tool_calls（仅在存在时）；GLM 目标下 arguments 为对象，且 content=null
       if (m?.role === 'assistant' && Array.isArray(m?.tool_calls) && m.tool_calls.length) {

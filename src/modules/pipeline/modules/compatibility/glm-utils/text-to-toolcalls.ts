@@ -206,3 +206,35 @@ export function harvestToolCallsFromText(input: string): { toolCalls: ToolCallLi
 
   return { toolCalls: filtered, remainder };
 }
+
+// 将工具调用转换为标准的 rcc.tool.v1 JSON 字符串（仅意图，不包含 executed/result）
+export function toolCallsToRccJsonBlocks(calls: ToolCallLite[]): string[] {
+  const blocks: string[] = [];
+  for (const c of calls || []) {
+    try {
+      let argsObj: any = {};
+      if (typeof c.args === 'string') {
+        try { argsObj = JSON.parse(c.args); } catch { argsObj = { _raw: c.args }; }
+      } else if (c.args && typeof (c.args as any) === 'object') {
+        argsObj = c.args;
+      }
+      const env = {
+        version: 'rcc.tool.v1',
+        tool: { name: c.name, ...(c.id ? { call_id: c.id } : {}) },
+        arguments: argsObj
+      } as Record<string, unknown>;
+      blocks.push(JSON.stringify(env));
+    } catch { /* ignore one block */ }
+  }
+  return blocks;
+}
+
+// 从文本中抽取工具意图，并且以 rcc.tool.v1 JSON 块形式返回，同时给出剩余文本
+export function harvestRccBlocksFromText(input: string): { blocks: string[]; remainder: string } {
+  if (typeof input !== 'string' || !input.trim()) {
+    return { blocks: [], remainder: typeof input === 'string' ? input : '' };
+  }
+  const { toolCalls, remainder } = harvestToolCallsFromText(input);
+  const blocks = toolCallsToRccJsonBlocks(toolCalls);
+  return { blocks, remainder };
+}
