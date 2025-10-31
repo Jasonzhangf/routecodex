@@ -13,8 +13,8 @@ import type { PipelineDebugLogger as PipelineDebugLoggerInterface } from '../../
 import type { UnknownObject, /* LogData */ } from '../../../../types/common-types.js';
 import { sanitizeAndValidateOpenAIChat } from '../../utils/preflight-validator.js';
 import { stripThinkingTags } from '../../../../server/utils/text-filters.js';
-// Reuse llmswitch-core textual tool-call extractor for reasoning_content rescue
-import { extractRCCToolCallsFromText, extractApplyPatchCallsFromText, extractExecuteBlocksFromText } from 'rcc-llmswitch-core/conversion';
+// GLM 专用：从 reasoning_content 文本中提取工具调用
+import { harvestToolCallsFromText } from './glm-utils/text-to-toolcalls.js';
 
 export class GLMCompatibility implements CompatibilityModule {
   readonly id: string;
@@ -246,19 +246,31 @@ export class GLMCompatibility implements CompatibilityModule {
             const text = stripThinkingTags(String(msg.content));
             (msg as any).content = text;
           }
-          // Reasoning rescue: if GLM puts rcc.tool.v1 / patch / execute blocks into reasoning_content, convert to tool_calls before stripping
+          // 在 GLM 兼容层针对 reasoning_content 进行供应商专用的工具提取：
+          // 若 message.tool_calls 为空且 reasoning_content 是文本，则抽取其中的工具意图，
+          // 将其规范化为 OpenAI tool_calls；剩余文本（去除思考标签后）仅在 content 为空时回填。
           try {
-            const rc = (msg as any).reasoning_content;
-            const hasNoCalls = !Array.isArray((msg as any).tool_calls) || (msg as any).tool_calls.length === 0;
-            if (hasNoCalls && typeof rc === 'string' && rc.trim().length) {
-              const text = String(rc);
-              const calls = extractRCCToolCallsFromText(text) || extractApplyPatchCallsFromText(text) || extractExecuteBlocksFromText(text);
-              if (Array.isArray(calls) && calls.length) {
-                (msg as any).tool_calls = calls.map((c: any) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args } }));
-                if ((msg as any).content === undefined) (msg as any).content = '';
+            const hasCalls = Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length > 0;
+            const rcText = (msg as any).reasoning_content;
+            const contentStr = typeof (msg as any).content === 'string' ? String((msg as any).content) : '';
+            if (!hasCalls && typeof rcText === 'string' && rcText.trim().length > 0) {
+              const { toolCalls, remainder } = harvestToolCallsFromText(String(rcText));
+              if (toolCalls.length > 0) {
+                // 规范化为 OpenAI tool_calls 结构（arguments 必须为字符串）
+                (msg as any).tool_calls = toolCalls.map(tc => ({
+                  id: tc.id && String(tc.id).trim() ? String(tc.id) : `call_${Math.random().toString(36).slice(2, 10)}`,
+                  type: 'function',
+                  function: { name: tc.name, arguments: typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args ?? {}) }
+                }));
+                // 若 content 为空，则用余下文本（剔除思考标签）回填；否则保留现有 content
+                if (!contentStr || !contentStr.trim().length) {
+                  (msg as any).content = stripThinkingTags(String(remainder || ''));
+                }
+                // 统一标记 finish_reason 为 tool_calls（覆盖不一致的 'stop' 等值）
+                (c as any).finish_reason = 'tool_calls';
               }
             }
-          } catch { /* ignore rescue errors */ }
+          } catch { /* ignore harvest errors */ }
           // If GLM placed visible text in reasoning_content and content is empty, promote it into content (after stripping thinking tags)
           try {
             // 仅在 chat/completions（strip 策略）下，将 reasoning_content 的可见文本提升为 content；

@@ -568,7 +568,7 @@ export function normalizeChatRequest(request: any): any {
   try { return applyOpenAIToolingStage(normalized as any); } catch { return normalized; }
 }
 
-export function normalizeChatResponse(res: any): any {
+function normalizeChatResponse(res: any): any {
   // deprecated: pass-through to avoid duplicate normalization in openai-openai
   return res;
   if (false) { // legacy logic retained below (never executed)

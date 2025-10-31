@@ -170,10 +170,17 @@ export class StreamingManager {
     const genCallId = (index: number) => `call_${requestId}_${index}_${Math.random().toString(36).slice(2, 8)}`;
 
     // Helper: synthesize OpenAI-style streaming chunks from a non-stream JSON response
-    const synthesizeFromResponse = (resp: any) => {
+    const synthesizeFromResponse = async (resp: any) => {
       const chunks: any[] = [];
       try {
-        const msg = resp?.choices?.[0]?.message || {};
+        let msg = resp?.choices?.[0]?.message || {};
+        // Convert textual tool markup in assistant content to tool_calls (e.g., <tool_call> ...)
+        try {
+          const core = await import('rcc-llmswitch-core/conversion');
+          if (core && typeof (core as any).normalizeAssistantTextToToolCalls === 'function') {
+            msg = (core as any).normalizeAssistantTextToToolCalls(msg) || msg;
+          }
+        } catch { /* keep original msg */ }
         const role = typeof msg?.role === 'string' ? msg.role : 'assistant';
         const content = typeof msg?.content === 'string' ? msg.content : '';
         const toolCallsFromArray = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
@@ -262,7 +269,7 @@ export class StreamingManager {
     if (typeof data === 'object' && data !== null) {
       // Non-stream JSON response: synthesize delta stream when choices[].message exists
       if (Array.isArray((data as any).choices) && (data as any).choices.length > 0 && (data as any).choices[0]?.message) {
-        const { chunks, finish } = synthesizeFromResponse(data);
+        const { chunks, finish } = await synthesizeFromResponse(data);
         for (const c of chunks) {
           await this.sendChunk(res, c, requestId, model);
           await this.delay(10);

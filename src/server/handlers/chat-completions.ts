@@ -121,9 +121,24 @@ export class ChatCompletionsHandler extends BaseHandler {
       }
 
       // Return JSON response
-      const payload = pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
+      let payload = pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
         ? (pipelineResponse as Record<string, unknown>).data
         : pipelineResponse;
+      // 修复：将助手文本里的工具标记转换为 tool_calls，避免 shell 被当作文字
+      try {
+        const core = await import('rcc-llmswitch-core/conversion');
+        const choices = Array.isArray((payload as any)?.choices) ? (payload as any).choices : [];
+        if (choices.length > 0 && choices[0]?.message && typeof (core as any).normalizeAssistantTextToToolCalls === 'function') {
+          const msg0 = choices[0].message;
+          const fixed = (core as any).normalizeAssistantTextToToolCalls(msg0) || msg0;
+          if (fixed !== msg0) {
+            const copy = { ...(payload as any) };
+            copy.choices = [...choices];
+            copy.choices[0] = { ...copy.choices[0], message: fixed };
+            payload = copy;
+          }
+        }
+      } catch { /* ignore */ }
       const normalized = this.responseNormalizer.normalizeOpenAIResponse(payload, 'chat');
       // Chat 路径不注入 Responses 的 required_action 结构，保持协议纯净
       this.sendJsonResponse(res, normalized, requestId);

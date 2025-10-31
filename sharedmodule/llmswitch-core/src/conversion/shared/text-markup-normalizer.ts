@@ -1,5 +1,6 @@
 // Normalize textual markup into OpenAI tool_calls shape.
 // Gated by RCC_TEXT_MARKUP_COMPAT=1 to avoid overreach.
+import { isImagePath } from './media.js';
 
 export type ToolCallLite = { id?: string; name: string; args: string };
 
@@ -45,6 +46,13 @@ export function extractRCCToolCallsFromText(text: string): ToolCallLite[] | null
       if (!name) continue;
       const callId = typeof tool.call_id === 'string' && tool.call_id.trim() ? tool.call_id.trim() : undefined;
       const argsObj = (obj.arguments !== undefined ? obj.arguments : {});
+      // Guard: view_image must have a valid image path
+      try {
+        if (String(name).toLowerCase() === 'view_image') {
+          const p = (argsObj && typeof argsObj === 'object') ? (argsObj as any).path : undefined;
+          if (!isImagePath(p)) { continue; }
+        }
+      } catch { /* keep best-effort */ }
       let argsStr = '{}';
       try { argsStr = JSON.stringify(argsObj ?? {}); } catch { argsStr = '{}'; }
       out.push({ id: callId, name, args: argsStr });
@@ -151,6 +159,13 @@ export function extractXMLToolCallsFromText(text: string): ToolCallLite[] | null
           try { const val = JSON.parse(jsonMatch[0]); (argsObj as any).arguments = val; } catch { /* ignore */ }
         }
       }
+      // Guard: view_image must have a valid image path
+      try {
+        if (String(name).toLowerCase() === 'view_image') {
+          const p = (argsObj && typeof argsObj === 'object') ? (argsObj as any).path : undefined;
+          if (!isImagePath(p)) { continue; }
+        }
+      } catch { /* ignore guard errors */ }
       let argsStr = '{}';
       try { argsStr = JSON.stringify(argsObj); } catch { argsStr = '{}'; }
       out.push({ id: `call_${Math.random().toString(36).slice(2, 10)}`, name, args: argsStr });

@@ -67,7 +67,7 @@ RouteCodex LLMSwitch 核心模块，提供 AI 服务提供商之间的协议转�
 
 ```typescript
 // 转换核心功能
-import { normalizeChatRequest, normalizeChatResponse } from 'rcc-llmswitch-core/conversion';
+import { normalizeChatRequest } from 'rcc-llmswitch-core/conversion';
 
 // 特定编解码器
 import { OpenAIOpenAIConversionCodec } from 'rcc-llmswitch-core/conversion/codecs/openai-openai-codec';

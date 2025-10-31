@@ -2,7 +2,8 @@ export * from './types.js';
 export * from './schema-validator.js';
 export * from './codec-registry.js';
 export * from './switch-orchestrator.js';
-export * from './shared/openai-normalize.js';
+// Export only request-side normalization from openai-normalize
+export { normalizeChatRequest } from './shared/openai-normalize.js';
 export * from './shared/tooling.js';
 export * from '../guidance/index.js';
 export * from './shared/tool-mapping.js';

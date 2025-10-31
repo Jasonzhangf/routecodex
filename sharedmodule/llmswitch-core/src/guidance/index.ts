@@ -188,6 +188,7 @@ export function buildSystemToolGuidance(): string {
   lines.push(bullet('apply_patch example / 示例：\n*** Begin Patch\n*** Update File: path/to/file.ts\n@@\n- old line\n+ new line\n*** End Patch'));
   lines.push(bullet('update_plan: Keep exactly one step in_progress; others pending/completed. / 仅一个 in_progress 步骤。'));
   lines.push(bullet('view_image: Path must be an image file (.png .jpg .jpeg .gif .webp .bmp .svg). / 仅图片路径。'));
+  // (No command-specific search policy here to avoid over-constraining models.)
   lines.push(bullet('Do not narrate tool intent (e.g., “工具调用已生成，请执行工具并继续。”); emit tool_calls directly. / 不要输出“准备调用工具/工具调用已生成”等提示，直接生成 tool_calls。'));
   return lines.join('\n');
 }

@@ -117,15 +117,15 @@ export function applyOpenAIToolingStage(payload: OpenAIChatPayload): OpenAIChatP
             });
             (msg as any).tool_calls = rewrited;
             // Additional shell fixups (e.g., common find misuse):
+        try {
+          const tcs2 = Array.isArray((msg as any).tool_calls) ? ((msg as any).tool_calls as any[]) : [];
+          const fixed = tcs2.map((tc: any) => {
             try {
-              const tcs2 = Array.isArray((msg as any).tool_calls) ? ((msg as any).tool_calls as any[]) : [];
-              const fixed = tcs2.map((tc: any) => {
-                try {
-                  const fn = tc?.function || {};
-                  const nm = String(fn?.name || '').trim().toLowerCase();
-                  const argStr = typeof fn?.arguments === 'string' ? fn.arguments : (fn?.arguments != null ? JSON.stringify(fn.arguments) : '{}');
-                  let aobj: any = {}; try { aobj = JSON.parse(argStr); } catch { aobj = {}; }
-                  if (nm === 'shell' && Array.isArray(aobj?.command) && aobj.command.length > 0 && String(aobj.command[0]).toLowerCase() === 'find') {
+              const fn = tc?.function || {};
+              const nm = String(fn?.name || '').trim().toLowerCase();
+              const argStr = typeof fn?.arguments === 'string' ? fn.arguments : (fn?.arguments != null ? JSON.stringify(fn.arguments) : '{}');
+              let aobj: any = {}; try { aobj = JSON.parse(argStr); } catch { aobj = {}; }
+              if (nm === 'shell' && Array.isArray(aobj?.command) && aobj.command.length > 0 && String(aobj.command[0]).toLowerCase() === 'find') {
                     const toks = aobj.command.map((x: any) => String(x));
                     const patched: string[] = [];
                     patched.push('find');
@@ -176,6 +176,8 @@ export function applyOpenAIToolingStage(payload: OpenAIChatPayload): OpenAIChatP
       }
     }
   } catch { /* ignore */ }
+
+  // (no per-command shell fixups here; avoid command-specific policy at this layer)
 
   return out;
 }
