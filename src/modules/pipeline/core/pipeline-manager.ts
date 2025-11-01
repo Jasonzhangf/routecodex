@@ -1126,8 +1126,21 @@ export class PipelineManager implements RCCBaseModule {
   };
 
   private createQwenProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { QwenProvider } = await import('../modules/provider/qwen-provider.js');
-    return new QwenProvider(config, dependencies);
+    // 使用V2 Provider - 统一处理所有OpenAI兼容服务
+    const { V1ConfigConverter } = await import('../modules/provider/v2/api/v1-config-converter.js');
+    const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
+
+    // 将V1配置转换为V2配置
+    const v2Config = V1ConfigConverter.fromV1Config(config);
+
+    // 验证V2配置
+    const validation = ProviderFactory.validateConfig(v2Config);
+    if (!validation.isValid) {
+      throw new Error(`Invalid V2 Qwen provider configuration: ${validation.errors.join(', ')}`);
+    }
+
+    // 创建并返回V2 Provider实例
+    return ProviderFactory.createProvider(v2Config, dependencies);
   };
 
   private createIFlowProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
@@ -1136,13 +1149,39 @@ export class PipelineManager implements RCCBaseModule {
   };
 
   private createGLMHTTPProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { GLMHTTPProvider } = await import('../modules/provider/glm-http-provider.js');
-    return new GLMHTTPProvider(config, dependencies);
+    // 使用V2 Provider - 统一处理所有OpenAI兼容服务
+    const { V1ConfigConverter } = await import('../modules/provider/v2/api/v1-config-converter.js');
+    const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
+
+    // 将V1配置转换为V2配置
+    const v2Config = V1ConfigConverter.fromV1Config(config);
+
+    // 验证V2配置
+    const validation = ProviderFactory.validateConfig(v2Config);
+    if (!validation.isValid) {
+      throw new Error(`Invalid V2 GLM provider configuration: ${validation.errors.join(', ')}`);
+    }
+
+    // 创建并返回V2 Provider实例
+    return ProviderFactory.createProvider(v2Config, dependencies);
   };
 
   private createGenericOpenAIProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { GenericOpenAIProvider } = await import('../modules/provider/generic-openai-provider.js');
-    return new GenericOpenAIProvider(config, dependencies);
+    // 使用V2 Provider - 统一处理所有OpenAI兼容服务
+    const { V1ConfigConverter } = await import('../modules/provider/v2/api/v1-config-converter.js');
+    const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
+
+    // 将V1配置转换为V2配置
+    const v2Config = V1ConfigConverter.fromV1Config(config);
+
+    // 验证V2配置
+    const validation = ProviderFactory.validateConfig(v2Config);
+    if (!validation.isValid) {
+      throw new Error(`Invalid V2 Generic OpenAI provider configuration: ${validation.errors.join(', ')}`);
+    }
+
+    // 创建并返回V2 Provider实例
+    return ProviderFactory.createProvider(v2Config, dependencies);
   };
 
   private createGenericHTTPModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
@@ -1156,8 +1195,21 @@ export class PipelineManager implements RCCBaseModule {
   };
 
   private createOpenAIProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { OpenAIProvider } = await import('../modules/provider/openai-provider.js');
-    return new OpenAIProvider(config, dependencies);
+    // 使用V2 Provider - 与V1完全接口兼容
+    const { V1ConfigConverter } = await import('../modules/provider/v2/api/v1-config-converter.js');
+    const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
+
+    // 将V1配置转换为V2配置
+    const v2Config = V1ConfigConverter.fromV1Config(config);
+
+    // 验证V2配置
+    const validation = ProviderFactory.validateConfig(v2Config);
+    if (!validation.isValid) {
+      throw new Error(`Invalid V2 provider configuration: ${validation.errors.join(', ')}`);
+    }
+
+    // 创建并返回V2 Provider实例
+    return ProviderFactory.createProvider(v2Config, dependencies);
   };
 
   private createGenericResponsesProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
