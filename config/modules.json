@@ -180,6 +180,10 @@
       "enabled": true,
       "config": {
         "moduleType": "virtual-router",
+        "contextBudget": {
+          "defaultMaxContextBytes": 200000,
+          "safetyRatio": 0.1
+        },
         "enableClassification": true,
         "classificationConfig": {
                     "confidenceThreshold": 60,
