@@ -14,8 +14,6 @@ import type { UnknownObject, /* LogData */ } from '../../../../types/common-type
 import { sanitizeAndValidateOpenAIChat } from '../../utils/preflight-validator.js';
 import { stripThinkingTags } from '../../../../server/utils/text-filters.js';
 import { ErrorContextBuilder, EnhancedRouteCodexError, type ErrorContext } from '../../../../server/utils/error-context.js';
-// GLM 专用：从 reasoning_content 文本中提取工具调用
-import { harvestRccBlocksFromText } from './glm-utils/text-to-toolcalls.js';
 
 export class GLMCompatibility implements CompatibilityModule {
   readonly id: string;
@@ -63,6 +61,18 @@ export class GLMCompatibility implements CompatibilityModule {
     }
 
     const outbound = { ...(typeof request === 'object' && request !== null ? request : {}) } as UnknownObject;
+    // Snapshot before sanitize
+    try {
+      const reqId = (dto?.route?.requestId as string) || `req_${Date.now()}`;
+      const os = await import('os'); const path = await import('path'); const fs = await import('fs/promises');
+      const dir = (path as any).default.join((os as any).default.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
+      await (fs as any).mkdir(dir, { recursive: true });
+      const file = (path as any).default.join(dir, `${reqId}_compat-pre.json`);
+      const msgs: any[] = Array.isArray((outbound as any).messages) ? ((outbound as any).messages as any[]) : [];
+      const types: Record<string, number> = {};
+      for (const m of msgs) { if (m && m.role==='assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) { const t = (m.content===null)?'null':(typeof m.content); types[t]=(types[t]||0)+1; } }
+      await (fs as any).writeFile(file, JSON.stringify({ stage:'compat-pre', assistant_tool_calls: Object.values(types).reduce((a:number,b:number)=>a+b,0), content_types: types }, null, 2), 'utf-8');
+    } catch {}
 
     if (!this.forceDisableThinking && typeof outbound === 'object' && outbound !== null && !('thinking' in outbound)) {
       const payload = this.resolveThinkingPayload(outbound);
@@ -76,6 +86,17 @@ export class GLMCompatibility implements CompatibilityModule {
     }
 
     this.sanitizeRequest(outbound);
+    try {
+      const reqId = (dto?.route?.requestId as string) || `req_${Date.now()}`;
+      const os = await import('os'); const path = await import('path'); const fs = await import('fs/promises');
+      const dir = (path as any).default.join((os as any).default.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
+      await (fs as any).mkdir(dir, { recursive: true });
+      const file = (path as any).default.join(dir, `${reqId}_compat-post.json`);
+      const msgs: any[] = Array.isArray((outbound as any).messages) ? ((outbound as any).messages as any[]) : [];
+      const types: Record<string, number> = {};
+      for (const m of msgs) { if (m && m.role==='assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) { const t = (m.content===null)?'null':(typeof m.content); types[t]=(types[t]||0)+1; } }
+      await (fs as any).writeFile(file, JSON.stringify({ stage:'compat-post', assistant_tool_calls: Object.values(types).reduce((a:number,b:number)=>a+b,0), content_types: types }, null, 2), 'utf-8');
+    } catch {}
 
     // 方案B：若在最小清理后上下文有效消息为空，则不向上游发送，直接中止并交由上层返回错误
     try {
@@ -300,37 +321,7 @@ export class GLMCompatibility implements CompatibilityModule {
             const text = stripThinkingTags(String(msg.content));
             (msg as any).content = text;
           }
-          // 标准化：将文本化工具意图统一搬运到 reasoning_content（不生成 tool_calls）
-          try {
-            const parts: string[] = [];
-            // 1) 从 content 中抽取意图块并清理剩余可见文本
-            if (typeof (msg as any).content === 'string' && (msg as any).content.trim().length > 0) {
-              const { blocks, remainder } = harvestRccBlocksFromText(String((msg as any).content));
-              if (blocks.length) parts.push(...blocks);
-              (msg as any).content = stripThinkingTags(String(remainder || ''));
-            }
-            // 2) 从 reasoning_content 中抽取并规范化为 rcc.tool.v1，再与剩余 reasoning 文本合并
-            if (typeof (msg as any).reasoning_content === 'string' && (msg as any).reasoning_content.trim().length > 0) {
-              const { blocks, remainder } = harvestRccBlocksFromText(String((msg as any).reasoning_content));
-              if (blocks.length) parts.push(...blocks);
-              const rest = String(remainder || '').trim();
-              if (rest.length) parts.push(stripThinkingTags(rest));
-            }
-            if (parts.length) {
-              (msg as any).reasoning_content = parts.join('\n');
-            }
-            // 不在 GLM 层生成 tool_calls；统一由 llmswitch 收割
-          } catch (error) {
-              // 快速死亡原则 - 暴露GLM工具意图收割错误（避免引用未定义局部变量）
-              throw new EnhancedRouteCodexError(error as Error, {
-                module: 'GLMCompatibility',
-                file: 'src/modules/pipeline/modules/compatibility/glm-compatibility.ts',
-                function: 'normalizeResponse',
-                line: ErrorContextBuilder.extractLineNumber(error as Error),
-                additional: { operation: 'glm-tool-intent-harvest' }
-              });
-            }
-          // 不在 GLM 层删除 reasoning_content；由端点/llmswitch 决定展示策略（Chat/Anthropic 移除，Responses 保留）
+          // 不在 GLM 层进行任何“工具意图抽取/搬运”；由 llmswitch-core OpenAI 阶段统一处理。
           // Ensure tool_calls.function.arguments are strings for downstream OpenAI consumers
           if (Array.isArray(msg?.tool_calls)) {
             try {

@@ -54,6 +54,10 @@ curl -sS -X POST http://127.0.0.1:5520/v1/chat/completions \
 - 第一阶段问题（已解决）：assistant.content 混入 rcc.tool.v1 结果或半残 JSON，导致 GLM 500。
 - 仍存触发源：大量 `role:'tool'` 历史（尤其尾部成组出现）在 Chat Completions 中不被 GLM 可靠接受，最终以 500 报错。
 
+### 新增（经实测确认）
+- 当某一轮消息为 `role:'assistant'` 且包含 `tool_calls` 时，若其 `content` 为“空/全空白字符串”而非 `null`，在部分上下文下会直接触发 GLM 500；将该轮 `content` 置为 `null` 后恢复为 200。
+- 该问题独立于“巨大 rcc.tool.v1 结果包”，属于“形状不一致”导致的上游严格校验失败/不稳定。
+
 ## 统一修复策略（一次到位，避免反复）
 
 只做一件事：规范“最后一轮工具结果”的内容形状；不动历史、不改角色。
@@ -78,6 +82,10 @@ curl -sS -X POST http://127.0.0.1:5520/v1/chat/completions \
 3) Provider 层
    - 不做清洗（遵循“清洗不在 provider”的要求）。
 
+4) OpenAI 形状一致性修正（新增）
+   - 当且仅当某一轮为 `role:'assistant'` 且包含 `tool_calls`，并且其 `content` 是空/空白字符串时，将其规范化为 `null`（若已有文本或非空白，保持不变）。
+   - 该修正位于 llmswitch-core 的 OpenAI 编码器中，默认启用，无需开关。
+
 ## 实施清单
 
 1) 保持 llmswitch-core 现状：不再改动工具入口。
@@ -101,6 +109,39 @@ curl -sS -X POST http://127.0.0.1:5520/v1/chat/completions \
   - assistant.content 不含工具结果文本。
   - 保留全部历史工具调用与角色（不丢记忆、不改角色）。
   - GLM 返回含文本或函数调用（tool_calls）的正常响应。
+
+## 实验复现与快速修复片段（新增）
+
+以最新失败样本为例，使用 curl 验证：
+
+1) 基线（常见出现 500）：
+
+```
+REQ=~/.routecodex/codex-samples/openai-chat/<your>_provider-request.json
+jq '. + {stream:false}' "$REQ" >/tmp/baseline.json
+curl -sS -H 'Content-Type: application/json' --data @/tmp/baseline.json \
+  http://127.0.0.1:5520/v1/chat/completions | jq -r '.error?.message // .choices[0]?.finish_reason'
+```
+
+2) 仅将“assistant 且有 tool_calls 且 content 为空白”的回合置 `null`（应恢复 200）：
+
+```
+jq '(.messages |= (map(
+  if (.role=="assistant" and ((.tool_calls|length)? // 0)>0) and ((.content|type)=="string") and ((.content|gsub("[[:space:]]+"; ""))|length)==0)
+  then (.content=null) else . end))) + {stream:false}' "$REQ" > /tmp/fix-null.json
+curl -sS -H 'Content-Type: application/json' --data @/tmp/fix-null.json \
+  http://127.0.0.1:5520/v1/chat/completions | jq -r '.error?.message // .choices[0]?.finish_reason'
+```
+
+3) 可选：剪掉尾部一条消息验证“尾部空白 assistant（无 tool_calls）”是否也是触发点：
+
+```
+jq '{model, messages: .messages[0:-1], tools, tool_choice} + {stream:false}' "$REQ" >/tmp/trim-tail.json
+curl -sS -H 'Content-Type: application/json' --data @/tmp/trim-tail.json \
+  http://127.0.0.1:5520/v1/chat/completions | jq -r '.error?.message // .choices[0]?.finish_reason'
+```
+
+以上对比有助于快速定位是“形状不一致”还是“尾部空白 assistant”引起的 500。
 
 ## 备注
 

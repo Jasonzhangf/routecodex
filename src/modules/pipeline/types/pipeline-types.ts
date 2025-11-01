@@ -26,7 +26,7 @@ export type PipelineInitializationState = 'pending' | 'initializing' | 'ready' |
  */
 export interface ModuleTypeMapping {
   // LLMSwitch 实现统一从 rcc-llmswitch-core 提供，避免本地重复实现
-  'llmswitch-openai-openai': import('rcc-llmswitch-core/llmswitch/openai-normalizer').OpenAINormalizerLLMSwitch;
+  'llmswitch-openai-openai': import('rcc-llmswitch-core/llmswitch/llmswitch-conversion-router').ConversionRouterLLMSwitch;
   'llmswitch-anthropic-openai': import('rcc-llmswitch-core/llmswitch/anthropic-openai-converter').AnthropicOpenAIConverter;
   'streaming-control': import('../modules/workflow/streaming-control.js').StreamingControlWorkflow;
   'field-mapping': import('../modules/compatibility/field-mapping.js').FieldMappingCompatibility;
