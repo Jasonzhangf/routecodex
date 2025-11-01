@@ -21,7 +21,7 @@ export interface HttpRequestConfig {
  * HTTP响应
  */
 export interface HttpResponse {
-  data: any;
+  data: unknown;
   status: number;
   statusText: string;
   headers: Record<string, string>;
@@ -74,7 +74,7 @@ export class HttpClient {
    */
   async post(
     url: string,
-    data?: any,
+    data?: unknown,
     headers?: Record<string, string>
   ): Promise<HttpResponse> {
     return this.request('POST', url, data, headers);
@@ -85,7 +85,7 @@ export class HttpClient {
    */
   async put(
     url: string,
-    data?: any,
+    data?: unknown,
     headers?: Record<string, string>
   ): Promise<HttpResponse> {
     return this.request('PUT', url, data, headers);
@@ -103,7 +103,7 @@ export class HttpClient {
    */
   async patch(
     url: string,
-    data?: any,
+    data?: unknown,
     headers?: Record<string, string>
   ): Promise<HttpResponse> {
     return this.request('PATCH', url, data, headers);
@@ -115,7 +115,7 @@ export class HttpClient {
   private async request(
     method: string,
     url: string,
-    data?: any,
+    data?: unknown,
     headers?: Record<string, string>
   ): Promise<HttpResponse> {
     const fullUrl = this.buildUrl(url);
@@ -135,10 +135,10 @@ export class HttpClient {
    */
   private async sendRequestWithRetry(
     url: string,
-    data: any,
+    data: unknown,
     config: HttpRequestConfig
   ): Promise<HttpResponse> {
-    let lastError: any;
+    let lastError: unknown;
 
     for (let attempt = 0; attempt <= config.maxRetries!; attempt++) {
       try {
@@ -167,7 +167,7 @@ export class HttpClient {
    */
   private async sendSingleRequest(
     url: string,
-    data: any,
+    data: unknown,
     config: HttpRequestConfig
   ): Promise<HttpResponse> {
     const controller = new AbortController();
@@ -248,19 +248,20 @@ export class HttpClient {
   /**
    * 判断是否应该重试
    */
-  private shouldRetry(error: any, attempt: number, maxRetries: number): boolean {
+  private shouldRetry(error: unknown, attempt: number, maxRetries: number): boolean {
     if (attempt >= maxRetries) {
       return false;
     }
 
     // 网络错误通常可以重试
-    if (error.name === 'TypeError' || error.code === 'ECONNREFUSED') {
+    const err = error as any;
+    if (err.name === 'TypeError' || err.code === 'ECONNREFUSED') {
       return true;
     }
 
     // HTTP状态码错误
-    if (error.message) {
-      const statusMatch = error.message.match(/HTTP (\d{3})/);
+    if (err.message) {
+      const statusMatch = err.message.match(/HTTP (\d{3})/);
       if (statusMatch) {
         const status = parseInt(statusMatch[1]);
         // 5xx服务器错误和429限流错误可以重试
@@ -269,7 +270,7 @@ export class HttpClient {
     }
 
     // AbortError（超时）可以重试
-    if (error.name === 'AbortError') {
+    if (err.name === 'AbortError') {
       return true;
     }
 
@@ -279,22 +280,23 @@ export class HttpClient {
   /**
    * 创建Provider错误
    */
-  private createProviderError(error: any): ProviderError {
+  private createProviderError(error: unknown): ProviderError {
     const providerError: ProviderError = error instanceof Error ? error as ProviderError : new Error(String(error)) as ProviderError;
+    const err = error as any;
 
     // 设置错误类型
-    if (error.name === 'AbortError' || error.message?.includes('timeout')) {
+    if (err.name === 'AbortError' || err.message?.includes('timeout')) {
       providerError.type = 'network';
-    } else if (error.message?.includes('HTTP 4')) {
+    } else if (err.message?.includes('HTTP 4')) {
       providerError.type = 'server';
-    } else if (error.message?.includes('401') || error.message?.includes('403')) {
+    } else if (err.message?.includes('401') || err.message?.includes('403')) {
       providerError.type = 'authentication';
     } else {
       providerError.type = 'unknown';
     }
 
     // 提取状态码
-    const statusMatch = error.message?.match(/HTTP (\d{3})/);
+    const statusMatch = err.message?.match(/HTTP (\d{3})/);
     if (statusMatch) {
       providerError.statusCode = parseInt(statusMatch[1]);
     }

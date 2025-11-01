@@ -89,7 +89,7 @@ export class ModuleConfigReader {
       for (const c of tryCandidates) {
         try {
           const stat = await fs.stat(c);
-          if (stat.isFile()) return c;
+          if (stat.isFile()) {return c;}
         } catch { /* next */ }
       }
       // Fallback to original (will error upstream)

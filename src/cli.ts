@@ -63,6 +63,34 @@ const logger = {
   debug: (msg: string) => console.log(`${chalk.gray('◉')  } ${  msg}`)
 };
 
+// Ensure llmswitch-core is resolvable; if not (common when running local repo without building submodule),
+// re-exec global RouteCodex binary with same args to avoid local workspace lookup.
+async function ensureGlobalCoreOrReroute(): Promise<void> {
+  try {
+    // Quick probe (does not keep the module)
+    await import('rcc-llmswitch-core/api');
+    return; // OK
+  } catch {
+    try {
+      const probe = spawnSync('sh', ['-lc', 'command -v routecodex || which routecodex || true'], { encoding: 'utf8' });
+      const bin = String(probe.stdout || '').trim();
+      if (bin) {
+        logger.info(`Local llmswitch-core unavailable; rerouting to global: ${bin}`);
+        const args = process.argv.slice(2);
+        const exec = spawnSync(bin, args, { stdio: 'inherit', env: process.env });
+        const code = typeof exec.status === 'number' ? exec.status : 0;
+        process.exit(code);
+      }
+    } catch {
+      // fall through
+    }
+    // If no global binary found, continue locally (will fail fast with informative error later)
+  }
+}
+
+// Top-level guard (non-blocking if global available)
+await ensureGlobalCoreOrReroute();
+
 // CLI program setup
 const program = new Command();
 
@@ -132,8 +160,8 @@ program
         spinner.text = 'Checking RouteCodex server status...';
         const normalizeConnectHost = (h: string): string => {
           const v = String(h || '').toLowerCase();
-          if (v === '0.0.0.0') return '127.0.0.1';
-          if (v === '::' || v === '::1' || v === 'localhost') return '127.0.0.1';
+          if (v === '0.0.0.0') {return '127.0.0.1';}
+          if (v === '::' || v === '::1' || v === 'localhost') {return '127.0.0.1';}
           return h || '127.0.0.1';
         };
         const connectHost = normalizeConnectHost(actualHost);
@@ -143,9 +171,9 @@ program
           const timeoutId = setTimeout(() => controller.abort(), 3000);
           const response = await fetch(`${serverUrl}/ready`, { signal: controller.signal, method: 'GET' } as any);
           clearTimeout(timeoutId);
-          if (!response.ok) throw new Error('Server not ready');
+          if (!response.ok) {throw new Error('Server not ready');}
           const j = await response.json().catch(() => ({}));
-          if (j?.status !== 'ready') throw new Error('Server reported not_ready');
+          if (j?.status !== 'ready') {throw new Error('Server reported not_ready');}
           spinner.succeed('RouteCodex server is ready');
         } catch (error) {
           spinner.info('RouteCodex server is not running, starting it...');
@@ -176,8 +204,8 @@ program
               }
             } catch { /* ignore */ }
           }
-          if (ready) spinner.succeed('RouteCodex server is ready');
-          else spinner.warn('RouteCodex server may not be fully ready, continuing...');
+          if (ready) {spinner.succeed('RouteCodex server is ready');}
+          else {spinner.warn('RouteCodex server may not be fully ready, continuing...');}
         }
       }
 
@@ -186,8 +214,8 @@ program
       // Prepare environment variables for Claude Code
       const resolvedBaseHost = String((() => {
         const v = String(actualHost || '').toLowerCase();
-        if (v === '0.0.0.0') return '127.0.0.1';
-        if (v === '::' || v === '::1' || v === 'localhost') return '127.0.0.1';
+        if (v === '0.0.0.0') {return '127.0.0.1';}
+        if (v === '::' || v === '::1' || v === 'localhost') {return '127.0.0.1';}
         return actualHost || '127.0.0.1';
       })());
       const anthropicBase = `http://${resolvedBaseHost}:${actualPort}`;
@@ -287,7 +315,7 @@ program
 
       const norm = (h: string | undefined): string => {
         const v = String(h || '').toLowerCase();
-        if (v === '0.0.0.0' || v === '::' || v === '::1' || v === 'localhost') return '127.0.0.1';
+        if (v === '0.0.0.0' || v === '::' || v === '::1' || v === 'localhost') {return '127.0.0.1';}
         return h || '127.0.0.1';
       };
       const resolvedHost = norm(host);
@@ -1405,7 +1433,7 @@ program
       // Read ~/.codex/config.toml to discover fc base_url and env_key
       try {
         const codexPath = path.join(homedir(), '.codex', 'config.toml');
-        if (!fs.existsSync(codexPath)) return { ok: false };
+        if (!fs.existsSync(codexPath)) {return { ok: false };}
         const txt = fs.readFileSync(codexPath, 'utf8');
         // crude scan for [model_providers.fc] block
         const lines = txt.split(/\r?\n/);
@@ -1416,13 +1444,13 @@ program
             inFc = /^\[\s*model_providers\.fc\s*\]$/.test(line);
             continue;
           }
-          if (!inFc) continue;
+          if (!inFc) {continue;}
           const m1 = line.match(/^base_url\s*=\s*"([^"]+)"/);
-          if (m1) baseUrl = m1[1];
+          if (m1) {baseUrl = m1[1];}
           const m2 = line.match(/^env_key\s*=\s*"([^"]+)"/);
-          if (m2) envKey = m2[1];
+          if (m2) {envKey = m2[1];}
         }
-        if (!baseUrl) return { ok: false };
+        if (!baseUrl) {return { ok: false };}
         // Write ~/.routecodex/monitor.json
         const monDir = path.join(homedir(), '.routecodex');
         try { fs.mkdirSync(monDir, { recursive: true }); } catch {}

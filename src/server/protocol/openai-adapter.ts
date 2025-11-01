@@ -15,19 +15,19 @@ export class OpenAIAdapter implements IProtocolAdapter {
   }
 
   detectRequest(request: unknown): boolean {
-    if (!request || typeof request !== 'object') return false;
+    if (!request || typeof request !== 'object') {return false;}
     const r = request as Record<string, unknown>;
     return Array.isArray(r.messages) || typeof r.prompt === 'string';
   }
 
   detectResponse(response: unknown): boolean {
-    if (!response || typeof response !== 'object') return false;
+    if (!response || typeof response !== 'object') {return false;}
     const r = response as Record<string, unknown>;
     return Array.isArray(r.choices) || r.object === 'list' || r.object === 'chat.completion';
   }
 
   normalizeRequest(request: unknown): unknown {
-    if (!request || typeof request !== 'object') return {};
+    if (!request || typeof request !== 'object') {return {};}
     const r = request as Record<string, unknown>;
     // Ensure assistant tool_calls use stringified args
     if (Array.isArray(r.messages)) {
@@ -49,18 +49,18 @@ export class OpenAIAdapter implements IProtocolAdapter {
   }
 
   normalizeResponse(response: unknown): unknown {
-    if (!response || typeof response !== 'object') return {};
+    if (!response || typeof response !== 'object') {return {};}
     return { ...(response as Record<string, unknown>) };
   }
 
   // Convert Anthropic → OpenAI (sourceProtocol='anthropic')
   convertFromProtocol(request: unknown, sourceProtocol: string): unknown {
-    if (sourceProtocol !== 'anthropic') return this.normalizeRequest(request);
+    if (sourceProtocol !== 'anthropic') {return this.normalizeRequest(request);}
     const r = (request && typeof request === 'object') ? (request as Record<string, unknown>) : {};
     const out: any = { ...r };
     if (Array.isArray(out.messages)) {
       out.messages = (out.messages as any[]).map((m: any) => {
-        if (!m || typeof m !== 'object') return m;
+        if (!m || typeof m !== 'object') {return m;}
         const role = typeof m.role === 'string' ? m.role : 'user';
         const c = (m as any).content;
         if (Array.isArray(c)) {
@@ -78,7 +78,7 @@ export class OpenAIAdapter implements IProtocolAdapter {
 
   // Convert OpenAI → Anthropic (targetProtocol='anthropic')
   convertToProtocol(request: unknown, targetProtocol: string): unknown {
-    if (targetProtocol !== 'anthropic') return this.normalizeRequest(request);
+    if (targetProtocol !== 'anthropic') {return this.normalizeRequest(request);}
     // Minimal passthrough: no-op since we primarily consume OpenAI Chat internally
     return this.normalizeRequest(request);
   }

@@ -231,7 +231,7 @@ export class ErrorContextBuilder {
    * 从错误堆栈中提取行号
    */
   static extractLineNumber(error: Error): number {
-    if (!error.stack) return 0;
+    if (!error.stack) {return 0;}
 
     const stackLines = error.stack.split('\n');
     for (const line of stackLines) {
@@ -250,7 +250,7 @@ export class ErrorContextBuilder {
   static safeStringify(obj: any, maxSize: number = 1000): string {
     try {
       const str = JSON.stringify(obj, null, 2);
-      return str.length > maxSize ? str.substring(0, maxSize) + '...' : str;
+      return str.length > maxSize ? `${str.substring(0, maxSize)  }...` : str;
     } catch {
       return '[无法序列化的对象]';
     }

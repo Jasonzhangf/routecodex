@@ -130,21 +130,10 @@ export class GLMHTTPProvider implements ProviderModule {
       } catch { return `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`; }
     })();
     const endpoint = `${this.getBaseUrl()}/chat/completions`;
-    // Passthrough payload as-is. Do not sanitize/trim/strip tool_calls.
-    // Normalize to OpenAI Chat request shape (embed tool history, clamp overly long assistant text)
-    let payloadObj: Record<string, unknown> = { ...(request as any) } as Record<string, unknown>;
-    try {
-      const core = await import('rcc-llmswitch-core/conversion');
-      if (payloadObj && typeof payloadObj === 'object') {
-        const normalized = (core as any).normalizeChatRequest?.(payloadObj) || payloadObj;
-        // Ensure result is an object with messages/tools fields preserved
-        if (normalized && typeof normalized === 'object') {
-          payloadObj = { ...(normalized as Record<string, unknown>) };
-        }
-      }
-    } catch {
-      // best-effort; if core unavailable, continue with original payload
-    }
+    // Provider层保持“纯通信”职责：不做兼容性转换/修复，直接透传请求（仅剥离内部元数据）。
+    const payloadObj: Record<string, unknown> = { ...(request as any) } as Record<string, unknown>;
+
+    // 注意：Provider 层不做兼容性修复（遵循“Provider 仅通信”原则）。
 
     const token = this.authContext.token!;
 
@@ -288,15 +277,15 @@ export class GLMHTTPProvider implements ProviderModule {
         }
         // Business code
         const c = String(bizCode ?? '');
-        if (c === '1210') tips.push('业务码1210：参数有误，请检查文档与必填字段。');
-        if (c === '1213') tips.push('业务码1213：缺少必填字段，请补齐。');
-        if (c === '1214') tips.push('业务码1214：字段非法，请按文档修正。');
-        if (c === '1302') tips.push('业务码1302：并发过高，降低并发或申请扩容。');
-        if (c === '1303') tips.push('业务码1303：频率过高，降低调用频率或申请扩容。');
-        if (c === '1304') tips.push('业务码1304：今日调用次数用尽，次日重置或购买配额。');
-        if (c === '1113') tips.push('业务码1113：账户欠费，请充值后重试。');
-        if (c === '1112') tips.push('业务码1112：账户被锁定，请联系客服解锁。');
-        if (!tips.length) tips.push('参考 GLM API 指引：校验鉴权、配额与参数格式。');
+        if (c === '1210') {tips.push('业务码1210：参数有误，请检查文档与必填字段。');}
+        if (c === '1213') {tips.push('业务码1213：缺少必填字段，请补齐。');}
+        if (c === '1214') {tips.push('业务码1214：字段非法，请按文档修正。');}
+        if (c === '1302') {tips.push('业务码1302：并发过高，降低并发或申请扩容。');}
+        if (c === '1303') {tips.push('业务码1303：频率过高，降低调用频率或申请扩容。');}
+        if (c === '1304') {tips.push('业务码1304：今日调用次数用尽，次日重置或购买配额。');}
+        if (c === '1113') {tips.push('业务码1113：账户欠费，请充值后重试。');}
+        if (c === '1112') {tips.push('业务码1112：账户被锁定，请联系客服解锁。');}
+        if (!tips.length) {tips.push('参考 GLM API 指引：校验鉴权、配额与参数格式。');}
         return tips;
       })();
 

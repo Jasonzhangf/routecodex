@@ -161,10 +161,10 @@ export class ResponsesConfigUtil {
         try {
           const cand = path.join(dir, 'package.json');
           const stat = await fs.stat(cand).catch(() => null as any);
-          if (stat && stat.isFile()) return dir;
+          if (stat && stat.isFile()) {return dir;}
         } catch { /* continue */ }
         const parent = path.dirname(dir);
-        if (parent === dir) break;
+        if (parent === dir) {break;}
         dir = parent;
       }
       return startDir; // best effort
@@ -200,14 +200,14 @@ export class ResponsesConfigUtil {
     // Resolve final mapping file path
     const resolveMappingPath = (p: string | null): string => {
       const raw = (p || '').trim();
-      if (!raw) return defaultMappingPath;
+      if (!raw) {return defaultMappingPath;}
       if (raw.startsWith('~')) {
         const home = process.env.HOME || process.env.USERPROFILE || '';
         return path.join(home, raw.slice(1));
       }
-      if (path.isAbsolute(raw)) return raw;
+      if (path.isAbsolute(raw)) {return raw;}
       // Treat as package-root relative or process CWD relative depending on prefix
-      if (raw.startsWith('./') || raw.startsWith('config/')) return path.join(pkgRoot, raw.replace(/^\.\//, ''));
+      if (raw.startsWith('./') || raw.startsWith('config/')) {return path.join(pkgRoot, raw.replace(/^\.\//, ''));}
       return path.join(pkgRoot, raw);
     };
 
@@ -232,10 +232,10 @@ export class ResponsesConfigUtil {
 
   private static mergeWithEnv(base: ResponsesModuleConfig): ResponsesModuleConfig {
     const envBool = (v: string | undefined): boolean | undefined => {
-      if (v == null) return undefined;
+      if (v == null) {return undefined;}
       const s = String(v).trim().toLowerCase();
-      if (['1','true','yes','on'].includes(s)) return true;
-      if (['0','false','no','off'].includes(s)) return false;
+      if (['1','true','yes','on'].includes(s)) {return true;}
+      if (['0','false','no','off'].includes(s)) {return false;}
       return undefined;
     };
 
@@ -247,14 +247,14 @@ export class ResponsesConfigUtil {
     const requiredAction = envBool(process.env.ROUTECODEX_RESP_SSE_REQUIRED_ACTION);
     const hb = process.env.ROUTECODEX_RESPONSES_HEARTBEAT_MS;
 
-    if (useLlmswitch !== undefined) c.conversion.useLlmswitch = useLlmswitch;
-    if (fallback !== undefined) c.conversion.fallbackEnabled = fallback;
-    if (forceNonStream !== undefined) c.conversion.forceProviderStream = forceNonStream;
-    if (lifecycle !== undefined) c.sse.emitTextItemLifecycle = lifecycle;
-    if (requiredAction !== undefined) c.sse.emitRequiredAction = requiredAction;
+    if (useLlmswitch !== undefined) {c.conversion.useLlmswitch = useLlmswitch;}
+    if (fallback !== undefined) {c.conversion.fallbackEnabled = fallback;}
+    if (forceNonStream !== undefined) {c.conversion.forceProviderStream = forceNonStream;}
+    if (lifecycle !== undefined) {c.sse.emitTextItemLifecycle = lifecycle;}
+    if (requiredAction !== undefined) {c.sse.emitRequiredAction = requiredAction;}
     if (hb !== undefined && hb !== '') {
       const n = Number(hb);
-      if (Number.isFinite(n)) c.sse.heartbeatMs = n;
+      if (Number.isFinite(n)) {c.sse.heartbeatMs = n;}
     }
     return c;
   }

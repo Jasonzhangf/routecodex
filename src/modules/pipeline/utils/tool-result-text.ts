@@ -19,24 +19,24 @@ export function extractToolText(value: unknown): string {
   const push = (arr: string[], s?: string) => {
     if (typeof s === 'string') {
       const t = stripAnsi(s).trim();
-      if (t) arr.push(t);
+      if (t) {arr.push(t);}
     }
   };
   const uniqMerge = (parts: string[], limitLines = MAX_LINES, limitChars = MAX_CHARS) => {
     const seen = new Set<string>();
     const out: string[] = [];
     for (const p of parts) {
-      if (!p) continue;
-      if (seen.has(p)) continue;
+      if (!p) {continue;}
+      if (seen.has(p)) {continue;}
       seen.add(p);
       out.push(p);
-      if (out.length >= limitLines) break;
+      if (out.length >= limitLines) {break;}
       const total = out.join('\n');
-      if (total.length >= limitChars) break;
+      if (total.length >= limitChars) {break;}
     }
     let text = out.join('\n');
     if (text.length > limitChars) {
-      text = `[输出已截断至 ${limitChars} 字符]\n` + text.slice(0, limitChars - 12) + '\n...(truncated)';
+      text = `[输出已截断至 ${limitChars} 字符]\n${  text.slice(0, limitChars - 12)  }\n...(truncated)`;
     }
     return text;
   };
@@ -44,7 +44,7 @@ export function extractToolText(value: unknown): string {
     const texts: string[] = [];
     if (Array.isArray(v)) {
       for (const p of v) {
-        if (!p) continue;
+        if (!p) {continue;}
         if (typeof p === 'string') { push(texts, p); continue; }
         if (p && typeof p === 'object') {
           const obj: any = p as any;
@@ -64,7 +64,7 @@ export function extractToolText(value: unknown): string {
       try {
         const parsed = JSON.parse(s);
         const t = extractToolText(parsed);
-        if (t) return t;
+        if (t) {return t;}
       } catch { /* ignore parse errors */ }
     }
     return stripAnsi(s);
@@ -74,13 +74,13 @@ export function extractToolText(value: unknown): string {
   if (Array.isArray(value)) {
     // Prefer pure textual parts
     const t = flattenParts(value).join('\n').trim();
-    if (t) return t;
+    if (t) {return t;}
     // Fallback to JSON when explicitly requested
     if (FAITHFUL) {
       try {
         const txt = JSON.stringify(value);
         if (txt.length > MAX_CHARS) {
-          return `[输出已截断至 ${MAX_CHARS} 字符]\n` + txt.slice(0, MAX_CHARS - 12) + '\n...(truncated)';
+          return `[输出已截断至 ${MAX_CHARS} 字符]\n${  txt.slice(0, MAX_CHARS - 12)  }\n...(truncated)`;
         }
         return txt;
       } catch { /* ignore */ }
@@ -104,10 +104,10 @@ export function extractToolText(value: unknown): string {
     // Exit/metadata
     try {
       const meta: any = obj.metadata || obj.meta || {};
-      if (typeof meta.exit_code === 'number') exitCode = meta.exit_code;
-      if (typeof meta.duration_seconds === 'number') duration = meta.duration_seconds;
-      if (typeof obj.exit_code === 'number' && exitCode === undefined) exitCode = obj.exit_code;
-      if (typeof obj.duration_seconds === 'number' && duration === undefined) duration = obj.duration_seconds;
+      if (typeof meta.exit_code === 'number') {exitCode = meta.exit_code;}
+      if (typeof meta.duration_seconds === 'number') {duration = meta.duration_seconds;}
+      if (typeof obj.exit_code === 'number' && exitCode === undefined) {exitCode = obj.exit_code;}
+      if (typeof obj.duration_seconds === 'number' && duration === undefined) {duration = obj.duration_seconds;}
     } catch { /* ignore */ }
 
     // Executed/command echo
@@ -128,7 +128,7 @@ export function extractToolText(value: unknown): string {
       }
       if (!toolName && obj.tool && typeof obj.tool === 'object') {
         const tn = (obj.tool as any).name;
-        if (typeof tn === 'string' && tn.trim()) toolName = tn.trim();
+        if (typeof tn === 'string' && tn.trim()) {toolName = tn.trim();}
       }
     } catch { /* ignore */ }
 
@@ -151,7 +151,7 @@ export function extractToolText(value: unknown): string {
       ['stack', obj.stack]
     ];
     for (const [, v] of errFields) {
-      if (!v) continue;
+      if (!v) {continue;}
       if (typeof v === 'string') { push(errors, pickFirstLine(v)); continue; }
       if (Array.isArray(v)) { push(errors, pickFirstLine(flattenParts(v).join('\n'))); continue; }
       if (typeof v === 'object') {
@@ -170,7 +170,7 @@ export function extractToolText(value: unknown): string {
       ['result', obj.result]
     ];
     for (const [k, v] of outFields) {
-      if (!v) continue;
+      if (!v) {continue;}
       if (typeof v === 'string') { push(outputs, v); continue; }
       if (Array.isArray(v)) { outputs.push(...flattenParts(v)); continue; }
       if (typeof v === 'object') {
@@ -185,11 +185,11 @@ export function extractToolText(value: unknown): string {
 
     // Success-first: if stdout/output present, return only that (no merges)
     const outMerged = uniqMerge(outputs).trim();
-    if (outMerged) return outMerged;
+    if (outMerged) {return outMerged;}
 
     // Otherwise, return stderr/error text to avoid silent failures
     const errMerged = uniqMerge(errors).trim();
-    if (errMerged) return errMerged;
+    if (errMerged) {return errMerged;}
 
     // If the command succeeded with no output, emit a clear success marker (with write summary when possible)
     if (exitCode === 0) {
@@ -205,22 +205,22 @@ export function extractToolText(value: unknown): string {
           try {
             // cat > path << 'EOF' ...
             const m1 = s.match(/cat\s*>\s*([^\s]+)\s*<<\s*['\"]?EOF['\"]?/i);
-            if (m1 && m1[1]) return m1[1];
+            if (m1 && m1[1]) {return m1[1];}
             // generic redirect: > path or >> path
             const m2 = s.match(/[>]{1,2}\s*([^\s;&|]+)/);
-            if (m2 && m2[1]) return m2[1];
+            if (m2 && m2[1]) {return m2[1];}
           } catch { /* ignore */ }
           return null;
         };
         const detectSedEdit = (s: string): string | null => {
           try {
             // naive: last non-flag token as path when sed -i present
-            if (!/\bsed\b[^\n]*\-i\b/i.test(s)) return null;
+            if (!/\bsed\b[^\n]*\-i\b/i.test(s)) {return null;}
             const parts = s.split(/\s+/).filter(Boolean);
             let path: string | null = null;
             for (let i = parts.length - 1; i >= 0; i--) {
               const t = parts[i];
-              if (/^-/.test(t)) continue;
+              if (/^-/.test(t)) {continue;}
               path = t; break;
             }
             return path;
@@ -241,7 +241,7 @@ export function extractToolText(value: unknown): string {
         return 'Command succeeded (no output).\n建议改用 apply_patch 工具进行文件编辑。';
       };
       const msg = summarize();
-      if (executedLine) return msg ? `${msg}\n${executedLine}` : executedLine;
+      if (executedLine) {return msg ? `${msg}\n${executedLine}` : executedLine;}
       return msg || 'Command succeeded (no output).';
     }
 
@@ -249,11 +249,11 @@ export function extractToolText(value: unknown): string {
     if (FAITHFUL) {
       try {
         const txt = JSON.stringify(value);
-        return txt.length > MAX_CHARS ? (txt.slice(0, MAX_CHARS - 12) + '\n...(truncated)') : txt;
+        return txt.length > MAX_CHARS ? (`${txt.slice(0, MAX_CHARS - 12)  }\n...(truncated)`) : txt;
       } catch { /* ignore */ }
     }
-    if (exitCode !== undefined) return `Exit code: ${exitCode}`;
-    if (executedLine) return executedLine;
+    if (exitCode !== undefined) {return `Exit code: ${exitCode}`;}
+    if (executedLine) {return executedLine;}
     return '';
   }
 

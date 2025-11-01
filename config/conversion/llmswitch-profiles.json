@@ -16,8 +16,7 @@
       "codec": "openai-openai",
       "inputSchema": "config/schemas/openai-chat.request.schema.json",
       "canonicalRequestSchema": "config/schemas/openai-chat.request.schema.json",
-      "canonicalResponseSchema": "config/schemas/openai-chat.response.schema.json",
-      "clientResponseSchema": "config/schemas/openai-chat.response.schema.json"
+      "canonicalResponseSchema": "config/schemas/openai-chat.response.schema.json"
     },
     "responses-chat": {
       "incomingProtocol": "openai.responses",

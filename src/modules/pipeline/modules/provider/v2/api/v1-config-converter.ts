@@ -63,7 +63,9 @@ export class V1ConfigConverter {
   /**
    * 从V1配置提取provider类型
    */
-  private static extractProviderType(v1Config: ModuleConfig, providerConfig: any): ProviderType {
+  private static extractProviderType(v1Config: ModuleConfig, providerConfig: unknown): ProviderType {
+    const config = providerConfig as any;
+
     // 1. 从provider type推断
     if (v1Config.type && typeof v1Config.type === 'string') {
       const typeMap: Record<string, string> = {
@@ -82,7 +84,7 @@ export class V1ConfigConverter {
     }
 
     // 2. 从base URL推断
-    if (providerConfig.baseUrl) {
+    if (config.baseUrl) {
       const urlMap: Record<string, string> = {
         'open.bigmodel.cn': 'glm',
         'portal.qwen.ai': 'qwen',
@@ -91,17 +93,17 @@ export class V1ConfigConverter {
       };
 
       for (const [domain, type] of Object.entries(urlMap)) {
-        if (providerConfig.baseUrl!.includes(domain)) {
+        if (config.baseUrl!.includes(domain)) {
           return type as ProviderType;
         }
       }
     }
 
     // 3. 从默认配置推断
-    if (providerConfig.auth?.type === 'oauth') {
+    if (config.auth?.type === 'oauth') {
       // Qwen使用OAuth
       return 'qwen' as ProviderType;
-    } else if (providerConfig.auth?.type === 'apikey') {
+    } else if (config.auth?.type === 'apikey') {
       // 默认假设为GLM
       return 'glm' as ProviderType;
     }
@@ -113,8 +115,9 @@ export class V1ConfigConverter {
   /**
    * 转换认证配置
    */
-  private static convertAuthConfig(providerConfig: any): any {
-    const auth = providerConfig.auth;
+  private static convertAuthConfig(providerConfig: unknown): unknown {
+    const config = providerConfig as any;
+    const auth = config.auth;
 
     if (!auth) {
       throw new Error('V1 config missing authentication configuration');
@@ -146,40 +149,41 @@ export class V1ConfigConverter {
   /**
    * 转换覆盖配置
    */
-  private static convertOverrides(v1Overrides: any): any {
-    const overrides: any = {};
+  private static convertOverrides(v1Overrides: unknown): unknown {
+    const overrides = v1Overrides as any;
+    const result: any = {};
 
     // 转换模型覆盖
-    if (v1Overrides.model) {
-      overrides.defaultModel = v1Overrides.model;
+    if (overrides.model) {
+      result.defaultModel = overrides.model;
     }
 
     // 转换基础URL覆盖
-    if (v1Overrides.baseUrl) {
-      overrides.baseUrl = v1Overrides.baseUrl;
+    if (overrides.baseUrl) {
+      result.baseUrl = overrides.baseUrl;
     }
 
     // 转换端点覆盖
-    if (v1Overrides.endpoint) {
-      overrides.endpoint = v1Overrides.endpoint;
+    if (overrides.endpoint) {
+      result.endpoint = overrides.endpoint;
     }
 
     // 转换头部覆盖
-    if (v1Overrides.headers) {
-      overrides.headers = v1Overrides.headers;
+    if (overrides.headers) {
+      result.headers = overrides.headers;
     }
 
     // 转换超时设置
-    if (v1Overrides.timeout) {
-      overrides.timeout = v1Overrides.timeout;
+    if (overrides.timeout) {
+      result.timeout = overrides.timeout;
     }
 
     // 转换重试设置
-    if (v1Overrides.maxRetries) {
-      overrides.maxRetries = v1Overrides.maxRetries;
+    if (overrides.maxRetries) {
+      result.maxRetries = overrides.maxRetries;
     }
 
-    return overrides;
+    return result;
   }
 
   /**

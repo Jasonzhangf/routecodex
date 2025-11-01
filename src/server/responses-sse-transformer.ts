@@ -49,7 +49,7 @@ export class ResponsesSSETransformer {
 
   public processOpenAIChunk(raw: any): ResponsesEvent[] {
     const events: ResponsesEvent[] = [];
-    if (!raw) return events;
+    if (!raw) {return events;}
 
     this.ensureMeta(raw);
 

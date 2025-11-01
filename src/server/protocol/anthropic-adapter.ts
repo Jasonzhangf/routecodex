@@ -14,30 +14,30 @@ export class AnthropicAdapter implements IProtocolAdapter {
   }
 
   detectRequest(request: unknown): boolean {
-    if (!request || typeof request !== 'object') return false;
+    if (!request || typeof request !== 'object') {return false;}
     const r = request as Record<string, unknown>;
     return typeof r.system === 'string' || (Array.isArray(r.messages) && this.isAnthropicMessageArray(r.messages as any[]));
   }
 
   detectResponse(response: unknown): boolean {
-    if (!response || typeof response !== 'object') return false;
+    if (!response || typeof response !== 'object') {return false;}
     const r = response as Record<string, unknown>;
     return r.type === 'message' || Array.isArray(r.content);
   }
 
   normalizeRequest(request: unknown): unknown {
-    if (!request || typeof request !== 'object') return {};
+    if (!request || typeof request !== 'object') {return {};}
     return { ...(request as Record<string, unknown>) };
   }
 
   normalizeResponse(response: unknown): unknown {
-    if (!response || typeof response !== 'object') return {};
+    if (!response || typeof response !== 'object') {return {};}
     return { ...(response as Record<string, unknown>) };
   }
 
   // Convert OpenAI → Anthropic
   convertFromProtocol(request: unknown, sourceProtocol: string): unknown {
-    if (sourceProtocol !== 'openai') return this.normalizeRequest(request);
+    if (sourceProtocol !== 'openai') {return this.normalizeRequest(request);}
     try {
       const { AnthropicOpenAIConverter } = require('rcc-llmswitch-core/llmswitch/anthropic-openai-converter');
       const { PipelineDebugLogger } = require('../../modules/pipeline/utils/debug-logger.js');
@@ -53,7 +53,7 @@ export class AnthropicAdapter implements IProtocolAdapter {
 
   // Convert Anthropic → OpenAI
   convertToProtocol(request: unknown, targetProtocol: string): unknown {
-    if (targetProtocol !== 'openai') return this.normalizeRequest(request);
+    if (targetProtocol !== 'openai') {return this.normalizeRequest(request);}
     try {
       const { AnthropicOpenAIConverter } = require('rcc-llmswitch-core/llmswitch/anthropic-openai-converter');
       const { PipelineDebugLogger } = require('../../modules/pipeline/utils/debug-logger.js');

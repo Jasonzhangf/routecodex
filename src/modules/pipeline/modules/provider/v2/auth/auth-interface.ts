@@ -147,7 +147,7 @@ export interface IOAuthClient {
   /**
    * 更新令牌存储
    */
-  updateTokenStorage(storage: TokenStorage, tokenData: any): void;
+  updateTokenStorage(storage: TokenStorage, tokenData: unknown): void;
 }
 
 /**

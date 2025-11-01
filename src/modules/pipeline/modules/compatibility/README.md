@@ -51,10 +51,36 @@ Compatibility 模块是流水线架构的第 3 层，负责处理请求和响应
 - **特性**:
   - OpenAI 格式 ↔ GLM 格式转换（最小清理）
   - 思考内容（thinking）处理（私有 <think>…</think> 清理）
-  - 工具调用兼容性（仅保留最近一轮 `assistant.tool_calls`，空数组字段删除）
+  - 工具调用兼容性（严格不在兼容层进行“文本→工具”收割；统一入口在 llmswitch-core）
   - 过滤 `view_image` 的非图片路径调用（仅允许常见图片后缀）
   - 删除空的 user/assistant 消息（无 content 且无 tool_calls）
-  - 1210/1214 错误兼容：严格不伪造工具配对，删除非法调用；默认 `tool_choice=auto`
+  - 1210/1214 错误兼容：严格不伪造工具配对；默认 `tool_choice=auto`
+  - 清洗“最后一条工具返回内容”（仅最后一条 role=tool）：固定模式去噪 + 长度上限（默认 512 字节）
+
+#### GLM 专用：最后一条工具返回内容清洗（Fail-Fast + 暴露问题）
+
+为避免上游（GLM）因历史工具回显噪声导致 500，我们在兼容层实施“仅清洗最后一条工具返回内容”的最小策略，既保留工具记忆，又消除易触发错误的噪声：
+
+- 作用范围：
+  - 只定位“最后一条 role=tool 消息”的 `content`，不删除任何历史，不修改消息结构与顺序。
+- 固定去噪模式（不改变语义）：
+  - 移除常见拒绝/环境信息片段：`failed in sandbox`、`unsupported call`、`工具调用不可用` 等。
+  - 可选清除明显的工具结果封套噪声（如极长 stdout/stderr/结果包标记），保持文本可读性。
+- 长度上限：
+  - 默认 512 字节；超出时按 UTF-8 字节预算截断，并在预算内追加标记 `…[truncated to 512B]`，确保（内容+标记）总计不超过 512B。
+  - 理由：GLM 对载荷长度及非结构化大块文本敏感；仅对“最后一条工具返回”限幅即可消除 500 根因。
+- 边界与职责：
+  - 仅在 GLM 兼容层执行最小清洗；工具引导/工具规范化仍由 llmswitch-core 统一入口处理。
+  - 不对早期的工具历史做删除（避免丢失“工具记忆”）。
+
+验证结论（样本 `req_1761995666461_tp5iqay5y`）：
+
+- 原样（含大量 role=tool 历史与回显）：500。
+- 仅将末条 user 改 ASCII：200（绕过，但非根因修复）。
+- 删除全部 role=tool 历史：200（代价大，丢记忆，不采用）。
+- 保留全部历史，仅清洗“最后一条 role=tool 内容”为 512 字节并去噪：200（推荐方案）。
+
+该策略默认启用，无开关，固定生效（遵循“唯一入口/明确策略”）。
 
 ### 🌊 iFlow 兼容性
 - **实现文件**: `iflow-compatibility.ts`
@@ -536,6 +562,11 @@ console.log({
 - **Provider**: LM Studio, Qwen, GLM, iFlow
 - **请求转换**: 通过 Compatibility 层进行格式适配
 - **响应转换**: 转换回标准 OpenAI 格式
+
+### GLM Coding 端点（推荐）
+- **基础路径**: `https://open.bigmodel.cn/api/coding/paas/v4`
+- **聊天补全**: `https://open.bigmodel.cn/api/coding/paas/v4/chat/completions`
+- 说明：与常规 `https://open.bigmodel.cn/api/paas/v4/chat/completions` 相比，coding 路径在计费/配额与可用性上更稳定；本项目在 GLM 兼容层测试中统一使用 coding 路径。
 
 ### Responses 协议
 - **请求路径**: `/v1/responses` → LLM Switch → Chat → Compatibility

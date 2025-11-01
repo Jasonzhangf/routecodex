@@ -148,7 +148,7 @@ export function createOpenAIStandard(
 /**
  * 便捷函数 - 从V1配置转换
  */
-export function fromV1Config(_v1Config: any, _dependencies: ModuleDependencies): IProviderV2 {
+export function fromV1Config(_v1Config: unknown, _dependencies: ModuleDependencies): IProviderV2 {
   // 这里会实现V1到V2的配置转换
   // 实际实现在api/config-provider.ts中
   throw new Error('V1 config transformation not implemented yet');

@@ -307,7 +307,7 @@ class BaseOAuthClient implements IOAuthClient {
     return this.currentToken;
   }
 
-  updateTokenStorage(storage: TokenStorage, tokenData: any): void {
+  updateTokenStorage(storage: TokenStorage, tokenData: unknown): void {
     // 更新token存储
     Object.assign(storage, tokenData);
   }

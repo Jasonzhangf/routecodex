@@ -37,7 +37,7 @@ function createMockContext(stage: HookStage): HookExecutionContext {
 /**
  * 模拟请求数据
  */
-function createMockRequest(): any {
+function createMockRequest(): unknown {
   return {
     model: 'gpt-3.5-turbo',
     messages: [
@@ -66,7 +66,7 @@ function createMockRequest(): any {
 /**
  * 模拟响应数据
  */
-function createMockResponse(): any {
+function createMockResponse(): unknown {
   return {
     status: 200,
     headers: {
@@ -110,7 +110,7 @@ async function testRequestPreprocessingHook(): Promise<void> {
   const result = await BidirectionalHookManager.executeHookChain(
     HookStage.REQUEST_PREPROCESSING,
     'request',
-    requestData,
+    requestData as any,
     context
   );
 
@@ -137,7 +137,7 @@ async function testAuthenticationHook(): Promise<void> {
   const result = await BidirectionalHookManager.executeHookChain(
     HookStage.AUTHENTICATION,
     'auth',
-    authData,
+    authData as any,
     context
   );
 
@@ -158,7 +158,7 @@ async function testHttpRequestHook(): Promise<void> {
   const result = await BidirectionalHookManager.executeHookChain(
     HookStage.HTTP_REQUEST,
     'request',
-    requestData,
+    requestData as any,
     context
   );
 
@@ -179,14 +179,14 @@ async function testHttpResponseHook(): Promise<void> {
   const result = await BidirectionalHookManager.executeHookChain(
     HookStage.HTTP_RESPONSE,
     'response',
-    responseData,
+    responseData as any,
     context
   );
 
   console.log('✅ HTTP响应Hook测试完成');
-  console.log(`📊 响应状态码: ${responseData.status}`);
-  console.log(`📊 内容长度检测: ${!!responseData.data?.choices?.[0]?.message?.content?.length}`);
-  console.log(`📊 Token使用统计: ${!!responseData.data?.usage}`);
+  console.log(`📊 响应状态码: ${(responseData as any).status}`);
+  console.log(`📊 内容长度检测: ${!!(responseData as any).data?.choices?.[0]?.message?.content?.length}`);
+  console.log(`📊 Token使用统计: ${!!(responseData as any).data?.usage}`);
 }
 
 /**
@@ -197,7 +197,7 @@ async function testResponsePostProcessingHook(): Promise<void> {
 
   const context = createMockContext(HookStage.RESPONSE_POSTPROCESSING);
   const responseData = {
-    data: createMockResponse().data,
+    data: (createMockResponse() as any).data,
     status: 200,
     headers: {}
   };
@@ -205,7 +205,7 @@ async function testResponsePostProcessingHook(): Promise<void> {
   const result = await BidirectionalHookManager.executeHookChain(
     HookStage.RESPONSE_POSTPROCESSING,
     'response',
-    responseData,
+    responseData as any,
     context
   );
 
@@ -307,7 +307,7 @@ async function testHookPriority(): Promise<void> {
   const result = await BidirectionalHookManager.executeHookChain(
     HookStage.REQUEST_PREPROCESSING,
     'request',
-    requestData,
+    requestData as any,
     context
   );
 
@@ -373,7 +373,7 @@ async function testPerformanceThresholds(): Promise<void> {
   const result = await BidirectionalHookManager.executeHookChain(
     HookStage.REQUEST_PREPROCESSING,
     'request',
-    requestData,
+    requestData as any,
     context
   );
 

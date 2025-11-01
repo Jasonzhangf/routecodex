@@ -24,6 +24,7 @@ export class GLMCompatibility implements CompatibilityModule {
   private isInitialized = false;
   private logger: PipelineDebugLoggerInterface;
   private readonly forceDisableThinking: boolean;
+  private readonly compatPolicy: { removeFunctionStrict: boolean; useCoreNormalize: boolean };
   // Mapping config removed: router layer must not parse/reshape tool arguments.
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
@@ -32,6 +33,14 @@ export class GLMCompatibility implements CompatibilityModule {
     this.config = config;
     this.forceDisableThinking = process.env.RCC_GLM_DISABLE_THINKING === '1';
     this.thinkingDefaults = this.normalizeThinkingConfig(this.config?.config?.thinking);
+    const cfg = (this.config?.config as any) || {};
+    const compat = (cfg.compat || {}) as Record<string, unknown>;
+    const envRemove = String(process.env.RCC_GLM_REMOVE_FUNCTION_STRICT || '1') !== '0';
+    const envNormalize = String(process.env.RCC_GLM_USE_CORE_NORMALIZE || '0') === '1';
+    this.compatPolicy = {
+      removeFunctionStrict: typeof compat.removeFunctionStrict === 'boolean' ? compat.removeFunctionStrict : envRemove,
+      useCoreNormalize: typeof compat.useCoreNormalize === 'boolean' ? compat.useCoreNormalize : envNormalize,
+    };
   }
 
   async initialize(): Promise<void> {
@@ -85,7 +94,7 @@ export class GLMCompatibility implements CompatibilityModule {
       }
     }
 
-    this.sanitizeRequest(outbound);
+    await this.sanitizeRequest(outbound);
     try {
       const reqId = (dto?.route?.requestId as string) || `req_${Date.now()}`;
       const os = await import('os'); const path = await import('path'); const fs = await import('fs/promises');
@@ -226,7 +235,7 @@ export class GLMCompatibility implements CompatibilityModule {
     return Object.keys(map).length > 0 ? map : null;
   }
 
-  private sanitizeRequest(payload: UnknownObject): void {
+  private async sanitizeRequest(payload: UnknownObject): Promise<void> {
     if (!payload || typeof payload !== 'object') {
       return;
     }
@@ -240,11 +249,25 @@ export class GLMCompatibility implements CompatibilityModule {
       });
     }
 
-    const sanitized = result.payload;
+    let sanitized = result.payload;
     // Light-touch: overlay sanitized fields but do NOT prune unknown keys
     for (const [key, value] of Object.entries(sanitized)) {
       (payload as UnknownObject)[key] = value as unknown;
     }
+
+    // 可选：使用核心归一化（配置驱动），仅做安全的轻量规范，不做语义改写
+    try {
+      if (this.compatPolicy.useCoreNormalize) {
+        const core = await import('rcc-llmswitch-core/conversion');
+        const normalized = (core as any)?.normalizeChatRequest?.(payload as any);
+        if (normalized && typeof normalized === 'object') {
+          sanitized = normalized as UnknownObject;
+          for (const [key, value] of Object.entries(sanitized)) {
+            (payload as UnknownObject)[key] = value as unknown;
+          }
+        }
+      }
+    } catch { /* ignore */ }
 
     // 工具文本化规范化由 llmswitch-core 统一处理；GLM 层不再收割 assistant.content，避免重复处理
     // 但为避免 GLM 500（上游对超大/非结构化工具结果文本敏感），做“尾部最小化清理”：
@@ -257,8 +280,8 @@ export class GLMCompatibility implements CompatibilityModule {
         let idx = -1;
         for (let i = msgs.length - 1; i >= 0; i--) {
           const m = msgs[i];
-          if (!m || typeof m !== 'object') continue;
-          if (String(m.role || '').toLowerCase() !== 'assistant') continue;
+          if (!m || typeof m !== 'object') {continue;}
+          if (String(m.role || '').toLowerCase() !== 'assistant') {continue;}
           if (Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0) { idx = i; break; }
         }
         if (idx >= 0 && idx + 1 < msgs.length) {
@@ -269,7 +292,7 @@ export class GLMCompatibility implements CompatibilityModule {
             // 非结构化工具结果常见于 assistant.content 文本
             const shouldTrim = (v: unknown): boolean => {
               try {
-                if (typeof v !== 'string') return false;
+                if (typeof v !== 'string') {return false;}
                 const s = String(v);
                 const big = s.length > 8000; // 明显膨胀
                 const looksResult = /(\bexit_code\b|\bduration_seconds\b|\bstdout\b|\bstderr\b)/i.test(s)
@@ -303,10 +326,76 @@ export class GLMCompatibility implements CompatibilityModule {
         additional: { operation: 'glm-tail-cleanup' }
       });
     }
+
+    // 删除 GLM 不接受的工具字段（配置驱动，默认开启）
+    try {
+      if (this.compatPolicy.removeFunctionStrict && Array.isArray((payload as any).tools)) {
+        for (const t of ((payload as any).tools as any[])) {
+          if (!t || typeof t !== 'object') {continue;}
+          const fn = (t as any).function;
+          if (fn && typeof fn === 'object' && 'strict' in fn) {
+            delete (fn as any).strict;
+          }
+        }
+      }
+    } catch { /* ignore */ }
+
+    // 精准清洗：仅清洗“最后一条 role=tool 的内容”——固定模式去噪并限制长度（固定 512 字节，无开关）
+    // 目的：保留工具记忆，不删除历史，仅移除容易触发 GLM 500 的噪声/超长文本
+    try {
+      const msgs: any[] = Array.isArray((payload as any).messages) ? ((payload as any).messages as any[]) : [];
+      if (msgs.length > 0) {
+        let lastToolIdx = -1;
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          const m = msgs[i];
+          if (!m || typeof m !== 'object') {continue;}
+          const role = String((m as any).role || '').toLowerCase();
+          if (role === 'tool') { lastToolIdx = i; break; }
+        }
+        if (lastToolIdx >= 0) {
+          const maxLen = 512;
+          const badPatterns: RegExp[] = [
+            /failed in sandbox/ig,
+            /unsupported call/ig,
+            /工具调用不可用/ig,
+          ];
+          const tmsg = msgs[lastToolIdx];
+          const c = (tmsg && typeof tmsg.content === 'string') ? String(tmsg.content) : '';
+          if (c && typeof c === 'string') {
+            let cleaned = c;
+            for (const re of badPatterns) {cleaned = cleaned.replace(re, '');}
+            // 以 UTF-8 字节为单位进行截断，并在预算内追加提示标记
+            const marker = '…[truncated to 512B]';
+            const toBytes = (s: string) => Buffer.byteLength(s, 'utf8');
+            const sliceUtf8 = (s: string, bytes: number) => {
+              if (bytes <= 0) {return '';}
+              const buf = Buffer.from(s, 'utf8');
+              if (buf.length <= bytes) {return s;}
+              const cut = buf.subarray(0, bytes);
+              let out = cut.toString('utf8');
+              // 保障回转后不超预算
+              while (toBytes(out) > bytes) {
+                out = out.slice(0, Math.max(0, out.length - 1));
+              }
+              return out;
+            };
+            const cleanedBytes = toBytes(cleaned);
+            if (cleanedBytes > maxLen) {
+              const allowance = Math.max(0, maxLen - toBytes(marker));
+              const head = sliceUtf8(cleaned, allowance);
+              (tmsg as any).content = head + marker;
+            } else {
+              (tmsg as any).content = cleaned;
+            }
+            this.logger.logModule(this.id, 'glm-last-tool-clean', { index: lastToolIdx, originalBytes: c.length, cleanedBytes: cleaned.length, maxLen });
+          }
+        }
+      }
+    } catch { /* ignore */ }
   }
 
   private normalizeResponse(resp: any, metadata?: any): any {
-    if (!resp || typeof resp !== 'object') return resp;
+    if (!resp || typeof resp !== 'object') {return resp;}
     const entryEndpoint = metadata?.entryEndpoint || metadata?.endpoint || '';
     const reasoningPolicy = this.resolveReasoningPolicy(entryEndpoint);
     // Already OpenAI chat completion
@@ -403,7 +492,7 @@ export class GLMCompatibility implements CompatibilityModule {
       const toolCalls: any[] = [];
       try {
         for (const b of blocks) {
-          if (!b || typeof b !== 'object') continue;
+          if (!b || typeof b !== 'object') {continue;}
           const type = String((b as any).type || '').toLowerCase();
           if (type === 'tool_use') {
             const name = typeof (b as any).name === 'string' ? (b as any).name : undefined;
@@ -457,12 +546,12 @@ export class GLMCompatibility implements CompatibilityModule {
   private resolveReasoningPolicy(entryEndpointRaw: string): 'strip' | 'preserve' {
     const policy = String(process.env.RCC_REASONING_POLICY || 'auto').trim().toLowerCase();
     const ep = String(entryEndpointRaw || '').toLowerCase();
-    if (policy === 'strip') return 'strip';
-    if (policy === 'preserve') return 'preserve';
+    if (policy === 'strip') {return 'strip';}
+    if (policy === 'preserve') {return 'preserve';}
     // auto: chat/messages strip; responses preserve
-    if (ep.includes('/v1/responses')) return 'preserve';
-    if (ep.includes('/v1/chat/completions')) return 'strip';
-    if (ep.includes('/v1/messages')) return 'strip';
+    if (ep.includes('/v1/responses')) {return 'preserve';}
+    if (ep.includes('/v1/chat/completions')) {return 'strip';}
+    if (ep.includes('/v1/messages')) {return 'strip';}
     return 'strip';
   }
 
@@ -471,17 +560,17 @@ export class GLMCompatibility implements CompatibilityModule {
   private flattenAnthropicContent(blocks: any[]): string[] {
     const texts: string[] = [];
     for (const block of blocks) {
-      if (!block) continue;
-      if (typeof block === 'string') { const t = block.trim(); if (t) texts.push(t); continue; }
+      if (!block) {continue;}
+      if (typeof block === 'string') { const t = block.trim(); if (t) {texts.push(t);} continue; }
       if (typeof block === 'object') {
         const type = String((block as any).type || '').toLowerCase();
         if ((type === 'text' || type === 'input_text' || type === 'output_text') && typeof (block as any).text === 'string') {
-          const t = (block as any).text.trim(); if (t) texts.push(t); continue; }
+          const t = (block as any).text.trim(); if (t) {texts.push(t);} continue; }
         if (Array.isArray((block as any).content)) {
           texts.push(...this.flattenAnthropicContent((block as any).content));
           continue;
         }
-        if (typeof (block as any).content === 'string') { const t = (block as any).content.trim(); if (t) texts.push(t); continue; }
+        if (typeof (block as any).content === 'string') { const t = (block as any).content.trim(); if (t) {texts.push(t);} continue; }
       }
     }
     return texts;

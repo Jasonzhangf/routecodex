@@ -21,10 +21,10 @@ export class GenericResponsesProvider implements ProviderModule {
   async initialize(): Promise<void> { this.isInitialized = true; }
 
   async processIncoming(request: SharedPipelineRequest): Promise<unknown> {
-    if (!this.isInitialized) await this.initialize();
+    if (!this.isInitialized) {await this.initialize();}
     const cfg = (this.config.config || {}) as any;
     const baseUrl = String(cfg.baseUrl || cfg.baseURL || '').replace(/\/+$/, '');
-    if (!baseUrl) throw new Error('generic-responses: baseUrl required');
+    if (!baseUrl) {throw new Error('generic-responses: baseUrl required');}
     const apiKey = String((cfg.auth && (cfg.auth.apiKey || cfg.auth.token)) || '').trim();
     const url = `${baseUrl}/responses`;
     const headers: Record<string, string> = {
@@ -32,7 +32,7 @@ export class GenericResponsesProvider implements ProviderModule {
       'accept': 'application/json',
       'OpenAI-Beta': process.env.RCC_OPENAI_RESPONSES_BETA || 'responses-2024-12-17',
     };
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+    if (apiKey) {headers['Authorization'] = `Bearer ${apiKey}`;}
 
     const payload = request.data as any;
     const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });

@@ -202,7 +202,7 @@ export class TransformationEngine {
       const validations = await this.validateData(data);
 
       // Apply transformations
-      let transformedData: R = { ...(data as any) };
+      const transformedData: R = { ...(data as any) };
       const logs: TransformationLog[] = [];
       let currentDepth = 0;
 

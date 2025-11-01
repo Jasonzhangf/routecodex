@@ -87,50 +87,43 @@ export class ChatCompletionsHandler extends BaseHandler {
     });
 
     try {
-      // Optional: Replace/Inject system prompt into OpenAI Chat messages (mirrors Anthropic injection)
+      // 可选：受控的“静态”系统提示注入（默认关闭）。
+      // 禁止样本抓取式注入；仅当明确配置 ROUTECODEX_ENABLE_SERVER_SYSTEM_PROMPT=1 且提供
+      // ROUTECODEX_SERVER_SYSTEM_PROMPT=</path/to/prompt.txt> 时，才会替换/插入一条 system。
       try {
-        const { shouldReplaceSystemPrompt, SystemPromptLoader, replaceSystemInOpenAIMessages } = await import('../../utils/system-prompt-loader.js');
-        const sel = shouldReplaceSystemPrompt();
-        if (sel) {
-          const loader = SystemPromptLoader.getInstance();
-          const sys = await loader.getPrompt(sel);
+        const enable = String(process.env.ROUTECODEX_ENABLE_SERVER_SYSTEM_PROMPT || '0') === '1';
+        const filePath = String(process.env.ROUTECODEX_SERVER_SYSTEM_PROMPT || '').trim();
+        if (enable && filePath && Array.isArray((req.body as any)?.messages)) {
+          const fs = await import('fs/promises');
+          const sysText = await fs.readFile(filePath, 'utf-8');
+          const messages = (req.body as any).messages as any[];
           const currentSys = (() => {
             try {
-              const m = Array.isArray((req.body as any)?.messages) ? (req.body as any).messages[0] : null;
-              return (m && typeof m === 'object' && (m as any).role === 'system' && typeof (m as any).content === 'string') ? String((m as any).content) : '';
+              const m = messages[0];
+              return (m && typeof m === 'object' && m.role === 'system' && typeof m.content === 'string') ? String(m.content) : '';
             } catch { return ''; }
           })();
           const hasMdMarkers = /\bCLAUDE\.md\b|\bAGENT(?:S)?\.md\b/i.test(currentSys);
-          if (sys && Array.isArray((req.body as any)?.messages) && !hasMdMarkers) {
-            (req.body as any).messages = replaceSystemInOpenAIMessages((req.body as any).messages, sys) as any[];
-            try { res.setHeader('x-rc-system-prompt-source', sel); } catch (error) {
-              // 快速死亡原则 - 暴露响应头设置失败
-              throw new EnhancedRouteCodexError(error as Error, {
-                module: 'ChatCompletionsHandler',
-                file: 'src/server/handlers/chat-completions.ts',
-                function: 'handleRequest',
-                line: 100,
-                requestId,
-                additional: {
-                  operation: 'system-prompt-header',
-                  promptSource: sel
-                }
-              });
+          const replaceSystemInOpenAIMessagesSimple = (msgs: any[], sys: string): any[] => {
+            if (!Array.isArray(msgs)) {return msgs;}
+            const out = msgs.slice();
+            if (out.length > 0 && out[0] && out[0].role === 'system') {
+              out[0] = { ...out[0], role: 'system', content: sys };
+            } else {
+              out.unshift({ role: 'system', content: sys });
             }
+            return out;
+          };
+          if (!hasMdMarkers) {
+            (req.body as any).messages = replaceSystemInOpenAIMessagesSimple(messages, sysText) as any[];
+            try { res.setHeader('x-rc-system-prompt-source', 'static-file'); } catch { /* ignore */ }
           }
         }
       } catch (error) {
-        // 快速死亡原则 - 暴露系统提示加载失败
-        throw new EnhancedRouteCodexError(error as Error, {
-          module: 'ChatCompletionsHandler',
-          file: 'src/server/handlers/chat-completions.ts',
-          function: 'handleRequest',
-          line: 103,
+        // 注入失败不影响主流程
+        this.logger.logModule('ChatCompletionsHandler', 'system-prompt-static-skip', {
           requestId,
-          additional: {
-            operation: 'system-prompt-replacement',
-            error: 'System prompt loader failure'
-          }
+          reason: (error as Error)?.message || String(error)
         });
       }
 
@@ -144,7 +137,7 @@ export class ChatCompletionsHandler extends BaseHandler {
           throw new RouteCodexError('Chat endpoint only accepts OpenAI Chat payload (messages: string or OpenAI content parts). Use the Responses endpoint for Responses-shaped payloads.', 'invalid_protocol', 400);
         }
       } catch (e) {
-        if (e instanceof RouteCodexError) throw e;
+        if (e instanceof RouteCodexError) {throw e;}
       }
 
       // Tool guidance和归一化在 llmswitch-core 的 OpenAI 工具阶段统一处理
@@ -167,7 +160,7 @@ export class ChatCompletionsHandler extends BaseHandler {
       }
 
       // Return JSON response
-      let payload = pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
+      const payload = pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
         ? (pipelineResponse as Record<string, unknown>).data
         : pipelineResponse;
       // 工具文本→tool_calls 的归一化已在 llmswitch-core (openai-openai codec) 统一完成，这里不再做重复处理
@@ -321,13 +314,13 @@ export class ChatCompletionsHandler extends BaseHandler {
       const c: Record<string, number> = { system: 0, user: 0, assistant: 0, tool: 0, unknown: 0 };
       for (const m of Array.isArray(msgs) ? msgs : []) {
         const r = String(m?.role || '').toLowerCase();
-        if (r === 'system' || r === 'user' || r === 'assistant' || r === 'tool') c[r] += 1; else c.unknown += 1;
+        if (r === 'system' || r === 'user' || r === 'assistant' || r === 'tool') {c[r] += 1;} else {c.unknown += 1;}
       }
       return c;
     };
     const writeSnapshot = (kind: 'pre-llmswitch' | 'post-llmswitch', payload: any) => {
       try {
-        if (!snapshotDir) return;
+        if (!snapshotDir) {return;}
         const fs = require('fs'); const path = require('path');
         const file = path.join(snapshotDir, `${requestId}_${kind}.json`);
         const msgs = Array.isArray(payload?.messages) ? payload.messages : [];
