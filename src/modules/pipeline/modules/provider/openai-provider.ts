@@ -378,62 +378,22 @@ export class OpenAIProvider implements ProviderModule {
         stream: (request as { stream?: boolean }).stream ?? false
       };
 
-      // Tool role content normalization is handled in llmswitch-openai-openai; provider must not transform messages.
-
-      // Safe compaction: merge consecutive assistant tool_calls blocks and coalesce consecutive tool messages
+      // Provider不做消息/工具结构转换与合并；所有逻辑在 llmswitch-core 统一处理
+      // 仅记录一次 assistant+tool_calls 的 content 类型分布，便于定位谁在改写 content
       try {
         const msgs = Array.isArray((chatRequest as any).messages) ? ((chatRequest as any).messages as any[]) : [];
-        const compacted: any[] = [];
-        let pendingToolCalls: any[] = [];
-        const flushToolCalls = () => {
-          if (pendingToolCalls.length) {
-            compacted.push({ role: 'assistant', tool_calls: pendingToolCalls });
-            pendingToolCalls = [];
-          }
-        };
+        const types: Record<string, number> = {};
         for (const m of msgs) {
-          if (!m || typeof m !== 'object') { flushToolCalls(); compacted.push(m); continue; }
-          if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
-            pendingToolCalls.push(...m.tool_calls);
-            continue;
+          if (m && m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+            const t = (m.content === null) ? 'null' : (typeof m.content);
+            types[t] = (types[t] || 0) + 1;
           }
-          if (m.role === 'tool') {
-            // flush any pending assistant tool_calls before tool messages
-            flushToolCalls();
-            const prev = compacted[compacted.length - 1];
-            if (prev && prev.role === 'tool' && typeof prev.tool_call_id === 'string' && prev.tool_call_id === m.tool_call_id) {
-              const a = typeof prev.content === 'string' ? prev.content : String(prev.content ?? '');
-              const b = typeof m.content === 'string' ? m.content : String(m.content ?? '');
-              prev.content = a && b ? (a + '\n' + b) : (a || b);
-              continue;
-            }
-            compacted.push(m);
-            continue;
-          }
-          // for normal text or other roles, flush pending and pass through
-          flushToolCalls();
-          compacted.push(m);
         }
-        flushToolCalls();
-        (chatRequest as any).messages = compacted;
-      } catch { /* no-op on compaction errors */ }
-
-      // Removed provider-level dotted tool name canonicalization to keep
-      // transformation responsibilities within LLMSwitch conversion layer.
-
-      // Add tools if provided (non-GLM or already preflighted)
-      {
-        const tools = (request as { tools?: any[] }).tools;
-        if (Array.isArray(tools) && tools.length > 0 && !('tools' in chatRequest)) {
-          chatRequest.tools = tools;
-          chatRequest.tool_choice = (request as { tool_choice?: string }).tool_choice || 'auto';
-        }
-      }
-
-      // Add response format if provided
-      if ((request as { response_format?: any }).response_format) {
-        chatRequest.response_format = (request as { response_format?: any }).response_format;
-      }
+        const summary = { stage: 'provider-pre-send', assistant_tool_calls: Object.values(types).reduce((a,b)=>a+b,0), content_types: types };
+        const baseDir = path.join(homedir(), '.routecodex', 'codex-samples', 'openai-chat');
+        await fs.mkdir(baseDir, { recursive: true });
+        await fs.writeFile(path.join(baseDir, `${requestId}_provider-summary.json`), JSON.stringify(summary, null, 2), 'utf-8');
+      } catch { /* ignore */ }
 
       // Persist final payload snapshots for observability
       try {

@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.74.1",
+  "version": "0.74.11",
   "description": "Multi-provider OpenAI proxy server with native dry-run capabilities",
   "type": "module",
   "main": "dist/index.js",
@@ -93,6 +93,7 @@
     "verify:split-args": "node scripts/verify-toolcall-arg-splitting.mjs",
     "verify:pairing": "node scripts/verify-tool-pairing.mjs",
     "verify:tools:offline": "node scripts/verify-tools-offline.mjs",
+    "verify:tools:strict": "node scripts/verify-tool-arguments.mjs",
     "depcheck": "depcheck",
     "license:check": "echo 'license check temporarily disabled'",
     "ncu:check": "ncu --errorLevel 2",

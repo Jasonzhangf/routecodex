@@ -88,8 +88,8 @@ export class PipelineModuleRegistryImpl implements PipelineModuleRegistry {
     if (!entry) {
       // Suggest migration for deprecated/old type names
       const suggestions: Record<string, string> = {
-        'openai-normalizer': 'llmswitch-openai-openai',
-        'llm-switch-openai-openai': 'llmswitch-openai-openai',
+        'openai-normalizer': 'llmswitch-conversion-router',
+        'llm-switch-openai-openai': 'llmswitch-conversion-router',
         'llm-switch-anthropic-openai': 'llmswitch-anthropic-openai',
       };
       const hint = suggestions[config.type];

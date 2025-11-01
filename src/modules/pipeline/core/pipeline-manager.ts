@@ -840,14 +840,15 @@ export class PipelineManager implements RCCBaseModule {
   private initializeModuleRegistry(): void {
     // Register default module factories
     // Canonical LLMSwitch names
-    this.registry.registerModule('llmswitch-openai-openai', this.createOpenAINormalizerModule);
+    // Route legacy openai normalizer type to conversion router to ensure single entrypoint
+    this.registry.registerModule('llmswitch-openai-openai', this.createConversionRouterModule);
     this.registry.registerModule('llmswitch-anthropic-openai', this.createAnthropicOpenAIConverterModule);
     this.registry.registerModule('llmswitch-response-chat', this.createResponsesChatLLMSwitchModule);
     this.registry.registerModule('llmswitch-conversion-router', this.createConversionRouterModule);
     this.registry.registerModule('llmswitch-responses-passthrough', this.createResponsesPassthroughLLMSwitchModule);
     // unified switch removed; use llmswitch-conversion-router instead
-    // Aliases for backward compatibility (merged-config may still emit these)
-    this.registry.registerModule('openai-normalizer', this.createOpenAINormalizerModule);
+    // Aliases for backward compatibility (map to conversion-router to keep single path)
+    this.registry.registerModule('openai-normalizer', this.createConversionRouterModule);
     this.registry.registerModule('anthropic-openai-converter', this.createAnthropicOpenAIConverterModule);
     this.registry.registerModule('responses-chat-switch', this.createResponsesChatLLMSwitchModule);
     this.registry.registerModule('streaming-control', this.createStreamingControlModule);

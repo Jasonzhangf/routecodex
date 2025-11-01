@@ -136,13 +136,9 @@ function stripThinkingAndToolMarkup(text: string): string {
   if (typeof text !== 'string' || !text) return '' + (text ?? '');
   let out = text;
   try {
-    // Remove <think>...</think> blocks (single or multiline)
+    // 仅移除思考标签；工具相关标记由 llmswitch-core canonicalizer 统一处理
     out = out.replace(/<think>[\s\S]*?<\/think>/g, '');
-    // Remove stray <think> or </think> tokens if unmatched
     out = out.replace(/<\/?think>/g, '');
-    // Remove inline <tool_call>…</tool_call> blocks that some clients embed in prompts
-    out = out.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '');
-    out = out.replace(/<\/?tool_call>/g, '');
   } catch { /* non-blocking */ }
   return out;
 }
@@ -276,7 +272,13 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
           if (input === null || input === undefined) return {};
           if (typeof input === 'object') return input;
           if (typeof input === 'string') {
-            try { return JSON.parse(input); } catch { return {}; }
+            const s = input;
+            try { return JSON.parse(s); } catch {
+              // 精确修复：当上游历史中 arguments 是无法解析的 JSON 字符串时，
+              // 不再丢弃为 {}，而是以 { raw: <原字符串> } 形式保留，满足 GLM 对 object 的要求，
+              // 同时避免丢失原始意图，保持与 CCR“保留原始数据”一致。
+              return { raw: s };
+            }
           }
           return {};
         };
