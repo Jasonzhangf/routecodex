@@ -96,6 +96,14 @@ export class PipelineManager implements RCCBaseModule {
       // Pre-create all pipelines
       await this.createPipelines();
 
+      // After creation, expose a concise summary for consistency checks
+      try {
+        this.logger.logPipeline('manager', 'pipelines-summary', {
+          ids: Array.from(this.pipelines.keys()),
+          count: this.pipelines.size
+        });
+      } catch { /* ignore */ }
+
       this.isInitialized = true;
       this.logger.logPipeline('manager', 'initialized', {
         createdPipelines: this.pipelines.size
@@ -107,6 +115,20 @@ export class PipelineManager implements RCCBaseModule {
       });
       throw error;
     }
+  }
+
+  /**
+   * Returns list of created pipeline IDs (for router consistency checks)
+   */
+  public getPipelineIds(): string[] {
+    return Array.from(this.pipelines.keys());
+  }
+
+  /**
+   * Check whether a pipeline with the given id exists
+   */
+  public hasPipeline(id: string): boolean {
+    return this.pipelines.has(id);
   }
 
   /**

@@ -56,8 +56,7 @@ export class HttpClient {
       maxRetries: config.maxRetries || 3,
       retryDelay: config.retryDelay || 1000,
       defaultHeaders: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'RouteCodex/2.0'
+        'Content-Type': 'application/json'
       }
     };
   }

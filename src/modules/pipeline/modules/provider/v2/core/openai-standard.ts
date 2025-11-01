@@ -9,8 +9,6 @@ import { HttpClient } from '../utils/http-client.js';
 import { DynamicProfileLoader, ServiceProfileValidator } from '../config/service-profiles.js';
 import { ApiKeyAuthProvider } from '../auth/apikey-auth.js';
 import { OAuthAuthProvider } from '../auth/oauth-auth.js';
-import { HookStage } from '../config/provider-debug-hooks.js';
-import { registerDebugExampleHooks } from '../hooks/debug-example-hooks.js';
 import { createHookSystemIntegration } from '../hooks/hooks-integration.js';
 import type { IAuthProvider } from '../auth/auth-interface.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
@@ -126,23 +124,20 @@ export class OpenAIStandard extends BaseProvider {
    */
   private configureHookDebugging(): void {
     try {
-      // 注册调试示例Hooks（保持现有行为）
-      registerDebugExampleHooks();
-
-      // 设置调试配置
+      // 设置调试配置（使用统一Hook系统的阶段字符串）
       const debugConfig = {
         enabled: true,
         level: 'verbose',
         maxDataSize: 1024 * 64, // 64KB 单次输出上限，避免过大控制台噪声
         stages: [
-          HookStage.REQUEST_PREPROCESSING,
-          HookStage.REQUEST_VALIDATION,
-          HookStage.AUTHENTICATION,
-          HookStage.HTTP_REQUEST,
-          HookStage.HTTP_RESPONSE,
-          HookStage.RESPONSE_VALIDATION,
-          HookStage.RESPONSE_POSTPROCESSING,
-          HookStage.ERROR_HANDLING
+          'request_preprocessing',
+          'request_validation',
+          'authentication',
+          'http_request',
+          'http_response',
+          'response_validation',
+          'response_postprocessing',
+          'error_handling'
         ],
         outputFormat: 'structured',
         outputTargets: ['console'],
@@ -210,7 +205,6 @@ export class OpenAIStandard extends BaseProvider {
       maxRetries: effectiveRetries,
       defaultHeaders: {
         'Content-Type': 'application/json',
-        'User-Agent': 'RouteCodex/2.0',
         ...(profile.headers || {}),
       }
     });
@@ -232,7 +226,7 @@ export class OpenAIStandard extends BaseProvider {
 
     // 🔍 Hook 1: 请求预处理阶段
     const preprocessResult = await hookManager.executeHookChain(
-      HookStage.REQUEST_PREPROCESSING,
+      'request_preprocessing',
       'request',
       processedRequest,
       context
@@ -242,7 +236,7 @@ export class OpenAIStandard extends BaseProvider {
 
     // 🔍 Hook 2: 请求验证阶段
     const validationResult = await hookManager.executeHookChain(
-      HookStage.REQUEST_VALIDATION,
+      'request_validation',
       'request',
       processedRequest,
       context
@@ -263,7 +257,7 @@ export class OpenAIStandard extends BaseProvider {
 
     // 🔍 Hook 3: HTTP响应阶段
     const httpResponseResult = await hookManager.executeHookChain(
-      HookStage.HTTP_RESPONSE,
+      'http_response',
       'response',
       processedResponse,
       context
@@ -273,7 +267,7 @@ export class OpenAIStandard extends BaseProvider {
 
     // 🔍 Hook 4: 响应验证阶段
     const validationResult = await hookManager.executeHookChain(
-      HookStage.RESPONSE_VALIDATION,
+      'response_validation',
       'response',
       processedResponse,
       context
@@ -283,7 +277,7 @@ export class OpenAIStandard extends BaseProvider {
 
     // 🔍 Hook 5: 响应后处理阶段
     const postprocessResult = await hookManager.executeHookChain(
-      HookStage.RESPONSE_POSTPROCESSING,
+      'response_postprocessing',
       'response',
       processedResponse,
       context
@@ -320,7 +314,7 @@ export class OpenAIStandard extends BaseProvider {
 
     // 🔍 Hook 8: HTTP请求阶段
     const httpRequestResult = await hookManager.executeHookChain(
-      HookStage.HTTP_REQUEST,
+      'http_request',
       'request',
       request,
       this.createProviderContext()
@@ -336,7 +330,7 @@ export class OpenAIStandard extends BaseProvider {
       // 🔍 Hook 9: 错误处理阶段
       const targetUrl = `${this.getEffectiveBaseUrl().replace(/\/$/, '')}/${endpoint.startsWith('/') ? endpoint.slice(1) : endpoint}`;
       const errorResult = await hookManager.executeHookChain(
-        HookStage.ERROR_HANDLING,
+        'error_handling',
         'error',
         { error, request: processedRequest, url: targetUrl, headers },
         this.createProviderContext()
@@ -386,8 +380,7 @@ export class OpenAIStandard extends BaseProvider {
 
   private async buildRequestHeaders(): Promise<Record<string, string>> {
     const baseHeaders: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'User-Agent': 'RouteCodex/2.0'
+      'Content-Type': 'application/json'
     };
 
     // 服务特定头部
@@ -411,7 +404,7 @@ export class OpenAIStandard extends BaseProvider {
 
     // 🔍 Hook 6: 认证阶段
     await hookManager.executeHookChain(
-      HookStage.AUTHENTICATION,
+      'authentication',
       'auth',
       authHeaders,
       this.createProviderContext()
@@ -419,7 +412,7 @@ export class OpenAIStandard extends BaseProvider {
 
     // 🔍 Hook 7: Headers处理阶段
     const headersResult = await hookManager.executeHookChain(
-      HookStage.REQUEST_PREPROCESSING,
+      'request_preprocessing',
       'headers',
       finalHeaders,
       this.createProviderContext()

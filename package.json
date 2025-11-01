@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.74.36",
+  "version": "0.74.39",
   "description": "Multi-provider OpenAI proxy server with native dry-run capabilities",
   "type": "module",
   "main": "dist/index.js",

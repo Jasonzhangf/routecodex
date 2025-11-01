@@ -480,6 +480,30 @@ export class HttpServer extends BaseModule implements IHttpServer {
     } catch (error) {
       console.error('Failed to attach route pools to OpenAI router:', error);
     }
+
+    // Consistency check: every bound pipeline id must exist in PipelineManager
+    try {
+      if (this.pipelineManager && routePools) {
+        const existing = new Set<string>(this.pipelineManager.getPipelineIds());
+        const missing: Array<{ route: string; id: string }> = [];
+        for (const [route, ids] of Object.entries(routePools)) {
+          for (const id of ids || []) {
+            if (!existing.has(id)) missing.push({ route, id });
+          }
+        }
+        if (missing.length) {
+          // Fail fast with detailed message
+          const details = missing.map(m => `${m.route}→${m.id}`).join(', ');
+          const err = new Error(`RoutePools reference unknown pipelines: ${details}`);
+          (err as any).code = 'route_pools_inconsistent';
+          throw err;
+        }
+      }
+    } catch (e) {
+      // Surface the problem and stop boot/attachment
+      console.error('Route pools consistency check failed:', e);
+      throw e;
+    }
   }
 
   public attachRouteMeta(routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }>): void {
