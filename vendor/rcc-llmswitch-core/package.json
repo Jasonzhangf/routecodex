@@ -1,0 +1,34 @@
+{
+  "name": "rcc-llmswitch-core",
+  "version": "0.0.0-vendored",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./api": {
+      "import": "./dist/api.js",
+      "types": "./dist/api.d.ts"
+    },
+    "./conversion": {
+      "import": "./dist/conversion/index.js",
+      "types": "./dist/conversion/index.d.ts"
+    },
+    "./conversion/*": {
+      "import": "./dist/conversion/*.js",
+      "types": "./dist/conversion/*.d.ts"
+    },
+    "./llmswitch/*": {
+      "import": "./dist/llmswitch/*.js",
+      "types": "./dist/llmswitch/*.d.ts"
+    },
+    "./guidance": {
+      "import": "./dist/guidance/index.js",
+      "types": "./dist/guidance/index.d.ts"
+    }
+  }
+}

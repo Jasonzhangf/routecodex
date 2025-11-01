@@ -1,0 +1,17 @@
+{
+  "type": "openai-standard",
+  "config": {
+    "providerType": "glm",
+    "baseUrl": "https://open.bigmodel.cn/api/coding/v4",
+    "auth": {
+      "type": "apikey",
+      "apiKey": "${GLM_API_KEY}"
+    },
+    "overrides": {
+      "defaultModel": "glm-4",
+      "headers": {
+        "User-Agent": "RouteCodex/2.0"
+      }
+    }
+  }
+}
