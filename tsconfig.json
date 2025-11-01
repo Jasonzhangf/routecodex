@@ -23,11 +23,15 @@
     "typeRoots": ["./node_modules/@types", "./src/types"],
     "incremental": false,
     "baseUrl": ".",
-    "paths": {
-      "rcc-llmswitch-core/conversion": ["node_modules/rcc-llmswitch-core/dist/conversion/index.d.ts"],
-      "rcc-llmswitch-core/guidance": ["node_modules/rcc-llmswitch-core/dist/guidance/index.d.ts"],
-      "rcc-llmswitch-core/llmswitch/*": ["node_modules/rcc-llmswitch-core/dist/llmswitch/*"]
-    }
+      "paths": {
+        "rcc-llmswitch-core/api": [
+          "sharedmodule/llmswitch-core/dist/api.d.ts",
+          "node_modules/rcc-llmswitch-core/dist/api.d.ts"
+        ],
+        "rcc-llmswitch-core/conversion": ["node_modules/rcc-llmswitch-core/dist/conversion/index.d.ts"],
+        "rcc-llmswitch-core/guidance": ["node_modules/rcc-llmswitch-core/dist/guidance/index.d.ts"],
+        "rcc-llmswitch-core/llmswitch/*": ["node_modules/rcc-llmswitch-core/dist/llmswitch/*"]
+      }
   },
   "include": ["src/**/*"],
   "exclude": [
@@ -43,6 +47,8 @@
     "src/components/EnhancedJsonViewer.css.bak",
     "src/examples/EnhancedJsonViewerExample.tsx.bak",
     "src/utils/message-truncator.ts.bak",
-    "src/components/historical"
+    "src/components/historical",
+    "src/modules/hooks/**/*",
+    "src/modules/pipeline/modules/provider/legacy/**/*"
   ]
 }

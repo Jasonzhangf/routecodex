@@ -9,8 +9,9 @@ import { HttpClient } from '../utils/http-client.js';
 import { DynamicProfileLoader, ServiceProfileValidator } from '../config/service-profiles.js';
 import { ApiKeyAuthProvider } from '../auth/apikey-auth.js';
 import { OAuthAuthProvider } from '../auth/oauth-auth.js';
-import { BidirectionalHookManager, HookStage } from '../config/provider-debug-hooks.js';
+import { HookStage } from '../config/provider-debug-hooks.js';
 import { registerDebugExampleHooks } from '../hooks/debug-example-hooks.js';
+import { createHookSystemIntegration } from '../hooks/hooks-integration.js';
 import type { IAuthProvider } from '../auth/auth-interface.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ProviderContext, ServiceProfile, ProviderType } from '../api/provider-types.js';
@@ -29,6 +30,7 @@ export class OpenAIStandard extends BaseProvider {
   private authProvider: IAuthProvider | null = null;
   private httpClient!: HttpClient;
   private serviceProfile: ServiceProfile;
+  private hookSystemIntegration: any; // Hook系统集成实例
 
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     super(config, dependencies);
@@ -44,6 +46,9 @@ export class OpenAIStandard extends BaseProvider {
 
     // 创建认证提供者
     this.authProvider = this.createAuthProvider();
+
+    // 初始化Hook系统集成
+    this.initializeHookSystem();
   }
 
   /**
@@ -60,43 +65,103 @@ export class OpenAIStandard extends BaseProvider {
         }
       }
 
-      // 打开 Provider 高级 Hook（用于字段输入/输出问题排查）
-      // 默认开启详细级别；如需关闭可在运行时根据实际需要修改 setDebugConfig
-      try {
-        registerDebugExampleHooks();
-        BidirectionalHookManager.setDebugConfig({
-          enabled: true,
-          level: 'verbose',
-          maxDataSize: 1024 * 64, // 64KB 单次输出上限，避免过大控制台噪声
-          stages: [
-            HookStage.REQUEST_PREPROCESSING,
-            HookStage.REQUEST_VALIDATION,
-            HookStage.AUTHENTICATION,
-            HookStage.HTTP_REQUEST,
-            HookStage.HTTP_RESPONSE,
-            HookStage.RESPONSE_VALIDATION,
-            HookStage.RESPONSE_POSTPROCESSING,
-            HookStage.ERROR_HANDLING
-          ],
-          outputFormat: 'structured',
-          outputTargets: ['console'],
-          performanceThresholds: {
-            maxHookExecutionTime: 500,    // 单个Hook 500ms告警
-            maxTotalExecutionTime: 5000,  // 阶段总时长 5s 告警
-            maxDataSize: 1024 * 256       // 256KB 数据告警
-          }
-        });
-        this.dependencies.logger?.logModule(this.id, 'provider-debug-hooks-enabled', { providerType: this.providerType });
-      } catch (e) {
-        this.dependencies.logger?.logModule(this.id, 'provider-debug-hooks-error', { error: e instanceof Error ? e.message : String(e) });
-      }
+      // 初始化新的Hook系统集成
+      await this.hookSystemIntegration.initialize();
+
+      // 设置调试配置（向后兼容）
+      this.configureHookDebugging();
+
+      this.dependencies.logger?.logModule(this.id, 'provider-hook-system-initialized', {
+        providerType: this.providerType,
+        integrationEnabled: true
+      });
     } catch (error) {
       // 暴露问题，快速失败，便于定位凭证问题
-      this.dependencies.logger?.logModule(this.id, 'auth-initialize-error', {
+      this.dependencies.logger?.logModule(this.id, 'provider-initialization-error', {
         providerType: this.providerType,
         error: error instanceof Error ? error.message : String(error)
       });
       throw error;
+    }
+  }
+
+  /**
+   * 初始化Hook系统集成
+   */
+  private initializeHookSystem(): void {
+    try {
+      this.hookSystemIntegration = createHookSystemIntegration(
+        this.dependencies,
+        this.id,
+        {
+          enabled: true,
+          debugMode: true, // Provider v2默认启用调试模式
+          snapshotEnabled: true,
+          migrationMode: true // 迁移现有Hooks
+        }
+      );
+
+      this.dependencies.logger?.logModule(this.id, 'hook-system-integration-created', {
+        providerId: this.id
+      });
+    } catch (error) {
+      this.dependencies.logger?.logModule(this.id, 'hook-system-integration-failed', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      // 创建兼容的空实现，避免系统崩溃
+      this.hookSystemIntegration = {
+        getBidirectionalHookManager: () => ({
+          registerHook: () => {},
+          unregisterHook: () => {},
+          executeHookChain: async () => ({ data: {}, metrics: {} }),
+          setDebugConfig: () => {}
+        }),
+        setDebugConfig: () => {}
+      };
+    }
+  }
+
+  /**
+   * 配置Hook调试（保持向后兼容）
+   */
+  private configureHookDebugging(): void {
+    try {
+      // 注册调试示例Hooks（保持现有行为）
+      registerDebugExampleHooks();
+
+      // 设置调试配置
+      const debugConfig = {
+        enabled: true,
+        level: 'verbose',
+        maxDataSize: 1024 * 64, // 64KB 单次输出上限，避免过大控制台噪声
+        stages: [
+          HookStage.REQUEST_PREPROCESSING,
+          HookStage.REQUEST_VALIDATION,
+          HookStage.AUTHENTICATION,
+          HookStage.HTTP_REQUEST,
+          HookStage.HTTP_RESPONSE,
+          HookStage.RESPONSE_VALIDATION,
+          HookStage.RESPONSE_POSTPROCESSING,
+          HookStage.ERROR_HANDLING
+        ],
+        outputFormat: 'structured',
+        outputTargets: ['console'],
+        performanceThresholds: {
+          maxHookExecutionTime: 500,    // 单个Hook 500ms告警
+          maxTotalExecutionTime: 5000,  // 阶段总时长 5s 告警
+          maxDataSize: 1024 * 256       // 256KB 数据告警
+        }
+      };
+
+      this.hookSystemIntegration.setDebugConfig(debugConfig);
+
+      this.dependencies.logger?.logModule(this.id, 'provider-debug-hooks-configured', {
+        providerType: this.providerType
+      });
+    } catch (error) {
+      this.dependencies.logger?.logModule(this.id, 'provider-debug-hooks-error', {
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 
@@ -162,8 +227,11 @@ export class OpenAIStandard extends BaseProvider {
       ...request
     };
 
+    // 获取Hook管理器（新的统一系统）
+    const hookManager = this.hookSystemIntegration.getBidirectionalHookManager() as any;
+
     // 🔍 Hook 1: 请求预处理阶段
-    const preprocessResult = await BidirectionalHookManager.executeHookChain(
+    const preprocessResult = await hookManager.executeHookChain(
       HookStage.REQUEST_PREPROCESSING,
       'request',
       processedRequest,
@@ -173,7 +241,7 @@ export class OpenAIStandard extends BaseProvider {
     processedRequest = preprocessResult.data as UnknownObject;
 
     // 🔍 Hook 2: 请求验证阶段
-    const validationResult = await BidirectionalHookManager.executeHookChain(
+    const validationResult = await hookManager.executeHookChain(
       HookStage.REQUEST_VALIDATION,
       'request',
       processedRequest,
@@ -185,13 +253,16 @@ export class OpenAIStandard extends BaseProvider {
     return processedRequest;
   }
 
-  protected async postprocessResponse(response: any, context: ProviderContext): Promise<any> {
+  protected async postprocessResponse(response: unknown, context: ProviderContext): Promise<unknown> {
     const processingTime = Date.now() - context.startTime;
 
     let processedResponse = response;
 
+    // 获取Hook管理器（新的统一系统）
+    const hookManager = this.hookSystemIntegration.getBidirectionalHookManager() as any;
+
     // 🔍 Hook 3: HTTP响应阶段
-    const httpResponseResult = await BidirectionalHookManager.executeHookChain(
+    const httpResponseResult = await hookManager.executeHookChain(
       HookStage.HTTP_RESPONSE,
       'response',
       processedResponse,
@@ -201,7 +272,7 @@ export class OpenAIStandard extends BaseProvider {
     processedResponse = httpResponseResult.data;
 
     // 🔍 Hook 4: 响应验证阶段
-    const validationResult = await BidirectionalHookManager.executeHookChain(
+    const validationResult = await hookManager.executeHookChain(
       HookStage.RESPONSE_VALIDATION,
       'response',
       processedResponse,
@@ -211,7 +282,7 @@ export class OpenAIStandard extends BaseProvider {
     processedResponse = validationResult.data;
 
     // 🔍 Hook 5: 响应后处理阶段
-    const postprocessResult = await BidirectionalHookManager.executeHookChain(
+    const postprocessResult = await hookManager.executeHookChain(
       HookStage.RESPONSE_POSTPROCESSING,
       'response',
       processedResponse,
@@ -222,14 +293,14 @@ export class OpenAIStandard extends BaseProvider {
 
     return {
       data: (processedResponse as any).data || processedResponse,
-      status: (processedResponse as any).status || response.status,
-      headers: (processedResponse as any).headers || response.headers,
+      status: (processedResponse as any).status || (response as any).status,
+      headers: (processedResponse as any).headers || (response as any).headers,
       metadata: {
         requestId: context.requestId,
         processingTime,
         providerType: this.providerType,
-        model: ((processedResponse as any).data as any)?.model || (response.data as any)?.model,
-        usage: ((processedResponse as any).data as any)?.usage || (response.data as any)?.usage,
+        model: ((processedResponse as any).data as any)?.model || ((response as any).data as any)?.model,
+        usage: ((processedResponse as any).data as any)?.usage || ((response as any).data as any)?.usage,
         hookMetrics: {
           httpResponse: httpResponseResult.metrics,
           validation: validationResult.metrics,
@@ -239,13 +310,16 @@ export class OpenAIStandard extends BaseProvider {
     };
   }
 
-  protected async sendRequestInternal(request: UnknownObject): Promise<any> {
+  protected async sendRequestInternal(request: UnknownObject): Promise<unknown> {
     // 仅传入 endpoint，让 HttpClient 按 baseUrl 进行拼接；避免 full URL 再次拼接导致 /https:/ 重复
     const endpoint = this.getEffectiveEndpoint();
     const headers = await this.buildRequestHeaders();
 
+    // 获取Hook管理器（新的统一系统）
+    const hookManager = this.hookSystemIntegration.getBidirectionalHookManager() as any;
+
     // 🔍 Hook 8: HTTP请求阶段
-    const httpRequestResult = await BidirectionalHookManager.executeHookChain(
+    const httpRequestResult = await hookManager.executeHookChain(
       HookStage.HTTP_REQUEST,
       'request',
       request,
@@ -255,13 +329,13 @@ export class OpenAIStandard extends BaseProvider {
     const processedRequest = httpRequestResult.data as UnknownObject;
 
     // 发送HTTP请求
-    let response: any;
+    let response: unknown;
     try {
       response = await this.httpClient.post(endpoint, processedRequest, headers);
     } catch (error) {
       // 🔍 Hook 9: 错误处理阶段
       const targetUrl = `${this.getEffectiveBaseUrl().replace(/\/$/, '')}/${endpoint.startsWith('/') ? endpoint.slice(1) : endpoint}`;
-      const errorResult = await BidirectionalHookManager.executeHookChain(
+      const errorResult = await hookManager.executeHookChain(
         HookStage.ERROR_HANDLING,
         'error',
         { error, request: processedRequest, url: targetUrl, headers },
@@ -332,8 +406,11 @@ export class OpenAIStandard extends BaseProvider {
       ...authHeaders
     };
 
+    // 获取Hook管理器（新的统一系统）
+    const hookManager = this.hookSystemIntegration.getBidirectionalHookManager() as any;
+
     // 🔍 Hook 6: 认证阶段
-    await BidirectionalHookManager.executeHookChain(
+    await hookManager.executeHookChain(
       HookStage.AUTHENTICATION,
       'auth',
       authHeaders,
@@ -341,7 +418,7 @@ export class OpenAIStandard extends BaseProvider {
     );
 
     // 🔍 Hook 7: Headers处理阶段
-    const headersResult = await BidirectionalHookManager.executeHookChain(
+    const headersResult = await hookManager.executeHookChain(
       HookStage.REQUEST_PREPROCESSING,
       'headers',
       finalHeaders,

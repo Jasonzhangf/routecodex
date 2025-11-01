@@ -52,7 +52,7 @@ export class OpenAIProvider implements ProviderModule {
 
   // ---- Normalization helpers ----
   private normalizeBaseUrl(u?: string): string | undefined {
-    if (!u) return u;
+    if (!u) {return u;}
     try {
       let s = String(u).trim();
       // Drop any explicit endpoint suffix if present
@@ -71,16 +71,16 @@ export class OpenAIProvider implements ProviderModule {
     const isRedacted = (s?: string) => !!s && (/\*/.test(s) || /REDACTED/i.test(s));
     const pickFromConfig = (): string | undefined => {
       const direct = (cfg as any)?.auth?.apiKey as string | undefined;
-      if (direct && String(direct).trim() && !isRedacted(direct)) return String(direct).trim();
+      if (direct && String(direct).trim() && !isRedacted(direct)) {return String(direct).trim();}
       const top = (cfg as any)?.apiKey as unknown;
-      if (Array.isArray(top) && (top as any[])[0] && !isRedacted(String((top as any[])[0]))) return String((top as any[])[0]).trim();
-      if (typeof top === 'string' && (top as string).trim() && !isRedacted(top as string)) return (top as string).trim();
+      if (Array.isArray(top) && (top as any[])[0] && !isRedacted(String((top as any[])[0]))) {return String((top as any[])[0]).trim();}
+      if (typeof top === 'string' && (top as string).trim() && !isRedacted(top as string)) {return (top as string).trim();}
       return undefined;
     };
     const c = pickFromConfig();
-    if (c) return { key: c, source: 'config' };
+    if (c) {return { key: c, source: 'config' };}
     const envKey = String(process.env.ROUTECODEX_API_KEY || process.env.OPENAI_API_KEY || '').trim();
-    if (envKey) return { key: envKey, source: 'env' };
+    if (envKey) {return { key: envKey, source: 'env' };}
     return { key: undefined, source: 'none' };
   }
 
@@ -218,7 +218,7 @@ export class OpenAIProvider implements ProviderModule {
 
       // Debug: snapshot resolved init params (redacted)
       try {
-        const mask = (s?: string) => (s && s.length >= 8) ? `${s.slice(0,2)}***${s.slice(-4)}` : (!!s ? '***' : '');
+        const mask = (s?: string) => (s && s.length >= 8) ? `${s.slice(0,2)}***${s.slice(-4)}` : (s ? '***' : '');
         this.logger.logModule(this.id, 'init-config-resolved', {
           baseUrl_from_config: providerConfig.baseUrl || null,
           baseUrl_normalized: baseUrlNormalized || null,
@@ -326,7 +326,7 @@ export class OpenAIProvider implements ProviderModule {
       // Preflight param check before network call; ensure '/v1' not duplicated and endpoint path is correct
       try {
         const providerConfig = this.config.config as ProviderConfig;
-        const mask = (s?: string) => (s && s.length >= 8) ? `${s.slice(0,2)}***${s.slice(-4)}` : (!!s ? '***' : '');
+        const mask = (s?: string) => (s && s.length >= 8) ? `${s.slice(0,2)}***${s.slice(-4)}` : (s ? '***' : '');
         const reqModel = (request as any)?.model;
         const normalized = this.normalizeBaseUrl(providerConfig.baseUrl);
         // If normalization changed effective base url, recreate client with corrected base
@@ -465,12 +465,12 @@ export class OpenAIProvider implements ProviderModule {
           // Generic OpenAI-compatible fetch (endpoint and payload kept standard).
           // Any vendor-specific shaping must be handled in compatibility modules.
           const { key: apiKey } = this.resolveApiKey(providerCfg);
-          const join = (a: string, b: string) => a.replace(/\/+$/,'') + '/' + b.replace(/^\/+/, '');
+          const join = (a: string, b: string) => `${a.replace(/\/+$/,'')  }/${  b.replace(/^\/+/, '')}`;
           const endpoint = join(baseNorm, 'chat/completions');
           const payloadOut = wirePayload;
           // Log compat preflight (sanitized)
           try {
-            const mask = (s?: string) => (s && s.length >= 8) ? `${s.slice(0,2)}***${s.slice(-4)}` : (!!s ? '***' : '');
+            const mask = (s?: string) => (s && s.length >= 8) ? `${s.slice(0,2)}***${s.slice(-4)}` : (s ? '***' : '');
             this.logger.logModule(this.id, 'compat-preflight', {
               endpoint,
               baseUrl_normalized: baseNorm,

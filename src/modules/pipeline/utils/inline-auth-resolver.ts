@@ -13,12 +13,12 @@ import { homedir } from 'os';
 function normalizeFamilyId(providerId: string): string {
   const pid = String(providerId || '').toLowerCase();
   // Normalize known families and common aliases
-  if (pid.includes('qwen') || pid.includes('dashscope') || pid.includes('aliyun')) return 'qwen';
-  if (pid.includes('openai')) return 'openai';
-  if (pid.includes('zhipu') || pid === 'glm' || pid.includes('bigmodel')) return 'glm';
-  if (pid.includes('modelscope')) return 'modelscope';
-  if (pid.includes('lmstudio') || pid.includes('lm-studio')) return 'lmstudio';
-  if (pid.includes('iflow')) return 'iflow';
+  if (pid.includes('qwen') || pid.includes('dashscope') || pid.includes('aliyun')) {return 'qwen';}
+  if (pid.includes('openai')) {return 'openai';}
+  if (pid.includes('zhipu') || pid === 'glm' || pid.includes('bigmodel')) {return 'glm';}
+  if (pid.includes('modelscope')) {return 'modelscope';}
+  if (pid.includes('lmstudio') || pid.includes('lm-studio')) {return 'lmstudio';}
+  if (pid.includes('iflow')) {return 'iflow';}
   return pid;
 }
 

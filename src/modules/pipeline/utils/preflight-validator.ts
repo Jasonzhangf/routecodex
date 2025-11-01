@@ -133,7 +133,7 @@ const extractToolText = extractToolTextShared;
 
 // Remove hidden-thinking markup and tool markup hints from plain string content
 function stripThinkingAndToolMarkup(text: string): string {
-  if (typeof text !== 'string' || !text) return '' + (text ?? '');
+  if (typeof text !== 'string' || !text) {return `${  text ?? ''}`;}
   let out = text;
   try {
     // 仅移除思考标签；工具相关标记由 llmswitch-core canonicalizer 统一处理
@@ -269,8 +269,8 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
       try {
         // GLM 目标需要 arguments 为 JSON 对象；其它目标保持 OpenAI 字符串
         const parseArgumentsObject = (input: any): any => {
-          if (input === null || input === undefined) return {};
-          if (typeof input === 'object') return input;
+          if (input === null || input === undefined) {return {};}
+          if (typeof input === 'object') {return input;}
           if (typeof input === 'string') {
             const s = input;
             try { return JSON.parse(s); } catch {
@@ -319,7 +319,7 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
 
   // Chat 路径不应在预检阶段将“用户文本”转换为工具消息；该语义应由 Responses 桥接负责
   // 因此，这里不再进行“用户文本→tool 消息”的转换，原样保留 mappedMessages 顺序
-  let normalizedMessages: any[] = [...mappedMessages];
+  const normalizedMessages: any[] = [...mappedMessages];
 
   let messages = normalizedMessages.filter((msg: any, idx: number) => {
     const text = typeof msg?.content === 'string' ? msg.content.trim() : '';
@@ -334,6 +334,20 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
     }
     return true;
   });
+
+  // 过滤历史中由旧版兜底逻辑产生的“拒绝/不支持”类工具结果，避免造成循环与噪声。
+  // 特征：role=tool 且 content 以“unsupported call:”或“工具调用不可用”开头。
+  try {
+    messages = messages.filter((msg: any) => {
+      if (!msg || msg.role !== 'tool') {return true;}
+      const c = typeof msg.content === 'string' ? msg.content.trim() : '';
+      if (!c) {return true;}
+      const lowered = c.toLowerCase();
+      if (lowered.startsWith('unsupported call:')) {return false;}
+      if (c.startsWith('工具调用不可用')) {return false;}
+      return true;
+    });
+  } catch { /* ignore */ }
 
   // 可选：是否丢弃空的 assistant 消息（由策略控制）
   if (targetGLM && messages.length && getGLMPolicy().dropEmptyAssistant) {
@@ -431,8 +445,8 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
             const name = typeof fn?.name === 'string' ? fn.name : undefined;
             const args = targetGLM
               ? ((): any => {
-                  if (fn?.arguments === null || fn?.arguments === undefined) return {};
-                  if (typeof fn?.arguments === 'object') return fn.arguments;
+                  if (fn?.arguments === null || fn?.arguments === undefined) {return {};}
+                  if (typeof fn?.arguments === 'object') {return fn.arguments;}
                   if (typeof fn?.arguments === 'string') {
                     try { return JSON.parse(fn.arguments); } catch { return {}; }
                   }
@@ -440,8 +454,8 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
                 })()
               : stringifyFunctionArguments(fn?.arguments);
             const out: any = { type: 'function', function: { arguments: args } };
-            if (tc?.id) out.id = tc.id;
-            if (name) (out.function as any).name = name;
+            if (tc?.id) {out.id = tc.id;}
+            if (name) {(out.function as any).name = name;}
             return out;
           }).filter((entry: any) => {
             // Guard: drop view_image for non-image paths to avoid misclassification
@@ -449,7 +463,7 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
               if (entry?.function?.name === 'view_image') {
                 const a = entry?.function?.arguments;
                 const pathVal = (targetGLM ? a?.path : ((): any => { try { return JSON.parse(a).path; } catch { return undefined; } })());
-                if (!isImagePath(pathVal)) return false;
+                if (!isImagePath(pathVal)) {return false;}
               }
             } catch { /* ignore */ }
             return true;
@@ -468,9 +482,9 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
         const hasAssistantCall = (id: string): boolean => messages.some((x: any) => x?.role === 'assistant' && Array.isArray(x?.tool_calls) && x.tool_calls.some((tc: any) => String(tc?.id || '') === id));
         for (let i = 0; i < messages.length; i++) {
           const msg: any = messages[i];
-          if (msg?.role !== 'tool') continue;
+          if (msg?.role !== 'tool') {continue;}
           const callId = typeof msg?.tool_call_id === 'string' ? msg.tool_call_id : undefined;
-          if (!callId || paired.has(callId)) continue;
+          if (!callId || paired.has(callId)) {continue;}
           if (!hasAssistantCall(callId)) {
             let name = 'tool';
             let args = '{}';
@@ -479,7 +493,7 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
               const parsed = JSON.parse(raw);
               if (parsed && typeof parsed === 'object') {
                 const t = (parsed as any).tool;
-                if (t && typeof t.name === 'string' && t.name.trim()) name = t.name.trim();
+                if (t && typeof t.name === 'string' && t.name.trim()) {name = t.name.trim();}
                 const a = (parsed as any).arguments;
                 if (a && typeof a === 'object') { try { args = JSON.stringify(a); } catch { args = '{}'; } }
               }
@@ -496,16 +510,16 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
 
   // 过滤无意义的空消息（GLM 目标下）：content 为空/空串且无 tool_calls 的 assistant/user
   const filteredMessages = (() => {
-    if (!targetGLM) return messages;
+    if (!targetGLM) {return messages;}
     try {
       return (messages as any[]).filter((mm: any) => {
-        if (!mm || typeof mm !== 'object') return false;
+        if (!mm || typeof mm !== 'object') {return false;}
         const role = mm.role;
         const hasToolCalls = Array.isArray(mm.tool_calls) && mm.tool_calls.length > 0;
         if (role === 'assistant' || role === 'user') {
           const c = mm.content;
           const emptyText = (c === '' || c === undefined || c === null);
-          if (emptyText && !hasToolCalls) return false;
+          if (emptyText && !hasToolCalls) {return false;}
         }
         return true;
       });

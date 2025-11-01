@@ -88,8 +88,24 @@ export class PassthroughCompatibility implements CompatibilityModule {
       const payload = isDto ? (response as UnknownObject).data : response;
       this.logger.logModule(this.id, 'processing-response-start', { hasChoices: !!(payload as any)?.choices });
 
-      // Simply return the response as-is (passthrough)
-      const result = payload;
+      // Minimal normalization to satisfy OpenAI Chat client schema
+      const result = payload as any;
+      try {
+        if (result && typeof result === 'object' && Array.isArray(result.choices)) {
+          if (result.object == null) {
+            result.object = 'chat.completion';
+          }
+          if (result.id == null) {
+            result.id = `chatcmpl_${Math.random().toString(36).slice(2)}`;
+          }
+          if (result.created == null) {
+            result.created = Math.floor(Date.now() / 1000);
+          }
+          if (result.model == null) {
+            result.model = 'unknown';
+          }
+        }
+      } catch { /* keep passthrough semantics if anything fails */ }
 
       this.logger.logModule(this.id, 'processing-response-complete', {
         transformationCount: 0

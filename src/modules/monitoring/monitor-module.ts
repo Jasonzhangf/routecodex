@@ -18,29 +18,29 @@ export class MonitorModule {
   }
 
   async onIncoming(_req: unknown, _ctx: { meta: MonitorMeta; summary?: Record<string, unknown> }): Promise<void> {
-    if (!this.enabled) return;
+    if (!this.enabled) {return;}
     const { meta, summary } = _ctx;
     await this.recorder.start(meta.reqId, { meta, request: _req, summary });
   }
 
   async onRouteDecision(_reqId: string, _decision: unknown, _ctx?: { meta: MonitorMeta }): Promise<void> {
-    if (!this.enabled) return;
-    if (!_ctx?.meta) return;
+    if (!this.enabled) {return;}
+    if (!_ctx?.meta) {return;}
     await this.recorder.writeDecision(_ctx.meta, _decision);
   }
 
   async onOutgoing(_response: unknown, _ctx: { meta: MonitorMeta }): Promise<void> {
-    if (!this.enabled) return;
+    if (!this.enabled) {return;}
     await this.recorder.writeResponse(_ctx.meta, _response);
   }
 
   async onStreamChunk(_chunk: unknown, _ctx: { meta: MonitorMeta; type?: string }): Promise<void> {
-    if (!this.enabled) return;
+    if (!this.enabled) {return;}
     await this.recorder.appendStream(_ctx.meta, { type: _ctx.type || 'chunk', data: _chunk, at: Date.now() });
   }
 
   async finalize(_ctx: { meta: MonitorMeta; summary?: Record<string, unknown> }): Promise<void> {
-    if (!this.enabled) return;
+    if (!this.enabled) {return;}
     await this.recorder.finalize(_ctx.meta, _ctx.summary);
   }
 }

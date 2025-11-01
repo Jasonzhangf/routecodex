@@ -30,8 +30,8 @@ export interface ModuleTypeMapping {
   'llmswitch-anthropic-openai': import('rcc-llmswitch-core/llmswitch/anthropic-openai-converter').AnthropicOpenAIConverter;
   'streaming-control': import('../modules/workflow/streaming-control.js').StreamingControlWorkflow;
   'field-mapping': import('../modules/compatibility/field-mapping.js').FieldMappingCompatibility;
-  'qwen-provider': import('../modules/provider/qwen-provider.js').QwenProvider;
-  'generic-http': import('../modules/provider/generic-http-provider.js').GenericHTTPProvider;
+  // 'qwen-provider': import('../modules/provider/v2/core/qwen-provider.js').QwenProvider;
+  // 'generic-http': import('../modules/provider/v2/core/generic-http-provider.js').GenericHTTPProvider;
 }
 
 /**

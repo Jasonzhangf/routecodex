@@ -244,7 +244,7 @@ export class ProtocolHandler extends BaseModule {
           if (b && b.type === 'text' && typeof b.text === 'string') {
             const words = b.text.split(/\s+/g);
             for (const w of words) {
-              chunks.push({ metadata: { model: options.model }, content: w + ' ', done: false });
+              chunks.push({ metadata: { model: options.model }, content: `${w  } `, done: false });
             }
           }
         }
@@ -360,16 +360,16 @@ ProtocolHandler.prototype.tryTransparentOpenAI = async function tryTransparentOp
       process.env.RCC_MONITOR_TRANSPARENT === '1' ||
       process.env.RCC_TRANSPARENT_ROUTING === '1'
     );
-    if (!envTransparent) return false;
+    if (!envTransparent) {return false;}
 
     const monitorCfg = await MonitorConfigUtil.load();
     const tcfg = MonitorConfigUtil.getTransparent(monitorCfg as MonitorLikeConfig as any) as TransparentConfig | null;
-    if (!tcfg) return false;
+    if (!tcfg) {return false;}
 
     // Resolve upstream base
     const hdrUp = (req.headers['x-rc-upstream-url'] as string | undefined) || (req.headers['x-rcc-upstream-url'] as string | undefined);
     const upstreamBase = hdrUp || tcfg.endpoints?.openai || '';
-    if (!upstreamBase) return false;
+    if (!upstreamBase) {return false;}
 
     // Decide wire API
     const preferWire: 'chat' | 'responses' = wire || tcfg.wireApi || 'responses';
@@ -383,19 +383,19 @@ ProtocolHandler.prototype.tryTransparentOpenAI = async function tryTransparentOp
     const allowlist = (tcfg.headerAllowlist || ['accept','content-type','x-*']).map(h => h.toLowerCase());
     const passHeader = (key: string): boolean => {
       const k = key.toLowerCase();
-      if (allowlist.includes(k)) return true;
-      if (allowlist.some(x => x.endsWith('*') && k.startsWith(x.slice(0, -1)))) return true;
+      if (allowlist.includes(k)) {return true;}
+      if (allowlist.some(x => x.endsWith('*') && k.startsWith(x.slice(0, -1)))) {return true;}
       return false;
     };
     const headers: TransparentHeaders = {};
     for (const [k, v] of Object.entries(req.headers)) {
-      if (v === undefined) continue;
-      if (!passHeader(k)) continue;
+      if (v === undefined) {continue;}
+      if (!passHeader(k)) {continue;}
       headers[k] = Array.isArray(v) ? v.join(', ') : String(v);
     }
     const normalizeBearerAuth = (val: string): string => {
       const s = String(val || '').trim();
-      if (!s) return s;
+      if (!s) {return s;}
       return /^bearer\s+/i.test(s) ? s : `Bearer ${s}`;
     };
     const finalAuth = overrideAuth || envAuth || incomingAuth || tcfg.authorization || undefined;
@@ -407,14 +407,14 @@ ProtocolHandler.prototype.tryTransparentOpenAI = async function tryTransparentOp
     // Attach extra headers (do not override Authorization)
     if (tcfg.extraHeaders) {
       for (const [ek, ev] of Object.entries(tcfg.extraHeaders)) {
-        if (!ek) continue; if (ek.toLowerCase() === 'authorization') continue;
+        if (!ek) {continue;} if (ek.toLowerCase() === 'authorization') {continue;}
         headers[ek] = ev;
       }
     }
     // Ensure Beta header for Responses wire
     if (preferWire === 'responses') {
       const lower = Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
-      if (!('openai-beta' in lower)) headers['OpenAI-Beta'] = 'responses-2024-12-17';
+      if (!('openai-beta' in lower)) {headers['OpenAI-Beta'] = 'responses-2024-12-17';}
     }
 
     // Timeout
@@ -427,20 +427,20 @@ ProtocolHandler.prototype.tryTransparentOpenAI = async function tryTransparentOp
       const mm = tcfg.modelMapping || {};
       const normalizeModel = (model: string): string => {
         const trimmed = String(model || '').trim();
-        if (!trimmed) return trimmed;
-        if (/gpt-5(?:-codex)?$/i.test(trimmed)) return 'gpt-5';
-        if (/-codex$/i.test(trimmed)) return trimmed.replace(/-codex$/i, '');
+        if (!trimmed) {return trimmed;}
+        if (/gpt-5(?:-codex)?$/i.test(trimmed)) {return 'gpt-5';}
+        if (/-codex$/i.test(trimmed)) {return trimmed.replace(/-codex$/i, '');}
         return trimmed;
       };
       const inputModel = normalizeModel(working.model ?? '');
       let mapped = inputModel && mm[inputModel];
-      if (!mapped && mm['*']) mapped = mm['*'];
-      if (!mapped && mm['default']) mapped = mm['default'];
+      if (!mapped && mm['*']) {mapped = mm['*'];}
+      if (!mapped && mm['default']) {mapped = mm['default'];}
       if (!mapped && preferWire === 'responses') {
         mapped = 'gpt-5';
       }
-      if (mapped) working.model = normalizeModel(mapped);
-      else working.model = inputModel || working.model;
+      if (mapped) {working.model = normalizeModel(mapped);}
+      else {working.model = inputModel || working.model;}
     } catch { /* ignore mapping errors */ }
 
     const isStream = !!working?.stream;
@@ -493,7 +493,7 @@ ProtocolHandler.prototype.tryTransparentOpenAI = async function tryTransparentOp
       try {
         res.status(upstream.status);
         for (const [k, v] of Object.entries(upstream.headers || {})) {
-          if (k.toLowerCase() === 'content-length') continue;
+          if (k.toLowerCase() === 'content-length') {continue;}
           try { res.setHeader(k, String(v)); } catch { /* ignore */ }
         }
         res.type('application/json');
@@ -530,10 +530,10 @@ ProtocolHandler.prototype.tryTransparentAnthropic = async function tryTransparen
     );
     const monitorCfg = await MonitorConfigUtil.load();
     const enabled = envTransparent || MonitorConfigUtil.isTransparentEnabled(monitorCfg);
-    if (!enabled) return false;
+    if (!enabled) {return false;}
 
     const tcfg = MonitorConfigUtil.getTransparent(monitorCfg as any) as TransparentConfig | null;
-    if (!tcfg || !tcfg.endpoints?.anthropic) return false;
+    if (!tcfg || !tcfg.endpoints?.anthropic) {return false;}
 
     const upstreamBase = tcfg.endpoints.anthropic;
     const url = joinUrl(upstreamBase, '/messages');
@@ -594,7 +594,7 @@ ProtocolHandler.prototype.tryTransparentAnthropic = async function tryTransparen
       try {
         res.status(upstream.status);
         for (const [k, v] of Object.entries(upstream.headers || {})) {
-          if (k.toLowerCase() === 'content-length') continue;
+          if (k.toLowerCase() === 'content-length') {continue;}
           try { res.setHeader(k, String(v)); } catch {}
         }
         res.type('application/json');
@@ -639,10 +639,10 @@ ProtocolHandler.prototype.fireMonitorAB = async function fireMonitorAB(this: Pro
     const mode = (monitorCfg as any)?.mode;
     const envAB = process.env.ROUTECODEX_MONITOR_AB === '1' || process.env.RCC_MONITOR_AB === '1';
     const enabledAB = envAB || mode === 'passive';
-    if (!enabledAB) return;
+    if (!enabledAB) {return;}
 
     const tcfg = MonitorConfigUtil.getTransparent(monitorCfg as any) as TransparentConfig | null;
-    if (!tcfg || !tcfg.endpoints?.openai) return;
+    if (!tcfg || !tcfg.endpoints?.openai) {return;}
 
     const upstreamBase = tcfg.endpoints.openai;
     const pathPart = wire === 'chat' ? '/chat/completions' : '/responses';
@@ -656,7 +656,7 @@ ProtocolHandler.prototype.fireMonitorAB = async function fireMonitorAB(this: Pro
     // Responses Beta header if needed
     if (wire === 'responses') { headers['OpenAI-Beta'] = 'responses-2024-12-17'; }
     // Extra headers
-    if (tcfg.extraHeaders) { for (const [k,v] of Object.entries(tcfg.extraHeaders)) { if (k.toLowerCase()!=='authorization') headers[k]=v; } }
+    if (tcfg.extraHeaders) { for (const [k,v] of Object.entries(tcfg.extraHeaders)) { if (k.toLowerCase()!=='authorization') {headers[k]=v;} } }
 
     // Clone original body before any handler mutation (prefer raw capture)
     const sourceBody: any = (req as any).__rawBody !== undefined ? (req as any).__rawBody : (req as any).body;
@@ -685,7 +685,7 @@ ProtocolHandler.prototype.fireMonitorAB = async function fireMonitorAB(this: Pro
     const normalizeHeaders = (h: Record<string, unknown>): Record<string, string> => {
       const out: Record<string, string> = {};
       for (const [hk, hv] of Object.entries(h || {})) {
-        if (hv === undefined || hv === null) continue;
+        if (hv === undefined || hv === null) {continue;}
         out[hk] = Array.isArray(hv) ? hv.map(v => String(v)).join(', ') : String(hv);
       }
       return out;
@@ -752,17 +752,17 @@ ProtocolHandler.prototype.fireMonitorAB = async function fireMonitorAB(this: Pro
 ProtocolHandler.prototype.tryBridgeResponsesToChat = async function tryBridgeResponsesToChat(this: ProtocolHandler, req: Request, res: Response): Promise<boolean> {
   try {
     const bridgeEnabled = (req.headers['x-rc-bridge-chat'] === '1') || (process.env.ROUTECODEX_BRIDGE_CHAT === '1');
-    if (!bridgeEnabled) return false;
+    if (!bridgeEnabled) {return false;}
 
     const monitorCfg = await MonitorConfigUtil.load();
     const tcfg = MonitorConfigUtil.getTransparent(monitorCfg as any) as TransparentConfig | null;
-    if (!tcfg || !tcfg.endpoints?.openai) return false;
+    if (!tcfg || !tcfg.endpoints?.openai) {return false;}
     const upstreamBase = tcfg.endpoints.openai;
     const url = joinUrl(upstreamBase, '/chat/completions');
     const headers: Record<string,string> = {};
     const auth = (tcfg as any)?.auth?.openai || (tcfg as any)?.authorization || '';
     if (auth) { headers['Authorization'] = /^Bearer\s+/i.test(String(auth)) ? String(auth) : `Bearer ${String(auth)}`; }
-    if (tcfg.extraHeaders) { for (const [k,v] of Object.entries(tcfg.extraHeaders)) { if (k.toLowerCase()!=='authorization') headers[k]=v; } }
+    if (tcfg.extraHeaders) { for (const [k,v] of Object.entries(tcfg.extraHeaders)) { if (k.toLowerCase()!=='authorization') {headers[k]=v;} } }
 
     // Convert incoming Responses payload to Chat
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -780,16 +780,16 @@ ProtocolHandler.prototype.tryBridgeResponsesToChat = async function tryBridgeRes
       const mm = tcfg.modelMapping || {};
       const normalizeModel = (model: string): string => {
         const val = String(model || '').trim();
-        if (!val) return val;
-        if (/gpt-5(?:-codex)?$/i.test(val)) return 'gpt-5-high';
-        if (/-codex$/i.test(val)) return val.replace(/-codex$/i, '');
+        if (!val) {return val;}
+        if (/gpt-5(?:-codex)?$/i.test(val)) {return 'gpt-5-high';}
+        if (/-codex$/i.test(val)) {return val.replace(/-codex$/i, '');}
         return val;
       };
       const src = normalizeModel(chatReq?.model ?? '');
       let mapped = src && mm[src];
-      if (!mapped && mm['*']) mapped = mm['*'];
-      if (!mapped && mm['default']) mapped = mm['default'];
-      if (!mapped) mapped = src;
+      if (!mapped && mm['*']) {mapped = mm['*'];}
+      if (!mapped && mm['default']) {mapped = mm['default'];}
+      if (!mapped) {mapped = src;}
       chatReq.model = normalizeModel(mapped);
     } catch { /* ignore */ }
 

@@ -49,15 +49,15 @@ export async function executeTool(spec: ToolCallSpec): Promise<ToolResult> {
     const hasMeta = (tokensOrScript: string[] | string): boolean => {
       const metas = ['>>','<<','|',';','&&','||','>','<'];
       const test = (s: string) => metas.some(m => s.includes(m));
-      if (typeof tokensOrScript === 'string') return test(tokensOrScript);
+      if (typeof tokensOrScript === 'string') {return test(tokensOrScript);}
       return tokensOrScript.some(t => test(String(t)));
     };
     const quoteToken = (s: string) => {
-      if (s === '') return "''";
-      if (/[^A-Za-z0-9_\.\-\/:]/.test(s)) return "'" + s.replace(/'/g, "'\\''") + "'";
+      if (s === '') {return "''";}
+      if (/[^A-Za-z0-9_\.\-\/:]/.test(s)) {return `'${  s.replace(/'/g, "'\\''")  }'`;}
       return s;
     };
-    const quoteScript = (s: string) => "'" + String(s).replace(/'/g, "'\\''") + "'";
+    const quoteScript = (s: string) => `'${  String(s).replace(/'/g, "'\\''")  }'`;
 
     const normalizeBashLc = (script: string | string[]): string => {
       const sc = Array.isArray(script) ? script.map(String).join(' ') : String(script);
@@ -74,7 +74,7 @@ export async function executeTool(spec: ToolCallSpec): Promise<ToolResult> {
             const inner = tryParseJsonArray(t2);
             if (inner && inner.length) {
               if (inner[0] === 'bash' && inner[1] === '-lc') {
-                if (inner.length >= 3) return normalizeBashLc(inner.slice(2).map(String).join(' '));
+                if (inner.length >= 3) {return normalizeBashLc(inner.slice(2).map(String).join(' '));}
                 return normalizeBashLc('');
               }
               // Treat as argv → if contains meta, convert to -lc script
@@ -92,7 +92,7 @@ export async function executeTool(spec: ToolCallSpec): Promise<ToolResult> {
       // Not bash -lc
       if (tokens.length === 1 && looksJsonArray(tokens[0])) {
         const inner = tryParseJsonArray(tokens[0]);
-        if (inner) return normalizeFromArray(inner);
+        if (inner) {return normalizeFromArray(inner);}
       }
       return hasMeta(tokens)
         ? normalizeBashLc(tokens)
@@ -115,7 +115,7 @@ export async function executeTool(spec: ToolCallSpec): Promise<ToolResult> {
           let idx = -1;
           for (const m of metas) {
             const i = s.indexOf(m);
-            if (i >= 0) idx = (idx === -1) ? i : Math.min(idx, i);
+            if (i >= 0) {idx = (idx === -1) ? i : Math.min(idx, i);}
           }
           return idx;
         })();
@@ -124,9 +124,9 @@ export async function executeTool(spec: ToolCallSpec): Promise<ToolResult> {
           const arrPart = s.slice(0, bound).trim();
           const rest = firstMetaIndex >= 0 ? s.slice(bound).trim() : '';
           let parsed: any[] | null = null;
-          try { if (arrPart.endsWith(']')) { const v = JSON.parse(arrPart); if (Array.isArray(v)) parsed = v; } } catch { parsed = null; }
+          try { if (arrPart.endsWith(']')) { const v = JSON.parse(arrPart); if (Array.isArray(v)) {parsed = v;} } } catch { parsed = null; }
           if (parsed && parsed.length) {
-            const script = parsed.map(String).join(' ') + (rest ? (' ' + rest) : '');
+            const script = parsed.map(String).join(' ') + (rest ? (` ${  rest}`) : '');
             command = normalizeBashLc(script);
           } else {
             command = hasMeta(s) ? normalizeBashLc(s) : s;
@@ -181,17 +181,17 @@ export async function executeTool(spec: ToolCallSpec): Promise<ToolResult> {
           // Detect heredoc write: cat > path << 'EOF'
           const detectWriteTarget = (s: string): string | null => {
             const m1 = s.match(/cat\s*>\s*([^\s]+)\s*<<\s*['\"]?EOF['\"]?/i);
-            if (m1 && m1[1]) return m1[1];
+            if (m1 && m1[1]) {return m1[1];}
             const m2 = s.match(/[>]{1,2}\s*([^\s;&|]+)/);
-            if (m2 && m2[1]) return m2[1];
+            if (m2 && m2[1]) {return m2[1];}
             return null;
           };
           const detectSedEdit = (s: string): string | null => {
-            if (!/\bsed\b[^\n]*\-i\b/i.test(s)) return null;
+            if (!/\bsed\b[^\n]*\-i\b/i.test(s)) {return null;}
             const parts = s.split(/\s+/).filter(Boolean);
             for (let i = parts.length - 1; i >= 0; i--) {
               const t = parts[i];
-              if (!t.startsWith('-')) return t;
+              if (!t.startsWith('-')) {return t;}
             }
             return null;
           };

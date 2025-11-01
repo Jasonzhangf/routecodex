@@ -89,14 +89,14 @@ export class iFlowCompatibility implements CompatibilityModule {
         if ((hasImage || isVisionModel) && typeof out === 'object' && out) {
           // Normalize image item: allow string or object with url
           const normMsgs = (maybeMessages || []).map((m: any) => {
-            if (!Array.isArray(m?.content)) return m;
+            if (!Array.isArray(m?.content)) {return m;}
             const content = m.content.map((c: any) => {
               if (c && typeof c === 'object' && (c.type === 'image_url' || c.type === 'image')) {
                 const url = typeof c.image_url === 'string' ? c.image_url : (c.image_url?.url || c.url || '');
                 return { type: 'image_url', image_url: url };
               }
-              if (c && typeof c === 'object' && c.type === 'text') return c;
-              if (typeof c === 'string') return { type: 'text', text: c };
+              if (c && typeof c === 'object' && c.type === 'text') {return c;}
+              if (typeof c === 'string') {return { type: 'text', text: c };}
               return c;
             });
             return { role: m.role || 'user', content };

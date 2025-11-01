@@ -20,7 +20,7 @@ export class ResponsesMapper {
             const str = JSON.stringify(metaIn.tools);
             const hash = crypto.createHash('sha256').update(str).digest('hex');
             (metaIn as any).tools_hash = hash;
-            if (Array.isArray(metaIn.tools)) (metaIn as any).tools_count = (metaIn.tools as any[]).length;
+            if (Array.isArray(metaIn.tools)) {(metaIn as any).tools_count = (metaIn.tools as any[]).length;}
           } catch { /* ignore */ }
         }
         if ((reqMeta as any).tool_choice !== undefined && metaIn.tool_choice === undefined) {

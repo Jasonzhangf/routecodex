@@ -33,8 +33,15 @@ GLM（General Language Model）是智谱AI开发的大语言模型系列，支�
 
 ### 对话补全
 ```
+# 标准 Chat API（官方文档）
 POST https://open.bigmodel.cn/api/paas/v4/chat/completions
+
+# 本项目当前默认接入（Coding 路由）
+POST https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
 ```
+
+说明：当前 RouteCodex GLM Provider 使用 Coding 路由（`/api/coding/paas/v4`）。如果你的账号/环境未开通
+Coding 路由，请改用标准 Chat API（`/api/paas/v4`）。两者的请求体形状一致，但网关策略可能不同。
 
 ### 认证方式
 ```

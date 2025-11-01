@@ -44,7 +44,7 @@ export class Recorder {
   async appendStream(meta: MonitorMeta, event: StreamEventRecord): Promise<void> {
     const dir = this.entryDir(meta);
     await fs.mkdir(dir, { recursive: true });
-    const line = JSON.stringify({ ...event, at: event.at || Date.now() }) + '\n';
+    const line = `${JSON.stringify({ ...event, at: event.at || Date.now() })  }\n`;
     await fs.appendFile(path.join(dir, 'stream-events.jsonl'), line);
   }
 

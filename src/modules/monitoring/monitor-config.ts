@@ -34,7 +34,7 @@ function monitorPath(): string {
 }
 
 function parseMaybeEnv(val?: string): string | undefined {
-  if (!val) return undefined;
+  if (!val) {return undefined;}
   const s = String(val).trim();
   if (s.toLowerCase().startsWith('env:')) {
     const key = s.slice(4).trim();
@@ -69,9 +69,9 @@ export class MonitorConfigUtil {
       return true;
     }
     const c = cfg || null;
-    if (!c) return false;
-    if (c.mode === 'transparent') return true;
-    if (c.transparent && c.transparent.enabled) return true;
+    if (!c) {return false;}
+    if (c.mode === 'transparent') {return true;}
+    if (c.transparent && c.transparent.enabled) {return true;}
     return false;
   }
 

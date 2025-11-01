@@ -12,7 +12,7 @@ import { StreamingManager } from '../utils/streaming-manager.js';
 import { ResponsesConfigUtil } from '../config/responses-config.js';
 import { ResponsesConverter } from '../conversion/responses-converter.js';
 import { ResponsesMapper } from '../conversion/responses-mapper.js';
-import { buildResponsesPayloadFromChat, normalizeTools } from 'rcc-llmswitch-core/conversion';
+import { buildResponsesPayloadFromChat, normalizeTools } from 'rcc-llmswitch-core/api';
 // Protocol conversion is handled downstream by llmswitch (Responses→Chat) for providers.
 import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
 
@@ -65,27 +65,20 @@ export class ResponsesHandler extends BaseHandler {
 
     try {
       try { res.setHeader('x-rc-conversion-profile', 'responses-openai'); } catch { /* ignore */ }
-      // Optional: Replace/Inject system prompt for OpenAI Responses (prefer instructions field)
+      // 可选：受控的“静态”系统提示注入（默认关闭），优先写入 instructions 字段
+      // 禁止样本抓取式注入；仅当明确配置 ROUTECODEX_ENABLE_SERVER_SYSTEM_PROMPT=1 且提供
+      // ROUTECODEX_SERVER_SYSTEM_PROMPT=</path/to/prompt.txt> 时，才在 instructions 为空时写入。
       try {
-        const { shouldReplaceSystemPrompt, SystemPromptLoader } = await import('../../utils/system-prompt-loader.js');
-        const sel = shouldReplaceSystemPrompt();
-        if (sel) {
-          const loader = SystemPromptLoader.getInstance();
-          const sys = await loader.getPrompt(sel);
-          const currentSys = (() => {
-            try {
-              const txt = typeof (req.body as any)?.instructions === 'string' ? String((req.body as any).instructions) : '';
-              return txt;
-            } catch { return ''; }
-          })();
-          const hasMdMarkers = /\bCLAUDE\.md\b|\bAGENT(?:S)?\.md\b/i.test(currentSys);
-          if (sys && !hasMdMarkers) {
-            // Only set when empty or whitespace to avoid clobbering explicit instructions
-            const instr = typeof (req.body as any)?.instructions === 'string' ? String((req.body as any).instructions) : '';
-            if (!instr || !instr.trim()) {
-              (req.body as any).instructions = sys;
-              try { res.setHeader('x-rc-system-prompt-source', sel); } catch { /* ignore */ }
-            }
+        const enable = String(process.env.ROUTECODEX_ENABLE_SERVER_SYSTEM_PROMPT || '0') === '1';
+        const filePath = String(process.env.ROUTECODEX_SERVER_SYSTEM_PROMPT || '').trim();
+        if (enable && filePath) {
+          const fs = await import('fs/promises');
+          const sysText = await fs.readFile(filePath, 'utf-8');
+          const instr = typeof (req.body as any)?.instructions === 'string' ? String((req.body as any).instructions) : '';
+          const hasMdMarkers = /\bCLAUDE\.md\b|\bAGENT(?:S)?\.md\b/i.test(instr);
+          if (!hasMdMarkers && (!instr || !instr.trim())) {
+            (req.body as any).instructions = sysText;
+            try { res.setHeader('x-rc-system-prompt-source', 'static-file'); } catch { /* ignore */ }
           }
         }
       } catch { /* non-blocking */ }
@@ -101,29 +94,29 @@ export class ResponsesHandler extends BaseHandler {
         // stream：仅当未显式给出时，按 Accept 头推断
         if (typeof merged.stream !== 'boolean') {
           const inferred = ResponsesConverter.inferStreamingFlag(b, req);
-          if (typeof inferred === 'boolean') merged.stream = inferred;
+          if (typeof inferred === 'boolean') {merged.stream = inferred;}
         }
         // 若原本没有 instructions/input，则尝试从 Chat 形状派生
         if (typeof merged.instructions !== 'string' || merged.instructions.trim() === '') {
           if (Array.isArray(b.messages)) {
             const sys: string[] = [];
             for (const m of b.messages) {
-              if (!m || typeof m !== 'object') continue;
+              if (!m || typeof m !== 'object') {continue;}
               const role = (m as any).role;
               const content = (m as any).content;
-              if (role === 'system' && typeof content === 'string' && content.trim()) sys.push(content.trim());
+              if (role === 'system' && typeof content === 'string' && content.trim()) {sys.push(content.trim());}
             }
-            if (sys.length) merged.instructions = sys.join('\n\n');
+            if (sys.length) {merged.instructions = sys.join('\n\n');}
           }
         }
         if (typeof merged.input === 'undefined' || (typeof merged.input === 'string' && merged.input.trim() === '')) {
           if (Array.isArray(b.messages)) {
             const userTexts: string[] = [];
             for (const m of b.messages) {
-              if (!m || typeof m !== 'object') continue;
+              if (!m || typeof m !== 'object') {continue;}
               const role = (m as any).role;
               const content = (m as any).content;
-              if (role === 'user' && typeof content === 'string' && content.trim()) userTexts.push(content.trim());
+              if (role === 'user' && typeof content === 'string' && content.trim()) {userTexts.push(content.trim());}
               if (role === 'user' && Array.isArray(content)) {
                 for (const part of content) {
                   if (part && typeof part === 'object' && typeof (part as any).text === 'string' && (part as any).text.trim()) {
@@ -132,7 +125,7 @@ export class ResponsesHandler extends BaseHandler {
                 }
               }
             }
-            if (userTexts.length) merged.input = userTexts.join('\n');
+            if (userTexts.length) {merged.input = userTexts.join('\n');}
           }
           // Anthropic content 兼容
           if (typeof merged.input === 'undefined' && Array.isArray(b.content)) {
@@ -142,7 +135,7 @@ export class ResponsesHandler extends BaseHandler {
                 texts.push(c.text.trim());
               }
             }
-            if (texts.length) merged.input = texts.join('\n');
+            if (texts.length) {merged.input = texts.join('\n');}
           }
         }
 
@@ -160,7 +153,7 @@ export class ResponsesHandler extends BaseHandler {
       // Process request through pipeline
       const response = await this.processResponseRequest(req, requestId);
 
-      // Handle streaming vs non-streaming response
+      // Handle streaming vs non-streaming response（保留“合成流”以兼容 Responses 客户端）
       if (req.body.stream) {
         // Prefer true streaming bridge when upstream returns a Readable and RCC_R2C_STREAM is enabled (default on)
         try {
@@ -191,7 +184,7 @@ export class ResponsesHandler extends BaseHandler {
         return;
       }
 
-      // Return JSON response in OpenAI Responses format
+      // Return JSON response in OpenAI Responses format（确定性路径，无流时只返回 JSON）
       const normalized = await this.buildResponsesJson(
         response,
         {
@@ -348,7 +341,7 @@ export class ResponsesHandler extends BaseHandler {
     reqMeta?: Record<string, unknown>
   ): Promise<void> {
     let heartbeatTimer: NodeJS.Timeout | null = null;
-    let streamAborted = false;
+    const streamAborted = false;
     // audit writer stub (initialized after fs paths are ready)
     let auditWrite: (kind: 'event' | 'meta' | 'end' | 'error', payload: Record<string, unknown>) => Promise<void> = async () => Promise.resolve();
     try {
@@ -363,7 +356,7 @@ export class ResponsesHandler extends BaseHandler {
       const capture = async (event: string, data: unknown) => {
         try {
           await ensureDirs();
-          const line = JSON.stringify({ ts: Date.now(), requestId, event, data }) + '\n';
+          const line = `${JSON.stringify({ ts: Date.now(), requestId, event, data })  }\n`;
           await fs.appendFile(sseFile, line, 'utf-8');
         } catch { /* ignore */ }
       };
@@ -450,9 +443,9 @@ export class ResponsesHandler extends BaseHandler {
       if (requestInstructions && !requestMeta.instructions) {
         requestMeta.instructions = requestInstructions;
       }
-      if (reqTools !== undefined && requestMeta.tools === undefined) requestMeta.tools = reqTools;
-      if (reqToolChoice !== undefined && requestMeta.tool_choice === undefined) requestMeta.tool_choice = reqToolChoice;
-      if (reqParallel !== undefined && requestMeta.parallel_tool_calls === undefined) requestMeta.parallel_tool_calls = reqParallel;
+      if (reqTools !== undefined && requestMeta.tools === undefined) {requestMeta.tools = reqTools;}
+      if (reqToolChoice !== undefined && requestMeta.tool_choice === undefined) {requestMeta.tool_choice = reqToolChoice;}
+      if (reqParallel !== undefined && requestMeta.parallel_tool_calls === undefined) {requestMeta.parallel_tool_calls = reqParallel;}
       // If tool-followup is present, prefer __initial for tool events and __final for text/usage
       const rawInitial = (response && typeof response === 'object' && (response as any).__initial) ? (response as any).__initial : response;
       const rawFinal = (response && typeof response === 'object' && (response as any).__final) ? (response as any).__final : response;
@@ -477,10 +470,10 @@ export class ResponsesHandler extends BaseHandler {
 
       const extractText = (resp: any): string => {
         const texts: string[] = [];
-        const push = (s?: string) => { if (typeof s === 'string') { const t = s.trim(); if (t) texts.push(t); } };
+        const push = (s?: string) => { if (typeof s === 'string') { const t = s.trim(); if (t) {texts.push(t);} } };
         const walkBlocks = (blocks: any[]): void => {
           for (const b of blocks || []) {
-            if (!b || typeof b !== 'object') continue;
+            if (!b || typeof b !== 'object') {continue;}
             const t = (b as any).type;
             if ((t === 'text' || t === 'output_text') && typeof (b as any).text === 'string') { push((b as any).text); continue; }
             if (t === 'message' && Array.isArray((b as any).content)) { walkBlocks((b as any).content); continue; }
@@ -488,9 +481,9 @@ export class ResponsesHandler extends BaseHandler {
           }
         };
         try {
-          if (resp && typeof resp.output_text === 'string') push(resp.output_text);
-          if (resp && Array.isArray(resp.output)) walkBlocks(resp.output);
-          if (resp && Array.isArray(resp.content)) walkBlocks(resp.content);
+          if (resp && typeof resp.output_text === 'string') {push(resp.output_text);}
+          if (resp && Array.isArray(resp.output)) {walkBlocks(resp.output);}
+          if (resp && Array.isArray(resp.content)) {walkBlocks(resp.content);}
           // Support Chat content as string or array-of-parts
           const chat = resp?.choices?.[0]?.message?.content;
           if (typeof chat === 'string') {
@@ -522,7 +515,7 @@ export class ResponsesHandler extends BaseHandler {
 
       const toCleanObject = (obj: Record<string, unknown>) => {
         for (const key of Object.keys(obj)) {
-          if (obj[key] === undefined) delete obj[key];
+          if (obj[key] === undefined) {delete obj[key];}
         }
         return obj;
       };
@@ -537,23 +530,23 @@ export class ResponsesHandler extends BaseHandler {
         snap.created_at = createdAt;
         delete (snap as any).created;
         snap.status = snap.status || 'completed';
-        if (!('background' in snap)) snap.background = false;
-        if (!('error' in snap)) snap.error = null;
-        if (!('incomplete_details' in snap)) snap.incomplete_details = null;
-        if (requestMeta.instructions && !snap.instructions) snap.instructions = requestMeta.instructions;
-        if (requestMeta.reasoning && !snap.reasoning) snap.reasoning = requestMeta.reasoning;
-        if (requestMeta.tool_choice && !snap.tool_choice) snap.tool_choice = requestMeta.tool_choice;
-        if (requestMeta.parallel_tool_calls !== undefined && !snap.parallel_tool_calls) snap.parallel_tool_calls = requestMeta.parallel_tool_calls;
-        if (requestMeta.tools && !snap.tools) snap.tools = requestMeta.tools;
-        if (requestMeta.store !== undefined && !snap.store) snap.store = requestMeta.store;
-        if (requestMeta.include && !snap.include) snap.include = requestMeta.include;
-        if (requestMeta.prompt_cache_key && !snap.prompt_cache_key) snap.prompt_cache_key = requestMeta.prompt_cache_key;
+        if (!('background' in snap)) {snap.background = false;}
+        if (!('error' in snap)) {snap.error = null;}
+        if (!('incomplete_details' in snap)) {snap.incomplete_details = null;}
+        if (requestMeta.instructions && !snap.instructions) {snap.instructions = requestMeta.instructions;}
+        if (requestMeta.reasoning && !snap.reasoning) {snap.reasoning = requestMeta.reasoning;}
+        if (requestMeta.tool_choice && !snap.tool_choice) {snap.tool_choice = requestMeta.tool_choice;}
+        if (requestMeta.parallel_tool_calls !== undefined && !snap.parallel_tool_calls) {snap.parallel_tool_calls = requestMeta.parallel_tool_calls;}
+        if (requestMeta.tools && !snap.tools) {snap.tools = requestMeta.tools;}
+        if (requestMeta.store !== undefined && !snap.store) {snap.store = requestMeta.store;}
+        if (requestMeta.include && !snap.include) {snap.include = requestMeta.include;}
+        if (requestMeta.prompt_cache_key && !snap.prompt_cache_key) {snap.prompt_cache_key = requestMeta.prompt_cache_key;}
         // Prefer provider-reported model; only fallback to request model when missing
         snap.model = (snap.model as string) || (model as string) || 'unknown';
-        if (!snap.metadata) snap.metadata = {};
-        if (!Array.isArray(snap.output) && Array.isArray(finalResp?.output)) snap.output = finalResp?.output;
-        if (!('output_text' in snap)) snap.output_text = finalResp?.output_text ?? textOut ?? '';
-        if (finalResp?.usage && !snap.usage) snap.usage = finalResp.usage;
+        if (!snap.metadata) {snap.metadata = {};}
+        if (!Array.isArray(snap.output) && Array.isArray(finalResp?.output)) {snap.output = finalResp?.output;}
+        if (!('output_text' in snap)) {snap.output_text = finalResp?.output_text ?? textOut ?? '';}
+        if (finalResp?.usage && !snap.usage) {snap.usage = finalResp.usage;}
         return toCleanObject(snap);
       };
 
@@ -570,6 +563,10 @@ export class ResponsesHandler extends BaseHandler {
         delete snap.output_text;
         delete snap.usage;
         delete snap.required_action;
+        // Avoid sending giant instructions block in early SSE events to prevent client buffering/stalls
+        if (typeof (snap as any).instructions === 'string') {
+          delete (snap as any).instructions;
+        }
         return toCleanObject(snap);
       })();
 
@@ -589,9 +586,9 @@ export class ResponsesHandler extends BaseHandler {
         return out.filter((it: any) => it && (it.type === 'function_call' || it.type === 'tool_call'));
       };
       const deriveRequiredAction = (funcCalls: any[]): Record<string, unknown> | null => {
-        if (!Array.isArray(funcCalls) || funcCalls.length === 0) return null;
+        if (!Array.isArray(funcCalls) || funcCalls.length === 0) {return null;}
         const toStringArgs = (v: any): string => {
-          if (typeof v === 'string') return v;
+          if (typeof v === 'string') {return v;}
           try { return JSON.stringify(v ?? {}); } catch { return '{}'; }
         };
         const calls = funcCalls.map((it: any) => {
@@ -612,7 +609,7 @@ export class ResponsesHandler extends BaseHandler {
         try {
           const ra = resp?.required_action;
           const arr = (ra && ra.type === 'submit_tool_outputs') ? (ra.submit_tool_outputs?.tool_calls || []) : [];
-          if (!Array.isArray(arr) || !arr.length) return [];
+          if (!Array.isArray(arr) || !arr.length) {return [];}
           return arr.map((c: any) => ({
             type: 'function_call',
             id: c?.id,
@@ -624,31 +621,36 @@ export class ResponsesHandler extends BaseHandler {
         } catch { return []; }
       };
       const pickFuncCalls = (): any[] => {
-        const f1 = getFunctionCalls(finalResp); if (Array.isArray(f1) && f1.length) return f1;
-        const f2 = getFunctionCalls(initialResp); if (Array.isArray(f2) && f2.length) return f2;
-        const f3 = getFuncCallsFromRequiredAction(finalResp); if (Array.isArray(f3) && f3.length) return f3;
-        const f4 = getFuncCallsFromRequiredAction(initialResp); if (Array.isArray(f4) && f4.length) return f4;
+        const f1 = getFunctionCalls(finalResp); if (Array.isArray(f1) && f1.length) {return f1;}
+        const f2 = getFunctionCalls(initialResp); if (Array.isArray(f2) && f2.length) {return f2;}
+        const f3 = getFuncCallsFromRequiredAction(finalResp); if (Array.isArray(f3) && f3.length) {return f3;}
+        const f4 = getFuncCallsFromRequiredAction(initialResp); if (Array.isArray(f4) && f4.length) {return f4;}
         return [];
       };
       let funcCalls = pickFuncCalls();
+      // 过滤无效函数调用（缺少 name 或 name 为 'tool'），避免发出不可执行的 function_call 事件
+      funcCalls = Array.isArray(funcCalls) ? funcCalls.filter((it: any) => {
+        const nm = (typeof it?.name === 'string' ? it.name : (typeof it?.function?.name === 'string' ? it.function.name : '')).trim();
+        return nm.length > 0 && nm.toLowerCase() !== 'tool';
+      }) : [];
 
       // Build known MCP servers (env + discovered from original request snapshot)
       const knownServers = (() => {
         const set = new Set<string>();
         try {
           const serversRaw = String(process.env.ROUTECODEX_MCP_SERVERS || '').trim();
-          if (serversRaw) { for (const s of serversRaw.split(',').map(x => x.trim()).filter(Boolean)) set.add(s); }
+          if (serversRaw) { for (const s of serversRaw.split(',').map(x => x.trim()).filter(Boolean)) {set.add(s);} }
           const snap = (reqMeta && typeof reqMeta === 'object') ? reqMeta : {};
           const messages = Array.isArray((snap as any).messages) ? ((snap as any).messages as any[]) : [];
           for (const m of messages) {
             try {
               if (m && m.role === 'tool' && typeof m.content === 'string') {
-                const o = JSON.parse(m.content); const sv = o?.arguments?.server; if (typeof sv === 'string' && sv.trim()) set.add(sv.trim());
+                const o = JSON.parse(m.content); const sv = o?.arguments?.server; if (typeof sv === 'string' && sv.trim()) {set.add(sv.trim());}
               }
               if (m && m.role === 'assistant' && Array.isArray(m.tool_calls)) {
                 for (const tc of m.tool_calls) {
                   const argStr = String(tc?.function?.arguments ?? '');
-                  try { const parsed = JSON.parse(argStr); const sv = parsed?.server; if (typeof sv === 'string' && sv.trim()) set.add(sv.trim()); } catch {}
+                  try { const parsed = JSON.parse(argStr); const sv = parsed?.server; if (typeof sv === 'string' && sv.trim()) {set.add(sv.trim());} } catch {}
                 }
               }
             } catch { /* ignore */ }
@@ -661,15 +663,16 @@ export class ResponsesHandler extends BaseHandler {
         const toArgsStr = (v: any) => (typeof v === 'string' ? v : (() => { try { return JSON.stringify(v ?? {}); } catch { return '{}'; } })());
         const canonicalizeTool = (name: string | undefined, argsStr: string): { name: string; args: string } => {
           const whitelist = new Set(['read_mcp_resource', 'list_mcp_resources', 'list_mcp_resource_templates']);
-          if (!name || typeof name !== 'string') return { name: 'tool', args: argsStr };
+          if (!name || typeof name !== 'string') {return { name: 'tool', args: argsStr };}
           const dot = name.indexOf('.');
-          if (dot <= 0) return { name, args: argsStr };
+          if (dot <= 0) {return { name, args: argsStr };}
           const base = name.slice(dot + 1).trim();
-          if (!whitelist.has(base)) return { name, args: argsStr };
+          if (!whitelist.has(base)) {return { name, args: argsStr };}
           // Drop the dotted prefix unconditionally; do not inject server from prefix
           return { name: base, args: argsStr };
         };
-        let outIndex = 0;
+        // Reserve 0 for text outputs; tool_call items start at 1
+        let outIndex = 1;
         // Deduplicate short-window identical function_call (name + arguments)
         const WINDOW = Math.max(1, Math.min(16, Number(process.env.ROUTECODEX_TOOL_CALL_DEDUPE_WINDOW || 4)));
         const lastKeys: string[] = [];
@@ -686,25 +689,51 @@ export class ResponsesHandler extends BaseHandler {
           lastKeys.push(currKey);
           if (lastKeys.length > WINDOW) {
             const old = lastKeys.shift();
-            if (old) lastSet.delete(old);
+            if (old) {lastSet.delete(old);}
           }
-          await writeEvt('response.output_item.added', { type: 'response.output_item.added', output_index: outIndex, item: { id, type: 'function_call', status: 'in_progress', arguments: '', call_id, name } });
+          // Align item.type with stable schema
+          await writeEvt('response.output_item.added', { type: 'response.output_item.added', output_index: outIndex, item: { id, type: 'tool_call', status: 'in_progress', arguments: '', call_id, name } });
+          // Early required_action (idempotent per call id)
+          try {
+            const responseMeta = { id: (baseResp as any)?.id || `resp_${requestId}`, object: 'response', created_at: createdTs, model: (baseResp as any)?.model || (model || 'unknown') } as Record<string, unknown>;
+            const tool_calls_submit = [ { id, type: 'function', function: { name: String(name), arguments: '' } } ];
+            const tool_calls_simple = [ { id, type: 'function', name: String(name) } ];
+            await writeEvt('response.required_action', { type: 'response.required_action', response: responseMeta, required_action: { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: tool_calls_submit } } });
+            // compatibility variant for clients expecting type='tool_calls' (top-level name)
+            await writeEvt('response.required_action', { type: 'response.required_action', response: responseMeta, required_action: { type: 'tool_calls', tool_calls: tool_calls_simple } });
+          } catch { /* ignore early RA */ }
           await writeEvt('response.content_part.added', { type: 'response.content_part.added', item_id: id, output_index: outIndex, content_index: 0, part: { type: 'input_json', partial_json: '' } });
           // arguments deltas
           const parts = Math.max(3, Math.min(12, Math.ceil(argsStr.length / 8)));
           const step = Math.max(1, Math.ceil(argsStr.length / parts));
           for (let i = 0; i < argsStr.length; i += step) {
             const d = argsStr.slice(i, i + step);
+            await writeEvt('response.tool_call.delta', { type: 'response.tool_call.delta', item_id: id, output_index: outIndex, delta: { arguments: d } });
             await writeEvt('response.function_call_arguments.delta', { type: 'response.function_call_arguments.delta', item_id: id, output_index: outIndex, delta: d });
           }
           await writeEvt('response.function_call_arguments.done', { type: 'response.function_call_arguments.done', item_id: id, output_index: outIndex, arguments: String(argsStr) });
-          await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: outIndex, item: { id, type: 'function_call', status: 'completed', arguments: String(argsStr), call_id, name } });
+          await writeEvt('response.output_item.done', { type: 'response.output_item.done', output_index: outIndex, item: { id, type: 'tool_call', status: 'completed', arguments: String(argsStr), call_id, name } });
           outIndex += 1;
         }
+        // After function_call streaming, emit required_action for clients to submit tool outputs
+        try {
+          const ra = deriveRequiredAction(funcCalls);
+          if (ra) {
+            const responseMeta = { id: (baseResp as any)?.id || `resp_${requestId}`, object: 'response', created_at: createdTs, model: (baseResp as any)?.model || (model || 'unknown') } as Record<string, unknown>;
+            await writeEvt('response.required_action', { type: 'response.required_action', response: responseMeta, required_action: ra });
+            // compatibility: emit tool_calls variant as well (top-level name)
+            if ((ra as any)?.type === 'submit_tool_outputs') {
+              const calls = (ra as any)?.submit_tool_outputs?.tool_calls || [];
+              const tool_calls_simple = calls.map((c: any) => ({ id: (c?.id || c?.call_id), type: 'function', name: (c?.function?.name || c?.name) }));
+              await writeEvt('response.required_action', { type: 'response.required_action', response: responseMeta, required_action: { type: 'tool_calls', tool_calls: tool_calls_simple } });
+            }
+          }
+        } catch { /* ignore */ }
+
         // After function_call streaming, emit completed and close
         const srcUsage2 = finalResp?.usage ? finalResp.usage : (initialResp?.usage ? initialResp.usage : undefined);
         const usage2 = (() => {
-          if (!srcUsage2 || typeof srcUsage2 !== 'object') return undefined as unknown as Record<string, number> | undefined;
+          if (!srcUsage2 || typeof srcUsage2 !== 'object') {return undefined as unknown as Record<string, number> | undefined;}
           const input = (typeof (srcUsage2 as any).input_tokens === 'number') ? (srcUsage2 as any).input_tokens : (typeof (srcUsage2 as any).prompt_tokens === 'number' ? (srcUsage2 as any).prompt_tokens : 0);
           const output = (typeof (srcUsage2 as any).output_tokens === 'number') ? (srcUsage2 as any).output_tokens : (typeof (srcUsage2 as any).completion_tokens === 'number' ? (srcUsage2 as any).completion_tokens : 0);
           const total = (typeof (srcUsage2 as any).total_tokens === 'number') ? (srcUsage2 as any).total_tokens : (input + output);
@@ -712,7 +741,7 @@ export class ResponsesHandler extends BaseHandler {
         })();
         const completedSnapshot2 = { ...baseResp, status: 'completed' } as Record<string, unknown>;
         completedSnapshot2.created_at = completedSnapshot2.created_at ?? createdTs;
-        if (usage2) completedSnapshot2.usage = usage2;
+        if (usage2) {completedSnapshot2.usage = usage2;}
         const completed2 = { type: 'response.completed', response: toCleanObject(completedSnapshot2) } as Record<string, unknown>;
         await writeEvt('response.completed', completed2);
         // Emit terminal done event to signal clients to stop reconnecting
@@ -737,7 +766,7 @@ export class ResponsesHandler extends BaseHandler {
       // Map usage from final turn if available
       const srcUsage = finalResp?.usage ? finalResp.usage : (initialResp?.usage ? initialResp.usage : undefined);
       const mapUsage = (u: any) => {
-        if (!u || typeof u !== 'object') return undefined as unknown;
+        if (!u || typeof u !== 'object') {return undefined as unknown;}
         const input = (typeof u.input_tokens === 'number') ? u.input_tokens
           : (typeof u.prompt_tokens === 'number') ? u.prompt_tokens
           : 0;
@@ -756,7 +785,7 @@ export class ResponsesHandler extends BaseHandler {
       if (!textOut) {
         delete completedSnapshot.output_text;
       }
-      if (usage) completedSnapshot.usage = usage;
+      if (usage) {completedSnapshot.usage = usage;}
       // Ensure completed.output 仅包含聚合文本（如存在）；不注入 reasoning/function_call 条目
       try {
         const list: any[] = [];
@@ -769,6 +798,8 @@ export class ResponsesHandler extends BaseHandler {
       if (streamAborted) { return; }
       await writeEvt('response.completed', completed);
       await writeEvt('response.done', { type: 'response.done' } as unknown as Record<string, unknown>);
+      // Compatibility: some clients expect a final [DONE] line
+      try { res.write(`data: [DONE]\n\n`); } catch { /* ignore */ }
       // no SSE audit summary when Azure artifacts removed
       try { res.end(); } catch { /* ignore */ }
       await auditWrite('end', { phase: 'completed' });
@@ -826,11 +857,11 @@ export class ResponsesHandler extends BaseHandler {
                 const str = JSON.stringify(meta.tools);
                 const hash = crypto.createHash('sha256').update(str).digest('hex');
                 (meta as any).tools_hash = hash;
-                if (Array.isArray(meta.tools)) (meta as any).tools_count = (meta.tools as any[]).length;
+                if (Array.isArray(meta.tools)) {(meta as any).tools_count = (meta.tools as any[]).length;}
               } catch { /* ignore */ }
             }
-            if (typeof reqMeta.tool_choice !== 'undefined') meta.tool_choice = reqMeta.tool_choice;
-            if (typeof reqMeta.parallel_tool_calls !== 'undefined') meta.parallel_tool_calls = reqMeta.parallel_tool_calls;
+            if (typeof reqMeta.tool_choice !== 'undefined') {meta.tool_choice = reqMeta.tool_choice;}
+            if (typeof reqMeta.parallel_tool_calls !== 'undefined') {meta.parallel_tool_calls = reqMeta.parallel_tool_calls;}
             base.metadata = meta;
             return await ResponsesMapper.enrichResponsePayload(base, payload as Record<string, unknown>, reqMeta as Record<string, unknown>);
           }
@@ -860,7 +891,7 @@ export class ResponsesHandler extends BaseHandler {
       let converted = converted0;
       if (funcCalls.length > 0) {
         const toStringJson = (v: unknown): string => {
-          if (typeof v === 'string') return v;
+          if (typeof v === 'string') {return v;}
           try { return JSON.stringify(v ?? {}); } catch { return '{}'; }
         };
         const calls = funcCalls.map((it: any) => {
@@ -874,16 +905,16 @@ export class ResponsesHandler extends BaseHandler {
         const warnings: Array<Record<string, unknown>> = [];
         const detectWriteRedirection = (name: string | undefined, args: string): boolean => {
           try {
-            if (!name || name.toLowerCase() !== 'shell') return false;
+            if (!name || name.toLowerCase() !== 'shell') {return false;}
             const obj = JSON.parse(args);
             const cmd = obj?.command;
             const getScript = (): string => {
-              if (typeof cmd === 'string') return cmd;
-              if (Array.isArray(cmd)) return cmd.map((x: any) => String(x)).join(' ');
+              if (typeof cmd === 'string') {return cmd;}
+              if (Array.isArray(cmd)) {return cmd.map((x: any) => String(x)).join(' ');}
               return '';
             };
             const s = getScript().toLowerCase();
-            if (!s) return false;
+            if (!s) {return false;}
             const hasBash = /\bbash\b\s+-lc\b/.test(s);
             const hasCatWrite = /cat\s*>\s*[^\s<]+/.test(s);
             const hasHeredoc = /<</.test(s);
@@ -906,7 +937,7 @@ export class ResponsesHandler extends BaseHandler {
           } catch { /* ignore */ }
         }
         const required_action: any = { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: calls } };
-        if (warnings.length) (required_action as any).validation = { warnings };
+        if (warnings.length) {(required_action as any).validation = { warnings };}
         converted = { ...(converted0 as any), required_action };
       }
 

@@ -40,7 +40,7 @@ export class ErrorBuilder {
     // Determine status code with precedence
     const statusFromObj = this.extractStatus(e);
     const routeCodexStatus = error instanceof RouteCodexError ? error.status : undefined;
-    let status = statusFromObj ?? routeCodexStatus ?? 500;
+    const status = statusFromObj ?? routeCodexStatus ?? 500;
 
     // Extract best-effort message from common shapes
     const message = this.extractMessage(error, e);
@@ -142,20 +142,20 @@ export class ErrorBuilder {
     const upstreamCode = (e?.response as any)?.data?.error?.code || (typeof e?.code === 'string' ? e.code : undefined);
 
     const mapStatusToType = (s: number): string => {
-      if (s === 400) return 'bad_request';
-      if (s === 401) return 'unauthorized';
-      if (s === 403) return 'forbidden';
-      if (s === 404) return 'not_found';
-      if (s === 408) return 'request_timeout';
-      if (s === 409) return 'conflict';
-      if (s === 422) return 'unprocessable_entity';
-      if (s === 429) return 'rate_limit_exceeded';
-      if (s >= 500) return 'server_error';
+      if (s === 400) {return 'bad_request';}
+      if (s === 401) {return 'unauthorized';}
+      if (s === 403) {return 'forbidden';}
+      if (s === 404) {return 'not_found';}
+      if (s === 408) {return 'request_timeout';}
+      if (s === 409) {return 'conflict';}
+      if (s === 422) {return 'unprocessable_entity';}
+      if (s === 429) {return 'rate_limit_exceeded';}
+      if (s >= 500) {return 'server_error';}
       return 'internal_error';
     };
 
     const mapKindToType = (k?: string): string | undefined => {
-      if (!k) return undefined;
+      if (!k) {return undefined;}
       const m: Record<string, string> = {
         network: 'network_error',
         server: 'server_error',
@@ -191,8 +191,8 @@ export class ErrorBuilder {
     // Add provider/upstream details
     if (e?.details && typeof e.details === 'object' && e.details !== null) {
       const d = e.details as Record<string, unknown>;
-      if ('provider' in d) details.provider = d.provider;
-      if ('upstream' in d) details.upstream = d.upstream;
+      if ('provider' in d) {details.provider = d.provider;}
+      if ('upstream' in d) {details.upstream = d.upstream;}
     } else if (e?.response && typeof e.response === 'object' && e.response !== null && 'data' in e.response) {
       details.upstream = (e.response as Record<string, unknown>).data;
     }

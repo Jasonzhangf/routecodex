@@ -450,7 +450,7 @@ export class IFlowProvider implements ProviderModule {
     const providerConfig = this.config.config as ProviderConfig;
     const raw = providerConfig.baseUrl || '';
     try {
-      if (!raw) return IFLOW_API_ENDPOINT;
+      if (!raw) {return IFLOW_API_ENDPOINT;}
       const u = new URL(raw);
       const host = (u.host || '').toLowerCase();
       const path = (u.pathname || '').replace(/\/$/, '');

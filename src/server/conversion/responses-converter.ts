@@ -13,11 +13,11 @@ export class ResponsesConverter {
   static inferStreamingFlag(body: unknown, req: Request): boolean | undefined {
     try {
       const hasStream = (body as any)?.stream;
-      if (typeof hasStream === 'boolean') return hasStream;
+      if (typeof hasStream === 'boolean') {return hasStream;}
     } catch { /* ignore */ }
     try {
       const accept = String(req.headers['accept'] || '').toLowerCase();
-      if (accept.includes('text/event-stream')) return true;
+      if (accept.includes('text/event-stream')) {return true;}
     } catch { /* ignore */ }
     return undefined;
   }

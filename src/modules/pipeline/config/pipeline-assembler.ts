@@ -120,17 +120,17 @@ export class PipelineAssembler {
       try {
         const addIf = (arr: Array<Record<string, unknown>>, obj: unknown) => {
           const r = this.asRecord(obj);
-          if (Object.keys(r).length) arr.push(r);
+          if (Object.keys(r).length) {arr.push(r);}
         };
         const familyFromType = (t: string) => (t || '').toLowerCase().split('-')[0];
         const typeStr = String((provider as any).type || '');
         const family = familyFromType(typeStr);
         const aliasFamily = ((): string | undefined => {
           const t = typeStr.toLowerCase();
-          if (t.includes('glm')) return 'openai';
-          if (t.includes('openai')) return 'openai';
-          if (t.includes('lmstudio')) return 'lmstudio';
-          if (t.includes('qwen')) return 'qwen';
+          if (t.includes('glm')) {return 'openai';}
+          if (t.includes('openai')) {return 'openai';}
+          if (t.includes('lmstudio')) {return 'lmstudio';}
+          if (t.includes('qwen')) {return 'qwen';}
           return undefined;
         })();
 
@@ -338,7 +338,7 @@ export class PipelineAssembler {
         const filtered: Record<string, string[]> = {};
         for (const [route, ids] of Object.entries(routePools || {})) {
           const keep = (ids || []).filter(id => present.has(id));
-          if (keep.length) filtered[route] = keep;
+          if (keep.length) {filtered[route] = keep;}
         }
         if (!filtered.default || filtered.default.length === 0) {
           filtered.default = presentIds;

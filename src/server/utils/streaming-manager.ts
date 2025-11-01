@@ -7,7 +7,7 @@ import { type Response } from 'express';
 import type { ProtocolHandlerConfig } from '../handlers/base-handler.js';
 import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
 import { stripThinkingTags } from './text-filters.js';
-import { chunkString } from 'rcc-llmswitch-core/conversion';
+import { chunkString } from 'rcc-llmswitch-core/api';
 import { ErrorContextBuilder, EnhancedRouteCodexError, type ErrorContext } from './error-context.js';
 import os from 'node:os';
 import path from 'node:path';
@@ -212,6 +212,24 @@ export class StreamingManager {
     res: Response,
     model: string
   ): Promise<void> {
+    // Helper: unwrap nested { data: {...} } wrappers until we reach an object with
+    // OpenAI Chat response shape (choices/message) or delta chunks.
+    const unwrapData = (obj: any): any => {
+      try {
+        let cur = obj;
+        const seen = new Set<any>();
+        while (cur && typeof cur === 'object' && !Array.isArray(cur) && !seen.has(cur)) {
+          seen.add(cur);
+          // Stop when the payload clearly looks like an OpenAI Chat response or a delta chunk
+          if (Array.isArray((cur as any).choices) || (cur as any).object === 'chat.completion.chunk') {break;}
+          if ('data' in cur && (cur as any).data && typeof (cur as any).data === 'object') {
+            cur = (cur as any).data; continue;
+          }
+          break;
+        }
+        return cur;
+      } catch { return obj; }
+    };
     const finishReasons: string[] = [];
     let sawToolCalls = false;
     const emitChatRequiredAction = (_msg: any) => { /* removed Responses semantics from Chat SSE */ };
@@ -222,14 +240,14 @@ export class StreamingManager {
     const synthesizeFromResponse = async (resp: any) => {
       const chunks: any[] = [];
       try {
-        let msg = resp?.choices?.[0]?.message || {};
+        const msg = resp?.choices?.[0]?.message || {};
         // 文本→工具归一化已在 llmswitch-core 的 openai-openai codec 处理，这里不重复
         const role = typeof msg?.role === 'string' ? msg.role : 'assistant';
         const content = typeof msg?.content === 'string' ? msg.content : '';
         const toolCallsFromArray = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
         const fnCall = (msg as any)?.function_call || null;
         const toolCalls = (() => {
-          if (toolCallsFromArray.length) return toolCallsFromArray;
+          if (toolCallsFromArray.length) {return toolCallsFromArray;}
           if (fnCall && typeof fnCall === 'object') {
             const name = typeof fnCall.name === 'string' ? fnCall.name : undefined;
             const args = typeof fnCall.arguments === 'string' ? fnCall.arguments : (fnCall.arguments != null ? JSON.stringify(fnCall.arguments) : undefined);
@@ -270,9 +288,12 @@ export class StreamingManager {
           }
         }
 
-        const finish = toolCalls.length > 0
+        let finish = toolCalls.length > 0
           ? 'tool_calls'
           : (resp?.choices?.[0]?.finish_reason || resp?.finish_reason || 'stop');
+        // Guard: if upstream finish_reason=='tool_calls' but we didn't extract any,
+        // do not emit misleading tool_calls final
+        if (finish === 'tool_calls' && toolCalls.length === 0) {finish = 'stop';}
         return { chunks, finish };
       } catch {
         return { chunks, finish: 'stop' };
@@ -310,9 +331,19 @@ export class StreamingManager {
     }
 
     if (typeof data === 'object' && data !== null) {
+      // Align with validated logic: unwrap nested data so we can reliably synthesize
+      const unwrapped = unwrapData(data);
       // Non-stream JSON response: synthesize delta stream when choices[].message exists
-      if (Array.isArray((data as any).choices) && (data as any).choices.length > 0 && (data as any).choices[0]?.message) {
-        const { chunks, finish } = await synthesizeFromResponse(data);
+      if (Array.isArray((unwrapped as any).choices) && (unwrapped as any).choices.length > 0 && (unwrapped as any).choices[0]?.message) {
+        // Align with core: canonicalize response tools before synthesizing to ensure
+        // tool_calls are present when upstream varies shape
+        let source = unwrapped;
+        try {
+          const core = await import('rcc-llmswitch-core/api');
+          const canon = (core as any).processChatResponseTools?.(unwrapped);
+          if (canon && typeof canon === 'object') {source = canon;}
+        } catch { /* non-blocking */ }
+        const { chunks, finish } = await synthesizeFromResponse(source);
         for (const c of chunks) {
           await this.sendChunk(res, c, requestId, model);
           await this.delay(10);
@@ -322,7 +353,7 @@ export class StreamingManager {
         return;
       }
       // Fallback: treat as single chunk
-      await pushChunk(data);
+      await pushChunk(unwrapped);
       const finalReason = finishReasons.length ? finishReasons[finishReasons.length - 1] : undefined;
       this.sendFinalChunk(res, requestId, model, finalReason);
       return;
@@ -350,7 +381,7 @@ export class StreamingManager {
         };
         const parseArgs = (args: any): any => {
           if (typeof args === 'string') { try { return JSON.parse(args); } catch { return {}; } }
-          if (args && typeof args === 'object') return args;
+          if (args && typeof args === 'object') {return args;}
           return {};
         };
         for (const c of choices) {
@@ -410,11 +441,11 @@ export class StreamingManager {
       };
       const parseArgs = (args: any): any => {
         if (typeof args === 'string') { try { return JSON.parse(args); } catch { return {}; } }
-        if (args && typeof args === 'object') return args;
+        if (args && typeof args === 'object') {return args;}
         return {};
       };
       const toolCalls = (() => {
-        if (toolCallsArr && toolCallsArr.length) return toolCallsArr;
+        if (toolCallsArr && toolCallsArr.length) {return toolCallsArr;}
         if (fnCall && typeof fnCall === 'object') {
           const name = typeof fnCall.name === 'string' ? fnCall.name : undefined;
           const args = typeof fnCall.arguments === 'string' ? fnCall.arguments : (fnCall.arguments != null ? JSON.stringify(fnCall.arguments) : undefined);
@@ -426,7 +457,7 @@ export class StreamingManager {
       })();
       // Filter invalid view_image tool_calls when arguments contain a non-image path
       const filteredToolCalls = (() => {
-        if (!Array.isArray(toolCalls)) return toolCalls;
+        if (!Array.isArray(toolCalls)) {return toolCalls;}
         const kept: any[] = [];
         for (const tc of toolCalls) {
           try {
@@ -515,7 +546,7 @@ export class StreamingManager {
     // Clean reasoning/thinking tags in content fields (delta.content and message.content)
     const cleanse = (obj: any) => {
       try {
-        if (!obj || typeof obj !== 'object') return obj;
+        if (!obj || typeof obj !== 'object') {return obj;}
         const choices = Array.isArray(obj.choices) ? obj.choices : [];
         for (const c of choices) {
           if (c && typeof c === 'object') {
@@ -573,7 +604,7 @@ export class StreamingManager {
                 bucket.order.push(key);
                 if (bucket.order.length > WINDOW) {
                   const old = bucket.order.shift();
-                  if (old) bucket.set.delete(old);
+                  if (old) {bucket.set.delete(old);}
                 }
               }
             } catch { kept.push(tc); }
@@ -685,8 +716,8 @@ export class StreamingManager {
   private writeSSELog(requestId: string, event: string, data: any): void {
     try {
       const ws = this.sseLogWriters.get(requestId);
-      if (!ws) return;
-      ws.write(JSON.stringify({ ts: Date.now(), requestId, event, data }) + '\n');
+      if (!ws) {return;}
+      ws.write(`${JSON.stringify({ ts: Date.now(), requestId, event, data })  }\n`);
     } catch { /* ignore */ }
   }
 
@@ -718,7 +749,7 @@ export class StreamingManager {
           res.write(`data: ${JSON.stringify(payload)}\n\n`);
         } catch { /* ignore */ }
       };
-      if (pre) writeBeat();
+      if (pre) {writeBeat();}
       const timer = setInterval(writeBeat, iv);
       this.heartbeatTimers.set(requestId, timer);
       try { res.on('close', () => this.stopHeartbeat(requestId)); } catch { /* ignore */ }

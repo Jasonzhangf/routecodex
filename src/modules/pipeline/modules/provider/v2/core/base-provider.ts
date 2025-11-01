@@ -38,7 +38,7 @@ export abstract class BaseProvider implements IProviderV2 {
   protected abstract getServiceProfile(): ServiceProfile;
   protected abstract createAuthProvider(): IAuthProvider;
   protected abstract preprocessRequest(request: UnknownObject): UnknownObject | Promise<UnknownObject>;
-  protected abstract postprocessResponse(response: any, context: ProviderContext): any | Promise<any>;
+  protected abstract postprocessResponse(response: unknown, context: ProviderContext): unknown | Promise<any>;
 
   // 通用实现方法
   async initialize(): Promise<void> {
@@ -60,7 +60,7 @@ export abstract class BaseProvider implements IProviderV2 {
     }
   }
 
-  async processIncoming(request: UnknownObject): Promise<any> {
+  async processIncoming(request: UnknownObject): Promise<unknown> {
     if (!this.isInitialized) {
       throw new Error('Provider is not initialized');
     }
@@ -105,19 +105,19 @@ export abstract class BaseProvider implements IProviderV2 {
   }
 
   // 实现ProviderModule接口要求的公共sendRequest方法
-  async sendRequest(request: any): Promise<unknown> {
+  async sendRequest(request: unknown): Promise<unknown> {
     if (!this.isInitialized) {
       throw new Error('Provider is not initialized');
     }
 
-    const context = this.createContext(request);
+    const context = this.createContext(request as UnknownObject);
 
     try {
       this.requestCount++;
       this.lastActivity = Date.now();
 
       // 预处理请求
-      const processedRequest = await this.preprocessRequest(request);
+      const processedRequest = await this.preprocessRequest(request as UnknownObject);
 
       // 发送请求 (子类实现)
       const response = await this.sendRequestInternal(processedRequest);
@@ -190,7 +190,7 @@ export abstract class BaseProvider implements IProviderV2 {
     // 默认实现为空，子类可以重写
   }
 
-  protected abstract sendRequestInternal(request: UnknownObject): Promise<any>;
+  protected abstract sendRequestInternal(request: UnknownObject): Promise<unknown>;
 
   protected async performHealthCheck(_url: string): Promise<boolean> {
     // 默认健康检查实现
