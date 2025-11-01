@@ -1,9 +1,12 @@
 /**
- * GLM Compatibility Implementation
+ * GLM Compatibility Implementation (New Modular Version)
  *
- * Normalizes GLM-specific OpenAI-compatible responses so downstream
- * consumers always see text in message.content. GLM often returns
- * reasoning_content while leaving content empty when reasoning is enabled.
+ * New modular GLM compatibility implementation with Hook system and
+ * configuration-driven field mapping. This implementation provides:
+ * - Hook-based tool cleaning and validation
+ * - Configuration-driven field mapping
+ * - Modular architecture for easy maintenance
+ * - Transparent interface compatibility
  */
 
 import type { CompatibilityModule, ModuleConfig, ModuleDependencies } from '../../interfaces/pipeline-interfaces.js';
@@ -11,9 +14,14 @@ import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 import type { TransformationRule } from '../../interfaces/pipeline-interfaces.js';
 import type { PipelineDebugLogger as PipelineDebugLoggerInterface } from '../../interfaces/pipeline-interfaces.js';
 import type { UnknownObject, /* LogData */ } from '../../../../types/common-types.js';
-import { sanitizeAndValidateOpenAIChat } from '../../utils/preflight-validator.js';
-import { stripThinkingTags } from '../../../../server/utils/text-filters.js';
-import { ErrorContextBuilder, EnhancedRouteCodexError, type ErrorContext } from '../../../../server/utils/error-context.js';
+import type { CompatibilityContext } from './compatibility-interface.js';
+
+// Import new modular components
+import { CompatibilityModuleFactory } from './compatibility-factory.js';
+import { CompatibilityManager } from './compatibility-manager.js';
+
+// Ensure GLM module is registered
+import './glm/index.js';
 
 export class GLMCompatibility implements CompatibilityModule {
   readonly id: string;
@@ -23,33 +31,156 @@ export class GLMCompatibility implements CompatibilityModule {
 
   private isInitialized = false;
   private logger: PipelineDebugLoggerInterface;
-  private readonly forceDisableThinking: boolean;
-  private readonly compatPolicy: { removeFunctionStrict: boolean; useCoreNormalize: boolean };
-  // Mapping config removed: router layer must not parse/reshape tool arguments.
+  private compatibilityManager: CompatibilityManager | null = null;
+  private moduleId: string | null = null;
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
     this.logger = dependencies.logger;
     this.id = `compatibility-glm-${Date.now()}`;
     this.config = config;
-    this.forceDisableThinking = process.env.RCC_GLM_DISABLE_THINKING === '1';
-    this.thinkingDefaults = this.normalizeThinkingConfig(this.config?.config?.thinking);
-    const cfg = (this.config?.config as any) || {};
-    const compat = (cfg.compat || {}) as Record<string, unknown>;
-    const envRemove = String(process.env.RCC_GLM_REMOVE_FUNCTION_STRICT || '1') !== '0';
-    const envNormalize = String(process.env.RCC_GLM_USE_CORE_NORMALIZE || '0') === '1';
-    this.compatPolicy = {
-      removeFunctionStrict: typeof compat.removeFunctionStrict === 'boolean' ? compat.removeFunctionStrict : envRemove,
-      useCoreNormalize: typeof compat.useCoreNormalize === 'boolean' ? compat.useCoreNormalize : envNormalize,
-    };
   }
 
   async initialize(): Promise<void> {
     try {
       this.logger.logModule(this.id, 'initializing', { config: this.config });
+
+      // Initialize compatibility manager with new modular architecture
+      this.compatibilityManager = new CompatibilityManager(this.dependencies);
+      await this.compatibilityManager.initialize();
+
+      // Create GLM compatibility module using factory
+      const moduleConfig = {
+        id: 'glm-modular',
+        type: 'glm',
+        providerType: 'glm',
+        enabled: true,
+        priority: 1,
+        profileId: 'glm-standard',
+        config: {
+          debugMode: true,
+          strictValidation: true,
+          // Preserve existing thinking config
+          thinking: this.config?.config?.thinking,
+          // Add new modular features with detailed GLM field mappings
+          fieldMappings: {
+            // Usage field mappings (GLM -> OpenAI format)
+            'usage.prompt_tokens': {
+              'targetPath': 'usage.input_tokens',
+              'type': 'number',
+              'direction': 'incoming',
+              'conversion': 'direct'
+            },
+            'usage.completion_tokens': {
+              'targetPath': 'usage.output_tokens',
+              'type': 'number',
+              'direction': 'incoming',
+              'conversion': 'direct'
+            },
+            'usage.total_tokens': {
+              'targetPath': 'usage.total_tokens',
+              'type': 'number',
+              'direction': 'incoming',
+              'conversion': 'direct'
+            },
+
+            // Timestamp mappings
+            'created_at': {
+              'targetPath': 'created',
+              'type': 'number',
+              'direction': 'both',
+              'conversion': 'direct'
+            },
+
+            // Reasoning content handling (GLM specific)
+            'reasoning_content': {
+              'targetPath': 'reasoning',
+              'type': 'string',
+              'direction': 'both',
+              'conversion': 'extract_blocks',
+              'nestedExtraction': {
+                'patterns': ['<reasoning>', '</reasoning>', '<thinking>', '</thinking>'],
+                'stripTags': true
+              }
+            },
+
+            // Model field mapping
+            'model': {
+              'targetPath': 'model',
+              'type': 'string',
+              'direction': 'both',
+              'conversion': 'direct'
+            },
+
+            // Message structure normalization
+            'messages': {
+              'targetPath': 'messages',
+              'type': 'array',
+              'direction': 'both',
+              'conversion': 'normalize_structure',
+              'arrayRules': {
+                'content': {
+                  'type': 'string_or_array',
+                  'flattenArrays': true,
+                  'nullToString': true
+                },
+                'tool_calls': {
+                  'ensureArgumentsString': true,
+                  'validateStructure': true
+                }
+              }
+            },
+
+            // Tool calls normalization
+            'choices[].message.tool_calls': {
+              'targetPath': 'choices[].message.tool_calls',
+              'type': 'array',
+              'direction': 'both',
+              'conversion': 'normalize_tool_calls',
+              'nestedRules': {
+                'function.arguments': {
+                  'type': 'string',
+                  'ensureStringified': true,
+                  'parseOnError': true
+                }
+              }
+            },
+
+            // Choice structure mapping
+            'choices[].finish_reason': {
+              'targetPath': 'choices[].finish_reason',
+              'type': 'string',
+              'direction': 'both',
+              'conversion': 'map_values',
+              'valueMapping': {
+                'stop_sequence': 'stop',
+                'max_tokens': 'length',
+                'tool_calls': 'tool_calls'
+              }
+            }
+          },
+          toolCleaning: {
+            maxToolContentLength: 512,
+            enableTruncation: true,
+            noisePatterns: [
+              '<reasoning>',
+              '</reasoning>',
+              '<thinking>',
+              '</thinking>'
+            ]
+          }
+        },
+        hookConfig: {
+          enabled: true,
+          debugMode: true,
+          snapshotEnabled: false
+        }
+      };
+
+      this.moduleId = await this.compatibilityManager.createModule(moduleConfig);
+
       this.validateConfig();
-      // Tool-mapping disabled: follow CCR approach (no router-level semantic parsing of tool arguments)
       this.isInitialized = true;
-      this.logger.logModule(this.id, 'initialized');
+      this.logger.logModule(this.id, 'initialized', { moduleId: this.moduleId });
     } catch (error) {
       this.logger.logModule(this.id, 'initialization-error', { error });
       throw error;
@@ -61,6 +192,10 @@ export class GLMCompatibility implements CompatibilityModule {
       throw new Error('GLM Compatibility module is not initialized');
     }
 
+    if (!this.compatibilityManager || !this.moduleId) {
+      throw new Error('GLM Compatibility manager not properly initialized');
+    }
+
     const isDto = this.isSharedPipelineRequest(requestParam);
     const dto = isDto ? requestParam as SharedPipelineRequest : null;
     const request = isDto ? dto!.data : requestParam as unknown;
@@ -69,77 +204,103 @@ export class GLMCompatibility implements CompatibilityModule {
       return isDto ? dto! : { data: request, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
     }
 
-    const outbound = { ...(typeof request === 'object' && request !== null ? request : {}) } as UnknownObject;
-    // Snapshot before sanitize
     try {
-      const reqId = (dto?.route?.requestId as string) || `req_${Date.now()}`;
-      const os = await import('os'); const path = await import('path'); const fs = await import('fs/promises');
-      const dir = (path as any).default.join((os as any).default.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
-      await (fs as any).mkdir(dir, { recursive: true });
-      const file = (path as any).default.join(dir, `${reqId}_compat-pre.json`);
-      const msgs: any[] = Array.isArray((outbound as any).messages) ? ((outbound as any).messages as any[]) : [];
-      const types: Record<string, number> = {};
-      for (const m of msgs) { if (m && m.role==='assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) { const t = (m.content===null)?'null':(typeof m.content); types[t]=(types[t]||0)+1; } }
-      await (fs as any).writeFile(file, JSON.stringify({ stage:'compat-pre', assistant_tool_calls: Object.values(types).reduce((a:number,b:number)=>a+b,0), content_types: types }, null, 2), 'utf-8');
-    } catch {}
+      // Create compatibility context
+      const context: CompatibilityContext = {
+        compatibilityId: this.moduleId,
+        profileId: 'glm-standard',
+        providerType: 'glm',
+        direction: 'incoming',
+        stage: 'request_processing',
+        requestId: (dto?.route?.requestId as string) || `req_${Date.now()}`,
+        executionId: `exec_${Date.now()}`,
+        timestamp: Date.now(),
+        startTime: Date.now(),
+        metadata: {
+          dataSize: JSON.stringify(request).length,
+          dataKeys: Object.keys(request),
+          config: this.config.config
+        }
+      };
 
-    if (!this.forceDisableThinking && typeof outbound === 'object' && outbound !== null && !('thinking' in outbound)) {
-      const payload = this.resolveThinkingPayload(outbound);
-      if (payload) {
-        outbound.thinking = payload;
-        this.logger.logModule(this.id, 'thinking-applied', {
-          model: this.getModelId(outbound),
-          payload
-        });
-      }
+      // Process using new modular compatibility manager
+      const processedRequest = await this.compatibilityManager.processRequest(
+        this.moduleId,
+        request as UnknownObject,
+        context
+      );
+
+      return isDto ? { ...dto!, data: processedRequest } : { data: processedRequest, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
+
+    } catch (error) {
+      this.logger.logModule(this.id, 'process-incoming-error', { error: error instanceof Error ? error.message : String(error) });
+      throw error;
     }
-
-    await this.sanitizeRequest(outbound);
-    try {
-      const reqId = (dto?.route?.requestId as string) || `req_${Date.now()}`;
-      const os = await import('os'); const path = await import('path'); const fs = await import('fs/promises');
-      const dir = (path as any).default.join((os as any).default.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
-      await (fs as any).mkdir(dir, { recursive: true });
-      const file = (path as any).default.join(dir, `${reqId}_compat-post.json`);
-      const msgs: any[] = Array.isArray((outbound as any).messages) ? ((outbound as any).messages as any[]) : [];
-      const types: Record<string, number> = {};
-      for (const m of msgs) { if (m && m.role==='assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) { const t = (m.content===null)?'null':(typeof m.content); types[t]=(types[t]||0)+1; } }
-      await (fs as any).writeFile(file, JSON.stringify({ stage:'compat-post', assistant_tool_calls: Object.values(types).reduce((a:number,b:number)=>a+b,0), content_types: types }, null, 2), 'utf-8');
-    } catch {}
-
-    // 方案B：若在最小清理后上下文有效消息为空，则不向上游发送，直接中止并交由上层返回错误
-    try {
-      const msgs: any[] = Array.isArray((outbound as any).messages) ? ((outbound as any).messages as any[]) : [];
-      const nonSystem = msgs.filter((m: any) => m && typeof m === 'object' && String(m.role || '').toLowerCase() !== 'system');
-      if (nonSystem.length === 0) {
-        const err = new Error('empty_prompt_after_cleanup');
-        (err as any).code = 'empty_prompt_after_cleanup';
-        (err as any).details = { reason: 'All messages removed by GLM minimal cleanup (empty or invalid)', stage: 'glm-compatibility' };
-        throw err;
-      }
-    } catch (e) {
-      throw e;
-    }
-
-    return isDto ? { ...dto!, data: outbound } : { data: outbound, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
   }
 
   async processOutgoing(response: any): Promise<unknown> {
-    if (!this.isInitialized) { throw new Error('GLM Compatibility module is not initialized'); }
-    // Normalize GLM responses to OpenAI Chat Completions shape when needed
-    const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
-    const payload = isDto ? (response as any).data : response;
-    const meta = isDto ? (response as any).metadata : undefined;
-    const out = this.normalizeResponse(payload, meta);
-    if (isDto) {
-      return { ...(response as any), data: out };
+    if (!this.isInitialized) {
+      throw new Error('GLM Compatibility module is not initialized');
     }
-    return out;
+
+    if (!this.compatibilityManager || !this.moduleId) {
+      throw new Error('GLM Compatibility manager not properly initialized');
+    }
+
+    try {
+      // Extract response data and metadata
+      const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
+      const payload = isDto ? (response as any).data : response;
+      const meta = isDto ? (response as any).metadata : undefined;
+
+      // Create compatibility context for response processing
+      const context: CompatibilityContext = {
+        compatibilityId: this.moduleId,
+        profileId: 'glm-standard',
+        providerType: 'glm',
+        direction: 'outgoing',
+        stage: 'response_processing',
+        requestId: meta?.requestId || `req_${Date.now()}`,
+        executionId: `exec_${Date.now()}`,
+        timestamp: Date.now(),
+        startTime: Date.now(),
+        metadata: {
+          dataSize: JSON.stringify(payload).length,
+          dataKeys: Object.keys(payload),
+          config: this.config.config
+        }
+      };
+
+      // Process response using new modular compatibility manager
+      const processedResponse = await this.compatibilityManager.processResponse(
+        this.moduleId,
+        payload as UnknownObject,
+        context
+      );
+
+      // Return response in expected format
+      if (isDto) {
+        return { ...(response as any), data: processedResponse };
+      }
+      return processedResponse;
+
+    } catch (error) {
+      this.logger.logModule(this.id, 'process-outgoing-error', { error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
   }
 
   async cleanup(): Promise<void> {
     try {
       this.logger.logModule(this.id, 'cleanup-start');
+
+      // Cleanup compatibility manager and modules
+      if (this.compatibilityManager) {
+        await this.compatibilityManager.cleanup();
+        this.compatibilityManager = null;
+      }
+
+      this.moduleId = null;
       this.isInitialized = false;
       this.logger.logModule(this.id, 'cleanup-complete');
     } catch (error) {
@@ -149,17 +310,23 @@ export class GLMCompatibility implements CompatibilityModule {
   }
 
   async applyTransformations(data: any, _rules: TransformationRule[]): Promise<unknown> {
-    // Currently no explicit transformation rules required beyond reasoning_content handling
+    // Delegated to new modular compatibility manager
+    if (!this.compatibilityManager || !this.moduleId) {
+      return data;
+    }
     return data;
   }
 
   getStatus(): { id: string; type: string; isInitialized: boolean; ruleCount: number; lastActivity: number } {
+    const managerStats = this.compatibilityManager ? this.compatibilityManager.getStats() : {};
     return {
       id: this.id,
       type: this.type,
       isInitialized: this.isInitialized,
       ruleCount: this.rules.length,
-      lastActivity: Date.now()
+      lastActivity: Date.now(),
+      moduleId: this.moduleId,
+      managerStats
     };
   }
 
@@ -169,8 +336,6 @@ export class GLMCompatibility implements CompatibilityModule {
     }
     this.logger.logModule(this.id, 'config-validation-success', { type: this.config.type });
   }
-
-  private readonly thinkingDefaults: ThinkingConfig | null;
 
   private resolveThinkingPayload(request: Record<string, unknown>): Record<string, unknown> | null {
     if (this.forceDisableThinking) {

@@ -17,8 +17,14 @@ interface ModuleDependencies {
   debugCenter?: any;
 }
 
-// 导入独立Hook系统
-const { createHooksSystem } = require('../../../../hooks/index.js');
+// 导入独立Hook系统（可选）。若不存在，则降级为兼容的空实现以保证启动成功。
+let createHooksSystem: any = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  ({ createHooksSystem } = require('../../../../hooks/index.js'));
+} catch (_err) {
+  createHooksSystem = null; // 在运行环境未构建 hooks 模块时，走兼容路径
+}
 
 /**
  * Hook系统集成配置
@@ -65,6 +71,14 @@ export class HookSystemIntegration {
     }
 
     try {
+      if (!createHooksSystem) {
+        // 未提供 hooks 模块时，直接使用兼容管理器，避免阻塞管线创建
+        this.legacyManager = this.createLegacyCompatibilityManager();
+        this.dependencies.logger?.logModule(this.providerId, 'hook-system-disabled-or-missing', {
+          reason: 'hooks-module-not-found',
+        });
+        return;
+      }
       // 创建Hook系统实例
       this.hooksSystem = createHooksSystem({
         maxConcurrentHooks: 10,
@@ -94,12 +108,7 @@ export class HookSystemIntegration {
       // 创建BidirectionalHookManager包装器
       this.legacyManager = this.hooksSystem.providerAdapter.createLegacyManagerWrapper();
 
-      // 迁移现有Hooks（如果启用）
-      if (this.config.migrationMode) {
-        await this.migrateExistingHooks();
-      }
-
-      // 注册Provider特定的Hooks
+      // 注册Provider特定的Hooks（快照/指标等）
       await this.registerProviderHooks();
 
       this.dependencies.logger?.logModule(this.providerId, 'hook-system-integrated', {
@@ -120,32 +129,7 @@ export class HookSystemIntegration {
   /**
    * 迁移现有的Provider V2 Hooks
    */
-  private async migrateExistingHooks(): Promise<void> {
-    try {
-      // 动态导入现有Hook管理器和调试Hooks
-      const { BidirectionalHookManager } = await import('../config/provider-debug-hooks.js');
-      const { registerDebugExampleHooks } = await import('../hooks/debug-example-hooks.js');
-
-      // 注册调试示例Hooks到旧系统
-      registerDebugExampleHooks();
-
-      // 迁移现有静态Hooks（如果存在）
-      // BidirectionalHookManager是静态类，无需实例化
-      if (this.hooksSystem.providerAdapter.migrateExistingHooks) {
-        this.hooksSystem.providerAdapter.migrateExistingHooks(BidirectionalHookManager);
-      }
-
-      this.dependencies.logger?.logModule(this.providerId, 'existing-hooks-migrated', {
-        providerId: this.providerId
-      });
-
-    } catch (error) {
-      this.dependencies.logger?.logModule(this.providerId, 'hook-migration-error', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-      // 不抛出错误，允许系统继续运行
-    }
-  }
+  // 迁移旧Hooks的逻辑已移除：统一由新的Hook系统负责（避免双栈并行）
 
   /**
    * 注册Provider特定的Hooks

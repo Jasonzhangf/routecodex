@@ -1,0 +1,75 @@
+{
+  "incomingMappings": [
+    {
+      "sourcePath": "usage.prompt_tokens",
+      "targetPath": "usage.input_tokens",
+      "type": "number",
+      "direction": "incoming"
+    },
+    {
+      "sourcePath": "usage.completion_tokens",
+      "targetPath": "usage.output_tokens",
+      "type": "number",
+      "direction": "incoming"
+    },
+    {
+      "sourcePath": "created",
+      "targetPath": "created_at",
+      "type": "number",
+      "direction": "incoming"
+    },
+    {
+      "sourcePath": "model",
+      "targetPath": "model",
+      "type": "string",
+      "direction": "incoming",
+      "transform": "normalizeModelName"
+    }
+  ],
+  "outgoingMappings": [
+    {
+      "sourcePath": "usage.input_tokens",
+      "targetPath": "usage.prompt_tokens",
+      "type": "number",
+      "direction": "outgoing"
+    },
+    {
+      "sourcePath": "usage.output_tokens",
+      "targetPath": "usage.completion_tokens",
+      "type": "number",
+      "direction": "outgoing"
+    },
+    {
+      "sourcePath": "usage.total_input_tokens",
+      "targetPath": "usage.prompt_tokens",
+      "type": "number",
+      "direction": "outgoing"
+    },
+    {
+      "sourcePath": "usage.total_output_tokens",
+      "targetPath": "usage.completion_tokens",
+      "type": "number",
+      "direction": "outgoing"
+    },
+    {
+      "sourcePath": "created_at",
+      "targetPath": "created",
+      "type": "number",
+      "direction": "outgoing"
+    },
+    {
+      "sourcePath": "reasoning_content",
+      "targetPath": "reasoning_content",
+      "type": "string",
+      "direction": "outgoing",
+      "transform": "extractReasoningBlocks"
+    },
+    {
+      "sourcePath": "choices[*].finish_reason",
+      "targetPath": "choices[*].finish_reason",
+      "type": "string",
+      "direction": "outgoing",
+      "transform": "normalizeFinishReason"
+    }
+  ]
+}
