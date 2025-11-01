@@ -1,151 +1,80 @@
-# Chat 路径 GLM 500（Operation failed）分析与统一修复方案
+# Chat GLM 500 调查与处置记录（精准定位）
 
-## 症状与样本
+## 背景
+- 现象：Chat 通路上游 GLM 返回 500（Operation failed）。
+- 最新失败样本目录：`~/.routecodex/codex-samples/openai-chat`
+  - 例：`req_1761955101841_2d71u9w6x_provider-request.json`
 
-- 现象：Chat 调用偶发或连续报错 500（Operation failed），或“无症状停止”。
-- 采样位置（新近样本）：
-  - 最新请求：`~/.routecodex/codex-samples/openai-chat/req_1761896456280_s7i9w6_provider-request.json`
-  - 其它错误样本：`*_provider-error.json`（例如 `req_1761896340638_7fdehrjnh_provider-error.json`）
+## 症状与证据
+- 请求载荷体积异常：多轮 `role:"tool"` 消息携带巨大 JSON/文本结果；两条超长 system 提示叠加。
+- codec/compat 阶段的快照显示：`assistant.tool_calls` 的 `content` 已规范为 `null`；但 `provider-request.json` 依然包含大量工具结果文本（历史轮未最小化）。
+- SSE 侧报错：`Error: GLM API error: 500 Internal Server Error - Operation failed`。
 
-## 关键观察（校正后）
+## 根因（Root Cause）
+- 历史工具结果在多轮会话中持续累积为长文本，叠加双 system 文本，导致上游 GLM 对载荷体量/结构敏感触发 500。
+- 并非“工具引导未生效”。工具引导与工具增强均在 llmswitch-core 正常注入（`[Codex Tool Guidance v1]` + 严格 schema）。
 
-1) 历史“工具结果”污染已被阻断：assistant.content 中的 rcc.tool.v1 executed/result 等不会再出现（不回灌）。
+## CCR（Claude Code Router）的相关做法（预算来源）
+- CCR 以“总上下文预算（token count）”为核心，计算消息 + system + tools 的 token 数，并基于阈值选用长上下文模型：
+  - 位置：`../../claude-code-router/src/utils/router.ts`
+  - 关键点：
+    - 使用 `tiktoken` 计算 token（消息文本、tool_use/input、tool_result/content、system 文本、工具 schema 都计入）。
+    - 与配置阈值比较（`config.Router.longContextThreshold`，默认 60,000 tokens）。
+    - 超阈值或结合上一轮 usage 过大则切换到 `config.Router.longContext` 模型。
+- CCR 并不把大段工具结果回灌到 assistant 文本；工作流结束时通过 ExitTool 返回最终文本，移除 `tool_calls`。
 
-2) 触发 500 的根因是“最后一轮工具对”的结果形状：最后一轮 `role:'tool'` 的 content 是超大 rcc.tool.v1 JSON 包（含 executed/result/exit_code/stdout/嵌套 output），GLM chat/completions 对此不稳定。
+## 我们的对齐策略（直击根因）
+- 唯一入口：仅在 `sharedmodule/llmswitch-core` 做统一处理；Provider/兼容层不做逻辑修改。
+- 两类措施：
+  1) 工具结果“主动最小化 + 分层预算”
+     - 所有 `role:'tool'` 消息统一“文本化+裁剪”。
+     - rcc.tool.v1 成功 → 提取 stdout/简明输出；失败 → `执行失败：前三行`；无输出 → `执行成功（无输出）`。
+     - 为避免累计膨胀，引入分层预算：
+       - 总载荷预算（token/字节，按 CCR 思路来自配置/环境）。
+       - 每条工具消息预算（HEAD/TAIL、类型化提要），最近 N 条额度更大，其余更严格。
+       - 保留结构与 `tool_call_id`，不改角色、不清历史（记忆靠历史）。
+  2) 去噪
+     - 删除“无 `tool_calls` 且内容为空/仅空白”的 `assistant` 回合，减少空 turn.
 
-3) 错误做法回顾：
-   - 过去曾尝试“删除/剥离历史工具调用”，这会让模型记忆丢失、上下文断裂，是错误做法，已明确禁止。
+## 已落地（当前版本）
+- 实施位置：`sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.ts`
+  - 统一对所有 `role:'tool'` 消息做“文本化+截断”，并在文本前加截断提示（例如：`[输出已截断至 2048 字符]`）。
+  - 默认阈值：`RCC_TOOL_TEXT_LIMIT`（默认 2048，可调）。
+  - `assistant` 含 `tool_calls` 时，将空字符串 `content` 规范为 `null`（保留混合内容）。
+  - 删除空文本 `assistant`（无工具调用）。
 
-## 可复现验证（curl）
+## curl 复现与验证
+1. 启动本地服务（示例端口 5520）
+   ```bash
+   rcc start  # 或 routecodex start
+   ```
+2. 使用失败样本 `*_raw-request.json` 复现
+   ```bash
+   jq -r '.body' ~/.routecodex/codex-samples/openai-chat/<失败样本>_raw-request.json > /tmp/rc_req_body.json
+   curl -s -o /tmp/rc_resp.json -w "%{http_code}" \
+     -H 'Content-Type: application/json' \
+     --data @/tmp/rc_req_body.json \
+     http://127.0.0.1:5520/v1/chat/completions
+   ```
+3. 成功标准
+   - `provider-request.json` 中：
+     - `role:'tool'` 文本出现截断提示；历史轮不再巨量。
+     - 不再出现空的 `assistant` turn。
+   - SSE/JSON 不再出现上游 500。
 
-使用本地采样请求复现并二分定位触发点。以下命令以“最新一条样本”为例：
+## 后续工作（对齐 CCR 的“预算来源”）
+- 预算来源与策略：
+  - 总上下文预算：
+    - 从配置载入（建议：`config.Router.longContextThreshold`/`ROUTECODEX_CONTEXT_BUDGET_TOKENS`）。
+    - 用 `tiktoken` 计算请求 token 数，参照 CCR 的 `router.ts` 逻辑。
+  - 分层预算落到工具结果：
+    - 最近 N 条工具消息额度更大，其余更严格（HEAD/TAIL/摘要）。
+    - 类型化提要（stderr/失败仅前几行，stdout/JSON 取关键信息）。
+  - 超预算策略：
+    - 优先压缩工具结果文本，不修改历史结构与角色；必要时切换长上下文模型（CCR 同源策略）。
 
-1) 直接复放（通常重现 500）：
+## 结论
+- 500 原因是“累积工具结果文本 + 超长 system 导致载荷过大”，而非“工具引导缺失”。
+- 处置方案定位在唯一入口（llmswitch-core），以“主动最小化 + 预算控制”预防问题发生。
+- 下一步将把“分层预算 + 类型化提要 + 全局上下文预算（CCR 同源）”落地为可配置策略，并继续用 curl 真样本回放验证。
 
-```
-REQ=~/.routecodex/codex-samples/openai-chat/req_1761896456280_s7i9w6_provider-request.json
-curl -sS -X POST http://127.0.0.1:5520/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  --data @${REQ} | jq .
-```
-
-2) 剪掉尾部一条消息再试（常见转为 200）：
-
-```
-jq '{model, messages: .messages[0:-1], tools, tool_choice, stream}' ${REQ} > /tmp/trim1.json
-curl -sS -X POST http://127.0.0.1:5520/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  --data @/tmp/trim1.json | jq .
-```
-
-3) 移除全部 `role:"tool"` 历史再试（预期 200；验证 GLM 对 tool 角色敏感）：
-
-```
-jq '{model, messages: [ .messages[] | select(.role != "tool") ], tools, tool_choice, stream}' ${REQ} > /tmp/no-tool.json
-curl -sS -X POST http://127.0.0.1:5520/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  --data @/tmp/no-tool.json | jq .
-```
-
-若 (2)/(3) 能显著降低 500 概率，即可确认“最后一轮工具结果的内容形状（巨大 JSON 包）”是主要触发因素。
-
-## 根因总结
-
-- 第一阶段问题（已解决）：assistant.content 混入 rcc.tool.v1 结果或半残 JSON，导致 GLM 500。
-- 仍存触发源：大量 `role:'tool'` 历史（尤其尾部成组出现）在 Chat Completions 中不被 GLM 可靠接受，最终以 500 报错。
-
-### 新增（经实测确认）
-- 当某一轮消息为 `role:'assistant'` 且包含 `tool_calls` 时，若其 `content` 为“空/全空白字符串”而非 `null`，在部分上下文下会直接触发 GLM 500；将该轮 `content` 置为 `null` 后恢复为 200。
-- 该问题独立于“巨大 rcc.tool.v1 结果包”，属于“形状不一致”导致的上游严格校验失败/不稳定。
-
-## 统一修复策略（一次到位，避免反复）
-
-只做一件事：规范“最后一轮工具结果”的内容形状；不动历史、不改角色。
-
-1) llmswitch-core（唯一工具入口）
-   - 已生效：
-     - 意图抽取为标准 tool_calls；
-     - 结果包/半残文本清洗；
-     - 禁止把工具结果嵌回 assistant 文本；
-     - 邻近去重、view_image 误用改写。
-   - 新增（最终方案）：仅对“最后一轮” assistant.tool_calls 的配对 `role:'tool'` 结果执行“极简文本化”。
-     - 成功（exit_code==0 或 result.success==true）：content → “执行成功”。
-     - 失败：content → “执行失败：<简要原因>”（优先 stderr/error 首行，最多 2–3 行）。
-     - 统一长度上限（默认 8192，`RCC_TOOL_TEXT_LIMIT` 可调），超长追加“...(truncated)”。
-     - 不改消息角色、不改配对、不回灌 assistant.text。
-
-2) GLM 兼容层
-   - 不要删除/剥离历史工具调用（保留全部上下文）。
-   - 不要修改消息角色（role:'tool' 原样保留）。
-   - 不在此层做与角色/历史相关的重写，避免“记忆丢失”。
-
-3) Provider 层
-   - 不做清洗（遵循“清洗不在 provider”的要求）。
-
-4) OpenAI 形状一致性修正（新增）
-   - 当且仅当某一轮为 `role:'assistant'` 且包含 `tool_calls`，并且其 `content` 是空/空白字符串时，将其规范化为 `null`（若已有文本或非空白，保持不变）。
-   - 该修正位于 llmswitch-core 的 OpenAI 编码器中，默认启用，无需开关。
-
-## 实施清单
-
-1) 保持 llmswitch-core 现状：不再改动工具入口。
-
-2) GLM 兼容层（一次性落稳）：
-   - 将 `keepToolRole` 设为 false：把 `role:'tool'` 统一降级为 `role:'user'`，纯文本结果；
-   - 将 `stripHistoricalAssistantToolCalls` 设为 true，`keepOnlyLastAssistantToolCalls` 设为 true；
-   - 可选：确保“最后一条为 user”（若尾部为工具结果文本时），避免收口异常；
-   - 保持 `arguments` 为对象（GLM 侧），`assistant.content=null`（当存在 tool_calls 时）。
-
-3) 文档与回放验证：
-   - 以上述 curl 三步，针对近 5 条样本批量验证；
-   - 记录 prompt_tokens 与 500 命中率前后对比；
-   - 保持“默认稳定策略，无需环境变量开关”。
-
-## 验收标准
-
-- Chat 路径：
-  - 不再出现“无症状停止”（空内容 + stop）。
-  - 500（Operation failed）在同类样本上消失。
-  - assistant.content 不含工具结果文本。
-  - 保留全部历史工具调用与角色（不丢记忆、不改角色）。
-  - GLM 返回含文本或函数调用（tool_calls）的正常响应。
-
-## 实验复现与快速修复片段（新增）
-
-以最新失败样本为例，使用 curl 验证：
-
-1) 基线（常见出现 500）：
-
-```
-REQ=~/.routecodex/codex-samples/openai-chat/<your>_provider-request.json
-jq '. + {stream:false}' "$REQ" >/tmp/baseline.json
-curl -sS -H 'Content-Type: application/json' --data @/tmp/baseline.json \
-  http://127.0.0.1:5520/v1/chat/completions | jq -r '.error?.message // .choices[0]?.finish_reason'
-```
-
-2) 仅将“assistant 且有 tool_calls 且 content 为空白”的回合置 `null`（应恢复 200）：
-
-```
-jq '(.messages |= (map(
-  if (.role=="assistant" and ((.tool_calls|length)? // 0)>0) and ((.content|type)=="string") and ((.content|gsub("[[:space:]]+"; ""))|length)==0)
-  then (.content=null) else . end))) + {stream:false}' "$REQ" > /tmp/fix-null.json
-curl -sS -H 'Content-Type: application/json' --data @/tmp/fix-null.json \
-  http://127.0.0.1:5520/v1/chat/completions | jq -r '.error?.message // .choices[0]?.finish_reason'
-```
-
-3) 可选：剪掉尾部一条消息验证“尾部空白 assistant（无 tool_calls）”是否也是触发点：
-
-```
-jq '{model, messages: .messages[0:-1], tools, tool_choice} + {stream:false}' "$REQ" >/tmp/trim-tail.json
-curl -sS -H 'Content-Type: application/json' --data @/tmp/trim-tail.json \
-  http://127.0.0.1:5520/v1/chat/completions | jq -r '.error?.message // .choices[0]?.finish_reason'
-```
-
-以上对比有助于快速定位是“形状不一致”还是“尾部空白 assistant”引起的 500。
-
-## 备注
-
-## 错误做法（明确禁止）
-
-- 删除/剥离历史工具调用（会导致模型记忆缺失与反复执行）：禁止。
-- 修改工具消息角色（将 `tool` 降级为 `user/assistant` 或嵌回 assistant）：禁止。
