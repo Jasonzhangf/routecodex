@@ -28,10 +28,18 @@ export async function writeCompatSnapshot(options: {
     const dir = path.join(base, folder);
     await ensureDir(dir);
     const file = path.join(dir, `${options.requestId}_${options.phase}.json`);
-    const payload = typeof options.data === 'string' ? options.data : JSON.stringify(options.data, null, 2);
+    const meta = {
+      stage: options.phase,
+      version: String(process.env.ROUTECODEX_VERSION || 'dev'),
+      buildTime: String(process.env.ROUTECODEX_BUILD_TIME || new Date().toISOString())
+    };
+    const wrapped = {
+      meta,
+      data: options.data
+    } as any;
+    const payload = typeof wrapped === 'string' ? wrapped : JSON.stringify(wrapped, null, 2);
     await fsp.writeFile(file, payload, 'utf-8');
   } catch {
     // snapshot is non-blocking; ignore any fs errors
   }
 }
-

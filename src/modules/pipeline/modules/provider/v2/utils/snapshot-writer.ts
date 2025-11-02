@@ -48,6 +48,11 @@ export async function writeProviderSnapshot(options: {
         : 'provider-error';
     const file = path.join(dir, `${options.requestId}_${suffix}.json`);
     const payload = {
+      meta: {
+        stage: suffix,
+        version: String(process.env.ROUTECODEX_VERSION || 'dev'),
+        buildTime: String(process.env.ROUTECODEX_BUILD_TIME || new Date().toISOString())
+      },
       url: options.url,
       headers: maskHeaders(options.headers || {}),
       ...(typeof options.data === 'string' ? { bodyText: options.data } : { body: options.data })
@@ -57,4 +62,3 @@ export async function writeProviderSnapshot(options: {
     // non-blocking
   }
 }
-

@@ -155,11 +155,11 @@ export class GLMResponseValidationHook extends BaseHook {
       }
     }
 
-    // 检查tool_calls字段
-    if (message.tool_calls) {
-      const toolCallErrors = this.validateToolCalls(message.tool_calls, choiceIndex);
-      errors.push(...toolCallErrors);
-    }
+    // 工具调用由 llmswitch-core 统一校验与修复；此处不阻断（最小清理原则）
+    // if (message.tool_calls) {
+    //   const toolCallErrors = this.validateToolCalls(message.tool_calls, choiceIndex);
+    //   errors.push(...toolCallErrors);
+    // }
 
     return errors;
   }
