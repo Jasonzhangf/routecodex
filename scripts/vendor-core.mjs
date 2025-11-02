@@ -12,7 +12,10 @@ async function main(){
   const root=process.cwd();
   const src=path.join(root,'sharedmodule','llmswitch-core','dist');
   const out=path.join(root,'vendor','rcc-llmswitch-core');
-  if(!(await exists(src))){ console.log('[vendor-core] llmswitch-core dist not found, skip'); return; }
+  if(!(await exists(src))){
+    console.error('[vendor-core] ERROR: llmswitch-core dist not found. Please build sharedmodule/llmswitch-core first.');
+    process.exit(2);
+  }
   await rimraf(out);
   await fsp.mkdir(out,{recursive:true});
   // write package.json for vendored core
@@ -34,4 +37,3 @@ async function main(){
 }
 
 main().catch(e=>{ console.error('[vendor-core] failed',e?.message||e); process.exit(0); });
-
