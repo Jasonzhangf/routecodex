@@ -8,7 +8,7 @@ import { BaseHook } from './base-hook.js';
  * 将GLM特有的响应格式转换为标准OpenAI格式
  */
 export class GLMResponseNormalizationHook extends BaseHook {
-  readonly name = 'glm-response-normalization';
+  readonly name = 'glm.02.response-normalization';
   readonly stage = 'outgoing_postprocessing';
   readonly priority = 200;
 
@@ -59,8 +59,8 @@ export class GLMResponseNormalizationHook extends BaseHook {
     }
   }
 
-  private normalizeUsageFields(usage: UnknownObject): UnknownObject {
-    const normalizedUsage = { ...usage };
+  private normalizeUsageFields(usage: any): UnknownObject {
+    const normalizedUsage: any = { ...(usage as any) };
 
     // GLM可能使用不同的字段名
     const fieldMappings = {
@@ -95,7 +95,7 @@ export class GLMResponseNormalizationHook extends BaseHook {
     return normalizedUsage;
   }
 
-  private extractReasoningContent(reasoningContent: string | UnknownObject): string {
+  private extractReasoningContent(reasoningContent: any): string {
     if (typeof reasoningContent === 'string') {
       return this.extractReasoningBlocks(reasoningContent);
     }

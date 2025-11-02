@@ -1,6 +1,6 @@
 import type { CompatibilityModule, CompatibilityContext } from './compatibility-interface.js';
-import type { UnknownObject } from '../../../types/common-types.js';
-import type { ModuleDependencies } from '../../../types/module.types.js';
+import type { UnknownObject } from '../../../../types/common-types.js';
+import type { ModuleDependencies } from '../../../../types/module.types.js';
 import type { CompatibilityModuleConfig, CompatibilityModuleInstance } from './compatibility-factory.js';
 import { CompatibilityModuleFactory } from './compatibility-factory.js';
 
@@ -111,8 +111,8 @@ export class CompatibilityManager {
       const moduleIds: string[] = [];
 
       // 处理兼容性模块配置
-      if (config.compatibility && Array.isArray(config.compatibility.modules)) {
-        for (const moduleConfig of config.compatibility.modules) {
+      if (configContent.compatibility && Array.isArray(configContent.compatibility.modules)) {
+        for (const moduleConfig of configContent.compatibility.modules) {
           const moduleId = await this.createModule(moduleConfig);
           moduleIds.push(moduleId);
         }
@@ -136,12 +136,10 @@ export class CompatibilityManager {
   }
 
   /**
-   * 加载配置文件
+   * 加载配置文件（严格失败）
    */
   private async loadConfigFile(configPath: string): Promise<any> {
     const fs = await import('fs/promises');
-    const path = await import('path');
-
     try {
       const configContent = await fs.readFile(configPath, 'utf8');
       return JSON.parse(configContent);
@@ -298,8 +296,8 @@ export class CompatibilityManager {
    * 删除兼容性模块
    */
   async removeModule(moduleId: string): Promise<void> {
-    const module = this.modules.get(moduleId);
-    if (!module) {
+    const instance = this.moduleInstances.get(moduleId);
+    if (!instance) {
       return;
     }
 
@@ -308,8 +306,8 @@ export class CompatibilityManager {
     });
 
     try {
-      await module.cleanup();
-      this.modules.delete(moduleId);
+      await instance.module.cleanup();
+      this.moduleInstances.delete(moduleId);
 
       this.dependencies.logger?.logModule('compatibility-manager', 'module-removed', {
         moduleId
@@ -329,12 +327,12 @@ export class CompatibilityManager {
    */
   async cleanup(): Promise<void> {
     this.dependencies.logger?.logModule('compatibility-manager', 'cleanup-start', {
-      moduleCount: this.modules.size
+      moduleCount: this.moduleInstances.size
     });
 
-    const cleanupPromises = Array.from(this.modules.entries()).map(async ([id, module]) => {
+    const cleanupPromises = Array.from(this.moduleInstances.entries()).map(async ([id, instance]) => {
       try {
-        await module.cleanup();
+        await instance.module.cleanup();
       } catch (error) {
         this.dependencies.logger?.logError?.(error as Error, {
           component: 'CompatibilityManager',
@@ -345,7 +343,7 @@ export class CompatibilityManager {
     });
 
     await Promise.all(cleanupPromises);
-    this.modules.clear();
+    this.moduleInstances.clear();
     this.isInitialized = false;
 
     this.dependencies.logger?.logModule('compatibility-manager', 'cleanup-complete', {});
@@ -355,18 +353,20 @@ export class CompatibilityManager {
    * 获取模块统计信息
    */
   getStats(): UnknownObject {
-    const stats = {
-      totalModules: this.modules.size,
+    const stats: any = {
+      totalModules: this.moduleInstances.size,
       isInitialized: this.isInitialized,
       registeredTypes: CompatibilityModuleFactory.getRegisteredTypes(),
       modulesByType: {} as Record<string, number>,
       modulesByProvider: {} as Record<string, number>
     };
 
-    for (const module of this.modules.values()) {
-      stats.modulesByType[module.type] = (stats.modulesByType[module.type] || 0) + 1;
-      if (module.providerType) {
-        stats.modulesByProvider[module.providerType] = (stats.modulesByProvider[module.providerType] || 0) + 1;
+    for (const instance of this.moduleInstances.values()) {
+      const t = (instance.module as any).type || 'unknown';
+      const p = (instance.module as any).providerType || instance.config.providerType || 'unknown';
+      stats.modulesByType[t] = (stats.modulesByType[t] || 0) + 1;
+      if (p) {
+        stats.modulesByProvider[p] = (stats.modulesByProvider[p] || 0) + 1;
       }
     }
 
@@ -378,6 +378,13 @@ export class CompatibilityManager {
    */
   private registerBuiltinModules(): void {
     // 在这里注册内置的兼容性模块类型
-    // GLM模块会在这里注册
+    // 仅注册 V2 GLM 模块类型（防止旧实现被误用）
+    try {
+      // 动态导入以避免循环依赖
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require('./glm/index.js');
+    } catch {
+      // 忽略注册失败（由上层 index.ts 导入兜底）
+    }
   }
 }

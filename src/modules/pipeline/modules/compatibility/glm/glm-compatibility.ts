@@ -1,6 +1,6 @@
-import type { CompatibilityModule, CompatibilityContext } from '../../compatibility-interface.js';
-import type { UnknownObject } from '../../../../../../types/common-types.js';
-import type { ModuleDependencies } from '../../../../../../types/module.types.js';
+import type { CompatibilityModule, CompatibilityContext } from '../compatibility-interface.js';
+import type { UnknownObject } from '../../../../../types/common-types.js';
+import type { ModuleDependencies } from '../../../../../types/module.types.js';
 import { GLMFieldMappingProcessor } from './field-mapping/field-mapping-processor.js';
 import { GLMToolCleaningHook } from './hooks/glm-tool-cleaning-hook.js';
 import { GLMRequestValidationHook } from './hooks/glm-request-validation-hook.js';
@@ -55,9 +55,10 @@ export class GLMCompatibility implements CompatibilityModule {
   }
 
   async processIncoming(request: UnknownObject, context: CompatibilityContext): Promise<UnknownObject> {
+    const reqId = (context as any)?.requestId || 'unknown';
     this.dependencies.logger?.logModule('glm-compatibility', 'processIncoming-start', {
       compatibilityId: this.id,
-      requestId: context.requestId
+      requestId: reqId
     });
 
     try {
@@ -72,14 +73,14 @@ export class GLMCompatibility implements CompatibilityModule {
 
       this.dependencies.logger?.logModule('glm-compatibility', 'processIncoming-success', {
         compatibilityId: this.id,
-        requestId: context.requestId
+        requestId: reqId
       });
 
       return validatedRequest;
     } catch (error) {
       this.dependencies.logger?.logError?.(error as Error, {
         compatibilityId: this.id,
-        requestId: context.requestId,
+        requestId: reqId,
         stage: 'processIncoming'
       });
       throw error;
@@ -87,9 +88,10 @@ export class GLMCompatibility implements CompatibilityModule {
   }
 
   async processOutgoing(response: UnknownObject, context: CompatibilityContext): Promise<UnknownObject> {
+    const reqId = (context as any)?.requestId || 'unknown';
     this.dependencies.logger?.logModule('glm-compatibility', 'processOutgoing-start', {
       compatibilityId: this.id,
-      requestId: context.requestId
+      requestId: reqId
     });
 
     try {
@@ -104,14 +106,14 @@ export class GLMCompatibility implements CompatibilityModule {
 
       this.dependencies.logger?.logModule('glm-compatibility', 'processOutgoing-success', {
         compatibilityId: this.id,
-        requestId: context.requestId
+        requestId: reqId
       });
 
       return normalizedResponse;
     } catch (error) {
       this.dependencies.logger?.logError?.(error as Error, {
         compatibilityId: this.id,
-        requestId: context.requestId,
+        requestId: reqId,
         stage: 'processOutgoing'
       });
       throw error;

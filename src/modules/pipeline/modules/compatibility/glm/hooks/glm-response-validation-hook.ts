@@ -8,7 +8,7 @@ import { BaseHook } from './base-hook.js';
  * 校验响应字段的完整性和有效性，特别是工具调用相关的字段
  */
 export class GLMResponseValidationHook extends BaseHook {
-  readonly name = 'glm-response-validation';
+  readonly name = 'glm.01.response-validation';
   readonly stage = 'outgoing_validation';
   readonly priority = 300;
 
@@ -22,8 +22,10 @@ export class GLMResponseValidationHook extends BaseHook {
     this.logExecution(context, { stage: 'response-validation-start' });
 
     try {
-      // 执行响应校验
-      this.validateResponse(data);
+      // 统一解包（provider可能返回 { data, status, headers, metadata } 结构）
+      const payload = this.unwrapResponse(data);
+      // 执行响应校验（仅校验GLM最小必要字段）
+      this.validateResponse(payload);
 
       this.logExecution(context, { stage: 'response-validation-success' });
 
@@ -37,7 +39,7 @@ export class GLMResponseValidationHook extends BaseHook {
   private validateResponse(response: UnknownObject): void {
     const errors: string[] = [];
 
-    // 基础字段校验
+    // 基础字段校验（不强制要求 OpenAI 的 object 字段）
     errors.push(...this.validateBasicFields(response));
 
     // choices字段校验
@@ -63,9 +65,7 @@ export class GLMResponseValidationHook extends BaseHook {
       errors.push('响应缺少有效的id字段');
     }
 
-    if (!response.object || typeof response.object !== 'string') {
-      errors.push('响应缺少有效的object字段');
-    }
+    // GLM 不提供 OpenAI 的 object 字段，不强制
 
     if (!response.created || typeof response.created !== 'number') {
       errors.push('响应缺少有效的created字段');
@@ -76,6 +76,16 @@ export class GLMResponseValidationHook extends BaseHook {
     }
 
     return errors;
+  }
+
+  private unwrapResponse(response: UnknownObject): UnknownObject {
+    try {
+      if (response && typeof response === 'object' && 'data' in response && (response as any).data) {
+        const d = (response as any).data;
+        if (d && typeof d === 'object') { return d as UnknownObject; }
+      }
+    } catch { /* ignore */ }
+    return response;
   }
 
   private validateChoices(choices: unknown): string[] {
@@ -229,7 +239,7 @@ export class GLMResponseValidationHook extends BaseHook {
     return errors;
   }
 
-  private validateUsage(usage: unknown): string[] {
+  private validateUsage(usage: any): string[] {
     const errors: string[] = [];
 
     if (!usage || typeof usage !== 'object') {

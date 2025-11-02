@@ -6,6 +6,36 @@
 
 RouteCodex是一个功能强大的多提供商OpenAI代理服务器，支持原生dry-run调试能力、动态路由分类、4层管道架构和实时监控。提供统一的API接口，无缝集成多个AI服务提供商。
 
+## 🔄 V2 重构状态（Server / Compatibility / Provider）
+
+本仓库已完成面向生产的 V2 重构并默认启用：
+
+- Compatibility V2（GLM 先行）
+  - 位置：`src/modules/pipeline/modules/compatibility/glm/*`（模块化 + Hook 化）。
+  - 职责：仅做 Provider 特定的最小字段标准化与 reasoning_content 处理；不做“文本→工具”。
+  - 快照：端点感知的 `compat-pre/compat-post` 写入 `~/.routecodex/codex-samples/{openai-chat|openai-responses|anthropic-messages}`。
+  - 配合：工具治理统一在 llmswitch-core v2（请求：schema 增强 + 系统工具指引注入；响应：文本→tool_calls + Responses 非流 required_action 合成）。
+
+- Provider V2（OpenAI 标准 HTTP 封装）
+  - 位置：`src/modules/pipeline/modules/provider/v2/*`。
+  - 能力：统一 HTTP 发送、认证物化、Header/URL 组合、请求/响应/错误快照（`provider-request/response/error`）。
+  - 策略：Fail Fast，无兜底；授权快照含 `authMeta（scheme,len,sha256）` 便于排查 401。
+
+- Server 端变化
+  - 端点仅管 HTTP 协议、认证和路由；工具治理单点在 llmswitch-core v2。
+  - 启动期校验 routePools ↔ pipelines 一致性（不再“懒创建”）。
+  - SSE 头与终止事件一致化（Chat/Responses）。
+
+构建顺序（重要）：
+
+1) 先编译共享模块：`npm --prefix sharedmodule/llmswitch-core run build`
+2) 再编译根包并安装/发布：`npm run build` 或 `npm pack && npm i -g ./routecodex-*.tgz`
+
+调试与快照：
+
+- `ROUTECODEX_HOOKS_VERBOSITY=verbose`（或 `RCC_HOOKS_VERBOSITY=verbose`）写全链路快照；
+- 常见链路（Chat）：raw-request → pre-llmswitch → post-llmswitch → compat-pre → provider-request → provider-response → compat-post。
+
 ## 🚀 核心特性
 
 ### 🏗️ 4层管道架构

@@ -1,6 +1,7 @@
 import type { CompatibilityModule } from './compatibility-interface.js';
-import type { UnknownObject } from '../../../types/common-types.js';
-import type { ModuleDependencies } from '../../../types/module.types.js';
+import type { UnknownObject } from '../../../../types/common-types.js';
+import type { ModuleDependencies } from '../../../../types/module.types.js';
+import type { CompatibilityContext } from './compatibility-interface.js';
 
 /**
  * 兼容性模块配置接口
