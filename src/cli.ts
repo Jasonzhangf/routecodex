@@ -63,33 +63,19 @@ const logger = {
   debug: (msg: string) => console.log(`${chalk.gray('◉')  } ${  msg}`)
 };
 
-// Ensure llmswitch-core is resolvable; if not (common when running local repo without building submodule),
-// re-exec global RouteCodex binary with same args to avoid local workspace lookup.
-async function ensureGlobalCoreOrReroute(): Promise<void> {
+// Ensure llmswitch-core is resolvable;严格失败（不再尝试“重路由到全局”）
+async function ensureCoreOrFail(): Promise<void> {
   try {
-    // Quick probe (does not keep the module)
     await import('rcc-llmswitch-core/api');
-    return; // OK
-  } catch {
-    try {
-      const probe = spawnSync('sh', ['-lc', 'command -v routecodex || which routecodex || true'], { encoding: 'utf8' });
-      const bin = String(probe.stdout || '').trim();
-      if (bin) {
-        logger.info(`Local llmswitch-core unavailable; rerouting to global: ${bin}`);
-        const args = process.argv.slice(2);
-        const exec = spawnSync(bin, args, { stdio: 'inherit', env: process.env });
-        const code = typeof exec.status === 'number' ? exec.status : 0;
-        process.exit(code);
-      }
-    } catch {
-      // fall through
-    }
-    // If no global binary found, continue locally (will fail fast with informative error later)
+  } catch (err) {
+    logger.error('llmswitch-core not found. Please build sharedmodule/llmswitch-core or install package dependencies.');
+    logger.error('建议顺序: 先编译 sharedmodule/llmswitch-core，再编译根包并全局安装。');
+    process.exit(1);
   }
 }
 
-// Top-level guard (non-blocking if global available)
-await ensureGlobalCoreOrReroute();
+// Top-level guard（Fail Fast，无兜底）
+await ensureCoreOrFail();
 
 // CLI program setup
 const program = new Command();

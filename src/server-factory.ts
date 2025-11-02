@@ -15,7 +15,7 @@ type ServerConfigV2 = any;
  */
 export interface ServerCreateOptions {
   useV2?: boolean;        // 是否使用V2服务器
-  fallbackToV1?: boolean; // V2失败时是否降级到V1
+  fallbackToV1?: boolean; // 历史参数（保留类型）。V2全局禁用降级，忽略此参数。
   config?: {              // 额外配置
     v2HooksEnabled?: boolean;
     v2MiddlewareEnabled?: boolean;
@@ -50,7 +50,8 @@ export class ServerFactory {
     options: ServerCreateOptions = {}
   ): Promise<ServerInstance> {
     const useV2 = options.useV2 || process.env.ROUTECODEX_USE_V2 === 'true';
-    const fallbackToV1 = options.fallbackToV1 ?? true;
+    // 全局禁用降级（Fail Fast）：如果V2启用但创建失败，直接抛错，不再回退到V1
+    const fallbackToV1 = false;
 
     console.log(`[ServerFactory] Creating server instance (V2: ${useV2}, Fallback: ${fallbackToV1})`);
 
@@ -62,12 +63,8 @@ export class ServerFactory {
       } catch (error) {
         console.error('[ServerFactory] Failed to create V2 server:', error);
 
-        if (fallbackToV1) {
-          console.log('[ServerFactory] Falling back to V1 server');
-          return await this.createV1Server(config as ServerConfig, options);
-        } else {
-          throw error;
-        }
+        // 不再降级
+        throw error;
       }
     } else {
       return await this.createV1Server(config as ServerConfig, options);
