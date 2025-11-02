@@ -1072,7 +1072,11 @@ export class ConfigManagerModule extends BaseModule {
       }
 
       console.error(`Failed to save merged config to ${this.mergedConfigPath}:`, error);
-      throw error;
+      // Do not block server startup on save errors (e.g., oversized config); continue without persisting.
+      try {
+        this.publishDebugEvent('save_skipped', { saveId, reason: 'persist_failed_but_non_fatal', totalTime });
+      } catch { /* ignore */ }
+      return; // best-effort: skip writing to disk
     }
   }
 

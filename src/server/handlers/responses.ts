@@ -12,7 +12,8 @@ import { StreamingManager } from '../utils/streaming-manager.js';
 import { ResponsesConfigUtil } from '../config/responses-config.js';
 import { ResponsesConverter } from '../conversion/responses-converter.js';
 import { ResponsesMapper } from '../conversion/responses-mapper.js';
-import { buildResponsesPayloadFromChat, normalizeTools } from 'rcc-llmswitch-core/api';
+import { buildResponsesPayloadFromChat } from 'rcc-llmswitch-core/conversion/responses/responses-openai-bridge';
+import { normalizeTools } from 'rcc-llmswitch-core/conversion/shared/args-mapping';
 // Protocol conversion is handled downstream by llmswitch (Responses→Chat) for providers.
 import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
 

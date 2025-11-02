@@ -10,6 +10,7 @@ import { DynamicProfileLoader, ServiceProfileValidator } from '../config/service
 import { ApiKeyAuthProvider } from '../auth/apikey-auth.js';
 import { OAuthAuthProvider } from '../auth/oauth-auth.js';
 import { createHookSystemIntegration } from '../hooks/hooks-integration.js';
+import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
 import type { IAuthProvider } from '../auth/auth-interface.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ProviderContext, ServiceProfile, ProviderType } from '../api/provider-types.js';
@@ -308,6 +309,8 @@ export class OpenAIStandard extends BaseProvider {
     // 仅传入 endpoint，让 HttpClient 按 baseUrl 进行拼接；避免 full URL 再次拼接导致 /https:/ 重复
     const endpoint = this.getEffectiveEndpoint();
     const headers = await this.buildRequestHeaders();
+    const context = this.createProviderContext();
+    const targetUrl = `${this.getEffectiveBaseUrl().replace(/\/$/, '')}/${endpoint.startsWith('/') ? endpoint.slice(1) : endpoint}`;
 
     // 获取Hook管理器（新的统一系统）
     const hookManager = this.hookSystemIntegration.getBidirectionalHookManager() as any;
@@ -317,29 +320,62 @@ export class OpenAIStandard extends BaseProvider {
       'http_request',
       'request',
       request,
-      this.createProviderContext()
+      context
     );
 
     const processedRequest = httpRequestResult.data as UnknownObject;
+
+    // 快照：provider-request（默认开启，脱敏headers）
+    try {
+      await writeProviderSnapshot({
+        phase: 'provider-request',
+        requestId: context.requestId,
+        data: processedRequest,
+        headers,
+        url: targetUrl
+      });
+    } catch { /* non-blocking */ }
 
     // 发送HTTP请求
     let response: unknown;
     try {
       response = await this.httpClient.post(endpoint, processedRequest, headers);
+      // 快照：provider-response
+      try {
+        await writeProviderSnapshot({
+          phase: 'provider-response',
+          requestId: context.requestId,
+          data: response,
+          headers,
+          url: targetUrl
+        });
+      } catch { /* non-blocking */ }
     } catch (error) {
       // 🔍 Hook 9: 错误处理阶段
-      const targetUrl = `${this.getEffectiveBaseUrl().replace(/\/$/, '')}/${endpoint.startsWith('/') ? endpoint.slice(1) : endpoint}`;
       const errorResult = await hookManager.executeHookChain(
         'error_handling',
         'error',
         { error, request: processedRequest, url: targetUrl, headers },
-        this.createProviderContext()
+        context
       );
 
       // 如果Hook处理了错误，使用Hook的返回结果
       if (errorResult.data && (errorResult.data as any).error === false) {
         return errorResult.data;
       }
+
+      // 快照：provider-error（记录最小诊断信息）
+      try {
+        await writeProviderSnapshot({
+          phase: 'provider-error',
+          requestId: context.requestId,
+          data: {
+            message: error instanceof Error ? error.message : String(error)
+          },
+          headers,
+          url: targetUrl
+        });
+      } catch { /* non-blocking */ }
 
       throw error;
     }

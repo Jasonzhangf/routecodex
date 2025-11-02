@@ -28,7 +28,7 @@ interface ValidationRule {
  * 校验请求字段的完整性和有效性
  */
 export class GLMRequestValidationHook extends BaseHook {
-  readonly name = 'glm-request-validation';
+  readonly name = 'glm.02.request-validation';
   readonly stage = 'incoming_validation';
   readonly priority = 300;
 
@@ -217,9 +217,20 @@ export class GLMRequestValidationHook extends BaseHook {
       }
     }
 
-    // 允许值校验
-    if (rule.allowedValues && !rule.allowedValues.includes(String(fieldValue))) {
-      throw new Error(rule.errorMessage);
+    // 允许值校验（支持通配符字段返回数组的情况，如 messages[*].role）
+    if (rule.allowedValues) {
+      if (Array.isArray(fieldValue)) {
+        for (let i = 0; i < fieldValue.length; i++) {
+          const v = fieldValue[i];
+          if (!rule.allowedValues.includes(String(v))) {
+            throw new Error(rule.errorMessage);
+          }
+        }
+      } else {
+        if (!rule.allowedValues.includes(String(fieldValue))) {
+          throw new Error(rule.errorMessage);
+        }
+      }
     }
   }
 

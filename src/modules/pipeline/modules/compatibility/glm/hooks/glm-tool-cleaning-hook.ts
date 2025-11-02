@@ -9,14 +9,7 @@ import { BaseHook } from './base-hook.js';
 interface Message {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string | null;
-  tool_calls?: Array<{
-    id: string;
-    type: string;
-    function: {
-      name: string;
-      arguments: string;
-    };
-  }>;
+  tool_calls?: any[];
 }
 
 /**
@@ -24,7 +17,7 @@ interface Message {
  * 处理GLM特有的工具消息清洗逻辑
  */
 export class GLMToolCleaningHook extends BaseHook {
-  readonly name = 'glm-tool-cleaning';
+  readonly name = 'glm.01.tool-cleaning';
   readonly stage = 'incoming_preprocessing';
   readonly priority = 100;
 
@@ -48,7 +41,7 @@ export class GLMToolCleaningHook extends BaseHook {
     this.logExecution(context, { stage: 'tool-cleaning-start' });
 
     try {
-      const result = { ...data };
+      const result: any = { ...(data as any) };
 
       // 处理messages字段
       if (result.messages && Array.isArray(result.messages)) {
@@ -116,7 +109,7 @@ export class GLMToolCleaningHook extends BaseHook {
 
   private cleanTools(tools: unknown[]): unknown[] {
     return tools.map(tool => {
-      const cleanedTool = { ...tool };
+      const cleanedTool: any = { ...(tool as any) };
 
       // 移除tools[].function.strict（GLM不识别）
       if (typeof cleanedTool === 'object' && cleanedTool !== null) {
@@ -132,8 +125,8 @@ export class GLMToolCleaningHook extends BaseHook {
   }
 
   private cleanToolCalls(toolCalls: unknown[]): unknown[] {
-    return toolCalls.map(toolCall => {
-      const cleanedToolCall = { ...toolCall };
+    return (toolCalls as any[]).map(toolCall => {
+      const cleanedToolCall: any = { ...(toolCall as any) };
 
       if (typeof cleanedToolCall === 'object' && cleanedToolCall !== null) {
         const functionObj = (cleanedToolCall as any).function;

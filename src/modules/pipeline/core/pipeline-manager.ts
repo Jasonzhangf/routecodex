@@ -1138,8 +1138,9 @@ export class PipelineManager implements RCCBaseModule {
   };
 
   private createGLMCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    // Use the wrapper module that adapts V2 modular GLM compatibility to PipelineModule shape
     const { GLMCompatibility } = await import('../modules/compatibility/glm-compatibility.js');
-    return new GLMCompatibility(config, dependencies);
+    return new GLMCompatibility(config, dependencies) as unknown as PipelineModule;
   };
 
   private createQwenCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {

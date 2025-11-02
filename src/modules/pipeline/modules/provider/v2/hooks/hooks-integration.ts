@@ -137,8 +137,9 @@ export class HookSystemIntegration {
   private async registerProviderHooks(): Promise<void> {
     try {
       // 注册快照记录Hook
+      const orderedName = `${this.providerId ? this.providerId : 'provider'}.07.snapshot-recorder`;
       this.hooksSystem.hookManager.registerHook({
-        name: 'provider-snapshot-recorder',
+        name: orderedName,
         stage: 'response_postprocessing' as any,
         target: 'response',
         priority: 999, // 最低优先级，确保最后执行

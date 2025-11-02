@@ -7,7 +7,7 @@ import { type Response } from 'express';
 import type { ProtocolHandlerConfig } from '../handlers/base-handler.js';
 import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
 import { stripThinkingTags } from './text-filters.js';
-import { chunkString } from 'rcc-llmswitch-core/api';
+import { chunkString } from 'rcc-llmswitch-core/conversion/shared/tooling';
 import { ErrorContextBuilder, EnhancedRouteCodexError, type ErrorContext } from './error-context.js';
 import os from 'node:os';
 import path from 'node:path';

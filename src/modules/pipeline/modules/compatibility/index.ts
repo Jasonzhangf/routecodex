@@ -8,6 +8,7 @@ export type { CompatibilityContext, CompatibilityModule } from './compatibility-
 export type { CompatibilityModuleConfig } from './compatibility-factory.js';
 export { CompatibilityModuleFactory } from './compatibility-factory.js';
 export { CompatibilityManager } from './compatibility-manager.js';
+import { CompatibilityManager } from './compatibility-manager.js';
 
 // 导入GLM模块以触发注册
 import './glm/index.js';

@@ -222,10 +222,41 @@ export class PipelineAssembler {
       const metaForId = this.asRecord(routeMeta[id] || (pac as any).routeMeta?.[id] || {});
       const providerIdForKey = typeof metaForId.providerId === 'string' ? metaForId.providerId : undefined;
       const keyIdForPipeline = typeof metaForId.keyId === 'string' ? metaForId.keyId : undefined;
-      const actualKey = resolveKey(providerIdForKey, keyIdForPipeline);
-      if (actualKey) {
+      // First, resolve via keyMappings
+      let resolvedKey = resolveKey(providerIdForKey, keyIdForPipeline);
+      // If missing or current key looks redacted, try pac.authMappings
+      const curAuth = this.asRecord(provCfg.auth || {});
+      const curKey = String((curAuth as any).apiKey || '').trim();
+      const looksRedacted = curKey === '***REDACTED***' || (curKey && curKey.length <= 16);
+      if ((!resolvedKey || looksRedacted) && keyIdForPipeline) {
+        const am = (pac as any).authMappings as Record<string, unknown> | undefined;
+        const candidate = am && typeof am[keyIdForPipeline] === 'string' ? String(am[keyIdForPipeline]) : undefined;
+        if (candidate && candidate.trim()) {
+          resolvedKey = candidate.trim();
+        }
+      }
+      if (!resolvedKey) {
+        // Final fallback: try to read from user config (~/.routecodex/config.json)
+        try {
+          const home = process.env.HOME || '';
+          if (home) {
+            const userCfgPath = path.join(home, '.routecodex', 'config.json');
+            const txt = await fs.readFile(userCfgPath, 'utf-8');
+            const uj = JSON.parse(txt) as Record<string, unknown>;
+            const vr = this.asRecord(uj['virtualrouter']);
+            const provs = this.asRecord(vr['providers']);
+            const glmProv = this.asRecord(provs['glm']);
+            const a = this.asRecord(glmProv['auth']);
+            const k = typeof a['apiKey'] === 'string' ? String(a['apiKey']).trim() : '';
+            if (k && k !== '***REDACTED***') {
+              resolvedKey = k;
+            }
+          }
+        } catch { /* ignore */ }
+      }
+      if (resolvedKey) {
         const dstAuth = this.asRecord(provCfg.auth || {});
-        (dstAuth as any).apiKey = actualKey;
+        (dstAuth as any).apiKey = resolvedKey;
         if (!(dstAuth as any).type) { (dstAuth as any).type = 'apikey'; }
         provCfg.auth = dstAuth;
       }

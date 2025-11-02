@@ -49,6 +49,8 @@
     "src/utils/message-truncator.ts.bak",
     "src/components/historical",
     "src/modules/hooks/**/*",
-    "src/modules/pipeline/modules/provider/legacy/**/*"
+    "src/modules/pipeline/modules/provider/legacy/**/*",
+    "src/server-v2/**/*",
+    "src/server-v2/**"
   ]
 }
