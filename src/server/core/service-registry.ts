@@ -87,15 +87,7 @@ export class ServiceRegistry {
       ServiceLifetime.Singleton
     );
 
-    // Register response normalizer
-    this.container.register(
-      `${servicePrefix}ResponseNormalizer`,
-      () => {
-        const { ResponseNormalizer } = require('../utils/response-normalizer.js');
-        return new ResponseNormalizer();
-      },
-      ServiceLifetime.Singleton
-    );
+    // Response normalizer removed: protocol conversion is handled exclusively in llmswitch-core.
 
     // Register streaming manager if enabled
     if (config?.enableStreaming) {

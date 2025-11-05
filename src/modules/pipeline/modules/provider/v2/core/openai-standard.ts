@@ -222,6 +222,14 @@ export class OpenAIStandard extends BaseProvider {
       ...request
     };
 
+    // 强制非流式：移除/关闭 stream 标志，配合上层进行 SSE 合成
+    try {
+      if ((processedRequest as any).stream === true) {
+        // Prefer removing the field to avoid upstream enabling SSE by body
+        delete (processedRequest as any).stream;
+      }
+    } catch { /* ignore */ }
+
     // 获取Hook管理器（新的统一系统）
     const hookManager = this.hookSystemIntegration.getBidirectionalHookManager() as any;
 
@@ -244,6 +252,8 @@ export class OpenAIStandard extends BaseProvider {
     );
 
     processedRequest = validationResult.data as UnknownObject;
+
+    // Provider 层不再修改工具 schema；统一入口在 llmswitch-core/兼容层
 
     return processedRequest;
   }
@@ -336,7 +346,7 @@ export class OpenAIStandard extends BaseProvider {
       });
     } catch { /* non-blocking */ }
 
-    // 发送HTTP请求
+    // 发送HTTP请求（统一走非流式）。上游若需要SSE，由上层统一合成。
     let response: unknown;
     try {
       response = await this.httpClient.post(endpoint, processedRequest, headers);
@@ -379,6 +389,10 @@ export class OpenAIStandard extends BaseProvider {
 
       throw error;
     }
+
+    // Provider 不处理工具修复/注入逻辑：统一收敛到 llmswitch-core 与兼容层
+    // 此处不做任何自动修复/重试，保持单次请求的幂等与可观测性
+    try { /* no-op */ } catch { /* ignore */ }
 
     return response;
   }
@@ -435,6 +449,11 @@ export class OpenAIStandard extends BaseProvider {
       ...authHeaders
     };
 
+    // 禁用上游SSE：设置 Accept 为 application/json（若未被显式覆盖）
+    if (!('Accept' in finalHeaders) && !('accept' in finalHeaders)) {
+      finalHeaders['Accept'] = 'application/json';
+    }
+
     // 获取Hook管理器（新的统一系统）
     const hookManager = this.hookSystemIntegration.getBidirectionalHookManager() as any;
 
@@ -473,6 +492,8 @@ export class OpenAIStandard extends BaseProvider {
       this.serviceProfile.defaultEndpoint
     );
   }
+
+  // （工具自动修复辅助函数已删除）
 
   private createProviderContext(): ProviderContext {
     return {

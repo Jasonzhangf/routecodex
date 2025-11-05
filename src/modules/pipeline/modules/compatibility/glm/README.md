@@ -28,6 +28,8 @@ Outgoing响应流：
 glm/
 ├── glm-compatibility.ts              # 主兼容模块
 ├── index.ts                          # 模块导出
+├── filters/
+│   └── glm-shape-filter.ts           # 形状过滤器（基于 JSON 配置）
 ├── field-mapping/
 │   └── field-mapping-processor.ts    # 字段映射处理器
 ├── hooks/
@@ -37,7 +39,8 @@ glm/
 │   ├── glm-response-validation-hook.ts # 响应校验Hook
 │   └── glm-response-normalization-hook.ts # 响应标准化Hook
 └── config/
-    └── field-mappings.json           # 字段映射配置
+    ├── field-mappings.json           # 字段映射配置
+    └── shape-filters.json            # 形状过滤配置（GLM 请求/响应白名单 + 约束）
 ```
 
 ## 核心功能
@@ -55,6 +58,18 @@ glm/
 - 时间戳字段: created_at ↔ created
 - 模型名称标准化
 - reasoning_content处理
+
+### 2.5. 形状过滤（基于 JSON 配置）
+- 配置文件：`config/shape-filters.json`
+- 请求侧：
+  - 仅保留文档允许的顶层字段
+  - messages：限定角色集合；assistant 含 tool_calls 时 content=null；tool 角色内容拍平为非空字符串
+  - assistant.tool_calls.function.arguments 强制为 JSON 对象
+  - tools：统一为 {type:'function',function:{name,description,parameters(对象)}}；存在 tools 时强制 tool_choice='auto'
+- 响应侧：
+  - 仅保留 GLM 文档定义的顶层字段
+  - choices[*].message：content 在 tool_calls 存在时置 null；tool_calls.function.arguments 统一为对象；role 缺省为 assistant
+  - finish_reason 缺省按是否存在 tool_calls 设为 'tool_calls'
 
 ### 3. 请求校验 (incoming_validation)
 - 检查必须字段: model, messages
@@ -95,6 +110,36 @@ glm/
       "direction": "outgoing"
     }
   ]
+}
+```
+
+### 形状过滤配置 (shape-filters.json)
+```json
+{
+  "request": {
+    "allowTopLevel": ["model", "messages", "stream", "thinking", "do_sample", "temperature", "top_p", "max_tokens", "tool_stream", "tools", "tool_choice", "stop", "response_format", "request_id", "user_id"],
+    "messages": {
+      "allowedRoles": ["system", "user", "assistant", "tool"],
+      "assistantWithToolCallsContentNull": true,
+      "toolContentStringify": true
+    },
+    "tools": { "normalize": true, "forceToolChoiceAuto": true },
+    "assistantToolCalls": { "functionArgumentsType": "object" }
+  },
+  "response": {
+    "allowTopLevel": ["id", "request_id", "created", "model", "choices", "usage", "video_result", "web_search", "content_filter"],
+    "choices": {
+      "required": true,
+      "message": {
+        "allow": ["role", "content", "reasoning_content", "audio", "tool_calls"],
+        "roleDefault": "assistant",
+        "contentNullWhenToolCalls": true,
+        "tool_calls": { "function": { "nameRequired": true, "argumentsType": "object" } }
+      },
+      "finish_reason": ["stop", "tool_calls", "length", "sensitive", "network_error"]
+    },
+    "usage": { "allow": ["prompt_tokens", "completion_tokens", "prompt_tokens_details", "total_tokens"] }
+  }
 }
 ```
 

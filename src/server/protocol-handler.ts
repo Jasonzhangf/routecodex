@@ -753,6 +753,7 @@ ProtocolHandler.prototype.tryBridgeResponsesToChat = async function tryBridgeRes
   try {
     const bridgeEnabled = (req.headers['x-rc-bridge-chat'] === '1') || (process.env.ROUTECODEX_BRIDGE_CHAT === '1');
     if (!bridgeEnabled) {return false;}
+    const requestId = `bridge_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
 
     const monitorCfg = await MonitorConfigUtil.load();
     const tcfg = MonitorConfigUtil.getTransparent(monitorCfg as any) as TransparentConfig | null;
@@ -764,16 +765,11 @@ ProtocolHandler.prototype.tryBridgeResponsesToChat = async function tryBridgeRes
     if (auth) { headers['Authorization'] = /^Bearer\s+/i.test(String(auth)) ? String(auth) : `Bearer ${String(auth)}`; }
     if (tcfg.extraHeaders) { for (const [k,v] of Object.entries(tcfg.extraHeaders)) { if (k.toLowerCase()!=='authorization') {headers[k]=v;} } }
 
-    // Convert incoming Responses payload to Chat
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { ResponsesToChatLLMSwitch } = await import('rcc-llmswitch-core/llmswitch/llmswitch-response-chat');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { PipelineDebugLogger } = require('../utils/debug-logger.js');
-    const logger = new PipelineDebugLogger(null, { enableConsoleLogging: false, enableDebugCenter: false });
-    const deps = { errorHandlingCenter: {}, debugCenter: {}, logger } as any;
-    const conv = new ResponsesToChatLLMSwitch({ type: 'llmswitch-response-chat', config: {} }, deps);
-    if (typeof conv.initialize === 'function') { await conv.initialize(); }
-    const chatReq: any = await conv.transformRequest(req.body);
+    // Convert incoming Responses payload → OpenAI Chat（llmswitch-core v2 bridge）
+    const mod = await import('rcc-llmswitch-core');
+    const coreConv: any = (mod as any).LLMSwitchV2 || mod;
+    const built = coreConv.buildChatRequestFromResponses?.(req.body, { requestId }) || { request: req.body };
+    const chatReq: any = built?.request || {};
 
     // Apply model mapping only to upstream
     try {
@@ -797,8 +793,8 @@ ProtocolHandler.prototype.tryBridgeResponsesToChat = async function tryBridgeRes
     chatReq.stream = false;
     const upstream = await axios.post(url, chatReq, { headers: { ...headers, Accept: 'application/json', 'Content-Type': 'application/json' }, validateStatus: () => true, timeout: tcfg.timeoutMs || 30000 });
 
-    // Convert Chat JSON back to Responses JSON
-    const responsesJson = await conv.transformResponse(upstream.data);
+    // Convert Chat JSON back to Responses JSON（llmswitch-core v2 bridge）
+    const responsesJson = coreConv.buildResponsesPayloadFromChat?.(upstream.data, { requestId }) || upstream.data;
     res.status(upstream.status);
     try { res.setHeader('Content-Type', 'application/json'); } catch { /* ignore */ }
     res.send(responsesJson);

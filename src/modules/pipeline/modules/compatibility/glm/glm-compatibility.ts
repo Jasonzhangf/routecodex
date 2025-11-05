@@ -2,10 +2,8 @@ import type { CompatibilityModule, CompatibilityContext } from '../compatibility
 import type { UnknownObject } from '../../../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../../../types/module.types.js';
 import { GLMFieldMappingProcessor } from './field-mapping/field-mapping-processor.js';
-import { GLMToolCleaningHook } from './hooks/glm-tool-cleaning-hook.js';
-import { GLMRequestValidationHook } from './hooks/glm-request-validation-hook.js';
-import { GLMResponseValidationHook } from './hooks/glm-response-validation-hook.js';
-import { GLMResponseNormalizationHook } from './hooks/glm-response-normalization-hook.js';
+import { BaseCompatibility } from '../base-compatibility.js';
+import { sanitizeAndValidateOpenAIChat } from '../../../utils/preflight-validator.js';
 
 /**
  * GLM兼容模块
@@ -17,22 +15,15 @@ export class GLMCompatibility implements CompatibilityModule {
   readonly providerType = 'glm';
 
   private fieldMappingProcessor: GLMFieldMappingProcessor;
-  private toolCleaningHook: GLMToolCleaningHook;
-  private requestValidationHook: GLMRequestValidationHook;
-  private responseValidationHook: GLMResponseValidationHook;
-  private responseNormalizationHook: GLMResponseNormalizationHook;
   private dependencies: ModuleDependencies;
+  private baseCompat: BaseCompatibility | null = null;
 
   constructor(dependencies: ModuleDependencies) {
     this.id = `glm-compatibility-${Date.now()}`;
     this.dependencies = dependencies;
 
-    // 初始化组件
+    // 初始化组件（仅字段映射；hooks 留空）
     this.fieldMappingProcessor = new GLMFieldMappingProcessor(dependencies);
-    this.toolCleaningHook = new GLMToolCleaningHook(dependencies);
-    this.requestValidationHook = new GLMRequestValidationHook(dependencies);
-    this.responseValidationHook = new GLMResponseValidationHook(dependencies);
-    this.responseNormalizationHook = new GLMResponseNormalizationHook(dependencies);
   }
 
   async initialize(): Promise<void> {
@@ -43,10 +34,30 @@ export class GLMCompatibility implements CompatibilityModule {
 
     // 初始化各个组件
     await this.fieldMappingProcessor.initialize();
-    await this.toolCleaningHook.initialize();
-    await this.requestValidationHook.initialize();
-    await this.responseValidationHook.initialize();
-    await this.responseNormalizationHook.initialize();
+
+    // 基础兼容：通用逻辑 + GLM 配置 + hooks
+    // 运行时路径：dist/modules/pipeline/modules/compatibility/glm/glm-compatibility.js
+    // JSON 位于同级的 ./config/shape-filters.json
+    let shapePath: string | undefined = undefined;
+    try {
+      const { fileURLToPath } = await import('url');
+      const { dirname, join } = await import('path');
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = dirname(__filename);
+      shapePath = join(__dirname, 'config', 'shape-filters.json');
+
+    } catch { /* keep undefined to be safe */ }
+
+    this.baseCompat = new BaseCompatibility(this.dependencies, {
+      providerType: 'glm',
+      shapeFilterConfigPath: shapePath || '',
+      mapper: {
+        mapIncoming: async (req: UnknownObject) => await this.fieldMappingProcessor.mapIncoming(req),
+        mapOutgoing: async (res: UnknownObject) => await this.fieldMappingProcessor.mapOutgoing(res)
+      },
+      // hooks 留空，仅保留快照
+    });
+    await this.baseCompat.initialize();
 
     this.dependencies.logger?.logModule('glm-compatibility', 'initialized', {
       compatibilityId: this.id,
@@ -62,21 +73,11 @@ export class GLMCompatibility implements CompatibilityModule {
     });
 
     try {
-      // 1. Hook: 工具清洗
-      const cleanedRequest = await this.toolCleaningHook.execute(request, context);
-
-      // 2. 标准字段映射
-      const mappedRequest = await this.fieldMappingProcessor.mapIncoming(cleanedRequest);
-
-      // 3. Hook: 请求字段校验
-      const validatedRequest = await this.requestValidationHook.execute(mappedRequest, context);
-
-      this.dependencies.logger?.logModule('glm-compatibility', 'processIncoming-success', {
-        compatibilityId: this.id,
-        requestId: reqId
-      });
-
-      return validatedRequest;
+      const out = await this.baseCompat!.processIncoming(request as UnknownObject, context);
+      // 最后一公里：再次收敛 tools schema，移除 oneOf，统一 shell.command 为 string[]（GLM更友好）
+      this.sanitizeGLMToolsSchema(out);
+      this.dependencies.logger?.logModule('glm-compatibility', 'processIncoming-success', { compatibilityId: this.id, requestId: reqId });
+      return out;
     } catch (error) {
       this.dependencies.logger?.logError?.(error as Error, {
         compatibilityId: this.id,
@@ -95,21 +96,9 @@ export class GLMCompatibility implements CompatibilityModule {
     });
 
     try {
-      // 1. 标准字段映射
-      const mappedResponse = await this.fieldMappingProcessor.mapOutgoing(response);
-
-      // 2. Hook: 响应字段校验
-      const validatedResponse = await this.responseValidationHook.execute(mappedResponse, context);
-
-      // 3. Hook: 响应标准化
-      const normalizedResponse = await this.responseNormalizationHook.execute(validatedResponse, context);
-
-      this.dependencies.logger?.logModule('glm-compatibility', 'processOutgoing-success', {
-        compatibilityId: this.id,
-        requestId: reqId
-      });
-
-      return normalizedResponse;
+      const out = await this.baseCompat!.processOutgoing(response as UnknownObject, context);
+      this.dependencies.logger?.logModule('glm-compatibility', 'processOutgoing-success', { compatibilityId: this.id, requestId: reqId });
+      return out;
     } catch (error) {
       this.dependencies.logger?.logError?.(error as Error, {
         compatibilityId: this.id,
@@ -125,15 +114,52 @@ export class GLMCompatibility implements CompatibilityModule {
       compatibilityId: this.id
     });
 
-    // 清理各个组件
+    // 清理各个组件（仅映射器）
     await this.fieldMappingProcessor.cleanup();
-    await this.toolCleaningHook.cleanup();
-    await this.requestValidationHook.cleanup();
-    await this.responseValidationHook.cleanup();
-    await this.responseNormalizationHook.cleanup();
 
     this.dependencies.logger?.logModule('glm-compatibility', 'cleanup-complete', {
       compatibilityId: this.id
     });
+  }
+
+  // 本地收敛（与字段映射器中的逻辑一致）：去掉 oneOf，统一为数组字符串
+  private sanitizeGLMToolsSchema(data: UnknownObject): void {
+    try {
+      const tools = (data as any)?.tools;
+      if (!Array.isArray(tools)) return;
+      for (const t of tools) {
+        if (!t || typeof t !== 'object') continue;
+        const fn = (t as any).function;
+        // 移除 OpenAI 扩展字段 strict（GLM 不接受）
+        try { if (fn && typeof fn === 'object' && 'strict' in fn) { delete (fn as any).strict; } } catch { /* ignore */ }
+        const name = typeof fn?.name === 'string' ? fn.name : undefined;
+        const params = fn?.parameters && typeof fn.parameters === 'object' ? fn.parameters : undefined;
+        if (!params || !name) continue;
+        const props = (params as any).properties && typeof (params as any).properties === 'object' ? (params as any).properties : undefined;
+        if (!props) continue;
+        if (name === 'shell' && props.command) {
+          const cmd = props.command as any;
+          if (cmd && typeof cmd === 'object') {
+            delete cmd.oneOf;
+            cmd.type = 'array';
+            cmd.items = { type: 'string' };
+            if (typeof cmd.description !== 'string' || !cmd.description) {
+              cmd.description = 'Shell command argv tokens. Use ["bash","-lc","<cmd>"] form.';
+            }
+          } else {
+            (props as any).command = {
+              description: 'Shell command argv tokens. Use ["bash","-lc","<cmd>"] form.',
+              type: 'array',
+              items: { type: 'string' }
+            };
+          }
+          if (!Array.isArray((params as any).required)) (params as any).required = [];
+          const req: string[] = (params as any).required;
+          if (!req.includes('command')) req.push('command');
+          if (typeof (params as any).type !== 'string') (params as any).type = 'object';
+          if (typeof (params as any).additionalProperties !== 'boolean') (params as any).additionalProperties = false;
+        }
+      }
+    } catch { /* ignore */ }
   }
 }

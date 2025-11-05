@@ -6,30 +6,21 @@
 import express, { type Request, type Response } from 'express';
 import { BaseHandler, type ProtocolHandlerConfig } from './base-handler.js';
 import { RouteCodexError } from '../types.js';
-import { RequestValidator } from '../utils/request-validator.js';
-import { ResponseNormalizer } from '../utils/response-normalizer.js';
 import { StreamingManager } from '../utils/streaming-manager.js';
 import { ResponsesConfigUtil } from '../config/responses-config.js';
-import { ResponsesConverter } from '../conversion/responses-converter.js';
-import { ResponsesMapper } from '../conversion/responses-mapper.js';
-import { buildResponsesPayloadFromChat } from 'rcc-llmswitch-core/conversion/responses/responses-openai-bridge';
-import { normalizeTools } from 'rcc-llmswitch-core/conversion/shared/args-mapping';
+// v2 APIs loaded dynamically at call-sites to avoid subpath export issues
 // Protocol conversion is handled downstream by llmswitch (Responses→Chat) for providers.
-import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
+// No local protocol conversion; llmswitch-core handles mapping/aggregation.
 
 /**
  * Responses Handler
  * Handles /v1/responses endpoint (OpenAI Responses)
  */
 export class ResponsesHandler extends BaseHandler {
-  private requestValidator: RequestValidator;
-  private responseNormalizer: ResponseNormalizer;
   private streamingManager: StreamingManager;
 
   constructor(config: ProtocolHandlerConfig) {
     super(config);
-    this.requestValidator = new RequestValidator();
-    this.responseNormalizer = new ResponseNormalizer();
     this.streamingManager = new StreamingManager(config);
   }
 
@@ -66,83 +57,9 @@ export class ResponsesHandler extends BaseHandler {
 
     try {
       try { res.setHeader('x-rc-conversion-profile', 'responses-openai'); } catch { /* ignore */ }
-      // 可选：受控的“静态”系统提示注入（默认关闭），优先写入 instructions 字段
-      // 禁止样本抓取式注入；仅当明确配置 ROUTECODEX_ENABLE_SERVER_SYSTEM_PROMPT=1 且提供
-      // ROUTECODEX_SERVER_SYSTEM_PROMPT=</path/to/prompt.txt> 时，才在 instructions 为空时写入。
-      try {
-        const enable = String(process.env.ROUTECODEX_ENABLE_SERVER_SYSTEM_PROMPT || '0') === '1';
-        const filePath = String(process.env.ROUTECODEX_SERVER_SYSTEM_PROMPT || '').trim();
-        if (enable && filePath) {
-          const fs = await import('fs/promises');
-          const sysText = await fs.readFile(filePath, 'utf-8');
-          const instr = typeof (req.body as any)?.instructions === 'string' ? String((req.body as any).instructions) : '';
-          const hasMdMarkers = /\bCLAUDE\.md\b|\bAGENT(?:S)?\.md\b/i.test(instr);
-          if (!hasMdMarkers && (!instr || !instr.trim())) {
-            (req.body as any).instructions = sysText;
-            try { res.setHeader('x-rc-system-prompt-source', 'static-file'); } catch { /* ignore */ }
-          }
-        }
-      } catch { /* non-blocking */ }
+      // 禁止服务器端静态系统提示注入（V1路径移除）：不再写入 instructions。
 
-      // 仅改变格式，不清洗/丢弃字段：基于原始请求体派生 Responses 关键字段并回写，保留全部原字段
-      try {
-        const b: any = req.body || {};
-        const merged: any = { ...b };
-        // model：如缺失则置为 unknown（不强行覆盖已有值）
-        if (typeof merged.model !== 'string' || !merged.model) {
-          merged.model = 'unknown';
-        }
-        // stream：仅当未显式给出时，按 Accept 头推断
-        if (typeof merged.stream !== 'boolean') {
-          const inferred = ResponsesConverter.inferStreamingFlag(b, req);
-          if (typeof inferred === 'boolean') {merged.stream = inferred;}
-        }
-        // 若原本没有 instructions/input，则尝试从 Chat 形状派生
-        if (typeof merged.instructions !== 'string' || merged.instructions.trim() === '') {
-          if (Array.isArray(b.messages)) {
-            const sys: string[] = [];
-            for (const m of b.messages) {
-              if (!m || typeof m !== 'object') {continue;}
-              const role = (m as any).role;
-              const content = (m as any).content;
-              if (role === 'system' && typeof content === 'string' && content.trim()) {sys.push(content.trim());}
-            }
-            if (sys.length) {merged.instructions = sys.join('\n\n');}
-          }
-        }
-        if (typeof merged.input === 'undefined' || (typeof merged.input === 'string' && merged.input.trim() === '')) {
-          if (Array.isArray(b.messages)) {
-            const userTexts: string[] = [];
-            for (const m of b.messages) {
-              if (!m || typeof m !== 'object') {continue;}
-              const role = (m as any).role;
-              const content = (m as any).content;
-              if (role === 'user' && typeof content === 'string' && content.trim()) {userTexts.push(content.trim());}
-              if (role === 'user' && Array.isArray(content)) {
-                for (const part of content) {
-                  if (part && typeof part === 'object' && typeof (part as any).text === 'string' && (part as any).text.trim()) {
-                    userTexts.push((part as any).text.trim());
-                  }
-                }
-              }
-            }
-            if (userTexts.length) {merged.input = userTexts.join('\n');}
-          }
-          // Anthropic content 兼容
-          if (typeof merged.input === 'undefined' && Array.isArray(b.content)) {
-            const texts: string[] = [];
-            for (const c of b.content) {
-              if (c && typeof c === 'object' && (c.type === 'text' || c.type === 'output_text') && typeof c.text === 'string' && c.text.trim()) {
-                texts.push(c.text.trim());
-              }
-            }
-            if (texts.length) {merged.input = texts.join('\n');}
-          }
-        }
-
-        req.body = merged; // 不移除任何原字段
-        try { res.setHeader('x-rc-adapter', 'normalized:chat|anthropic->responses:non-lossy'); } catch { /* ignore */ }
-      } catch { /* non-blocking */ }
+      // No server-side request mutation or protocol synthesis here per architecture rules.
 
       // Tool guidance and normalization are handled in llmswitch-core (openai tooling stage)
 
@@ -164,25 +81,15 @@ export class ResponsesHandler extends BaseHandler {
           const nestedReadable = (!topReadable && response && typeof (response as any).data?.pipe === 'function') ? (response as any).data : null;
           const readable = topReadable || nestedReadable;
           if (useBridge && readable) {
-            const core = await import('rcc-llmswitch-core/conversion');
+          const core = await import('rcc-llmswitch-core/v2/conversion');
             const windowMs = Number(process.env.RCC_R2C_COALESCE_MS || 1000) || 1000;
             await (core as any).transformOpenAIStreamToResponses(readable, res, { requestId, model: req.body.model, windowMs, tools: (req.body as any)?.tools });
             return;
           }
         } catch { /* fall through to synthetic SSE */ }
 
-        await this.streamResponsesSSE(
-          response,
-          requestId,
-          res,
-          req.body.model,
-          (req.body as any)?.tools,
-          (req.body as any)?.tool_choice,
-          (req.body as any)?.parallel_tool_calls,
-          (req.body as any)?.instructions,
-          originalRequestSnapshot
-        );
-        return;
+        // Fail fast: no local synthesis; upstream must provide readable SSE for bridge
+        throw new RouteCodexError('Upstream is not streamable; no local Responses SSE synthesis', 'stream_unavailable', 502);
       }
 
       // Return JSON response in OpenAI Responses format（确定性路径，无流时只返回 JSON）
@@ -432,14 +339,7 @@ export class ResponsesHandler extends BaseHandler {
       };
 
       const requestMeta = { ...(reqMeta ?? {}) } as Record<string, unknown>;
-      // Normalize tools declaration for Responses SSE metadata (align with other routes)
-      try {
-        const rawTools = (requestMeta as any).tools;
-        if (Array.isArray(rawTools)) {
-          const nt = normalizeTools(rawTools as any[]);
-          (requestMeta as any).tools = (nt as any[]).map((t: any) => (t && t.type === 'function' && t.function && typeof t.function === 'object') ? { ...t, function: { ...t.function, strict: true } } : t);
-        }
-      } catch { /* ignore tools normalize errors */ }
+      // 工具定义不在 Server 层归一化；统一由 llmswitch-core 处理
       const requestInstructions = typeof reqInstructions === 'string' ? reqInstructions : undefined;
       if (requestInstructions && !requestMeta.instructions) {
         requestMeta.instructions = requestInstructions;
@@ -454,7 +354,14 @@ export class ResponsesHandler extends BaseHandler {
       // Normalize both initial/final payloads into OpenAI Responses JSON (passthrough if already Responses)
       const toResponsesShape = async (payload: any) => {
         // Always use core bridge to ensure canonical sanitation (e.g., strip tool result envelopes)
-        return buildResponsesPayloadFromChat(payload, undefined) as Record<string, unknown>;
+        try {
+          const mod = await import('rcc-llmswitch-core');
+          const core: any = (mod as any).LLMSwitchV2 || mod;
+          if (typeof core.buildResponsesPayloadFromChat === 'function') {
+            return core.buildResponsesPayloadFromChat(payload, undefined) as Record<string, unknown>;
+          }
+        } catch { /* ignore */ }
+        return payload as Record<string, unknown>;
       };
       const initialResp = await toResponsesShape(rawInitial);
       const finalResp = await toResponsesShape(rawFinal);
@@ -552,7 +459,7 @@ export class ResponsesHandler extends BaseHandler {
       };
 
       const baseSnapshot = assembleSnapshot();
-      const baseResp = await ResponsesMapper.enrichResponsePayload(baseSnapshot, finalResp as Record<string, unknown>, requestMeta);
+      const baseResp = baseSnapshot as Record<string, unknown>;
       const now = () => Math.floor(Date.now() / 1000);
       // Text strict Azure mode removed per rollback request; keep default text path
 
@@ -592,13 +499,13 @@ export class ResponsesHandler extends BaseHandler {
           if (typeof v === 'string') {return v;}
           try { return JSON.stringify(v ?? {}); } catch { return '{}'; }
         };
-        const calls = funcCalls.map((it: any) => {
+        const calls = Array.isArray(funcCalls) ? funcCalls.map((it: any) => {
           const id = typeof it.id === 'string' ? it.id : (typeof it.call_id === 'string' ? it.call_id : `call_${Math.random().toString(36).slice(2,8)}`);
           const name = typeof it.name === 'string' ? it.name : (typeof it.tool_name === 'string' ? it.tool_name : (it?.function?.name || 'tool'));
           const argsVal = it.arguments ?? it?.function?.arguments ?? {};
           const argsStr = toStringArgs(argsVal);
           return { id, type: 'function', function: { name: String(name), arguments: String(argsStr) } };
-        });
+        }) : [];
         return { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: calls } } as Record<string, unknown>;
       };
       // 主动“按优先级”提取工具调用：
@@ -724,8 +631,8 @@ export class ResponsesHandler extends BaseHandler {
             await writeEvt('response.required_action', { type: 'response.required_action', response: responseMeta, required_action: ra });
             // compatibility: emit tool_calls variant as well (top-level name)
             if ((ra as any)?.type === 'submit_tool_outputs') {
-              const calls = (ra as any)?.submit_tool_outputs?.tool_calls || [];
-              const tool_calls_simple = calls.map((c: any) => ({ id: (c?.id || c?.call_id), type: 'function', name: (c?.function?.name || c?.name) }));
+              const calls = Array.isArray((ra as any)?.submit_tool_outputs?.tool_calls) ? (ra as any).submit_tool_outputs.tool_calls : [];
+              const tool_calls_simple = Array.isArray(calls) ? calls.map((c: any) => ({ id: (c?.id || c?.call_id), type: 'function', name: (c?.function?.name || c?.name) })) : [];
               await writeEvt('response.required_action', { type: 'response.required_action', response: responseMeta, required_action: { type: 'tool_calls', tool_calls: tool_calls_simple } });
             }
           }
@@ -838,44 +745,22 @@ export class ResponsesHandler extends BaseHandler {
   private async buildResponsesJson(raw: any, reqMeta?: { tools?: unknown; tool_choice?: unknown; parallel_tool_calls?: unknown }): Promise<any> {
     const pick = (v: any) => (v && typeof v === 'object' && v.__final) ? v.__final : v;
     const payload = pick(raw);
+    // If already a Responses-shaped object, return as-is
+    if (payload && typeof payload === 'object' && (
+      (payload as any).object === 'response' ||
+      Array.isArray((payload as any).output) ||
+      typeof (payload as any).output_text === 'string'
+    )) {
+      return payload;
+    }
+    // Otherwise, delegate Chat→Responses conversion to llmswitch-core
     try {
-      if (payload && typeof payload === 'object') {
-        if (payload.object === 'response' || Array.isArray((payload as any).output) || typeof (payload as any).output_text === 'string') {
-          // 不合并任何服务器端工具结果；仅透传请求工具定义到 metadata
-          if (reqMeta && typeof reqMeta === 'object' && payload && typeof payload === 'object') {
-            const base: any = { ...(payload as any) };
-            const meta: Record<string, unknown> = { ...(base.metadata || {}) };
-            if (typeof reqMeta.tools !== 'undefined') {
-              try {
-                const nt = Array.isArray((reqMeta as any).tools) ? normalizeTools((reqMeta as any).tools as any[]) : (reqMeta as any).tools;
-                const toolsStrict = Array.isArray(nt) ? (nt as any[]).map((t: any) => (t && t.type === 'function' && t.function && typeof t.function === 'object') ? { ...t, function: { ...t.function, strict: true } } : t) : nt;
-                meta.tools = toolsStrict;
-              } catch {
-                meta.tools = reqMeta.tools as unknown as any[];
-              }
-              try {
-                const crypto = await import('crypto');
-                const str = JSON.stringify(meta.tools);
-                const hash = crypto.createHash('sha256').update(str).digest('hex');
-                (meta as any).tools_hash = hash;
-                if (Array.isArray(meta.tools)) {(meta as any).tools_count = (meta.tools as any[]).length;}
-              } catch { /* ignore */ }
-            }
-            if (typeof reqMeta.tool_choice !== 'undefined') {meta.tool_choice = reqMeta.tool_choice;}
-            if (typeof reqMeta.parallel_tool_calls !== 'undefined') {meta.parallel_tool_calls = reqMeta.parallel_tool_calls;}
-            base.metadata = meta;
-            return await ResponsesMapper.enrichResponsePayload(base, payload as Record<string, unknown>, reqMeta as Record<string, unknown>);
-          }
-          return await ResponsesMapper.enrichResponsePayload(payload as Record<string, unknown>, payload as Record<string, unknown>, reqMeta as Record<string, unknown>);
-        }
-      }
-    } catch { /* ignore */ }
-    try {
-      // Core codec: Chat JSON → Responses JSON（严格、按 schema 归一），并传入请求工具上下文以统一出参行为
+      const mod = await import('rcc-llmswitch-core');
+      const core: any = (mod as any).LLMSwitchV2 || mod;
       let toolsNorm: Array<Record<string, unknown>> = [];
       const reqTools = reqMeta?.tools as unknown;
-      if (Array.isArray(reqTools)) {
-        try { toolsNorm = normalizeTools(reqTools as any[]); } catch { /* ignore */ }
+      if (Array.isArray(reqTools) && typeof core.normalizeTools === 'function') {
+        toolsNorm = core.normalizeTools(reqTools as any[]);
       }
       const ctx = {
         metadata: toolsNorm.length ? { tools: toolsNorm } : undefined,
@@ -884,67 +769,12 @@ export class ResponsesHandler extends BaseHandler {
         toolChoice: (reqMeta as any)?.tool_choice,
         parallelToolCalls: (reqMeta as any)?.parallel_tool_calls,
       } as any;
-      const converted0 = buildResponsesPayloadFromChat(payload, ctx) as Record<string, unknown>;
-
-      // Synthesize required_action for non-stream JSON when存在 function_call 输出
-      const outputs = Array.isArray((converted0 as any)?.output) ? ((converted0 as any).output as any[]) : [];
-      const funcCalls = outputs.filter(it => it && (it.type === 'function_call' || it.type === 'tool_call'));
-      let converted = converted0;
-      if (funcCalls.length > 0) {
-        const toStringJson = (v: unknown): string => {
-          if (typeof v === 'string') {return v;}
-          try { return JSON.stringify(v ?? {}); } catch { return '{}'; }
-        };
-        const calls = funcCalls.map((it: any) => {
-          const id = typeof it.id === 'string' ? it.id : (typeof it.call_id === 'string' ? it.call_id : `call_${Math.random().toString(36).slice(2,8)}`);
-          const nm = typeof it.name === 'string' ? it.name : (typeof it?.function?.name === 'string' ? it.function.name : 'tool');
-          const rawArgs = it.arguments ?? it?.function?.arguments ?? {};
-          const argsStr = toStringJson(rawArgs);
-          return { id, type: 'function', function: { name: String(nm), arguments: String(argsStr) } };
-        });
-        // Validation warnings for unsafe write redirection (cat > without heredoc)
-        const warnings: Array<Record<string, unknown>> = [];
-        const detectWriteRedirection = (name: string | undefined, args: string): boolean => {
-          try {
-            if (!name || name.toLowerCase() !== 'shell') {return false;}
-            const obj = JSON.parse(args);
-            const cmd = obj?.command;
-            const getScript = (): string => {
-              if (typeof cmd === 'string') {return cmd;}
-              if (Array.isArray(cmd)) {return cmd.map((x: any) => String(x)).join(' ');}
-              return '';
-            };
-            const s = getScript().toLowerCase();
-            if (!s) {return false;}
-            const hasBash = /\bbash\b\s+-lc\b/.test(s);
-            const hasCatWrite = /cat\s*>\s*[^\s<]+/.test(s);
-            const hasHeredoc = /<</.test(s);
-            return hasBash && hasCatWrite && !hasHeredoc;
-          } catch { return false; }
-        };
-        for (const c of calls) {
-          try {
-            const nm = (c as any)?.function?.name as string | undefined;
-            const argStr = (c as any)?.function?.arguments as string || '{}';
-            if (detectWriteRedirection(nm, argStr)) {
-              warnings.push({
-                call_id: (c as any)?.id,
-                name: nm || 'tool',
-                kind: 'write_redirection_without_heredoc',
-                message: '禁止使用 cat 重定向写文件，请改用 apply_patch。',
-                suggestion: '使用统一 diff 补丁：\n*** Begin Patch\n*** Update File: path/to/file\n@@\n- old line\n+ new line\n*** End Patch'
-              });
-            }
-          } catch { /* ignore */ }
-        }
-        const required_action: any = { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: calls } };
-        if (warnings.length) {(required_action as any).validation = { warnings };}
-        converted = { ...(converted0 as any), required_action };
+      if (typeof core.buildResponsesPayloadFromChat === 'function') {
+        return core.buildResponsesPayloadFromChat(payload, ctx) as Record<string, unknown>;
       }
-
-      return await ResponsesMapper.enrichResponsePayload(converted as Record<string, unknown>, payload as Record<string, unknown>, reqMeta as Record<string, unknown>);
+      // If core conversion unavailable, fail fast
+      throw new Error('llmswitch-core buildResponsesPayloadFromChat unavailable');
     } catch (e) {
-      // 不允许 fallback：严格报错，便于定位转换问题
       const msg = (e as Error)?.message || 'Responses conversion failed (Chat→Responses)';
       const err = new RouteCodexError(msg, 'conversion_error', 400);
       throw err;

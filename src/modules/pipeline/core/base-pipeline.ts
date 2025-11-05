@@ -642,6 +642,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     this.updateModuleStatuses();
   }
 
+  
   /**
    * Process request through LLMSwitch module
    */

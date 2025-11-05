@@ -147,16 +147,16 @@ export class PipelineErrorIntegration {
    * Extract error code from various error types
    */
   private extractErrorCode(error: any): string {
-    if (error.code) {
-      return error.code;
+    if (error && Object.prototype.hasOwnProperty.call(error, 'code') && (error as any).code !== undefined) {
+      try { return String((error as any).code).toUpperCase(); } catch { return 'UNKNOWN_ERROR'; }
     }
 
     if (error.statusCode) {
       return `HTTP_${error.statusCode}`;
     }
 
-    if (error.name) {
-      return error.name.toUpperCase().replace(/\s+/g, '_');
+    if (error && (error as any).name) {
+      try { return String((error as any).name).toUpperCase().replace(/\s+/g, '_'); } catch { /* ignore */ }
     }
 
     // Categorize based on error message patterns
@@ -175,7 +175,9 @@ export class PipelineErrorIntegration {
    * Categorize error for better handling
    */
   private categorizeError(pipelineError: PipelineError, originalError: any): void {
-    const code = pipelineError.code;
+    const codeRaw = (pipelineError && (pipelineError as any).code) ? (pipelineError as any).code : 'UNKNOWN_ERROR';
+    const codeStr = (() => { try { return String(codeRaw); } catch { return 'UNKNOWN_ERROR'; } })();
+    const code = codeStr.toUpperCase();
     const details: any = (pipelineError as any).details || ((pipelineError as any).details = {});
 
     // Add error category

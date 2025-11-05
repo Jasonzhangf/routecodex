@@ -2,6 +2,8 @@ import type { CompatibilityContext } from '../../compatibility-interface.js';
 import type { UnknownObject } from '../../../../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../../../../types/module.types.js';
 import { BaseHook } from './base-hook.js';
+// 统一的工具结果文本提取器：保证 tool 消息 content 为非空字符串
+import { extractToolText } from '../../../../utils/tool-result-text.js';
 
 /**
  * 消息接口
@@ -48,7 +50,7 @@ export class GLMToolCleaningHook extends BaseHook {
         result.messages = this.cleanMessages(result.messages);
       }
 
-      // 处理tools字段
+      // 处理tools字段（最小清理：移除 function.strict，仅做噪声清理；规范化交由形状过滤器处理）
       if (result.tools && Array.isArray(result.tools)) {
         result.tools = this.cleanTools(result.tools);
       }
@@ -74,7 +76,23 @@ export class GLMToolCleaningHook extends BaseHook {
       const message = messages[i] as Message;
       const cleanedMessage = { ...message };
 
-      // 处理最后一条role=tool的消息
+      // 对 role:'tool' 的消息，统一拍平为非空字符串（空则给出标准成功文案）
+      if (cleanedMessage.role === 'tool') {
+        try {
+          const text = extractToolText(cleanedMessage.content);
+          // 空输出统一文案在 extractToolText 内部已处理，这里仅做兜底
+          cleanedMessage.content = (typeof text === 'string' && text.trim().length)
+            ? text
+            : 'Command succeeded (no output).';
+        } catch {
+          // 保底兜底：不可解析时也不返回空串
+          cleanedMessage.content = (typeof cleanedMessage.content === 'string' && cleanedMessage.content.trim().length)
+            ? cleanedMessage.content.trim()
+            : 'Command succeeded (no output).';
+        }
+      }
+
+      // 处理最后一条role=tool的消息（在文本拍平后，再做噪声清理与截断）
       if (this.isLastToolMessage(messages, i)) {
         cleanedMessage.content = this.cleanToolContent(cleanedMessage.content || '');
       }
@@ -84,13 +102,12 @@ export class GLMToolCleaningHook extends BaseHook {
         cleanedMessage.content = this.cleanAssistantContent(cleanedMessage.content || '', messages, i);
       }
 
-      // 强制串化tool_calls中的arguments
-      if (cleanedMessage.tool_calls && Array.isArray(cleanedMessage.tool_calls)) {
-        cleanedMessage.tool_calls = this.cleanToolCalls(cleanedMessage.tool_calls);
-      }
+      // 不在此处处理 tool_calls 参数形状；交由形状过滤器统一处理
 
-      // content数组扁平化为字符串
+      // llmswitch-core现在返回字符串，不再需要数组拍平处理
+      // 保留此逻辑仅用于兼容旧的数组格式数据
       if (Array.isArray(cleanedMessage.content)) {
+        console.warn('GLM Tool Cleaning: 接收到数组格式的content，可能来自旧版本兼容');
         cleanedMessage.content = cleanedMessage.content.map(item =>
           typeof item === 'string' ? item : JSON.stringify(item)
         ).join('');
@@ -108,10 +125,9 @@ export class GLMToolCleaningHook extends BaseHook {
   }
 
   private cleanTools(tools: unknown[]): unknown[] {
+    // 最小清理：仅移除 tools[].function.strict（GLM不识别），其余规范化由形状过滤器处理
     return tools.map(tool => {
       const cleanedTool: any = { ...(tool as any) };
-
-      // 移除tools[].function.strict（GLM不识别）
       if (typeof cleanedTool === 'object' && cleanedTool !== null) {
         const functionObj = (cleanedTool as any).function;
         if (functionObj && typeof functionObj === 'object') {
@@ -119,26 +135,21 @@ export class GLMToolCleaningHook extends BaseHook {
           (cleanedTool as any).function = functionWithoutStrict;
         }
       }
-
       return cleanedTool;
     });
   }
 
   private cleanToolCalls(toolCalls: unknown[]): unknown[] {
-    return (toolCalls as any[]).map(toolCall => {
-      const cleanedToolCall: any = { ...(toolCall as any) };
-
-      if (typeof cleanedToolCall === 'object' && cleanedToolCall !== null) {
-        const functionObj = (cleanedToolCall as any).function;
-        if (functionObj && typeof functionObj === 'object') {
-          // 强制串化arguments
-          if (functionObj.arguments && typeof functionObj.arguments !== 'string') {
-            functionObj.arguments = JSON.stringify(functionObj.arguments);
-          }
-        }
-      }
-
-      return cleanedToolCall;
+    // 已改为在 cleanMessages 中对象化处理；此处仅做保守兜底（若上游误传字符串对象则解析为对象）
+    return (toolCalls as any[]).map(tc => {
+      try {
+        const copy: any = { ...(tc || {}) };
+        const fn = copy.function || {};
+        const args = fn?.arguments;
+        if (typeof args === 'string') { try { fn.arguments = JSON.parse(args); } catch { fn.arguments = { raw: args }; } }
+        copy.function = fn;
+        return copy;
+      } catch { return tc; }
     });
   }
 

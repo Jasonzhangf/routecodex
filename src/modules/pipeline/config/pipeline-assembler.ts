@@ -51,8 +51,27 @@ export class PipelineAssembler {
     const globalKeys = this.asRecord(keyMappings.global || {});
     const providerKeys = this.asRecord(keyMappings.providers || {});
     const pipelinesIn = Array.isArray((pac as any).pipelines) ? (pac as any).pipelines as any[] : [];
-    if (!pipelinesIn.length) {
-      throw new Error('[PipelineAssembler] No pipelines in pipeline_assembler.config. Ensure config-manager generated pipelines.');
+
+    // v2 兼容旧配置：当未生成 pipelines 时，根据 legacy routePools 自动合成最小可用流水线
+    // 规则：
+    // - 从 routePools 收集被引用的 pipelineId（例如 glm_key1.glm-4.5-air）
+    // - 解析 provider 家族（glm/openai/qwen 等）与可能的 keyId/modelId
+    // - 为每个 id 生成 provider + compatibility + llmSwitch 模块；provider 基本配置从 virtualrouter.providers 合并
+    // - 兼容 keyMappings 与用户配置（~/.routecodex/config.json）的 apiKey 注入
+    let synthesizeFromLegacy = false;
+    const legacyRoutePools: Record<string, string[]> = (pac as any).routePools || {};
+    const referencedLegacyIds = new Set<string>();
+    if (!pipelinesIn.length && legacyRoutePools && typeof legacyRoutePools === 'object') {
+      for (const ids of Object.values(legacyRoutePools)) {
+        (ids || []).forEach((id: string) => { if (typeof id === 'string' && id.trim()) referencedLegacyIds.add(id); });
+      }
+      if (referencedLegacyIds.size > 0) {
+        synthesizeFromLegacy = true;
+      }
+    }
+    if (!pipelinesIn.length && !synthesizeFromLegacy) {
+      // 最后兜底：没有 pipelines，也没有 legacy routePools，则后面默认会再兜底 default 路由
+      // 为避免启动失败，这里不再抛错
     }
 
     const pipelines: PipelineConfig[] = [];
@@ -79,15 +98,88 @@ export class PipelineAssembler {
       if (fromProv) { return fromProv; }
       return undefined;
     };
-    for (const p of pipelinesIn) {
+    const sourcePipes = synthesizeFromLegacy ? Array.from(referencedLegacyIds).map((id) => ({ id })) : pipelinesIn;
+    for (const p of sourcePipes) {
       const id = String(p.id || '');
       if (!id || seen.has(id)) { continue; }
-      const modules = (p.modules || {}) as Record<string, unknown>;
-      const provider = modules.provider as { type?: string; config?: Record<string, unknown> };
-      let llmSwitch = modules.llmSwitch as { type?: string; config?: Record<string, unknown> } | undefined;
-      const workflow = modules.workflow as { type?: string; config?: Record<string, unknown> } | undefined;
-      const compatibility = modules.compatibility as { type?: string; config?: Record<string, unknown> } | undefined;
-      if (!id || !provider?.type || !compatibility?.type) { continue; }
+      const modules = this.asRecord((p as any).modules || {});
+
+      // 解析 provider 家族（legacy id 形如 glm_key1.glm-4.5-air）
+      const parseLegacy = (pid: string) => {
+        try {
+          const out: { provider: string; keyId?: string; modelId?: string } = { provider: 'openai' };
+          const us = pid.split('_');
+          if (us.length >= 1 && us[0]) { out.provider = us[0]; }
+          const dot = pid.indexOf('.');
+          if (dot > 0 && dot < pid.length - 1) { out.modelId = pid.slice(dot + 1); }
+          if (us.length >= 2) {
+            const rest = us[1];
+            const dot2 = rest.indexOf('.');
+            out.keyId = dot2 > 0 ? rest.slice(0, dot2) : rest;
+          }
+          return out;
+        } catch { return { provider: 'openai' } as const; }
+      };
+
+      const legacy = synthesizeFromLegacy ? parseLegacy(id) : null;
+      const provider = synthesizeFromLegacy
+        ? { type: (legacy?.provider || 'openai'), config: {} as Record<string, unknown> }
+        : (modules.provider as { type?: string; config?: Record<string, unknown> });
+      let llmSwitch = synthesizeFromLegacy
+        ? { type: 'llmswitch-conversion-router', config: {} as Record<string, unknown> }
+        : (modules.llmSwitch as { type?: string; config?: Record<string, unknown> } | undefined);
+      const workflow = synthesizeFromLegacy
+        ? undefined
+        : (modules.workflow as { type?: string; config?: Record<string, unknown> } | undefined);
+      let compatibility = synthesizeFromLegacy
+        ? { type: (legacy && legacy.provider === 'glm') ? 'glm-compatibility' : 'passthrough-compatibility', config: {} as Record<string, unknown> }
+        : (modules.compatibility as { type?: string; config?: Record<string, unknown> } | undefined);
+
+      // 提前执行“provider 级兼容层继承”，避免在前置校验前丢失兼容层（此前逻辑过晚，导致未显式声明时被跳过）
+      if (!synthesizeFromLegacy) {
+        try {
+          const provTypeStr = String((provider as any)?.type || '').trim();
+          if (provTypeStr) {
+            // 从 virtualrouter.providers 与 modules.virtualrouter.config.providers 中查找同族/provider的兼容层声明
+            const family = provTypeStr.toLowerCase();
+            const pickProvCompat = (): { type?: string; config?: Record<string, unknown> } | undefined => {
+              const readCompat = (provObj: Record<string, unknown> | undefined): { type?: string; config?: Record<string, unknown> } | undefined => {
+                const c = provObj && typeof provObj === 'object' ? (provObj as any).compatibility : undefined;
+                const rec = (c && typeof c === 'object') ? c as Record<string, unknown> : undefined;
+                if (!rec) return undefined;
+                const t = typeof rec.type === 'string' ? String(rec.type) : '';
+                const cfg = rec.config && typeof rec.config === 'object' ? rec.config as Record<string, unknown> : {};
+                return t ? { type: t, config: cfg } : undefined;
+              };
+              try {
+                const topVr = PipelineAssembler.asRecord((mc as Record<string, unknown>).virtualrouter || {});
+                const topProviders = PipelineAssembler.asRecord(topVr.providers || {});
+                const direct = PipelineAssembler.asRecord((topProviders as any)[provTypeStr]);
+                const famProv = PipelineAssembler.asRecord((topProviders as any)[family]);
+                return readCompat(direct) || readCompat(famProv);
+              } catch { /* ignore */ }
+              try {
+                const modulesRec = PipelineAssembler.asRecord(mc.modules || {});
+                const vrCfg = PipelineAssembler.asRecord(PipelineAssembler.asRecord(modulesRec.virtualrouter).config || {});
+                const modProviders = PipelineAssembler.asRecord(vrCfg.providers || {});
+                const direct = PipelineAssembler.asRecord((modProviders as any)[provTypeStr]);
+                const famProv = PipelineAssembler.asRecord((modProviders as any)[family]);
+                return readCompat(direct) || readCompat(famProv);
+              } catch { /* ignore */ }
+              return undefined;
+            };
+            if (!(compatibility && compatibility.type)) {
+              const inherited = pickProvCompat();
+              if (inherited?.type) {
+                compatibility = { type: String(inherited.type), config: PipelineAssembler.asRecord(inherited.config || {}) } as any;
+              }
+            }
+          }
+        } catch { /* ignore */ }
+      }
+
+      // 校验必要字段（provider 与 兼容层类型），若缺失则跳过该 pipeline
+      if (!id || !provider?.type || !((compatibility && compatibility.type) || synthesizeFromLegacy)) { continue; }
       // Enrich llmSwitch config from merged-config virtualrouter if missing
       if (llmSwitch && (!llmSwitch.config || Object.keys(llmSwitch.config || {}).length === 0)) {
         try {
@@ -182,6 +274,7 @@ export class PipelineAssembler {
             if (!(dstAuth as any).type) { (dstAuth as any).type = 'apikey'; }
             provCfg.auth = dstAuth;
           }
+          // 兼容层继承已在前置阶段完成，这里不再重复
         }
       } catch { /* ignore enrichment errors */ }
 
@@ -219,7 +312,8 @@ export class PipelineAssembler {
           }
         }
       } catch { /* ignore */ }
-      const metaForId = this.asRecord(routeMeta[id] || (pac as any).routeMeta?.[id] || {});
+      const legacyDefaults = legacy ? { providerId: (legacy as any).provider, modelId: (legacy as any).modelId || 'unknown', keyId: (legacy as any).keyId || 'key1' } : {};
+      const metaForId = this.asRecord(routeMeta[id] || (pac as any).routeMeta?.[id] || legacyDefaults);
       const providerIdForKey = typeof metaForId.providerId === 'string' ? metaForId.providerId : undefined;
       const keyIdForPipeline = typeof metaForId.keyId === 'string' ? metaForId.keyId : undefined;
       // First, resolve via keyMappings
@@ -261,14 +355,17 @@ export class PipelineAssembler {
         provCfg.auth = dstAuth;
       }
 
+      const fam = String(provider.type || '').toLowerCase();
+      const compatTypeSelected = (compatibility && compatibility.type)
+        ? String(compatibility.type)
+        : '';
+      const compatCfgSelected = this.asRecord((compatibility && compatibility.config) || {});
       const modBlock: Record<string, unknown> = {
         provider: { type: provider.type, config: provCfg },
-        compatibility: { type: compatibility.type, config: compatibility.config || {} },
       };
-
-      // Compatibility 判定只来源于配置；若未指定，则显式默认为透传（passthrough-compatibility）
-      if (!compatibility?.type) {
-        modBlock.compatibility = { type: 'passthrough-compatibility', config: {} };
+      // Compatibility 必须显式指定：未指定则不注入兼容层模块
+      if (compatibility?.type) {
+        (modBlock as any).compatibility = { type: compatTypeSelected, config: compatCfgSelected };
       }
 
       const allowedSwitches = new Set([
@@ -287,7 +384,7 @@ export class PipelineAssembler {
             config: llmSwitch.config || {},
           };
         } else {
-          // 默认使用转换路由器（内部根据端点自动选择 codec），对齐 CCR
+          // 默认使用转换路由器（内部根据端点自动选择 codec），统一入口
           modBlock.llmSwitch = { type: 'llmswitch-conversion-router', config: {} };
         }
       } else {
@@ -295,7 +392,16 @@ export class PipelineAssembler {
         modBlock.llmSwitch = { type: 'llmswitch-conversion-router', config: {} };
       }
       if (workflow?.type) { modBlock.workflow = { type: workflow.type, config: workflow.config || {} }; }
-      pipelines.push({ id, provider: { type: provider.type }, modules: modBlock, settings: { debugEnabled: true } } as PipelineConfig);
+      // 选择 provider 模块实现名（家族→模块）
+      const providerModuleType = fam === 'glm' ? 'glm-http-provider'
+        : fam === 'openai' ? 'openai-provider'
+        : fam === 'qwen' ? 'qwen-provider'
+        : fam === 'lmstudio' ? 'lmstudio-http'
+        : 'generic-openai-provider';
+      modBlock.provider = { type: providerModuleType, config: provCfg };
+      // 不再强制 GLM 使用专有兼容模块；完全配置化（如需GLM行为，由外部配置 shapeFilterConfigPath 即可）
+
+      pipelines.push({ id, provider: { type: fam || 'openai' }, modules: modBlock, settings: { debugEnabled: true } } as PipelineConfig);
       seen.add(id);
     }
 
@@ -334,7 +440,7 @@ export class PipelineAssembler {
       routePools = pools;
       routeMeta = meta;
     } else {
-      // If routePools exist but reference unknown ids, drop invalid ones
+      // If routePools exist but reference unknown ids, drop invalid ones (legacy 引用将因上面合成被保留)
       const pools: Record<string, string[]> = {};
       for (const [routeName, ids] of Object.entries(routePools || {})) {
         pools[routeName] = (ids || []).filter(id => availableIds.has(id));

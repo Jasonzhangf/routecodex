@@ -80,6 +80,59 @@ export class HttpClient {
   }
 
   /**
+   * 发送POST请求并返回可读流（适用于 SSE ）
+   */
+  async postStream(
+    url: string,
+    data?: unknown,
+    headers?: Record<string, string>
+  ): Promise<any> {
+    const fullUrl = this.buildUrl(url);
+    const finalHeaders = this.buildHeaders({ 'Accept': 'text/event-stream', ...(headers || {}) });
+
+    const controller = new AbortController();
+    const timeout = this.defaultConfig.timeout;
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    try {
+      const fetchOptions: any = {
+        method: 'POST',
+        headers: finalHeaders,
+        body: data !== undefined ? JSON.stringify(data) : undefined,
+        signal: controller.signal
+      };
+
+      const response = await fetch(fullUrl, fetchOptions as any);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      // Convert WHATWG ReadableStream to Node.js Readable for pipeline streaming
+      const anyRes: any = response as any;
+      const body: any = (response as any).body;
+      if (body && typeof (body as any).getReader === 'function') {
+        try {
+          const { Readable } = await import('node:stream');
+          const nodeStream = (Readable as any).fromWeb ? (Readable as any).fromWeb(body) : undefined;
+          if (nodeStream && typeof nodeStream.pipe === 'function') {
+            return nodeStream; // streaming-manager expects .pipe()
+          }
+        } catch { /* ignore conversion errors */ }
+      }
+
+      // If body is not a web stream or conversion failed, try lower-level access
+      if (anyRes && typeof anyRes.pipe === 'function') {
+        return anyRes; // already a Node readable
+      }
+
+      // As a last resort, throw to let caller decide (should not fallback silently)
+      throw new Error('Upstream response body is not streamable');
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  /**
    * 发送PUT请求
    */
   async put(

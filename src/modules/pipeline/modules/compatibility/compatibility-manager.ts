@@ -386,5 +386,12 @@ export class CompatibilityManager {
     } catch {
       // 忽略注册失败（由上层 index.ts 导入兜底）
     }
+    try {
+      // 注册通用配置兼容模块
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require('./config/index.js');
+    } catch {
+      // 忽略注册失败
+    }
   }
 }

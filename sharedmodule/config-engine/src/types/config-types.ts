@@ -181,15 +181,16 @@ export const ProviderConfigSchema = z.object({
 });
 
 export const RoutingConfigSchema = z.object({
-  default: z.array(z.string()),
-  coding: z.array(z.string()),
-  longcontext: z.array(z.string()),
-  tools: z.array(z.string()),
-  thinking: z.array(z.string()),
-  vision: z.array(z.string()),
-  websearch: z.array(z.string()),
-  background: z.array(z.string()),
-});
+  // Make all category arrays optional and default to [] to be permissive with minimal configs
+  default: z.array(z.string()).optional().default([]),
+  coding: z.array(z.string()).optional().default([]),
+  longcontext: z.array(z.string()).optional().default([]),
+  tools: z.array(z.string()).optional().default([]),
+  thinking: z.array(z.string()).optional().default([]),
+  vision: z.array(z.string()).optional().default([]),
+  websearch: z.array(z.string()).optional().default([]),
+  background: z.array(z.string()).optional().default([]),
+}).catchall(z.array(z.string()));
 
 export const VirtualRouterConfigSchema = z.object({
   inputProtocol: z.enum(['openai', 'anthropic', 'custom']),

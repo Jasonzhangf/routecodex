@@ -7,12 +7,9 @@ import { type Request, type Response } from 'express';
 import { BaseHandler, type ProtocolHandlerConfig } from './base-handler.js';
 import { type RequestContext, type OpenAIChatCompletionRequest } from '../types.js';
 import { RouteCodexError } from '../types.js';
-import { RequestValidator } from '../utils/request-validator.js';
-import { ResponseNormalizer } from '../utils/response-normalizer.js';
 import { StreamingManager } from '../utils/streaming-manager.js';
-import { ProtocolDetector } from '../protocol/protocol-detector.js';
-import { OpenAIAdapter } from '../protocol/openai-adapter.js';
 import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
+import { getAppVersion, getCoreVersion } from '../utils/version.js';
 import { ErrorContextBuilder, EnhancedRouteCodexError, type ErrorContext } from '../utils/error-context.js';
 import os from 'os';
 import path from 'path';
@@ -22,14 +19,10 @@ import path from 'path';
  * Handles /v1/chat/completions endpoint
  */
 export class ChatCompletionsHandler extends BaseHandler {
-  private requestValidator: RequestValidator;
-  private responseNormalizer: ResponseNormalizer;
   private streamingManager: StreamingManager;
 
   constructor(config: ProtocolHandlerConfig) {
     super(config);
-    this.requestValidator = new RequestValidator();
-    this.responseNormalizer = new ResponseNormalizer();
     this.streamingManager = new StreamingManager(config);
   }
 
@@ -87,60 +80,15 @@ export class ChatCompletionsHandler extends BaseHandler {
     });
 
     try {
-      // 可选：受控的“静态”系统提示注入（默认关闭）。
-      // 禁止样本抓取式注入；仅当明确配置 ROUTECODEX_ENABLE_SERVER_SYSTEM_PROMPT=1 且提供
-      // ROUTECODEX_SERVER_SYSTEM_PROMPT=</path/to/prompt.txt> 时，才会替换/插入一条 system。
-      try {
-        const enable = String(process.env.ROUTECODEX_ENABLE_SERVER_SYSTEM_PROMPT || '0') === '1';
-        const filePath = String(process.env.ROUTECODEX_SERVER_SYSTEM_PROMPT || '').trim();
-        if (enable && filePath && Array.isArray((req.body as any)?.messages)) {
-          const fs = await import('fs/promises');
-          const sysText = await fs.readFile(filePath, 'utf-8');
-          const messages = (req.body as any).messages as any[];
-          const currentSys = (() => {
-            try {
-              const m = messages[0];
-              return (m && typeof m === 'object' && m.role === 'system' && typeof m.content === 'string') ? String(m.content) : '';
-            } catch { return ''; }
-          })();
-          const hasMdMarkers = /\bCLAUDE\.md\b|\bAGENT(?:S)?\.md\b/i.test(currentSys);
-          const replaceSystemInOpenAIMessagesSimple = (msgs: any[], sys: string): any[] => {
-            if (!Array.isArray(msgs)) {return msgs;}
-            const out = msgs.slice();
-            if (out.length > 0 && out[0] && out[0].role === 'system') {
-              out[0] = { ...out[0], role: 'system', content: sys };
-            } else {
-              out.unshift({ role: 'system', content: sys });
-            }
-            return out;
-          };
-          if (!hasMdMarkers) {
-            (req.body as any).messages = replaceSystemInOpenAIMessagesSimple(messages, sysText) as any[];
-            try { res.setHeader('x-rc-system-prompt-source', 'static-file'); } catch { /* ignore */ }
-          }
-        }
-      } catch (error) {
-        // 注入失败不影响主流程
-        this.logger.logModule('ChatCompletionsHandler', 'system-prompt-static-skip', {
-          requestId,
-          reason: (error as Error)?.message || String(error)
-        });
-      }
-
+      // 禁止服务器端静态系统提示注入（V1路径移除）；仅保留客户端提供与 llmswitch-core 的幂等引导。
+      // 此处不再对 req.body.messages 做任何替换或插入。
+    
       // Strict protocol separation: Chat endpoint only accepts OpenAI Chat payload.
       // Do NOT auto-convert Anthropic/Responses-shaped payloads here to avoid cross-path pollution.
-      try {
-        const detector = new ProtocolDetector();
-        const det = detector.detectFromRequest(req);
-        const looksAnthropicContent = Array.isArray(req.body?.messages) && (req.body.messages as any[]).some((m: any) => Array.isArray(m?.content) && m.content.some((c: any) => c && typeof c === 'object' && typeof c.type === 'string'));
-        if (det.protocol === 'anthropic' || det.protocol === 'responses' || looksAnthropicContent) {
-          throw new RouteCodexError('Chat endpoint only accepts OpenAI Chat payload (messages: string or OpenAI content parts). Use the Responses endpoint for Responses-shaped payloads.', 'invalid_protocol', 400);
-        }
-      } catch (e) {
-        if (e instanceof RouteCodexError) {throw e;}
-      }
+      // 放宽协议形状校验：不再在这里报 400，由后续 llmswitch 转换器在唯一入口做统一处理
+      // 兼容携带 Anthropics/Responses 形状的 messages，后续模块会按路由自动转换
 
-      // Tool guidance和归一化在 llmswitch-core 的 OpenAI 工具阶段统一处理
+      // 工具治理移至 llmswitch-core 编解码器唯一入口；Server 不再做工具归一化/增强。
       try { res.setHeader('x-rc-conversion-profile', 'openai-openai'); } catch { /* ignore */ }
 
       // Skip strict request validation (preserve raw inputs)
@@ -150,7 +98,7 @@ export class ChatCompletionsHandler extends BaseHandler {
 
       // Handle streaming vs non-streaming response (also honor Accept: text/event-stream)
       const accept = String(req.headers['accept'] || '').toLowerCase();
-      const wantsSSE = (accept.includes('text/event-stream') || req.body?.stream === true);
+      const wantsSSE = accept.includes('text/event-stream') || req.body?.stream === true;
       if (wantsSSE) {
         const streamModel = (pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse)
           ? ((pipelineResponse as any).data?.model ?? req.body.model)
@@ -163,10 +111,8 @@ export class ChatCompletionsHandler extends BaseHandler {
       const payload = pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
         ? (pipelineResponse as Record<string, unknown>).data
         : pipelineResponse;
-      // 工具文本→tool_calls 的归一化已在 llmswitch-core (openai-openai codec) 统一完成，这里不再做重复处理
-      const normalized = this.responseNormalizer.normalizeOpenAIResponse(payload, 'chat');
-      // Chat 路径不注入 Responses 的 required_action 结构，保持协议纯净
-      this.sendJsonResponse(res, normalized, requestId);
+      // No local protocol conversion; forward provider JSON as-is
+      this.sendJsonResponse(res, payload, requestId);
 
       this.logCompletion(requestId, startTime, true);
     } catch (error) {
@@ -322,6 +268,8 @@ export class ChatCompletionsHandler extends BaseHandler {
       try {
         if (!snapshotDir) {return;}
         const fs = require('fs'); const path = require('path');
+        const appVersion = getAppVersion();
+        const coreVersion = getCoreVersion();
         const file = path.join(snapshotDir, `${requestId}_${kind}.json`);
         const msgs = Array.isArray(payload?.messages) ? payload.messages : [];
         const counts = roleCounts(msgs);
@@ -335,22 +283,26 @@ export class ChatCompletionsHandler extends BaseHandler {
           return sum;
         })();
         const stats = { kind, counts, total: msgs.length, assistant_tool_calls: tc.length, content_types: ctSummary };
-        fs.writeFileSync(file, JSON.stringify({ requestId, stats }, null, 2), 'utf-8');
+        fs.writeFileSync(file, JSON.stringify({ requestId, version: appVersion, coreVersion, stats }, null, 2), 'utf-8');
       } catch { /* ignore */ }
     };
     try { writeSnapshot('pre-llmswitch', chatPayload); } catch { /* ignore */ }
     // 不在入口执行 legacy OpenAI normalizer；统一由 pipeline conversion-router + canonicalizer 处理
     chatPayload = { ...(req.body || {}) } as Record<string, unknown>;
+
+    // 工具治理已在 llmswitch-core 编解码器处理；这里不再调用 governTools，避免重复。
     try { writeSnapshot('post-llmswitch', chatPayload); } catch { /* ignore */ }
 
     // Ensure payload model aligns with selected route meta
     const normalizedPayload = { ...chatPayload, ...(modelId ? { model: modelId } : {}) } as Record<string, unknown>;
     // Inject route.requestId into payload metadata for downstream providers (capture + pairing)
     try {
+      const appVersion = getAppVersion();
+      const coreVersion = getCoreVersion();
       const meta = (normalizedPayload as any)._metadata && typeof (normalizedPayload as any)._metadata === 'object'
         ? { ...(normalizedPayload as any)._metadata }
         : {};
-      (normalizedPayload as any)._metadata = { ...meta, requestId };
+      (normalizedPayload as any)._metadata = { ...meta, requestId, appVersion, coreVersion };
     } catch { /* non-blocking */ }
 
     const pipelineRequest = {
@@ -387,10 +339,41 @@ export class ChatCompletionsHandler extends BaseHandler {
       process.env.ROUTECODEX_PIPELINE_MAX_WAIT_MS ||
       300000
     );
+    const startedAt = Date.now();
     const pipelineResponse = await Promise.race([
       this.getPipelineManager()?.processRequest?.(pipelineRequest) || Promise.reject(new Error('Pipeline manager not available')),
       new Promise((_, reject) => setTimeout(() => reject(new Error(`Pipeline timeout after ${pipelineTimeoutMs}ms`)), Math.max(1, pipelineTimeoutMs)))
     ]);
+
+    // 异步触发 V2 并跑（dry-run），不阻塞主链路
+    try {
+      const { ServiceContainer, ServiceTokens } = await import('../core/service-container.js');
+      const container = ServiceContainer.getInstance();
+      const dryRunManager = container.tryResolve<any>(ServiceTokens.V2_DRYRUN_MANAGER);
+      if (dryRunManager) {
+        const v1Duration = Date.now() - startedAt;
+        const v2Req = {
+          id: requestId,
+          method: req.method,
+          headers: this.sanitizeHeaders(req.headers),
+          body: req.body,
+          metadata: { timestamp: startedAt, source: 'chat-completions' }
+        };
+        const v1Resp = {
+          id: `response-${requestId}`,
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+          body: pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
+            ? (pipelineResponse as Record<string, unknown>).data
+            : pipelineResponse,
+          metadata: { timestamp: Date.now(), duration: v1Duration }
+        };
+        // 非阻塞并发执行
+        setImmediate(() => {
+          try { dryRunManager.processRequest(requestId, v2Req, v1Resp, null, v1Duration); } catch { /* 忽略并跑错误 */ }
+        });
+      }
+    } catch { /* 忽略并跑接线错误，不影响主流程 */ }
 
     return pipelineResponse;
   }

@@ -6,9 +6,6 @@
 import { type Request, type Response } from 'express';
 import { BaseHandler, type ProtocolHandlerConfig } from './base-handler.js';
 import { RouteCodexError } from '../types.js';
-import { RequestValidator } from '../utils/request-validator.js';
-import { ProtocolDetector } from '../protocol/protocol-detector.js';
-import { OpenAIAdapter } from '../protocol/openai-adapter.js';
 
 /**
  * Embedding data interface
@@ -37,11 +34,9 @@ export interface EmbeddingResponse {
  * Handles /v1/embeddings endpoint for all protocol compatibility
  */
 export class EmbeddingsHandler extends BaseHandler {
-  private requestValidator: RequestValidator;
 
   constructor(config: ProtocolHandlerConfig) {
     super(config);
-    this.requestValidator = new RequestValidator();
   }
 
   /**
@@ -61,27 +56,7 @@ export class EmbeddingsHandler extends BaseHandler {
     });
 
     try {
-      // Forced adapter preflight: if payload is Anthropic/Responses-shaped, normalize to OpenAI embeddings-compatible
-      try {
-        const looksAnthropicContent = Array.isArray(req.body?.messages) && (req.body.messages as any[]).some((m: any) => Array.isArray(m?.content) && m.content.some((c: any) => c && typeof c === 'object' && c.type));
-        const detector = new ProtocolDetector();
-        const det = detector.detectFromRequest(req);
-        if (looksAnthropicContent || det.protocol === 'anthropic' || det.protocol === 'responses') {
-          const adapter = new OpenAIAdapter();
-          req.body = adapter.convertFromProtocol(req.body, 'anthropic') as any;
-          try { res.setHeader('x-rc-adapter', 'anthropic->openai'); } catch { /* ignore */ }
-        }
-      } catch { /* non-blocking */ }
-
-      // Validate request
-      const validation = this.requestValidator.validateEmbedding(req.body);
-      if (!validation.isValid) {
-        throw new RouteCodexError(
-          `Request validation failed: ${validation.errors.join(', ')}`,
-          'validation_error',
-          400
-        );
-      }
+      // 不做自作主张的输入校验；失败在后续阶段快速暴露（不兜底）
 
       // Process request
       const pipelineResponse = await this.processEmbeddingsRequest(req, requestId);

@@ -1,723 +1,141 @@
 /**
- * Streaming Manager Utility
- * Handles streaming responses for different protocols
+ * Streaming Manager Utility (simplified)
+ * Only forwards upstream readable streams or uses llmswitch-core bridges.
+ * No local protocol conversion or tool argument aggregation.
  */
 
 import { type Response } from 'express';
 import type { ProtocolHandlerConfig } from '../handlers/base-handler.js';
-import { PipelineDebugLogger } from '../../modules/pipeline/utils/debug-logger.js';
-import { stripThinkingTags } from './text-filters.js';
-import { chunkString } from 'rcc-llmswitch-core/conversion/shared/tooling';
-import { ErrorContextBuilder, EnhancedRouteCodexError, type ErrorContext } from './error-context.js';
+import { EnhancedRouteCodexError } from './error-context.js';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+import { getAppVersion, getCoreVersion } from './version.js';
+// streaming functions are loaded via dynamic import to avoid tight coupling to tgz export surface
 
-/**
- * Streaming chunk interface
- */
-export interface StreamingChunk {
-  id: string;
-  object: string;
-  created: number;
-  model: string;
-  choices: Array<{
-    index: number;
-    delta: {
-      content?: string;
-      role?: string;
-      tool_calls?: any[];
-    };
-    finish_reason?: string | null;
-  }>;
-}
-
-/**
- * Streaming Manager Class
- */
 export class StreamingManager {
   private config: ProtocolHandlerConfig;
-  private logger: PipelineDebugLogger;
-  private heartbeatTimers: Map<string, NodeJS.Timeout> = new Map();
-  // Track a short window of recent tool_call signatures per request to drop short-range duplicates across chunks
-  private lastToolCallKeys: Map<string, { set: Set<string>; order: string[] }> = new Map();
-  // Per-request SSE event logs
   private sseLogWriters: Map<string, fs.WriteStream> = new Map();
 
   constructor(config: ProtocolHandlerConfig) {
     this.config = config;
-    this.logger = new PipelineDebugLogger(null, {
-      enableConsoleLogging: config.enableMetrics ?? true,
-      enableDebugCenter: false,
-    });
   }
 
-  /**
-   * Stream response to client
-   */
-  async streamResponse(response: any, requestId: string, res: Response, model: string): Promise<void> {
+  async streamResponse(response: any, requestId: string, res: Response, _model: string): Promise<void> {
+    // Headers
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('x-request-id', requestId);
+    (res as any).flushHeaders?.();
+
+    if (!this.shouldStreamFromPipeline()) {
+      throw new Error('Streaming pipeline is disabled for this endpoint');
+    }
+
+    // Minimal SSE logging
     try {
-      // Set appropriate headers for streaming
-      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-      res.setHeader('Cache-Control', 'no-cache, no-transform');
-      res.setHeader('Connection', 'keep-alive');
-      // Disable proxy buffering for Nginx/Cloudflare style proxies to avoid stuck streams
-      try { res.setHeader('X-Accel-Buffering', 'no'); } catch (error) {
-        // 快速死亡原则 - 暴露SSE响应头设置错误
-        throw new EnhancedRouteCodexError(error as Error, {
-          module: 'StreamingManager',
-          file: 'src/server/utils/streaming-manager.ts',
-          function: 'streamResponse',
-          line: ErrorContextBuilder.extractLineNumber(error as Error),
-          additional: {
-            operation: 'sse-buffering-header',
-            requestId,
-            model
-          }
-        });
-      }
-      res.setHeader('x-request-id', requestId);
-      // Flush headers to start the SSE stream immediately
-      try { (res as any).flushHeaders?.(); } catch (error) {
-        // 快速死亡原则 - 暴露SSE响应头刷新错误
-        throw new EnhancedRouteCodexError(error as Error, {
-          module: 'StreamingManager',
-          file: 'src/server/utils/streaming-manager.ts',
-          function: 'streamResponse',
-          line: ErrorContextBuilder.extractLineNumber(error as Error),
-          additional: {
-            operation: 'sse-header-flush',
-            requestId,
-            model
-          }
-        });
+      const base = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
+      fs.mkdirSync(base, { recursive: true });
+      const file = path.join(base, `${requestId}_sse-events.log`);
+      const ws = fs.createWriteStream(file, { flags: 'a' });
+      this.sseLogWriters.set(requestId, ws);
+      this.writeSSELog(requestId, 'stream.start', { requestId, appVersion: getAppVersion(), coreVersion: getCoreVersion() });
+    } catch { /* ignore */ }
+
+    try {
+      // If response is a readable stream, passthrough; otherwise synthesize from JSON
+      const core = await import('rcc-llmswitch-core/api');
+      const passthrough = (core as any).streamOpenAIReadablePassthrough;
+      const readable = this.isStreamable(response);
+      if (readable) {
+        if (typeof passthrough !== 'function') throw new Error('core.streamOpenAIReadablePassthrough unavailable');
+        await passthrough(response, res as any, { requestId });
+        try { this.writeSSELog(requestId, 'stream.done', { requestId }); } catch { /* ignore */ }
+        return;
       }
 
-      // Start streaming
-      if (!this.shouldStreamFromPipeline()) {
-        throw new Error('Streaming pipeline is disabled for this endpoint');
-      }
-
-      // Start SSE heartbeats (pre-heartbeat + periodic)
-      this.startHeartbeat(res, requestId, model);
-
-      // Open SSE event log file for Chat
-      try {
-        const base = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
-        fs.mkdirSync(base, { recursive: true });
-        const file = path.join(base, `${requestId}_sse-events.log`);
-        const ws = fs.createWriteStream(file, { flags: 'a' });
-        this.sseLogWriters.set(requestId, ws);
-        this.writeSSELog(requestId, 'stream.start', { requestId, model });
-      } catch (error) {
-        // 快速死亡原则 - 暴露SSE日志初始化错误
-        throw new EnhancedRouteCodexError(error as Error, {
-          module: 'StreamingManager',
-          file: 'src/server/utils/streaming-manager.ts',
-          function: 'streamResponse',
-          line: ErrorContextBuilder.extractLineNumber(error as Error),
-          additional: {
-            operation: 'sse-log-initialization',
-            requestId,
-            model,
-            logDirectory: path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-chat')
-          }
-        });
-      }
-
-      await this.streamFromPipeline(response, requestId, res, model);
-
-    } catch (error) {
-      this.logger.logModule('StreamingManager', 'stream_error', {
-        requestId,
-        error: error instanceof Error ? error.message : String(error),
-        model,
-      });
-
-      // Send error chunk and close
-      this.sendErrorChunk(res, error, requestId);
-      this.stopHeartbeat(requestId);
-      res.end();
-      try {
-        this.writeSSELog(requestId, 'stream.error', { message: (error as any)?.message || String(error) });
-      } catch (logError) {
-        // 快速死亡原则 - 暴露SSE错误日志写入失败
-        throw new EnhancedRouteCodexError(logError instanceof Error ? logError : new Error(String(logError)), {
-          module: 'StreamingManager',
-          file: 'src/server/utils/streaming-manager.ts',
-          function: 'streamResponse',
-          line: ErrorContextBuilder.extractLineNumber((logError instanceof Error ? logError : new Error(String(logError))) as Error),
-          additional: {
-            operation: 'sse-error-log-write',
-            requestId,
-            originalError: (error as any)?.message || String(error)
-          }
-        });
-      }
-      try {
-        this.closeSSELog(requestId);
-      } catch (logCloseError) {
-        // 快速死亡原则 - 暴露SSE日志关闭失败
-        throw new EnhancedRouteCodexError(logCloseError instanceof Error ? logCloseError : new Error(String(logCloseError)), {
-          module: 'StreamingManager',
-          file: 'src/server/utils/streaming-manager.ts',
-          function: 'streamResponse',
-          line: ErrorContextBuilder.extractLineNumber((logCloseError instanceof Error ? logCloseError : new Error(String(logCloseError))) as Error),
-          additional: {
-            operation: 'sse-log-close',
-            requestId
-          }
-        });
-      }
+      // Synthesize SSE from JSON payload
+      const payload = (response && typeof response === 'object' && 'data' in (response as any))
+        ? (response as any).data
+        : response;
+      await this.synthesizeOpenAIChatSSE(payload, requestId, res);
+      try { this.writeSSELog(requestId, 'stream.done', { requestId, synthesized: true }); } catch { /* ignore */ }
+    } catch (err) {
+      this.sendErrorChunk(res, err, requestId);
+    } finally {
+      try { this.closeSSELog(requestId); } catch { /* ignore */ }
     }
   }
 
-  /**
-   * Stream Anthropic-compatible responses (delegates to generic streaming)
-   */
   async streamAnthropicResponse(response: any, requestId: string, res: Response, model: string): Promise<void> {
-    await this.streamResponse(response, requestId, res, model);
+    // Headers
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('x-request-id', requestId);
+    (res as any).flushHeaders?.();
+
+    const windowMs = Number(process.env.RCC_O2A_COALESCE_MS || 1000) || 1000;
+    try {
+      const top = response && typeof (response as any).pipe === 'function' ? (response as any) : null;
+      const nested = (!top && response && typeof (response as any).data?.pipe === 'function') ? (response as any).data : null;
+      const readable = top || nested;
+      if (readable) {
+        const core = await import('rcc-llmswitch-core/api');
+        const fn = (core as any).streamOpenAIToAnthropic;
+        if (typeof fn === 'function') {
+          await fn(response, res as any, { requestId, model, windowMs });
+          return;
+        }
+        // Legacy entry
+        const legacy = await import('rcc-llmswitch-core');
+        const t = (legacy as any).transformOpenAIStreamToAnthropic;
+        if (typeof t !== 'function') throw new Error('Anthropic streaming transformer unavailable');
+        await t(readable, res as any, { requestId, model, windowMs, useEventHeaders: true });
+        return;
+      }
+      // Synthesize Anthropic SSE from non-stream JSON
+      const payload = (response && typeof response === 'object' && 'data' in (response as any))
+        ? (response as any).data
+        : response;
+      await this.synthesizeAnthropicSSE(payload, requestId, model, res);
+    } catch (e) {
+      this.sendErrorChunk(res, e, requestId);
+    }
   }
 
-  /**
-   * Check if should stream from pipeline
-   */
   private shouldStreamFromPipeline(): boolean {
     return this.config.enablePipeline ?? false;
   }
 
-  /**
-   * Stream from pipeline
-   */
-  private async streamFromPipeline(
-    response: any,
-    requestId: string,
-    res: Response,
-    model: string
-  ): Promise<void> {
-    // Always synthesize streaming from non-stream JSON
-    if (!response || typeof response !== 'object' || !('data' in response)) {
-      throw new Error('Streaming pipeline response is missing data payload');
-    }
-    const data = (response as Record<string, unknown>).data as any;
-    await this.processStreamingData(data, requestId, res, model);
-  }
-
-  /**
-   * Process streaming data
-   */
-  private async processStreamingData(
-    data: any,
-    requestId: string,
-    res: Response,
-    model: string
-  ): Promise<void> {
-    // Helper: unwrap nested { data: {...} } wrappers until we reach an object with
-    // OpenAI Chat response shape (choices/message) or delta chunks.
-    const unwrapData = (obj: any): any => {
-      try {
-        let cur = obj;
-        const seen = new Set<any>();
-        while (cur && typeof cur === 'object' && !Array.isArray(cur) && !seen.has(cur)) {
-          seen.add(cur);
-          // Stop when the payload clearly looks like an OpenAI Chat response or a delta chunk
-          if (Array.isArray((cur as any).choices) || (cur as any).object === 'chat.completion.chunk') {break;}
-          if ('data' in cur && (cur as any).data && typeof (cur as any).data === 'object') {
-            cur = (cur as any).data; continue;
-          }
-          break;
-        }
-        return cur;
-      } catch { return obj; }
-    };
-    const finishReasons: string[] = [];
-    let sawToolCalls = false;
-    const emitChatRequiredAction = (_msg: any) => { /* removed Responses semantics from Chat SSE */ };
-    // Removed user-visible tool hint delta to avoid confusing client UIs.
-    const genCallId = (index: number) => `call_${requestId}_${index}_${Math.random().toString(36).slice(2, 8)}`;
-
-    // Helper: synthesize OpenAI-style streaming chunks from a non-stream JSON response
-    const synthesizeFromResponse = async (resp: any) => {
-      const chunks: any[] = [];
-      try {
-        const msg = resp?.choices?.[0]?.message || {};
-        // 文本→工具归一化已在 llmswitch-core 的 openai-openai codec 处理，这里不重复
-        const role = typeof msg?.role === 'string' ? msg.role : 'assistant';
-        const content = typeof msg?.content === 'string' ? msg.content : '';
-        const toolCallsFromArray = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
-        const fnCall = (msg as any)?.function_call || null;
-        const toolCalls = (() => {
-          if (toolCallsFromArray.length) {return toolCallsFromArray;}
-          if (fnCall && typeof fnCall === 'object') {
-            const name = typeof fnCall.name === 'string' ? fnCall.name : undefined;
-            const args = typeof fnCall.arguments === 'string' ? fnCall.arguments : (fnCall.arguments != null ? JSON.stringify(fnCall.arguments) : undefined);
-            if (name || args) {
-              return [{ id: undefined, type: 'function', function: { ...(name?{name}:{ }), ...(args?{arguments: args}:{ }) } }];
-            }
-          }
-          return [] as any[];
-        })();
-
-        // Emit initial role delta to satisfy some clients' expectations
-        chunks.push({ role });
-
-        // Emit content when it不是工具JSON/补丁块回显
-        const isLikelyToolJson = (s: string): boolean => /"version"\s*:\s*"rcc\.tool\.v1"/i.test(s) || /rcc\.tool\.v1/i.test(s);
-        const isPatchBlock = (s: string): boolean => /\*\*\*\s*Begin\s*Patch/i.test(s);
-        if (content.length > 0 && !isLikelyToolJson(content) && !isPatchBlock(content)) {
-          chunks.push({ content });
-        }
-
-        // Emit tool_calls as delta blocks: name then arguments (single shot)
-        if (toolCalls.length > 0) {
-          sawToolCalls = true;
-          for (let i = 0; i < toolCalls.length; i++) {
-            const tc = toolCalls[i] || {};
-            const fn = tc.function || {};
-            const id = typeof tc.id === 'string' && tc.id.trim() ? tc.id : genCallId(i);
-            const name = typeof fn.name === 'string' ? fn.name : undefined;
-            const args = typeof fn.arguments === 'string' ? fn.arguments : (fn.arguments != null ? JSON.stringify(fn.arguments) : undefined);
-            if (name) {
-              chunks.push({ tool_calls: [{ index: i, id, type: 'function', function: { name } }] });
-            }
-            if (typeof args === 'string' && args.length > 0) {
-              for (const d of chunkString(args)) {
-                chunks.push({ tool_calls: [{ index: i, id, type: 'function', function: { arguments: d } }] });
-              }
-            }
-          }
-        }
-
-        let finish = toolCalls.length > 0
-          ? 'tool_calls'
-          : (resp?.choices?.[0]?.finish_reason || resp?.finish_reason || 'stop');
-        // Guard: if upstream finish_reason=='tool_calls' but we didn't extract any,
-        // do not emit misleading tool_calls final
-        if (finish === 'tool_calls' && toolCalls.length === 0) {finish = 'stop';}
-        return { chunks, finish };
-      } catch {
-        return { chunks, finish: 'stop' };
-      }
-    };
-
-    const pushChunk = async (raw: any) => {
-      const normalized = this.normalizeChunk(raw, model, finishReasons);
-      await this.sendChunk(res, normalized, requestId, model);
-      await this.delay(10);
-    };
-
-    if (Array.isArray(data)) {
-      // If array of chunks, stream as-is. Ensure the first delta carries role=assistant
-      try {
-        const first = data[0];
-        if (first) {
-          const preview = this.normalizeChunk(first, model, []);
-          const hasRole = !!(preview?.choices && preview.choices[0]?.delta && typeof preview.choices[0].delta.role === 'string');
-          if (!hasRole) {
-            await this.sendChunk(res, { role: 'assistant' }, requestId, model);
-            await this.delay(10);
-          }
-        }
-      } catch { /* ignore */ }
-
-      for (const chunk of data) {
-        await pushChunk(chunk);
-      }
-      let finalReason = finishReasons.length ? finishReasons[finishReasons.length - 1] : undefined;
-      if (!finalReason && sawToolCalls) { finalReason = 'tool_calls'; }
-      // Removed hint delta to avoid confusing client UIs
-      this.sendFinalChunk(res, requestId, model, finalReason);
-      return;
-    }
-
-    if (typeof data === 'object' && data !== null) {
-      // Align with validated logic: unwrap nested data so we can reliably synthesize
-      const unwrapped = unwrapData(data);
-      // Non-stream JSON response: synthesize delta stream when choices[].message exists
-      if (Array.isArray((unwrapped as any).choices) && (unwrapped as any).choices.length > 0 && (unwrapped as any).choices[0]?.message) {
-        // Align with core: canonicalize response tools before synthesizing to ensure
-        // tool_calls are present when upstream varies shape
-        let source = unwrapped;
-        try {
-          const core = await import('rcc-llmswitch-core/api');
-          const canon = (core as any).processChatResponseTools?.(unwrapped);
-          if (canon && typeof canon === 'object') {source = canon;}
-        } catch { /* non-blocking */ }
-        const { chunks, finish } = await synthesizeFromResponse(source);
-        for (const c of chunks) {
-          await this.sendChunk(res, c, requestId, model);
-          await this.delay(10);
-        }
-        try { emitChatRequiredAction((data as any).choices[0]?.message); } catch { /* ignore */ }
-        this.sendFinalChunk(res, requestId, model, finish);
-        return;
-      }
-      // Fallback: treat as single chunk
-      await pushChunk(unwrapped);
-      const finalReason = finishReasons.length ? finishReasons[finishReasons.length - 1] : undefined;
-      this.sendFinalChunk(res, requestId, model, finalReason);
-      return;
-    }
-  }
-
-  /**
-   * Normalize chunk into OpenAI streaming shape
-   */
-  private normalizeChunk(chunk: any, model: string, finishReasons: string[]): any {
-    if (!chunk || typeof chunk !== 'object') {
-      return chunk;
-    }
-
-    const hasDelta =
-      chunk.object === 'chat.completion.chunk' ||
-      (Array.isArray(chunk.choices) && chunk.choices.some((choice: any) => choice?.delta));
-
-    if (hasDelta) {
-      // Map delta.function_call -> delta.tool_calls for OpenAI older shape
-      try {
-        const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
-        const isImagePath = (p: any): boolean => {
-          try { const s = String(p || '').toLowerCase(); return /\.(png|jpg|jpeg|gif|webp|bmp|svg|tiff?|ico|heic|jxl)$/.test(s); } catch { return false; }
-        };
-        const parseArgs = (args: any): any => {
-          if (typeof args === 'string') { try { return JSON.parse(args); } catch { return {}; } }
-          if (args && typeof args === 'object') {return args;}
-          return {};
-        };
-        for (const c of choices) {
-          const d = c?.delta || {};
-          const fc = d?.function_call;
-          if (fc && typeof fc === 'object') {
-            const name = typeof fc.name === 'string' ? fc.name : undefined;
-            const args = typeof fc.arguments === 'string' ? fc.arguments : (fc.arguments != null ? JSON.stringify(fc.arguments) : undefined);
-            const tc: any = { index: 0, type: 'function', function: {} as any };
-            if (name) { (tc.function as any).name = name; }
-            if (typeof args === 'string') { (tc.function as any).arguments = args; }
-            if (!Array.isArray(d.tool_calls)) { d.tool_calls = []; }
-            (d.tool_calls as any[]).push(tc);
-          }
-          // Filter invalid view_image tool_calls where path is not an image
-          if (Array.isArray(d.tool_calls)) {
-            const kept: any[] = [];
-            for (const tc of d.tool_calls as any[]) {
-              try {
-                const fn = tc?.function || {};
-                const nm = typeof fn?.name === 'string' ? fn.name : undefined;
-                if (nm === 'view_image') {
-                  const a = parseArgs(fn?.arguments);
-                  const p = (a && typeof a === 'object') ? (a as any).path : undefined;
-                  if (!isImagePath(p)) {
-                    // Replace with a brief hint in content; drop this tool_call
-                    const hint = typeof p === 'string' && p ? `提示：${p} 不是图片，请改用 shell: {"command":["cat","${p}"]}` : '提示：路径不是图片，请改用 shell: {"command":["cat","<path>"]}';
-                    if (typeof d.content === 'string' && d.content.length > 0) {
-                      d.content += `\n${hint}`;
-                    } else {
-                      d.content = hint;
-                    }
-                    continue;
-                  }
-                }
-                kept.push(tc);
-              } catch { kept.push(tc); }
-            }
-            d.tool_calls = kept;
-          }
-        }
-      } catch { /* ignore */ }
-      this.captureFinishReason(chunk, finishReasons);
-      return chunk;
-    }
-
-    if (!Array.isArray(chunk.choices)) {
-      return chunk;
-    }
-
-    const normalizedChoices = chunk.choices.map((choice: any, index: number) => {
-      const message = choice?.message || {};
-      const toolCallsArr = Array.isArray(message.tool_calls) ? message.tool_calls : undefined;
-      const fnCall = (message as any)?.function_call || null;
-      const isImagePath = (p: any): boolean => {
-        try { const s = String(p || '').toLowerCase(); return /\.(png|jpg|jpeg|gif|webp|bmp|svg|tiff?|ico|heic|jxl)$/.test(s); } catch { return false; }
-      };
-      const parseArgs = (args: any): any => {
-        if (typeof args === 'string') { try { return JSON.parse(args); } catch { return {}; } }
-        if (args && typeof args === 'object') {return args;}
-        return {};
-      };
-      const toolCalls = (() => {
-        if (toolCallsArr && toolCallsArr.length) {return toolCallsArr;}
-        if (fnCall && typeof fnCall === 'object') {
-          const name = typeof fnCall.name === 'string' ? fnCall.name : undefined;
-          const args = typeof fnCall.arguments === 'string' ? fnCall.arguments : (fnCall.arguments != null ? JSON.stringify(fnCall.arguments) : undefined);
-          if (name || args) {
-            return [{ id: undefined, type: 'function', function: { ...(name?{name}:{ }), ...(args?{arguments: args}:{ }) } }];
-          }
-        }
-        return undefined;
-      })();
-      // Filter invalid view_image tool_calls when arguments contain a non-image path
-      const filteredToolCalls = (() => {
-        if (!Array.isArray(toolCalls)) {return toolCalls;}
-        const kept: any[] = [];
-        for (const tc of toolCalls) {
-          try {
-            const fn = (tc as any)?.function || {};
-            const nm = typeof fn?.name === 'string' ? fn.name : undefined;
-            if (nm === 'view_image') {
-              const a = parseArgs((fn as any).arguments);
-              const p = (a && typeof a === 'object') ? (a as any).path : undefined;
-              if (!isImagePath(p)) {
-                const hint = typeof p === 'string' && p ? `提示：${p} 不是图片，请改用 shell: {"command":["cat","${p}"]}` : '提示：路径不是图片，请改用 shell: {"command":["cat","<path>"]}';
-                if (typeof message.content === 'string' && message.content.length > 0) {
-                  message.content += `\n${hint}`;
-                } else {
-                  (message as any).content = hint;
-                }
-                continue;
-              }
-            }
-            kept.push(tc);
-          } catch { kept.push(tc); }
-        }
-        return kept;
-      })();
-      const delta: Record<string, unknown> = {};
-      if (message.role && typeof message.role === 'string') {
-        delta.role = message.role;
-      }
-      if (typeof message.content === 'string') {
-        const s = message.content as string;
-        const looksToolJson = /"version"\s*:\s*"rcc\.tool\.v1"/i.test(s) || /rcc\.tool\.v1/i.test(s);
-        const looksPatch = /\*\*\*\s*Begin\s*Patch/i.test(s);
-        if (!looksToolJson && !looksPatch) {
-          delta.content = s;
-        }
-      }
-      if (filteredToolCalls) {
-        delta.tool_calls = filteredToolCalls;
-      }
-      if (typeof choice.content === 'string' && !delta.content) {
-        delta.content = choice.content;
-      }
-
-      const finishReason = choice?.finish_reason ?? (message?.finish_reason as string | undefined);
-      if (finishReason) {
-        finishReasons.push(finishReason);
-      }
-
-      return {
-        index: choice?.index ?? index,
-        delta,
-        finish_reason: null
-      };
-    });
-
-    return {
-      id: chunk.id ?? `chatcmpl-${Date.now()}`,
-      object: 'chat.completion.chunk',
-      created: chunk.created ?? Math.floor(Date.now() / 1000),
-      model: chunk.model ?? model,
-      choices: normalizedChoices
-    };
-  }
-
-  private captureFinishReason(chunk: any, finishReasons: string[]): void {
-    if (!chunk || typeof chunk !== 'object') {
-      return;
-    }
-    const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
-    for (const choice of choices) {
-      const reason = choice?.finish_reason;
-      if (typeof reason === 'string' && reason.length > 0) {
-        finishReasons.push(reason);
-      }
-    }
-  }
-
-  /**
-   * Send chunk to response
-   */
-  private async sendChunk(
-    res: Response,
-    chunk: StreamingChunk | any,
-    requestId: string,
-    model: string
-  ): Promise<void> {
-    // Clean reasoning/thinking tags in content fields (delta.content and message.content)
-    const cleanse = (obj: any) => {
-      try {
-        if (!obj || typeof obj !== 'object') {return obj;}
-        const choices = Array.isArray(obj.choices) ? obj.choices : [];
-        for (const c of choices) {
-          if (c && typeof c === 'object') {
-            const d = c.delta || {};
-            if (typeof d.content === 'string') { d.content = stripThinkingTags(d.content); }
-            if (c.message && typeof c.message === 'object' && typeof c.message.content === 'string') {
-              c.message.content = stripThinkingTags(c.message.content);
-            }
-          }
-        }
-      } catch { /* ignore */ }
-      return obj;
-    };
-
-    // If passing a light delta object (e.g., { role }, { content }, { tool_calls }), clean its content
-    if (chunk && typeof chunk === 'object' && !('id' in chunk)) {
-      if (typeof (chunk as any).content === 'string') {
-        (chunk as any).content = stripThinkingTags((chunk as any).content);
-      }
-    }
-
-    const chunkData = typeof chunk === 'object' && chunk.id ? cleanse(chunk) : {
-      id: `chatcmpl-${Date.now()}`,
-      object: 'chat.completion.chunk',
-      created: Math.floor(Date.now() / 1000),
-      model,
-      choices: [{
-        index: 0,
-        delta: chunk,
-        finish_reason: null
-      }]
-    };
-
-    // Short-window duplicate tool_call dedupe (per request, across chunks)
-    try {
-      const choices = Array.isArray((chunkData as any).choices) ? (chunkData as any).choices : [];
-      for (const c of choices) {
-        const d = c?.delta || {};
-        if (Array.isArray(d.tool_calls) && d.tool_calls.length > 0) {
-          const kept: any[] = [];
-          const WINDOW = Math.max(1, Math.min(16, Number(process.env.ROUTECODEX_TOOL_CALL_DEDUPE_WINDOW || 4)));
-          const bucket = this.lastToolCallKeys.get(requestId) || { set: new Set<string>(), order: [] };
-          for (const tc of d.tool_calls as any[]) {
-            try {
-              const fn = tc?.function || {};
-              const name = typeof fn?.name === 'string' ? fn.name : '';
-              const args = fn?.arguments;
-              const argsStr = typeof args === 'string' ? args : (args != null ? JSON.stringify(args) : '');
-              const key = `${name}\n${argsStr}`;
-              const hasBoth = name && argsStr;
-              if (hasBoth && bucket.set.has(key)) { continue; }
-              kept.push(tc);
-              if (hasBoth) {
-                bucket.set.add(key);
-                bucket.order.push(key);
-                if (bucket.order.length > WINDOW) {
-                  const old = bucket.order.shift();
-                  if (old) {bucket.set.delete(old);}
-                }
-              }
-            } catch { kept.push(tc); }
-          }
-          d.tool_calls = kept;
-          this.lastToolCallKeys.set(requestId, bucket);
-        }
-      }
-    } catch { /* ignore dedupe errors */ }
-
-    const sseData = `data: ${JSON.stringify(chunkData)}\n\n`;
-    res.write(sseData);
-    try { this.writeSSELog(requestId, 'chunk', chunkData); } catch { /* ignore */ }
-
-    try {
-      const LOG = String(process.env.ROUTECODEX_LOG_STREAM_CHUNKS || process.env.RCC_LOG_STREAM_CHUNKS || '0') === '1';
-      if (LOG) {
-        this.logger.logModule('StreamingManager', 'chunk_sent', {
-          requestId,
-          chunkId: chunkData.id,
-          model,
-        });
-      }
-    } catch { /* no-op */ }
-  }
-
-  /**
-   * Send final chunk
-   */
-  private sendFinalChunk(res: Response, requestId: string, model: string, finishReason?: string): void {
-    const finalChunk = {
-      id: `chatcmpl-${Date.now()}`,
-      object: 'chat.completion.chunk',
-      created: Math.floor(Date.now() / 1000),
-      model,
-      choices: [{
-        index: 0,
-        delta: {},
-        finish_reason: finishReason ?? 'stop'
-      }]
-    };
-
-    // 可选：发出 Responses 风格的 done 事件（默认关闭，以避免跨协议混用）
-    try {
-      const EMIT_RESP_DONE = String(process.env.ROUTECODEX_CHAT_RESP_DONE || '0') === '1';
-      if (EMIT_RESP_DONE) {
-        const evt = { type: 'response.done' } as Record<string, unknown>;
-        res.write(`event: response.done\n`);
-        res.write(`data: ${JSON.stringify(evt)}\n\n`);
-      }
-    } catch { /* ignore */ }
-    const finalData = `data: ${JSON.stringify(finalChunk)}\n\ndata: [DONE]\n\n`;
-    res.write(finalData);
-    this.stopHeartbeat(requestId);
-    res.end();
-    // Reset short-window cache for this request
-    try { this.lastToolCallKeys.delete(requestId); } catch { /* ignore */ }
-    try {
-      this.writeSSELog(requestId, 'chunk.final', finalChunk);
-      this.writeSSELog(requestId, 'done', { requestId });
-      this.closeSSELog(requestId);
-    } catch { /* ignore */ }
-
-    try {
-      const LOG = String(process.env.ROUTECODEX_LOG_STREAM_CHUNKS || process.env.RCC_LOG_STREAM_CHUNKS || '0') === '1';
-      if (LOG) {
-        this.logger.logModule('StreamingManager', 'stream_complete', {
-          requestId,
-          model,
-        });
-      }
-    } catch { /* no-op */ }
-  }
-
-  /**
-   * Send error chunk
-   */
   private sendErrorChunk(res: Response, error: any, requestId: string): void {
-    const errorChunk = {
-      id: `chatcmpl-${Date.now()}`,
-      object: 'chat.completion.chunk',
-      created: Math.floor(Date.now() / 1000),
-      model: 'unknown',
-      choices: [{
-        index: 0,
-        delta: {
-          content: `Error: ${error instanceof Error ? error.message : String(error)}`
-        },
-        finish_reason: 'error'
-      }]
-    };
-
     try {
-      const evt = { type: 'response.done' } as Record<string, unknown>;
-      res.write(`event: response.done\n`);
-      res.write(`data: ${JSON.stringify(evt)}\n\n`);
-    } catch { /* ignore */ }
-    const errorData = `data: ${JSON.stringify(errorChunk)}\n\ndata: [DONE]\n\n`;
-    res.write(errorData);
-    this.stopHeartbeat(requestId);
-    try {
+      const errorChunk = {
+        id: `error_${Date.now()}`,
+        object: 'chat.completion.chunk',
+        created: Math.floor(Date.now() / 1000),
+        model: 'unknown',
+        choices: [],
+        error: {
+          message: (error instanceof Error ? error.message : String(error)) || 'stream error',
+          type: 'streaming_error',
+          code: 'STREAM_FAILED',
+          requestId,
+        }
+      } as any;
+      const errorData = `data: ${JSON.stringify(errorChunk)}\n\ndata: [DONE]\n\n`;
+      res.write(errorData);
       this.writeSSELog(requestId, 'error', errorChunk);
       this.writeSSELog(requestId, 'done', { requestId });
-      this.closeSSELog(requestId);
     } catch { /* ignore */ }
   }
 
-  // Write one SSE log record line
   private writeSSELog(requestId: string, event: string, data: any): void {
     try {
       const ws = this.sseLogWriters.get(requestId);
-      if (!ws) {return;}
-      ws.write(`${JSON.stringify({ ts: Date.now(), requestId, event, data })  }\n`);
+      if (!ws) return;
+      ws.write(`${JSON.stringify({ ts: Date.now(), requestId, event, data })}\n`);
     } catch { /* ignore */ }
   }
 
@@ -731,60 +149,134 @@ export class StreamingManager {
     finally { this.sseLogWriters.delete(requestId); }
   }
 
-  /**
-   * Delay utility
-   */
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  // Heartbeat helpers
-  private startHeartbeat(res: Response, requestId: string, model: string): void {
-    try {
-      const iv = Math.max(1000, Number(process.env.ROUTECODEX_STREAM_HEARTBEAT_MS || process.env.RCC_STREAM_HEARTBEAT_MS || 15000));
-      const pre = String(process.env.ROUTECODEX_STREAM_PRE_HEARTBEAT || process.env.RCC_STREAM_PRE_HEARTBEAT || '1') === '1';
-      const writeBeat = () => {
-        try {
-          const payload = { type: 'heartbeat', ts: Date.now(), model };
-          res.write(`data: ${JSON.stringify(payload)}\n\n`);
-        } catch { /* ignore */ }
-      };
-      if (pre) {writeBeat();}
-      const timer = setInterval(writeBeat, iv);
-      this.heartbeatTimers.set(requestId, timer);
-      try { res.on('close', () => this.stopHeartbeat(requestId)); } catch { /* ignore */ }
-    } catch { /* ignore */ }
-  }
-
-  private stopHeartbeat(requestId: string): void {
-    try {
-      const t = this.heartbeatTimers.get(requestId);
-      if (t) { clearInterval(t); this.heartbeatTimers.delete(requestId); }
-    } catch { /* ignore */ }
-  }
-
-  /**
-   * Check if response is streamable
-   */
+  // Compatibility helpers (minimal)
   isStreamable(response: any): boolean {
-    return (
-      response?.stream === true ||
-      (typeof response?.pipe === 'function') ||
-      (Array.isArray(response?.data)) ||
-      (this.config.enableStreaming === true)
-    );
+    return (typeof response?.pipe === 'function') || (typeof response?.data?.pipe === 'function');
+  }
+
+  getStreamingStats(): { enabled: boolean; config: ProtocolHandlerConfig } {
+    return { enabled: this.config.enableStreaming ?? false, config: this.config };
   }
 
   /**
-   * Get streaming statistics
+   * Synthesize OpenAI Chat SSE from a non-stream JSON payload
    */
-  getStreamingStats(): {
-    enabled: boolean;
-    config: ProtocolHandlerConfig;
-  } {
-    return {
-      enabled: this.config.enableStreaming ?? false,
-      config: this.config,
-    };
+  private async synthesizeOpenAIChatSSE(payload: any, requestId: string, res: Response): Promise<void> {
+    try {
+      try { res.setHeader('x-rc-synth', '1'); } catch { /* ignore */ }
+      const nowSec = Math.floor(Date.now() / 1000);
+      const model = (payload?.model) || 'unknown';
+      const choice = Array.isArray(payload?.choices) ? payload.choices[0] : null;
+      const msg = choice?.message || {};
+      const content: string = typeof msg?.content === 'string' ? msg.content : '';
+      const tc: any[] = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
+
+      const writeChunk = (obj: any) => {
+        const line = `data: ${JSON.stringify(obj)}\n\n`;
+        try { res.write(line); } catch { /* ignore */ }
+        try { this.writeSSELog(requestId, 'chunk', obj); } catch { /* ignore */ }
+      };
+
+      // Emit content chunks if present
+      if (content && content.length) {
+        const step = 200; // simple segmentation
+        for (let i = 0; i < content.length; i += step) {
+          const slice = content.slice(i, i + step);
+          const chunk = {
+            id: `syn_${Date.now()}_${i}`,
+            object: 'chat.completion.chunk',
+            created: nowSec,
+            model,
+            choices: [ { index: 0, delta: { content: slice }, finish_reason: null } ]
+          };
+          writeChunk(chunk);
+        }
+      }
+
+      // Emit tool_calls as a single delta chunk if present
+      if (tc && tc.length) {
+        const first = tc[0] || {};
+        const fn = first.function || {};
+        const name = typeof fn?.name === 'string' ? fn.name : undefined;
+        let args = fn?.arguments;
+        if (args && typeof args !== 'string') { try { args = JSON.stringify(args); } catch { args = String(args); } }
+        const chunk = {
+          id: `syn_tc_${Date.now()}`,
+          object: 'chat.completion.chunk',
+          created: nowSec,
+          model,
+          choices: [ { index: 0, delta: { tool_calls: [ { index: 0, id: first.id || `call_${Date.now()}`, type: 'function', function: { name, arguments: args || '{}' } } ] }, finish_reason: null } ]
+        } as any;
+        writeChunk(chunk);
+      }
+
+      // Final chunk
+      const finish = Array.isArray(tc) && tc.length ? 'tool_calls' : (choice?.finish_reason || 'stop');
+      const finalChunk = {
+        id: `syn_end_${Date.now()}`,
+        object: 'chat.completion.chunk',
+        created: nowSec,
+        model,
+        choices: [ { index: 0, delta: {}, finish_reason: finish } ]
+      };
+      writeChunk(finalChunk);
+      try { res.write('data: [DONE]\n\n'); } catch { /* ignore */ }
+      try { res.end(); } catch { /* ignore */ }
+    } catch (error) {
+      this.sendErrorChunk(res, error, requestId);
+    }
+  }
+
+  /**
+   * Synthesize Anthropic Messages SSE from a non-stream OpenAI JSON payload
+   */
+  private async synthesizeAnthropicSSE(payload: any, requestId: string, model: string, res: Response): Promise<void> {
+    try {
+      try { res.setHeader('x-rc-synth', 'anthropic'); } catch { /* ignore */ }
+      const nowSec = Math.floor(Date.now() / 1000);
+      const ch = Array.isArray(payload?.choices) ? payload.choices[0] : null;
+      const msg = ch?.message || {};
+      const text: string = typeof msg?.content === 'string' ? msg.content : '';
+      const toolCalls: any[] = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
+
+      const write = (event: string, data: any) => {
+        try { res.write(`event: ${event}\n`); } catch { /* ignore */ }
+        try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch { /* ignore */ }
+        try { this.writeSSELog(requestId, event, data); } catch { /* ignore */ }
+      };
+
+      // message_start
+      write('message_start', { type: 'message', id: `msg_${Date.now()}`, model, role: 'assistant' });
+
+      let blockIndex = 0;
+      if (text && text.length) {
+        write('content_block_start', { index: blockIndex, content_block: { type: 'text', text: '' } });
+        const step = 200;
+        for (let i = 0; i < text.length; i += step) {
+          const slice = text.slice(i, i + step);
+          write('content_block_delta', { index: blockIndex, delta: { type: 'text_delta', text: slice } });
+        }
+        write('content_block_stop', { index: blockIndex });
+        blockIndex++;
+      }
+
+      for (const tc of toolCalls) {
+        const fn = tc?.function || {};
+        const name = typeof fn?.name === 'string' ? fn.name : 'tool';
+        let input: any = {};
+        if (typeof fn?.arguments === 'string') { try { input = JSON.parse(fn.arguments); } catch { input = {}; } }
+        else if (fn?.arguments && typeof fn.arguments === 'object') { input = fn.arguments; }
+        write('content_block_start', { index: blockIndex, content_block: { type: 'tool_use', id: tc?.id || `call_${Date.now()}`, name, input } });
+        write('content_block_stop', { index: blockIndex });
+        blockIndex++;
+      }
+
+      const stopReason = ch?.finish_reason === 'tool_calls' ? 'tool_use' : (ch?.finish_reason || 'stop');
+      write('message_delta', { delta: { stop_reason: stopReason }, usage: payload?.usage || undefined });
+      write('message_stop', { created: nowSec });
+      try { res.end(); } catch { /* ignore */ }
+    } catch (error) {
+      this.sendErrorChunk(res, error, requestId);
+    }
   }
 }
