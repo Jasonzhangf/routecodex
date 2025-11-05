@@ -91,8 +91,9 @@ export const DEFAULT_COMPATIBILITY_OPTIONS: CompatibilityOptions = {
   normalizeProviderTypes: true,
   generateKeyAliases: true,
   processOAuth: true,
-  defaultCompatibility: 'passthrough-compatibility',
-  defaultLLMSwitch: 'llmswitch-openai-openai'
+  // No default compatibility or llmswitch; require explicit config and use runtime switching
+  defaultCompatibility: undefined,
+  defaultLLMSwitch: undefined
 };
 
 // Legacy compatibility options for backward compatibility
@@ -101,8 +102,8 @@ export const LEGACY_COMPATIBILITY_OPTIONS: CompatibilityOptions = {
   normalizeProviderTypes: true,
   generateKeyAliases: true,
   processOAuth: true,
-  defaultCompatibility: 'passthrough-compatibility',
-  defaultLLMSwitch: 'llmswitch-openai-openai'
+  defaultCompatibility: undefined,
+  defaultLLMSwitch: undefined
 };
 
 // Strict compatibility options for new configurations

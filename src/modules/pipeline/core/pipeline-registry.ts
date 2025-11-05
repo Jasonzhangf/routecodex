@@ -14,7 +14,6 @@ import type {
 } from '../interfaces/pipeline-interfaces.js';
 // import type { DebugCenter } from '../types/external-types.js';
 import { DebugEventBus } from 'rcc-debugcenter';
-import { ModuleEnhancementFactory } from '../../enhancement/module-enhancement-factory.js';
 
 /**
  * Registry entry for module factories
@@ -41,7 +40,7 @@ export class PipelineModuleRegistryImpl implements PipelineModuleRegistry {
   // Debug enhancement properties
   private isEnhanced = false;
   private debugEventBus: DebugEventBus | null = null;
-  private enhancementFactory: ModuleEnhancementFactory | null = null;
+  // Enhancement factory removed
   private registryMetrics: Map<string, any> = new Map();
   private creationHistory: any[] = [];
   private maxHistorySize = 100;
@@ -412,40 +411,8 @@ export class PipelineModuleRegistryImpl implements PipelineModuleRegistry {
    * Initialize debug enhancements
    */
   initializeDebugEnhancements(): void {
-    try {
-      this.debugEventBus = DebugEventBus.getInstance();
-
-      // Create a default debug center for enhancement factory
-      const debugCenter = {
-        enabled: true,
-        logLevel: 'info',
-        consoleOutput: true
-      };
-
-      // Initialize enhancement factory with proper debug center
-      this.enhancementFactory = new ModuleEnhancementFactory(debugCenter as any);
-
-      // Register this registry for enhancement
-      this.enhancementFactory.registerConfig('module-registry', {
-        enabled: true,
-        level: 'detailed',
-        consoleLogging: true,
-        debugCenter: true,
-        performanceTracking: true,
-        requestLogging: true,
-        errorTracking: true,
-        transformationLogging: true
-      });
-
-      // Subscribe to registry-specific events
-      this.subscribeToRegistryEvents();
-
-      this.isEnhanced = true;
-
-      console.log('Module registry debug enhancements initialized with full functionality');
-    } catch (error) {
-      console.warn('Failed to initialize registry debug enhancements:', error);
-    }
+    // Enhancements removed; leave as no-op
+    this.isEnhanced = false;
   }
 
   /**

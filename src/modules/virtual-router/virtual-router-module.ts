@@ -3,12 +3,11 @@
  * 完全基于modules.json配置，无fallback，无硬编码，无默认值
  */
 
-import { BaseModule } from '../../core/base-module.js';
+import { BaseModule } from 'rcc-basemodule';
 import { ModelFieldConverter } from '../../utils/model-field-converter/index.js';
 import { RCCUnimplementedModule } from '../../modules/unimplemented-module.js';
 import { ConfigRequestClassifier } from './classifiers/config-request-classifier.js';
-import { virtualRouterDryRunExecutor } from './virtual-router-dry-run.js';
-import type { VirtualRouterDryRunConfig } from './virtual-router-dry-run.js';
+// Dry-run executor removed
 
 export class VirtualRouterModule extends BaseModule {
   private routeTargets: Record<string, unknown> = {};
@@ -18,7 +17,6 @@ export class VirtualRouterModule extends BaseModule {
   private fieldConverter: ModelFieldConverter;
   private unimplementedModule: RCCUnimplementedModule;
   private inputModelRequestClassifier: ConfigRequestClassifier | null = null;
-  private dryRunConfig: VirtualRouterDryRunConfig = { enabled: false };
 
   constructor() {
     super({
@@ -55,21 +53,7 @@ export class VirtualRouterModule extends BaseModule {
       // 设置流水线配置
       this.pipelineConfigs = cfg['pipelineConfigs'] as Record<string, unknown>;
 
-      // 处理dry-run配置
-      if ((cfg['dryRun'] as Record<string, unknown> | undefined)?.['enabled']) {
-        this.dryRunConfig = {
-          enabled: true,
-          includeLoadBalancerDetails: ((cfg['dryRun'] as Record<string, unknown>)?.['includeLoadBalancerDetails'] as boolean) ?? true,
-          includeHealthStatus: ((cfg['dryRun'] as Record<string, unknown>)?.['includeHealthStatus'] as boolean) ?? true,
-          includeWeightCalculation: ((cfg['dryRun'] as Record<string, unknown>)?.['includeWeightCalculation'] as boolean) ?? true,
-          simulateProviderHealth: ((cfg['dryRun'] as Record<string, unknown>)?.['simulateProviderHealth'] as boolean) ?? true,
-          forcedProviderId: (cfg['dryRun'] as Record<string, unknown>)?.['forcedProviderId'] as string | undefined
-        };
-        
-        // 初始化虚拟路由器dry-run执行器
-        await virtualRouterDryRunExecutor.initialize(cfg);
-        console.log('🔍 Virtual Router Dry-Run mode enabled');
-      }
+      // Dry-run configuration removed
 
       // 初始化输入模型分类器
       await this.initializeInputModelClassifier(cfg);
@@ -160,10 +144,7 @@ export class VirtualRouterModule extends BaseModule {
           moduleId: 'virtual-router-mock',
         } as unknown as Record<string, unknown>;
       }
-      // 检查是否启用了dry-run模式
-      if (this.dryRunConfig.enabled) {
-        return await this.executeDryRunRouting(request);
-      }
+      // Dry-run removed
 
       // 1. 输入模型分类
       const classificationResult = await this.classifyRequest(request);
@@ -226,55 +207,7 @@ export class VirtualRouterModule extends BaseModule {
     }
   }
 
-  /**
-   * 执行dry-run路由，返回详细的负载均衡和路由决策信息
-   */
-  private async executeDryRunRouting(request: Record<string, unknown>): Promise<Record<string, unknown>> {
-    console.log('🔍 Executing virtual router dry-run...');
-    
-    try {
-      // 准备分类输入
-      const classificationInput = {
-        request: request,
-        endpoint: (request['endpoint'] as string) || '/v1/chat/completions',
-        protocol: (request['protocol'] as string) || 'openai'
-      };
-
-      // 执行虚拟路由器dry-run
-      const dryRunResult = await virtualRouterDryRunExecutor.executeDryRun(classificationInput);
-
-      // 返回dry-run结果，包含真实的负载均衡决策
-      return {
-        response: {
-          id: `dryrun-response-${Date.now()}`,
-          object: 'chat.completion',
-          model: 'dry-run-mode',
-          choices: [{
-            index: 0,
-            message: {
-              role: 'assistant',
-              content: 'Virtual router dry-run completed successfully'
-            }
-          }]
-        },
-        routing: {
-          route: dryRunResult.routingDecision.route,
-          confidence: dryRunResult.routingDecision.confidence,
-          reasoning: dryRunResult.routingDecision.reasoning,
-          target: {
-            providerId: dryRunResult.loadBalancerAnalysis?.selectedProvider || 'unknown',
-            modelId: 'unknown',
-            keyId: 'unknown'
-          },
-          dryRunDetails: dryRunResult // 包含完整的dry-run信息
-        }
-      };
-
-    } catch (error) {
-      console.error(`❌ Virtual router dry-run failed:`, error);
-      throw error;
-    }
-  }
+  // Dry-run routing removed
 
   /**
    * 分类请求 - 完全基于输入模型
@@ -328,7 +261,7 @@ export class VirtualRouterModule extends BaseModule {
     const classifierStatus = this.inputModelRequestClassifier?.getStatus() || null;
     
     return {
-      status: this.isModuleRunning() ? 'running' : 'stopped',
+      status: 'running',
       routeTargets: Object.keys(this.routeTargets),
       pipelineConfigs: Object.keys(this.pipelineConfigs),
       classifier: {

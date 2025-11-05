@@ -158,18 +158,7 @@ export function autoUpgradeConfiguration(config: any): any {
   switch (schemaVersion) {
     case '1.0.0':
       // Upgrade from 1.0.0 to 1.1.0
-      if (upgraded.virtualrouter?.providers) {
-        // Add default compatibility for all providers
-        Object.keys(upgraded.virtualrouter.providers).forEach(providerId => {
-          const provider = upgraded.virtualrouter.providers[providerId];
-          if (!provider.compatibility) {
-            provider.compatibility = {
-              type: 'passthrough-compatibility',
-              config: {},
-            };
-          }
-        });
-      }
+      // Do NOT inject any default compatibility. Compatibility is loaded only when explicitly configured.
       upgraded.schemaVersion = '1.1.0';
       // falls through
 

@@ -11,7 +11,6 @@ import net from 'net';
 import { spawn } from 'child_process';
 import { createRequire } from 'module';
 import { ConfigManagerModule } from './modules/config-manager/config-manager-module.js';
-import { MonitorConfigUtil } from './modules/monitoring/monitor-config.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 
 // Polyfill CommonJS require for ESM runtime to satisfy dependencies that call require()
@@ -135,14 +134,8 @@ class RouteCodexApp {
       let mergedConfig: any | null = null;
       // For normal `rcc start`, ignore monitor transparent by default.
       // Only honor transparent routing when explicitly enabled via env.
-      const honorTransparent = process.env.RCC_MONITOR_TRANSPARENT === '1' || process.env.RCC_TRANSPARENT_ROUTING === '1' || process.env.ROUTECODEX_MONITOR_TRANSPARENT === '1' || process.env.ROUTECODEX_TRANSPARENT_ROUTING === '1';
-      let transparentEnabled = false;
-      if (honorTransparent) {
-        try {
-          const m = await MonitorConfigUtil.load();
-          transparentEnabled = MonitorConfigUtil.isTransparentEnabled(m);
-        } catch { transparentEnabled = false; }
-      }
+      // Monitoring/transparent routing removed; keep disabled
+      const transparentEnabled = false;
 
       await this.configManager.initialize(configManagerConfig);
       // 2. 加载合并后的配置
@@ -218,24 +211,7 @@ class RouteCodexApp {
       console.log(`📖 OpenAI API: http://${serverConfig.host}:${serverConfig.port}/v1/openai`);
       console.log(`🔬 Anthropic API: http://${serverConfig.host}:${serverConfig.port}/v1/anthropic`);
 
-      // Optional: run samples dry-run on startup (non-blocking)
-      if (process.env.ROUTECODEX_SAMPLES_DRY_RUN_ON_START === '1') {
-        try {
-          const { spawn } = await import('child_process');
-          const cmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-          const child = spawn(cmd, ['run', '-s', 'dry-run:samples'], {
-            stdio: 'inherit',
-            env: process.env,
-            cwd: process.cwd(),
-            detached: false,
-          });
-          child.on('exit', (code) => {
-            console.log(`🧪 samples-dry-run finished with code ${code}`);
-          });
-        } catch (e) {
-          console.warn('⚠️ Failed to run samples dry-run on start:', e);
-        }
-      }
+      // samples dry-run removed
 
     } catch (error) {
       console.error('❌ Failed to start RouteCodex server:', error);
@@ -391,9 +367,8 @@ class RouteCodexApp {
  * then force-killing as a last resort. Mirrors previous startup behavior.
  */
 async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boolean } = {}): Promise<void> {
-  // Retained for backward-compatibility but no longer called on normal start.
+  // Quick probe first; if we can bind, it's free
   try {
-    // Quick check: attempt to bind to the port
     const probe = net.createServer();
     const canListen = await new Promise<boolean>(resolve => {
       probe.once('error', () => resolve(false));
@@ -407,55 +382,57 @@ async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boole
     // fallthrough
   }
 
-  // Always attempt to free the port if bind failed (legacy behavior)
-
-  const getPids = async (): Promise<string[]> => {
-    try {
-      const ls = spawn('lsof', ['-ti', `:${port}`]);
-      return await new Promise<string[]>((resolve) => {
-        let out = '';
-        ls.stdout.on('data', d => (out += String(d)));
-        ls.on('close', () => {
-          resolve(out.split(/\s+/).map(s => s.trim()).filter(Boolean));
-        });
-        ls.on('error', () => resolve([]));
-      });
-    } catch {
-      return [];
-    }
-  };
-
-  const pids = await getPids();
-  if (!pids || pids.length === 0) { return; }
-
+  // Try graceful HTTP shutdown if a compatible server is there
   if (opts.attemptGraceful) {
     const graceful = await attemptHttpShutdown(port);
     if (graceful) {
       // Give the server a moment to exit cleanly
       for (let i = 0; i < 10; i++) {
         await new Promise(r => setTimeout(r, 300));
-        const remain = await getPids();
-        if (!remain.length) { return; }
+        if (await canBind(port)) return;
       }
     }
   }
 
-  console.warn(`⚠️ Port ${port} in use by PID(s): ${pids.join(', ')} — sending SIGTERM...`);
+  // Fall back to SIGTERM/SIGKILL processes listening on the port (avoid self-kill by probing first)
+  const pids = await listPidsOnPort(port);
+  if (!pids.length) return;
   for (const pid of pids) {
     try { process.kill(Number(pid), 'SIGTERM'); } catch { /* ignore */ }
   }
-  // wait up to 5s for graceful shutdown
   for (let i = 0; i < 10; i++) {
-    await new Promise(r => setTimeout(r, 500));
-    const remain = await getPids();
-    if (!remain.length) { return; }
+    await new Promise(r => setTimeout(r, 300));
+    if (await canBind(port)) return;
   }
-  console.warn(`⚠️ Port ${port} still in use — sending SIGKILL...`);
-  const remain = await getPids();
+  const remain = await listPidsOnPort(port);
   for (const pid of remain) {
     try { process.kill(Number(pid), 'SIGKILL'); } catch { /* ignore */ }
   }
-  await new Promise(r => setTimeout(r, 800));
+  await new Promise(r => setTimeout(r, 500));
+}
+
+async function canBind(port: number): Promise<boolean> {
+  return await new Promise<boolean>(resolve => {
+    try {
+      const s = net.createServer();
+      s.once('error', () => resolve(false));
+      s.listen({ host: '0.0.0.0', port }, () => {
+        s.close(() => resolve(true));
+      });
+    } catch { resolve(false); }
+  });
+}
+
+async function listPidsOnPort(port: number): Promise<string[]> {
+  return await new Promise<string[]>(resolve => {
+    try {
+      const ps = spawn('lsof', ['-ti', `:${port}`]);
+      let out = '';
+      ps.stdout.on('data', d => (out += String(d)));
+      ps.on('close', () => resolve(out.split(/\s+/).map(s => s.trim()).filter(Boolean)));
+      ps.on('error', () => resolve([]));
+    } catch { resolve([]); }
+  });
 }
 
 async function attemptHttpShutdown(port: number): Promise<boolean> {
@@ -464,21 +441,13 @@ async function attemptHttpShutdown(port: number): Promise<boolean> {
     const timeout = setTimeout(() => {
       try { controller.abort(); } catch { /* ignore */ }
     }, 1000);
-
     const res = await fetch(`http://127.0.0.1:${port}/shutdown`, {
       method: 'POST',
       signal: (controller as any).signal
     } as any).catch(() => null);
-
     clearTimeout(timeout);
-    if (res && res.ok) {
-      console.warn(`⚠️ Requested graceful shutdown on port ${port} via /shutdown.`);
-      return true;
-    }
-  } catch {
-    // ignore
-  }
-  return false;
+    return !!(res && res.ok);
+  } catch { return false; }
 }
 
 /** Quick health probe to avoid killing a healthy server instance */

@@ -263,7 +263,20 @@ export class GLMCompatibility implements CompatibilityModule {
       } catch { /* best-effort; fall back to manager */ }
 
       // Process using modular compatibility manager（包含字段映射、校验、hooks 等）
-      const processedRequest = await this.compatibilityManager.processRequest(this.moduleId, preFiltered, context);
+      let processedRequest = await this.compatibilityManager.processRequest(this.moduleId, preFiltered, context);
+
+      // Final preflight for GLM: enforce last-user policy and sanitize payload to avoid upstream 1214
+      const preflight = sanitizeAndValidateOpenAIChat(processedRequest as any, { target: 'glm', enableTools: true, glmPolicy: 'compat' });
+      if (Array.isArray(preflight.issues) && preflight.issues.length) {
+        const errs = preflight.issues.filter(i => i.level === 'error');
+        if (errs.length) {
+          const detail = errs.map(e => e.code).join(',');
+          const baseError = new Error(`compat-validation-failed: ${detail}`);
+          // Wrap in EnhancedRouteCodexError for unified error pipeline
+          throw new EnhancedRouteCodexError(baseError, { module: 'GLMCompatibility', function: 'processIncoming', requestId: context.requestId, additional: { issues: preflight.issues } } as any);
+        }
+      }
+      processedRequest = preflight.payload as UnknownObject;
 
       // Write compat-post snapshot
       try {

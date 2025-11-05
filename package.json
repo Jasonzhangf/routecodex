@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.76.0",
+  "version": "0.76.10",
   "description": "Multi-provider OpenAI proxy server with native dry-run capabilities",
   "type": "module",
   "main": "dist/index.js",
@@ -69,6 +69,7 @@
     "monitor:diff": "node scripts/monitor-diff.mjs",
     "monitor:capture:responses": "node scripts/upstream-multiturn-capture.mjs",
     "monitor:embed": "node scripts/monitor-embed-keys.mjs",
+    "replay:toolcall": "node scripts/replay-recorded-toolcall.mjs",
     "build:smoke": "npm run build && node scripts/protocol-smoke.mjs",
     "start:verify:fg": "node scripts/start-verify.mjs --mode fg --timeout 90",
     "dry-run": "node scripts/dry-run-cli.mjs",

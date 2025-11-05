@@ -24,6 +24,8 @@ import { extractToolText as extractToolTextShared } from './tool-result-text.js'
 export interface PreflightOptions {
   target: 'glm' | 'openai' | 'generic';
   enableTools?: boolean;
+  /** Optional override for GLM policy: defaults to env if omitted */
+  glmPolicy?: 'preserve' | 'compat';
 }
 
 export interface PreflightResult {
@@ -47,8 +49,8 @@ type GLMPolicy = {
   contextSafetyRatio: number;
 };
 
-function getGLMPolicy(): GLMPolicy {
-  const mode = String(process.env.RCC_GLM_POLICY || 'preserve').trim().toLowerCase();
+function getGLMPolicy(override?: 'preserve' | 'compat'): GLMPolicy {
+  const mode = String(override || process.env.RCC_GLM_POLICY || 'preserve').trim().toLowerCase();
   if (mode === 'compat') {
     return {
       keepToolRole: true,
@@ -198,7 +200,8 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
   // Set RCC_DISABLE_INPUT_VALIDATION=0 to re-enable the previous sanitizer.
   try {
     const DISABLE = String(process.env.RCC_DISABLE_INPUT_VALIDATION ?? '1') !== '0';
-    if (DISABLE) {
+    const forcedCompat = targetGLM && opts.glmPolicy === 'compat';
+    if (DISABLE && !forcedCompat) {
       // Minimal GLM compatibility still applies to avoid upstream 1210:
       //  - Strip historical assistant.tool_calls（仅保留最近一条消息中的 tool_calls）
       //  - 清理空的/无效的 tool_calls（function.name 为空的项）
@@ -357,7 +360,7 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
   } catch { /* ignore */ }
 
   // 可选：是否丢弃空的 assistant 消息（由策略控制）
-  if (targetGLM && messages.length && getGLMPolicy().dropEmptyAssistant) {
+  if (targetGLM && messages.length && getGLMPolicy(opts.glmPolicy).dropEmptyAssistant) {
     messages = messages.filter((msg: any, idx: number) => {
       const isAssistant = msg?.role === 'assistant';
       const isEmpty = typeof msg?.content === 'string' ? msg.content.trim().length === 0 : true;
@@ -376,8 +379,8 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
 
   // 不再修改用户角色：不强制首条/末条转换为 user
 
-  if (targetGLM && messages.length && getGLMPolicy().contextTrim) {
-    const policy = getGLMPolicy();
+  if (targetGLM && messages.length && getGLMPolicy(opts.glmPolicy).contextTrim) {
+    const policy = getGLMPolicy(opts.glmPolicy);
     const r = (policy.contextSafetyRatio > 0 && policy.contextSafetyRatio < 1) ? policy.contextSafetyRatio : 0.85;
     const maxTokensBudget = Math.floor((policy.maxContextTokens || 200000) * r);
     if (maxTokensBudget > 0) {
@@ -424,6 +427,32 @@ export function sanitizeAndValidateOpenAIChat(input: UnknownObject, opts: Prefli
             path: 'messages'
           });
         }
+      }
+    }
+  }
+
+  // Enforce: last message must be a non-empty user text for GLM when policy requires it
+  if (targetGLM && messages.length && getGLMPolicy(opts.glmPolicy).ensureLastUser) {
+    let trimmedTail = 0;
+    while (messages.length > 0) {
+      const last = messages[messages.length - 1] as any;
+      const isUser = last?.role === 'user';
+      const hasText = typeof last?.content === 'string' && last.content.trim().length > 0;
+      if (isUser && hasText) break;
+      messages.pop();
+      trimmedTail += 1;
+    }
+    if (trimmedTail > 0) {
+      issues.push({ level: 'warn', code: 'messages.trailing.trimmed', message: `Trimmed ${trimmedTail} trailing non-user/empty messages to satisfy GLM policy.` });
+    }
+    if (!messages.length) {
+      issues.push({ level: 'error', code: 'messages.none_after_trim', message: 'All messages removed while enforcing last-user policy.' });
+    } else {
+      const last = messages[messages.length - 1] as any;
+      if (last.role !== 'user') {
+        issues.push({ level: 'error', code: 'messages.last.not_user', message: 'Last message is not user after enforcement.' });
+      } else if (typeof last.content !== 'string' || last.content.trim().length === 0) {
+        issues.push({ level: 'error', code: 'messages.last.empty', message: 'Last user message has empty content after enforcement.' });
       }
     }
   }
