@@ -1,71 +1,32 @@
 # Dependencies
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 
-# Build output
+# Build outputs
 dist/
-build/
+coverage/
+*.tsbuildinfo
 
-# Environment variables
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# OS files
+.DS_Store
+
+# Archives / packages
+*.tgz
+*.zip
 
 # Logs
-logs/
+npm-debug.log*
+yarn-error.log*
 *.log
 
-# Runtime data
-pids/
-*.pid
-*.seed
-*.pid.lock
+# Environment files
+.env
+.env.*
 
-# Coverage directory used by tools like istanbul
-coverage/
-.nyc_output
+# Local caches / scratch
+tmp/
+.cache/
+reports/
 
-# IDE files
+# Editor/IDE
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
-
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Debug - but allow src/modules/debug
-debug/
-!src/modules/debug/
-
-# Cache
-.cache/
-.tmp/
-# Generated files
-debug-logs/
-config/merged-config.*.json
-experiments/
-
-# Local caches and package tarballs
-.npm-cache/
-routecodex-*.tgz
-
-# Generated test artifacts
-tests/output/
-
-# Generated merged configs under sharedmodule
-sharedmodule/config-engine/config/merged-config.*.json
-
-# Exclude llmswitch-core submodule tree from this repo (managed independently)
-sharedmodule/llmswitch-core/
