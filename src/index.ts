@@ -196,12 +196,19 @@ class RouteCodexApp {
       }
       this._isRunning = true;
 
-      // 7. 获取服务器状态
-      // const status = (this.httpServer as any).getStatus();
-      const serverConfig = {
-        host: (mergedConfig && (mergedConfig as any).modules && (mergedConfig as any).modules.httpserver && (mergedConfig as any).modules.httpserver.config && (mergedConfig as any).modules.httpserver.config.host) || 'localhost',
-        port
-      };
+      // 7. V2 组件已禁用 - 为确保 V1 稳定性，暂时禁用 V2 dry-run 功能
+      // 如需启用 V2，请设置环境变量 ROUTECODEX_V2_DRYRUN=1
+      console.log('ℹ️ V2 components disabled for stability - V1 pipeline active');
+
+      // 7. 获取服务器状态（使用 HTTP 服务器解析后的最终绑定地址与端口）
+      // 优先读取服务器自身解析结果，避免日志误导（例如 host 放在不同层级或为 0.0.0.0 时）
+      let serverConfig = { host: '127.0.0.1', port } as { host: string; port: number };
+      try {
+        const resolved = await (this.httpServer as any).getServerConfig?.();
+        if (resolved && resolved.server) {
+          serverConfig = { host: String(resolved.server.host || '127.0.0.1'), port: Number(resolved.server.port || port) };
+        }
+      } catch { /* ignore; fall back to defaults */ }
 
       console.log(`✅ RouteCodex server started successfully!`);
       console.log(`🌐 Server URL: http://${serverConfig.host}:${serverConfig.port}`);
@@ -288,6 +295,12 @@ class RouteCodexApp {
    */
   private async detectServerPort(_modulesConfigPath: string): Promise<number> {
     try {
+      // Highest priority: explicit environment override
+      const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
+      if (!Number.isNaN(envPort) && envPort > 0) {
+        console.log(`🔧 Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT)`);
+        return envPort;
+      }
       // 首先检查ROUTECODEX_CONFIG_PATH环境变量（当前使用的）
       if (process.env.ROUTECODEX_CONFIG_PATH) {
         const configPath = process.env.ROUTECODEX_CONFIG_PATH;

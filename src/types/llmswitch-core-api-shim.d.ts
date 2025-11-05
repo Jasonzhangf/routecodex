@@ -10,7 +10,5 @@ declare module 'rcc-llmswitch-core/api' {
   export const normalizeTools: any;
   export const chunkString: any;
   export const buildSystemToolGuidance: any;
-  export const refineSystemToolGuidance: any;
   export const SchemaValidator: any;
 }
-

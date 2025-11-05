@@ -321,7 +321,8 @@ export const ServiceTokens = {
   PIPELINE_MANAGER: 'PipelineManager',
   ROUTE_POOLS: 'RoutePools',
   ROUTE_META: 'RouteMeta',
-  ROUTING_CLASSIFIER: 'RoutingClassifier'
+  ROUTING_CLASSIFIER: 'RoutingClassifier',
+  V2_DRYRUN_MANAGER: 'V2DryRunManager'
 } as const;
 
 export type ServiceTokenType = typeof ServiceTokens[keyof typeof ServiceTokens];

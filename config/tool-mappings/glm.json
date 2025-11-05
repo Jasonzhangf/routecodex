@@ -11,9 +11,7 @@
           "regex": "\\\\[tool_call:shell\\\\][\\\\s\\\\S]*?\\\\{\\\\\\\"command\\\\\\\",\\\\\\\"(?<cmd>[^\\\\\\\"]+)\\\\\\\"\\\\]"
         }
       ],
-      "postprocess": [
-        { "ensure_array": { "field": "command", "default_shell": true } }
-      ],
+      "postprocess": [],
       "aliases": { "cmd": "command" }
     },
     "apply_patch": {
@@ -30,4 +28,3 @@
     }
   }
 }
-

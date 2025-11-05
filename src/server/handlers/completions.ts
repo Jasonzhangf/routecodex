@@ -7,25 +7,17 @@ import { type Request, type Response } from 'express';
 import { BaseHandler, type ProtocolHandlerConfig } from './base-handler.js';
 import { type RequestContext, type OpenAICompletionRequest } from '../types.js';
 import { RouteCodexError } from '../types.js';
-import { RequestValidator } from '../utils/request-validator.js';
-import { ResponseNormalizer } from '../utils/response-normalizer.js';
 import { StreamingManager } from '../utils/streaming-manager.js';
-import { ProtocolDetector } from '../protocol/protocol-detector.js';
-import { OpenAIAdapter } from '../protocol/openai-adapter.js';
 
 /**
  * Completions Handler
  * Handles /v1/completions endpoint
  */
 export class CompletionsHandler extends BaseHandler {
-  private requestValidator: RequestValidator;
-  private responseNormalizer: ResponseNormalizer;
   private streamingManager: StreamingManager;
 
   constructor(config: ProtocolHandlerConfig) {
     super(config);
-    this.requestValidator = new RequestValidator();
-    this.responseNormalizer = new ResponseNormalizer();
     this.streamingManager = new StreamingManager(config);
   }
 
@@ -45,27 +37,7 @@ export class CompletionsHandler extends BaseHandler {
     });
 
     try {
-      // Forced adapter preflight: convert Anthropic/Responses-shaped payloads to OpenAI
-      try {
-        const looksAnthropicContent = Array.isArray(req.body?.messages) && (req.body.messages as any[]).some((m: any) => Array.isArray(m?.content) && m.content.some((c: any) => c && typeof c === 'object' && c.type));
-        const detector = new ProtocolDetector();
-        const det = detector.detectFromRequest(req);
-        if (looksAnthropicContent || det.protocol === 'anthropic' || det.protocol === 'responses') {
-          const adapter = new OpenAIAdapter();
-          req.body = adapter.convertFromProtocol(req.body, 'anthropic') as any;
-          try { res.setHeader('x-rc-adapter', 'anthropic->openai'); } catch { /* ignore */ }
-        }
-      } catch { /* non-blocking */ }
-
-      // Validate request
-      const validation = this.requestValidator.validateCompletion(req.body);
-      if (!validation.isValid) {
-        throw new RouteCodexError(
-          `Request validation failed: ${validation.errors.join(', ')}`,
-          'validation_error',
-          400
-        );
-      }
+      // 不做自作主张的输入校验；失败在后续阶段快速暴露（不兜底）
 
       // Process request through pipeline
       const pipelineResponse = await this.processCompletionRequest(req, requestId);
@@ -83,8 +55,8 @@ export class CompletionsHandler extends BaseHandler {
       const payload = pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
         ? (pipelineResponse as Record<string, unknown>).data
         : pipelineResponse;
-      const normalized = this.responseNormalizer.normalizeOpenAIResponse(payload, 'completion');
-      this.sendJsonResponse(res, normalized, requestId);
+      // No local protocol conversion; forward provider JSON as-is
+      this.sendJsonResponse(res, payload, requestId);
 
       this.logCompletion(requestId, startTime, true);
     } catch (error) {

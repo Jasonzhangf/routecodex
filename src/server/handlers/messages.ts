@@ -6,25 +6,17 @@
 import { type Request, type Response } from 'express';
 import { BaseHandler, type ProtocolHandlerConfig } from './base-handler.js';
 import { RouteCodexError } from '../types.js';
-import { RequestValidator } from '../utils/request-validator.js';
-import { ResponseNormalizer } from '../utils/response-normalizer.js';
 import { StreamingManager } from '../utils/streaming-manager.js';
-import { ProtocolDetector } from '../protocol/protocol-detector.js';
-import { AnthropicAdapter } from '../protocol/anthropic-adapter.js';
 
 /**
  * Messages Handler
  * Handles /v1/messages endpoint for Anthropic compatibility
  */
 export class MessagesHandler extends BaseHandler {
-  private requestValidator: RequestValidator;
-  private responseNormalizer: ResponseNormalizer;
   private streamingManager: StreamingManager;
 
   constructor(config: ProtocolHandlerConfig) {
     super(config);
-    this.requestValidator = new RequestValidator();
-    this.responseNormalizer = new ResponseNormalizer();
     this.streamingManager = new StreamingManager(config);
   }
 
@@ -46,33 +38,7 @@ export class MessagesHandler extends BaseHandler {
     });
 
     try {
-      // Forced adapter preflight: convert OpenAI-shaped payloads to Anthropic
-      try {
-        const looksOpenAI = Array.isArray(req.body?.messages) && (req.body.messages as any[]).some((m: any) => typeof m?.content === 'string');
-        const detector = new ProtocolDetector();
-        const det = detector.detectFromRequest(req);
-        if (looksOpenAI || det.protocol === 'openai') {
-          const adapter = new AnthropicAdapter();
-          req.body = adapter.convertFromProtocol(req.body, 'openai') as any;
-          try { res.setHeader('x-rc-adapter', 'openai->anthropic'); } catch { /* ignore */ }
-        }
-      } catch { /* non-blocking */ }
-
-      // 对齐 OpenAI 通路：跳过严格校验，保留原始入参，避免丢参/误拒
-      // 如需启用严格校验，设置 RCC_ENABLE_MSG_VALIDATION=1
-      try {
-        const enableValidation = String(process.env.RCC_ENABLE_MSG_VALIDATION || '').trim() === '1';
-        if (enableValidation) {
-          const validation = this.requestValidator.validateMessages(req.body);
-          if (!validation.isValid) {
-            throw new RouteCodexError(
-              `Request validation failed: ${validation.errors.join(', ')}`,
-              'validation_error',
-              400
-            );
-          }
-        }
-      } catch { /* keep going on validator errors */ }
+      // 不做自作主张的输入校验；失败在后续阶段快速暴露（不兜底）
 
       // Process request
       const pipelineResponse = await this.processMessagesRequest(req, requestId);
@@ -93,9 +59,10 @@ export class MessagesHandler extends BaseHandler {
           const nestedReadable = (!topReadable && pipelineResponse && typeof (pipelineResponse as any).data?.pipe === 'function') ? (pipelineResponse as any).data : null;
           const readable = topReadable || nestedReadable;
           if (useO2AStream && readable) {
-            const core = await import('rcc-llmswitch-core/conversion');
-            const windowMs = Number(process.env.RCC_O2A_COALESCE_MS || 1000) || 1000;
-            await (core as any).transformOpenAIStreamToAnthropic(readable, res, { requestId, model: streamModel, windowMs, useEventHeaders: true });
+          const mod = await import('rcc-llmswitch-core');
+          const core: any = (mod as any).LLMSwitchV2 || mod;
+          const windowMs = Number(process.env.RCC_O2A_COALESCE_MS || 1000) || 1000;
+          await core.transformOpenAIStreamToAnthropic(readable, res, { requestId, model: streamModel, windowMs, useEventHeaders: true });
             return;
           }
         } catch {
@@ -106,12 +73,50 @@ export class MessagesHandler extends BaseHandler {
         return;
       }
 
-      // Return JSON response
-      const payload = pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
+      // Return JSON response (convert OpenAI→Anthropic for non-streaming)
+      const raw = pipelineResponse && typeof pipelineResponse === 'object' && 'data' in pipelineResponse
         ? (pipelineResponse as Record<string, unknown>).data
         : pipelineResponse;
-      const normalized = this.responseNormalizer.normalizeAnthropicResponse(payload);
-      this.sendJsonResponse(res, normalized, requestId);
+
+      const toAnthropicMessage = (openai: any): any => {
+        try {
+          const ch = Array.isArray(openai?.choices) ? openai.choices[0] : null;
+          const msg = ch?.message || {};
+          const contentBlocks: any[] = [];
+          // text content
+          if (typeof msg?.content === 'string' && msg.content.length) {
+            contentBlocks.push({ type: 'text', text: msg.content });
+          }
+          // tool calls → tool_use blocks
+          if (Array.isArray(msg?.tool_calls)) {
+            for (const tc of msg.tool_calls) {
+              const fn = tc?.function || {};
+              const name = typeof fn?.name === 'string' ? fn.name : undefined;
+              let input: any = {};
+              if (typeof fn?.arguments === 'string') { try { input = JSON.parse(fn.arguments); } catch { input = {}; } }
+              else if (fn?.arguments && typeof fn.arguments === 'object') { input = fn.arguments; }
+              contentBlocks.push({ type: 'tool_use', id: tc?.id || `call_${Date.now()}`, name, input });
+            }
+          }
+          const finish = ch?.finish_reason === 'tool_calls' ? 'tool_use' : (ch?.finish_reason || 'stop');
+          const out = {
+            id: openai?.id || `msg_${Date.now()}`,
+            type: 'message',
+            role: 'assistant',
+            model: openai?.model || (raw as any)?.model || req.body?.model,
+            content: contentBlocks,
+            stop_reason: finish,
+            usage: openai?.usage || undefined
+          };
+          return out;
+        } catch {
+          return raw;
+        }
+      };
+
+      const looksOpenAI = raw && typeof raw === 'object' && Array.isArray((raw as any).choices);
+      const payload = looksOpenAI ? toAnthropicMessage(raw) : raw;
+      this.sendJsonResponse(res, payload, requestId);
 
       this.logCompletion(requestId, startTime, true);
     } catch (error) {

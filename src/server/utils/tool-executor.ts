@@ -61,10 +61,13 @@ export async function executeTool(spec: ToolCallSpec): Promise<ToolResult> {
 
     const normalizeBashLc = (script: string | string[]): string => {
       const sc = Array.isArray(script) ? script.map(String).join(' ') : String(script);
-      return ['bash','-lc', quoteScript(sc)].map(quoteToken).join(' ');
+      const quoted = quoteScript(sc);
+      // Avoid double quoting for third token which is already single-quoted
+      return `bash -lc ${quoted}`;
     };
 
     const normalizeFromArray = (arr: any[]): string => {
+      if (!Array.isArray(arr)) return String(arr || '');
       const tokens = arr.map((x) => String(x));
       if (tokens.length >= 2 && tokens[0] === 'bash' && tokens[1] === '-lc') {
         if (tokens.length === 3) {
@@ -84,7 +87,7 @@ export async function executeTool(spec: ToolCallSpec): Promise<ToolResult> {
             }
           }
           // Good shape: bash -lc 'script'
-          return ['bash','-lc', quoteScript(t2)].map(quoteToken).join(' ');
+          return `bash -lc ${quoteScript(t2)}`;
         }
         // Merge tail tokens into one script
         return normalizeBashLc(tokens.slice(2));

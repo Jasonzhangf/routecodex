@@ -137,13 +137,16 @@ export class ResponseNormalizer {
    */
   private normalizeChoices(choices: any[]): any[] {
     return choices.map((choice, index) => ({
-      index: choice.index || index,
-      message: choice.message || {
+      index: choice && typeof choice === 'object' ? (choice.index || index) : index,
+      message: choice && typeof choice === 'object' ? (choice.message || {
         role: 'assistant',
         content: choice.text || '',
+      }) : {
+        role: 'assistant',
+        content: '',
       },
-      finish_reason: choice.finish_reason || 'stop',
-      delta: choice.delta || null,
+      finish_reason: choice && typeof choice === 'object' ? (choice.finish_reason || 'stop') : 'stop',
+      delta: choice && typeof choice === 'object' ? (choice.delta || null) : null,
     }));
   }
 
@@ -154,30 +157,39 @@ export class ResponseNormalizer {
     const choices: any[] = [];
 
     if (response.content) {
+      // 安全的content处理
+      let contentText = '';
+      if (typeof response.content === 'string') {
+        contentText = response.content;
+      } else if (Array.isArray(response.content)) {
+        contentText = response.content
+          .filter((item: any) => item && item.type === 'text')
+          .map((item: any) => item.text || '')
+          .join('\n');
+      } else {
+        // 处理其他类型的content
+        contentText = String(response.content || '');
+      }
+
       choices.push({
         index: 0,
         message: {
           role: 'assistant',
-          content: typeof response.content === 'string'
-            ? response.content
-            : response.content
-                .filter((item: any) => item.type === 'text')
-                .map((item: any) => item.text)
-                .join('\n'),
+          content: contentText,
         },
         finish_reason: response.stop_reason ? this.mapAnthropicStopReason(response.stop_reason) : 'stop',
       });
     }
 
-    // Handle tool calls if present
-    if (response.content && response.content.some((item: any) => item.type === 'tool_use')) {
+    // 安全的工具调用处理
+    if (Array.isArray(response.content) && response.content.some((item: any) => item && item.type === 'tool_use')) {
       const toolCalls = response.content
-        .filter((item: any) => item.type === 'tool_use')
+        .filter((item: any) => item && item.type === 'tool_use')
         .map((tool: any) => ({
-          id: tool.id,
+          id: tool.id || `tool_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
           type: 'function',
           function: {
-            name: tool.name,
+            name: tool.name || 'unknown',
             arguments: JSON.stringify(tool.input || {}),
           },
         }));
@@ -271,9 +283,9 @@ export class ResponseNormalizer {
         ...choice,
         message: {
           ...choice.message,
-          content: typeof choice.message.content === 'string'
+          content: typeof choice.message?.content === 'string'
             ? choice.message.content.trim()
-            : choice.message.content,
+            : choice.message?.content || '',
         },
       }));
     }
@@ -284,7 +296,7 @@ export class ResponseNormalizer {
         ...choice,
         message: {
           ...choice.message,
-          content: this.sanitizeContent(choice.message.content),
+          content: this.sanitizeContent(choice.message?.content || ''),
         },
       }));
     }

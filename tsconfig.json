@@ -28,9 +28,15 @@
           "sharedmodule/llmswitch-core/dist/api.d.ts",
           "node_modules/rcc-llmswitch-core/dist/api.d.ts"
         ],
-        "rcc-llmswitch-core/conversion": ["node_modules/rcc-llmswitch-core/dist/conversion/index.d.ts"],
         "rcc-llmswitch-core/guidance": ["node_modules/rcc-llmswitch-core/dist/guidance/index.d.ts"],
-        "rcc-llmswitch-core/llmswitch/*": ["node_modules/rcc-llmswitch-core/dist/llmswitch/*"]
+        "rcc-llmswitch-core/v2": [
+          "sharedmodule/llmswitch-core/dist/v2/index.d.ts",
+          "node_modules/rcc-llmswitch-core/dist/v2/index.d.ts"
+        ],
+        "rcc-llmswitch-core/v2/*": [
+          "sharedmodule/llmswitch-core/dist/v2/*",
+          "node_modules/rcc-llmswitch-core/dist/v2/*"
+        ]
       }
   },
   "include": ["src/**/*"],
@@ -51,6 +57,7 @@
     "src/modules/hooks/**/*",
     "src/modules/pipeline/modules/provider/legacy/**/*",
     "src/server-v2/**/*",
-    "src/server-v2/**"
-  ]
+    "src/server-v2/**",
+    "src/modules/pipeline/v2/**/*",
+      ]
 }

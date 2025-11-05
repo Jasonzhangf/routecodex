@@ -2,47 +2,71 @@
 
 [![npm version](https://badge.fury.io/js/routecodex.svg)](https://badge.fury.io/js/routecodex)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![TypeScript](https://img.shields.io/badge/TypeScript-4.9+-blue.svg)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9+-blue.svg)](https://www.typescriptlang.org/)
 
-RouteCodex是一个功能强大的多提供商OpenAI代理服务器，支持原生dry-run调试能力、动态路由分类、4层管道架构和实时监控。提供统一的API接口，无缝集成多个AI服务提供商。
+RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配置驱动的V2架构，支持原生dry-run调试能力、动态路由分类、4层管道架构和实时监控。提供统一的API接口，无缝集成多个AI服务提供商。
 
-## 🔄 V2 重构状态（Server / Compatibility / Provider）
+## 🔄 V2 架构特性
 
-本仓库已完成面向生产的 V2 重构并默认启用：
+本仓库已完成面向生产的 V2 重构并默认启用，基于9大核心架构原则：
 
-- Compatibility V2（GLM 先行）
-  - 位置：`src/modules/pipeline/modules/compatibility/glm/*`（模块化 + Hook 化）。
-  - 职责：仅做 Provider 特定的最小字段标准化与 reasoning_content 处理；不做“文本→工具”。
-  - 快照：端点感知的 `compat-pre/compat-post` 写入 `~/.routecodex/codex-samples/{openai-chat|openai-responses|anthropic-messages}`。
-  - 配合：工具治理统一在 llmswitch-core v2（请求：schema 增强 + 系统工具指引注入；响应：文本→tool_calls + Responses 非流 required_action 合成）。
+### 🏗️ V2 核心组件
 
-- Provider V2（OpenAI 标准 HTTP 封装）
-  - 位置：`src/modules/pipeline/modules/provider/v2/*`。
-  - 能力：统一 HTTP 发送、认证物化、Header/URL 组合、请求/响应/错误快照（`provider-request/response/error`）。
-  - 策略：Fail Fast，无兜底；授权快照含 `authMeta（scheme,len,sha256）` 便于排查 401。
+- **Compatibility V2（配置驱动）**
+  - 位置：`src/modules/pipeline/modules/compatibility/glm/*`（模块化 + Hook 系统）
+  - 职责：仅做 Provider 特定的最小字段标准化与 reasoning_content 处理
+  - 特性：配置驱动的字段映射、GLM 专用工具清理、1210/1214错误兼容
+  - 工具治理：统一在 llmswitch-core v2 处理，避免重复实现
 
-- Server 端变化
-  - 端点仅管 HTTP 协议、认证和路由；工具治理单点在 llmswitch-core v2。
-  - 启动期校验 routePools ↔ pipelines 一致性（不再“懒创建”）。
-  - SSE 头与终止事件一致化（Chat/Responses）。
+- **Provider V2（统一OpenAI标准）**
+  - 位置：`src/modules/pipeline/modules/provider/v2/*`
+  - 能力：统一 HTTP 发送、认证管理、请求/响应快照
+  - 支持服务：OpenAI、GLM、Qwen、iFlow、LM Studio
+  - 策略：Fail Fast 原则，无隐藏兜底机制
 
-构建顺序（重要）：
+- **LLM Switch Core（工具处理中心）**
+  - 位置：`sharedmodule/llmswitch-core/`
+  - 职责：工具调用统一处理、文本意图收割、系统工具指引
+  - 特性：三端一致性（Chat/Responses/Messages）、参数聚合修复
 
-1) 先编译共享模块：`npm --prefix sharedmodule/llmswitch-core run build`
-2) 再编译根包并安装/发布：`npm run build` 或 `npm pack && npm i -g ./routecodex-*.tgz`
+### 🎯 9大核心架构原则
 
-调试与快照：
+1. **统一工具处理** - 所有工具调用通过 llmswitch-core 统一入口
+2. **最小兼容层** - Compatibility层仅处理provider特定字段
+3. **统一工具引导** - 系统工具指引集中管理
+4. **快速死亡** - Fail Fast，无隐藏fallback
+5. **暴露问题** - 结构化日志，完整错误上下文
+6. **清晰解决** - 单一处理路径，确定性行为
+7. **功能分离** - 模块职责单一，边界清晰
+8. **配置驱动** - 无硬编码，外部化配置管理
+9. **模块化** - 文件大小控制，功能导向拆分
 
-- `ROUTECODEX_HOOKS_VERBOSITY=verbose`（或 `RCC_HOOKS_VERBOSITY=verbose`）写全链路快照；
-- 常见链路（Chat）：raw-request → pre-llmswitch → post-llmswitch → compat-pre → provider-request → provider-response → compat-post。
+### 🔧 构建与调试
+
+**构建顺序（重要）**：
+```bash
+# 1. 先编译共享模块
+npm --prefix sharedmodule/llmswitch-core run build
+
+# 2. 再编译根包
+npm run build
+
+# 3. 安装或发布
+npm pack && npm i -g ./routecodex-*.tgz
+```
+
+**调试与快照**：
+- 环境变量：`ROUTECODEX_HOOKS_VERBOSITY=verbose`
+- 快照路径：`~/.routecodex/codex-samples/{openai-chat|openai-responses|anthropic-messages}`
+- 完整链路：raw-request → pre-llmswitch → post-llmswitch → compat-pre → provider-request → provider-response → compat-post
 
 ## 🚀 核心特性
 
-### 🏗️ 4层管道架构
-- **LLM Switch层**: 动态路由分类和协议转换
-- **Compatibility层**: 格式转换和字段适配
-- **Provider层**: 标准HTTP通信和服务适配
-- **AI Service层**: 多提供商AI模型支持
+### 🏗️ 双向4层管道架构
+- **LLM Switch Workflow层**: 动态路由分类、协议转换、llmswitch-core工具处理统一入口
+- **Compatibility层**: Provider特定字段标准化、reasoning_content处理、双向修剪转换
+- **Provider层**: 统一HTTP通信、认证管理、连接池优化、双向请求响应处理
+- **External AI Service层**: 多提供商AI模型支持、性能监控、双向数据流
 
 ### 🔧 智能路由系统
 支持7种动态路由类别，自动选择最优处理流水线：
@@ -56,18 +80,19 @@ RouteCodex是一个功能强大的多提供商OpenAI代理服务器，支持原�
 
 ### 🛠️ Provider V2架构
 完全重构的Provider系统，提供：
-- 统一的OpenAI标准接口
-- 配置驱动的服务适配
-- 双向钩子系统
-- 高级内存管理
-- 错误边界保护
+- 统一的OpenAI标准接口（支持5大提供商）
+- 配置驱动的服务适配（API Key + OAuth）
+- 认证管理模块化
+- 请求/响应快照系统
+- Fail Fast错误处理机制
 
 ### 🎯 Dry-Run调试系统
 完整的调试和测试框架：
 - 节点级dry-run执行
 - 智能输入模拟
 - 双向管道处理
-- 高级错误恢复机制
+- 完整快照链路追踪
+- 结构化错误分析
 
 ### 📊 实时监控界面
 基于Web的综合调试界面：
@@ -78,20 +103,20 @@ RouteCodex是一个功能强大的多提供商OpenAI代理服务器，支持原�
 
 ## 📦 支持的提供商
 
-| 提供商 | 支持状态 | 认证方式 | 特色功能 |
-|--------|----------|----------|----------|
-| **OpenAI** | ✅ 完全支持 | API Key | GPT系列模型，DALL-E图像生成 |
-| **Anthropic** | ✅ 完全支持 | API Key | Claude系列模型，长上下文支持 |
-| **Qwen** | ✅ 完全支持 | OAuth/API Key | 阿里云通义千问系列 |
-| **GLM** | ✅ 完全支持 | API Key | 智谱AI GLM系列 |
-| **LM Studio** | ✅ 完全支持 | API Key | 本地模型部署，工具调用支持 |
-| **iFlow** | ✅ 完全支持 | OAuth | 多模态AI服务 |
+| 提供商 | 支持状态 | 认证方式 | 特色功能 | V2架构状态 |
+|--------|----------|----------|----------|-------------|
+| **OpenAI** | ✅ 完全支持 | API Key | GPT系列模型，DALL-E图像生成 | ✅ Provider V2 |
+| **Anthropic** | ✅ 完全支持 | API Key | Claude系列模型，长上下文支持 | ✅ Provider V2 |
+| **Qwen** | ✅ 完全支持 | OAuth | 阿里云通义千问系列，客户端元数据 | ✅ Provider V2 |
+| **GLM** | ✅ 完全支持 | API Key | 智谱AI GLM系列，思考内容处理 | ✅ Compatibility V2 + Provider V2 |
+| **LM Studio** | ✅ 完全支持 | API Key | 本地模型部署，工具调用支持 | ✅ Provider V2 |
+| **iFlow** | ✅ 完全支持 | OAuth | 多模态AI服务，PKCE支持 | ✅ Provider V2 |
 
 ## 🚀 快速开始
 
 ### 系统要求
 
-- **Node.js**: 16.0.0 或更高版本
+- **Node.js**: 20.0.0 或更高版本（推荐 < 26）
 - **npm**: 8.0.0 或更高版本
 - **操作系统**: Windows 10+, macOS 10.15+, Ubuntu 20.04+
 - **内存**: 建议 4GB 以上
@@ -99,17 +124,22 @@ RouteCodex是一个功能强大的多提供商OpenAI代理服务器，支持原�
 
 ### 安装
 
-#### 方式一：自动安装（推荐）
+#### 自动安装（推荐）
 
 ```bash
-# 使用npm脚本自动安装
+# 一键构建并全局安装（自动处理权限问题）
 npm run install:global
-
-# 或者快速安装（跳过测试）
-npm run install:quick
 ```
 
-#### 方式二：手动安装
+安装脚本会自动：
+- ✅ 检查Node.js版本（需要>=20）
+- ✅ 清理旧的安装残留
+- ✅ 构建项目
+- ✅ 处理权限配置
+- ✅ 全局安装到正确位置
+- ✅ 验证安装结果
+
+#### 手动安装
 
 ```bash
 # 克隆仓库
@@ -126,15 +156,23 @@ npm run build
 npm install -g .
 ```
 
-#### 方式三：使用安装脚本
+#### 清理旧安装
+
+如果遇到安装问题，可以先清理旧安装：
 
 ```bash
-# Linux/macOS
-./scripts/build-and-install.sh
+# 清理全局安装残留
+./scripts/cleanup-global.sh
 
-# Windows
-scripts\build-and-install.bat
+# 然后重新安装
+npm run install:global
 ```
+
+#### 权限问题解决
+
+如果遇到权限问题，请参考 [INSTALL.md](./INSTALL.md) 中的详细说明。
+
+> 说明：统一使用 `scripts/install-global.sh`，支持自动权限处理和旧安装清理。
 
 ### 基础配置
 
@@ -144,44 +182,74 @@ scripts\build-and-install.bat
 cp config/examples/basic-config.json ~/.routecodex/config.json
 ```
 
-2. **配置提供商**
+2. **V2架构配置示例**
 ```json
 {
+  "version": "1.0",
   "providers": {
-    "openai-provider": {
+    "glm-provider": {
       "type": "openai-standard",
       "config": {
-        "baseUrl": "https://api.openai.com/v1",
+        "providerType": "glm",
+        "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
         "auth": {
           "type": "apikey",
-          "apiKey": "${OPENAI_API_KEY}"
+          "apiKey": "${GLM_API_KEY}"
+        },
+        "models": {
+          "glm-4": {
+            "maxTokens": 8192,
+            "temperature": 0.7
+          }
+        }
+      }
+    },
+    "qwen-provider": {
+      "type": "openai-standard",
+      "config": {
+        "providerType": "qwen",
+        "auth": {
+          "type": "oauth",
+          "clientId": "${QWEN_CLIENT_ID}",
+          "clientSecret": "${QWEN_CLIENT_SECRET}"
         }
       }
     }
   },
   "pipelines": [
     {
-      "id": "openai-gpt4",
-      "providerId": "openai-provider",
-      "models": ["gpt-4"],
+      "id": "glm-pipeline",
+      "providerId": "glm-provider",
+      "models": ["glm-4"],
       "modules": {
-        "llmSwitch": { "type": "openai-passthrough" },
-        "compatibility": { "type": "openai-normalizer" },
-        "provider": { "type": "openai-http" }
+        "llmSwitch": { "type": "llmswitch-v2" },
+        "compatibility": { "type": "glm-compatibility" },
+        "provider": { "type": "openai-standard-v2" }
       }
     }
-  ]
+  ],
+  "dynamicRouting": {
+    "enabled": true,
+    "defaultTarget": {
+      "providerId": "glm-provider",
+      "modelId": "glm-4"
+    }
+  }
 }
 ```
 
 3. **设置环境变量**
 ```bash
-# OpenAI API密钥
-export OPENAI_API_KEY="your-openai-api-key"
+# GLM API密钥（智谱AI）
+export GLM_API_KEY="your-glm-api-key"
 
-# 可选：其他提供商密钥
+# Qwen OAuth配置（阿里云）
+export QWEN_CLIENT_ID="your-qwen-client-id"
+export QWEN_CLIENT_SECRET="your-qwen-client-secret"
+
+# 其他提供商密钥
+export OPENAI_API_KEY="your-openai-api-key"
 export ANTHROPIC_API_KEY="your-anthropic-api-key"
-export QWEN_API_KEY="your-qwen-api-key"
 ```
 
 ### 启动服务
@@ -352,65 +420,85 @@ curl http://localhost:5506/api/debug/export/json > monitoring-data.json
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    RouteCodex System Architecture               │
+│                 RouteCodex V2 双向流水线架构                    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
 │  │   HTTP Server   │  │   WebSocket     │  │   Debug API     │  │
-│  │                 │  │   Interface     │  │                 │  │
+│  │   (双向通信)     │  │   Interface     │  │   (双向监控)     │  │
 │  │ • REST API      │  │ • Real-time     │  │ • Metrics       │  │
 │  │ • Streaming     │  │   updates       │  │ • Event log     │  │
 │  │ • Authentication│  │ • Monitoring    │  │ • Health check  │  │
 │  └─────────────────┘  └─────────────────┘  └─────────────────┘  │
+│                  ▲▼             ▲▼                    ▲▼           │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────────┐  │
-│  │                    4-Layer Pipeline Architecture             │  │
-│  │                                                             │  │
+│  │                双向4-Layer Pipeline Architecture             │  │
+│  │                          ▲▼ 双向数据流                       │  │
 │  │  ┌─────────────┬──────────────┬──────────────────────────┐  │  │
-│  │  │  LLM Switch │ Compatibility │        Provider         │  │  │
-│  │  │             │              │                          │  │  │
-│  │  │ • Routing   │ • Format     │ • HTTP communication     │  │  │
-│  │  │ • Protocol  │   conversion │ • Authentication         │  │  │
-│  │  │ • Classification │ • Field  │ • Error handling         │  │  │
-│  │  │             │   mapping    │ • Health monitoring      │  │  │
+│  │  │LLM Switch   │ Compatibility │        Provider         │  │  │
+│  │  │  Workflow   │    Layer     │          Layer              │  │  │
+│  │  │      ▲▼     │      ▲▼      │           ▲▼             │  │  │
+│  │  │ • 双向路由   │ • 双向格式   │ • 双向HTTP通信            │  │  │
+│  │  │ • 双向协议   │   转换       │ • 双向认证               │  │  │
+│  │  │ • 双向分类   │ • 双向字段   │ • 双向错误处理            │  │  │
+│  │  │ • 工具统一   │   映射       │ • 双向健康监控            │  │  │
+│  │  │   处理      │             │                          │  │  │
+│  │  └─────────────┴──────────────┴──────────────────────────┘  │  │
+│  └─────────────────────────────────────────────────────────────┘  │
+│                  ▲▼ 双向工具处理循环                              │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────────┐  │
+│  │              llmswitch-core 双向工具处理核心                  │  │
+│  │                          ▲▼                                │  │
+│  │  ┌─────────────┬──────────────┬──────────────────────────┐  │  │
+│  │  │ 工具规范化器  │  文本收割器   │      系统工具指引         │  │  │
+│  │  │      ▲▼     │      ▲▼     │           ▲▼            │  │  │
+│  │  │ • 双向规范   │ • 双向收割   │ • 双向schema增强         │  │  │
+│  │  │ • 双向生成   │ • 双向提取   │ • 双向指引注入           │  │  │
+│  │  │ • 双向去重   │ • 双向清理   │ • 双向行为标准化         │  │  │
 │  │  └─────────────┴──────────────┴──────────────────────────┘  │  │
 │  └─────────────────────────────────────────────────────────────┘  │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────────┐  │
 │  │                    Configuration & Management               │  │
-│  │                                                             │  │
+│  │                          ▲▼                                │  │
 │  │  ┌─────────────┬──────────────┬──────────────────────────┐  │  │
 │  │  │   Config    │   Monitoring  │      Dry-Run System      │  │  │
 │  │  │  Engine     │              │                          │  │  │
-│  │  │ • JSON      │ • Performance │ • Node-level execution   │  │  │
-│  │  │ • Validation │ • Metrics     │ • Input simulation       │  │  │
-│  │  │ • Hot reload │ • Health      │ • Error boundaries       │  │  │
+│  │  │ • 双向JSON  │ • 双向性能   │ • 双向节点级执行           │  │  │
+│  │  │ • 双向验证   │ • 双向指标   │ • 双向输入模拟            │  │  │
+│  │  │ • 双向热重载 │ • 双向健康   │ • 双向错误边界            │  │  │
 │  │  └─────────────┴──────────────┴──────────────────────────┘  │  │
 │  └─────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
+
+▲▼ 双向数据流：请求流(↓)和响应流(↑)在每一层双向传递
+工具循环：工具选择 → llmswitch处理 → Provider修剪 → AI执行 → 结果收集 → 下一轮请求
 ```
 
 ### 核心组件
 
-#### 1. LLM Switch层
-- **动态路由分类**: 基于请求内容自动选择处理流水线
-- **协议转换**: OpenAI ↔ Anthropic ↔ Gemini协议转换
-- **请求预处理**: 模型映射、参数标准化、工具调用处理
+#### 1. LLM Switch Workflow层
+- **双向动态路由分类**: 基于请求内容自动选择处理流水线
+- **双向协议转换**: OpenAI ↔ Anthropic ↔ Gemini协议双向转换
+- **llmswitch-core工具处理**: 统一工具调用处理、文本收割、系统指引
+- **双向请求预处理**: 模型映射、参数标准化、工具调用处理
 
 #### 2. Compatibility层
-- **格式转换**: 字段映射、数据结构适配
-- **提供商适配**: 处理不同提供商的特殊要求
-- **响应标准化**: 统一输出格式，错误处理
+- **双向格式转换**: 字段映射、数据结构适配、双向修剪转换
+- **双向提供商适配**: 处理不同提供商的特殊要求
+- **双向响应标准化**: 统一输出格式，错误处理，字段映射
 
 #### 3. Provider层 (V2)
-- **统一接口**: 标准化的Provider实现
-- **认证管理**: API Key、OAuth、会话管理
-- **连接管理**: 连接池、重试机制、健康检查
+- **双向统一接口**: 标准化的Provider实现，支持双向请求响应
+- **双向认证管理**: API Key、OAuth、会话管理
+- **双向连接管理**: 连接池、重试机制、健康检查、双向HTTP通信
 
-#### 4. AI Service层
-- **多提供商支持**: 统一的AI服务接口
-- **模型管理**: 动态模型加载、能力检测
-- **性能优化**: 批量处理、缓存机制
+#### 4. External AI Service层
+- **双向多提供商支持**: 统一的AI服务接口，双向数据流
+- **双向模型管理**: 动态模型加载、能力检测
+- **双向性能优化**: 批量处理、缓存机制、双向监控
 
 ### 配置系统
 
@@ -771,11 +859,7 @@ curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
 nvm install node
 npm install -g routecodex
 
-# 解决方案2：配置npm前缀
-mkdir ~/.npm-global
-npm config set prefix '~/.npm-global'
-echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
-source ~/.bashrc
+# 解决方案2：直接使用npm install -g
 npm install -g routecodex
 ```
 

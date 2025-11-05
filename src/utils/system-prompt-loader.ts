@@ -1,228 +1,54 @@
-import fs from 'fs/promises';
-import path from 'path';
+export type Source = 'codex' | 'claude';
 
-type Source = 'codex' | 'claude';
-
-export class SystemPromptLoader {
-  private static instance: SystemPromptLoader | null = null;
-  private cache: Map<Source, string | null> = new Map();
-  private lastScanAt: number = 0;
-
-  public static getInstance(): SystemPromptLoader {
-    if (!this.instance) {
-      this.instance = new SystemPromptLoader();
-    }
-    return this.instance;
-  }
-
-  public async getPrompt(source: Source): Promise<string | null> {
-    // Simple cache with 5s staleness window
-    const now = Date.now();
-    if (this.cache.has(source) && now - this.lastScanAt < 5000) {
-      return this.cache.get(source) ?? null;
-    }
-    let value: string | null = null;
-    try {
-      if (source === 'codex') {
-        value = await this.findLatestCodexPrompt();
-      } else if (source === 'claude') {
-        value = await this.findLatestClaudePrompt();
-      }
-    } catch {
-      value = null;
-    }
-    // Fallback to built-in minimal prompt (ensures tool guidance is always available)
-    if (!value) {
-      value = this.getBuiltInPrompt(source);
-    }
-    this.cache.set(source, value);
-    this.lastScanAt = now;
-    return value;
-  }
-
-  private getSamplesDir(): string {
-    const home = process.env.HOME || process.env.USERPROFILE || '';
-    return path.join(home, '.routecodex', 'codex-samples');
-  }
-
-  private async listFiles(): Promise<Array<{ name: string; full: string; mtimeMs: number }>> {
-    const dir = this.getSamplesDir();
-    try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
-      const files: Array<{ name: string; full: string; mtimeMs: number }> = [];
-      for (const e of entries) {
-        if (!e.isFile()) {continue;}
-        const full = path.join(dir, e.name);
-        try {
-          const st = await fs.stat(full);
-          files.push({ name: e.name, full, mtimeMs: st.mtimeMs });
-        } catch {
-          // ignore
-        }
-      }
-      // newest first
-      files.sort((a, b) => b.mtimeMs - a.mtimeMs);
-      return files;
-    } catch {
-      return [];
-    }
-  }
-
-  private async readJson(p: string): Promise<unknown | null> {
-    try {
-      const txt = await fs.readFile(p, 'utf8');
-      return JSON.parse(txt);
-    } catch {
-      return null;
-    }
-  }
-
-  private extractSystemFromOpenAIShape(j: unknown): string | null {
-    // Accept shapes: { data: { messages: [...] } } or { body: { messages: [...] } } or { messages: [...] }
-    const candidates: unknown[] = [];
-    if (j && typeof j === 'object') {
-
-      if ((j as Record<string, unknown>).data && typeof (j as Record<string, unknown>).data === 'object') {candidates.push((j as Record<string, unknown>).data);}
-      if ((j as Record<string, unknown>).body && typeof (j as Record<string, unknown>).body === 'object') {candidates.push((j as Record<string, unknown>).body);}
-      candidates.push(j);
-    }
-    for (const obj of candidates) {
-      if (obj && typeof obj === 'object') {
-        const objRecord = obj as Record<string, unknown>;
-        const msgs = objRecord.messages;
-        if (Array.isArray(msgs) && msgs.length) {
-          for (const m of msgs) {
-            if (m && typeof m === 'object') {
-              const mRecord = m as Record<string, unknown>;
-              if (mRecord.role === 'system' && 
-                  typeof mRecord.content === 'string' && 
-                  mRecord.content.trim().length > 0) {
-                return mRecord.content as string;
-              }
-            }
-
-          }
-        }
-      }
-    }
-    return null;
-  }
-
-  private extractSystemFromAnthropicShape(j: unknown): string | null {
-    // Accept shapes: { data: { system: string } } or { body: { system: string } } or { system: string }
-    const candidates: unknown[] = [];
-    if (j && typeof j === 'object') {
-
-      if ((j as Record<string, unknown>).data && typeof (j as Record<string, unknown>).data === 'object') {candidates.push((j as Record<string, unknown>).data);}
-      if ((j as Record<string, unknown>).body && typeof (j as Record<string, unknown>).body === 'object') {candidates.push((j as Record<string, unknown>).body);}
-      candidates.push(j);
-    }
-    for (const obj of candidates) {
-      if (obj && typeof obj === 'object') {
-        const objRecord = obj as Record<string, unknown>;
-        if (typeof objRecord.system === 'string' && objRecord.system.trim().length > 0) {
-          return objRecord.system as string;
-        }
-
-      }
-    }
-    return null;
-  }
-
-  private async findLatestCodexPrompt(): Promise<string | null> {
-    const files = await this.listFiles();
-    // First pass: look for a recognizable Codex CLI system prompt
-    for (const f of files) {
-      if (!/^(pipeline-in-|chat-req_)/.test(f.name)) {continue;}
-      const j = await this.readJson(f.full);
-      if (!j) {continue;}
-      const sys = this.extractSystemFromOpenAIShape(j);
-      if (sys && /Codex CLI/i.test(sys)) {
-        return sys;
-      }
-    }
-    // Fallback: return the latest system message regardless of content
-    for (const f of files) {
-      if (!/^(pipeline-in-|chat-req_)/.test(f.name)) {continue;}
-      const j = await this.readJson(f.full);
-      if (!j) {continue;}
-      const sys = this.extractSystemFromOpenAIShape(j);
-      if (sys) {return sys;}
-    }
-    return null;
-  }
-
-  private async findLatestClaudePrompt(): Promise<string | null> {
-    const files = await this.listFiles();
-    // First, look for anthropic canonical captures with system field
-    for (const f of files) {
-      if (!/^pipeline-in-/.test(f.name)) {continue;}
-      const j = await this.readJson(f.full);
-      if (!j) {continue;}
-      // Ensure it was a /v1/messages request if metadata present
-
-      const url = j && typeof j === 'object' ? (j as Record<string, unknown>).metadata && typeof (j as Record<string, unknown>).metadata === 'object' ? ((j as Record<string, unknown>).metadata as Record<string, unknown>).url as string | undefined : undefined : undefined;
-
-      if (url && !url.includes('/v1/messages') && !url.includes('/anthropic/messages')) {
-        continue;
-      }
-      const sys = this.extractSystemFromAnthropicShape(j);
-      if (sys) {return sys;}
-    }
-    // Fallback: any recent chat/pipeline-in file that contains a Claude-flavored system string
-    for (const f of files) {
-      if (!/^(pipeline-in-|chat-req_)/.test(f.name)) {continue;}
-      const j = await this.readJson(f.full);
-      if (!j) {continue;}
-      const sys = this.extractSystemFromOpenAIShape(j);
-      if (sys && /claude|anthropic/i.test(sys)) {
-        return sys;
-      }
-    }
-    return null;
-  }
-
-  // Built-in fallback system prompts with tool guidance
-  private getBuiltInPrompt(source: Source): string | null {
-    if (source === 'codex') {
-      return (
-        [
-          'You are a coding agent running in the Codex CLI.',
-          'Be concise, precise, and helpful. Use active voice.',
-          '',
-          'Use the provided tool descriptions as the source of truth.',
-          'Follow repository AGENTS.md and environment policies.',
-          '',
-          'Content rules: prefer bullets, avoid heavy formatting unless requested.',
-          'When referencing files, include clickable paths (path:line).',
-          '',
-          'Safety and scope: do not modify unrelated code or add licenses.'
-        ].join('\n')
-      );
-    }
-    if (source === 'claude') {
-      return (
-        [
-          'You are a precise coding assistant integrated with Codex CLI.',
-          'Default to brevity and actionable guidance.',
-          '',
-          'Use tool descriptions for exact behavior; do not assume extra fields.',
-          'Keep formatting minimal; include file paths with :line when referencing.',
-          'Obey AGENTS.md. For sharedmodule changes, build modules first, then the root package.',
-        ].join('\n')
-      );
-    }
-    return null;
-  }
+/**
+ * Basic tool guidance (router-style)
+ */
+export function getBasicToolGuidance(): string {
+  return [
+    '<system-reminder>Tool mode is active. You are expected to proactively execute the most suitable tool to help complete the task.',
+    '',
+    '## Shell Commands Format',
+    '- Prefer a single string for the entire command; meta operators (|, >, &&, ||) must appear inside that string.',
+    '- If you need argv tokens, avoid placing meta operators as separate array elements. For complex commands, use a single string; the runtime will wrap with bash -lc as needed.',
+    '- Always use proper JSON formatting for tool arguments',
+    '',
+    '## File Operations Priority',
+    '- Use Read tool for reading files (preferred over shell commands)',
+    '- Use Write tool for creating new files',
+    '- Use Edit tool for modifying existing files',
+    '- Only use shell commands for file operations when dedicated tools are not available',
+    '',
+    '## Execution Guidelines',
+    '- Evaluate tool applicability before invocation',
+    '- Use tools efficiently and appropriately',
+    '- Provide clear context and purpose for tool usage',
+    '- Handle errors gracefully and provide meaningful feedback</system-reminder>'
+  ].join('\n');
 }
 
+/**
+ * Get tool guidance (simplified router-style)
+ */
+export function getDynamicToolGuidance(): string {
+  return getBasicToolGuidance();
+}
+
+/**
+ * Check if system prompt replacement should be enabled
+ */
 export function shouldReplaceSystemPrompt(): Source | null {
+  // Only enable when explicitly opted-in via ROUTECODEX_SYSTEM_PROMPT_ENABLE=1
+  const enabled = String(process.env.ROUTECODEX_SYSTEM_PROMPT_ENABLE || '0') === '1';
+  if (!enabled) return null;
   const sel = (process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE || '').toLowerCase();
   if (sel === 'codex') {return 'codex';}
   if (sel === 'claude') {return 'claude';}
   return null;
 }
 
+/**
+ * Replace or append system message in OpenAI messages
+ */
 export function replaceSystemInOpenAIMessages(messages: unknown[], systemText: string): unknown[] {
   if (!Array.isArray(messages)) {return messages;}
   const out = [...messages];
@@ -230,7 +56,10 @@ export function replaceSystemInOpenAIMessages(messages: unknown[], systemText: s
   const idx = out.findIndex((m) => m && typeof m === 'object' && (m as Record<string, unknown>).role === 'system');
   if (idx >= 0) {
     const m = { ...(out[idx] || {}) };
-    (m as Record<string, unknown>).content = systemText;
+    const existingContent = (m as Record<string, unknown>).content as string || '';
+
+    // Append tool guidance to existing system content
+    (m as Record<string, unknown>).content = existingContent + '\n\n' + systemText;
 
     out[idx] = m;
   } else {

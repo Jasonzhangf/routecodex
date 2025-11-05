@@ -22,6 +22,7 @@ import { ErrorContextBuilder, EnhancedRouteCodexError } from '../../../../server
 // Import new modular components
 import { CompatibilityModuleFactory } from './compatibility-factory.js';
 import { CompatibilityManager } from './compatibility-manager.js';
+import { UniversalShapeFilter } from './filters/universal-shape-filter.js';
 
 // Ensure GLM module is registered
 import './glm/index.js';
@@ -247,12 +248,22 @@ export class GLMCompatibility implements CompatibilityModule {
         await writeCompatSnapshot({ phase: 'compat-pre', requestId: reqId, data: request as UnknownObject, entryEndpoint });
       } catch { /* non-blocking */ }
 
-      // Process using new modular compatibility manager
-      const processedRequest = await this.compatibilityManager.processRequest(
-        this.moduleId,
-        request as UnknownObject,
-        context
-      );
+      // Pre-guard: apply provider JSON shape filter directly (配置驱动的字段级规则)，确保关键字段规范（如删除 assistant.tool_calls）
+      // 仍在兼容层内执行，符合“唯一入口/最小兼容层”原则
+      let preFiltered = request as UnknownObject;
+      try {
+        const { fileURLToPath } = await import('url');
+        const { dirname, join } = await import('path');
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = dirname(__filename);
+        const shapePath = join(__dirname, 'glm', 'config', 'shape-filters.json');
+        const filter = new UniversalShapeFilter({ configPath: shapePath });
+        await filter.initialize();
+        preFiltered = await filter.applyRequestFilter(preFiltered);
+      } catch { /* best-effort; fall back to manager */ }
+
+      // Process using modular compatibility manager（包含字段映射、校验、hooks 等）
+      const processedRequest = await this.compatibilityManager.processRequest(this.moduleId, preFiltered, context);
 
       // Write compat-post snapshot
       try {

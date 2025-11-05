@@ -334,6 +334,8 @@ export class ConversionEngine {
       // Process content blocks
       const toolCalls: any[] = [];
       const textParts: string[] = [];
+      const toolMessages: any[] = [];
+      const toolUseById: Record<string, { name?: string; input?: any }> = {};
 
       if (response.content && Array.isArray(response.content)) {
         for (const block of response.content) {
@@ -344,6 +346,28 @@ export class ConversionEngine {
             if (toolCall) {
               toolCalls.push(toolCall);
             }
+            try {
+              const bid = String((block as any)?.id || '');
+              toolUseById[bid] = {
+                name: (block as any)?.name,
+                input: (block as any)?.input
+              };
+            } catch { /* ignore */ }
+          } else if (block.type === 'tool_result') {
+            // Preserve tool_result as an OpenAI-style tool role message (extension-only), no rcc envelope
+            try {
+              const tool_use_id = (block as any)?.tool_use_id || (block as any)?.id || '';
+              const rawContent = (block as any)?.content;
+              const toString = (v: any): string => {
+                if (typeof v === 'string') return v;
+                try { return JSON.stringify(v ?? ''); } catch { return String(v); }
+              };
+              let contentStr = toString(rawContent);
+              if (!contentStr || contentStr.trim().length === 0) {
+                contentStr = 'Command succeeded (no output).';
+              }
+              toolMessages.push({ role: 'tool', tool_call_id: String(tool_use_id || ''), content: contentStr });
+            } catch { /* ignore malformed tool_result */ }
           }
         }
       }
@@ -383,6 +407,16 @@ export class ConversionEngine {
 
       const endTime = performance.now();
       context.metrics.conversionTime += (endTime - startTime);
+
+      // Attach extension with tool role messages (non-standard; for downstream bridges)
+      try {
+        if (toolMessages.length > 0) {
+          (openAIResponse as any)._extensions = {
+            ...(openAIResponse as any)._extensions || {},
+            tool_messages: toolMessages
+          };
+        }
+      } catch { /* non-blocking */ }
 
       return openAIResponse;
     } catch (error) {

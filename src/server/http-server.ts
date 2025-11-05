@@ -178,8 +178,13 @@ export class HttpServer extends BaseModule implements IHttpServer {
     // Priority: httpserver.port > server.port > port (root level)
     let resolvedPort: number | undefined;
 
+    // 0. Environment override for port (highest priority)
+    const envPortNum = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
+    if (!Number.isNaN(envPortNum) && envPortNum > 0) {
+      resolvedPort = envPortNum;
+    }
     // 1. Try httpserver.config.port from merged config
-    if (typeof (httpCfg as any)?.port === 'number' && (httpCfg as any).port > 0) {
+    else if (typeof (httpCfg as any)?.port === 'number' && (httpCfg as any).port > 0) {
       resolvedPort = (httpCfg as any).port;
     }
     // 2. Try server.port from root config
@@ -196,8 +201,14 @@ export class HttpServer extends BaseModule implements IHttpServer {
     }
 
     // Host field translation: support multiple configuration field names
-    // Priority: httpserver.host > server.host > host (root level)
+    // Priority: env override > httpserver.host > server.host > host (root level)
     let resolvedHost: string | undefined;
+
+    // 0. Environment override
+    const envHost = String(process.env.ROUTECODEX_HOST || process.env.RCC_HOST || '').trim();
+    if (envHost) {
+      resolvedHost = envHost;
+    }
 
     // 1. Try httpserver.config.host from merged config
     if (typeof (httpCfg as any)?.host === 'string' && (httpCfg as any).host.trim()) {
@@ -214,12 +225,12 @@ export class HttpServer extends BaseModule implements IHttpServer {
 
     // Fallback to IPv4 localhost if no host found; avoid IPv6 by default
     resolvedHost = resolvedHost || '127.0.0.1';
-    // Normalize host to IPv4-friendly values
+    // Normalize host for common aliases but preserve 0.0.0.0 to accept external connections
     try {
       const lower = String(resolvedHost).toLowerCase();
       if (lower === 'localhost') { resolvedHost = '127.0.0.1'; }
       if (lower === '::' || lower === '::1') { resolvedHost = '127.0.0.1'; }
-      if (lower === '0.0.0.0') { resolvedHost = '127.0.0.1'; }
+      // NOTE: Do NOT rewrite '0.0.0.0' — it must bind to all interfaces
     } catch { /* ignore normalization errors */ }
     const resolvedCors = (httpCfg as any)?.cors || (rootCfg as any)?.cors || { origin: '*', credentials: true };
     // Unified timeout override via env (in ms)
@@ -1035,22 +1046,7 @@ export class HttpServer extends BaseModule implements IHttpServer {
         const providerId = m?.providerId || 'unknown';
         const modelId = m?.modelId || 'unknown';
 
-        // Optional: Replace only system prompt (tools untouched) if selector active
-        try {
-          const { shouldReplaceSystemPrompt, SystemPromptLoader } = await import('../utils/system-prompt-loader.js');
-          const sel = shouldReplaceSystemPrompt();
-          if (sel) {
-            const loader = SystemPromptLoader.getInstance();
-            const sys = await loader.getPrompt(sel);
-            const currentSys = (req.body && typeof req.body === 'object' && (req.body as any).system) ? String((req.body as any).system) : '';
-            const hasMdMarkers = /\bCLAUDE\.md\b|\bAGENT(?:S)?\.md\b/i.test(currentSys);
-            if (sys && req.body && typeof req.body === 'object' && !hasMdMarkers) {
-              req.body = { ...(req.body as Record<string, unknown>), system: sys } as any;
-              try { res.setHeader('x-rc-system-prompt-source', sel); } catch { /* ignore */ }
-            }
-          }
-          // Tool guidance and normalization are handled downstream in llmswitch-core
-        } catch { /* non-blocking */ }
+        // 禁止服务器端系统提示替换（V1路径移除）；仅保留下游 llmswitch-core 的治理。
 
         const pipelineRequest = {
           data: req.body,

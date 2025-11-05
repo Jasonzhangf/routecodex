@@ -62,3 +62,55 @@ export async function writeProviderSnapshot(options: {
     // non-blocking
   }
 }
+
+export async function writeProviderRetrySnapshot(options: {
+  type: 'request' | 'response';
+  requestId: string;
+  data: unknown;
+  headers?: Record<string, unknown>;
+  url?: string;
+}): Promise<void> {
+  try {
+    const base = path.join(os.homedir(), '.routecodex', 'codex-samples');
+    const dir = path.join(base, 'openai-chat');
+    await ensureDir(dir);
+    const suffix = options.type === 'request' ? 'provider-request.retry' : 'provider-response.retry';
+    const file = path.join(dir, `${options.requestId}_${suffix}.json`);
+    const payload = {
+      meta: {
+        stage: suffix,
+        version: String(process.env.ROUTECODEX_VERSION || 'dev'),
+        buildTime: String(process.env.ROUTECODEX_BUILD_TIME || new Date().toISOString())
+      },
+      url: options.url,
+      headers: maskHeaders(options.headers || {}),
+      ...(typeof options.data === 'string' ? { bodyText: options.data } : { body: options.data })
+    };
+    await fsp.writeFile(file, JSON.stringify(payload, null, 2), 'utf-8');
+  } catch {
+    // non-blocking
+  }
+}
+
+export async function writeRepairFeedbackSnapshot(options: {
+  requestId: string;
+  feedback: unknown;
+}): Promise<void> {
+  try {
+    const base = path.join(os.homedir(), '.routecodex', 'codex-samples');
+    const dir = path.join(base, 'openai-chat');
+    await ensureDir(dir);
+    const file = path.join(dir, `${options.requestId}_repair-feedback.json`);
+    const payload = {
+      meta: {
+        stage: 'repair-feedback',
+        version: String(process.env.ROUTECODEX_VERSION || 'dev'),
+        buildTime: String(process.env.ROUTECODEX_BUILD_TIME || new Date().toISOString())
+      },
+      feedback: options.feedback
+    };
+    await fsp.writeFile(file, JSON.stringify(payload, null, 2), 'utf-8');
+  } catch {
+    // non-blocking
+  }
+}

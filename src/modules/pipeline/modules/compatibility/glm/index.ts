@@ -6,8 +6,9 @@ import type { ModuleDependencies } from '../../../../../types/module.types.js';
 import { CompatibilityModuleFactory } from '../compatibility-factory.js';
 import { GLMCompatibility } from './glm-compatibility.js';
 
-// 注册GLM模块类型到工厂
+// 注册GLM模块类型到工厂（同时兼容历史名称）
 CompatibilityModuleFactory.registerModuleType('glm', GLMCompatibility);
+CompatibilityModuleFactory.registerModuleType('glm-compatibility', GLMCompatibility as any);
 
 // 导出模块和组件
 export { GLMCompatibility } from './glm-compatibility.js';

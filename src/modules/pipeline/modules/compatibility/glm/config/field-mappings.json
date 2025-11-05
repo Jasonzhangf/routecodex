@@ -19,11 +19,23 @@
       "direction": "incoming"
     },
     {
+      "sourcePath": "request_id",
+      "targetPath": "request_id",
+      "type": "string",
+      "direction": "incoming"
+    },
+    {
       "sourcePath": "model",
       "targetPath": "model",
       "type": "string",
       "direction": "incoming",
       "transform": "normalizeModelName"
+    },
+    {
+      "sourcePath": "choices[*].message.tool_calls[*].function.arguments",
+      "targetPath": "choices[*].message.tool_calls[*].function.arguments",
+      "type": "string",
+      "direction": "incoming"
     }
   ],
   "outgoingMappings": [
@@ -58,6 +70,12 @@
       "direction": "outgoing"
     },
     {
+      "sourcePath": "request_id",
+      "targetPath": "request_id",
+      "type": "string",
+      "direction": "outgoing"
+    },
+    {
       "sourcePath": "reasoning_content",
       "targetPath": "reasoning_content",
       "type": "string",
@@ -70,6 +88,12 @@
       "type": "string",
       "direction": "outgoing",
       "transform": "normalizeFinishReason"
+    },
+    {
+      "sourcePath": "choices[*].message.tool_calls[*].function.arguments",
+      "targetPath": "choices[*].message.tool_calls[*].function.arguments",
+      "type": "string",
+      "direction": "outgoing"
     }
   ]
 }

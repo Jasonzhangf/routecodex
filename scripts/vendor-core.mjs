@@ -25,10 +25,17 @@ async function main(){
     exports:{
       '.':{import:'./dist/index.js',types:'./dist/index.d.ts'},
       './api':{import:'./dist/api.js',types:'./dist/api.d.ts'},
-      './conversion':{import:'./dist/conversion/index.js',types:'./dist/conversion/index.d.ts'},
-      './conversion/*':{import:'./dist/conversion/*.js',types:'./dist/conversion/*.d.ts'},
-      './llmswitch/*':{import:'./dist/llmswitch/*.js',types:'./dist/llmswitch/*.d.ts'},
-      './guidance':{import:'./dist/guidance/index.js',types:'./dist/guidance/index.d.ts'}
+      // v2 exports (preferred)
+      './v2':{import:'./dist/v2/index.js',types:'./dist/v2/index.d.ts'},
+      './v2/*':{import:'./dist/v2/*.js',types:'./dist/v2/*.d.ts'},
+      './v2/conversion':{import:'./dist/v2/conversion/index.js',types:'./dist/v2/conversion/index.d.ts'},
+      './v2/conversion/*':{import:'./dist/v2/conversion/*.js',types:'./dist/v2/conversion/*.d.ts'},
+      './v2/conversion/codecs/*':{import:'./dist/v2/conversion/codecs/*.js',types:'./dist/v2/conversion/codecs/*.d.ts'},
+      './v2/conversion/shared/*':{import:'./dist/v2/conversion/shared/*.js',types:'./dist/v2/conversion/shared/*.d.ts'},
+      './v2/conversion/responses/*':{import:'./dist/v2/conversion/responses/*.js',types:'./dist/v2/conversion/responses/*.d.ts'},
+      './v2/conversion/streaming/*':{import:'./dist/v2/conversion/streaming/*.js',types:'./dist/v2/conversion/streaming/*.d.ts'},
+      './v2/guidance':{import:'./dist/v2/guidance/index.js',types:'./dist/v2/guidance/index.d.ts'},
+      './v2/guidance/*':{import:'./dist/v2/guidance/*.js',types:'./dist/v2/guidance/*.d.ts'}
     }
   };
   await fsp.writeFile(path.join(out,'package.json'),JSON.stringify(pj,null,2),'utf-8');

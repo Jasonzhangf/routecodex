@@ -60,6 +60,8 @@ export class GLMFieldMappingProcessor {
     });
 
     try {
+      // Provider-specific: sanitize GLM tools schema to avoid unsupported JSON Schema features (e.g., oneOf)
+      this.sanitizeGLMToolsSchema(request);
       const result = this.applyMappings(request, this.config.incomingMappings);
 
       this.dependencies.logger?.logModule('glm-field-mapping', 'mapIncoming-success', {
@@ -222,32 +224,123 @@ export class GLMFieldMappingProcessor {
     return result;
   }
 
+  /**
+   * GLM 接受的工具 schema 比较保守：去掉 oneOf，使用明确的类型定义。
+   * 这里对 shell 工具的 parameters.properties.command 统一为 { type: 'array', items: { type: 'string' } }。
+   * 注意：这是 provider 层的 schema 约束标准化，不涉及工具调用的语义转换。
+   */
+  private sanitizeGLMToolsSchema(data: UnknownObject): void {
+    try {
+      const tools = (data as any)?.tools;
+      if (!Array.isArray(tools)) return;
+      for (const t of tools) {
+        if (!t || typeof t !== 'object') continue;
+        const fn = (t as any).function;
+        // 移除 OpenAI 扩展字段 strict（GLM 不接受）
+        try { if (fn && typeof fn === 'object' && 'strict' in fn) { delete (fn as any).strict; } } catch { /* ignore */ }
+        const name = typeof fn?.name === 'string' ? fn.name : undefined;
+        const params = fn?.parameters && typeof fn.parameters === 'object' ? fn.parameters : undefined;
+        if (!params || !name) continue;
+        const props = (params as any).properties && typeof (params as any).properties === 'object' ? (params as any).properties : undefined;
+        if (!props) continue;
+
+        // 仅对 shell.command 进行约束清理：去掉 oneOf，统一为数组字符串
+        if (name === 'shell' && props.command) {
+          const cmd = props.command;
+          // 删除 oneOf 等复杂结构
+          if (cmd && typeof cmd === 'object') {
+            delete (cmd as any).oneOf;
+            (cmd as any).type = 'array';
+            (cmd as any).items = { type: 'string' };
+            if (typeof (cmd as any).description !== 'string' || !(cmd as any).description) {
+              (cmd as any).description = 'Shell command argv tokens. Use ["bash","-lc","<cmd>"] form.';
+            }
+          } else {
+            // 若 props.command 不是对象，直接重建
+            (props as any).command = {
+              description: 'Shell command argv tokens. Use ["bash","-lc","<cmd>"] form.',
+              type: 'array',
+              items: { type: 'string' }
+            };
+          }
+          // parameters.required 至少包含 command；additionalProperties 缺省为 false 以收敛形状
+          if (!Array.isArray((params as any).required)) (params as any).required = [];
+          const req: string[] = (params as any).required;
+          if (!req.includes('command')) req.push('command');
+          if (typeof (params as any).type !== 'string') (params as any).type = 'object';
+          if (typeof (params as any).additionalProperties !== 'boolean') (params as any).additionalProperties = false;
+        }
+      }
+    } catch {
+      // 非关键路径，保守忽略
+    }
+  }
+
   private applyMapping(data: UnknownObject, mapping: FieldMapping): void {
     const sourceValue = this.getNestedProperty(data, mapping.sourcePath);
 
     if (sourceValue !== undefined) {
       let transformedValue = sourceValue;
 
-      // 应用类型转换
-      transformedValue = this.convertType(transformedValue, mapping.type);
-
       // 应用自定义转换
       if (mapping.transform) {
         transformedValue = this.applyTransform(transformedValue, mapping.transform);
       }
+
+      // 应用类型转换
+      transformedValue = this.convertType(transformedValue, mapping.type);
 
       this.setNestedProperty(data, mapping.targetPath, transformedValue);
     }
   }
 
   private getNestedProperty(obj: UnknownObject, path: string): any {
-    return path.split('.').reduce((current, key) => {
+    const keys = path.split('.');
+
+    // 处理通配符路径，如 choices[*].message.tool_calls
+    if (path.includes('[*]')) {
+      return this.getWildcardProperty(obj, keys);
+    }
+
+    return keys.reduce((current, key) => {
       return current && current[key] !== undefined ? current[key] : undefined;
     }, obj as any);
   }
 
+  private getWildcardProperty(obj: UnknownObject, keys: string[]): any[] {
+    const results: any[] = [];
+    const processWildcard = (current: any, keyIndex: number, currentPath: any[] = []): void => {
+      if (keyIndex >= keys.length) {
+        results.push(current);
+        return;
+      }
+
+      const key = keys[keyIndex];
+
+      if (key === '[*]') {
+        if (Array.isArray(current)) {
+          current.forEach((item, index) => {
+            processWildcard(item, keyIndex + 1, [...currentPath, index]);
+          });
+        }
+      } else if (current && typeof current === 'object' && current[key] !== undefined) {
+        processWildcard(current[key], keyIndex + 1, [...currentPath, key]);
+      }
+    };
+
+    processWildcard(obj, 0);
+    return results;
+  }
+
   private setNestedProperty(obj: UnknownObject, path: string, value: any): void {
     const keys = path.split('.');
+
+    // 处理通配符路径，如 choices[*].message.tool_calls
+    if (path.includes('[*]')) {
+      this.setWildcardProperty(obj, keys, value);
+      return;
+    }
+
     const lastKey = keys.pop()!;
 
     const target = keys.reduce((current, key) => {
@@ -258,6 +351,36 @@ export class GLMFieldMappingProcessor {
     }, obj as any);
 
     target[lastKey] = value;
+  }
+
+  private setWildcardProperty(obj: UnknownObject, keys: string[], value: any): void {
+    const processSetWildcard = (current: any, keyIndex: number, valueToSet: any): void => {
+      if (keyIndex >= keys.length - 1) {
+        const lastKey = keys[keyIndex].replace('[*]', '');
+        if (Array.isArray(current)) {
+          current.forEach(item => {
+            if (item && typeof item === 'object') {
+              item[lastKey] = valueToSet;
+            }
+          });
+        }
+        return;
+      }
+
+      const key = keys[keyIndex];
+
+      if (key === '[*]') {
+        if (Array.isArray(current)) {
+          current.forEach(item => {
+            processSetWildcard(item, keyIndex + 1, valueToSet);
+          });
+        }
+      } else if (current && typeof current === 'object') {
+        processSetWildcard(current[key], keyIndex + 1, valueToSet);
+      }
+    };
+
+    processSetWildcard(obj, 0, value);
   }
 
   private convertType(value: any, targetType: string): any {
@@ -290,8 +413,44 @@ export class GLMFieldMappingProcessor {
         return typeof value === 'string' ? value.toLowerCase() : value;
       case 'uppercase':
         return typeof value === 'string' ? value.toUpperCase() : value;
+      case 'normalizeModelName':
+        return typeof value === 'string' ? value.replace(/^gpt-/, 'glm-') : value;
+      case 'extractReasoningBlocks':
+        return typeof value === 'string' ? this.extractReasoningBlocks(value) : value;
+      case 'normalizeFinishReason':
+        return typeof value === 'string' ? this.normalizeFinishReason(value) : value;
       default:
         return value;
     }
+  }
+
+  private extractReasoningBlocks(content: string): string {
+    // 提取推理内容块
+    const reasoningPatterns = [
+      /<reasoning>([\s\S]*?)<\/reasoning>/gi,
+      /<thinking>([\s\S]*?)<\/thinking>/gi,
+      /\[REASONING\]([\s\S]*?)\[\/REASONIONG\]/gi,
+      /\[THINKING\]([\s\S]*?)\[\/THINKING\]/gi
+    ];
+
+    for (const pattern of reasoningPatterns) {
+      const match = content.match(pattern);
+      if (match) {
+        return match[1].trim();
+      }
+    }
+    return content;
+  }
+
+  private normalizeFinishReason(reason: string): string {
+    // 标准化结束原因
+    const reasonMap: Record<string, string> = {
+      'tool_calls': 'tool_calls',
+      'stop': 'stop',
+      'length': 'length',
+      'sensitive': 'content_filter',
+      'network_error': 'error'
+    };
+    return reasonMap[reason] || reason;
   }
 }
