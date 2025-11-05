@@ -40,7 +40,7 @@ import {
   resolveOAuthTokenPath,
   normalizeOAuthConfig
 } from './normalization/key-alias-normalization.js';
-import { getDefaultLLMSwitchType } from './normalization/provider-normalization.js';
+// LLM switch is runtime-dynamic; we do not derive its type here.
 import {
   DirectApiKeyConfig,
   ConfigValidationResult
@@ -328,24 +328,9 @@ export class CompatibilityEngine {
 
           normalizedConfig.type = normalizedType;
         } else {
-          // Already a valid type, keep as-is, but allow heuristic overrides (GLM etc.)
+          // Already a valid family type (e.g., 'openai'); do NOT override to implementation-specific modules.
+          // All third-party OpenAI-compatible endpoints must use the standard 'openai-provider'.
           normalizedConfig.type = originalType;
-          try {
-            const base = String((providerConfig as any)?.baseURL || (providerConfig as any)?.baseUrl || '').toLowerCase();
-            const idLower = String(providerId || '').toLowerCase();
-            if (idLower.includes('glm') || /open\.bigmodel\.cn\/api\/coding\/paas/i.test(base)) {
-              if (normalizedConfig.type !== 'glm-http-provider') {
-                warnings.push({
-                  code: 'PROVIDER_TYPE_HEURISTIC_OVERRIDE',
-                  message: `Overriding provider type '${originalType}' to 'glm-http-provider' for provider '${providerId}' based on baseUrl/id heuristics`,
-                  path: `/virtualrouter/providers/${providerId}/type`,
-                  severity: 'info',
-                  details: { originalValue: originalType, normalizedValue: 'glm-http-provider', ruleApplied: 'glm-baseurl-heuristic' }
-                });
-              }
-              normalizedConfig.type = 'glm-http-provider';
-            }
-          } catch { /* ignore heuristic errors */ }
         }
 
         // Apply provider-specific transformations (run after potential heuristic override)
@@ -654,13 +639,17 @@ export class CompatibilityEngine {
     const providers = (vr.providers || {}) as Record<string, any>;
 
     // Helper: pick compatibility by family/type with light defaults
-    const pickCompatibility = (normalizedType: string): { type: string; config: Record<string, any> } => {
-      const t = String(normalizedType || '').toLowerCase();
-      if (t.includes('qwen')) { return { type: 'qwen-compatibility', config: {} }; }
-      if (t.includes('glm')) { return { type: 'glm-compatibility', config: {} }; }
-      if (t.includes('lmstudio')) { return { type: 'lmstudio-compatibility', config: {} }; }
-      if (t.includes('iflow')) { return { type: 'iflow-compatibility', config: {} }; }
-      return { type: 'field-mapping', config: {} };
+    // Compatibility selection must never guess. If user config specifies a compatibility type
+    // under providers[providerId].compatibility, use it; otherwise do not attach compatibility.
+    const resolveCompatibility = (providerId: string): { type: string; config: Record<string, any> } | null => {
+      try {
+        const prov = providers[providerId] || {};
+        const comp = (prov && typeof prov.compatibility === 'object') ? (prov.compatibility as Record<string, any>) : undefined;
+        const compType = typeof comp?.type === 'string' ? String(comp.type) : '';
+        const compCfg = (comp?.config && typeof comp.config === 'object') ? (comp.config as Record<string, any>) : {};
+        if (compType) { return { type: compType, config: compCfg }; }
+      } catch { /* ignore */ }
+      return null;
     };
 
     const pickLlmswitchConfig = (llmSwitchType: string, existing?: Record<string, unknown>): Record<string, unknown> => {
@@ -685,43 +674,34 @@ export class CompatibilityEngine {
       const models = (pCfg?.models || {}) as Record<string, any>;
       const aliases = (keyMappings?.providers?.[providerId] ? Object.keys(keyMappings.providers[providerId]) : ['key1']) as string[];
 
-      // Special-case: generic-responses provider → synthesize a 'responses' model
-      if (normalizedType.toLowerCase() === 'generic-responses' || normalizedType.toLowerCase() === 'generic_responses') {
-        for (const keyId of aliases) {
-          const cfgKey = `${providerId}.responses.${keyId}`;
-          const inputProtocol = 'responses';
-          const llmSwitchType = 'llmswitch-responses-passthrough';
-          pipelines[cfgKey] = {
-            provider: {
-              type: normalizedType,
-              baseURL,
-            },
-            model: {},
-            keyConfig: {
-              keyId,
-              actualKey: keyMappings.providers?.[providerId]?.[keyId] || keyId,
-              keyType: 'apiKey',
-            },
-            protocols: {
-              input: inputProtocol,
-              output: 'responses',
-            },
-            compatibility: { type: 'passthrough-compatibility', config: {} },
-            llmSwitch: { type: llmSwitchType, config: {} },
-            workflow: { type: 'streaming-control', config: {} },
-          } as any;
-        }
-        // Skip normal model loop for this provider
-        continue;
-      }
+      // No special-case for generic-responses; we always use conversion-router at runtime.
 
       for (const [modelId, mCfg] of Object.entries(models)) {
         const maxContext = Number((mCfg as any)?.maxContext) || undefined;
         const maxTokens = Number((mCfg as any)?.maxTokens) || undefined;
         for (const keyId of aliases) {
           const cfgKey = `${providerId}.${modelId}.${keyId}`;
-          const inputProtocol = vr?.inputProtocol || 'openai';
-          const llmSwitchType = getDefaultLLMSwitchType(inputProtocol);
+          // LLM switch type is fixed to dynamic conversion-router
+          // Prefer model-level compatibility when explicitly provided; otherwise provider-level
+          const compat = ((): { type: string; config: Record<string, any> } | null => {
+            try {
+              const mc = (mCfg as any)?.compatibility;
+              if (mc && typeof mc === 'object') {
+                // Support new wrapper shape: { type: 'compatibility', config: { moduleType, moduleConfig } }
+                const t = typeof mc.type === 'string' ? String(mc.type) : '';
+                if (t === 'compatibility') {
+                  const moduleType = String(mc.config?.moduleType || '').trim();
+                  const moduleConfig = (mc.config?.moduleConfig && typeof mc.config.moduleConfig === 'object') ? mc.config.moduleConfig as Record<string, any> : {};
+                  if (moduleType) { return { type: moduleType, config: moduleConfig }; }
+                } else if (t) {
+                  // Legacy direct type (e.g., 'glm' | 'glm-compatibility' | 'qwen')
+                  const configObj = (mc.config && typeof mc.config === 'object') ? (mc.config as Record<string, any>) : {};
+                  return { type: t, config: configObj };
+                }
+              }
+            } catch {/* ignore */}
+            return resolveCompatibility(providerId);
+          })();
           pipelines[cfgKey] = {
             provider: {
               type: normalizedType,
@@ -737,12 +717,9 @@ export class CompatibilityEngine {
               actualKey: keyMappings.providers?.[providerId]?.[keyId] || keyId,
               keyType: 'apiKey',
             },
-            protocols: {
-              input: inputProtocol,
-              output: 'openai',
-            },
-            compatibility: pickCompatibility(normalizedType),
-            llmSwitch: { type: llmSwitchType, config: pickLlmswitchConfig(llmSwitchType) },
+            // Protocol hints are not required for conversion-router; keep minimal
+            ...(compat ? { compatibility: compat } : {}),
+            llmSwitch: { type: 'llmswitch-conversion-router', config: {} },
             workflow: { type: 'streaming-control', config: {} },
           } as any;
         }

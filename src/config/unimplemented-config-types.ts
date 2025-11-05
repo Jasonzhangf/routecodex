@@ -3,7 +3,8 @@
  * Extended with Unimplemented Module Support
  */
 
-import { type ProviderConfig } from '../server/types.js';
+// Local placeholder for ProviderConfig to avoid dependency on old server types
+type ProviderConfig = Record<string, unknown>;
 import { type UnimplementedModuleConfig } from '../modules/unimplemented-module.js';
 // UnimplementedProviderConfig dependency removed; use generic shape to avoid tight coupling
 type UnimplementedProviderConfig = Record<string, unknown>;

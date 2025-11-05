@@ -131,55 +131,15 @@ export class PipelineAssembler {
       const workflow = synthesizeFromLegacy
         ? undefined
         : (modules.workflow as { type?: string; config?: Record<string, unknown> } | undefined);
+      // Compatibility: do not synthesize or guess. Only use when explicitly provided in modules.
       let compatibility = synthesizeFromLegacy
-        ? { type: (legacy && legacy.provider === 'glm') ? 'glm-compatibility' : 'passthrough-compatibility', config: {} as Record<string, unknown> }
+        ? undefined
         : (modules.compatibility as { type?: string; config?: Record<string, unknown> } | undefined);
 
-      // 提前执行“provider 级兼容层继承”，避免在前置校验前丢失兼容层（此前逻辑过晚，导致未显式声明时被跳过）
-      if (!synthesizeFromLegacy) {
-        try {
-          const provTypeStr = String((provider as any)?.type || '').trim();
-          if (provTypeStr) {
-            // 从 virtualrouter.providers 与 modules.virtualrouter.config.providers 中查找同族/provider的兼容层声明
-            const family = provTypeStr.toLowerCase();
-            const pickProvCompat = (): { type?: string; config?: Record<string, unknown> } | undefined => {
-              const readCompat = (provObj: Record<string, unknown> | undefined): { type?: string; config?: Record<string, unknown> } | undefined => {
-                const c = provObj && typeof provObj === 'object' ? (provObj as any).compatibility : undefined;
-                const rec = (c && typeof c === 'object') ? c as Record<string, unknown> : undefined;
-                if (!rec) return undefined;
-                const t = typeof rec.type === 'string' ? String(rec.type) : '';
-                const cfg = rec.config && typeof rec.config === 'object' ? rec.config as Record<string, unknown> : {};
-                return t ? { type: t, config: cfg } : undefined;
-              };
-              try {
-                const topVr = PipelineAssembler.asRecord((mc as Record<string, unknown>).virtualrouter || {});
-                const topProviders = PipelineAssembler.asRecord(topVr.providers || {});
-                const direct = PipelineAssembler.asRecord((topProviders as any)[provTypeStr]);
-                const famProv = PipelineAssembler.asRecord((topProviders as any)[family]);
-                return readCompat(direct) || readCompat(famProv);
-              } catch { /* ignore */ }
-              try {
-                const modulesRec = PipelineAssembler.asRecord(mc.modules || {});
-                const vrCfg = PipelineAssembler.asRecord(PipelineAssembler.asRecord(modulesRec.virtualrouter).config || {});
-                const modProviders = PipelineAssembler.asRecord(vrCfg.providers || {});
-                const direct = PipelineAssembler.asRecord((modProviders as any)[provTypeStr]);
-                const famProv = PipelineAssembler.asRecord((modProviders as any)[family]);
-                return readCompat(direct) || readCompat(famProv);
-              } catch { /* ignore */ }
-              return undefined;
-            };
-            if (!(compatibility && compatibility.type)) {
-              const inherited = pickProvCompat();
-              if (inherited?.type) {
-                compatibility = { type: String(inherited.type), config: PipelineAssembler.asRecord(inherited.config || {}) } as any;
-              }
-            }
-          }
-        } catch { /* ignore */ }
-      }
+      // 不进行 provider 级兼容层继承或推断。compatibility 仅来自显式 modules 定义。
 
-      // 校验必要字段（provider 与 兼容层类型），若缺失则跳过该 pipeline
-      if (!id || !provider?.type || !((compatibility && compatibility.type) || synthesizeFromLegacy)) { continue; }
+      // 校验必要字段（provider）；兼容层可选
+      if (!id || !provider?.type) { continue; }
       // Enrich llmSwitch config from merged-config virtualrouter if missing
       if (llmSwitch && (!llmSwitch.config || Object.keys(llmSwitch.config || {}).length === 0)) {
         try {
@@ -363,7 +323,7 @@ export class PipelineAssembler {
       const modBlock: Record<string, unknown> = {
         provider: { type: provider.type, config: provCfg },
       };
-      // Compatibility 必须显式指定：未指定则不注入兼容层模块
+      // Only attach compatibility when explicitly provided in pipeline config
       if (compatibility?.type) {
         (modBlock as any).compatibility = { type: compatTypeSelected, config: compatCfgSelected };
       }
@@ -392,14 +352,8 @@ export class PipelineAssembler {
         modBlock.llmSwitch = { type: 'llmswitch-conversion-router', config: {} };
       }
       if (workflow?.type) { modBlock.workflow = { type: workflow.type, config: workflow.config || {} }; }
-      // 选择 provider 模块实现名（家族→模块）
-      const providerModuleType = fam === 'glm' ? 'glm-http-provider'
-        : fam === 'openai' ? 'openai-provider'
-        : fam === 'qwen' ? 'qwen-provider'
-        : fam === 'lmstudio' ? 'lmstudio-http'
-        : 'generic-openai-provider';
-      modBlock.provider = { type: providerModuleType, config: provCfg };
-      // 不再强制 GLM 使用专有兼容模块；完全配置化（如需GLM行为，由外部配置 shapeFilterConfigPath 即可）
+      // Do not infer provider module type; honor the type already provided in pipeline definition
+      // (modBlock.provider already set above)
 
       pipelines.push({ id, provider: { type: fam || 'openai' }, modules: modBlock, settings: { debugEnabled: true } } as PipelineConfig);
       seen.add(id);
@@ -420,13 +374,38 @@ export class PipelineAssembler {
     if (rtAny && Object.keys(rtAny).length > 0) {
       const pools: Record<string, string[]> = {};
       const meta: Record<string, { providerId: string; modelId: string; keyId: string }> = { ...routeMeta };
+      // Build a reverse index for exact matching
+      const indexByTriple = new Map<string, string>();
+      Object.entries(meta).forEach(([pid, m]) => {
+        const k = `${m.providerId}|${m.modelId}|${m.keyId || 'key1'}`;
+        if (!indexByTriple.has(k)) indexByTriple.set(k, pid);
+      });
       for (const [routeName, targets] of Object.entries(rtAny)) {
         const list = Array.isArray(targets) ? targets : [];
         const ids: string[] = [];
         for (const t of list) {
-          const fam = providerFamily(t.providerId);
-          const candidates = pipelineByFamily[fam] || [];
-          const chosen = candidates[0] || pipelines[0]?.id;
+          // Prefer exact providerId+modelId+keyId match via routeMeta
+          const exactKey = `${t.providerId}|${t.modelId}|${t.keyId || 'key1'}`;
+          let chosen = indexByTriple.get(exactKey);
+          if (!chosen) {
+            // Fallback: search pipelines for matching provider model config
+            const match = pipelines.find(p => {
+              try {
+                const prov = (p as any).modules?.provider?.config || {};
+                const mdl = String((prov as any).model || '');
+                const mid = String(t.modelId || '');
+                // Match by configured modelId
+                return mdl === mid;
+              } catch { return false; }
+            });
+            if (match) chosen = match.id;
+          }
+          if (!chosen) {
+            // Final fallback by family to keep previous behavior
+            const fam = providerFamily(t.providerId);
+            const candidates = pipelineByFamily[fam] || [];
+            chosen = candidates[0] || pipelines[0]?.id;
+          }
           if (chosen) {
             ids.push(chosen);
             if (!meta[chosen]) {

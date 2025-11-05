@@ -1,5 +1,5 @@
 import type { CompatibilityConfig } from '../types/compatibility-types.js';
-import { getDefaultLLMSwitchType } from '../normalization/provider-normalization.js';
+// LLM switch is runtime-dynamic; always use a single conversion-router.
 
 export interface PipelineAssemblerModuleConfig {
   type: string;
@@ -12,7 +12,7 @@ export interface PipelineAssemblerPipeline {
   modules: {
     llmSwitch: PipelineAssemblerModuleConfig;
     workflow: PipelineAssemblerModuleConfig;
-    compatibility: PipelineAssemblerModuleConfig;
+    compatibility?: PipelineAssemblerModuleConfig;
     provider: { type: string; config: Record<string, unknown> };
   };
   settings?: { debugEnabled?: boolean };
@@ -58,19 +58,24 @@ export function buildPipelineAssemblerConfig(compat: CompatibilityConfig): Pipel
   const pushPipeline = (providerId: string, modelId: string, keyId: string, cfg: any) => {
     const pipelineId = `${providerId}_${keyId}.${modelId}`;
     // Build provider config
-    // Normalize provider module type to registered module names
-    const rawType = String(cfg?.provider?.type || providerId);
-    const providerType = (() => {
-      const t = rawType.toLowerCase();
-      const pid = providerId.toLowerCase();
-      if (t.includes('qwen') || pid.includes('qwen')) return 'qwen-provider';
-      if (t.includes('openai') || pid.includes('openai') || pid.includes('modelscope')) return 'openai-provider';
-      if (t.includes('glm') || pid === 'glm') return 'glm-http-provider';
-      if (t.includes('lmstudio') || pid.includes('lmstudio')) return 'lmstudio-http';
-      if (t.includes('iflow') || pid.includes('iflow')) return 'iflow-provider';
-      if (t.includes('generic-http')) return 'generic-http';
-      return rawType; // fallback to original
-    })();
+    // Map family type -> concrete module type; keep explicit module types as-is.
+    const specifiedType = String(cfg?.provider?.type || '').trim();
+    const moduleTypeWhitelist = new Set([
+      'openai-provider', 'generic-openai-provider', 'glm-http-provider', 'lmstudio-http',
+      'qwen-provider', 'iflow-provider', 'generic-http', 'generic-responses'
+    ]);
+    const familyToModule: Record<string, string> = {
+      openai: 'openai-provider',
+      qwen: 'qwen-provider',
+      lmstudio: 'lmstudio-http',
+      iflow: 'iflow-provider',
+      custom: 'generic-http'
+    };
+    let providerType = 'openai-provider';
+    if (specifiedType) {
+      const lowered = specifiedType.toLowerCase();
+      providerType = moduleTypeWhitelist.has(lowered) ? lowered : (familyToModule[lowered] || 'openai-provider');
+    }
     const providerBaseUrl = (cfg?.provider?.baseURL || cfg?.provider?.baseUrl);
     const authObj = (() => {
       const actualKey = cfg?.keyConfig?.actualKey;
@@ -93,31 +98,26 @@ export function buildPipelineAssemblerConfig(compat: CompatibilityConfig): Pipel
     if (providerBaseUrl) { (providerConfig as any).config.baseUrl = providerBaseUrl; }
     (providerConfig as any).config.model = modelId;
 
-    const deriveLlmswitchConfig = (type: string, existing?: Record<string, unknown>): Record<string, unknown> => {
-      if (existing && Object.keys(existing).length > 0) {
-        return existing;
-      }
-      if (type === 'llmswitch-conversion-router') {
-        return {
-          profilesPath: 'config/conversion/llmswitch-profiles.json',
-          defaultProfile: 'openai-chat'
-        };
-      }
-      return {};
-    };
-    const llmSwitchType = cfg?.llmSwitch?.type
-      ? cfg.llmSwitch.type
-      : getDefaultLLMSwitchType(String(cfg?.protocols?.input || 'openai'));
-    const llmSwitch = {
-      type: llmSwitchType,
-      config: deriveLlmswitchConfig(llmSwitchType, cfg?.llmSwitch?.config)
-    };
+    // Always attach a single dynamic conversion-router; do not derive or require user config.
+    const llmSwitch = { type: 'llmswitch-conversion-router', config: {} } as const;
     const workflow = cfg?.workflow?.type ? { type: cfg.workflow.type, config: cfg.workflow.config || {}, enabled: cfg.workflow.enabled !== false } : { type: 'streaming-control', config: {} };
-    const compatibility = cfg?.compatibility?.type ? { type: cfg.compatibility.type, config: cfg.compatibility.config || {} } : { type: 'field-mapping', config: {} };
+    // Standardize compatibility: always use 'compatibility' module; pass moduleType + moduleConfig when present
+    const normalizeCompatType = (t?: string): string | undefined => {
+      if (!t) return undefined;
+      const s = String(t).toLowerCase();
+      if (s === 'glm-compatibility' || s === 'glm') return 'glm';
+      if (s === 'qwen-compatibility' || s === 'qwen') return 'qwen';
+      if (s === 'lmstudio-compatibility' || s === 'lmstudio') return 'lmstudio';
+      if (s === 'iflow-compatibility' || s === 'iflow') return 'iflow';
+      return s;
+    };
+    const compatType = normalizeCompatType(cfg?.compatibility?.type ? String(cfg.compatibility.type) : undefined);
+    const compatConfig = (cfg?.compatibility?.config && typeof cfg.compatibility.config === 'object') ? (cfg.compatibility.config as Record<string, unknown>) : {};
+    const compatibility = compatType ? ({ type: 'compatibility', config: { moduleType: compatType, moduleConfig: compatConfig } } as PipelineAssemblerModuleConfig) : undefined;
 
     pipelines.push({
       id: pipelineId,
-      modules: { llmSwitch, workflow, compatibility, provider: providerConfig as any },
+      modules: { llmSwitch, workflow, ...(compatibility ? { compatibility } : {}), provider: providerConfig as any },
       settings: { debugEnabled: true }
     });
 

@@ -22,7 +22,6 @@ import { BasePipeline } from './base-pipeline.js';
 import { PipelineModuleRegistryImpl } from '../core/pipeline-registry.js';
 import { PipelineDebugLogger } from '../utils/debug-logger.js';
 import { DebugEventBus } from 'rcc-debugcenter';
-import { ModuleEnhancementFactory } from '../../enhancement/module-enhancement-factory.js';
 import { Key429Tracker, /* type Key429ErrorRecord */ } from '../../../utils/key-429-tracker.js';
 import { PipelineHealthManager } from '../../../utils/pipeline-health-manager.js';
 
@@ -45,7 +44,6 @@ export class PipelineManager implements RCCBaseModule {
   private isInitialized = false;
 
   // Debug enhancement properties
-  private enhancementFactory!: ModuleEnhancementFactory;
   private isEnhanced = false;
   private debugEventBus!: DebugEventBus;
   private managerMetrics: Map<string, { values: number[]; lastUpdated: number }> = new Map();
@@ -76,9 +74,6 @@ export class PipelineManager implements RCCBaseModule {
 
     this.initializeModuleRegistry();
     this.initializeDebugEnhancements();
-
-    // Initialize registry debug enhancements (no debugCenter parameter needed)
-    this.registry.initializeDebugEnhancements();
   }
 
   /**
@@ -875,11 +870,8 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('responses-chat-switch', this.createResponsesChatLLMSwitchModule);
     this.registry.registerModule('streaming-control', this.createStreamingControlModule);
     this.registry.registerModule('field-mapping', this.createFieldMappingModule);
-    this.registry.registerModule('qwen-compatibility', this.createQwenCompatibilityModule);
-    // GLM compatibility module
-    this.registry.registerModule('glm-compatibility', this.createGLMCompatibilityModule);
-    // iFlow compatibility + provider
-    this.registry.registerModule('iflow-compatibility', this.createIFlowCompatibilityModule);
+    // Standard V2 compatibility wrapper (single entry)
+    this.registry.registerModule('compatibility', this.createStandardCompatibilityModule);
     this.registry.registerModule('iflow-provider', this.createIFlowProviderModule);
     this.registry.registerModule('glm-http-provider', this.createGLMHTTPProviderModule);
     this.registry.registerModule('generic-openai-provider', this.createGenericOpenAIProviderModule);
@@ -892,8 +884,7 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('generic-responses', this.createGenericResponsesProviderModule);
 
     // Register LM Studio module factories
-    this.registry.registerModule('lmstudio-compatibility', this.createLMStudioCompatibilityModule);
-    this.registry.registerModule('passthrough-compatibility', this.createPassthroughCompatibilityModule);
+    // Remove legacy compatibility module registrations: only use standard wrapper
     
 
     this.logger.logPipeline('manager', 'module-registry-initialized', {
@@ -906,44 +897,8 @@ export class PipelineManager implements RCCBaseModule {
    * Initialize debug enhancements
    */
   private initializeDebugEnhancements(): void {
-    // Allow disabling DebugCenter enhancements via env (default off)
-    if (String(process.env.ROUTECODEX_ENABLE_DEBUGCENTER || '0') !== '1') {
-      this.isEnhanced = false;
-      return;
-    }
-    try {
-      this.debugEventBus = DebugEventBus.getInstance();
-
-      // Initialize enhancement factory with proper debug center
-      this.enhancementFactory = new ModuleEnhancementFactory(this.debugCenter);
-
-      // Register this manager for enhancement
-      this.enhancementFactory.registerConfig('pipeline-manager', {
-        enabled: true,
-        level: 'detailed',
-        consoleLogging: true,
-        debugCenter: true,
-        performanceTracking: true,
-        requestLogging: true,
-        errorTracking: true,
-        transformationLogging: true
-      });
-
-      // Subscribe to manager-specific events
-      this.subscribeToManagerEvents();
-
-      this.isEnhanced = true;
-
-      this.logger.logPipeline('manager', 'debug-enhancements-initialized', {
-        enhanced: true,
-        eventBusAvailable: !!this.debugEventBus,
-        enhancementFactoryAvailable: !!this.enhancementFactory
-      });
-    } catch (error) {
-      this.logger.logPipeline('manager', 'debug-enhancements-error', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-    }
+    // Enhancements removed
+    this.isEnhanced = false;
   }
 
   /**
@@ -1121,9 +1076,9 @@ export class PipelineManager implements RCCBaseModule {
   };
 
   private createConversionRouterModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { OpenAIOpenAIAdapter } = await import('../modules/llmswitch-v2-adapters.js');
-    // Route to OpenAI Chat normalization as a router shim
-    return new OpenAIOpenAIAdapter(config, dependencies) as unknown as PipelineModule;
+    const { ConversionRouterAdapter } = await import('../modules/llmswitch-v2-adapters.js');
+    // Dynamic router: choose codec by entryEndpoint (/v1/messages → anthropic, /v1/responses → responses)
+    return new ConversionRouterAdapter(config, dependencies) as unknown as PipelineModule;
   };
 
   // unified switch factory removed
@@ -1138,10 +1093,9 @@ export class PipelineManager implements RCCBaseModule {
     return new FieldMappingCompatibility(config, dependencies);
   };
 
-  private createGLMCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    // Use the wrapper module that adapts V2 modular GLM compatibility to PipelineModule shape
-    const { GLMCompatibility } = await import('../modules/compatibility/glm-compatibility.js');
-    return new GLMCompatibility(config, dependencies) as unknown as PipelineModule;
+  private createStandardCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { StandardCompatibility } = await import('../modules/compatibility/standard-compatibility.js');
+    return new StandardCompatibility(config, dependencies);
   };
 
   private createQwenCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {

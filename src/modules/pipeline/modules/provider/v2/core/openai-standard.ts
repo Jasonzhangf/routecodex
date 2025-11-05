@@ -335,12 +335,31 @@ export class OpenAIStandard extends BaseProvider {
 
     const processedRequest = httpRequestResult.data as UnknownObject;
 
+    // Flatten request body to standard OpenAI Chat JSON
+    const finalBody = (() => {
+      const r: any = processedRequest || {};
+      const dataObj: any = (r && typeof r === 'object' && 'data' in r && typeof r.data === 'object') ? r.data : r;
+      const body: any = { ...dataObj };
+      // Override model with provider config if specified
+      const cfgModel = (this.config as any)?.config?.model;
+      if (typeof cfgModel === 'string' && cfgModel.trim()) {
+        body.model = cfgModel.trim();
+      } else if (typeof body.model !== 'string' || !body.model) {
+        // fallback to service profile default if missing
+        body.model = this.serviceProfile.defaultModel;
+      }
+      // Remove metadata/envelope fields that upstream doesn't accept
+      try { if ('metadata' in body) { delete body.metadata; } } catch { /* ignore */ }
+      try { if ((body as any).stream === true) { delete body.stream; } } catch { /* ignore */ }
+      return body;
+    })();
+
     // 快照：provider-request（默认开启，脱敏headers）
     try {
       await writeProviderSnapshot({
         phase: 'provider-request',
         requestId: context.requestId,
-        data: processedRequest,
+        data: finalBody,
         headers,
         url: targetUrl
       });
@@ -349,7 +368,7 @@ export class OpenAIStandard extends BaseProvider {
     // 发送HTTP请求（统一走非流式）。上游若需要SSE，由上层统一合成。
     let response: unknown;
     try {
-      response = await this.httpClient.post(endpoint, processedRequest, headers);
+      response = await this.httpClient.post(endpoint, finalBody, headers);
       // 快照：provider-response
       try {
         await writeProviderSnapshot({

@@ -6,7 +6,6 @@
  */
 
 import type { RCCBaseModule, ErrorHandlingCenter, DebugCenter } from '../types/external-types.js';
-import { EnhancementRegistry } from '../../enhancement/module-enhancement-factory.js';
 import type {
   PipelineRequest,
   PipelineResponse,
@@ -25,7 +24,6 @@ import type {
 import { PipelineErrorIntegration } from '../utils/error-integration.js';
 import { PipelineDebugLogger } from '../utils/debug-logger.js';
 import { DebugEventBus } from 'rcc-debugcenter';
-import { ModuleEnhancementFactory } from '../../enhancement/module-enhancement-factory.js';
 import type { SharedPipelineRequest, SharedPipelineResponse } from '../../../types/shared-dtos.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 
@@ -42,7 +40,6 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
   readonly moduleVersion = '1.0.0';
 
   // Debug enhancement properties
-  private enhancementFactory!: ModuleEnhancementFactory;
   private isEnhanced = false;
   private debugEventBus!: DebugEventBus;
   private performanceMetrics: Map<string, number[]> = new Map();
@@ -190,14 +187,27 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
       debugStages.push('provider');
 
       // Wrap provider payload to DTO for response transformation chain
+      // Preserve routing metadata (entryEndpoint/protocol) for response phase so llmswitch can route correctly
+      const processedMeta = (processedRequest && typeof processedRequest === 'object' && (processedRequest as any).metadata)
+        ? (processedRequest as any).metadata as Record<string, unknown>
+        : {};
+      const originalMeta = ((request as any)?.metadata && typeof (request as any).metadata === 'object')
+        ? (request as any).metadata as Record<string, unknown>
+        : {};
+      const entryEndpoint = (processedMeta as any).entryEndpoint ?? (originalMeta as any).entryEndpoint ?? (request as any)?.entryEndpoint ?? (request as any)?.data?.metadata?.entryEndpoint;
+      const endpoint = (processedMeta as any).endpoint ?? (originalMeta as any).endpoint ?? entryEndpoint;
+      const protocol = (processedMeta as any).protocol ?? (originalMeta as any).protocol;
       let responseDto: SharedPipelineResponse = {
         data: providerPayload,
         metadata: {
           pipelineId: this.pipelineId,
           processingTime: 0,
           stages: [],
-          requestId: request.route?.requestId || 'unknown'
-        }
+          requestId: request.route?.requestId || 'unknown',
+          ...(entryEndpoint ? { entryEndpoint } : {}),
+          ...(endpoint ? { endpoint } : {}),
+          ...(protocol ? { protocol } : {})
+        } as any
       };
 
       // Stage 5: Response transformation chain (reverse order)
@@ -305,36 +315,8 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
    * Initialize debug enhancements
    */
   private initializeDebugEnhancements(): void {
-    try {
-      this.debugEventBus = DebugEventBus.getInstance();
-
-      // Initialize enhancement factory with proper debug center
-      this.enhancementFactory = new ModuleEnhancementFactory(this.debugCenter);
-
-      // Register this pipeline for enhancement
-      EnhancementRegistry.getInstance().registerConfig(this.pipelineId, {
-        enabled: true,
-        level: 'detailed',
-        consoleLogging: true,
-        debugCenter: true,
-        performanceTracking: true,
-        requestLogging: true,
-        errorTracking: true,
-        transformationLogging: true
-      });
-
-      this.isEnhanced = true;
-
-      this.debugLogger.logPipeline(this.pipelineId, 'debug-enhancements-initialized', {
-        enhanced: true,
-        eventBusAvailable: !!this.debugEventBus,
-        enhancementFactoryAvailable: !!this.enhancementFactory
-      });
-    } catch (error) {
-      this.debugLogger.logPipeline(this.pipelineId, 'debug-enhancements-error', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-    }
+    // Enhancements removed
+    this.isEnhanced = false;
   }
 
   /**
@@ -652,9 +634,16 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     }
 
     try {
-      const transformedDto = await this.modules.llmSwitch.processIncoming(request);
-      this.debugLogger.logTransformation(request.route?.requestId || 'unknown', 'llm-switch-request', request.data, transformedDto.data);
-      return transformedDto;
+      try { console.log('[LLMSWITCH] entryEndpoint:', (request as any)?.metadata?.entryEndpoint); } catch { /* ignore */ }
+      const transformed = await this.modules.llmSwitch.processIncoming(request);
+      const isDto = transformed && typeof transformed === 'object'
+        && 'data' in (transformed as Record<string, unknown>)
+        && 'metadata' in (transformed as Record<string, unknown>);
+      const out: SharedPipelineRequest = isDto
+        ? { ...(request as any), ...(transformed as any), route: request.route }
+        : { ...request, data: transformed as UnknownObject } as SharedPipelineRequest;
+      this.debugLogger.logTransformation(request.route?.requestId || 'unknown', 'llm-switch-request', request.data, (out as any).data);
+      return out;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {
         stage: 'llm-switch',
@@ -675,8 +664,14 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
 
     try {
       const processed = await this.modules.workflow.processIncoming(request);
-      this.debugLogger.logTransformation(request.route?.requestId || 'unknown', 'workflow-request', request.data, processed.data);
-      return processed;
+      const isDto = processed && typeof processed === 'object'
+        && 'data' in (processed as Record<string, unknown>)
+        && 'metadata' in (processed as Record<string, unknown>);
+      const out: SharedPipelineRequest = isDto
+        ? { ...(request as any), ...(processed as any), route: request.route }
+        : { ...request, data: processed as UnknownObject } as SharedPipelineRequest;
+      this.debugLogger.logTransformation(request.route?.requestId || 'unknown', 'workflow-request', request.data, (out as any).data);
+      return out;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {
         stage: 'workflow',
@@ -697,8 +692,14 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
 
     try {
       const transformed = await this.modules.compatibility.processIncoming(request);
-      this.debugLogger.logTransformation(request.route?.requestId || 'unknown', 'compatibility-request', request.data, transformed.data);
-      return transformed;
+      const isDto = transformed && typeof transformed === 'object'
+        && 'data' in (transformed as Record<string, unknown>)
+        && 'metadata' in (transformed as Record<string, unknown>);
+      const out: SharedPipelineRequest = isDto
+        ? { ...(request as any), ...(transformed as any), route: request.route }
+        : { ...request, data: transformed as UnknownObject } as SharedPipelineRequest;
+      this.debugLogger.logTransformation(request.route?.requestId || 'unknown', 'compatibility-request', request.data, (out as any).data);
+      return out;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {
         stage: 'compatibility',

@@ -98,12 +98,12 @@ export function normalizeProviderType(
     (providerConfig as any)?.auth?.oauth
   );
 
-  // Heuristics first: detect GLM Coding Plan by providerId/baseUrl and force glm-http-provider
+  // Heuristics first: detect OpenAI-compatible third-party by providerId/baseUrl and normalize to openai-provider
   try {
     const id = String(providerId || '').toLowerCase();
     const base = String(providerConfig?.baseURL || providerConfig?.baseUrl || '').toLowerCase();
     if (id.includes('glm') || /open\.bigmodel\.cn\/api\/coding\/paas/i.test(base)) {
-      return 'glm-http-provider';
+      return 'openai-provider';
     }
   } catch { /* ignore heuristic errors */ }
 

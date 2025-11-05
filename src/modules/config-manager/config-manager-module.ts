@@ -6,7 +6,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { homedir } from 'os';
-import { BaseModule } from '../../core/base-module.js';
+import { BaseModule } from 'rcc-basemodule';
 import type { UnknownObject } from '../../types/common-types.js';
 import { ConfigParser } from 'routecodex-config-engine';
 import { CompatibilityEngine } from 'routecodex-config-compat';
@@ -33,6 +33,10 @@ export class ConfigManagerModule extends BaseModule {
   private mergeHistory: unknown[] = [];
   private validationHistory: unknown[] = [];
   // maxHistorySize is now inherited from BaseModule
+  // Provide minimal local debug props to satisfy usage after core merge
+  private isDebugEnhanced: boolean = false;
+  private debugEventBus: unknown = null;
+  private maxHistorySize: number = 100;
 
   constructor(configPath?: string) {
     super({
@@ -322,7 +326,7 @@ export class ConfigManagerModule extends BaseModule {
           outputProtocol: 'openai',
           providers: {
             glm: {
-              type: 'glm',
+              type: 'openai',
               // Do not hardcode upstream endpoint or credentials in default config
               // Require explicit configuration or environment variables
               apiKey: [],
@@ -331,11 +335,14 @@ export class ConfigManagerModule extends BaseModule {
                 'glm-4.6': {
                   maxContext: 200000,
                   maxTokens: 8192,
-                  // 开启思考（thinking）
+                  // 显式使用标准 V2 兼容包装器
                   compatibility: {
-                    type: 'glm-compatibility',
+                    type: 'compatibility',
                     config: {
-                      thinking: { enabled: true, payload: { type: 'enabled' } }
+                      moduleType: 'glm',
+                      moduleConfig: {
+                        thinking: { enabled: true, payload: { type: 'enabled' } }
+                      }
                     }
                   }
                 }
@@ -476,13 +483,14 @@ export class ConfigManagerModule extends BaseModule {
         // 归一化 providers.*.type: 将模块实现名映射为提供商家族名
         // glm-http-provider -> glm, openai-provider -> openai, lmstudio-http -> lmstudio, qwen-provider -> qwen, iflow-provider -> iflow, generic-http -> custom
         const familyTypeMap: Record<string, string> = {
-          'glm-http-provider': 'glm',
           'openai-provider': 'openai',
           'generic-openai-provider': 'openai',
           'lmstudio-http': 'lmstudio',
           'qwen-provider': 'qwen',
           'iflow-provider': 'iflow',
           'generic-http': 'custom',
+          // 统一第三方 OpenAI 兼容：glm-http-provider 也归入 openai 家族
+          'glm-http-provider': 'openai',
         };
         try {
           const vrNode = (normalizedInput as Record<string, unknown>)?.['virtualrouter'] as Record<string, unknown> | undefined;
@@ -497,10 +505,7 @@ export class ConfigManagerModule extends BaseModule {
             // Normalize unsupported family names to allowed enum for parser
             // The parser only allows: openai | anthropic | qwen | lmstudio | iflow | custom
             // Accept legacy 'glm' family by mapping to 'custom' here; assembler will still detect pid==='glm'
-            const family = String(provs[pid]?.type || '').toLowerCase();
-            if (family === 'glm') {
-              provs[pid].type = 'custom';
-            }
+            // 不再将 glm 作为单独 family；统一归入 openai 家族
           });
         } catch { /* noop */ }
 
@@ -800,14 +805,23 @@ export class ConfigManagerModule extends BaseModule {
       const key = [providerId, modelId, keyId].filter(Boolean).join('.');
       const pc = ensureObj(pipelineConfigs[key]);
       const provType = String(pc?.provider?.type || providerId || 'openai');
-      const compatType = provType === 'glm' ? 'glm-compatibility' : 'passthrough-compatibility';
       const pid = keyId ? `${providerId}_${keyId}.${modelId}` : `${providerId}.${modelId}`;
       const providerCfg: Record<string, unknown> = { type: provType, config: { ...(pc?.provider || {}) } } as any;
-      const compatibilityCfg = { type: compatType, config: { ...(pc?.compatibility?.config || {}) } } as any;
+      const compatibilityCfg = (() => {
+        // 仅在显式配置时附加标准兼容模块
+        const c = (pc?.compatibility && typeof pc.compatibility === 'object') ? (pc.compatibility as Record<string, unknown>) : undefined;
+        if (c && typeof (c as any).type === 'string') {
+          // 透传 modules.compatibility（建议使用 { type:'compatibility', config:{ moduleType, moduleConfig } }）
+          return c;
+        }
+        return undefined;
+      })();
       const llmSwitchCfg = { type: 'llmswitch-conversion-router', config: {} };
       const workflowCfg = { type: 'streaming-control', config: {} };
 
-      pipelines.push({ id: pid, modules: { provider: providerCfg, compatibility: compatibilityCfg, llmSwitch: llmSwitchCfg, workflow: workflowCfg } });
+      const modules: any = { provider: providerCfg, llmSwitch: llmSwitchCfg, workflow: workflowCfg };
+      if (compatibilityCfg) { modules.compatibility = compatibilityCfg; }
+      pipelines.push({ id: pid, modules });
       routeMeta[pid] = { providerId, modelId, keyId } as any;
       return pid;
     };

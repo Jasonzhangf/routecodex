@@ -1126,13 +1126,12 @@ program
   });
 
 // Import commands at top level
-import { createDryRunCommands } from './commands/dry-run.js';
 // offline-log CLI temporarily disabled to simplify build
 
 // simple-log config helper removed
 
 // Add commands
-program.addCommand(createDryRunCommands());
+// dry-run commands removed
 // offline-log command disabled
 // simple-log command removed
 
@@ -1189,22 +1188,7 @@ program
     console.log('  rcc config validate');
     console.log('');
 
-    console.log(chalk.yellow('5. Dry-Run Testing:'));
-    console.log('  # Execute request pipeline dry-run');
-    console.log('  rcc dry-run request ./request.json --pipeline-id test --mode dry-run');
-    console.log('');
-    console.log('  # Execute response pipeline dry-run');
-    console.log('  rcc dry-run response ./response.json --pipeline-id test');
-    console.log('');
-    console.log('  # Start response capture session');
-    console.log('  rcc dry-run capture --start');
-    console.log('');
-    console.log('  # Process multiple files in batch');
-    console.log('  rcc dry-run batch ./test-data --pattern *.json --output ./results');
-    console.log('');
-    console.log('  # Execute chain of pipelines');
-    console.log('  rcc dry-run chain ./input.json --chain ./chain-config.json');
-    console.log('');
+    // Dry-Run examples removed
 
     console.log(chalk.yellow('6. Environment Variables:'));
     console.log('  # Set LM Studio API Key');
