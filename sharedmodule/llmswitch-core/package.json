@@ -1,0 +1,68 @@
+{
+  "name": "rcc-llmswitch-core",
+  "version": "0.2.6",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json --outDir dist",
+    "prepublishOnly": "npm run build"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./v2": {
+      "import": "./dist/v2/index.js",
+      "types": "./dist/v2/index.d.ts"
+    },
+    "./v2/*": {
+      "import": "./dist/v2/*.js",
+      "types": "./dist/v2/*.d.ts"
+    },
+    "./v2/conversion": {
+      "import": "./dist/v2/conversion/index.js",
+      "types": "./dist/v2/conversion/index.d.ts"
+    },
+    "./v2/conversion/*": {
+      "import": "./dist/v2/conversion/*.js",
+      "types": "./dist/v2/conversion/*.d.ts"
+    },
+    "./v2/conversion/codecs/*": {
+      "import": "./dist/v2/conversion/codecs/*.js",
+      "types": "./dist/v2/conversion/codecs/*.d.ts"
+    },
+    "./v2/conversion/shared/*": {
+      "import": "./dist/v2/conversion/shared/*.js",
+      "types": "./dist/v2/conversion/shared/*.d.ts"
+    },
+    "./v2/conversion/responses/*": {
+      "import": "./dist/v2/conversion/responses/*.js",
+      "types": "./dist/v2/conversion/responses/*.d.ts"
+    },
+    "./v2/conversion/streaming/*": {
+      "import": "./dist/v2/conversion/streaming/*.js",
+      "types": "./dist/v2/conversion/streaming/*.d.ts"
+    },
+    "./v2/guidance": {
+      "import": "./dist/v2/guidance/index.js",
+      "types": "./dist/v2/guidance/index.d.ts"
+    },
+    "./v2/guidance/*": {
+      "import": "./dist/v2/guidance/*.js",
+      "types": "./dist/v2/guidance/*.d.ts"
+    },
+    "./api": {
+      "import": "./dist/api.js",
+      "types": "./dist/api.d.ts"
+    }
+  },
+  "dependencies": {}
+}
