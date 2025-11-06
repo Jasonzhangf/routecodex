@@ -30,3 +30,18 @@ reports/
 # Editor/IDE
 .vscode/
 .idea/
+
+# llmswitch-core build outputs (do not commit)
+sharedmodule/llmswitch-core/dist/
+
+# Vendorized core builds (never commit built artifacts)
+vendor/
+vendor/**/dist/
+vendor/rcc-llmswitch-core/dist/
+
+# Additional local test artifacts
+test-results/
+test-artifacts/
+
+# Local npm cache
+.npm-cache-local/
