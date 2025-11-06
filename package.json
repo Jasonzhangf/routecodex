@@ -139,7 +139,7 @@
     "@types/jest": "^29.5.5",
     "@types/node": "^20.19.21",
     "@typescript-eslint/eslint-plugin": "^6.7.4",
-    "@typescript-eslint/parser": "^6.7.4",
+    "@typescript-eslint/parser": "^8.46.1",
     "@typescript-eslint/typescript-estree": "^6.7.4",
     "complexity-report": "^2.0.0-alpha",
     "depcheck": "^1.4.7",
