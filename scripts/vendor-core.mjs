@@ -10,11 +10,18 @@ async function copyDir(src,dst){ await fsp.mkdir(dst,{recursive:true}); for(cons
 
 async function main(){
   const root=process.cwd();
-  const src=path.join(root,'sharedmodule','llmswitch-core','dist');
+  const srcLocal=path.join(root,'sharedmodule','llmswitch-core','dist');
+  const srcNode=path.join(root,'node_modules','rcc-llmswitch-core','dist');
   const out=path.join(root,'vendor','rcc-llmswitch-core');
-  if(!(await exists(src))){
-    console.error('[vendor-core] ERROR: llmswitch-core dist not found. Please build sharedmodule/llmswitch-core first.');
-    process.exit(2);
+  let src=srcLocal;
+  if(!(await exists(srcLocal))){
+    if (await exists(srcNode)) {
+      console.log('[vendor-core] local dist missing; using node_modules/rcc-llmswitch-core/dist');
+      src=srcNode;
+    } else {
+      console.error('[vendor-core] ERROR: llmswitch-core dist not found (neither sharedmodule nor node_modules).');
+      process.exit(2);
+    }
   }
   await rimraf(out);
   await fsp.mkdir(out,{recursive:true});

@@ -31,8 +31,8 @@ reports/
 .vscode/
 .idea/
 
-# llmswitch-core build outputs (do not commit)
-sharedmodule/llmswitch-core/dist/
+# Do not manage llmswitch-core in this repo (moved to separate repo)
+sharedmodule/llmswitch-core/
 
 # Vendorized core builds (never commit built artifacts)
 vendor/
