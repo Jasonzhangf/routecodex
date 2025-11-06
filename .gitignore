@@ -66,3 +66,6 @@ tests/output/
 
 # Generated merged configs under sharedmodule
 sharedmodule/config-engine/config/merged-config.*.json
+
+# Do not manage llmswitch-core in this repo (moved to separate repo)
+sharedmodule/llmswitch-core/
