@@ -14,7 +14,10 @@ function fail(msg){
 }
 
 if (!fs.existsSync(tsc)) fail('TypeScript not installed in root node_modules. Run npm i.');
-if (!fs.existsSync(proj)) fail('llmswitch-core tsconfig.json not found.');
+if (!fs.existsSync(proj)) {
+  console.log('[build-core] llmswitch-core source not found in sharedmodule; skipping local build');
+  process.exit(0);
+}
 
 console.log('[build-core] Compiling llmswitch-core with root TypeScript...');
 const res = spawnSync(process.execPath, [tsc, '-p', proj], { stdio: 'inherit' });
@@ -22,4 +25,3 @@ if ((res.status ?? 0) !== 0) fail('TypeScript build failed for llmswitch-core');
 
 if (!fs.existsSync(outDir)) fail('llmswitch-core dist not produced');
 console.log('[build-core] llmswitch-core built:', outDir);
-
