@@ -197,8 +197,14 @@ export class OpenAIStandard extends BaseProvider {
   protected createHttpClient(): void {
     const profile = this.serviceProfile;
     const effectiveBase = this.getEffectiveBaseUrl();
-    const effectiveTimeout = this.config.config.overrides?.timeout ?? profile.timeout ?? 60000;
-    const effectiveRetries = this.config.config.overrides?.maxRetries ?? profile.maxRetries ?? 3;
+    const envTimeout = Number(process.env.ROUTECODEX_PROVIDER_TIMEOUT_MS || process.env.RCC_PROVIDER_TIMEOUT_MS || NaN);
+    const effectiveTimeout = Number.isFinite(envTimeout) && envTimeout > 0
+      ? envTimeout
+      : (this.config.config.overrides?.timeout ?? profile.timeout ?? 60000);
+    const envRetries = Number(process.env.ROUTECODEX_PROVIDER_RETRIES || process.env.RCC_PROVIDER_RETRIES || NaN);
+    const effectiveRetries = Number.isFinite(envRetries) && envRetries >= 0
+      ? envRetries
+      : (this.config.config.overrides?.maxRetries ?? profile.maxRetries ?? 3);
 
     this.httpClient = new HttpClient({
       baseUrl: effectiveBase,
@@ -215,17 +221,32 @@ export class OpenAIStandard extends BaseProvider {
     const context = this.createProviderContext();
 
     // 初始请求预处理
-    let processedRequest: UnknownObject = {
-      model: (request as any).model ||
-             this.config.config.overrides?.defaultModel ||
-             this.serviceProfile.defaultModel,
-      ...request
-    };
-
-    // 强制非流式：移除/关闭 stream 标志，配合上层进行 SSE 合成
+    const pipelineModel = (this.config.config as any)?.model;
+    let processedRequest: UnknownObject = { ...request };
+    // 记录入站原始模型，便于响应阶段还原（不影响上游请求体）
     try {
-      if ((processedRequest as any).stream === true) {
-        // Prefer removing the field to avoid upstream enabling SSE by body
+      const inboundModel = (request as any)?.model;
+      const entryEndpoint = (request as any)?.metadata?.entryEndpoint || (request as any)?.entryEndpoint;
+      const streamFlag = (request as any)?.metadata?.stream ?? (request as any)?.stream;
+      (processedRequest as any).metadata = {
+        ...(processedRequest as any).metadata,
+        ...(entryEndpoint ? { entryEndpoint } : {}),
+        ...(typeof streamFlag === 'boolean' ? { stream: !!streamFlag } : {}),
+        __origModel: inboundModel
+      };
+    } catch { /* ignore */ }
+    // 发送前覆盖为流水线配置的上游模型（若存在），否则保留原值或使用默认
+    (processedRequest as any).model =
+      (typeof pipelineModel === 'string' && pipelineModel.trim()) ? pipelineModel.trim() :
+      (processedRequest as any).model ||
+      this.config.config.overrides?.defaultModel ||
+      this.serviceProfile.defaultModel;
+
+    // 流式开关：仅当非 Responses 端点时才移除 stream；Responses 端点需要真实上游流
+    try {
+      const entryEndpoint = String(((request as any)?.metadata?.entryEndpoint) || '');
+      const isResponses = entryEndpoint === '/v1/responses';
+      if ((processedRequest as any).stream === true && !isResponses) {
         delete (processedRequest as any).stream;
       }
     } catch { /* ignore */ }
@@ -259,6 +280,13 @@ export class OpenAIStandard extends BaseProvider {
   }
 
   protected async postprocessResponse(response: unknown, context: ProviderContext): Promise<unknown> {
+    // 流式短路：保持原始流对象上行，不进入后处理链
+    try {
+      const r: any = response as any;
+      if (r && typeof r === 'object' && r.__sse_stream) {
+        return r;
+      }
+    } catch { /* ignore */ }
     const processingTime = Date.now() - context.startTime;
 
     let processedResponse = response;
@@ -296,6 +324,77 @@ export class OpenAIStandard extends BaseProvider {
 
     processedResponse = postprocessResult.data;
 
+    // Normalize tool arguments for Chat non-stream responses (fix invalid stringified arrays like "[\"ls\", \"-la\"]")
+    try {
+      const root: any = (processedResponse as any)?.data?.data || (processedResponse as any)?.data || processedResponse;
+      const tryNormalize = (fnArgs: any): any => {
+        if (typeof fnArgs !== 'string') return fnArgs;
+        try {
+          const obj = JSON.parse(fnArgs);
+          const cmd = (obj as any).command;
+          if (typeof cmd === 'string') {
+            const s = String(cmd).trim();
+            let arr: string[] | null = null;
+            // case: JSON array as string
+            if ((s.startsWith('[') && s.endsWith(']')) || (s.startsWith('"[') && s.endsWith(']"'))) {
+              const cleaned = s.replace(/^"|"$/g, '');
+              try { arr = JSON.parse(cleaned.replace(/'/g, '"')); } catch { /* fallthrough */ }
+            }
+            // case: comma separated
+            if (!arr && s.includes(',')) {
+              arr = s.replace(/\[|\]|\"/g, '').split(',').map(x => x.trim()).filter(Boolean);
+            }
+            // case: whitespace separated tokens
+            if (!arr && s.length) {
+              const parts = s.replace(/\[|\]|\"/g, '').split(/\s+/).filter(Boolean);
+              if (parts.length > 1) arr = parts;
+            }
+            if (arr && Array.isArray(arr)) {
+              (obj as any).command = arr;
+            }
+          }
+          return JSON.stringify(obj);
+        } catch {
+          return fnArgs;
+        }
+      };
+      const normalizeMessage = (msg: any) => {
+        try {
+          const tcs = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
+          for (const tc of tcs) {
+            if (tc && tc.function) {
+              tc.function.arguments = tryNormalize(tc.function.arguments);
+            }
+          }
+        } catch { /* ignore */ }
+      };
+      // OpenAI Chat non-stream (chat.completion)
+      if (root && Array.isArray(root?.choices)) {
+        for (const ch of root.choices) {
+          if (ch?.message) normalizeMessage(ch.message);
+        }
+      }
+      // OpenAI Responses shape (output -> message content)
+      if (root && Array.isArray(root?.output)) {
+        for (const item of root.output) {
+          if (item?.role === 'assistant' && Array.isArray(item?.content)) {
+            // some implementations might carry tool calls here in variants; keep minimal
+          }
+        }
+      }
+    } catch { /* silent normalize errors */ }
+
+    // 响应模型名还原为入站模型（仅对外展示层；上游快照保持原样）
+    try {
+      const root: any = (processedResponse as any)?.data?.data || (processedResponse as any)?.data || processedResponse;
+      if (root && typeof root === 'object' && typeof (root as any).model === 'string') {
+        const inboundModel = (context as any)?.model || (processedResponse as any)?.metadata?.__origModel;
+        if (typeof inboundModel === 'string' && inboundModel.trim()) {
+          (root as any).model = inboundModel.trim();
+        }
+      }
+    } catch { /* ignore */ }
+
     return {
       data: (processedResponse as any).data || processedResponse,
       status: (processedResponse as any).status || (response as any).status,
@@ -304,7 +403,8 @@ export class OpenAIStandard extends BaseProvider {
         requestId: context.requestId,
         processingTime,
         providerType: this.providerType,
-        model: ((processedResponse as any).data as any)?.model || ((response as any).data as any)?.model,
+        // 对外暴露的 model 统一为入站模型
+        model: (context as any)?.model || ((processedResponse as any).data as any)?.model || ((response as any).data as any)?.model,
         usage: ((processedResponse as any).data as any)?.usage || ((response as any).data as any)?.usage,
         hookMetrics: {
           httpResponse: httpResponseResult.metrics,
@@ -348,9 +448,26 @@ export class OpenAIStandard extends BaseProvider {
         // fallback to service profile default if missing
         body.model = this.serviceProfile.defaultModel;
       }
+      // Resolve max_tokens according to priority:
+      // 1) request.max_tokens (number > 0) or request.maxTokens (camelCase)
+      // 2) provider overrides (config.config.overrides.maxTokens) if provided and > 0
+      // 3) default 8192
+      try {
+        const reqMt = Number((dataObj as any)?.max_tokens ?? (dataObj as any)?.maxTokens ?? NaN);
+        const cfgMt = Number((this.config as any)?.config?.overrides?.maxTokens ?? NaN);
+        const envMt = Number(process.env.ROUTECODEX_DEFAULT_MAX_TOKENS || process.env.RCC_DEFAULT_MAX_TOKENS || NaN);
+        const fallback = Number.isFinite(cfgMt) && cfgMt > 0
+          ? cfgMt
+          : (Number.isFinite(envMt) && envMt > 0 ? envMt : 8192);
+        const effective = Number.isFinite(reqMt) && reqMt > 0 ? reqMt : fallback;
+        // 写入 snake_case，兼容 OpenAI/Anthropic 端点
+        (body as any).max_tokens = effective;
+        // 删除 camelCase 以避免上游拒绝
+        if ('maxTokens' in body) delete (body as any).maxTokens;
+      } catch { /* ignore max_tokens resolution errors */ }
       // Remove metadata/envelope fields that upstream doesn't accept
       try { if ('metadata' in body) { delete body.metadata; } } catch { /* ignore */ }
-      try { if ((body as any).stream === true) { delete body.stream; } } catch { /* ignore */ }
+      // Provider 不再按入口端点做流控或形状处理；上层已统一非流式
       return body;
     })();
 
@@ -365,7 +482,7 @@ export class OpenAIStandard extends BaseProvider {
       });
     } catch { /* non-blocking */ }
 
-    // 发送HTTP请求（统一走非流式）。上游若需要SSE，由上层统一合成。
+    // 发送HTTP请求（统一非流式）
     let response: unknown;
     try {
       response = await this.httpClient.post(endpoint, finalBody, headers);

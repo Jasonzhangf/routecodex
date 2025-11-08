@@ -3,7 +3,7 @@
  *
  * 定义各个OpenAI兼容服务的预设配置档案
  */
-
+import { API_ENDPOINTS, HTTP_PROTOCOLS, LOCAL_HOSTS, DEFAULT_CONFIG } from "../../../../../../constants/index.js";
 import type { ServiceProfile } from '../api/provider-types.js';
 
 /**
@@ -12,8 +12,27 @@ import type { ServiceProfile } from '../api/provider-types.js';
  * 每个OpenAI兼容服务的基础配置，特殊处理通过动态配置注入
  */
 export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' | 'extensions'>> = {
+  /**
+   * OpenAI Responses API (native Responses endpoint)
+   * - Used for true SSE passthrough on /v1/responses
+   * - Auth: apikey (sk-...)
+   */
+  responses: {
+    defaultBaseUrl: API_ENDPOINTS.OPENAI,
+    defaultEndpoint: '/responses',
+    defaultModel: 'gpt-4.1-mini',
+    requiredAuth: ['apikey'],
+    optionalAuth: [],
+    headers: {
+      'Content-Type': 'application/json',
+      // Monitor成功样本要求此Beta标头，确保上游接受Responses协议
+      'OpenAI-Beta': 'responses-2024-12-17'
+    },
+    timeout: 60000,
+    maxRetries: 3
+  },
   openai: {
-    defaultBaseUrl: 'https://api.openai.com/v1',
+    defaultBaseUrl: API_ENDPOINTS.OPENAI,
     defaultEndpoint: '/chat/completions',
     defaultModel: 'gpt-4',
     requiredAuth: ['apikey'],
@@ -71,7 +90,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
   },
 
   lmstudio: {
-    defaultBaseUrl: 'http://localhost:1234',
+    defaultBaseUrl: `${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.LOCALHOST}:${DEFAULT_CONFIG.LM_STUDIO_PORT}`,
     defaultEndpoint: '/v1/chat/completions',
     defaultModel: 'local-model',
     requiredAuth: ['apikey'],

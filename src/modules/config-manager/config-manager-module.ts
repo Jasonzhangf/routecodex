@@ -251,8 +251,8 @@ export class ConfigManagerModule extends BaseModule {
       // 确保Auth目录存在
       await this.authFileResolver.ensureAuthDir();
 
-      // 生成初始合并配置
-      await this.generateMergedConfig();
+      // 生成初始合并配置（使用去除legacy的最小规范化构建器）
+      await this.generateMergedConfigCanonicalMinimal();
 
       // 启动配置监听
       if ((cfg?.['autoReload'] as boolean) === true) {
@@ -296,6 +296,145 @@ export class ConfigManagerModule extends BaseModule {
       }
 
       console.error('❌ Failed to initialize Config Manager Module:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 新构建器：完全去除 legacy 路径，只依据用户配置生成 merged-config 与 pac
+   */
+  private async generateMergedConfigCanonicalMinimal(): Promise<void> {
+    const startTime = Date.now();
+    const mergeId = `merge_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    try {
+      console.log('🔄 Generating merged configuration (canonical minimal, legacy removed)...');
+      const userConfig = await this.loadUserConfig();
+      const u: any = JSON.parse(JSON.stringify(userConfig || {}));
+      const vr: any = (u && u.virtualrouter) ? u.virtualrouter : {};
+      const providersIn: Record<string, any> = (vr.providers && typeof vr.providers === 'object') ? vr.providers : {};
+
+      const providers: Record<string, any> = {};
+      const keyVault: Record<string, Record<string, any>> = {};
+      for (const [pid, raw] of Object.entries(providersIn)) {
+        const p: any = JSON.parse(JSON.stringify(raw || {}));
+        if (!p.id) p.id = pid;
+        if (p.baseURL && !p.baseUrl) p.baseUrl = p.baseURL;
+        providers[pid] = p;
+        let apiKey = (p.auth && typeof p.auth.apiKey === 'string') ? p.auth.apiKey : '';
+        if (!apiKey) {
+          const arr = Array.isArray(p.apiKey) ? p.apiKey : (typeof p.apiKey === 'string' ? [p.apiKey] : []);
+          apiKey = arr[0] || '';
+        }
+        if (apiKey) {
+          keyVault[pid] = keyVault[pid] || {};
+          keyVault[pid]['key1'] = { type: 'apikey', value: apiKey, enabled: true };
+        }
+      }
+
+      const cats = ['default','coding','longcontext','tools','thinking','vision','websearch','background'];
+      const routingIn: Record<string, string[]> = (vr.routing && typeof vr.routing === 'object') ? vr.routing : {} as any;
+      const routePools: Record<string, string[]> = {};
+      for (const c of cats) {
+        const arr = Array.isArray(routingIn[c]) ? routingIn[c] : [];
+        const out: string[] = [];
+        for (const rid of arr) {
+          const s = String(rid || '').trim();
+          if (!s) continue;
+          const dot = s.indexOf('.');
+          if (dot <= 0 || dot >= s.length - 1) { out.push(s); continue; }
+          const providerId = s.slice(0, dot);
+          const modelId = s.slice(dot + 1);
+          const vault = keyVault[providerId] || {};
+          const keyIds = Object.keys(vault).filter(k => vault[k]?.enabled !== false);
+          if (keyIds.length === 0) { out.push(s); continue; }
+          for (const kid of keyIds) out.push(`${providerId}.${modelId}__${kid}`);
+        }
+        routePools[c] = Array.from(new Set(out));
+      }
+
+      const routeMeta: Record<string, { providerId: string; modelId: string; keyId?: string | null }> = {};
+      for (const arr of Object.values(routePools)) {
+        for (const id of arr) {
+          const base = String(id);
+          const parts = base.split('__');
+          const pv = parts[0];
+          const keyId = parts.length > 1 ? parts.slice(1).join('__') : null;
+          const dot = pv.indexOf('.');
+          if (dot > 0) {
+            const providerId = pv.slice(0, dot);
+            const modelId = pv.slice(dot + 1);
+            routeMeta[base] = { providerId, modelId, keyId };
+          }
+        }
+      }
+
+      const httpserver = (u && u.httpserver && typeof u.httpserver === 'object') ? u.httpserver : {};
+      const modules: any = {};
+      if (httpserver && (typeof httpserver.port === 'number' || typeof httpserver.host === 'string')) {
+        modules.httpserver = { enabled: true, config: { ...httpserver } };
+      }
+
+      // Build pipelines explicitly to avoid relying on any legacy synthesis
+      const pipelinesArr: any[] = [];
+      const added = new Set<string>();
+      const baseUrlOf = (provId: string) => {
+        try { return String(providers[provId]?.baseUrl || providers[provId]?.baseURL || ''); } catch { return ''; }
+      };
+      const apiKeyOf = (provId: string) => {
+        try { return String(keyVault[provId]?.key1?.value || ''); } catch { return ''; }
+      };
+      for (const ids of Object.values(routePools)) {
+        for (const id of ids) {
+          if (added.has(id)) continue;
+          added.add(id);
+          const dot = String(id).indexOf('.');
+          const provId = String(id).slice(0, dot);
+          const rest = String(id).slice(dot + 1);
+          const keyParts = rest.split('__');
+          const modelId = keyParts[0];
+          const keyId = keyParts[1] || 'key1';
+          const baseUrl = baseUrlOf(provId);
+          const apiKey = apiKeyOf(provId);
+          const pipeline = {
+            id,
+            provider: { type: 'openai' },
+            modules: {
+              provider: { type: 'openai', config: { baseUrl, timeout: 30000, auth: { type: 'apikey', apiKey } } },
+              compatibility: { type: 'glm', config: {} },
+              llmSwitch: { type: 'llmswitch-conversion-router', config: {} },
+              workflow: { type: 'streaming-control', config: {} }
+            },
+            settings: { debugEnabled: true },
+            authRef: { mode: 'perKey', providerId: provId, keyId }
+          };
+          pipelinesArr.push(pipeline);
+        }
+      }
+
+      const mergedConfig: any = {
+        providers,
+        keyVault,
+        pipelines: pipelinesArr,
+        routing: routePools,
+        routeMeta,
+        ...(httpserver ? { httpserver } : {}),
+        ...(modules.httpserver ? { modules } : {}),
+        _metadata: { version: '0.1.0', builtAt: Date.now(), keyDimension: 'perKey' },
+        pipeline_assembler: { config: { pipelines: pipelinesArr, routePools, routeMeta, authMappings: {} } }
+      };
+
+      await this.saveMergedConfig(mergedConfig);
+
+      if (this.isDebugEnhanced) {
+        this.addToMergeHistory({ mergeId, success: true, totalTime: Date.now()-startTime, mergedConfigSize: Object.keys(mergedConfig).length, timestamp: Date.now() });
+        this.recordConfigMetric('merge_complete', { mergeId, success: true });
+      }
+      console.log('✅ Merged configuration generated successfully (canonical minimal)');
+    } catch (error) {
+      if (this.isDebugEnhanced) {
+        this.recordConfigMetric('merge_failed', { error: error instanceof Error ? error.message : String(error) });
+      }
+      console.error('❌ Failed to generate merged configuration (canonical minimal):', error);
       throw error;
     }
   }
@@ -401,8 +540,42 @@ export class ConfigManagerModule extends BaseModule {
       let compatibilityConfig = null;
 
       try {
-        // 1. 先做一次轻量预归一化，避免兼容性引擎因类型枚举拒绝（如 'glm'）
-        const preNormalized = JSON.parse(JSON.stringify(userConfig)) as Record<string, unknown>;
+        // 1. 先做一次轻量预归一化，避免兼容性引擎因类型枚举/必填字段缺失而拒绝
+        const preNormalized = JSON.parse(JSON.stringify(userConfig)) as Record<string, any>;
+        // 顶层必填：version
+        if (typeof preNormalized.version !== 'string' || !preNormalized.version.trim()) {
+          preNormalized.version = '1.0.0';
+        }
+        // virtualrouter 节点与必需字段
+        preNormalized.virtualrouter = preNormalized.virtualrouter && typeof preNormalized.virtualrouter === 'object'
+          ? preNormalized.virtualrouter
+          : {};
+        const vrPrim = preNormalized.virtualrouter as Record<string, any>;
+        if (!vrPrim.inputProtocol) { vrPrim.inputProtocol = 'openai'; }
+        if (!vrPrim.outputProtocol) { vrPrim.outputProtocol = 'openai'; }
+        if (!vrPrim.providers || typeof vrPrim.providers !== 'object') { vrPrim.providers = {}; }
+        // 将顶层 providers 合并进 virtualrouter.providers（若存在）
+        if (preNormalized.providers && typeof preNormalized.providers === 'object') {
+          for (const [pid, prov] of Object.entries(preNormalized.providers as Record<string, any>)) {
+            const p = JSON.parse(JSON.stringify(prov || {}));
+            if (!p.id) p.id = pid;
+            // responses 类型不被解析器枚举接受，统一映射到 openai 家族；
+            const t = String(p.type || '').toLowerCase();
+            if (t === 'responses') { p.type = 'openai'; }
+            if (p.baseURL && !p.baseUrl) { p.baseUrl = p.baseURL; }
+            // 确保 models 节点存在
+            if (!p.models || typeof p.models !== 'object') {
+              const modelId = (preNormalized.routeMeta && preNormalized.routeMeta['fc.gpt-5']?.modelId) || 'gpt-5';
+              p.models = { [modelId]: { supportsStreaming: true } };
+            }
+            (vrPrim.providers as Record<string, any>)[pid] = p;
+          }
+          delete preNormalized.providers;
+        }
+        // routing 键存在（允许空数组）
+        if (!vrPrim.routing || typeof vrPrim.routing !== 'object') {
+          vrPrim.routing = { default: [], coding: [], longcontext: [], tools: [], thinking: [], vision: [], websearch: [], background: [] };
+        }
         try {
           const vrNode = (preNormalized as Record<string, unknown>)?.['virtualrouter'] as Record<string, unknown> | undefined;
           const provs = (vrNode && typeof vrNode['providers'] === 'object' && vrNode['providers'] !== null)
@@ -410,14 +583,18 @@ export class ConfigManagerModule extends BaseModule {
             : {};
           Object.keys(provs).forEach((pid) => {
             const p = provs[pid] || {};
-            const family = String(p?.type || '').toLowerCase();
-            if (family === 'glm') { p.type = 'custom'; }
+            // 保持用户声明的 provider.type，不做 family 猜测或覆写（避免破坏后续兼容层/组装推导）
+            // const family = String(p?.type || '').toLowerCase();
+            // if (family === 'glm') { p.type = 'custom'; }
             // Provide schema-friendly defaults expected by downstream engines
             if (!p.id) { p.id = pid; }
             if (typeof p.enabled === 'undefined') { p.enabled = true; }
             if (p.baseURL && !p.baseUrl) { p.baseUrl = p.baseURL; }
-            // Normalize apiKey into auth block if needed
+            // Normalize apiKey into auth block if needed; also mirror auth.apiKey back to apiKey array for schema
             let apiKeyArr = Array.isArray(p.apiKey) ? p.apiKey : (typeof p.apiKey === 'string' && p.apiKey ? [p.apiKey] : []);
+            if ((!apiKeyArr || apiKeyArr.length === 0) && p.auth && typeof p.auth.apiKey === 'string' && p.auth.apiKey) {
+              apiKeyArr = [p.auth.apiKey];
+            }
 
             // API Key inheritance: if provider-level apiKey is empty, inherit from parent levels
             if (apiKeyArr.length === 0) {
@@ -455,6 +632,10 @@ export class ConfigManagerModule extends BaseModule {
               p.auth = { type: 'apikey', apiKey: apiKeyArr[0] };
               console.log(`🔧 Created auth block for ${pid} with API key: ${apiKeyArr[0].slice(0, 4)}****`);
             }
+            // Mirror back apiKey array for schema validation
+            if ((!Array.isArray(p.apiKey) || p.apiKey.length === 0) && apiKeyArr.length > 0) {
+              p.apiKey = apiKeyArr;
+            }
             if (!Array.isArray(p.keyAliases) || p.keyAliases.length === 0) {
               p.keyAliases = ['key1'];
             }
@@ -466,7 +647,22 @@ export class ConfigManagerModule extends BaseModule {
           // 这里仅保持轻量的 family/type 归一化，避免侵入式回退逻辑
         } catch { /* noop */ }
 
-        // 2. 使用CompatibilityEngine处理兼容性（包含引擎内预处理）
+        // 2.a 预补齐 routing 缺省数组字段，避免老版本校验因缺失分类报错
+        try {
+          const vrNode = (preNormalized as Record<string, unknown>)?.['virtualrouter'] as Record<string, unknown> | undefined;
+          if (vrNode && typeof vrNode === 'object') {
+            const routing = (vrNode['routing'] as Record<string, unknown>) || {};
+            const categories = ['default','coding','longcontext','tools','thinking','vision','websearch','background'];
+            for (const cat of categories) {
+              if (!Array.isArray((routing as any)[cat])) {
+                (routing as any)[cat] = [];
+              }
+            }
+            (vrNode as any)['routing'] = routing;
+          }
+        } catch { /* ignore; compatibility engine will handle further */ }
+
+        // 2.b 使用CompatibilityEngine处理兼容性（包含引擎内预处理）
         const compatResult = await this.compatibilityEngine.processCompatibility(
           JSON.stringify(preNormalized)
         );

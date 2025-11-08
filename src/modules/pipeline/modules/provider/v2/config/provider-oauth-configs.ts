@@ -3,7 +3,7 @@
  *
  * 基于iflow和qwen的实际配置，提供预定义的OAuth流程配置
  */
-
+import { LOCAL_HOSTS, HTTP_PROTOCOLS, DEFAULT_CONFIG, API_PATHS } from "../../../../../../constants/index.js";
 import { OAuthFlowConfigManager, OAuthFlowType, OAuthActivationType, type OAuthFlowConfig } from './oauth-flows.js';
 import { OAuthDeviceFlowStrategyFactory } from '../strategies/oauth-device-flow.js';
 import { OAuthAuthCodeFlowStrategyFactory } from '../strategies/oauth-auth-code-flow.js';
@@ -71,7 +71,7 @@ function registerProviderOAuthConfigs(): void {
     client: {
       clientId: 'iflow-desktop-client',
       scopes: ['openid', 'profile', 'email', 'api'],
-      redirectUri: 'http://localhost:8080/oauth2callback'
+      redirectUri: `${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.LOCALHOST}:${DEFAULT_CONFIG.OAUTH_CALLBACK_PORT}${API_PATHS.OAUTH_CALLBACK}`
     },
     headers: {
       'User-Agent': 'iflow-cli/2.0',

@@ -3,7 +3,7 @@
  *
  * Centralized configuration management for V2 architecture.
  * Provides configuration validation, transformation, and management.
- */
+import { API_ENDPOINTS } from "../../../constants/index.js"; */
 
 import type { V2SystemConfig, ModuleConfig, ProviderConfig } from '../types/v2-types.js';
 import type { UnknownObject } from '../../../../types/common-types.js';
@@ -314,7 +314,7 @@ export class V2ConfigLibrary {
         type: 'provider',
         config: {
           providerType: 'openai',
-          baseUrl: 'https://api.openai.com/v1',
+          baseUrl: API_ENDPOINTS.OPENAI,
           auth: { type: 'apikey' }
         }
       } as ProviderConfig;
@@ -438,7 +438,7 @@ export class V2ConfigLibrary {
       version: '1.0',
       template: {
         providerType: 'openai',
-        baseUrl: 'https://api.openai.com/v1',
+        baseUrl: API_ENDPOINTS.OPENAI,
         auth: {
           type: 'apikey',
           apiKey: ''

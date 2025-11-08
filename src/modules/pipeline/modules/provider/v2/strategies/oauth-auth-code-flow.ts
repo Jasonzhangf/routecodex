@@ -3,7 +3,7 @@
  *
  * 实现标准的OAuth 2.0授权码流程，支持PKCE
  */
-
+import { LOCAL_HOSTS } from "../../../../../../constants/index.js";
 import type { UnknownObject } from '../../../../../../types/common-types.js';
 import { BaseOAuthFlowStrategy, OAuthFlowType } from '../config/oauth-flows.js';
 import type { OAuthFlowConfig } from '../config/oauth-flows.js';
@@ -140,7 +140,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
 
     // 查找可用端口
     const port = await findOpenPort();
-    const host = process.env.OAUTH_CALLBACK_HOST || 'localhost';
+    const host = process.env.OAUTH_CALLBACK_HOST || LOCAL_HOSTS.LOCALHOST;
 
     const callbackPromise = new Promise<{ code: string; verifier: string }>((resolve, reject) => {
       const server = http.createServer(async (req, res) => {

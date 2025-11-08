@@ -3,7 +3,7 @@ import net from 'net';
 import path from 'path';
 import { homedir } from 'os';
 
-export function generateCodeVerifier(): string {
+import { LOCAL_HOSTS } from "../../../constants/index.js";export function generateCodeVerifier(): string {
   const bytes = crypto.randomBytes(32);
   return bytes.toString('base64url');
 }
@@ -38,7 +38,7 @@ export async function findOpenPort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
     server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(0, LOCAL_HOSTS.IPV4, () => {
       const address = server.address();
       const port = typeof address === 'object' && address ? address.port : 0;
       server.close(() => resolve(port));

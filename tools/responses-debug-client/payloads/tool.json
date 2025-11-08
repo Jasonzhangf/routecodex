@@ -1,0 +1,27 @@
+{
+  "model": "gpt-4o-mini",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "input_text", "text": "Call the echo tool with {\"text\":\"ping\"}" }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "echo",
+      "description": "Echo back the provided text",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" }
+        },
+        "required": ["text"]
+      }
+    }
+  ],
+  "stream": true
+}
+

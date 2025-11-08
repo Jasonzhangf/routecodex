@@ -7,13 +7,12 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS, DEFAULT_CONFIG, API_ENDPOINTS } from "./constants/index.js";import fs from 'fs';
 import ora from 'ora';
 import type { Ora } from 'ora';
-import path from 'path';
-import fs from 'fs';
-import { homedir } from 'os';
+import path from "path";import { homedir } from 'os';
 import { spawnSync } from 'child_process';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import type { UnknownObject } from './types/common-types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -63,11 +62,21 @@ const logger = {
   debug: (msg: string) => console.log(`${chalk.gray('◉')  } ${  msg}`)
 };
 
-// Ensure llmswitch-core is resolvable;严格失败（不再尝试“重路由到全局”）
+// Ensure llmswitch-core is resolvable；先尝试依赖包，失败则回退到 vendor
 async function ensureCoreOrFail(): Promise<void> {
   try {
-    await import('rcc-llmswitch-core/api');
-  } catch (err) {
+    // 仅加载最小 guidance 入口，避免触发大体积转换模块的深层依赖
+    await import('rcc-llmswitch-core/v2/guidance/index.js');
+    return;
+  } catch {
+    try {
+      // vendor 路径：dist/ 旁的 vendor/rcc-llmswitch-core/dist/v2/guidance/index.js
+      const vendorGuidance = path.resolve(__dirname, '..', 'vendor', 'rcc-llmswitch-core', 'dist', 'v2', 'guidance', 'index.js');
+      if (fs.existsSync(vendorGuidance)) {
+        await import(pathToFileURL(vendorGuidance).href);
+        return;
+      }
+    } catch { /* ignore */ }
     logger.error('llmswitch-core not found. Please build sharedmodule/llmswitch-core or install package dependencies.');
     logger.error('建议顺序: 先编译 sharedmodule/llmswitch-core，再编译根包并全局安装。');
     process.exit(1);
@@ -103,7 +112,7 @@ program
   .description('Launch Claude Code interface with RouteCodex as proxy')
   .option('-p, --port <port>', 'RouteCodex server port (overrides config file)')
   // Default to IPv4 localhost to avoid environments where localhost resolves to ::1
-  .option('-h, --host <host>', 'RouteCodex server host', '127.0.0.1')
+  .option('-h, --host <host>', 'RouteCodex server host', LOCAL_HOSTS.IPV4)
   .option('-c, --config <config>', 'RouteCodex configuration file path')
   .option('--claude-path <path>', 'Path to Claude Code executable', 'claude')
   .option('--model <model>', 'Model to use with Claude Code')
@@ -146,9 +155,9 @@ program
         spinner.text = 'Checking RouteCodex server status...';
         const normalizeConnectHost = (h: string): string => {
           const v = String(h || '').toLowerCase();
-          if (v === '0.0.0.0') {return '127.0.0.1';}
-          if (v === '::' || v === '::1' || v === 'localhost') {return '127.0.0.1';}
-          return h || '127.0.0.1';
+          if (v === '0.0.0.0') {return LOCAL_HOSTS.IPV4;}
+          if (v === '::' || v === '::1' || v === 'localhost') {return LOCAL_HOSTS.IPV4;}
+          return h || LOCAL_HOSTS.IPV4;
         };
         const connectHost = normalizeConnectHost(actualHost);
         const serverUrl = `http://${connectHost}:${actualPort}`;
@@ -200,9 +209,9 @@ program
       // Prepare environment variables for Claude Code
       const resolvedBaseHost = String((() => {
         const v = String(actualHost || '').toLowerCase();
-        if (v === '0.0.0.0') {return '127.0.0.1';}
-        if (v === '::' || v === '::1' || v === 'localhost') {return '127.0.0.1';}
-        return actualHost || '127.0.0.1';
+        if (v === '0.0.0.0') {return LOCAL_HOSTS.IPV4;}
+        if (v === '::' || v === '::1' || v === 'localhost') {return LOCAL_HOSTS.IPV4;}
+        return actualHost || LOCAL_HOSTS.IPV4;
       })());
       const anthropicBase = `http://${resolvedBaseHost}:${actualPort}`;
       const claudeEnv = {
@@ -301,8 +310,8 @@ program
 
       const norm = (h: string | undefined): string => {
         const v = String(h || '').toLowerCase();
-        if (v === '0.0.0.0' || v === '::' || v === '::1' || v === 'localhost') {return '127.0.0.1';}
-        return h || '127.0.0.1';
+        if (v === '0.0.0.0' || v === '::' || v === '::1' || v === 'localhost') {return LOCAL_HOSTS.IPV4;}
+        return h || LOCAL_HOSTS.IPV4;
       };
       const resolvedHost = norm(host);
       const base = `http://${resolvedHost}:${port}`;
@@ -435,7 +444,7 @@ program
         fs.writeFileSync(pidFile, String(childProc.pid ?? ''), 'utf8');
       } catch (error) { /* ignore */ }
 
-      const host = (config?.httpserver?.host || config?.server?.host || config?.host || 'localhost');
+      const host = (config?.httpserver?.host || config?.server?.host || config?.host || LOCAL_HOSTS.LOCALHOST);
       spinner.succeed(`RouteCodex server starting on ${host}:${resolvedPort}`);
       logger.info(`Configuration loaded from: ${configPath}`);
       logger.info(`Server will run on port: ${resolvedPort}`);
@@ -445,7 +454,7 @@ program
       const shutdown = async (sig: NodeJS.Signals) => {
         // 1) Ask server to shutdown over HTTP
         try {
-          await fetch(`http://127.0.0.1:${resolvedPort}/shutdown`, { method: 'POST' }).catch(() => {});
+          await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${resolvedPort}${API_PATHS.SHUTDOWN}`, { method: 'POST' }).catch(() => {});
         } catch (error) { /* ignore */ }
         // 2) Forward signal to child
         try { childProc.kill(sig); } catch (error) { /* ignore */ }
@@ -582,8 +591,8 @@ async function initializeConfig(configPath: string, template?: string, force: bo
       case 'lmstudio':
         templateConfig = {
           server: {
-            port: 5506,
-            host: "localhost"
+            port: DEFAULT_CONFIG.PORT,
+            host: LOCAL_HOSTS.LOCALHOST
           },
           logging: {
             level: "info"
@@ -591,7 +600,7 @@ async function initializeConfig(configPath: string, template?: string, force: bo
           providers: {
             lmstudio: {
               type: "lmstudio",
-              baseUrl: "http://localhost:1234",
+              baseUrl: `${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.LOCALHOST}:${DEFAULT_CONFIG.LM_STUDIO_PORT}`,
               apiKey: "${LM_STUDIO_API_KEY:-}",
               models: {
                 "gpt-oss-20b-mlx": {
@@ -641,8 +650,8 @@ async function initializeConfig(configPath: string, template?: string, force: bo
       case 'oauth':
         templateConfig = {
           server: {
-            port: 5506,
-            host: "localhost"
+            port: DEFAULT_CONFIG.PORT,
+            host: LOCAL_HOSTS.LOCALHOST
           },
           logging: {
             level: "info"
@@ -717,8 +726,8 @@ async function initializeConfig(configPath: string, template?: string, force: bo
       default:
         templateConfig = {
           server: {
-            port: 5506,
-            host: "localhost"
+            port: DEFAULT_CONFIG.PORT,
+            host: LOCAL_HOSTS.LOCALHOST
           },
           logging: {
             level: "info"
@@ -727,7 +736,7 @@ async function initializeConfig(configPath: string, template?: string, force: bo
             openai: {
               type: "openai",
               apiKey: "${OPENAI_API_KEY}",
-              baseUrl: "https://api.openai.com/v1",
+              baseUrl: API_ENDPOINTS.OPENAI,
               models: {
                 "gpt-4": {
                   maxTokens: 8192,
@@ -916,13 +925,13 @@ program
       const child = spawn(nodeBin, args, { stdio: 'inherit', env });
       try { fs.writeFileSync(path.join(homedir(), '.routecodex', 'server.cli.pid'), String(child.pid ?? ''), 'utf8'); } catch (error) { /* ignore */ }
 
-      const host = (config?.httpserver?.host || config?.server?.host || config?.host || 'localhost');
+      const host = (config?.httpserver?.host || config?.server?.host || config?.host || LOCAL_HOSTS.LOCALHOST);
       spinner.succeed(`RouteCodex server restarting on ${host}:${resolvedPort}`);
       logger.info(`Server will run on port: ${resolvedPort}`);
       logger.info('Press Ctrl+C to stop the server');
 
       const shutdown = async (sig: NodeJS.Signals) => {
-        try { await fetch(`http://127.0.0.1:${resolvedPort}/shutdown`, { method: 'POST' }).catch(() => {}); } catch (error) { /* ignore */ }
+        try { await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${resolvedPort}${API_PATHS.SHUTDOWN}`, { method: 'POST' }).catch(() => {}); } catch (error) { /* ignore */ }
         try { child.kill(sig); } catch (error) { /* ignore */ }
         try { if (child.pid) { process.kill(-child.pid, sig); } } catch (error) { /* ignore */ }
         const deadline = Date.now() + 3500;
@@ -991,7 +1000,7 @@ program
         const config = JSON.parse(configContent);
 
         port = config?.port || config?.server?.port;
-        host = config?.server?.host || config?.host || 'localhost';
+        host = config?.server?.host || config?.host || LOCAL_HOSTS.LOCALHOST;
 
         if (!port || typeof port !== 'number' || port <= 0) {
           const errorMsg = 'Invalid or missing port configuration in configuration file';
@@ -1227,7 +1236,7 @@ async function ensurePortAvailable(port: number, parentSpinner: Ora, opts: { res
 
   // Best-effort HTTP shutdown on common loopback hosts to cover IPv4/IPv6
   try {
-    const candidates = ['127.0.0.1', 'localhost'];
+    const candidates = [LOCAL_HOSTS.IPV4, LOCAL_HOSTS.LOCALHOST];
     for (const h of candidates) {
       try {
         const controller = new AbortController();
@@ -1376,7 +1385,7 @@ async function isServerHealthyQuick(port: number): Promise<boolean> {
   try {
     const controller = new AbortController();
     const t = setTimeout(() => { try { controller.abort(); } catch { /* ignore */ } }, 800);
-    const res = await fetch(`http://127.0.0.1:${port}/health`, { method: 'GET', signal: controller.signal });
+    const res = await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${port}${API_PATHS.HEALTH}`, { method: 'GET', signal: controller.signal });
     clearTimeout(t);
     if (!res.ok) { return false; }
     const data = await res.json().catch(() => null);
@@ -1495,7 +1504,7 @@ program
         // Load config and resolve port
         if (!fs.existsSync(userCfgPath)) {
           spinner.fail(`Configuration file not found: ${userCfgPath}`);
-          console.log('Create minimal config, e.g.: {"httpserver":{"host":"127.0.0.1","port":5520}}');
+          console.log(`Create minimal config, e.g.: {"httpserver":{"host":"${LOCAL_HOSTS.IPV4}","port":${DEFAULT_CONFIG.PORT}}}`);
           process.exit(1);
         }
         const cfg = JSON.parse(fs.readFileSync(userCfgPath, 'utf8'));
@@ -1547,7 +1556,7 @@ program
   .command('port')
   .description('Port utilities (doctor)')
   .argument('<sub>', 'Subcommand: doctor')
-  .argument('[port]', 'Port number (e.g., 5520)')
+  .argument('[port]', 'Port number (e.g., ${DEFAULT_CONFIG.PORT})')
   .option('--kill', 'Kill all listeners on the port')
   .action(async (sub: string, portArg: string | undefined, opts: { kill?: boolean }) => {
     if ((sub || '').toLowerCase() !== 'doctor') {

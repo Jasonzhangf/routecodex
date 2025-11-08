@@ -186,6 +186,49 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
       timings.providerEnd = Date.now();
       debugStages.push('provider');
 
+      // Streaming fast-path: if provider returned SSE stream, convert to Responses SSE inside llmswitch-core and return.
+      try {
+        const anyProv: any = providerPayload as any;
+        if (anyProv && typeof anyProv === 'object' && anyProv.__sse_stream) {
+          const upstream = anyProv.__sse_stream;
+          // Dynamic import to vendor/core
+          const importCore = async (sub: string) => {
+            const path = await import('path');
+            const { fileURLToPath, pathToFileURL } = await import('url');
+            try {
+              const __filename = fileURLToPath(import.meta.url);
+              const __dirname = path.dirname(__filename);
+              const vendor = path.resolve(__dirname, '..', '..', '..', '..', 'vendor', 'rcc-llmswitch-core', 'dist');
+              const full = path.join(vendor, sub);
+              return await import(pathToFileURL(full).href);
+            } catch {
+              return await import('rcc-llmswitch-core/' + sub);
+            }
+          };
+          const mod = await importCore('v2/conversion/streaming/openai-to-responses-stream.js');
+          const fn = (mod && (mod.createResponsesSSEStreamFromOpenAI || mod.default?.createResponsesSSEStreamFromOpenAI)) as any;
+          if (typeof fn === 'function') {
+            const tools = ((processedRequest as any)?.data as any)?.tools;
+            const sse = fn(upstream, { requestId, model: String(((processedRequest as any)?.data as any)?.model || 'unknown'), tools });
+            const processingTime = Date.now() - startTime;
+            this.updateMetrics(processingTime, true);
+            const response: PipelineResponse = {
+              data: { __sse_responses: sse },
+              metadata: {
+                pipelineId: this.pipelineId,
+                processingTime,
+                stages: debugStages,
+                requestId: request.route?.requestId || 'unknown'
+              },
+              debug: undefined
+            } as any;
+            this.debugLogger.logResponse(request.route?.requestId || 'unknown', 'pipeline-success-stream', { note: 'core transformed SSE' });
+            this._status.state = 'ready';
+            return response;
+          }
+        }
+      } catch { /* ignore */ }
+
       // Wrap provider payload to DTO for response transformation chain
       // Preserve routing metadata (entryEndpoint/protocol) for response phase so llmswitch can route correctly
       const processedMeta = (processedRequest && typeof processedRequest === 'object' && (processedRequest as any).metadata)
@@ -204,6 +247,10 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
           processingTime: 0,
           stages: [],
           requestId: request.route?.requestId || 'unknown',
+          // 传递入站的 stream 标志，供后续 llmswitch 在响应阶段决定是否产出 __sse_responses
+          ...(typeof (processedRequest as any)?.metadata?.stream === 'boolean'
+            ? { stream: (processedRequest as any).metadata.stream }
+            : (typeof (request as any)?.metadata?.stream === 'boolean' ? { stream: (request as any).metadata.stream } : {})),
           ...(entryEndpoint ? { entryEndpoint } : {}),
           ...(endpoint ? { endpoint } : {}),
           ...(protocol ? { protocol } : {})
@@ -636,12 +683,13 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     try {
       try { console.log('[LLMSWITCH] entryEndpoint:', (request as any)?.metadata?.entryEndpoint); } catch { /* ignore */ }
       const transformed = await this.modules.llmSwitch.processIncoming(request);
-      const isDto = transformed && typeof transformed === 'object'
-        && 'data' in (transformed as Record<string, unknown>)
-        && 'metadata' in (transformed as Record<string, unknown>);
+      const trObj = transformed as unknown as Record<string, unknown>;
+      const isDto = trObj && typeof trObj === 'object'
+        && 'data' in trObj
+        && 'metadata' in trObj;
       const out: SharedPipelineRequest = isDto
         ? { ...(request as any), ...(transformed as any), route: request.route }
-        : { ...request, data: transformed as UnknownObject } as SharedPipelineRequest;
+        : { ...request, data: (transformed as unknown as UnknownObject) } as SharedPipelineRequest;
       this.debugLogger.logTransformation(request.route?.requestId || 'unknown', 'llm-switch-request', request.data, (out as any).data);
       return out;
     } catch (error) {
@@ -664,12 +712,13 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
 
     try {
       const processed = await this.modules.workflow.processIncoming(request);
-      const isDto = processed && typeof processed === 'object'
-        && 'data' in (processed as Record<string, unknown>)
-        && 'metadata' in (processed as Record<string, unknown>);
+      const prObj = processed as unknown as Record<string, unknown>;
+      const isDto = prObj && typeof prObj === 'object'
+        && 'data' in prObj
+        && 'metadata' in prObj;
       const out: SharedPipelineRequest = isDto
         ? { ...(request as any), ...(processed as any), route: request.route }
-        : { ...request, data: processed as UnknownObject } as SharedPipelineRequest;
+        : { ...request, data: (processed as unknown as UnknownObject) } as SharedPipelineRequest;
       this.debugLogger.logTransformation(request.route?.requestId || 'unknown', 'workflow-request', request.data, (out as any).data);
       return out;
     } catch (error) {
@@ -692,12 +741,13 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
 
     try {
       const transformed = await this.modules.compatibility.processIncoming(request);
-      const isDto = transformed && typeof transformed === 'object'
-        && 'data' in (transformed as Record<string, unknown>)
-        && 'metadata' in (transformed as Record<string, unknown>);
+      const cObj = transformed as unknown as Record<string, unknown>;
+      const isDto = cObj && typeof cObj === 'object'
+        && 'data' in cObj
+        && 'metadata' in cObj;
       const out: SharedPipelineRequest = isDto
         ? { ...(request as any), ...(transformed as any), route: request.route }
-        : { ...request, data: transformed as UnknownObject } as SharedPipelineRequest;
+        : { ...request, data: (transformed as unknown as UnknownObject) } as SharedPipelineRequest;
       this.debugLogger.logTransformation(request.route?.requestId || 'unknown', 'compatibility-request', request.data, (out as any).data);
       return out;
     } catch (error) {
@@ -719,7 +769,17 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     }
 
     try {
-      const responsePayload = await this.modules.provider.processIncoming(request.data as UnknownObject);
+      // Ensure provider receives entryEndpoint/stream flags inside body.metadata as well
+      const dataBody: any = request.data as UnknownObject;
+      const mergedMeta = {
+        ...((dataBody && typeof dataBody === 'object' && (dataBody as any).metadata) ? (dataBody as any).metadata : {}),
+        ...((request && typeof request === 'object' && (request as any).metadata) ? (request as any).metadata as any : {})
+      } as Record<string, unknown>;
+      const dataWithMeta = {
+        ...(dataBody || {}),
+        metadata: mergedMeta
+      } as UnknownObject;
+      const responsePayload = await this.modules.provider.processIncoming(dataWithMeta);
       this.debugLogger.logProviderRequest(this.pipelineId, 'request-start', request, responsePayload);
       return responsePayload as UnknownObject;
     } catch (error) {

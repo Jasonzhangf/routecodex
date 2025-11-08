@@ -599,6 +599,15 @@ export class PipelineManager implements RCCBaseModule {
 
       return response;
     } catch (error) {
+      // 禁止 Anthrop ic (/v1/messages) 的任何自动重试，直接抛出错误（零回退策略）
+      try {
+        const ep = String(((request as any)?.metadata?.entryEndpoint) || '').toLowerCase();
+        if (ep === '/v1/messages') {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          this.pipelineHealthManager.recordError(pipeline.pipelineId, errorMessage);
+          throw error;
+        }
+      } catch { /* ignore and continue */ }
       // Check if it's a 429 error
       const errorObj = error as Record<string, unknown>;
       if (errorObj['statusCode'] === 429 || errorObj['code'] === 'HTTP_429') {
@@ -859,15 +868,15 @@ export class PipelineManager implements RCCBaseModule {
     // Canonical LLMSwitch names
     // Route legacy openai normalizer type to conversion router to ensure single entrypoint
     this.registry.registerModule('llmswitch-openai-openai', this.createConversionRouterModule);
-    this.registry.registerModule('llmswitch-anthropic-openai', this.createAnthropicOpenAIConverterModule);
-    this.registry.registerModule('llmswitch-response-chat', this.createResponsesChatLLMSwitchModule);
+    this.registry.registerModule('llmswitch-anthropic-openai', this.createConversionRouterModule);
+    this.registry.registerModule('llmswitch-response-chat', this.createConversionRouterModule);
     this.registry.registerModule('llmswitch-conversion-router', this.createConversionRouterModule);
-    this.registry.registerModule('llmswitch-responses-passthrough', this.createResponsesPassthroughLLMSwitchModule);
+    this.registry.registerModule('llmswitch-responses-passthrough', this.createConversionRouterModule);
     // unified switch removed; use llmswitch-conversion-router instead
     // Aliases for backward compatibility (map to conversion-router to keep single path)
     this.registry.registerModule('openai-normalizer', this.createConversionRouterModule);
-    this.registry.registerModule('anthropic-openai-converter', this.createAnthropicOpenAIConverterModule);
-    this.registry.registerModule('responses-chat-switch', this.createResponsesChatLLMSwitchModule);
+    this.registry.registerModule('anthropic-openai-converter', this.createConversionRouterModule);
+    this.registry.registerModule('responses-chat-switch', this.createConversionRouterModule);
     this.registry.registerModule('streaming-control', this.createStreamingControlModule);
     this.registry.registerModule('field-mapping', this.createFieldMappingModule);
     // Standard V2 compatibility wrapper (single entry)
@@ -878,6 +887,14 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('qwen-provider', this.createQwenProviderModule);
     // Add alias for configuration compatibility
     this.registry.registerModule('qwen', this.createQwenProviderModule);
+    // Provider family aliases → concrete provider modules (V2)
+    this.registry.registerModule('glm', this.createGLMHTTPProviderModule);
+    this.registry.registerModule('openai', this.createOpenAIProviderModule);
+    // Responses provider (real SSE passthrough) → uses ProviderFactory to build ResponsesProvider
+    this.registry.registerModule('responses', this.createOpenAIProviderModule);
+    this.registry.registerModule('lmstudio', this.createLMStudioHTTPModule);
+    this.registry.registerModule('iflow', this.createIFlowProviderModule);
+    this.registry.registerModule('generic_responses', this.createGenericResponsesProviderModule);
     this.registry.registerModule('generic-http', this.createGenericHTTPModule);
     this.registry.registerModule('lmstudio-http', this.createLMStudioHTTPModule);
     this.registry.registerModule('openai-provider', this.createOpenAIProviderModule);
@@ -1104,148 +1121,126 @@ export class PipelineManager implements RCCBaseModule {
   };
 
   private createQwenProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    // 使用V2 Provider - 统一处理所有OpenAI兼容服务
-    const { V1ConfigConverter } = await import('../modules/provider/v2/api/v1-config-converter.js');
     const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
-
-    // 将V1配置转换为V2配置
-    const v2Config = V1ConfigConverter.fromV1Config(config);
-
-    // 验证V2配置
+    const v2Config = this.toV2ProviderConfig(config);
     const validation = ProviderFactory.validateConfig(v2Config);
     if (!validation.isValid) {
       throw new Error(`Invalid V2 Qwen provider configuration: ${validation.errors.join(', ')}`);
     }
-
-    // 创建并返回V2 Provider实例
     return ProviderFactory.createProvider(v2Config, dependencies);
   };
 
   private createIFlowProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    // 使用V2 Provider - 统一处理所有OpenAI兼容服务
-    const { V1ConfigConverter } = await import('../modules/provider/v2/api/v1-config-converter.js');
     const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
-
-    // 将V1配置转换为V2配置
-    const v2Config = V1ConfigConverter.fromV1Config(config);
-
-    // 验证V2配置
+    const v2Config = this.toV2ProviderConfig(config);
     const validation = ProviderFactory.validateConfig(v2Config);
     if (!validation.isValid) {
       throw new Error(`Invalid V2 iFlow provider configuration: ${validation.errors.join(', ')}`);
     }
-
-    // 创建并返回V2 Provider实例
     return ProviderFactory.createProvider(v2Config, dependencies);
   };
 
   private createGLMHTTPProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    // 使用V2 Provider - 统一处理所有OpenAI兼容服务
-    const { V1ConfigConverter } = await import('../modules/provider/v2/api/v1-config-converter.js');
     const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
-
-    // 将V1配置转换为V2配置
-    const v2Config = V1ConfigConverter.fromV1Config(config);
-
-    // 验证V2配置
+    const v2Config = this.toV2ProviderConfig(config);
     const validation = ProviderFactory.validateConfig(v2Config);
     if (!validation.isValid) {
       throw new Error(`Invalid V2 GLM provider configuration: ${validation.errors.join(', ')}`);
     }
-
-    // 创建并返回V2 Provider实例
     return ProviderFactory.createProvider(v2Config, dependencies);
   };
 
   private createGenericOpenAIProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    // 使用V2 Provider - 统一处理所有OpenAI兼容服务
-    const { V1ConfigConverter } = await import('../modules/provider/v2/api/v1-config-converter.js');
     const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
-
-    // 将V1配置转换为V2配置
-    const v2Config = V1ConfigConverter.fromV1Config(config);
-
-    // 验证V2配置
+    const v2Config = this.toV2ProviderConfig(config);
     const validation = ProviderFactory.validateConfig(v2Config);
     if (!validation.isValid) {
       throw new Error(`Invalid V2 Generic OpenAI provider configuration: ${validation.errors.join(', ')}`);
     }
-
-    // 创建并返回V2 Provider实例
     return ProviderFactory.createProvider(v2Config, dependencies);
   };
 
   private createGenericHTTPModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    // 使用V2 Provider - 统一处理所有OpenAI兼容服务
-    const { V1ConfigConverter } = await import('../modules/provider/v2/api/v1-config-converter.js');
     const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
-
-    // 将V1配置转换为V2配置
-    const v2Config = V1ConfigConverter.fromV1Config(config);
-
-    // 验证V2配置
+    const v2Config = this.toV2ProviderConfig(config);
     const validation = ProviderFactory.validateConfig(v2Config);
     if (!validation.isValid) {
       throw new Error(`Invalid V2 generic HTTP provider configuration: ${validation.errors.join(', ')}`);
     }
-
-    // 创建并返回V2 Provider实例
     return ProviderFactory.createProvider(v2Config, dependencies);
   };
 
   private createLMStudioHTTPModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    // 使用V2 Provider - 统一处理所有OpenAI兼容服务
-    const { V1ConfigConverter } = await import('../modules/provider/v2/api/v1-config-converter.js');
     const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
-
-    // 将V1配置转换为V2配置
-    const v2Config = V1ConfigConverter.fromV1Config(config);
-
-    // 验证V2配置
+    const v2Config = this.toV2ProviderConfig(config);
     const validation = ProviderFactory.validateConfig(v2Config);
     if (!validation.isValid) {
       throw new Error(`Invalid V2 LMStudio provider configuration: ${validation.errors.join(', ')}`);
     }
-
-    // 创建并返回V2 Provider实例
     return ProviderFactory.createProvider(v2Config, dependencies);
   };
 
   private createOpenAIProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    // 使用V2 Provider - 与V1完全接口兼容
-    const { V1ConfigConverter } = await import('../modules/provider/v2/api/v1-config-converter.js');
     const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
-
-    // 将V1配置转换为V2配置
-    const v2Config = V1ConfigConverter.fromV1Config(config);
-
-    // 验证V2配置
+    const v2Config = this.toV2ProviderConfig(config);
     const validation = ProviderFactory.validateConfig(v2Config);
     if (!validation.isValid) {
       throw new Error(`Invalid V2 provider configuration: ${validation.errors.join(', ')}`);
     }
-
-    // 创建并返回V2 Provider实例
     return ProviderFactory.createProvider(v2Config, dependencies);
   };
 
   private createGenericResponsesProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    // 使用V2 Provider - 统一处理所有OpenAI兼容服务
-    const { V1ConfigConverter } = await import('../modules/provider/v2/api/v1-config-converter.js');
     const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
-
-    // 将V1配置转换为V2配置
-    const v2Config = V1ConfigConverter.fromV1Config(config);
-
-    // 验证V2配置
+    const v2Config = this.toV2ProviderConfig(config);
     const validation = ProviderFactory.validateConfig(v2Config);
     if (!validation.isValid) {
       throw new Error(`Invalid V2 generic responses provider configuration: ${validation.errors.join(', ')}`);
     }
-
-    // 创建并返回V2 Provider实例
     return ProviderFactory.createProvider(v2Config, dependencies);
   };
+
+  /**
+   * 将组装后的 ModuleConfig 直接转换为 V2 OpenAIStandardConfig（不再走 V1 兼容路径）。
+   * 严格要求 provider.config.providerType 存在；不做推测与回退。
+   */
+  private toV2ProviderConfig(config: ModuleConfig): import('../modules/provider/v2/api/provider-config.js').OpenAIStandardConfig {
+    const cfg = (config?.config || {}) as Record<string, unknown>;
+    const providerType = typeof cfg['providerType'] === 'string' ? (cfg['providerType'] as string).trim() : '';
+    if (!providerType) {
+      throw new Error(`Missing required field: provider.config.providerType for module type '${config.type}'`);
+    }
+
+    const auth = (cfg['auth'] || {}) as Record<string, unknown>;
+    if (!auth || typeof auth !== 'object' || !('type' in auth)) {
+      throw new Error(`Missing required field: provider.config.auth for module type '${config.type}'`);
+    }
+
+    const baseUrl = (cfg['baseUrl'] as string) || (cfg['baseURL'] as string) || '';
+    const endpoint = (cfg['endpoint'] as string) || '';
+    const timeout = (cfg['timeout'] as number) || undefined;
+    const maxRetries = (cfg['maxRetries'] as number) || undefined;
+    const headers = (cfg['headers'] as Record<string, string>) || undefined;
+    const model = typeof cfg['model'] === 'string' ? (cfg['model'] as string) : undefined;
+
+    const overrides: Record<string, unknown> = {};
+    if (endpoint) overrides['endpoint'] = endpoint;
+    if (typeof timeout === 'number') overrides['timeout'] = timeout;
+    if (typeof maxRetries === 'number') overrides['maxRetries'] = maxRetries;
+    if (headers && Object.keys(headers).length) overrides['headers'] = headers;
+
+    const v2: any = {
+      type: 'openai-standard',
+      config: {
+        providerType,
+        auth,
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(model ? { model } : {}),
+        ...(Object.keys(overrides).length ? { overrides } : {})
+      }
+    };
+    return v2;
+  }
 
   private createLMStudioCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { LMStudioCompatibility } = await import('../modules/compatibility/lmstudio-compatibility.js');

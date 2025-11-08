@@ -65,13 +65,18 @@ export class StreamingControlWorkflow implements WorkflowModule {
       const originalStream = payload?.stream;
       let transformedPayload = { ...(payload || {}) };
 
-      // If streaming request, convert to non-streaming for provider
-      if (originalStream === true) {
+      // Preserve true streaming for OpenAI Responses endpoint to allow real SSE end-to-end
+      const entryEndpoint = String((dto?.metadata as any)?.entryEndpoint || (payload?.metadata as any)?.entryEndpoint || '');
+      const isResponses = entryEndpoint === '/v1/responses';
+
+      // If streaming request and NOT /v1/responses, convert to non‑streaming for provider stability
+      if (originalStream === true && !isResponses) {
         transformedPayload = this.convertStreamingToNonStreaming(payload);
         this.logger.logTransformation(dto?.route?.requestId || 'unknown', 'streaming-to-non-streaming', payload, transformedPayload);
       } else {
-        this.logger.logModule(this.id, 'non-streaming-request', {
-          hasStream: originalStream
+        this.logger.logModule(this.id, isResponses ? 'preserve-streaming-responses' : 'non-streaming-request', {
+          hasStream: originalStream,
+          entryEndpoint
         });
       }
 

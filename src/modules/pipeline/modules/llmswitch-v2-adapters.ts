@@ -1,9 +1,22 @@
 import type { ModuleConfig, ModuleDependencies, PipelineModule } from '../interfaces/pipeline-interfaces.js';
+import path from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
 
-// v2 conversion codecs
-import { OpenAIOpenAIConversionCodec } from 'rcc-llmswitch-core/v2/conversion/codecs/openai-openai-codec';
-import { AnthropicOpenAIConversionCodec } from 'rcc-llmswitch-core/v2/conversion/codecs/anthropic-openai-codec';
-import { ResponsesOpenAIConversionCodec } from 'rcc-llmswitch-core/v2/conversion/codecs/responses-openai-codec';
+// Runtime resolver: prefer vendored core, fallback to node_modules
+async function importCore(subpath: string): Promise<any> {
+  const clean = subpath.replace(/\.js$/i, '');
+  try {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const vendor = path.resolve(__dirname, '..', '..', '..', '..', 'vendor', 'rcc-llmswitch-core', 'dist');
+    const full = path.join(vendor, clean + '.js');
+    return await import(pathToFileURL(full).href);
+  } catch {
+    // fallback to package import (use export map without extension)
+    const pkgPath = 'rcc-llmswitch-core/' + clean.replace(/\\/g, '/');
+    return await import(pkgPath);
+  }
+}
 
 type Ctx = {
   requestId?: string;
@@ -50,15 +63,16 @@ abstract class BaseV2Adapter implements PipelineModule {
 
 // Dynamic router: choose proper codec by entryEndpoint
 export class ConversionRouterAdapter extends BaseV2Adapter {
-  private openaiCodec: OpenAIOpenAIConversionCodec;
-  private anthropicCodec: AnthropicOpenAIConversionCodec;
-  private responsesCodec: ResponsesOpenAIConversionCodec;
+  private openaiCodec: any;
+  private anthropicCodec: any;
+  private responsesCodec: any;
 
   constructor(config: ModuleConfig, _dependencies: ModuleDependencies) {
     super('llmswitch-conversion-router', config);
-    this.openaiCodec = new OpenAIOpenAIConversionCodec({});
-    this.anthropicCodec = new AnthropicOpenAIConversionCodec({});
-    this.responsesCodec = new ResponsesOpenAIConversionCodec({});
+    this.openaiCodec = null;
+    // 延迟加载 Anthropic 编解码器，避免在缺少该导出的场景下编译失败
+    this.anthropicCodec = null;
+    this.responsesCodec = null;
   }
 
   private pickProtocol(ctx: Ctx): 'openai-chat' | 'openai-responses' | 'anthropic-messages' {
@@ -91,12 +105,32 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
     let converted: any;
     switch (proto) {
       case 'anthropic-messages':
+        if (!this.anthropicCodec) {
+          try {
+            const mod = await importCore('v2/conversion/codecs/anthropic-openai-codec');
+            this.anthropicCodec = new (mod as any).AnthropicOpenAIConversionCodec({});
+          } catch (e) {
+            throw new Error(`Anthropic codec unavailable: ${(e as any)?.message || e}`);
+          }
+        }
         converted = await this.anthropicCodec.convertRequest(body, { outgoingProtocol: 'openai-chat' } as any, ctx as any);
         break;
       case 'openai-responses':
+        if (!this.responsesCodec) {
+          try {
+            const mod = await importCore('v2/conversion/codecs/responses-openai-codec');
+            this.responsesCodec = new (mod as any).ResponsesOpenAIConversionCodec({});
+          } catch (e) {
+            throw new Error(`Responses codec unavailable: ${(e as any)?.message || e}`);
+          }
+        }
         converted = await this.responsesCodec.convertRequest(body, { outgoingProtocol: 'openai-chat' } as any, ctx as any);
         break;
       default:
+        if (!this.openaiCodec) {
+          const mod = await importCore('v2/conversion/codecs/openai-openai-codec');
+          this.openaiCodec = new (mod as any).OpenAIOpenAIConversionCodec({});
+        }
         converted = await this.openaiCodec.convertRequest(body, { outgoingProtocol: 'openai-chat' } as any, ctx as any);
         break;
     }
@@ -118,28 +152,55 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
       : (() => { try { return this.pickProtocol(ctx); } catch { return (body && typeof body === 'object' && Array.isArray((body as any).messages)) ? 'openai-chat' : this.pickProtocol(ctx); } })();
     switch (proto) {
       case 'anthropic-messages':
-        // Convert OpenAI Chat response → Anthropic Messages
+        // Convert OpenAI Chat response → Anthropic Messages（延迟加载）
+        if (!this.anthropicCodec) {
+          try {
+            const mod = await importCore('v2/conversion/codecs/anthropic-openai-codec');
+            this.anthropicCodec = new (mod as any).AnthropicOpenAIConversionCodec({});
+          } catch (e) {
+            throw new Error(`Anthropic codec unavailable: ${(e as any)?.message || e}`);
+          }
+        }
         return await this.anthropicCodec.convertResponse(body, { outgoingProtocol: 'anthropic-messages' } as any, ctx as any);
       case 'openai-responses':
-        // Convert OpenAI Chat response → OpenAI Responses
+        // Convert OpenAI Chat response → OpenAI Responses（延迟加载）
+        if (!this.responsesCodec) {
+          try {
+            const mod = await importCore('v2/conversion/codecs/responses-openai-codec');
+            this.responsesCodec = new (mod as any).ResponsesOpenAIConversionCodec({});
+          } catch (e) {
+            throw new Error(`Responses codec unavailable: ${(e as any)?.message || e}`);
+          }
+        }
         return await this.responsesCodec.convertResponse(body, { outgoingProtocol: 'openai-responses' } as any, ctx as any);
       default:
         // Keep OpenAI Chat
+        if (!this.openaiCodec) {
+          const mod = await importCore('v2/conversion/codecs/openai-openai-codec');
+          this.openaiCodec = new (mod as any).OpenAIOpenAIConversionCodec({});
+        }
         return await this.openaiCodec.convertResponse(body, { outgoingProtocol: 'openai-chat' } as any, ctx as any);
     }
   }
 }
 
 export class OpenAIOpenAIAdapter extends BaseV2Adapter {
-  private codec: OpenAIOpenAIConversionCodec;
+  private codec: any;
 
   constructor(config: ModuleConfig, _dependencies: ModuleDependencies) {
     super('llmswitch-openai-openai', config);
-    this.codec = new OpenAIOpenAIConversionCodec({});
+    this.codec = null;
+  }
+
+  private async ensureCodec(): Promise<void> {
+    if (this.codec) return;
+    const mod = await importCore('v2/conversion/codecs/openai-openai-codec');
+    this.codec = new (mod as any).OpenAIOpenAIConversionCodec({});
   }
 
   async processIncoming(request: any): Promise<unknown> {
     if (!this.initialized) await this.initialize();
+    await this.ensureCodec();
     const ctx = this.buildContext(request);
     const profile = { outgoingProtocol: 'openai-chat' } as any;
     return await this.codec.convertRequest(request.data ?? request, profile, ctx as any);
@@ -147,6 +208,7 @@ export class OpenAIOpenAIAdapter extends BaseV2Adapter {
 
   async processOutgoing(response: any): Promise<unknown> {
     if (!this.initialized) await this.initialize();
+    await this.ensureCodec();
     const ctx = this.buildContext(response);
     const profile = { outgoingProtocol: 'openai-chat' } as any;
     return await this.codec.convertResponse(response.data ?? response, profile, ctx as any);
@@ -154,15 +216,22 @@ export class OpenAIOpenAIAdapter extends BaseV2Adapter {
 }
 
 export class AnthropicOpenAIAdapter extends BaseV2Adapter {
-  private codec: AnthropicOpenAIConversionCodec;
+  private codec: any;
 
   constructor(config: ModuleConfig, _dependencies: ModuleDependencies) {
     super('llmswitch-anthropic-openai', config);
-    this.codec = new AnthropicOpenAIConversionCodec({});
+    this.codec = null;
+  }
+
+  private async ensureCodec(): Promise<void> {
+    if (this.codec) return;
+    const mod = await importCore('v2/conversion/codecs/anthropic-openai-codec');
+    this.codec = new (mod as any).AnthropicOpenAIConversionCodec({});
   }
 
   async processIncoming(request: any): Promise<unknown> {
     if (!this.initialized) await this.initialize();
+    await this.ensureCodec();
     const ctx = this.buildContext(request);
     const profile = { outgoingProtocol: 'openai-chat' } as any;
     return await this.codec.convertRequest(request.data ?? request, profile, ctx as any);
@@ -170,6 +239,7 @@ export class AnthropicOpenAIAdapter extends BaseV2Adapter {
 
   async processOutgoing(response: any): Promise<unknown> {
     if (!this.initialized) await this.initialize();
+    await this.ensureCodec();
     const ctx = this.buildContext(response);
     const profile = { outgoingProtocol: 'openai-chat' } as any;
     return await this.codec.convertResponse(response.data ?? response, profile, ctx as any);
@@ -177,15 +247,22 @@ export class AnthropicOpenAIAdapter extends BaseV2Adapter {
 }
 
 export class ResponsesToChatAdapter extends BaseV2Adapter {
-  private codec: ResponsesOpenAIConversionCodec;
+  private codec: any;
 
   constructor(config: ModuleConfig, _dependencies: ModuleDependencies) {
     super('llmswitch-response-chat', config);
-    this.codec = new ResponsesOpenAIConversionCodec({});
+    this.codec = null;
+  }
+
+  private async ensureCodec(): Promise<void> {
+    if (this.codec) return;
+    const mod = await importCore('v2/conversion/codecs/responses-openai-codec');
+    this.codec = new (mod as any).ResponsesOpenAIConversionCodec({});
   }
 
   async processIncoming(request: any): Promise<unknown> {
     if (!this.initialized) await this.initialize();
+    await this.ensureCodec();
     const ctx = this.buildContext(request);
     const profile = { outgoingProtocol: 'openai-chat' } as any;
     return await this.codec.convertRequest(request.data ?? request, profile, ctx as any);
@@ -193,6 +270,7 @@ export class ResponsesToChatAdapter extends BaseV2Adapter {
 
   async processOutgoing(response: any): Promise<unknown> {
     if (!this.initialized) await this.initialize();
+    await this.ensureCodec();
     const ctx = this.buildContext(response);
     const profile = { outgoingProtocol: 'openai-chat' } as any;
     return await this.codec.convertResponse(response.data ?? response, profile, ctx as any);

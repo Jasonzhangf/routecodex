@@ -16,7 +16,7 @@ export type { ApiKeyAuth, OAuthAuth } from './provider-config.js';
 export type { IProviderV2, ProviderType, ProviderError, ProviderMetrics, ServiceProfile } from './provider-types.js';
 
 // V1兼容转换
-export { V1ConfigConverter, fromV1Config } from './v1-config-converter.js';
+// V1 转换器不再对外暴露；保持 v2 纯净引用路径
 
 // 认证模块
 export { ApiKeyAuthProvider } from '../auth/apikey-auth.js';

@@ -3,7 +3,7 @@
  * Multi-provider OpenAI proxy server with configuration management
  */
 
-import fs from 'fs/promises';
+import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS } from "./constants/index.js";import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
 import { homedir } from 'os';
@@ -103,7 +103,7 @@ class RouteCodexApp {
       // Ensure the port is available before continuing. Attempt graceful shutdown first.
       await ensurePortAvailable(port, { attemptGraceful: true });
 
-      this.mergedConfigPath = path.join(process.cwd(), 'config', `merged-config.${port}.json`);
+      // mergedConfigPath will be resolved after determining userConfigPath below
 
       // 确定用户配置文件路径，优先使用环境变量（RCC4_CONFIG_PATH / ROUTECODEX_CONFIG / ROUTECODEX_CONFIG_PATH），否则回退到共享解析
       function pickUserConfigPath(): string {
@@ -122,6 +122,8 @@ class RouteCodexApp {
         return resolveRouteCodexConfigPath();
       }
       const userConfigPath = pickUserConfigPath();
+      const mergedDir = path.dirname(userConfigPath);
+      this.mergedConfigPath = path.join(mergedDir, `merged-config.${port}.json`);
 
       const configManagerConfig = {
         configPath: userConfigPath,
@@ -132,13 +134,9 @@ class RouteCodexApp {
       };
 
       let mergedConfig: any | null = null;
-      // For normal `rcc start`, ignore monitor transparent by default.
-      // Only honor transparent routing when explicitly enabled via env.
-      // Monitoring/transparent routing removed; keep disabled
-      const transparentEnabled = false;
-
-      await this.configManager.initialize(configManagerConfig);
-      // 2. 加载合并后的配置
+      // 2. 运行时自动生成 merged-config.<port>.json（动态装配），不再要求预生成
+      //    使用配置管理模块基于用户配置与系统模块配置生成合并配置
+      await this.configManager.initialize(configManagerConfig as any);
       mergedConfig = await this.loadMergedConfig();
 
       // 3. 初始化HTTP服务器
@@ -148,19 +146,41 @@ class RouteCodexApp {
       // 4. 使用合并后的配置初始化服务器
       await (this.httpServer as any).initializeWithMergedConfig(mergedConfig);
 
+      // 4.1 校验 merged-config 的装配输入；若缺失 assembler pipelines，则允许使用顶层 pipelines（兼容旧配置）
+      try {
+        const pac = (mergedConfig as any)?.pipeline_assembler?.config;
+        const hasAssemblerPipes = !!(pac && Array.isArray(pac.pipelines) && pac.pipelines.length > 0);
+        const topLevelPipes = Array.isArray((mergedConfig as any)?.pipelines) ? (mergedConfig as any).pipelines : [];
+        if (hasAssemblerPipes) {
+          console.log(`🧱 Pipelines in merged (assembler): ${pac.pipelines.length}`);
+          try { const ids = pac.pipelines.map((p: any) => p?.id).filter(Boolean); console.log('🔎 Pipeline IDs:', ids); } catch {}
+        } else if (topLevelPipes.length > 0) {
+          console.log(`🧱 Pipelines in merged (top-level): ${topLevelPipes.length}`);
+          try { const ids = topLevelPipes.map((p: any) => p?.id).filter(Boolean); console.log('🔎 Pipeline IDs:', ids); } catch {}
+        } else {
+          console.warn(`⚠️  No pipelines found in ${this.mergedConfigPath}; proceeding (assembler will attempt legacy synthesis)`);
+        }
+      } catch (e: any) {
+        console.warn('⚠️  Pipeline validation warning:', e?.message || String(e));
+      }
+
       // 5. 按 merged-config 组装流水线并注入（完全配置驱动，无硬编码），透明模式下可跳过
       let pipelinesAttached = false;
       const { PipelineAssembler } = await import('./modules/pipeline/config/pipeline-assembler.js');
       const { manager, routePools, routeMeta } = await PipelineAssembler.assemble(mergedConfig);
       const poolsCount = Object.values(routePools || {}).reduce((acc, v) => acc + ((v || []).length), 0);
       if (!poolsCount) {
-        throw new Error('No pipelines assembled from merged-config (strict mode).');
+        console.warn('⚠️  No route pools assembled; server will start without active pipelines');
       }
       (this.httpServer as any).attachPipelineManager(manager);
       (this.httpServer as any).attachRoutePools(routePools);
       if (routeMeta) {
         (this.httpServer as any).attachRouteMeta(routeMeta);
       }
+      try {
+        const def = Array.isArray((routePools as any)?.default) ? (routePools as any).default[0] : undefined;
+        console.log(`🧭 Default pipeline: ${def || '(none)'}`);
+      } catch { /* ignore */ }
       // Attach classifier config if present
       const classifierConfig = (mergedConfig as any)?.modules?.virtualrouter?.config?.classificationConfig;
       if (classifierConfig) {
@@ -195,11 +215,11 @@ class RouteCodexApp {
 
       // 7. 获取服务器状态（使用 HTTP 服务器解析后的最终绑定地址与端口）
       // 优先读取服务器自身解析结果，避免日志误导（例如 host 放在不同层级或为 0.0.0.0 时）
-      let serverConfig = { host: '127.0.0.1', port } as { host: string; port: number };
+      let serverConfig = { host: LOCAL_HOSTS.IPV4, port } as { host: string; port: number };
       try {
         const resolved = await (this.httpServer as any).getServerConfig?.();
         if (resolved && resolved.server) {
-          serverConfig = { host: String(resolved.server.host || '127.0.0.1'), port: Number(resolved.server.port || port) };
+          serverConfig = { host: String(resolved.server.host || LOCAL_HOSTS.IPV4), port: Number(resolved.server.port || port) };
         }
       } catch { /* ignore; fall back to defaults */ }
 
@@ -441,7 +461,7 @@ async function attemptHttpShutdown(port: number): Promise<boolean> {
     const timeout = setTimeout(() => {
       try { controller.abort(); } catch { /* ignore */ }
     }, 1000);
-    const res = await fetch(`http://127.0.0.1:${port}/shutdown`, {
+    const res = await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${port}${API_PATHS.SHUTDOWN}`, {
       method: 'POST',
       signal: (controller as any).signal
     } as any).catch(() => null);
@@ -455,7 +475,7 @@ async function isServerHealthy(port: number): Promise<boolean> {
   try {
     const controller = new AbortController();
     const t = setTimeout(() => { try { controller.abort(); } catch { /* ignore */ } }, 800);
-    const res = await fetch(`http://127.0.0.1:${port}/health`, { method: 'GET', signal: (controller as any).signal } as any);
+    const res = await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${port}${API_PATHS.HEALTH}`, { method: 'GET', signal: (controller as any).signal } as any);
     clearTimeout(t);
     if (!res.ok) { return false; }
     const data = await res.json().catch(() => null);

@@ -27,6 +27,10 @@ tmp/
 .cache/
 reports/
 
+# Local-only modules (not managed in main repo)
+sharedmodule/llmswitch-core/
+sharedmodule/config-core/
+
 # Editor/IDE
 .vscode/
 .idea/

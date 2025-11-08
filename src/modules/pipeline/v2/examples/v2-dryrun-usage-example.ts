@@ -3,7 +3,7 @@
  *
  * Demonstrates how to use V2 parallel dry run functionality in various scenarios.
  */
-
+import { API_ENDPOINTS } from "../../../constants/index.js";
 import type { V2SystemConfig, PipelineRequest, PipelineResponse } from '../types/v2-types.js';
 import { V2DryRunFactory } from '../integration/v2-dryrun-factory.js';
 
@@ -54,7 +54,7 @@ export async function basicSetupExample(): Promise<void> {
             type: 'provider',
             config: {
               providerType: 'openai',
-              baseUrl: 'https://api.openai.com/v1',
+              baseUrl: API_ENDPOINTS.OPENAI,
               auth: {
                 type: 'apikey',
                 apiKey: 'test-key'

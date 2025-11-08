@@ -9,13 +9,7 @@
       "assistantWithToolCallsContentNull": true,
       "toolContentStringify": false
     },
-    "messagesRules": [
-      {
-        "when": { "role": "assistant", "hasToolCalls": true },
-        "action": "set",
-        "set": { "tool_calls": null }
-      }
-    ],
+    "messagesRules": [],
     "tools": {
       "normalize": false,
       "forceToolChoiceAuto": true
@@ -23,7 +17,11 @@
     "assistantToolCalls": { "functionArgumentsType": "string" }
   },
   "response": {
-    "allowTopLevel": ["id", "request_id", "created", "model", "choices", "usage", "video_result", "web_search", "content_filter"],
+    "allowTopLevel": [
+      "id", "request_id", "created", "model",
+      "choices", "usage", "video_result", "web_search", "content_filter",
+      "required_action", "output", "output_text", "status"
+    ],
     "choices": {
       "required": true,
       "message": {

@@ -96,42 +96,58 @@ function generateSnapshotPath(
 export async function writeServerV2Snapshot(options: ServerV2SnapshotOptions): Promise<void> {
   try {
     const { phase, requestId, data, entryEndpoint, error, metadata } = options;
-
-    // 创建快照数据结构
-    const snapshotData = {
-      timestamp: new Date().toISOString(),
-      phase,
-      requestId,
-      endpoint: entryEndpoint || 'unknown',
-      serverVersion: 'v2',
-      data: maskSensitiveData(data),
-      metadata: {
-        ...metadata,
+    // 优先通过 llmswitch-core 的 hooks 快照通道写入，保证与 core 一致
+    try {
+      const importCore = async (subpath: string) => {
+        try {
+          const pathMod = await import('path');
+          const { fileURLToPath, pathToFileURL } = await import('url');
+          const __filename = fileURLToPath(import.meta.url);
+          const __dirname = pathMod.dirname(__filename);
+          const vendor = pathMod.resolve(__dirname, '..', '..', '..', '..', 'vendor', 'rcc-llmswitch-core', 'dist');
+          const full = pathMod.join(vendor, subpath.replace(/\.js$/i,'') + '.js');
+          return await import(pathToFileURL(full).href);
+        } catch {
+          return await import('rcc-llmswitch-core/' + subpath.replace(/\\/g,'/').replace(/\.js$/i,''));
+        }
+      };
+      const hooks = await importCore('v2/hooks/hooks-integration');
+      const stage = phase === 'server-final' ? 'finalize-post' : (phase === 'server-entry' ? 'request_1_validation_pre' : phase);
+      await hooks.writeSnapshotViaHooks({
+        endpoint: entryEndpoint || '/v1/chat/completions',
+        stage,
+        requestId,
+        data: maskSensitiveData({ ...data, metadata: { ...(metadata||{}), error: error ? { name: error.name, message: error.message } : undefined } }),
+        verbosity: 'verbose'
+      });
+      return;
+    } catch {
+      // 回退到本地写盘（非首选）
+      const snapshotData = {
+        timestamp: new Date().toISOString(),
         phase,
-        writtenAt: Date.now(),
-        ...(error && {
-          error: {
-            name: error.name,
-            message: error.message,
-            stack: error.stack
-          }
-        })
-      }
-    };
-
-    // 错误信息已经在metadata中处理了
-
-    // 生成文件路径
-    const filePath = generateSnapshotPath(phase, requestId, entryEndpoint);
-
-    // 确保目录存在
-    await fs.mkdir(dirname(filePath), { recursive: true });
-
-    // 写入快照文件
-    await fs.writeFile(filePath, JSON.stringify(snapshotData, null, 2), 'utf-8');
-
-    console.log(`[ServerV2Snapshot] Snapshot written: ${filePath}`);
-
+        requestId,
+        endpoint: entryEndpoint || 'unknown',
+        serverVersion: 'v2',
+        data: maskSensitiveData(data),
+        metadata: {
+          ...metadata,
+          phase,
+          writtenAt: Date.now(),
+          ...(error && {
+            error: {
+              name: error.name,
+              message: error.message,
+              stack: error.stack
+            }
+          })
+        }
+      };
+      const filePath = generateSnapshotPath(phase, requestId, entryEndpoint);
+      await fs.mkdir(dirname(filePath), { recursive: true });
+      await fs.writeFile(filePath, JSON.stringify(snapshotData, null, 2), 'utf-8');
+      console.log(`[ServerV2Snapshot] Snapshot written (fallback): ${filePath}`);
+    }
   } catch (writeError) {
     console.error('[ServerV2Snapshot] Failed to write snapshot:', writeError);
     // 快照写入失败不应影响主流程

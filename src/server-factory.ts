@@ -3,7 +3,7 @@
  *
  * 提供V1和V2服务器的统一创建接口
  * 支持渐进式切换，零风险部署
- */
+import { LOCAL_HOSTS } from "../constants/index.js"; */
 
 import type { ServerConfig } from './server/RouteCodexServer.js';
 // Avoid hard type coupling with V2 files to keep build green when V2 is excluded.
@@ -137,7 +137,7 @@ export class ServerFactory {
     const defaultConfig: ServerConfigV2 = {
       server: {
         port: 5507,  // 使用不同端口避免冲突
-        host: '127.0.0.1',
+        host: LOCAL_HOSTS.IPV4,
         useV2: true
       },
       logging: {

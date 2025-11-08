@@ -3,7 +3,7 @@
  *
  * 演示和测试双向Hook监控系统的各种功能
  */
-
+import { API_ENDPOINTS, API_PATHS } from "../../../../../../constants/index.js";
 import type { HookExecutionContext, HookDataPacket } from '../config/provider-debug-hooks.js';
 import type { ServiceProfile } from '../api/provider-types.js';
 import { BidirectionalHookManager, HookStage } from '../config/provider-debug-hooks.js';
@@ -19,7 +19,7 @@ function createMockContext(stage: HookStage): HookExecutionContext {
     stage,
     startTime: Date.now() - 100,
     profile: {
-      defaultBaseUrl: 'https://api.openai.com',
+      defaultBaseUrl: API_ENDPOINTS.OPENAI_BASE,
       defaultEndpoint: '/v1/chat/completions',
       defaultModel: 'gpt-3.5-turbo',
       timeout: 60000,
@@ -225,7 +225,7 @@ async function testErrorHandlingHook(): Promise<void> {
   const errorData = {
     error: new Error('模拟网络错误'),
     request: { model: 'test-model' },
-    url: 'https://api.openai.com/v1/chat/completions',
+    url: API_ENDPOINTS.OPENAI_BASE + API_PATHS.OPENAI_CHAT,
     headers: {}
   };
 

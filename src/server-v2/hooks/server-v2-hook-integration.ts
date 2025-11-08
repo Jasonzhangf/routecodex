@@ -182,7 +182,10 @@ export class ServerV2HookIntegration {
             success: true,
             executionTime: hookExecutionTime,
             data: result.data,
-            observations: result.metadata ? [`${hook.name} executed successfully`] : undefined,
+            // 保证 observations 始终为数组，避免下游对 undefined 调用数组方法（如 .map/.length）
+            observations: (result && (result as any).observations && Array.isArray((result as any).observations))
+              ? (result as any).observations as string[]
+              : ((result && (result as any).metadata) ? [`${hook.name} executed successfully`] : []),
             metrics: result.metadata
           });
 

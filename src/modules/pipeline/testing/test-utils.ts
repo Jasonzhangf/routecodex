@@ -2,7 +2,7 @@
  * Testing utilities for pipeline modules
  */
 
-import type { PipelineConfig, ModuleDependencies } from '../interfaces/pipeline-interfaces.js';
+import { LOCAL_HOSTS, HTTP_PROTOCOLS, DEFAULT_CONFIG } from "../../../constants/index.js";import type { PipelineConfig, ModuleDependencies } from '../interfaces/pipeline-interfaces.js';
 import { BasePipeline } from '../core/base-pipeline.js';
 import type { ErrorHandlingCenter, DebugCenter } from '../types/external-types.js';
 
@@ -16,7 +16,7 @@ export async function createMockPipeline(
     id: 'test-pipeline',
     provider: {
       type: 'mock',
-      baseUrl: 'http://localhost:8080',
+      baseUrl: `${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.LOCALHOST}:${DEFAULT_CONFIG.OAUTH_CALLBACK_PORT}`,
       auth: { type: 'none' }
     },
     modules: {
@@ -64,7 +64,7 @@ export function createTestPipelineConfig(overrides?: Partial<PipelineConfig>): P
     id: 'test-pipeline',
     provider: {
       type: 'test',
-      baseUrl: 'http://localhost:8080',
+      baseUrl: `${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.LOCALHOST}:${DEFAULT_CONFIG.OAUTH_CALLBACK_PORT}`,
       auth: { type: 'none' }
     },
     modules: {

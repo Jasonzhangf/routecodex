@@ -50,7 +50,7 @@ export class PipelineAssembler {
     const keyMappings = this.asRecord(compatCfg.keyMappings || {});
     const globalKeys = this.asRecord(keyMappings.global || {});
     const providerKeys = this.asRecord(keyMappings.providers || {});
-    const pipelinesIn = Array.isArray((pac as any).pipelines) ? (pac as any).pipelines as any[] : [];
+    let pipelinesIn: any[] = Array.isArray((pac as any).pipelines) ? (pac as any).pipelines as any[] : [];
 
     // v2 兼容旧配置：当未生成 pipelines 时，根据 legacy routePools 自动合成最小可用流水线
     // 规则：
@@ -68,6 +68,16 @@ export class PipelineAssembler {
       if (referencedLegacyIds.size > 0) {
         synthesizeFromLegacy = true;
       }
+    }
+    // 优先使用合并配置顶层 pipelines（来自用户配置），避免错误的 legacy 解析
+    if (!pipelinesIn.length) {
+      try {
+        const mcPipes = Array.isArray((mc as any).pipelines) ? ((mc as any).pipelines as any[]) : [];
+        if (mcPipes.length > 0) {
+          pipelinesIn = mcPipes;
+          synthesizeFromLegacy = false;
+        }
+      } catch { /* ignore */ }
     }
     if (!pipelinesIn.length && !synthesizeFromLegacy) {
       // 最后兜底：没有 pipelines，也没有 legacy routePools，则后面默认会再兜底 default 路由
@@ -122,8 +132,9 @@ export class PipelineAssembler {
       };
 
       const legacy = synthesizeFromLegacy ? parseLegacy(id) : null;
+      const providerFamilyFromLegacy = synthesizeFromLegacy ? (legacy?.provider || 'openai') : undefined;
       const provider = synthesizeFromLegacy
-        ? { type: (legacy?.provider || 'openai'), config: {} as Record<string, unknown> }
+        ? { type: 'generic-openai-provider', config: {} as Record<string, unknown> }
         : (modules.provider as { type?: string; config?: Record<string, unknown> });
       let llmSwitch = synthesizeFromLegacy
         ? { type: 'llmswitch-conversion-router', config: {} as Record<string, unknown> }
@@ -175,7 +186,7 @@ export class PipelineAssembler {
           if (Object.keys(r).length) {arr.push(r);}
         };
         const familyFromType = (t: string) => (t || '').toLowerCase().split('-')[0];
-        const typeStr = String((provider as any).type || '');
+        const typeStr = String(synthesizeFromLegacy ? (providerFamilyFromLegacy || 'openai') : ((provider as any).type || ''));
         const family = familyFromType(typeStr);
         const aliasFamily = ((): string | undefined => {
           const t = typeStr.toLowerCase();
@@ -276,6 +287,17 @@ export class PipelineAssembler {
       const metaForId = this.asRecord(routeMeta[id] || (pac as any).routeMeta?.[id] || legacyDefaults);
       const providerIdForKey = typeof metaForId.providerId === 'string' ? metaForId.providerId : undefined;
       const keyIdForPipeline = typeof metaForId.keyId === 'string' ? metaForId.keyId : undefined;
+      // Ensure provider config carries the concrete upstream model id and providerType for this pipeline
+      try {
+        const upstreamModelId = typeof metaForId.modelId === 'string' ? metaForId.modelId : undefined;
+        if (upstreamModelId) {
+          (provCfg as any).model = upstreamModelId;
+        }
+        if (providerIdForKey) {
+          // 严格注入 providerType（不做推测）。
+          (provCfg as any).providerType = providerIdForKey;
+        }
+      } catch { /* ignore */ }
       // First, resolve via keyMappings
       let resolvedKey = resolveKey(providerIdForKey, keyIdForPipeline);
       // If missing or current key looks redacted, try pac.authMappings
@@ -315,7 +337,7 @@ export class PipelineAssembler {
         provCfg.auth = dstAuth;
       }
 
-      const fam = String(provider.type || '').toLowerCase();
+      const fam = 'openai';
       const compatTypeSelected = (compatibility && compatibility.type)
         ? String(compatibility.type)
         : '';
@@ -323,10 +345,9 @@ export class PipelineAssembler {
       const modBlock: Record<string, unknown> = {
         provider: { type: provider.type, config: provCfg },
       };
-      // Only attach compatibility when explicitly provided in pipeline config
-      if (compatibility?.type) {
-        (modBlock as any).compatibility = { type: compatTypeSelected, config: compatCfgSelected };
-      }
+      // Always attach the standard compatibility module. If user provided a compatibility config,
+      // pass it as the module config; otherwise use empty config.
+      (modBlock as any).compatibility = { type: 'compatibility', config: compatCfgSelected };
 
       const allowedSwitches = new Set([
         'llmswitch-anthropic-openai',

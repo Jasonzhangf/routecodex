@@ -1,0 +1,170 @@
+{
+  "providers": {
+    "glm": {
+      "id": "glm",
+      "enabled": true,
+      "type": "openai",
+      "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
+      "models": {
+        "glm-4.6": {
+          "supportsStreaming": true,
+          "compatibility": {
+            "type": "glm",
+            "config": {
+              "moduleConfig": {
+                "thinking": {
+                  "enabled": true,
+                  "payload": {
+                    "type": "enabled"
+                  }
+                },
+                "policy": {
+                  "preflight": true
+                }
+              }
+            }
+          }
+        },
+        "glm-4.5-air": {
+          "supportsStreaming": true,
+          "compatibility": {
+            "type": "glm",
+            "config": {
+              "moduleConfig": {
+                "thinking": {
+                  "enabled": true,
+                  "payload": {
+                    "type": "enabled"
+                  }
+                },
+                "policy": {
+                  "preflight": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "apiKey": [
+        "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
+      ],
+      "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+      "auth": {
+        "type": "apikey",
+        "apiKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
+      }
+    }
+  },
+  "keyVault": {
+    "glm": {
+      "key1": {
+        "type": "apikey",
+        "value": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB",
+        "enabled": true
+      }
+    }
+  },
+  "pipelines": [
+    {
+      "id": "glm.glm-4.6__key1",
+      "provider": {
+        "type": "openai"
+      },
+      "modules": {
+        "provider": {
+          "type": "openai",
+          "config": {
+            "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+            "timeout": 30000,
+            "auth": {
+              "type": "apikey",
+              "apiKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
+            }
+          }
+        },
+        "compatibility": {
+          "type": "glm",
+          "config": {}
+        },
+        "llmSwitch": {
+          "type": "llmswitch-conversion-router",
+          "config": {}
+        }
+      },
+      "settings": {
+        "debugEnabled": true
+      },
+      "authRef": {
+        "mode": "perKey",
+        "providerId": "glm",
+        "keyId": "key1"
+      }
+    },
+    {
+      "id": "glm.glm-4.5-air__key1",
+      "provider": {
+        "type": "openai"
+      },
+      "modules": {
+        "provider": {
+          "type": "openai",
+          "config": {
+            "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+            "timeout": 30000,
+            "auth": {
+              "type": "apikey",
+              "apiKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
+            }
+          }
+        },
+        "compatibility": {
+          "type": "glm",
+          "config": {}
+        },
+        "llmSwitch": {
+          "type": "llmswitch-conversion-router",
+          "config": {}
+        }
+      },
+      "settings": {
+        "debugEnabled": true
+      },
+      "authRef": {
+        "mode": "perKey",
+        "providerId": "glm",
+        "keyId": "key1"
+      }
+    }
+  ],
+  "routing": {
+    "default": [
+      "glm.glm-4.6__key1"
+    ],
+    "coding": [
+      "glm.glm-4.6__key1"
+    ],
+    "longcontext": [],
+    "tools": [],
+    "thinking": [],
+    "vision": [],
+    "websearch": [],
+    "background": []
+  },
+  "routeMeta": {
+    "glm.glm-4.6__key1": {
+      "providerId": "glm",
+      "modelId": "glm-4.6",
+      "keyId": "key1"
+    },
+    "glm.glm-4.5-air__key1": {
+      "providerId": "glm",
+      "modelId": "glm-4.5-air",
+      "keyId": "key1"
+    }
+  },
+  "_metadata": {
+    "version": "0.1.0",
+    "builtAt": 1762410851350,
+    "keyDimension": "perKey"
+  }
+}

@@ -91,9 +91,8 @@ export class V1ConfigConverter {
         'api.iflow.ai': 'iflow',
         'api.openai.com': 'openai'
       };
-
       for (const [domain, type] of Object.entries(urlMap)) {
-        if (config.baseUrl!.includes(domain)) {
+        if (String(config.baseUrl).includes(domain)) {
           return type as ProviderType;
         }
       }

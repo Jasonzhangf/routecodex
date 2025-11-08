@@ -78,7 +78,13 @@ export class UniversalShapeFilter {
         assistantToolCalls: { functionArgumentsType: 'string' }  // 修复：默认使用string格式而不是object
       },
       response: {
-        allowTopLevel: ['id','request_id','created','model','choices','usage','video_result','web_search','content_filter'],
+        // 保留 Responses 协议关键字段，避免在合成/转换前被丢弃
+        allowTopLevel: [
+          'id','request_id','created','model',
+          'choices','usage','video_result','web_search','content_filter',
+          // Responses 专有/常见：
+          'required_action','output','output_text','status'
+        ],
         choices: {
           required: true,
           message: {
@@ -252,6 +258,16 @@ export class UniversalShapeFilter {
   }
 
   async applyResponseFilter(payload: UnknownObject, _ctx?: CompatibilityContext): Promise<UnknownObject> {
+    // Bypass shape filtering by default to keep system running; can be turned off via env.
+    // Default: RCC_COMPAT_FILTER_OFF_RESPONSES is treated as ON unless explicitly set to 0/false/off.
+    const envFlag = String(process.env.RCC_COMPAT_FILTER_OFF_RESPONSES || '1').toLowerCase();
+    const envBypass = !(envFlag === '0' || envFlag === 'false' || envFlag === 'off');
+    try {
+      const entry = String((_ctx as any)?.entryEndpoint || (_ctx as any)?.endpoint || '').toLowerCase();
+      if (entry === '/v1/responses' || envBypass) {
+        return payload;
+      }
+    } catch { /* ignore */ if (envBypass) return payload; }
     const cfg = this.cfg!;
     const src: any = payload || {};
     const out: any = this.shallowPick(src, cfg.response.allowTopLevel);
