@@ -8,6 +8,7 @@
 import { OpenAIStandard } from './openai-standard.js';
 import type { ServiceProfile } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../../../../types/common-types.js';
+import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
 
 export class ResponsesProvider extends OpenAIStandard {
   /**
@@ -25,19 +26,60 @@ export class ResponsesProvider extends OpenAIStandard {
    * 覆写内部发送：/v1/responses 入口时强制使用上游 SSE（postStream）。
    */
   protected override async sendRequestInternal(request: UnknownObject): Promise<unknown> {
-    // 直接复用父类实现，但强制 wantsStream=true when entryEndpoint === '/v1/responses'
-    // 通过设置环境变量分支不够直观，这里直接走 SSE 分支。
-    const origEnv1 = process.env.ROUTECODEX_RESPONSES_UPSTREAM_SSE;
-    const origEnv2 = process.env.RCC_RESPONSES_UPSTREAM_SSE;
-    try {
-      process.env.ROUTECODEX_RESPONSES_UPSTREAM_SSE = '1';
-      return await super["sendRequestInternal"].call(this, request);
-    } finally {
-      if (origEnv1 === undefined) delete process.env.ROUTECODEX_RESPONSES_UPSTREAM_SSE; else process.env.ROUTECODEX_RESPONSES_UPSTREAM_SSE = origEnv1;
-      if (origEnv2 === undefined) delete process.env.RCC_RESPONSES_UPSTREAM_SSE; else process.env.RCC_RESPONSES_UPSTREAM_SSE = origEnv2;
+    // Minimal true-SSE path for /v1/responses: use postStream upstream and return a stream token
+    // Default OFF for safety; enable by setting ROUTECODEX_RESPONSES_UPSTREAM_SSE=1 (or RCC_RESPONSES_UPSTREAM_SSE=1)
+    const wantsUpstreamSSE = String(process.env.ROUTECODEX_RESPONSES_UPSTREAM_SSE || process.env.RCC_RESPONSES_UPSTREAM_SSE || '0') === '1';
+    if (!wantsUpstreamSSE) {
+      return await super.sendRequestInternal(request);
     }
+    // Build endpoint and headers
+    const endpoint = (this as any).getEffectiveEndpoint();
+    const headers = await (this as any).buildRequestHeaders();
+    const context = (this as any).createProviderContext(); // private in base; access via any
+    const targetUrl = `${(this as any).getEffectiveBaseUrl().replace(/\/$/, '')}/${String(endpoint).startsWith('/') ? String(endpoint).slice(1) : String(endpoint)}`;
+
+    // Flatten body (copy of base logic)
+    const finalBody = (() => {
+      const r: any = request || {};
+      const dataObj: any = (r && typeof r === 'object' && 'data' in r && typeof r.data === 'object') ? r.data : r;
+      const body: any = { ...dataObj };
+      const cfgModel = (this.config as any)?.config?.model;
+      if (typeof cfgModel === 'string' && cfgModel.trim()) {
+        body.model = cfgModel.trim();
+      } else if (typeof body.model !== 'string' || !body.model) {
+        body.model = (this as any).serviceProfile.defaultModel;
+      }
+      try {
+        const reqMt = Number((dataObj as any)?.max_tokens ?? (dataObj as any)?.maxTokens ?? NaN);
+        const cfgMt = Number((this.config as any)?.config?.overrides?.maxTokens ?? NaN);
+        const envMt = Number(process.env.ROUTECODEX_DEFAULT_MAX_TOKENS || process.env.RCC_DEFAULT_MAX_TOKENS || NaN);
+        const fallback = Number.isFinite(cfgMt) && cfgMt > 0 ? cfgMt : (Number.isFinite(envMt) && envMt > 0 ? envMt : 8192);
+        const effective = Number.isFinite(reqMt) && reqMt > 0 ? reqMt : fallback;
+        (body as any).max_tokens = effective;
+        if ('maxTokens' in body) delete (body as any).maxTokens;
+      } catch { /* ignore */ }
+      try { if ('metadata' in body) { delete body.metadata; } } catch { /* ignore */ }
+      // Ensure stream flag for upstream SSE
+      body.stream = true;
+      return body;
+    })();
+
+    // Snapshot provider-request (best-effort)
+    try {
+      await writeProviderSnapshot({
+        phase: 'provider-request',
+        requestId: context.requestId,
+        data: finalBody,
+        headers,
+        url: targetUrl
+      });
+    } catch { /* ignore */ }
+
+    // Perform upstream SSE POST
+    const stream = await (this as any).httpClient.postStream(endpoint, finalBody, { ...headers, Accept: 'text/event-stream' });
+    // Return a stream token object for BasePipeline to convert to Responses SSE
+    return { __sse_stream: stream } as any;
   }
 }
 
 export default ResponsesProvider;
-

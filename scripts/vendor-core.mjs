@@ -13,13 +13,8 @@ async function main(){
   const out=path.join(root,'vendor','rcc-llmswitch-core');
   let src=srcLocal;
   if(!(await exists(srcLocal))){
-    if (await exists(srcNode)) {
-      console.log('[vendor-core] local dist missing; using node_modules/rcc-llmswitch-core/dist');
-      src=srcNode;
-    } else {
-      console.error('[vendor-core] ERROR: llmswitch-core dist not found (neither sharedmodule nor node_modules).');
-      process.exit(2);
-    }
+    console.error('[vendor-core] ERROR: llmswitch-core local dist not found. Fallback to node_modules is disabled.');
+    process.exit(2);
   }
   await rimraf(out);
   await fsp.mkdir(out,{recursive:true});

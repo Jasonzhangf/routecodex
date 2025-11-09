@@ -19,8 +19,8 @@ if (!fs.existsSync(proj)) {
 console.log('[build-core] Compiling llmswitch-core with root TypeScript...');
 const res = spawnSync(process.execPath, [tsc, '-p', proj], { stdio: 'inherit' });
 if ((res.status ?? 0) !== 0) {
-  console.warn('[build-core] TypeScript build failed for llmswitch-core, falling back to node_modules dist');
-  process.exit(0);
+  console.error('[build-core] TypeScript build failed for llmswitch-core. Fallback is disabled.');
+  process.exit(res.status ?? 2);
 }
 
 if (!fs.existsSync(outDir)) fail('llmswitch-core dist not produced');

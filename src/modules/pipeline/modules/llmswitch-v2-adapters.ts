@@ -2,7 +2,7 @@ import type { ModuleConfig, ModuleDependencies, PipelineModule } from '../interf
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
-// Runtime resolver: prefer vendored core, fallback to node_modules
+// Runtime resolver: require vendored core (no fallback)
 async function importCore(subpath: string): Promise<any> {
   const clean = subpath.replace(/\.js$/i, '');
   try {
@@ -12,9 +12,7 @@ async function importCore(subpath: string): Promise<any> {
     const full = path.join(vendor, clean + '.js');
     return await import(pathToFileURL(full).href);
   } catch {
-    // fallback to package import (use export map without extension)
-    const pkgPath = 'rcc-llmswitch-core/' + clean.replace(/\\/g, '/');
-    return await import(pkgPath);
+    throw new Error(`[llmswitch] vendored core module missing: ${clean}.js`);
   }
 }
 
@@ -126,13 +124,24 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
         }
         converted = await this.responsesCodec.convertRequest(body, { outgoingProtocol: 'openai-chat' } as any, ctx as any);
         break;
-      default:
+      default: {
+        // Preserve original Chat logic: use OpenAI→OpenAI codec directly (no behavior change)
         if (!this.openaiCodec) {
           const mod = await importCore('v2/conversion/codecs/openai-openai-codec');
           this.openaiCodec = new (mod as any).OpenAIOpenAIConversionCodec({});
         }
         converted = await this.openaiCodec.convertRequest(body, { outgoingProtocol: 'openai-chat' } as any, ctx as any);
-        break;
+        break; }
+    }
+    // 统一入口规范化：为避免 Chat 行为改变，仅对非 Chat 协议应用
+    if (proto !== 'openai-chat') {
+      try {
+        const mod = await importCore('v2/conversion/shared/request-tool-canonicalizer');
+        const normalizeReq = (mod as any).normalizeRequestToolsForOpenAI || (mod as any).default;
+        if (typeof normalizeReq === 'function') {
+          converted = normalizeReq(converted, { endpoint: (proto === 'openai-responses') ? 'responses' : (proto === 'anthropic-messages' ? 'messages' : 'chat'), requestId: ctx.requestId });
+        }
+      } catch { /* ignore normalization failure */ }
     }
     // 返回时携带元数据，供响应阶段严格识别协议（不做兜底）
     const meta = (request && request.metadata && typeof request.metadata === 'object') ? { ...(request.metadata) } : {};
@@ -150,6 +159,19 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
     const proto: 'openai-chat' | 'openai-responses' | 'anthropic-messages' = (protoMeta === 'anthropic-messages' || protoMeta === 'openai-responses' || protoMeta === 'openai-chat')
       ? (protoMeta as any)
       : (() => { try { return this.pickProtocol(ctx); } catch { return (body && typeof body === 'object' && Array.isArray((body as any).messages)) ? 'openai-chat' : this.pickProtocol(ctx); } })();
+    // 为保证 Chat 行为不变，仅对非 Chat 协议在出口前做统一响应规范化
+    if (proto !== 'openai-chat') {
+      try {
+        const mod = await importCore('v2/conversion/shared/tool-canonicalizer');
+        const canon = (mod as any).canonicalizeChatResponseTools || (mod as any).default;
+        if (typeof canon === 'function') {
+          const isChatLike = !!(body && typeof body === 'object' && (Array.isArray((body as any).choices) || (body as any).message));
+          if (isChatLike) {
+            try { (response as any).data = canon(body); } catch { /* keep original */ }
+          }
+        }
+      } catch { /* ignore canonicalization failure */ }
+    }
     switch (proto) {
       case 'anthropic-messages':
         // Convert OpenAI Chat response → Anthropic Messages（延迟加载）
@@ -173,13 +195,14 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
           }
         }
         return await this.responsesCodec.convertResponse(body, { outgoingProtocol: 'openai-responses' } as any, ctx as any);
-      default:
-        // Keep OpenAI Chat
+      default: {
+        // Preserve original Chat logic: use OpenAI→OpenAI codec directly (no behavior change)
         if (!this.openaiCodec) {
           const mod = await importCore('v2/conversion/codecs/openai-openai-codec');
           this.openaiCodec = new (mod as any).OpenAIOpenAIConversionCodec({});
         }
         return await this.openaiCodec.convertResponse(body, { outgoingProtocol: 'openai-chat' } as any, ctx as any);
+      }
     }
   }
 }

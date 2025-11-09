@@ -18,7 +18,7 @@ interface Message {
  * GLM工具清洗Hook
  * 处理GLM特有的工具消息清洗逻辑
  */
-export class GLMToolCleaningHook extends BaseHook {
+export class iFlowToolCleaningHook extends BaseHook {
   readonly name = 'glm.01.tool-cleaning';
   readonly stage = 'incoming_preprocessing';
   readonly priority = 100;

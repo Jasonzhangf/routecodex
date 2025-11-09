@@ -2,6 +2,8 @@ import type { UnknownObject } from '../../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../../types/module.types.js';
 import type { CompatibilityContext } from './compatibility-interface.js';
 import { UniversalShapeFilter } from './filters/universal-shape-filter.js';
+import { ResponseBlacklistSanitizer } from './filters/response-blacklist-sanitizer.js';
+import * as path from 'path';
 
 export interface BaseCompatibilityOptions {
   providerType: string;
@@ -22,15 +24,24 @@ export class BaseCompatibility {
   protected readonly deps: ModuleDependencies;
   protected readonly opts: BaseCompatibilityOptions;
   protected filter: UniversalShapeFilter;
+  protected respBlacklist: ResponseBlacklistSanitizer;
 
   constructor(dependencies: ModuleDependencies, options: BaseCompatibilityOptions) {
     this.deps = dependencies;
     this.opts = options;
     this.filter = new UniversalShapeFilter({ configPath: options.shapeFilterConfigPath });
+    const respCfgPath = (() => {
+      try {
+        const dir = path.dirname(options.shapeFilterConfigPath || '');
+        return path.join(dir, 'response-blacklist.json');
+      } catch { return ''; }
+    })();
+    this.respBlacklist = new ResponseBlacklistSanitizer({ configPath: respCfgPath });
   }
 
   async initialize(): Promise<void> {
     await this.filter.initialize();
+    await this.respBlacklist.initialize();
   }
 
   async processIncoming(input: UnknownObject, ctx: CompatibilityContext): Promise<UnknownObject> {
@@ -74,6 +85,14 @@ export class BaseCompatibility {
     } catch { /* ignore */ }
 
     // Standard sequence: validate(entry) → filter → mapping → filter
+    // Minimal blacklist only on non-stream path (exclude /v1/responses)
+    try {
+      const entry = String((ctx as any)?.entryEndpoint || '').toLowerCase();
+      if (entry !== '/v1/responses') {
+        res = await this.respBlacklist.apply(res);
+      }
+    } catch { /* ignore blacklist errors */ }
+
     if (this.opts.validator?.response) {
       try { res = await this.opts.validator.response(res); } catch { /* ignore */ }
     }

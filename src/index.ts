@@ -168,7 +168,7 @@ class RouteCodexApp {
       let pipelinesAttached = false;
       const { PipelineAssembler } = await import('./modules/pipeline/config/pipeline-assembler.js');
       const { manager, routePools, routeMeta } = await PipelineAssembler.assemble(mergedConfig);
-      const poolsCount = Object.values(routePools || {}).reduce((acc, v) => acc + ((v || []).length), 0);
+      const poolsCount = Object.values(routePools || {}).reduce((acc: number, v: any) => acc + (Array.isArray(v) ? v.length : 0), 0);
       if (!poolsCount) {
         console.warn('⚠️  No route pools assembled; server will start without active pipelines');
       }

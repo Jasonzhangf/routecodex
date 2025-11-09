@@ -23,6 +23,7 @@ import { ErrorContextBuilder, EnhancedRouteCodexError } from '../../../../server
 import { CompatibilityModuleFactory } from './compatibility-factory.js';
 import { CompatibilityManager } from './compatibility-manager.js';
 import { UniversalShapeFilter } from './filters/universal-shape-filter.js';
+import { BlacklistSanitizer } from './filters/blacklist-sanitizer.js';
 
 // Ensure GLM module is registered
 import './glm/index.js';
@@ -260,6 +261,13 @@ export class GLMCompatibility implements CompatibilityModule {
         const filter = new UniversalShapeFilter({ configPath: shapePath });
         await filter.initialize();
         preFiltered = await filter.applyRequestFilter(preFiltered);
+        // Blacklist sanitizer: remove provider-incompatible fields before manager processing
+        try {
+          const blacklistPath = join(__dirname, 'glm', 'config', 'blacklist-rules.json');
+          const bl = new BlacklistSanitizer({ configPath: blacklistPath });
+          await bl.initialize();
+          preFiltered = await bl.apply(preFiltered);
+        } catch { /* ignore blacklist errors */ }
       } catch { /* best-effort; fall back to manager */ }
 
       // Process using modular compatibility manager（包含字段映射、校验、hooks 等）

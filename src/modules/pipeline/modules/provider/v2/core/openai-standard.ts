@@ -244,9 +244,8 @@ export class OpenAIStandard extends BaseProvider {
 
     // 流式开关：仅当非 Responses 端点时才移除 stream；Responses 端点需要真实上游流
     try {
-      const entryEndpoint = String(((request as any)?.metadata?.entryEndpoint) || '');
-      const isResponses = entryEndpoint === '/v1/responses';
-      if ((processedRequest as any).stream === true && !isResponses) {
+      // 统一：所有入口均移除 stream=true（Provider 始终走非流式），SSE 由上层合成
+      if ((processedRequest as any).stream === true) {
         delete (processedRequest as any).stream;
       }
     } catch { /* ignore */ }
@@ -323,66 +322,6 @@ export class OpenAIStandard extends BaseProvider {
     );
 
     processedResponse = postprocessResult.data;
-
-    // Normalize tool arguments for Chat non-stream responses (fix invalid stringified arrays like "[\"ls\", \"-la\"]")
-    try {
-      const root: any = (processedResponse as any)?.data?.data || (processedResponse as any)?.data || processedResponse;
-      const tryNormalize = (fnArgs: any): any => {
-        if (typeof fnArgs !== 'string') return fnArgs;
-        try {
-          const obj = JSON.parse(fnArgs);
-          const cmd = (obj as any).command;
-          if (typeof cmd === 'string') {
-            const s = String(cmd).trim();
-            let arr: string[] | null = null;
-            // case: JSON array as string
-            if ((s.startsWith('[') && s.endsWith(']')) || (s.startsWith('"[') && s.endsWith(']"'))) {
-              const cleaned = s.replace(/^"|"$/g, '');
-              try { arr = JSON.parse(cleaned.replace(/'/g, '"')); } catch { /* fallthrough */ }
-            }
-            // case: comma separated
-            if (!arr && s.includes(',')) {
-              arr = s.replace(/\[|\]|\"/g, '').split(',').map(x => x.trim()).filter(Boolean);
-            }
-            // case: whitespace separated tokens
-            if (!arr && s.length) {
-              const parts = s.replace(/\[|\]|\"/g, '').split(/\s+/).filter(Boolean);
-              if (parts.length > 1) arr = parts;
-            }
-            if (arr && Array.isArray(arr)) {
-              (obj as any).command = arr;
-            }
-          }
-          return JSON.stringify(obj);
-        } catch {
-          return fnArgs;
-        }
-      };
-      const normalizeMessage = (msg: any) => {
-        try {
-          const tcs = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
-          for (const tc of tcs) {
-            if (tc && tc.function) {
-              tc.function.arguments = tryNormalize(tc.function.arguments);
-            }
-          }
-        } catch { /* ignore */ }
-      };
-      // OpenAI Chat non-stream (chat.completion)
-      if (root && Array.isArray(root?.choices)) {
-        for (const ch of root.choices) {
-          if (ch?.message) normalizeMessage(ch.message);
-        }
-      }
-      // OpenAI Responses shape (output -> message content)
-      if (root && Array.isArray(root?.output)) {
-        for (const item of root.output) {
-          if (item?.role === 'assistant' && Array.isArray(item?.content)) {
-            // some implementations might carry tool calls here in variants; keep minimal
-          }
-        }
-      }
-    } catch { /* silent normalize errors */ }
 
     // 响应模型名还原为入站模型（仅对外展示层；上游快照保持原样）
     try {

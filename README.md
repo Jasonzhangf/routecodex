@@ -15,8 +15,8 @@ RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配�
 - **Compatibility V2（配置驱动）**
   - 位置：`src/modules/pipeline/modules/compatibility/glm/*`（模块化 + Hook 系统）
   - 职责：仅做 Provider 特定的最小字段标准化与 reasoning_content 处理
-  - 特性：配置驱动的字段映射、GLM 专用工具清理、1210/1214错误兼容
-  - 工具治理：统一在 llmswitch-core v2 处理，避免重复实现
+  - 特性：配置驱动字段映射、GLM 专用最小清理与 1210/1214 错误兼容
+  - 工具治理：统一在 llmswitch-core v2 处理；兼容层不进行工具语义修复/文本收割
 
 - **Provider V2（统一OpenAI标准）**
   - 位置：`src/modules/pipeline/modules/provider/v2/*`
@@ -26,8 +26,47 @@ RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配�
 
 - **LLM Switch Core（工具处理中心）**
   - 位置：`sharedmodule/llmswitch-core/`
-  - 职责：工具调用统一处理、文本意图收割、系统工具指引
-  - 特性：三端一致性（Chat/Responses/Messages）、参数聚合修复
+  - 职责：工具调用统一处理（唯一入口）、文本意图收割、系统工具指引
+  - 特性：三端一致性（Chat/Responses/Messages）；arguments 三段式修复（JSON→JSON5→安全修复→"{}"）；必要时从文本块收割重建 tool_calls；（可选）SSE 参数聚合
+
+## 📐 模块职责边界（Do / Don't）
+
+### llmswitch-core（唯一工具入口）
+- Do
+  - 统一工具规范：`canonicalizeChatResponseTools()` 保证 `content=null`、`finish_reason='tool_calls'`
+  - arguments 统一修复：`jsonish.repairArgumentsToString()`（JSON/JSON5 容错 + 安全修复）
+  - 文本收割：在“可疑+存在文本工具块”时，用 `harvestTools()` 重建标准 `tool_calls`
+  - （可选）SSE 聚合：吞掉参数增量，在工具完成时一次性下发完整 arguments（默认关闭）
+- Don't
+  - 进行 Provider 特定修复/HTTP 通信/配置管理
+  - 将同样逻辑复制到兼容层或 Provider 层
+
+### Compatibility（最小兼容层）
+- Do
+  - Provider 字段标准化、reasoning_content 处理、配置驱动映射
+  - 1210/1214 最小兼容（GLM）
+  - 请求侧最小黑名单（例如 GLM 删除 `tools[].function.strict`；无 tools 删除 `tool_choice`）
+  - 响应侧最小黑名单（仅非流式）：默认仅删 `usage.prompt_tokens_details.cached_tokens`
+    - 配置：`src/modules/pipeline/modules/compatibility/<provider>/config/response-blacklist.json`
+    - 关键字段保护：status/output/output_text/required_action/choices[].message.content/tool_calls/finish_reason
+- Don't
+  - 工具语义修复或文本收割（统一由 llmswitch-core 处理）
+
+### Provider V2（HTTP 通信）
+- Do
+  - 统一 HTTP 发送、认证管理、快照记录
+  - 配置驱动（baseUrl/timeout/retry/headers）
+- Don't
+  - 工具语义修复/参数归一（如改写 `shell.command`）
+  - 业务逻辑或格式转换
+  - 默认不上游真流式（Responses 直通）
+    - 开关（默认关闭）：`ROUTECODEX_RESPONSES_UPSTREAM_SSE=1` 或 `RCC_RESPONSES_UPSTREAM_SSE=1`
+
+### Server Endpoints（HTTP 协议层）
+- Do
+  - SSE 预心跳/错误帧、HTTP 协议处理、委托到管道
+- Don't
+  - 工具处理/格式转换/业务逻辑
 
 ### 🎯 9大核心架构原则
 

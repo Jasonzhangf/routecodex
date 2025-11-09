@@ -291,11 +291,18 @@ llmswitch-core → 根包 → 运行时
 - 格式转换 (Anthropic↔OpenAI工具格式)
 - 三端工具参数聚合与修复
 
+  细则（统一修复链）：
+  - arguments 统一修复：`jsonish.repairArgumentsToString()`（JSON→JSON5风格→安全修复→失败回退"{}"）
+  - 规范化器：`tool-canonicalizer.canonicalizeChatResponseTools()` 保证不变式（`content=null`，`finish_reason=tool_calls`），并在“可疑+存在文本块”时触发 `tool-harvester.harvestTools()` 从文本重建 `tool_calls`
+  - 流式聚合（可选）：可在 llmswitch-core 的流式转换中启用“吞掉参数增量，完成时一次性下发”的聚合策略（默认关闭，按需启用）
+
 **🛡️ 严格禁止**:
 - Provider特定处理 (委托给Compatibility层)
 - HTTP通信 (委托给Provider层)
 - 配置管理 (委托给配置系统)
 - 重复实现 (服务器端点、兼容层严禁重复)
+
+  注：不得在兼容层/Provider层重复实现 JSON/JSON5 修复或文本收割；工具治理的唯一入口在 llmswitch-core。
 
 **🔧 关键文件**:
 - `tool-canonicalizer.ts` - 工具调用规范化器 (**核心**)
@@ -315,11 +322,17 @@ llmswitch-core → 根包 → 运行时
 - 配置驱动转换
 - GLM专用处理 (1210/1214错误兼容)
 
+  细则：
+  - 请求侧黑名单（GLM）：`tools[].function.strict` 删除；当无 tools 时删除 `tool_choice`（仅请求预处理，最小化）
+  - 响应侧黑名单（非流式）：仅删除安全字段（默认 `usage.prompt_tokens_details.cached_tokens`）；配置文件：`.../compatibility/<provider>/config/response-blacklist.json`；关键字段受保护（status/output/output_text/required_action/choices[].message.content/tool_calls/finish_reason）
+  - 流式路径（/v1/responses）默认绕过任何响应黑名单/过滤，避免破坏事件序列
+
 **❌ 禁止**:
 - 工具调用转换
 - 文本工具收割
 - 重复处理
 - 兜底逻辑
+ - 修改工具语义（如重写 shell.command 等）
 
 ### Provider V2 - 统一HTTP通信
 **位置**: `src/modules/pipeline/modules/provider/v2/`
@@ -336,6 +349,11 @@ llmswitch-core → 根包 → 运行时
 - 工具处理
 - 格式转换
 - 业务逻辑
+ - 工具语义修复/参数归一（例如将 `shell.command` 字符串拆词为数组等）
+
+  细则：
+  - Responses 上游真流式直通为“可选能力”，由环境变量控制（默认关闭）：`ROUTECODEX_RESPONSES_UPSTREAM_SSE=1` 或 `RCC_RESPONSES_UPSTREAM_SSE=1`
+  - 未启用时 Provider 保持统一非流式 JSON；流式合成交由 llmswitch-core
 
 ### Server Endpoints - HTTP协议处理
 **位置**: `src/server/handlers/`

@@ -12,7 +12,7 @@ CompatibilityModuleFactory.registerModuleType('glm', GLMCompatibility);
 // 导出模块和组件
 export { GLMCompatibility } from './glm-compatibility.js';
 export { GLMFieldMappingProcessor } from './field-mapping/field-mapping-processor.js';
-export { GLMToolCleaningHook } from './hooks/glm-tool-cleaning-hook.js';
+export { iFlowToolCleaningHook as GLMToolCleaningHook } from './hooks/glm-tool-cleaning-hook.js';
 export { GLMRequestValidationHook } from './hooks/glm-request-validation-hook.js';
 export { GLMResponseValidationHook } from './hooks/glm-response-validation-hook.js';
 export { GLMResponseNormalizationHook } from './hooks/glm-response-normalization-hook.js';

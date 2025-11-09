@@ -6,11 +6,20 @@ Compatibility 模块提供协议格式转换功能，将不同供应商的API格
 
 Compatibility 模块是流水线架构的第 3 层，负责处理请求和响应的格式转换。它专注于处理供应商特定的格式差异，确保不同供应商之间的协议兼容性。
 
-### 📋 核心职责
-- **格式转换**: 供应商特定的请求/响应格式转换
-- **工具适配**: 工具调用格式的标准化处理
-- **字段映射**: 字段名称和结构的映射转换
-- **参数适配**: 供应商特定参数的标准化
+### 📋 职责边界（Do / Don't）
+
+Do（应做）
+- Provider 特定的最小字段标准化与映射（usage/created_at 等）。
+- reasoning_content（thinking）处理与必要字段修剪。
+- 最小黑名单：
+  - 请求侧（示例 GLM）：删除 `tools[].function.strict`；当无 tools 时移除 `tool_choice`。
+  - 响应侧（仅非流式）：默认仅删 `usage.prompt_tokens_details.cached_tokens`；配置文件 `./<provider>/config/response-blacklist.json`；关键字段保护。
+- 流式路径（/v1/responses）默认绕过响应黑名单/过滤，避免破坏 SSE 事件序列。
+
+Don't（不应做）
+- 工具语义修复（JSON/JSON5 修复、文本收割/重建）——统一由 llmswitch-core 处理。
+- 业务逻辑或 Provider 认证/重试/连接池等职责。
+- 重复实现工具治理逻辑（避免与 core 入口冲突）。
 
 ## 🔄 支持的兼容性模块
 

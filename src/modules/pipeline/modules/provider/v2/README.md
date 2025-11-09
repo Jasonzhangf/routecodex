@@ -34,6 +34,24 @@
 
 ## 📋 模块详细说明
 
+### 职责边界（Do / Don't）
+
+Do（应做）
+- 统一 HTTP 通信：请求发送、响应接收、超时/重试/错误处理。
+- 认证管理：API Key/OAuth、头部构建。
+- 快照记录：`provider-request/response/error` 统一写盘或通过 core hooks。
+- 配置驱动：baseUrl/timeout/retry/headers。
+
+Don't（不应做）
+- 工具语义修复/参数归一（例如改写 `shell.command`）。
+- 工具文本收割或 JSON/JSON5 修复（统一在 llmswitch-core）。
+- 业务逻辑或协议转换（委托给上层）。
+
+可选能力
+- Responses 上游真流式直通（默认关闭）：
+  - 开关：`ROUTECODEX_RESPONSES_UPSTREAM_SSE=1` 或 `RCC_RESPONSES_UPSTREAM_SSE=1`
+  - 未启用时 Provider 保持统一非流式 JSON；流式合成交由 llmswitch-core。
+
 ### API接口层 (v2/api/)
 
 #### 📄 index.ts - 统一对外接口
@@ -77,7 +95,7 @@
 
 #### 📄 openai-standard.ts - 标准实现
 - **作用**: 统一的OpenAI标准Provider实现
-- **职责**: 服务处理、配置驱动、请求路由
+- **职责**: 服务处理、配置驱动、请求路由（不做工具修复）
 - **关键功能**:
   - 根据配置选择服务处理逻辑
   - 服务特定的请求预处理和响应后处理
