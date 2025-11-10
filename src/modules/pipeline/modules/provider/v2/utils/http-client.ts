@@ -316,8 +316,9 @@ export class HttpClient {
       const statusMatch = err.message.match(/HTTP (\d{3})/);
       if (statusMatch) {
         const status = parseInt(statusMatch[1]);
-        // 5xx服务器错误和429限流错误可以重试
-        return status >= 500 || status === 429;
+        // 仅 5xx 服务器错误可在 HTTP 客户端层重试；
+        // 429 的退避与切换由 PipelineManager 统一处理（避免重复策略）。
+        return status >= 500;
       }
     }
 

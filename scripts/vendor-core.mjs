@@ -11,10 +11,16 @@ async function main(){
   const srcLocal=path.join(root,'sharedmodule','llmswitch-core','dist');
   const srcNode=path.join(root,'node_modules','rcc-llmswitch-core','dist');
   const out=path.join(root,'vendor','rcc-llmswitch-core');
+  // Prefer local dist built from sharedmodule (per AGENTS.md build order), fallback to node_modules package
   let src=srcLocal;
   if(!(await exists(srcLocal))){
-    console.error('[vendor-core] ERROR: llmswitch-core local dist not found. Fallback to node_modules is disabled.');
-    process.exit(2);
+    if(await exists(srcNode)){
+      console.warn('[vendor-core] local llmswitch-core dist missing; falling back to node_modules');
+      src=srcNode;
+    } else {
+      console.error('[vendor-core] ERROR: neither local dist nor node_modules found for rcc-llmswitch-core');
+      process.exit(2);
+    }
   }
   await rimraf(out);
   await fsp.mkdir(out,{recursive:true});

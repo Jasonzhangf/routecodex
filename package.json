@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.80.12",
+  "version": "0.80.43",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -102,7 +102,12 @@
     "depcheck": "depcheck",
     "license:check": "echo 'license check temporarily disabled'",
     "ncu:check": "ncu --errorLevel 2",
-    "package:validate": "npx package-json-validator"
+    "package:validate": "npx package-json-validator",
+    "test:consistency": "node scripts/v2-consistency/run-consistency-test.mjs",
+    "test:protocol": "jest --testPathPattern=protocol-tools-e2e.spec.ts --runInBand --detectOpenHandles --forceExit",
+    "test:v2:tools": "node tests/v2/dist/tool-processing-test.js",
+    "test:v2:protocol": "node tests/v2/dist/protocol-conversion-test.js",
+    "test:comprehensive": "node scripts/v2-consistency/comprehensive-consistency-test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
@@ -121,11 +126,12 @@
     "lmstudio": "^0.0.32",
     "node-fetch": "^3.3.2",
     "openai": "^5.23.0",
+    "open": "^9.1.0",
     "ora": "^9.0.0",
     "rcc-basemodule": "^0.2.7",
     "rcc-debugcenter": "^0.1.6",
     "rcc-errorhandling": "^1.0.10",
-    "rcc-llmswitch-core": "^0.2.11",
+    "rcc-llmswitch-core": "^0.2.20",
     "routecodex-config-compat": "^0.1.2",
     "routecodex-config-engine": "^0.1.1",
     "socket.io": "^4.8.1",

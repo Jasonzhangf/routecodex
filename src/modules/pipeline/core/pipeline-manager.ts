@@ -21,6 +21,7 @@ import type {
 import { BasePipeline } from './base-pipeline.js';
 import { PipelineModuleRegistryImpl } from '../core/pipeline-registry.js';
 import { PipelineDebugLogger } from '../utils/debug-logger.js';
+import { ErrorHandlerRegistry } from '../../../utils/error-handler-registry.js';
 import { DebugEventBus } from 'rcc-debugcenter';
 import { Key429Tracker, /* type Key429ErrorRecord */ } from '../../../utils/key-429-tracker.js';
 import { PipelineHealthManager } from '../../../utils/pipeline-health-manager.js';
@@ -453,62 +454,44 @@ export class PipelineManager implements RCCBaseModule {
     attemptedPipelines: Set<string>,
     retryKey: string
   ): Promise<PipelineResponse> {
-    // Extract key from error or request; avoid blacklisting unknown keys
-    const rawKey = this.extractKeyFromError(error) || 'unknown';
-    const pipelineIds = Array.from(attemptedPipelines);
-    let trackerResult: { blacklisted: boolean; shouldRetry: boolean; record: any } = { blacklisted: false, shouldRetry: true, record: { consecutiveCount: 0 } } as any;
-    if (rawKey && rawKey !== 'unknown') {
-      // Record 429 error in tracker only when key is known (fingerprinted)
-      trackerResult = this.key429Tracker.record429Error(rawKey, pipelineIds);
+    // Initialize registry
+    const registry = ErrorHandlerRegistry.getInstance();
+    try { await registry.initialize(); } catch { /* ignore */ }
 
-      this.logger.logPipeline('manager', '429-error-recorded', {
-        key: rawKey,
-        pipelineIds,
-        blacklisted: trackerResult.blacklisted,
-        shouldRetry: trackerResult.shouldRetry,
-        consecutiveCount: trackerResult.record.consecutiveCount
-      });
+    // Prepare a deferred to capture handler decision (response or final error)
+    let resolveFn: (v: PipelineResponse) => void;
+    let rejectFn: (e: unknown) => void;
+    const resultPromise: Promise<PipelineResponse> = new Promise((resolve, reject) => { resolveFn = resolve; rejectFn = reject; });
 
-      // If key is blacklisted, don't retry
-      if (trackerResult.blacklisted) {
-        // Mark affected pipelines as unhealthy
-        for (const pipelineId of pipelineIds) {
-          this.pipelineHealthManager.record429Error(pipelineId, rawKey);
-        }
+    // Backoff schedule (EHC can override by reading env or config); provide defaults
+    const s1 = Number(process.env.RCC_429_BACKOFF_MS_1 || process.env.ROUTECODEX_429_BACKOFF_MS_1 || 30000);
+    const s2 = Number(process.env.RCC_429_BACKOFF_MS_2 || process.env.ROUTECODEX_429_BACKOFF_MS_2 || 60000);
+    const s3 = Number(process.env.RCC_429_BACKOFF_MS_3 || process.env.ROUTECODEX_429_BACKOFF_MS_3 || 120000);
+    const schedule = [s1, s2, s3].filter(v => Number.isFinite(v) && v > 0);
 
-        throw new Error(`Key ${rawKey} is blacklisted due to too many 429 errors`);
-      }
-    } else {
-      // Unknown key: avoid blacklisting; just log and proceed with generic retry flow
-      this.logger.logPipeline('manager', '429-error-unknown-key', {
-        key: rawKey,
-        pipelineIds
-      });
-    }
-
-    // Get available pipelines excluding attempted ones
-    const availablePipelines = this.getAvailablePipelines(excludeIds => {
-      attemptedPipelines.forEach(id => excludeIds.add(id));
-      return excludeIds;
-    });
-
-    if (availablePipelines.length === 0) {
-      throw new Error('No available pipelines for retry after 429 error');
-    }
-
-    // Round-robin selection of next pipeline
-    const nextPipeline = this.selectNextPipelineRoundRobin(availablePipelines, retryKey);
-
-    this.logger.logPipeline('manager', '429-retry-attempt', {
+    // Hooks for the handler (avoid exposing internals; provide safe closures)
+    const ctx = {
+      request,
       retryKey,
-      originalError: (error instanceof Error ? error.message : String(error)),
-      nextPipeline: nextPipeline.pipelineId,
-      attempt: this.retryAttempts.get(retryKey) || 1,
-      maxAttempts: this.maxRetries
-    });
+      attemptedPipelineIds: Array.from(attemptedPipelines),
+      schedule,
+      hooks: {
+        getAvailablePipelines: (excludeIds: Set<string>) => this.getAvailablePipelines(ids => { excludeIds.forEach(id => ids.add(id)); return ids; }),
+        selectNextRoundRobin: (candidates: BasePipeline[]) => this.selectNextPipelineRoundRobin(candidates, retryKey),
+        processWithPipeline: (p: BasePipeline) => this.processRequestWithPipeline(p, request, retryKey),
+        getPipelineById: (id: string) => this.pipelines.get(id),
+        record429Error: (pipelineId: string, key?: string) => this.pipelineHealthManager.record429Error(pipelineId, key || 'unknown'),
+        logger: this.logger,
+        errorCenter: this.errorHandlingCenter
+      },
+      deferred: { resolve: resolveFn!, reject: rejectFn! }
+    };
 
-    // Process request with next pipeline
-    return await this.processRequestWithPipeline(nextPipeline, request, retryKey);
+    class RateLimitError extends Error { constructor(msg: string) { super(msg); this.name = 'RateLimitError'; } }
+    const err = new RateLimitError(error instanceof Error ? error.message : String(error));
+
+    await registry.handleError(err as any, 'rate_limit', 'pipeline-manager', ctx as any);
+    return resultPromise;
   }
 
   /**

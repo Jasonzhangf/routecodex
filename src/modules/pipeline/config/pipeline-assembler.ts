@@ -224,6 +224,10 @@ export class PipelineAssembler {
         for (const sysP of sysProvSources) {
           if (!provCfg.baseUrl && (sysP as any).baseUrl) { provCfg.baseUrl = (sysP as any).baseUrl as string; }
           if (!provCfg.baseUrl && (sysP as any).baseURL) { provCfg.baseUrl = (sysP as any).baseURL as string; }
+          // Provider级超时：允许从 virtualrouter.providers.* 读取 timeout 注入到 provider 配置
+          if (typeof (provCfg as any).timeout !== 'number' && typeof (sysP as any).timeout === 'number') {
+            (provCfg as any).timeout = Number((sysP as any).timeout);
+          }
           // Merge auth: if we already have an auth object, enrich missing fields
           const srcAuth = this.asRecord((sysP as any).auth || {});
           if (!provCfg.auth && Object.keys(srcAuth).length) {
@@ -249,9 +253,13 @@ export class PipelineAssembler {
         }
       } catch { /* ignore enrichment errors */ }
 
+      // Respect explicit OAuth: if auth.type === 'oauth', skip API key enrichment entirely
+      const authType = String(this.asRecord(provCfg.auth || {}).type || '').toLowerCase();
+      const isOAuthAuth = authType === 'oauth';
+
       // Generic enrichment: if auth still missing but baseUrl is known, try host-based match from providers catalog
       try {
-        const needAuth = !this.asRecord(provCfg.auth || {}).apiKey;
+        const needAuth = !isOAuthAuth && !this.asRecord(provCfg.auth || {}).apiKey;
         const base = String((provCfg as any).baseUrl || (provCfg as any).baseURL || '');
         if (needAuth && base) {
           const hostOf = (u: string): string | null => { try { return new URL(u).host; } catch { return null; } };
@@ -292,49 +300,62 @@ export class PipelineAssembler {
         const upstreamModelId = typeof metaForId.modelId === 'string' ? metaForId.modelId : undefined;
         if (upstreamModelId) {
           (provCfg as any).model = upstreamModelId;
+          // 模型级超时：若存在，则覆盖 provider 级超时（优先级更高）
+          try {
+            const topVr = this.asRecord((mc as Record<string, unknown>).virtualrouter || {});
+            const topProviders = this.asRecord(topVr.providers || {});
+            const provEntry = this.asRecord((topProviders as any)[providerIdForKey || ''] || {});
+            const models = this.asRecord(provEntry.models || {});
+            const mdl = this.asRecord(models[upstreamModelId] || {});
+            const mdlTimeout = typeof (mdl as any).timeout === 'number' ? Number((mdl as any).timeout) : undefined;
+            if (typeof mdlTimeout === 'number') {
+              (provCfg as any).timeout = mdlTimeout; // model.timeout 覆盖 provider.timeout
+            }
+          } catch { /* ignore model-level timeout resolution errors */ }
         }
-        if (providerIdForKey) {
-          // 严格注入 providerType（不做推测）。
-          (provCfg as any).providerType = providerIdForKey;
+        // 注入 providerType：优先使用 routeMeta.providerId（例如 'lmstudio'），否则回退到 provider.type 的别名映射
+        {
+          const supported = new Set(['openai', 'glm', 'qwen', 'iflow', 'lmstudio', 'responses']);
+          const alias = (s: string): string | '' => {
+            const t = (s || '').toLowerCase();
+            if (!t) return '' as any;
+            if (t.includes('openai') || t.includes('generic-openai') || t.includes('modelscope')) return 'openai';
+            if (t.includes('glm') || t.includes('bigmodel') || t.includes('zhipu')) return 'glm';
+            if (t.includes('qwen') || t.includes('dashscope') || t.includes('aliyun')) return 'qwen';
+            if (t.includes('lmstudio') || t.includes('lm-studio')) return 'lmstudio';
+            if (t.includes('iflow')) return 'iflow';
+            if (t.includes('responses')) return 'responses';
+            return '' as any;
+          };
+          const fromRoute = String(providerIdForKey || '').toLowerCase();
+          const fromProvider = String((provider && provider.type) || '').toLowerCase();
+          const cand1 = supported.has(fromRoute) ? fromRoute : alias(fromRoute);
+          const cand2 = supported.has(fromProvider) ? fromProvider : alias(fromProvider);
+          const finalType = cand1 || cand2 || 'openai';
+          (provCfg as any).providerType = finalType;
         }
       } catch { /* ignore */ }
-      // First, resolve via keyMappings
-      let resolvedKey = resolveKey(providerIdForKey, keyIdForPipeline);
-      // If missing or current key looks redacted, try pac.authMappings
-      const curAuth = this.asRecord(provCfg.auth || {});
-      const curKey = String((curAuth as any).apiKey || '').trim();
-      const looksRedacted = curKey === '***REDACTED***' || (curKey && curKey.length <= 16);
-      if ((!resolvedKey || looksRedacted) && keyIdForPipeline) {
-        const am = (pac as any).authMappings as Record<string, unknown> | undefined;
-        const candidate = am && typeof am[keyIdForPipeline] === 'string' ? String(am[keyIdForPipeline]) : undefined;
-        if (candidate && candidate.trim()) {
-          resolvedKey = candidate.trim();
-        }
-      }
-      if (!resolvedKey) {
-        // Final fallback: try to read from user config (~/.routecodex/config.json)
-        try {
-          const home = process.env.HOME || '';
-          if (home) {
-            const userCfgPath = path.join(home, '.routecodex', 'config.json');
-            const txt = await fs.readFile(userCfgPath, 'utf-8');
-            const uj = JSON.parse(txt) as Record<string, unknown>;
-            const vr = this.asRecord(uj['virtualrouter']);
-            const provs = this.asRecord(vr['providers']);
-            const glmProv = this.asRecord(provs['glm']);
-            const a = this.asRecord(glmProv['auth']);
-            const k = typeof a['apiKey'] === 'string' ? String(a['apiKey']).trim() : '';
-            if (k && k !== '***REDACTED***') {
-              resolvedKey = k;
-            }
+      if (!isOAuthAuth) {
+        // First, resolve via keyMappings
+        let resolvedKey = resolveKey(providerIdForKey, keyIdForPipeline);
+        // If missing or current key looks redacted, try pac.authMappings
+        const curAuth = this.asRecord(provCfg.auth || {});
+        const curKey = String((curAuth as any).apiKey || '').trim();
+        const looksRedacted = curKey === '***REDACTED***' || (curKey && curKey.length <= 16);
+        if ((!resolvedKey || looksRedacted) && keyIdForPipeline) {
+          const am = (pac as any).authMappings as Record<string, unknown> | undefined;
+          const candidate = am && typeof am[keyIdForPipeline] === 'string' ? String(am[keyIdForPipeline]) : undefined;
+          if (candidate && candidate.trim()) {
+            resolvedKey = candidate.trim();
           }
-        } catch { /* ignore */ }
-      }
-      if (resolvedKey) {
-        const dstAuth = this.asRecord(provCfg.auth || {});
-        (dstAuth as any).apiKey = resolvedKey;
-        if (!(dstAuth as any).type) { (dstAuth as any).type = 'apikey'; }
-        provCfg.auth = dstAuth;
+        }
+        // 严禁跨来源兜底读取用户全局配置中的其他provider密钥，避免污染
+        if (resolvedKey) {
+          const dstAuth = this.asRecord(provCfg.auth || {});
+          (dstAuth as any).apiKey = resolvedKey;
+          if (!(dstAuth as any).type) { (dstAuth as any).type = 'apikey'; }
+          provCfg.auth = dstAuth;
+        }
       }
 
       const fam = 'openai';
@@ -460,7 +481,8 @@ export class PipelineAssembler {
       }
     }
 
-    const managerConfig: PipelineManagerConfig = { pipelines, settings: { debugLevel: 'basic', defaultTimeout: 30000, maxRetries: 2 } };
+    // 默认超时提升至 300s（可被 provider.timeout 与 model.timeout 覆盖）
+    const managerConfig: PipelineManagerConfig = { pipelines, settings: { debugLevel: 'basic', defaultTimeout: 300000, maxRetries: 2 } };
     const dummyErrorCenter: any = { handleError: async () => {}, createContext: () => ({}), getStatistics: () => ({}) };
     const dummyDebugCenter: any = { logDebug: () => {}, logError: () => {}, logModule: () => {}, processDebugEvent: () => {}, getLogs: () => [] };
     const manager = new PipelineManager(managerConfig, dummyErrorCenter, dummyDebugCenter);
