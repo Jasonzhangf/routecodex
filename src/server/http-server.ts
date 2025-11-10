@@ -23,6 +23,7 @@ export class HttpServer {
   private pipelineManager: any = null;
   private routePools: Record<string, string[]> = {};
   private routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }> = {} as any;
+  private rrIndex: Record<string, number> = {};
 
   constructor(_modulesConfigPath?: string) {
     this.app = express();
@@ -191,6 +192,11 @@ export class HttpServer {
   public attachRoutePools(routePools: Record<string, string[]>): void {
     (globalThis as any).routePools = routePools;
     this.routePools = routePools || {};
+    // reset round-robin indices per pool
+    this.rrIndex = {};
+    try {
+      for (const name of Object.keys(this.routePools || {})) { this.rrIndex[name] = 0; }
+    } catch { /* ignore */ }
   }
 
   public attachRouteMeta(routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }>): void {
@@ -229,15 +235,19 @@ export class HttpServer {
   // Internal helpers
   private pickPipelineId(): string | null {
     try {
-      // Prefer 'default' route if present
+      // Prefer round-robin within the 'default' route pool if present
       const defaultIds = this.routePools?.['default'];
       if (Array.isArray(defaultIds) && defaultIds.length > 0) {
-        return String(defaultIds[0]);
+        const idx = (this.rrIndex['default'] || 0) % defaultIds.length;
+        this.rrIndex['default'] = idx + 1;
+        return String(defaultIds[idx]);
       }
-      // Otherwise, pick the first available id across all route pools
-      for (const ids of Object.values(this.routePools || {})) {
+      // Otherwise, pick the first non-empty pool and do per-pool RR
+      for (const [poolName, ids] of Object.entries(this.routePools || {})) {
         if (Array.isArray(ids) && ids.length > 0) {
-          return String(ids[0]);
+          const i = (this.rrIndex[poolName] || 0) % ids.length;
+          this.rrIndex[poolName] = i + 1;
+          return String(ids[i]);
         }
       }
       // Fallback to manager listing
