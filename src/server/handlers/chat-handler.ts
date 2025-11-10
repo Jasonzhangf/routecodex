@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import fsp from 'fs/promises';
 import type { HandlerContext } from './types.js';
+import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 
 // Chat endpoint: /v1/chat/completions (OpenAI Chat SSE shape)
 export async function handleChatCompletions(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
@@ -11,10 +12,11 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
   const entryEndpoint = '/v1/chat/completions';
   try {
     if (!ctx.pipelineManager) { res.status(503).json({ error: { message: 'Pipeline manager not attached' } }); return; }
-    const pipelineId = ctx.pickPipelineId();
-    if (!pipelineId) { res.status(500).json({ error: { message: 'No pipeline available' } }); return; }
-    const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     const payload = (req.body || {}) as any;
+    const pipelineId = await ctx.selectPipelineId(payload, entryEndpoint);
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    // Snapshot: http-request
+    try { await writeServerSnapshot({ phase: 'http-request', requestId, data: payload, entryEndpoint }); } catch { /* non-blocking */ }
     const wantsSSE = (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream')) || payload.stream === true;
 
     // Attach endpoint metadata into payload for downstream selection
@@ -59,6 +61,8 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
     const stopPreHeartbeat = () => { try { if (hbTimer) { clearInterval(hbTimer); hbTimer = null; } } catch { /* ignore */ } };
     if (wantsSSE) startPreHeartbeat();
 
+    // Snapshot: routing-selected
+    try { await writeServerSnapshot({ phase: 'routing-selected', requestId, data: { pipelineId }, entryEndpoint }); } catch { /* ignore */ }
     const response = await ctx.pipelineManager.processRequest(sharedReq);
     const out = (response && typeof response === 'object' && 'data' in response) ? (response as any).data : response;
     // 优先：核心返回了 __sse_responses → 无条件按 SSE 输出（零回退）
@@ -98,6 +102,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
     }
     // Non‑SSE
     stopPreHeartbeat();
+    try { await writeServerSnapshot({ phase: 'http-response', requestId, data: out, entryEndpoint }); } catch { /* ignore */ }
     res.status(200).json(out);
   } catch (error: any) {
     // SSE error path (zero fallback)
@@ -116,6 +121,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
         return;
       }
     } catch {}
+    try { await writeServerSnapshot({ phase: 'http-response.error', requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`, data: { message: error?.message || String(error) }, entryEndpoint }); } catch { /* ignore */ }
     if (!res.headersSent) res.status(500).json({ error: { message: error?.message || String(error) } });
   }
 }

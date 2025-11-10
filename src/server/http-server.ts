@@ -23,9 +23,10 @@ export class HttpServer {
   private pipelineManager: any = null;
   private routePools: Record<string, string[]> = {};
   private routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }> = {} as any;
-  private rrIndex: Record<string, number> = {};
   private virtualRouter: any = null;
   private classifierConfig: unknown = null;
+  // Minimal per-route round-robin index map used only as a last-resort fallback
+  private rrIndex: Map<string, number> = new Map();
 
   constructor(_modulesConfigPath?: string) {
     this.app = express();
@@ -170,7 +171,14 @@ export class HttpServer {
     return {
       pipelineManager: this.pipelineManager,
       routePools: this.routePools,
-      pickPipelineId: () => this.pickPipelineId(),
+      selectPipelineId: async (payload: any, entryEndpoint: string) => {
+        // Prefer virtual router; on absence/misconfig, fall back to default route pool RR
+        const pid = await this.pickPipelineIdViaVirtualRouter(payload as any, entryEndpoint);
+        if (pid) return pid;
+        const fb = this.pickPipelineId();
+        if (!fb) { throw new Error('No pipeline available'); }
+        return fb;
+      },
     } as HandlerContext;
   }
 
@@ -183,6 +191,16 @@ export class HttpServer {
       const port = typeof portRaw === 'number' ? portRaw : parseInt(String(portRaw), 10);
       this.host = host || '0.0.0.0';
       this.port = Number.isFinite(port) ? port : 5506;
+      // Snapshots toggle (default OFF). Allow config or env to enable.
+      try {
+        const snapsCfg = (this.mergedConfig as any)?.snapshots
+          || (this.mergedConfig as any)?.modules?.httpserver?.config?.snapshots
+          || (this.mergedConfig as any)?.debug?.snapshots
+          || {};
+        const env = String(process.env.ROUTECODEX_SNAPSHOTS || process.env.RCC_SNAPSHOTS || '').trim().toLowerCase();
+        const enabled = snapsCfg?.enabled === true || env === '1' || env === 'true' || env === 'yes';
+        try { (globalThis as any).rccSnapshotsEnabled = enabled; } catch { /* ignore */ }
+      } catch { /* ignore */ }
     } catch { /* keep defaults */ }
   }
 
@@ -194,11 +212,6 @@ export class HttpServer {
   public attachRoutePools(routePools: Record<string, string[]>): void {
     (globalThis as any).routePools = routePools;
     this.routePools = routePools || {};
-    // reset round-robin indices per pool
-    this.rrIndex = {};
-    try {
-      for (const name of Object.keys(this.routePools || {})) { this.rrIndex[name] = 0; }
-    } catch { /* ignore */ }
     this.ensureVirtualRouter();
   }
 
@@ -238,29 +251,6 @@ export class HttpServer {
   }
 
   // Internal helpers
-  private pickPipelineId(): string | null {
-    try {
-      // Prefer round-robin within the 'default' route pool if present
-      const defaultIds = this.routePools?.['default'];
-      if (Array.isArray(defaultIds) && defaultIds.length > 0) {
-        const idx = (this.rrIndex['default'] || 0) % defaultIds.length;
-        this.rrIndex['default'] = idx + 1;
-        return String(defaultIds[idx]);
-      }
-      // Otherwise, pick the first non-empty pool and do per-pool RR
-      for (const [poolName, ids] of Object.entries(this.routePools || {})) {
-        if (Array.isArray(ids) && ids.length > 0) {
-          const i = (this.rrIndex[poolName] || 0) % ids.length;
-          this.rrIndex[poolName] = i + 1;
-          return String(ids[i]);
-        }
-      }
-      // Fallback to manager listing
-      const ids = Array.isArray(this.pipelineManager?.getPipelineIds?.()) ? this.pipelineManager.getPipelineIds() : [];
-      if (ids.length > 0) { return String(ids[0]); }
-    } catch { /* ignore */ }
-    return null;
-  }
 
   private async pickPipelineIdViaVirtualRouter(payload: UnknownObject, entryEndpoint: string): Promise<string | null> {
     try {
@@ -287,6 +277,26 @@ export class HttpServer {
         this.virtualRouter.initialize({ classificationConfig: this.classifierConfig, routePools: this.routePools }).catch(()=>{});
       }
     } catch { /* ignore */ }
+  }
+
+  // Minimal fallback when Virtual Router is unavailable/misconfigured.
+  // Selects a pipelineId by round-robin within the 'default' route pool if present,
+  // otherwise the first available route pool. Intended to rarely execute.
+  private pickPipelineId(): string | null {
+    try {
+      const pools = this.routePools || {};
+      const poolNames = Object.keys(pools);
+      if (poolNames.length === 0) return null;
+      const routeName = pools['default'] ? 'default' : poolNames[0];
+      const targets = pools[routeName] || [];
+      if (!Array.isArray(targets) || targets.length === 0) return null;
+      const idx = this.rrIndex.get(routeName) ?? 0;
+      const pick = targets[idx % targets.length];
+      this.rrIndex.set(routeName, (idx + 1) % Math.max(1, targets.length));
+      return typeof pick === 'string' ? pick : null;
+    } catch {
+      return null;
+    }
   }
 
   private async handlePipelineRequest(req: Request, res: Response, entryEndpoint: string): Promise<void> {

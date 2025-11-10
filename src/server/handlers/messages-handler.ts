@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import fsp from 'fs/promises';
 import type { HandlerContext } from './types.js';
+import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 
 // Anthropic Messages endpoint: /v1/messages (Anthropic SSE with named events)
 export async function handleMessages(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
@@ -10,10 +11,11 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
   const entryEndpoint = '/v1/messages';
   try {
     if (!ctx.pipelineManager) { res.status(503).json({ error: { message: 'Pipeline manager not attached' } }); return; }
-    const pipelineId = ctx.pickPipelineId();
-    if (!pipelineId) { res.status(500).json({ error: { message: 'No pipeline available' } }); return; }
-    const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     const payload = (req.body || {}) as any;
+    const pipelineId = await ctx.selectPipelineId(payload, entryEndpoint);
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    // Snapshot: http-request
+    try { await writeServerSnapshot({ phase: 'http-request', requestId, data: payload, entryEndpoint }); } catch { /* non-blocking */ }
     const wantsSSE = (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream')) || payload.stream === true;
     try {
       const meta = (payload.metadata && typeof payload.metadata === 'object') ? payload.metadata : {};
@@ -52,6 +54,8 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     const stopPreHeartbeat = () => { try { if (hbTimer) { clearInterval(hbTimer); hbTimer = null; } } catch {} };
     if (wantsSSE) startPreHeartbeat();
 
+    // Snapshot: routing-selected
+    try { await writeServerSnapshot({ phase: 'routing-selected', requestId, data: { pipelineId }, entryEndpoint }); } catch { /* ignore */ }
     const response = await ctx.pipelineManager.processRequest(sharedReq);
     const out = (response && typeof response === 'object' && 'data' in response) ? (response as any).data : response;
     // 优先：如果核心返回了 __sse_responses，无条件按 SSE 管道输出（零回退，忽略 Accept/stream）
@@ -91,6 +95,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     }
     // Non‑SSE
     stopPreHeartbeat();
+    try { await writeServerSnapshot({ phase: 'http-response', requestId, data: out, entryEndpoint }); } catch { /* ignore */ }
     res.status(200).json(out);
   } catch (error: any) {
     try {
@@ -108,6 +113,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
         return;
       }
     } catch {}
+    try { await writeServerSnapshot({ phase: 'http-response.error', requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`, data: { message: error?.message || String(error) }, entryEndpoint }); } catch { /* ignore */ }
     if (!res.headersSent) res.status(500).json({ error: { message: error?.message || String(error) } });
   }
 }

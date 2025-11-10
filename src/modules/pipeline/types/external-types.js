@@ -1,3 +1,4 @@
+"use strict";
 /**
  * Mock types for external dependencies
  *
@@ -5,4 +6,4 @@
  * in the current build environment. These should be replaced with actual imports
  * when the corresponding modules are implemented.
  */
-export {};
+Object.defineProperty(exports, "__esModule", { value: true });
