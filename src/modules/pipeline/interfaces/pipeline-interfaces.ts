@@ -120,6 +120,14 @@ export interface PipelineManagerConfig {
     defaultTimeout?: number;
     maxRetries?: number;
     debugLevel?: 'none' | 'basic' | 'detailed';
+    rateLimit?: {
+      /** Backoff schedule in ms, e.g., [30000,60000,120000] */
+      backoffMs?: number[];
+      /** Whether to prefer switching pipeline on 429 when candidates exist */
+      switchOn429?: boolean;
+      /** Optional cap for attempts managed by manager-level retries */
+      maxAttempts?: number;
+    };
   };
 }
 

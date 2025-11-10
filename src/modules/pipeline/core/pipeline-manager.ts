@@ -50,6 +50,8 @@ export class PipelineManager implements RCCBaseModule {
   private managerMetrics: Map<string, { values: number[]; lastUpdated: number }> = new Map();
   private requestHistory: unknown[] = [];
   private maxHistorySize = 100;
+  // Round-robin state for default selection when pipelineId is missing
+  private rrCounter = 0;
 
   // 429 error handling properties
   private key429Tracker: Key429Tracker;
@@ -105,6 +107,11 @@ export class PipelineManager implements RCCBaseModule {
         createdPipelines: this.pipelines.size
       });
 
+      // Initialize round-robin baseline order
+      try {
+        this.rrCounter = 0;
+      } catch { /* ignore */ }
+
     } catch (error) {
       this.logger.logPipeline('manager', 'initialization-error', {
         error: error instanceof Error ? error.message : String(error)
@@ -138,14 +145,22 @@ export class PipelineManager implements RCCBaseModule {
     // Strict mode: require explicit pipelineId
     const directId = (routeRequest as any).pipelineId as string | undefined;
     if (!directId) {
-      const keys = Array.from(this.pipelines.keys());
-      this.logger.logPipeline('manager', 'pipeline-id-missing', {
+      // Default behavior: round-robin across available pipelines in current manager
+      const available = this.getAvailablePipelines(exclude => exclude);
+      const candidates = available.length ? available : Array.from(this.pipelines.values());
+      if (!candidates.length) {
+        throw new Error('No pipelines available for round-robin selection');
+      }
+      const idx = (this.rrCounter++) % candidates.length;
+      const chosen = candidates[idx];
+      this.logger.logPipeline('manager', 'pipeline-selected-rr', {
+        chosen: chosen.pipelineId,
+        total: candidates.length,
+        rrIndex: idx,
         providerId: routeRequest.providerId,
-        modelId: routeRequest.modelId,
-        availableCount: keys.length,
-        sample: keys.slice(0, 10)
+        modelId: routeRequest.modelId
       });
-      throw new Error('Pipeline ID missing in route; selection by provider/model is disabled');
+      return chosen;
     }
 
     const pipeline = this.pipelines.get(directId);
@@ -464,10 +479,15 @@ export class PipelineManager implements RCCBaseModule {
     const resultPromise: Promise<PipelineResponse> = new Promise((resolve, reject) => { resolveFn = resolve; rejectFn = reject; });
 
     // Backoff schedule (EHC can override by reading env or config); provide defaults
-    const s1 = Number(process.env.RCC_429_BACKOFF_MS_1 || process.env.ROUTECODEX_429_BACKOFF_MS_1 || 30000);
-    const s2 = Number(process.env.RCC_429_BACKOFF_MS_2 || process.env.ROUTECODEX_429_BACKOFF_MS_2 || 60000);
-    const s3 = Number(process.env.RCC_429_BACKOFF_MS_3 || process.env.ROUTECODEX_429_BACKOFF_MS_3 || 120000);
-    const schedule = [s1, s2, s3].filter(v => Number.isFinite(v) && v > 0);
+    // Resolve schedule from manager config → env defaults
+    const cfgSchedule = ((this.config?.settings as any)?.rateLimit?.backoffMs as number[] | undefined) || [];
+    let schedule = Array.isArray(cfgSchedule) ? cfgSchedule.filter(v => Number.isFinite(v) && v > 0) : [];
+    if (!schedule.length) {
+      const s1 = Number(process.env.RCC_429_BACKOFF_MS_1 || process.env.ROUTECODEX_429_BACKOFF_MS_1 || 30000);
+      const s2 = Number(process.env.RCC_429_BACKOFF_MS_2 || process.env.ROUTECODEX_429_BACKOFF_MS_2 || 60000);
+      const s3 = Number(process.env.RCC_429_BACKOFF_MS_3 || process.env.ROUTECODEX_429_BACKOFF_MS_3 || 120000);
+      schedule = [s1, s2, s3].filter(v => Number.isFinite(v) && v > 0);
+    }
 
     // Hooks for the handler (avoid exposing internals; provide safe closures)
     const ctx = {

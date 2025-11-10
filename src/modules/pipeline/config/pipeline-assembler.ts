@@ -482,7 +482,24 @@ export class PipelineAssembler {
     }
 
     // 默认超时提升至 300s（可被 provider.timeout 与 model.timeout 覆盖）
-    const managerConfig: PipelineManagerConfig = { pipelines, settings: { debugLevel: 'basic', defaultTimeout: 300000, maxRetries: 2 } };
+    // Build manager settings with optional errorHandling/rateLimit configuration from merged-config
+    const mgrSettings: PipelineManagerConfig['settings'] = { debugLevel: 'basic', defaultTimeout: 300000, maxRetries: 2 };
+    try {
+      const eh = this.asRecord((mc as any).errorHandling || {});
+      const rl = this.asRecord(eh.rateLimit || {});
+      const backoff = Array.isArray((rl as any).backoffMs) ? ((rl as any).backoffMs as unknown[]) : [];
+      const schedule: number[] = backoff.map(v => Number(v)).filter(v => Number.isFinite(v) && v > 0) as number[];
+      const switchOn429 = typeof (rl as any).switchOn429 === 'boolean' ? Boolean((rl as any).switchOn429) : undefined;
+      const maxAttempts = typeof (rl as any).maxAttempts === 'number' ? Number((rl as any).maxAttempts) : undefined;
+      if (schedule.length || switchOn429 !== undefined || maxAttempts !== undefined) {
+        mgrSettings.rateLimit = {};
+        if (schedule.length) mgrSettings.rateLimit.backoffMs = schedule;
+        if (switchOn429 !== undefined) mgrSettings.rateLimit.switchOn429 = switchOn429;
+        if (typeof maxAttempts === 'number') mgrSettings.rateLimit.maxAttempts = maxAttempts;
+      }
+    } catch { /* ignore optional errorHandling config */ }
+
+    const managerConfig: PipelineManagerConfig = { pipelines, settings: mgrSettings };
     const dummyErrorCenter: any = { handleError: async () => {}, createContext: () => ({}), getStatistics: () => ({}) };
     const dummyDebugCenter: any = { logDebug: () => {}, logError: () => {}, logModule: () => {}, processDebugEvent: () => {}, getLogs: () => [] };
     const manager = new PipelineManager(managerConfig, dummyErrorCenter, dummyDebugCenter);
