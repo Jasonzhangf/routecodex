@@ -4,18 +4,12 @@
  */
 
 import { BaseModule } from 'rcc-basemodule';
-import { ModelFieldConverter } from '../../utils/model-field-converter/index.js';
-import { RCCUnimplementedModule } from '../../modules/unimplemented-module.js';
 import { ConfigRequestClassifier } from './classifiers/config-request-classifier.js';
 // Dry-run executor removed
 
 export class VirtualRouterModule extends BaseModule {
-  private routeTargets: Record<string, unknown> = {};
-  private pipelineConfigs: Record<string, unknown> = {};
-  private protocolManager: ProtocolManager;
+  private routePools: Record<string, string[]> = {};
   private loadBalancer: LoadBalancer;
-  private fieldConverter: ModelFieldConverter;
-  private unimplementedModule: RCCUnimplementedModule;
   private inputModelRequestClassifier: ConfigRequestClassifier | null = null;
 
   constructor() {
@@ -26,13 +20,6 @@ export class VirtualRouterModule extends BaseModule {
       description: 'Pure routing decision based on input model - no load balancing'
     });
 
-    this.fieldConverter = new ModelFieldConverter();
-    this.unimplementedModule = new RCCUnimplementedModule({
-      moduleId: 'virtual-router-unimplemented',
-      moduleName: 'Virtual Router Unimplemented',
-      description: 'Unimplemented features for virtual router'
-    });
-    this.protocolManager = new ProtocolManager();
     this.loadBalancer = new LoadBalancer();
   }
 
@@ -46,26 +33,17 @@ export class VirtualRouterModule extends BaseModule {
       // 验证必需配置
       this.validateConfig(config as Record<string, unknown>);
 
-      // 设置路由目标池
+      // 设置路由池（每个路由对应一组 pipelineId）
       const cfg = config as Record<string, unknown>;
-      this.routeTargets = cfg['routeTargets'] as Record<string, unknown>;
-
-      // 设置流水线配置
-      this.pipelineConfigs = cfg['pipelineConfigs'] as Record<string, unknown>;
+      this.routePools = (cfg['routePools'] as Record<string, string[]>) || {};
 
       // Dry-run configuration removed
 
       // 初始化输入模型分类器
       await this.initializeInputModelClassifier(cfg);
 
-      // 初始化协议管理器
-      await this.protocolManager.initialize({
-        inputProtocol: cfg['inputProtocol'] as string,
-        outputProtocol: cfg['outputProtocol'] as string
-      });
-
       // 初始化负载均衡器
-      await this.loadBalancer.initialize(this.routeTargets);
+      await this.loadBalancer.initialize(this.routePools);
 
       console.log('✅ Input Model-based Virtual Router Module initialized successfully');
     } catch (error) {
@@ -81,21 +59,8 @@ export class VirtualRouterModule extends BaseModule {
     if (!config) {
       throw new Error('虚拟路由器配置不能为空');
     }
-
-    if (!config['routeTargets'] || Object.keys(config['routeTargets'] as Record<string, unknown>).length === 0) {
-      throw new Error('routeTargets配置不能为空');
-    }
-
-    if (!config['pipelineConfigs'] || Object.keys(config['pipelineConfigs'] as Record<string, unknown>).length === 0) {
-      throw new Error('pipelineConfigs配置不能为空');
-    }
-
-    if (!config['inputProtocol']) {
-      throw new Error('inputProtocol配置不能为空');
-    }
-
-    if (!config['outputProtocol']) {
-      throw new Error('outputProtocol配置不能为空');
+    if (!config['routePools'] || Object.keys(config['routePools'] as Record<string, unknown>).length === 0) {
+      throw new Error('routePools配置不能为空');
     }
   }
 
@@ -131,27 +96,17 @@ export class VirtualRouterModule extends BaseModule {
       // 2. 获取分类决定的路由
       const determinedRoute = String((classificationResult as Record<string, unknown>)['route'] || 'default');
       
-      // 3. 获取该路由的可用目标
-      const targets = ((this.routeTargets as Record<string, unknown>)[determinedRoute as string] as Array<Record<string, unknown>> | undefined);
-      if (!targets || targets.length === 0) {
-        throw new Error(`路由 ${determinedRoute} 没有配置目标模型`);
+      // 3. 选择具体流水线（池内 RR），分类失败时已经将 route 置为 'default'
+      const pool = (this.routePools as any)[determinedRoute] || (this.routePools as any)['default'] || [];
+      if (!Array.isArray(pool) || pool.length === 0) {
+        throw new Error(`路由 ${determinedRoute} 没有配置目标流水线`);
+      }
+      const pipelineId = await this.loadBalancer.selectTarget<string>(determinedRoute, pool as string[]);
+      if (!pipelineId) {
+        throw new Error(`路由 ${determinedRoute} 没有可用流水线`);
       }
 
-      // 4. 选择目标
-      const target = await this.loadBalancer.selectTarget(determinedRoute, targets);
-      if (!target) {
-        throw new Error(`路由 ${determinedRoute} 没有可用目标`);
-      }
-
-      // 5. 获取流水线配置
-      const pipelineConfig = (this.pipelineConfigs as Record<string, unknown>)[
-        `${target.providerId}.${target.modelId}.${target.keyId}`
-      ] as Record<string, unknown> | undefined;
-      if (!pipelineConfig) {
-        throw new Error(`未找到目标 ${target.providerId}.${target.modelId}.${target.keyId} 的流水线配置`);
-      }
-
-      // 仅返回路由决策与流水线配置；不在虚拟路由器内执行请求
+      // 仅返回路由决策与 pipelineId；不在虚拟路由器内执行请求
       return {
         success: true,
         routing: {
@@ -160,9 +115,8 @@ export class VirtualRouterModule extends BaseModule {
           inputModelWeight: (classificationResult as any).inputModelWeight,
           confidence: (classificationResult as any).confidence,
           reasoning: (classificationResult as any).reasoning,
-          target
-        },
-        pipelineConfig
+          pipelineId
+        }
       } as unknown as Record<string, unknown>;
 
     } catch (error) {
@@ -201,28 +155,6 @@ export class VirtualRouterModule extends BaseModule {
   }
 
   /**
-   * 执行请求
-   */
-  private async executeRequest(request: Record<string, unknown>, pipelineConfig: Record<string, unknown>): Promise<Record<string, unknown>> {
-    console.log(`🔄 Executing request to ${(pipelineConfig['provider'] as Record<string, unknown>)?.['baseURL']}`);
-    
-    // 这里应该调用实际的provider执行逻辑
-    // 现在返回模拟响应
-    return {
-      id: `response-${Date.now()}`,
-      object: 'chat.completion',
-      model: (pipelineConfig['provider'] as Record<string, unknown>)?.['type'],
-      choices: [{
-        index: 0,
-        message: {
-          role: 'assistant',
-          content: `Response from ${(pipelineConfig['provider'] as Record<string, unknown>)?.['type']} via route`
-        }
-      }]
-    };
-  }
-
-  /**
    * 获取状态
    */
   getStatus(): Record<string, unknown> {
@@ -230,13 +162,12 @@ export class VirtualRouterModule extends BaseModule {
     
     return {
       status: 'running',
-      routeTargets: Object.keys(this.routeTargets),
-      pipelineConfigs: Object.keys(this.pipelineConfigs),
+      routePools: Object.keys(this.routePools),
       classifier: {
         enabled: !!this.inputModelRequestClassifier,
         inputModelBased: true,
         protocols: classifierStatus?.protocols || [],
-        inputModelsConfigured: Object.keys(this.routeTargets).length
+        inputModelsConfigured: Object.keys(this.routePools).length
       }
     };
   }
@@ -276,16 +207,16 @@ class ProtocolManager {
   }
 }
 
-// 简化的负载均衡器
+// 简化的负载均衡器（按路由名维护 RR 索引）
 class LoadBalancer {
-  private routeTargets: Record<string, unknown> = {};
+  private routePools: Record<string, string[]> = {};
   private currentIndex: Map<string, number> = new Map();
 
-  async initialize(routeTargets: Record<string, unknown>): Promise<void> {
-    this.routeTargets = routeTargets;
+  async initialize(routePools: Record<string, string[]>): Promise<void> {
+    this.routePools = routePools;
   }
 
-  async selectTarget(routeName: string, targets: Array<Record<string, unknown>>): Promise<Record<string, unknown> | null> {
+  async selectTarget<T>(routeName: string, targets: Array<T>): Promise<T | null> {
     if (targets.length === 0) return null;
     if (targets.length === 1) return targets[0];
     const cur = this.currentIndex.get(routeName) || 0;

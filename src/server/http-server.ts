@@ -24,6 +24,8 @@ export class HttpServer {
   private routePools: Record<string, string[]> = {};
   private routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }> = {} as any;
   private rrIndex: Record<string, number> = {};
+  private virtualRouter: any = null;
+  private classifierConfig: unknown = null;
 
   constructor(_modulesConfigPath?: string) {
     this.app = express();
@@ -197,6 +199,7 @@ export class HttpServer {
     try {
       for (const name of Object.keys(this.routePools || {})) { this.rrIndex[name] = 0; }
     } catch { /* ignore */ }
+    this.ensureVirtualRouter();
   }
 
   public attachRouteMeta(routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }>): void {
@@ -206,6 +209,8 @@ export class HttpServer {
 
   public attachRoutingClassifierConfig(config: unknown): void {
     (globalThis as any).routingClassifierConfig = config;
+    this.classifierConfig = config;
+    this.ensureVirtualRouter();
   }
 
   public async start(): Promise<void> {
@@ -257,17 +262,39 @@ export class HttpServer {
     return null;
   }
 
+  private async pickPipelineIdViaVirtualRouter(payload: UnknownObject, entryEndpoint: string): Promise<string | null> {
+    try {
+      if (!this.virtualRouter) return null;
+      // attach endpoint so classifier can see it
+      try { (payload as any).endpoint = entryEndpoint; } catch { /* ignore */ }
+      const routed = await this.virtualRouter.routeRequest(payload, 'default');
+      const pid = (routed && (routed as any).routing && (routed as any).routing.pipelineId) ? String((routed as any).routing.pipelineId) : null;
+      return pid;
+    } catch { return null; }
+  }
+
+  private ensureVirtualRouter(): void {
+    try {
+      if (!this.classifierConfig || !this.routePools || Object.keys(this.routePools).length === 0) {
+        return; // insufficient info
+      }
+      // Lazy create or re-init
+      const needsInit = !this.virtualRouter;
+      if (!this.virtualRouter) {
+        try { const mod = require('../modules/virtual-router/virtual-router-module.js'); this.virtualRouter = new mod.VirtualRouterModule(); } catch { this.virtualRouter = null; }
+      }
+      if (this.virtualRouter && typeof this.virtualRouter.initialize === 'function') {
+        this.virtualRouter.initialize({ classificationConfig: this.classifierConfig, routePools: this.routePools }).catch(()=>{});
+      }
+    } catch { /* ignore */ }
+  }
+
   private async handlePipelineRequest(req: Request, res: Response, entryEndpoint: string): Promise<void> {
     // Declare SSE logger in outer scope so catch can access
     let sseLogger: { write: (line: string) => Promise<void> } = { write: async () => {} } as any;
     try {
       if (!this.pipelineManager) {
         res.status(503).json({ error: { message: 'Pipeline manager not attached' } });
-        return;
-      }
-      const pipelineId = this.pickPipelineId();
-      if (!pipelineId) {
-        res.status(500).json({ error: { message: 'No pipeline available' } });
         return;
       }
       const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -282,6 +309,14 @@ export class HttpServer {
           (payload as any).metadata = { ...meta, entryEndpoint, stream: wantsSSE };
         }
       } catch { /* ignore */ }
+      // Resolve pipeline via Virtual Router (preferred), fallback to per-pool RR
+      let pipelineId: string | null = await this.pickPipelineIdViaVirtualRouter(payload, entryEndpoint);
+      if (!pipelineId) { pipelineId = this.pickPipelineId(); }
+      if (!pipelineId) {
+        res.status(500).json({ error: { message: 'No pipeline available' } });
+        return;
+      }
+
       const sharedReq = {
         data: payload,
         route: { providerId: 'unknown', modelId: String((payload as any)?.model || 'unknown'), requestId, timestamp: Date.now(), pipelineId },
