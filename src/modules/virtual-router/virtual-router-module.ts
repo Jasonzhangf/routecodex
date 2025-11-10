@@ -103,31 +103,10 @@ export class VirtualRouterModule extends BaseModule {
    * 初始化输入模型分类器
    */
   private async initializeInputModelClassifier(config: Record<string, unknown>): Promise<void> {
-    let classificationConfig = config['classificationConfig'] as Record<string, unknown> | undefined;
+    const classificationConfig = config['classificationConfig'] as Record<string, unknown> | undefined;
     if (!classificationConfig) {
-      // 提供一个最小默认分类配置，满足测试环境
-      classificationConfig = {
-        protocolMapping: {
-          openai: {
-            endpoints: ['/v1/chat/completions'],
-            messageField: 'messages',
-            modelField: 'model',
-            toolsField: 'tools',
-            maxTokensField: 'max_tokens'
-          }
-        },
-        protocolHandlers: {
-          openai: { tokenCalculator: {}, toolDetector: { type: 'pattern', patterns: { webSearch: [], codeExecution: [], fileSearch: [], dataAnalysis: [] } } }
-        },
-        modelTiers: {
-          basic: { description: 'Basic', models: [], maxTokens: 4096, supportedFeatures: [] },
-          advanced: { description: 'Advanced', models: [], maxTokens: 8192, supportedFeatures: [] }
-        },
-        routingDecisions: { default: { description: 'Default', modelTier: 'basic', tokenThreshold: 0, toolTypes: [], priority: 50 } },
-        confidenceThreshold: 60
-      } as unknown as Record<string, unknown>;
+      throw new Error('classificationConfig 配置不能为空');
     }
-
     this.inputModelRequestClassifier = ConfigRequestClassifier.fromModuleConfig(classificationConfig as Record<string, unknown>);
   }
 
@@ -146,7 +125,7 @@ export class VirtualRouterModule extends BaseModule {
       }
       // Dry-run removed
 
-      // 1. 输入模型分类
+      // 1. 输入模型分类（失败则指向 default 路由池）
       const classificationResult = await this.classifyRequest(request);
       
       // 2. 获取分类决定的路由
@@ -159,7 +138,7 @@ export class VirtualRouterModule extends BaseModule {
       }
 
       // 4. 选择目标
-      const target = await this.loadBalancer.selectTarget(targets);
+      const target = await this.loadBalancer.selectTarget(determinedRoute, targets);
       if (!target) {
         throw new Error(`路由 ${determinedRoute} 没有可用目标`);
       }
@@ -172,34 +151,19 @@ export class VirtualRouterModule extends BaseModule {
         throw new Error(`未找到目标 ${target.providerId}.${target.modelId}.${target.keyId} 的流水线配置`);
       }
 
-      // 6. 协议转换（如果需要）
-      const convertedRequest = await this.protocolManager.convertRequest(
-        request,
-        (pipelineConfig['protocols'] as Record<string, string>)['input'],
-        (pipelineConfig['protocols'] as Record<string, string>)['output']
-      );
-
-      // 7. 执行请求
-      const response = await this.executeRequest(convertedRequest, pipelineConfig);
-
-      // 8. 协议转换响应（如果需要）
-      const convertedResponse = await this.protocolManager.convertResponse(
-        response,
-        (pipelineConfig['protocols'] as Record<string, string>)['output'],
-        (pipelineConfig['protocols'] as Record<string, string>)['input']
-      );
-
+      // 仅返回路由决策与流水线配置；不在虚拟路由器内执行请求
       return {
-        response: convertedResponse,
+        success: true,
         routing: {
           route: determinedRoute,
-          inputModel: classificationResult.inputModel,
-          inputModelWeight: classificationResult.inputModelWeight,
-          confidence: classificationResult.confidence,
-          reasoning: classificationResult.reasoning,
-          target: target
-        }
-      };
+          inputModel: (classificationResult as any).inputModel,
+          inputModelWeight: (classificationResult as any).inputModelWeight,
+          confidence: (classificationResult as any).confidence,
+          reasoning: (classificationResult as any).reasoning,
+          target
+        },
+        pipelineConfig
+      } as unknown as Record<string, unknown>;
 
     } catch (error) {
       console.error(`❌ Request routing failed:`, error);
@@ -217,19 +181,23 @@ export class VirtualRouterModule extends BaseModule {
       throw new Error('输入模型分类器未初始化');
     }
 
-    const classificationInput = {
-      request: request,
-      endpoint: (request['endpoint'] as string) || '/v1/chat/completions',
-      protocol: (request['protocol'] as string) || 'openai'
-    };
+    try {
+      const classificationInput = {
+        request: request,
+        endpoint: String((request as any)['endpoint'] || ''),
+        protocol: (typeof (request as any)['protocol'] === 'string') ? (request as any)['protocol'] : undefined
+      } as Record<string, unknown>;
 
-    const result = await this.inputModelRequestClassifier.classify(classificationInput);
-    
-    if (!result.success) {
-      throw new Error(`输入模型分类失败: ${result.reasoning}`);
+      const result = await (this.inputModelRequestClassifier as any).classify(classificationInput as any);
+      if (!result || (result as any).success === false) {
+        // 分类失败：指向 default 路由池
+        return { success: true, route: 'default', inputModel: 'unknown', confidence: 0, reasoning: 'fallback:classification_failed' } as any;
+      }
+      return result as unknown as Record<string, unknown>;
+    } catch {
+      // 分类异常：指向 default 路由池
+      return { success: true, route: 'default', inputModel: 'unknown', confidence: 0, reasoning: 'fallback:classification_error' } as any;
     }
-
-    return result as unknown as Record<string, unknown>;
   }
 
   /**
@@ -317,29 +285,13 @@ class LoadBalancer {
     this.routeTargets = routeTargets;
   }
 
-  async selectTarget(targets: Array<Record<string, unknown>>): Promise<Record<string, unknown> | null> {
-    if (targets.length === 0) {
-      return null;
-    }
-    
-    if (targets.length === 1) {
-      return targets[0];
-    }
-
-    // 简单的轮询
-    const routeName = Object.keys(this.routeTargets).find(name => 
-      this.routeTargets[name] === targets
-    );
-
-    if (!routeName) {
-      return targets[0];
-    }
-
-    const currentIndex = this.currentIndex.get(routeName) || 0;
-    const nextIndex = (currentIndex + 1) % targets.length;
-    this.currentIndex.set(routeName, nextIndex);
-
-    return targets[nextIndex];
+  async selectTarget(routeName: string, targets: Array<Record<string, unknown>>): Promise<Record<string, unknown> | null> {
+    if (targets.length === 0) return null;
+    if (targets.length === 1) return targets[0];
+    const cur = this.currentIndex.get(routeName) || 0;
+    const idx = cur % targets.length;
+    this.currentIndex.set(routeName, cur + 1);
+    return targets[idx];
   }
 
   getStatus(): { strategy: string; currentIndex: Record<string, number> } {
