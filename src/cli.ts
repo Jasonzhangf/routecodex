@@ -109,7 +109,7 @@ program
 // Code command - Launch Claude Code interface
 program
   .command('code')
-  .description('Launch Claude Code interface with RouteCodex as proxy')
+  .description('Launch Claude Code interface with RouteCodex as proxy (args after this command are passed to Claude by default)')
   .option('-p, --port <port>', 'RouteCodex server port (overrides config file)')
   // Default to IPv4 localhost to avoid environments where localhost resolves to ::1
   .option('-h, --host <host>', 'RouteCodex server host', LOCAL_HOSTS.IPV4)
@@ -118,6 +118,7 @@ program
   .option('--model <model>', 'Model to use with Claude Code')
   .option('--profile <profile>', 'Claude Code profile to use')
   .option('--ensure-server', 'Ensure RouteCodex server is running before launching Claude')
+  .allowUnknownOption(true)
   .action(async (options) => {
     const spinner = ora('Preparing Claude Code with RouteCodex...').start();
 
@@ -227,8 +228,8 @@ program
       logger.info('Unset ANTHROPIC_AUTH_TOKEN/ANTHROPIC_TOKEN for Claude process to avoid conflicts');
       logger.info(`Setting Anthropic base URL to: ${anthropicBase}`);
 
-      // Prepare Claude Code command arguments
-      const claudeArgs = [];
+      // Prepare Claude Code command arguments（将 rcc code 后面的原始参数默认透传给 Claude）
+      const claudeArgs: string[] = [];
 
       if (options.model) {
         claudeArgs.push('--model', options.model);
@@ -237,6 +238,34 @@ program
       if (options.profile) {
         claudeArgs.push('--profile', options.profile);
       }
+
+      // 透传用户紧随 `rcc code` 之后的参数（默认行为）
+      try {
+        const rawArgv = process.argv.slice(2); // drop node/bin and script
+        const idxCode = rawArgv.findIndex(a => a === 'code');
+        const afterCode = idxCode >= 0 ? rawArgv.slice(idxCode + 1) : [];
+        // 支持显式分隔符 -- ：其后的所有参数原样传给 Claude
+        const sepIndex = afterCode.indexOf('--');
+        const tail = sepIndex >= 0 ? afterCode.slice(sepIndex + 1) : afterCode;
+        // 过滤本命令自身已识别的选项，剩余的作为透传参数
+        const knownOpts = new Set(['-p','--port','-h','--host','-c','--config','--claude-path','--model','--profile','--ensure-server']);
+        const requireValue = new Set(['-p','--port','-h','--host','-c','--config','--claude-path','--model','--profile']);
+        const passThrough: string[] = [];
+        for (let i = 0; i < tail.length; i++) {
+          const tok = tail[i];
+          if (knownOpts.has(tok)) { if (requireValue.has(tok)) i++; continue; }
+          // 若是组合形式 --opt=value 且 opt 为已识别的，跳过
+          if (tok.startsWith('--')) {
+            const eq = tok.indexOf('=');
+            if (eq > 2) {
+              const optName = tok.slice(0, eq);
+              if (knownOpts.has(optName)) { continue; }
+            }
+          }
+          passThrough.push(tok);
+        }
+        if (passThrough.length) { claudeArgs.push(...passThrough); }
+      } catch { /* ignore passthrough errors */ }
 
       // Launch Claude Code
       const { spawn } = await import('child_process');
