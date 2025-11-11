@@ -10,6 +10,13 @@ The hybrid adapter enables seamless migration with zero downtime through:
 - **Configuration-driven migration** with rollback support
 - **Backward compatibility** with existing infrastructure
 
+## Mode Switch
+
+- Use `ROUTECODEX_PIPELINE_MODE` to select pipeline:
+  - `dynamic` → V2 dynamic pipeline (default)
+  - `static` → V1 static pipeline
+- Legacy `ROUTECODEX_USE_V2` is deprecated. Please migrate to `ROUTECODEX_PIPELINE_MODE`.
+
 ## Migration Phases
 
 ### Phase 1: Preparation (V1 Mode)

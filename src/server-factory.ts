@@ -51,7 +51,17 @@ export class ServerFactory {
     config: ServerConfig | ServerConfigV2,
     options: ServerCreateOptions = {}
   ): Promise<ServerInstance> {
-    const useV2 = options.useV2 || process.env.ROUTECODEX_USE_V2 === 'true';
+    // 新开关：ROUTECODEX_PIPELINE_MODE=dynamic|static（默认dynamic）
+    const modeEnv = String(process.env.ROUTECODEX_PIPELINE_MODE || process.env.RCC_PIPELINE_MODE || '').trim().toLowerCase();
+    const resolveUseV2 = (): boolean => {
+      if (modeEnv === 'dynamic' || modeEnv === 'v2') return true;
+      if (modeEnv === 'static' || modeEnv === 'v1') return false;
+      const legacy = String(process.env.ROUTECODEX_USE_V2 || '').trim().toLowerCase();
+      if (legacy === 'true' || legacy === '1') { console.warn('[ServerFactory] ROUTECODEX_USE_V2 已弃用，请使用 ROUTECODEX_PIPELINE_MODE=dynamic|static'); return true; }
+      if (legacy === 'false' || legacy === '0') { console.warn('[ServerFactory] ROUTECODEX_USE_V2 已弃用，请使用 ROUTECODEX_PIPELINE_MODE=dynamic|static'); return false; }
+      return true; // 默认动态（V2）
+    };
+    const useV2 = options.useV2 ?? resolveUseV2();
     // 全局禁用降级（Fail Fast）：如果V2启用但创建失败，直接抛错，不再回退到V1
     const fallbackToV1 = false;
 

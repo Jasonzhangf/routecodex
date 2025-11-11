@@ -99,6 +99,22 @@ npm pack && npm i -g ./routecodex-*.tgz
 - 快照路径：`~/.routecodex/codex-samples/{openai-chat|openai-responses|anthropic-messages}`
 - 完整链路：raw-request → pre-llmswitch → post-llmswitch → compat-pre → provider-request → provider-response → compat-post
 
+## 🔀 选择静态/动态流水线（V1/V2）
+
+- 开关：`ROUTECODEX_PIPELINE_MODE`
+- 取值：`dynamic`（动态流水线，V2，默认）或 `static`（静态流水线，V1）
+- 兼容：历史 `ROUTECODEX_USE_V2` 已弃用，请迁移至 `ROUTECODEX_PIPELINE_MODE`
+
+示例：
+
+```bash
+# 动态流水线（V2，默认）
+ROUTECODEX_PIPELINE_MODE=dynamic routecodex
+
+# 静态流水线（V1）
+ROUTECODEX_PIPELINE_MODE=static routecodex
+```
+
 ## 🚀 核心特性
 
 ### 🏗️ 双向4层管道架构

@@ -140,8 +140,17 @@ class RouteCodexApp {
       await this.configManager.initialize(configManagerConfig as any);
       mergedConfig = await this.loadMergedConfig();
 
-      // 3. 初始化服务器（V1/V2可切换）
-      const useV2 = String(process.env.ROUTECODEX_USE_V2 || 'false') === 'true';
+      // 3. 初始化服务器（V1/V2可切换，默认动态V2）
+      const modeEnv = String(process.env.ROUTECODEX_PIPELINE_MODE || process.env.RCC_PIPELINE_MODE || '').trim().toLowerCase();
+      const resolveUseV2 = (): boolean => {
+        if (modeEnv === 'dynamic' || modeEnv === 'v2') return true;
+        if (modeEnv === 'static' || modeEnv === 'v1') return false;
+        const legacy = String(process.env.ROUTECODEX_USE_V2 || '').trim().toLowerCase();
+        if (legacy === 'true' || legacy === '1') { console.warn('[RouteCodex] ROUTECODEX_USE_V2 已弃用，请使用 ROUTECODEX_PIPELINE_MODE=dynamic|static'); return true; }
+        if (legacy === 'false' || legacy === '0') { console.warn('[RouteCodex] ROUTECODEX_USE_V2 已弃用，请使用 ROUTECODEX_PIPELINE_MODE=dynamic|static'); return false; }
+        return true; // 默认动态（V2）
+      };
+      const useV2 = resolveUseV2();
       if (useV2) {
         // Resolve host/port from merged config for V2 constructor
         let bindHost = '0.0.0.0';
