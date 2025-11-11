@@ -1,7 +1,7 @@
-import { loadSystemConfig, loadUserConfig } from 'routecodex-config-core';
-import { buildCanonical } from 'routecodex-config-core';
-import { exportAssemblerConfigV2 } from 'routecodex-config-core';
-import { writeArtifacts } from 'routecodex-config-core';
+import { loadSystemConfig, loadUserConfig } from 'llmswitch-config-core';
+import { buildCanonical } from 'llmswitch-config-core';
+import { exportAssemblerConfigV2 } from 'llmswitch-config-core';
+import { writeArtifacts } from 'llmswitch-config-core';
 import path from 'path';
 
 async function main() {

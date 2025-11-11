@@ -1,4 +1,4 @@
-declare module 'routecodex-config-core' {
+declare module 'llmswitch-config-core' {
   export const loadSystemConfig: any;
   export const loadUserConfig: any;
   export const buildCanonical: any;
