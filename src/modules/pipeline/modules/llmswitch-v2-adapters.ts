@@ -133,6 +133,20 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
         converted = await this.openaiCodec.convertRequest(body, { outgoingProtocol: 'openai-chat' } as any, ctx as any);
         break; }
     }
+    // 统一请求工具治理（Chat 中间形态）——Anthropic/Responses 与 OpenAI 走同一条引擎链
+    try {
+      const filt = await importCore('v2/filters/index');
+      const engine = new (filt as any).FilterEngine();
+      // 可选：工具清单形状规范（若可用）
+      try { if ((filt as any).RequestToolListFilter) engine.registerFilter(new (filt as any).RequestToolListFilter()); } catch {}
+      engine.registerFilter(new (filt as any).RequestToolCallsStringifyFilter());
+      engine.registerFilter(new (filt as any).RequestToolChoicePolicyFilter());
+      engine.registerFilter(new (filt as any).RequestStreamingToNonStreamingFilter());
+      try { if ((filt as any).RequestOpenAIToolsNormalizeFilter) engine.registerFilter(new (filt as any).RequestOpenAIToolsNormalizeFilter()); } catch {}
+      const ctxRun = { requestId: ctx.requestId, endpoint: '/v1/chat/completions', profile: 'openai-chat' } as any;
+      try { converted = await engine.run('request_pre', converted, ctxRun); } catch {}
+      try { converted = await engine.run('request_post', converted, ctxRun); } catch {}
+    } catch { /* ignore filter engine errors */ }
     // 非 Chat 协议的请求规范化已在各自 codec 前半段完成（shape-only），随后统一走 Chat 请求工具阶段
     // 返回时携带元数据，供响应阶段严格识别协议（不做兜底）
     const meta = (request && request.metadata && typeof request.metadata === 'object') ? { ...(request.metadata) } : {};
@@ -150,19 +164,21 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
     const proto: 'openai-chat' | 'openai-responses' | 'anthropic-messages' = (protoMeta === 'anthropic-messages' || protoMeta === 'openai-responses' || protoMeta === 'openai-chat')
       ? (protoMeta as any)
       : (() => { try { return this.pickProtocol(ctx); } catch { return (body && typeof body === 'object' && Array.isArray((body as any).messages)) ? 'openai-chat' : this.pickProtocol(ctx); } })();
-    // 为保证 Chat 行为不变，仅对非 Chat 协议在出口前做统一响应规范化
-    if (proto !== 'openai-chat') {
-      try {
-        const mod = await importCore('v2/conversion/shared/tool-canonicalizer');
-        const canon = (mod as any).canonicalizeChatResponseTools || (mod as any).default;
-        if (typeof canon === 'function') {
-          const isChatLike = !!(body && typeof body === 'object' && (Array.isArray((body as any).choices) || (body as any).message));
-          if (isChatLike) {
-            try { (response as any).data = canon(body); } catch { /* keep original */ }
-          }
-        }
-      } catch { /* ignore canonicalization failure */ }
-    }
+    // 统一响应工具治理（始终以 Chat 中间形态进行），再转换到目标端点
+    try {
+      const isChatLike = !!(body && typeof body === 'object' && (Array.isArray((body as any).choices) || (body as any).message));
+      if (isChatLike) {
+        const filt = await importCore('v2/filters/index');
+        const engine = new (filt as any).FilterEngine();
+        engine.registerFilter(new (filt as any).ResponseToolTextCanonicalizeFilter());
+        try { if ((filt as any).ResponseToolArgumentsToonDecodeFilter) engine.registerFilter(new (filt as any).ResponseToolArgumentsToonDecodeFilter()); } catch {}
+        engine.registerFilter(new (filt as any).ResponseToolArgumentsStringifyFilter());
+        engine.registerFilter(new (filt as any).ResponseFinishInvariantsFilter());
+        const ctxRun = { requestId: ctx.requestId, endpoint: '/v1/chat/completions', profile: 'openai-chat' } as any;
+        try { (response as any).data = await engine.run('response_pre', body, ctxRun); } catch {}
+        try { (response as any).data = await engine.run('response_post', (response as any).data, ctxRun); } catch {}
+      }
+    } catch { /* ignore filter engine errors */ }
     switch (proto) {
       case 'anthropic-messages':
         // Convert OpenAI Chat response → Anthropic Messages（延迟加载）
