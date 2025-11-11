@@ -11,14 +11,14 @@ async function main(){
   const srcLocal=path.join(root,'sharedmodule','llmswitch-core','dist');
   const srcNode=path.join(root,'node_modules','rcc-llmswitch-core','dist');
   const out=path.join(root,'vendor','rcc-llmswitch-core');
-  // Prefer local dist built from sharedmodule (per AGENTS.md build order), fallback to node_modules package
-  let src=srcLocal;
-  if(!(await exists(srcLocal))){
-    if(await exists(srcNode)){
-      console.warn('[vendor-core] local llmswitch-core dist missing; falling back to node_modules');
-      src=srcNode;
+  // Prefer node_modules (external/local-file package) first; fallback to in-repo sharedmodule
+  let src=srcNode;
+  if(!(await exists(srcNode))){
+    if(await exists(srcLocal)){
+      console.warn('[vendor-core] node_modules package missing; falling back to local sharedmodule dist');
+      src=srcLocal;
     } else {
-      console.error('[vendor-core] ERROR: neither local dist nor node_modules found for rcc-llmswitch-core');
+      console.error('[vendor-core] ERROR: neither node_modules nor local sharedmodule dist found for rcc-llmswitch-core');
       process.exit(2);
     }
   }
