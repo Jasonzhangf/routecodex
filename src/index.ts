@@ -3,7 +3,8 @@
  * Multi-provider OpenAI proxy server with configuration management
  */
 
-import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS } from "./constants/index.js";import fs from 'fs/promises';
+import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS } from "./constants/index.js";
+import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
 import { homedir } from 'os';
@@ -139,29 +140,45 @@ class RouteCodexApp {
       await this.configManager.initialize(configManagerConfig as any);
       mergedConfig = await this.loadMergedConfig();
 
-      // 3. 初始化HTTP服务器
-      const HttpServer = (await import('./server/http-server.js')).HttpServer;
-      this.httpServer = new HttpServer(this.modulesConfigPath) as any;
+      // 3. 初始化服务器（V1/V2可切换）
+      const useV2 = String(process.env.ROUTECODEX_USE_V2 || 'false') === 'true';
+      if (useV2) {
+        // Resolve host/port from merged config for V2 constructor
+        let bindHost = '0.0.0.0';
+        let bindPort = port;
+        try {
+          const http = (mergedConfig as any)?.httpserver || (mergedConfig as any)?.modules?.httpserver?.config || {};
+          bindHost = String(http.host || '0.0.0.0');
+          const portRaw = http.port ?? (mergedConfig as any)?.server?.port ?? port;
+          bindPort = typeof portRaw === 'number' ? portRaw : parseInt(String(portRaw), 10);
+          if (!Number.isFinite(bindPort)) bindPort = port;
+        } catch { /* keep defaults */ }
+        const { RouteCodexServerV2 } = await import('./server-v2/core/route-codex-server-v2.js');
+        // V2 hooks 开关：默认开启；可通过 ROUTECODEX_V2_HOOKS=0/false/no 关闭
+        const hooksEnv = String(process.env.ROUTECODEX_V2_HOOKS || process.env.RCC_V2_HOOKS || '').trim().toLowerCase();
+        const hooksOff = hooksEnv === '0' || hooksEnv === 'false' || hooksEnv === 'no';
+        const hooksOn = !hooksOff;
+        this.httpServer = new RouteCodexServerV2({ server: { host: bindHost, port: bindPort, useV2: true }, logging: { level: 'debug', enableConsole: true }, providers: {}, v2Config: { enableHooks: hooksOn } }) as any;
+        await (this.httpServer as any).initializeWithMergedConfig(mergedConfig);
+      } else {
+        const HttpServer = (await import('./server/http-server.js')).HttpServer;
+        this.httpServer = new HttpServer(this.modulesConfigPath) as any;
+        await (this.httpServer as any).initializeWithMergedConfig(mergedConfig);
+      }
 
-      // 4. 使用合并后的配置初始化服务器
-      await (this.httpServer as any).initializeWithMergedConfig(mergedConfig);
-
-      // 4.1 校验 merged-config 的装配输入；若缺失 assembler pipelines，则允许使用顶层 pipelines（兼容旧配置）
+      // 4.1 校验 merged-config 的装配输入（V2严格：必须存在 assembler pipelines，不再兜底）
       try {
         const pac = (mergedConfig as any)?.pipeline_assembler?.config;
         const hasAssemblerPipes = !!(pac && Array.isArray(pac.pipelines) && pac.pipelines.length > 0);
-        const topLevelPipes = Array.isArray((mergedConfig as any)?.pipelines) ? (mergedConfig as any).pipelines : [];
         if (hasAssemblerPipes) {
           console.log(`🧱 Pipelines in merged (assembler): ${pac.pipelines.length}`);
           try { const ids = pac.pipelines.map((p: any) => p?.id).filter(Boolean); console.log('🔎 Pipeline IDs:', ids); } catch {}
-        } else if (topLevelPipes.length > 0) {
-          console.log(`🧱 Pipelines in merged (top-level): ${topLevelPipes.length}`);
-          try { const ids = topLevelPipes.map((p: any) => p?.id).filter(Boolean); console.log('🔎 Pipeline IDs:', ids); } catch {}
         } else {
-          console.warn(`⚠️  No pipelines found in ${this.mergedConfigPath}; proceeding (assembler will attempt legacy synthesis)`);
+          throw new Error(`No assembler pipelines found in ${this.mergedConfigPath}. 请使用 'npm run config:core:run' 生成 V2 装配配置`);
         }
       } catch (e: any) {
-        console.warn('⚠️  Pipeline validation warning:', e?.message || String(e));
+        console.error('❌ Pipeline validation error:', e?.message || String(e));
+        throw e;
       }
 
       // 5. 按 merged-config 组装流水线并注入（完全配置驱动，无硬编码），透明模式下可跳过
@@ -209,9 +226,8 @@ class RouteCodexApp {
       }
       this._isRunning = true;
 
-      // 7. V2 组件已禁用 - 为确保 V1 稳定性，暂时禁用 V2 dry-run 功能
-      // 如需启用 V2，请设置环境变量 ROUTECODEX_V2_DRYRUN=1
-      console.log('ℹ️ V2 components disabled for stability - V1 pipeline active');
+      // 7. 记录当前运行模式
+      console.log(useV2 ? '🔵 V2 dynamic pipeline active' : '🟢 V1 static pipeline active');
 
       // 7. 获取服务器状态（使用 HTTP 服务器解析后的最终绑定地址与端口）
       // 优先读取服务器自身解析结果，避免日志误导（例如 host 放在不同层级或为 0.0.0.0 时）

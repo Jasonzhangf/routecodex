@@ -14,6 +14,16 @@ import { BaseModule, type ModuleInfo } from 'rcc-basemodule';
 import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import { DebugEventBus } from 'rcc-debugcenter';
 import type { UnknownObject } from '../../types/common-types.js';
+import { ServerV2HookIntegration, type ServerV2HookContext } from '../hooks/server-v2-hook-integration.js';
+import { ServerRequestLoggingHook } from '../hooks/impl/server-request-logging-hook.js';
+import { ServerResponseEnhancementHook } from '../hooks/impl/server-response-enhancement-hook.js';
+import { ServerPerformanceMonitoringHook } from '../hooks/impl/server-performance-monitoring-hook.js';
+import { UnifiedHookStage } from '../../modules/hooks/types/hook-types.js';
+import { handleChatCompletions } from '../../server/handlers/chat-handler.js';
+import { handleMessages } from '../../server/handlers/messages-handler.js';
+import { handleResponses } from '../../server/handlers/responses-handler.js';
+import { handleSubmitToolOutputs } from '../../server/handlers/submit-tool-outputs-handler.js';
+import type { HandlerContext } from '../../server/handlers/types.js';
 
 /**
  * V2服务器配置接口
@@ -82,6 +92,13 @@ export class RouteCodexServerV2 extends BaseModule {
   // V2特性
   private hooksEnabled: boolean = false;
   private hookIntegration?: ServerV2HookIntegration;
+  // Routing and pipeline state (align with V1 HttpServer for parity)
+  private pipelineManager: any = null;
+  private routePools: Record<string, string[]> = {};
+  private routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }> = {} as any;
+  private virtualRouter: any = null;
+  private classifierConfig: unknown = null;
+  private rrIndex: Map<string, number> = new Map();
 
   constructor(config: ServerConfigV2) {
     const moduleInfo: ModuleInfo = {
@@ -124,10 +141,10 @@ export class RouteCodexServerV2 extends BaseModule {
       // 设置调试事件监听
       this.setupDebugLogging();
 
-      // 设置中间件
+      // 设置中间件（保持空，实现 parity）
       await this.setupMiddleware();
 
-      // 设置路由
+      // 设置HTTP端点（完全对齐V1行为）
       await this.setupRoutes();
 
       // 设置错误处理
@@ -217,6 +234,11 @@ export class RouteCodexServerV2 extends BaseModule {
     };
   }
 
+  // Non-standard helper used by index.ts for logging URL
+  public getServerConfig(): { host: string; port: number } {
+    return { host: this.config.server.host, port: this.config.server.port };
+  }
+
   /**
    * V1兼容接口：检查是否已初始化
    */
@@ -235,8 +257,14 @@ export class RouteCodexServerV2 extends BaseModule {
    * 设置中间件 (已移除所有中间件)
    */
   private async setupMiddleware(): Promise<void> {
-    console.log('[RouteCodexServerV2] All middleware removed');
-    // 无中间件设置
+    // 与V1对齐：启用 JSON 解析中间件（不做业务逻辑）
+    try {
+      const json = (express as any).json || (() => undefined);
+      this.app.use(json({ limit: '10mb' }));
+      console.log('[RouteCodexServerV2] Middleware: express.json enabled');
+    } catch {
+      console.warn('[RouteCodexServerV2] Failed to enable express.json; request bodies may be empty');
+    }
   }
 
   /**
@@ -245,54 +273,86 @@ export class RouteCodexServerV2 extends BaseModule {
   private async setupRoutes(): Promise<void> {
     console.log('[RouteCodexServerV2] Setting up routes...');
 
-    // V2健康检查端点 (不同端口避免冲突)
-    this.app.get('/health-v2', (req: Request, res: Response) => {
-      const status = this.getStatus();
-      res.json({
-        status: status.running ? 'healthy' : 'unhealthy',
-        version: 'v2',
-        timestamp: new Date().toISOString(),
-        uptime: status.uptime,
-        memory: status.memory,
-        hooksEnabled: status.hooksEnabled
-      });
+    // Health (V1 parity)
+    this.app.get('/health', (_req: Request, res: Response) => {
+      res.status(200).json({ status: 'ok', server: 'routecodex', version: String(process.env.ROUTECODEX_VERSION || 'dev') });
     });
 
-    // V1兼容的健康检查
-    this.app.get('/health', (req: Request, res: Response) => {
-      const status = this.getStatus();
-      res.json({
-        status: status.running ? 'healthy' : 'unhealthy',
-        version: 'v2',
-        timestamp: new Date().toISOString(),
-        uptime: status.uptime,
-        memory: status.memory
-      });
+    // Config (minimal parity)
+    this.app.get('/config', (_req: Request, res: Response) => {
+      res.status(200).json({ httpserver: { host: this.config.server.host, port: this.config.server.port }, merged: false });
     });
 
-    // V2专用端点 (用于测试)
-    this.app.post('/v2/chat/completions', this.handleChatCompletionsV2.bind(this));
-
-    // 状态端点
-    this.app.get('/status-v2', (req: Request, res: Response) => {
-      res.json(this.getStatus());
+    // Shutdown (localhost only)
+    this.app.post('/shutdown', (req: Request, res: Response) => {
+      try {
+        const ip = (req.socket && (req.socket as any).remoteAddress) || '';
+        const allowed = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+        if (!allowed) { res.status(403).json({ error: { message: 'forbidden' } }); return; }
+        res.status(200).json({ ok: true });
+        setTimeout(() => { try { process.kill(process.pid, 'SIGTERM'); } catch {} }, 50);
+      } catch {
+        try { res.status(200).json({ ok: true }); } catch {}
+        setTimeout(() => { try { process.kill(process.pid, 'SIGTERM'); } catch {} }, 50);
+      }
     });
 
-    // V1兼容的状态端点
-    this.app.get('/status', (req: Request, res: Response) => {
-      const status = this.getStatus();
-      res.json({
-        initialized: status.initialized,
-        running: status.running,
-        port: status.port,
-        host: status.host,
-        uptime: status.uptime,
-        memory: status.memory
-      });
+    // Debug pipelines
+    this.app.get('/debug/pipelines', (_req: Request, res: Response) => {
+      try {
+        const mgr: any = this.getPipelineManager();
+        const ids = Array.isArray(mgr?.getPipelineIds?.()) ? mgr.getPipelineIds() : [];
+        let status: any = null;
+        try { status = typeof mgr?.getStatus === 'function' ? mgr.getStatus() : null; } catch { status = null; }
+        res.status(200).json({ ids, routePools: this.routePools, routeMeta: this.routeMeta, status });
+      } catch (e: any) {
+        res.status(500).json({ error: { message: e?.message || String(e) } });
+      }
     });
 
-    // 模型列表端点 (V1兼容)
-    this.app.get('/v1/models', this.handleModels.bind(this));
+    // Core API endpoints — reuse V1 handlers for parity, with optional V2 hook snapshots
+    const withHookSnapshots = <H extends (req: Request, res: Response) => Promise<void>>(endpoint: string, handler: H) => {
+      return async (req: Request, res: Response) => {
+        const rid = (req as any).__requestId || this.generateRequestId();
+        (req as any).__requestId = rid;
+        const hctx = this.createHookContext(rid, endpoint, req.body);
+        // Patch res.json to capture response body
+        const originalJson = res.json.bind(res);
+        (res as any).json = (body: any) => {
+          if (this.hooksEnabled && this.hookIntegration) {
+            this.executeHooksWithSnapshot('server-response', body, hctx).catch(()=>{});
+            this.executeHooksWithSnapshot('server-final', body, hctx).catch(()=>{});
+          }
+          return originalJson(body);
+        };
+        // entry + pre-process snapshots
+        if (this.hooksEnabled && this.hookIntegration) {
+          await this.executeHooksWithSnapshot('server-entry', req.body, hctx).catch(()=>{});
+          await this.executeHooksWithSnapshot('server-pre-process', req.body, hctx).catch(()=>{});
+        }
+        try {
+          await handler(req, res);
+        } catch (err) {
+          if (this.hooksEnabled && this.hookIntegration) {
+            await this.executeHooksWithSnapshot('server-error', { error: String((err as any)?.message || err) } as any, hctx).catch(()=>{});
+          }
+          throw err;
+        }
+      };
+    };
+
+    this.app.post('/v1/chat/completions', withHookSnapshots('/v1/chat/completions', async (req, res) => {
+      await handleChatCompletions(req, res, this.buildHandlerContext());
+    }));
+    this.app.post('/v1/messages', withHookSnapshots('/v1/messages', async (req, res) => {
+      await handleMessages(req, res, this.buildHandlerContext());
+    }));
+    this.app.post('/v1/responses', withHookSnapshots('/v1/responses', async (req, res) => {
+      await handleResponses(req, res, this.buildHandlerContext());
+    }));
+    this.app.post('/v1/responses/:id/submit_tool_outputs', withHookSnapshots('/v1/responses', async (req, res) => {
+      await handleSubmitToolOutputs(req, res, this.buildHandlerContext());
+    }));
 
     // 404处理器
     this.app.use('*', (req: Request, res: Response) => {
@@ -343,7 +403,7 @@ export class RouteCodexServerV2 extends BaseModule {
       // 执行预处理Hook
       const preProcessResult = await this.executeHooksWithSnapshot('server-pre-process', entryResult.data, hookContext);
 
-      // 通过Pipeline系统处理请求（严格按照V1逻辑）
+      // 通过Pipeline系统处理请求（已弃用：当前端点复用V1处理器）
       let response: any;
 
       try {
@@ -555,7 +615,9 @@ export class RouteCodexServerV2 extends BaseModule {
    */
   private initializeHookIntegration(): void {
     console.log('[RouteCodexServerV2] Initializing Hook Integration system...');
-
+    if (typeof ServerV2HookIntegration !== 'function') {
+      throw new Error('ServerV2HookIntegration is not available. 请检查编译产物 dist/server-v2/hooks/server-v2-hook-integration.js 是否存在');
+    }
     this.hookIntegration = new ServerV2HookIntegration({
       enabled: true,
       snapshot: {
@@ -667,6 +729,93 @@ export class RouteCodexServerV2 extends BaseModule {
       description: 'RouteCodex Server V2 with enhanced hooks and middleware',
       type: 'server',
     };
+  }
+
+  // --- V1 parity helpers and attach methods ---
+  public async initializeWithMergedConfig(mergedConfig: any): Promise<void> {
+    // align snapshots toggle like V1
+    try {
+      const snapsCfg = (mergedConfig as any)?.snapshots
+        || (mergedConfig as any)?.modules?.httpserver?.config?.snapshots
+        || (mergedConfig as any)?.debug?.snapshots
+        || {};
+      const env = String(process.env.ROUTECODEX_SNAPSHOTS || process.env.RCC_SNAPSHOTS || '').trim().toLowerCase();
+      const enabled = snapsCfg?.enabled === true || env === '1' || env === 'true' || env === 'yes';
+      try { (globalThis as any).rccSnapshotsEnabled = enabled; } catch { /* ignore */ }
+    } catch { /* ignore */ }
+  }
+
+  public attachPipelineManager(manager: unknown): void {
+    (globalThis as any).pipelineManager = manager;
+    this.pipelineManager = manager;
+  }
+
+  public attachRoutePools(routePools: Record<string, string[]>): void {
+    (globalThis as any).routePools = routePools;
+    this.routePools = routePools || {};
+    this.ensureVirtualRouter();
+  }
+
+  public attachRouteMeta(routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }>): void {
+    (globalThis as any).routeMeta = routeMeta;
+    this.routeMeta = routeMeta || ({} as any);
+  }
+
+  public attachRoutingClassifierConfig(config: unknown): void {
+    (globalThis as any).routingClassifierConfig = config;
+    this.classifierConfig = config;
+    this.ensureVirtualRouter();
+  }
+
+  private buildHandlerContext(): HandlerContext {
+    return {
+      pipelineManager: this.pipelineManager,
+      routePools: this.routePools,
+      selectPipelineId: async (payload: any, entryEndpoint: string) => {
+        const pid = await this.pickPipelineIdViaVirtualRouter(payload as any, entryEndpoint);
+        if (pid) return pid;
+        const fb = this.pickPipelineId();
+        if (!fb) { throw new Error('No pipeline available'); }
+        return fb;
+      },
+    } as HandlerContext;
+  }
+
+  private async pickPipelineIdViaVirtualRouter(payload: UnknownObject, entryEndpoint: string): Promise<string | null> {
+    try {
+      if (!this.virtualRouter) return null;
+      try { (payload as any).endpoint = entryEndpoint; } catch { /* ignore */ }
+      const routed = await this.virtualRouter.routeRequest(payload, 'default');
+      const pid = (routed && (routed as any).routing && (routed as any).routing.pipelineId) ? String((routed as any).routing.pipelineId) : null;
+      return pid;
+    } catch { return null; }
+  }
+
+  private ensureVirtualRouter(): void {
+    try {
+      if (!this.classifierConfig || !this.routePools || Object.keys(this.routePools).length === 0) { return; }
+      if (!this.virtualRouter) {
+        try { const mod = require('../../modules/virtual-router/virtual-router-module.js'); this.virtualRouter = new mod.VirtualRouterModule(); } catch { this.virtualRouter = null; }
+      }
+      if (this.virtualRouter && typeof this.virtualRouter.initialize === 'function') {
+        this.virtualRouter.initialize({ classificationConfig: this.classifierConfig, routePools: this.routePools }).catch(()=>{});
+      }
+    } catch { /* ignore */ }
+  }
+
+  private pickPipelineId(): string | null {
+    try {
+      const pools = this.routePools || {};
+      const poolNames = Object.keys(pools);
+      if (poolNames.length === 0) return null;
+      const routeName = pools['default'] ? 'default' : poolNames[0];
+      const targets = pools[routeName] || [];
+      if (!Array.isArray(targets) || targets.length === 0) return null;
+      const idx = this.rrIndex.get(routeName) ?? 0;
+      const pick = targets[idx % targets.length];
+      this.rrIndex.set(routeName, (idx + 1) % Math.max(1, targets.length));
+      return typeof pick === 'string' ? pick : null;
+    } catch { return null; }
   }
 }
 // @ts-nocheck

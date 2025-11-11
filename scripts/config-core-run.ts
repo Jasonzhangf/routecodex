@@ -1,7 +1,7 @@
-import { loadSystemConfig, loadUserConfig } from '../sharedmodule/config-core/index.ts';
-import { buildCanonical } from '../sharedmodule/config-core/index.ts';
-import { exportAssemblerConfig } from '../sharedmodule/config-core/index.ts';
-import { writeArtifacts } from '../sharedmodule/config-core/index.ts';
+import { loadSystemConfig, loadUserConfig } from '../sharedmodule/config-core/index.js';
+import { buildCanonical } from '../sharedmodule/config-core/index.js';
+import { exportAssemblerConfigV2 } from '../sharedmodule/config-core/index.js';
+import { writeArtifacts } from '../sharedmodule/config-core/index.js';
 import path from 'path';
 
 async function main() {
@@ -21,7 +21,7 @@ async function main() {
   }
 
   const canonical = buildCanonical(sys, usr, { keyDimension: (process.env.RCC_KEY_DIMENSION as any) || 'perKey' });
-  const assemblerConfig = exportAssemblerConfig(canonical);
+  const assemblerConfig = exportAssemblerConfigV2(canonical);
   await writeArtifacts(outDir, {
     systemParsed: sys.data,
     userParsed: usr.data,

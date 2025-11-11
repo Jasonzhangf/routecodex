@@ -1,0 +1,37 @@
+{
+  "request": {
+    "allowTopLevel": [
+      "model", "messages", "stream", "thinking", "do_sample", "temperature", "top_p",
+      "max_tokens", "tools", "tool_choice", "stop", "response_format"
+    ],
+    "messages": {
+      "allowedRoles": ["system", "user", "assistant", "tool"],
+      "assistantWithToolCallsContentNull": true,
+      "toolContentStringify": false
+    },
+    "messagesRules": [],
+    "tools": {
+      "normalize": false,
+      "forceToolChoiceAuto": true
+    },
+    "assistantToolCalls": { "functionArgumentsType": "string" }
+  },
+  "response": {
+    "allowTopLevel": [
+      "id", "request_id", "created", "model",
+      "choices", "usage", "video_result", "web_search", "content_filter",
+      "required_action", "output", "output_text", "status"
+    ],
+    "choices": {
+      "required": true,
+      "message": {
+        "allow": ["role", "content", "reasoning_content", "audio", "tool_calls"],
+        "roleDefault": "assistant",
+        "contentNullWhenToolCalls": true,
+        "tool_calls": { "function": { "nameRequired": true, "argumentsType": "string" } }
+      },
+      "finish_reason": ["stop", "tool_calls", "length", "sensitive", "network_error"]
+    },
+    "usage": { "allow": ["prompt_tokens", "completion_tokens", "prompt_tokens_details", "total_tokens"] }
+  }
+}

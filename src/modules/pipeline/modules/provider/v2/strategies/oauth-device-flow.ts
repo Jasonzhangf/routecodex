@@ -113,46 +113,71 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       throw await this.parseErrorResponse(response);
     }
 
-    const deviceCodeResponse = await response.json();
+    // 设备码端点尝试解析 JSON；若失败打印预览并中断
+    let raw: any;
+    try {
+      raw = await response.json();
+    } catch {
+      const text = await response.text().catch(() => '');
+      const preview = (text || '').slice(0, 180);
+      throw new Error(`Device code endpoint did not return JSON (preview='${preview}')`);
+    }
 
+    const dbgEnabled = String(process.env.ROUTECODEX_OAUTH_DEBUG || '1') === '1';
+    if (dbgEnabled) {
+      try { console.log(`[OAuth] device-code raw: ${JSON.stringify(raw).slice(0, 512)}`); } catch { /* ignore */ }
+    }
+
+    // 兼容多种形状（顶层/ data / result；蛇形/驼峰；uri/url）
+    const d = (raw && typeof raw === 'object' && (raw.data || raw.result)) ? (raw.data || raw.result) : raw;
+    const map = (obj: any, keys: string[]): any => {
+      for (const k of keys) {
+        if (obj && typeof obj === 'object' && obj[k] != null) return obj[k];
+      }
+      return undefined;
+    };
+
+    const device_code = map(d, ['device_code', 'deviceCode', 'deviceCodeId']);
+    const user_code = map(d, ['user_code', 'userCode', 'user_code_text']);
+    const verification_uri = map(d, ['verification_uri', 'verification_url', 'verificationUri', 'verificationUrl']);
+    const verification_uri_complete = map(d, ['verification_uri_complete', 'verification_url_complete', 'verificationUriComplete', 'verificationUrlComplete']);
+    const expires_in = Number(map(d, ['expires_in', 'expiresIn'])) || 600;
+    const interval = Number(map(d, ['interval'])) || 5;
+
+    if (!verification_uri && !verification_uri_complete) {
+      throw new Error(`Device code JSON missing verification URL fields (keys present: ${Object.keys(d || {}).join(',')})`);
+    }
+    if (!device_code) {
+      throw new Error('Device code JSON missing device_code field');
+    }
+
+    // 友好提示
     console.log('Please visit the following URL to authorize the device:');
-    console.log(deviceCodeResponse.verification_uri);
-    console.log(`And enter the code: ${deviceCodeResponse.user_code}`);
-
-    if (deviceCodeResponse.verification_uri_complete) {
+    console.log(verification_uri || verification_uri_complete);
+    if (user_code) console.log(`And enter the code: ${user_code}`);
+    if (verification_uri_complete) {
       console.log('Or visit directly:');
-      console.log(deviceCodeResponse.verification_uri_complete);
+      console.log(verification_uri_complete);
     }
 
     return {
-      device_code: deviceCodeResponse.device_code,
-      user_code: deviceCodeResponse.user_code,
-      verification_uri: deviceCodeResponse.verification_uri,
-      verification_uri_complete: deviceCodeResponse.verification_uri_complete,
-      expires_in: deviceCodeResponse.expires_in,
-      interval: deviceCodeResponse.interval || 5
-    };
+      device_code,
+      user_code,
+      verification_uri,
+      verification_uri_complete,
+      expires_in,
+      interval
+    } as UnknownObject;
   }
 
   /**
    * 激活设备码流程
    */
   public async activate(deviceCodeData: UnknownObject, options: { openBrowser?: boolean } = {}): Promise<void> {
-    if (!options.openBrowser) {
-      console.log('Please manually visit the URL and enter the code to complete authorization.');
-      return;
-    }
-
-    const { open } = await import('open');
     const url = (deviceCodeData as any).verification_uri_complete || (deviceCodeData as any).verification_uri;
-
-    try {
-      await open(url);
-      console.log('Opened browser for device authorization.');
-    } catch (error) {
-      console.warn('Failed to open browser:', error instanceof Error ? error.message : String(error));
-      console.log('Please manually visit the URL and enter the code.');
-    }
+    const userCode = (deviceCodeData as any).user_code;
+    // 复用基类的跨平台打开逻辑（open/xdg-open/start），并打印URL与User Code
+    await super.activateWithBrowser({ verificationUri: url, userCode, authUrl: url } as any, options);
   }
 
   /**
@@ -189,7 +214,13 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
         });
 
         if (response.ok) {
-          return await response.json() as DeviceCodeTokenResponse;
+          try {
+            return await response.json() as DeviceCodeTokenResponse;
+          } catch {
+            const t = await response.text().catch(() => '');
+            const preview = (t || '').slice(0, 180);
+            throw new Error(`Token endpoint did not return JSON (preview='${preview}')`);
+          }
         }
 
         // 如果是授权待处理错误，继续轮询
@@ -218,7 +249,14 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
    */
   private async handlePostTokenActivation(tokenResponse: DeviceCodeTokenResponse): Promise<UnknownObject> {
     if (!this.config.features?.supportsApiKeyExchange) {
-      return tokenResponse as unknown as UnknownObject;
+      // 也补上标准字段，保证后续 validate 使用
+      const expiresAt = Date.now() + (tokenResponse.expires_in * 1000);
+      return {
+        ...tokenResponse,
+        expires_at: expiresAt,
+        expired: new Date(expiresAt).toISOString(),
+        expiry_date: expiresAt
+      } as UnknownObject;
     }
 
     // 尝试获取API密钥（如果有用户信息端点）
@@ -245,7 +283,8 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
     return {
       ...tokenResponse,
       expires_at: expiresAt,
-      expired: new Date(expiresAt).toISOString()
+      expired: new Date(expiresAt).toISOString(),
+      expiry_date: expiresAt
     } as UnknownObject;
   }
 
@@ -287,13 +326,15 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
 
         const tokenData = await response.json() as DeviceCodeTokenResponse;
 
-        // 转换为标准格式
+        // 转换为标准格式并尝试补全 apiKey（对齐 iflow 行为）
         const expiresAt = Date.now() + (tokenData.expires_in * 1000);
-        return {
+        const base: UnknownObject = {
           ...tokenData,
           expires_at: expiresAt,
           expired: new Date(expiresAt).toISOString()
         } as UnknownObject;
+        const finalToken = await this.handlePostTokenActivation(base as any);
+        return finalToken;
 
       } catch (error) {
         lastError = error;
@@ -320,7 +361,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
     }
 
     // 检查过期时间
-    const expiresAt = tokenObj.expires_at || tokenObj.expired;
+    const expiresAt = tokenObj.expires_at || tokenObj.expired || tokenObj.expiry_date;
     if (expiresAt) {
       const expiryDate = new Date(expiresAt);
       if (expiryDate <= new Date()) {
@@ -355,6 +396,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(this.tokenFile, JSON.stringify(token, null, 2));
       this.tokenStorage = token;
+      console.log(`[OAuth] [device_code] Token saved to: ${this.tokenFile}`);
     } catch (error) {
       console.error('Failed to save token:', error instanceof Error ? error.message : String(error));
       throw error;
@@ -369,6 +411,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       const content = await fs.readFile(this.tokenFile, 'utf-8');
       const token = JSON.parse(content) as UnknownObject;
       this.tokenStorage = token;
+      console.log(`[OAuth] [device_code] Token loaded from: ${this.tokenFile}`);
       return token;
     } catch (error) {
       this.tokenStorage = null;
@@ -381,8 +424,8 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
  * 设备码流程策略工厂
  */
 export class OAuthDeviceFlowStrategyFactory {
-  createStrategy(config: OAuthFlowConfig, httpClient?: typeof fetch): BaseOAuthFlowStrategy {
-    return new OAuthDeviceFlowStrategy(config, httpClient);
+  createStrategy(config: OAuthFlowConfig, httpClient?: typeof fetch, tokenFile?: string): BaseOAuthFlowStrategy {
+    return new OAuthDeviceFlowStrategy(config, httpClient, tokenFile);
   }
 
   getFlowType(): OAuthFlowType {

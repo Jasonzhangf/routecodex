@@ -58,18 +58,20 @@ function registerProviderOAuthConfigs(): void {
     }
   });
 
-  // iFlow OAuth配置 - 主要使用授权码流程，可配置设备码回退
+  // iFlow OAuth配置 - 对齐官方CLI习惯，默认使用设备码流程
   OAuthFlowConfigManager.registerDefaultConfig('iflow', {
-    flowType: OAuthFlowType.AUTHORIZATION_CODE,
+    flowType: OAuthFlowType.DEVICE_CODE,
     activationType: OAuthActivationType.AUTO_BROWSER,
     endpoints: {
-      deviceCodeUrl: 'https://iflow.cn/oauth/device/code',
-      tokenUrl: 'https://iflow.cn/oauth/token',
+      // 对齐 iflow CLI：使用 /api/oauth2 前缀端点
+      deviceCodeUrl: 'https://iflow.cn/api/oauth2/device/code',
+      tokenUrl: 'https://iflow.cn/api/oauth2/token',
       authorizationUrl: 'https://iflow.cn/oauth',
       userInfoUrl: 'https://iflow.cn/api/oauth/getUserInfo'
     },
     client: {
-      clientId: 'iflow-desktop-client',
+      // 对齐老版本与你提供页面示例
+      clientId: '10009311001',
       scopes: ['openid', 'profile', 'email', 'api'],
       redirectUri: `${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.LOCALHOST}:${DEFAULT_CONFIG.OAUTH_CALLBACK_PORT}${API_PATHS.OAUTH_CALLBACK}`
     },
@@ -77,7 +79,8 @@ function registerProviderOAuthConfigs(): void {
       'User-Agent': 'iflow-cli/2.0',
       'X-Requested-With': 'XMLHttpRequest',
       'Origin': 'https://iflow.cn',
-      'Referer': 'https://iflow.cn/oauth'
+      'Referer': 'https://iflow.cn/oauth',
+      'Accept': 'application/json'
     },
     polling: {
       interval: 5000,
@@ -101,8 +104,8 @@ function registerProviderOAuthConfigs(): void {
     flowType: OAuthFlowType.DEVICE_CODE,
     activationType: OAuthActivationType.AUTO_BROWSER,
     endpoints: {
-      deviceCodeUrl: 'https://iflow.cn/oauth/device/code',
-      tokenUrl: 'https://iflow.cn/oauth/token',
+      deviceCodeUrl: 'https://iflow.cn/api/oauth2/device/code',
+      tokenUrl: 'https://iflow.cn/api/oauth2/token',
       userInfoUrl: 'https://iflow.cn/api/oauth/getUserInfo'
     },
     client: {
@@ -113,7 +116,8 @@ function registerProviderOAuthConfigs(): void {
       'User-Agent': 'iflow-cli/2.0',
       'X-Requested-With': 'XMLHttpRequest',
       'Origin': 'https://iflow.cn',
-      'Referer': 'https://iflow.cn/oauth'
+      'Referer': 'https://iflow.cn/oauth',
+      'Accept': 'application/json'
     },
     polling: {
       interval: 5000,
@@ -154,9 +158,9 @@ export function getProviderOAuthConfig(providerId: string, overrides: Record<str
 /**
  * 创建Provider的OAuth策略
  */
-export function createProviderOAuthStrategy(providerId: string, overrides: Record<string, unknown> = {}) {
+export function createProviderOAuthStrategy(providerId: string, overrides: Record<string, unknown> = {}, tokenFile?: string) {
   const config = getProviderOAuthConfig(providerId, overrides);
-  return OAuthFlowConfigManager.createStrategy(config);
+  return OAuthFlowConfigManager.createStrategy(config, undefined, tokenFile);
 }
 
 /**

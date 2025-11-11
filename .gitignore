@@ -34,3 +34,15 @@ sharedmodule/config-core/
 # Editor/IDE
 .vscode/
 .idea/
+
+# Backup and temporary files
+*.backup
+*.bak*
+temp-*
+
+# Test and debug directories
+test-results/
+scripts/lib/
+scripts/tests/
+scripts/auth/
+scripts/oauth/

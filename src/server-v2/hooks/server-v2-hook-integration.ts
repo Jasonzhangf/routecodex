@@ -245,19 +245,27 @@ export class ServerV2HookIntegration {
     data: UnknownObject,
     context: ServerV2HookContext
   ): Promise<HookResult> {
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error(`Hook ${hook.name} timed out after ${this.config.hooks.timeout}ms`)), this.config.hooks.timeout);
-    });
+    // 使用可清理的超时，避免 Promise.race 残留的未处理拒绝
+    return await new Promise<HookResult>((resolve, reject) => {
+      const timeoutMs = Math.max(1, Number(this.config.hooks.timeout || 5000));
+      const timer = setTimeout(() => {
+        const err = new Error(`Hook ${hook.name} timed out after ${timeoutMs}ms`);
+        try { clearTimeout(timer); } catch { /* ignore */ }
+        reject(err);
+      }, timeoutMs);
 
-    const hookPromise = hook.execute(context, {
-      data,
-      metadata: {
-        size: JSON.stringify(data).length,
-        timestamp: Date.now()
-      }
-    });
+      const p = hook.execute(context, {
+        data,
+        metadata: {
+          size: (() => { try { return JSON.stringify(data).length; } catch { return 0; } })(),
+          timestamp: Date.now()
+        }
+      });
 
-    return Promise.race([hookPromise, timeoutPromise]);
+      Promise.resolve(p)
+        .then(res => { try { clearTimeout(timer); } catch { /* ignore */ } resolve(res); })
+        .catch(err => { try { clearTimeout(timer); } catch { /* ignore */ } reject(err); });
+    });
   }
 
   /**

@@ -24,12 +24,54 @@ export class LMStudioCompatibility implements CompatibilityModule {
   private isInitialized = false;
   private logger: PipelineDebugLoggerInterface;
   private transformationEngine: any; // TransformationEngine instance
+  private dependencies!: ModuleDependencies;
 
-  constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
-    this.logger = dependencies.logger;
-    this.id = `compatibility-${Date.now()}`;
-    this.config = config;
+  // 允许两种构造方式：
+  // 1) new LMStudioCompatibility(config, dependencies)
+  // 2) new LMStudioCompatibility(dependencies)
+  constructor(configOrDependencies: ModuleConfig | ModuleDependencies, maybeDependencies?: ModuleDependencies) {
+    const isLegacy = (arg: any): arg is ModuleConfig => !!arg && typeof arg === 'object' && 'type' in arg && 'config' in arg;
+
+    if (isLegacy(configOrDependencies) && maybeDependencies) {
+      // 旧用法：直接传入配置 + 依赖
+      const config = configOrDependencies as ModuleConfig;
+      const dependencies = maybeDependencies as ModuleDependencies;
+      this.dependencies = dependencies;
+      this.logger = dependencies.logger;
+      this.id = `compatibility-${Date.now()}`;
+      this.config = config;
+      
+    } else {
+      // 新用法：仅传入依赖，配置后续通过 setConfig 注入
+      const dependencies = configOrDependencies as ModuleDependencies;
+      this.dependencies = dependencies;
+      this.logger = dependencies.logger;
+      this.id = `compatibility-${Date.now()}`;
+      // 默认占位配置（保证初始化安全）
+      this.config = { type: 'lmstudio-compatibility', config: {} } as unknown as ModuleConfig;
+      this.dependencies = dependencies;
+    }
+
     this.rules = this.initializeTransformationRules();
+  }
+
+  /**
+   * 配置注入钩子（由工厂在创建后调用）
+   */
+  setConfig(config: ModuleConfig) {
+    // 基本校验与更新
+    try {
+      if (config && config.type === 'lmstudio-compatibility') {
+        // @ts-expect-error readonly for interface but safe for runtime
+        this.config = config;
+        // 重新构建规则，以便 customRules 生效
+        // @ts-expect-error readonly in type; runtime refresh is intended
+        this.rules = this.initializeTransformationRules();
+        this.logger?.logModule?.(this.id, 'config-updated', { hasCustomRules: !!(config?.config as any)?.customRules });
+      }
+    } catch {
+      // 安全忽略
+    }
   }
 
   /**
@@ -142,6 +184,7 @@ export class LMStudioCompatibility implements CompatibilityModule {
       throw error;
     }
   }
+
 
   /**
    * Apply compatibility transformations

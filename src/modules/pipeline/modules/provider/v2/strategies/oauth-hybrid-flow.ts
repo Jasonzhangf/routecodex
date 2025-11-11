@@ -122,8 +122,8 @@ export class OAuthHybridFlowStrategy extends BaseOAuthFlowStrategy {
  * 混合流程策略工厂
  */
 export class OAuthHybridFlowStrategyFactory {
-  createStrategy(config: OAuthFlowConfig, httpClient?: typeof fetch): BaseOAuthFlowStrategy {
-    return new OAuthHybridFlowStrategy(config as OAuthHybridFlowConfig, httpClient);
+  createStrategy(config: OAuthFlowConfig, httpClient?: typeof fetch, tokenFile?: string): BaseOAuthFlowStrategy {
+    return new OAuthHybridFlowStrategy(config as OAuthHybridFlowConfig, httpClient, tokenFile);
   }
 
   getFlowType(): OAuthFlowType {

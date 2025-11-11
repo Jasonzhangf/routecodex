@@ -68,11 +68,42 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
         }
       }
 
-      // 3. 执行新的授权码认证流程
+      // 3. 执行新的授权码认证流程（先启动本地回调服务，再打开浏览器）
       console.log('Starting OAuth authorization code flow...');
 
       const authCodeData = await this.initiateAuthCodeFlow();
+
+      // 3.1 启动本地回调服务（固定 localhost:8080，路径 /oauth2callback）
+      const serverResult = await this.startCallbackServer((authCodeData as any).state as string, (authCodeData as any).codeVerifier as string);
+
+      // 3.2 更新授权URL中的重定向参数（与本地回调服务一致），再打开浏览器
+      try {
+        const urlObj = new URL(authCodeData.authUrl as string);
+        const style = String((authCodeData as any).flowStyle || '').toLowerCase();
+        if (style === 'web' || style === 'legacy') {
+          // iflow web 登录样式：redirect=<redirectUri> & state=<state>
+          // 由 URLSearchParams 负责一次性编码，避免双重编码；state 保持独立参数
+          urlObj.searchParams.set('redirect', serverResult.redirectUri);
+        } else {
+          urlObj.searchParams.set('redirect_uri', serverResult.redirectUri);
+        }
+        (authCodeData as any).authUrl = urlObj.toString();
+        ;(authCodeData as any).redirectUri = serverResult.redirectUri;
+      } catch { /* ignore */ }
+
       await this.activate(authCodeData, options);
+
+      // 3.3 等待回调，获取授权码
+      try {
+        const cb = await serverResult.callbackPromise;
+        (authCodeData as any).code = cb.code;
+        (authCodeData as any).codeVerifier = cb.verifier;
+      } catch (err) {
+        console.error('OAuth authorization callback error:', err instanceof Error ? err.message : String(err));
+        throw err;
+      }
+
+      // 3.4 交换令牌
       const tokenResponse = await this.exchangeCodeForToken(authCodeData);
 
       // 4. 处理特殊激活（如API密钥交换）
@@ -104,28 +135,54 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
 
     const { codeVerifier, codeChallenge } = this.generatePKCEPair();
     const state = this.generateState();
-
     const authUrl = new URL(this.config.endpoints.authorizationUrl);
+    const isIflowHost = /(?:^|\.)iflow\.cn$/.test(authUrl.hostname);
+    const styleEnv = String(process.env.IFLOW_AUTH_STYLE || '').toLowerCase();
+    // iflow 默认使用 "web" 样式（你提供的实际页面参数），可用 IFLOW_AUTH_STYLE 覆盖为 standard/legacy
+    const style: 'web'|'standard'|'legacy' = (isIflowHost
+      ? (styleEnv === 'standard' || styleEnv === 'legacy' ? (styleEnv as any) : 'web')
+      : (styleEnv === 'legacy' ? 'legacy' : 'standard'));
 
-    // 标准OAuth2参数
-    authUrl.searchParams.set('response_type', 'code');
-    authUrl.searchParams.set('client_id', this.config.client.clientId);
-    authUrl.searchParams.set('redirect_uri', this.config.client.redirectUri);
-    authUrl.searchParams.set('scope', this.config.client.scopes.join(' '));
-    authUrl.searchParams.set('state', state);
-
-    // 添加PKCE参数（如果支持）
-    if (this.config.features?.supportsPKCE) {
+    if (style === 'web') {
+      // 对齐你粘贴的 iflow 页面 URL：loginMethod=phone&type=phone&redirect=<encoded(redirectUri)>&state=<state>&client_id=...
+      const redirectUri = this.config.client.redirectUri!;
+      authUrl.searchParams.set('loginMethod', 'phone');
+      authUrl.searchParams.set('type', 'phone');
+      authUrl.searchParams.set('redirect', encodeURIComponent(redirectUri));
+      authUrl.searchParams.set('state', state);
+      authUrl.searchParams.set('client_id', this.config.client.clientId);
+      // 可选：保留 PKCE 参数（服务端可能忽略）
+      authUrl.searchParams.set('code_challenge', codeChallenge);
+      authUrl.searchParams.set('code_challenge_method', 'S256');
+    } else if (style === 'legacy') {
+      // 老式 iflow Web 登录参数（state 融合在 redirect），兼容历史
+      const redirectUri = this.config.client.redirectUri!;
+      authUrl.searchParams.set('loginMethod', 'phone');
+      authUrl.searchParams.set('type', 'phone');
+      authUrl.searchParams.set('redirect', `${encodeURIComponent(redirectUri)}&state=${state}`);
+      authUrl.searchParams.set('client_id', this.config.client.clientId);
+      authUrl.searchParams.set('code_challenge', codeChallenge);
+      authUrl.searchParams.set('code_challenge_method', 'S256');
+    } else {
+      // 标准 OAuth2 授权码样式
+      authUrl.searchParams.set('response_type', 'code');
+      authUrl.searchParams.set('client_id', this.config.client.clientId);
+      authUrl.searchParams.set('redirect_uri', this.config.client.redirectUri!);
+      authUrl.searchParams.set('scope', this.config.client.scopes.join(' '));
+      authUrl.searchParams.set('state', state);
       authUrl.searchParams.set('code_challenge', codeChallenge);
       authUrl.searchParams.set('code_challenge_method', 'S256');
     }
 
+    // 记录样式供后续交换 token 逻辑使用
+    const flowStyle = style;
     return {
       authUrl: authUrl.toString(),
       state,
       codeVerifier,
-      codeChallenge
-    };
+      codeChallenge,
+      flowStyle
+    } as UnknownObject;
   }
 
   /**
@@ -138,14 +195,30 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     const http = await import('http');
     const url = await import('url');
 
-    // 查找可用端口
-    const port = await findOpenPort();
-    const host = process.env.OAUTH_CALLBACK_HOST || LOCAL_HOSTS.LOCALHOST;
+    // 固定为 localhost:8080/oauth2callback（与 iflow CLI 一致）
+    const configured = this.config.client.redirectUri;
+    let host = 'localhost';
+    let port: number = 8080;
+    let pathName = '/oauth2callback';
+    try {
+      if (configured) {
+        const u = new URL(configured);
+        host = u.hostname || host;
+        const parsedPort = Number(u.port || '');
+        if (Number.isFinite(parsedPort) && parsedPort > 0) {
+          port = parsedPort;
+        }
+        pathName = u.pathname || pathName;
+      }
+    } catch { /* ignore parsing errors */ }
 
     const callbackPromise = new Promise<{ code: string; verifier: string }>((resolve, reject) => {
       const server = http.createServer(async (req, res) => {
         try {
-          if (!req.url || !req.url.includes('/oauth2callback')) {
+          const full = new url.URL(req.url || '/', `http://${host}:${port}`);
+          const reqPath = full.pathname || '';
+          const okPath = reqPath === pathName || /oauth.*callback/i.test(reqPath);
+          if (!req.url || !okPath) {
             res.statusCode = 302;
             res.setHeader('Location', 'https://example.com');
             res.end();
@@ -153,7 +226,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
             return;
           }
 
-          const params = new url.URL(req.url, `http://${host}:${port}`).searchParams;
+          const params = full.searchParams;
 
           // 检查错误
           const error = params.get('error');
@@ -188,6 +261,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
           res.setHeader('Location', 'https://example.com');
           res.end();
 
+          console.log('[OAuth] Received authorization code via local callback');
           resolve({ code, verifier: codeVerifier });
 
         } catch (error) {
@@ -206,8 +280,9 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       server.listen(port, host);
     });
 
-    // 更新重定向URI
-    const redirectUri = `http://${host}:${port}/oauth2callback`;
+    // 更新重定向URI（使用配置中的路径或默认）
+    const redirectUri = `http://${host}:${port}${pathName}`;
+    console.log(`[OAuth] Starting local callback server at ${redirectUri}`);
 
     return { callbackPromise, redirectUri };
   }
@@ -222,9 +297,15 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     if (!data.code) {
       const serverResult = await this.startCallbackServer(data.state, data.codeVerifier);
 
-      // 更新授权URL中的重定向URI
+      // 更新授权URL中的重定向参数
       const authUrl = new URL(data.authUrl);
-      authUrl.searchParams.set('redirect_uri', serverResult.redirectUri);
+      const style = String((data as any).flowStyle || '').toLowerCase();
+      if (style === 'web' || style === 'legacy') {
+        // 由 URLSearchParams 统一编码，不手动 encodeURIComponent，避免双重编码
+        authUrl.searchParams.set('redirect', serverResult.redirectUri);
+      } else {
+        authUrl.searchParams.set('redirect_uri', serverResult.redirectUri);
+      }
       data.authUrl = authUrl.toString();
 
       // 等待回调
@@ -236,13 +317,15 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     const formData = new URLSearchParams({
       grant_type: 'authorization_code',
       code: data.code,
-      redirect_uri: this.config.client.redirectUri!,
+      // Prefer dynamically bound callback URI when available
+      redirect_uri: (data.redirectUri || this.config.client.redirectUri!) as string,
       client_id: this.config.client.clientId
     });
 
-    // 添加PKCE验证器（如果支持）
-    if (this.config.features?.supportsPKCE && data.codeVerifier) {
-      formData.append('code_verifier', data.codeVerifier);
+    // 添加PKCE验证器（如果支持）：web/legacy 不添加 code_verifier
+    const style2 = String((data as any).flowStyle || '').toLowerCase();
+    if (this.config.features?.supportsPKCE && (data as any).codeVerifier && style2 !== 'web' && style2 !== 'legacy') {
+      formData.append('code_verifier', String((data as any).codeVerifier));
     }
 
     // 添加客户端密钥（如果存在）
@@ -250,11 +333,15 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       formData.append('client_secret', this.config.client.clientSecret);
     }
 
+    // iflow web 登录样式常用 Basic(client_id:client_secret)
+    const tokenHeaders: Record<string,string> = { 'Content-Type': 'application/x-www-form-urlencoded' };
+    if (this.config.client.clientSecret) {
+      const basic = Buffer.from(`${this.config.client.clientId}:${this.config.client.clientSecret}`).toString('base64');
+      tokenHeaders['Authorization'] = `Basic ${basic}`;
+    }
     const response = await this.makeRequest(this.config.endpoints.tokenUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
+      headers: tokenHeaders,
       body: formData
     });
 
@@ -346,13 +433,15 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
 
         const tokenData = await response.json() as AuthCodeTokenResponse;
 
-        // 转换为标准格式
+        // 转换为标准格式并尝试补全 apiKey（对齐 iflow 行为）
         const expiresAt = Date.now() + (tokenData.expires_in * 1000);
-        return {
+        const base: UnknownObject = {
           ...tokenData,
           expires_at: expiresAt,
           expired: new Date(expiresAt).toISOString()
         } as UnknownObject;
+        const finalToken = await this.handlePostTokenActivation(base as any);
+        return finalToken;
 
       } catch (error) {
         lastError = error;
@@ -414,6 +503,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(this.tokenFile, JSON.stringify(token, null, 2));
       this.tokenStorage = token;
+      console.log(`[OAuth] [auth_code] Token saved to: ${this.tokenFile}`);
     } catch (error) {
       console.error('Failed to save token:', error instanceof Error ? error.message : String(error));
       throw error;
@@ -428,6 +518,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       const content = await fs.readFile(this.tokenFile, 'utf-8');
       const token = JSON.parse(content) as UnknownObject;
       this.tokenStorage = token;
+      console.log(`[OAuth] [auth_code] Token loaded from: ${this.tokenFile}`);
       return token;
     } catch (error) {
       this.tokenStorage = null;
@@ -440,8 +531,8 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
  * 授权码流程策略工厂
  */
 export class OAuthAuthCodeFlowStrategyFactory {
-  createStrategy(config: OAuthFlowConfig, httpClient?: typeof fetch): BaseOAuthFlowStrategy {
-    return new OAuthAuthCodeFlowStrategy(config, httpClient);
+  createStrategy(config: OAuthFlowConfig, httpClient?: typeof fetch, tokenFile?: string): BaseOAuthFlowStrategy {
+    return new OAuthAuthCodeFlowStrategy(config, httpClient, tokenFile);
   }
 
   getFlowType(): OAuthFlowType {

@@ -1,16 +1,19 @@
 {
   "providers": {
     "glm": {
-      "id": "glm",
-      "enabled": true,
       "type": "openai",
       "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
+      "apiKey": [
+        "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
+      ],
       "models": {
         "glm-4.6": {
-          "supportsStreaming": true,
+          "maxContext": 200000,
+          "maxTokens": 8192,
           "compatibility": {
-            "type": "glm",
+            "type": "compatibility",
             "config": {
+              "moduleType": "glm",
               "moduleConfig": {
                 "thinking": {
                   "enabled": true,
@@ -26,10 +29,12 @@
           }
         },
         "glm-4.5-air": {
-          "supportsStreaming": true,
+          "maxContext": 128000,
+          "maxTokens": 8192,
           "compatibility": {
-            "type": "glm",
+            "type": "compatibility",
             "config": {
+              "moduleType": "glm",
               "moduleConfig": {
                 "thinking": {
                   "enabled": true,
@@ -45,14 +50,8 @@
           }
         }
       },
-      "apiKey": [
-        "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
-      ],
-      "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
-      "auth": {
-        "type": "apikey",
-        "apiKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
-      }
+      "id": "glm",
+      "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4"
     }
   },
   "keyVault": {
@@ -79,48 +78,7 @@
             "auth": {
               "type": "apikey",
               "apiKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
-            },
-            "providerType": "glm"
-          }
-        },
-        "compatibility": {
-          "type": "glm",
-          "config": {}
-        },
-        "llmSwitch": {
-          "type": "llmswitch-conversion-router",
-          "config": {}
-        },
-        "workflow": {
-          "type": "streaming-control",
-          "config": {}
-        }
-      },
-      "settings": {
-        "debugEnabled": true
-      },
-      "authRef": {
-        "mode": "perKey",
-        "providerId": "glm",
-        "keyId": "key1"
-      }
-    },
-    {
-      "id": "glm.glm-4.5-air__key1",
-      "provider": {
-        "type": "openai"
-      },
-      "modules": {
-        "provider": {
-          "type": "openai",
-          "config": {
-            "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
-            "timeout": 30000,
-            "auth": {
-              "type": "apikey",
-              "apiKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
-            },
-            "providerType": "glm"
+            }
           }
         },
         "compatibility": {
@@ -150,9 +108,7 @@
     "default": [
       "glm.glm-4.6__key1"
     ],
-    "coding": [
-      "glm.glm-4.6__key1"
-    ],
+    "coding": [],
     "longcontext": [],
     "tools": [],
     "thinking": [],
@@ -165,29 +121,89 @@
       "providerId": "glm",
       "modelId": "glm-4.6",
       "keyId": "key1"
-    },
-    "glm.glm-4.5-air__key1": {
-      "providerId": "glm",
-      "modelId": "glm-4.5-air",
-      "keyId": "key1"
     }
   },
   "httpserver": {
-    "port": 5523,
+    "port": 5520,
     "host": "0.0.0.0"
   },
   "modules": {
     "httpserver": {
       "enabled": true,
       "config": {
-        "port": 5523,
+        "port": 5520,
         "host": "0.0.0.0"
       }
     }
   },
   "_metadata": {
     "version": "0.1.0",
-    "builtAt": 1762412282687,
+    "builtAt": 1762672344952,
     "keyDimension": "perKey"
+  },
+  "pipeline_assembler": {
+    "config": {
+      "pipelines": [
+        {
+          "id": "glm.glm-4.6__key1",
+          "provider": {
+            "type": "openai"
+          },
+          "modules": {
+            "provider": {
+              "type": "openai",
+              "config": {
+                "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+                "timeout": 30000,
+                "auth": {
+                  "type": "apikey",
+                  "apiKey": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
+                }
+              }
+            },
+            "compatibility": {
+              "type": "glm",
+              "config": {}
+            },
+            "llmSwitch": {
+              "type": "llmswitch-conversion-router",
+              "config": {}
+            },
+            "workflow": {
+              "type": "streaming-control",
+              "config": {}
+            }
+          },
+          "settings": {
+            "debugEnabled": true
+          },
+          "authRef": {
+            "mode": "perKey",
+            "providerId": "glm",
+            "keyId": "key1"
+          }
+        }
+      ],
+      "routePools": {
+        "default": [
+          "glm.glm-4.6__key1"
+        ],
+        "coding": [],
+        "longcontext": [],
+        "tools": [],
+        "thinking": [],
+        "vision": [],
+        "websearch": [],
+        "background": []
+      },
+      "routeMeta": {
+        "glm.glm-4.6__key1": {
+          "providerId": "glm",
+          "modelId": "glm-4.6",
+          "keyId": "key1"
+        }
+      },
+      "authMappings": {}
+    }
   }
 }

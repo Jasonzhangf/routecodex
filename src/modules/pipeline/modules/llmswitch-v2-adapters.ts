@@ -133,16 +133,7 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
         converted = await this.openaiCodec.convertRequest(body, { outgoingProtocol: 'openai-chat' } as any, ctx as any);
         break; }
     }
-    // 统一入口规范化：为避免 Chat 行为改变，仅对非 Chat 协议应用
-    if (proto !== 'openai-chat') {
-      try {
-        const mod = await importCore('v2/conversion/shared/request-tool-canonicalizer');
-        const normalizeReq = (mod as any).normalizeRequestToolsForOpenAI || (mod as any).default;
-        if (typeof normalizeReq === 'function') {
-          converted = normalizeReq(converted, { endpoint: (proto === 'openai-responses') ? 'responses' : (proto === 'anthropic-messages' ? 'messages' : 'chat'), requestId: ctx.requestId });
-        }
-      } catch { /* ignore normalization failure */ }
-    }
+    // 非 Chat 协议的请求规范化已在各自 codec 前半段完成（shape-only），随后统一走 Chat 请求工具阶段
     // 返回时携带元数据，供响应阶段严格识别协议（不做兜底）
     const meta = (request && request.metadata && typeof request.metadata === 'object') ? { ...(request.metadata) } : {};
     (meta as any).entryEndpoint = ctx.entryEndpoint;

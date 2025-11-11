@@ -251,7 +251,7 @@ export class ConfigManagerModule extends BaseModule {
       // 确保Auth目录存在
       await this.authFileResolver.ensureAuthDir();
 
-      // 生成初始合并配置（使用去除legacy的最小规范化构建器）
+      // 生成初始合并配置（本地最小构造器，V1/V2 双栈一致，后续再迁移到 config-core）
       await this.generateMergedConfigCanonicalMinimal();
 
       // 启动配置监听
@@ -308,7 +308,9 @@ export class ConfigManagerModule extends BaseModule {
     const mergeId = `merge_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     try {
       console.log('🔄 Generating merged configuration (canonical minimal, legacy removed)...');
+      const { writeConfigSnapshot } = await import('./utils/config-snapshot-writer.js');
       const userConfig = await this.loadUserConfig();
+      await writeConfigSnapshot({ phase: 'user-parsed', data: userConfig, metadata: { mergeId } });
       const u: any = JSON.parse(JSON.stringify(userConfig || {}));
       const vr: any = (u && u.virtualrouter) ? u.virtualrouter : {};
       const providersIn: Record<string, any> = (vr.providers && typeof vr.providers === 'object') ? vr.providers : {};
@@ -395,12 +397,61 @@ export class ConfigManagerModule extends BaseModule {
           const keyId = keyParts[1] || 'key1';
           const baseUrl = baseUrlOf(provId);
           const apiKey = apiKeyOf(provId);
+          // Derive auth from provider config: prefer explicit OAuth; else use apikey if present
+          const providerAuth = (() => {
+            try {
+              const a = (providers[provId] && (providers[provId] as any).auth) ? (providers[provId] as any).auth : undefined;
+              if (a && typeof a === 'object' && typeof a.type === 'string') {
+                const t = String(a.type).toLowerCase();
+                if (t === 'oauth') {
+                  return {
+                    type: 'oauth',
+                    clientId: a.clientId || 'iflow-desktop-client',
+                    tokenUrl: a.tokenUrl || 'https://iflow.cn/oauth/token',
+                    deviceCodeUrl: a.deviceCodeUrl || 'https://iflow.cn/oauth/device/code',
+                    scopes: Array.isArray(a.scopes) ? a.scopes : ['openid','profile','email','api'],
+                    tokenFile: a.tokenFile || `${homedir()}/.routecodex/tokens/iflow-default.json`
+                  } as any;
+                }
+                if (t === 'apikey' && typeof a.apiKey === 'string' && a.apiKey) {
+                  return { type: 'apikey', apiKey: a.apiKey } as any;
+                }
+              }
+            } catch { /* ignore */ }
+            if (apiKey) { return { type: 'apikey', apiKey } as any; }
+            return undefined;
+          })();
+          // 读取用户配置中的超时（优先级：模型级 > Provider级），否则不设置，让下游使用全局/默认
+          let userTimeout: number | undefined = undefined;
+          try {
+            const pCfg = providers[provId] || {};
+            const mdlCfg = (pCfg.models && typeof pCfg.models === 'object') ? (pCfg.models as any)[modelId] : undefined;
+            if (mdlCfg && typeof mdlCfg.timeout === 'number') {
+              userTimeout = Number(mdlCfg.timeout);
+            } else if (typeof pCfg.timeout === 'number') {
+              userTimeout = Number(pCfg.timeout);
+            }
+          } catch { /* ignore */ }
+
+          const providerModuleConfig: any = { baseUrl, ...(providerAuth ? { auth: providerAuth } : {}) };
+          if (typeof userTimeout === 'number') {
+            providerModuleConfig.timeout = userTimeout;
+          }
+
+          // Decide compatibility module by provider id
+          const compatType = (() => {
+            const idLower = String(provId || '').toLowerCase();
+            if (idLower.includes('lmstudio')) return 'lmstudio-compatibility';
+            if (idLower.includes('glm')) return 'glm';
+            return 'passthrough-compatibility';
+          })();
+
           const pipeline = {
             id,
             provider: { type: 'openai' },
             modules: {
-              provider: { type: 'openai', config: { baseUrl, timeout: 30000, auth: { type: 'apikey', apiKey } } },
-              compatibility: { type: 'glm', config: {} },
+              provider: { type: 'openai', config: providerModuleConfig },
+              compatibility: { type: compatType, config: {} },
               llmSwitch: { type: 'llmswitch-conversion-router', config: {} },
               workflow: { type: 'streaming-control', config: {} }
             },
@@ -411,6 +462,20 @@ export class ConfigManagerModule extends BaseModule {
         }
       }
 
+      // 使用 config-core 生成 V2 装配输入（pac）；严格禁止回退
+      const core = await import('../../../sharedmodule/config-core/index.js');
+      const canonicalLike: any = {
+        providers,
+        keyVault,
+        pipelines: pipelinesArr,
+        routing: routePools,
+        routeMeta,
+        _metadata: { version: '0.1.0', builtAt: Date.now(), keyDimension: 'perKey' }
+      };
+      await writeConfigSnapshot({ phase: 'canonical', data: canonicalLike, metadata: { mergeId } });
+      const assemblerConfig = core.exportAssemblerConfigV2(canonicalLike);
+      await writeConfigSnapshot({ phase: 'assembler', data: assemblerConfig, metadata: { mergeId } });
+
       const mergedConfig: any = {
         providers,
         keyVault,
@@ -420,10 +485,11 @@ export class ConfigManagerModule extends BaseModule {
         ...(httpserver ? { httpserver } : {}),
         ...(modules.httpserver ? { modules } : {}),
         _metadata: { version: '0.1.0', builtAt: Date.now(), keyDimension: 'perKey' },
-        pipeline_assembler: { config: { pipelines: pipelinesArr, routePools, routeMeta, authMappings: {} } }
+        pipeline_assembler: assemblerConfig
       };
 
       await this.saveMergedConfig(mergedConfig);
+      try { await writeConfigSnapshot({ phase: 'merged', data: mergedConfig, metadata: { mergeId, path: this.mergedConfigPath } }); } catch {}
 
       if (this.isDebugEnhanced) {
         this.addToMergeHistory({ mergeId, success: true, totalTime: Date.now()-startTime, mergedConfigSize: Object.keys(mergedConfig).length, timestamp: Date.now() });
@@ -438,6 +504,14 @@ export class ConfigManagerModule extends BaseModule {
       throw error;
     }
   }
+
+  /**
+   * 使用 sharedmodule/config-core 统一生成 merged-config 与 V2 装配输入
+   * - 顶层 pipelines: 供 V1 静态流水线使用
+   * - pipeline_assembler.config: 供 V2 动态流水线使用
+   */
+  // 预留：后续切换到 config-core 生成 merged-config
+  // private async generateMergedConfigViaCore(): Promise<void> { /* not used in Option B */ }
 
   /**
    * 若用户配置文件不存在，生成默认GLM配置（单一供应商、glm-4.6、thinking开启、内联API Key）

@@ -21,6 +21,7 @@ export class StreamingControlWorkflow implements WorkflowModule {
 
   private isInitialized = false;
   private logger: PipelineDebugLogger;
+  private injectedConfig: unknown = undefined;
 
   constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
     this.id = `workflow-${Date.now()}`;
@@ -48,6 +49,14 @@ export class StreamingControlWorkflow implements WorkflowModule {
       throw error;
     }
   }
+
+  // V2 注入（V1 不调用）
+  setConfig(cfg: unknown): void {
+    this.injectedConfig = cfg;
+    try { if (cfg && typeof cfg === 'object') { (this.config as any).config = { ...(this.config as any).config, ...(cfg as any) }; } } catch {}
+  }
+
+  getConfig(): unknown { return this.injectedConfig ?? (this.config as any)?.config ?? null; }
 
   /**
    * Process incoming request - Handle streaming conversion

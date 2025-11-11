@@ -65,7 +65,17 @@ export class CompatibilityModuleFactory {
       throw new Error(`Unknown compatibility module type: ${config.type}`);
     }
 
-    const module = new ModuleClass(dependencies);
+    const module = new ModuleClass(dependencies) as unknown as CompatibilityModule & { setConfig?: (cfg: unknown) => void };
+
+    // 尝试将配置传入模块（若模块支持 setConfig 钩子）
+    try {
+      if (typeof module.setConfig === 'function') {
+        module.setConfig(config as unknown);
+      }
+    } catch {
+      // 安全忽略：模块不支持 setConfig 或者不需要配置注入
+    }
+
     await module.initialize();
 
     return module;

@@ -177,12 +177,33 @@ export abstract class BaseOAuthFlowStrategy {
     }
 
     if (options.openBrowser !== false) {
+      // Prefer npm 'open' for cross-platform behavior; fallback to OS-specific commands
+      let opened = false;
       try {
-        const { exec } = await import('child_process');
-        const { promisify } = await import('util');
-        const execAsync = promisify(exec);
-        await execAsync(`open "${targetUrl}"`);
-      } catch (error) {
+        const openMod: any = await import('open');
+        if (openMod && (openMod.default || openMod.open)) {
+          const opener = openMod.default || openMod.open;
+          await opener(targetUrl);
+          opened = true;
+        }
+      } catch { /* ignore and fallback */ }
+      if (!opened) {
+        try {
+          const { exec } = await import('child_process');
+          const { promisify } = await import('util');
+          const execAsync: any = promisify(exec);
+          // macOS
+          await execAsync(`open \"${targetUrl}\"`).catch(async () => {
+            // Linux
+            await execAsync(`xdg-open \"${targetUrl}\"`).catch(async () => {
+              // Windows
+              await execAsync(`start \"\" \"${targetUrl}\"`, { shell: true } as any);
+            });
+          });
+          opened = true;
+        } catch { /* ignore */ }
+      }
+      if (!opened) {
         console.log('Could not open browser automatically. Please manually visit the URL.');
       }
     }
@@ -238,10 +259,11 @@ export abstract class BaseOAuthFlowStrategy {
    */
   protected async makeRequest(url: string, options: RequestInit = {}): Promise<Response> {
     const defaultHeaders = {
+      // 注意：表单请求会在调用处覆盖此项
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       ...this.config.headers
-    };
+    } as Record<string, string>;
 
     const mergedOptions: RequestInit = {
       ...options,
@@ -273,7 +295,7 @@ export abstract class BaseOAuthFlowStrategy {
  * OAuth流程工厂接口
  */
 export interface OAuthFlowStrategyFactory {
-  createStrategy(config: OAuthFlowConfig, httpClient?: typeof fetch): BaseOAuthFlowStrategy;
+  createStrategy(config: OAuthFlowConfig, httpClient?: typeof fetch, tokenFile?: string): BaseOAuthFlowStrategy;
   getFlowType(): OAuthFlowType;
 }
 
@@ -360,12 +382,12 @@ export class OAuthFlowConfigManager {
   /**
    * 创建OAuth流程策略
    */
-  static createStrategy(config: OAuthFlowConfig, httpClient?: typeof fetch): BaseOAuthFlowStrategy {
+  static createStrategy(config: OAuthFlowConfig, httpClient?: typeof fetch, tokenFile?: string): BaseOAuthFlowStrategy {
     const factory = this.getFlowFactory(config.flowType);
     if (!factory) {
       throw new Error(`No factory registered for OAuth flow type: ${config.flowType}`);
     }
-    return factory.createStrategy(config, httpClient);
+    return factory.createStrategy(config, httpClient, tokenFile);
   }
 
   /**

@@ -5,6 +5,8 @@
  */
 
 import type { IAuthProvider, AuthStatus, IOAuthClient, TokenStorage } from './auth-interface.js';
+import fs from 'fs/promises';
+import path from 'path';
 import type { OAuthAuth } from '../api/provider-config.js';
 
 /**
@@ -72,8 +74,12 @@ export class OAuthAuthProvider implements IAuthProvider {
       throw new Error('No valid OAuth token available');
     }
 
+    // iFlow 等服务在 userInfo 返回 apiKey 时，优先使用 apiKey 作为 Bearer
+    const bearer = (tokenStorage as any).apiKey && String((tokenStorage as any).apiKey).trim()
+      ? String((tokenStorage as any).apiKey).trim()
+      : String(tokenStorage.access_token);
     const headers: Record<string, string> = {
-      'Authorization': `Bearer ${tokenStorage.access_token}`
+      'Authorization': `Bearer ${bearer}`
     };
 
     // 添加OAuth特定的头部
@@ -213,8 +219,10 @@ export class OAuthAuthProvider implements IAuthProvider {
       throw new Error('OAuth client ID is required');
     }
 
-    if (!this.config.clientSecret && true) { // 简化grantType检查
-      throw new Error('OAuth client secret is required for this grant type');
+    // 放宽校验：若提供了 tokenFile（预先获取的令牌），允许缺失 clientSecret
+    // 真实授权码/交换流程在策略层实现；此处只负责读取并使用现有令牌。
+    if (!this.config.clientSecret && !this.config.tokenUrl) {
+      throw new Error('OAuth token URL is required');
     }
 
     if (!this.config.tokenUrl) {
@@ -266,10 +274,21 @@ class BaseOAuthClient implements IOAuthClient {
   private config: OAuthAuth;
   private providerType: string;
   private currentToken: TokenStorage | null = null;
+  private tokenFilePath: string | null = null;
 
   constructor(config: OAuthAuth, providerType: string) {
     this.config = config;
     this.providerType = providerType;
+    const tf = (this.config as any)?.tokenFile;
+    if (typeof tf === 'string' && tf.trim()) {
+      this.tokenFilePath = tf.replace(/^~\//, `${process.env.HOME || ''}/`);
+    } else {
+      // default path: ~/.routecodex/tokens/<providerType>-default.json
+      const home = process.env.HOME || '';
+      this.tokenFilePath = require('path').join(home, '.routecodex', 'tokens', `${this.providerType}-default.json`);
+      // write back to config for downstream users if needed
+      (this.config as any).tokenFile = this.tokenFilePath;
+    }
   }
 
   async initialize(): Promise<void> {
@@ -295,7 +314,15 @@ class BaseOAuthClient implements IOAuthClient {
 
   async saveToken(token: TokenStorage | null): Promise<void> {
     this.currentToken = token;
-    // 这里应该实现持久化存储
+    // 持久化到 tokenFile（若配置提供）
+    try {
+      if (this.tokenFilePath && token) {
+        const dir = path.dirname(this.tokenFilePath);
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(this.tokenFilePath, JSON.stringify(token, null, 2), 'utf-8');
+        console.log(`[OAuth] Token saved to: ${this.tokenFilePath}`);
+      }
+    } catch { /* ignore persistence errors */ }
   }
 
   getToken(): TokenStorage | null {
@@ -303,7 +330,18 @@ class BaseOAuthClient implements IOAuthClient {
   }
 
   async loadToken(): Promise<TokenStorage | null> {
-    // 这里应该实现从持久化存储加载
+    // 优先从配置的 tokenFile 读取
+    if (this.tokenFilePath) {
+      try {
+        const txt = await fs.readFile(this.tokenFilePath, 'utf-8');
+        const j = JSON.parse(txt) as TokenStorage;
+        this.currentToken = j;
+        console.log(`[OAuth] Token loaded from: ${this.tokenFilePath}`);
+        return j;
+      } catch {
+        // fallthrough to memory
+      }
+    }
     return this.currentToken;
   }
 

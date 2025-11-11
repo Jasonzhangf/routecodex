@@ -681,7 +681,17 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     }
 
     try {
-      try { console.log('[LLMSWITCH] entryEndpoint:', (request as any)?.metadata?.entryEndpoint); } catch { /* ignore */ }
+      try {
+        console.log('[LLMSWITCH] entryEndpoint:', (request as any)?.metadata?.entryEndpoint);
+        const { writePipelineSnapshot } = await import('../utils/pipeline-snapshot-writer.js');
+        await writePipelineSnapshot({
+          stage: 'pipeline.llmswitch.request.pre',
+          requestId: request.route?.requestId || 'unknown',
+          pipelineId: this.pipelineId,
+          data: request.data,
+          entryEndpoint: (request as any)?.metadata?.entryEndpoint as any
+        });
+      } catch { /* ignore */ }
       const transformed = await this.modules.llmSwitch.processIncoming(request);
       const trObj = transformed as unknown as Record<string, unknown>;
       const isDto = trObj && typeof trObj === 'object'
@@ -691,6 +701,16 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
         ? { ...(request as any), ...(transformed as any), route: request.route }
         : { ...request, data: (transformed as unknown as UnknownObject) } as SharedPipelineRequest;
       this.debugLogger.logTransformation(request.route?.requestId || 'unknown', 'llm-switch-request', request.data, (out as any).data);
+      try {
+        const { writePipelineSnapshot } = await import('../utils/pipeline-snapshot-writer.js');
+        await writePipelineSnapshot({
+          stage: 'pipeline.llmswitch.request.post',
+          requestId: request.route?.requestId || 'unknown',
+          pipelineId: this.pipelineId,
+          data: (out as any).data,
+          entryEndpoint: (request as any)?.metadata?.entryEndpoint as any
+        });
+      } catch { /* ignore */ }
       return out;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {
@@ -711,6 +731,10 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     }
 
     try {
+      try {
+        const { writePipelineSnapshot } = await import('../utils/pipeline-snapshot-writer.js');
+        await writePipelineSnapshot({ stage: 'pipeline.workflow.request.pre', requestId: request.route?.requestId || 'unknown', pipelineId: this.pipelineId, data: request.data, entryEndpoint: (request as any)?.metadata?.entryEndpoint as any });
+      } catch { /* ignore */ }
       const processed = await this.modules.workflow.processIncoming(request);
       const prObj = processed as unknown as Record<string, unknown>;
       const isDto = prObj && typeof prObj === 'object'
@@ -720,6 +744,10 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
         ? { ...(request as any), ...(processed as any), route: request.route }
         : { ...request, data: (processed as unknown as UnknownObject) } as SharedPipelineRequest;
       this.debugLogger.logTransformation(request.route?.requestId || 'unknown', 'workflow-request', request.data, (out as any).data);
+      try {
+        const { writePipelineSnapshot } = await import('../utils/pipeline-snapshot-writer.js');
+        await writePipelineSnapshot({ stage: 'pipeline.workflow.request.post', requestId: request.route?.requestId || 'unknown', pipelineId: this.pipelineId, data: (out as any).data, entryEndpoint: (request as any)?.metadata?.entryEndpoint as any });
+      } catch { /* ignore */ }
       return out;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {
@@ -740,6 +768,10 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     }
 
     try {
+      try {
+        const { writePipelineSnapshot } = await import('../utils/pipeline-snapshot-writer.js');
+        await writePipelineSnapshot({ stage: 'pipeline.compatibility.request.pre', requestId: request.route?.requestId || 'unknown', pipelineId: this.pipelineId, data: request.data, entryEndpoint: (request as any)?.metadata?.entryEndpoint as any });
+      } catch { /* ignore */ }
       const transformed = await this.modules.compatibility.processIncoming(request);
       const cObj = transformed as unknown as Record<string, unknown>;
       const isDto = cObj && typeof cObj === 'object'
@@ -749,6 +781,10 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
         ? { ...(request as any), ...(transformed as any), route: request.route }
         : { ...request, data: (transformed as unknown as UnknownObject) } as SharedPipelineRequest;
       this.debugLogger.logTransformation(request.route?.requestId || 'unknown', 'compatibility-request', request.data, (out as any).data);
+      try {
+        const { writePipelineSnapshot } = await import('../utils/pipeline-snapshot-writer.js');
+        await writePipelineSnapshot({ stage: 'pipeline.compatibility.request.post', requestId: request.route?.requestId || 'unknown', pipelineId: this.pipelineId, data: (out as any).data, entryEndpoint: (request as any)?.metadata?.entryEndpoint as any });
+      } catch { /* ignore */ }
       return out;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {
@@ -779,8 +815,16 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
         ...(dataBody || {}),
         metadata: mergedMeta
       } as UnknownObject;
+      try {
+        const { writePipelineSnapshot } = await import('../utils/pipeline-snapshot-writer.js');
+        await writePipelineSnapshot({ stage: 'pipeline.provider.request.pre', requestId: request.route?.requestId || 'unknown', pipelineId: this.pipelineId, data: dataWithMeta, entryEndpoint: (request as any)?.metadata?.entryEndpoint as any });
+      } catch { /* ignore */ }
       const responsePayload = await this.modules.provider.processIncoming(dataWithMeta);
       this.debugLogger.logProviderRequest(this.pipelineId, 'request-start', request, responsePayload);
+      try {
+        const { writePipelineSnapshot } = await import('../utils/pipeline-snapshot-writer.js');
+        await writePipelineSnapshot({ stage: 'pipeline.provider.response.post', requestId: request.route?.requestId || 'unknown', pipelineId: this.pipelineId, data: responsePayload, entryEndpoint: (request as any)?.metadata?.entryEndpoint as any });
+      } catch { /* ignore */ }
       return responsePayload as UnknownObject;
     } catch (error) {
       // Enrich error with provider context for standard error center handling
@@ -822,12 +866,20 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     }
 
     try {
+      try {
+        const { writePipelineSnapshot } = await import('../utils/pipeline-snapshot-writer.js');
+        await writePipelineSnapshot({ stage: 'pipeline.compatibility.response.pre', requestId: 'unknown', pipelineId: this.pipelineId, data: response, entryEndpoint: undefined });
+      } catch { /* ignore */ }
       const transformed = await this.modules.compatibility.processOutgoing(response as unknown as UnknownObject);
       const isDto = transformed && typeof transformed === 'object' && 'data' in (transformed as Record<string, unknown>) && 'metadata' in (transformed as Record<string, unknown>);
       const out: SharedPipelineResponse = isDto
         ? transformed as SharedPipelineResponse
         : { ...response, data: transformed as UnknownObject };
       this.debugLogger.logTransformation('unknown', 'compatibility-response', response, out);
+      try {
+        const { writePipelineSnapshot } = await import('../utils/pipeline-snapshot-writer.js');
+        await writePipelineSnapshot({ stage: 'pipeline.compatibility.response.post', requestId: 'unknown', pipelineId: this.pipelineId, data: out, entryEndpoint: undefined });
+      } catch { /* ignore */ }
       return out;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {
@@ -848,12 +900,20 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     }
 
     try {
+      try {
+        const { writePipelineSnapshot } = await import('../utils/pipeline-snapshot-writer.js');
+        await writePipelineSnapshot({ stage: 'pipeline.workflow.response.pre', requestId: 'unknown', pipelineId: this.pipelineId, data: response, entryEndpoint: undefined });
+      } catch { /* ignore */ }
       const processed = await this.modules.workflow.processOutgoing(response as unknown as UnknownObject);
       const isDto = processed && typeof processed === 'object' && 'data' in (processed as Record<string, unknown>) && 'metadata' in (processed as Record<string, unknown>);
       const out: SharedPipelineResponse = isDto
         ? processed as SharedPipelineResponse
         : { ...response, data: processed as UnknownObject };
       this.debugLogger.logTransformation('unknown', 'workflow-response', response, out);
+      try {
+        const { writePipelineSnapshot } = await import('../utils/pipeline-snapshot-writer.js');
+        await writePipelineSnapshot({ stage: 'pipeline.workflow.response.post', requestId: 'unknown', pipelineId: this.pipelineId, data: out, entryEndpoint: undefined });
+      } catch { /* ignore */ }
       return out;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {
@@ -874,12 +934,20 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     }
 
     try {
+      try {
+        const { writePipelineSnapshot } = await import('../utils/pipeline-snapshot-writer.js');
+        await writePipelineSnapshot({ stage: 'pipeline.llmswitch.response.pre', requestId: 'unknown', pipelineId: this.pipelineId, data: response, entryEndpoint: undefined });
+      } catch { /* ignore */ }
       const transformed = await this.modules.llmSwitch.processOutgoing(response as unknown as UnknownObject);
       const isDto = transformed && typeof transformed === 'object' && 'data' in (transformed as Record<string, unknown>) && 'metadata' in (transformed as Record<string, unknown>);
       const out: SharedPipelineResponse = isDto
         ? transformed as SharedPipelineResponse
         : { ...response, data: transformed as UnknownObject };
       this.debugLogger.logTransformation('unknown', 'llm-switch-response', response, out);
+      try {
+        const { writePipelineSnapshot } = await import('../utils/pipeline-snapshot-writer.js');
+        await writePipelineSnapshot({ stage: 'pipeline.llmswitch.response.post', requestId: 'unknown', pipelineId: this.pipelineId, data: out, entryEndpoint: undefined });
+      } catch { /* ignore */ }
       return out;
     } catch (error) {
       await this.errorIntegration.handleModuleError(error, {

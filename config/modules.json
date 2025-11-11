@@ -433,3 +433,51 @@
     }
   }
 }
+      "enabled": true,
+      "config": {
+        "moduleType": "hybrid-pipeline",
+        "mode": "hybrid",
+        "trafficSplit": {
+          "v2Percentage": 10,
+          "criteria": {
+            "byHash": true,
+            "byUser": false,
+            "byEndpoint": true,
+            "byProvider": true
+          },
+          "endpointOverrides": {
+            "/v1/chat/completions": 15,
+            "/v1/messages": 5,
+            "/v1/responses": 8
+          },
+          "providerOverrides": {
+            "openai": 12,
+            "anthropic": 8,
+            "glm": 15,
+            "qwen": 10
+          }
+        },
+        "migration": {
+          "enableProgressive": true,
+          "schedule": {
+            "startPercentage": 5,
+            "targetPercentage": 80,
+            "durationHours": 48,
+            "updateIntervalMinutes": 30
+          }
+        },
+        "healthCheck": {
+          "enabled": true,
+          "errorRateThreshold": 0.05,
+          "latencyThresholdMs": 8000,
+          "minSamples": 100
+        },
+        "fallback": {
+          "enabled": true,
+          "errorTypes": ["timeout", "connection", "upstream", "429", "500"],
+          "cooldownMs": 120000
+          }
+        }
+      }
+  }
+}

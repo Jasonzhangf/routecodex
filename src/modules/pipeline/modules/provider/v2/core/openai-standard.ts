@@ -9,6 +9,7 @@ import { HttpClient } from '../utils/http-client.js';
 import { DynamicProfileLoader, ServiceProfileValidator } from '../config/service-profiles.js';
 import { ApiKeyAuthProvider } from '../auth/apikey-auth.js';
 import { OAuthAuthProvider } from '../auth/oauth-auth.js';
+import { ensureValidOAuthToken, handleUpstreamInvalidOAuthToken } from '../auth/oauth-lifecycle.js';
 import { createHookSystemIntegration } from '../hooks/hooks-integration.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
 import type { IAuthProvider } from '../auth/auth-interface.js';
@@ -30,6 +31,7 @@ export class OpenAIStandard extends BaseProvider {
   private httpClient!: HttpClient;
   private serviceProfile: ServiceProfile;
   private hookSystemIntegration: any; // Hook系统集成实例
+  private injectedConfig: any = null;
 
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     super(config, dependencies);
@@ -58,10 +60,44 @@ export class OpenAIStandard extends BaseProvider {
     try {
       if (this.authProvider && typeof (this.authProvider as any).initialize === 'function') {
         await (this.authProvider as any).initialize();
-        // 可选的快速校验（不阻塞主流程）
-        if (typeof (this.authProvider as any).validateCredentials === 'function') {
-          try { await (this.authProvider as any).validateCredentials(); } catch { /* ignore */ }
-        }
+        try {
+          const auth: any = (this.config as any)?.config?.auth;
+          if (auth && auth.type === 'oauth') {
+            const forceReauthorize = false; // 初始化阶段：读取→必要时刷新；不强制重授权
+            const tokenFileHint = (auth as any)?.tokenFile || '(default)';
+            // 明确打印初始化 OAuth 日志（不依赖 Hook 系统）
+            console.log(`[OAuth] [init] provider=${this.providerType} type=${auth.type} tokenFile=${tokenFileHint} forceReauth=${forceReauthorize}`);
+            this.dependencies.logger?.logModule?.(this.id, 'oauth-init-start', {
+              providerType: this.providerType,
+              tokenFile: tokenFileHint,
+              forceReauthorize
+            });
+            try {
+              await ensureValidOAuthToken(this.providerType, auth as any, {
+                forceReacquireIfRefreshFails: true,
+                openBrowser: true,
+                forceReauthorize
+              });
+              console.log('[OAuth] [init] ensureValid OK');
+              this.dependencies.logger?.logModule?.(this.id, 'oauth-init-success', {
+                providerType: this.providerType
+              });
+            } catch (e: any) {
+              const msg = e?.message ? String(e.message) : String(e || 'unknown error');
+              console.error(`[OAuth] [init] ensureValid ERROR: ${msg}`);
+              this.dependencies.logger?.logModule?.(this.id, 'oauth-init-error', {
+                providerType: this.providerType,
+                error: msg
+              });
+              throw e;
+            }
+            // 确保 authProvider 内部 OAuth 客户端拿到最新 token
+            try { (this.authProvider as any)?.getOAuthClient?.()?.loadToken?.(); } catch { /* ignore */ }
+          } else if (typeof (this.authProvider as any).validateCredentials === 'function') {
+            // apikey 路径：可选的快速校验（不阻塞主流程）
+            try { await (this.authProvider as any).validateCredentials(); } catch { /* ignore */ }
+          }
+        } catch { /* ignore */ }
       }
 
       // 初始化新的Hook系统集成
@@ -82,6 +118,22 @@ export class OpenAIStandard extends BaseProvider {
       });
       throw error;
     }
+  }
+
+  // V2 注入（V1 不调用）
+  public setConfig(cfg: unknown): void {
+    try {
+      if (!cfg || typeof cfg !== 'object') return;
+      this.injectedConfig = cfg;
+      const c: any = (this.config as any) || {};
+      c.config = { ...(c.config || {}), ...(cfg as any) };
+      // 替换 serviceProfile 以反映新的 providerType/baseUrl
+      try { this.serviceProfile = this.getServiceProfile(); } catch { /* ignore */ }
+    } catch { /* ignore */ }
+  }
+
+  public getConfig(): unknown {
+    return this.injectedConfig ?? (this.config as any)?.config ?? null;
   }
 
   /**
@@ -379,13 +431,12 @@ export class OpenAIStandard extends BaseProvider {
       const r: any = processedRequest || {};
       const dataObj: any = (r && typeof r === 'object' && 'data' in r && typeof r.data === 'object') ? r.data : r;
       const body: any = { ...dataObj };
-      // Override model with provider config if specified
+      // Require model: 禁止默认回退
       const cfgModel = (this.config as any)?.config?.model;
       if (typeof cfgModel === 'string' && cfgModel.trim()) {
         body.model = cfgModel.trim();
       } else if (typeof body.model !== 'string' || !body.model) {
-        // fallback to service profile default if missing
-        body.model = this.serviceProfile.defaultModel;
+        throw new Error('provider-config-error: model is required (no default fallback)');
       }
       // Resolve max_tokens according to priority:
       // 1) request.max_tokens (number > 0) or request.maxTokens (camelCase)
@@ -436,6 +487,27 @@ export class OpenAIStandard extends BaseProvider {
         });
       } catch { /* non-blocking */ }
     } catch (error) {
+      // OAuth token 失效：尝试刷新/重获并重试一次
+      try {
+        const auth: any = (this.config as any)?.config?.auth;
+        if (auth && auth.type === 'oauth') {
+          const shouldRetry = await handleUpstreamInvalidOAuthToken(this.providerType, auth as any, error);
+          if (shouldRetry) {
+            const retryHeaders = await this.buildRequestHeaders();
+            response = await this.httpClient.post(endpoint, finalBody, retryHeaders);
+            try {
+              await writeProviderSnapshot({
+                phase: 'provider-response',
+                requestId: context.requestId,
+                data: response,
+                headers: retryHeaders,
+                url: targetUrl
+              });
+            } catch { /* non-blocking */ }
+            return response;
+          }
+        }
+      } catch { /* ignore and fallthrough */ }
       // 🔍 Hook 9: 错误处理阶段
       const errorResult = await hookManager.executeHookChain(
         'error_handling',
@@ -514,8 +586,38 @@ export class OpenAIStandard extends BaseProvider {
     // 配置覆盖头部
     const overrideHeaders = this.config.config.overrides?.headers || {};
 
-    // 认证头部
-    const authHeaders = this.authProvider?.buildHeaders() || {};
+    // OAuth：请求前确保令牌有效（提前刷新）
+    try {
+      const auth: any = (this.config as any)?.config?.auth;
+      if (auth && auth.type === 'oauth') {
+        console.log('[OAuth] [headers] ensureValid start (openBrowser=true, forceReauth=false)');
+        try {
+          await ensureValidOAuthToken(this.providerType, auth as any, {
+            forceReacquireIfRefreshFails: true,
+            openBrowser: true,
+            forceReauthorize: false
+          });
+          console.log('[OAuth] [headers] ensureValid OK');
+        } catch (e: any) {
+          const msg = e?.message ? String(e.message) : String(e || 'unknown error');
+          console.error(`[OAuth] [headers] ensureValid ERROR: ${msg}`);
+          // 继续抛出，让上层逻辑按 Fail Fast 处理
+          throw e;
+        }
+        try { (this.authProvider as any)?.getOAuthClient?.()?.loadToken?.(); } catch { /* ignore */ }
+      }
+    } catch (e) { /* bubble up in authHeaders build below */ }
+
+    // 认证头部（如为 OAuth，若当前无有效 token 则尝试拉取/刷新一次再取 headers）
+    let authHeaders: Record<string, string> = {};
+    try {
+      authHeaders = this.authProvider?.buildHeaders() || {};
+    } catch (e: any) {
+      // 不重复刷新/授权：一次 ensureValid 已在上方执行，失败则直接抛出
+      const msg = e?.message ? String(e.message) : String(e || '');
+      console.error(`[OAuth] [headers] buildHeaders() failed after single ensureValid: ${msg}`);
+      throw e;
+    }
 
     let finalHeaders: Record<string, string> = {
       ...baseHeaders,

@@ -1,0 +1,7 @@
+{
+  "paths": [
+    "usage.prompt_tokens_details.cached_tokens"
+  ],
+  "keepCritical": true
+}
+

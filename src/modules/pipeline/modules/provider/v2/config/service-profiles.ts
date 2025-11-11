@@ -28,7 +28,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       // Monitor成功样本要求此Beta标头，确保上游接受Responses协议
       'OpenAI-Beta': 'responses-2024-12-17'
     },
-    timeout: 60000,
+    timeout: 300000,
     maxRetries: 3
   },
   openai: {
@@ -40,7 +40,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     headers: {
       'Content-Type': 'application/json'
     },
-    timeout: 60000,
+    timeout: 300000,
     maxRetries: 3
   },
 
@@ -85,7 +85,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     headers: {
       'Content-Type': 'application/json'
     },
-    timeout: 60000,
+    timeout: 300000,
     maxRetries: 3
   },
 
@@ -98,7 +98,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     headers: {
       'Content-Type': 'application/json'
     },
-    timeout: 60000,
+    timeout: 300000,
     maxRetries: 3
   }
 };

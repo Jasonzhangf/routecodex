@@ -50,38 +50,9 @@ export class PipelineAssembler {
     const keyMappings = this.asRecord(compatCfg.keyMappings || {});
     const globalKeys = this.asRecord(keyMappings.global || {});
     const providerKeys = this.asRecord(keyMappings.providers || {});
-    let pipelinesIn: any[] = Array.isArray((pac as any).pipelines) ? (pac as any).pipelines as any[] : [];
-
-    // v2 兼容旧配置：当未生成 pipelines 时，根据 legacy routePools 自动合成最小可用流水线
-    // 规则：
-    // - 从 routePools 收集被引用的 pipelineId（例如 glm_key1.glm-4.5-air）
-    // - 解析 provider 家族（glm/openai/qwen 等）与可能的 keyId/modelId
-    // - 为每个 id 生成 provider + compatibility + llmSwitch 模块；provider 基本配置从 virtualrouter.providers 合并
-    // - 兼容 keyMappings 与用户配置（~/.routecodex/config.json）的 apiKey 注入
-    let synthesizeFromLegacy = false;
-    const legacyRoutePools: Record<string, string[]> = (pac as any).routePools || {};
-    const referencedLegacyIds = new Set<string>();
-    if (!pipelinesIn.length && legacyRoutePools && typeof legacyRoutePools === 'object') {
-      for (const ids of Object.values(legacyRoutePools)) {
-        (ids || []).forEach((id: string) => { if (typeof id === 'string' && id.trim()) referencedLegacyIds.add(id); });
-      }
-      if (referencedLegacyIds.size > 0) {
-        synthesizeFromLegacy = true;
-      }
-    }
-    // 优先使用合并配置顶层 pipelines（来自用户配置），避免错误的 legacy 解析
+    const pipelinesIn: any[] = Array.isArray((pac as any).pipelines) ? (pac as any).pipelines as any[] : [];
     if (!pipelinesIn.length) {
-      try {
-        const mcPipes = Array.isArray((mc as any).pipelines) ? ((mc as any).pipelines as any[]) : [];
-        if (mcPipes.length > 0) {
-          pipelinesIn = mcPipes;
-          synthesizeFromLegacy = false;
-        }
-      } catch { /* ignore */ }
-    }
-    if (!pipelinesIn.length && !synthesizeFromLegacy) {
-      // 最后兜底：没有 pipelines，也没有 legacy routePools，则后面默认会再兜底 default 路由
-      // 为避免启动失败，这里不再抛错
+      throw new Error('PipelineAssembler(V2): pipeline_assembler.config.pipelines is required (no fallback). 请使用 config-core 导出的 V2 装配配置');
     }
 
     const pipelines: PipelineConfig[] = [];
@@ -108,8 +79,7 @@ export class PipelineAssembler {
       if (fromProv) { return fromProv; }
       return undefined;
     };
-    const sourcePipes = synthesizeFromLegacy ? Array.from(referencedLegacyIds).map((id) => ({ id })) : pipelinesIn;
-    for (const p of sourcePipes) {
+    for (const p of pipelinesIn) {
       const id = String(p.id || '');
       if (!id || seen.has(id)) { continue; }
       const modules = this.asRecord((p as any).modules || {});
@@ -131,21 +101,11 @@ export class PipelineAssembler {
         } catch { return { provider: 'openai' } as const; }
       };
 
-      const legacy = synthesizeFromLegacy ? parseLegacy(id) : null;
-      const providerFamilyFromLegacy = synthesizeFromLegacy ? (legacy?.provider || 'openai') : undefined;
-      const provider = synthesizeFromLegacy
-        ? { type: 'generic-openai-provider', config: {} as Record<string, unknown> }
-        : (modules.provider as { type?: string; config?: Record<string, unknown> });
-      let llmSwitch = synthesizeFromLegacy
-        ? { type: 'llmswitch-conversion-router', config: {} as Record<string, unknown> }
-        : (modules.llmSwitch as { type?: string; config?: Record<string, unknown> } | undefined);
-      const workflow = synthesizeFromLegacy
-        ? undefined
-        : (modules.workflow as { type?: string; config?: Record<string, unknown> } | undefined);
-      // Compatibility: do not synthesize or guess. Only use when explicitly provided in modules.
-      let compatibility = synthesizeFromLegacy
-        ? undefined
-        : (modules.compatibility as { type?: string; config?: Record<string, unknown> } | undefined);
+      const provider = (modules.provider as { type?: string; config?: Record<string, unknown> });
+      let llmSwitch = (modules.llmSwitch as { type?: string; config?: Record<string, unknown> } | undefined);
+      const workflow = (modules.workflow as { type?: string; config?: Record<string, unknown> } | undefined);
+      // Compatibility: 仅使用显式声明
+      let compatibility = (modules.compatibility as { type?: string; config?: Record<string, unknown> } | undefined);
 
       // 不进行 provider 级兼容层继承或推断。compatibility 仅来自显式 modules 定义。
 
@@ -186,7 +146,7 @@ export class PipelineAssembler {
           if (Object.keys(r).length) {arr.push(r);}
         };
         const familyFromType = (t: string) => (t || '').toLowerCase().split('-')[0];
-        const typeStr = String(synthesizeFromLegacy ? (providerFamilyFromLegacy || 'openai') : ((provider as any).type || ''));
+        const typeStr = String(((provider as any).type || ''));
         const family = familyFromType(typeStr);
         const aliasFamily = ((): string | undefined => {
           const t = typeStr.toLowerCase();
@@ -291,8 +251,7 @@ export class PipelineAssembler {
           }
         }
       } catch { /* ignore */ }
-      const legacyDefaults = legacy ? { providerId: (legacy as any).provider, modelId: (legacy as any).modelId || 'unknown', keyId: (legacy as any).keyId || 'key1' } : {};
-      const metaForId = this.asRecord(routeMeta[id] || (pac as any).routeMeta?.[id] || legacyDefaults);
+      const metaForId = this.asRecord(routeMeta[id] || (pac as any).routeMeta?.[id] || {});
       const providerIdForKey = typeof metaForId.providerId === 'string' ? metaForId.providerId : undefined;
       const keyIdForPipeline = typeof metaForId.keyId === 'string' ? metaForId.keyId : undefined;
       // Ensure provider config carries the concrete upstream model id and providerType for this pipeline
@@ -366,9 +325,48 @@ export class PipelineAssembler {
       const modBlock: Record<string, unknown> = {
         provider: { type: provider.type, config: provCfg },
       };
-      // Always attach the standard compatibility module. If user provided a compatibility config,
-      // pass it as the module config; otherwise use empty config.
-      (modBlock as any).compatibility = { type: 'compatibility', config: compatCfgSelected };
+
+      // Attach compatibility respecting explicit submodule types.
+      // Rules:
+      // 1) If user explicitly selected a concrete submodule (e.g. 'glm', 'lmstudio-compatibility'), keep it.
+      // 2) If user selected the standard container 'compatibility' (or left empty), derive moduleType by providerType.
+      //    e.g. providerType 'glm' -> moduleType 'glm'. Otherwise fallback to 'passthrough-compatibility'.
+      (() => {
+        const normalizedType = compatTypeSelected.trim();
+        const providerType: string = String((provCfg as any)?.providerType || '').toLowerCase();
+
+        if (normalizedType && normalizedType.toLowerCase() !== 'compatibility') {
+          // Map explicit concrete module into standard container (no inference)
+          (modBlock as any).compatibility = {
+            type: 'compatibility',
+            config: {
+              moduleType: normalizedType,
+              moduleConfig: this.asRecord(compatCfgSelected || {}),
+              providerType,
+              // 透传由 config-core 生成的 direct files（若存在）供 StandardCompatibility 直载 JSON
+              ...(compatCfgSelected && (compatCfgSelected as any).files ? { files: (compatCfgSelected as any).files } : {})
+            }
+          };
+          return;
+        }
+
+        // Standard container path → require explicit moduleType
+        const moduleTypeRaw = String((compatCfgSelected as any)?.moduleType || '').trim();
+        if (!moduleTypeRaw) {
+          throw new Error(`compatibility.config.moduleType is required for container 'compatibility' (pipeline: ${id})`);
+        }
+        const moduleType = moduleTypeRaw;
+        const moduleConfig = this.asRecord((compatCfgSelected as any)?.moduleConfig || {});
+        (modBlock as any).compatibility = {
+          type: 'compatibility',
+          config: {
+            moduleType,
+            moduleConfig,
+            providerType,
+            ...(compatCfgSelected && (compatCfgSelected as any).files ? { files: (compatCfgSelected as any).files } : {})
+          }
+        };
+      })();
 
       const allowedSwitches = new Set([
         'llmswitch-anthropic-openai',
@@ -397,11 +395,48 @@ export class PipelineAssembler {
       // Do not infer provider module type; honor the type already provided in pipeline definition
       // (modBlock.provider already set above)
 
-      pipelines.push({ id, provider: { type: fam || 'openai' }, modules: modBlock, settings: { debugEnabled: true } } as PipelineConfig);
-      seen.add(id);
-    }
+    pipelines.push({ id, provider: { type: fam || 'openai' }, modules: modBlock, settings: { debugEnabled: true } } as PipelineConfig);
+    seen.add(id);
+  }
 
-    // Reconcile routePools with available pipelines using routeTargets if present
+  // Synthesize pipelines for ids present in routePools but missing from `pipelines`
+  try {
+    const poolsObj = this.asRecord((pac as any).routePools || {});
+    const idsFromPools = new Set<string>();
+    Object.values(poolsObj).forEach((arr: any) => {
+      if (Array.isArray(arr)) arr.forEach((pid: any) => { if (typeof pid === 'string' && pid.trim()) idsFromPools.add(pid.trim()); });
+    });
+    const existing = new Set(pipelines.map(p => p.id));
+    const alias = (s: string): string => {
+      const t = (s || '').toLowerCase();
+      if (t.includes('openai') || t.includes('generic-openai') || t.includes('modelscope')) return 'openai';
+      if (t.includes('glm') || t.includes('bigmodel') || t.includes('zhipu')) return 'glm';
+      if (t.includes('qwen') || t.includes('dashscope') || t.includes('aliyun')) return 'qwen';
+      if (t.includes('lmstudio') || t.includes('lm-studio')) return 'lmstudio';
+      if (t.includes('iflow')) return 'iflow';
+      if (t.includes('responses')) return 'responses';
+      return 'openai';
+    };
+    const parseLegacyId = (pid: string): { providerId: string; modelId: string; keyId?: string } | null => {
+      // pattern1: provider.model__key   e.g. glm.glm-4.6__key1
+      const m1 = pid.match(/^([^.]+)\.([^_]+)__([^_]+)$/);
+      if (m1) return { providerId: m1[1], modelId: m1[2], keyId: m1[3] };
+      // pattern2: provider_key.model   e.g. glm_key1.glm-4.6
+      const m2 = pid.match(/^([^_.]+)_([^\.]+)\.([\s\S]+)$/);
+      if (m2) return { providerId: m2[1], keyId: m2[2], modelId: m2[3] };
+      // pattern3: provider.model
+      const m3 = pid.match(/^([^\.]+)\.([\s\S]+)$/);
+      if (m3) return { providerId: m3[1], modelId: m3[2] };
+      return null;
+    };
+    for (const pid of idsFromPools) {
+      if (existing.has(pid)) continue;
+      // V2 禁止从 routePools 合成流水线，统一在配置阶段生成
+      throw new Error(`routePools references unknown pipeline id: ${pid}. V2 不允许兜底合成，请在配置中显式定义该 pipeline`);
+    }
+  } catch { /* non-fatal synthesis */ }
+
+  // Reconcile routePools with available pipelines using routeTargets if present (no fallback in V2)
     const availableIds = new Set(pipelines.map(p => p.id));
     const providerFamily = (s: string | undefined): string => (s || '').toLowerCase().split('-')[0];
     const pipelineByFamily: Record<string, string[]> = {};
@@ -443,10 +478,7 @@ export class PipelineAssembler {
             if (match) chosen = match.id;
           }
           if (!chosen) {
-            // Final fallback by family to keep previous behavior
-            const fam = providerFamily(t.providerId);
-            const candidates = pipelineByFamily[fam] || [];
-            chosen = candidates[0] || pipelines[0]?.id;
+            throw new Error(`V2 routing requires explicit pipeline mapping for target {providerId:'${t.providerId}', modelId:'${t.modelId}', keyId:'${t.keyId}'} — no fallback allowed`);
           }
           if (chosen) {
             ids.push(chosen);
@@ -461,24 +493,23 @@ export class PipelineAssembler {
       routePools = pools;
       routeMeta = meta;
     } else {
-      // If routePools exist but reference unknown ids, drop invalid ones (legacy 引用将因上面合成被保留)
-      const pools: Record<string, string[]> = {};
+      // Validate routePools strictly — unknown pipeline ids must be fixed in config
+      const invalid: Array<{ route: string; id: string }> = [];
       for (const [routeName, ids] of Object.entries(routePools || {})) {
-        pools[routeName] = (ids || []).filter(id => availableIds.has(id));
+        for (const id of (ids || [])) {
+          if (!availableIds.has(id)) invalid.push({ route: routeName, id });
+        }
       }
-      routePools = pools;
+      if (invalid.length) {
+        const list = invalid.map(x => `${x.route}:${x.id}`).join(', ');
+        throw new Error(`routePools reference unknown pipeline ids (no fallback in V2): ${list}`);
+      }
     }
 
     // Final safeguard: if no valid routePools, create a default route to the first pipeline
     const totalRoutes = Object.values(routePools || {}).reduce((acc, v) => acc + ((v || []).length), 0);
     if ((!routePools || Object.keys(routePools).length === 0) || totalRoutes === 0) {
-      if (pipelines.length > 0) {
-        const firstId = pipelines[0].id;
-        routePools = { default: [firstId] };
-        if (!routeMeta[firstId]) {
-          routeMeta[firstId] = { providerId: ((pipelines[0] as any).modules?.provider?.type || (pipelines[0] as any).provider?.type || 'openai') as string, modelId: (pipelines[0] as any).modules?.provider?.config?.model || 'unknown', keyId: 'key1' };
-        }
-      }
+      throw new Error('No valid routePools configured (V2 disables default-route fallback). Please define explicit routePools → pipeline ids');
     }
 
     // 默认超时提升至 300s（可被 provider.timeout 与 model.timeout 覆盖）
@@ -505,23 +536,27 @@ export class PipelineAssembler {
     const manager = new PipelineManager(managerConfig, dummyErrorCenter, dummyDebugCenter);
     await manager.initialize();
 
-    // Reconcile routePools against actually initialized pipelines (defensive):
+    // Reconcile routePools against actually initialized pipelines (strict in V2):
     try {
       const mgrAny: any = manager as any;
-      const presentIds: string[] = Array.from(mgrAny?.pipelines?.keys?.() || []);
-      if (presentIds.length > 0) {
-        const present = new Set<string>(presentIds);
-        const filtered: Record<string, string[]> = {};
-        for (const [route, ids] of Object.entries(routePools || {})) {
-          const keep = (ids || []).filter(id => present.has(id));
-          if (keep.length) {filtered[route] = keep;}
-        }
-        if (!filtered.default || filtered.default.length === 0) {
-          filtered.default = presentIds;
-        }
-        routePools = filtered;
+      const presentIds: string[] = Array.isArray(mgrAny?.getPipelineIds?.()) ? mgrAny.getPipelineIds() : [];
+      if (presentIds.length === 0) {
+        throw new Error('No pipelines initialized. Ensure pipeline_assembler.config.pipelines is correctly defined and providers are valid');
       }
-    } catch { /* best-effort; keep original pools if inspection fails */ }
+      const present = new Set<string>(presentIds);
+      const invalid: Array<{ route: string; id: string }> = [];
+      for (const [route, ids] of Object.entries(routePools || {})) {
+        for (const id of (ids || [])) {
+          if (!present.has(id)) invalid.push({ route, id });
+        }
+      }
+      if (invalid.length) {
+        const list = invalid.map(x => `${x.route}:${x.id}`).join(', ');
+        throw new Error(`routePools reference pipelines not created: ${list}`);
+      }
+    } catch (e) {
+      throw e instanceof Error ? e : new Error(String(e || 'routePools validation failed'));
+    }
 
     return { manager, routePools, routeMeta };
   }
