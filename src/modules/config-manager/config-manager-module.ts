@@ -463,7 +463,7 @@ export class ConfigManagerModule extends BaseModule {
       }
 
       // 使用 config-core 生成 V2 装配输入（pac）；严格禁止回退
-      const core = await import('../../../../sharedmodule/config-core/index.js');
+      const core = await import('routecodex-config-core');
       const canonicalLike: any = {
         providers,
         keyVault,

@@ -1,7 +1,7 @@
-import { loadSystemConfig, loadUserConfig } from '../../sharedmodule/config-core/index.js';
-import { buildCanonical } from '../../sharedmodule/config-core/index.js';
-import { exportAssemblerConfigV2 } from '../../sharedmodule/config-core/index.js';
-import { writeArtifacts } from '../../sharedmodule/config-core/index.js';
+import { loadSystemConfig, loadUserConfig } from 'routecodex-config-core';
+import { buildCanonical } from 'routecodex-config-core';
+import { exportAssemblerConfigV2 } from 'routecodex-config-core';
+import { writeArtifacts } from 'routecodex-config-core';
 import path from 'path';
 
 async function main() {
