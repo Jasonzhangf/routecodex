@@ -279,7 +279,15 @@ program
 
       // Launch Claude Code
       const { spawn } = await import('child_process');
-      const claudeProcess = spawn(options.claudePath, claudeArgs, {
+      const claudeBin = ((): string => {
+        try {
+          const v = String(options?.claudePath || '').trim();
+          if (v) return v;
+        } catch {}
+        const envPath = String(process.env.CLAUDE_PATH || '').trim();
+        return envPath || 'claude';
+      })();
+      const claudeProcess = spawn(claudeBin, claudeArgs, {
         stdio: 'inherit',
         env: claudeEnv
       });
@@ -287,6 +295,7 @@ program
       spinner.succeed('Claude Code launched with RouteCodex proxy');
       // Log normalized IPv4 host to avoid confusion (do not print ::/localhost)
       logger.info(`Using RouteCodex server at: http://${resolvedBaseHost}:${actualPort}`);
+      logger.info(`Claude binary: ${claudeBin}`);
       logger.info('Press Ctrl+C to exit Claude Code');
 
       // Handle graceful shutdown
