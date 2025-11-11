@@ -118,8 +118,12 @@ program
   .option('--model <model>', 'Model to use with Claude Code')
   .option('--profile <profile>', 'Claude Code profile to use')
   .option('--ensure-server', 'Ensure RouteCodex server is running before launching Claude')
+  .argument('[extraArgs...]', 'Additional args to pass through to Claude')
   .allowUnknownOption(true)
-  .action(async (options) => {
+  .allowExcessArguments(true)
+  .action(async (...cmdArgs) => {
+    const options = cmdArgs.pop() as any; // Commander passes options as last arg
+    const extraArgsFromCommander: string[] = Array.isArray(cmdArgs[0]) ? (cmdArgs[0] as string[]) : [];
     const spinner = ora('Preparing Claude Code with RouteCodex...').start();
 
     try {
@@ -264,7 +268,13 @@ program
           }
           passThrough.push(tok);
         }
-        if (passThrough.length) { claudeArgs.push(...passThrough); }
+        // 合并 Commander 捕获到的额外参数（多数为位置参数），与我们手动解析的尾参数，去重保序
+        const merged: string[] = [];
+        const seen = new Set<string>();
+        const pushUnique = (arr: string[]) => { for (const t of arr) { if (!seen.has(t)) { seen.add(t); merged.push(t); } } };
+        pushUnique(extraArgsFromCommander);
+        pushUnique(passThrough);
+        if (merged.length) { claudeArgs.push(...merged); }
       } catch { /* ignore passthrough errors */ }
 
       // Launch Claude Code
