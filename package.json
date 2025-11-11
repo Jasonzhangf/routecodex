@@ -131,7 +131,7 @@
     "rcc-basemodule": "^0.2.7",
     "rcc-debugcenter": "^0.1.6",
     "rcc-errorhandling": "^1.0.10",
-    "rcc-llmswitch-core": "^0.2.21",
+    "rcc-llmswitch-core": "file:/Users/fanzhang/Documents/github/sharedmodule/llmswitch-core",
     "routecodex-config-compat": "^0.1.2",
     "routecodex-config-engine": "^0.1.1",
     "rcc-config-core": "^0.1.1",
