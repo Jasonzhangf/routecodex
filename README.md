@@ -115,6 +115,34 @@ ROUTECODEX_PIPELINE_MODE=dynamic routecodex
 ROUTECODEX_PIPELINE_MODE=static routecodex
 ```
 
+## 🖥️ CLI：`rcc code` 参数透传到 Claude
+
+`rcc code` 会把紧跟在子命令 `code` 之后的参数默认传递给 Claude（Claude Code 可执行文件）。这使你可以无缝使用 Claude 自身的命令行参数，同时由 RouteCodex 代理请求到本地服务。
+
+- 透传规则
+  - `rcc code` 自身会消费的选项（不会透传）：
+    - `-p/--port`、`-h/--host`、`-c/--config`、`--claude-path`、`--model`、`--profile`、`--ensure-server`
+  - 除上述选项外，`code` 后的其它参数会按原顺序透传给 Claude。
+  - 若使用分隔符 `--`，则 `--` 之后的所有参数将不做解析、原样透传。
+
+- 环境与代理
+  - `rcc code` 会为子进程设置：`ANTHROPIC_BASE_URL/ANTHROPIC_API_URL=http://<host>:<port>` 与 `ANTHROPIC_API_KEY=rcc-proxy-key`，并清理 `ANTHROPIC_AUTH_TOKEN/ANTHROPIC_TOKEN`，确保经由 RouteCodex 代理。
+  - 可用 `--ensure-server` 在启动 Claude 前探测并尝试启动本地 RouteCodex 服务。
+
+- 使用示例
+  ```bash
+  # 直接传递 Claude 自身参数（无分隔符）
+  rcc code --model claude-3-5 -- --project ~/my/repo --editor vscode
+
+  # 显式使用分隔符 -- 强制原样传参（推荐在复杂参数场景）
+  rcc code -p 5506 -- --project ~/src/foo --some-claude-flag value
+
+  # 指定 Claude 可执行文件路径
+  rcc code --claude-path /usr/local/bin/claude -- --project ~/repo
+  ```
+
+> 提示：若透传参数与 `rcc code` 自身选项名冲突，建议使用 `--` 分隔，避免被 CLI 解析。
+
 ## 🚀 核心特性
 
 ### 🏗️ 双向4层管道架构
