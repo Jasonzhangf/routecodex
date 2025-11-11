@@ -1,0 +1,176 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://routecodex.dev/schema/canonical-config.json",
+  "type": "object",
+  "required": ["providers", "pipelines", "routing", "routeMeta"],
+  "additionalProperties": true,
+  "properties": {
+    "providers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type", "baseUrl"],
+        "properties": {
+          "type": { "type": "string" },
+          "baseUrl": { "type": "string" },
+          "models": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "compatibility": {
+                  "type": "object",
+                  "properties": {
+                    "type": { "type": "string" },
+                    "config": { "type": ["object", "null"] }
+                  },
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "keyVault": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "oneOf": [
+            {
+              "required": ["type", "value"],
+              "properties": {
+                "type": { "const": "apikey" },
+                "value": { "type": "string" },
+                "enabled": { "type": "boolean" }
+              }
+            },
+            {
+              "required": ["type", "oauth"],
+              "properties": {
+                "type": { "const": "oauth" },
+                "oauth": {
+                  "type": "object",
+                  "required": ["clientId", "clientSecret", "tokenUrl"],
+                  "properties": {
+                    "grant": { "type": "string" },
+                    "clientId": { "type": "string" },
+                    "clientSecret": { "type": "string" },
+                    "tokenUrl": { "type": "string" },
+                    "scopes": { "type": "array", "items": { "type": "string" } }
+                  }
+                },
+                "enabled": { "type": "boolean" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pipelines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "modules"],
+        "properties": {
+          "id": { "type": "string" },
+          "modules": {
+            "type": "object",
+            "required": ["provider", "llmSwitch"],
+            "properties": {
+              "provider": {
+                "type": "object",
+                "required": ["type", "config"],
+                "properties": {
+                  "type": { "type": "string" },
+                  "config": { "type": "object" }
+                }
+              },
+              "compatibility": {
+                "type": "object",
+                "properties": {
+                  "type": { "type": "string" },
+                  "config": { "type": ["object", "null"] }
+                }
+              },
+              "llmSwitch": {
+                "type": "object",
+                "required": ["type"],
+                "properties": {
+                  "type": { "type": "string" },
+                  "config": { "type": "object" }
+                }
+              },
+              "workflow": {
+                "type": "object",
+                "properties": {
+                  "type": { "type": "string" },
+                  "config": { "type": "object" }
+                }
+              }
+            }
+          },
+          "authRef": {
+            "type": "object",
+            "properties": {
+              "mode": { "type": "string", "enum": ["perKey", "runtime", "explicit"] },
+              "providerId": { "type": "string" },
+              "keyId": { "type": "string" }
+            },
+            "additionalProperties": true
+          },
+          "settings": { "type": "object" }
+        }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "routeMeta": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "providerId": { "type": "string" },
+          "modelId": { "type": "string" },
+          "keyId": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "httpserver": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "port": { "type": "number" },
+        "host": { "type": "string" }
+      }
+    },
+    "modules": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "httpserver": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "config": {
+              "type": "object",
+              "properties": {
+                "port": { "type": "number" },
+                "host": { "type": "string" }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "_metadata": { "type": "object" }
+  }
+}
