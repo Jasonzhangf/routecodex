@@ -1,4 +1,4 @@
-declare module 'llmswitch-config-core' {
+declare module 'rcc-config-core' {
   export const loadSystemConfig: any;
   export const loadUserConfig: any;
   export const buildCanonical: any;
