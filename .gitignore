@@ -1,48 +1,12 @@
-# Dependencies
-node_modules/
-
-# Build outputs
+# Build artifacts
 dist/
 coverage/
-*.tsbuildinfo
 
-# OS files
-.DS_Store
-
-# Archives / packages
+# Local caches and packs
+.npm-cache/
 *.tgz
-*.zip
 
-# Logs
-npm-debug.log*
-yarn-error.log*
-*.log
+# Local debug payloads
+payloads/
+tools/responses-debug-client/logs/
 
-# Environment files
-.env
-.env.*
-
-# Local caches / scratch
-tmp/
-.cache/
-reports/
-
-# Local-only modules (not managed in main repo)
-sharedmodule/llmswitch-core/
-sharedmodule/config-core/
-
-# Editor/IDE
-.vscode/
-.idea/
-
-# Backup and temporary files
-*.backup
-*.bak*
-temp-*
-
-# Test and debug directories
-test-results/
-scripts/lib/
-scripts/tests/
-scripts/auth/
-scripts/oauth/
