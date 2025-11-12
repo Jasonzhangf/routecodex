@@ -4,11 +4,37 @@ import path from 'path';
 import fsp from 'fs/promises';
 import type { HandlerContext } from './types.js';
 import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
+import Ajv from 'ajv';
 
 // Anthropic Messages endpoint: /v1/messages (Anthropic SSE with named events)
 export async function handleMessages(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
   let sseLogger: { write: (line: string) => Promise<void> } = { write: async () => {} } as any;
   const entryEndpoint = '/v1/messages';
+  // Lazy schema validator cache (Anthropic Messages request)
+  let getAnthropicRequestValidator = (() => {
+    let compiled: any | null = null;
+    let compiling: Promise<any> | null = null;
+    return async () => {
+      if (compiled) return compiled;
+      if (compiling) return compiling;
+      compiling = (async () => {
+        try {
+          const schemaPath = path.resolve(process.cwd(), 'config', 'schemas', 'anthropic-messages.request.schema.json');
+          const raw = await fsp.readFile(schemaPath, 'utf-8');
+          const schema = JSON.parse(raw);
+          const ajv = new Ajv({ allErrors: true, strict: false });
+          compiled = ajv.compile(schema);
+          return compiled;
+        } catch {
+          // If schema load fails, skip pre-validation to avoid breaking flow
+          return (data: unknown) => true;
+        } finally {
+          compiling = null;
+        }
+      })();
+      return compiling;
+    };
+  })();
   try {
     if (!ctx.pipelineManager) { res.status(503).json({ error: { message: 'Pipeline manager not attached' } }); return; }
     const payload = (req.body || {}) as any;
@@ -21,6 +47,52 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       const meta = (payload.metadata && typeof payload.metadata === 'object') ? payload.metadata : {};
       payload.metadata = { ...meta, entryEndpoint, stream: wantsSSE };
     } catch { /* ignore */ }
+
+    // Pre-validate anthropic messages request shape (fail fast with detailed errors)
+    try {
+      const validate = await getAnthropicRequestValidator();
+      const ok = validate(payload);
+      if (!ok) {
+        const details = Array.isArray((validate as any).errors)
+          ? (validate as any).errors.map((e: any) => ({
+              instancePath: e.instancePath,
+              schemaPath: e.schemaPath,
+              keyword: e.keyword,
+              message: e.message,
+              params: e.params
+            }))
+          : [];
+        const errBody = {
+          type: 'schema_validation_failed',
+          endpoint: entryEndpoint,
+          required: ['model', 'messages'],
+          details
+        } as any;
+        // SSE path
+        if (wantsSSE) {
+          // Stop pre-heartbeat if started later
+          try { /* stop below if started */ } catch {}
+          try {
+            res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+            res.setHeader('Cache-Control','no-cache, no-transform');
+            res.setHeader('Connection','keep-alive');
+            res.setHeader('X-Accel-Buffering','no');
+          } catch {}
+          try {
+            const s1 = `event: error\n`;
+            const s2 = `data: ${JSON.stringify({ type: 'error', error: errBody })}\n\n`;
+            res.write(s1); res.write(s2);
+            sseLogger.write(s1).catch(()=>{}); sseLogger.write(s2).catch(()=>{});
+            const done = 'data: [DONE]\n\n'; res.write(done); sseLogger.write(done).catch(()=>{});
+          } catch {}
+          try { res.end(); } catch {}
+          return;
+        }
+        // JSON path
+        res.status(422).json({ error: errBody });
+        return;
+      }
+    } catch { /* ignore pre-validation errors */ }
     const sharedReq: any = {
       data: payload,
       route: { providerId: 'unknown', modelId: String(payload?.model || 'unknown'), requestId, timestamp: Date.now(), pipelineId },
@@ -56,17 +128,18 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
 
     // Snapshot: routing-selected
     try { await writeServerSnapshot({ phase: 'routing-selected', requestId, data: { pipelineId }, entryEndpoint }); } catch { /* ignore */ }
+
+    // 按原逻辑：直接委托流水线，SSE/JSON 由核心与下游决定
     const response = await ctx.pipelineManager.processRequest(sharedReq);
     const out = (response && typeof response === 'object' && 'data' in response) ? (response as any).data : response;
-    // 优先：如果核心返回了 __sse_responses，无条件按 SSE 管道输出（零回退，忽略 Accept/stream）
     if (out && typeof out === 'object' && (out as any).__sse_responses) {
       try { console.log('[HTTP][SSE] piping core stream for /v1/messages', { requestId }); } catch {}
       stopPreHeartbeat();
       try {
         res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-        res.setHeader('Cache-Control','no-cache, no-transform');
-        res.setHeader('Connection','keep-alive');
-        res.setHeader('X-Accel-Buffering','no');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
       } catch {}
       try {
         const { PassThrough } = await import('node:stream');
@@ -79,7 +152,6 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       }
       return;
     }
-    // 其次：客户端期待 SSE 但核心未给出流，按零回退输出最小错误帧
     if (wantsSSE) {
       stopPreHeartbeat();
       try {
@@ -93,9 +165,8 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       try { res.end(); } catch {}
       return;
     }
-    // Non‑SSE
     stopPreHeartbeat();
-    try { await writeServerSnapshot({ phase: 'http-response', requestId, data: out, entryEndpoint }); } catch { /* ignore */ }
+    try { await writeServerSnapshot({ phase: 'http-response', requestId, data: out, entryEndpoint }); } catch {}
     res.status(200).json(out);
   } catch (error: any) {
     try {

@@ -126,6 +126,25 @@ class RouteCodexApp {
       const mergedDir = path.dirname(userConfigPath);
       this.mergedConfigPath = path.join(mergedDir, `merged-config.${port}.json`);
 
+      // Honor serverTools toggle strictly by config.json (single source of truth)
+      // Set ROUTECODEX_SERVER_TOOLS env based on user config, so core replacement logic
+      // relies only on config, avoiding cwd/path ambiguity.
+      try {
+        const rawCfg = await fs.readFile(userConfigPath, 'utf-8');
+        const cfg = JSON.parse(rawCfg || '{}');
+        const st = (cfg && typeof cfg === 'object') ? (cfg as any).serverTools : null;
+        const enabled = !!(st && st.enabled === true && st.replace && st.replace.web_fetch && st.replace.web_fetch.enabled === true);
+        // 单一判断来源：严格以用户配置为准，强制覆盖核心的其他推断路径
+        const val = enabled ? '1' : '0';
+        process.env.ROUTECODEX_SERVER_TOOLS = val;
+        process.env.RCC_SERVER_TOOLS = val;
+        try { console.log(`[ServerTools] web_fetch replacement = ${enabled ? 'ENABLED' : 'DISABLED'} (from ${userConfigPath})`); } catch {}
+      } catch {
+        // 配置缺失则明确关闭
+        process.env.ROUTECODEX_SERVER_TOOLS = '0';
+        process.env.RCC_SERVER_TOOLS = '0';
+      }
+
       const configManagerConfig = {
         configPath: userConfigPath,
         mergedConfigPath: this.mergedConfigPath,

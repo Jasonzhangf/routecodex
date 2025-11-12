@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.80.51",
+  "version": "0.80.98",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -72,8 +72,11 @@
     "replay:toolcall": "node scripts/replay-recorded-toolcall.mjs",
     "replay:responses": "node scripts/replay-responses-sse.mjs",
     "build:smoke": "npm run build && node scripts/protocol-smoke.mjs",
+    "snapshot:inspect": "node scripts/snapshot-inspect.mjs",
     "probe:toon": "node scripts/toon-suite.mjs",
     "debug:responses": "tsx tools/responses-debug-client/src/index.ts",
+    "debug:responses:lmstudio:text": "tsx tools/responses-debug-client/src/index.ts --file tools/responses-debug-client/payloads/lmstudio-text.json --baseURL ${LMSTUDIO_BASEURL:-http://127.0.0.1:1234/v1}",
+    "debug:responses:lmstudio:tool": "tsx tools/responses-debug-client/src/index.ts --file tools/responses-debug-client/payloads/lmstudio-tool.json --baseURL ${LMSTUDIO_BASEURL:-http://127.0.0.1:1234/v1}",
     "start:verify:fg": "node scripts/start-verify.mjs --mode fg --timeout 90",
     "dry-run": "node scripts/dry-run-cli.mjs",
     "dry-run:samples": "tsx scripts/samples-dry-run.mjs",
@@ -81,6 +84,8 @@
     "rc-config": "node scripts/rc-config.mjs",
     "config:validate:providers": "node scripts/validate-config-providers.mjs",
     "config:update:providers": "node scripts/update-config-providers.mjs",
+    "models:update": "node scripts/update-models.mjs",
+    "models:update:qwen": "node scripts/update-models.mjs --provider qwen-provider --write",
     "config:use-local": "node scripts/switch-config-deps.mjs local && npm i",
     "config:use-published": "node scripts/switch-config-deps.mjs published && npm i",
     "test:modelscope": "node scripts/test-modelscope.mjs",
@@ -104,7 +109,6 @@
     "ncu:check": "ncu --errorLevel 2",
     "package:validate": "npx package-json-validator",
     "test:consistency": "node scripts/v2-consistency/run-consistency-test.mjs",
-    "test:protocol": "jest --testPathPattern=protocol-tools-e2e.spec.ts --runInBand --detectOpenHandles --forceExit",
     "test:v2:tools": "node tests/v2/dist/tool-processing-test.js",
     "test:v2:protocol": "node tests/v2/dist/protocol-conversion-test.js",
     "test:comprehensive": "node scripts/v2-consistency/comprehensive-consistency-test.mjs"
@@ -125,16 +129,16 @@
     "helmet": "^7.0.0",
     "lmstudio": "^0.0.32",
     "node-fetch": "^3.3.2",
-    "openai": "^5.23.0",
     "open": "^9.1.0",
+    "openai": "^5.23.0",
     "ora": "^9.0.0",
     "rcc-basemodule": "^0.2.7",
+    "rcc-config-core": "^0.1.1",
     "rcc-debugcenter": "^0.1.6",
     "rcc-errorhandling": "^1.0.10",
-    "rcc-llmswitch-core": "file:/Users/fanzhang/Documents/github/sharedmodule/llmswitch-core",
+    "rcc-llmswitch-core": "^0.2.96",
     "routecodex-config-compat": "^0.1.2",
     "routecodex-config-engine": "^0.1.1",
-    "rcc-config-core": "^0.1.1",
     "socket.io": "^4.8.1",
     "zod": "^3.23.8"
   },
@@ -175,7 +179,6 @@
     "ajv",
     "zod",
     "routecodex-config-engine",
-    "routecodex-config-compat",
-    "rcc-llmswitch-core"
+    "routecodex-config-compat"
   ]
 }
