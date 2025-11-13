@@ -13,6 +13,7 @@ import { CompatibilityManager } from './compatibility-manager.js';
 // 导入GLM模块以触发注册
 import './glm/index.js';
 import './lmstudio/index.js';
+import './passthrough/index.js';
 
 /**
  * 兼容性模块API

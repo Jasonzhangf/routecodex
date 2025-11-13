@@ -273,6 +273,7 @@ export class OpenAIStandard extends BaseProvider {
       ? envRetries
       : (this.config.config.overrides?.maxRetries ?? profile.maxRetries ?? 3);
 
+    const overrideHeaders = (this.config.config as any)?.overrides?.headers || (this.config.config as any)?.headers || undefined;
     this.httpClient = new HttpClient({
       baseUrl: effectiveBase,
       timeout: effectiveTimeout,
@@ -280,6 +281,7 @@ export class OpenAIStandard extends BaseProvider {
       defaultHeaders: {
         'Content-Type': 'application/json',
         ...(profile.headers || {}),
+        ...(overrideHeaders || {}),
       }
     });
   }
@@ -536,20 +538,44 @@ export class OpenAIStandard extends BaseProvider {
         return errorResult.data;
       }
 
-      // 快照：provider-error（记录最小诊断信息）
+      // 规范化错误：补充结构化字段，移除仅文本填充的旧做法
+      let normalized: any = error as any;
+      try {
+        // 提取状态码
+        const msg = typeof normalized?.message === 'string' ? normalized.message : String(normalized || '');
+        const m = msg.match(/HTTP\s+(\d{3})/i);
+        const parsedStatus = m ? parseInt(m[1], 10) : undefined;
+        const statusCode = Number.isFinite(normalized?.statusCode) ? Number(normalized.statusCode) : (Number.isFinite(normalized?.status) ? Number(normalized.status) : (parsedStatus || undefined));
+        if (statusCode && !Number.isNaN(statusCode)) {
+          normalized.statusCode = statusCode;
+          if (!normalized.status) normalized.status = statusCode;
+          if (!normalized.code) normalized.code = `HTTP_${statusCode}`;
+        }
+        // 兼容 Manager 的 code 路径（response.data.error.code）
+        if (!normalized.response) normalized.response = {};
+        if (!normalized.response.data) normalized.response.data = {};
+        if (!normalized.response.data.error) normalized.response.data.error = {};
+        if (normalized.code && !normalized.response.data.error.code) {
+          normalized.response.data.error.code = normalized.code;
+        }
+      } catch { /* keep original */ }
+
+      // 快照：provider-error（结构化写入）
       try {
         await writeProviderSnapshot({
           phase: 'provider-error',
           requestId: context.requestId,
           data: {
-            message: error instanceof Error ? error.message : String(error)
+            status: normalized?.statusCode ?? normalized?.status ?? null,
+            code: normalized?.code ?? null,
+            error: typeof normalized?.message === 'string' ? normalized.message : String(normalized || '')
           },
           headers,
           url: targetUrl
         });
       } catch { /* non-blocking */ }
 
-      throw error;
+      throw normalized;
     }
 
     // Provider 不处理工具修复/注入逻辑：统一收敛到 llmswitch-core 与兼容层

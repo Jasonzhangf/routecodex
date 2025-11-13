@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.81.1",
+  "version": "0.81.19",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -27,8 +27,6 @@
   "bundledDependencies": [
     "ajv",
     "zod",
-    "routecodex-config-engine",
-    "routecodex-config-compat",
     "rcc-llmswitch-core"
   ],
   "engines": {
@@ -79,6 +77,7 @@
     "debug:responses:lmstudio:tool": "tsx tools/responses-debug-client/src/index.ts --file tools/responses-debug-client/payloads/lmstudio-tool.json --baseURL ${LMSTUDIO_BASEURL:-http://127.0.0.1:1234/v1}",
     "start:verify:fg": "node scripts/start-verify.mjs --mode fg --timeout 90",
     "dry-run": "node scripts/dry-run-cli.mjs",
+    "dry-run:rr-429": "node scripts/dry-run-rr-429.mjs",
     "dry-run:samples": "tsx scripts/samples-dry-run.mjs",
     "config:core:run": "tsx scripts/config-core-run.ts",
     "rc-config": "node scripts/rc-config.mjs",
@@ -132,12 +131,10 @@
     "openai": "^5.23.0",
     "ora": "^9.0.0",
     "rcc-basemodule": "^0.2.7",
-    "rcc-config-core": "^0.1.1",
+    "rcc-config-core": "^0.1.5",
     "rcc-debugcenter": "^0.1.6",
     "rcc-errorhandling": "^1.0.10",
-    "rcc-llmswitch-core": "file:/Users/fanzhang/Documents/github/sharedmodule/llmswitch-core/rcc-llmswitch-core-0.3.10.tgz",
-    "routecodex-config-compat": "^0.1.2",
-    "routecodex-config-engine": "^0.1.1",
+    "rcc-llmswitch-core": "^0.3.12",
     "socket.io": "^4.8.1",
     "zod": "^3.23.8"
   },
@@ -176,8 +173,6 @@
   },
   "bundleDependencies": [
     "ajv",
-    "zod",
-    "routecodex-config-engine",
-    "routecodex-config-compat"
+    "zod"
   ]
 }

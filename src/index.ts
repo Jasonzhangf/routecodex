@@ -101,9 +101,6 @@ class RouteCodexApp {
       // 1. 初始化配置管理器
       const port = await this.detectServerPort(this.modulesConfigPath);
 
-      // Ensure the port is available before continuing. Attempt graceful shutdown first.
-      await ensurePortAvailable(port, { attemptGraceful: true });
-
       // mergedConfigPath will be resolved after determining userConfigPath below
 
       // 确定用户配置文件路径，优先使用环境变量（RCC4_CONFIG_PATH / ROUTECODEX_CONFIG / ROUTECODEX_CONFIG_PATH），否则回退到共享解析
@@ -156,6 +153,7 @@ class RouteCodexApp {
       let mergedConfig: any | null = null;
       // 2. 运行时自动生成 merged-config.<port>.json（动态装配），不再要求预生成
       //    使用配置管理模块基于用户配置与系统模块配置生成合并配置
+      //    注意：放在端口可用性检查之前，以确保即使端口被占用也会重建合并配置
       await this.configManager.initialize(configManagerConfig as any);
       mergedConfig = await this.loadMergedConfig();
 
@@ -234,7 +232,9 @@ class RouteCodexApp {
       pipelinesAttached = true;
       console.log('🧩 Pipeline assembled from merged-config and attached to server.');
 
-      // 6. 启动服务器（若端口被占用，自动释放后重试一次）
+      // 6. 启动服务器（若端口被占用，先尝试优雅释放；确保在合并配置已生成之后）
+      // Ensure the port is available before continuing. Attempt graceful shutdown first.
+      await ensurePortAvailable(port, { attemptGraceful: true });
       try {
         await (this.httpServer as any).start();
       } catch (err: any) {

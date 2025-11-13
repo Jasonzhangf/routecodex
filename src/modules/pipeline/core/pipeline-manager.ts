@@ -50,14 +50,18 @@ export class PipelineManager implements RCCBaseModule {
   private managerMetrics: Map<string, { values: number[]; lastUpdated: number }> = new Map();
   private requestHistory: unknown[] = [];
   private maxHistorySize = 100;
-  // Round-robin state for default selection when pipelineId is missing
+  // Round-robin state per route pool; fallback rr for legacy
   private rrCounter = 0;
+  private rrIndexByRoute: Map<string, number> = new Map();
 
   // 429 error handling properties
   private key429Tracker: Key429Tracker;
   private pipelineHealthManager: PipelineHealthManager;
   private retryAttempts: Map<string, number> = new Map();
   private maxRetries = 3;
+  // Dynamic route-pool state (in-memory): routePools and per-pipeline 429/cooldown/ban
+  private routePools: Record<string, string[]> = {};
+  private pipeline429State: Map<string, { step: number; consecutive: number; firstAt: number; lastAt: number; cooldownUntil?: number; bannedToday?: boolean; bannedReason?: string }>=new Map();
 
   constructor(
     config: PipelineManagerConfig,
@@ -120,6 +124,11 @@ export class PipelineManager implements RCCBaseModule {
     }
   }
 
+  // Inject assembled routePools from server so we can restrict 429 switching within the same pool
+  public attachRoutePools(pools: Record<string, string[]>): void {
+    this.routePools = pools || {};
+  }
+
   /**
    * Returns list of created pipeline IDs (for router consistency checks)
    */
@@ -142,21 +151,39 @@ export class PipelineManager implements RCCBaseModule {
       throw new Error('PipelineManager is not initialized');
     }
 
-    // Strict mode: require explicit pipelineId
+    // If no explicit pipelineId, perform per-route-pool round-robin selection
     const directId = (routeRequest as any).pipelineId as string | undefined;
     if (!directId) {
-      // Default behavior: round-robin across available pipelines in current manager
-      const available = this.getAvailablePipelines(exclude => exclude);
-      const candidates = available.length ? available : Array.from(this.pipelines.values());
-      if (!candidates.length) {
-        throw new Error('No pipelines available for round-robin selection');
+      // Determine route pool name (default if not provided)
+      const routeName = String((routeRequest as any)?.routeName || (routeRequest as any)?.metadata?.routeName || 'default');
+      const poolIds: string[] = Array.isArray((this.routePools as any)?.[routeName]) ? (this.routePools as any)[routeName] : [];
+      let candidates: BasePipeline[] = [];
+      if (poolIds.length) {
+        const now = Date.now();
+        candidates = poolIds
+          .map(id => this.pipelines.get(id))
+          .filter((p): p is BasePipeline => !!p)
+          .filter(p => {
+            const st = this.pipeline429State.get(p.pipelineId);
+            const inCooldown = st && st.cooldownUntil !== undefined && now < (st.cooldownUntil || 0);
+            const banned = st && st.bannedToday === true;
+            return !inCooldown && !banned && this.pipelineHealthManager.isPipelineAvailable(p.pipelineId);
+          });
       }
-      const idx = (this.rrCounter++) % candidates.length;
+      if (!candidates.length) {
+        // fallback to all pipelines if pool empty or all filtered
+        candidates = Array.from(this.pipelines.values()).filter(p => this.pipelineHealthManager.isPipelineAvailable(p.pipelineId));
+      }
+      if (!candidates.length) throw new Error('No pipelines available for round-robin selection');
+      const cur = this.rrIndexByRoute.get(routeName) || 0;
+      const idx = cur % candidates.length;
       const chosen = candidates[idx];
+      this.rrIndexByRoute.set(routeName, (cur + 1) % Math.max(1, candidates.length));
       this.logger.logPipeline('manager', 'pipeline-selected-rr', {
         chosen: chosen.pipelineId,
         total: candidates.length,
         rrIndex: idx,
+        routeName,
         providerId: routeRequest.providerId,
         modelId: routeRequest.modelId
       });
@@ -469,49 +496,52 @@ export class PipelineManager implements RCCBaseModule {
     attemptedPipelines: Set<string>,
     retryKey: string
   ): Promise<PipelineResponse> {
-    // Initialize registry
-    const registry = ErrorHandlerRegistry.getInstance();
-    try { await registry.initialize(); } catch { /* ignore */ }
+    // 1) Update dynamic state for the last attempted pipeline (cooldown/step/window)
+    try {
+      const last = Array.from(attemptedPipelines)[Array.from(attemptedPipelines).length - 1];
+      if (last) this.apply429StepForPipeline(last);
+    } catch { /* ignore */ }
 
-    // Prepare a deferred to capture handler decision (response or final error)
-    let resolveFn: (v: PipelineResponse) => void;
-    let rejectFn: (e: unknown) => void;
-    const resultPromise: Promise<PipelineResponse> = new Promise((resolve, reject) => { resolveFn = resolve; rejectFn = reject; });
-
-    // Backoff schedule (EHC can override by reading env or config); provide defaults
-    // Resolve schedule from manager config → env defaults
-    const cfgSchedule = ((this.config?.settings as any)?.rateLimit?.backoffMs as number[] | undefined) || [];
-    let schedule = Array.isArray(cfgSchedule) ? cfgSchedule.filter(v => Number.isFinite(v) && v > 0) : [];
-    if (!schedule.length) {
-      const s1 = Number(process.env.RCC_429_BACKOFF_MS_1 || process.env.ROUTECODEX_429_BACKOFF_MS_1 || 30000);
-      const s2 = Number(process.env.RCC_429_BACKOFF_MS_2 || process.env.ROUTECODEX_429_BACKOFF_MS_2 || 60000);
-      const s3 = Number(process.env.RCC_429_BACKOFF_MS_3 || process.env.ROUTECODEX_429_BACKOFF_MS_3 || 120000);
-      schedule = [s1, s2, s3].filter(v => Number.isFinite(v) && v > 0);
+    // 2) Try to switch within the same route pool (no waiting)
+    const excludeIds = new Set<string>(attemptedPipelines);
+    const candidates = this.getPoolRestrictedAvailablePipelines(attemptedPipelines, excludeIds);
+    if (Array.isArray(candidates) && candidates.length > 0) {
+      const next = this.selectNextPipelineRoundRobin(candidates, retryKey);
+      attemptedPipelines.add(next.pipelineId);
+      return await this.processRequestWithPipeline(next, request, retryKey);
     }
 
-    // Hooks for the handler (avoid exposing internals; provide safe closures)
-    const ctx = {
-      request,
-      retryKey,
-      attemptedPipelineIds: Array.from(attemptedPipelines),
-      schedule,
-      hooks: {
-        getAvailablePipelines: (excludeIds: Set<string>) => this.getAvailablePipelines(ids => { excludeIds.forEach(id => ids.add(id)); return ids; }),
-        selectNextRoundRobin: (candidates: BasePipeline[]) => this.selectNextPipelineRoundRobin(candidates, retryKey),
-        processWithPipeline: (p: BasePipeline) => this.processRequestWithPipeline(p, request, retryKey),
-        getPipelineById: (id: string) => this.pipelines.get(id),
-        record429Error: (pipelineId: string, key?: string) => this.pipelineHealthManager.record429Error(pipelineId, key || 'unknown'),
-        logger: this.logger,
-        errorCenter: this.errorHandlingCenter
-      },
-      deferred: { resolve: resolveFn!, reject: rejectFn! }
-    };
+    // 3) Pool exhausted: emit advisory to error center, then fail fast with diagnostic
+    try {
+      await (this.errorHandlingCenter as any)?.handleError?.({
+        type: 'rate_limit_pool_exhausted',
+        timestamp: Date.now(),
+        requestId: (request as any)?.route?.requestId,
+        attempted: Array.from(attemptedPipelines),
+      });
+    } catch { /* ignore */ }
 
-    class RateLimitError extends Error { constructor(msg: string) { super(msg); this.name = 'RateLimitError'; } }
-    const err = new RateLimitError(error instanceof Error ? error.message : String(error));
+    // Compute minimal retryAfter among cooled pipelines in the same pool
+    let minRetryAfter = 0;
+    try {
+      const anchor = Array.from(attemptedPipelines)[0];
+      const poolIds: string[] = [];
+      for (const ids of Object.values(this.routePools || {})) {
+        if (Array.isArray(ids) && anchor && ids.includes(anchor)) { poolIds.push(...ids); break; }
+      }
+      const now = Date.now();
+      const futureTimes = poolIds
+        .map(id => this.pipeline429State.get(id)?.cooldownUntil || 0)
+        .filter(t => t && t > now)
+        .map(t => t - now);
+      if (futureTimes.length) { minRetryAfter = Math.max(0, Math.min(...futureTimes)); }
+    } catch { /* ignore */ }
 
-    await registry.handleError(err as any, 'rate_limit', 'pipeline-manager', ctx as any);
-    return resultPromise;
+    const e: any = new Error('Route pool exhausted: all pipelines cooling down or banned');
+    e.statusCode = 429;
+    e.code = 'HTTP_429_POOL_EXHAUSTED';
+    if (minRetryAfter > 0) e.retryAfterMs = minRetryAfter;
+    throw e;
   }
 
   /**
@@ -563,8 +593,49 @@ export class PipelineManager implements RCCBaseModule {
       }
 
       // Skip unhealthy pipelines
+      // Skip dynamic bans/cooldown
+      const st = this.pipeline429State.get(pipeline.pipelineId);
+      const now = Date.now();
+      const inCooldown = st && st.cooldownUntil !== undefined && now < (st.cooldownUntil || 0);
+      const banned = st && st.bannedToday === true;
+      if (inCooldown || banned) return false;
       return this.pipelineHealthManager.isPipelineAvailable(pipeline.pipelineId);
     });
+  }
+
+  /**
+   * Get available pipelines restricted to the same route pool as the first attempted pipeline
+   */
+  private getPoolRestrictedAvailablePipelines(
+    attempted: Set<string>,
+    excludeIds: Set<string>
+  ): BasePipeline[] {
+    const attemptedArr = Array.from(attempted);
+    const anchor = attemptedArr.length ? attemptedArr[0] : null;
+    let allowed: Set<string> | null = null;
+    if (anchor) {
+      allowed = new Set<string>();
+      for (const [routeName, ids] of Object.entries(this.routePools || {})) {
+        if (Array.isArray(ids) && ids.includes(anchor)) {
+          ids.forEach(id => allowed!.add(id));
+        }
+      }
+    }
+    const exclude = new Set<string>(excludeIds);
+    // Always exclude already attempted pipelines
+    attempted.forEach(id => exclude.add(id));
+    const all = Array.from(this.pipelines.values());
+    const filtered = all.filter(p => {
+      if (allowed && !allowed.has(p.pipelineId)) return false;
+      if (exclude.has(p.pipelineId)) return false;
+      const st = this.pipeline429State.get(p.pipelineId);
+      const now = Date.now();
+      const inCooldown = st && st.cooldownUntil !== undefined && now < (st.cooldownUntil || 0);
+      const banned = st && st.bannedToday === true;
+      if (inCooldown || banned) return false;
+      return this.pipelineHealthManager.isPipelineAvailable(p.pipelineId);
+    });
+    return filtered;
   }
 
   /**
@@ -596,9 +667,10 @@ export class PipelineManager implements RCCBaseModule {
     try {
       const response = await pipeline.processRequest(request);
 
-      // On success, record success and reset retry count
+      // On success, record success and reset retry count; clear 429 consecutive state for this pipeline
       this.pipelineHealthManager.recordSuccess(pipeline.pipelineId);
       this.retryAttempts.delete(retryKey);
+      try { this.reset429State(pipeline.pipelineId); } catch { /* ignore */ }
 
       return response;
     } catch (error) {
@@ -611,9 +683,40 @@ export class PipelineManager implements RCCBaseModule {
           throw error;
         }
       } catch { /* ignore and continue */ }
-      // Check if it's a 429 error
+      // Check if it's a 429 error (robust detection)
       const errorObj = error as Record<string, unknown>;
-      if (errorObj['statusCode'] === 429 || errorObj['code'] === 'HTTP_429') {
+      const status = (errorObj['statusCode'] as any) || (errorObj['status'] as any) || (errorObj as any)?.response?.status;
+      // Collect common code fields (flattened and nested) and evaluate strictly
+      const codeCandidatesRaw: any[] = [
+        (errorObj as any)?.code,
+        (errorObj as any)?.error?.code,
+        (errorObj as any)?.errors?.code,
+        (errorObj as any)?.response?.data?.error?.code,
+        (errorObj as any)?.response?.data?.errors?.code,
+      ].filter((v) => v !== undefined && v !== null);
+      const codeMatchStrict = (() => {
+        const known = new Set([
+          '429', 'HTTP_429', 'TOO_MANY_REQUESTS', 'RATE_LIMITED', 'RATE_LIMIT', 'REQUEST_LIMIT_EXCEEDED', 'RATE_LIMIT_EXCEEDED'
+        ]);
+        for (const v of codeCandidatesRaw) {
+          if (typeof v === 'number' && v === 429) return true;
+          const s = String(v).trim();
+          if (/^\d+$/.test(s) && Number(s) === 429) return true;
+          const u = s.toUpperCase();
+          if (known.has(u)) return true;
+        }
+        return false;
+      })();
+      const looks429 = (() => {
+        if (status === 429) return true;
+        if (codeMatchStrict) return true;
+        // Contains check on code fields only (no text fallback)
+        for (const v of codeCandidatesRaw) {
+          try { if (String(v).includes('429')) return true; } catch { /* ignore */ }
+        }
+        return false;
+      })();
+      if (looks429) {
         const currentAttempt = this.retryAttempts.get(retryKey) || 0;
 
         if (currentAttempt < this.maxRetries) {
@@ -625,11 +728,64 @@ export class PipelineManager implements RCCBaseModule {
         }
       }
 
-      // For other errors, just record the error
+      // For other errors, handle special cases (401/403) → ban today; otherwise record error
       const errorMessage = error instanceof Error ? error.message : String(error);
+      try {
+        const status = (error as any)?.statusCode || (error as any)?.status || (error as any)?.response?.status;
+        if (status === 401 || status === 403) {
+          this.markPipelineBannedToday(pipeline.pipelineId, 'auth_invalid');
+        }
+      } catch { /* ignore */ }
       this.pipelineHealthManager.recordError(pipeline.pipelineId, errorMessage);
       throw error;
     }
+  }
+
+  // 429 dynamic state helpers
+  private apply429StepForPipeline(pipelineId: string): void {
+    const now = Date.now();
+    const cur = this.pipeline429State.get(pipelineId) || { step: 0, consecutive: 0, firstAt: now, lastAt: now };
+    const consecutive = (cur.consecutive || 0) + 1;
+    const firstAt = cur.firstAt || now;
+    const step = Math.min((cur.step || 0) + 1, 3);
+    const schedule = this.getBackoffSchedule();
+    const delay = schedule[Math.max(0, Math.min(step - 1, schedule.length - 1))] || 30000;
+    const cooldownUntil = now + delay;
+    const windowMs = now - firstAt;
+    const banDisabled = this.is429BanDisabled();
+    const bannedToday = banDisabled ? false : ((windowMs > 120000) ? true : (cur.bannedToday === true));
+    const next = { step, consecutive, firstAt, lastAt: now, cooldownUntil, bannedToday, bannedReason: bannedToday ? 'quota_exhausted_today' : undefined };
+    this.pipeline429State.set(pipelineId, next as any);
+  }
+
+  private reset429State(pipelineId: string): void {
+    const cur = this.pipeline429State.get(pipelineId);
+    if (!cur) return;
+    this.pipeline429State.set(pipelineId, { step: 0, consecutive: 0, firstAt: 0, lastAt: 0 });
+  }
+
+  private markPipelineBannedToday(pipelineId: string, reason: string): void {
+    if (this.is429BanDisabled()) { return; }
+    const now = Date.now();
+    const cur = this.pipeline429State.get(pipelineId) || { step: 0, consecutive: 0, firstAt: now, lastAt: now };
+    this.pipeline429State.set(pipelineId, { ...cur, bannedToday: true, bannedReason: reason, cooldownUntil: undefined });
+  }
+
+  private getBackoffSchedule(): number[] {
+    const cfgSchedule = ((this.config?.settings as any)?.rateLimit?.backoffMs as number[] | undefined) || [];
+    let schedule = Array.isArray(cfgSchedule) ? cfgSchedule.filter(v => Number.isFinite(v) && v > 0) : [];
+    if (!schedule.length) {
+      const s1 = Number(process.env.RCC_429_BACKOFF_MS_1 || process.env.ROUTECODEX_429_BACKOFF_MS_1 || 30000);
+      const s2 = Number(process.env.RCC_429_BACKOFF_MS_2 || process.env.ROUTECODEX_429_BACKOFF_MS_2 || 60000);
+      const s3 = Number(process.env.RCC_429_BACKOFF_MS_3 || process.env.ROUTECODEX_429_BACKOFF_MS_3 || 120000);
+      schedule = [s1, s2, s3].filter(v => Number.isFinite(v) && v > 0);
+    }
+    return schedule;
+  }
+
+  private is429BanDisabled(): boolean {
+    const v = String(process.env.RCC_429_DISABLE_BAN || process.env.ROUTECODEX_429_DISABLE_BAN || '').trim().toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes' || v === 'on';
   }
 
   /**

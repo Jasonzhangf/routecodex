@@ -754,6 +754,12 @@ export class RouteCodexServerV2 extends BaseModule {
     (globalThis as any).routePools = routePools;
     this.routePools = routePools || {};
     this.ensureVirtualRouter();
+    try {
+      const mgr: any = this.pipelineManager as any;
+      if (mgr && typeof mgr.attachRoutePools === 'function') {
+        mgr.attachRoutePools(this.routePools);
+      }
+    } catch { /* ignore */ }
   }
 
   public attachRouteMeta(routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }>): void {

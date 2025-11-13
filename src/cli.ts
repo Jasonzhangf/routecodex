@@ -103,6 +103,18 @@ program
   .description('RouteCodex CLI - Multi-provider OpenAI proxy server and Claude Code interface')
   .version(pkgVersion);
 
+// Provider command group - update models and generate minimal provider config
+try {
+  const { createProviderUpdateCommand } = await import('./commands/provider-update.js');
+  program.addCommand(createProviderUpdateCommand());
+} catch { /* optional: command not available in some builds */ }
+
+// Validate command - auto start server then run E2E checks
+try {
+  const { createValidateCommand } = await import('./commands/validate.js');
+  program.addCommand(createValidateCommand());
+} catch { /* optional */ }
+
 // Code command - Launch Claude Code interface
 program
   .command('code')

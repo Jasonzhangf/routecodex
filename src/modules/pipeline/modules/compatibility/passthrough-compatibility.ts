@@ -21,12 +21,26 @@ export class PassthroughCompatibility implements CompatibilityModule {
   readonly rules: TransformationRule[] = [];
 
   private isInitialized = false;
-  private logger: PipelineDebugLoggerInterface;
+  private logger!: PipelineDebugLoggerInterface;
+  private dependencies!: ModuleDependencies;
 
-  constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
-    this.logger = dependencies.logger;
-    this.id = `compatibility-passthrough-${Date.now()}`;
-    this.config = config;
+  // 支持两种构造方式：new PassthroughCompatibility(config, deps) 或 new PassthroughCompatibility(deps)
+  constructor(configOrDependencies: ModuleConfig | ModuleDependencies, maybeDependencies?: ModuleDependencies) {
+    const isLegacy = (arg: any): arg is ModuleConfig => !!arg && typeof arg === 'object' && 'type' in arg && 'config' in arg;
+    if (isLegacy(configOrDependencies) && maybeDependencies) {
+      const config = configOrDependencies as ModuleConfig;
+      const dependencies = maybeDependencies as ModuleDependencies;
+      this.dependencies = dependencies;
+      this.logger = dependencies.logger;
+      this.id = `compatibility-passthrough-${Date.now()}`;
+      this.config = config;
+    } else {
+      const dependencies = configOrDependencies as ModuleDependencies;
+      this.dependencies = dependencies;
+      this.logger = dependencies.logger;
+      this.id = `compatibility-passthrough-${Date.now()}`;
+      this.config = { type: 'passthrough-compatibility', config: {} } as unknown as ModuleConfig;
+    }
   }
 
   /**
@@ -37,7 +51,7 @@ export class PassthroughCompatibility implements CompatibilityModule {
       this.logger.logModule(this.id, 'initialization-start');
       
       // Validate configuration
-      this.validateConfig();
+    this.validateConfig();
       
       this.isInitialized = true;
       this.logger.logModule(this.id, 'initialization-complete');

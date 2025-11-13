@@ -188,6 +188,14 @@ export class PipelineAssembler {
           if (typeof (provCfg as any).timeout !== 'number' && typeof (sysP as any).timeout === 'number') {
             (provCfg as any).timeout = Number((sysP as any).timeout);
           }
+          // Provider级 headers：允许从 virtualrouter.providers.* 读取 headers 注入（如 User-Agent）
+          try {
+            const srcHeaders = this.asRecord((sysP as any).headers || {});
+            if (Object.keys(srcHeaders).length) {
+              const dstHeaders = this.asRecord((provCfg as any).headers || {});
+              (provCfg as any).headers = { ...dstHeaders, ...srcHeaders } as Record<string, string>;
+            }
+          } catch { /* ignore header merge errors */ }
           // Merge auth: if we already have an auth object, enrich missing fields
           const srcAuth = this.asRecord((sysP as any).auth || {});
           if (!provCfg.auth && Object.keys(srcAuth).length) {

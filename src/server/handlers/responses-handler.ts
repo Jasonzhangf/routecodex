@@ -43,7 +43,7 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
       };
       await writeServerSnapshot({ phase: 'http-request.parsed', requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2,10)}`, data: summarize(payload), entryEndpoint });
     } catch { /* ignore */ }
-    const pipelineId = await ctx.selectPipelineId(payload, entryEndpoint);
+    const pipelineId = null as unknown as string; // 强制由 PipelineManager 基于路由池轮询选择
     const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     // Snapshot: http-request
     try { await writeServerSnapshot({ phase: 'http-request', requestId, data: payload, entryEndpoint }); } catch { /* non-blocking */ }
@@ -54,8 +54,8 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
     } catch { /* ignore */ }
     const sharedReq: any = {
       data: payload,
-      route: { providerId: 'unknown', modelId: String(payload?.model || 'unknown'), requestId, timestamp: Date.now(), pipelineId },
-      metadata: { entryEndpoint, endpoint: entryEndpoint, stream: wantsSSE },
+      route: { providerId: 'unknown', modelId: String(payload?.model || 'unknown'), requestId, timestamp: Date.now() },
+      metadata: { entryEndpoint, endpoint: entryEndpoint, stream: wantsSSE, routeName: 'default' },
       debug: { enabled: false, stages: {} },
       entryEndpoint
     };

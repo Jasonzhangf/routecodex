@@ -108,6 +108,9 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
     await this.orchestrator.initialize();
   }
 
+  // For unified behavior: default Responses → Chat bridge unless explicit passthrough module is used
+  // No per-adapter codec instantiation here; delegate strictly to core bridge
+
   private pickProtocol(ctx: Ctx): 'openai-chat' | 'openai-responses' | 'anthropic-messages' {
     const ep = String(ctx.entryEndpoint || ctx.endpoint || '').toLowerCase();
     try { console.log('[LLMSWITCH.pick] ctx=', ctx); } catch { /* ignore */ }
@@ -122,6 +125,11 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
 
   async processIncoming(request: any): Promise<unknown> {
     if (!this.initialized) await this.initialize();
+    const ctx = this.buildContext(request);
+    let ep = String(ctx.entryEndpoint || ctx.endpoint || '').toLowerCase();
+    // Fallback: infer responses by payload shape when endpoint is missing
+    // entryEndpoint is required; no inference here
+    // Strictly delegate to core bridge; no adapter-level bridging
     const __filename = fileURLToPath(import.meta.url);
     const pkgRoot = path.resolve(path.dirname(__filename), '../../../..');
     const bridge = await importCore('v2/bridge/routecodex-adapter');
@@ -144,6 +152,10 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
 
   async processOutgoing(response: any): Promise<unknown> {
     if (!this.initialized) await this.initialize();
+    const ctx = this.buildContext(response);
+    let ep = String(ctx.entryEndpoint || ctx.endpoint || '').toLowerCase();
+    // entryEndpoint is required; no inference here
+    // Strictly delegate to core bridge; no adapter-level bridging
     const __filename = fileURLToPath(import.meta.url);
     const pkgRoot = path.resolve(path.dirname(__filename), '../../../..');
     const bridge = await importCore('v2/bridge/routecodex-adapter');

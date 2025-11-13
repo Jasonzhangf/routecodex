@@ -6,6 +6,7 @@
 
 import { OpenAIStandard } from './openai-standard.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
+import crypto from 'node:crypto';
 import type { IProviderV2 } from '../api/provider-types.js';
 import type { ModuleDependencies } from '../../../../interfaces/pipeline-interfaces.js';
 
@@ -131,9 +132,21 @@ export class ProviderFactory {
     const { providerType, auth } = config.config;
     const authType = auth.type;
     const baseUrl = config.config.baseUrl || '';
+    // 将“认证身份”纳入实例ID，避免不同 key 复用同一实例
+    let authIdentity = '';
+    try {
+      if (authType === 'apikey' && typeof (auth as any).apiKey === 'string') {
+        const key = String((auth as any).apiKey);
+        authIdentity = crypto.createHash('sha256').update(key).digest('hex').slice(0, 12);
+      } else if (authType === 'oauth') {
+        const tokenFile = (auth as any).tokenFile || '';
+        const clientId = (auth as any).clientId || '';
+        authIdentity = crypto.createHash('sha256').update(String(tokenFile || clientId)).digest('hex').slice(0, 12);
+      }
+    } catch { authIdentity = ''; }
 
-    // 基于关键配置生成唯一ID
-    const idComponents = [providerType, authType, baseUrl].filter(Boolean);
+    // 基于关键配置生成唯一ID（包含认证身份摘要）
+    const idComponents = [providerType, authType, baseUrl, authIdentity].filter(Boolean);
     return idComponents.join('-');
   }
 }

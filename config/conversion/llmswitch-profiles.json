@@ -1,6 +1,6 @@
 {
   "profiles": {
-    "anthropic-messages": {
+    "anthropic-chat": {
       "incomingProtocol": "anthropic.messages",
       "outgoingProtocol": "openai.chat",
       "codec": "anthropic-openai",
@@ -30,7 +30,7 @@
     }
   },
   "endpointBindings": {
-    "/v1/messages": "anthropic-messages",
+    "/v1/messages": "anthropic-chat",
     "/v1/chat/completions": "openai-chat",
     "/v1/responses": "responses-chat"
   }
