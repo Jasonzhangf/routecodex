@@ -42,46 +42,8 @@ export class ConfigManagerModule extends BaseModule {
   }
 
   private async generateMergedConfigViaCore(): Promise<void> {
-    // 兼容导入 rcc-config-core（不同安装形态：exports 入口 / 显式 dist / 按子模块聚合）
-    const core = await (async () => {
-      const tryImport = async (spec: string): Promise<any> => {
-        // 通过计算得来的 spec 避免 TS 类型检查器要求类型声明
-        return await import(spec as any);
-      };
-      try {
-        return await tryImport('rcc-config-core');
-      } catch {
-        try {
-          // 显式入口（有些环境的解析器更偏好具体路径）
-          return await tryImport('rcc-config-core/dist/index.js');
-        } catch {
-          // 子模块聚合兜底（仍然只依赖 config-core，不回退到 legacy 实现）
-          const [loaders, canonical, asm, merged] = await Promise.all([
-            tryImport('rcc-config-core/interpreter/loaders.js'),
-            tryImport('rcc-config-core/interpreter/build-canonical.js'),
-            tryImport('rcc-config-core/exporters/export-assembler-v2.js'),
-            tryImport('rcc-config-core/exporters/build-merged.js'),
-          ]);
-          return {
-            loadSystemConfig: loaders.loadSystemConfig,
-            loadUserConfig: loaders.loadUserConfig,
-            writeJsonPretty: loaders.writeJsonPretty,
-            buildCanonical: canonical.buildCanonical,
-            exportAssemblerConfigV2: asm.exportAssemblerConfigV2,
-            buildMergedConfig: merged.buildMergedConfig,
-            writeMerged: merged.writeMerged,
-          } as unknown as {
-            loadSystemConfig: (p: string) => Promise<any>;
-            loadUserConfig: (p: string) => Promise<any>;
-            writeJsonPretty: (p: string, d: unknown) => Promise<void>;
-            buildCanonical: (s: any, u: any, o?: any) => any;
-            exportAssemblerConfigV2: (c: any) => any;
-            buildMergedConfig: (c: any) => any;
-            writeMerged: (p: string, m: any) => Promise<void>;
-          };
-        }
-      }
-    })();
+    // 使用标准入口导入 rcc-config-core（包内已提供 dist/index.js 与 exports 字段）
+    const core = await import('rcc-config-core');
     const sys = await core.loadSystemConfig(this.systemConfigPath);
     const usr = await core.loadUserConfig(this.configPath);
     if (!usr?.ok) {
