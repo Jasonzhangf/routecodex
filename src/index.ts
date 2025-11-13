@@ -343,6 +343,12 @@ class RouteCodexApp {
         console.log(`🔧 Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT)`);
         return envPort;
       }
+
+      // Dev 模式：无论配置是否存在，若未显式指定端口，则使用固定默认 5555
+      if (buildInfo.mode === 'dev') {
+        console.log('🔧 Using dev default port 5555');
+        return 5555;
+      }
       // 首先检查ROUTECODEX_CONFIG_PATH环境变量（当前使用的）
       if (process.env.ROUTECODEX_CONFIG_PATH) {
         const configPath = process.env.ROUTECODEX_CONFIG_PATH;
@@ -422,30 +428,10 @@ class RouteCodexApp {
         }
       }
     } catch (error) {
-      // ignore; perform final resolution below
+      console.error('❌ Error detecting server port:', error);
     }
-    // 最终根据构建模式收敛端口解析：dev→默认5555；release→必须配置
-    try {
-      let cfgPort: number | null = null;
-      try {
-        const defaultConfigPath = path.join(homedir(), '.routecodex', 'config.json');
-        if (fsSync.existsSync(defaultConfigPath)) {
-          const raw = await fs.readFile(defaultConfigPath, 'utf-8');
-          const json = JSON.parse(raw || '{}');
-          cfgPort = (json && typeof json.httpserver === 'object' && typeof json.httpserver.port === 'number')
-            ? json.httpserver.port
-            : (typeof (json as any).port === 'number' ? (json as any).port : null);
-        }
-      } catch { /* ignore */ }
-      const resolved = resolvePortForMode({ mode: buildInfo.mode, cliPort: undefined, configPort: cfgPort });
-      if (buildInfo.mode === 'dev' && resolved === 5555) {
-        console.log('🔧 Using dev default port 5555');
-      }
-      return resolved;
-    } catch (e) {
-      console.error('❌ Error detecting server port:', e);
-      throw new Error('HTTP server port not found. In release mode, set httpserver.port in your user configuration file.');
-    }
+    // Release 模式：必须从配置获取端口或通过环境传入；走到这里表示未命中，Fail Fast
+    throw new Error('HTTP server port not found. In release mode, set httpserver.port in your user configuration file.');
   }
 }
 

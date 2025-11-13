@@ -71,17 +71,24 @@ async function dynamicImport(p: string): Promise<any> {
 }
 
 async function ensureCoreOrFail(): Promise<void> {
-  // 仅通过 npm 依赖检测（移除 vendor 兜底）
+  // 优先通过 npm 依赖检测
   try { await dynamicImport('rcc-llmswitch-core/package.json'); return; } catch { /* ignore */ }
   try { await dynamicImport('rcc-llmswitch-core'); return; } catch { /* ignore */ }
+  // dev 模式允许使用本包内 vendor 兜底
+  try {
+    const { pathToFileURL } = await import('url');
+    const vendorPath = path.resolve(__dirname, '..', 'vendor', 'rcc-llmswitch-core', 'dist', 'index.js');
+    const url = pathToFileURL(vendorPath).href;
+    await dynamicImport(url);
+    return;
+  } catch { /* ignore */ }
 
-  logger.error('llmswitch-core not found via npm dependency.');
-  logger.error('请先安装依赖: npm i rcc-llmswitch-core@latest，再执行构建与全局安装。');
+  logger.error('llmswitch-core not found (npm nor vendored).');
+  logger.error('请先安装依赖: npm i rcc-llmswitch-core@latest，或使用包含 vendor 的构建。');
   process.exit(1);
 }
 
-// Top-level guard（Fail Fast，无兜底）
-await ensureCoreOrFail();
+// 延后依赖检查：仅在需要启动/使用核心功能的命令里再检查
 
 // CLI program setup
 const program = new Command();
@@ -526,6 +533,8 @@ program
       const env = { ...process.env } as NodeJS.ProcessEnv;
       // Ensure server process picks the intended user config path
       env.ROUTECODEX_CONFIG = configPath;
+      // Pass chosen port explicitly to server entry (dev/release aware)
+      try { env.ROUTECODEX_PORT = String(resolvedPort); } catch { /* ignore */ }
       const args: string[] = [serverEntry, modulesConfigPath];
 
       const childProc = spawn(nodeBin, args, { stdio: 'inherit', env });

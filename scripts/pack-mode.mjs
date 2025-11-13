@@ -33,6 +33,17 @@ try {
   // Ensure description mentions mode
   const suffix = args.name === 'rcc' ? ' (release)' : ' (dev)';
   mutated.description = String(original.description || 'RouteCodex').replace(/\s*\((dev|release)\)$/, '') + suffix;
+  // Prefer real dependencies over bundled to avoid missing build artifacts (e.g., ajv/dist)
+  if (args.name === 'routecodex' || args.name === 'rcc') {
+    mutated.bundledDependencies = [];
+    mutated.bundleDependencies = [];
+    mutated.dependencies = {
+      ...(original.dependencies || {}),
+      "ajv": original.dependencies?.ajv || "^8.17.1",
+      "zod": original.dependencies?.zod || "^3.23.8",
+      "rcc-llmswitch-core": original.dependencies?.["rcc-llmswitch-core"] || "^0.3.12"
+    };
+  }
   fs.writeFileSync(pkgPath, JSON.stringify(mutated, null, 2));
 
   // pack
@@ -45,4 +56,3 @@ try {
   fs.writeFileSync(pkgPath, fs.readFileSync(backupPath, 'utf-8'));
   fs.unlinkSync(backupPath);
 }
-
