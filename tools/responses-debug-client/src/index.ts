@@ -86,6 +86,28 @@ async function main() {
   const reqBody = await readJson(file);
   if (reqBody.stream == null) reqBody.stream = true;
 
+  // Attach a client-side request id into payload.metadata for correlation
+  const clientRequestId = `cli_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    const meta = (reqBody && typeof reqBody === 'object' && (reqBody as any).metadata && typeof (reqBody as any).metadata === 'object')
+      ? (reqBody as any).metadata : {};
+    (reqBody as any).metadata = { ...meta, client_request_id: clientRequestId };
+  } catch { /* ignore */ }
+
+  // Snapshot exact client request body to ~/.routecodex/codex-samples/responses-client/
+  try {
+    const home = process.env.HOME || process.env.USERPROFILE || '.';
+    const dir = path.join(String(home), '.routecodex', 'codex-samples', 'responses-client');
+    await fs.mkdir(dir, { recursive: true });
+    const out = path.join(dir, `${clientRequestId}_client-request.json`);
+    await fs.writeFile(out, JSON.stringify({
+      timestamp: new Date().toISOString(),
+      baseURL,
+      request: reqBody
+    }, null, 2), 'utf-8');
+    if (!raw) console.log(`[${nowIso()}] saved client snapshot: ${out}`);
+  } catch { /* non-blocking */ }
+
   const client = new OpenAI({ apiKey, baseURL });
   const start = Date.now();
   console.log(`[${nowIso()}] connect baseURL=${baseURL}`);

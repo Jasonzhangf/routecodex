@@ -12,6 +12,37 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
   try {
     if (!ctx.pipelineManager) { res.status(503).json({ error: { message: 'Pipeline manager not attached' } }); return; }
     const payload = (req.body || {}) as any;
+    // Server-side parsed summary for inbound Responses payload
+    try {
+      const summarize = (p: any) => {
+        const input = Array.isArray(p?.input) ? p.input : [];
+        const inputSummary = input.map((it: any) => {
+          const role = String((it?.role || 'user')).toLowerCase();
+          const type = String((it?.type || 'message')).toLowerCase();
+          const blocks = Array.isArray(it?.content) ? it.content : [];
+          const blockTypes: Record<string, number> = {};
+          for (const b of blocks) {
+            const bt = String((b?.type || 'text')).toLowerCase();
+            blockTypes[bt] = (blockTypes[bt] || 0) + 1;
+          }
+          return { role, type, blocks: blockTypes };
+        });
+        const tools = Array.isArray(p?.tools) ? p.tools.length : 0;
+        const meta = (p?.metadata && typeof p.metadata === 'object') ? p.metadata : undefined;
+        return {
+          model: p?.model,
+          hasInstructions: typeof p?.instructions === 'string' && p.instructions.length > 0,
+          inputCount: input.length,
+          inputSummary,
+          toolsCount: tools,
+          toolChoice: p?.tool_choice,
+          parallelToolCalls: p?.parallel_tool_calls,
+          stream: p?.stream === true,
+          client_request_id: meta?.client_request_id
+        };
+      };
+      await writeServerSnapshot({ phase: 'http-request.parsed', requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2,10)}`, data: summarize(payload), entryEndpoint });
+    } catch { /* ignore */ }
     const pipelineId = await ctx.selectPipelineId(payload, entryEndpoint);
     const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     // Snapshot: http-request

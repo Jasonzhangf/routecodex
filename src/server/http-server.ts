@@ -1,4 +1,5 @@
 import express, { type Application, type Request, type Response } from 'express';
+import { writeServerSnapshot } from '../utils/snapshot-writer.js';
 import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -105,8 +106,8 @@ export class HttpServer {
 
   public async initializeWithMergedConfig(mergedConfig: any): Promise<void> {
     this.mergedConfig = (mergedConfig && typeof mergedConfig === 'object') ? (mergedConfig as UnknownObject) : null;
-    try {
-      const http = (this.mergedConfig as any)?.httpserver || (this.mergedConfig as any)?.modules?.httpserver?.config || {};
+      try {
+        const http = (this.mergedConfig as any)?.httpserver || (this.mergedConfig as any)?.modules?.httpserver?.config || {};
       const host = String(http.host || '0.0.0.0');
       const portRaw = http.port ?? (this.mergedConfig as any)?.server?.port ?? 5506;
       const port = typeof portRaw === 'number' ? portRaw : parseInt(String(portRaw), 10);
@@ -119,8 +120,14 @@ export class HttpServer {
           || (this.mergedConfig as any)?.debug?.snapshots
           || {};
         const env = String(process.env.ROUTECODEX_SNAPSHOTS || process.env.RCC_SNAPSHOTS || '').trim().toLowerCase();
-        const enabled = snapsCfg?.enabled === true || env === '1' || env === 'true' || env === 'yes';
-        try { (globalThis as any).rccSnapshotsEnabled = enabled; } catch { /* ignore */ }
+        // Default behavior: snapshots ON unless explicitly disabled
+        const disable = snapsCfg?.enabled === false || env === '0' || env === 'false' || env === 'no';
+        const enable = snapsCfg?.enabled === true || env === '1' || env === 'true' || env === 'yes';
+        if (disable) {
+          try { (globalThis as any).rccSnapshotsEnabled = false; } catch { /* ignore */ }
+        } else if (enable) {
+          try { (globalThis as any).rccSnapshotsEnabled = true; } catch { /* ignore */ }
+        } // else leave undefined → writer defaults to ON
       } catch { /* ignore */ }
     } catch { /* keep defaults */ }
   }
@@ -233,6 +240,8 @@ export class HttpServer {
       const wantsSSE =
         typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream')
         || (payload && typeof payload === 'object' && ((payload as any).stream === true));
+      // Server snapshot: http-request
+      try { await writeServerSnapshot({ phase: 'http-request', requestId, data: payload, entryEndpoint }); } catch { /* non-blocking */ }
       // Also copy entryEndpoint into body.metadata for adapters that only see request.data
       try {
         if (payload && typeof payload === 'object') {
@@ -247,6 +256,8 @@ export class HttpServer {
         res.status(500).json({ error: { message: 'No pipeline available' } });
         return;
       }
+      // Server snapshot: routing-selected
+      try { await writeServerSnapshot({ phase: 'routing-selected', requestId, data: { pipelineId }, entryEndpoint }); } catch { /* ignore */ }
 
       const sharedReq = {
         data: payload,
@@ -295,6 +306,8 @@ export class HttpServer {
 
       const response = await this.pipelineManager.processRequest(sharedReq);
       const out = (response && typeof response === 'object' && 'data' in response) ? (response as any).data : response;
+      // Prewrite snapshot (informational)
+      try { await writeServerSnapshot({ phase: 'http-response', requestId, data: out, entryEndpoint }); } catch { /* ignore */ }
       if (wantsSSE) {
         if (entryEndpoint === '/v1/responses') {
           if (out && typeof out === 'object' && (out as any).__sse_responses) {

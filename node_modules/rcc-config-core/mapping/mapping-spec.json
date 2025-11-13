@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "0.1.0",
+  "description": "Mapping specification from module.json + config.json to CanonicalConfig",
+  "options": {
+    "keyDimensionDefault": "perKey",
+    "idFormat": {
+      "template": "<providerId>.<modelId>",
+      "perKeySuffix": "__<keyId>"
+    }
+  },
+  "rules": [
+    {
+      "name": "providers.basic",
+      "source": "/virtualrouter/providers/:pid",
+      "target": "/providers/:pid",
+      "strategy": "copy",
+      "normalize": {
+        "aliases": { "baseURL": "baseUrl" },
+        "lowercase": ["type"]
+      },
+      "required": ["type", "baseUrl"],
+      "forbidGuess": true
+    },
+    {
+      "name": "providers.models.compatibility",
+      "source": "/virtualrouter/providers/:pid/models/:mid/compatibility",
+      "target": "/providers/:pid/models/:mid/compatibility",
+      "strategy": "copy",
+      "required": [],
+      "forbidGuess": true
+    },
+    {
+      "name": "keyVault.fromUserAuth",
+      "source": "/virtualrouter/providers/:pid/auth",
+      "target": "/keyVault/:pid",
+      "strategy": "auth-to-vault",
+      "notes": "Extract either apikey or oauth credentials into keyVault with explicit keyId (default keyId='key1' if user specified a single credential).",
+      "forbidGuess": true
+    },
+    {
+      "name": "keyMappings.global",
+      "source": "/virtualrouter/keyMappings/global",
+      "target": "/keyVault",
+      "strategy": "inject-mapped-keys",
+      "notes": "Place mapped keys under corresponding provider and keyId entries.",
+      "forbidGuess": true
+    },
+    {
+      "name": "pipelines.explicit",
+      "source": "/pipelines[]",
+      "target": "/pipelines[]",
+      "strategy": "validate-and-accept",
+      "constraints": {
+        "modules.provider.type": { "required": true },
+        "id": { "pattern": "^[A-Za-z0-9._-]+(__[A-Za-z0-9._-]+)?$" }
+      },
+      "forbidGuess": true
+    },
+    {
+      "name": "routing.categories",
+      "source": "/virtualrouter/routing/:category",
+      "target": "/routing/:category",
+      "strategy": "copy",
+      "defaultsTo": [],
+      "postProcess": {
+        "when": "perKey",
+        "expandAllKeys": true
+      },
+      "forbidGuess": true
+    },
+    {
+      "name": "routeMeta.derive",
+      "source": "(derived from /pipelines)",
+      "target": "/routeMeta",
+      "strategy": "derive",
+      "notes": "Parse id '<providerId>.<modelId>[__<keyId>]' to build meta mapping."
+    }
+  ]
+}

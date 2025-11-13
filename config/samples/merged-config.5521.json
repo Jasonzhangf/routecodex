@@ -1,0 +1,175 @@
+{
+  "providers": {
+    "lmstudio": {
+      "id": "lmstudio",
+      "enabled": true,
+      "type": "lmstudio",
+      "baseURL": "http://localhost:1234",
+      "apiKey": [
+        "${LMSTUDIO_API_KEY:-}"
+      ],
+      "models": {
+        "gpt-oss-20b-mlx": {}
+      },
+      "baseUrl": "http://localhost:1234"
+    }
+  },
+  "keyVault": {
+    "lmstudio": {
+      "key1": {
+        "type": "apikey",
+        "value": "${LMSTUDIO_API_KEY:-}",
+        "enabled": true
+      }
+    }
+  },
+  "pipelines": [
+    {
+      "id": "lmstudio.gpt-oss-20b-mlx__key1",
+      "provider": {
+        "type": "openai"
+      },
+      "modules": {
+        "provider": {
+          "type": "openai",
+          "config": {
+            "baseUrl": "http://localhost:1234",
+            "auth": {
+              "type": "apikey",
+              "apiKey": "${LMSTUDIO_API_KEY:-}"
+            }
+          }
+        },
+        "compatibility": {
+          "type": "lmstudio-compatibility",
+          "config": {}
+        },
+        "llmSwitch": {
+          "type": "llmswitch-conversion-router",
+          "config": {}
+        },
+        "workflow": {
+          "type": "streaming-control",
+          "config": {}
+        }
+      },
+      "settings": {
+        "debugEnabled": true
+      },
+      "authRef": {
+        "mode": "perKey",
+        "providerId": "lmstudio",
+        "keyId": "key1"
+      }
+    }
+  ],
+  "routing": {
+    "default": [
+      "lmstudio.gpt-oss-20b-mlx__key1"
+    ],
+    "coding": [],
+    "longcontext": [],
+    "tools": [],
+    "thinking": [],
+    "vision": [],
+    "websearch": [],
+    "background": []
+  },
+  "routeMeta": {
+    "lmstudio.gpt-oss-20b-mlx__key1": {
+      "providerId": "lmstudio",
+      "modelId": "gpt-oss-20b-mlx",
+      "keyId": "key1"
+    }
+  },
+  "httpserver": {
+    "port": 5521,
+    "host": "0.0.0.0"
+  },
+  "modules": {
+    "httpserver": {
+      "enabled": true,
+      "config": {
+        "port": 5521,
+        "host": "0.0.0.0"
+      }
+    }
+  },
+  "_metadata": {
+    "version": "0.1.0",
+    "builtAt": 1762914175064,
+    "keyDimension": "perKey"
+  },
+  "pipeline_assembler": {
+    "config": {
+      "pipelines": [
+        {
+          "id": "lmstudio.gpt-oss-20b-mlx__key1",
+          "provider": {
+            "type": "openai"
+          },
+          "modules": {
+            "provider": {
+              "type": "openai",
+              "config": {
+                "baseUrl": "http://localhost:1234",
+                "auth": {
+                  "type": "apikey",
+                  "apiKey": "${LMSTUDIO_API_KEY:-}"
+                },
+                "providerType": "lmstudio",
+                "model": "gpt-oss-20b-mlx"
+              }
+            },
+            "compatibility": {
+              "type": "compatibility",
+              "config": {
+                "moduleType": "lmstudio-compatibility",
+                "moduleConfig": {},
+                "providerType": "lmstudio",
+                "files": {
+                  "shapeFilters": "shape-filters.json",
+                  "fieldMappings": "field-mappings.json"
+                }
+              }
+            },
+            "llmSwitch": {
+              "type": "llmswitch-conversion-router",
+              "config": {}
+            },
+            "workflow": {
+              "type": "streaming-control",
+              "config": {},
+              "enabled": true
+            }
+          },
+          "settings": {
+            "debugEnabled": true
+          }
+        }
+      ],
+      "routePools": {
+        "default": [
+          "lmstudio.gpt-oss-20b-mlx__key1"
+        ],
+        "coding": [],
+        "longcontext": [],
+        "tools": [],
+        "thinking": [],
+        "vision": [],
+        "websearch": [],
+        "background": []
+      },
+      "routeMeta": {
+        "lmstudio.gpt-oss-20b-mlx__key1": {
+          "providerId": "lmstudio",
+          "modelId": "gpt-oss-20b-mlx",
+          "keyId": "key1"
+        }
+      },
+      "authMappings": {
+        "key1": "${LMSTUDIO_API_KEY:-}"
+      }
+    }
+  }
+}

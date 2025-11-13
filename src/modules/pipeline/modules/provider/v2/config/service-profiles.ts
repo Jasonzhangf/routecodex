@@ -60,19 +60,19 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
   },
 
   qwen: {
-    defaultBaseUrl: 'https://portal.qwen.ai/v1',
+    // Qwen OpenAI兼容模式（最新API默认域名），按需可在用户配置中覆盖 baseUrl
+    // 说明：也可使用 DashScope 兼容模式：https://dashscope.aliyuncs.com/compatible-mode/v1
+    defaultBaseUrl: 'https://api.qwen.ai/v1',
     defaultEndpoint: '/chat/completions',
     defaultModel: 'qwen-plus',
-    requiredAuth: ['oauth'],
-    optionalAuth: ['apikey'],
+    requiredAuth: [],
+    optionalAuth: ['apikey','oauth'],
     headers: {
-      'User-Agent': 'google-api-nodejs-client/9.15.1',
-      'X-Goog-Api-Client': 'gl-node/22.17.0',
-      'Client-Metadata': 'ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI',
+      'Content-Type': 'application/json',
       'Accept': 'application/json'
     },
     timeout: 300000,
-    maxRetries: 2
+    maxRetries: 3
   },
 
   iflow: {

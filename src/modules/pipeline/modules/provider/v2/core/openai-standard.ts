@@ -9,6 +9,7 @@ import { HttpClient } from '../utils/http-client.js';
 import { DynamicProfileLoader, ServiceProfileValidator } from '../config/service-profiles.js';
 import { ApiKeyAuthProvider } from '../auth/apikey-auth.js';
 import { OAuthAuthProvider } from '../auth/oauth-auth.js';
+import { TokenFileAuthProvider } from '../auth/tokenfile-auth.js';
 import { ensureValidOAuthToken, handleUpstreamInvalidOAuthToken } from '../auth/oauth-lifecycle.js';
 import { createHookSystemIntegration } from '../hooks/hooks-integration.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
@@ -79,6 +80,14 @@ export class OpenAIStandard extends BaseProvider {
                 forceReauthorize
               });
               console.log('[OAuth] [init] ensureValid OK');
+              // If we used TokenFileAuthProvider, re-initialize to pick up freshly created token file
+              try {
+                if ((this.authProvider as any)?.constructor?.name === 'TokenFileAuthProvider') {
+                  await (this.authProvider as any).initialize();
+                } else {
+                  (this.authProvider as any)?.getOAuthClient?.()?.loadToken?.();
+                }
+              } catch { /* ignore */ }
               this.dependencies.logger?.logModule?.(this.id, 'oauth-init-success', {
                 providerType: this.providerType
               });
@@ -240,6 +249,12 @@ export class OpenAIStandard extends BaseProvider {
     if (auth.type === 'apikey') {
       return new ApiKeyAuthProvider(auth);
     } else if (auth.type === 'oauth') {
+      // For providers like Qwen where public OAuth client may not be available,
+      // allow reading tokens produced by external login tools (CLIProxyAPI)
+      const useTokenFile = this.providerType === 'qwen' && !(auth as any).clientId && !(auth as any).tokenUrl && !(auth as any).deviceCodeUrl;
+      if (useTokenFile) {
+        return new TokenFileAuthProvider(auth);
+      }
       return new OAuthAuthProvider(auth, this.providerType);
     } else {
       throw new Error(`Unsupported auth type: ${(auth as any).type}`);

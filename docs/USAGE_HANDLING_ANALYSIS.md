@@ -10,10 +10,10 @@
 
 ### 架构概述
 
-claude-code-router作为客户端代理，使用`@musistudio/llms`包作为底层LLM代理服务器，实现以下数据流：
+（更新）已移除 `@musistudio/llms` 依赖与相关通路，统一由 RouteCodex 与 llmswitch-core 直接对齐客户端/上游协议形状：
 
 ```
-客户端请求 → claude-code-router → @musistudio/llms → RouteCodex → AI服务提供商
+客户端请求 → RouteCodex → AI服务提供商
 ```
 
 ### Usage数据结构
@@ -27,7 +27,7 @@ interface Usage {
 
 ### Usage数据收集机制
 
-#### 1. 流式响应处理
+#### 1. 流式响应处理（RouteCodex 直接处理）
 
 **位置**: `src/index.ts:272-291`
 

@@ -1,18 +1,18 @@
 import type { ModuleConfig, ModuleDependencies, PipelineModule } from '../interfaces/pipeline-interfaces.js';
 import path from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+// Orchestration moved into llmswitch-core; adapters delegate to core bridge
+import { fileURLToPath } from 'url';
 
-// Runtime resolver: require vendored core (no fallback)
+// Runtime resolver: import from installed package only（严格，无兜底）
 async function importCore(subpath: string): Promise<any> {
   const clean = subpath.replace(/\.js$/i, '');
+  const spec = `rcc-llmswitch-core/${clean}`;
   try {
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const vendor = path.resolve(__dirname, '..', '..', '..', '..', 'vendor', 'rcc-llmswitch-core', 'dist');
-    const full = path.join(vendor, clean + '.js');
-    return await import(pathToFileURL(full).href);
-  } catch {
-    throw new Error(`[llmswitch] vendored core module missing: ${clean}.js`);
+    // 动态 ESM 按包导入，依赖包内 exports 映射（独立模块负责暴露路径）
+    return await import(spec);
+  } catch (e) {
+    const msg = (e as any)?.message || String(e);
+    throw new Error(`[llmswitch] import failed: ${spec}: ${msg}`);
   }
 }
 
@@ -50,7 +50,8 @@ abstract class BaseV2Adapter implements PipelineModule {
         requestId: String(route.requestId || (meta as any).requestId || `req_${Date.now()}`),
         endpoint: String((meta as any).endpoint || (meta as any).entryEndpoint || (dataMeta as any).entryEndpoint || dataEntry || rootEntry || ''),
         entryEndpoint: String((meta as any).entryEndpoint || (dataMeta as any).entryEndpoint || dataEntry || rootEntry || ''),
-        metadata: meta,
+        // 合并顶层与 data.metadata，确保 stream/entryEndpoint 等旗标传入 codec
+        metadata: { ...(meta as any), ...(dataMeta as any) },
       };
     } catch { return {}; }
   }
@@ -61,16 +62,50 @@ abstract class BaseV2Adapter implements PipelineModule {
 
 // Dynamic router: choose proper codec by entryEndpoint
 export class ConversionRouterAdapter extends BaseV2Adapter {
-  private openaiCodec: any;
-  private anthropicCodec: any;
-  private responsesCodec: any;
+  private orchestrator: any;
+  private readonly deps: ModuleDependencies;
 
   constructor(config: ModuleConfig, _dependencies: ModuleDependencies) {
     super('llmswitch-conversion-router', config);
-    this.openaiCodec = null;
-    // 延迟加载 Anthropic 编解码器，避免在缺少该导出的场景下编译失败
-    this.anthropicCodec = null;
-    this.responsesCodec = null;
+    this.orchestrator = null;
+    this.deps = _dependencies;
+  }
+
+  // Chat 工具治理链在 llmswitch-core 内部的各 codec 中执行；此适配器不再触发
+
+  private async ensureOrchestrator(): Promise<void> {
+    if (this.orchestrator) return;
+    const mod = await importCore('v2/conversion/switch-orchestrator');
+    const { SwitchOrchestrator } = mod as any;
+    const __filename = fileURLToPath(import.meta.url);
+    const pkgRoot = path.resolve(path.dirname(__filename), '../../../..');
+    this.orchestrator = new SwitchOrchestrator({}, {
+      baseDir: pkgRoot,
+      profilesPath: 'config/conversion/llmswitch-profiles.json'
+    });
+    // 在回退后的 core 版本中，CodecRegistry 默认不包含任何工厂；
+    // 需要由宿主（routecodex）显式注册核心 codec 工厂，确保 profile 中的 codec 可解析。
+    // 与 profiles 中的 "codec" 值严格对齐：
+    //  - "openai-openai" → OpenAIOpenAIConversionCodec
+    //  - "anthropic-openai" → AnthropicOpenAIConversionCodec
+    //  - "responses-openai" → ResponsesOpenAIConversionCodec
+    try {
+      const factories: Record<string, () => Promise<any>> = {};
+      const openaiCodecMod = await importCore('v2/conversion/codecs/openai-openai-codec');
+      factories['openai-openai'] = async () => new (openaiCodecMod as any).OpenAIOpenAIConversionCodec({});
+
+      const anthCodecMod = await importCore('v2/conversion/codecs/anthropic-openai-codec');
+      factories['anthropic-openai'] = async () => new (anthCodecMod as any).AnthropicOpenAIConversionCodec({});
+
+      const respCodecMod = await importCore('v2/conversion/codecs/responses-openai-codec');
+      factories['responses-openai'] = async () => new (respCodecMod as any).ResponsesOpenAIConversionCodec({});
+
+      this.orchestrator.registerFactories(factories);
+    } catch (e) {
+      const msg = (e as any)?.message || String(e);
+      throw new Error(`[llmswitch] failed to register codec factories: ${msg}`);
+    }
+    await this.orchestrator.initialize();
   }
 
   private pickProtocol(ctx: Ctx): 'openai-chat' | 'openai-responses' | 'anthropic-messages' {
@@ -87,103 +122,55 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
 
   async processIncoming(request: any): Promise<unknown> {
     if (!this.initialized) await this.initialize();
-    const ctx = this.buildContext(request);
-    const body = request?.data ?? request;
-    let proto: 'openai-chat' | 'openai-responses' | 'anthropic-messages';
+    const __filename = fileURLToPath(import.meta.url);
+    const pkgRoot = path.resolve(path.dirname(__filename), '../../../..');
+    const bridge = await importCore('v2/bridge/routecodex-adapter');
+    const result = await (bridge as any).processIncoming(request, { baseDir: pkgRoot, profilesPath: 'config/conversion/llmswitch-profiles.json' });
+    // Normalize: some core bridge versions may return an envelope like
+    // { payload, pipelineId, ... }. Downstream expects plain Chat JSON
+    // (BasePipeline will wrap it into DTO). Keep DTO if already returned.
     try {
-      proto = this.pickProtocol(ctx);
-    } catch (err) {
-      // If endpoint missing but body clearly matches OpenAI Chat (has messages), treat as openai-chat
-      if (body && typeof body === 'object' && Array.isArray((body as any).messages)) {
-        proto = 'openai-chat';
-      } else {
-        throw err;
+      if (result && typeof result === 'object') {
+        const obj: any = result as any;
+        const looksDto = ('data' in obj) && ('metadata' in obj);
+        if (looksDto) return result;
+        if ('payload' in obj && obj.payload && typeof obj.payload === 'object') {
+          return obj.payload;
+        }
       }
-    }
-    let converted: any;
-    switch (proto) {
-      case 'anthropic-messages':
-        if (!this.anthropicCodec) {
-          try {
-            const mod = await importCore('v2/conversion/codecs/anthropic-openai-codec');
-            this.anthropicCodec = new (mod as any).AnthropicOpenAIConversionCodec({});
-          } catch (e) {
-            throw new Error(`Anthropic codec unavailable: ${(e as any)?.message || e}`);
-          }
-        }
-        converted = await this.anthropicCodec.convertRequest(body, { outgoingProtocol: 'openai-chat' } as any, ctx as any);
-        break;
-      case 'openai-responses':
-        if (!this.responsesCodec) {
-          try {
-            const mod = await importCore('v2/conversion/codecs/responses-openai-codec');
-            this.responsesCodec = new (mod as any).ResponsesOpenAIConversionCodec({});
-          } catch (e) {
-            throw new Error(`Responses codec unavailable: ${(e as any)?.message || e}`);
-          }
-        }
-        converted = await this.responsesCodec.convertRequest(body, { outgoingProtocol: 'openai-chat' } as any, ctx as any);
-        break;
-      default: {
-        // Preserve original Chat logic: use OpenAI→OpenAI codec directly (no behavior change)
-        if (!this.openaiCodec) {
-          const mod = await importCore('v2/conversion/codecs/openai-openai-codec');
-          this.openaiCodec = new (mod as any).OpenAIOpenAIConversionCodec({});
-        }
-        converted = await this.openaiCodec.convertRequest(body, { outgoingProtocol: 'openai-chat' } as any, ctx as any);
-        break; }
-    }
-    // 工具治理由各 codec 内部的 FilterEngine 统一处理（避免在适配器重复执行）
-    // 非 Chat 协议的请求规范化已在各自 codec 前半段完成（shape-only），随后统一走 Chat 请求工具阶段
-    // 返回时携带元数据，供响应阶段严格识别协议（不做兜底）
-    const meta = (request && request.metadata && typeof request.metadata === 'object') ? { ...(request.metadata) } : {};
-    (meta as any).entryEndpoint = ctx.entryEndpoint;
-    (meta as any).protocol = proto;
-    return { data: converted, metadata: meta } as any;
+    } catch { /* ignore */ }
+    return result;
   }
 
   async processOutgoing(response: any): Promise<unknown> {
     if (!this.initialized) await this.initialize();
-    const ctx = this.buildContext(response);
-    const meta = (response && (response as any).metadata && typeof (response as any).metadata === 'object') ? (response as any).metadata : {};
-    const protoMeta = typeof (meta as any).protocol === 'string' ? (meta as any).protocol : '';
-    const body = response?.data ?? response;
-    const proto: 'openai-chat' | 'openai-responses' | 'anthropic-messages' = (protoMeta === 'anthropic-messages' || protoMeta === 'openai-responses' || protoMeta === 'openai-chat')
-      ? (protoMeta as any)
-      : (() => { try { return this.pickProtocol(ctx); } catch { return (body && typeof body === 'object' && Array.isArray((body as any).messages)) ? 'openai-chat' : this.pickProtocol(ctx); } })();
-    // 响应工具治理也由各 codec 内部的 FilterEngine 统一处理
-    switch (proto) {
-      case 'anthropic-messages':
-        // Convert OpenAI Chat response → Anthropic Messages（延迟加载）
-        if (!this.anthropicCodec) {
-          try {
-            const mod = await importCore('v2/conversion/codecs/anthropic-openai-codec');
-            this.anthropicCodec = new (mod as any).AnthropicOpenAIConversionCodec({});
-          } catch (e) {
-            throw new Error(`Anthropic codec unavailable: ${(e as any)?.message || e}`);
-          }
+    const __filename = fileURLToPath(import.meta.url);
+    const pkgRoot = path.resolve(path.dirname(__filename), '../../../..');
+    const bridge = await importCore('v2/bridge/routecodex-adapter');
+    const invokeSecondRound = async (dto: any, _ctx: any) => {
+      try {
+        // Build a SharedPipelineRequest and re-enter pipeline (non-streaming second round)
+        const reqId = `req_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+        const sharedReq: any = {
+          data: dto?.body,
+          route: { providerId: 'unknown', modelId: String(dto?.body?.model || 'unknown'), requestId: reqId, timestamp: Date.now(), pipelineId: (response as any)?.route?.pipelineId || (response as any)?.route?.pipelineId },
+          metadata: { entryEndpoint: dto?.entryEndpoint, endpoint: dto?.entryEndpoint, stream: false },
+          debug: { enabled: false, stages: {} },
+          entryEndpoint: dto?.entryEndpoint
+        };
+        // We don't have direct manager here; rely on hosting pipeline to provide a dependency callback if available
+        const runner = (this.deps as any)?.invokeSecondRound;
+        if (typeof runner === 'function') {
+          const out = await runner(sharedReq);
+          return out && out.data ? out : { data: out };
         }
-        return await this.anthropicCodec.convertResponse(body, { outgoingProtocol: 'anthropic-messages' } as any, ctx as any);
-      case 'openai-responses':
-        // Convert OpenAI Chat response → OpenAI Responses（延迟加载）
-        if (!this.responsesCodec) {
-          try {
-            const mod = await importCore('v2/conversion/codecs/responses-openai-codec');
-            this.responsesCodec = new (mod as any).ResponsesOpenAIConversionCodec({});
-          } catch (e) {
-            throw new Error(`Responses codec unavailable: ${(e as any)?.message || e}`);
-          }
-        }
-        return await this.responsesCodec.convertResponse(body, { outgoingProtocol: 'openai-responses' } as any, ctx as any);
-      default: {
-        // Preserve original Chat logic: use OpenAI→OpenAI codec directly (no behavior change)
-        if (!this.openaiCodec) {
-          const mod = await importCore('v2/conversion/codecs/openai-openai-codec');
-          this.openaiCodec = new (mod as any).OpenAIOpenAIConversionCodec({});
-        }
-        return await this.openaiCodec.convertResponse(body, { outgoingProtocol: 'openai-chat' } as any, ctx as any);
+        // Fallback: return original dto (no-op)
+        return { data: dto?.body };
+      } catch (e) {
+        return { data: dto?.body };
       }
-    }
+    };
+    return await (bridge as any).processOutgoing(response, { baseDir: pkgRoot, profilesPath: 'config/conversion/llmswitch-profiles.json', invokeSecondRound });
   }
 }
 
@@ -206,7 +193,12 @@ export class OpenAIOpenAIAdapter extends BaseV2Adapter {
     await this.ensureCodec();
     const ctx = this.buildContext(request);
     const profile = { outgoingProtocol: 'openai-chat' } as any;
-    return await this.codec.convertRequest(request.data ?? request, profile, ctx as any);
+    const converted = await this.codec.convertRequest(request.data ?? request, profile, ctx as any);
+    const obj = converted as any;
+    if (obj && typeof obj === 'object' && 'payload' in obj && obj.payload && typeof obj.payload === 'object') {
+      return obj.payload;
+    }
+    return converted;
   }
 
   async processOutgoing(response: any): Promise<unknown> {
@@ -237,7 +229,12 @@ export class AnthropicOpenAIAdapter extends BaseV2Adapter {
     await this.ensureCodec();
     const ctx = this.buildContext(request);
     const profile = { outgoingProtocol: 'openai-chat' } as any;
-    return await this.codec.convertRequest(request.data ?? request, profile, ctx as any);
+    const converted = await this.codec.convertRequest(request.data ?? request, profile, ctx as any);
+    const obj = converted as any;
+    if (obj && typeof obj === 'object' && 'payload' in obj && obj.payload && typeof obj.payload === 'object') {
+      return obj.payload;
+    }
+    return converted;
   }
 
   async processOutgoing(response: any): Promise<unknown> {
@@ -268,7 +265,12 @@ export class ResponsesToChatAdapter extends BaseV2Adapter {
     await this.ensureCodec();
     const ctx = this.buildContext(request);
     const profile = { outgoingProtocol: 'openai-chat' } as any;
-    return await this.codec.convertRequest(request.data ?? request, profile, ctx as any);
+    const converted = await this.codec.convertRequest(request.data ?? request, profile, ctx as any);
+    const obj = converted as any;
+    if (obj && typeof obj === 'object' && 'payload' in obj && obj.payload && typeof obj.payload === 'object') {
+      return obj.payload;
+    }
+    return converted;
   }
 
   async processOutgoing(response: any): Promise<unknown> {

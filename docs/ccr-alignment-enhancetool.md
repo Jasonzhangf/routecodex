@@ -100,7 +100,6 @@
 ---
 
 附：CCR 代码阅读锚点（仅供对照，不在代码注释中引用）
-- `@musistudio/llms` 打包后的 `server.cjs` 中 `class name="enhancetool"`（非流/流式两条路径）；
+- （更新）移除 `@musistudio/llms` 依赖描述；增强工具路径由 llmswitch-core 统一实现（透明代理 + 二轮请求）。
 - 流式路径中 `content_block_start/stop` 与 `partial_json` 聚合逻辑；
 - 非流路径中 arguments 三段式修复与回退策略。
-

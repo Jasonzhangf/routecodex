@@ -1,0 +1,123 @@
+0 verbose cli /opt/homebrew/Cellar/node/24.8.0/bin/node /opt/homebrew/bin/npm
+1 info using npm@11.6.0
+2 info using node@v24.8.0
+3 silly config load:file:/opt/homebrew/lib/node_modules/npm/npmrc
+4 silly config load:file:/Users/fanzhang/Documents/github/routecodex-worktree/fix/.npmrc
+5 silly config load:file:/Users/fanzhang/.npmrc
+6 silly config load:file:/opt/homebrew/etc/npmrc
+7 verbose title npm i file:/Users/fanzhang/Documents/github/sharedmodule/llmswitch-core/rcc-llmswitch-core-0.3.4.tgz
+8 verbose argv "i" "--no-audit" "--no-fund" "--omit" "optional" "--force" "file:/Users/fanzhang/Documents/github/sharedmodule/llmswitch-core/rcc-llmswitch-core-0.3.4.tgz"
+9 verbose logfile logs-max:10 dir:/Users/fanzhang/Documents/github/routecodex-worktree/fix/.npm-cache-local/_logs/2025-11-13T02_47_26_625Z-
+10 verbose logfile /Users/fanzhang/Documents/github/routecodex-worktree/fix/.npm-cache-local/_logs/2025-11-13T02_47_26_625Z-debug-0.log
+11 warn using --force Recommended protections disabled.
+12 silly logfile done cleaning log files
+13 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+14 silly idealTree buildDeps
+15 silly fetch manifest rcc-llmswitch-core@file:../../sharedmodule/llmswitch-core/rcc-llmswitch-core-0.3.4.tgz
+16 silly placeDep ROOT rcc-llmswitch-core@0.3.1 OK for: routecodex@0.81.0 want: file:../../sharedmodule/llmswitch-core/rcc-llmswitch-core-0.3.4.tgz
+17 silly fetch manifest tiktoken@^1.0.22
+18 silly packumentCache full:https://registry.npmjs.org/tiktoken cache-miss
+19 http fetch GET 200 https://registry.npmjs.org/tiktoken 767ms (cache miss)
+20 silly packumentCache full:https://registry.npmjs.org/tiktoken set size:undefined disposed:false
+21 silly placeDep ROOT tiktoken@1.0.22 OK for: rcc-llmswitch-core@0.3.1 want: ^1.0.22
+22 silly reify moves {}
+23 silly reify mark deleted [
+23 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@colors/colors'
+23 silly reify ]
+24 silly reify mark deleted [
+24 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/aix-ppc64'
+24 silly reify ]
+25 silly reify mark deleted [
+25 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/android-arm'
+25 silly reify ]
+26 silly reify mark deleted [
+26 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/android-arm64'
+26 silly reify ]
+27 silly reify mark deleted [
+27 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/android-x64'
+27 silly reify ]
+28 silly reify mark deleted [
+28 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/darwin-arm64'
+28 silly reify ]
+29 silly reify mark deleted [
+29 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/darwin-x64'
+29 silly reify ]
+30 silly reify mark deleted [
+30 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/freebsd-arm64'
+30 silly reify ]
+31 silly reify mark deleted [
+31 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/freebsd-x64'
+31 silly reify ]
+32 silly reify mark deleted [
+32 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/linux-arm'
+32 silly reify ]
+33 silly reify mark deleted [
+33 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/linux-arm64'
+33 silly reify ]
+34 silly reify mark deleted [
+34 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/linux-ia32'
+34 silly reify ]
+35 silly reify mark deleted [
+35 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/linux-loong64'
+35 silly reify ]
+36 silly reify mark deleted [
+36 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/linux-mips64el'
+36 silly reify ]
+37 silly reify mark deleted [
+37 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/linux-ppc64'
+37 silly reify ]
+38 silly reify mark deleted [
+38 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/linux-riscv64'
+38 silly reify ]
+39 silly reify mark deleted [
+39 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/linux-s390x'
+39 silly reify ]
+40 silly reify mark deleted [
+40 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/linux-x64'
+40 silly reify ]
+41 silly reify mark deleted [
+41 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/netbsd-arm64'
+41 silly reify ]
+42 silly reify mark deleted [
+42 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/netbsd-x64'
+42 silly reify ]
+43 silly reify mark deleted [
+43 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/openbsd-arm64'
+43 silly reify ]
+44 silly reify mark deleted [
+44 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/openbsd-x64'
+44 silly reify ]
+45 silly reify mark deleted [
+45 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/openharmony-arm64'
+45 silly reify ]
+46 silly reify mark deleted [
+46 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/sunos-x64'
+46 silly reify ]
+47 silly reify mark deleted [
+47 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/win32-arm64'
+47 silly reify ]
+48 silly reify mark deleted [
+48 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/win32-ia32'
+48 silly reify ]
+49 silly reify mark deleted [
+49 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/@esbuild/win32-x64'
+49 silly reify ]
+50 silly reify mark deleted [
+50 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/fsevents'
+50 silly reify ]
+51 silly reify mark deleted [
+51 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/uglify-js',
+51 silly reify   '/Users/fanzhang/Documents/github/routecodex-worktree/fix/node_modules/.bin/uglifyjs'
+51 silly reify ]
+52 http cache tiktoken@https://registry.npmjs.org/tiktoken/-/tiktoken-1.0.22.tgz 0ms (cache hit)
+53 http cache rcc-llmswitch-core@file:/Users/fanzhang/Documents/github/sharedmodule/llmswitch-core/rcc-llmswitch-core-0.3.4.tgz 0ms (cache hit)
+54 silly tarball no local data for tiktoken@https://registry.npmjs.org/tiktoken/-/tiktoken-1.0.22.tgz. Extracting by manifest.
+55 http fetch GET 200 https://registry.npmjs.org/tiktoken/-/tiktoken-1.0.22.tgz 2242ms (cache miss)
+56 silly ADD node_modules/tiktoken
+57 silly ADD node_modules/rcc-llmswitch-core
+58 verbose cwd /Users/fanzhang/Documents/github/routecodex-worktree/fix
+59 verbose os Darwin 24.6.0
+60 verbose node v24.8.0
+61 verbose npm  v11.6.0
+62 verbose exit 0
+63 info ok

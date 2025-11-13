@@ -47,21 +47,8 @@ export async function writeServerSnapshot(options: {
 }): Promise<void> {
   if (!isSnapshotsEnabled()) return; // default OFF
   try {
-    // Prefer system hooks managed snapshot (unified with other modules)
-    const importCore = async (subpath: string) => {
-      try {
-        const pathMod = await import('path');
-        const { fileURLToPath, pathToFileURL } = await import('url');
-        const __filename = fileURLToPath(import.meta.url);
-        const __dirname = pathMod.dirname(__filename);
-        const vendor = pathMod.resolve(__dirname, '..', 'vendor', 'rcc-llmswitch-core', 'dist');
-        const full = pathMod.join(vendor, subpath.replace(/\.js$/i,'') + '.js');
-        return await import(pathToFileURL(full).href);
-      } catch {
-        return await import('rcc-llmswitch-core/' + subpath.replace(/\\/g,'/').replace(/\.js$/i,''));
-      }
-    };
-    const hooks = await importCore('v2/hooks/hooks-integration');
+    // 仅通过已发布的独立包加载（移除本地 vendor 兜底）
+    const hooks = await import('rcc-llmswitch-core/v2/hooks/hooks-integration');
     const endpoint = options.entryEndpoint || '/v1/chat/completions';
     await (hooks as any).writeSnapshotViaHooks({
       endpoint,

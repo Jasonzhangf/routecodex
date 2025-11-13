@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://routecodex.dev/schema/system-config.json",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "modules": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "virtualrouter": { "type": ["object", "null"] },
+        "provider": { "type": ["object", "null"] },
+        "compatibility": { "type": ["object", "null"] },
+        "llmSwitch": { "type": ["object", "null"] },
+        "workflow": { "type": ["object", "null"] }
+      }
+    },
+    "registries": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "providers": { "type": "array", "items": { "type": "string" } },
+        "compatibilities": { "type": "array", "items": { "type": "string" } },
+        "llmSwitches": { "type": "array", "items": { "type": "string" } },
+        "workflows": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "llmSwitch": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string" },
+            "config": { "type": "object" }
+          }
+        },
+        "routing": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

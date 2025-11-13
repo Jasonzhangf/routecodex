@@ -63,24 +63,21 @@ const logger = {
 };
 
 // Ensure llmswitch-core is resolvable；先尝试依赖包，失败则回退到 vendor
+async function dynamicImport(p: string): Promise<any> {
+  // Avoid TypeScript/ESM static resolution so we can probe optional entries safely
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval
+  const fn = Function('p', 'return import(p)');
+  return fn(p);
+}
+
 async function ensureCoreOrFail(): Promise<void> {
-  try {
-    // 仅加载最小 guidance 入口，避免触发大体积转换模块的深层依赖
-    await import('rcc-llmswitch-core/v2/guidance/index.js');
-    return;
-  } catch {
-    try {
-      // vendor 路径：dist/ 旁的 vendor/rcc-llmswitch-core/dist/v2/guidance/index.js
-      const vendorGuidance = path.resolve(__dirname, '..', 'vendor', 'rcc-llmswitch-core', 'dist', 'v2', 'guidance', 'index.js');
-      if (fs.existsSync(vendorGuidance)) {
-        await import(pathToFileURL(vendorGuidance).href);
-        return;
-      }
-    } catch { /* ignore */ }
-    logger.error('llmswitch-core not found. Please build sharedmodule/llmswitch-core or install package dependencies.');
-    logger.error('建议顺序: 先编译 sharedmodule/llmswitch-core，再编译根包并全局安装。');
-    process.exit(1);
-  }
+  // 仅通过 npm 依赖检测（移除 vendor 兜底）
+  try { await dynamicImport('rcc-llmswitch-core/package.json'); return; } catch { /* ignore */ }
+  try { await dynamicImport('rcc-llmswitch-core'); return; } catch { /* ignore */ }
+
+  logger.error('llmswitch-core not found via npm dependency.');
+  logger.error('请先安装依赖: npm i rcc-llmswitch-core@latest，再执行构建与全局安装。');
+  process.exit(1);
 }
 
 // Top-level guard（Fail Fast，无兜底）
@@ -115,6 +112,7 @@ program
   .option('-h, --host <host>', 'RouteCodex server host', LOCAL_HOSTS.IPV4)
   .option('-c, --config <config>', 'RouteCodex configuration file path')
   .option('--claude-path <path>', 'Path to Claude Code executable', 'claude')
+  .option('--cwd <dir>', 'Working directory for Claude Code (defaults to current shell cwd)')
   .option('--model <model>', 'Model to use with Claude Code')
   .option('--profile <profile>', 'Claude Code profile to use')
   .option('--ensure-server', 'Ensure RouteCodex server is running before launching Claude')
@@ -219,8 +217,21 @@ program
         return actualHost || LOCAL_HOSTS.IPV4;
       })());
       const anthropicBase = `http://${resolvedBaseHost}:${actualPort}`;
+      const currentCwd = (() => {
+        try {
+          const d = options.cwd ? String(options.cwd) : process.cwd();
+          const resolved = path.resolve(d);
+          if (fs.existsSync(resolved)) return resolved;
+        } catch {}
+        return process.cwd();
+      })();
       const claudeEnv = {
         ...process.env,
+        // Normalize working directory context for downstream tools
+        PWD: currentCwd,
+        RCC_WORKDIR: currentCwd,
+        ROUTECODEX_WORKDIR: currentCwd,
+        CLAUDE_WORKDIR: currentCwd,
         // Cover both common env var names used by Anthropic SDK / tools
         ANTHROPIC_BASE_URL: anthropicBase,
         ANTHROPIC_API_URL: anthropicBase,
@@ -289,13 +300,15 @@ program
       })();
       const claudeProcess = spawn(claudeBin, claudeArgs, {
         stdio: 'inherit',
-        env: claudeEnv
+        env: claudeEnv,
+        cwd: currentCwd
       });
 
       spinner.succeed('Claude Code launched with RouteCodex proxy');
       // Log normalized IPv4 host to avoid confusion (do not print ::/localhost)
       logger.info(`Using RouteCodex server at: http://${resolvedBaseHost}:${actualPort}`);
       logger.info(`Claude binary: ${claudeBin}`);
+      logger.info(`Working directory for Claude: ${currentCwd}`);
       logger.info('Press Ctrl+C to exit Claude Code');
 
       // Handle graceful shutdown

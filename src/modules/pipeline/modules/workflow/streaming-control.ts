@@ -62,63 +62,22 @@ export class StreamingControlWorkflow implements WorkflowModule {
    * Process incoming request - Handle streaming conversion
    */
   async processIncoming(requestParam: SharedPipelineRequest): Promise<SharedPipelineRequest> {
+    // Pass-through: do not modify payload or metadata
     if (!this.isInitialized) {
       throw new Error('Streaming Control Workflow is not initialized');
     }
-
-    try {
-      const isDto = requestParam && typeof requestParam === 'object' && 'data' in requestParam && 'route' in requestParam;
-      const dto = isDto ? (requestParam as SharedPipelineRequest) : null;
-      const payload = isDto ? (dto!.data as any) : (requestParam as any);
-
-      const originalStream = payload?.stream;
-      let transformedPayload = { ...(payload || {}) };
-
-      // Preserve true streaming for OpenAI Responses endpoint to allow real SSE end-to-end
-      const entryEndpoint = String((dto?.metadata as any)?.entryEndpoint || (payload?.metadata as any)?.entryEndpoint || '');
-
-      // 统一：所有入口均将 stream=true 转为非流式请求（SSE 由核心在响应阶段合成）
-      if (originalStream === true) {
-        transformedPayload = this.convertStreamingToNonStreaming(payload);
-        this.logger.logTransformation(dto?.route?.requestId || 'unknown', 'streaming-to-non-streaming', payload, transformedPayload);
-      } else {
-        this.logger.logModule(this.id, 'non-streaming-request', {
-          hasStream: originalStream,
-          entryEndpoint
-        });
-      }
-
-      return isDto
-        ? { ...dto!, data: transformedPayload }
-        : { data: transformedPayload, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
-
-    } catch (error) {
-      this.logger.logModule(this.id, 'request-process-error', { error });
-      throw error;
-    }
+    return requestParam;
   }
 
   /**
    * Process outgoing response - Handle streaming response conversion
    */
   async processOutgoing(response: any): Promise<any> {
+    // Pass-through
     if (!this.isInitialized) {
       throw new Error('Streaming Control Workflow is not initialized');
     }
-
-    try {
-      const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
-      const payload = isDto ? (response as any).data : response;
-      // Always return non-streaming response. No mock streaming conversion.
-      this.logger.logModule(this.id, 'return-non-streaming-response', {
-        note: 'Streaming responses are not implemented; unified to non-streaming.'
-      });
-      return isDto ? response : payload;
-
-    } catch (error) {
-      this.logger.logModule(this.id, 'response-process-error', { error, response });
-      throw error;
-    }
+    return response;
   }
 
   /**
@@ -175,26 +134,8 @@ export class StreamingControlWorkflow implements WorkflowModule {
   /**
    * Convert streaming request to non-streaming
    */
-  private convertStreamingToNonStreaming(request: any): any {
-    const converted = {
-      ...request,
-      stream: false, // Set to false for provider
-      originalStream: true, // Mark original as streaming
-      _streamingMetadata: {
-        originalRequest: true,
-        convertedAt: Date.now(),
-        workflowId: this.id
-      }
-    };
-
-    // Handle streaming-specific parameter conversions
-    if (request.stream_options) {
-      converted._originalStreamOptions = request.stream_options;
-      delete converted.stream_options;
-    }
-
-    return converted;
-  }
+  // No conversion in pass-through mode
+  private convertStreamingToNonStreaming(request: any): any { return request; }
 
   /**
    * Convert non-streaming response to streaming
@@ -206,25 +147,10 @@ export class StreamingControlWorkflow implements WorkflowModule {
    * Validate module configuration
    */
   private validateConfig(): void {
-    if (!this.config.type || this.config.type !== 'streaming-control') {
-      throw new Error('Invalid Workflow type configuration');
-    }
-
-    if (!this.config.config) {
-      throw new Error('Workflow configuration is required');
-    }
-
-    // Set default configuration values
-    const config = this.config.config;
-    config.enableStreaming = config.enableStreaming ?? true;
-    config.bufferSize = config.bufferSize ?? 1024;
-    config.timeout = config.timeout ?? 30000;
-
+    // Pass-through: accept any config; do not enforce or mutate
     this.logger.logModule(this.id, 'config-validation-success', {
-      type: this.config.type,
-      enableStreaming: config.enableStreaming,
-      bufferSize: config.bufferSize,
-      timeout: config.timeout
+      type: this.config?.type || 'streaming-control',
+      mode: 'pass-through'
     });
   }
 

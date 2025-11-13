@@ -5,7 +5,6 @@
  */
 
 import { OpenAIStandard } from './openai-standard.js';
-import { ResponsesProvider } from './responses-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { IProviderV2 } from '../api/provider-types.js';
 import type { ModuleDependencies } from '../../../../interfaces/pipeline-interfaces.js';
@@ -32,11 +31,8 @@ export class ProviderFactory {
     // 创建新实例（按 providerType 分派）
     const ptype = String(config?.config?.providerType || '').toLowerCase();
     let provider: IProviderV2;
-    if (ptype === 'responses') {
-      provider = new ResponsesProvider(config, dependencies) as unknown as IProviderV2;
-    } else {
-      provider = new OpenAIStandard(config, dependencies);
-    }
+    // 'responses' 不再有专用 Provider，统一走 OpenAIStandard（Chat标准供应商）
+    provider = new OpenAIStandard(config, dependencies);
     this.instances.set(instanceId, provider);
 
     return provider;

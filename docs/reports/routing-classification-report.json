@@ -1,0 +1,22 @@
+{
+  "scanned": 3731,
+  "byCategory": {
+    "default": 3731,
+    "tools": 0,
+    "coding": 0,
+    "longContext": 0,
+    "thinking": 0,
+    "webSearch": 0
+  },
+  "neverHit": [
+    "tools",
+    "coding",
+    "longContext",
+    "thinking",
+    "webSearch"
+  ],
+  "sampleByCategory": {
+    "default": "/Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1762688650150_gr5ujr2us_provider-request.json"
+  },
+  "errors": []
+}

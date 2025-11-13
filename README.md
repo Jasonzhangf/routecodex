@@ -6,6 +6,34 @@
 
 RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配置驱动的V2架构，支持原生dry-run调试能力、动态路由分类、4层管道架构和实时监控。提供统一的API接口，无缝集成多个AI服务提供商。
 
+## LLM Switch（前后半段）总览
+
+- 前半段（Conversion）
+  - Chat：保持 OpenAI Chat 标准；删除 stream，统一非流
+  - Responses：instructions + input → Chat.messages（仅形状转换，不做工具治理/兜底）
+  - Anthropic：Claude → Chat（仅形状转换）
+  - SSE：默认不上游直通；需要时前半段合成为非流 JSON
+
+- 后半段（Chat Pipeline，唯一治理点）
+  - 请求：canonicalize + arguments 修复 + MCP 两步暴露
+  - Provider：仅 HTTP 转发与快照
+  - 响应：统一 Chat 形状，工具结果与 tool_call_id 配对
+  - Responses：从 Chat 反向映射 required_action/items（仅映射，不治理）
+
+文档与代码参考：
+- 核心实现与详细说明：`vendor/rcc-llmswitch-core/`
+- 源码文档（本地）：`/Users/fanzhang/Documents/github/sharedmodule/llmswitch-core/README.md`
+
+## 快照排查指南（命令行）
+
+- 快速查看某个请求 RID 在各阶段的顶层键/消息概况/可疑字段：
+  - 运行：`npm run snapshot:inspect -- --rid <RID> [--endpoint openai-responses|openai-chat|anthropic-messages]`
+  - 输出：
+    - http-request / llmswitch.request.post / compatibility.request.post / provider.request.pre 的顶层键
+    - messages 统计（条数、角色覆盖、是否存在 user）
+    - 是否出现 data/metadata/stream 等可疑顶层键
+    - 简要差异（哪个阶段新增了可疑键）
+
 ## 🔄 V2 架构特性
 
 本仓库已完成面向生产的 V2 重构并默认启用，基于9大核心架构原则：

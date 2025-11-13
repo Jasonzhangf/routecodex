@@ -186,10 +186,26 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
       timings.providerEnd = Date.now();
       debugStages.push('provider');
 
-      // Streaming fast-path: if provider returned SSE stream, convert to Responses SSE inside llmswitch-core and return.
+      // Streaming fast-path: only allow when inbound/outbound are both Responses
+      // (i.e., entry endpoint is '/v1/responses'). Otherwise, do not use upstream
+      // SSE direct conversion to keep path consistent with Chat finalize.
       try {
         const anyProv: any = providerPayload as any;
-        if (anyProv && typeof anyProv === 'object' && anyProv.__sse_stream) {
+        // Derive entryEndpoint before deciding fast-path
+        const __processedMeta = (processedRequest && typeof processedRequest === 'object' && (processedRequest as any).metadata)
+          ? (processedRequest as any).metadata as Record<string, unknown>
+          : {};
+        const __originalMeta = ((request as any)?.metadata && typeof (request as any).metadata === 'object')
+          ? (request as any).metadata as Record<string, unknown>
+          : {};
+        const __entryEndpoint = (__processedMeta as any).entryEndpoint
+          ?? (__originalMeta as any).entryEndpoint
+          ?? (request as any)?.entryEndpoint
+          ?? (request as any)?.data?.metadata?.entryEndpoint;
+
+        const allowResponsesFastPath = String(__entryEndpoint || '').toLowerCase() === '/v1/responses';
+
+        if (allowResponsesFastPath && anyProv && typeof anyProv === 'object' && anyProv.__sse_stream) {
           const upstream = anyProv.__sse_stream;
           // Dynamic import to vendor/core
           const importCore = async (sub: string) => {
@@ -630,6 +646,15 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
       debugCenter: this.debugCenter,
       logger: this.debugLogger
     };
+    // Host-provided invoker for llmswitch-core autoloop second round
+    (dependencies as any).invokeSecondRound = async (sharedReq: any) => {
+      try {
+        const resp = await this.processRequest(sharedReq);
+        return resp;
+      } catch (e) {
+        return { data: { error: String((e as any)?.message || e) } } as any;
+      }
+    };
     const strict = process.env.ROUTECODEX_PIPELINE_STRICT !== '0';
 
     // Initialize LLMSwitch module (required in strict mode)
@@ -805,19 +830,20 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     }
 
     try {
-      // Ensure provider receives entryEndpoint/stream flags inside body.metadata as well
+      // Do NOT inject metadata into the provider body.
+      // Provider should receive pure Chat JSON (model/messages/tools/...).
       const dataBody: any = request.data as UnknownObject;
-      const mergedMeta = {
-        ...((dataBody && typeof dataBody === 'object' && (dataBody as any).metadata) ? (dataBody as any).metadata : {}),
-        ...((request && typeof request === 'object' && (request as any).metadata) ? (request as any).metadata as any : {})
-      } as Record<string, unknown>;
-      const dataWithMeta = {
-        ...(dataBody || {}),
-        metadata: mergedMeta
-      } as UnknownObject;
+      const dataWithMeta = { ...(dataBody || {}) } as UnknownObject;
       try {
         const { writePipelineSnapshot } = await import('../utils/pipeline-snapshot-writer.js');
-        await writePipelineSnapshot({ stage: 'pipeline.provider.request.pre', requestId: request.route?.requestId || 'unknown', pipelineId: this.pipelineId, data: dataWithMeta, entryEndpoint: (request as any)?.metadata?.entryEndpoint as any });
+        await writePipelineSnapshot({
+          stage: 'pipeline.provider.request.pre',
+          requestId: request.route?.requestId || 'unknown',
+          pipelineId: this.pipelineId,
+          data: dataWithMeta,
+          entryEndpoint: (request as any)?.metadata?.entryEndpoint as any,
+          metadata: (request as any)?.metadata as any
+        });
       } catch { /* ignore */ }
       const responsePayload = await this.modules.provider.processIncoming(dataWithMeta);
       this.debugLogger.logProviderRequest(this.pipelineId, 'request-start', request, responsePayload);

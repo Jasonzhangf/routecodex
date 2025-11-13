@@ -59,7 +59,7 @@ client(Anthropic) → endpoint(/v1/messages)
   - ../../claude-code-router/src/agents/image.agent.ts:167（图片场景的系统提示注入）
 
 2) Transformer（Provider 适配 + 工具策略）
-- 核心服务：@musistudio/llms（打包在 node_modules/dist/esm/server.mjs）
+- （更新）已移除 @musistudio/llms 相关描述，统一由 llmswitch-core 实现工具治理与透明代理。
 - 职责：
   - 请求/响应入站与出站格式适配（含流）：OpenAI ↔ Anthropic、Gemini、DeepSeek 等
   - 工具定义与结果在不同协议间的形状互转

@@ -20,6 +20,20 @@ async function main(){
 
   const body=await readJson(file);
   if (body.stream == null) body.stream = true;
+  // attach client_request_id and snapshot request body
+  const clientRequestId = `cli_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+  try{
+    const meta = (body && typeof body==='object' && body.metadata && typeof body.metadata==='object') ? body.metadata : {};
+    body.metadata = { ...meta, client_request_id: clientRequestId };
+  }catch{}
+  try{
+    const home = process.env.HOME || process.env.USERPROFILE || '.';
+    const dir = path.join(String(home), '.routecodex', 'codex-samples', 'responses-client');
+    await fs.mkdir(dir, { recursive: true });
+    const out = path.join(dir, `${clientRequestId}_client-request.json`);
+    await fs.writeFile(out, JSON.stringify({ timestamp: new Date().toISOString(), baseURL, request: body }, null, 2), 'utf-8');
+    if(!raw) console.log('saved client snapshot:', out);
+  }catch{}
 
   const client=new OpenAI({ apiKey, baseURL });
   console.log(`[${nowIso()}] connect baseURL=${baseURL}`);
@@ -49,4 +63,3 @@ async function main(){
 }
 
 main().catch(e=>{ console.error('fatal', e?.message||String(e)); process.exit(2); });
-

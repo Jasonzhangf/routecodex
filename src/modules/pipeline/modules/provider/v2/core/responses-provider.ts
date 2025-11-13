@@ -26,12 +26,10 @@ export class ResponsesProvider extends OpenAIStandard {
    * 覆写内部发送：/v1/responses 入口时强制使用上游 SSE（postStream）。
    */
   protected override async sendRequestInternal(request: UnknownObject): Promise<unknown> {
-    // Minimal true-SSE path for /v1/responses: use postStream upstream and return a stream token
-    // Default OFF for safety; enable by setting ROUTECODEX_RESPONSES_UPSTREAM_SSE=1 (or RCC_RESPONSES_UPSTREAM_SSE=1)
-    const wantsUpstreamSSE = String(process.env.ROUTECODEX_RESPONSES_UPSTREAM_SSE || process.env.RCC_RESPONSES_UPSTREAM_SSE || '0') === '1';
-    if (!wantsUpstreamSSE) {
-      return await super.sendRequestInternal(request);
-    }
+    // Upstream SSE直通仅在Provider配置显式允许时启用：
+    //  - config.upstreamSse === true （所有模型）
+    //  - 或 config.upstreamSseModels: string[] 包含当前 body.model
+    // 注：不再依赖入站端点判断；是否直通由 Provider 配置+模型决定。
     // Build endpoint and headers
     const endpoint = (this as any).getEffectiveEndpoint();
     const headers = await (this as any).buildRequestHeaders();
@@ -59,10 +57,23 @@ export class ResponsesProvider extends OpenAIStandard {
         if ('maxTokens' in body) delete (body as any).maxTokens;
       } catch { /* ignore */ }
       try { if ('metadata' in body) { delete body.metadata; } } catch { /* ignore */ }
-      // Ensure stream flag for upstream SSE
-      body.stream = true;
       return body;
     })();
+
+    // Read provider configuration for upstream SSE decision
+    const cfg: any = (this.config as any)?.config || {};
+    const allowAll = cfg.upstreamSse === true;
+    const allowedModels: string[] = Array.isArray(cfg.upstreamSseModels) ? cfg.upstreamSseModels.map((s: any)=>String(s)) : [];
+    const modelId = String((finalBody as any)?.model || 'unknown');
+    const allowForModel = allowedModels.includes(modelId);
+    const allowUpstream = allowAll || allowForModel;
+
+    if (!allowUpstream) {
+      return await super.sendRequestInternal(request);
+    }
+
+    // Ensure stream flag for upstream SSE
+    (finalBody as any).stream = true;
 
     // Snapshot provider-request (best-effort)
     try {

@@ -1,0 +1,157 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://routecodex.dev/schema/user-config.json",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "version": { "type": ["string", "number"] },
+    "virtualrouter": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "providers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": { "type": "string" },
+              "enabled": { "type": "boolean" },
+              "type": { "type": "string" },
+              "baseUrl": { "type": "string" },
+              "baseURL": { "type": "string" },
+              "auth": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": ["type", "apiKey"],
+                    "properties": {
+                      "type": { "const": "apikey" },
+                      "apiKey": { "type": "string" }
+                    },
+                    "additionalProperties": true
+                  },
+                  {
+                    "type": "object",
+                    "required": ["type", "clientId", "clientSecret", "tokenUrl"],
+                    "properties": {
+                      "type": { "const": "oauth" },
+                      "grant": { "type": "string" },
+                      "clientId": { "type": "string" },
+                      "clientSecret": { "type": "string" },
+                      "tokenUrl": { "type": "string" },
+                      "scopes": { "type": "array", "items": { "type": "string" } }
+                    },
+                    "additionalProperties": true
+                  }
+                ]
+              },
+              "models": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "export": { "type": "boolean" },
+                    "compatibility": {
+                      "type": "object",
+                      "required": ["type"],
+                      "properties": {
+                        "type": { "type": "string" },
+                        "config": { "type": ["object", "null"] }
+                      },
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "routing": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "default": { "type": "array", "items": { "type": "string" }, "default": [] },
+            "coding": { "type": "array", "items": { "type": "string" }, "default": [] },
+            "longcontext": { "type": "array", "items": { "type": "string" }, "default": [] },
+            "tools": { "type": "array", "items": { "type": "string" }, "default": [] },
+            "thinking": { "type": "array", "items": { "type": "string" }, "default": [] },
+            "vision": { "type": "array", "items": { "type": "string" }, "default": [] },
+            "websearch": { "type": "array", "items": { "type": "string" }, "default": [] },
+            "background": { "type": "array", "items": { "type": "string" }, "default": [] }
+          }
+        },
+        "keyMappings": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "global": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            },
+            "providers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "pipelines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "modules"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "modules": {
+            "type": "object",
+            "required": ["provider"],
+            "properties": {
+              "provider": {
+                "type": "object",
+                "required": ["type", "config"],
+                "properties": {
+                  "type": { "type": "string" },
+                  "config": { "type": "object" }
+                },
+                "additionalProperties": true
+              },
+              "compatibility": {
+                "type": "object",
+                "required": ["type"],
+                "properties": {
+                  "type": { "type": "string" },
+                  "config": { "type": ["object", "null"] }
+                },
+                "additionalProperties": true
+              },
+              "llmSwitch": {
+                "type": "object",
+                "properties": {
+                  "type": { "type": "string" },
+                  "config": { "type": "object" }
+                },
+                "additionalProperties": true
+              },
+              "workflow": {
+                "type": "object",
+                "properties": {
+                  "type": { "type": "string" },
+                  "config": { "type": "object" }
+                },
+                "additionalProperties": true
+              }
+            }
+          },
+          "settings": { "type": "object" }
+        },
+        "additionalProperties": true
+      }
+    }
+  }
+}

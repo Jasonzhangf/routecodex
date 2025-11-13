@@ -1,0 +1,8 @@
+{
+  "error": {
+    "message": "Required",
+    "type": "invalid_request_error",
+    "param": "tools.0.name",
+    "code": "missing_required_parameter"
+  }
+}

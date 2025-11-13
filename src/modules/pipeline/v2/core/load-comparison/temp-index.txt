@@ -1,0 +1,5 @@
+  // 1. Build test scenarios from multiple sources
+  const [realWorldScenarios, configScenarios] = await Promise.all([
+    await (buildRealWorldTestSuite as any)(sampleDir),
+    await (buildConfigBasedTestSuite as any)(configSamplesDir, dryRunSamplesDir)
+  ]);

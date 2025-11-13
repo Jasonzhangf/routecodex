@@ -88,6 +88,9 @@ export class V1ConfigConverter {
       const urlMap: Record<string, string> = {
         'open.bigmodel.cn': 'glm',
         'portal.qwen.ai': 'qwen',
+        'api.qwen.ai': 'qwen',
+        'chat.qwen.ai': 'qwen',
+        'dashscope.aliyuncs.com': 'qwen',
         'api.iflow.ai': 'iflow',
         'api.openai.com': 'openai'
       };
