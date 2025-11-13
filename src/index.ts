@@ -12,6 +12,8 @@ import net from 'net';
 import { spawn } from 'child_process';
 import { createRequire } from 'module';
 import { ConfigManagerModule } from './modules/config-manager/config-manager-module.js';
+import { buildInfo } from './build-info.js';
+import { resolvePortForMode } from './server/utils/port-resolver.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 
 // Polyfill CommonJS require for ESM runtime to satisfy dependencies that call require()
@@ -255,7 +257,7 @@ class RouteCodexApp {
       this._isRunning = true;
 
       // 7. 记录当前运行模式
-      console.log(useV2 ? '🔵 V2 dynamic pipeline active' : '🟢 V1 static pipeline active');
+      console.log(`${buildInfo.mode === 'dev' ? '🧪 dev' : '🚢 release'} mode · ` + (useV2 ? '🔵 V2 dynamic pipeline active' : '🟢 V1 static pipeline active'));
 
       // 7. 获取服务器状态（使用 HTTP 服务器解析后的最终绑定地址与端口）
       // 优先读取服务器自身解析结果，避免日志误导（例如 host 放在不同层级或为 0.0.0.0 时）
@@ -420,9 +422,30 @@ class RouteCodexApp {
         }
       }
     } catch (error) {
-      console.error('❌ Error detecting server port:', error);
+      // ignore; perform final resolution below
     }
-    throw new Error('HTTP server port not found. Please set "port" in your user configuration file.');
+    // 最终根据构建模式收敛端口解析：dev→默认5555；release→必须配置
+    try {
+      let cfgPort: number | null = null;
+      try {
+        const defaultConfigPath = path.join(homedir(), '.routecodex', 'config.json');
+        if (fsSync.existsSync(defaultConfigPath)) {
+          const raw = await fs.readFile(defaultConfigPath, 'utf-8');
+          const json = JSON.parse(raw || '{}');
+          cfgPort = (json && typeof json.httpserver === 'object' && typeof json.httpserver.port === 'number')
+            ? json.httpserver.port
+            : (typeof (json as any).port === 'number' ? (json as any).port : null);
+        }
+      } catch { /* ignore */ }
+      const resolved = resolvePortForMode({ mode: buildInfo.mode, cliPort: undefined, configPort: cfgPort });
+      if (buildInfo.mode === 'dev' && resolved === 5555) {
+        console.log('🔧 Using dev default port 5555');
+      }
+      return resolved;
+    } catch (e) {
+      console.error('❌ Error detecting server port:', e);
+      throw new Error('HTTP server port not found. In release mode, set httpserver.port in your user configuration file.');
+    }
   }
 }
 
