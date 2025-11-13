@@ -71,20 +71,29 @@ async function dynamicImport(p: string): Promise<any> {
 }
 
 async function ensureCoreOrFail(): Promise<void> {
-  // 仅通过 npm 依赖检测（移除 vendor 兜底）
+  // 优先通过 npm 依赖检测
   try { await dynamicImport('rcc-llmswitch-core/package.json'); return; } catch { /* ignore */ }
   try { await dynamicImport('rcc-llmswitch-core'); return; } catch { /* ignore */ }
+  // dev 模式允许使用本包内 vendor 兜底
+  try {
+    const { pathToFileURL } = await import('url');
+    const vendorPath = path.resolve(__dirname, '..', 'vendor', 'rcc-llmswitch-core', 'dist', 'index.js');
+    const url = pathToFileURL(vendorPath).href;
+    await dynamicImport(url);
+    return;
+  } catch { /* ignore */ }
 
-  logger.error('llmswitch-core not found via npm dependency.');
-  logger.error('请先安装依赖: npm i rcc-llmswitch-core@latest，再执行构建与全局安装。');
+  logger.error('llmswitch-core not found (npm nor vendored).');
+  logger.error('请先安装依赖: npm i rcc-llmswitch-core@latest，或使用包含 vendor 的构建。');
   process.exit(1);
 }
 
-// Top-level guard（Fail Fast，无兜底）
-await ensureCoreOrFail();
+// 延后依赖检查：仅在需要启动/使用核心功能的命令里再检查
 
 // CLI program setup
 const program = new Command();
+let buildInfo: { mode: 'dev' | 'release'; version?: string } = { mode: 'release' } as any;
+try { buildInfo = (await import('./build-info.js')).buildInfo; } catch { /* fallback release */ }
 
 // Resolve version from package.json at runtime to avoid hardcoding mismatches
 const pkgVersion: string = (() => {
@@ -99,7 +108,7 @@ const pkgVersion: string = (() => {
 })();
 
 program
-  .name('rcc')
+  .name(buildInfo.mode === 'dev' ? 'routecodex' : 'rcc')
   .description('RouteCodex CLI - Multi-provider OpenAI proxy server and Claude Code interface')
   .version(pkgVersion);
 
@@ -416,6 +425,7 @@ program
   .command('start')
   .description('Start the RouteCodex server')
   .option('-c, --config <config>', 'Configuration file path')
+  .option('-p, --port <port>', 'Server port (overrides config)')
   .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
   .option('--codex', 'Use Codex system prompt (tools unchanged)')
   .option('--claude', 'Use Claude system prompt (tools unchanged)')
@@ -464,7 +474,7 @@ program
         process.exit(1);
       }
 
-      // Load and validate configuration
+      // Load configuration (in release, port is required if not provided by CLI)
       let config;
       try {
         const configContent = fs.readFileSync(configPath, 'utf8');
@@ -475,15 +485,30 @@ program
         process.exit(1);
       }
 
-      // Validate required configuration fields (prefer httpserver.port; allow top-level port)
-      const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
-      if (!port || typeof port !== 'number' || port <= 0) {
-        spinner.fail('Invalid or missing port configuration');
-        logger.error('Please set a valid port (httpserver.port or top-level port) in your configuration');
-        process.exit(1);
+      // Resolve port by mode: dev → default 5555; release → must be configured if no CLI override
+      let resolvedPort: number | null = null;
+      if (options.port) {
+        const n = Number(options.port);
+        if (!Number.isFinite(n) || n <= 0) {
+          spinner.fail('Invalid --port value');
+          process.exit(1);
+        }
+        resolvedPort = n;
       }
-
-      const resolvedPort = port;
+      if (resolvedPort == null) {
+        const cfgPort = (config?.httpserver?.port ?? config?.server?.port ?? config?.port) ?? null;
+        if (buildInfo.mode === 'dev') {
+          resolvedPort = typeof cfgPort === 'number' && cfgPort > 0 ? cfgPort : 5555;
+        } else {
+          if (typeof cfgPort === 'number' && cfgPort > 0) {
+            resolvedPort = cfgPort;
+          } else {
+            spinner.fail('Invalid or missing port configuration');
+            logger.error('In release mode, please set httpserver.port (or pass --port) in your configuration');
+            process.exit(1);
+          }
+        }
+      }
 
       // Ensure port state aligns with requested behavior (always take over to avoid duplicates)
       await ensurePortAvailable(resolvedPort, spinner, { restart: true });
@@ -508,6 +533,8 @@ program
       const env = { ...process.env } as NodeJS.ProcessEnv;
       // Ensure server process picks the intended user config path
       env.ROUTECODEX_CONFIG = configPath;
+      // Pass chosen port explicitly to server entry (dev/release aware)
+      try { env.ROUTECODEX_PORT = String(resolvedPort); } catch { /* ignore */ }
       const args: string[] = [serverEntry, modulesConfigPath];
 
       const childProc = spawn(nodeBin, args, { stdio: 'inherit', env });

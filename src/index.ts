@@ -12,6 +12,8 @@ import net from 'net';
 import { spawn } from 'child_process';
 import { createRequire } from 'module';
 import { ConfigManagerModule } from './modules/config-manager/config-manager-module.js';
+import { buildInfo } from './build-info.js';
+import { resolvePortForMode } from './server/utils/port-resolver.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 
 // Polyfill CommonJS require for ESM runtime to satisfy dependencies that call require()
@@ -255,7 +257,7 @@ class RouteCodexApp {
       this._isRunning = true;
 
       // 7. 记录当前运行模式
-      console.log(useV2 ? '🔵 V2 dynamic pipeline active' : '🟢 V1 static pipeline active');
+      console.log(`${buildInfo.mode === 'dev' ? '🧪 dev' : '🚢 release'} mode · ` + (useV2 ? '🔵 V2 dynamic pipeline active' : '🟢 V1 static pipeline active'));
 
       // 7. 获取服务器状态（使用 HTTP 服务器解析后的最终绑定地址与端口）
       // 优先读取服务器自身解析结果，避免日志误导（例如 host 放在不同层级或为 0.0.0.0 时）
@@ -341,6 +343,12 @@ class RouteCodexApp {
         console.log(`🔧 Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT)`);
         return envPort;
       }
+
+      // Dev 模式：无论配置是否存在，若未显式指定端口，则使用固定默认 5555
+      if (buildInfo.mode === 'dev') {
+        console.log('🔧 Using dev default port 5555');
+        return 5555;
+      }
       // 首先检查ROUTECODEX_CONFIG_PATH环境变量（当前使用的）
       if (process.env.ROUTECODEX_CONFIG_PATH) {
         const configPath = process.env.ROUTECODEX_CONFIG_PATH;
@@ -422,7 +430,8 @@ class RouteCodexApp {
     } catch (error) {
       console.error('❌ Error detecting server port:', error);
     }
-    throw new Error('HTTP server port not found. Please set "port" in your user configuration file.');
+    // Release 模式：必须从配置获取端口或通过环境传入；走到这里表示未命中，Fail Fast
+    throw new Error('HTTP server port not found. In release mode, set httpserver.port in your user configuration file.');
   }
 }
 
