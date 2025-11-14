@@ -167,12 +167,20 @@ export class PipelineManager implements RCCBaseModule {
             const st = this.pipeline429State.get(p.pipelineId);
             const inCooldown = st && st.cooldownUntil !== undefined && now < (st.cooldownUntil || 0);
             const banned = st && st.bannedToday === true;
-            return !inCooldown && !banned && this.pipelineHealthManager.isPipelineAvailable(p.pipelineId);
+            // 移除健康 gating：仅按429冷却/当日拉黑过滤
+            return !inCooldown && !banned;
           });
       }
       if (!candidates.length) {
         // fallback to all pipelines if pool empty or all filtered
-        candidates = Array.from(this.pipelines.values()).filter(p => this.pipelineHealthManager.isPipelineAvailable(p.pipelineId));
+        // 移除健康 gating：fallback 全量 pipelines 仅按429状态过滤
+        const now = Date.now();
+        candidates = Array.from(this.pipelines.values()).filter(p => {
+          const st = this.pipeline429State.get(p.pipelineId);
+          const inCooldown = st && st.cooldownUntil !== undefined && now < (st.cooldownUntil || 0);
+          const banned = st && st.bannedToday === true;
+          return !inCooldown && !banned;
+        });
       }
       if (!candidates.length) throw new Error('No pipelines available for round-robin selection');
       const cur = this.rrIndexByRoute.get(routeName) || 0;
@@ -511,17 +519,17 @@ export class PipelineManager implements RCCBaseModule {
       return await this.processRequestWithPipeline(next, request, retryKey);
     }
 
-    // 3) Pool exhausted: emit advisory to error center, then fail fast with diagnostic
+    // 3) Pool exhausted: hold the request and wait, then retry within the same pool
     try {
       await (this.errorHandlingCenter as any)?.handleError?.({
-        type: 'rate_limit_pool_exhausted',
+        type: 'rate_limit_pool_exhausted_pre_wait',
         timestamp: Date.now(),
         requestId: (request as any)?.route?.requestId,
         attempted: Array.from(attemptedPipelines),
       });
     } catch { /* ignore */ }
 
-    // Compute minimal retryAfter among cooled pipelines in the same pool
+    // Compute min cooldown among pool members
     let minRetryAfter = 0;
     try {
       const anchor = Array.from(attemptedPipelines)[0];
@@ -535,6 +543,36 @@ export class PipelineManager implements RCCBaseModule {
         .filter(t => t && t > now)
         .map(t => t - now);
       if (futureTimes.length) { minRetryAfter = Math.max(0, Math.min(...futureTimes)); }
+    } catch { /* ignore */ }
+
+    // Wait plan: first wait for minRetryAfter (if present), then follow backoff schedule
+    const waits: number[] = [];
+    try {
+      const schedule = this.getBackoffSchedule();
+      if (minRetryAfter > 0) waits.push(minRetryAfter);
+      waits.push(...schedule);
+    } catch { /* ignore */ }
+
+    for (const delay of waits) {
+      try { await new Promise(res => setTimeout(res, Math.max(0, delay))); } catch { /* ignore */ }
+      // After wait, re-check candidates within the same route pool
+      const excludeIds = new Set<string>(attemptedPipelines);
+      const candidates2 = this.getPoolRestrictedAvailablePipelines(attemptedPipelines, excludeIds);
+      if (Array.isArray(candidates2) && candidates2.length > 0) {
+        const next = this.selectNextPipelineRoundRobin(candidates2, retryKey);
+        attemptedPipelines.add(next.pipelineId);
+        return await this.processRequestWithPipeline(next, request, retryKey);
+      }
+    }
+
+    // Still exhausted after waits → return structured 429 with minimal retryAfter
+    try {
+      await (this.errorHandlingCenter as any)?.handleError?.({
+        type: 'rate_limit_pool_exhausted_final',
+        timestamp: Date.now(),
+        requestId: (request as any)?.route?.requestId,
+        attempted: Array.from(attemptedPipelines),
+      });
     } catch { /* ignore */ }
 
     const e: any = new Error('Route pool exhausted: all pipelines cooling down or banned');
@@ -593,13 +631,13 @@ export class PipelineManager implements RCCBaseModule {
       }
 
       // Skip unhealthy pipelines
-      // Skip dynamic bans/cooldown
+      // Skip dynamic bans/cooldown（移除健康 gating）
       const st = this.pipeline429State.get(pipeline.pipelineId);
       const now = Date.now();
       const inCooldown = st && st.cooldownUntil !== undefined && now < (st.cooldownUntil || 0);
       const banned = st && st.bannedToday === true;
       if (inCooldown || banned) return false;
-      return this.pipelineHealthManager.isPipelineAvailable(pipeline.pipelineId);
+      return true;
     });
   }
 
@@ -633,7 +671,7 @@ export class PipelineManager implements RCCBaseModule {
       const inCooldown = st && st.cooldownUntil !== undefined && now < (st.cooldownUntil || 0);
       const banned = st && st.bannedToday === true;
       if (inCooldown || banned) return false;
-      return this.pipelineHealthManager.isPipelineAvailable(p.pipelineId);
+      return true;
     });
     return filtered;
   }
