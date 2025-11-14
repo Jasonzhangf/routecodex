@@ -60,4 +60,4 @@ fi
 
 echo ""
 echo "🎉 快速安装完成！"
-echo "使用命令: routecodex 或 rcc"
+echo "使用命令: routecodex"

@@ -100,22 +100,14 @@ const { pkgName, pkgVersion }: { pkgName: string; pkgVersion: string } = (() => 
   }
 })();
 
-// Package variant / invocation mode:
-// - routecodex package invoked as `routecodex` => dev mode (default 5555)
-// - invoked as `rcc` => behave like release (config-driven port)
-const INVOKED_BIN = (() => {
-  try {
-    const p = process.argv?.[1] || '';
-    return p ? path.basename(p) : '';
-  } catch {
-    return '';
-  }
-})();
-const IS_DEV_MODE = pkgName === 'routecodex' && INVOKED_BIN === 'routecodex';
+// Package variant:
+// - routecodex => dev 包（本地开发，默认端口 5555）
+// - rcc        => release 包（按配置端口启动）
+const IS_DEV_MODE = pkgName === 'routecodex';
 const DEFAULT_DEV_PORT = 5555;
 
 program
-  .name('rcc')
+  .name(pkgName === 'rcc' ? 'rcc' : 'routecodex')
   .description('RouteCodex CLI - Multi-provider OpenAI proxy server and Claude Code interface')
   .version(pkgVersion);
 

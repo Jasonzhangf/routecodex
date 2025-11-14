@@ -6,8 +6,7 @@
   "main": "dist/index.js",
   "module": "dist/index.js",
   "bin": {
-    "routecodex": "./dist/cli.js",
-    "rcc": "./dist/cli.js"
+    "routecodex": "./dist/cli.js"
   },
   "exports": {
     ".": {
