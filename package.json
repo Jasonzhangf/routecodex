@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.81.19",
+  "version": "0.81.21",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -114,6 +114,7 @@
     "license:check": "echo 'license check temporarily disabled'",
     "ncu:check": "ncu --errorLevel 2",
     "package:validate": "npx package-json-validator",
+    "analyze:tools:fileops": "node scripts/analyze-tools-fileops.mjs",
     "test:consistency": "node scripts/v2-consistency/run-consistency-test.mjs",
     "test:v2:tools": "node tests/v2/dist/tool-processing-test.js",
     "test:v2:protocol": "node tests/v2/dist/protocol-conversion-test.js",
