@@ -1,4 +1,5 @@
 import fetch from 'node-fetch';
+import { createProviderOAuthStrategy } from '../../modules/pipeline/modules/provider/v2/config/provider-oauth-configs.js';
 import { buildAuthHeaders } from './auth-headers.js';
 import { normalizeBaseUrlForModels } from './url-normalize.js';
 import type { ModelsList, ProviderInputConfig } from './types.js';
@@ -15,6 +16,89 @@ function resolveProviderType(inType?: string): string {
   return t;
 }
 
+async function buildOAuthHeaders(provider: ProviderInputConfig, providerKind: string, verbose = false): Promise<Record<string, string>> {
+  const auth = provider.auth;
+  if (!auth || auth.type !== 'oauth') return {};
+
+  // Only providers with predefined OAuth configs are supported here
+  const kind = providerKind.toLowerCase();
+  if (kind !== 'qwen' && kind !== 'iflow') {
+    return {};
+  }
+
+  try {
+    const overrides: Record<string, unknown> = {};
+    const endpoints: any = {};
+    const client: any = {};
+
+    if (auth.tokenUrl) endpoints.tokenUrl = auth.tokenUrl;
+    if (auth.deviceCodeUrl) endpoints.deviceCodeUrl = auth.deviceCodeUrl;
+    if (Object.keys(endpoints).length > 0) overrides.endpoints = endpoints;
+
+    if (auth.clientId) client.clientId = auth.clientId;
+    if (auth.clientSecret) client.clientSecret = auth.clientSecret;
+    if (Array.isArray(auth.scopes) && auth.scopes.length > 0) client.scopes = auth.scopes;
+    if (Object.keys(client).length > 0) overrides.client = client;
+
+    const strategy: any = createProviderOAuthStrategy(kind, overrides);
+
+    // Try existing token first
+    let token: any = null;
+    try {
+      token = await strategy.loadToken();
+    } catch {
+      token = null;
+    }
+
+    let valid = false;
+    try {
+      if (token && typeof strategy.validateToken === 'function') {
+        valid = !!strategy.validateToken(token);
+      } else {
+        valid = !!token;
+      }
+    } catch {
+      valid = false;
+    }
+
+    if (!valid) {
+      if (verbose) {
+        // eslint-disable-next-line no-console
+        console.log(`[provider-update] Starting OAuth flow for provider='${kind}' (device/authorization flow may open a browser)...`);
+      }
+      token = await strategy.authenticate({ openBrowser: true });
+      try {
+        await strategy.saveToken(token);
+      } catch {
+        /* non-fatal */
+      }
+    } else if (verbose) {
+      // eslint-disable-next-line no-console
+      console.log(`[provider-update] Reusing existing OAuth token for provider='${kind}'.`);
+    }
+
+    let hdrs: Record<string, string> = {};
+    try {
+      const h = await strategy.getAuthorizationHeader(token);
+      if (h && typeof h === 'object') {
+        hdrs = Object.entries(h).reduce((acc, [k, v]) => {
+          if (typeof v === 'string') acc[k] = v;
+          return acc;
+        }, {} as Record<string, string>);
+      }
+    } catch {
+      hdrs = {};
+    }
+    return hdrs;
+  } catch (e) {
+    if (verbose) {
+      // eslint-disable-next-line no-console
+      console.error('[provider-update] OAuth authentication failed:', (e as any)?.message || String(e));
+    }
+    return {};
+  }
+}
+
 export async function fetchModelsFromUpstream(provider: ProviderInputConfig, verbose = false): Promise<ModelsList> {
   const type = resolveProviderType(provider.type);
   const baseUrl = (provider.baseUrl || provider.baseURL || '').trim();
@@ -22,9 +106,14 @@ export async function fetchModelsFromUpstream(provider: ProviderInputConfig, ver
   const endpoint = normalizeBaseUrlForModels(baseUrl);
   const headers: Record<string, string> = {
     'Accept': 'application/json',
-    'Content-Type': 'application/json',
-    ...buildAuthHeaders(provider.auth)
+    'Content-Type': 'application/json'
   };
+  if (provider.auth?.type === 'oauth') {
+    const oauthHeaders = await buildOAuthHeaders(provider, type, verbose);
+    Object.assign(headers, oauthHeaders);
+  } else {
+    Object.assign(headers, buildAuthHeaders(provider.auth));
+  }
   if (verbose) {
     // eslint-disable-next-line no-console
     console.log(`[provider-update] Fetching models: type=${type} url=${endpoint}`);
@@ -54,4 +143,3 @@ export async function fetchModelsFromUpstream(provider: ProviderInputConfig, ver
   } catch { /* ignore */ }
   return { models, raw: json };
 }
-

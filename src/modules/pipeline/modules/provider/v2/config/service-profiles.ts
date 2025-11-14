@@ -60,16 +60,21 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
   },
 
   qwen: {
-    // Qwen OpenAI兼容模式（最新API默认域名），按需可在用户配置中覆盖 baseUrl
-    // 说明：也可使用 DashScope 兼容模式：https://dashscope.aliyuncs.com/compatible-mode/v1
-    defaultBaseUrl: 'https://api.qwen.ai/v1',
+    // Qwen OpenAI兼容模式
+    // 对齐 CLIProxyAPI：使用 portal.qwen.ai 作为统一入口
+    // OAuth 设备码/令牌端点在 chat.qwen.ai 下，由 provider-oauth-configs 提供
+    defaultBaseUrl: 'https://portal.qwen.ai/v1',
     defaultEndpoint: '/chat/completions',
     defaultModel: 'qwen-plus',
     requiredAuth: [],
     optionalAuth: ['apikey','oauth'],
     headers: {
       'Content-Type': 'application/json',
-      'Accept': 'application/json'
+      'Accept': 'application/json',
+      // 对齐 CLIProxyAPI 的默认客户端标识（Qwen 官方示例）
+      'User-Agent': 'google-api-nodejs-client/9.15.1',
+      'X-Goog-Api-Client': 'gl-node/22.17.0',
+      'Client-Metadata': 'ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI'
     },
     timeout: 300000,
     maxRetries: 3

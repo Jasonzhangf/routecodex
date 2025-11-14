@@ -20,13 +20,24 @@ export async function updateProviderModels(options: UpdateOptions): Promise<Upda
   if (!input) throw new Error('--config is required');
   const raw = readJson(input);
   if (!raw || typeof raw !== 'object') throw new Error('invalid provider config JSON');
-  const apiKeyList = Array.isArray(raw.apiKey) ? (raw.apiKey as any[]).map((x)=>String(x)) : undefined;
+  // Support both legacy flat configs and V2 openai-standard provider configs:
+  // - Legacy: { providerId, type, baseUrl, auth, apiKey:[] }
+  // - V2: { type: 'openai-standard', config: { providerType, baseUrl, auth, apiKey? } }
+  const openaiStdConfig = (raw as any).type === 'openai-standard' && (raw as any).config && typeof (raw as any).config === 'object'
+    ? (raw as any).config
+    : null;
+  const baseNode: any = openaiStdConfig || raw;
+
+  const apiKeyList = Array.isArray(baseNode.apiKey)
+    ? (baseNode.apiKey as any[]).map((x)=>String(x))
+    : undefined;
   const provider: ProviderInputConfig = {
-    providerId: options.providerId || String(raw.providerId || raw.id || 'provider').trim(),
-    type: String(raw.type || 'openai'),
-    baseUrl: String(raw.baseUrl || raw.baseURL || ''),
-    baseURL: String(raw.baseURL || raw.baseUrl || ''),
-    auth: raw.auth,
+    providerId: options.providerId || String(baseNode.providerId || baseNode.id || (raw as any).providerId || (raw as any).id || 'provider').trim(),
+    // For openai-standard configs, prefer config.providerType as the logical upstream family (e.g., 'qwen', 'glm')
+    type: String(baseNode.providerType || baseNode.type || (raw as any).type || 'openai'),
+    baseUrl: String(baseNode.baseUrl || baseNode.baseURL || ''),
+    baseURL: String(baseNode.baseURL || baseNode.baseUrl || ''),
+    auth: baseNode.auth,
     apiKey: apiKeyList
   };
   if (!provider.providerId) throw new Error('providerId missing');

@@ -3,11 +3,19 @@ export type AuthConfig = {
   apiKey?: string;
   headerName?: string;
   prefix?: string;
+
+  // OAuth-related fields (optional, used when type === 'oauth')
+  clientId?: string;
+  clientSecret?: string;
+  tokenUrl?: string;
+  deviceCodeUrl?: string;
+  scopes?: string[];
 };
 
 export type ProviderInputConfig = {
   providerId: string;
-  type: string; // e.g., 'openai' | 'openai-standard' | 'glm' | 'qwen' | 'modelscope' | 'anthropic' | 'iflow'
+  // Provider family/type hint used for upstream calls (e.g., 'openai' | 'glm' | 'qwen' | 'iflow')
+  type: string;
   baseUrl?: string;
   baseURL?: string;
   auth?: AuthConfig;

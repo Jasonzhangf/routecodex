@@ -101,6 +101,20 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       scope: this.config.client.scopes.join(' ')
     });
 
+    // 启用 PKCE：对齐 Qwen CLI 实现（设备码 + 代码校验）
+    let codeVerifier: string | undefined;
+    if (this.config.features?.supportsPKCE) {
+      try {
+        const pair = this.generatePKCEPair();
+        codeVerifier = pair.codeVerifier;
+        formData.append('code_challenge', pair.codeChallenge);
+        formData.append('code_challenge_method', 'S256');
+      } catch {
+        // PKCE 生成失败时不阻断设备码流程，只是不加校验参数
+        codeVerifier = undefined;
+      }
+    }
+
     const response = await this.makeRequest(this.config.endpoints.deviceCodeUrl, {
       method: 'POST',
       headers: {
@@ -160,14 +174,20 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       console.log(verification_uri_complete);
     }
 
-    return {
+    const result: any = {
       device_code,
       user_code,
       verification_uri,
       verification_uri_complete,
       expires_in,
       interval
-    } as UnknownObject;
+    };
+
+    if (codeVerifier) {
+      result.code_verifier = codeVerifier;
+    }
+
+    return result as UnknownObject;
   }
 
   /**
@@ -187,6 +207,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
     const maxAttempts = this.config.polling?.maxAttempts || 60;
     const interval = (this.config.polling?.interval || 5) * 1000;
     const deviceCode = (deviceCodeData as any).device_code;
+    const codeVerifier: string | undefined = (deviceCodeData as any).code_verifier;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       if (attempt > 0) {
@@ -199,6 +220,11 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
           client_id: this.config.client.clientId,
           device_code: deviceCode
         });
+
+        // Qwen 等提供商要求在轮询阶段携带 code_verifier（PKCE）
+        if (this.config.features?.supportsPKCE && codeVerifier) {
+          formData.append('code_verifier', codeVerifier);
+        }
 
         // 添加客户端密钥（如果存在）
         if (this.config.client.clientSecret) {
