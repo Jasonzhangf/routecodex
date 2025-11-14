@@ -141,11 +141,8 @@ verify_install() {
     if command -v routecodex &> /dev/null; then
         echo "✅ routecodex 已全局安装"
         routecodex --version
-    elif command -v rcc &> /dev/null; then
-        echo "✅ rcc 已全局安装"
-        rcc --version
     else
-        echo "❌ 全局安装失败"
+        echo "❌ 全局安装失败（未找到 routecodex 命令）"
         exit 1
     fi
 }
@@ -172,11 +169,6 @@ cleanup_old_install() {
         rm -f "$NPM_PREFIX/bin/routecodex"
     fi
 
-    if [ -L "$NPM_PREFIX/bin/rcc" ]; then
-        echo "🗑️  删除旧的rcc可执行文件..."
-        rm -f "$NPM_PREFIX/bin/rcc"
-    fi
-
     # 清理异常生成的本地配置目录（历史脚本bug）
     if [ -d "$HOME/.routecodexundefined" ]; then
         echo "🗑️  移除异常目录 ~/.routecodexundefined ..."
@@ -198,8 +190,7 @@ main() {
     echo "🎉 全局安装完成!"
     echo ""
     echo "使用方法:"
-    echo "  routecodex         # 使用完整命令"
-    echo "  rcc                # 使用简写命令"
+    echo "  routecodex         # 全局 CLI 命令（dev 包）"
     echo ""
 
     # 如果有权限问题，给出提示

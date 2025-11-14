@@ -7,7 +7,7 @@
 
 import type { DebugCenter } from '../types/external-types.js';
 import type { LogData } from '../../../types/common-types.js';
-import { DebugEventBus } from 'rcc-debugcenter';
+import { DebugEventBus } from '../../debugcenter/debug-event-bus-shim.js';
 
 /**
  * Log entry interface

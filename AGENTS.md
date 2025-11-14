@@ -557,9 +557,11 @@ npm run build:verify
 - [ ] **推导过程**: 是否提供完整的分析和推导过程？
 - [ ] **README更新**: 修改完成后是否已同步更新README？
 
-## 📦 安装与升级（唯一安装脚本）
+## 📦 安装与升级（dev / release）
 
-使用唯一的安装脚本完成从构建到全局安装的完整流程：
+### dev 包（routecodex，默认安装）
+
+使用唯一的 dev 安装脚本完成从构建到全局安装的完整流程：
 
 ```bash
 npm run install:global
@@ -569,10 +571,32 @@ npm run install:global
 - 构建 sharedmodule/llmswitch-core 与根包（TypeScript → dist）
 - npm pack 生成 tgz 包
 - 卸载全局旧版 routecodex（若存在）
-- 使用 npm 默认全局路径执行 npm install -g 安装新版本
-- 验证安装（打印 routecodex --version）
+- 使用 npm 默认全局路径执行 `npm install -g .` 安装新版本 dev 包（只导出 `routecodex` 命令）
+- 验证安装（打印 `routecodex --version`）
 
 注意：不修改 npm prefix、不使用自定义 cache，完全遵循 npm 默认全局安装路径。
+
+### release 包（rcc，单独安装）
+
+release 版 CLI 使用单独脚本，从当前源码生成 rcc 包并全局安装：
+
+```bash
+npm run install:release
+```
+
+脚本执行步骤（概览）：
+- 基于当前源码运行一次完整构建
+- 使用 `npm pack` 生成临时 routecodex tgz，并在临时目录重写 `package.json` 为：
+  - `"name": "rcc"`
+  - `"bin": { "rcc": "./dist/cli.js" }`
+- 在临时目录再次 `npm pack` 生成 `rcc-<version>.tgz`
+- 卸载已有全局 rcc（若存在），再对 `rcc-<version>.tgz` 执行 `npm install -g`
+- 验证安装（打印 `rcc --version`）
+
+约束与原则：
+- 默认安装脚本 **只安装 dev 包 routecodex**，release `rcc` 必须显式执行 `npm run install:release`
+- dev 包 `routecodex`：用于本地开发与调试，默认端口 5555（除非显式 `ROUTECODEX_PORT` / `RCC_PORT` 指定）
+- release 包 `rcc`：严格按用户配置端口启动（`httpserver.port` / `server.port` / 顶层 `port`），不得复用 dev 默认 5555 逻辑
 
 ## 🚨 GRE错误治理流程
 
@@ -590,5 +614,5 @@ npm run install:global
 
 ---
 
-**最后更新**: 2025-11-05
-**版本**: 0.75.69
+**最后更新**: 2025-11-14
+**版本**: 0.81.23

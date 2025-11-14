@@ -62,7 +62,7 @@ const logger = {
   debug: (msg: string) => console.log(`${chalk.gray('◉')  } ${  msg}`)
 };
 
-// Ensure llmswitch-core is resolvable；先尝试依赖包，失败则回退到 vendor
+// Ensure llmswitch-core is resolvable（dev/worktree 场景下由 pipeline 加载 vendor）
 async function dynamicImport(p: string): Promise<any> {
   // Avoid TypeScript/ESM static resolution so we can probe optional entries safely
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
@@ -71,44 +71,41 @@ async function dynamicImport(p: string): Promise<any> {
 }
 
 async function ensureCoreOrFail(): Promise<void> {
-  // 优先通过 npm 依赖检测
-  try { await dynamicImport('rcc-llmswitch-core/package.json'); return; } catch { /* ignore */ }
-  try { await dynamicImport('rcc-llmswitch-core'); return; } catch { /* ignore */ }
-  // dev 模式允许使用本包内 vendor 兜底
-  try {
-    const { pathToFileURL } = await import('url');
-    const vendorPath = path.resolve(__dirname, '..', 'vendor', 'rcc-llmswitch-core', 'dist', 'index.js');
-    const url = pathToFileURL(vendorPath).href;
-    await dynamicImport(url);
-    return;
-  } catch { /* ignore */ }
-
-  logger.error('llmswitch-core not found (npm nor vendored).');
-  logger.error('请先安装依赖: npm i rcc-llmswitch-core@latest，或使用包含 vendor 的构建。');
-  process.exit(1);
+  // 在当前 worktree/dev 场景下：
+  // - llmswitch-core 已通过 sharedmodule/llmswitch-core 构建，并由 vendor/rcc-llmswitch-core/dist 提供；
+  // - 实际加载在 pipeline/server 模块内部完成；
+  // 这里不再做额外的模块解析探测，避免因为本地 node_modules 结构差异导致 CLI 直接失败。
+  return;
 }
 
-// 延后依赖检查：仅在需要启动/使用核心功能的命令里再检查
+// Top-level guard（Fail Fast，无兜底）
+await ensureCoreOrFail();
 
 // CLI program setup
 const program = new Command();
-let buildInfo: { mode: 'dev' | 'release'; version?: string } = { mode: 'release' } as any;
-try { buildInfo = (await import('./build-info.js')).buildInfo; } catch { /* fallback release */ }
 
-// Resolve version from package.json at runtime to avoid hardcoding mismatches
-const pkgVersion: string = (() => {
+// Resolve package metadata from package.json at runtime to avoid hardcoding mismatches
+const { pkgName, pkgVersion }: { pkgName: string; pkgVersion: string } = (() => {
   try {
     const pkgPath = path.resolve(__dirname, '..', 'package.json');
     const txt = fs.readFileSync(pkgPath, 'utf-8');
     const j = JSON.parse(txt);
-    return typeof j?.version === 'string' ? j.version : '0.0.0';
+    const name = typeof j?.name === 'string' ? j.name : 'routecodex';
+    const version = typeof j?.version === 'string' ? j.version : '0.0.0';
+    return { pkgName: name, pkgVersion: version };
   } catch {
-    return '0.0.0';
+    return { pkgName: 'routecodex', pkgVersion: '0.0.0' };
   }
 })();
 
+// Package variant:
+// - routecodex => dev 包（本地开发，默认端口 5555）
+// - rcc        => release 包（按配置端口启动）
+const IS_DEV_MODE = pkgName === 'routecodex';
+const DEFAULT_DEV_PORT = 5555;
+
 program
-  .name(buildInfo.mode === 'dev' ? 'routecodex' : 'rcc')
+  .name(pkgName === 'rcc' ? 'rcc' : 'routecodex')
   .description('RouteCodex CLI - Multi-provider OpenAI proxy server and Claude Code interface')
   .version(pkgVersion);
 
@@ -425,7 +422,6 @@ program
   .command('start')
   .description('Start the RouteCodex server')
   .option('-c, --config <config>', 'Configuration file path')
-  .option('-p, --port <port>', 'Server port (overrides config)')
   .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
   .option('--codex', 'Use Codex system prompt (tools unchanged)')
   .option('--claude', 'Use Claude system prompt (tools unchanged)')
@@ -474,7 +470,7 @@ program
         process.exit(1);
       }
 
-      // Load configuration (in release, port is required if not provided by CLI)
+      // Load and validate configuration (non-dev packages rely on config port)
       let config;
       try {
         const configContent = fs.readFileSync(configPath, 'utf8');
@@ -485,29 +481,27 @@ program
         process.exit(1);
       }
 
-      // Resolve port by mode: dev → default 5555; release → must be configured if no CLI override
-      let resolvedPort: number | null = null;
-      if (options.port) {
-        const n = Number(options.port);
-        if (!Number.isFinite(n) || n <= 0) {
-          spinner.fail('Invalid --port value');
+      // Determine effective port:
+      // - dev mode (routecodex invoked as `routecodex`): env override, otherwise fixed dev default 5555 (do not touch rcc on config port)
+      // - non-dev mode (invoked as `rcc` or other): config-driven port
+      let resolvedPort: number;
+      if (IS_DEV_MODE) {
+        const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
+        if (!Number.isNaN(envPort) && envPort > 0) {
+          logger.info(`Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT) [dev]`);
+          resolvedPort = envPort;
+        } else {
+          resolvedPort = DEFAULT_DEV_PORT;
+          logger.info(`Using dev default port ${resolvedPort} (routecodex dev)`);
+        }
+      } else {
+        const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
+        if (!port || typeof port !== 'number' || port <= 0) {
+          spinner.fail('Invalid or missing port configuration');
+          logger.error('Please set a valid port (httpserver.port or top-level port) in your configuration');
           process.exit(1);
         }
-        resolvedPort = n;
-      }
-      if (resolvedPort == null) {
-        const cfgPort = (config?.httpserver?.port ?? config?.server?.port ?? config?.port) ?? null;
-        if (buildInfo.mode === 'dev') {
-          resolvedPort = typeof cfgPort === 'number' && cfgPort > 0 ? cfgPort : 5555;
-        } else {
-          if (typeof cfgPort === 'number' && cfgPort > 0) {
-            resolvedPort = cfgPort;
-          } else {
-            spinner.fail('Invalid or missing port configuration');
-            logger.error('In release mode, please set httpserver.port (or pass --port) in your configuration');
-            process.exit(1);
-          }
-        }
+        resolvedPort = port;
       }
 
       // Ensure port state aligns with requested behavior (always take over to avoid duplicates)
@@ -533,8 +527,10 @@ program
       const env = { ...process.env } as NodeJS.ProcessEnv;
       // Ensure server process picks the intended user config path
       env.ROUTECODEX_CONFIG = configPath;
-      // Pass chosen port explicitly to server entry (dev/release aware)
-      try { env.ROUTECODEX_PORT = String(resolvedPort); } catch { /* ignore */ }
+      // For dev mode, force server to use the same effective port to keep CLI and server in sync
+      if (IS_DEV_MODE) {
+        env.ROUTECODEX_PORT = String(resolvedPort);
+      }
       const args: string[] = [serverEntry, modulesConfigPath];
 
       const childProc = spawn(nodeBin, args, { stdio: 'inherit', env });
@@ -897,7 +893,7 @@ program
         process.exit(1);
       }
 
-      // Load configuration to get port
+      // Load configuration to get port (non-dev packages rely on config port)
       let config;
       try {
         const configContent = fs.readFileSync(configPath, 'utf8');
@@ -908,14 +904,28 @@ program
         process.exit(1);
       }
 
-      const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
-      if (!port || typeof port !== 'number' || port <= 0) {
-        spinner.fail('Invalid or missing port configuration');
-        logger.error('Configuration file must specify a valid port number');
-        process.exit(1);
+      // Determine effective port for restart:
+      // - dev mode: env override, otherwise dev default 5555
+      // - non-dev mode: config-driven port
+      let resolvedPort: number;
+      if (IS_DEV_MODE) {
+        const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
+        if (!Number.isNaN(envPort) && envPort > 0) {
+          logger.info(`Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT) [dev]`);
+          resolvedPort = envPort;
+        } else {
+          resolvedPort = DEFAULT_DEV_PORT;
+          logger.info(`Using dev default port ${resolvedPort} (routecodex dev restart)`);
+        }
+      } else {
+        const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
+        if (!port || typeof port !== 'number' || port <= 0) {
+          spinner.fail('Invalid or missing port configuration');
+          logger.error('Configuration file must specify a valid port number');
+          process.exit(1);
+        }
+        resolvedPort = port;
       }
-
-      const resolvedPort = port;
 
       const pids = findListeningPids(resolvedPort);
       if (!pids.length) {
@@ -978,14 +988,21 @@ program
         process.exit(1);
       }
 
-      const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
-      if (!port || typeof port !== 'number' || port <= 0) {
-        spinner.fail('Invalid or missing port configuration');
-        logger.error('Configuration file must specify a valid port number');
-        process.exit(1);
+      // Determine effective port with environment override first
+      const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
+      let resolvedPort: number;
+      if (!Number.isNaN(envPort) && envPort > 0) {
+        logger.info(`Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT)`);
+        resolvedPort = envPort;
+      } else {
+        const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
+        if (!port || typeof port !== 'number' || port <= 0) {
+          spinner.fail('Invalid or missing port configuration');
+          logger.error('Configuration file must specify a valid port number');
+          process.exit(1);
+        }
+        resolvedPort = port;
       }
-
-      const resolvedPort = port;
 
       // Stop current instance (if any)
       const pids = findListeningPids(resolvedPort);
@@ -1021,6 +1038,10 @@ program
 
       const modulesConfigPath = getModulesConfigPath();
       const env = { ...process.env } as NodeJS.ProcessEnv;
+      // Keep server port aligned with restart logic in dev mode
+      if (IS_DEV_MODE) {
+        env.ROUTECODEX_PORT = String(resolvedPort);
+      }
       const args: string[] = [serverEntry, modulesConfigPath];
       const child = spawn(nodeBin, args, { stdio: 'inherit', env });
       try { fs.writeFileSync(path.join(homedir(), '.routecodex', 'server.cli.pid'), String(child.pid ?? ''), 'utf8'); } catch (error) { /* ignore */ }
@@ -1608,14 +1629,30 @@ program
           process.exit(1);
         }
         const cfg = JSON.parse(fs.readFileSync(userCfgPath, 'utf8'));
-        const port = (cfg?.httpserver?.port ?? cfg?.server?.port ?? cfg?.port);
-        if (!port || typeof port !== 'number' || port <= 0) {
-          spinner.fail('Invalid or missing port configuration');
-          process.exit(1);
+        // Determine effective port in monitor mode:
+        // - dev mode: env override, otherwise dev default (do not touch rcc on config port)
+        // - non-dev mode: config-driven port
+        let resolvedPort: number;
+        if (IS_DEV_MODE) {
+          const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
+          if (!Number.isNaN(envPort) && envPort > 0) {
+            console.log(chalk.gray(`Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT) [dev monitor]`));
+            resolvedPort = envPort;
+          } else {
+            resolvedPort = DEFAULT_DEV_PORT;
+            console.log(chalk.gray(`Using dev default port ${resolvedPort} for monitor mode`));
+          }
+        } else {
+          const port = (cfg?.httpserver?.port ?? cfg?.server?.port ?? cfg?.port);
+          if (!port || typeof port !== 'number' || port <= 0) {
+            spinner.fail('Invalid or missing port configuration');
+            process.exit(1);
+          }
+          resolvedPort = port;
         }
 
         // Free port if requested via --restart equivalent (optional)
-        await ensurePortAvailable(port, spinner, { restart: true });
+        await ensurePortAvailable(resolvedPort, spinner, { restart: true });
 
         const nodeBin = process.execPath;
         const serverEntry = path.resolve(__dirname, 'index.js');
@@ -1623,6 +1660,9 @@ program
         const { spawn } = await import('child_process');
         const env = { ...process.env } as NodeJS.ProcessEnv;
         env.ROUTECODEX_CONFIG = userCfgPath;
+        if (IS_DEV_MODE) {
+          env.ROUTECODEX_PORT = String(resolvedPort);
+        }
         // Enable runtime monitoring in passive A/B mode by default
         env.ROUTECODEX_MONITOR_ENABLED = '1';
         env.ROUTECODEX_MONITOR_AB = '1';
@@ -1632,7 +1672,7 @@ program
         console.log('Press Ctrl+C to stop');
 
         const shutdown = async (sig: NodeJS.Signals) => {
-          try { await fetch(`http://127.0.0.1:${port}/shutdown`, { method: 'POST' } as any).catch(() => null); } catch {}
+          try { await fetch(`http://127.0.0.1:${resolvedPort}/shutdown`, { method: 'POST' } as any).catch(() => null); } catch {}
           try { child.kill(sig); } catch {}
           process.exit(0);
         };

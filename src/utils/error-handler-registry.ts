@@ -4,34 +4,10 @@
  * Provides standardized error handling across all modules
  */
 
-// Import error handling components with proper type handling
-import * as debugcenter from 'rcc-debugcenter';
-import * as errorhandling from 'rcc-errorhandling';
-
-// Check if ErrorHandlingCenter exists, fallback to mock if not
-const EHC = (errorhandling as Record<string, unknown>).ErrorHandlingCenter as (new () => {
-  initialize: () => Promise<void>;
-  handleError: (ctx?: unknown) => Promise<void>;
-  destroy: () => Promise<void>;
-}) | undefined;
-const ErrorHandlingCenterClass: new () => {
-  initialize: () => Promise<void>;
-  handleError: (ctx?: unknown) => Promise<void>;
-  destroy: () => Promise<void>;
-} = EHC ??
-  class {
-    async initialize() {/* noop */}
-    async handleError() {/* noop */}
-    async destroy() {/* noop */}
-  };
-
-// Check if DebugEventBus exists, fallback to mock if not
-const USE_DEBUGCENTER = String(process.env.ROUTECODEX_ENABLE_DEBUGCENTER || '0') === '1';
-const DEB = (debugcenter as Record<string, unknown>).DebugEventBus as { getInstance: () => { publish: (evt: unknown) => void } } | undefined;
-const DebugEventBusClass: { getInstance: () => { publish: (evt: unknown) => void } } =
-  (USE_DEBUGCENTER && DEB)
-    ? DEB
-    : { getInstance: () => ({ publish: (_evt: unknown) => {} }) };
+// 在 dev/worktree 场景下，直接使用本仓库提供的 shim 实现，
+// 避免对 rcc-debugcenter / rcc-errorhandling 的运行时依赖。
+import { ErrorHandlingCenter } from '../modules/errorhandling/error-handling-center-shim.js';
+import { DebugEventBus } from '../modules/debugcenter/debug-event-bus-shim.js';
 
 // Define ErrorContext interface locally
 interface ErrorContext {
@@ -83,8 +59,8 @@ export class ErrorHandlerRegistry {
   private initialized: boolean = false;
 
   private constructor() {
-    this.errorHandlingCenter = new ErrorHandlingCenterClass();
-    this.debugEventBus = DebugEventBusClass.getInstance();
+    this.errorHandlingCenter = new ErrorHandlingCenter();
+    this.debugEventBus = DebugEventBus.getInstance();
   }
 
   /**

@@ -22,7 +22,7 @@ import { BasePipeline } from './base-pipeline.js';
 import { PipelineModuleRegistryImpl } from '../core/pipeline-registry.js';
 import { PipelineDebugLogger } from '../utils/debug-logger.js';
 import { ErrorHandlerRegistry } from '../../../utils/error-handler-registry.js';
-import { DebugEventBus } from 'rcc-debugcenter';
+import { DebugEventBus } from '../../debugcenter/debug-event-bus-shim.js';
 import { Key429Tracker, /* type Key429ErrorRecord */ } from '../../../utils/key-429-tracker.js';
 import { PipelineHealthManager } from '../../../utils/pipeline-health-manager.js';
 
