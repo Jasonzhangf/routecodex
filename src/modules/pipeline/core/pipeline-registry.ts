@@ -13,7 +13,7 @@ import type {
   ModuleDependencies
 } from '../interfaces/pipeline-interfaces.js';
 // import type { DebugCenter } from '../types/external-types.js';
-import { DebugEventBus } from 'rcc-debugcenter';
+import { DebugEventBus } from '../../debugcenter/debug-event-bus-shim.js';
 
 /**
  * Registry entry for module factories

@@ -10,9 +10,9 @@
  */
 
 import express, { type Application, type Request, type Response } from 'express';
-import { BaseModule, type ModuleInfo } from 'rcc-basemodule';
-import { ErrorHandlingCenter } from 'rcc-errorhandling';
-import { DebugEventBus } from 'rcc-debugcenter';
+import { BaseModule, type ModuleInfo } from '../../modules/config-manager/base-module-shim.js';
+import { ErrorHandlingCenter } from '../../modules/errorhandling/error-handling-center-shim.js';
+import { DebugEventBus } from '../../modules/debugcenter/debug-event-bus-shim.js';
 import type { UnknownObject } from '../../types/common-types.js';
 import { ServerV2HookIntegration, type ServerV2HookContext } from '../hooks/server-v2-hook-integration.js';
 import { ServerRequestLoggingHook } from '../hooks/impl/server-request-logging-hook.js';

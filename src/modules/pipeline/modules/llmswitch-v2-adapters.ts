@@ -8,7 +8,6 @@ async function importCore(subpath: string): Promise<any> {
   const clean = subpath.replace(/\.js$/i, '');
   const spec = `rcc-llmswitch-core/${clean}`;
   try {
-    // 动态 ESM 按包导入，依赖包内 exports 映射（独立模块负责暴露路径）
     return await import(spec);
   } catch (e) {
     const msg = (e as any)?.message || String(e);

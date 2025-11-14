@@ -23,7 +23,7 @@ import type {
 } from '../interfaces/pipeline-interfaces.js';
 import { PipelineErrorIntegration } from '../utils/error-integration.js';
 import { PipelineDebugLogger } from '../utils/debug-logger.js';
-import { DebugEventBus } from 'rcc-debugcenter';
+import { DebugEventBus } from '../../debugcenter/debug-event-bus-shim.js';
 import type { SharedPipelineRequest, SharedPipelineResponse } from '../../../types/shared-dtos.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 

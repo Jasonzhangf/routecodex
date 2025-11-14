@@ -3,7 +3,7 @@
  * 仅依赖 rcc-config-core 生成 merged-config 与 V2 装配输入
  */
 
-import { BaseModule } from 'rcc-basemodule';
+import { BaseModule } from './base-module-shim.js';
 import type { UnknownObject } from '../../types/common-types.js';
 import { AuthFileResolver } from '../../config/auth-file-resolver.js';
 import path from 'path';

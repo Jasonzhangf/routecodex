@@ -1,13 +1,12 @@
 {
   "name": "routecodex",
-  "version": "0.81.21",
+  "version": "0.81.23",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "bin": {
-    "routecodex": "./dist/cli.js",
-    "rcc": "./dist/cli.js"
+    "routecodex": "./dist/cli.js"
   },
   "exports": {
     ".": {
@@ -34,8 +33,6 @@
   },
   "scripts": {
     "build": "node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && tsc && node scripts/copy-compat-assets.mjs",
-    "build:mode:dev": "BUILD_MODE=dev node scripts/gen-build-info.mjs && npm run -s build",
-    "build:mode:release": "BUILD_MODE=release node scripts/gen-build-info.mjs && npm run -s build",
     "build:dev": "npm run clean && node scripts/build-core.mjs && tsc && node scripts/copy-compat-assets.mjs",
     "build:min": "node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && tsc && node scripts/copy-compat-configs.mjs",
     "prepack": "echo skip-prepack",
@@ -59,12 +56,8 @@
     "prebuild": "echo skip-lint",
     "prepare": "",
     "postinstall": "chmod +x dist/cli.js || true",
-    "pack:dev": "node scripts/pack-mode.mjs --name routecodex --bin routecodex",
-    "pack:release": "node scripts/pack-mode.mjs --name rcc --bin rcc",
-    "install:global": "npm run -s build:mode:dev && npm run -s pack:dev && npm i -g ./routecodex-*.tgz",
-    "install:global:dev": "npm run -s build:mode:dev && npm run -s pack:dev && npm i -g ./routecodex-*.tgz",
-    "install:global:release": "npm run -s build:mode:release && npm run -s pack:release && npm i -g ./rcc-*.tgz",
-    "publish:release": "npm run -s build:mode:release && npm run -s pack:release && npm publish ./rcc-*.tgz",
+    "install:global": "./scripts/install-global.sh",
+    "install:release": "./scripts/install-release.sh",
     "audit:tool-text": "node scripts/audit-tool-text.mjs",
     "start:bg": "bash scripts/run-bg.sh -- 'node dist/index.js'",
     "start:fg": "bash scripts/run-fg-gtimeout.sh 12 -- 'node dist/index.js'",
@@ -114,7 +107,6 @@
     "license:check": "echo 'license check temporarily disabled'",
     "ncu:check": "ncu --errorLevel 2",
     "package:validate": "npx package-json-validator",
-    "analyze:tools:fileops": "node scripts/analyze-tools-fileops.mjs",
     "test:consistency": "node scripts/v2-consistency/run-consistency-test.mjs",
     "test:v2:tools": "node tests/v2/dist/tool-processing-test.js",
     "test:v2:protocol": "node tests/v2/dist/protocol-conversion-test.js",
@@ -142,7 +134,7 @@
     "rcc-config-core": "^0.1.6",
     "rcc-debugcenter": "^0.1.6",
     "rcc-errorhandling": "^1.0.10",
-    "rcc-llmswitch-core": "^0.3.12",
+    "rcc-llmswitch-core": "file:sharedmodule/llmswitch-core/rcc-llmswitch-core-0.3.12.tgz",
     "socket.io": "^4.8.1",
     "zod": "^3.23.8"
   },

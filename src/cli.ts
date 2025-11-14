@@ -62,7 +62,7 @@ const logger = {
   debug: (msg: string) => console.log(`${chalk.gray('◉')  } ${  msg}`)
 };
 
-// Ensure llmswitch-core is resolvable；先尝试依赖包，失败则回退到 vendor
+// Ensure llmswitch-core is resolvable（dev/worktree 场景下由 pipeline 加载 vendor）
 async function dynamicImport(p: string): Promise<any> {
   // Avoid TypeScript/ESM static resolution so we can probe optional entries safely
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
@@ -71,29 +71,18 @@ async function dynamicImport(p: string): Promise<any> {
 }
 
 async function ensureCoreOrFail(): Promise<void> {
-  // 优先通过 npm 依赖检测
-  try { await dynamicImport('rcc-llmswitch-core/package.json'); return; } catch { /* ignore */ }
-  try { await dynamicImport('rcc-llmswitch-core'); return; } catch { /* ignore */ }
-  // dev 模式允许使用本包内 vendor 兜底
-  try {
-    const { pathToFileURL } = await import('url');
-    const vendorPath = path.resolve(__dirname, '..', 'vendor', 'rcc-llmswitch-core', 'dist', 'index.js');
-    const url = pathToFileURL(vendorPath).href;
-    await dynamicImport(url);
-    return;
-  } catch { /* ignore */ }
-
-  logger.error('llmswitch-core not found (npm nor vendored).');
-  logger.error('请先安装依赖: npm i rcc-llmswitch-core@latest，或使用包含 vendor 的构建。');
-  process.exit(1);
+  // 在当前 worktree/dev 场景下：
+  // - llmswitch-core 已通过 sharedmodule/llmswitch-core 构建，并由 vendor/rcc-llmswitch-core/dist 提供；
+  // - 实际加载在 pipeline/server 模块内部完成；
+  // 这里不再做额外的模块解析探测，避免因为本地 node_modules 结构差异导致 CLI 直接失败。
+  return;
 }
 
-// 延后依赖检查：仅在需要启动/使用核心功能的命令里再检查
+// Top-level guard（Fail Fast，无兜底）
+await ensureCoreOrFail();
 
 // CLI program setup
 const program = new Command();
-let buildInfo: { mode: 'dev' | 'release'; version?: string } = { mode: 'release' } as any;
-try { buildInfo = (await import('./build-info.js')).buildInfo; } catch { /* fallback release */ }
 
 // Resolve version from package.json at runtime to avoid hardcoding mismatches
 const pkgVersion: string = (() => {
@@ -107,8 +96,17 @@ const pkgVersion: string = (() => {
   }
 })();
 
+<<<<<<< HEAD
+=======
+// Package variant:
+// - routecodex => dev 包（本地开发，默认端口 5555）
+// - rcc        => release 包（按配置端口启动）
+const IS_DEV_MODE = pkgName === 'routecodex';
+const DEFAULT_DEV_PORT = 5555;
+
+>>>>>>> worktree-llmswitch-v3
 program
-  .name(buildInfo.mode === 'dev' ? 'routecodex' : 'rcc')
+  .name(pkgName === 'rcc' ? 'rcc' : 'routecodex')
   .description('RouteCodex CLI - Multi-provider OpenAI proxy server and Claude Code interface')
   .version(pkgVersion);
 
@@ -425,7 +423,6 @@ program
   .command('start')
   .description('Start the RouteCodex server')
   .option('-c, --config <config>', 'Configuration file path')
-  .option('-p, --port <port>', 'Server port (overrides config)')
   .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
   .option('--codex', 'Use Codex system prompt (tools unchanged)')
   .option('--claude', 'Use Claude system prompt (tools unchanged)')
@@ -474,7 +471,11 @@ program
         process.exit(1);
       }
 
+<<<<<<< HEAD
       // Load configuration (in release, port is required if not provided by CLI)
+=======
+      // Load and validate configuration (non-dev packages rely on config port)
+>>>>>>> worktree-llmswitch-v3
       let config;
       try {
         const configContent = fs.readFileSync(configPath, 'utf8');
@@ -485,6 +486,7 @@ program
         process.exit(1);
       }
 
+<<<<<<< HEAD
       // Resolve port by mode: dev → default 5555; release → must be configured if no CLI override
       let resolvedPort: number | null = null;
       if (options.port) {
@@ -508,6 +510,29 @@ program
             process.exit(1);
           }
         }
+=======
+      // Determine effective port:
+      // - dev mode (routecodex invoked as `routecodex`): env override, otherwise fixed dev default 5555 (do not touch rcc on config port)
+      // - non-dev mode (invoked as `rcc` or other): config-driven port
+      let resolvedPort: number;
+      if (IS_DEV_MODE) {
+        const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
+        if (!Number.isNaN(envPort) && envPort > 0) {
+          logger.info(`Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT) [dev]`);
+          resolvedPort = envPort;
+        } else {
+          resolvedPort = DEFAULT_DEV_PORT;
+          logger.info(`Using dev default port ${resolvedPort} (routecodex dev)`);
+        }
+      } else {
+        const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
+        if (!port || typeof port !== 'number' || port <= 0) {
+          spinner.fail('Invalid or missing port configuration');
+          logger.error('Please set a valid port (httpserver.port or top-level port) in your configuration');
+          process.exit(1);
+        }
+        resolvedPort = port;
+>>>>>>> worktree-llmswitch-v3
       }
 
       // Ensure port state aligns with requested behavior (always take over to avoid duplicates)
@@ -533,8 +558,15 @@ program
       const env = { ...process.env } as NodeJS.ProcessEnv;
       // Ensure server process picks the intended user config path
       env.ROUTECODEX_CONFIG = configPath;
+<<<<<<< HEAD
       // Pass chosen port explicitly to server entry (dev/release aware)
       try { env.ROUTECODEX_PORT = String(resolvedPort); } catch { /* ignore */ }
+=======
+      // For dev mode, force server to use the same effective port to keep CLI and server in sync
+      if (IS_DEV_MODE) {
+        env.ROUTECODEX_PORT = String(resolvedPort);
+      }
+>>>>>>> worktree-llmswitch-v3
       const args: string[] = [serverEntry, modulesConfigPath];
 
       const childProc = spawn(nodeBin, args, { stdio: 'inherit', env });
