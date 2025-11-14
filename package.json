@@ -57,6 +57,7 @@
     "prepare": "",
     "postinstall": "chmod +x dist/cli.js || true",
     "install:global": "./scripts/install-global.sh",
+    "install:release": "./scripts/install-release.sh",
     "audit:tool-text": "node scripts/audit-tool-text.mjs",
     "start:bg": "bash scripts/run-bg.sh -- 'node dist/index.js'",
     "start:fg": "bash scripts/run-fg-gtimeout.sh 12 -- 'node dist/index.js'",
