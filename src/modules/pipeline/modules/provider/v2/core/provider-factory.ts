@@ -109,12 +109,20 @@ export class ProviderFactory {
         errors.push('Missing required field for apikey auth: apiKey');
       }
 
-      if (auth.type === 'oauth' && !auth.clientId) {
-        errors.push('Missing required field for oauth auth: clientId');
-      }
+      if (auth.type === 'oauth') {
+        const ptype = String(config.config.providerType || '').toLowerCase();
+        const isQwen = ptype === 'qwen';
+        const isIflow = ptype === 'iflow';
 
-      if (auth.type === 'oauth' && !auth.tokenUrl) {
-        errors.push('Missing required field for oauth auth: tokenUrl');
+        // 对于 qwen / iflow 等内置 OAuth provider，clientId/tokenUrl 可从默认配置或环境推断，
+        // 因此不强制要求在用户配置中显式提供，避免硬编码凭证。
+        if (!auth.clientId && !isQwen && !isIflow) {
+          errors.push('Missing required field for oauth auth: clientId');
+        }
+
+        if (!auth.tokenUrl && !isQwen && !isIflow) {
+          errors.push('Missing required field for oauth auth: tokenUrl');
+        }
       }
     }
 

@@ -415,9 +415,12 @@ export class RouteCodexServerV2 extends BaseModule {
           throw new Error('Pipeline Manager not available');
         }
 
-        // 构建PipelineRequest（按照V1方式）
+        // 构建PipelineRequest（按照V1方式）——模型必须由客户端显式提供
+        if (!req.body?.model) {
+          throw new Error('Model is required for V2 chat completions');
+        }
         const pipelineRequest = {
-          model: req.body.model || 'gpt-3.5-turbo',
+          model: req.body.model,
           messages: req.body.messages || [],
           stream: req.body.stream || false,
           tools: req.body.tools,

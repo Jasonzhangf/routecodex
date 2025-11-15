@@ -115,6 +115,45 @@ export class ConfigManagerModule extends BaseModule {
         assemblerConfig.routePools = pools;
       }
     } catch { /* non-fatal */ }
+
+    // 补全 Provider V2 所需的 auth 配置（特别是 OAuth 场景，例如 qwen）
+    // 注意：rcc-config-core 的 canonical 目前不会保留 providers[].auth，只保留 keyVault；
+    // 这里从 user config 中提取 auth 并注入到 assemblerConfig.pipelines[].modules.provider.config.auth。
+    try {
+      const userData = (usr as any)?.data || {};
+      const vrUser = (userData as any).virtualrouter || {};
+      const userProviders = (vrUser as any).providers || (userData as any).providers || {};
+      const providerAuthMap: Record<string, unknown> = {};
+      for (const [provId, rawProv] of Object.entries(userProviders as Record<string, any>)) {
+        const auth = (rawProv as any)?.auth;
+        if (auth && typeof auth === 'object' && 'type' in auth) {
+          providerAuthMap[provId] = auth;
+        }
+      }
+
+      if (assemblerConfig && Array.isArray(assemblerConfig.pipelines) && Object.keys(providerAuthMap).length) {
+        for (const p of assemblerConfig.pipelines as any[]) {
+          const providerModule = (p as any)?.modules?.provider;
+          const cfg = providerModule?.config || providerModule?.moduleConfig || null;
+          if (!cfg) continue;
+          if (cfg.auth && typeof cfg.auth === 'object' && 'type' in cfg.auth) continue;
+
+          const provId: string =
+            typeof cfg.providerId === 'string' && cfg.providerId.trim()
+              ? cfg.providerId.trim()
+              : (typeof p.id === 'string' && p.id.includes('.')
+                  ? p.id.split('.')[0]
+                  : '');
+          if (!provId) continue;
+
+          const auth = providerAuthMap[provId];
+          if (auth) {
+            cfg.auth = auth;
+            providerModule.config = cfg;
+          }
+        }
+      }
+    } catch { /* non-fatal auth injection */ }
     const mergedWithPac = { ...built.merged, pipeline_assembler: { config: assemblerConfig } } as Record<string, unknown>;
     await core.writeMerged(this.mergedConfigPath, mergedWithPac);
   }

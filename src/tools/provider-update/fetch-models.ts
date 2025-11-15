@@ -1,4 +1,5 @@
 import fetch from 'node-fetch';
+import path from 'path';
 import { createProviderOAuthStrategy } from '../../modules/pipeline/modules/provider/v2/config/provider-oauth-configs.js';
 import { buildAuthHeaders } from './auth-headers.js';
 import { normalizeBaseUrlForModels } from './url-normalize.js';
@@ -40,7 +41,16 @@ async function buildOAuthHeaders(provider: ProviderInputConfig, providerKind: st
     if (Array.isArray(auth.scopes) && auth.scopes.length > 0) client.scopes = auth.scopes;
     if (Object.keys(client).length > 0) overrides.client = client;
 
-    const strategy: any = createProviderOAuthStrategy(kind, overrides);
+    // 统一 tokenFile 路径，避免与运行时 OAuth 流程使用不同文件导致重复授权：
+    // - qwen: ~/.routecodex/auth/qwen-oauth.json （对齐 oauth-lifecycle 默认）
+    // - iflow: 保持默认（~/.iflow/oauth_creds.json）
+    const home = process.env.HOME || '';
+    const tokenFile =
+      kind === 'qwen'
+        ? path.join(home, '.routecodex', 'auth', 'qwen-oauth.json')
+        : undefined;
+
+    const strategy: any = createProviderOAuthStrategy(kind, overrides, tokenFile);
 
     // Try existing token first
     let token: any = null;

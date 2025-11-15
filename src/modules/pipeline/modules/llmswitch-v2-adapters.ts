@@ -1,17 +1,21 @@
 import type { ModuleConfig, ModuleDependencies, PipelineModule } from '../interfaces/pipeline-interfaces.js';
 import path from 'path';
 // Orchestration moved into llmswitch-core; adapters delegate to core bridge
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
-// Runtime resolver: import from installed package only（严格，无兜底）
+// Runtime resolver: import from vendored llmswitch-core dist（严格，Fail Fast）
 async function importCore(subpath: string): Promise<any> {
   const clean = subpath.replace(/\.js$/i, '');
-  const spec = `rcc-llmswitch-core/${clean}`;
+  const filename = `${clean}.js`;
   try {
-    return await import(spec);
+    const __filename = fileURLToPath(import.meta.url);
+    const pkgRoot = path.resolve(path.dirname(__filename), '../../../..');
+    const target = path.join(pkgRoot, 'vendor', 'rcc-llmswitch-core', 'dist', filename);
+    const url = pathToFileURL(target).href;
+    return await import(url);
   } catch (e) {
     const msg = (e as any)?.message || String(e);
-    throw new Error(`[llmswitch] import failed: ${spec}: ${msg}`);
+    throw new Error(`[llmswitch] import failed: vendor/rcc-llmswitch-core/dist/${filename}: ${msg}`);
   }
 }
 

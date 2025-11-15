@@ -102,8 +102,13 @@ export function buildOrUpdateProviderConfig(args: BuildConfigArgs): { config: Js
   // Set default routing if empty
   const vr = existing.virtualrouter;
   const route = Array.isArray(vr.routing?.default) ? vr.routing.default : [];
-  if (!route || route.length === 0) {
-    // Prefer glm-4.6 if available; else first model
+  const routeModels = (route || []).map((r: string) => {
+    const parts = String(r || '').split('.');
+    return parts.length > 1 ? parts[1] : parts[0];
+  }).filter(Boolean);
+  const hasValidDefault = routeModels.some((m: string) => modelsFiltered.includes(m));
+  if (!route || route.length === 0 || !hasValidDefault) {
+    // Prefer glm-4.6 if available; else首个可用模型
     const preferred = modelsFiltered.includes('glm-4.6') ? 'glm-4.6' : (modelsFiltered[0] || null);
     if (preferred) vr.routing.default = [`${providerId}.${preferred}`];
   }

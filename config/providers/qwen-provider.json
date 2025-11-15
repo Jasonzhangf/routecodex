@@ -5,6 +5,9 @@
     "baseUrl": "https://portal.qwen.ai/v1",
     "auth": {
       "type": "oauth"
-    }
+    },
+    "models": [
+      "qwen3-coder-plus"
+    ]
   }
 }

@@ -65,7 +65,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     // OAuth 设备码/令牌端点在 chat.qwen.ai 下，由 provider-oauth-configs 提供
     defaultBaseUrl: 'https://portal.qwen.ai/v1',
     defaultEndpoint: '/chat/completions',
-    defaultModel: 'qwen-plus',
+    // 默认模型对齐当前配置，只保留 qwen3-coder-plus
+    defaultModel: 'qwen3-coder-plus',
     requiredAuth: [],
     optionalAuth: ['apikey','oauth'],
     headers: {

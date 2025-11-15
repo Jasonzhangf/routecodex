@@ -8,8 +8,51 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS, DEFAULT_CONFIG, API_ENDPOINTS } from "./constants/index.js";import fs from 'fs';
-import ora from 'ora';
-import type { Ora } from 'ora';
+// Spinner wrapper (lazy-loaded to avoid hard dependency on ora/restore-cursor issues)
+type Spinner = {
+  start(text?: string): Spinner;
+  succeed(text?: string): void;
+  fail(text?: string): void;
+  warn(text?: string): void;
+  info(text?: string): void;
+  stop(): void;
+  text: string;
+};
+async function createSpinner(text: string): Promise<Spinner> {
+  try {
+    const mod: any = await dynamicImport('ora');
+    const oraFn: any = mod?.default || mod;
+    if (typeof oraFn === 'function') {
+      const s = oraFn(text);
+      return s.start();
+    }
+  } catch {
+    // fall through to stub
+  }
+  // Fallback stub spinner that just logs messages
+  let currentText = text;
+  const log = (prefix: string, msg?: string) => {
+    const m = msg ?? currentText;
+    if (!m) return;
+    // eslint-disable-next-line no-console
+    console.log(`${prefix} ${m}`);
+  };
+  const stub: any = {
+    start(msg?: string) {
+      if (msg) currentText = msg;
+      log('...', msg);
+      return stub;
+    },
+    succeed(msg?: string) { log('✓', msg); },
+    fail(msg?: string) { log('✗', msg); },
+    warn(msg?: string) { log('⚠', msg); },
+    info(msg?: string) { log('ℹ', msg); },
+    stop() { /* no-op */ },
+    get text() { return currentText; },
+    set text(v: string) { currentText = v; }
+  };
+  return stub as Spinner;
+}
 import path from "path";import { homedir } from 'os';
 import { spawnSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -96,15 +139,26 @@ const pkgVersion: string = (() => {
   }
 })();
 
-<<<<<<< HEAD
-=======
+// Resolve package name to distinguish dev/release variants
+const pkgName: string = (() => {
+  try {
+    const pkgPath = path.resolve(__dirname, '..', 'package.json');
+    const txt = fs.readFileSync(pkgPath, 'utf-8');
+    const j = JSON.parse(txt);
+    if (typeof j?.name === 'string' && j.name.trim()) {
+      return j.name.trim();
+    }
+  } catch {
+    // ignore and fall back
+  }
+  return 'routecodex';
+})();
+
 // Package variant:
 // - routecodex => dev 包（本地开发，默认端口 5555）
 // - rcc        => release 包（按配置端口启动）
 const IS_DEV_MODE = pkgName === 'routecodex';
 const DEFAULT_DEV_PORT = 5555;
-
->>>>>>> worktree-llmswitch-v3
 program
   .name(pkgName === 'rcc' ? 'rcc' : 'routecodex')
   .description('RouteCodex CLI - Multi-provider OpenAI proxy server and Claude Code interface')
@@ -141,7 +195,7 @@ program
   .action(async (...cmdArgs) => {
     const options = cmdArgs.pop() as any; // Commander passes options as last arg
     const extraArgsFromCommander: string[] = Array.isArray(cmdArgs[0]) ? (cmdArgs[0] as string[]) : [];
-    const spinner = ora('Preparing Claude Code with RouteCodex...').start();
+    const spinner = await createSpinner('Preparing Claude Code with RouteCodex...');
 
     try {
       // Resolve configuration and determine port
@@ -429,7 +483,7 @@ program
   .option('--restart', 'Restart if an instance is already running')
   .option('--exclusive', 'Always take over the port (kill existing listeners)')
   .action(async (options) => {
-    const spinner = ora('Starting RouteCodex server...').start();
+    const spinner = await createSpinner('Starting RouteCodex server...');
 
     try {
       // Validate system prompt replacement flags
@@ -471,11 +525,7 @@ program
         process.exit(1);
       }
 
-<<<<<<< HEAD
-      // Load configuration (in release, port is required if not provided by CLI)
-=======
       // Load and validate configuration (non-dev packages rely on config port)
->>>>>>> worktree-llmswitch-v3
       let config;
       try {
         const configContent = fs.readFileSync(configPath, 'utf8');
@@ -486,31 +536,6 @@ program
         process.exit(1);
       }
 
-<<<<<<< HEAD
-      // Resolve port by mode: dev → default 5555; release → must be configured if no CLI override
-      let resolvedPort: number | null = null;
-      if (options.port) {
-        const n = Number(options.port);
-        if (!Number.isFinite(n) || n <= 0) {
-          spinner.fail('Invalid --port value');
-          process.exit(1);
-        }
-        resolvedPort = n;
-      }
-      if (resolvedPort == null) {
-        const cfgPort = (config?.httpserver?.port ?? config?.server?.port ?? config?.port) ?? null;
-        if (buildInfo.mode === 'dev') {
-          resolvedPort = typeof cfgPort === 'number' && cfgPort > 0 ? cfgPort : 5555;
-        } else {
-          if (typeof cfgPort === 'number' && cfgPort > 0) {
-            resolvedPort = cfgPort;
-          } else {
-            spinner.fail('Invalid or missing port configuration');
-            logger.error('In release mode, please set httpserver.port (or pass --port) in your configuration');
-            process.exit(1);
-          }
-        }
-=======
       // Determine effective port:
       // - dev mode (routecodex invoked as `routecodex`): env override, otherwise fixed dev default 5555 (do not touch rcc on config port)
       // - non-dev mode (invoked as `rcc` or other): config-driven port
@@ -532,7 +557,6 @@ program
           process.exit(1);
         }
         resolvedPort = port;
->>>>>>> worktree-llmswitch-v3
       }
 
       // Ensure port state aligns with requested behavior (always take over to avoid duplicates)
@@ -558,15 +582,10 @@ program
       const env = { ...process.env } as NodeJS.ProcessEnv;
       // Ensure server process picks the intended user config path
       env.ROUTECODEX_CONFIG = configPath;
-<<<<<<< HEAD
-      // Pass chosen port explicitly to server entry (dev/release aware)
-      try { env.ROUTECODEX_PORT = String(resolvedPort); } catch { /* ignore */ }
-=======
       // For dev mode, force server to use the same effective port to keep CLI and server in sync
       if (IS_DEV_MODE) {
         env.ROUTECODEX_PORT = String(resolvedPort);
       }
->>>>>>> worktree-llmswitch-v3
       const args: string[] = [serverEntry, modulesConfigPath];
 
       const childProc = spawn(nodeBin, args, { stdio: 'inherit', env });
@@ -700,7 +719,7 @@ program
 
 // Initialize configuration helper function
 async function initializeConfig(configPath: string, template?: string, force: boolean = false) {
-  const spinner = ora('Initializing configuration...').start();
+  const spinner = await createSpinner('Initializing configuration...');
 
   try {
     // Create config directory if it doesn't exist
@@ -806,35 +825,13 @@ async function initializeConfig(configPath: string, template?: string, force: bo
                   supportsTools: true
                 }
               }
-            },
-            iflow: {
-              type: "iflow-http",
-              baseUrl: "https://api.iflow.cn/v1",
-              oauth: {
-                clientId: "10009311001",
-                clientSecret: "4Z3YjXycVsQvyGF1etiNlIBB4RsqSDtW",
-                authUrl: "https://iflow.cn/oauth",
-                tokenUrl: "https://iflow.cn/oauth/token",
-                deviceCodeUrl: "https://iflow.cn/oauth/device/code",
-                scopes: ["openid", "profile", "api"]
-              },
-              models: {
-                "iflow-pro": {
-                  maxTokens: 32768,
-                  temperature: 0.7,
-                  supportsStreaming: true,
-                  supportsTools: true
-                }
-              }
             }
           },
           routing: {
             default: "qwen",
             models: {
               "gpt-4": "qwen3-coder-plus",
-              "gpt-3.5-turbo": "qwen3-coder-plus",
-              "claude-3-haiku": "qwen3-coder-plus",
-              "claude-3-sonnet": "iflow-pro"
+              "gpt-3.5-turbo": "qwen3-coder-plus"
             }
           },
           features: {
@@ -915,7 +912,7 @@ program
   .command('stop')
   .description('Stop the RouteCodex server')
   .action(async (options) => {
-    const spinner = ora('Stopping RouteCodex server...').start();
+    const spinner = await createSpinner('Stopping RouteCodex server...');
     try {
       // Resolve config path and port
       const configPath = path.join(homedir(), '.routecodex', 'config.json');
@@ -985,7 +982,7 @@ program
   .option('--codex', 'Use Codex system prompt (tools unchanged)')
   .option('--claude', 'Use Claude system prompt (tools unchanged)')
   .action(async (options) => {
-    const spinner = ora('Restarting RouteCodex server...').start();
+    const spinner = await createSpinner('Restarting RouteCodex server...');
     try {
       // Resolve config path
       const configPath = options.config || path.join(homedir(), '.routecodex', 'config.json');
@@ -1363,7 +1360,7 @@ function determinePort(configPath: string, fallback: number): number {
   return fallback;
 }
 
-async function ensurePortAvailable(port: number, parentSpinner: Ora, opts: { restart?: boolean } = {}): Promise<void> {
+async function ensurePortAvailable(port: number, parentSpinner: Spinner, opts: { restart?: boolean } = {}): Promise<void> {
   if (!port || Number.isNaN(port)) { return; }
 
   // Best-effort HTTP shutdown on common loopback hosts to cover IPv4/IPv6
@@ -1394,7 +1391,7 @@ async function ensurePortAvailable(port: number, parentSpinner: Ora, opts: { res
 
   parentSpinner.stop();
   logger.warning(`Port ${port} is in use by PID(s): ${initialPids.join(', ')}`);
-  const stopSpinner = ora(`Port ${port} is in use on 0.0.0.0. Attempting graceful stop...`).start();
+  const stopSpinner = await createSpinner(`Port ${port} is in use on 0.0.0.0. Attempting graceful stop...`);
   const gracefulTimeout = Number(process.env.ROUTECODEX_STOP_TIMEOUT_MS ?? 5000);
   const killTimeout = Number(process.env.ROUTECODEX_KILL_TIMEOUT_MS ?? 3000);
   const pollInterval = 150;
@@ -1621,7 +1618,7 @@ program
     }
 
     if (sub === 'start') {
-      const spinner = ora('Starting RouteCodex in monitor mode...').start();
+      const spinner = await createSpinner('Starting RouteCodex in monitor mode...');
       try {
         const filled = ensureMonitorJsonForCodexFc();
         if (filled.ok) {
@@ -1695,7 +1692,7 @@ program
       console.error(chalk.red("Unknown subcommand. Use: rcc port doctor [port] [--kill]"));
       process.exit(2);
     }
-    const spinner = ora('Inspecting port...').start();
+    const spinner = await createSpinner('Inspecting port...');
     try {
       let port = Number(portArg || 0);
       if (!Number.isFinite(port) || port <= 0) {
@@ -1729,7 +1726,7 @@ program
       }
 
       if (opts.kill && pids.length) {
-        const ksp = ora(`Killing ${pids.length} listener(s) on ${port}...`).start();
+        const ksp = await createSpinner(`Killing ${pids.length} listener(s) on ${port}...`);
         for (const pid of pids) {
           try { process.kill(pid, 'SIGKILL'); } catch (e) { ksp.warn(`Failed to kill ${pid}: ${(e as Error).message}`); }
         }

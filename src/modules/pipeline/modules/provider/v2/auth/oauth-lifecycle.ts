@@ -28,12 +28,21 @@ function defaultTokenFile(providerType: string): string {
   if (providerType === 'iflow') {
     return path.join(home, '.iflow', 'oauth_creds.json');
   }
+  // Qwen: 按配置体系约定，OAuth 凭证默认放在 ~/.routecodex/auth 目录
+  if (providerType === 'qwen') {
+    return path.join(home, '.routecodex', 'auth', 'qwen-oauth.json');
+  }
   return path.join(home, '.routecodex', 'tokens', `${providerType}-default.json`);
 }
 
 function resolveTokenFilePath(auth: OAuthAuth, providerType: string): string {
   const tf = (auth as any).tokenFile as string | undefined;
   const resolved = tf && tf.trim() ? expandHome(tf.trim()) : defaultTokenFile(providerType);
+  // 将最终路径回写到配置中，确保 TokenFileAuthProvider / OAuthAuthProvider 等后续组件
+  // 使用同一份 tokenFile 设置，避免出现多处默认路径不一致的问题。
+  if (!tf || !tf.trim()) {
+    (auth as any).tokenFile = resolved;
+  }
   return resolved;
 }
 
@@ -155,21 +164,42 @@ export async function ensureValidOAuthToken(
         }
         return null;
       };
-      const now = Date.now();
-      const exp = getExpiresAt(token);
-      const hasApiKey = token && typeof (token as any).apiKey === 'string' && (token as any).apiKey.trim().length > 0;
-      // 严格要求 apiKey 才视为有效，避免用 access_token 继续运行
-      const validAccess = hasApiKey;
-      // iFlow 特例：若缺少 apiKey，尝试用现有 access_token 获取 apiKey 后再保存
-      // 不做预先 enrichment；缺少 apiKey 必须走设备码授权，一次性获取并保存
-      if (!forceReauth && validAccess) {
-        console.log(`[OAuth] Using existing token (${hasApiKey ? 'apiKey' : 'access_token'} valid). No authorization required.`);
-        lastRunAt.set(k, Date.now());
-        return;
-      }
+  const now = Date.now();
+  const exp = getExpiresAt(token);
+  const hasApiKey = token && typeof (token as any).apiKey === 'string' && (token as any).apiKey.trim().length > 0;
+  const hasAccess = token && typeof (token as any).access_token === 'string' && (token as any).access_token.trim().length > 0;
+  const provider = String(providerType || '').toLowerCase();
 
-      // 3) 近过期/已过期：优先刷新；失败且允许时才走交互授权
-      if (!forceReauth && token?.refresh_token && typeof strat.refreshToken === 'function') {
+  // 令牌是否已过期（或接近过期，留 60s 缓冲）
+  const skewMs = 60_000;
+  const isExpiredOrNear = (() => {
+    if (exp == null) return false;
+    return now >= (exp - skewMs);
+  })();
+
+  // 判断是否可直接复用本地令牌：
+  // - iflow：必须有 apiKey，且不过期；缺少 apiKey 时走设备码流并交换 apiKey
+  // - qwen：access_token + 未过期 即视为有效，不强制要求 apiKey（access_token 就是主要凭证）
+  // - 其他：优先 apiKey，其次 access_token，只要不过期即可
+  let validAccess = false;
+  if (provider === 'iflow') {
+    validAccess = hasApiKey && !isExpiredOrNear;
+  } else if (provider === 'qwen') {
+    validAccess = (hasApiKey || hasAccess) && !isExpiredOrNear;
+  } else {
+    validAccess = (hasApiKey || hasAccess) && !isExpiredOrNear;
+  }
+
+  // iFlow 特例：若缺少 apiKey，尝试用现有 access_token 获取 apiKey 后再保存
+  // 不做预先 enrichment；缺少 apiKey 必须走设备码授权，一次性获取并保存
+  if (!forceReauth && validAccess) {
+    console.log(`[OAuth] Using existing token (${hasApiKey ? 'apiKey' : 'access_token'} valid). No authorization required.`);
+    lastRunAt.set(k, Date.now());
+    return;
+  }
+
+  // 3) 近过期/已过期：优先刷新；失败且允许时才走交互授权
+  if (!forceReauth && isExpiredOrNear && token?.refresh_token && typeof strat.refreshToken === 'function') {
         try {
           console.log('[OAuth] refreshing token...');
           const refreshed = await strat.refreshToken(token.refresh_token);

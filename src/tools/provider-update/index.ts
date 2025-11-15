@@ -78,6 +78,18 @@ export async function updateProviderModels(options: UpdateOptions): Promise<Upda
       try {
         if (Array.isArray(raw?.models)) return (raw.models as any[]).map((x)=>String(x)).filter(Boolean);
       } catch { /* ignore */ }
+      // 支持 openai-standard 配置：从 config.model / config.models 读取种子模型
+      try {
+        const cfg: any = (raw as any)?.config;
+        if (cfg) {
+          if (typeof cfg.model === 'string' && cfg.model.trim()) {
+            return [String(cfg.model).trim()];
+          }
+          if (Array.isArray(cfg.models)) {
+            return (cfg.models as any[]).map((x)=>String(x)).filter(Boolean);
+          }
+        }
+      } catch { /* ignore */ }
       return [];
     })();
     if (seedModels.length > 0) {

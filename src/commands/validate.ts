@@ -56,18 +56,19 @@ async function ensureServer(configPath: string, verbose = false): Promise<{ base
 }
 
 function samplePayload(endpoint: string, scenario: string): any {
+  // 仅生成形状示例，具体 model 由调用者在配置中指定
   if (endpoint === 'chat' && scenario === 'webfetch') {
     return {
-      model: 'glm-4.6',
+      model: '',
       messages: [
-        { role: 'user', content: '获取这个网页：https://www.kimi.com/coding/docs/third-party-agents.html，要求 markdown 输出' }
+        { role: 'user', content: '请根据当前配置的模型，测试一个简单的网页抓取场景。' }
       ],
       stream: false
     };
   }
   if (endpoint === 'chat' && scenario === 'listfiles') {
     return {
-      model: 'glm-4.6',
+      model: '',
       tools: [
         {
           type: 'function',
@@ -95,15 +96,15 @@ function samplePayload(endpoint: string, scenario: string): any {
   }
   if (endpoint === 'responses' && scenario === 'webfetch') {
     return {
-      model: 'glm-4.6',
+      model: '',
       input: [
-        { role: 'user', content: [{ type: 'input_text', text: '获取这个网页：https://www.kimi.com/coding/docs/third-party-agents.html，要求 markdown 输出' }] }
+        { role: 'user', content: [{ type: 'input_text', text: '请根据当前配置的模型，测试 Responses 端点。' }] }
       ],
       stream: false
     };
   }
   // default simple text
-  return { model: 'glm-4.6', messages: [{ role: 'user', content: 'ping' }], stream: false };
+  return { model: '', messages: [{ role: 'user', content: 'ping' }], stream: false };
 }
 
 async function sendRequest(base: string, endpoint: string, payload: any, timeoutMs: number): Promise<{ ok: boolean; data: any; status: number; text?: string }>{
