@@ -11,6 +11,7 @@ import path from 'path';
 const HOME = os.homedir();
 const CHAT_DIR = path.join(HOME, '.routecodex', 'codex-samples', 'openai-chat');
 const RESP_DIR = path.join(HOME, '.routecodex', 'codex-samples', 'openai-responses');
+const ANTH_DIR = path.join(HOME, '.routecodex', 'codex-samples', 'anthropic-messages');
 
 function safeParse(jsonStr) { try { return JSON.parse(jsonStr); } catch { return null; } }
 
@@ -31,6 +32,13 @@ function buildClassifierConfig() {
         modelField: 'model',
         toolsField: 'tools',
         maxTokensField: 'max_tokens'
+      },
+      anthropic: {
+        endpoints: ['/v1/messages'],
+        messageField: 'messages',
+        modelField: 'model',
+        toolsField: 'tools',
+        maxTokensField: 'max_tokens'
       }
     },
     protocolHandlers: {
@@ -45,19 +53,56 @@ function buildClassifierConfig() {
             dataAnalysis: ['sql', 'analytics', 'pandas', 'chart']
           }
         }
+      },
+      anthropic: {
+        tokenCalculator: {},
+        toolDetector: {
+          type: 'pattern',
+          patterns: {
+            webSearch: ['web_search', 'search', 'browse'],
+            codeExecution: ['code', 'execute', 'bash', 'python'],
+            fileSearch: ['file', 'read', 'write'],
+            dataAnalysis: ['data', 'analysis', 'chart']
+          }
+        }
       }
     },
     modelTiers: {
       basic: { description: 'Basic', models: ['gpt-oss-20b-mlx', 'glm-4.6'], maxTokens: 8192, supportedFeatures: [] },
       advanced: { description: 'Advanced', models: ['glm-4.6', 'gpt-oss-20b-mlx'], maxTokens: 65536, supportedFeatures: ['tools'] }
     },
+    longContextThresholdTokens: 100000,
+    thinkingKeywords: [
+      '思考',
+      '深度思考',
+      '逐步思考',
+      '一步一步思考',
+      '先思考再回答',
+      '推理',
+      '逻辑推理',
+      '分析',
+      '深度分析',
+      '深入分析',
+      '数据分析',
+      'think step by step',
+      'reason step by step',
+      'step by step reasoning',
+      'chain of thought',
+      'deep analysis',
+      'detailed analysis',
+      'analyze',
+      'analysis',
+      'reasoning'
+    ],
+    // 优先级：vision > thinking > tools > longContext > coding > default
     routingDecisions: {
-      default: { description: 'Default', modelTier: 'basic', tokenThreshold: 0, toolTypes: [], priority: 50 },
-      coding: { description: 'Coding', modelTier: 'advanced', tokenThreshold: 0, toolTypes: ['codeExecution'], priority: 80 },
-      tools: { description: 'Tools', modelTier: 'advanced', tokenThreshold: 0, toolTypes: ['codeExecution', 'fileSearch', 'dataAnalysis', 'webSearch'], priority: 85 },
-      longContext: { description: 'Long Context', modelTier: 'advanced', tokenThreshold: 8000, toolTypes: [], priority: 70 },
-      thinking: { description: 'Thinking', modelTier: 'advanced', tokenThreshold: 0, toolTypes: ['dataAnalysis'], priority: 60 },
-      webSearch: { description: 'Web Search', modelTier: 'basic', tokenThreshold: 0, toolTypes: ['webSearch'], priority: 65 }
+      default: { description: 'Default', modelTier: 'basic', tokenThreshold: 0, toolTypes: [], priority: 10 },
+      vision:  { description: 'Vision',  modelTier: 'advanced', tokenThreshold: 0, toolTypes: [], priority: 90 },
+      thinking: { description: 'Thinking', modelTier: 'advanced', tokenThreshold: 0, toolTypes: ['dataAnalysis'], priority: 80 },
+      tools: { description: 'Tools', modelTier: 'advanced', tokenThreshold: 0, toolTypes: ['codeExecution', 'fileSearch', 'dataAnalysis', 'webSearch'], priority: 60 },
+      longContext: { description: 'Long Context', modelTier: 'advanced', tokenThreshold: 100000, toolTypes: [], priority: 50 },
+      coding: { description: 'Coding', modelTier: 'advanced', tokenThreshold: 0, toolTypes: ['codeExecution', 'fileSearch'], priority: 40 },
+      webSearch: { description: 'Web Search', modelTier: 'advanced', tokenThreshold: 0, toolTypes: ['webSearch'], priority: 60 }
     },
     confidenceThreshold: 60
   };
@@ -84,15 +129,27 @@ async function loadChatRequests() {
 }
 
 async function loadResponsesRequests() {
-  // We try sse_input as the closest to request payload
-  const files = await listFiles(RESP_DIR, /_response_5_sse_input\.json$/);
+  // Use provider request snapshots as canonical Responses request payloads
+  const files = await listFiles(RESP_DIR, /_pipeline\.provider\.request\.pre\.json$/);
   const out = [];
   for (const file of files) {
     try {
       const j = safeParse(await fsp.readFile(file, 'utf-8'));
-      // Many files wrap payload under specific keys; we pass top-level for token/tool detection best-effort
-      const data = j && j.data ? j.data : j;
-      if (data) out.push({ endpoint: '/v1/responses', body: data, file });
+      const body = j && j.data && j.data.payload ? j.data.payload : null;
+      if (body) out.push({ endpoint: '/v1/responses', body, file });
+    } catch {}
+  }
+  return out;
+}
+
+async function loadAnthropicRequests() {
+  const files = await listFiles(ANTH_DIR, /_pipeline\.provider\.request\.pre\.json$/);
+  const out = [];
+  for (const file of files) {
+    try {
+      const j = safeParse(await fsp.readFile(file, 'utf-8'));
+      const body = j && j.data && j.data.payload ? j.data.payload : null;
+      if (body) out.push({ endpoint: '/v1/messages', body, file });
     } catch {}
   }
   return out;
@@ -131,10 +188,11 @@ async function main() {
 
   const chatReqs = await loadChatRequests();
   const respReqs = await loadResponsesRequests();
-  const all = [...chatReqs, ...respReqs];
+  const anthReqs = await loadAnthropicRequests();
+  const all = [...chatReqs, ...respReqs, ...anthReqs];
 
   const hitCounts = new Map();
-  const categories = ['default','tools','coding','longContext','thinking','webSearch'];
+  const categories = ['default','tools','coding','longContext','thinking','webSearch','vision'];
   for (const c of categories) hitCounts.set(c, 0);
 
   const samples = {};
@@ -142,7 +200,7 @@ async function main() {
 
   for (const item of all) {
     try {
-      const res = await cls.classify({ request: item.body, endpoint: item.endpoint, protocol: 'openai' });
+      const res = await cls.classify({ request: item.body, endpoint: item.endpoint });
       const route = res && res.success ? String(res.route || 'default') : 'default';
       hitCounts.set(route, (hitCounts.get(route) || 0) + 1);
       if (!samples[route]) samples[route] = item.file;

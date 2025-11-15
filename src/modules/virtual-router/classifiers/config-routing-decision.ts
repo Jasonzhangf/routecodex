@@ -29,6 +29,7 @@ export interface RoutingDecisionInput {
   hasTools: boolean;
   complexity: number;
   requestedMaxTokens?: number;
+   hasImageContent?: boolean;
 }
 
 export interface RoutingDecisionResult {
@@ -168,6 +169,15 @@ export class ConfigRoutingDecision {
     let confidence = 0.4; // 提高基础置信度
     let reasoning = '';
 
+    // 对 vision 路由：若当前请求没有图像内容，则直接视为不匹配
+    if (routeName === 'vision' && input.hasImageContent === false) {
+      return {
+        confidence: 0,
+        reasoning: 'no_image_content_for_vision_route',
+        factors
+      };
+    }
+
     // 1. Token阈值评估 - 降低阈值要求，提高匹配度
     if (input.tokenCount >= routeConfig.tokenThreshold) {
       factors.tokenBased = true;
@@ -235,9 +245,15 @@ export class ConfigRoutingDecision {
       reasoning += '数据分析工具强制路由; ';
     }
 
-    if (routeName === 'vision' && (input.model.toLowerCase().includes('vision') || input.model.toLowerCase().includes('vl'))) {
-      confidence = Math.min(confidence + 0.35, 0.9); // 视觉模型强制路由
-      reasoning += '视觉模型强制路由; ';
+    if (routeName === 'vision') {
+      if (input.hasImageContent) {
+        confidence = Math.min(confidence + 0.35, 0.9); // 视觉请求优先路由
+        reasoning += '检测到图像内容，视觉路由优先; ';
+      }
+      if (input.model.toLowerCase().includes('vision') || input.model.toLowerCase().includes('vl')) {
+        confidence = Math.min(confidence + 0.35, 0.95); // 视觉模型强制路由
+        reasoning += '视觉模型强制路由; ';
+      }
     }
 
     if (routeName === 'background' && input.complexity < 20) {

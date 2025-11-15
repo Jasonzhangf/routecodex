@@ -38,8 +38,31 @@ if [ ! -d "${PKG_DIR}" ]; then
   exit 1
 fi
 
+# 如果依赖中使用了 file: 形式的 rcc-llmswitch-core，本地打包时需要把对应 tgz 一并带入
+# 否则全局安装时 npm 在全局目录下找不到该 tgz，会导致 ENOENT
+CORE_SPEC=$(node -p "require('./package.json').dependencies && require('./package.json').dependencies['rcc-llmswitch-core'] || ''" 2>/dev/null || echo "")
+if [[ "${CORE_SPEC}" == file:* ]]; then
+  CORE_REL_PATH="${CORE_SPEC#file:}"
+  CORE_REL_ROOT="${CORE_REL_PATH%%/*}"          # 通常为 sharedmodule
+  SRC_TGZ_PATH="${CORE_REL_PATH}"
+  DST_TGZ_PATH="${PKG_DIR}/${CORE_REL_PATH}"
+
+  if [ -f "${SRC_TGZ_PATH}" ]; then
+    echo "📦 检测到本地 rcc-llmswitch-core tgz: ${SRC_TGZ_PATH}，打包到 release 中..."
+    mkdir -p "$(dirname "${DST_TGZ_PATH}")"
+    cp "${SRC_TGZ_PATH}" "${DST_TGZ_PATH}"
+  else
+    echo "⚠️  警告：未找到本地 rcc-llmswitch-core tgz (${SRC_TGZ_PATH})，release 将依赖 npm registry 中的版本"
+    CORE_REL_ROOT=""
+    CORE_REL_PATH=""
+  fi
+else
+  CORE_REL_ROOT=""
+  CORE_REL_PATH=""
+fi
+
 echo "🛠️  重写临时包为 rcc (release)..."
-node - <<'EOF' "${PKG_DIR}"
+CORE_REL_ROOT="${CORE_REL_ROOT}" CORE_REL_PATH="${CORE_REL_PATH}" node - <<'EOF' "${PKG_DIR}"
 const fs = require('fs');
 const path = require('path');
 const pkgDir = process.argv[2];
@@ -47,6 +70,16 @@ const pkgPath = path.join(pkgDir, 'package.json');
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 pkg.name = 'rcc';
 pkg.bin = { rcc: './dist/cli.js' };
+
+// 如果存在本地 rcc-llmswitch-core tgz，将其所在根目录加入 files，确保 npm pack 时带上该文件
+const coreRelRoot = process.env.CORE_REL_ROOT;
+if (Array.isArray(pkg.files) && coreRelRoot) {
+  const rootEntry = coreRelRoot.endsWith('/') ? coreRelRoot : coreRelRoot + '/';
+  if (!pkg.files.includes(rootEntry)) {
+    pkg.files.push(rootEntry);
+  }
+}
+
 fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
 EOF
 

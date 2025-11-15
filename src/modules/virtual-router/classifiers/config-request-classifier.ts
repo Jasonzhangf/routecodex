@@ -85,6 +85,9 @@ export interface ConfigClassifierConfig {
   };
   routingDecisions: import('./config-routing-decision.js').RoutingDecisionConfig;
   confidenceThreshold: number;
+  // 额外配置：基于文本/Token的简单决策树所需参数
+  thinkingKeywords?: string[];
+  longContextThresholdTokens?: number;
 }
 
 export class ConfigRequestClassifier {
@@ -150,7 +153,7 @@ export class ConfigRequestClassifier {
 
   /**
    * 分类请求
-   */
+  */
   async classify(input: ConfigClassificationInput): Promise<ConfigClassificationResult> {
     const startTime = Date.now();
     const steps: Array<{ step: string; duration: number; success: boolean }> = [];
@@ -182,28 +185,24 @@ export class ConfigRequestClassifier {
       const modelTierStep = await this.analyzeModelTier(input.request, tokenStep.result!, input.userPreferences);
       steps.push({ step: 'model_tier_analysis', duration: Date.now() - startTime, success: modelTierStep.success });
 
-      // 5. 路由决策
-      const routingStep = await this.makeRoutingDecision(
-        tokenStep.result!,
-        toolStep.result!,
-        modelTierStep.result!,
-        protocol || 'openai',
+      // 5. 构建特征 + 简单决策树路由
+      const features = this.buildRequestFeatures(
+        input.request,
         input.endpoint,
-        input.request
+        protocol || 'openai',
+        tokenStep.result!,
+        toolStep.result!
       );
-      steps.push({ step: 'routing_decision', duration: Date.now() - startTime, success: routingStep.success });
+      const routingDecision = this.decideRoute(features, modelTierStep.result!);
+      steps.push({ step: 'routing_decision', duration: Date.now() - startTime, success: true });
 
-      if (!routingStep.success) {
-        return this.createErrorResult('Routing decision failed', steps);
-      }
-
-      // 6. 整合结果
+      // 6. 整合结果（confidence 仅用于诊断，不参与路由选择）
       const result = this.integrateResults(
         protocol || 'openai',
         tokenStep.result!,
         toolStep.result!,
         modelTierStep.result!,
-        routingStep.result!,
+        routingDecision,
         steps,
         Date.now() - startTime
       );
@@ -218,7 +217,7 @@ export class ConfigRequestClassifier {
 
   /**
    * 检测协议
-   */
+  */
   private async detectProtocol(endpoint: string): Promise<{ success: boolean; protocol?: string }> {
     try {
       for (const [protocol, mapping] of Object.entries(this.config.protocolMapping)) {
@@ -235,8 +234,97 @@ export class ConfigRequestClassifier {
   }
 
   /**
-   * 分析Token
+   * 检测当前请求是否包含图像内容（用于vision路由判定）
+   * - OpenAI: messages[].content[] 中 type 包含 image/image_url
+   * - Anthropic: messages[].content[] 中 type 包含 image
    */
+  private hasImageContentForProtocol(request: UnknownObject, protocol: string): boolean {
+    try {
+      const mapping = this.config.protocolMapping[protocol];
+      if (!mapping) return false;
+      const rawMessages = (request as Record<string, unknown>)[mapping.messageField] as unknown;
+      if (!Array.isArray(rawMessages)) return false;
+      for (const m of rawMessages as any[]) {
+        if (!m || typeof m !== 'object') continue;
+        const content = (m as any).content;
+        if (Array.isArray(content)) {
+          for (const part of content) {
+            if (!part || typeof part !== 'object') continue;
+            const t = String((part as any).type || '').toLowerCase();
+            if (t.includes('image')) {
+              return true;
+            }
+            // OpenAI style: { type: 'image_url', image_url: { url: string } }
+            const url = (part as any).image_url && typeof (part as any).image_url.url === 'string'
+              ? (part as any).image_url.url
+              : undefined;
+            if (url && url.trim()) return true;
+          }
+        }
+      }
+    } catch {
+      // 非致命，默认为无图像
+    }
+    return false;
+  }
+
+  /**
+   * 检测thinking意图：基于用户提示词中的中英文关键字匹配
+   */
+  private detectThinkingIntent(request: UnknownObject, endpoint: string): boolean {
+    const keywords = this.config.thinkingKeywords || [];
+    if (!keywords.length) return false;
+
+    let primaryText = '';
+    let allText = '';
+
+    try {
+      // 基于protocolMapping抽取messages字段
+      const protocol = this.detectProtocolSync(endpoint);
+      const mapping = this.config.protocolMapping[protocol];
+      if (!mapping) return false;
+      const rawMessages = (request as Record<string, unknown>)[mapping.messageField] as unknown;
+      const messages = Array.isArray(rawMessages) ? rawMessages as any[] : [];
+
+      const userTexts: string[] = [];
+      for (const m of messages) {
+        if (!m || typeof m !== 'object') continue;
+        const role = String((m as any).role || '').toLowerCase();
+        if (role !== 'user') continue;
+        const c = (m as any).content;
+        if (typeof c === 'string') {
+          userTexts.push(c);
+        } else if (Array.isArray(c)) {
+          for (const part of c) {
+            if (part && typeof part === 'object' && typeof (part as any).text === 'string') {
+              userTexts.push((part as any).text);
+            }
+          }
+        }
+      }
+      if (userTexts.length) {
+        primaryText = userTexts[userTexts.length - 1];
+        allText = userTexts.join('\n');
+      }
+    } catch {
+      // ignore extraction errors
+    }
+
+    const source = (primaryText + '\n' + allText).toLowerCase();
+    if (!source.trim()) return false;
+
+    for (const kw of keywords) {
+      if (!kw) continue;
+      const needle = String(kw).toLowerCase();
+      if (!needle.trim()) continue;
+      if (source.includes(needle)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * 分析Token
+  */
   private async analyzeTokens(request: UnknownObject, endpoint: string, protocol: string): Promise<{ success: boolean; result?: ProtocolTokenCalculationResult }> {
     try {
       const tokenCalculator = this.tokenCalculators.get(protocol);
@@ -244,7 +332,12 @@ export class ConfigRequestClassifier {
         return { success: false };
       }
 
-      const result = tokenCalculator.calculate(request, endpoint);
+      // 优先使用异步的精确Token计算（内部使用tiktoken，严格模式），不可用时标记失败
+      const anyCalc = tokenCalculator as any;
+      if (typeof anyCalc.calculateAsync !== 'function') {
+        return { success: false };
+      }
+      const result: ProtocolTokenCalculationResult = await anyCalc.calculateAsync(request, endpoint);
       return { success: true, result };
     } catch (error) {
       return { success: false };
@@ -319,41 +412,170 @@ export class ConfigRequestClassifier {
   }
 
   /**
-   * 做出路由决策
+   * 构建用于简单决策树的请求特征
    */
-  private async makeRoutingDecision(
-    tokenAnalysis: ProtocolTokenCalculationResult,
-    toolAnalysis: ConfigToolDetectionResult,
-    modelTierAnalysis: ModelTierClassificationResult,
-    protocol: string,
+  private buildRequestFeatures(
+    request: UnknownObject,
     endpoint: string,
-    request: UnknownObject
-  ): Promise<{ success: boolean; result?: RoutingDecisionResult }> {
-    try {
-      const protocolConfig = this.config.protocolMapping[protocol];
-      if (!protocolConfig) {
-        return { success: false };
+    protocol: string,
+    tokenAnalysis: ProtocolTokenCalculationResult,
+    toolAnalysis: ConfigToolDetectionResult
+  ): {
+    protocol: string;
+    endpoint: string;
+    model: string;
+    totalTokens: number;
+    hasTools: boolean;
+    toolTypes: string[];
+    hasWebSearchTools: boolean;
+    hasEditTools: boolean;
+    hasDataAnalysisTools: boolean;
+    hasImageContent: boolean;
+    thinkingIntent: boolean;
+  } {
+    const mapping = this.config.protocolMapping[protocol] || Object.values(this.config.protocolMapping)[0];
+    const model = mapping ? this.extractModelFromRequest(request, mapping as any) : 'unknown-model';
+    const toolTypes = toolAnalysis?.toolTypes || [];
+    const hasTools = toolAnalysis?.hasTools || false;
+    const hasWebSearchTools = toolTypes.includes('webSearch');
+    const hasEditTools = toolTypes.includes('codeExecution') || toolTypes.includes('fileSearch');
+    const hasDataAnalysisTools = toolTypes.includes('dataAnalysis');
+    const hasImageContent = this.hasImageContentForProtocol(request, protocol);
+    const thinkingIntent = this.detectThinkingIntent(request, endpoint);
+
+    return {
+      protocol,
+      endpoint,
+      model,
+      totalTokens: tokenAnalysis?.totalTokens || 0,
+      hasTools,
+      toolTypes,
+      hasWebSearchTools,
+      hasEditTools,
+      hasDataAnalysisTools,
+      hasImageContent,
+      thinkingIntent
+    };
+  }
+
+  /**
+   * 简单决策树：根据RequestFeatures和配置做出路由决策（无打分，只有顺序规则）
+   */
+  private decideRoute(
+    f: {
+      protocol: string;
+      endpoint: string;
+      model: string;
+      totalTokens: number;
+      hasTools: boolean;
+      toolTypes: string[];
+      hasWebSearchTools: boolean;
+      hasEditTools: boolean;
+      hasDataAnalysisTools: boolean;
+      hasImageContent: boolean;
+      thinkingIntent: boolean;
+    },
+    modelTierAnalysis: ModelTierClassificationResult
+  ): RoutingDecisionResult {
+    const routingCfg = this.config.routingDecisions || {};
+    const hasRoute = (name: string) => Object.prototype.hasOwnProperty.call(routingCfg, name);
+    const longThreshold = typeof this.config.longContextThresholdTokens === 'number'
+      ? this.config.longContextThresholdTokens
+      : 100000;
+
+    const alternatives: Array<{ route: string; confidence: number; reasoning: string }> = [];
+
+    // 1) Vision
+    if (hasRoute('vision')) {
+      if (f.hasImageContent) {
+        return {
+          route: 'vision',
+          modelTier: modelTierAnalysis?.tier || 'advanced',
+          confidence: 1,
+          reasoning: 'has_image_content',
+          factors: { tokenBased: false, toolBased: false, modelBased: true, complexityBased: false },
+          alternativeRoutes: alternatives,
+          configBased: true
+        };
       }
-
-      const model = this.extractModelFromRequest(request, protocolConfig);
-
-      const requestedMax = this.extractMaxTokensFromRequest(request, protocolConfig);
-      const input = {
-        protocol,
-        endpoint,
-        model,
-        tokenCount: (typeof requestedMax === 'number' ? requestedMax : (tokenAnalysis?.totalTokens || 0)),
-        toolTypes: toolAnalysis?.toolTypes || [],
-        hasTools: toolAnalysis?.hasTools || false,
-        complexity: (toolAnalysis?.complexity?.medium || 0),
-        requestedMaxTokens: requestedMax
-      };
-
-      const result = this.routingDecision.makeDecision(input);
-      return { success: true, result };
-    } catch (error) {
-      return { success: false };
     }
+
+    // 2) Long context
+    if (hasRoute('longContext') && f.totalTokens >= longThreshold) {
+      return {
+        route: 'longContext',
+        modelTier: modelTierAnalysis?.tier || 'advanced',
+        confidence: 1,
+        reasoning: `token_count>=${longThreshold}`,
+        factors: { tokenBased: true, toolBased: false, modelBased: true, complexityBased: false },
+        alternativeRoutes: alternatives,
+        configBased: true
+      };
+    }
+
+    // 3) Thinking（文本意图）
+    if (hasRoute('thinking') && f.thinkingIntent) {
+      return {
+        route: 'thinking',
+        modelTier: modelTierAnalysis?.tier || 'advanced',
+        confidence: 1,
+        reasoning: 'thinking_keywords_matched',
+        factors: { tokenBased: false, toolBased: false, modelBased: true, complexityBased: false },
+        alternativeRoutes: alternatives,
+        configBased: true
+      };
+    }
+
+    // 4) Coding（编辑/执行类工具）
+    if (hasRoute('coding') && f.hasEditTools) {
+      return {
+        route: 'coding',
+        modelTier: modelTierAnalysis?.tier || 'advanced',
+        confidence: 1,
+        reasoning: 'edit_tools_present',
+        factors: { tokenBased: false, toolBased: true, modelBased: true, complexityBased: false },
+        alternativeRoutes: alternatives,
+        configBased: true
+      };
+    }
+
+    // 5) WebSearch
+    if (hasRoute('webSearch') && f.hasWebSearchTools) {
+      return {
+        route: 'webSearch',
+        modelTier: modelTierAnalysis?.tier || 'advanced',
+        confidence: 1,
+        reasoning: 'web_search_tools_present',
+        factors: { tokenBased: false, toolBased: true, modelBased: true, complexityBased: false },
+        alternativeRoutes: alternatives,
+        configBased: true
+      };
+    }
+
+    // 6) Tools（有工具但未命中其它路由）
+    if (hasRoute('tools') && f.hasTools) {
+      return {
+        route: 'tools',
+        modelTier: modelTierAnalysis?.tier || 'advanced',
+        confidence: 1,
+        reasoning: 'tools_present',
+        factors: { tokenBased: false, toolBased: true, modelBased: true, complexityBased: false },
+        alternativeRoutes: alternatives,
+        configBased: true
+      };
+    }
+
+    // 7) Default 兜底
+    const fallbackRoute = hasRoute('default') ? 'default' : Object.keys(routingCfg)[0] || 'default';
+    return {
+      route: fallbackRoute,
+      modelTier: modelTierAnalysis?.tier || 'basic',
+      confidence: 1,
+      reasoning: 'no_rule_matched',
+      factors: { tokenBased: false, toolBased: false, modelBased: true, complexityBased: false },
+      alternativeRoutes: alternatives,
+      configBased: true
+    };
   }
 
   /**
@@ -556,7 +778,11 @@ export class ConfigRequestClassifier {
       protocolHandlers: cfg.protocolHandlers as ConfigClassifierConfig['protocolHandlers'],
       modelTiers: cfg.modelTiers as ConfigClassifierConfig['modelTiers'],
       routingDecisions: cfg.routingDecisions as ConfigClassifierConfig['routingDecisions'],
-      confidenceThreshold: (cfg.confidenceThreshold as number) || 60
+      confidenceThreshold: (cfg.confidenceThreshold as number) || 60,
+      thinkingKeywords: (cfg.thinkingKeywords as string[]) || [],
+      longContextThresholdTokens: typeof cfg.longContextThresholdTokens === 'number'
+        ? (cfg.longContextThresholdTokens as number)
+        : undefined
     };
 
     return new ConfigRequestClassifier(config);

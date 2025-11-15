@@ -777,27 +777,32 @@ export class RouteCodexServerV2 extends BaseModule {
   }
 
   private buildHandlerContext(): HandlerContext {
+    const selectRouteName = async (payload: any, entryEndpoint: string) => {
+      const route = await this.pickRouteNameViaVirtualRouter(payload as any, entryEndpoint);
+      if (route && typeof route === 'string') return route;
+      // 若虚拟路由器不可用或分类失败，统一退回 default 路由池
+      return 'default';
+    };
+
     return {
       pipelineManager: this.pipelineManager,
       routePools: this.routePools,
-      selectPipelineId: async (payload: any, entryEndpoint: string) => {
-        const pid = await this.pickPipelineIdViaVirtualRouter(payload as any, entryEndpoint);
-        if (pid) return pid;
-        const fb = this.pickPipelineId();
-        if (!fb) { throw new Error('No pipeline available'); }
-        return fb;
-      },
+      selectRouteName,
     } as HandlerContext;
   }
 
-  private async pickPipelineIdViaVirtualRouter(payload: UnknownObject, entryEndpoint: string): Promise<string | null> {
+  private async pickRouteNameViaVirtualRouter(payload: UnknownObject, entryEndpoint: string): Promise<string | null> {
     try {
       if (!this.virtualRouter) return null;
       try { (payload as any).endpoint = entryEndpoint; } catch { /* ignore */ }
       const routed = await this.virtualRouter.routeRequest(payload, 'default');
-      const pid = (routed && (routed as any).routing && (routed as any).routing.pipelineId) ? String((routed as any).routing.pipelineId) : null;
-      return pid;
-    } catch { return null; }
+      const routeName = (routed && (routed as any).routing && (routed as any).routing.route)
+        ? String((routed as any).routing.route)
+        : 'default';
+      return routeName;
+    } catch {
+      return null;
+    }
   }
 
   private ensureVirtualRouter(): void {

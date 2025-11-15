@@ -1,0 +1,19 @@
+{
+  "thinkingSamples": 3572,
+  "keywordHits": {
+    "analysis": 1234,
+    "思考": 1690,
+    "推理": 572,
+    "分析": 2348,
+    "reasoning": 1304,
+    "analyze": 12
+  },
+  "samplePerKeyword": {
+    "analysis": "/Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1762999988376_zyns5xw9n_provider-request.json",
+    "思考": "/Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1763002108523_9wlgh144y_provider-request.json",
+    "推理": "/Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1763002108523_9wlgh144y_provider-request.json",
+    "分析": "/Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1763002108523_9wlgh144y_provider-request.json",
+    "reasoning": "/Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1763002387567_v2m2i4vc2_provider-request.json",
+    "analyze": "/Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1763085298297_n028lwxea_provider-request.json"
+  }
+}

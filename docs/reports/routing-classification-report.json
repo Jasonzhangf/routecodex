@@ -1,22 +1,24 @@
 {
-  "scanned": 3731,
+  "scanned": 6967,
   "byCategory": {
-    "default": 3731,
-    "tools": 0,
-    "coding": 0,
-    "longContext": 0,
-    "thinking": 0,
-    "webSearch": 0
+    "default": 562,
+    "tools": 586,
+    "coding": 248,
+    "longContext": 2013,
+    "thinking": 3534,
+    "webSearch": 24,
+    "vision": 0
   },
   "neverHit": [
-    "tools",
-    "coding",
-    "longContext",
-    "thinking",
-    "webSearch"
+    "vision"
   ],
   "sampleByCategory": {
-    "default": "/Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1762688650150_gr5ujr2us_provider-request.json"
+    "thinking": "/Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1762999988376_zyns5xw9n_provider-request.json",
+    "longContext": "/Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1763000100195_09q89vvi2_provider-request.json",
+    "tools": "/Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1763002108961_i6ia6jndk_provider-request.json",
+    "webSearch": "/Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1763002108961_k3ysf83dl_provider-request.json",
+    "coding": "/Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1763002110308_iyj8j09zq_provider-request.json",
+    "default": "/Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1763014458732_3yfsckrin_provider-request.json"
   },
   "errors": []
 }

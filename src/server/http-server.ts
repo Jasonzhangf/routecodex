@@ -93,14 +93,9 @@ export class HttpServer {
     return {
       pipelineManager: this.pipelineManager,
       routePools: this.routePools,
-      selectPipelineId: async (payload: any, entryEndpoint: string) => {
-        // Prefer virtual router; on absence/misconfig, fall back to default route pool RR
-        const pid = await this.pickPipelineIdViaVirtualRouter(payload as any, entryEndpoint);
-        if (pid) return pid;
-        const fb = this.pickPipelineId();
-        if (!fb) { throw new Error('No pipeline available'); }
-        return fb;
-      },
+      // V1 路径尚未全面接入虚拟路由器，这里统一返回 'default'，
+      // 由 HttpServer 自己的 pickPipelineId* 逻辑决定具体流水线。
+      selectRouteName: async (_payload: any, _entryEndpoint: string) => 'default',
     } as HandlerContext;
   }
 

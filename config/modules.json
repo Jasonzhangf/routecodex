@@ -184,13 +184,36 @@
           "defaultMaxContextBytes": 200000,
           "safetyRatio": 0.1
         },
-        "enableClassification": true,
-        "classificationConfig": {
-                    "confidenceThreshold": 60,
+          "enableClassification": true,
+          "classificationConfig": {
+          "confidenceThreshold": 60,
           "enableSmartRouting": true,
+          "longContextThresholdTokens": 100000,
+          "thinkingKeywords": [
+            "思考",
+            "深度思考",
+            "逐步思考",
+            "一步一步思考",
+            "先思考再回答",
+            "推理",
+            "逻辑推理",
+            "分析",
+            "深度分析",
+            "深入分析",
+            "数据分析",
+            "think step by step",
+            "reason step by step",
+            "step by step reasoning",
+            "chain of thought",
+            "deep analysis",
+            "detailed analysis",
+            "analyze",
+            "analysis",
+            "reasoning"
+          ],
           "protocolMapping": {
             "openai": {
-              "endpoints": ["/v1/chat/completions", "/v1/completions"],
+              "endpoints": ["/v1/chat/completions", "/v1/completions", "/v1/responses"],
               "messageField": "messages",
               "modelField": "model",
               "toolsField": "tools",
@@ -222,37 +245,51 @@
             "default": {
               "description": "Default routing for general requests",
               "modelTier": "basic",
-              "tokenThreshold": 8000,
+              "tokenThreshold": 0,
               "toolTypes": [],
-              "priority": 1
+              "priority": 10
             },
-            "longContext": {
-              "description": "Routing for long context requests",
+            "vision": {
+              "description": "Routing for vision / multimodal requests",
               "modelTier": "advanced",
-              "tokenThreshold": 10000,
+              "tokenThreshold": 0,
               "toolTypes": [],
               "priority": 90
             },
             "thinking": {
-              "description": "Routing for complex reasoning requests",
+              "description": "Routing for complex reasoning / data analysis requests",
               "modelTier": "advanced",
-              "tokenThreshold": 16000,
-              "toolTypes": ["dataAnalysis", "complex_reasoning"],
-              "priority": 85
+              "tokenThreshold": 0,
+              "toolTypes": ["dataAnalysis"],
+              "priority": 80
+            },
+            "tools": {
+              "description": "Routing for tool-intensive requests (non-vision)",
+              "modelTier": "advanced",
+              "tokenThreshold": 0,
+              "toolTypes": ["codeExecution", "fileSearch", "dataAnalysis", "webSearch"],
+              "priority": 60
+            },
+            "longContext": {
+              "description": "Routing for long context requests",
+              "modelTier": "advanced",
+              "tokenThreshold": 100000,
+              "toolTypes": [],
+              "priority": 50
             },
             "coding": {
               "description": "Routing for code generation requests",
               "modelTier": "advanced",
-              "tokenThreshold": 24000,
+              "tokenThreshold": 0,
               "toolTypes": ["codeExecution", "fileSearch"],
-              "priority": 80
+              "priority": 40
             },
             "webSearch": {
               "description": "Routing for web search requests",
               "modelTier": "advanced",
-              "tokenThreshold": 12000,
+              "tokenThreshold": 0,
               "toolTypes": ["webSearch"],
-              "priority": 95
+              "priority": 60
             }
           },
           "protocolHandlers": {
@@ -395,8 +432,7 @@
           }
         }
       }
-    }
-    ,
+    },
     "dryrunengine": {
       "enabled": false,
       "config": {
@@ -404,13 +440,28 @@
         "requestPipeline": {
           "dryRunMode": "partial",
           "nodeConfigs": {
-            "compatibility": { "enabled": false, "mode": "output-validation", "breakpointBehavior": "continue", "verbosity": "minimal" },
-            "provider": { "enabled": false, "mode": "output-validation", "breakpointBehavior": "continue", "verbosity": "minimal" }
+            "compatibility": {
+              "enabled": false,
+              "mode": "output-validation",
+              "breakpointBehavior": "continue",
+              "verbosity": "minimal"
+            },
+            "provider": {
+              "enabled": false,
+              "mode": "output-validation",
+              "breakpointBehavior": "continue",
+              "verbosity": "minimal"
+            }
           },
           "inputSimulation": {
             "enabled": true,
             "primaryStrategy": "historical-data",
-            "fallbackStrategies": ["schema-inference", "rule-based", "ai-generation", "request-propagation"],
+            "fallbackStrategies": [
+              "schema-inference",
+              "rule-based",
+              "ai-generation",
+              "request-propagation"
+            ],
             "qualityRequirement": "medium",
             "useHistoricalData": true,
             "enableSmartInference": true
@@ -422,17 +473,30 @@
             "enabled": true,
             "inputSource": "real-response",
             "performanceAnalysis": true,
-            "caching": { "enabled": true, "maxSize": 100, "ttlMs": 300000, "keyStrategy": "request-id" }
+            "caching": {
+              "enabled": true,
+              "maxSize": 100,
+              "ttlMs": 300000,
+              "keyStrategy": "request-id"
+            }
           },
           "nodeConfigs": {
-            "response-processor": { "enabled": true, "mode": "output-validation", "breakpointBehavior": "continue", "verbosity": "normal" }
+            "response-processor": {
+              "enabled": true,
+              "mode": "output-validation",
+              "breakpointBehavior": "continue",
+              "verbosity": "normal"
+            }
           }
         },
-        "driverFeedback": { "enabled": true, "feedbackDelayMs": 100, "analysisLevel": "detailed" }
+        "driverFeedback": {
+          "enabled": true,
+          "feedbackDelayMs": 100,
+          "analysisLevel": "detailed"
+        }
       }
-    }
-  }
-}
+    },
+    "hybridpipeline": {
       "enabled": true,
       "config": {
         "moduleType": "hybrid-pipeline",
@@ -476,8 +540,8 @@
           "enabled": true,
           "errorTypes": ["timeout", "connection", "upstream", "429", "500"],
           "cooldownMs": 120000
-          }
         }
       }
+    }
   }
 }

@@ -166,23 +166,16 @@ export class PipelineManager implements RCCBaseModule {
           .filter(p => {
             const st = this.pipeline429State.get(p.pipelineId);
             const inCooldown = st && st.cooldownUntil !== undefined && now < (st.cooldownUntil || 0);
-            const banned = st && st.bannedToday === true;
-            // 移除健康 gating：仅按429冷却/当日拉黑过滤
-            return !inCooldown && !banned;
-          });
-      }
-      if (!candidates.length) {
-        // fallback to all pipelines if pool empty or all filtered
-        // 移除健康 gating：fallback 全量 pipelines 仅按429状态过滤
-        const now = Date.now();
-        candidates = Array.from(this.pipelines.values()).filter(p => {
-          const st = this.pipeline429State.get(p.pipelineId);
-          const inCooldown = st && st.cooldownUntil !== undefined && now < (st.cooldownUntil || 0);
           const banned = st && st.bannedToday === true;
+          // 移除健康 gating：仅按429冷却/当日拉黑过滤
           return !inCooldown && !banned;
         });
       }
-      if (!candidates.length) throw new Error('No pipelines available for round-robin selection');
+      // 不再在此处执行“跨池 fallback”；路由池选择由虚拟路由器统一决策，
+      // 若该池内所有流水线均不可用，则直接报错。
+      if (!candidates.length) {
+        throw new Error(`No pipelines available for round-robin selection (route=${routeName})`);
+      }
       const cur = this.rrIndexByRoute.get(routeName) || 0;
       const idx = cur % candidates.length;
       const chosen = candidates[idx];

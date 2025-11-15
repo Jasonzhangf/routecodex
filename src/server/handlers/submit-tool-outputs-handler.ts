@@ -59,12 +59,11 @@ export async function handleSubmitToolOutputs(req: Request, res: Response, ctx: 
     }
 
     try {
-      const pipelineId = await ctx.selectPipelineId(payload, '/v1/responses');
-      if (!pipelineId) { throw new Error('No pipeline available'); }
+      const routeName = await ctx.selectRouteName(payload, '/v1/responses');
       const sharedReq = {
         data: payload,
-        route: { providerId: 'unknown', modelId: String(payload.model||'unknown'), requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, timestamp: Date.now(), pipelineId },
-        metadata: { entryEndpoint: '/v1/responses', endpoint: '/v1/responses', stream: wantsSSE },
+        route: { providerId: 'unknown', modelId: String(payload.model||'unknown'), requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, timestamp: Date.now() },
+        metadata: { entryEndpoint: '/v1/responses', endpoint: '/v1/responses', stream: wantsSSE, routeName },
         debug: { enabled: false, stages: {} }
       } as any;
       const response = await (ctx.pipelineManager as any).processRequest(sharedReq);
@@ -95,4 +94,3 @@ export async function handleSubmitToolOutputs(req: Request, res: Response, ctx: 
 }
 
 export default { handleSubmitToolOutputs };
-

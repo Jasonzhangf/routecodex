@@ -21,7 +21,6 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
   try {
     if (!ctx.pipelineManager) { res.status(503).json({ error: { message: 'Pipeline manager not attached' } }); return; }
     const payload = (req.body || {}) as any;
-    const pipelineId = null as unknown as string; // 强制由 PipelineManager 基于路由池轮询选择
     const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     // Snapshot: http-request
     try { await writeServerSnapshot({ phase: 'http-request', requestId, data: payload, entryEndpoint }); } catch { /* non-blocking */ }
@@ -30,6 +29,9 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       const meta = (payload.metadata && typeof payload.metadata === 'object') ? payload.metadata : {};
       payload.metadata = { ...meta, entryEndpoint, stream: wantsSSE };
     } catch { /* ignore */ }
+
+    // 使用虚拟路由器决策具体 pipelineId（首选路径）
+    const routeName = await ctx.selectRouteName(payload, entryEndpoint);
 
     // Pre-validate anthropic messages request shape (fail fast with detailed errors)
     try {
@@ -79,7 +81,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     const sharedReq: any = {
       data: payload,
       route: { providerId: 'unknown', modelId: String(payload?.model || 'unknown'), requestId, timestamp: Date.now() },
-      metadata: { entryEndpoint, endpoint: entryEndpoint, stream: wantsSSE, routeName: 'default' },
+      metadata: { entryEndpoint, endpoint: entryEndpoint, stream: wantsSSE, routeName },
       debug: { enabled: false, stages: {} },
       entryEndpoint
     };
@@ -109,8 +111,8 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     const stopPreHeartbeat = () => { try { if (hbTimer) { clearInterval(hbTimer); hbTimer = null; } } catch {} };
     if (wantsSSE) startPreHeartbeat();
 
-    // Snapshot: routing-selected
-    try { await writeServerSnapshot({ phase: 'routing-selected', requestId, data: { pipelineId }, entryEndpoint }); } catch { /* ignore */ }
+    // Snapshot: routing-selected（由虚拟路由器决策 routeName）
+    try { await writeServerSnapshot({ phase: 'routing-selected', requestId, data: { routeName }, entryEndpoint }); } catch { /* ignore */ }
 
     // 按原逻辑：直接委托流水线，SSE/JSON 由核心与下游决定
     const response = await ctx.pipelineManager.processRequest(sharedReq);

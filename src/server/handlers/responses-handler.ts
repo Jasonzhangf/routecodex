@@ -43,7 +43,6 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
       };
       await writeServerSnapshot({ phase: 'http-request.parsed', requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2,10)}`, data: summarize(payload), entryEndpoint });
     } catch { /* ignore */ }
-    const pipelineId = null as unknown as string; // 强制由 PipelineManager 基于路由池轮询选择
     const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     // Snapshot: http-request
     try { await writeServerSnapshot({ phase: 'http-request', requestId, data: payload, entryEndpoint }); } catch { /* non-blocking */ }
@@ -52,10 +51,12 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
       const meta = (payload.metadata && typeof payload.metadata === 'object') ? payload.metadata : {};
       payload.metadata = { ...meta, entryEndpoint, stream: wantsSSE };
     } catch { /* ignore */ }
+
+    const routeName = await ctx.selectRouteName(payload, entryEndpoint);
     const sharedReq: any = {
       data: payload,
       route: { providerId: 'unknown', modelId: String(payload?.model || 'unknown'), requestId, timestamp: Date.now() },
-      metadata: { entryEndpoint, endpoint: entryEndpoint, stream: wantsSSE, routeName: 'default' },
+      metadata: { entryEndpoint, endpoint: entryEndpoint, stream: wantsSSE, routeName },
       debug: { enabled: false, stages: {} },
       entryEndpoint
     };
@@ -84,8 +85,8 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
     const stopPreHeartbeat = () => { try { if (hbTimer) { clearInterval(hbTimer); hbTimer = null; } } catch {} };
     if (wantsSSE) startPreHeartbeat();
 
-    // Snapshot: routing-selected
-    try { await writeServerSnapshot({ phase: 'routing-selected', requestId, data: { pipelineId }, entryEndpoint }); } catch { /* ignore */ }
+    // Snapshot: routing-selected（由虚拟路由器决策 routeName）
+    try { await writeServerSnapshot({ phase: 'routing-selected', requestId, data: { routeName }, entryEndpoint }); } catch { /* ignore */ }
     const response = await ctx.pipelineManager.processRequest(sharedReq);
     const out = (response && typeof response === 'object' && 'data' in response) ? (response as any).data : response;
     // 优先：核心返回了 __sse_responses → 无条件按 SSE 输出（零回退）

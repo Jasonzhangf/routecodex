@@ -71,6 +71,34 @@ export class ProtocolTokenCalculator {
   }
 
   /**
+   * 使用llmswitch-core内置的TokenCounter进行精确/智能Token计算（优先tiktoken，回退估算）
+   * 保持签名不变，由ConfigRequestClassifier在内部优先调用此方法（async）以进行长上下文判定。
+   */
+  async calculateAsync(request: Record<string, unknown>, endpoint: string): Promise<ProtocolTokenCalculationResult> {
+    const protocol = this.detectProtocol(endpoint);
+    // 使用 llmswitch-core 的严格 TokenCounter（禁止估算回退）；任何错误由上层分类器处理（Fail Fast）
+    const mod: any = await import('rcc-llmswitch-core/v2/utils/token-counter');
+    const TokenCounter = mod.TokenCounter;
+    const { inputTokens, toolTokens } = await TokenCounter.calculateRequestTokensStrict(
+      request,
+      typeof (request as any)?.model === 'string' ? String((request as any).model) : 'gpt-3.5-turbo'
+    );
+    const totalTokens = inputTokens + (toolTokens || 0);
+    return {
+      totalTokens,
+      messageTokens: inputTokens,
+      systemTokens: 0,
+      toolTokens: toolTokens || 0,
+      breakdown: {
+        messages: inputTokens,
+        system: 0,
+        tools: toolTokens || 0
+      },
+      protocol
+    };
+  }
+
+  /**
    * 检测协议类型
    */
   private detectProtocol(endpoint: string): string {
