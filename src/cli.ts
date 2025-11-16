@@ -239,22 +239,35 @@ program
       let actualPort = options.port ? parseInt(options.port, 10) : null;
       let actualHost = options.host;
 
-      // If no explicit port provided, try to read from config file
-      if (!actualPort && fs.existsSync(configPath)) {
-        try {
-          const configContent = fs.readFileSync(configPath, 'utf8');
-          const config = JSON.parse(configContent);
-          actualPort = (config?.httpserver?.port ?? config?.server?.port ?? config?.port) || null;
-          actualHost = (config?.httpserver?.host || config?.server?.host || config?.host || actualHost);
-        } catch (error) {
-          spinner.warn('Failed to read configuration file, using defaults');
+      // 如果未显式指定端口：
+      // - dev 模式（routecodex）：与 start 保持一致，优先使用 env 覆盖，否则固定 5555；
+      // - release 模式（rcc）：从配置文件读取 httpserver/server/顶层 port。
+      if (!actualPort) {
+        if (IS_DEV_MODE) {
+          const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
+          if (!Number.isNaN(envPort) && envPort > 0) {
+            logger.info(`Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT) [dev code]`);
+            actualPort = envPort;
+          } else {
+            actualPort = DEFAULT_DEV_PORT;
+            logger.info(`Using dev default port ${actualPort} for routecodex code (matching dev server)`);
+          }
+        } else if (fs.existsSync(configPath)) {
+          try {
+            const configContent = fs.readFileSync(configPath, 'utf8');
+            const config = JSON.parse(configContent);
+            actualPort = (config?.httpserver?.port ?? config?.server?.port ?? config?.port) || null;
+            actualHost = (config?.httpserver?.host || config?.server?.host || config?.host || actualHost);
+          } catch (error) {
+            spinner.warn('Failed to read configuration file, using defaults');
+          }
         }
       }
 
-      // Require explicit port if not provided via flag or config
+      // Require explicit port if not provided via flag/env/config
       if (!actualPort) {
         spinner.fail('Invalid or missing port configuration for RouteCodex server');
-        logger.error('Please set httpserver.port in your configuration (e.g., ~/.routecodex/config.json)');
+        logger.error('Please set httpserver.port in your configuration (e.g., ~/.routecodex/config.json), or use -p/--port');
         process.exit(1);
       }
 
@@ -286,9 +299,16 @@ program
           const modulesConfigPath = path.resolve(__dirname, '../config/modules.json');
           const serverEntry = path.resolve(__dirname, 'index.js');
 
+          const env = { ...process.env } as NodeJS.ProcessEnv;
+          // 在 dev 模式下，强制与 code 使用同一端口，并显式指定配置文件，保持与 `routecodex start` 一致。
+          if (IS_DEV_MODE) {
+            env.ROUTECODEX_PORT = String(actualPort);
+            env.ROUTECODEX_CONFIG = configPath;
+          }
+
           const serverProcess = spawn(process.execPath, [serverEntry, modulesConfigPath], {
             stdio: 'pipe',
-            env: { ...process.env },
+            env,
             detached: true
           });
 
