@@ -316,10 +316,13 @@ export class RouteCodexServerV2 extends BaseModule {
         const rid = (req as any).__requestId || this.generateRequestId();
         (req as any).__requestId = rid;
         const hctx = this.createHookContext(rid, endpoint, req.body);
+        // 对于 /v1/messages（Anthropic Messages），禁用 server-response/server-final Hook，
+        // 避免在 llmswitch-core 已完成 Anthropic↔Chat↔Anthropic 闭环后再次套用 OpenAI finalizer 造成内容丢失。
+        const skipResponseHooks = endpoint === '/v1/messages';
         // Patch res.json to capture response body
         const originalJson = res.json.bind(res);
         (res as any).json = (body: any) => {
-          if (this.hooksEnabled && this.hookIntegration) {
+          if (this.hooksEnabled && this.hookIntegration && !skipResponseHooks) {
             this.executeHooksWithSnapshot('server-response', body, hctx).catch(()=>{});
             this.executeHooksWithSnapshot('server-final', body, hctx).catch(()=>{});
           }
