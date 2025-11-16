@@ -104,7 +104,7 @@ export class ProviderFactory {
     }
 
     // 验证providerType
-    const supportedTypes = ['openai', 'glm', 'qwen', 'iflow', 'lmstudio', 'responses'];
+    const supportedTypes = ['openai', 'glm', 'qwen', 'iflow', 'lmstudio', 'responses', 'anthropic'];
     if (config.config.providerType && !supportedTypes.includes(config.config.providerType)) {
       errors.push(`Unsupported providerType: ${config.config.providerType}. Supported types: ${supportedTypes.join(', ')}`);
     }

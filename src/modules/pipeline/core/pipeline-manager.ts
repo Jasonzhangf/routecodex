@@ -1082,6 +1082,8 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('openai', this.createOpenAIProviderModule);
     // Responses provider (real SSE passthrough) → uses ProviderFactory to build ResponsesProvider
     this.registry.registerModule('responses', this.createOpenAIProviderModule);
+    // Anthropic Messages provider family（标准 /v1/messages wire）
+    this.registry.registerModule('anthropic', this.createOpenAIProviderModule);
     this.registry.registerModule('lmstudio', this.createLMStudioHTTPModule);
     this.registry.registerModule('iflow', this.createIFlowProviderModule);
     this.registry.registerModule('generic_responses', this.createGenericResponsesProviderModule);

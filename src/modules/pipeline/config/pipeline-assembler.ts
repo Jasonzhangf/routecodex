@@ -286,10 +286,11 @@ export class PipelineAssembler {
         /* ignore */
       }
 
-      // 注入 providerType：优先使用 routeMeta.providerId（例如 'lmstudio'），
-      // 然后回退到 provider.type 的别名映射；无法推断时直接报错（V2 禁止兜底）。
+      // 注入 providerType：
+      //  - 默认优先使用 routeMeta.providerId（例如 'lmstudio'），再尝试 provider.type 的别名映射；
+      //  - 对于 Responses / Anthropic 等协议型 provider，优先使用 provider.type 的别名，以便明确区分 wire 家族。
       {
-        const supported = new Set(['openai', 'glm', 'qwen', 'iflow', 'lmstudio', 'responses']);
+        const supported = new Set(['openai', 'glm', 'qwen', 'iflow', 'lmstudio', 'responses', 'anthropic']);
         const alias = (s: string): string | '' => {
           const t = (s || '').toLowerCase();
           if (!t) return '' as any;
@@ -299,13 +300,18 @@ export class PipelineAssembler {
           if (t.includes('lmstudio') || t.includes('lm-studio')) return 'lmstudio';
           if (t.includes('iflow')) return 'iflow';
           if (t.includes('responses')) return 'responses';
+          if (t.includes('anthropic')) return 'anthropic';
           return '' as any;
         };
         const fromRoute = String(providerIdForKey || '').toLowerCase();
         const fromProvider = String((provider && provider.type) || '').toLowerCase();
-        const cand1 = supported.has(fromRoute) ? fromRoute : alias(fromRoute);
-        const cand2 = supported.has(fromProvider) ? fromProvider : alias(fromProvider);
-        const finalType = cand1 || cand2;
+        const candRoute = supported.has(fromRoute) ? fromRoute : alias(fromRoute);
+        const candProv = supported.has(fromProvider) ? fromProvider : alias(fromProvider);
+        // Responses/Anthropic 等协议 provider 应优先按 provider.type 归类；其它家族仍以 routeMeta 为主
+        const finalType =
+          (candProv === 'responses' || candProv === 'anthropic')
+            ? candProv
+            : (candRoute || candProv);
         if (!finalType) {
           throw new Error(
             `PipelineAssembler(V2): unable to infer providerType for pipeline '${id}'. ` +
