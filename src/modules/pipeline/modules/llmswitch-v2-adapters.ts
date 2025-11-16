@@ -136,7 +136,13 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
     const __filename = fileURLToPath(import.meta.url);
     const pkgRoot = path.resolve(path.dirname(__filename), '../../../..');
     const bridge = await importCore('v2/bridge/routecodex-adapter');
-    const result = await (bridge as any).processIncoming(request, { baseDir: pkgRoot, profilesPath: 'config/conversion/llmswitch-profiles.json' });
+    const typeLower = String(this.config.type || '').toLowerCase();
+    const processMode = typeLower === 'llmswitch-responses-passthrough' ? 'passthrough' : 'chat';
+    const result = await (bridge as any).processIncoming(request, {
+      baseDir: pkgRoot,
+      profilesPath: 'config/conversion/llmswitch-profiles.json',
+      processMode
+    });
     // Normalize: some core bridge versions may return an envelope like
     // { payload, pipelineId, ... }. Downstream expects plain Chat JSON
     // (BasePipeline will wrap it into DTO). Keep DTO if already returned.
@@ -162,6 +168,8 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
     const __filename = fileURLToPath(import.meta.url);
     const pkgRoot = path.resolve(path.dirname(__filename), '../../../..');
     const bridge = await importCore('v2/bridge/routecodex-adapter');
+    const typeLower = String(this.config.type || '').toLowerCase();
+    const processMode = typeLower === 'llmswitch-responses-passthrough' ? 'passthrough' : 'chat';
     const invokeSecondRound = async (dto: any, _ctx: any) => {
       try {
         // Build a SharedPipelineRequest and re-enter pipeline (non-streaming second round)
@@ -185,7 +193,12 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
         return { data: dto?.body };
       }
     };
-    return await (bridge as any).processOutgoing(response, { baseDir: pkgRoot, profilesPath: 'config/conversion/llmswitch-profiles.json', invokeSecondRound });
+    return await (bridge as any).processOutgoing(response, {
+      baseDir: pkgRoot,
+      profilesPath: 'config/conversion/llmswitch-profiles.json',
+      processMode,
+      invokeSecondRound
+    });
   }
 }
 

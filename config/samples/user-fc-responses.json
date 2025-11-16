@@ -1,0 +1,39 @@
+{
+  "version": "1.0.0",
+  "httpserver": { "port": 5555, "host": "0.0.0.0" },
+  "virtualrouter": {
+    "inputProtocol": "openai",
+    "outputProtocol": "openai",
+    "providers": {
+      "fc": {
+        "id": "fc",
+        "enabled": true,
+        "type": "openai",
+        "baseURL": "https://www.fakercode.top/v1",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "${FC_API_KEY}"
+        },
+        "apiKey": ["${FC_API_KEY}"],
+        "models": {
+          "gpt-5.1": {
+            "supportsStreaming": true
+          }
+        },
+        "responses": {
+          "process": "passthrough"
+        }
+      }
+    },
+    "routing": {
+      "default": ["fc.gpt-5.1"],
+      "coding": [],
+      "longcontext": [],
+      "thinking": [],
+      "tools": [],
+      "vision": [],
+      "websearch": [],
+      "background": []
+    }
+  }
+}

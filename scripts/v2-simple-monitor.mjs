@@ -82,10 +82,11 @@ if (fs.existsSync(debugLogsDir)) {
 // 3. 检查编译输出
 console.log('\n🔧 编译状态:');
 const distDir = path.join(projectRoot, 'dist');
-const v2DistDir = path.join(distDir, 'modules/pipeline/v2');
+// V2 pipeline 构建输出目录（新版布局）
+const v2DistDir = path.join(distDir, 'modules', 'pipeline');
 
 if (fs.existsSync(v2DistDir)) {
-  console.log('✅ V2模块已编译');
+  console.log('✅ V2流水线模块已编译');
 
   const v2Files = [];
   function collectFiles(dir, prefix = '') {
@@ -148,15 +149,15 @@ const debugLogsCount = fs.existsSync(debugLogsDir)
 
 if (debugLogsCount > 0) {
   console.log('✅ 流水线系统活跃');
-  console.log('💡 建议运行: node src/server/http-server.ts 启动完整服务');
+  console.log('💡 建议使用: routecodex start --config ~/.routecodex/config.json （默认监听 5555 端口）');
 } else {
   console.log('⚠️  流水线系统可能未启动');
-  console.log('💡 建议检查服务启动状态');
+  console.log('💡 建议检查 5555 端口上的 RouteCodex 服务是否已启动（routecodex start）');
 }
 
 if (fs.existsSync(v2DistDir)) {
   console.log('✅ V2模块已准备就绪');
-  console.log('💡 可以在代码中集成V2干运行功能');
+  console.log('💡 可以在当前 5555 端口的服务中集成 V2 干运行监控');
 } else {
   console.log('⚠️  V2模块需要编译');
   console.log('💡 运行: npm run build');

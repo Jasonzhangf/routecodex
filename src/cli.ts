@@ -176,6 +176,38 @@ try {
   program.addCommand(createValidateCommand());
 } catch { /* optional */ }
 
+// Monitor command - run simple V2 dry-run monitoring summary
+// Use a specific name to avoid conflicts with other commands.
+if (!program.commands.some(cmd => cmd.name() === 'v2-monitor')) {
+  program
+    .command('v2-monitor')
+    .description('Run V2 dry-run monitoring summary (checks build + basic process state)')
+    .action(async () => {
+      const spinner = await createSpinner('Running V2 monitor...');
+      try {
+        const monitorScript = path.resolve(__dirname, '../scripts/v2-simple-monitor.mjs');
+        if (!fs.existsSync(monitorScript)) {
+          spinner.fail('V2 monitor script not found');
+          logger.error(`Missing script: ${monitorScript}`);
+          process.exit(1);
+        }
+        spinner.stop();
+        const { spawn } = await import('child_process');
+        const child = spawn(process.execPath, [monitorScript], {
+          stdio: 'inherit',
+          env: { ...process.env }
+        });
+        child.on('exit', (code) => {
+          process.exit(code ?? 0);
+        });
+      } catch (error: any) {
+        spinner.fail('Failed to run V2 monitor');
+        logger.error(error?.message || String(error));
+        process.exit(1);
+      }
+    });
+}
+
 // Code command - Launch Claude Code interface
 program
   .command('code')

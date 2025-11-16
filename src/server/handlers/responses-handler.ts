@@ -4,15 +4,144 @@ import path from 'path';
 import fsp from 'fs/promises';
 import type { HandlerContext } from './types.js';
 import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
+import { getTransparentMonitorConfigForResponses } from '../utils/monitor-transparent.js';
+import { logNonBlockingError, runNonBlocking } from '../utils/non-blocking-error-logger.js';
 
 // Responses endpoint: /v1/responses (OpenAI Responses SSE with named events)
 export async function handleResponses(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
   let sseLogger: { write: (line: string) => Promise<void> } = { write: async () => {} } as any;
   const entryEndpoint = '/v1/responses';
+  const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  const payload = (req.body || {}) as any;
+
+  // Transparent monitor mode: 直接透传到上游 /v1/responses（绕过本地流水线）
+  const monitorCfg = getTransparentMonitorConfigForResponses();
+  if (monitorCfg.enabled && monitorCfg.upstreamUrl) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      try {
+        controller.abort();
+      } catch {
+        /* ignore */
+      }
+    }, monitorCfg.timeoutMs ?? 15000);
+
+    try {
+      await runNonBlocking(
+        { component: 'http.responses-handler', operation: 'snapshot.monitor-upstream-request', requestId, entryEndpoint },
+        () =>
+          writeServerSnapshot({
+            phase: 'monitor.upstream-request',
+            requestId,
+            data: {
+              upstreamUrl: monitorCfg.upstreamUrl,
+              timeoutMs: monitorCfg.timeoutMs ?? 15000,
+              hasAuthHeader: !!monitorCfg.authHeader,
+              payload
+            },
+            entryEndpoint
+          })
+      );
+
+      const headers: Record<string, string> = {
+        'content-type': 'application/json'
+      };
+      if (monitorCfg.authHeader) {
+        headers['authorization'] = monitorCfg.authHeader;
+      }
+
+      const upstreamResp = await fetch(monitorCfg.upstreamUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+        signal: controller.signal as any
+      } as any);
+
+      clearTimeout(timeout);
+
+      const text = await upstreamResp.text();
+      await runNonBlocking(
+        { component: 'http.responses-handler', operation: 'snapshot.monitor-upstream-response', requestId, entryEndpoint },
+        () =>
+          writeServerSnapshot({
+            phase: 'monitor.upstream-response',
+            requestId,
+            data: {
+              status: upstreamResp.status,
+              ok: upstreamResp.ok,
+              headers: (() => {
+                try {
+                  const all: Record<string, string> = {};
+                  upstreamResp.headers.forEach((v, k) => {
+                    all[k] = v;
+                  });
+                  return all;
+                } catch {
+                  return {};
+                }
+              })(),
+              bodyText: text
+            },
+            entryEndpoint
+          })
+      );
+      const ct = upstreamResp.headers.get('content-type') || 'application/json; charset=utf-8';
+      try {
+        res.status(upstreamResp.status);
+        res.setHeader('Content-Type', ct);
+      } catch {
+        // headers 已发送或响应已结束，尽力而为
+      }
+      try {
+        res.send(text);
+      } catch {
+        // ignore send errors
+      }
+      await runNonBlocking(
+        { component: 'http.responses-handler', operation: 'snapshot.monitor-http-response', requestId, entryEndpoint },
+        () =>
+          writeServerSnapshot({
+            phase: 'monitor.http-response',
+            requestId,
+            data: {
+              status: upstreamResp.status,
+              contentType: ct,
+              bodyText: text
+            },
+            entryEndpoint
+          })
+      );
+      return;
+    } catch (error: any) {
+      clearTimeout(timeout);
+      await runNonBlocking(
+        { component: 'http.responses-handler', operation: 'snapshot.monitor-upstream-error', requestId, entryEndpoint },
+        () =>
+          writeServerSnapshot({
+            phase: 'monitor.upstream-error',
+            requestId,
+            data: {
+              message: error?.message || String(error),
+              name: error?.name,
+              code: (error as any)?.code
+            },
+            entryEndpoint
+          })
+      );
+      if (!res.headersSent) {
+        res.status(502).json({
+          error: {
+            message: error?.message || String(error),
+            type: 'monitor_upstream_error'
+          }
+        });
+      }
+      return;
+    }
+  }
   try {
     if (!ctx.pipelineManager) { res.status(503).json({ error: { message: 'Pipeline manager not attached' } }); return; }
-    const payload = (req.body || {}) as any;
-    // Server-side parsed summary for inbound Responses payload
+    // Server-side parsed summary for inbound Responses payload（非阻塞）
     try {
       const summarize = (p: any) => {
         const input = Array.isArray(p?.input) ? p.input : [];
@@ -42,15 +171,28 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
         };
       };
       await writeServerSnapshot({ phase: 'http-request.parsed', requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2,10)}`, data: summarize(payload), entryEndpoint });
-    } catch { /* ignore */ }
+    } catch (error) {
+      await logNonBlockingError(
+        { component: 'http.responses-handler', operation: 'snapshot.http-request-parsed', entryEndpoint },
+        error
+      );
+    }
     const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     // Snapshot: http-request
-    try { await writeServerSnapshot({ phase: 'http-request', requestId, data: payload, entryEndpoint }); } catch { /* non-blocking */ }
+    await runNonBlocking(
+      { component: 'http.responses-handler', operation: 'snapshot.http-request', requestId, entryEndpoint },
+      () => writeServerSnapshot({ phase: 'http-request', requestId, data: payload, entryEndpoint })
+    );
     const wantsSSE = (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream')) || payload.stream === true;
     try {
       const meta = (payload.metadata && typeof payload.metadata === 'object') ? payload.metadata : {};
       payload.metadata = { ...meta, entryEndpoint, stream: wantsSSE };
-    } catch { /* ignore */ }
+    } catch (error) {
+      await logNonBlockingError(
+        { component: 'http.responses-handler', operation: 'payload.attach-metadata', requestId, entryEndpoint },
+        error
+      );
+    }
 
     const routeName = await ctx.selectRouteName(payload, entryEndpoint);
     const sharedReq: any = {
@@ -63,10 +205,37 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
     sseLogger = (() => {
       try {
         const dir = path.join(os.homedir(), '.routecodex', 'logs', 'sse');
-        const ensure = async () => { try { await fsp.mkdir(dir, { recursive: true }); } catch {} };
+        const ensure = async () => {
+          try {
+            await fsp.mkdir(dir, { recursive: true });
+          } catch (error) {
+            await logNonBlockingError(
+              { component: 'http.responses-handler', operation: 'sse.ensure-dir', requestId, entryEndpoint },
+              error
+            );
+          }
+        };
         const file = path.join(dir, `${requestId}_server.sse.log`);
-        return { async write(s: string) { try { await ensure(); await fsp.appendFile(file, `[${new Date().toISOString()}] ${s}`, 'utf-8'); } catch {} } };
-      } catch { return { async write(_s: string) { /* ignore */ } }; }
+        return {
+          async write(s: string) {
+            try {
+              await ensure();
+              await fsp.appendFile(file, `[${new Date().toISOString()}] ${s}`, 'utf-8');
+            } catch (error) {
+              await logNonBlockingError(
+                { component: 'http.responses-handler', operation: 'sse.append-log', requestId, entryEndpoint },
+                error
+              );
+            }
+          }
+        };
+      } catch (error) {
+        void logNonBlockingError(
+          { component: 'http.responses-handler', operation: 'sse.logger-init', requestId, entryEndpoint },
+          error
+        );
+        return { async write(_s: string) { /* noop */ } };
+      }
     })();
     // Pre heartbeat
     let hbTimer: NodeJS.Timeout | null = null;
@@ -77,16 +246,47 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Accel-Buffering', 'no');
         (res as any).flushHeaders?.();
-      } catch { /* ignore */ }
+      } catch (error) {
+        void logNonBlockingError(
+          { component: 'http.responses-handler', operation: 'sse.set-headers', requestId, entryEndpoint },
+          error
+        );
+      }
       const iv = Math.max(1000, Number(process.env.ROUTECODEX_STREAM_HEARTBEAT_MS || process.env.RCC_STREAM_HEARTBEAT_MS || 15000));
-      const writeBeat = () => { try { const s = `: pre-heartbeat ${Date.now()}\n\n`; res.write(s); sseLogger.write(s).catch(()=>{}); } catch {} };
+      const writeBeat = () => {
+        try {
+          const s = `: pre-heartbeat ${Date.now()}\n\n`;
+          res.write(s);
+          sseLogger.write(s).catch(()=>{});
+        } catch (error) {
+          void logNonBlockingError(
+            { component: 'http.responses-handler', operation: 'sse.heartbeat', requestId, entryEndpoint, level: 'debug' },
+            error
+          );
+        }
+      };
       writeBeat(); hbTimer = setInterval(writeBeat, iv);
     };
-    const stopPreHeartbeat = () => { try { if (hbTimer) { clearInterval(hbTimer); hbTimer = null; } } catch {} };
+    const stopPreHeartbeat = () => {
+      try {
+        if (hbTimer) {
+          clearInterval(hbTimer);
+          hbTimer = null;
+        }
+      } catch (error) {
+        void logNonBlockingError(
+          { component: 'http.responses-handler', operation: 'sse.heartbeat-stop', requestId, entryEndpoint, level: 'debug' },
+          error
+        );
+      }
+    };
     if (wantsSSE) startPreHeartbeat();
 
     // Snapshot: routing-selected（由虚拟路由器决策 routeName）
-    try { await writeServerSnapshot({ phase: 'routing-selected', requestId, data: { routeName }, entryEndpoint }); } catch { /* ignore */ }
+    await runNonBlocking(
+      { component: 'http.responses-handler', operation: 'snapshot.routing-selected', requestId, entryEndpoint },
+      () => writeServerSnapshot({ phase: 'routing-selected', requestId, data: { routeName }, entryEndpoint })
+    );
     const response = await ctx.pipelineManager.processRequest(sharedReq);
     const out = (response && typeof response === 'object' && 'data' in response) ? (response as any).data : response;
     // 优先：核心返回了 __sse_responses → 无条件按 SSE 输出（零回退）
@@ -98,7 +298,12 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
         res.setHeader('Cache-Control','no-cache');
         res.setHeader('Connection','keep-alive');
         res.setHeader('X-Accel-Buffering','no');
-      } catch {}
+      } catch (error) {
+        void logNonBlockingError(
+          { component: 'http.responses-handler', operation: 'sse.set-headers-fallback', requestId, entryEndpoint },
+          error
+        );
+      }
       try {
         const { PassThrough } = await import('node:stream');
         const tee = new PassThrough();
@@ -130,7 +335,10 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
     }
     // Non-SSE
     stopPreHeartbeat();
-    try { await writeServerSnapshot({ phase: 'http-response', requestId, data: out, entryEndpoint }); } catch { /* ignore */ }
+    await runNonBlocking(
+      { component: 'http.responses-handler', operation: 'snapshot.http-response', requestId, entryEndpoint },
+      () => writeServerSnapshot({ phase: 'http-response', requestId, data: out, entryEndpoint })
+    );
     res.status(200).json(out);
   } catch (error: any) {
     // SSE error path
@@ -148,7 +356,15 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
         return;
       }
     } catch {}
-    try { await writeServerSnapshot({ phase: 'http-response.error', requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`, data: { message: error?.message || String(error) }, entryEndpoint }); } catch { /* ignore */ }
+    await runNonBlocking(
+      { component: 'http.responses-handler', operation: 'snapshot.http-response-error', entryEndpoint },
+      () => writeServerSnapshot({
+        phase: 'http-response.error',
+        requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+        data: { message: error?.message || String(error) },
+        entryEndpoint
+      })
+    );
     if (!res.headersSent) res.status(500).json({ error: { message: error?.message || String(error) } });
   }
 }

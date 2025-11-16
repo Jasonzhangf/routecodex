@@ -6,6 +6,7 @@ function normalizeProvider(id, raw) {
   const headers = asRecord(p.headers || {});
   const type = p.type || 'openai';
   const models = asRecord(p.models || {});
+  const responses = asRecord(p.responses || {});
   const apiKey = Array.isArray(p.apiKey)
     ? p.apiKey
     : (typeof p.apiKey === 'string' && p.apiKey.trim() ? [p.apiKey.trim()] : []);
@@ -13,7 +14,7 @@ function normalizeProvider(id, raw) {
   const keys = [];
   if (Array.isArray(apiKey)) keys.push(...apiKey.filter(Boolean));
   if (typeof authApiKey === 'string' && authApiKey.trim()) keys.push(authApiKey.trim());
-  return { id, type, baseUrl, headers, models, keys };
+  return { id, type, baseUrl, headers, models, responses, keys };
 }
 
 export function buildCanonical(system, user, options = {}) {
@@ -26,7 +27,14 @@ export function buildCanonical(system, user, options = {}) {
   const providers = {}; const keyVault = {};
   for (const [pid, raw] of Object.entries(providersIn)) {
     const p = normalizeProvider(pid, raw);
-    providers[pid] = { id: pid, type: p.type, baseUrl: p.baseUrl, headers: p.headers, models: p.models };
+    providers[pid] = {
+      id: pid,
+      type: p.type,
+      baseUrl: p.baseUrl,
+      headers: p.headers,
+      models: p.models,
+      ...(Object.keys(asRecord(p.responses || {})).length ? { responses: p.responses } : {})
+    };
     if (p.keys && p.keys.length) {
       keyVault[pid] = {};
       p.keys.forEach((v, i) => { keyVault[pid][`key${i+1}`] = { type: 'apikey', value: v, enabled: true }; });
@@ -68,4 +76,3 @@ export function buildCanonical(system, user, options = {}) {
     _metadata: { version: '0.1.0', builtAt: Date.now(), keyDimension }
   };
 }
-

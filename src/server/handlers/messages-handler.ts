@@ -4,6 +4,7 @@ import path from 'path';
 import fsp from 'fs/promises';
 import type { HandlerContext } from './types.js';
 import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
+import { logNonBlockingError, runNonBlocking } from '../utils/non-blocking-error-logger.js';
 
 // Anthropic Messages endpoint: /v1/messages (Anthropic SSE with named events)
 export async function handleMessages(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
@@ -22,13 +23,21 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     if (!ctx.pipelineManager) { res.status(503).json({ error: { message: 'Pipeline manager not attached' } }); return; }
     const payload = (req.body || {}) as any;
     const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-    // Snapshot: http-request
-    try { await writeServerSnapshot({ phase: 'http-request', requestId, data: payload, entryEndpoint }); } catch { /* non-blocking */ }
+    // Snapshot: http-request（非阻塞，错误写入内部错误日志）
+    await runNonBlocking(
+      { component: 'http.messages-handler', operation: 'snapshot.http-request', requestId, entryEndpoint },
+      () => writeServerSnapshot({ phase: 'http-request', requestId, data: payload, entryEndpoint })
+    );
     const wantsSSE = (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream')) || payload.stream === true;
     try {
       const meta = (payload.metadata && typeof payload.metadata === 'object') ? payload.metadata : {};
       payload.metadata = { ...meta, entryEndpoint, stream: wantsSSE };
-    } catch { /* ignore */ }
+    } catch (error) {
+      await logNonBlockingError(
+        { component: 'http.messages-handler', operation: 'payload.attach-metadata', requestId, entryEndpoint },
+        error
+      );
+    }
 
     // 使用虚拟路由器决策具体 pipelineId（首选路径）
     const routeName = await ctx.selectRouteName(payload, entryEndpoint);
@@ -77,7 +86,12 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
         res.status(422).json({ error: errBody });
         return;
       }
-    } catch { /* ignore pre-validation errors */ }
+    } catch (error) {
+      await logNonBlockingError(
+        { component: 'http.messages-handler', operation: 'pre-validate.anthropic-request', requestId, entryEndpoint },
+        error
+      );
+    }
     const sharedReq: any = {
       data: payload,
       route: { providerId: 'unknown', modelId: String(payload?.model || 'unknown'), requestId, timestamp: Date.now() },
@@ -89,10 +103,37 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     sseLogger = (() => {
       try {
         const dir = path.join(os.homedir(), '.routecodex', 'logs', 'sse');
-        const ensure = async () => { try { await fsp.mkdir(dir, { recursive: true }); } catch {} };
+        const ensure = async () => {
+          try {
+            await fsp.mkdir(dir, { recursive: true });
+          } catch (error) {
+            await logNonBlockingError(
+              { component: 'http.messages-handler', operation: 'sse.ensure-dir', requestId, entryEndpoint },
+              error
+            );
+          }
+        };
         const file = path.join(dir, `${requestId}_server.sse.log`);
-        return { async write(s: string) { try { await ensure(); await fsp.appendFile(file, `[${new Date().toISOString()}] ${s}`, 'utf-8'); } catch {} } };
-      } catch { return { async write(_s: string) { /* ignore */ } }; }
+        return {
+          async write(s: string) {
+            try {
+              await ensure();
+              await fsp.appendFile(file, `[${new Date().toISOString()}] ${s}`, 'utf-8');
+            } catch (error) {
+              await logNonBlockingError(
+                { component: 'http.messages-handler', operation: 'sse.append-log', requestId, entryEndpoint },
+                error
+              );
+            }
+          }
+        };
+      } catch (error) {
+        void logNonBlockingError(
+          { component: 'http.messages-handler', operation: 'sse.logger-init', requestId, entryEndpoint },
+          error
+        );
+        return { async write(_s: string) { /* noop */ } };
+      }
     })();
     // Pre heartbeat
     let hbTimer: NodeJS.Timeout | null = null;
@@ -103,16 +144,47 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Accel-Buffering', 'no');
         (res as any).flushHeaders?.();
-      } catch { /* ignore */ }
+      } catch (error) {
+        void logNonBlockingError(
+          { component: 'http.messages-handler', operation: 'sse.set-headers', requestId, entryEndpoint },
+          error
+        );
+      }
       const iv = Math.max(1000, Number(process.env.ROUTECODEX_STREAM_HEARTBEAT_MS || process.env.RCC_STREAM_HEARTBEAT_MS || 15000));
-      const writeBeat = () => { try { const s = `: pre-heartbeat ${Date.now()}\n\n`; res.write(s); sseLogger.write(s).catch(()=>{}); } catch {} };
+      const writeBeat = () => {
+        try {
+          const s = `: pre-heartbeat ${Date.now()}\n\n`;
+          res.write(s);
+          sseLogger.write(s).catch(()=>{});
+        } catch (error) {
+          void logNonBlockingError(
+            { component: 'http.messages-handler', operation: 'sse.heartbeat', requestId, entryEndpoint, level: 'debug' },
+            error
+          );
+        }
+      };
       writeBeat(); hbTimer = setInterval(writeBeat, iv);
     };
-    const stopPreHeartbeat = () => { try { if (hbTimer) { clearInterval(hbTimer); hbTimer = null; } } catch {} };
+    const stopPreHeartbeat = () => {
+      try {
+        if (hbTimer) {
+          clearInterval(hbTimer);
+          hbTimer = null;
+        }
+      } catch (error) {
+        void logNonBlockingError(
+          { component: 'http.messages-handler', operation: 'sse.heartbeat-stop', requestId, entryEndpoint, level: 'debug' },
+          error
+        );
+      }
+    };
     if (wantsSSE) startPreHeartbeat();
 
     // Snapshot: routing-selected（由虚拟路由器决策 routeName）
-    try { await writeServerSnapshot({ phase: 'routing-selected', requestId, data: { routeName }, entryEndpoint }); } catch { /* ignore */ }
+    await runNonBlocking(
+      { component: 'http.messages-handler', operation: 'snapshot.routing-selected', requestId, entryEndpoint },
+      () => writeServerSnapshot({ phase: 'routing-selected', requestId, data: { routeName }, entryEndpoint })
+    );
 
     // 按原逻辑：直接委托流水线，SSE/JSON 由核心与下游决定
     const response = await ctx.pipelineManager.processRequest(sharedReq);
@@ -144,14 +216,22 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
         res.setHeader('Cache-Control','no-cache, no-transform');
         res.setHeader('Connection','keep-alive');
         res.setHeader('X-Accel-Buffering','no');
-      } catch {}
+      } catch (error) {
+        void logNonBlockingError(
+          { component: 'http.messages-handler', operation: 'sse.set-headers-fallback', requestId, entryEndpoint },
+          error
+        );
+      }
       try { const s = `data: ${JSON.stringify({ error: { message: 'NO_CORE_SSE', code: 'NO_CORE_SSE' } })}\n\n`; res.write(s); sseLogger.write(s).catch(()=>{}); } catch {}
       try { const done = 'data: [DONE]\n\n'; res.write(done); sseLogger.write(done).catch(()=>{}); } catch {}
       try { res.end(); } catch {}
       return;
     }
     stopPreHeartbeat();
-    try { await writeServerSnapshot({ phase: 'http-response', requestId, data: out, entryEndpoint }); } catch {}
+    await runNonBlocking(
+      { component: 'http.messages-handler', operation: 'snapshot.http-response', requestId, entryEndpoint },
+      () => writeServerSnapshot({ phase: 'http-response', requestId, data: out, entryEndpoint })
+    );
     res.status(200).json(out);
   } catch (error: any) {
     try {
@@ -169,7 +249,15 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
         return;
       }
     } catch {}
-    try { await writeServerSnapshot({ phase: 'http-response.error', requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`, data: { message: error?.message || String(error) }, entryEndpoint }); } catch { /* ignore */ }
+    await runNonBlocking(
+      { component: 'http.messages-handler', operation: 'snapshot.http-response-error', entryEndpoint },
+      () => writeServerSnapshot({
+        phase: 'http-response.error',
+        requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+        data: { message: error?.message || String(error) },
+        entryEndpoint
+      })
+    );
     if (!res.headersSent) res.status(500).json({ error: { message: error?.message || String(error) } });
   }
 }

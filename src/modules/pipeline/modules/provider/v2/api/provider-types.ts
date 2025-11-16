@@ -34,8 +34,9 @@ export interface IProviderV2 extends ProviderModule {
 
 /**
  * 支持的Provider类型
+ * - 新增 'responses'：专门用于 OpenAI Responses wire（/v1/responses）
  */
-export type ProviderType = 'openai' | 'glm' | 'qwen' | 'iflow' | 'lmstudio';
+export type ProviderType = 'openai' | 'glm' | 'qwen' | 'iflow' | 'lmstudio' | 'responses';
 
 /**
  * 服务类型映射
@@ -45,7 +46,8 @@ export const PROVIDER_TYPE_MAP = {
   GLM: 'glm',
   QWEN: 'qwen',
   IFLOW: 'iflow',
-  LMSTUDIO: 'lmstudio'
+  LMSTUDIO: 'lmstudio',
+  RESPONSES: 'responses'
 } as const;
 
 /**

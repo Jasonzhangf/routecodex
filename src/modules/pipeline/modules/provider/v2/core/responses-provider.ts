@@ -26,10 +26,9 @@ export class ResponsesProvider extends OpenAIStandard {
    * 覆写内部发送：/v1/responses 入口时强制使用上游 SSE（postStream）。
    */
   protected override async sendRequestInternal(request: UnknownObject): Promise<unknown> {
-    // Upstream SSE直通仅在Provider配置显式允许时启用：
-    //  - config.upstreamSse === true （所有模型）
-    //  - 或 config.upstreamSseModels: string[] 包含当前 body.model
-    // 注：不再依赖入站端点判断；是否直通由 Provider 配置+模型决定。
+    // 对于 Responses provider，默认使用上游 SSE 直通：
+    //  - 始终通过 postStream 打 /responses（或有效 endpoint）
+    //  - 不再依赖额外 env/config 开关
     // Build endpoint and headers
     const endpoint = (this as any).getEffectiveEndpoint();
     const headers = await (this as any).buildRequestHeaders();
@@ -59,18 +58,6 @@ export class ResponsesProvider extends OpenAIStandard {
       try { if ('metadata' in body) { delete body.metadata; } } catch { /* ignore */ }
       return body;
     })();
-
-    // Read provider configuration for upstream SSE decision
-    const cfg: any = (this.config as any)?.config || {};
-    const allowAll = cfg.upstreamSse === true;
-    const allowedModels: string[] = Array.isArray(cfg.upstreamSseModels) ? cfg.upstreamSseModels.map((s: any)=>String(s)) : [];
-    const modelId = String((finalBody as any)?.model || 'unknown');
-    const allowForModel = allowedModels.includes(modelId);
-    const allowUpstream = allowAll || allowForModel;
-
-    if (!allowUpstream) {
-      return await super.sendRequestInternal(request);
-    }
 
     // Ensure stream flag for upstream SSE
     (finalBody as any).stream = true;

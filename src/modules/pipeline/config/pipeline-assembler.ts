@@ -262,7 +262,7 @@ export class PipelineAssembler {
       const metaForId = this.asRecord(routeMeta[id] || (pac as any).routeMeta?.[id] || {});
       const providerIdForKey = typeof metaForId.providerId === 'string' ? metaForId.providerId : undefined;
       const keyIdForPipeline = typeof metaForId.keyId === 'string' ? metaForId.keyId : undefined;
-      // Ensure provider config carries the concrete upstream model id and providerType for this pipeline
+      // Ensure provider config carries the concrete upstream model id for this pipeline
       try {
         const upstreamModelId = typeof metaForId.modelId === 'string' ? metaForId.modelId : undefined;
         if (upstreamModelId) {
@@ -278,30 +278,42 @@ export class PipelineAssembler {
             if (typeof mdlTimeout === 'number') {
               (provCfg as any).timeout = mdlTimeout; // model.timeout 覆盖 provider.timeout
             }
-          } catch { /* ignore model-level timeout resolution errors */ }
+          } catch {
+            /* ignore model-level timeout resolution errors */
+          }
         }
-        // 注入 providerType：优先使用 routeMeta.providerId（例如 'lmstudio'），否则回退到 provider.type 的别名映射
-        {
-          const supported = new Set(['openai', 'glm', 'qwen', 'iflow', 'lmstudio', 'responses']);
-          const alias = (s: string): string | '' => {
-            const t = (s || '').toLowerCase();
-            if (!t) return '' as any;
-            if (t.includes('openai') || t.includes('generic-openai') || t.includes('modelscope')) return 'openai';
-            if (t.includes('glm') || t.includes('bigmodel') || t.includes('zhipu')) return 'glm';
-            if (t.includes('qwen') || t.includes('dashscope') || t.includes('aliyun')) return 'qwen';
-            if (t.includes('lmstudio') || t.includes('lm-studio')) return 'lmstudio';
-            if (t.includes('iflow')) return 'iflow';
-            if (t.includes('responses')) return 'responses';
-            return '' as any;
-          };
-          const fromRoute = String(providerIdForKey || '').toLowerCase();
-          const fromProvider = String((provider && provider.type) || '').toLowerCase();
-          const cand1 = supported.has(fromRoute) ? fromRoute : alias(fromRoute);
-          const cand2 = supported.has(fromProvider) ? fromProvider : alias(fromProvider);
-          const finalType = cand1 || cand2 || 'openai';
-          (provCfg as any).providerType = finalType;
+      } catch {
+        /* ignore */
+      }
+
+      // 注入 providerType：优先使用 routeMeta.providerId（例如 'lmstudio'），
+      // 然后回退到 provider.type 的别名映射；无法推断时直接报错（V2 禁止兜底）。
+      {
+        const supported = new Set(['openai', 'glm', 'qwen', 'iflow', 'lmstudio', 'responses']);
+        const alias = (s: string): string | '' => {
+          const t = (s || '').toLowerCase();
+          if (!t) return '' as any;
+          if (t.includes('openai') || t.includes('generic-openai') || t.includes('modelscope')) return 'openai';
+          if (t.includes('glm') || t.includes('bigmodel') || t.includes('zhipu')) return 'glm';
+          if (t.includes('qwen') || t.includes('dashscope') || t.includes('aliyun')) return 'qwen';
+          if (t.includes('lmstudio') || t.includes('lm-studio')) return 'lmstudio';
+          if (t.includes('iflow')) return 'iflow';
+          if (t.includes('responses')) return 'responses';
+          return '' as any;
+        };
+        const fromRoute = String(providerIdForKey || '').toLowerCase();
+        const fromProvider = String((provider && provider.type) || '').toLowerCase();
+        const cand1 = supported.has(fromRoute) ? fromRoute : alias(fromRoute);
+        const cand2 = supported.has(fromProvider) ? fromProvider : alias(fromProvider);
+        const finalType = cand1 || cand2;
+        if (!finalType) {
+          throw new Error(
+            `PipelineAssembler(V2): unable to infer providerType for pipeline '${id}'. ` +
+            `routeMeta.providerId='${providerIdForKey || ''}', provider.type='${(provider && provider.type) || ''}'`
+          );
         }
-      } catch { /* ignore */ }
+        (provCfg as any).providerType = finalType;
+      }
       if (!isOAuthAuth) {
         // First, resolve via keyMappings
         let resolvedKey = resolveKey(providerIdForKey, keyIdForPipeline);
@@ -325,7 +337,6 @@ export class PipelineAssembler {
         }
       }
 
-      const fam = 'openai';
       const compatTypeSelected = (compatibility && compatibility.type)
         ? String(compatibility.type)
         : '';
@@ -403,7 +414,17 @@ export class PipelineAssembler {
       // Do not infer provider module type; honor the type already provided in pipeline definition
       // (modBlock.provider already set above)
 
-    pipelines.push({ id, provider: { type: fam || 'openai' }, modules: modBlock, settings: { debugEnabled: true } } as PipelineConfig);
+    const providerTypeForPipeline = String((provCfg as any).providerType || provider.type || '').trim();
+    if (!providerTypeForPipeline) {
+      throw new Error(`PipelineAssembler(V2): provider.type/providerType is required for pipeline '${id}'（禁止兜底为 openai）`);
+    }
+
+    pipelines.push({
+      id,
+      provider: { type: providerTypeForPipeline },
+      modules: modBlock,
+      settings: { debugEnabled: true }
+    } as PipelineConfig);
     seen.add(id);
   }
 

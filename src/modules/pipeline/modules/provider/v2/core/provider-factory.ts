@@ -5,6 +5,7 @@
  */
 
 import { OpenAIStandard } from './openai-standard.js';
+import { ResponsesProvider } from './responses-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import crypto from 'node:crypto';
 import type { IProviderV2 } from '../api/provider-types.js';
@@ -32,8 +33,14 @@ export class ProviderFactory {
     // 创建新实例（按 providerType 分派）
     const ptype = String(config?.config?.providerType || '').toLowerCase();
     let provider: IProviderV2;
-    // 'responses' 不再有专用 Provider，统一走 OpenAIStandard（Chat标准供应商）
-    provider = new OpenAIStandard(config, dependencies);
+
+    // 真正的 Responses provider：用于 OpenAI Responses wire (/v1/responses)
+    if (ptype === 'responses') {
+      provider = new ResponsesProvider(config, dependencies);
+    } else {
+      // 默认：OpenAI 标准 Chat provider（兼容 glm/qwen 等 openai-standard upstream）
+      provider = new OpenAIStandard(config, dependencies);
+    }
     this.instances.set(instanceId, provider);
 
     return provider;
