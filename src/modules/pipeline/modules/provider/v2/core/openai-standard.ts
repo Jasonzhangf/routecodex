@@ -306,10 +306,11 @@ export class OpenAIStandard extends BaseProvider {
     } catch { /* ignore */ }
     // 发送前覆盖为流水线配置的上游模型（若存在），否则保留原值或使用默认
     (processedRequest as any).model =
-      (typeof pipelineModel === 'string' && pipelineModel.trim()) ? pipelineModel.trim() :
-      (processedRequest as any).model ||
-      this.config.config.overrides?.defaultModel ||
-      this.serviceProfile.defaultModel;
+      (typeof pipelineModel === 'string' && pipelineModel.trim())
+        ? pipelineModel.trim()
+        : (processedRequest as any).model ||
+          this.config.config.overrides?.defaultModel ||
+          this.serviceProfile.defaultModel;
 
     // 流式开关：仅当非 Responses 端点时才移除 stream；Responses 端点需要真实上游流
     try {

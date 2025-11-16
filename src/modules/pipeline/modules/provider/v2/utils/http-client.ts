@@ -104,7 +104,9 @@ export class HttpClient {
 
       const response = await fetch(fullUrl, fetchOptions as any);
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        // 与非流式 request 保持一致：在错误中包含上游返回体，便于快照/日志分析
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       // Convert WHATWG ReadableStream to Node.js Readable for pipeline streaming
