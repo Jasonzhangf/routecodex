@@ -342,6 +342,8 @@ export class PipelineAssembler {
         : '';
       const compatCfgSelected = this.asRecord((compatibility && compatibility.config) || {});
       const modBlock: Record<string, unknown> = {
+        // provider 模块类型使用归一化后的 providerTypeForPipeline（openai/glm/qwen/iflow/lmstudio/responses 等），
+        // 而不是原始 config.provider.type，确保能命中已注册的 Provider module 工厂。
         provider: { type: provider.type, config: provCfg },
       };
 
@@ -418,6 +420,9 @@ export class PipelineAssembler {
     if (!providerTypeForPipeline) {
       throw new Error(`PipelineAssembler(V2): provider.type/providerType is required for pipeline '${id}'（禁止兜底为 openai）`);
     }
+
+    // 将 modules.provider 的模块类型同步为归一化后的 providerTypeForPipeline，保证能够命中 Registry 中注册的模块工厂
+    (modBlock as any).provider = { type: providerTypeForPipeline, config: provCfg };
 
     pipelines.push({
       id,
