@@ -173,40 +173,6 @@ export class VirtualRouterModule extends BaseModule {
   }
 }
 
-// 简化的协议管理器
-class ProtocolManager {
-  private inputProtocol: string = '';
-  private outputProtocol: string = '';
-
-  async initialize(config: { inputProtocol: string; outputProtocol: string }): Promise<void> {
-    this.inputProtocol = config.inputProtocol;
-    this.outputProtocol = config.outputProtocol;
-  }
-
-  async convertRequest(request: Record<string, unknown>, fromProtocol: string, toProtocol: string): Promise<Record<string, unknown>> {
-    if (fromProtocol === toProtocol) {
-      return request;
-    }
-    // 简化处理
-    return request;
-  }
-
-  async convertResponse(response: Record<string, unknown>, fromProtocol: string, toProtocol: string): Promise<Record<string, unknown>> {
-    if (fromProtocol === toProtocol) {
-      return response;
-    }
-    // 简化处理
-    return response;
-  }
-
-  getStatus(): { inputProtocol: string; outputProtocol: string } {
-    return {
-      inputProtocol: this.inputProtocol,
-      outputProtocol: this.outputProtocol
-    };
-  }
-}
-
 // 简化的负载均衡器（按路由名维护 RR 索引）
 class LoadBalancer {
   private routePools: Record<string, string[]> = {};

@@ -3,7 +3,6 @@
   "port": 5522,
   "host": "0.0.0.0",
   "virtualrouter": {
-    "inputProtocol": "openai",
     "outputProtocol": "openai",
     "providers": {
       "glm": {

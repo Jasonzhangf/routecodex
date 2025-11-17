@@ -11,7 +11,6 @@ export interface RouteTarget {
   modelId: string;
   keyId: string;
   actualKey: string;
-  inputProtocol: 'openai' | 'anthropic' | 'responses';
   outputProtocol: 'openai' | 'anthropic' | 'responses';
 }
 
@@ -77,7 +76,6 @@ export interface VirtualRouterConfig {
   routeTargets: RouteTargetPool;
   pipelineConfigs: PipelineConfigs;
   authMappings: Record<string, string>;
-  inputProtocol: 'openai' | 'anthropic' | 'responses';
   outputProtocol: 'openai' | 'anthropic' | 'responses';
   timeout: number;
   userConfigDefaults?: {
@@ -152,7 +150,6 @@ export interface UserConfig {
     email: string;
   };
   virtualrouter: {
-    inputProtocol: 'openai' | 'anthropic' | 'responses';
     outputProtocol: 'openai' | 'anthropic' | 'responses';
     providers: Record<
       string,

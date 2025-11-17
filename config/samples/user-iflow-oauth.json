@@ -2,7 +2,6 @@
   "version": "1.0.0",
   "httpserver": { "port": 5524, "host": "0.0.0.0" },
   "virtualrouter": {
-    "inputProtocol": "openai",
     "outputProtocol": "openai",
     "providers": {
       "iflow": {

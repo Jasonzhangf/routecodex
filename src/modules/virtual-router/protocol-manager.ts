@@ -4,7 +4,6 @@
  */
 
 export class ProtocolManager {
-  private inputProtocol: string = 'openai';
   private outputProtocol: string = 'openai';
   private converters: Map<string, ProtocolConverter> = new Map();
 
@@ -24,8 +23,8 @@ export class ProtocolManager {
   /**
    * 设置协议
    */
-  setProtocols(inputProtocol: string, outputProtocol: string): void {
-    this.inputProtocol = inputProtocol;
+  setProtocols(_inputProtocol: string, outputProtocol: string): void {
+    // inputProtocol 已废弃，仅保留 outputProtocol 供状态输出使用
     this.outputProtocol = outputProtocol;
   }
 
@@ -77,7 +76,6 @@ export class ProtocolManager {
    */
   getStatus(): ProtocolManagerStatus {
     return {
-      inputProtocol: this.inputProtocol,
       outputProtocol: this.outputProtocol,
       supportedConversions: this.getSupportedConversions()
     };
@@ -170,7 +168,6 @@ class AnthropicToOpenAIConverter implements ProtocolConverter {
 
 // 类型定义
 interface ProtocolManagerStatus {
-  inputProtocol: string;
   outputProtocol: string;
   supportedConversions: string[];
 }
