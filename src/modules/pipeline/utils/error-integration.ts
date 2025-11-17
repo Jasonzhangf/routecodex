@@ -260,9 +260,13 @@ export class PipelineErrorIntegration {
     // Check error category
     const errorCode = this.extractErrorCode(error);
 
-    // 429 errors are retryable and will be handled by the 429 error handling system
-    if (errorCode === 'HTTP_429' || error.statusCode === 429) {
-      return true;
+    // 429 相关错误（包括 HTTP_429_MODEL_COOLDOWN）不在此层重试，由 PipelineManager 统一处理
+    if (
+      errorCode === 'HTTP_429' ||
+      errorCode === 'HTTP_429_MODEL_COOLDOWN' ||
+      error.statusCode === 429
+    ) {
+      return false;
     }
 
     const nonRetryableCodes = [
@@ -399,7 +403,7 @@ export class PipelineErrorIntegration {
     const key = (error.details as any)?.key || (context as any).key || 'unknown';
     const pipelineIds = (error.details as any)?.pipelineIds || [context.pipelineId];
 
-    // Log 429 error to ErrorHandlingCenter
+    // Log 429 error to ErrorHandlingCenter（不在此层触发额外重试，由 PipelineManager 统一控制）
     await this.errorHandlingCenter.handleError({
       type: '429-error-executed',
       timestamp: Date.now(),
@@ -410,12 +414,9 @@ export class PipelineErrorIntegration {
       action: '429_rate_limit_handling',
       key,
       pipelineIds,
-      retryable: true
+      retryable: false
     });
-
-    // The actual retry logic will be handled by the PipelineManager's retry scheduler
-    // This method is responsible for logging and preparing the error for retry
-    throw new Error(`429 Rate Limit Error in ${context.stage}: ${error.message} (key: ${key})`);
+    // 不再在错误集成层抛出新的错误，保持原始错误往上传递
   }
 
   /**

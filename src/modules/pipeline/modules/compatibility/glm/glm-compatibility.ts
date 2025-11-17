@@ -98,6 +98,14 @@ export class GLMCompatibility implements CompatibilityModule {
     });
 
     try {
+      // 仅在 GLM Chat provider 上生效：
+      // - providerType !== 'glm'（例如 anthropic/responses 等协议型 provider）时，直接透传，避免错误地将
+      //   Anthropic/Responses 形状当作 OpenAI Chat 进行预检与重写。
+      const providerFamily = String((context as any)?.providerType || '').toLowerCase();
+      if (providerFamily && providerFamily !== 'glm') {
+        return request;
+      }
+
       // Extract DTO payload if present
       const isDto = request && typeof request === 'object' && (
         Object.prototype.hasOwnProperty.call(request as Record<string, unknown>, 'data') ||
@@ -157,6 +165,11 @@ export class GLMCompatibility implements CompatibilityModule {
     });
 
     try {
+      const providerFamily = String((context as any)?.providerType || '').toLowerCase();
+      if (providerFamily && providerFamily !== 'glm') {
+        return response;
+      }
+
       const out = await this.baseCompat!.processOutgoing(response as UnknownObject, context);
       this.dependencies.logger?.logModule('glm-compatibility', 'processOutgoing-success', { compatibilityId: this.id, requestId: reqId });
       return out;

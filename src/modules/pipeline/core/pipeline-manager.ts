@@ -285,7 +285,7 @@ export class PipelineManager implements RCCBaseModule {
         ...(request as any)?.route?.pipelineId ? { pipelineId: (request as any).route.pipelineId as string } : {},
       } as any);
 
-      // Process request with 429 error handling (per-model熔断，无内部等待/回退)
+      // Process request through selected pipeline
       const response = await this.processRequestWithPipeline(pipeline, request);
 
       // Enhanced response logging
@@ -625,7 +625,7 @@ export class PipelineManager implements RCCBaseModule {
 
       return response;
     } catch (error) {
-      // 禁止 Anthrop ic (/v1/messages) 的任何自动重试，直接抛出错误（零回退策略）
+      // 禁止 Anthropic (/v1/messages) 的任何自动重试，直接抛出错误（零回退策略）
       try {
         const ep = String(((request as any)?.metadata?.entryEndpoint) || '').toLowerCase();
         if (ep === '/v1/messages') {
@@ -634,6 +634,7 @@ export class PipelineManager implements RCCBaseModule {
           throw error;
         }
       } catch { /* ignore and continue */ }
+
       // Check if it's a 429 error (robust detection)
       const errorObj = error as Record<string, unknown>;
       const status = (errorObj['statusCode'] as any) || (errorObj['status'] as any) || (errorObj as any)?.response?.status;
@@ -1010,6 +1011,8 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('openai', this.createOpenAIProviderModule);
     // Responses provider (real SSE passthrough) → uses ProviderFactory to build ResponsesProvider
     this.registry.registerModule('responses', this.createOpenAIProviderModule);
+    // Anthropic Messages provider family（标准 /v1/messages wire）
+    this.registry.registerModule('anthropic', this.createOpenAIProviderModule);
     this.registry.registerModule('lmstudio', this.createLMStudioHTTPModule);
     this.registry.registerModule('iflow', this.createIFlowProviderModule);
     this.registry.registerModule('generic_responses', this.createGenericResponsesProviderModule);

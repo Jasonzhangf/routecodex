@@ -9,6 +9,36 @@ import { AuthFileResolver } from '../../config/auth-file-resolver.js';
 import path from 'path';
 import { homedir } from 'os';
 
+type CanonicalConfig = {
+  providers?: Record<string, unknown>;
+  keyVault?: Record<string, unknown>;
+  routing?: Record<string, unknown>;
+  routeMeta?: Record<string, unknown>;
+  _metadata?: Record<string, unknown>;
+};
+
+function asRecord(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+}
+
+function buildCompatibilityKeyMappingsLocal(canonical: CanonicalConfig): { providers: Record<string, Record<string, string>> } {
+  const out: { providers: Record<string, Record<string, string>> } = { providers: {} };
+  try {
+    const vault = asRecord(canonical.keyVault || {});
+    for (const [provId, keys] of Object.entries(vault)) {
+      const m: Record<string, string> = {};
+      for (const [keyId, meta] of Object.entries(asRecord(keys))) {
+        const v = asRecord(meta).value;
+        if (typeof v === 'string' && v.trim()) m[keyId] = v.trim();
+      }
+      if (Object.keys(m).length) out.providers[provId] = m;
+    }
+  } catch {
+    // non-fatal
+  }
+  return out;
+}
+
 export class ConfigManagerModule extends BaseModule {
   private configPath: string;
   private systemConfigPath: string;
@@ -63,9 +93,28 @@ export class ConfigManagerModule extends BaseModule {
         );
       } catch { /* ignore */ }
     } catch { /* ignore cleanup errors */ }
-    const canonical = core.buildCanonical(sys?.ok ? sys : { ok: true, data: {} }, usr, { keyDimension: 'perKey' } as any);
+    const canonical = core.buildCanonical(
+      sys?.ok ? sys : { ok: true, data: {} },
+      usr,
+      { keyDimension: 'perKey' } as any
+    ) as CanonicalConfig;
+
+    // 由 config-core 导出装配配置（V2 装配输入）
     let assemblerConfig: any = core.exportAssemblerConfigV2(canonical);
-    const built = core.buildMergedConfig(canonical);
+
+    // 在本地重建 merged-config 结构，避免依赖未导出的 buildMergedConfig/writeMerged
+    const keyMappings = buildCompatibilityKeyMappingsLocal(canonical);
+    const mergedBase: Record<string, unknown> = {
+      providers: canonical.providers,
+      keyVault: canonical.keyVault,
+      routing: canonical.routing,
+      routeMeta: canonical.routeMeta,
+      _metadata: canonical._metadata,
+    };
+    if (Object.keys(asRecord(keyMappings.providers)).length) {
+      (mergedBase as any).compatibilityConfig = { keyMappings };
+    }
+    const built = { merged: mergedBase, assemblerConfig, keyMappings };
     // 安全去重：当同时配置了 auth.apiKey 与 apiKey[] 时，可能生成重复 keyAlias，导致重复流水线
     try {
       const cc = (built as any)?.merged?.compatibilityConfig || (built as any)?.compatibilityConfig || {};
@@ -154,8 +203,11 @@ export class ConfigManagerModule extends BaseModule {
         }
       }
     } catch { /* non-fatal auth injection */ }
+
+    // ⚠️ process/requestProcess/responseProcess 的注入逻辑统一移交给 config-core；
+    // ConfigManager 仅负责写回 config-core 生成的 assemblerConfig，不再修改 llmSwitch.config.*
     const mergedWithPac = { ...built.merged, pipeline_assembler: { config: assemblerConfig } } as Record<string, unknown>;
-    await core.writeMerged(this.mergedConfigPath, mergedWithPac);
+    await (core as any).writeJsonPretty(this.mergedConfigPath, mergedWithPac);
   }
 
   getStatus(): UnknownObject {

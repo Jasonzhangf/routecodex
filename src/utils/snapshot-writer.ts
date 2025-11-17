@@ -1,6 +1,7 @@
 import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { writeSnapshotViaHooks } from '../modules/llmswitch/bridge.js';
 
 export type ServerSnapshotPhase =
   | 'http-request'
@@ -46,34 +47,41 @@ export async function writeServerSnapshot(options: {
   entryEndpoint?: string;
 }): Promise<void> {
   if (!isSnapshotsEnabled()) return; // default OFF
+  const endpoint = options.entryEndpoint || '/v1/chat/completions';
+
+  // 1) 尝试通过 llmswitch-core hooks 写快照（供核心调试使用）
   try {
-    // 仅通过已发布的独立包加载（移除本地 vendor 兜底）
-    const hooks = await import('rcc-llmswitch-core/v2/hooks/hooks-integration');
-    const endpoint = options.entryEndpoint || '/v1/chat/completions';
-    await (hooks as any).writeSnapshotViaHooks({
+    await writeSnapshotViaHooks(`server`, {
       endpoint,
       stage: String(options.phase),
       requestId: options.requestId,
       data: options.data,
       verbosity: 'verbose'
-    });
+    } as any);
   } catch {
-    // Fallback: write to local files (non-blocking)
-    try {
-      const base = path.join(os.homedir(), '.routecodex', 'codex-samples');
-      const folder = mapEndpointToFolder(options.entryEndpoint);
-      const dir = path.join(base, folder);
-      await ensureDir(dir);
-      const file = path.join(dir, `${options.requestId}_${String(options.phase).replace(/[^a-z0-9_.-]/gi,'_')}.json`);
-      const payload = {
-        meta: {
-          stage: options.phase,
-          version: String(process.env.ROUTECODEX_VERSION || 'dev'),
-          buildTime: String(process.env.ROUTECODEX_BUILD_TIME || new Date().toISOString())
-        },
-        data: options.data
-      };
-      await fsp.writeFile(file, JSON.stringify(payload, null, 2), 'utf-8');
-    } catch { /* ignore fs errors */ }
+    // ignore hook errors; always fall through to local file snapshot
+  }
+
+  // 2) 本地文件快照（永远写，非阻塞），便于 RouteCodex 侧对比 server/provider/pipeline
+  try {
+    const base = path.join(os.homedir(), '.routecodex', 'codex-samples');
+    const folder = mapEndpointToFolder(options.entryEndpoint);
+    const dir = path.join(base, folder);
+    await ensureDir(dir);
+    const file = path.join(
+      dir,
+      `${options.requestId}_${String(options.phase).replace(/[^a-z0-9_.-]/gi, '_')}.json`
+    );
+    const payload = {
+      meta: {
+        stage: options.phase,
+        version: String(process.env.ROUTECODEX_VERSION || 'dev'),
+        buildTime: String(process.env.ROUTECODEX_BUILD_TIME || new Date().toISOString())
+      },
+      data: options.data
+    };
+    await fsp.writeFile(file, JSON.stringify(payload, null, 2), 'utf-8');
+  } catch {
+    /* ignore fs errors */
   }
 }

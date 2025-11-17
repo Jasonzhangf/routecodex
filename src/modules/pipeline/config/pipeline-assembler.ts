@@ -262,7 +262,7 @@ export class PipelineAssembler {
       const metaForId = this.asRecord(routeMeta[id] || (pac as any).routeMeta?.[id] || {});
       const providerIdForKey = typeof metaForId.providerId === 'string' ? metaForId.providerId : undefined;
       const keyIdForPipeline = typeof metaForId.keyId === 'string' ? metaForId.keyId : undefined;
-      // Ensure provider config carries the concrete upstream model id and providerType for this pipeline
+      // Ensure provider config carries the concrete upstream model id for this pipeline
       try {
         const upstreamModelId = typeof metaForId.modelId === 'string' ? metaForId.modelId : undefined;
         if (upstreamModelId) {
@@ -278,37 +278,57 @@ export class PipelineAssembler {
             if (typeof mdlTimeout === 'number') {
               (provCfg as any).timeout = mdlTimeout; // model.timeout 覆盖 provider.timeout
             }
-          } catch { /* ignore model-level timeout resolution errors */ }
-        }
-        // 注入 providerType（协议族）：
-        // - 仅使用 'openai' | 'anthropic' | 'gemini' | 'responses'
-        // - 第三方 OpenAI 兼容服务统一视为 'openai'
-        {
-          const alias = (s: string): string | '' => {
-            const t = (s || '').toLowerCase();
-            if (!t) return '' as any;
-            if (t.includes('anthropic') || t.includes('claude')) return 'anthropic';
-            if (t.includes('gemini') || t.includes('vertex') || t.includes('google')) return 'gemini';
-            if (t.includes('responses')) return 'responses';
-            // 其余（glm/qwen/lmstudio/iflow/modelscope 等）均按 openai 处理
-            if (t.includes('openai') || t.includes('generic-openai') || t.includes('modelscope') || t.includes('glm') || t.includes('bigmodel') || t.includes('zhipu') || t.includes('qwen') || t.includes('dashscope') || t.includes('aliyun') || t.includes('lmstudio') || t.includes('lm-studio') || t.includes('iflow')) {
-              return 'openai';
-            }
-            return '' as any;
-          };
-          const fromRoute = String(providerIdForKey || '').toLowerCase();
-          const fromProvider = String((provider && provider.type) || '').toLowerCase();
-          // 1) 显式 routeMeta.providerId 优先，保持与虚拟路由配置一致（如 'glm'、'lmstudio' 或任意自定义 id）
-          if (fromRoute) {
-            const mapped = alias(fromRoute) || 'openai';
-            (provCfg as any).providerType = mapped;
-          } else {
-            // 2) 否则基于 provider.type 做一次别名归一（兼容旧配置）
-            const cand = alias(fromProvider) || 'openai';
-            (provCfg as any).providerType = cand;
+          } catch {
+            /* ignore model-level timeout resolution errors */
           }
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
+
+      // 注入 providerType：
+      //  - provider.config.type 明确标记协议族（responses/anthropic/openai/...）时优先生效；
+      //  - 其次使用 provider.type 的别名映射；
+      //  - 再回退到 routeMeta.providerId（例如 'lmstudio'）；
+      //  - 对于 Responses / Anthropic 等协议型 provider，始终以协议为准，而不是家族名。
+      {
+        const supported = new Set(['openai', 'glm', 'qwen', 'iflow', 'lmstudio', 'responses', 'anthropic']);
+        const alias = (s: string): string | '' => {
+          const t = (s || '').toLowerCase();
+          if (!t) return '' as any;
+          if (t.includes('openai') || t.includes('generic-openai') || t.includes('modelscope')) return 'openai';
+          if (t.includes('glm') || t.includes('bigmodel') || t.includes('zhipu')) return 'glm';
+          if (t.includes('qwen') || t.includes('dashscope') || t.includes('aliyun')) return 'qwen';
+          if (t.includes('lmstudio') || t.includes('lm-studio')) return 'lmstudio';
+          if (t.includes('iflow')) return 'iflow';
+          if (t.includes('responses')) return 'responses';
+          if (t.includes('anthropic')) return 'anthropic';
+          return '' as any;
+        };
+        const provCfgObj = this.asRecord(provider?.config || {});
+        const fromCfgTypeRaw = String((provCfgObj as any).type || '').toLowerCase();
+        const candCfg = alias(fromCfgTypeRaw);
+        const fromRoute = String(providerIdForKey || '').toLowerCase();
+        const fromProvider = String((provider && provider.type) || '').toLowerCase();
+        const candRoute = supported.has(fromRoute) ? fromRoute : alias(fromRoute);
+        const candProv = supported.has(fromProvider) ? fromProvider : alias(fromProvider);
+        // 协议型 provider（responses/anthropic）优先按 config.type 归类，其次按 provider.type；其余家族仍以 routeMeta 为主
+        let finalType: string | '' = '';
+        if (candCfg === 'responses' || candCfg === 'anthropic') {
+          finalType = candCfg;
+        } else if (candProv === 'responses' || candProv === 'anthropic') {
+          finalType = candProv;
+        } else {
+          finalType = candRoute || candProv || candCfg;
+        }
+        if (!finalType) {
+          throw new Error(
+            `PipelineAssembler(V2): unable to infer providerType for pipeline '${id}'. ` +
+            `routeMeta.providerId='${providerIdForKey || ''}', provider.type='${(provider && provider.type) || ''}'`
+          );
+        }
+        (provCfg as any).providerType = finalType;
+      }
       if (!isOAuthAuth) {
         // First, resolve via keyMappings
         let resolvedKey = resolveKey(providerIdForKey, keyIdForPipeline);
@@ -332,12 +352,13 @@ export class PipelineAssembler {
         }
       }
 
-      const fam = 'openai';
       const compatTypeSelected = (compatibility && compatibility.type)
         ? String(compatibility.type)
         : '';
       const compatCfgSelected = this.asRecord((compatibility && compatibility.config) || {});
       const modBlock: Record<string, unknown> = {
+        // provider 模块类型使用归一化后的 providerTypeForPipeline（openai/glm/qwen/iflow/lmstudio/responses 等），
+        // 而不是原始 config.provider.type，确保能命中已注册的 Provider module 工厂。
         provider: { type: provider.type, config: provCfg },
       };
 
@@ -394,9 +415,10 @@ export class PipelineAssembler {
       if (llmSwitch?.type) {
         const normalizedType = String(llmSwitch.type).toLowerCase();
         if (allowedSwitches.has(normalizedType)) {
+          const cfg = this.asRecord(llmSwitch.config || {});
           modBlock.llmSwitch = {
             type: llmSwitch.type,
-            config: llmSwitch.config || {},
+            config: cfg,
           };
         } else {
           // 默认使用转换路由器（内部根据端点自动选择 codec），统一入口
@@ -410,7 +432,48 @@ export class PipelineAssembler {
       // Do not infer provider module type; honor the type already provided in pipeline definition
       // (modBlock.provider already set above)
 
-    pipelines.push({ id, provider: { type: fam || 'openai' }, modules: modBlock, settings: { debugEnabled: true } } as PipelineConfig);
+    const providerTypeForPipeline = String((provCfg as any).providerType || provider.type || '').trim();
+    if (!providerTypeForPipeline) {
+      throw new Error(`PipelineAssembler(V2): provider.type/providerType is required for pipeline '${id}'（禁止兜底为 openai）`);
+    }
+
+    // 将 modules.provider 的模块类型同步为归一化后的 providerTypeForPipeline，保证能够命中 Registry 中注册的模块工厂
+    (modBlock as any).provider = { type: providerTypeForPipeline, config: provCfg };
+
+    // 根据 providerType 决定出口协议（providerProtocol），传入 llmSwitch 配置：
+    //  - openai/glm/qwen/iflow/lmstudio → openai-chat
+    //  - responses → openai-responses
+    //  - anthropic → anthropic-messages
+    (() => {
+      const t = providerTypeForPipeline.toLowerCase();
+      let providerProtocol = 'openai-chat';
+      if (t === 'responses') providerProtocol = 'openai-responses';
+      else if (t === 'anthropic') providerProtocol = 'anthropic-messages';
+
+      const lsBlock = (modBlock as any).llmSwitch as { type?: string; config?: Record<string, unknown> } | undefined;
+      if (lsBlock) {
+        const cfg = this.asRecord(lsBlock.config || {});
+        if (!cfg.providerProtocol) {
+          (cfg as any).providerProtocol = providerProtocol;
+        }
+        // 将 provider.process 透传给 llmSwitch.config.process，供 core 决定 passthrough/chat 模式
+        const rawProcess = (provCfg as any)?.process;
+        if (typeof rawProcess === 'string' && rawProcess.trim() && !cfg.process) {
+          (cfg as any).process = rawProcess.trim();
+        }
+        (modBlock as any).llmSwitch = {
+          type: lsBlock.type || 'llmswitch-conversion-router',
+          config: cfg
+        };
+      }
+    })();
+
+    pipelines.push({
+      id,
+      provider: { type: providerTypeForPipeline },
+      modules: modBlock,
+      settings: { debugEnabled: true }
+    } as PipelineConfig);
     seen.add(id);
   }
 

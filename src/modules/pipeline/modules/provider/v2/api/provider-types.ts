@@ -33,20 +33,25 @@ export interface IProviderV2 extends ProviderModule {
 }
 
 /**
- * ProviderType 仅表示“协议族”，而非具体厂商。
- * 所有第三方 OpenAI 兼容服务统一映射为 'openai'，
- * 其他协议族只保留 anthropic/gemini/responses。
+ * 支持的Provider类型
+ * - 'openai'     : OpenAI Chat 兼容族
+ * - 'responses'  : OpenAI Responses wire（/v1/responses）
+ * - 'anthropic'  : Anthropic Messages wire（/v1/messages）
+ * - 其余为具体兼容族（glm/qwen/iflow/lmstudio）
  */
-export type ProviderType = 'openai' | 'anthropic' | 'gemini' | 'responses';
+export type ProviderType = 'openai' | 'glm' | 'qwen' | 'iflow' | 'lmstudio' | 'responses' | 'anthropic';
 
 /**
- * 服务类型映射（供枚举/日志使用）
+ * 服务类型映射
  */
 export const PROVIDER_TYPE_MAP = {
   OPENAI: 'openai',
-  ANTHROPIC: 'anthropic',
-  GEMINI: 'gemini',
-  RESPONSES: 'responses'
+  GLM: 'glm',
+  QWEN: 'qwen',
+  IFLOW: 'iflow',
+  LMSTUDIO: 'lmstudio',
+  RESPONSES: 'responses',
+  ANTHROPIC: 'anthropic'
 } as const;
 
 /**

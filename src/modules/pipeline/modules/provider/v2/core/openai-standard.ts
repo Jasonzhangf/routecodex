@@ -321,12 +321,14 @@ export class OpenAIStandard extends BaseProvider {
     } catch { /* ignore */ }
     // 发送前覆盖为流水线配置的上游模型（若存在），否则保留原值或使用默认
     (processedRequest as any).model =
-      (typeof pipelineModel === 'string' && pipelineModel.trim()) ? pipelineModel.trim() :
-      (processedRequest as any).model ||
-      this.config.config.overrides?.defaultModel ||
-      this.serviceProfile.defaultModel;
+      (typeof pipelineModel === 'string' && pipelineModel.trim())
+        ? pipelineModel.trim()
+        : (processedRequest as any).model ||
+          this.config.config.overrides?.defaultModel ||
+          this.serviceProfile.defaultModel;
 
-    // 流式开关：仅当非 Responses 端点时才移除 stream；Responses 端点需要真实上游流
+    // 流式开关：基础 Provider 统一移除入口层的 stream 标记，
+    // 具体协议（如 Responses/Anthropic）的真实流控由各自独立 Provider 处理
     try {
       // 统一：所有入口均移除 stream=true（Provider 始终走非流式），SSE 由上层合成
       if ((processedRequest as any).stream === true) {
@@ -459,7 +461,7 @@ export class OpenAIStandard extends BaseProvider {
     const processedRequest = httpRequestResult.data as UnknownObject;
 
     // Flatten request body to standard OpenAI Chat JSON
-    const finalBody = (() => {
+    let finalBody: any = (() => {
       const r: any = processedRequest || {};
       const dataObj: any = (r && typeof r === 'object' && 'data' in r && typeof r.data === 'object') ? r.data : r;
       const body: any = { ...dataObj };

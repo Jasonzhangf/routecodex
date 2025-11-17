@@ -207,29 +207,14 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
 
         if (allowResponsesFastPath && anyProv && typeof anyProv === 'object' && anyProv.__sse_stream) {
           const upstream = anyProv.__sse_stream;
-          // Dynamic import to vendor/core
-          const importCore = async (sub: string) => {
-            const path = await import('path');
-            const { fileURLToPath, pathToFileURL } = await import('url');
-            try {
-              const __filename = fileURLToPath(import.meta.url);
-              const __dirname = path.dirname(__filename);
-              const vendor = path.resolve(__dirname, '..', '..', '..', '..', 'vendor', 'rcc-llmswitch-core', 'dist');
-              const full = path.join(vendor, sub);
-              return await import(pathToFileURL(full).href);
-            } catch {
-              return await import('rcc-llmswitch-core/' + sub);
-            }
-          };
-          const mod = await importCore('v2/conversion/streaming/openai-to-responses-stream.js');
-          const fn = (mod && (mod.createResponsesSSEStreamFromOpenAI || mod.default?.createResponsesSSEStreamFromOpenAI)) as any;
-          if (typeof fn === 'function') {
-            const tools = ((processedRequest as any)?.data as any)?.tools;
-            const sse = fn(upstream, { requestId, model: String(((processedRequest as any)?.data as any)?.model || 'unknown'), tools });
+          const providerType = String(this.config.provider?.type || '').toLowerCase();
+
+          if (providerType === 'responses') {
+            // Responses provider：上游已经是 Responses SSE，直接透传，不再按 OpenAI Chat SSE 转换
             const processingTime = Date.now() - startTime;
             this.updateMetrics(processingTime, true);
             const response: PipelineResponse = {
-              data: { __sse_responses: sse },
+              data: { __sse_responses: upstream },
               metadata: {
                 pipelineId: this.pipelineId,
                 processingTime,
@@ -238,9 +223,32 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
               },
               debug: undefined
             } as any;
-            this.debugLogger.logResponse(request.route?.requestId || 'unknown', 'pipeline-success-stream', { note: 'core transformed SSE' });
+            this.debugLogger.logResponse(request.route?.requestId || 'unknown', 'pipeline-success-stream', { note: 'responses upstream SSE passthrough' });
             this._status.state = 'ready';
             return response;
+          } else {
+            // Chat 型 provider：OpenAI Chat SSE → Responses SSE（保持原有转换逻辑，由 llmswitch-core 统一实现）
+            const { createResponsesSSEStreamFromOpenAI } = await import('../../llmswitch/bridge.js');
+            const fn: any = createResponsesSSEStreamFromOpenAI;
+            if (typeof fn === 'function') {
+              const tools = ((processedRequest as any)?.data as any)?.tools;
+              const sse = fn(upstream, { requestId, model: String(((processedRequest as any)?.data as any)?.model || 'unknown'), tools });
+              const processingTime = Date.now() - startTime;
+              this.updateMetrics(processingTime, true);
+              const response: PipelineResponse = {
+                data: { __sse_responses: sse },
+                metadata: {
+                  pipelineId: this.pipelineId,
+                  processingTime,
+                  stages: debugStages,
+                  requestId: request.route?.requestId || 'unknown'
+                },
+                debug: undefined
+              } as any;
+              this.debugLogger.logResponse(request.route?.requestId || 'unknown', 'pipeline-success-stream', { note: 'core transformed SSE' });
+              this._status.state = 'ready';
+              return response;
+            }
           }
         }
       } catch { /* ignore */ }

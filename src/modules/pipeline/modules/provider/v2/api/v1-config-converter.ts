@@ -66,6 +66,14 @@ export class V1ConfigConverter {
   private static extractProviderType(v1Config: ModuleConfig, providerConfig: unknown): ProviderType {
     const config = providerConfig as any;
 
+    // 0. 针对 Responses wire 的特殊识别：baseUrl 命中 fakercode.top 等域名时，优先视为 responses
+    try {
+      const baseUrlRaw = String(config.baseUrl || config.baseURL || '').toLowerCase();
+      if (baseUrlRaw.includes('fakercode.top')) {
+        return 'responses';
+      }
+    } catch { /* ignore */ }
+
     // 1. 从provider type推断
     if (v1Config.type && typeof v1Config.type === 'string') {
       const typeMap: Record<string, string> = {

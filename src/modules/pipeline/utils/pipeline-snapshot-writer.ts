@@ -1,6 +1,7 @@
 import os from 'os';
 import path from 'path';
 import fsp from 'fs/promises';
+import { writeSnapshotViaHooks } from '../../llmswitch/bridge.js';
 
 export interface PipelineSnapshotOptions {
   stage: string;                // e.g., pipeline.llmswitch.request.pre
@@ -13,21 +14,7 @@ export interface PipelineSnapshotOptions {
 
 async function writeViaHooks(opts: PipelineSnapshotOptions): Promise<boolean> {
   try {
-    const importCore = async (subpath: string) => {
-      try {
-        const pathMod = await import('path');
-        const { fileURLToPath, pathToFileURL } = await import('url');
-        const __filename = fileURLToPath(import.meta.url);
-        const __dirname = pathMod.dirname(__filename);
-        const vendor = pathMod.resolve(__dirname, '..', '..', '..', '..', 'vendor', 'rcc-llmswitch-core', 'dist');
-        const full = pathMod.join(vendor, subpath.replace(/\.js$/i,'') + '.js');
-        return await import(pathToFileURL(full).href);
-      } catch {
-        return await import('rcc-llmswitch-core/' + subpath.replace(/\\/g,'/').replace(/\.js$/i,''));
-      }
-    };
-    const hooks = await importCore('v2/hooks/hooks-integration');
-    await (hooks as any).writeSnapshotViaHooks({
+    await writeSnapshotViaHooks('pipeline', {
       endpoint: opts.entryEndpoint || 'pipeline',
       stage: opts.stage,
       requestId: opts.requestId,
@@ -61,4 +48,3 @@ export async function writePipelineSnapshot(opts: PipelineSnapshotOptions): Prom
     // ignore local fallback errors
   }
 }
-

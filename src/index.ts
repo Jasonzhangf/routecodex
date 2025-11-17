@@ -159,39 +159,24 @@ class RouteCodexApp {
       mergedConfig = await this.loadMergedConfig();
 
       // 3. 初始化服务器（V1/V2可切换，默认动态V2）
-      const modeEnv = String(process.env.ROUTECODEX_PIPELINE_MODE || process.env.RCC_PIPELINE_MODE || '').trim().toLowerCase();
-      const resolveUseV2 = (): boolean => {
-        if (modeEnv === 'dynamic' || modeEnv === 'v2') return true;
-        if (modeEnv === 'static' || modeEnv === 'v1') return false;
-        const legacy = String(process.env.ROUTECODEX_USE_V2 || '').trim().toLowerCase();
-        if (legacy === 'true' || legacy === '1') { console.warn('[RouteCodex] ROUTECODEX_USE_V2 已弃用，请使用 ROUTECODEX_PIPELINE_MODE=dynamic|static'); return true; }
-        if (legacy === 'false' || legacy === '0') { console.warn('[RouteCodex] ROUTECODEX_USE_V2 已弃用，请使用 ROUTECODEX_PIPELINE_MODE=dynamic|static'); return false; }
-        return true; // 默认动态（V2）
-      };
-      const useV2 = resolveUseV2();
-      if (useV2) {
-        // Resolve host/port from merged config for V2 constructor
-        let bindHost = '0.0.0.0';
-        let bindPort = port;
-        try {
-          const http = (mergedConfig as any)?.httpserver || (mergedConfig as any)?.modules?.httpserver?.config || {};
-          bindHost = String(http.host || '0.0.0.0');
-          const portRaw = http.port ?? (mergedConfig as any)?.server?.port ?? port;
-          bindPort = typeof portRaw === 'number' ? portRaw : parseInt(String(portRaw), 10);
-          if (!Number.isFinite(bindPort)) bindPort = port;
-        } catch { /* keep defaults */ }
-        const { RouteCodexServerV2 } = await import('./server-v2/core/route-codex-server-v2.js');
-        // V2 hooks 开关：默认开启；可通过 ROUTECODEX_V2_HOOKS=0/false/no 关闭
-        const hooksEnv = String(process.env.ROUTECODEX_V2_HOOKS || process.env.RCC_V2_HOOKS || '').trim().toLowerCase();
-        const hooksOff = hooksEnv === '0' || hooksEnv === 'false' || hooksEnv === 'no';
-        const hooksOn = !hooksOff;
-        this.httpServer = new RouteCodexServerV2({ server: { host: bindHost, port: bindPort, useV2: true }, logging: { level: 'debug', enableConsole: true }, providers: {}, v2Config: { enableHooks: hooksOn } }) as any;
-        await (this.httpServer as any).initializeWithMergedConfig(mergedConfig);
-      } else {
-        const HttpServer = (await import('./server/http-server.js')).HttpServer;
-        this.httpServer = new HttpServer(this.modulesConfigPath) as any;
-        await (this.httpServer as any).initializeWithMergedConfig(mergedConfig);
-      }
+      // 3. 初始化服务器（仅使用 V2 动态流水线架构）
+      // Resolve host/port from merged config for V2 constructor
+      let bindHost = '0.0.0.0';
+      let bindPort = port;
+      try {
+        const http = (mergedConfig as any)?.httpserver || (mergedConfig as any)?.modules?.httpserver?.config || {};
+        bindHost = String(http.host || '0.0.0.0');
+        const portRaw = http.port ?? (mergedConfig as any)?.server?.port ?? port;
+        bindPort = typeof portRaw === 'number' ? portRaw : parseInt(String(portRaw), 10);
+        if (!Number.isFinite(bindPort)) bindPort = port;
+      } catch { /* keep defaults */ }
+      const { RouteCodexServerV2 } = await import('./server-v2/core/route-codex-server-v2.js');
+      // V2 hooks 开关：默认开启；可通过 ROUTECODEX_V2_HOOKS=0/false/no 关闭
+      const hooksEnv = String(process.env.ROUTECODEX_V2_HOOKS || process.env.RCC_V2_HOOKS || '').trim().toLowerCase();
+      const hooksOff = hooksEnv === '0' || hooksEnv === 'false' || hooksEnv === 'no';
+      const hooksOn = !hooksOff;
+      this.httpServer = new RouteCodexServerV2({ server: { host: bindHost, port: bindPort, useV2: true }, logging: { level: 'debug', enableConsole: true }, providers: {}, v2Config: { enableHooks: hooksOn } }) as any;
+      await (this.httpServer as any).initializeWithMergedConfig(mergedConfig);
 
       // 4.1 校验 merged-config 的装配输入（V2严格：必须存在 assembler pipelines，不再兜底）
       try {
@@ -255,8 +240,8 @@ class RouteCodexApp {
       }
       this._isRunning = true;
 
-      // 7. 记录当前运行模式
-      console.log(`${buildInfo.mode === 'dev' ? '🧪 dev' : '🚢 release'} mode · ` + (useV2 ? '🔵 V2 dynamic pipeline active' : '🟢 V1 static pipeline active'));
+      // 7. 记录当前运行模式（仅 V2）
+      console.log(`${buildInfo.mode === 'dev' ? '🧪 dev' : '🚢 release'} mode · 🔵 V2 dynamic pipeline active`);
 
       // 7. 获取服务器状态（使用 HTTP 服务器解析后的最终绑定地址与端口）
       // 优先读取服务器自身解析结果，避免日志误导（例如 host 放在不同层级或为 0.0.0.0 时）

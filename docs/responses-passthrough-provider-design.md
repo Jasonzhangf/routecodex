@@ -6,7 +6,7 @@
 
 - 目标
   - 在 `/v1/responses` 下提供“真实 SSE 透传”能力：输入 Responses 请求，输出同规范 Responses 事件流。
-  - 使用配置驱动：`~/.routecodex/config.json` 中新增一个 `type: "responses"` 的 provider；模型设为 `gpt-5`；将其设置为默认路由（`routing.default`）。
+  - 使用配置驱动：`~/.routecodex/config.json` 中新增一个 `type: "responses-standard"` 的 provider；模型设为 `gpt-5.1`；将其设置为默认路由（`routing.default`）。
   - 与黑盒客户端无耦合：不需要客户端改代码即可稳定收到事件与字节。
   - 强可观测：保留请求/响应快照；增加服务端原始 SSE 字节 tee 日志。
 
@@ -23,10 +23,10 @@
 
 ## 3. 模块设计
 
-### 3.1 新 Provider：`responses`（真实 SSE 透传）
+### 3.1 新 Provider：`responses-standard`（真实 SSE 透传）
 
-- 文件：`src/modules/pipeline/modules/provider/v2/core/responses-provider.ts`
-- 类型：`responses`
+- 文件：`src/modules/pipeline/modules/provider/v2/core/responses-standard-provider.ts`
+- 类型：`responses-standard`
 - 关键点：
   - 从 provider 配置读取 `baseUrl`、`auth.apiKey`、`overrides.timeout`，构造请求。
   - 请求端点：`POST <baseUrl>/responses`（与 OpenAI Responses 文档一致）。
@@ -40,39 +40,43 @@
   - 续轮工具：
     - `POST <baseUrl>/responses/:id/submit_tool_outputs`，同样走 `Accept: text/event-stream`，返回 Node Readable。
 
-### 3.2 LLM Switch：Responses 直通模块
+### 3.2 LLM Switch：Responses 直通模块（基于输入/输出形状的默认逻辑）
 
 - 文件：`src/modules/pipeline/modules/llmswitch/llmswitch-responses-passthrough.ts`
 - 类型：`llmswitch-responses-passthrough`
-- 行为：
-  - `processIncoming`：原样返回 `{ data, metadata: { protocol: 'openai-responses' } }`；
-  - `processOutgoing`：原样返回（直通模式不做转换）。
+- 行为（设计）：
+  - 同一个 llmswitch-core 模块既支持 **桥接** 又支持 **直通**，通过“输入/输出形状 + provider 类型”决定：
+    - 若入口为 `/v1/responses` 且 provider 类型为 `responses-standard`，并且请求 payload 已经是标准 Responses 形状（`model + instructions + input[] + tools[] + stream` 等），则视为 **Responses canonical**，只做 schema 校验 & 工具过滤 & 快照，不做 Chat/Anthropic 转换（直通模式）。
+    - 若入口为 `/v1/responses`，但 payload 是 Chat/Anthropic 形状（例如 `messages[]`），则仍可按配置启用桥接逻辑（Chat→Responses→上游）。
+  - `processIncoming`：根据 payload 形状与 endpoint/type 决定“是否需要桥接”；  
+  - `processOutgoing`：若 provider 返回的 JSON 已是 `object: "response"` 等标准 Responses 输出，则直接透传；否则才走 Responses bridge。
 
-### 3.3 路由器（选择直通）
+### 3.3 路由器（仅选择路由池，不做“是否直通”决策）
 
 - 文件：`src/modules/pipeline/modules/llmswitch-v2-adapters.ts`
-- 规则：
-  - 若 provider 类型为 `responses`（或 `metadata.protocol === 'openai-responses'`），则 pick 为 Responses 并走直通模块；
-  - 否则保持现有逻辑。
+- 规则（设计）：
+  - virtual router 只决定 `routeName`（即进入哪个 route pool），不决定“是否直通”；
+  - PipelineManager 在对应 route pool 内做轮询（与其它流水线平行，没有特殊分支）；  
+  - 是否走 Responses 直通，由 llmswitch-core 在模块内部按照“入口 endpoint + provider 类型 + 请求/响应形状”统一决策，避免多处重复判断。
 
 ### 3.4 HTTP Server（SSE 透传与日志）
 
 - 文件：`src/server/http-server.ts`
-- `/v1/responses`：
-  - 早写响应头并 `flushHeaders()`：
+  - `/v1/responses`：
+    - 早写响应头并 `flushHeaders()`：
     - `Content-Type: text/event-stream; charset=utf-8`
     - `Cache-Control: no-cache, no-transform`
     - `Connection: keep-alive`
     - `X-Accel-Buffering: no`
   - 若上游返回 `__sse_stream`：tee 到 `~/.routecodex/logs/sse/<requestId>_server.sse.log`，同时 pipe 至客户端。
   - 不做本地合成（直通模式）。
-- `/v1/responses/:id/submit_tool_outputs`：
+  - `/v1/responses/:id/submit_tool_outputs`：
   - 同上，透传上游返回的 SSE，tee+pipe。
 
 ## 4. 配置与选择
 
 - Provider 配置（示例，已按照你的要求生成到 `~/.routecodex/config.responses.json`）：
-  - `type`: `"responses"`
+  - `type`: `"responses-standard"`
   - `baseUrl`: `"https://www.fakercode.top/v1"`
   - `auth.type`: `"apikey"`
   - `auth.apiKey`: 从 `~/.zshrc` 的 `FC_API_KEY` 读取
@@ -147,28 +151,28 @@
     "fc": {
       "id": "fc",
       "enabled": true,
-      "type": "responses",
+      "type": "responses-standard",
       "baseUrl": "https://www.fakercode.top/v1",
       "auth": { "type": "apikey", "apiKey": "<从 ~/.zshrc 读取 FC_API_KEY>" },
       "overrides": { "timeout": 60000 }
     }
   },
   "routing": {
-    "default": [ "fc.gpt-5" ],
-    "/v1/responses": [ "fc.gpt-5" ]
+    "default": [ "fc.gpt-5.1" ],
+    "/v1/responses": [ "fc.gpt-5.1" ]
   },
   "pipelines": [
     {
-      "id": "fc.gpt-5",
-      "provider": { "type": "responses" },
+      "id": "fc.gpt-5.1",
+      "provider": { "type": "responses-standard" },
       "modules": {
         "provider": {
-          "type": "responses",
+          "type": "responses-standard",
           "config": {
             "baseUrl": "https://www.fakercode.top/v1",
             "timeout": 60000,
             "auth": { "type": "apikey", "apiKey": "<FC_API_KEY>" },
-            "model": "gpt-5"
+            "model": "gpt-5.1"
           }
         },
         "llmSwitch": { "type": "llmswitch-conversion-router", "config": {} },
@@ -182,4 +186,3 @@
 ```
 
 以上为实施蓝图。审批后我按此执行，并在实现中严格对照本文件逐项落地与验证。
-

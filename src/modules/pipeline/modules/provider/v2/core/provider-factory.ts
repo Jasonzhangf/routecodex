@@ -5,6 +5,7 @@
  */
 
 import { OpenAIStandard } from './openai-standard.js';
+import { ResponsesProvider } from './responses-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import crypto from 'node:crypto';
 import type { IProviderV2 } from '../api/provider-types.js';
@@ -32,8 +33,16 @@ export class ProviderFactory {
     // 创建新实例（按 providerType 分派）
     const ptype = String(config?.config?.providerType || '').toLowerCase();
     let provider: IProviderV2;
-    // 'responses' 不再有专用 Provider，统一走 OpenAIStandard（Chat标准供应商）
-    provider = new OpenAIStandard(config, dependencies);
+
+    if (ptype === 'responses') {
+      // 真正的 Responses provider：用于 OpenAI Responses wire (/v1/responses)
+      provider = new ResponsesProvider(config, dependencies);
+    } else {
+      // 默认：OpenAI 标准 Provider：
+      //  - providerType='openai'/'glm'/'qwen'/'iflow'/'lmstudio' → Chat 形状；
+      //  - providerType='anthropic' → 通过 ServiceProfile 选择 /v1/messages wire（协议转换由 llmswitch-core 处理）。
+      provider = new OpenAIStandard(config, dependencies);
+    }
     this.instances.set(instanceId, provider);
 
     return provider;
@@ -96,6 +105,12 @@ export class ProviderFactory {
       errors.push('Missing required field: config.auth');
     }
 
+    // 验证providerType
+    const supportedTypes = ['openai', 'glm', 'qwen', 'iflow', 'lmstudio', 'responses', 'anthropic'];
+    if (config.config.providerType && !supportedTypes.includes(config.config.providerType)) {
+      errors.push(`Unsupported providerType: ${config.config.providerType}. Supported types: ${supportedTypes.join(', ')}`);
+    }
+
     // 验证认证配置
     if (config.config.auth) {
       const auth = config.config.auth;
@@ -104,13 +119,17 @@ export class ProviderFactory {
       }
 
       if (auth.type === 'oauth') {
-        // 对于通用 openai-compat provider，要求显式提供 OAuth 端点与 clientId，
-        // 具体第三方（如 qwen/iflow）可通过预先写入配置或使用外部登录工具生成 token。
-        if (!auth.clientId) {
+        const ptype = String(config.config.providerType || '').toLowerCase();
+        const isQwen = ptype === 'qwen';
+        const isIflow = ptype === 'iflow';
+
+        // 对于 qwen / iflow 等内置 OAuth provider，clientId/tokenUrl 可从默认配置或环境推断，
+        // 因此不强制要求在用户配置中显式提供，避免硬编码凭证。
+        if (!auth.clientId && !isQwen && !isIflow) {
           errors.push('Missing required field for oauth auth: clientId');
         }
 
-        if (!auth.tokenUrl && !auth.deviceCodeUrl) {
+        if (!auth.tokenUrl && !isQwen && !isIflow) {
           errors.push('Missing required field for oauth auth: tokenUrl');
         }
       }

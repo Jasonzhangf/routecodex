@@ -1,23 +1,8 @@
 import type { ModuleConfig, ModuleDependencies, PipelineModule } from '../interfaces/pipeline-interfaces.js';
 import path from 'path';
-// Orchestration moved into llmswitch-core; adapters delegate to core bridge
-import { fileURLToPath, pathToFileURL } from 'url';
-
-// Runtime resolver: import from vendored llmswitch-core dist（严格，Fail Fast）
-async function importCore(subpath: string): Promise<any> {
-  const clean = subpath.replace(/\.js$/i, '');
-  const filename = `${clean}.js`;
-  try {
-    const __filename = fileURLToPath(import.meta.url);
-    const pkgRoot = path.resolve(path.dirname(__filename), '../../../..');
-    const target = path.join(pkgRoot, 'vendor', 'rcc-llmswitch-core', 'dist', filename);
-    const url = pathToFileURL(target).href;
-    return await import(url);
-  } catch (e) {
-    const msg = (e as any)?.message || String(e);
-    throw new Error(`[llmswitch] import failed: vendor/rcc-llmswitch-core/dist/${filename}: ${msg}`);
-  }
-}
+// Orchestration moved into llmswitch-core; adapters delegate to bridge module
+import { fileURLToPath } from 'url';
+import { bridgeProcessIncoming, bridgeProcessOutgoing } from '../../llmswitch/bridge.js';
 
 type Ctx = {
   requestId?: string;
@@ -63,6 +48,16 @@ abstract class BaseV2Adapter implements PipelineModule {
   abstract processOutgoing(response: any): Promise<unknown>;
 }
 
+function resolveProcessMode(rawMode: unknown, typeLower: string): 'chat' | 'passthrough' {
+  const v = typeof rawMode === 'string' ? rawMode.toLowerCase() : '';
+  if (v === 'passthrough') return 'passthrough';
+  if (v === 'chat') return 'chat';
+  // 兼容旧配置：responses 直通模块默认采用 passthrough
+  if (typeLower === 'llmswitch-responses-passthrough') return 'passthrough';
+  // 默认按 chat 处理（完整 Anth↔Chat/Responses↔Chat 编解码链）
+  return 'chat';
+}
+
 // Dynamic router: choose proper codec by entryEndpoint
 export class ConversionRouterAdapter extends BaseV2Adapter {
   private orchestrator: any;
@@ -78,37 +73,9 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
 
   private async ensureOrchestrator(): Promise<void> {
     if (this.orchestrator) return;
-    const mod = await importCore('v2/conversion/switch-orchestrator');
-    const { SwitchOrchestrator } = mod as any;
-    const __filename = fileURLToPath(import.meta.url);
-    const pkgRoot = path.resolve(path.dirname(__filename), '../../../..');
-    this.orchestrator = new SwitchOrchestrator({}, {
-      baseDir: pkgRoot,
-      profilesPath: 'config/conversion/llmswitch-profiles.json'
-    });
-    // 在回退后的 core 版本中，CodecRegistry 默认不包含任何工厂；
-    // 需要由宿主（routecodex）显式注册核心 codec 工厂，确保 profile 中的 codec 可解析。
-    // 与 profiles 中的 "codec" 值严格对齐：
-    //  - "openai-openai" → OpenAIOpenAIConversionCodec
-    //  - "anthropic-openai" → AnthropicOpenAIConversionCodec
-    //  - "responses-openai" → ResponsesOpenAIConversionCodec
-    try {
-      const factories: Record<string, () => Promise<any>> = {};
-      const openaiCodecMod = await importCore('v2/conversion/codecs/openai-openai-codec');
-      factories['openai-openai'] = async () => new (openaiCodecMod as any).OpenAIOpenAIConversionCodec({});
-
-      const anthCodecMod = await importCore('v2/conversion/codecs/anthropic-openai-codec');
-      factories['anthropic-openai'] = async () => new (anthCodecMod as any).AnthropicOpenAIConversionCodec({});
-
-      const respCodecMod = await importCore('v2/conversion/codecs/responses-openai-codec');
-      factories['responses-openai'] = async () => new (respCodecMod as any).ResponsesOpenAIConversionCodec({});
-
-      this.orchestrator.registerFactories(factories);
-    } catch (e) {
-      const msg = (e as any)?.message || String(e);
-      throw new Error(`[llmswitch] failed to register codec factories: ${msg}`);
-    }
-    await this.orchestrator.initialize();
+    // V3：编解码器注册和 Orchestrator 初始化交由 llmswitch-core 内部处理；
+    // 此处仅保留占位，避免破坏现有调用路径。
+    this.orchestrator = null;
   }
 
   // For unified behavior: default Responses → Chat bridge unless explicit passthrough module is used
@@ -129,14 +96,21 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
   async processIncoming(request: any): Promise<unknown> {
     if (!this.initialized) await this.initialize();
     const ctx = this.buildContext(request);
-    let ep = String(ctx.entryEndpoint || ctx.endpoint || '').toLowerCase();
-    // Fallback: infer responses by payload shape when endpoint is missing
-    // entryEndpoint is required; no inference here
-    // Strictly delegate to core bridge; no adapter-level bridging
-    const __filename = fileURLToPath(import.meta.url);
-    const pkgRoot = path.resolve(path.dirname(__filename), '../../../..');
-    const bridge = await importCore('v2/bridge/routecodex-adapter');
-    const result = await (bridge as any).processIncoming(request, { baseDir: pkgRoot, profilesPath: 'config/conversion/llmswitch-profiles.json' });
+    const typeLower = String(this.config.type || '').toLowerCase();
+    const cfg: any = (this.config as any)?.config || {};
+    // 请求侧优先使用 requestProcess，其次回退到通用 process
+    const rawModeIn = (typeof cfg.requestProcess === 'string' ? cfg.requestProcess : cfg.process) as string | undefined;
+    const processMode = resolveProcessMode(rawModeIn, typeLower);
+    // providerProtocol 优先来自配置（由 config-core / assembler 注入），缺失时按入口端点推断
+    let providerProtocol = String(cfg.providerProtocol || '').toLowerCase();
+    if (!providerProtocol) {
+      providerProtocol = this.pickProtocol(ctx);
+    }
+    const result = await bridgeProcessIncoming(request, {
+      processMode,
+      providerProtocol,
+      profilesPath: 'config/conversion/llmswitch-profiles.json'
+    });
     // Normalize: some core bridge versions may return an envelope like
     // { payload, pipelineId, ... }. Downstream expects plain Chat JSON
     // (BasePipeline will wrap it into DTO). Keep DTO if already returned.
@@ -156,12 +130,17 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
   async processOutgoing(response: any): Promise<unknown> {
     if (!this.initialized) await this.initialize();
     const ctx = this.buildContext(response);
-    let ep = String(ctx.entryEndpoint || ctx.endpoint || '').toLowerCase();
     // entryEndpoint is required; no inference here
-    // Strictly delegate to core bridge; no adapter-level bridging
-    const __filename = fileURLToPath(import.meta.url);
-    const pkgRoot = path.resolve(path.dirname(__filename), '../../../..');
-    const bridge = await importCore('v2/bridge/routecodex-adapter');
+    const typeLower = String(this.config.type || '').toLowerCase();
+    const cfg: any = (this.config as any)?.config || {};
+    // 响应侧优先使用 responseProcess，其次回退到通用 process
+    const rawModeOut = (typeof cfg.responseProcess === 'string' ? cfg.responseProcess : cfg.process) as string | undefined;
+    const processMode = resolveProcessMode(rawModeOut, typeLower);
+    // 响应侧同样需要 providerProtocol，用于确定 Chat→Anth/Chat→Responses 的出口编码
+    let providerProtocol = String(cfg.providerProtocol || '').toLowerCase();
+    if (!providerProtocol) {
+      providerProtocol = this.pickProtocol(ctx);
+    }
     const invokeSecondRound = async (dto: any, _ctx: any) => {
       try {
         // Build a SharedPipelineRequest and re-enter pipeline (non-streaming second round)
@@ -185,7 +164,12 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
         return { data: dto?.body };
       }
     };
-    return await (bridge as any).processOutgoing(response, { baseDir: pkgRoot, profilesPath: 'config/conversion/llmswitch-profiles.json', invokeSecondRound });
+    return await bridgeProcessOutgoing(response, {
+      processMode,
+      providerProtocol,
+      profilesPath: 'config/conversion/llmswitch-profiles.json',
+      invokeSecondRound
+    });
   }
 }
 
@@ -199,8 +183,9 @@ export class OpenAIOpenAIAdapter extends BaseV2Adapter {
 
   private async ensureCodec(): Promise<void> {
     if (this.codec) return;
-    const mod = await importCore('v2/conversion/codecs/openai-openai-codec');
-    this.codec = new (mod as any).OpenAIOpenAIConversionCodec({});
+    const mod = await import('../../llmswitch/bridge.js');
+    // 保持现有路径不变：OpenAI→OpenAI codec 由 core 内部管理，此处仅占位以兼容旧路径。
+    this.codec = (mod as any).openaiCodec ?? null;
   }
 
   async processIncoming(request: any): Promise<unknown> {
@@ -235,8 +220,8 @@ export class AnthropicOpenAIAdapter extends BaseV2Adapter {
 
   private async ensureCodec(): Promise<void> {
     if (this.codec) return;
-    const mod = await importCore('v2/conversion/codecs/anthropic-openai-codec');
-    this.codec = new (mod as any).AnthropicOpenAIConversionCodec({});
+    const mod = await import('../../llmswitch/bridge.js');
+    this.codec = (mod as any).anthropicCodec ?? null;
   }
 
   async processIncoming(request: any): Promise<unknown> {
@@ -271,8 +256,8 @@ export class ResponsesToChatAdapter extends BaseV2Adapter {
 
   private async ensureCodec(): Promise<void> {
     if (this.codec) return;
-    const mod = await importCore('v2/conversion/codecs/responses-openai-codec');
-    this.codec = new (mod as any).ResponsesOpenAIConversionCodec({});
+    const mod = await import('../../llmswitch/bridge.js');
+    this.codec = (mod as any).responsesCodec ?? null;
   }
 
   async processIncoming(request: any): Promise<unknown> {

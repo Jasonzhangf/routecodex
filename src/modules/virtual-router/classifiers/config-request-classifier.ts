@@ -262,8 +262,13 @@ export class ConfigRequestClassifier {
           }
         }
       }
-    } catch {
-      // 非致命，默认为无图像
+    } catch (error) {
+      // 非致命：记录一次特征提取错误，保持“无图像”决策
+      try {
+        console.warn('[virtual-router] hasImageContentForProtocol failed', { protocol, message: (error as any)?.message });
+      } catch {
+        // ignore logging failure
+      }
     }
     return false;
   }
@@ -306,8 +311,15 @@ export class ConfigRequestClassifier {
         primaryText = userTexts[userTexts.length - 1];
         allText = userTexts.join('\n');
       }
-    } catch {
-      // ignore extraction errors
+    } catch (error) {
+      try {
+        console.warn('[virtual-router] detectThinkingIntent failed', {
+          endpoint,
+          message: (error as any)?.message
+        });
+      } catch {
+        // ignore logging failure
+      }
     }
 
     const source = (primaryText + '\n' + allText).toLowerCase();

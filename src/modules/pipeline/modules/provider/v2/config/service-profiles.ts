@@ -3,7 +3,7 @@
  *
  * 定义各个OpenAI兼容服务的预设配置档案
  */
-import { API_ENDPOINTS, HTTP_PROTOCOLS, LOCAL_HOSTS, DEFAULT_CONFIG } from "../../../../../../constants/index.js";
+import { API_ENDPOINTS, API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS, DEFAULT_CONFIG } from "../../../../../../constants/index.js";
 import type { ServiceProfile } from '../api/provider-types.js';
 
 /**
@@ -39,6 +39,25 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     optionalAuth: [],
     headers: {
       'Content-Type': 'application/json'
+    },
+    timeout: 300000,
+    maxRetries: 3
+  },
+
+  /**
+   * Anthropic Messages API
+   * - 标准 anthropic provider（/v1/messages）
+   * - 对于 Zhipu/GLM 的 Anthropic 兼容端点，可通过 baseUrl 覆盖 defaultBaseUrl
+   */
+  anthropic: {
+    defaultBaseUrl: API_ENDPOINTS.ANTHROPIC,
+    defaultEndpoint: API_PATHS.ANTHROPIC_MESSAGES,
+    defaultModel: 'claude-3-haiku-20240307',
+    requiredAuth: ['apikey'],
+    optionalAuth: [],
+    headers: {
+      'Content-Type': 'application/json'
+      // 版本标头由上游/配置控制，这里不硬编码 anthropic-version，避免与兼容端点冲突
     },
     timeout: 300000,
     maxRetries: 3
