@@ -57,11 +57,11 @@ export class PipelineManager implements RCCBaseModule {
   // 429 error handling properties
   private key429Tracker: Key429Tracker;
   private pipelineHealthManager: PipelineHealthManager;
-  private retryAttempts: Map<string, number> = new Map();
-  private maxRetries = 3;
   // Dynamic route-pool state (in-memory): routePools and per-pipeline 429/cooldown/ban
   private routePools: Record<string, string[]> = {};
   private pipeline429State: Map<string, { step: number; consecutive: number; firstAt: number; lastAt: number; cooldownUntil?: number; bannedToday?: boolean; bannedReason?: string }>=new Map();
+  // Model-level 429 state (cross-route/cross-pool): keyed by providerId::modelId
+  private model429State: Map<string, { step: number; consecutive: number; lastAt: number; cooldownUntil: number }> = new Map();
 
   constructor(
     config: PipelineManagerConfig,
@@ -150,6 +150,26 @@ export class PipelineManager implements RCCBaseModule {
     if (!this.isInitialized) {
       throw new Error('PipelineManager is not initialized');
     }
+
+    // Fail fast if the target model is currently in 429 cooldown (model-level熔断，跨route/pool去重)
+    try {
+      const modelKey = this.getModelKeyForRoute(routeRequest);
+      if (this.isModelCoolingDown(modelKey)) {
+        const retryAfterMs = this.getModelRetryAfterMs(modelKey);
+        const e: any = new Error('Upstream model cooling down due to previous 429s');
+        e.statusCode = 429;
+        e.code = 'HTTP_429_MODEL_COOLDOWN';
+        if (retryAfterMs > 0) {
+          e.retryAfterMs = retryAfterMs;
+        }
+        e.context = {
+          providerId: routeRequest.providerId,
+          modelId: routeRequest.modelId,
+          modelKey
+        };
+        throw e;
+      }
+    } catch { /* 如果模式键推导失败，不影响正常路由 */ }
 
     // If no explicit pipelineId, perform per-route-pool round-robin selection
     const directId = (routeRequest as any).pipelineId as string | undefined;
@@ -241,7 +261,6 @@ export class PipelineManager implements RCCBaseModule {
 
     const startTime = Date.now();
     const requestId = request.route.requestId;
-    const retryKey = `retry_${requestId}_${Date.now()}`;
     const requestContext = {
       requestId,
       providerId: request.route.providerId,
@@ -266,8 +285,8 @@ export class PipelineManager implements RCCBaseModule {
         ...(request as any)?.route?.pipelineId ? { pipelineId: (request as any).route.pipelineId as string } : {},
       } as any);
 
-      // Process request with 429 error handling
-      const response = await this.processRequestWithPipeline(pipeline, request, retryKey);
+      // Process request with 429 error handling (per-model熔断，无内部等待/回退)
+      const response = await this.processRequestWithPipeline(pipeline, request);
 
       // Enhanced response logging
       const processingTime = Date.now() - startTime;
@@ -318,9 +337,6 @@ export class PipelineManager implements RCCBaseModule {
         requestId: request.route.requestId,
         enhanced: this.isEnhanced
       });
-
-      // Cleanup retry attempts on final error
-      this.retryAttempts.delete(retryKey);
 
       throw error;
     }
@@ -386,6 +402,79 @@ export class PipelineManager implements RCCBaseModule {
   }
 
   /**
+   * Build a stable model key for a route-level request (providerId + modelId).
+   * 用于跨 route/pool 的 429 熔断去重。
+   */
+  private getModelKeyForRoute(routeRequest: RouteRequest): string {
+    const providerId = String(routeRequest.providerId || 'unknown');
+    const modelId = String(routeRequest.modelId || 'unknown');
+    return `${providerId}::${modelId}`;
+  }
+
+  /**
+   * Build model key for an in-flight pipeline + request pair.
+   * 目前与 getModelKeyForRoute 保持一致，后续如有需要可从 pipeline.config 提取实际上游模型。
+   */
+  private getModelKeyForRequest(_pipeline: BasePipeline, request: PipelineRequest): string {
+    return this.getModelKeyForRoute({
+      providerId: request.route.providerId,
+      modelId: request.route.modelId,
+      requestId: request.route.requestId
+    } as RouteRequest);
+  }
+
+  /**
+   * 检查某个模型是否处于 429 冷却期
+   */
+  private isModelCoolingDown(modelKey: string): boolean {
+    const st = this.model429State.get(modelKey);
+    if (!st) return false;
+    return st.cooldownUntil > Date.now();
+  }
+
+  /**
+   * 返回模型剩余冷却时间（毫秒）
+   */
+  private getModelRetryAfterMs(modelKey: string): number {
+    const st = this.model429State.get(modelKey);
+    if (!st) return 0;
+    const remaining = st.cooldownUntil - Date.now();
+    return remaining > 0 ? remaining : 0;
+  }
+
+  /**
+   * 记录一次 429 错误并更新模型退避节奏，返回本次推荐的 retryAfterMs。
+   * 退避节奏：30s, 60s, 120s（单模型维度），不在当前请求内等待。
+   */
+  private updateModel429State(modelKey: string): number {
+    const now = Date.now();
+    const existing = this.model429State.get(modelKey);
+    const schedule = this.getBackoffSchedule();
+
+    if (!existing) {
+      const delay = schedule[0] ?? 30000;
+      this.model429State.set(modelKey, {
+        step: 1,
+        consecutive: 1,
+        lastAt: now,
+        cooldownUntil: now + delay
+      });
+      return delay;
+    }
+
+    const step = Math.min((existing.step || 0) + 1, 3);
+    const delay = schedule[Math.max(0, Math.min(step - 1, schedule.length - 1))] ?? 30000;
+    const next = {
+      step,
+      consecutive: (existing.consecutive || 0) + 1,
+      lastAt: now,
+      cooldownUntil: now + delay
+    };
+    this.model429State.set(modelKey, next);
+    return delay;
+  }
+
+  /**
    * Get enhanced manager status with debug information
    */
   getStatus(): {
@@ -400,7 +489,6 @@ export class PipelineManager implements RCCBaseModule {
     errorHandling429?: {
       keyTracker: unknown;
       healthManager: unknown;
-      retryAttempts: number;
     };
   } {
     const baseStatus = {
@@ -411,8 +499,7 @@ export class PipelineManager implements RCCBaseModule {
       statistics: this.logger.getStatistics(),
       errorHandling429: {
         keyTracker: this.key429Tracker.getDebugInfo(),
-        healthManager: this.pipelineHealthManager.getDebugInfo(),
-        retryAttempts: this.retryAttempts.size
+        healthManager: this.pipelineHealthManager.getDebugInfo()
       }
     };
 
@@ -489,93 +576,6 @@ export class PipelineManager implements RCCBaseModule {
   }
 
   /**
-   * Handle 429 error with automatic retry
-   */
-  private async handle429Error(
-    error: unknown,
-    request: PipelineRequest,
-    attemptedPipelines: Set<string>,
-    retryKey: string
-  ): Promise<PipelineResponse> {
-    // 1) Update dynamic state for the last attempted pipeline (cooldown/step/window)
-    try {
-      const last = Array.from(attemptedPipelines)[Array.from(attemptedPipelines).length - 1];
-      if (last) this.apply429StepForPipeline(last);
-    } catch { /* ignore */ }
-
-    // 2) Try to switch within the same route pool (no waiting)
-    const excludeIds = new Set<string>(attemptedPipelines);
-    const candidates = this.getPoolRestrictedAvailablePipelines(attemptedPipelines, excludeIds);
-    if (Array.isArray(candidates) && candidates.length > 0) {
-      const next = this.selectNextPipelineRoundRobin(candidates, retryKey);
-      attemptedPipelines.add(next.pipelineId);
-      return await this.processRequestWithPipeline(next, request, retryKey);
-    }
-
-    // 3) Pool exhausted: hold the request and wait, then retry within the same pool
-    try {
-      await (this.errorHandlingCenter as any)?.handleError?.({
-        type: 'rate_limit_pool_exhausted_pre_wait',
-        timestamp: Date.now(),
-        requestId: (request as any)?.route?.requestId,
-        attempted: Array.from(attemptedPipelines),
-      });
-    } catch { /* ignore */ }
-
-    // Compute min cooldown among pool members
-    let minRetryAfter = 0;
-    try {
-      const anchor = Array.from(attemptedPipelines)[0];
-      const poolIds: string[] = [];
-      for (const ids of Object.values(this.routePools || {})) {
-        if (Array.isArray(ids) && anchor && ids.includes(anchor)) { poolIds.push(...ids); break; }
-      }
-      const now = Date.now();
-      const futureTimes = poolIds
-        .map(id => this.pipeline429State.get(id)?.cooldownUntil || 0)
-        .filter(t => t && t > now)
-        .map(t => t - now);
-      if (futureTimes.length) { minRetryAfter = Math.max(0, Math.min(...futureTimes)); }
-    } catch { /* ignore */ }
-
-    // Wait plan: first wait for minRetryAfter (if present), then follow backoff schedule
-    const waits: number[] = [];
-    try {
-      const schedule = this.getBackoffSchedule();
-      if (minRetryAfter > 0) waits.push(minRetryAfter);
-      waits.push(...schedule);
-    } catch { /* ignore */ }
-
-    for (const delay of waits) {
-      try { await new Promise(res => setTimeout(res, Math.max(0, delay))); } catch { /* ignore */ }
-      // After wait, re-check candidates within the same route pool
-      const excludeIds = new Set<string>(attemptedPipelines);
-      const candidates2 = this.getPoolRestrictedAvailablePipelines(attemptedPipelines, excludeIds);
-      if (Array.isArray(candidates2) && candidates2.length > 0) {
-        const next = this.selectNextPipelineRoundRobin(candidates2, retryKey);
-        attemptedPipelines.add(next.pipelineId);
-        return await this.processRequestWithPipeline(next, request, retryKey);
-      }
-    }
-
-    // Still exhausted after waits → return structured 429 with minimal retryAfter
-    try {
-      await (this.errorHandlingCenter as any)?.handleError?.({
-        type: 'rate_limit_pool_exhausted_final',
-        timestamp: Date.now(),
-        requestId: (request as any)?.route?.requestId,
-        attempted: Array.from(attemptedPipelines),
-      });
-    } catch { /* ignore */ }
-
-    const e: any = new Error('Route pool exhausted: all pipelines cooling down or banned');
-    e.statusCode = 429;
-    e.code = 'HTTP_429_POOL_EXHAUSTED';
-    if (minRetryAfter > 0) e.retryAfterMs = minRetryAfter;
-    throw e;
-  }
-
-  /**
    * Extract key from error
    */
   private extractKeyFromError(error: unknown): string | null {
@@ -610,97 +610,17 @@ export class PipelineManager implements RCCBaseModule {
   }
 
   /**
-   * Get available pipelines for retry
-   */
-  private getAvailablePipelines(
-    excludeFilter: (excludeIds: Set<string>) => Set<string>
-  ): BasePipeline[] {
-    const excludeIds = excludeFilter(new Set<string>());
-
-    return Array.from(this.pipelines.values()).filter(pipeline => {
-      // Skip pipelines that are explicitly excluded
-      if (excludeIds.has(pipeline.pipelineId)) {
-        return false;
-      }
-
-      // Skip unhealthy pipelines
-      // Skip dynamic bans/cooldown（移除健康 gating）
-      const st = this.pipeline429State.get(pipeline.pipelineId);
-      const now = Date.now();
-      const inCooldown = st && st.cooldownUntil !== undefined && now < (st.cooldownUntil || 0);
-      const banned = st && st.bannedToday === true;
-      if (inCooldown || banned) return false;
-      return true;
-    });
-  }
-
-  /**
-   * Get available pipelines restricted to the same route pool as the first attempted pipeline
-   */
-  private getPoolRestrictedAvailablePipelines(
-    attempted: Set<string>,
-    excludeIds: Set<string>
-  ): BasePipeline[] {
-    const attemptedArr = Array.from(attempted);
-    const anchor = attemptedArr.length ? attemptedArr[0] : null;
-    let allowed: Set<string> | null = null;
-    if (anchor) {
-      allowed = new Set<string>();
-      for (const [routeName, ids] of Object.entries(this.routePools || {})) {
-        if (Array.isArray(ids) && ids.includes(anchor)) {
-          ids.forEach(id => allowed!.add(id));
-        }
-      }
-    }
-    const exclude = new Set<string>(excludeIds);
-    // Always exclude already attempted pipelines
-    attempted.forEach(id => exclude.add(id));
-    const all = Array.from(this.pipelines.values());
-    const filtered = all.filter(p => {
-      if (allowed && !allowed.has(p.pipelineId)) return false;
-      if (exclude.has(p.pipelineId)) return false;
-      const st = this.pipeline429State.get(p.pipelineId);
-      const now = Date.now();
-      const inCooldown = st && st.cooldownUntil !== undefined && now < (st.cooldownUntil || 0);
-      const banned = st && st.bannedToday === true;
-      if (inCooldown || banned) return false;
-      return true;
-    });
-    return filtered;
-  }
-
-  /**
-   * Select next pipeline using round-robin strategy
-   */
-  private selectNextPipelineRoundRobin(
-    availablePipelines: BasePipeline[],
-    retryKey: string
-  ): BasePipeline {
-    if (availablePipelines.length === 0) {
-      throw new Error('No available pipelines for round-robin selection');
-    }
-
-    // Simple round-robin based on retry count
-    const attempt = this.retryAttempts.get(retryKey) || 0;
-    const index = attempt % availablePipelines.length;
-
-    return availablePipelines[index];
-  }
-
-  /**
    * Process request with specific pipeline and retry tracking
    */
   private async processRequestWithPipeline(
     pipeline: BasePipeline,
-    request: PipelineRequest,
-    retryKey: string
+    request: PipelineRequest
   ): Promise<PipelineResponse> {
     try {
       const response = await pipeline.processRequest(request);
 
-      // On success, record success and reset retry count; clear 429 consecutive state for this pipeline
+      // On success, record success and clear 429 consecutive state for this pipeline
       this.pipelineHealthManager.recordSuccess(pipeline.pipelineId);
-      this.retryAttempts.delete(retryKey);
       try { this.reset429State(pipeline.pipelineId); } catch { /* ignore */ }
 
       return response;
@@ -748,15 +668,23 @@ export class PipelineManager implements RCCBaseModule {
         return false;
       })();
       if (looks429) {
-        const currentAttempt = this.retryAttempts.get(retryKey) || 0;
+        // 429 视为上游模型熔断信号：按 providerId+modelId 记录退避状态，并立即向客户端返回结构化429
+        const modelKey = this.getModelKeyForRequest(pipeline, request);
+        const retryAfterMs = this.updateModel429State(modelKey);
 
-        if (currentAttempt < this.maxRetries) {
-          this.retryAttempts.set(retryKey, currentAttempt + 1);
-
-          // Handle 429 error with retry
-          const attemptedPipelines = new Set([pipeline.pipelineId]);
-          return await this.handle429Error(error, request, attemptedPipelines, retryKey);
+        const e: any = new Error('Upstream model cooling down due to previous 429s');
+        e.statusCode = 429;
+        e.code = 'HTTP_429_MODEL_COOLDOWN';
+        if (retryAfterMs > 0) {
+          e.retryAfterMs = retryAfterMs;
         }
+        e.context = {
+          providerId: request.route.providerId,
+          modelId: request.route.modelId,
+          modelKey
+        };
+        this.pipelineHealthManager.recordError(pipeline.pipelineId, e.message);
+        throw e;
       }
 
       // For other errors, handle special cases (401/403) → ban today; otherwise record error
