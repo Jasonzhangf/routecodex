@@ -20,7 +20,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
   responses: {
     defaultBaseUrl: API_ENDPOINTS.OPENAI,
     defaultEndpoint: '/responses',
-    defaultModel: 'gpt-4.1-mini',
+    defaultModel: '',
     requiredAuth: ['apikey'],
     optionalAuth: [],
     headers: {
@@ -191,8 +191,11 @@ export class ServiceProfileValidator {
 
     const profile = DynamicProfileLoader.buildServiceProfile(providerType);
     if (!profile) {
-      errors.push(`Unsupported provider type: ${providerType}`);
-      return { isValid: false, errors, warnings };
+      // 对于未知的 providerType，不再视为错误：
+      // - 使用调用方提供的 auth 配置
+      // - 不做基于预设 profile 的额外约束，便于接入任意 OpenAI 兼容第三方
+      warnings.push(`No built-in service profile for providerType='${providerType}', using generic settings`);
+      return { isValid: true, errors, warnings };
     }
 
     // 验证认证类型
