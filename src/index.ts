@@ -13,7 +13,6 @@ import { spawn } from 'child_process';
 import { createRequire } from 'module';
 import { ConfigManagerModule } from './modules/config-manager/config-manager-module.js';
 import { buildInfo } from './build-info.js';
-import { resolvePortForMode } from './server/utils/port-resolver.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 
 // Polyfill CommonJS require for ESM runtime to satisfy dependencies that call require()

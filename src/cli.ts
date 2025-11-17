@@ -8,6 +8,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS, DEFAULT_CONFIG, API_ENDPOINTS } from "./constants/index.js";import fs from 'fs';
+import { buildInfo } from './build-info.js';
 // Spinner wrapper (lazy-loaded to avoid hard dependency on ora/restore-cursor issues)
 type Spinner = {
   start(text?: string): Spinner;
@@ -139,7 +140,7 @@ const pkgVersion: string = (() => {
   }
 })();
 
-// Resolve package name to distinguish dev/release variants
+// Resolve package name for display / binary naming
 const pkgName: string = (() => {
   try {
     const pkgPath = path.resolve(__dirname, '..', 'package.json');
@@ -154,10 +155,10 @@ const pkgName: string = (() => {
   return 'routecodex';
 })();
 
-// Package variant:
-// - routecodex => dev 包（本地开发，默认端口 5555）
-// - rcc        => release 包（按配置端口启动）
-const IS_DEV_MODE = pkgName === 'routecodex';
+// Package variant由编译期 buildInfo.mode 决定：
+// - dev     => 本地开发包（routecodex，默认端口 5555）
+// - release => 发布包（rcc，严格按配置端口启动）
+const IS_DEV_MODE = buildInfo.mode === 'dev';
 const DEFAULT_DEV_PORT = 5555;
 program
   .name(pkgName === 'rcc' ? 'rcc' : 'routecodex')

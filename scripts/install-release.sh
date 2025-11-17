@@ -15,7 +15,8 @@ VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "0.0.0
 echo "📦 当前源码版本: routecodex@${VERSION}"
 
 echo "🔨 构建源码..."
-npm run build
+# release 包：显式使用 BUILD_MODE=release 以便在编译期区分 dev/release
+BUILD_MODE=release npm run build
 
 TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/rcc-release.XXXXXX")
 TARBALL="routecodex-${VERSION}.tgz"

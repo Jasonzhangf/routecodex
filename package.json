@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.81.24",
+  "version": "0.81.23",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -32,9 +32,9 @@
     "node": ">=20 <26"
   },
   "scripts": {
-    "build": "node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && tsc && node scripts/copy-compat-assets.mjs",
-    "build:dev": "npm run clean && node scripts/build-core.mjs && tsc && node scripts/copy-compat-assets.mjs",
-    "build:min": "node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && tsc && node scripts/copy-compat-configs.mjs",
+    "build": "node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs",
+    "build:dev": "npm run clean && node scripts/build-core.mjs && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs",
+    "build:min": "node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-configs.mjs",
     "prepack": "echo skip-prepack",
     "postbuild": "chmod +x dist/cli.js || true",
     "build:watch": "tsc --watch",
@@ -134,7 +134,7 @@
     "rcc-config-core": "^0.1.6",
     "rcc-debugcenter": "^0.1.6",
     "rcc-errorhandling": "^1.0.10",
-    "rcc-llmswitch-core": "^0.3.16",
+    "rcc-llmswitch-core": "file:sharedmodule/llmswitch-core/rcc-llmswitch-core-0.3.14.tgz",
     "socket.io": "^4.8.1",
     "zod": "^3.23.8"
   },
