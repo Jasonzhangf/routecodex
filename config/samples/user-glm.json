@@ -3,13 +3,12 @@
   "port": 5522,
   "host": "0.0.0.0",
   "virtualrouter": {
-    "inputProtocol": "openai",
     "outputProtocol": "openai",
     "providers": {
       "glm": {
         "id": "glm",
         "enabled": true,
-        "type": "glm",
+        "type": "openai",
         "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
         "apiKey": ["${GLM_API_KEY}"],
         "models": {

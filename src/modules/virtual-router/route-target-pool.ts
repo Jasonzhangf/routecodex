@@ -99,8 +99,6 @@ interface RouteTarget {
   modelId: string;
   keyId: string;
   actualKey: string;
-  inputProtocol: string;
-  outputProtocol: string;
 }
 
 interface RoutePoolStatistics {

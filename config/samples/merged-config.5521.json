@@ -3,7 +3,7 @@
     "lmstudio": {
       "id": "lmstudio",
       "enabled": true,
-      "type": "lmstudio",
+      "type": "openai",
       "baseURL": "http://localhost:1234",
       "apiKey": [
         "${LMSTUDIO_API_KEY:-}"

@@ -55,11 +55,11 @@ async function ensureServer(configPath: string, verbose = false): Promise<{ base
   return { base };
 }
 
-function samplePayload(endpoint: string, scenario: string): any {
-  // 仅生成形状示例，具体 model 由调用者在配置中指定
+function samplePayload(endpoint: string, scenario: string, model: string): any {
+  // 仅生成形状示例，具体 model 由调用者在配置中指定（若提供则填入）
   if (endpoint === 'chat' && scenario === 'webfetch') {
     return {
-      model: '',
+      model: model || '',
       messages: [
         { role: 'user', content: '请根据当前配置的模型，测试一个简单的网页抓取场景。' }
       ],
@@ -68,7 +68,7 @@ function samplePayload(endpoint: string, scenario: string): any {
   }
   if (endpoint === 'chat' && scenario === 'listfiles') {
     return {
-      model: '',
+      model: model || '',
       tools: [
         {
           type: 'function',
@@ -96,7 +96,7 @@ function samplePayload(endpoint: string, scenario: string): any {
   }
   if (endpoint === 'responses' && scenario === 'webfetch') {
     return {
-      model: '',
+      model: model || '',
       input: [
         { role: 'user', content: [{ type: 'input_text', text: '请根据当前配置的模型，测试 Responses 端点。' }] }
       ],
@@ -104,7 +104,40 @@ function samplePayload(endpoint: string, scenario: string): any {
     };
   }
   // default simple text
-  return { model: '', messages: [{ role: 'user', content: 'ping' }], stream: false };
+  return { model: model || '', messages: [{ role: 'user', content: 'ping' }], stream: false };
+}
+
+function resolveDefaultModelFromConfig(cfgPath: string, endpoint: string): string {
+  const j = readJson(cfgPath) || {};
+  try {
+    const vr = j?.virtualrouter || {};
+    // 1) 优先使用 routing.default 中的第一个目标（例如 lmstudio.gpt-oss-20b-mlx__key1）
+    const routes = vr?.routing?.default;
+    if (Array.isArray(routes) && routes.length > 0 && typeof routes[0] === 'string') {
+      const first = String(routes[0]);
+      // pattern: provider.model__key 或 provider.model
+      const dot = first.indexOf('.');
+      if (dot > 0 && dot < first.length - 1) {
+        const rest = first.slice(dot + 1); // model__key 或 model
+        const modelId = rest.split('__')[0];
+        if (modelId && modelId.trim()) return modelId.trim();
+      }
+    }
+    // 2) 回退到 providers.*.models 中的第一个模型名
+    const providers = vr?.providers || {};
+    const providerEntries = Object.values(providers) as any[];
+    for (const prov of providerEntries) {
+      try {
+        const models = prov?.models || {};
+        const keys = Object.keys(models);
+        if (keys.length > 0 && keys[0].trim()) {
+          return keys[0].trim();
+        }
+      } catch { /* ignore per-provider errors */ }
+    }
+  } catch { /* ignore resolution errors */ }
+  // 默认留空，让上游 schema 决定是否报错
+  return '';
 }
 
 async function sendRequest(base: string, endpoint: string, payload: any, timeoutMs: number): Promise<{ ok: boolean; data: any; status: number; text?: string }>{
@@ -159,13 +192,19 @@ export function createValidateCommand(): Command {
         const cfg = opts.config || path.join(homedir(), '.routecodex', 'config.json');
         const verbose = !!opts.verbose;
         const { base } = await ensureServer(cfg, verbose);
-        const payload = (() => {
-          if (opts.payload && fs.existsSync(opts.payload)) return readJson(opts.payload) || samplePayload(opts.endpoint, opts.scenario);
-          return samplePayload(opts.endpoint, opts.scenario);
-        })();
-        const tmo = Number(opts.timeout || 45000);
         const endpoint = String(opts.endpoint || 'chat');
         const scenario = String(opts.scenario || 'webfetch');
+        const defaultModel = resolveDefaultModelFromConfig(cfg, endpoint);
+        const payload = (() => {
+          if (opts.payload && fs.existsSync(opts.payload)) {
+            const fromFile = readJson(opts.payload) || samplePayload(endpoint, scenario, defaultModel);
+            if (!fromFile || typeof fromFile !== 'object') return fromFile;
+            if (!fromFile.model && defaultModel) (fromFile as any).model = defaultModel;
+            return fromFile;
+          }
+          return samplePayload(endpoint, scenario, defaultModel);
+        })();
+        const tmo = Number(opts.timeout || 45000);
         const res = await sendRequest(base, endpoint, payload, tmo);
         if (!res.ok) {
           console.error(`[validate] HTTP ${res.status}: ${res.text?.slice(0, 400)}`);

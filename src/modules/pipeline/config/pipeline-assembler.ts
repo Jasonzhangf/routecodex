@@ -280,26 +280,33 @@ export class PipelineAssembler {
             }
           } catch { /* ignore model-level timeout resolution errors */ }
         }
-        // 注入 providerType：优先使用 routeMeta.providerId（例如 'lmstudio'），否则回退到 provider.type 的别名映射
+        // 注入 providerType（协议族）：
+        // - 仅使用 'openai' | 'anthropic' | 'gemini' | 'responses'
+        // - 第三方 OpenAI 兼容服务统一视为 'openai'
         {
-          const supported = new Set(['openai', 'glm', 'qwen', 'iflow', 'lmstudio', 'responses']);
           const alias = (s: string): string | '' => {
             const t = (s || '').toLowerCase();
             if (!t) return '' as any;
-            if (t.includes('openai') || t.includes('generic-openai') || t.includes('modelscope')) return 'openai';
-            if (t.includes('glm') || t.includes('bigmodel') || t.includes('zhipu')) return 'glm';
-            if (t.includes('qwen') || t.includes('dashscope') || t.includes('aliyun')) return 'qwen';
-            if (t.includes('lmstudio') || t.includes('lm-studio')) return 'lmstudio';
-            if (t.includes('iflow')) return 'iflow';
+            if (t.includes('anthropic') || t.includes('claude')) return 'anthropic';
+            if (t.includes('gemini') || t.includes('vertex') || t.includes('google')) return 'gemini';
             if (t.includes('responses')) return 'responses';
+            // 其余（glm/qwen/lmstudio/iflow/modelscope 等）均按 openai 处理
+            if (t.includes('openai') || t.includes('generic-openai') || t.includes('modelscope') || t.includes('glm') || t.includes('bigmodel') || t.includes('zhipu') || t.includes('qwen') || t.includes('dashscope') || t.includes('aliyun') || t.includes('lmstudio') || t.includes('lm-studio') || t.includes('iflow')) {
+              return 'openai';
+            }
             return '' as any;
           };
           const fromRoute = String(providerIdForKey || '').toLowerCase();
           const fromProvider = String((provider && provider.type) || '').toLowerCase();
-          const cand1 = supported.has(fromRoute) ? fromRoute : alias(fromRoute);
-          const cand2 = supported.has(fromProvider) ? fromProvider : alias(fromProvider);
-          const finalType = cand1 || cand2 || 'openai';
-          (provCfg as any).providerType = finalType;
+          // 1) 显式 routeMeta.providerId 优先，保持与虚拟路由配置一致（如 'glm'、'lmstudio' 或任意自定义 id）
+          if (fromRoute) {
+            const mapped = alias(fromRoute) || 'openai';
+            (provCfg as any).providerType = mapped;
+          } else {
+            // 2) 否则基于 provider.type 做一次别名归一（兼容旧配置）
+            const cand = alias(fromProvider) || 'openai';
+            (provCfg as any).providerType = cand;
+          }
         }
       } catch { /* ignore */ }
       if (!isOAuthAuth) {

@@ -4,7 +4,7 @@
   "mode": "dry-run",
   "providers": {
     "lmstudio": {
-      "type": "lmstudio",
+      "type": "openai",
       "baseUrl": "http://localhost:1234",
       "models": {
         "gpt-oss-20b-mlx": {
@@ -16,7 +16,7 @@
       }
     },
     "qwen": {
-      "type": "qwen-provider",
+      "type": "openai",
       "baseUrl": "https://chat.qwen.ai",
       "models": {
         "qwen3-coder-plus": {

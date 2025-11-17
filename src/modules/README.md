@@ -216,14 +216,12 @@ const routeTargets = {
       providerId: 'qwen',
       modelId: 'qwen3-coder-plus',
       keyId: 'key1', // 使用别名，不是真实密钥
-      inputProtocol: 'openai',
       outputProtocol: 'openai'
     },
     {
       providerId: 'qwen', 
       modelId: 'qwen3-coder-plus',
       keyId: 'key2', // 第二个别名
-      inputProtocol: 'openai',
       outputProtocol: 'openai'
     }
   ]

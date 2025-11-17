@@ -2,13 +2,12 @@
   "version": "1.0.0",
   "httpserver": { "port": 5521, "host": "0.0.0.0" },
   "virtualrouter": {
-    "inputProtocol": "openai",
     "outputProtocol": "openai",
     "providers": {
       "lmstudio": {
         "id": "lmstudio",
         "enabled": true,
-        "type": "lmstudio",
+        "type": "openai",
         "baseURL": "http://localhost:1234",
         "apiKey": ["${LMSTUDIO_API_KEY:-}"],
         "models": {

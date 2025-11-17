@@ -96,12 +96,6 @@ export class ProviderFactory {
       errors.push('Missing required field: config.auth');
     }
 
-    // 验证providerType
-    const supportedTypes = ['openai', 'glm', 'qwen', 'iflow', 'lmstudio', 'responses'];
-    if (config.config.providerType && !supportedTypes.includes(config.config.providerType)) {
-      errors.push(`Unsupported providerType: ${config.config.providerType}. Supported types: ${supportedTypes.join(', ')}`);
-    }
-
     // 验证认证配置
     if (config.config.auth) {
       const auth = config.config.auth;
@@ -110,17 +104,13 @@ export class ProviderFactory {
       }
 
       if (auth.type === 'oauth') {
-        const ptype = String(config.config.providerType || '').toLowerCase();
-        const isQwen = ptype === 'qwen';
-        const isIflow = ptype === 'iflow';
-
-        // 对于 qwen / iflow 等内置 OAuth provider，clientId/tokenUrl 可从默认配置或环境推断，
-        // 因此不强制要求在用户配置中显式提供，避免硬编码凭证。
-        if (!auth.clientId && !isQwen && !isIflow) {
+        // 对于通用 openai-compat provider，要求显式提供 OAuth 端点与 clientId，
+        // 具体第三方（如 qwen/iflow）可通过预先写入配置或使用外部登录工具生成 token。
+        if (!auth.clientId) {
           errors.push('Missing required field for oauth auth: clientId');
         }
 
-        if (!auth.tokenUrl && !isQwen && !isIflow) {
+        if (!auth.tokenUrl && !auth.deviceCodeUrl) {
           errors.push('Missing required field for oauth auth: tokenUrl');
         }
       }

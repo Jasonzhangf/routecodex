@@ -44,11 +44,9 @@
         "routeTargets": {},
         "pipelineConfigs": {},
         "authMappings": {},
-        "inputProtocol": "responses",
         "outputProtocol": "openai",
         "timeout": 300000
       }
     }
   }
 }
-

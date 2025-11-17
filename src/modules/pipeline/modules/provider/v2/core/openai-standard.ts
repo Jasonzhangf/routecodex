@@ -224,10 +224,25 @@ export class OpenAIStandard extends BaseProvider {
 
   protected getServiceProfile(): ServiceProfile {
     const profile = DynamicProfileLoader.buildServiceProfile(this.providerType);
-    if (!profile) {
-      throw new Error(`Unsupported provider type: ${this.providerType}`);
+    if (profile) {
+      return profile;
     }
-    return profile;
+    // 未注册的 providerType：构造一个通用的 OpenAI 兼容配置，
+    // 仅依赖显式提供的 baseUrl / model / auth；不注入任何模型回退。
+    const baseUrl = (this.config.config.baseUrl || '').trim();
+    const model = (this.config.config as any).model;
+    return {
+      defaultBaseUrl: baseUrl || 'https://api.openai.com/v1',
+      defaultEndpoint: '/chat/completions',
+      defaultModel: typeof model === 'string' && model.trim() ? String(model) : '',
+      requiredAuth: [],
+      optionalAuth: ['apikey', 'oauth'],
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      timeout: 300000,
+      maxRetries: 3
+    };
   }
 
   protected createAuthProvider(): IAuthProvider {

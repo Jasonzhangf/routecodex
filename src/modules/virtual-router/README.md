@@ -182,7 +182,6 @@ const router = new VirtualRouterModule();
 await router.initialize({
   routeTargets: routeTargetPools,
   pipelineConfigs: pipelineConfigs,
-  inputProtocol: 'openai',
   outputProtocol: 'openai'
 });
 
@@ -213,12 +212,7 @@ const response = await router.executeRequest({
 
 ### 协议转换
 ```typescript
-// Anthropic输入，OpenAI输出
-await router.initialize({
-  inputProtocol: 'anthropic',
-  outputProtocol: 'openai'
-});
-
+// Anthropic输入，OpenAI输出（示例保留，仅展示协议转换概念）
 const response = await router.executeRequest({
   model: 'claude-3-sonnet',
   messages: [{ role: 'user', content: 'Hello' }]
@@ -285,9 +279,7 @@ const config = {
         providerId: 'qwen',
         modelId: 'qwen3-coder-plus',
         keyId: 'qwen-auth-1',
-        actualKey: 'qwen-auth-1',
-        inputProtocol: 'openai',
-        outputProtocol: 'openai'
+        actualKey: 'qwen-auth-1'
       }
     ]
   },

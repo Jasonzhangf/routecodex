@@ -78,7 +78,7 @@ export class PipelineConfigManager {
       totalConfigs: this.configs.size,
       cachedInstances: this.configCache.size,
       providerTypes: {},
-      protocolTypes: { input: {}, output: {} }
+      protocolTypes: { output: {} }
     };
 
     for (const config of this.configs.values()) {
@@ -86,12 +86,8 @@ export class PipelineConfigManager {
       const providerType = config.provider.type;
       stats.providerTypes[providerType] = (stats.providerTypes[providerType] || 0) + 1;
 
-      // 统计协议类型
-      const inputProtocol = config.protocols.input;
+      // 统计协议类型（仅关注输出协议族）
       const outputProtocol = config.protocols.output;
-
-      stats.protocolTypes.input[inputProtocol] =
-        (stats.protocolTypes.input[inputProtocol] || 0) + 1;
       stats.protocolTypes.output[outputProtocol] =
         (stats.protocolTypes.output[outputProtocol] || 0) + 1;
     }
@@ -136,7 +132,6 @@ interface PipelineConfig {
     actualKey: string;
   };
   protocols: {
-    input: string;
     output: string;
   };
 }
@@ -146,7 +141,6 @@ interface PipelineConfigStatistics {
   cachedInstances: number;
   providerTypes: Record<string, number>;
   protocolTypes: {
-    input: Record<string, number>;
     output: Record<string, number>;
   };
 }

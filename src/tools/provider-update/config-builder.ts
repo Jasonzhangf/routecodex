@@ -20,7 +20,6 @@ function ensureProviderSkeleton(providerId: string, provider: ProviderInputConfi
       host: '127.0.0.1'
     },
     virtualrouter: {
-      inputProtocol: 'openai',
       outputProtocol: 'openai',
       providers: {
         [providerId]: {
@@ -51,7 +50,7 @@ export function buildOrUpdateProviderConfig(args: BuildConfigArgs): { config: Js
   const { providerId, provider, modelsFiltered, outputPath } = args;
   const existing = readJson(outputPath) || ensureProviderSkeleton(providerId, provider);
   const provNode = ((existing.virtualrouter || {}).providers || {})[providerId] || ensureProviderSkeleton(providerId, provider).virtualrouter.providers[providerId];
-  if (!existing.virtualrouter) (existing as any).virtualrouter = { inputProtocol: 'openai', outputProtocol: 'openai', providers: {}, routing: { default: [] } };
+  if (!existing.virtualrouter) (existing as any).virtualrouter = { outputProtocol: 'openai', providers: {}, routing: { default: [] } };
   if (!existing.virtualrouter.providers) existing.virtualrouter.providers = {};
   existing.virtualrouter.providers[providerId] = provNode;
   const currentModels: Record<string, any> = (provNode.models && typeof provNode.models === 'object') ? provNode.models : {};

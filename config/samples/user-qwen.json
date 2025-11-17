@@ -2,7 +2,6 @@
   "version": "1.0.0",
   "httpserver": { "port": 5520, "host": "0.0.0.0" },
   "virtualrouter": {
-    "inputProtocol": "anthropic",
     "outputProtocol": "openai",
     "providers": {
       "qwen-provider": {

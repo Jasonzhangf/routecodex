@@ -75,7 +75,7 @@
   },
   "providers": {
     "lmstudio": {
-      "type": "lmstudio",
+      "type": "openai",
       "baseUrl": "http://localhost:1234",
       "enabled": true,
       "health": "healthy",
@@ -94,7 +94,7 @@
       }
     },
     "qwen": {
-      "type": "qwen-provider",
+      "type": "openai",
       "baseUrl": "https://chat.qwen.ai",
       "enabled": true,
       "health": "healthy",
