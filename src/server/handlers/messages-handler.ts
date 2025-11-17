@@ -180,6 +180,12 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     };
     if (wantsSSE) startPreHeartbeat();
 
+    // Snapshot: pipeline-entry（HTTP server 视角下进入流水线的共享请求 DTO）
+    await runNonBlocking(
+      { component: 'http.messages-handler', operation: 'snapshot.pipeline-entry', requestId, entryEndpoint },
+      () => writeServerSnapshot({ phase: 'pipeline-entry', requestId, data: sharedReq, entryEndpoint })
+    );
+
     // Snapshot: routing-selected（由虚拟路由器决策 routeName）
     await runNonBlocking(
       { component: 'http.messages-handler', operation: 'snapshot.routing-selected', requestId, entryEndpoint },
@@ -189,6 +195,12 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     // 按原逻辑：直接委托流水线，SSE/JSON 由核心与下游决定
     const response = await ctx.pipelineManager.processRequest(sharedReq);
     const out = (response && typeof response === 'object' && 'data' in response) ? (response as any).data : response;
+
+    // Snapshot: pipeline-exit（HTTP server 视角下流水线出口的标准化响应 payload）
+    await runNonBlocking(
+      { component: 'http.messages-handler', operation: 'snapshot.pipeline-exit', requestId, entryEndpoint },
+      () => writeServerSnapshot({ phase: 'pipeline-exit', requestId, data: out, entryEndpoint })
+    );
     if (out && typeof out === 'object' && (out as any).__sse_responses) {
       try { console.log('[HTTP][SSE] piping core stream for /v1/messages', { requestId }); } catch {}
       stopPreHeartbeat();

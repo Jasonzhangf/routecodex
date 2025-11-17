@@ -76,10 +76,9 @@ export class ProtocolTokenCalculator {
    */
   async calculateAsync(request: Record<string, unknown>, endpoint: string): Promise<ProtocolTokenCalculationResult> {
     const protocol = this.detectProtocol(endpoint);
-    // 使用 llmswitch-core 的严格 TokenCounter（禁止估算回退）；任何错误由上层分类器处理（Fail Fast）
-    const mod: any = await import('rcc-llmswitch-core/v2/utils/token-counter');
-    const TokenCounter = mod.TokenCounter;
-    const { inputTokens, toolTokens } = await TokenCounter.calculateRequestTokensStrict(
+    // 使用 llmswitch-bridge 封装的严格 TokenCounter；任何错误由上层分类器处理（Fail Fast）
+    const { calculateRequestTokensStrict } = await import('../../llmswitch/bridge.js');
+    const { inputTokens, toolTokens } = await calculateRequestTokensStrict(
       request,
       typeof (request as any)?.model === 'string' ? String((request as any).model) : 'gpt-3.5-turbo'
     );
@@ -242,12 +241,12 @@ export class ProtocolTokenCalculator {
 
   /**
    * 估算文本Token数
+   * 当前实现：先使用简单字符长度估算（快速、无依赖），后续可通过 llmswitch-bridge 接入更精确的计数器。
    */
   private estimateTextTokens(text: string): number {
     if (!text || typeof text !== 'string') {
       return 0;
     }
-
     const estimatedTokens = Math.ceil(text.length * this.config.tokenRatio);
     return Math.max(1, estimatedTokens);
   }

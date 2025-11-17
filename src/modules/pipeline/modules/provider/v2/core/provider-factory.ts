@@ -34,11 +34,13 @@ export class ProviderFactory {
     const ptype = String(config?.config?.providerType || '').toLowerCase();
     let provider: IProviderV2;
 
-    // 真正的 Responses provider：用于 OpenAI Responses wire (/v1/responses)
     if (ptype === 'responses') {
+      // 真正的 Responses provider：用于 OpenAI Responses wire (/v1/responses)
       provider = new ResponsesProvider(config, dependencies);
     } else {
-      // 默认：OpenAI 标准 Chat provider（兼容 glm/qwen 等 openai-standard upstream）
+      // 默认：OpenAI 标准 Provider：
+      //  - providerType='openai'/'glm'/'qwen'/'iflow'/'lmstudio' → Chat 形状；
+      //  - providerType='anthropic' → 通过 ServiceProfile 选择 /v1/messages wire（协议转换由 llmswitch-core 处理）。
       provider = new OpenAIStandard(config, dependencies);
     }
     this.instances.set(instanceId, provider);

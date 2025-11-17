@@ -9,29 +9,7 @@ import { OpenAIStandard } from './openai-standard.js';
 import type { ServiceProfile } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../../../../types/common-types.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
-
-// 动态加载 llmswitch-core：优先使用工作目录下的 vendor/rcc-llmswitch-core/dist，
-// （基于当前模块文件所在的 dist 目录推导工程根），Fail Fast 不再静默回退。
-async function importCore(subpath: string): Promise<any> {
-  const clean = subpath.replace(/\.js$/i, '');
-  const filename = `${clean}.js`;
-  try {
-    const pathMod = await import('path');
-    const { pathToFileURL, fileURLToPath } = await import('url');
-    // 基于当前编译后文件所在位置推导 dist 根目录，再拼 vendor 路径，避免受 process.cwd() 影响
-    const here = fileURLToPath(import.meta.url);
-    const dir = pathMod.dirname(here);
-    // dist/modules/pipeline/modules/provider/v2/core → package root
-    // segments: dist / modules / pipeline / modules / provider / v2 / core  → 7 级
-    const packageRoot = pathMod.resolve(dir, '../../../../../../../');
-    const vendor = pathMod.resolve(packageRoot, 'vendor', 'rcc-llmswitch-core', 'dist');
-    const full = pathMod.join(vendor, filename);
-    return await import(pathToFileURL(full).href);
-  } catch (e) {
-    const msg = (e as any)?.message || String(e);
-    throw new Error(`[responses-provider] import failed: rcc-llmswitch-core/${filename}: ${msg}`);
-  }
-}
+import { buildResponsesRequestFromChat } from '../../../../../llmswitch/bridge.js';
 
 export class ResponsesProvider extends OpenAIStandard {
   /**
@@ -94,25 +72,19 @@ export class ResponsesProvider extends OpenAIStandard {
       const looksResponses = Array.isArray((finalBody as any).input) || typeof (finalBody as any).instructions === 'string';
       const looksChat = Array.isArray((finalBody as any).messages);
       if (!looksResponses && looksChat) {
-        const bridgeMod = await importCore('v2/conversion/responses/responses-openai-bridge');
-        const builder = bridgeMod as any;
-        if (typeof builder.buildResponsesRequestFromChat === 'function') {
-          const res = builder.buildResponsesRequestFromChat(finalBody);
-          const reqObj = res && typeof res === 'object' && 'request' in res ? (res.request as any) : res;
-          if (!reqObj || typeof reqObj !== 'object') {
-            throw new Error('buildResponsesRequestFromChat did not return a valid request object');
-          }
-          // 用 Responses 形状覆盖原始 body（保持 model 为上游模型）
-          const currentModel = (finalBody as any).model;
-          for (const k of Object.keys(finalBody)) {
-            delete (finalBody as any)[k];
-          }
-          Object.assign(finalBody as any, reqObj);
-          if (currentModel) {
-            (finalBody as any).model = currentModel;
-          }
-        } else {
-          throw new Error('buildResponsesRequestFromChat not found in bridge module');
+        const res = await buildResponsesRequestFromChat(finalBody);
+        const reqObj = res && typeof res === 'object' && 'request' in res ? (res.request as any) : res;
+        if (!reqObj || typeof reqObj !== 'object') {
+          throw new Error('buildResponsesRequestFromChat did not return a valid request object');
+        }
+        // 用 Responses 形状覆盖原始 body（保持 model 为上游模型）
+        const currentModel = (finalBody as any).model;
+        for (const k of Object.keys(finalBody)) {
+          delete (finalBody as any)[k];
+        }
+        Object.assign(finalBody as any, reqObj);
+        if (currentModel) {
+          (finalBody as any).model = currentModel;
         }
       }
     } catch (e) {

@@ -8,6 +8,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS, DEFAULT_CONFIG, API_ENDPOINTS } from "./constants/index.js";import fs from 'fs';
+import { buildInfo } from './build-info.js';
 // Spinner wrapper (lazy-loaded to avoid hard dependency on ora/restore-cursor issues)
 type Spinner = {
   start(text?: string): Spinner;
@@ -139,7 +140,7 @@ const pkgVersion: string = (() => {
   }
 })();
 
-// Resolve package name to distinguish dev/release variants
+// Resolve package name for display / binary naming
 const pkgName: string = (() => {
   try {
     const pkgPath = path.resolve(__dirname, '..', 'package.json');
@@ -154,10 +155,10 @@ const pkgName: string = (() => {
   return 'routecodex';
 })();
 
-// Package variant:
-// - routecodex => dev 包（本地开发，默认端口 5555）
-// - rcc        => release 包（按配置端口启动）
-const IS_DEV_MODE = pkgName === 'routecodex';
+// 包变体：
+// - routecodex（dev 包）：默认端口 5555，用于本地开发调试，不读取配置端口，除非显式设置 ROUTECODEX_PORT/RCC_PORT
+// - rcc（release 包）：严格按配置文件端口启动（httpserver.port/server.port/port）
+const IS_DEV_PACKAGE = pkgName === 'routecodex';
 const DEFAULT_DEV_PORT = 5555;
 program
   .name(pkgName === 'rcc' ? 'rcc' : 'routecodex')
@@ -175,38 +176,6 @@ try {
   const { createValidateCommand } = await import('./commands/validate.js');
   program.addCommand(createValidateCommand());
 } catch { /* optional */ }
-
-// Monitor command - run simple V2 dry-run monitoring summary
-// Use a specific name to avoid conflicts with other commands.
-if (!program.commands.some(cmd => cmd.name() === 'v2-monitor')) {
-  program
-    .command('v2-monitor')
-    .description('Run V2 dry-run monitoring summary (checks build + basic process state)')
-    .action(async () => {
-      const spinner = await createSpinner('Running V2 monitor...');
-      try {
-        const monitorScript = path.resolve(__dirname, '../scripts/v2-simple-monitor.mjs');
-        if (!fs.existsSync(monitorScript)) {
-          spinner.fail('V2 monitor script not found');
-          logger.error(`Missing script: ${monitorScript}`);
-          process.exit(1);
-        }
-        spinner.stop();
-        const { spawn } = await import('child_process');
-        const child = spawn(process.execPath, [monitorScript], {
-          stdio: 'inherit',
-          env: { ...process.env }
-        });
-        child.on('exit', (code) => {
-          process.exit(code ?? 0);
-        });
-      } catch (error: any) {
-        spinner.fail('Failed to run V2 monitor');
-        logger.error(error?.message || String(error));
-        process.exit(1);
-      }
-    });
-}
 
 // Code command - Launch Claude Code interface
 program
@@ -239,20 +208,18 @@ program
       let actualPort = options.port ? parseInt(options.port, 10) : null;
       let actualHost = options.host;
 
-      // 如果未显式指定端口：
-      // - dev 模式（routecodex）：与 start 保持一致，优先使用 env 覆盖，否则固定 5555；
-      // - release 模式（rcc）：从配置文件读取 httpserver/server/顶层 port。
-      if (!actualPort) {
-        if (IS_DEV_MODE) {
+      // Determine effective port for code command:
+      // - dev package (routecodex): env override, otherwise固定 5555，不读取配置端口
+      // - release package (rcc): 按配置/参数解析端口
+      if (IS_DEV_PACKAGE) {
+        if (!actualPort) {
           const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
-          if (!Number.isNaN(envPort) && envPort > 0) {
-            logger.info(`Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT) [dev code]`);
-            actualPort = envPort;
-          } else {
-            actualPort = DEFAULT_DEV_PORT;
-            logger.info(`Using dev default port ${actualPort} for routecodex code (matching dev server)`);
-          }
-        } else if (fs.existsSync(configPath)) {
+          actualPort = Number.isFinite(envPort) && envPort > 0 ? envPort : DEFAULT_DEV_PORT;
+          logger.info(`Using dev default port ${actualPort} for routecodex code (config ports ignored)`);
+        }
+      } else {
+        // 非 dev 包：若未显式指定端口，则从配置文件解析
+        if (!actualPort && fs.existsSync(configPath)) {
           try {
             const configContent = fs.readFileSync(configPath, 'utf8');
             const config = JSON.parse(configContent);
@@ -264,10 +231,10 @@ program
         }
       }
 
-      // Require explicit port if not provided via flag/env/config
+      // Require explicit port if not resolved
       if (!actualPort) {
         spinner.fail('Invalid or missing port configuration for RouteCodex server');
-        logger.error('Please set httpserver.port in your configuration (e.g., ~/.routecodex/config.json), or use -p/--port');
+        logger.error('Please set httpserver.port in your configuration (e.g., ~/.routecodex/config.json) or use --port');
         process.exit(1);
       }
 
@@ -299,16 +266,9 @@ program
           const modulesConfigPath = path.resolve(__dirname, '../config/modules.json');
           const serverEntry = path.resolve(__dirname, 'index.js');
 
-          const env = { ...process.env } as NodeJS.ProcessEnv;
-          // 在 dev 模式下，强制与 code 使用同一端口，并显式指定配置文件，保持与 `routecodex start` 一致。
-          if (IS_DEV_MODE) {
-            env.ROUTECODEX_PORT = String(actualPort);
-            env.ROUTECODEX_CONFIG = configPath;
-          }
-
           const serverProcess = spawn(process.execPath, [serverEntry, modulesConfigPath], {
             stdio: 'pipe',
-            env,
+            env: { ...process.env },
             detached: true
           });
 
@@ -479,19 +439,28 @@ program
       let host = (options.host as string | undefined) || undefined;
       let port = options.port ? parseInt(String(options.port), 10) : NaN;
 
-      if (!Number.isFinite(port) || port <= 0) {
-        if (fs.existsSync(configPath)) {
-          try {
-            const raw = fs.readFileSync(configPath, 'utf8');
-            const cfg = JSON.parse(raw);
-            port = (cfg?.httpserver?.port ?? cfg?.server?.port ?? cfg?.port) || port;
-            host = (cfg?.httpserver?.host || cfg?.server?.host || cfg?.host || host);
-          } catch { /* ignore */ }
+      if (IS_DEV_PACKAGE) {
+        // dev 包：env>flag>5555，不从配置里解析端口
+        if (!Number.isFinite(port) || port <= 0) {
+          const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
+          port = Number.isFinite(envPort) && envPort > 0 ? envPort : DEFAULT_DEV_PORT;
+        }
+      } else {
+        // release 包：若未显式指定端口，则从配置解析
+        if (!Number.isFinite(port) || port <= 0) {
+          if (fs.existsSync(configPath)) {
+            try {
+              const raw = fs.readFileSync(configPath, 'utf8');
+              const cfg = JSON.parse(raw);
+              port = (cfg?.httpserver?.port ?? cfg?.server?.port ?? cfg?.port) || port;
+              host = (cfg?.httpserver?.host || cfg?.server?.host || cfg?.host || host);
+            } catch { /* ignore */ }
+          }
         }
       }
 
       if (!Number.isFinite(port) || port <= 0) {
-        throw new Error('Missing port. Set via --port or config file');
+        throw new Error('Missing port. Set via --port, env or config file');
       }
 
       const norm = (h: string | undefined): string => {
@@ -589,17 +558,17 @@ program
       }
 
       // Determine effective port:
-      // - dev mode (routecodex invoked as `routecodex`): env override, otherwise fixed dev default 5555 (do not touch rcc on config port)
-      // - non-dev mode (invoked as `rcc` or other): config-driven port
+      // - dev package (`routecodex`): env override, otherwise固定端口 5555（完全忽略配置中的端口）
+      // - release package (`rcc`): 严格按配置文件端口启动
       let resolvedPort: number;
-      if (IS_DEV_MODE) {
+      if (IS_DEV_PACKAGE) {
         const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
         if (!Number.isNaN(envPort) && envPort > 0) {
-          logger.info(`Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT) [dev]`);
+          logger.info(`Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT) [dev package: routecodex]`);
           resolvedPort = envPort;
         } else {
           resolvedPort = DEFAULT_DEV_PORT;
-          logger.info(`Using dev default port ${resolvedPort} (routecodex dev)`);
+          logger.info(`Using dev default port ${resolvedPort} (routecodex dev package)`);
         }
       } else {
         const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
@@ -634,8 +603,8 @@ program
       const env = { ...process.env } as NodeJS.ProcessEnv;
       // Ensure server process picks the intended user config path
       env.ROUTECODEX_CONFIG = configPath;
-      // For dev mode, force server to use the same effective port to keep CLI and server in sync
-      if (IS_DEV_MODE) {
+      // 对 dev 包（routecodex），强制通过环境变量传递端口，确保服务器与 CLI 使用同一个 5555/自定义端口
+      if (IS_DEV_PACKAGE) {
         env.ROUTECODEX_PORT = String(resolvedPort);
       }
       const args: string[] = [serverEntry, modulesConfigPath];

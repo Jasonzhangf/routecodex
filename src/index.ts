@@ -13,7 +13,6 @@ import { spawn } from 'child_process';
 import { createRequire } from 'module';
 import { ConfigManagerModule } from './modules/config-manager/config-manager-module.js';
 import { buildInfo } from './build-info.js';
-import { resolvePortForMode } from './server/utils/port-resolver.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 
 // Polyfill CommonJS require for ESM runtime to satisfy dependencies that call require()
@@ -159,6 +158,7 @@ class RouteCodexApp {
       await this.configManager.initialize(configManagerConfig as any);
       mergedConfig = await this.loadMergedConfig();
 
+      // 3. 初始化服务器（V1/V2可切换，默认动态V2）
       // 3. 初始化服务器（仅使用 V2 动态流水线架构）
       // Resolve host/port from merged config for V2 constructor
       let bindHost = '0.0.0.0';

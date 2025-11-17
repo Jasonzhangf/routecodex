@@ -216,6 +216,21 @@ export class GLMCompatibility implements CompatibilityModule {
 
     const isDto = this.isSharedPipelineRequest(requestParam);
     const dto = isDto ? requestParam as SharedPipelineRequest : null;
+
+    // 对于 Anthropic Messages 等非 GLM Chat 协议（entryEndpoint 包含 /v1/messages），
+    // 直接透传，不应用任何 GLM 兼容逻辑，避免错误地重写 tool 结果或提示字段。
+    try {
+      const meta = (dto?.metadata ?? {}) as any;
+      const entryEndpoint = String(
+        meta?.entryEndpoint ??
+        (requestParam as any)?.entryEndpoint ??
+        ''
+      ).toLowerCase();
+      if (entryEndpoint.includes('/v1/messages')) {
+        return isDto ? dto! : requestParam as SharedPipelineRequest;
+      }
+    } catch { /* best-effort; fallthrough to normal path */ }
+
     const request = isDto ? dto!.data : requestParam as unknown;
 
     if (!request || typeof request !== 'object') {
@@ -318,6 +333,14 @@ export class GLMCompatibility implements CompatibilityModule {
       const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
       const payload = isDto ? (response as any).data : response;
       const meta = isDto ? (response as any).metadata : undefined;
+
+      // 同样地，对于 /v1/messages 路径，GLM 兼容模块不应修改 Anthropic 响应，直接透传
+      try {
+        const entryEndpoint = String(meta?.entryEndpoint || '').toLowerCase();
+        if (entryEndpoint.includes('/v1/messages')) {
+          return response;
+        }
+      } catch { /* ignore and continue */ }
 
       // Create compatibility context for response processing
       const context: CompatibilityContext = {

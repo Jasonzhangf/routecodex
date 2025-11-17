@@ -287,8 +287,10 @@ export class PipelineAssembler {
       }
 
       // 注入 providerType：
-      //  - 默认优先使用 routeMeta.providerId（例如 'lmstudio'），再尝试 provider.type 的别名映射；
-      //  - 对于 Responses / Anthropic 等协议型 provider，优先使用 provider.type 的别名，以便明确区分 wire 家族。
+      //  - provider.config.type 明确标记协议族（responses/anthropic/openai/...）时优先生效；
+      //  - 其次使用 provider.type 的别名映射；
+      //  - 再回退到 routeMeta.providerId（例如 'lmstudio'）；
+      //  - 对于 Responses / Anthropic 等协议型 provider，始终以协议为准，而不是家族名。
       {
         const supported = new Set(['openai', 'glm', 'qwen', 'iflow', 'lmstudio', 'responses', 'anthropic']);
         const alias = (s: string): string | '' => {
@@ -303,15 +305,22 @@ export class PipelineAssembler {
           if (t.includes('anthropic')) return 'anthropic';
           return '' as any;
         };
+        const provCfgObj = this.asRecord(provider?.config || {});
+        const fromCfgTypeRaw = String((provCfgObj as any).type || '').toLowerCase();
+        const candCfg = alias(fromCfgTypeRaw);
         const fromRoute = String(providerIdForKey || '').toLowerCase();
         const fromProvider = String((provider && provider.type) || '').toLowerCase();
         const candRoute = supported.has(fromRoute) ? fromRoute : alias(fromRoute);
         const candProv = supported.has(fromProvider) ? fromProvider : alias(fromProvider);
-        // Responses/Anthropic 等协议 provider 应优先按 provider.type 归类；其它家族仍以 routeMeta 为主
-        const finalType =
-          (candProv === 'responses' || candProv === 'anthropic')
-            ? candProv
-            : (candRoute || candProv);
+        // 协议型 provider（responses/anthropic）优先按 config.type 归类，其次按 provider.type；其余家族仍以 routeMeta 为主
+        let finalType: string | '' = '';
+        if (candCfg === 'responses' || candCfg === 'anthropic') {
+          finalType = candCfg;
+        } else if (candProv === 'responses' || candProv === 'anthropic') {
+          finalType = candProv;
+        } else {
+          finalType = candRoute || candProv || candCfg;
+        }
         if (!finalType) {
           throw new Error(
             `PipelineAssembler(V2): unable to infer providerType for pipeline '${id}'. ` +
@@ -406,9 +415,10 @@ export class PipelineAssembler {
       if (llmSwitch?.type) {
         const normalizedType = String(llmSwitch.type).toLowerCase();
         if (allowedSwitches.has(normalizedType)) {
+          const cfg = this.asRecord(llmSwitch.config || {});
           modBlock.llmSwitch = {
             type: llmSwitch.type,
-            config: llmSwitch.config || {},
+            config: cfg,
           };
         } else {
           // 默认使用转换路由器（内部根据端点自动选择 codec），统一入口
@@ -429,6 +439,34 @@ export class PipelineAssembler {
 
     // 将 modules.provider 的模块类型同步为归一化后的 providerTypeForPipeline，保证能够命中 Registry 中注册的模块工厂
     (modBlock as any).provider = { type: providerTypeForPipeline, config: provCfg };
+
+    // 根据 providerType 决定出口协议（providerProtocol），传入 llmSwitch 配置：
+    //  - openai/glm/qwen/iflow/lmstudio → openai-chat
+    //  - responses → openai-responses
+    //  - anthropic → anthropic-messages
+    (() => {
+      const t = providerTypeForPipeline.toLowerCase();
+      let providerProtocol = 'openai-chat';
+      if (t === 'responses') providerProtocol = 'openai-responses';
+      else if (t === 'anthropic') providerProtocol = 'anthropic-messages';
+
+      const lsBlock = (modBlock as any).llmSwitch as { type?: string; config?: Record<string, unknown> } | undefined;
+      if (lsBlock) {
+        const cfg = this.asRecord(lsBlock.config || {});
+        if (!cfg.providerProtocol) {
+          (cfg as any).providerProtocol = providerProtocol;
+        }
+        // 将 provider.process 透传给 llmSwitch.config.process，供 core 决定 passthrough/chat 模式
+        const rawProcess = (provCfg as any)?.process;
+        if (typeof rawProcess === 'string' && rawProcess.trim() && !cfg.process) {
+          (cfg as any).process = rawProcess.trim();
+        }
+        (modBlock as any).llmSwitch = {
+          type: lsBlock.type || 'llmswitch-conversion-router',
+          config: cfg
+        };
+      }
+    })();
 
     pipelines.push({
       id,

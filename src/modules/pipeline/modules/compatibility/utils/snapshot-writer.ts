@@ -1,6 +1,7 @@
 import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { writeSnapshotViaHooks } from '../../../../llmswitch/bridge.js';
 
 type Phase = 'compat-pre' | 'compat-post';
 
@@ -25,22 +26,8 @@ export async function writeCompatSnapshot(options: {
   try {
     // 统一通过 llmswitch-core hooks 快照通道写入（优先），保持与核心路径一致
     try {
-      const importCore = async (subpath: string) => {
-        try {
-          const pathMod = await import('path');
-          const { fileURLToPath, pathToFileURL } = await import('url');
-          const __filename = fileURLToPath(import.meta.url);
-          const __dirname = pathMod.dirname(__filename);
-          const vendor = pathMod.resolve(__dirname, '..', '..', '..', '..', '..', '..', 'vendor', 'rcc-llmswitch-core', 'dist');
-          const full = pathMod.join(vendor, subpath.replace(/\.js$/i,'') + '.js');
-          return await import(pathToFileURL(full).href);
-        } catch {
-          return await import('rcc-llmswitch-core/' + subpath.replace(/\\/g,'/').replace(/\.js$/i,''));
-        }
-      };
-      const hooks = await importCore('v2/hooks/hooks-integration');
       const endpoint = options.entryEndpoint || '/v1/chat/completions';
-      await (hooks as any).writeSnapshotViaHooks({
+      await writeSnapshotViaHooks('compatibility', {
         endpoint,
         stage: String(options.phase),
         requestId: options.requestId,

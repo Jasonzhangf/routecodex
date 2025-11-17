@@ -739,15 +739,21 @@ export class RouteCodexServerV2 extends BaseModule {
 
   // --- V1 parity helpers and attach methods ---
   public async initializeWithMergedConfig(mergedConfig: any): Promise<void> {
-    // align snapshots toggle like V1
+    // Align snapshots toggle with config/env, but keep sensible defaults:
+    // - 若配置或环境显式指定则覆盖；
+    // - 否则保留 snapshot-writer 的默认行为（默认开启），避免误关调试快照。
     try {
       const snapsCfg = (mergedConfig as any)?.snapshots
         || (mergedConfig as any)?.modules?.httpserver?.config?.snapshots
         || (mergedConfig as any)?.debug?.snapshots
         || {};
-      const env = String(process.env.ROUTECODEX_SNAPSHOTS || process.env.RCC_SNAPSHOTS || '').trim().toLowerCase();
-      const enabled = snapsCfg?.enabled === true || env === '1' || env === 'true' || env === 'yes';
-      try { (globalThis as any).rccSnapshotsEnabled = enabled; } catch { /* ignore */ }
+      const envRaw = String(process.env.ROUTECODEX_SNAPSHOTS || process.env.RCC_SNAPSHOTS || '').trim().toLowerCase();
+      const envHasToggle = envRaw === '1' || envRaw === 'true' || envRaw === 'yes' || envRaw === '0' || envRaw === 'false' || envRaw === 'no';
+      const cfgHasToggle = typeof (snapsCfg as any)?.enabled === 'boolean';
+      if (envHasToggle || cfgHasToggle) {
+        const enabled = (snapsCfg as any)?.enabled === true || envRaw === '1' || envRaw === 'true' || envRaw === 'yes';
+        try { (globalThis as any).rccSnapshotsEnabled = enabled; } catch { /* ignore */ }
+      }
     } catch { /* ignore */ }
   }
 

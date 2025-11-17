@@ -9,6 +9,7 @@ import { promises as fs } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import type { UnknownObject } from '../../types/common-types.js';
+import { writeSnapshotViaHooks } from '../../modules/llmswitch/bridge.js';
 
 /**
  * Server V2 Snapshot阶段定义
@@ -98,22 +99,8 @@ export async function writeServerV2Snapshot(options: ServerV2SnapshotOptions): P
     const { phase, requestId, data, entryEndpoint, error, metadata } = options;
     // 优先通过 llmswitch-core 的 hooks 快照通道写入，保证与 core 一致
     try {
-      const importCore = async (subpath: string) => {
-        try {
-          const pathMod = await import('path');
-          const { fileURLToPath, pathToFileURL } = await import('url');
-          const __filename = fileURLToPath(import.meta.url);
-          const __dirname = pathMod.dirname(__filename);
-          const vendor = pathMod.resolve(__dirname, '..', '..', '..', '..', 'vendor', 'rcc-llmswitch-core', 'dist');
-          const full = pathMod.join(vendor, subpath.replace(/\.js$/i,'') + '.js');
-          return await import(pathToFileURL(full).href);
-        } catch {
-          return await import('rcc-llmswitch-core/' + subpath.replace(/\\/g,'/').replace(/\.js$/i,''));
-        }
-      };
-      const hooks = await importCore('v2/hooks/hooks-integration');
       const stage = phase === 'server-final' ? 'finalize-post' : (phase === 'server-entry' ? 'request_1_validation_pre' : phase);
-      await hooks.writeSnapshotViaHooks({
+      await writeSnapshotViaHooks('server-v2', {
         endpoint: entryEndpoint || '/v1/chat/completions',
         stage,
         requestId,

@@ -235,7 +235,7 @@ ROUTECODEX_PIPELINE_MODE=static routecodex
 
 ### 安装
 
-#### 自动安装（推荐）
+#### 自动安装（推荐，dev 包 `routecodex`）
 
 ```bash
 # 一键构建并全局安装（自动处理权限问题）
@@ -245,12 +245,14 @@ npm run install:global
 安装脚本会自动：
 - ✅ 检查Node.js版本（需要>=20）
 - ✅ 清理旧的安装残留
-- ✅ 构建项目
+- ✅ 构建项目（编译为 dev 模式，默认端口 5555）
 - ✅ 处理权限配置
 - ✅ 全局安装到正确位置
 - ✅ 验证安装结果
 
-#### 手动安装
+> 说明：`routecodex` 作为 dev 包，适用于本地开发与调试，默认在端口 **5555** 启动（也可通过 `ROUTECODEX_PORT` / `RCC_PORT` 显式指定）。
+
+#### 手动安装（等价于 dev 包）
 
 ```bash
 # 克隆仓库
@@ -263,9 +265,19 @@ npm install
 # 构建项目
 npm run build
 
-# 全局安装
+# 全局安装（dev 包 routecodex）
 npm install -g .
 ```
+
+#### Release 安装（发布包 `rcc`，可选）
+
+```bash
+# 基于当前源码构建并全局安装 rcc（release 包）
+npm run install:release
+```
+
+- `rcc` 作为 release 包，仅从用户配置中读取端口（`httpserver.port` / `server.port` / 顶层 `port`），**不会复用 dev 默认 5555**。
+- 适合在实际使用环境中按配置文件严格控制监听端口。
 
 #### 清理旧安装
 

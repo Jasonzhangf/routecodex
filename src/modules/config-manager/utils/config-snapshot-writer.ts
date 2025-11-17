@@ -1,6 +1,7 @@
 import os from 'os';
 import path from 'path';
 import fsp from 'fs/promises';
+import { writeSnapshotViaHooks } from '../../llmswitch/bridge.js';
 
 export interface ConfigSnapshotOptions {
   phase: 'system-parsed' | 'user-parsed' | 'canonical' | 'assembler' | 'merged';
@@ -13,22 +14,8 @@ function genId() { return `cfg_${Date.now()}_${Math.random().toString(36).slice(
 
 async function writeViaHooks(opts: ConfigSnapshotOptions): Promise<boolean> {
   try {
-    const importCore = async (subpath: string) => {
-      try {
-        const pathMod = await import('path');
-        const { fileURLToPath, pathToFileURL } = await import('url');
-        const __filename = fileURLToPath(import.meta.url);
-        const __dirname = pathMod.dirname(__filename);
-        const vendor = pathMod.resolve(__dirname, '..', '..', '..', '..', 'vendor', 'rcc-llmswitch-core', 'dist');
-        const full = pathMod.join(vendor, subpath.replace(/\.js$/i,'') + '.js');
-        return await import(pathToFileURL(full).href);
-      } catch {
-        return await import('rcc-llmswitch-core/' + subpath.replace(/\\/g,'/').replace(/\.js$/i,''));
-      }
-    };
-    const hooks = await importCore('v2/hooks/hooks-integration');
     const requestId = opts.requestId || genId();
-    await (hooks as any).writeSnapshotViaHooks({
+    await writeSnapshotViaHooks('config-core', {
       endpoint: 'config-core',
       stage: `config-${opts.phase}`,
       requestId,
@@ -55,4 +42,3 @@ export async function writeConfigSnapshot(opts: ConfigSnapshotOptions): Promise<
     // ignore
   }
 }
-

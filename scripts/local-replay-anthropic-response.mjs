@@ -31,21 +31,70 @@ async function main() {
 
   const txt = await fs.readFile(respFile, 'utf-8');
   const wrap = JSON.parse(txt);
-  const src = wrap?.inputData || wrap?.data || wrap; // accept multiple wrappers
+  const anthMsg = wrap?.inputData || wrap?.data || wrap; // Anthropic message shape
   const requestId = (wrap?.context?.requestId) || wrap?.requestId || `anthres_${Date.now()}`;
 
   const codecUrl = pathToFileURL(path.join(process.cwd(), 'sharedmodule', 'llmswitch-core', 'dist', 'v2', 'conversion', 'codecs', 'anthropic-openai-codec.js')).href;
   const { AnthropicOpenAIConversionCodec } = await import(codecUrl);
   const codec = new AnthropicOpenAIConversionCodec({});
 
-  const profile = { outgoingProtocol: 'anthropic-messages' };
-  const context = { requestId, endpoint: '/v1/messages', entryEndpoint: '/v1/messages', metadata: {} };
+  // 按 v3 回环测试同样路径执行：
+  // AnthropicMessage -> AnthReq-like -> ChatRequest -> fake ChatResponse -> AnthropicMessage'
+  const anthReqLike = {
+    model: anthMsg.model,
+    messages: [
+      {
+        role: anthMsg.role,
+        content: anthMsg.content
+      }
+    ]
+  };
 
-  const normalized = await codec.convertResponse(src, profile, context);
+  const profileReq = { id: 'anthropic-standard', from: 'anthropic-messages', to: 'openai-chat' };
+  const ctxReq = {
+    endpoint: 'anthropic',
+    entryEndpoint: '/v1/messages',
+    stream: false,
+    requestId
+  };
+  const chatReq = await codec.convertRequest(anthReqLike, profileReq, ctxReq);
+
+  const mapStopToFinish = (sr) => {
+    const v = String(sr || '');
+    if (v === 'tool_use') return 'tool_calls';
+    if (v === 'max_tokens') return 'length';
+    if (v === 'stop_sequence') return 'content_filter';
+    return 'stop';
+  };
+
+  const fakeChatResp = {
+    id: `chatcmpl_${requestId}`,
+    object: 'chat.completion',
+    model: chatReq.model || anthMsg.model,
+    choices: [
+      {
+        index: 0,
+        finish_reason: mapStopToFinish(anthMsg.stop_reason),
+        message: Array.isArray(chatReq.messages) && chatReq.messages.length
+          ? chatReq.messages[chatReq.messages.length - 1]
+          : { role: 'assistant', content: '' }
+      }
+    ],
+    usage: {}
+  };
+
+  const profileResp = { id: 'anthropic-standard', from: 'openai-chat', to: 'anthropic-messages' };
+  const ctxResp = {
+    endpoint: 'anthropic',
+    entryEndpoint: '/v1/messages',
+    stream: false,
+    requestId: `${requestId}_back`
+  };
+
+  const normalized = await codec.convertResponse(fakeChatResp, profileResp, ctxResp);
   const outPath = path.join(outDir, `replay_${requestId}_convertResponse.json`);
   await fs.writeFile(outPath, JSON.stringify(normalized, null, 2), 'utf-8');
   console.log('Anthropic convertResponse done; output written to', outPath);
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
-

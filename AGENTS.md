@@ -355,6 +355,43 @@ llmswitch-core → 根包 → 运行时
   - Responses 上游真流式直通为“可选能力”，由环境变量控制（默认关闭）：`ROUTECODEX_RESPONSES_UPSTREAM_SSE=1` 或 `RCC_RESPONSES_UPSTREAM_SSE=1`
   - 未启用时 Provider 保持统一非流式 JSON；流式合成交由 llmswitch-core
 
+### ProviderType / 协议类型（统一约定）
+
+在 V2/V3 架构中，**必须严格区分“Provider 家族名”和“协议类型”**，避免混用：
+
+- `providerId` / `providers.<id>`: 家族/实例名称（例如 `openai`、`glm`、`qwen`、`iflow`、`lmstudio` 等），只用于标识路由池与凭证来源。
+- `providerType`（config-core / provider-v2 层）: **协议族类型**，只允许以下值：
+  - `"openai"`      → OpenAI Chat 兼容协议（包含 OpenAI / GLM / Qwen / LM Studio / iFlow 等所有 chat-completions 族）
+  - `"responses"`   → OpenAI Responses wire（`/v1/responses`）
+  - `"anthropic"`   → Anthropic Messages wire（`/v1/messages`）
+  - `"gemini"`      → Gemini Chat wire（未来扩展）
+- `providerProtocol`（llmswitch-core / llmswitch-conversion-router 层）: **具体协议 ID**，与 llmswitch-core 的 profile 绑定：
+  - `"openai-chat"`        ↔ `/v1/chat/completions`（canonical Chat）
+  - `"openai-responses"`   ↔ `/v1/responses`
+  - `"anthropic-messages"` ↔ `/v1/messages`
+  - `"gemini-chat"`        ↔ Gemini Chat 端点
+
+统一规则：
+
+- **入口协议** 由 `entryEndpoint` 决定（`/v1/chat` / `/v1/responses` / `/v1/messages`），由 config-core 生成的 `config/conversion/llmswitch-profiles.json.endpointBindings` 绑定到对应 profile，llmswitch-core 只信任该表。
+- **出口协议** 由 `providerType` 决定，由 `pipeline_assembler` 在组装阶段将其映射为 `llmSwitch.config.providerProtocol` 并透传给 llmswitch-core 的 bridge：
+  - `providerType: "openai"`      → `providerProtocol: "openai-chat"`
+  - `providerType: "responses"`   → `providerProtocol: "openai-responses"`
+  - `providerType: "anthropic"`   → `providerProtocol: "anthropic-messages"`
+  - `providerType: "gemini"`      → `providerProtocol: "gemini-chat"`
+- **家族特定逻辑**（GLM/Qwen/LM Studio 等）只能基于：
+  - `providerId`（例如 `glm`、`qwen`）
+  - 或兼容层内部的 module 配置（例如 GLMCompatibility 硬编码 `providerType: "glm"`），严禁在 llmswitch-core 内部使用这些家族名。
+
+禁止事项：
+
+- 禁止在 llmswitch-core 中引入 `"glm"` / `"qwen"` / `"iflow"` / `"lmstudio"` 等作为协议名；这些只能出现在 host 侧（RouteCodex provider 模块、兼容层）作为家族/厂商标识。
+- 禁止在 provider-v2 中将 `providerType` 用作“家族”与“协议”二义混用；所有协议判断必须通过 `providerType`→`providerProtocol` 的映射完成。
+- 新增协议时，必须同时：
+  1. 在 config-core profiles 中增加 `incomingProtocol/outgoingProtocol` 与 `endpointBindings`；
+  2. 在 `providerType` 联合类型和 `providerProtocol` 映射中注册；
+  3. 在 llmswitch-core 的 codec/streaming 层补全对应编解码器与闭环测试。
+
 ### Server Endpoints - HTTP协议处理
 **位置**: `src/server/handlers/`
 

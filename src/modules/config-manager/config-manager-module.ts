@@ -203,6 +203,9 @@ export class ConfigManagerModule extends BaseModule {
         }
       }
     } catch { /* non-fatal auth injection */ }
+
+    // ⚠️ process/requestProcess/responseProcess 的注入逻辑统一移交给 config-core；
+    // ConfigManager 仅负责写回 config-core 生成的 assemblerConfig，不再修改 llmSwitch.config.*
     const mergedWithPac = { ...built.merged, pipeline_assembler: { config: assemblerConfig } } as Record<string, unknown>;
     await (core as any).writeJsonPretty(this.mergedConfigPath, mergedWithPac);
   }

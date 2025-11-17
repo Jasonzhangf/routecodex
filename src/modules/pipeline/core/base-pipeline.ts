@@ -227,22 +227,9 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
             this._status.state = 'ready';
             return response;
           } else {
-            // Chat 型 provider：OpenAI Chat SSE → Responses SSE（保持原有转换逻辑）
-            const importCore = async (sub: string) => {
-              const path = await import('path');
-              const { fileURLToPath, pathToFileURL } = await import('url');
-              try {
-                const __filename = fileURLToPath(import.meta.url);
-                const __dirname = path.dirname(__filename);
-                const vendor = path.resolve(__dirname, '..', '..', '..', '..', 'vendor', 'rcc-llmswitch-core', 'dist');
-                const full = path.join(vendor, sub);
-                return await import(pathToFileURL(full).href);
-              } catch {
-                return await import('rcc-llmswitch-core/' + sub);
-              }
-            };
-            const mod = await importCore('v2/conversion/streaming/openai-to-responses-stream.js');
-            const fn = (mod && (mod.createResponsesSSEStreamFromOpenAI || mod.default?.createResponsesSSEStreamFromOpenAI)) as any;
+            // Chat 型 provider：OpenAI Chat SSE → Responses SSE（保持原有转换逻辑，由 llmswitch-core 统一实现）
+            const { createResponsesSSEStreamFromOpenAI } = await import('../../llmswitch/bridge.js');
+            const fn: any = createResponsesSSEStreamFromOpenAI;
             if (typeof fn === 'function') {
               const tools = ((processedRequest as any)?.data as any)?.tools;
               const sse = fn(upstream, { requestId, model: String(((processedRequest as any)?.data as any)?.model || 'unknown'), tools });
