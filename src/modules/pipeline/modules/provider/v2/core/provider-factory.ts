@@ -99,55 +99,13 @@ export class ProviderFactory {
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    // 验证必需字段
-    if (!config.type) {
-      errors.push('Missing required field: type');
+    // 检查必需字段
+    if (!config?.config?.providerType) {
+      errors.push('providerType is required');
     }
 
-    if (!config.config) {
-      errors.push('Missing required field: config');
-    }
-
-    if (!config.config.providerType) {
-      errors.push('Missing required field: config.providerType');
-    }
-
-    if (!config.config.auth) {
-      errors.push('Missing required field: config.auth');
-    }
-
-    // 验证providerType（协议族）
-    const supportedTypes = ['openai', 'responses', 'anthropic'];
-    if (config.config.providerType && !supportedTypes.includes(config.config.providerType)) {
-      errors.push(`Unsupported providerType: ${config.config.providerType}. Supported types: ${supportedTypes.join(', ')}`);
-    }
-
-    // 验证认证配置
-    if (config.config.auth) {
-      const auth = config.config.auth;
-      if (auth.type === 'apikey' && !auth.apiKey) {
-        errors.push('Missing required field for apikey auth: apiKey');
-      }
-
-      if (auth.type === 'oauth') {
-        // OAuth providerId 通过扩展字段传入（避免与协议族 providerType 混淆）
-        const ext: any = (config as any)?.config?.extensions || {};
-        const oauthProviderId = typeof ext.oauthProviderId === 'string' && ext.oauthProviderId.trim()
-          ? String(ext.oauthProviderId).trim().toLowerCase()
-          : '';
-        const isQwen = oauthProviderId === 'qwen';
-        const isIflow = oauthProviderId === 'iflow';
-
-        // 对于 qwen / iflow 等内置 OAuth provider，clientId/tokenUrl 可从默认配置或环境推断，
-        // 因此不强制要求在用户配置中显式提供，避免硬编码凭证。
-        if (!auth.clientId && !isQwen && !isIflow) {
-          errors.push('Missing required field for oauth auth: clientId');
-        }
-
-        if (!auth.tokenUrl && !isQwen && !isIflow) {
-          errors.push('Missing required field for oauth auth: tokenUrl');
-        }
-      }
+    if (!config?.config?.auth?.type) {
+      errors.push('auth.type is required');
     }
 
     return {
@@ -161,25 +119,11 @@ export class ProviderFactory {
    * 生成实例ID
    */
   private static generateInstanceId(config: OpenAIStandardConfig): string {
-    const { providerType, auth } = config.config;
-    const authType = auth.type;
-    const baseUrl = config.config.baseUrl || '';
-    // 将“认证身份”纳入实例ID，避免不同 key 复用同一实例
-    let authIdentity = '';
-    try {
-      if (authType === 'apikey' && typeof (auth as any).apiKey === 'string') {
-        const key = String((auth as any).apiKey);
-        authIdentity = crypto.createHash('sha256').update(key).digest('hex').slice(0, 12);
-      } else if (authType === 'oauth') {
-        const tokenFile = (auth as any).tokenFile || '';
-        const clientId = (auth as any).clientId || '';
-        authIdentity = crypto.createHash('sha256').update(String(tokenFile || clientId)).digest('hex').slice(0, 12);
-      }
-    } catch { authIdentity = ''; }
-
-    // 基于关键配置生成唯一ID（包含认证身份摘要）
-    const idComponents = [providerType, authType, baseUrl, authIdentity].filter(Boolean);
-    return idComponents.join('-');
+    const providerType = config?.config?.providerType || 'unknown';
+    const baseUrl = config?.config?.baseUrl || '';
+    const authType = config?.config?.auth?.type || '';
+    const input = `${providerType}:${baseUrl}:${authType}`;
+    return crypto.createHash('sha256').update(input).digest('hex').substring(0, 16);
   }
 }
 
@@ -201,5 +145,3 @@ export function fromV1Config(_v1Config: unknown, _dependencies: ModuleDependenci
   // 实际实现在api/config-provider.ts中
   throw new Error('V1 config transformation not implemented yet');
 }
-
-export default ProviderFactory;
