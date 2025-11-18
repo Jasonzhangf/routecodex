@@ -131,7 +131,7 @@
     "openai": "^5.23.0",
     "ora": "^9.0.0",
     "rcc-basemodule": "^0.2.7",
-    "rcc-config-core": "file:../../github/sharedmodule/config-core/rcc-config-core-0.1.10.tgz",
+    "rcc-config-core": "file:../../github/sharedmodule/config-core/rcc-config-core-0.1.11.tgz",
     "rcc-debugcenter": "^0.1.6",
     "rcc-errorhandling": "^1.0.10",
     "rcc-llmswitch-core": "file:sharedmodule/llmswitch-core/rcc-llmswitch-core-0.3.21.tgz",
