@@ -1,0 +1,667 @@
+- Starting RouteCodex server...
+ℹ Using dev default port 5555 (routecodex dev package)
+[32m✔[39m RouteCodex server starting on 0.0.0.0:5555
+ℹ Configuration loaded from: /Users/fanzhang/.routecodex/config.json
+ℹ Server will run on port: 5555
+ℹ Press Ctrl+C to stop the server
+🚀 Starting RouteCodex server...
+📁 Modules configuration file: /Users/fanzhang/Documents/router-worktree/dev/config/modules.json
+🔧 Using port 5555 from environment (ROUTECODEX_PORT/RCC_PORT)
+[ServerTools] web_fetch replacement = ENABLED (from /Users/fanzhang/.routecodex/config.json)
+Auth directory created: /Users/fanzhang/.routecodex/auth
+[RouteCodexServerV2] Initializing Hook integration system...
+[RouteCodexServerV2] Initializing Hook Integration system...
+[ServerV2HookIntegration] Initialized with config: {
+  enabled: true,
+  snapshotEnabled: true,
+  hooksEnabled: true,
+  level: 'normal'
+}
+[ServerV2HookIntegration] Registered hook: server.01.request-logging at stage pipeline_preprocessing
+[ServerV2HookIntegration] Registered hook: server.02.response-enhancement at stage response_postprocessing
+[ServerV2HookIntegration] Registered hook: server.03.performance-monitoring at stage response_validation
+[RouteCodexServerV2] Hook Integration initialized with 3 hooks
+[RouteCodexServerV2] Initialized with hooks: true
+🧱 Pipelines in merged (assembler): 6
+🔎 Pipeline IDs: [
+  'fc_key1.gpt-5.1',
+  'glm_key1.glm-4.6',
+  'qwen.qwen3-coder-plus',
+  'iflow.kimi-k2-thinking',
+  'iflow.minimax-m2',
+  'iflow.qwen3-vl-plus'
+]
+[2025-11-18T14:40:46.669Z] [INFO] [manager] [pipeline-lifecycle] module-registry-initialized {
+  moduleTypes: [
+    'llmswitch-openai-openai',
+    'llmswitch-anthropic-openai',
+    'llmswitch-response-chat',
+    'llmswitch-conversion-router',
+    'llmswitch-responses-passthrough',
+    'openai-normalizer',
+    'anthropic-openai-converter',
+    'responses-chat-switch',
+    'streaming-control',
+    'field-mapping',
+    'compatibility',
+    'openai-http-provider',
+    'responses-http-provider',
+    'anthropic-http-provider',
+    'openai',
+    'responses',
+    'anthropic'
+  ],
+  enhanced: false
+}
+[2025-11-18T14:40:46.669Z] [INFO] [manager] [pipeline-lifecycle] initializing { pipelineCount: 6 }
+[2025-11-18T14:40:46.670Z] [INFO] [manager] [pipeline-lifecycle] config-validation-success {
+  pipelineCount: 6,
+  pipelineIds: [
+    'fc_key1.gpt-5.1',
+    'glm_key1.glm-4.6',
+    'qwen.qwen3-coder-plus',
+    'iflow.kimi-k2-thinking',
+    'iflow.minimax-m2',
+    'iflow.qwen3-vl-plus'
+  ]
+}
+[2025-11-18T14:40:46.670Z] [INFO] [fc_key1.gpt-5.1] [pipeline-lifecycle] initializing {
+  config: {
+    id: 'fc_key1.gpt-5.1',
+    provider: { type: 'responses' },
+    modules: {
+      provider: [Object],
+      compatibility: [Object],
+      llmSwitch: [Object],
+      workflow: [Object]
+    },
+    settings: { debugEnabled: true }
+  }
+}
+[2025-11-18T14:40:46.670Z] [INFO] [glm_key1.glm-4.6] [pipeline-lifecycle] initializing {
+  config: {
+    id: 'glm_key1.glm-4.6',
+    provider: { type: 'openai' },
+    modules: {
+      provider: [Object],
+      compatibility: [Object],
+      llmSwitch: [Object],
+      workflow: [Object]
+    },
+    settings: { debugEnabled: true }
+  }
+}
+[2025-11-18T14:40:46.670Z] [INFO] [qwen.qwen3-coder-plus] [pipeline-lifecycle] initializing {
+  config: {
+    id: 'qwen.qwen3-coder-plus',
+    provider: { type: 'openai' },
+    modules: {
+      provider: [Object],
+      compatibility: [Object],
+      llmSwitch: [Object],
+      workflow: [Object]
+    },
+    settings: { debugEnabled: true }
+  }
+}
+[2025-11-18T14:40:46.670Z] [INFO] [iflow.kimi-k2-thinking] [pipeline-lifecycle] initializing {
+  config: {
+    id: 'iflow.kimi-k2-thinking',
+    provider: { type: 'openai' },
+    modules: {
+      provider: [Object],
+      compatibility: [Object],
+      llmSwitch: [Object],
+      workflow: [Object]
+    },
+    settings: { debugEnabled: true }
+  }
+}
+[2025-11-18T14:40:46.670Z] [INFO] [iflow.minimax-m2] [pipeline-lifecycle] initializing {
+  config: {
+    id: 'iflow.minimax-m2',
+    provider: { type: 'openai' },
+    modules: {
+      provider: [Object],
+      compatibility: [Object],
+      llmSwitch: [Object],
+      workflow: [Object]
+    },
+    settings: { debugEnabled: true }
+  }
+}
+[2025-11-18T14:40:46.670Z] [INFO] [iflow.qwen3-vl-plus] [pipeline-lifecycle] initializing {
+  config: {
+    id: 'iflow.qwen3-vl-plus',
+    provider: { type: 'openai' },
+    modules: {
+      provider: [Object],
+      compatibility: [Object],
+      llmSwitch: [Object],
+      workflow: [Object]
+    },
+    settings: { debugEnabled: true }
+  }
+}
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] initializing: workflow-1763476846671 {
+  moduleId: 'workflow-1763476846671',
+  action: 'initializing',
+  config: { type: 'streaming-control', config: {} }
+}
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] config-validation-success: workflow-1763476846671 {
+  moduleId: 'workflow-1763476846671',
+  action: 'config-validation-success',
+  type: 'streaming-control',
+  mode: 'pass-through'
+}
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] initialized: workflow-1763476846671 { moduleId: 'workflow-1763476846671', action: 'initialized' }
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] initializing: workflow-1763476846671 {
+  moduleId: 'workflow-1763476846671',
+  action: 'initializing',
+  config: { type: 'streaming-control', config: {} }
+}
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] config-validation-success: workflow-1763476846671 {
+  moduleId: 'workflow-1763476846671',
+  action: 'config-validation-success',
+  type: 'streaming-control',
+  mode: 'pass-through'
+}
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] initialized: workflow-1763476846671 { moduleId: 'workflow-1763476846671', action: 'initialized' }
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] initializing: workflow-1763476846671 {
+  moduleId: 'workflow-1763476846671',
+  action: 'initializing',
+  config: { type: 'streaming-control', config: {} }
+}
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] config-validation-success: workflow-1763476846671 {
+  moduleId: 'workflow-1763476846671',
+  action: 'config-validation-success',
+  type: 'streaming-control',
+  mode: 'pass-through'
+}
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] initialized: workflow-1763476846671 { moduleId: 'workflow-1763476846671', action: 'initialized' }
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] initializing: workflow-1763476846671 {
+  moduleId: 'workflow-1763476846671',
+  action: 'initializing',
+  config: { type: 'streaming-control', config: {} }
+}
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] config-validation-success: workflow-1763476846671 {
+  moduleId: 'workflow-1763476846671',
+  action: 'config-validation-success',
+  type: 'streaming-control',
+  mode: 'pass-through'
+}
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] initialized: workflow-1763476846671 { moduleId: 'workflow-1763476846671', action: 'initialized' }
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] initializing: workflow-1763476846671 {
+  moduleId: 'workflow-1763476846671',
+  action: 'initializing',
+  config: { type: 'streaming-control', config: {} }
+}
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] config-validation-success: workflow-1763476846671 {
+  moduleId: 'workflow-1763476846671',
+  action: 'config-validation-success',
+  type: 'streaming-control',
+  mode: 'pass-through'
+}
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] initialized: workflow-1763476846671 { moduleId: 'workflow-1763476846671', action: 'initialized' }
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] initializing: workflow-1763476846671 {
+  moduleId: 'workflow-1763476846671',
+  action: 'initializing',
+  config: { type: 'streaming-control', config: {} }
+}
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] config-validation-success: workflow-1763476846671 {
+  moduleId: 'workflow-1763476846671',
+  action: 'config-validation-success',
+  type: 'streaming-control',
+  mode: 'pass-through'
+}
+[2025-11-18T14:40:46.671Z] [INFO] [workflow] [module] initialized: workflow-1763476846671 { moduleId: 'workflow-1763476846671', action: 'initialized' }
+[2025-11-18T14:40:46.676Z] [INFO] [compatibility] [module] initializing: compatibility-manager { moduleId: 'compatibility-manager', action: 'initializing' }
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] initialized: compatibility-manager {
+  moduleId: 'compatibility-manager',
+  action: 'initialized',
+  registeredTypes: [
+    'glm',
+    'glm-compatibility',
+    'lmstudio-compatibility',
+    'passthrough-compatibility',
+    'iflow',
+    'iflow-compatibility',
+    'qwen-compatibility',
+    'qwen'
+  ]
+}
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] initializing: compatibility-manager { moduleId: 'compatibility-manager', action: 'initializing' }
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] initialized: compatibility-manager {
+  moduleId: 'compatibility-manager',
+  action: 'initialized',
+  registeredTypes: [
+    'glm',
+    'glm-compatibility',
+    'lmstudio-compatibility',
+    'passthrough-compatibility',
+    'iflow',
+    'iflow-compatibility',
+    'qwen-compatibility',
+    'qwen'
+  ]
+}
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] initializing: compatibility-manager { moduleId: 'compatibility-manager', action: 'initializing' }
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] initialized: compatibility-manager {
+  moduleId: 'compatibility-manager',
+  action: 'initialized',
+  registeredTypes: [
+    'glm',
+    'glm-compatibility',
+    'lmstudio-compatibility',
+    'passthrough-compatibility',
+    'iflow',
+    'iflow-compatibility',
+    'qwen-compatibility',
+    'qwen'
+  ]
+}
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] initializing: compatibility-manager { moduleId: 'compatibility-manager', action: 'initializing' }
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] initialized: compatibility-manager {
+  moduleId: 'compatibility-manager',
+  action: 'initialized',
+  registeredTypes: [
+    'glm',
+    'glm-compatibility',
+    'lmstudio-compatibility',
+    'passthrough-compatibility',
+    'iflow',
+    'iflow-compatibility',
+    'qwen-compatibility',
+    'qwen'
+  ]
+}
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] initializing: compatibility-manager { moduleId: 'compatibility-manager', action: 'initializing' }
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] initialized: compatibility-manager {
+  moduleId: 'compatibility-manager',
+  action: 'initialized',
+  registeredTypes: [
+    'glm',
+    'glm-compatibility',
+    'lmstudio-compatibility',
+    'passthrough-compatibility',
+    'iflow',
+    'iflow-compatibility',
+    'qwen-compatibility',
+    'qwen'
+  ]
+}
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] initializing: compatibility-manager { moduleId: 'compatibility-manager', action: 'initializing' }
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] initialized: compatibility-manager {
+  moduleId: 'compatibility-manager',
+  action: 'initialized',
+  registeredTypes: [
+    'glm',
+    'glm-compatibility',
+    'lmstudio-compatibility',
+    'passthrough-compatibility',
+    'iflow',
+    'iflow-compatibility',
+    'qwen-compatibility',
+    'qwen'
+  ]
+}
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] creating-module: compatibility-manager {
+  moduleId: 'compatibility-manager',
+  action: 'creating-module',
+  type: 'passthrough-compatibility',
+  providerType: 'responses'
+}
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] initialization-start: compatibility-passthrough-1763476846677 {
+  moduleId: 'compatibility-passthrough-1763476846677',
+  action: 'initialization-start'
+}
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] initialization-complete: compatibility-passthrough-1763476846677 {
+  moduleId: 'compatibility-passthrough-1763476846677',
+  action: 'initialization-complete'
+}
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] creating-module: compatibility-manager {
+  moduleId: 'compatibility-manager',
+  action: 'creating-module',
+  type: 'glm-compatibility',
+  providerType: 'openai'
+}
+[2025-11-18T14:40:46.677Z] [INFO] [glm] [module] initializing: glm-compatibility {
+  moduleId: 'glm-compatibility',
+  action: 'initializing',
+  compatibilityId: 'glm-compatibility-1763476846677',
+  providerType: 'glm'
+}
+[2025-11-18T14:40:46.677Z] [INFO] [glm] [module] using-default-config: glm-field-mapping { moduleId: 'glm-field-mapping', action: 'using-default-config' }
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] creating-module: compatibility-manager {
+  moduleId: 'compatibility-manager',
+  action: 'creating-module',
+  type: 'qwen-compatibility',
+  providerType: 'openai'
+}
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] transformation-rules-initialized: compatibility-1763476846677 {
+  moduleId: 'compatibility-1763476846677',
+  action: 'transformation-rules-initialized',
+  ruleCount: 3
+}
+Qwen Compatibility debug enhancements initialized
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] initializing: compatibility-1763476846677 {
+  moduleId: 'compatibility-1763476846677',
+  action: 'initializing',
+  config: {
+    id: 'qwen-compatibility-1763476846677',
+    type: 'qwen-compatibility',
+    providerType: 'openai',
+    enabled: true,
+    priority: 1,
+    config: {}
+  },
+  type: 'qwen-compatibility'
+}
+[2025-11-18T14:40:46.677Z] [INFO] [compatibility] [module] creating-module: compatibility-manager {
+  moduleId: 'compatibility-manager',
+  action: 'creating-module',
+  type: 'iflow',
+  providerType: 'openai'
+}
+[2025-11-18T14:40:46.677Z] [INFO] [glm] [module] initializing: glm-compatibility {
+  moduleId: 'glm-compatibility',
+  action: 'initializing',
+  compatibilityId: 'glm-compatibility-1763476846677',
+  providerType: 'glm'
+}
+[2025-11-18T14:40:46.678Z] [INFO] [iflow] [module] using-default-config: iflow-field-mapping { moduleId: 'iflow-field-mapping', action: 'using-default-config' }
+[2025-11-18T14:40:46.678Z] [INFO] [compatibility] [module] creating-module: compatibility-manager {
+  moduleId: 'compatibility-manager',
+  action: 'creating-module',
+  type: 'iflow',
+  providerType: 'openai'
+}
+[2025-11-18T14:40:46.678Z] [INFO] [glm] [module] initializing: glm-compatibility {
+  moduleId: 'glm-compatibility',
+  action: 'initializing',
+  compatibilityId: 'glm-compatibility-1763476846678',
+  providerType: 'glm'
+}
+[2025-11-18T14:40:46.678Z] [INFO] [iflow] [module] using-default-config: iflow-field-mapping { moduleId: 'iflow-field-mapping', action: 'using-default-config' }
+[2025-11-18T14:40:46.678Z] [INFO] [compatibility] [module] creating-module: compatibility-manager {
+  moduleId: 'compatibility-manager',
+  action: 'creating-module',
+  type: 'iflow',
+  providerType: 'openai'
+}
+[2025-11-18T14:40:46.678Z] [INFO] [glm] [module] initializing: glm-compatibility {
+  moduleId: 'glm-compatibility',
+  action: 'initializing',
+  compatibilityId: 'glm-compatibility-1763476846678',
+  providerType: 'glm'
+}
+[2025-11-18T14:40:46.678Z] [INFO] [iflow] [module] using-default-config: iflow-field-mapping { moduleId: 'iflow-field-mapping', action: 'using-default-config' }
+[2025-11-18T14:40:46.678Z] [INFO] [glm] [module] initialized: glm-field-mapping {
+  moduleId: 'glm-field-mapping',
+  action: 'initialized',
+  incomingMappings: 5,
+  outgoingMappings: 4
+}
+[2025-11-18T14:40:46.678Z] [INFO] [iflow] [module] initialized: iflow-field-mapping {
+  moduleId: 'iflow-field-mapping',
+  action: 'initialized',
+  incomingMappings: 5,
+  outgoingMappings: 4
+}
+[2025-11-18T14:40:46.678Z] [INFO] [iflow] [module] initialized: iflow-field-mapping {
+  moduleId: 'iflow-field-mapping',
+  action: 'initialized',
+  incomingMappings: 5,
+  outgoingMappings: 4
+}
+[2025-11-18T14:40:46.678Z] [INFO] [iflow] [module] initialized: iflow-field-mapping {
+  moduleId: 'iflow-field-mapping',
+  action: 'initialized',
+  incomingMappings: 5,
+  outgoingMappings: 4
+}
+[2025-11-18T14:40:46.678Z] [INFO] [compatibility] [module] module-created: compatibility-manager {
+  moduleId: 'compatibility-passthrough-1763476846677',
+  action: 'module-created',
+  type: 'passthrough-compatibility',
+  providerType: 'responses'
+}
+[2025-11-18T14:40:46.678Z] [INFO] [compatibility] [module] module-loaded: compatibility-1763476846676 {
+  moduleId: 'compatibility-passthrough-1763476846677',
+  action: 'module-loaded',
+  moduleType: 'passthrough-compatibility',
+  providerType: 'responses'
+}
+[2025-11-18T14:40:46.682Z] [INFO] [compatibility] [module] initialized: compatibility-1763476846677 { moduleId: 'compatibility-1763476846677', action: 'initialized' }
+[2025-11-18T14:40:46.683Z] [INFO] [compatibility] [module] module-created: compatibility-manager {
+  moduleId: 'compatibility-1763476846677',
+  action: 'module-created',
+  type: 'qwen-compatibility',
+  providerType: 'openai'
+}
+[2025-11-18T14:40:46.683Z] [INFO] [compatibility] [module] module-loaded: compatibility-1763476846676 {
+  moduleId: 'compatibility-1763476846677',
+  action: 'module-loaded',
+  moduleType: 'qwen-compatibility',
+  providerType: 'openai'
+}
+[2025-11-18T14:40:46.684Z] [INFO] [provider] [module] hook-system-integration-created: provider-1763476846683-lyhe85yxm {
+  moduleId: 'provider-1763476846683-lyhe85yxm',
+  action: 'hook-system-integration-created',
+  providerId: 'provider-1763476846683-lyhe85yxm'
+}
+[2025-11-18T14:40:46.684Z] [INFO] [provider] [module] hook-system-integration-created: provider-1763476846684-hepmmy7x0 {
+  moduleId: 'provider-1763476846684-hepmmy7x0',
+  action: 'hook-system-integration-created',
+  providerId: 'provider-1763476846684-hepmmy7x0'
+}
+[2025-11-18T14:40:46.684Z] [INFO] [provider] [module] initialization-start: provider-1763476846683-lyhe85yxm {
+  moduleId: 'provider-1763476846683-lyhe85yxm',
+  action: 'initialization-start'
+}
+[2025-11-18T14:40:46.684Z] [INFO] [provider] [module] initialization-start: provider-1763476846684-hepmmy7x0 {
+  moduleId: 'provider-1763476846684-hepmmy7x0',
+  action: 'initialization-start'
+}
+[2025-11-18T14:40:46.684Z] [INFO] [provider] [module] provider-initialization-error: provider-1763476846684-hepmmy7x0 {
+  moduleId: 'provider-1763476846684-hepmmy7x0',
+  action: 'provider-initialization-error',
+  providerType: 'openai',
+  error: 'Invalid API key: must be a non-empty string'
+}
+[2025-11-18T14:40:46.684Z] [INFO] [provider] [module] hook-system-disabled-or-missing: provider-1763476846683-lyhe85yxm {
+  moduleId: 'provider-1763476846683-lyhe85yxm',
+  action: 'hook-system-disabled-or-missing',
+  reason: 'hooks-module-not-found'
+}
+[2025-11-18T14:40:46.684Z] [INFO] [provider] [module] initialization-error: provider-1763476846684-hepmmy7x0 {
+  moduleId: 'provider-1763476846684-hepmmy7x0',
+  action: 'initialization-error',
+  error: Error: Invalid API key: must be a non-empty string
+      at ApiKeyAuthProvider.initialize (file:///Users/fanzhang/Documents/router-worktree/dev/dist/modules/pipeline/modules/provider/v2/auth/apikey-auth.js:32:23)
+      at OpenAIStandard.onInitialize (file:///Users/fanzhang/Documents/router-worktree/dev/dist/modules/pipeline/modules/provider/v2/core/openai-standard.js:47:41)
+      at OpenAIStandard.initialize (file:///Users/fanzhang/Documents/router-worktree/dev/dist/modules/pipeline/modules/provider/v2/core/base-provider.js:31:24)
+      at BasePipeline.initializeModules (file:///Users/fanzhang/Documents/router-worktree/dev/dist/modules/pipeline/core/base-pipeline.js:609:41)
+      at async BasePipeline.initialize (file:///Users/fanzhang/Documents/router-worktree/dev/dist/modules/pipeline/core/base-pipeline.js:77:13)
+      at async file:///Users/fanzhang/Documents/router-worktree/dev/dist/modules/pipeline/core/pipeline-manager.js:1026:17
+      at async Promise.allSettled (index 2)
+      at async PipelineManager.createPipelines (file:///Users/fanzhang/Documents/router-worktree/dev/dist/modules/pipeline/core/pipeline-manager.js:1043:25)
+      at async PipelineManager.initialize (file:///Users/fanzhang/Documents/router-worktree/dev/dist/modules/pipeline/core/pipeline-manager.js:77:13)
+      at async PipelineAssembler.assemble (file:///Users/fanzhang/Documents/router-worktree/dev/dist/modules/pipeline/config/pipeline-assembler.js:687:9)
+}
+[2025-11-18T14:40:46.684Z] [INFO] [provider] [module] provider-debug-hooks-configured: provider-1763476846683-lyhe85yxm {
+  moduleId: 'provider-1763476846683-lyhe85yxm',
+  action: 'provider-debug-hooks-configured',
+  providerType: 'responses'
+}
+[2025-11-18T14:40:46.684Z] [INFO] [provider] [module] provider-hook-system-initialized: provider-1763476846683-lyhe85yxm {
+  moduleId: 'provider-1763476846683-lyhe85yxm',
+  action: 'provider-hook-system-initialized',
+  providerType: 'responses',
+  integrationEnabled: true
+}
+[2025-11-18T14:40:46.684Z] [INFO] [provider] [module] initialization-complete: provider-1763476846683-lyhe85yxm {
+  moduleId: 'provider-1763476846683-lyhe85yxm',
+  action: 'initialization-complete',
+  providerType: 'responses'
+}
+[2025-11-18T14:40:46.685Z] [INFO] [fc_key1.gpt-5.1] [pipeline-lifecycle] initialized { modules: [ 'llmSwitch', 'workflow', 'compatibility', 'provider' ] }
+[2025-11-18T14:40:46.685Z] [INFO] [manager] [pipeline-lifecycle] pipeline-created {
+  pipelineId: 'fc_key1.gpt-5.1',
+  providerType: 'responses',
+  modules: [ 'provider', 'compatibility', 'llmSwitch', 'workflow' ]
+}
+[2025-11-18T14:40:46.685Z] [INFO] [glm] [module] initialized: glm-compatibility {
+  moduleId: 'glm-compatibility',
+  action: 'initialized',
+  compatibilityId: 'glm-compatibility-1763476846678',
+  providerType: 'glm'
+}
+[2025-11-18T14:40:46.685Z] [INFO] [compatibility] [module] module-created: compatibility-manager {
+  moduleId: 'glm-compatibility-1763476846678',
+  action: 'module-created',
+  type: 'iflow',
+  providerType: 'openai'
+}
+[2025-11-18T14:40:46.685Z] [INFO] [compatibility] [module] module-loaded: compatibility-1763476846676 {
+  moduleId: 'glm-compatibility-1763476846678',
+  action: 'module-loaded',
+  moduleType: 'iflow',
+  providerType: 'openai'
+}
+[2025-11-18T14:40:46.685Z] [INFO] [glm] [module] initialized: glm-compatibility {
+  moduleId: 'glm-compatibility',
+  action: 'initialized',
+  compatibilityId: 'glm-compatibility-1763476846678',
+  providerType: 'glm'
+}
+[2025-11-18T14:40:46.685Z] [INFO] [compatibility] [module] module-created: compatibility-manager {
+  moduleId: 'glm-compatibility-1763476846678',
+  action: 'module-created',
+  type: 'iflow',
+  providerType: 'openai'
+}
+[2025-11-18T14:40:46.685Z] [INFO] [compatibility] [module] module-loaded: compatibility-1763476846676 {
+  moduleId: 'glm-compatibility-1763476846678',
+  action: 'module-loaded',
+  moduleType: 'iflow',
+  providerType: 'openai'
+}
+[2025-11-18T14:40:46.685Z] [INFO] [glm] [module] initialized: glm-compatibility {
+  moduleId: 'glm-compatibility',
+  action: 'initialized',
+  compatibilityId: 'glm-compatibility-1763476846677',
+  providerType: 'glm'
+}
+[2025-11-18T14:40:46.686Z] [INFO] [compatibility] [module] module-created: compatibility-manager {
+  moduleId: 'glm-compatibility-1763476846677',
+  action: 'module-created',
+  type: 'iflow',
+  providerType: 'openai'
+}
+[2025-11-18T14:40:46.686Z] [INFO] [compatibility] [module] module-loaded: compatibility-1763476846676 {
+  moduleId: 'glm-compatibility-1763476846677',
+  action: 'module-loaded',
+  moduleType: 'iflow',
+  providerType: 'openai'
+}
+[2025-11-18T14:40:46.686Z] [INFO] [glm] [module] initialized: glm-compatibility {
+  moduleId: 'glm-compatibility',
+  action: 'initialized',
+  compatibilityId: 'glm-compatibility-1763476846677',
+  providerType: 'glm'
+}
+[2025-11-18T14:40:46.686Z] [INFO] [compatibility] [module] module-created: compatibility-manager {
+  moduleId: 'glm-compatibility-1763476846677',
+  action: 'module-created',
+  type: 'glm-compatibility',
+  providerType: 'openai'
+}
+[2025-11-18T14:40:46.686Z] [INFO] [compatibility] [module] module-loaded: compatibility-1763476846676 {
+  moduleId: 'glm-compatibility-1763476846677',
+  action: 'module-loaded',
+  moduleType: 'glm-compatibility',
+  providerType: 'openai'
+}
+[2025-11-18T14:40:46.686Z] [INFO] [provider] [module] hook-system-integration-created: provider-1763476846686-twyzhshgh {
+  moduleId: 'provider-1763476846686-twyzhshgh',
+  action: 'hook-system-integration-created',
+  providerId: 'provider-1763476846686-twyzhshgh'
+}
+[2025-11-18T14:40:46.686Z] [INFO] [provider] [module] initialization-start: provider-1763476846686-twyzhshgh {
+  moduleId: 'provider-1763476846686-twyzhshgh',
+  action: 'initialization-start'
+}
+[2025-11-18T14:40:46.686Z] [INFO] [provider] [module] hook-system-disabled-or-missing: provider-1763476846686-twyzhshgh {
+  moduleId: 'provider-1763476846686-twyzhshgh',
+  action: 'hook-system-disabled-or-missing',
+  reason: 'hooks-module-not-found'
+}
+[2025-11-18T14:40:46.686Z] [INFO] [provider] [module] provider-debug-hooks-configured: provider-1763476846686-twyzhshgh {
+  moduleId: 'provider-1763476846686-twyzhshgh',
+  action: 'provider-debug-hooks-configured',
+  providerType: 'openai'
+}
+[2025-11-18T14:40:46.686Z] [INFO] [provider] [module] provider-hook-system-initialized: provider-1763476846686-twyzhshgh {
+  moduleId: 'provider-1763476846686-twyzhshgh',
+  action: 'provider-hook-system-initialized',
+  providerType: 'openai',
+  integrationEnabled: true
+}
+[2025-11-18T14:40:46.686Z] [INFO] [provider] [module] initialization-complete: provider-1763476846686-twyzhshgh {
+  moduleId: 'provider-1763476846686-twyzhshgh',
+  action: 'initialization-complete',
+  providerType: 'openai'
+}
+[2025-11-18T14:40:46.686Z] [INFO] [glm_key1.glm-4.6] [pipeline-lifecycle] initialized { modules: [ 'llmSwitch', 'workflow', 'compatibility', 'provider' ] }
+[2025-11-18T14:40:46.686Z] [INFO] [manager] [pipeline-lifecycle] pipeline-created {
+  pipelineId: 'glm_key1.glm-4.6',
+  providerType: 'openai',
+  modules: [ 'provider', 'compatibility', 'llmSwitch', 'workflow' ]
+}
+[2025-11-18T14:40:47.686Z] [INFO] [manager] [pipeline-lifecycle] pipeline-creation-error {
+  pipelineId: 'qwen.qwen3-coder-plus',
+  error: 'Invalid API key: must be a non-empty string'
+}
+[2025-11-18T14:40:47.687Z] [INFO] [manager] [pipeline-lifecycle] pipeline-creation-error {
+  pipelineId: 'iflow.minimax-m2',
+  error: "Failed to create module of type openai: Auth type 'oauth' not supported for provider 'openai'. Supported types: apikey"
+}
+[2025-11-18T14:40:47.687Z] [INFO] [manager] [pipeline-lifecycle] pipeline-creation-error {
+  pipelineId: 'iflow.qwen3-vl-plus',
+  error: "Failed to create module of type openai: Auth type 'oauth' not supported for provider 'openai'. Supported types: apikey"
+}
+[2025-11-18T14:40:47.687Z] [INFO] [manager] [pipeline-lifecycle] pipeline-creation-error {
+  pipelineId: 'iflow.kimi-k2-thinking',
+  error: "Failed to create module of type openai: Auth type 'oauth' not supported for provider 'openai'. Supported types: apikey"
+}
+[2025-11-18T14:40:47.687Z] [INFO] [manager] [pipeline-lifecycle] all-pipelines-created { count: 2, created: 2, failed: 4, version: '0.81.54' }
+[PipelineManager] pipelines-initialized {
+  total: 2,
+  ids: [ 'fc_key1.gpt-5.1', 'glm_key1.glm-4.6' ],
+  version: '0.81.54'
+}
+[2025-11-18T14:40:47.687Z] [INFO] [manager] [pipeline-lifecycle] pipelines-summary { ids: [ 'fc_key1.gpt-5.1', 'glm_key1.glm-4.6' ], count: 2 }
+[2025-11-18T14:40:47.687Z] [INFO] [manager] [pipeline-lifecycle] initialized { createdPipelines: 2 }
+[PipelineAssembler] pruned pipelines not created from routePools: default:qwen.qwen3-coder-plus, default:iflow.kimi-k2-thinking, default:iflow.minimax-m2, coding:iflow.kimi-k2-thinking, longcontext:iflow.kimi-k2-thinking, thinking:iflow.kimi-k2-thinking, vision:iflow.qwen3-vl-plus, websearch:qwen.qwen3-coder-plus, background:iflow.minimax-m2, background:qwen.qwen3-coder-plus, tools:qwen.qwen3-coder-plus, tools:iflow.kimi-k2-thinking
+🧭 Default pipeline: fc_key1.gpt-5.1
+🧩 Pipeline assembled from merged-config and attached to server.
+[RouteCodexServerV2] Starting initialization...
+[RouteCodexServerV2] Middleware: express.json enabled
+[RouteCodexServerV2] Setting up routes...
+[RouteCodexServerV2] Routes setup completed
+[RouteCodexServerV2] Initialization completed successfully
+[RouteCodexServerV2] Server started on 0.0.0.0:5555
+🚢 release mode · 🔵 V2 dynamic pipeline active
+✅ RouteCodex server started successfully!
+🌐 Server URL: http://127.0.0.1:5555
+🗂️ Merged config: /Users/fanzhang/.routecodex/merged-config.5555.json
+📊 Health check: http://127.0.0.1:5555/health
+🔧 Configuration: http://127.0.0.1:5555/config
+📖 OpenAI API: http://127.0.0.1:5555/v1/openai
+🔬 Anthropic API: http://127.0.0.1:5555/v1/messages
+
+🛑 Received shutdown signal, stopping server gracefully...
+🛑 Stopping RouteCodex server...
+[RouteCodexServerV2] Server stopped
+✅ RouteCodex server stopped successfully

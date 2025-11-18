@@ -485,6 +485,7 @@ export class PipelineAssembler {
       const t = providerTypeForPipeline.toLowerCase();
       let providerProtocol = 'openai-chat';
       if (t === 'responses') providerProtocol = 'openai-responses';
+        else if (t === 'iflow') providerProtocol = 'openai-chat';
       else if (t === 'anthropic') providerProtocol = 'anthropic-messages';
 
       const lsBlock = (modBlock as any).llmSwitch as { type?: string; config?: Record<string, unknown> } | undefined;
