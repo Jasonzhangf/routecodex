@@ -46,23 +46,69 @@
           }
         }
       },
-      "qwen-provider": {
-        "id": "qwen-provider",
+      "qwen": {
+        "id": "qwen",
         "enabled": true,
-        "type": "qwen",
-        "baseURL": "https://api.qwen.ai/v1",
+        "type": "openai",
+        "baseURL": "https://portal.qwen.ai/v1",
         "auth": {
           "type": "oauth"
         },
         "models": {
-          "qwen-plus": {}
+          "qwen3-coder-plus": {}
+        }
+      },
+      "kimi": {
+        "id": "kimi",
+        "enabled": true,
+        "type": "openai",
+        "baseURL": "https://api.kimi.com/coding/v1",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "${KIMI_API_KEY}"
+        },
+        "models": {
+          "kimi-for-coding": {}
+        }
+      },
+      "iflow": {
+        "id": "iflow",
+        "enabled": true,
+        "type": "iflow",
+        "baseURL": "https://apis.iflow.cn/v1",
+        "auth": {
+          "type": "iflow-oauth",
+          "tokenFile": "~/.routecodex/auth/iflow-oauth.json"
+        },
+        "models": {
+          "tstars2.0": {},
+          "qwen3-coder-plus": {},
+          "qwen3-coder": {},
+          "qwen3-max": {},
+          "qwen3-vl-plus": {},
+          "qwen3-max-preview": {},
+          "kimi-k2-0905": {},
+          "glm-4.6": {},
+          "kimi-k2": {},
+          "kimi-k2-thinking": {},
+          "deepseek-v3.2": {},
+          "deepseek-v3.1": {},
+          "deepseek-r1": {},
+          "deepseek-v3": {},
+          "qwen3-32b": {},
+          "qwen3-235b-a22b-thinking-2507": {},
+          "qwen3-235b-a22b-instruct": {},
+          "qwen3-235b": {},
+          "minimax-m2": {}
         }
       }
     },
     "routing": {
       "default": [
-        "qwen-provider.qwen-plus",
-        "glm.glm-4.6"
+        "glm.glm-4.6",
+        "qwen.qwen3-coder-plus",
+        "iflow.kimi-k2-thinking",
+        "iflow.minimax-m2"
       ],
       "anthropic": [
         "glm.glm-4.6"
@@ -71,7 +117,9 @@
       "longcontext": [],
       "tools": [],
       "thinking": [],
-      "vision": [],
+      "vision": [
+        "iflow.qwen3-vl-plus"
+      ],
       "websearch": [],
       "background": []
     }

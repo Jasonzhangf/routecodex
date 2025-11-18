@@ -33,14 +33,21 @@ export class QwenCompatibility implements CompatibilityModule {
   private errorHistory: any[] = [];
   private maxHistorySize = 50;
 
-  constructor(config: ModuleConfig, private dependencies: ModuleDependencies) {
+  constructor(private dependencies: ModuleDependencies) {
     this.logger = dependencies.logger;
     this.id = `compatibility-${Date.now()}`;
-    this.config = config;
+    this.config = {} as ModuleConfig;
     this.rules = this.initializeTransformationRules();
 
     // Initialize debug enhancements
     this.initializeDebugEnhancements();
+  }
+
+  /**
+   * 工厂注入配置（与其他兼容模块保持一致）
+   */
+  setConfig(config: ModuleConfig): void {
+    (this as any).config = config;
   }
 
   /**

@@ -149,9 +149,9 @@ function logData(data: LogData): void {
 ```typescript
 import { SharedRouteRequest, SharedPipelineRequest } from './shared-dtos';
 
-// 创建路由请求
+// 创建路由请求（providerId 为配置中的 provider 名，非协议族）
 const routeRequest: SharedRouteRequest = {
-  providerId: 'qwen-provider',
+  providerId: 'qwen',
   modelId: 'qwen3-coder-plus',
   requestId: 'req-123',
   timestamp: Date.now()
@@ -161,7 +161,7 @@ const routeRequest: SharedRouteRequest = {
 const pipelineRequest: SharedPipelineRequest = {
   data: { messages: [{ role: 'user', content: 'Hello' }] },
   route: {
-    providerId: 'qwen-provider',
+    providerId: 'qwen',
     modelId: 'qwen3-coder-plus',
     requestId: 'req-123',
     timestamp: Date.now()

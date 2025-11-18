@@ -259,7 +259,9 @@ class RouteCodexApp {
       console.log(`📊 Health check: http://${serverConfig.host}:${serverConfig.port}/health`);
       console.log(`🔧 Configuration: http://${serverConfig.host}:${serverConfig.port}/config`);
       console.log(`📖 OpenAI API: http://${serverConfig.host}:${serverConfig.port}/v1/openai`);
-      console.log(`🔬 Anthropic API: http://${serverConfig.host}:${serverConfig.port}/v1/anthropic`);
+      // Anthropic 入口保持 V2 之前的一致形态：/v1/messages
+      // 不在日志中引入新的 /v1/anthropic 前缀，避免与实际路由不符
+      console.log(`🔬 Anthropic API: http://${serverConfig.host}:${serverConfig.port}/v1/messages`);
 
       // samples dry-run removed
 

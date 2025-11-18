@@ -3,6 +3,8 @@ import { createProviderOAuthStrategy, getProviderOAuthConfig } from '../config/p
 import { OAuthFlowType } from '../config/oauth-flows.js';
 import fs from 'fs/promises';
 import path from 'path';
+import { fetchIFlowUserInfo, mergeIFlowTokenData, type IFlowTokenData } from "./iflow-userinfo-helper.js";
+import { fetchQwenUserInfo, mergeQwenTokenData, hasQwenApiKey, type QwenTokenData } from "./qwen-userinfo-helper.js";
 
 type EnsureOpts = {
   forceReacquireIfRefreshFails?: boolean;
@@ -97,15 +99,7 @@ export async function ensureValidOAuthToken(
           }
         } catch { /* ignore */ }
       }
-      // iFlow 严格端点与头部（对齐官方客户端）
-      if (providerType === 'iflow') {
-        try {
-          const needPatchDevice = typeof ep.deviceCodeUrl !== 'string' || !/\/api\/oauth2\/device\/code$/.test(ep.deviceCodeUrl);
-          const needPatchToken = typeof ep.tokenUrl !== 'string' || !/\/api\/oauth2\/token$/.test(ep.tokenUrl);
-          if (needPatchDevice) ep.deviceCodeUrl = 'https://iflow.cn/api/oauth2/device/code';
-          if (needPatchToken) ep.tokenUrl = 'https://iflow.cn/api/oauth2/token';
-        } catch { /* ignore */ }
-      }
+      // iFlow 头部（使用配置中的标准OAuth端点，不再需要端点修正）
 
       const enforcedHeaders = (providerType === 'iflow') ? {
         'User-Agent': 'iflow-cli/2.0',
@@ -140,13 +134,26 @@ export async function ensureValidOAuthToken(
         const tf = tokenFilePath;
         const txt = await fs.readFile(tf, 'utf-8').catch(() => '');
         if (!txt) return null as any;
-        try { return JSON.parse(txt); } catch { return null as any; }
+        try {
+          const parsed: any = JSON.parse(txt);
+          // 兼容 CLIProxyAPI 风格：若只存在 api_key，则补充 apiKey 便于后续统一处理
+          if (parsed && typeof parsed.apiKey !== 'string' && typeof parsed.api_key === 'string') {
+            parsed.apiKey = parsed.api_key;
+          }
+          return parsed;
+        } catch {
+          return null as any;
+        }
       };
 
       const token = await readLocalToken();
       try {
         const exists = !!token;
-        const hasApiKey0 = exists && typeof (token as any).apiKey === 'string' && (token as any).apiKey.trim().length > 0;
+        const hasApiKey0 = exists && (() => {
+          const t: any = token;
+          const k = (t.apiKey || t.api_key);
+          return typeof k === 'string' && k.trim().length > 0;
+        })();
         const hasAccess0 = exists && typeof (token as any).access_token === 'string' && (token as any).access_token.trim().length > 0;
         const exp0Raw: any = exists ? ((token as any).expires_at ?? (token as any).expired ?? (token as any).expiry_date) : null;
         console.log(`[OAuth] token.read: exists=${exists} hasApiKey=${hasApiKey0} hasAccess=${hasAccess0} expRaw=${String(exp0Raw)}`);
@@ -166,7 +173,11 @@ export async function ensureValidOAuthToken(
       };
   const now = Date.now();
   const exp = getExpiresAt(token);
-  const hasApiKey = token && typeof (token as any).apiKey === 'string' && (token as any).apiKey.trim().length > 0;
+  const hasApiKey = !!(token && (() => {
+    const t: any = token;
+    const k = (t.apiKey || t.api_key);
+    return typeof k === 'string' && k.trim().length > 0;
+  })());
   const hasAccess = token && typeof (token as any).access_token === 'string' && (token as any).access_token.trim().length > 0;
   const provider = String(providerType || '').toLowerCase();
 
@@ -216,6 +227,33 @@ export async function ensureValidOAuthToken(
             if (typeof strat.saveToken === 'function' && authed) {
               await strat.saveToken(authed);
               console.log(`[OAuth] Token acquired and saved: ${tokenFilePath}`);
+            
+            // iFlow专用：获取API Key并更新token文件
+            if (providerType === "iflow") {
+              try {
+                console.log("[OAuth] iFlow detected, fetching API Key via getUserInfo...");
+                
+                // 从认证结果中获取access_token
+                const accessToken = authed.access_token || authed.AccessToken;
+                if (!accessToken) {
+                  console.warn("[OAuth] iFlow: no access_token found in auth result, skipping API Key fetch");
+                } else {
+                  // 调用getUserInfo获取API Key
+                  const userInfo = await fetchIFlowUserInfo(accessToken);
+                  console.log(`[OAuth] iFlow: successfully fetched API Key for ${userInfo.email}`);
+                  
+                  // 合并OAuth token和API Key数据
+                  const mergedToken = mergeIFlowTokenData(authed, userInfo);
+                  
+                  // 重新保存包含API Key的完整token数据
+                  await strat.saveToken(mergedToken);
+                  console.log(`[OAuth] iFlow: API Key saved to token file`);
+                }
+              } catch (error) {
+                console.error(`[OAuth] iFlow: failed to fetch API Key - ${error instanceof Error ? error.message : String(error)}`);
+                // 不中断主流程，继续使用原始token
+              }
+            }
             }
             lastRunAt.set(k, Date.now());
             return;
@@ -236,6 +274,33 @@ export async function ensureValidOAuthToken(
             console.log(`[OAuth] Token acquired (auth_code) and saved: ${tokenFilePath}`);
           }
           lastRunAt.set(k, Date.now());
+            
+            // iFlow专用：获取API Key并更新token文件
+            if (providerType === "iflow") {
+              try {
+                console.log("[OAuth] iFlow detected, fetching API Key via getUserInfo...");
+                
+                // 从认证结果中获取access_token
+                const accessToken = authed.access_token || authed.AccessToken;
+                if (!accessToken) {
+                  console.warn("[OAuth] iFlow: no access_token found in auth result, skipping API Key fetch");
+                } else {
+                  // 调用getUserInfo获取API Key
+                  const userInfo = await fetchIFlowUserInfo(accessToken);
+                  console.log(`[OAuth] iFlow: successfully fetched API Key for ${userInfo.email}`);
+                  
+                  // 合并OAuth token和API Key数据
+                  const mergedToken = mergeIFlowTokenData(authed, userInfo);
+                  
+                  // 重新保存包含API Key的完整token数据
+                  await authCodeStrat.saveToken(mergedToken);
+                  console.log(`[OAuth] iFlow: API Key saved to token file`);
+                }
+              } catch (error) {
+                console.error(`[OAuth] iFlow: failed to fetch API Key - ${error instanceof Error ? error.message : String(error)}`);
+                // 不中断主流程，继续使用原始token
+              }
+            }
           return;
         } catch (e1) {
           console.warn(`[OAuth] auth_code flow failed: ${e1 instanceof Error ? e1.message : String(e1)}`);
@@ -248,6 +313,33 @@ export async function ensureValidOAuthToken(
               console.log(`[OAuth] Token acquired (device_code) and saved: ${tokenFilePath}`);
             }
             lastRunAt.set(k, Date.now());
+            
+            // iFlow专用：获取API Key并更新token文件
+            if (providerType === "iflow") {
+              try {
+                console.log("[OAuth] iFlow detected, fetching API Key via getUserInfo...");
+                
+                // 从认证结果中获取access_token
+                const accessToken = authed2.access_token || authed2.AccessToken;
+                if (!accessToken) {
+                  console.warn("[OAuth] iFlow: no access_token found in auth result, skipping API Key fetch");
+                } else {
+                  // 调用getUserInfo获取API Key
+                  const userInfo = await fetchIFlowUserInfo(accessToken);
+                  console.log(`[OAuth] iFlow: successfully fetched API Key for ${userInfo.email}`);
+                  
+                  // 合并OAuth token和API Key数据
+                  const mergedToken = mergeIFlowTokenData(authed2, userInfo);
+                  
+                  // 重新保存包含API Key的完整token数据
+                  await deviceStrat.saveToken(mergedToken);
+                  console.log(`[OAuth] iFlow: API Key saved to token file`);
+                }
+              } catch (error) {
+                console.error(`[OAuth] iFlow: failed to fetch API Key - ${error instanceof Error ? error.message : String(error)}`);
+                // 不中断主流程，继续使用原始token
+              }
+            }
             return;
           } catch (e2) {
             const msg = e2 instanceof Error ? e2.message : String(e2 || '');
@@ -261,6 +353,33 @@ export async function ensureValidOAuthToken(
           if (typeof strat.saveToken === 'function' && authed) {
             await strat.saveToken(authed);
             console.log(`[OAuth] Token acquired and saved: ${tokenFilePath}`);
+            
+            // iFlow专用：获取API Key并更新token文件
+            if (providerType === "iflow") {
+              try {
+                console.log("[OAuth] iFlow detected, fetching API Key via getUserInfo...");
+                
+                // 从认证结果中获取access_token
+                const accessToken = authed.access_token || authed.AccessToken;
+                if (!accessToken) {
+                  console.warn("[OAuth] iFlow: no access_token found in auth result, skipping API Key fetch");
+                } else {
+                  // 调用getUserInfo获取API Key
+                  const userInfo = await fetchIFlowUserInfo(accessToken);
+                  console.log(`[OAuth] iFlow: successfully fetched API Key for ${userInfo.email}`);
+                  
+                  // 合并OAuth token和API Key数据
+                  const mergedToken = mergeIFlowTokenData(authed, userInfo);
+                  
+                  // 重新保存包含API Key的完整token数据
+                  await strat.saveToken(mergedToken);
+                  console.log(`[OAuth] iFlow: API Key saved to token file`);
+                }
+              } catch (error) {
+                console.error(`[OAuth] iFlow: failed to fetch API Key - ${error instanceof Error ? error.message : String(error)}`);
+                // 不中断主流程，继续使用原始token
+              }
+            }
           }
           lastRunAt.set(k, Date.now());
         } catch (e) {

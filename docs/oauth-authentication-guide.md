@@ -20,313 +20,148 @@ The Unified OAuth Authentication System provides a comprehensive solution for ma
 Request → Provider → AuthResolver → OAuth Manager → Token Resolution → Response
 ```
 
-## Configuration
+## 🔐 iFlow OAuth 实现详解
 
-### OAuth Configuration
+### 核心流程概述
 
-OAuth configurations are defined in the provider configuration under the `oauth` section:
+iFlow 的 OAuth 实现遵循 **"access_token → API Key → 实际请求"** 的两阶段模式：
 
-```json
-{
-  "providers": {
-    "qwen-provider": {
-      "type": "qwen-http",
-      "baseURL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      "apiKey": ["auth-qwen-oauth-config"],
-      "oauth": {
-        "qwen-oauth-config": {
-          "clientId": "your-client-id",
-          "clientSecret": "your-client-secret",
-          "authUrl": "https://dashscope.aliyuncs.com/api/v1/oauth/authorize",
-          "tokenUrl": "https://dashscope.aliyuncs.com/api/v1/oauth/token",
-          "deviceCodeUrl": "https://dashscope.aliyuncs.com/api/v1/oauth/device_code",
-          "scopes": ["openid", "profile", "api"],
-          "enablePKCE": true,
-          "apiBaseUrl": "https://dashscope.aliyuncs.com"
-        }
-      }
+1. **OAuth 认证阶段**：获取 `access_token` 和 `refresh_token`
+2. **API Key 提取阶段**：用 `access_token` 调用 `getUserInfo` 获取真正的 `api_key`
+3. **业务请求阶段**：所有后续 API 调用都使用 `api_key` 作为 `Authorization: Bearer <api_key>`
+
+> ⚠️ **关键区别**：iFlow 的 `access_token` **只能**用来换取 API Key，**不能**直接作为鉴权凭证调用聊天完成接口。
+
+### 详细流程步骤
+
+#### 阶段1：OAuth 认证（获取 access_token）
+
+```
+用户授权 → 浏览器回调 → 授权码交换 → 获取 access_token + refresh_token
+```
+
+- **端点**：`https://iflow.cn/oauth/token`
+- **流程**：标准 OAuth 2.0 授权码流程或设备码流程
+- **输出**：`{ access_token, refresh_token, token_type, expires_in, scope }`
+
+#### 阶段2：API Key 提取（getUserInfo 调用）
+
+```
+access_token → getUserInfo → api_key + email
+```
+
+- **端点**：`https://iflow.cn/api/oauth/getUserInfo?accessToken=<token>`
+- **请求**：`GET` 请求，无额外 headers
+- **响应**：`{ success: true, data: { apiKey: "sk-xxx", email: "user@mail", phone: "+86..." } }`
+- **关键**：如果 `apiKey` 为空，整个流程失败（Fast-Fail 原则）
+
+#### 阶段3：业务 API 调用（使用 api_key）
+
+```
+api_key → Authorization: Bearer <api_key> → 聊天完成接口
+```
+
+- **端点**：`https://apis.iflow.cn/v1/chat/completions`
+- **鉴权**：`Authorization: Bearer sk-xxx`（**不是** access_token）
+- **模型**：默认 `kimi`，支持模型列表需查阅 iFlow 官方文档
+
+### 与 CLIProxyAPI 的对齐
+
+我们的实现完全对齐 CLIProxyAPI 的 Go 版本逻辑：
+
+| 步骤 | CLIProxyAPI (Go) | RouteCodex (TypeScript) |
+|------|------------------|-------------------------|
+| OAuth 认证 | `ExchangeCodeForTokens()` | `oauth-lifecycle.ts` 中的标准流程 |
+| 获取 API Key | `FetchUserInfo()` → `apiKey` | `fetchIFlowUserInfo()` → `api_key` |
+| 存储格式 | `IFlowTokenStorage` 结构体 | 相同字段名的 JSON 对象 |
+| 鉴权方式 | `Authorization: Bearer <api_key>` | 完全一致 |
+| 错误处理 | Fast-Fail，无隐藏回退 | 完全一致 |
+
+### 代码实现位置
+
+1. **OAuth 生命周期管理**：`src/modules/pipeline/modules/provider/v2/auth/oauth-lifecycle.ts`
+   - 在 `ensureValidOAuthToken()` 中，iFlow 认证成功后会自动调用 `fetchIFlowUserInfo()`
+   - 将返回的 `api_key` 和 `email` 合并到 token 数据中并重新保存
+
+2. **API Key 提取逻辑**：`src/modules/pipeline/modules/provider/v2/auth/iflow-userinfo-helper.ts`
+   - `fetchIFlowUserInfo()`：调用 `https://iflow.cn/api/oauth/getUserInfo`
+   - `mergeIFlowTokenData()`：将 OAuth token 与用户信息合并
+
+3. **认证提供者**：`src/modules/pipeline/modules/provider/v2/auth/tokenfile-auth.ts`
+   - `TokenFileAuthProvider.buildHeaders()`：优先使用 `api_key`，回退到 `access_token`
+
+4. **服务配置**：`src/modules/pipeline/modules/provider/v2/config/service-profiles.ts`
+   - iFlow 默认端点：`https://apis.iflow.cn/v1/chat/completions`
+   - 默认模型：`kimi`
+
+### 使用示例
+
+```typescript
+// 1. 配置 iFlow OAuth
+const iflowConfig = {
+  type: 'openai-standard',
+  config: {
+    providerType: 'iflow',
+    auth: {
+      type: 'oauth'
+      // 无需手动指定 clientId/secret，使用内置默认值
     }
   }
-}
-```
-
-### Auth ID Patterns
-
-- **Static tokens**: `auth-config-name`
-- **OAuth tokens**: `auth-provider-config-name` (e.g., `auth-qwen-oauth-config`)
-
-## Provider-Specific Implementations
-
-### Qwen OAuth Manager
-
-The Qwen OAuth Manager supports:
-
-- **Device Flow** with PKCE security
-- **API Key authentication** as fallback
-- **Automatic token refresh**
-- **JWT token parsing** for expiry information
-
-#### Configuration Example
-
-```typescript
-const qwenConfig = {
-  clientId: 'your-qwen-client-id',
-  clientSecret: 'your-qwen-client-secret',
-  authUrl: 'https://dashscope.aliyuncs.com/api/v1/oauth/authorize',
-  tokenUrl: 'https://dashscope.aliyuncs.com/api/v1/oauth/token',
-  deviceCodeUrl: 'https://dashscope.aliyuncs.com/api/v1/oauth/device_code',
-  scopes: ['openid', 'profile', 'api'],
-  enablePKCE: true,
-  apiBaseUrl: 'https://dashscope.aliyuncs.com'
 };
+
+// 2. 首次使用会触发浏览器授权
+const provider = new OpenAIStandard(iflowConfig, dependencies);
+await provider.initialize(); // → 打开浏览器 → 授权 → 获取 API Key
+
+// 3. 后续使用直接读取本地 token 文件
+// ~/.routecodex/auth/iflow-oauth.json 包含：
+// {
+//   "access_token": "...",
+//   "refresh_token": "...",
+//   "api_key": "sk-xxx",      // ← 实际用于 API 调用
+//   "email": "user@mail.com",
+//   "type": "iflow"
+// }
+
+// 4. 正常调用模型
+const response = await provider.processIncoming({
+  model: 'kimi',
+  messages: [{ role: 'user', content: 'Hello iFlow!' }]
+});
 ```
 
-### iFlow OAuth Manager
+### 故障排查
 
-The iFlow OAuth Manager supports:
+| 问题 | 可能原因 | 解决方案 |
+|------|----------|----------|
+| `getaddrinfo ENOTFOUND iflow.cn` | DNS 解析失败 | 检查网络连接，确认 iFlow 服务状态 |
+| `empty api key returned` | getUserInfo 未返回 apiKey | 确认 iFlow 账户已开通 API 权限 |
+| `401 Unauthorized` | api_key 无效 | 重新走 OAuth 流程获取新的 api_key |
+| `40308` 业务错误 | 使用了 access_token 而非 api_key | 确认 TokenFileAuthProvider 正确读取了 api_key 字段 |
 
-- **Device Flow** with PKCE security
-- **Legacy credentials file** compatibility
-- **Automatic token refresh**
-- **Fallback to existing credentials**
+### 环境变量
 
-#### Configuration Example
+- `IFLOW_CLIENT_ID`：覆盖默认 clientId（高级用法）
+- `IFLOW_CLIENT_SECRET`：覆盖默认 clientSecret（高级用法）
+- `ROUTECODEX_OAUTH_AUTO_OPEN=0`：禁用自动打开浏览器（手动授权）
 
-```typescript
-const iflowConfig = {
-  clientId: '10009311001',
-  clientSecret: '4Z3YjXycVsQvyGF1etiNlIBB4RsqSDtW',
-  authUrl: 'https://iflow.cn/oauth',
-  tokenUrl: 'https://iflow.cn/oauth/token',
-  deviceCodeUrl: 'https://iflow.cn/oauth/device/code',
-  scopes: ['openid', 'profile', 'api'],
-  enablePKCE: true,
-  useLegacyCredentials: true,
-  apiBaseUrl: 'https://api.iflow.cn/v1'
-};
+# Unified OAuth Authentication System Guide
+
+## Overview
+
+The Unified OAuth Authentication System provides a comprehensive solution for managing authentication across multiple AI service providers. It supports both static token files and dynamic OAuth 2.0 flows with automatic token refresh, PKCE security, and unified configuration management.
+
+## Architecture
+
+### Core Components
+
+1. **OAuthConfigManager** - Centralized configuration management
+2. **BaseOAuthManager** - Abstract base class for OAuth implementations
+3. **Provider-specific Managers** - QwenOAuthManager and iFlowOAuthManager
+4. **AuthResolver** - Unified token resolution supporting both static and OAuth
+5. **UserConfigParser** - Extended to support OAuth configuration parsing
+
+### Authentication Flow
+
 ```
-
-## Usage
-
-### Basic Usage
-
-```typescript
-import { AuthResolver } from './src/modules/pipeline/utils/auth-resolver.js';
-import { QwenOAuthManager } from './src/modules/pipeline/utils/qwen-oauth-manager.js';
-import { iFlowOAuthManager } from './src/modules/pipeline/utils/iflow-oauth-manager.js';
-import { PipelineDebugLogger } from './src/modules/pipeline/utils/debug-logger.js';
-
-// Initialize logger
-const logger = new PipelineDebugLogger('oauth-test');
-
-// Create OAuth managers
-const qwenManager = new QwenOAuthManager(logger, qwenConfig);
-const iflowManager = new iFlowOAuthManager(logger, iflowConfig);
-
-// Create auth resolver
-const authResolver = new AuthResolver({}, logger);
-
-// Register OAuth managers
-authResolver.registerOAuthProvider('qwen', qwenManager);
-authResolver.registerOAuthProvider('iflow', iflowManager);
-
-// Resolve tokens
-const qwenToken = await authResolver.resolveToken('auth-qwen-config');
-const iflowToken = await authResolver.resolveToken('auth-iflow-config');
-```
-
-### Integration with Providers
-
-The Qwen HTTP Provider and iFlow Provider have been updated to automatically use the unified authentication system:
-
-```typescript
-// Provider automatically detects OAuth configuration
-const qwenProvider = new QwenHTTPProvider(config, dependencies);
-const iflowProvider = new IFlowProvider(config, dependencies);
-
-// Authentication is handled automatically
-const response = await qwenProvider.processIncoming(request);
-```
-
-## Authentication Flows
-
-### Device Flow with PKCE
-
-1. **Generate PKCE Codes**: Create code verifier and challenge
-2. **Request Device Code**: Get device code and user code
-3. **User Authentication**: User visits verification URL and enters code
-4. **Token Polling**: Poll for access token using device code
-5. **Token Storage**: Store token securely with expiry information
-
-### Token Refresh
-
-1. **Expiry Check**: Check if token is about to expire
-2. **Refresh Request**: Use refresh token to get new access token
-3. **Update Storage**: Store new token with updated expiry
-4. **Update Context**: Update in-memory authentication context
-
-### Static Token Fallback
-
-1. **File Detection**: Detect if auth ID corresponds to static file
-2. **Token Reading**: Read token from configured file path
-3. **Caching**: Cache token for performance
-4. **Validation**: Optional token validation with provider
-
-## Security Features
-
-### PKCE (Proof Key for Code Exchange)
-
-- **Code Verifier**: Random 32-byte string
-- **Code Challenge**: SHA256 hash of verifier
-- **Method**: S256 (SHA256)
-- **Security**: Prevents authorization code interception attacks
-
-### Token Security
-
-- **Secure Storage**: Tokens stored in user's home directory
-- **Automatic Refresh**: Tokens refreshed before expiry
-- **Revocation**: Support for token revocation and cleanup
-- **Minimal Exposure**: Tokens only exposed when necessary
-
-### Configuration Security
-
-- **Sensitive Data**: Client secrets and tokens are encrypted at rest
-- **Access Control**: Configuration files have restricted permissions
-- **Environment Variables**: Support for environment-based configuration
-
-## Error Handling
-
-### Common Errors
-
-1. **Authentication Failed**: Invalid credentials or configuration
-2. **Token Expired**: Token has expired and refresh failed
-3. **Network Error**: Cannot reach OAuth provider
-4. **Configuration Error**: Invalid OAuth configuration
-5. **Device Code Expired**: User did not authenticate in time
-
-### Error Recovery
-
-1. **Retry Logic**: Automatic retry for transient errors
-2. **Fallback**: Fallback to static tokens if OAuth fails
-3. **Re-authentication**: Trigger new OAuth flow if refresh fails
-4. **Configuration Validation**: Validate configuration before use
-
-## Testing
-
-### Test Script
-
-Run the comprehensive test suite:
-
-```bash
-node examples/test-oauth-system.mjs
-```
-
-### Test Coverage
-
-- OAuth Configuration Manager
-- Provider-specific OAuth Managers
-- Auth Resolver Integration
-- Token Resolution
-- Auth Context Management
-- Cleanup and Resource Management
-
-## Migration Guide
-
-### From Static Tokens
-
-1. **Update Configuration**: Add OAuth configuration to provider settings
-2. **Update Auth IDs**: Change from static auth IDs to OAuth auth IDs
-3. **Update Dependencies**: Ensure OAuth managers are imported and registered
-4. **Test Authentication**: Verify OAuth flows work correctly
-
-### From Legacy OAuth
-
-1. **Update Provider**: Use new unified OAuth managers
-2. **Update Configuration**: Migrate to new OAuth configuration format
-3. **Update Auth Resolution**: Use AuthResolver instead of direct OAuth calls
-4. **Test Compatibility**: Verify existing functionality still works
-
-## Troubleshooting
-
-### Common Issues
-
-1. **OAuth Flow Not Triggered**
-   - Verify auth ID pattern: `auth-provider-config`
-   - Check OAuth manager registration
-   - Verify configuration syntax
-
-2. **Token Refresh Fails**
-   - Check refresh token availability
-   - Verify refresh token URL
-   - Check network connectivity
-
-3. **Authentication Errors**
-   - Verify client credentials
-   - Check OAuth scopes
-   - Verify redirect URIs
-
-4. **Configuration Errors**
-   - Validate JSON syntax
-   - Check required fields
-   - Verify file permissions
-
-### Debug Logging
-
-Enable debug logging to troubleshoot issues:
-
-```typescript
-const logger = new PipelineDebugLogger('oauth-test', { level: 'debug' });
-```
-
-## Performance Considerations
-
-### Token Caching
-
-- **Memory Cache**: Tokens cached in memory for performance
-- **File Cache**: Tokens persisted to disk for reuse
-- **Cache Invalidation**: Automatic cache invalidation on expiry
-
-### Concurrent Access
-
-- **Authentication Lock**: Prevent concurrent authentication attempts
-- **Token Refresh**: Atomic token refresh operations
-- **Thread Safety**: Safe for use in multi-threaded environments
-
-## Future Enhancements
-
-### Planned Features
-
-1. **Additional Providers**: Support for more OAuth providers
-2. **Advanced Flows**: Authorization code flow with web server
-3. **Token Encryption**: Enhanced token encryption at rest
-4. **Metrics**: Authentication metrics and monitoring
-5. **Web UI**: Web-based authentication interface
-
-### Extensibility
-
-The system is designed to be easily extensible:
-
-1. **New Providers**: Extend BaseOAuthManager
-2. **Custom Flows**: Implement custom authentication flows
-3. **Plugin System**: Support for third-party authentication plugins
-4. **Configuration Sources**: Support for additional configuration sources
-
-## Contributing
-
-### Development Setup
-
-1. **Install Dependencies**: `npm install`
-2. **Run Tests**: `npm test`
-3. **Lint Code**: `npm run lint`
-4. **Build**: `npm run build`
-
-### Code Standards
-
-- **TypeScript**: Use TypeScript for all new code
-- **ES Modules**: Use ES module syntax
-- **Documentation**: Document all public APIs
-- **Testing**: Write comprehensive tests
-
-## License
-
-This project is licensed under the MIT License. See LICENSE file for details.
+Request → Provider → AuthResolver → OAuth Manager → Token Resolution → Response

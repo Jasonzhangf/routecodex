@@ -164,8 +164,8 @@ ConfigMerger
   - qwen3-coder-plus, qwen3-coder
   - https://portal.qwen.ai/v1
 
-- **IFLOW**: 4个模型，3个API密钥
-  - deepseek-r1, kimi-k2, qwen3-coder, glm-4.5
+- **IFLOW**: 4个模型，3个API密钥（模型名称以 iflow 控制台为准）
+  - qwen3-coder-plus, deepseek-v3.2, glm-4.6, kimi-k2-0905
   - https://apis.iflow.cn/v1
 
 - **MODELSCOPE**: 10个模型，4个API密钥

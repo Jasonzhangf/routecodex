@@ -805,9 +805,34 @@ export class RouteCodexServerV2 extends BaseModule {
       if (!this.virtualRouter) return null;
       try { (payload as any).endpoint = entryEndpoint; } catch { /* ignore */ }
       const routed = await this.virtualRouter.routeRequest(payload, 'default');
-      const routeName = (routed && (routed as any).routing && (routed as any).routing.route)
-        ? String((routed as any).routing.route)
+      const routing = (routed && (routed as any).routing && typeof (routed as any).routing === 'object')
+        ? ((routed as any).routing as Record<string, unknown>)
+        : {};
+
+      const routeName = (routing.route && typeof routing.route === 'string')
+        ? String(routing.route)
         : 'default';
+
+      // 使用虚拟路由的 inputModel 作为逻辑模型 ID：
+      // - 仅在请求载荷中缺失 model 且 inputModel 为非空/非 unknown 时补齐；
+      // - 避免覆盖用户显式指定的模型。
+      try {
+        const hasModel =
+          typeof (payload as any).model === 'string' &&
+          (payload as any).model.trim().length > 0 &&
+          (payload as any).model.trim().toLowerCase() !== 'unknown';
+
+        const inputModelRaw = routing.inputModel;
+        const inputModel =
+          typeof inputModelRaw === 'string' ? inputModelRaw.trim() : '';
+
+        if (!hasModel && inputModel && inputModel.toLowerCase() !== 'unknown') {
+          (payload as any).model = inputModel;
+        }
+      } catch {
+        // best-effort：不影响路由选择
+      }
+
       return routeName;
     } catch {
       return null;

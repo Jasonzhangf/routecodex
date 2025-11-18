@@ -8,7 +8,7 @@
         "id": "iflow",
         "enabled": true,
         "type": "iflow",
-        "baseURL": "https://api.iflow.cn/v1",
+        "baseURL": "https://apis.iflow.cn/v1",
         "apiKey": [],
         "oauth": {
           "default": {
@@ -20,7 +20,10 @@
           }
         },
         "models": {
-          "iflow-general": {}
+          "qwen3-coder-plus": {},
+          "deepseek-v3.2": {},
+          "glm-4.6": {},
+          "kimi-k2-0905": {}
         }
       }
     },

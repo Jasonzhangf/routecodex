@@ -6,6 +6,9 @@
 
 import { OpenAIStandard } from './openai-standard.js';
 import { ResponsesProvider } from './responses-provider.js';
+import { OpenAIHttpProvider } from './openai-http-provider.js';
+import { ResponsesHttpProvider } from './responses-http-provider.js';
+import { AnthropicHttpProvider } from './anthropic-http-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import crypto from 'node:crypto';
 import type { IProviderV2 } from '../api/provider-types.js';
@@ -30,15 +33,23 @@ export class ProviderFactory {
       return this.instances.get(instanceId)!;
     }
 
-    // 创建新实例（按 providerType 分派）
+    // 创建新实例
     const ptype = String(config?.config?.providerType || '').toLowerCase();
+    const moduleType = String(config?.type || '').toLowerCase();
     let provider: IProviderV2;
 
-    if (ptype === 'responses') {
-      // 真正的 Responses provider：用于 OpenAI Responses wire (/v1/responses)
+    // 1) 新的 HTTP Provider 模块（按协议族拆分）
+    if (moduleType === 'openai-http-provider') {
+      provider = new OpenAIHttpProvider(config, dependencies);
+    } else if (moduleType === 'responses-http-provider') {
+      provider = new ResponsesHttpProvider(config, dependencies);
+    } else if (moduleType === 'anthropic-http-provider') {
+      provider = new AnthropicHttpProvider(config, dependencies);
+    } else if (ptype === 'responses') {
+      // 2) 兼容旧路径：仍使用 ResponsesProvider（真实 Responses wire /v1/responses）
       provider = new ResponsesProvider(config, dependencies);
     } else {
-      // 默认：OpenAI 标准 Provider：
+      // 3) 默认：OpenAI 标准 Provider：
       //  - providerType='openai'/'glm'/'qwen'/'iflow'/'lmstudio' → Chat 形状；
       //  - providerType='anthropic' → 通过 ServiceProfile 选择 /v1/messages wire（协议转换由 llmswitch-core 处理）。
       provider = new OpenAIStandard(config, dependencies);
@@ -105,8 +116,8 @@ export class ProviderFactory {
       errors.push('Missing required field: config.auth');
     }
 
-    // 验证providerType
-    const supportedTypes = ['openai', 'glm', 'qwen', 'iflow', 'lmstudio', 'responses', 'anthropic'];
+    // 验证providerType（协议族）
+    const supportedTypes = ['openai', 'responses', 'anthropic'];
     if (config.config.providerType && !supportedTypes.includes(config.config.providerType)) {
       errors.push(`Unsupported providerType: ${config.config.providerType}. Supported types: ${supportedTypes.join(', ')}`);
     }
@@ -119,9 +130,13 @@ export class ProviderFactory {
       }
 
       if (auth.type === 'oauth') {
-        const ptype = String(config.config.providerType || '').toLowerCase();
-        const isQwen = ptype === 'qwen';
-        const isIflow = ptype === 'iflow';
+        // OAuth providerId 通过扩展字段传入（避免与协议族 providerType 混淆）
+        const ext: any = (config as any)?.config?.extensions || {};
+        const oauthProviderId = typeof ext.oauthProviderId === 'string' && ext.oauthProviderId.trim()
+          ? String(ext.oauthProviderId).trim().toLowerCase()
+          : '';
+        const isQwen = oauthProviderId === 'qwen';
+        const isIflow = oauthProviderId === 'iflow';
 
         // 对于 qwen / iflow 等内置 OAuth provider，clientId/tokenUrl 可从默认配置或环境推断，
         // 因此不强制要求在用户配置中显式提供，避免硬编码凭证。

@@ -4,6 +4,8 @@
  * For providers that don't expose public client credentials, we can piggyback on an
  * external login tool that stores OAuth tokens locally. This auth provider reads
  * the token JSON and injects `Authorization: Bearer <access_token>`.
+ * 
+ * 更新：支持iFlow的API Key模式 - 优先使用api_key字段，回退到access_token
  */
 
 import fs from 'fs';
@@ -39,9 +41,9 @@ export class TokenFileAuthProvider implements IAuthProvider {
       this.updateStatus(false, false, 'token_file_unreadable');
       return;
     }
-    const ok = this.hasAccessToken(this.token);
+    const ok = this.hasAccessToken(this.token) || this.hasApiKey(this.token);
     this.isInitialized = true;
-    this.updateStatus(ok, ok, ok ? undefined : 'missing_access_token');
+    this.updateStatus(ok, ok, ok ? undefined : 'missing_access_token_or_api_key');
   }
 
   buildHeaders(): Record<string, string> {
@@ -51,8 +53,15 @@ export class TokenFileAuthProvider implements IAuthProvider {
       if (file) this.token = this.readJson(file);
     }
     if (!this.isInitialized || !this.token) throw new Error('TokenFileAuthProvider not initialized');
+    
+    // iFlow专用：优先使用API Key，回退到access_token
+    const apiKey = this.extractApiKey(this.token);
+    if (apiKey) {
+      return { 'Authorization': `Bearer ${apiKey}` };
+    }
+    
     const access = this.extractAccessToken(this.token);
-    if (!access) throw new Error('TokenFileAuthProvider: no access_token in token file');
+    if (!access) throw new Error('TokenFileAuthProvider: no access_token or api_key in token file');
     return { 'Authorization': `Bearer ${access}` };
   }
 
@@ -96,10 +105,18 @@ export class TokenFileAuthProvider implements IAuthProvider {
   private readJson(p: string): any | null { try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { return null; } }
 
   private hasAccessToken(tok: any): boolean { return !!this.extractAccessToken(tok); }
+  
+  private hasApiKey(tok: any): boolean { return !!this.extractApiKey(tok); }
 
   private extractAccessToken(tok: any): string | null {
     if (!tok || typeof tok !== 'object') return null;
     const cand = (tok as any).access_token || (tok as any).AccessToken || (tok as any).token || '';
+    return typeof cand === 'string' && cand.trim() ? cand.trim() : null;
+  }
+  
+  private extractApiKey(tok: any): string | null {
+    if (!tok || typeof tok !== 'object') return null;
+    const cand = (tok as any).api_key || (tok as any).APIKey || '';
     return typeof cand === 'string' && cand.trim() ? cand.trim() : null;
   }
 

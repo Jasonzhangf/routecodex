@@ -842,6 +842,21 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
       // Provider should receive pure Chat JSON (model/messages/tools/...).
       const dataBody: any = request.data as UnknownObject;
       const dataWithMeta = { ...(dataBody || {}) } as UnknownObject;
+
+      // 确保在到达 Provider 前请求始终带有逻辑模型 ID：
+      // - 若 Chat 载荷中已存在 model 字段，则保持不变；
+      // - 若缺失，则回填为 route.modelId（由虚拟路由/组装器确定的逻辑模型）。
+      try {
+        const hasModel =
+          typeof (dataWithMeta as any).model === 'string' &&
+          (dataWithMeta as any).model.trim().length > 0;
+        const routeModel = request.route?.modelId;
+        if (!hasModel && typeof routeModel === 'string' && routeModel.trim()) {
+          (dataWithMeta as any).model = routeModel.trim();
+        }
+      } catch {
+        // best-effort：不影响主流程
+      }
       try {
         const { writePipelineSnapshot } = await import('../utils/pipeline-snapshot-writer.js');
         await writePipelineSnapshot({

@@ -52,221 +52,128 @@ Don't（不应做）
   - 开关：`ROUTECODEX_RESPONSES_UPSTREAM_SSE=1` 或 `RCC_RESPONSES_UPSTREAM_SSE=1`
   - 未启用时 Provider 保持统一非流式 JSON；流式合成交由 llmswitch-core。
 
-### API接口层 (v2/api/)
+## 🔐 iFlow OAuth 实现详解
 
-#### 📄 index.ts - 统一对外接口
-- **作用**: 提供与V1版本完全一致的对外接口
-- **职责**: 统一导出、类型定义、兼容性保证
-- **关键功能**:
-  - 导出 `OpenAIStandard` 主要类
-  - 导出所有类型定义和配置接口
-  - 提供V1兼容的类型别名
-  - 提供便捷的工厂函数
+### 核心流程概述
 
-#### 📄 provider-types.ts - 类型定义
-- **作用**: 定义与V1完全兼容的类型接口
-- **职责**: 类型安全、接口定义、扩展类型
-- **关键类型**:
-  - `IProviderV2`: 统一Provider接口
-  - `ProviderType`: 支持的服务类型
-  - `ProviderError`: 错误类型定义
-  - `ProviderMetrics`: 性能指标类型
+iFlow 的 OAuth 实现遵循 **"access_token → API Key → 实际请求"** 的两阶段模式：
 
-#### 📄 provider-config.ts - 配置接口
-- **作用**: 定义统一的配置接口和验证规则
-- **职责**: 配置标准化、V1兼容、类型安全
-- **关键接口**:
-  - `OpenAIStandardConfig`: 统一配置接口
-  - `ApiKeyAuth`: API Key认证配置
-  - `OAuthAuth`: OAuth认证配置
-  - `ServiceOverrides`: 服务覆盖配置
+1. **OAuth 认证阶段**：获取 `access_token` 和 `refresh_token`
+2. **API Key 提取阶段**：用 `access_token` 调用 `getUserInfo` 获取真正的 `api_key`
+3. **业务请求阶段**：所有后续 API 调用都使用 `api_key` 作为 `Authorization: Bearer <api_key>`
 
-### 核心实现层 (v2/core/)
+> ⚠️ **关键区别**：iFlow 的 `access_token` **只能**用来换取 API Key，**不能**直接作为鉴权凭证调用聊天完成接口。
 
-#### 📄 base-provider.ts - 基础抽象类
-- **作用**: 提供Provider的通用实现和抽象方法
-- **职责**: 通用逻辑、抽象方法定义、模板模式
-- **关键功能**:
-  - 生命周期管理 (`initialize`, `cleanup`)
-  - 请求处理流程 (`processIncoming`, `processOutgoing`)
-  - 健康检查 (`checkHealth`)
-  - 错误处理和日志记录
-  - 抽象方法定义（供子类实现）
+### 详细流程步骤
 
-#### 📄 openai-standard.ts - 标准实现
-- **作用**: 统一的OpenAI标准Provider实现
-- **职责**: 服务处理、配置驱动、请求路由（不做工具修复）
-- **关键功能**:
-  - 根据配置选择服务处理逻辑
-  - 服务特定的请求预处理和响应后处理
-  - 认证头部构建和验证
-  - HTTP请求发送和响应处理
-  - 支持的服务: OpenAI, GLM, Qwen, iFlow, LM Studio
+#### 阶段1：OAuth 认证（获取 access_token）
 
-#### 📄 provider-factory.ts - 实例工厂
-- **作用**: Provider实例的创建和管理
-- **职责**: 实例创建、生命周期管理、配置验证
-- **关键功能**:
-  - `createProvider()`: 创建Provider实例
-  - `getProvider()`: 获取现有实例
-  - `cleanupAll()`: 清理所有实例
-  - 配置验证和错误处理
-  - 实例缓存和复用
+```
+用户授权 → 浏览器回调 → 授权码交换 → 获取 access_token + refresh_token
+```
 
-### 认证模块 (v2/auth/)
+- **端点**：`https://iflow.cn/oauth/token`
+- **流程**：标准 OAuth 2.0 授权码流程或设备码流程
+- **输出**：`{ access_token, refresh_token, token_type, expires_in, scope }`
 
-#### 📄 auth-interface.ts - 认证接口
-- **作用**: 定义统一的认证接口和标准
-- **职责**: 认证抽象、类型定义、标准协议
-- **关键接口**:
-  - `IAuthProvider`: 统一认证接口
-  - `IOAuthClient`: OAuth客户端接口
-  - `TokenStorage`: 令牌存储接口
-  - 认证状态和错误类型定义
+#### 阶段2：API Key 提取（getUserInfo 调用）
 
-#### 📄 apikey-auth.ts - API Key认证 (待实现)
-- **作用**: API Key认证的具体实现
-- **职责**: API Key验证、头部构建、凭证管理
-- **关键功能**:
-  - API Key格式验证
-  - Authorization头部构建
-  - 凭证状态检查
-  - 可配置的头部名称和前缀
+```
+access_token → getUserInfo → api_key + email
+```
 
-#### 📄 oauth-auth.ts - OAuth认证 (待实现)
-- **作用**: OAuth认证的具体实现
-- **职责**: OAuth流程处理、令牌管理、刷新机制
-- **关键功能**:
-  - OAuth 2.0流程处理
-  - 访问令牌和刷新令牌管理
-  - 令牌自动刷新
-  - 支持设备流和授权码流程
+- **端点**：`https://iflow.cn/api/oauth/getUserInfo?accessToken=<token>`
+- **请求**：`GET` 请求，无额外 headers
+- **响应**：`{ success: true, data: { apiKey: "sk-xxx", email: "user@mail", phone: "+86..." } }`
+- **关键**：如果 `apiKey` 为空，整个流程失败（Fast-Fail 原则）
 
-### 配置管理 (v2/config/)
+#### 阶段3：业务 API 调用（使用 api_key）
 
-#### 📄 service-profiles.ts - 服务配置档案
-- **作用**: 定义各服务的预设配置和验证规则
-- **职责**: 服务预设、配置验证、扩展支持
-- **关键功能**:
-  - 5种服务的完整预设配置
-  - 配置验证器和类型检查
-  - 服务配置注册和扩展机制
-  - 认证类型支持验证
+```
+api_key → Authorization: Bearer <api_key> → 聊天完成接口
+```
 
-### 工具模块 (v2/utils/)
+- **端点**：`https://apis.iflow.cn/v1/chat/completions`
+- **鉴权**：`Authorization: Bearer sk-xxx`（**不是** access_token）
+- **模型**：默认 `kimi`，支持模型列表需查阅 iFlow 官方文档
 
-#### 📄 http-client.ts - HTTP客户端 (已实现)
-- **作用**: 提供统一的HTTP请求处理功能
-- **职责**: HTTP通信、重试机制、错误处理
-- **关键功能**:
-  - 标准HTTP方法支持 (GET, POST, PUT, DELETE, PATCH)
-  - 自动重试机制和指数退避
-  - 超时控制和错误处理
-  - 请求头构建和响应解析
+### 与 CLIProxyAPI 的对齐
 
-## 🚀 使用指南
+我们的实现完全对齐 CLIProxyAPI 的 Go 版本逻辑：
 
-### 基础使用
+| 步骤 | CLIProxyAPI (Go) | RouteCodex (TypeScript) |
+|------|------------------|-------------------------|
+| OAuth 认证 | `ExchangeCodeForTokens()` | `oauth-lifecycle.ts` 中的标准流程 |
+| 获取 API Key | `FetchUserInfo()` → `apiKey` | `fetchIFlowUserInfo()` → `api_key` |
+| 存储格式 | `IFlowTokenStorage` 结构体 | 相同字段名的 JSON 对象 |
+| 鉴权方式 | `Authorization: Bearer <api_key>` | 完全一致 |
+| 错误处理 | Fast-Fail，无隐藏回退 | 完全一致 |
+
+### 代码实现位置
+
+1. **OAuth 生命周期管理**：`src/modules/pipeline/modules/provider/v2/auth/oauth-lifecycle.ts`
+   - 在 `ensureValidOAuthToken()` 中，iFlow 认证成功后会自动调用 `fetchIFlowUserInfo()`
+   - 将返回的 `api_key` 和 `email` 合并到 token 数据中并重新保存
+
+2. **API Key 提取逻辑**：`src/modules/pipeline/modules/provider/v2/auth/iflow-userinfo-helper.ts`
+   - `fetchIFlowUserInfo()`：调用 `https://iflow.cn/api/oauth/getUserInfo`
+   - `mergeIFlowTokenData()`：将 OAuth token 与用户信息合并
+
+3. **认证提供者**：`src/modules/pipeline/modules/provider/v2/auth/tokenfile-auth.ts`
+   - `TokenFileAuthProvider.buildHeaders()`：优先使用 `api_key`，回退到 `access_token`
+
+4. **服务配置**：`src/modules/pipeline/modules/provider/v2/config/service-profiles.ts`
+   - iFlow 默认端点：`https://apis.iflow.cn/v1/chat/completions`
+   - 默认模型：`kimi`
+
+### 使用示例
 
 ```typescript
-import { OpenAIStandard, type OpenAIStandardConfig } from './api/index.js';
-
-// GLM配置
-const glmConfig: OpenAIStandardConfig = {
+// 1. 配置 iFlow OAuth
+const iflowConfig = {
   type: 'openai-standard',
   config: {
-    providerType: 'glm',
+    providerType: 'iflow',
     auth: {
-      type: 'apikey',
-      apiKey: 'your-glm-api-key'
-    },
-    overrides: {
-      defaultModel: 'glm-4'
+      type: 'oauth'
+      // 无需手动指定 clientId/secret，使用内置默认值
     }
   }
 };
 
-// 创建Provider实例
-const glmProvider = new OpenAIStandard(glmConfig, dependencies);
-await glmProvider.initialize();
+// 2. 首次使用会触发浏览器授权
+const provider = new OpenAIStandard(iflowConfig, dependencies);
+await provider.initialize(); // → 打开浏览器 → 授权 → 获取 API Key
 
-// 使用Provider
-const request = {
-  model: 'glm-4',
-  messages: [{ role: 'user', content: 'Hello!' }]
-};
-const response = await glmProvider.processIncoming(request);
+// 3. 后续使用直接读取本地 token 文件
+// ~/.routecodex/auth/iflow-oauth.json 包含：
+// {
+//   "access_token": "...",
+//   "refresh_token": "...",
+//   "api_key": "sk-xxx",      // ← 实际用于 API 调用
+//   "email": "user@mail.com",
+//   "type": "iflow"
+// }
+
+// 4. 正常调用模型
+const response = await provider.processIncoming({
+  model: 'kimi',
+  messages: [{ role: 'user', content: 'Hello iFlow!' }]
+});
 ```
 
-### 工厂创建
+### 故障排查
 
-```typescript
-import { createOpenAIStandard } from './api/index.js';
+| 问题 | 可能原因 | 解决方案 |
+|------|----------|----------|
+| `getaddrinfo ENOTFOUND iflow.cn` | DNS 解析失败 | 检查网络连接，确认 iFlow 服务状态 |
+| `empty api key returned` | getUserInfo 未返回 apiKey | 确认 iFlow 账户已开通 API 权限 |
+| `401 Unauthorized` | api_key 无效 | 重新走 OAuth 流程获取新的 api_key |
+| `40308` 业务错误 | 使用了 access_token 而非 api_key | 确认 TokenFileAuthProvider 正确读取了 api_key 字段 |
 
-// 使用工厂创建实例
-const provider = createOpenAIStandard(config, dependencies);
-```
+### 环境变量
 
-### 支持的服务类型
+- `IFLOW_CLIENT_ID`：覆盖默认 clientId（高级用法）
+- `IFLOW_CLIENT_SECRET`：覆盖默认 clientSecret（高级用法）
+- `ROUTECODEX_OAUTH_AUTO_OPEN=0`：禁用自动打开浏览器（手动授权）
 
-| 服务类型 | 认证方式 | 默认端点 | 特殊处理 |
-|---------|---------|-----------|---------|
-| `openai` | API Key | `/v1/chat/completions` | 组织ID支持 |
-| `glm` | API Key | `/chat/completions` | 中文优化 |
-| `qwen` | OAuth | `/chat/completions` | 客户端元数据 |
-| `iflow` | OAuth | `/v1/chat/completions` | PKCE支持 |
-| `lmstudio` | API Key | `/v1/chat/completions` | 本地模型 |
-
-## 🔄 V1兼容性
-
-### 接口完全一致
-
-```typescript
-// V1版本用法 (完全不变)
-import { GLMHTTPProvider } from '../glm-http-provider.js';
-const v1Provider = new GLMHTTPProvider(v1Config, dependencies);
-
-// V2版本用法 (接口一致)
-import { OpenAIStandard } from './v2/api/index.js';
-const v2Provider = new OpenAIStandard(v2Config, dependencies);
-
-// 两个版本的方法签名完全相同
-await v1Provider.initialize();
-await v2Provider.initialize();
-
-await v1Provider.processIncoming(request);
-await v2Provider.processIncoming(request);
-```
-
-### 配置转换支持
-
-```typescript
-import { fromV1Config } from './v2/api/index.js';
-
-// 从V1配置创建V2 Provider
-const v2Provider = fromV1Config(v1Config, dependencies);
-```
-
-## 📈 扩展性
-
-### 添加新服务类型
-
-1. 在 `service-profiles.ts` 中添加服务配置
-2. 在 `provider-types.ts` 中添加类型定义
-3. 根据需要实现特殊处理逻辑
-
-### 自定义认证方式
-
-1. 在 `auth-interface.ts` 中扩展接口
-2. 实现新的认证类
-3. 在核心Provider中注册认证工厂
-
-### 服务特定配置扩展
-
-1. 使用 `ServiceOverrides` 覆盖默认配置
-2. 通过配置档案注册扩展
-3. 实现自定义的请求/响应处理
-
----
-
-**版本**: 2.0.0 | **兼容性**: 与V1接口完全兼容 | **维护状态**: 活跃开发中 | **目录**: src/modules/pipeline/modules/provider/v2/

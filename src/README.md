@@ -100,6 +100,7 @@ routecodex start
 
 ## 最近更新
 
+- 0.81.53: iFlow OAuth 流程对齐 CLIProxyAPI，在完成 OAuth 令牌交换后自动调用用户信息接口派生并持久化 API Key，优先使用 API Key 作为上游鉴权凭证，修复 40308 秒停问题。
 - 0.41.1: 修复 Anthropic 流式工具调用事件规范。现在会按照标准事件顺序输出工具输入（tool_use），避免在 Claude Code 中出现空参数工具调用导致的错误。
 
 ## 配置

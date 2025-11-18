@@ -162,7 +162,7 @@ interface PipelineConfig {
 
 ### IFLOW Provider
 - **API地址**: https://apis.iflow.cn/v1
-- **支持模型**: deepseek-r1, kimi-k2, qwen3-coder, glm-4.5
+- **支持模型**: qwen3-coder-plus, deepseek-v3.2, glm-4.6, kimi-k2-0905
 - **API密钥**: 3个密钥支持负载均衡
 - **特点**: 多样化模型覆盖
 

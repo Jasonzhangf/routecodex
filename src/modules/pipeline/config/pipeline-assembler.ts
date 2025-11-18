@@ -262,6 +262,23 @@ export class PipelineAssembler {
       const metaForId = this.asRecord(routeMeta[id] || (pac as any).routeMeta?.[id] || {});
       const providerIdForKey = typeof metaForId.providerId === 'string' ? metaForId.providerId : undefined;
       const keyIdForPipeline = typeof metaForId.keyId === 'string' ? metaForId.keyId : undefined;
+
+      // 对内置 OAuth provider（qwen/iflow）在 provider.config 上注入 extensions.oauthProviderId，
+      // 以便 ProviderFactory.validateConfig 能选择正确的默认 OAuth 配置，而不要求在用户配置中硬编码 clientId/tokenUrl。
+      if (isOAuthAuth && providerIdForKey) {
+        const family = String(providerIdForKey).toLowerCase();
+        if (family === 'qwen' || family === 'iflow') {
+          try {
+            const ext = this.asRecord((provCfg as any).extensions || {});
+            if (!ext.oauthProviderId) {
+              (ext as any).oauthProviderId = family;
+              (provCfg as any).extensions = ext;
+            }
+          } catch {
+            // best-effort 注入，失败时保持原样，让上游校验显式报错
+          }
+        }
+      }
       // Ensure provider config carries the concrete upstream model id for this pipeline
       try {
         const upstreamModelId = typeof metaForId.modelId === 'string' ? metaForId.modelId : undefined;
@@ -286,48 +303,52 @@ export class PipelineAssembler {
         /* ignore */
       }
 
-      // 注入 providerType：
-      //  - provider.config.type 明确标记协议族（responses/anthropic/openai/...）时优先生效；
-      //  - 其次使用 provider.type 的别名映射；
-      //  - 再回退到 routeMeta.providerId（例如 'lmstudio'）；
-      //  - 对于 Responses / Anthropic 等协议型 provider，始终以协议为准，而不是家族名。
+      // 注入 providerType（协议族）：
+      //  - 若 canonical 已提供 provider.config.providerType 且属于协议族集合（openai/responses/anthropic/...），则直接信任；
+      //  - 否则才根据 provider.type / routeMeta.providerId 做最小推断，且只输出协议族，而不是 glm/qwen/iflow/lmstudio 这类家族名。
       {
-        const supported = new Set(['openai', 'glm', 'qwen', 'iflow', 'lmstudio', 'responses', 'anthropic']);
-        const alias = (s: string): string | '' => {
-          const t = (s || '').toLowerCase();
-          if (!t) return '' as any;
-          if (t.includes('openai') || t.includes('generic-openai') || t.includes('modelscope')) return 'openai';
-          if (t.includes('glm') || t.includes('bigmodel') || t.includes('zhipu')) return 'glm';
-          if (t.includes('qwen') || t.includes('dashscope') || t.includes('aliyun')) return 'qwen';
-          if (t.includes('lmstudio') || t.includes('lm-studio')) return 'lmstudio';
-          if (t.includes('iflow')) return 'iflow';
-          if (t.includes('responses')) return 'responses';
-          if (t.includes('anthropic')) return 'anthropic';
-          return '' as any;
-        };
+        const protocolFamilies = new Set(['openai', 'responses', 'anthropic', 'gemini']);
         const provCfgObj = this.asRecord(provider?.config || {});
-        const fromCfgTypeRaw = String((provCfgObj as any).type || '').toLowerCase();
-        const candCfg = alias(fromCfgTypeRaw);
-        const fromRoute = String(providerIdForKey || '').toLowerCase();
-        const fromProvider = String((provider && provider.type) || '').toLowerCase();
-        const candRoute = supported.has(fromRoute) ? fromRoute : alias(fromRoute);
-        const candProv = supported.has(fromProvider) ? fromProvider : alias(fromProvider);
-        // 协议型 provider（responses/anthropic）优先按 config.type 归类，其次按 provider.type；其余家族仍以 routeMeta 为主
-        let finalType: string | '' = '';
-        if (candCfg === 'responses' || candCfg === 'anthropic') {
-          finalType = candCfg;
-        } else if (candProv === 'responses' || candProv === 'anthropic') {
-          finalType = candProv;
+        const existing = String((provCfgObj as any).providerType || '').toLowerCase();
+        if (existing && protocolFamilies.has(existing)) {
+          (provCfg as any).providerType = existing;
         } else {
-          finalType = candRoute || candProv || candCfg;
+          const alias = (s: string): string | '' => {
+            const t = (s || '').toLowerCase();
+            if (!t) return '' as any;
+            if (t.includes('openai') || t.includes('generic-openai') || t.includes('modelscope')) return 'openai';
+            if (t.includes('responses')) return 'responses';
+            if (t.includes('anthropic')) return 'anthropic';
+            // glm/qwen/iflow/lmstudio 等家族一律归到 openai 协议族
+            if (t.includes('glm') || t.includes('zhipu') || t.includes('qwen') || t.includes('dashscope') || t.includes('aliyun') ||
+                t.includes('iflow') || t.includes('lmstudio') || t.includes('lm-studio')) {
+              return 'openai';
+            }
+            return '' as any;
+          };
+          const fromCfgTypeRaw = String((provCfgObj as any).type || '').toLowerCase();
+          const candCfg = alias(fromCfgTypeRaw);
+          const fromRoute = String(providerIdForKey || '').toLowerCase();
+          const fromProvider = String((provider && provider.type) || '').toLowerCase();
+          const candRoute = alias(fromRoute);
+          const candProv = alias(fromProvider);
+          // 协议型 provider（responses/anthropic）优先按 config.type 归类，其次按 provider.type；其余按 routeMeta/provider.type 归类
+          let finalType: string | '' = '';
+          if (candCfg === 'responses' || candCfg === 'anthropic') {
+            finalType = candCfg;
+          } else if (candProv === 'responses' || candProv === 'anthropic') {
+            finalType = candProv;
+          } else {
+            finalType = candRoute || candProv || candCfg || 'openai';
+          }
+          if (!finalType || !protocolFamilies.has(finalType)) {
+            throw new Error(
+              `PipelineAssembler(V2): unable to infer providerType (protocol family) for pipeline '${id}'. ` +
+              `routeMeta.providerId='${providerIdForKey || ''}', provider.type='${(provider && provider.type) || ''}'`
+            );
+          }
+          (provCfg as any).providerType = finalType;
         }
-        if (!finalType) {
-          throw new Error(
-            `PipelineAssembler(V2): unable to infer providerType for pipeline '${id}'. ` +
-            `routeMeta.providerId='${providerIdForKey || ''}', provider.type='${(provider && provider.type) || ''}'`
-          );
-        }
-        (provCfg as any).providerType = finalType;
       }
       if (!isOAuthAuth) {
         // First, resolve via keyMappings
@@ -364,19 +385,26 @@ export class PipelineAssembler {
 
       // Attach compatibility respecting explicit submodule types.
       // Rules:
-      // 1) If user explicitly selected a concrete submodule (e.g. 'glm', 'lmstudio-compatibility'), keep it.
-      // 2) If user selected the standard container 'compatibility' (or left empty), derive moduleType by providerType.
-      //    e.g. providerType 'glm' -> moduleType 'glm'. Otherwise fallback to 'passthrough-compatibility'.
+      // 1) 如果用户直接在 compatibility.type 上声明了具体子模块（例如 'glm' / 'passthrough'），
+      //    则将其视为子模块类型并包一层标准容器 'compatibility'。
+      //    - 对于 'passthrough'，内部统一归一为内置模块名 'passthrough-compatibility'。
+      // 2) 如果用户选择了标准容器 'compatibility'，则优先读取 config.moduleType；
+      //    若缺失或为空，则默认走 passthrough-compatibility（“不写就是 passthrough-compatibility”）。
       (() => {
         const normalizedType = compatTypeSelected.trim();
         const providerType: string = String((provCfg as any)?.providerType || '').toLowerCase();
 
         if (normalizedType && normalizedType.toLowerCase() !== 'compatibility') {
-          // Map explicit concrete module into standard container (no inference)
+          // Map explicit concrete submodule into standard container (no inference)
+          const subTypeRaw = normalizedType;
+          const subTypeLower = subTypeRaw.toLowerCase();
+          // 允许在配置中使用简写 'passthrough'，内部统一映射到内置模块 'passthrough-compatibility'
+          const moduleType = subTypeLower === 'passthrough' ? 'passthrough-compatibility' : subTypeRaw;
+
           (modBlock as any).compatibility = {
             type: 'compatibility',
             config: {
-              moduleType: normalizedType,
+              moduleType,
               moduleConfig: this.asRecord(compatCfgSelected || {}),
               providerType,
               // 透传由 config-core 生成的 direct files（若存在）供 StandardCompatibility 直载 JSON
@@ -386,12 +414,17 @@ export class PipelineAssembler {
           return;
         }
 
-        // Standard container path → require explicit moduleType
-        const moduleTypeRaw = String((compatCfgSelected as any)?.moduleType || '').trim();
-        if (!moduleTypeRaw) {
-          throw new Error(`compatibility.config.moduleType is required for container 'compatibility' (pipeline: ${id})`);
+        // Standard container path：moduleType 可选，缺省视为 passthrough-compatibility
+        let moduleType = String((compatCfgSelected as any)?.moduleType || '').trim();
+        const mtLower = moduleType.toLowerCase();
+        if (!mtLower) {
+          // 不写 moduleType → 默认 passthrough-compatibility
+          moduleType = 'passthrough-compatibility';
+        } else if (mtLower === 'passthrough') {
+          // 允许简写 'passthrough'
+          moduleType = 'passthrough-compatibility';
         }
-        const moduleType = moduleTypeRaw;
+
         const moduleConfig = this.asRecord((compatCfgSelected as any)?.moduleConfig || {});
         (modBlock as any).compatibility = {
           type: 'compatibility',
@@ -428,7 +461,11 @@ export class PipelineAssembler {
         // 未指定 llmSwitch 时，使用转换路由器
         modBlock.llmSwitch = { type: 'llmswitch-conversion-router', config: {} };
       }
-      if (workflow?.type) { modBlock.workflow = { type: workflow.type, config: workflow.config || {} }; }
+      if (workflow?.type) {
+        modBlock.workflow = { type: workflow.type, config: workflow.config || {} };
+      } else {
+        modBlock.workflow = { type: 'streaming-control', config: {} };
+      }
       // Do not infer provider module type; honor the type already provided in pipeline definition
       // (modBlock.provider already set above)
 
@@ -478,6 +515,7 @@ export class PipelineAssembler {
   }
 
   // Synthesize pipelines for ids present in routePools but missing from `pipelines`
+  // V2 禁止从 routePools 合成流水线，这里仅做显式检测并 Fail Fast，防止静默兜底。
   try {
     const poolsObj = this.asRecord((pac as any).routePools || {});
     const idsFromPools = new Set<string>();
@@ -485,16 +523,6 @@ export class PipelineAssembler {
       if (Array.isArray(arr)) arr.forEach((pid: any) => { if (typeof pid === 'string' && pid.trim()) idsFromPools.add(pid.trim()); });
     });
     const existing = new Set(pipelines.map(p => p.id));
-    const alias = (s: string): string => {
-      const t = (s || '').toLowerCase();
-      if (t.includes('openai') || t.includes('generic-openai') || t.includes('modelscope')) return 'openai';
-      if (t.includes('glm') || t.includes('bigmodel') || t.includes('zhipu')) return 'glm';
-      if (t.includes('qwen') || t.includes('dashscope') || t.includes('aliyun')) return 'qwen';
-      if (t.includes('lmstudio') || t.includes('lm-studio')) return 'lmstudio';
-      if (t.includes('iflow')) return 'iflow';
-      if (t.includes('responses')) return 'responses';
-      return 'openai';
-    };
     const parseLegacyId = (pid: string): { providerId: string; modelId: string; keyId?: string } | null => {
       // pattern1: provider.model__key   e.g. glm.glm-4.6__key1
       const m1 = pid.match(/^([^.]+)\.([^_]+)__([^_]+)$/);
@@ -571,7 +599,7 @@ export class PipelineAssembler {
       routePools = pools;
       routeMeta = meta;
     } else {
-      // Validate routePools strictly — unknown pipeline ids must be fixed in config
+      // Validate routePools strictly — unknown pipeline ids 必须在配置中修正
       const invalid: Array<{ route: string; id: string }> = [];
       for (const [routeName, ids] of Object.entries(routePools || {})) {
         for (const id of (ids || [])) {
@@ -614,7 +642,9 @@ export class PipelineAssembler {
     const manager = new PipelineManager(managerConfig, dummyErrorCenter, dummyDebugCenter);
     await manager.initialize();
 
-    // Reconcile routePools against actually initialized pipelines (strict in V2):
+    // Reconcile routePools against actually initialized pipelines：
+    //  - 若某些 pipeline 初始化失败，仅剪枝对应 routePools 引用，而不拖垮整个服务器；
+    //  - 仍然要求至少存在一条有效流水线以保证服务可用。
     try {
       const mgrAny: any = manager as any;
       const presentIds: string[] = Array.isArray(mgrAny?.getPipelineIds?.()) ? mgrAny.getPipelineIds() : [];
@@ -623,15 +653,24 @@ export class PipelineAssembler {
       }
       const present = new Set<string>(presentIds);
       const invalid: Array<{ route: string; id: string }> = [];
+      const pruned: Record<string, string[]> = {};
       for (const [route, ids] of Object.entries(routePools || {})) {
+        const kept: string[] = [];
         for (const id of (ids || [])) {
-          if (!present.has(id)) invalid.push({ route, id });
+          if (present.has(id)) {
+            kept.push(id);
+          } else {
+            invalid.push({ route, id });
+          }
         }
+        pruned[route] = kept;
       }
       if (invalid.length) {
         const list = invalid.map(x => `${x.route}:${x.id}`).join(', ');
-        throw new Error(`routePools reference pipelines not created: ${list}`);
+        // eslint-disable-next-line no-console
+        console.warn(`[PipelineAssembler] pruned pipelines not created from routePools: ${list}`);
       }
+      routePools = pruned;
     } catch (e) {
       throw e instanceof Error ? e : new Error(String(e || 'routePools validation failed'));
     }

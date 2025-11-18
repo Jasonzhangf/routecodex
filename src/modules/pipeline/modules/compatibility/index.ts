@@ -14,6 +14,8 @@ import { CompatibilityManager } from './compatibility-manager.js';
 import './glm/index.js';
 import './lmstudio/index.js';
 import './passthrough/index.js';
+import './iflow/index.js';
+import './qwen/index.js';
 
 /**
  * 兼容性模块API

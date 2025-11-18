@@ -274,16 +274,22 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
    * 处理令牌后激活（如API密钥交换）
    */
   private async handlePostTokenActivation(tokenResponse: DeviceCodeTokenResponse): Promise<UnknownObject> {
-    if (!this.config.features?.supportsApiKeyExchange) {
-      // 也补上标准字段，保证后续 validate 使用
-      const expiresAt = Date.now() + (tokenResponse.expires_in * 1000);
+    // 统一补标准过期字段，方便 validate 使用
+    const computeStandardShape = (payload: DeviceCodeTokenResponse & { apiKey?: string; api_key?: string; email?: string }): UnknownObject => {
+      const expiresAt = Date.now() + (payload.expires_in * 1000);
       return {
-        ...tokenResponse,
+        ...payload,
         expires_at: expiresAt,
         expired: new Date(expiresAt).toISOString(),
         expiry_date: expiresAt
       } as UnknownObject;
+    };
+
+    if (!this.config.features?.supportsApiKeyExchange) {
+      return computeStandardShape(tokenResponse);
     }
+
+    const enriched: DeviceCodeTokenResponse & { apiKey?: string; api_key?: string; email?: string } = { ...tokenResponse };
 
     // 尝试获取API密钥（如果有用户信息端点）
     if (this.config.endpoints.userInfoUrl && tokenResponse.access_token) {
@@ -295,8 +301,31 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
 
         if (userInfoResponse.ok) {
           const userInfo = await userInfoResponse.json();
-          if ((userInfo as any).apiKey) {
-            (tokenResponse as any).apiKey = (userInfo as any).apiKey;
+          const root: any = userInfo;
+          let apiKey: string | undefined;
+          let email: string | undefined;
+
+          if (root && typeof root.apiKey === 'string') {
+            apiKey = root.apiKey;
+          } else if (root && typeof root.data === 'object' && root.data) {
+            const data = root.data as any;
+            if (typeof data.apiKey === 'string') {
+              apiKey = data.apiKey;
+            }
+            if (typeof data.email === 'string') {
+              email = data.email;
+            } else if (typeof data.phone === 'string') {
+              email = data.phone;
+            }
+          }
+
+          if (apiKey && apiKey.trim()) {
+            enriched.apiKey = apiKey.trim();
+            // 兼容 CLIProxyAPI 的字段命名
+            enriched.api_key = apiKey.trim();
+          }
+          if (email && email.trim()) {
+            enriched.email = email.trim();
           }
         }
       } catch (error) {
@@ -304,13 +333,8 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       }
     }
 
-    // 转换为标准格式
-    const expiresAt = Date.now() + (tokenResponse.expires_in * 1000);
     return {
-      ...tokenResponse,
-      expires_at: expiresAt,
-      expired: new Date(expiresAt).toISOString(),
-      expiry_date: expiresAt
+      ...computeStandardShape(enriched)
     } as UnknownObject;
   }
 
@@ -405,8 +429,9 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
     const tokenObj = token as any;
 
     // 优先使用API密钥（如果存在）
-    if (tokenObj.apiKey && tokenObj.apiKey.trim()) {
-      return `Bearer ${tokenObj.apiKey}`;
+    const apiKey = (tokenObj.apiKey || tokenObj.api_key || '').trim();
+    if (apiKey) {
+      return `Bearer ${apiKey}`;
     }
 
     const tokenType = tokenObj.token_type || 'Bearer';

@@ -39,7 +39,7 @@ if [ ! -d "${PKG_DIR}" ]; then
   exit 1
 fi
 
-# 为 release rcc 包优先内嵌本地 llmswitch-core tgz（独立核心仓库标准构建产物）
+# 为 release rcc 包优先内嵌本地 llmswitch-core / config-core tgz（独立核心仓库标准构建产物）
 CORE_REL_ROOT=""
 CORE_REL_PATH=""
 CORE_VERSION=$(node -p "require('./sharedmodule/llmswitch-core/package.json').version" 2>/dev/null || echo "")
@@ -60,8 +60,24 @@ if [ -n "${CORE_VERSION}" ]; then
   fi
 fi
 
+# config-core: 采用本地 tgz 内嵌方式，避免在全局环境下依赖仓库相对路径
+CONFIG_CORE_REL_PATH=""
+CONFIG_CORE_VERSION=$(node -p "require('../../github/sharedmodule/config-core/package.json').version" 2>/dev/null || echo "")
+if [ -n "${CONFIG_CORE_VERSION}" ]; then
+  CFG_SRC_TGZ="../../github/sharedmodule/config-core/rcc-config-core-${CONFIG_CORE_VERSION}.tgz"
+  CFG_DST_TGZ="${PKG_DIR}/rcc-config-core-${CONFIG_CORE_VERSION}.tgz"
+  if [ -f "${CFG_SRC_TGZ}" ]; then
+    echo "📦 使用本地 rcc-config-core tgz: ${CFG_SRC_TGZ}，打包到 release 中..."
+    cp "${CFG_SRC_TGZ}" "${CFG_DST_TGZ}"
+    CONFIG_CORE_REL_PATH="rcc-config-core-${CONFIG_CORE_VERSION}.tgz"
+  else
+    echo "⚠️  未找到本地 rcc-config-core tgz (${CFG_SRC_TGZ})，release 将依赖 npm registry 中 rcc-config-core@${CONFIG_CORE_VERSION}"
+    CONFIG_CORE_REL_PATH=""
+  fi
+fi
+
 echo "🛠️  重写临时包为 rcc (release)..."
-CORE_REL_ROOT="${CORE_REL_ROOT}" CORE_REL_PATH="${CORE_REL_PATH}" node - <<'EOF' "${PKG_DIR}"
+CORE_REL_ROOT="${CORE_REL_ROOT}" CORE_REL_PATH="${CORE_REL_PATH}" CONFIG_CORE_REL_PATH="${CONFIG_CORE_REL_PATH}" node - <<'EOF' "${PKG_DIR}"
 const fs = require('fs');
 const path = require('path');
 const pkgDir = process.argv[2];
@@ -83,6 +99,17 @@ if (Array.isArray(pkg.files) && coreRelRoot) {
   const rootEntry = coreRelRoot.endsWith('/') ? coreRelRoot : coreRelRoot + '/';
   if (!pkg.files.includes(rootEntry)) {
     pkg.files.push(rootEntry);
+  }
+}
+
+// 对于 rcc-config-core，release 包中不再保留指向本地仓库的 file: ../../github/... 路径，
+// 而是改为引用当前包内嵌的 tgz（如存在）；否则仍保留原始声明交由 npm 自行解析。
+const cfgCoreRelPath = process.env.CONFIG_CORE_REL_PATH;
+if (cfgCoreRelPath) {
+  if (!pkg.dependencies) pkg.dependencies = {};
+  pkg.dependencies['rcc-config-core'] = `file:${cfgCoreRelPath}`;
+  if (Array.isArray(pkg.files) && !pkg.files.includes(cfgCoreRelPath)) {
+    pkg.files.push(cfgCoreRelPath);
   }
 }
 

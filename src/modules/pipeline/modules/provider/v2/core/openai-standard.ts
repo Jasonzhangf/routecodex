@@ -62,19 +62,26 @@ export class OpenAIStandard extends BaseProvider {
       if (this.authProvider && typeof (this.authProvider as any).initialize === 'function') {
         await (this.authProvider as any).initialize();
         try {
-          const auth: any = (this.config as any)?.config?.auth;
+          const cfgAny: any = (this.config as any) ?? {};
+          const auth: any = cfgAny?.config?.auth;
           if (auth && auth.type === 'oauth') {
+            const extensions = (cfgAny.config && typeof cfgAny.config.extensions === 'object')
+              ? (cfgAny.config.extensions as any)
+              : {};
+            const oauthProviderId: string = typeof extensions.oauthProviderId === 'string' && extensions.oauthProviderId.trim()
+              ? String(extensions.oauthProviderId).trim()
+              : this.providerType;
             const forceReauthorize = false; // 初始化阶段：读取→必要时刷新；不强制重授权
             const tokenFileHint = (auth as any)?.tokenFile || '(default)';
             // 明确打印初始化 OAuth 日志（不依赖 Hook 系统）
-            console.log(`[OAuth] [init] provider=${this.providerType} type=${auth.type} tokenFile=${tokenFileHint} forceReauth=${forceReauthorize}`);
+            console.log(`[OAuth] [init] provider=${oauthProviderId} type=${auth.type} tokenFile=${tokenFileHint} forceReauth=${forceReauthorize}`);
             this.dependencies.logger?.logModule?.(this.id, 'oauth-init-start', {
-              providerType: this.providerType,
+              providerType: oauthProviderId,
               tokenFile: tokenFileHint,
               forceReauthorize
             });
             try {
-              await ensureValidOAuthToken(this.providerType, auth as any, {
+              await ensureValidOAuthToken(oauthProviderId, auth as any, {
                 forceReacquireIfRefreshFails: true,
                 openBrowser: true,
                 forceReauthorize
@@ -89,7 +96,7 @@ export class OpenAIStandard extends BaseProvider {
                 }
               } catch { /* ignore */ }
               this.dependencies.logger?.logModule?.(this.id, 'oauth-init-success', {
-                providerType: this.providerType
+                providerType: oauthProviderId
               });
             } catch (e: any) {
               const msg = e?.message ? String(e.message) : String(e || 'unknown error');
@@ -223,10 +230,125 @@ export class OpenAIStandard extends BaseProvider {
   }
 
   protected getServiceProfile(): ServiceProfile {
-    const profile = DynamicProfileLoader.buildServiceProfile(this.providerType);
-    if (profile) {
-      return profile;
+    const cfg: any = (this.config as any)?.config || {};
+
+    // Feature flag: 优先/强制使用 config-core 输出的 provider 行为字段
+    const useConfigCoreEnv = String(
+      process.env.ROUTECODEX_USE_CONFIG_CORE_PROVIDER_DEFAULTS ||
+      process.env.RCC_USE_CONFIG_CORE_PROVIDER_DEFAULTS ||
+      ''
+    ).trim().toLowerCase();
+    const forceConfigCoreDefaults =
+      useConfigCoreEnv === '1' ||
+      useConfigCoreEnv === 'true' ||
+      useConfigCoreEnv === 'yes' ||
+      useConfigCoreEnv === 'on';
+
+    const baseFromCfg = (cfg.baseUrl || cfg.overrides?.baseUrl || '').trim();
+    const endpointFromCfg = (cfg.overrides?.endpoint || cfg.endpoint || '').trim();
+    const defaultModelFromCfg = (cfg.overrides?.defaultModel || cfg.defaultModel || '').trim();
+    const timeoutFromCfg = cfg.overrides?.timeout ?? cfg.timeout;
+    const maxRetriesFromCfg = cfg.overrides?.maxRetries ?? cfg.maxRetries;
+    const headersFromCfg = (cfg.overrides?.headers || cfg.headers) as Record<string, string> | undefined;
+    const authCapsFromCfg = (cfg as any).authCapabilities as
+      | { required?: string[]; optional?: string[] }
+      | undefined;
+
+    const hasConfigCoreProfile =
+      !!baseFromCfg ||
+      !!endpointFromCfg ||
+      !!defaultModelFromCfg ||
+      typeof timeoutFromCfg === 'number' ||
+      typeof maxRetriesFromCfg === 'number' ||
+      !!authCapsFromCfg ||
+      !!headersFromCfg;
+
+    // 先从 service-profiles 取出基础 profile（用于补全缺失字段/校验）
+    const baseProfile = DynamicProfileLoader.buildServiceProfile(this.providerType);
+
+    // 如果 config-core 已提供字段，或强制要求使用 config-core，则以 config-core 为主
+    if (hasConfigCoreProfile || forceConfigCoreDefaults) {
+      if (forceConfigCoreDefaults) {
+        // 严格模式下，关键字段缺失直接 Fail Fast
+        if (!baseFromCfg) {
+          throw new Error(
+            `Provider config-core defaults missing baseUrl for providerType=${this.providerType}`
+          );
+        }
+        if (!endpointFromCfg && !baseProfile?.defaultEndpoint) {
+          throw new Error(
+            `Provider config-core defaults missing endpoint for providerType=${this.providerType}`
+          );
+        }
+      }
+
+      const defaultBaseUrl =
+        baseFromCfg ||
+        baseProfile?.defaultBaseUrl ||
+        'https://api.openai.com/v1';
+
+      const defaultEndpoint =
+        endpointFromCfg ||
+        baseProfile?.defaultEndpoint ||
+        '/chat/completions';
+
+      const defaultModel =
+        (defaultModelFromCfg && defaultModelFromCfg.length > 0)
+          ? defaultModelFromCfg
+          : (baseProfile?.defaultModel ?? '');
+
+      const genericRequiredAuth: string[] = [];
+      const genericOptionalAuth: string[] = ['apikey', 'oauth'];
+
+      const requiredAuth =
+        authCapsFromCfg?.required && authCapsFromCfg.required.length
+          ? authCapsFromCfg.required
+          : (baseProfile?.requiredAuth ?? genericRequiredAuth);
+
+      const optionalAuth =
+        authCapsFromCfg?.optional && authCapsFromCfg.optional.length
+          ? authCapsFromCfg.optional
+          : (baseProfile?.optionalAuth ?? genericOptionalAuth);
+
+      const mergedHeaders: Record<string, string> = {
+        ...(baseProfile?.headers || {}),
+        ...(headersFromCfg || {})
+      };
+
+      const timeout =
+        typeof timeoutFromCfg === 'number'
+          ? timeoutFromCfg
+          : (baseProfile?.timeout ?? 300000);
+
+      const maxRetries =
+        typeof maxRetriesFromCfg === 'number'
+          ? maxRetriesFromCfg
+          : (baseProfile?.maxRetries ?? 3);
+
+      return {
+        defaultBaseUrl,
+        defaultEndpoint,
+        defaultModel,
+        requiredAuth,
+        optionalAuth,
+        headers: mergedHeaders,
+        timeout,
+        maxRetries,
+        hooks: baseProfile?.hooks,
+        features: baseProfile?.features,
+        extensions: {
+          ...(baseProfile?.extensions || {}),
+          // 透传 config-core 的协议信息，方便调试
+          protocol: (cfg as any).protocol || (baseProfile?.extensions as any)?.protocol
+        }
+      };
     }
+
+    // 未提供 config-core provider 行为字段时，保持原有 service-profiles 行为
+    if (baseProfile) {
+      return baseProfile;
+    }
+
     // 未注册的 providerType：构造一个通用的 OpenAI 兼容配置，
     // 仅依赖显式提供的 baseUrl / model / auth；不注入任何模型回退。
     const baseUrl = (this.config.config.baseUrl || '').trim();
@@ -247,16 +369,25 @@ export class OpenAIStandard extends BaseProvider {
 
   protected createAuthProvider(): IAuthProvider {
     const auth = this.config.config.auth;
+    const cfgAny: any = (this.config as any) ?? {};
+    const extensions = (cfgAny.config && typeof cfgAny.config.extensions === 'object')
+      ? (cfgAny.config.extensions as any)
+      : {};
+    // 对于 OAuth，优先使用扩展中的 oauthProviderId（iflow/qwen 等家族），否则退回协议族 providerType
+    const providerIdForAuth =
+      auth.type === 'oauth' && typeof extensions.oauthProviderId === 'string' && extensions.oauthProviderId.trim()
+        ? String(extensions.oauthProviderId).trim()
+        : this.providerType;
 
-    // 验证认证配置
+    // 验证认证配置（按 providerIdForAuth 选择服务档案）
     const validation = ServiceProfileValidator.validateServiceProfile(
-      this.providerType,
+      providerIdForAuth,
       auth.type
     );
 
     if (!validation.isValid) {
       throw new Error(
-        `Invalid auth configuration for ${this.providerType}: ${validation.errors.join(', ')}`
+        `Invalid auth configuration for ${providerIdForAuth}: ${validation.errors.join(', ')}`
       );
     }
 
@@ -266,11 +397,15 @@ export class OpenAIStandard extends BaseProvider {
     } else if (auth.type === 'oauth') {
       // For providers like Qwen where public OAuth client may not be available,
       // allow reading tokens produced by external login tools (CLIProxyAPI)
-      const useTokenFile = this.providerType === 'qwen' && !(auth as any).clientId && !(auth as any).tokenUrl && !(auth as any).deviceCodeUrl;
+      const useTokenFile =
+        (providerIdForAuth === 'qwen' || providerIdForAuth === 'iflow') &&
+        !(auth as any).clientId &&
+        !(auth as any).tokenUrl &&
+        !(auth as any).deviceCodeUrl;
       if (useTokenFile) {
         return new TokenFileAuthProvider(auth);
       }
-      return new OAuthAuthProvider(auth, this.providerType);
+      return new OAuthAuthProvider(auth, providerIdForAuth);
     } else {
       throw new Error(`Unsupported auth type: ${(auth as any).type}`);
     }
@@ -646,11 +781,18 @@ export class OpenAIStandard extends BaseProvider {
 
     // OAuth：请求前确保令牌有效（提前刷新）
     try {
-      const auth: any = (this.config as any)?.config?.auth;
+      const cfgAny: any = (this.config as any) ?? {};
+      const auth: any = cfgAny?.config?.auth;
       if (auth && auth.type === 'oauth') {
+        const extensions = (cfgAny.config && typeof cfgAny.config.extensions === 'object')
+          ? (cfgAny.config.extensions as any)
+          : {};
+        const oauthProviderId: string = typeof extensions.oauthProviderId === 'string' && extensions.oauthProviderId.trim()
+          ? String(extensions.oauthProviderId).trim()
+          : this.providerType;
         console.log('[OAuth] [headers] ensureValid start (openBrowser=true, forceReauth=false)');
         try {
-          await ensureValidOAuthToken(this.providerType, auth as any, {
+          await ensureValidOAuthToken(oauthProviderId, auth as any, {
             forceReacquireIfRefreshFails: true,
             openBrowser: true,
             forceReauthorize: false

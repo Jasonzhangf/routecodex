@@ -58,20 +58,21 @@ function registerProviderOAuthConfigs(): void {
     }
   });
 
-  // iFlow OAuth配置 - 对齐官方CLI习惯，默认使用设备码流程
+  // iFlow OAuth配置 - 对齐CLIProxyAPI和官方CLI，使用标准OAuth端点
   OAuthFlowConfigManager.registerDefaultConfig('iflow', {
     flowType: OAuthFlowType.DEVICE_CODE,
     activationType: OAuthActivationType.AUTO_BROWSER,
     endpoints: {
-      // 对齐 iflow CLI：使用 /api/oauth2 前缀端点
-      deviceCodeUrl: 'https://iflow.cn/api/oauth2/device/code',
-      tokenUrl: 'https://iflow.cn/api/oauth2/token',
+      // 对齐CLIProxyAPI：使用标准OAuth端点，移除/api/oauth2/前缀
+      deviceCodeUrl: 'https://iflow.cn/oauth/device/code',
+      tokenUrl: 'https://iflow.cn/oauth/token',
       authorizationUrl: 'https://iflow.cn/oauth',
       userInfoUrl: 'https://iflow.cn/api/oauth/getUserInfo'
     },
     client: {
-      // 对齐老版本与你提供页面示例
+      // 对齐CLIProxyAPI：使用官方客户端ID和密钥
       clientId: '10009311001',
+      clientSecret: '4Z3YjXycVsQvyGF1etiNlIBB4RsqSDtW',
       scopes: ['openid', 'profile', 'email', 'api'],
       redirectUri: `${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.LOCALHOST}:${DEFAULT_CONFIG.OAUTH_CALLBACK_PORT}${API_PATHS.OAUTH_CALLBACK}`
     },
@@ -99,17 +100,20 @@ function registerProviderOAuthConfigs(): void {
     }
   });
 
-  // iFlow OAuth设备码配置（备用）
+  // iFlow OAuth设备码配置（备用）- 对齐CLIProxyAPI
   OAuthFlowConfigManager.registerDefaultConfig('iflow-device', {
     flowType: OAuthFlowType.DEVICE_CODE,
     activationType: OAuthActivationType.AUTO_BROWSER,
     endpoints: {
-      deviceCodeUrl: 'https://iflow.cn/api/oauth2/device/code',
-      tokenUrl: 'https://iflow.cn/api/oauth2/token',
+      // 使用标准OAuth端点，与CLIProxyAPI一致
+      deviceCodeUrl: 'https://iflow.cn/oauth/device/code',
+      tokenUrl: 'https://iflow.cn/oauth/token',
       userInfoUrl: 'https://iflow.cn/api/oauth/getUserInfo'
     },
     client: {
-      clientId: 'iflow-desktop-client',
+      // 使用与主配置相同的客户端凭据
+      clientId: '10009311001',
+      clientSecret: '4Z3YjXycVsQvyGF1etiNlIBB4RsqSDtW',
       scopes: ['openid', 'profile', 'email', 'api']
     },
     headers: {

@@ -377,8 +377,31 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
 
         if (userInfoResponse.ok) {
           const userInfo = await userInfoResponse.json();
-          if ((userInfo as any).apiKey) {
-            (tokenResponse as any).apiKey = (userInfo as any).apiKey;
+          const root: any = userInfo;
+          let apiKey: string | undefined;
+          let email: string | undefined;
+
+          if (root && typeof root.apiKey === 'string') {
+            apiKey = root.apiKey;
+          } else if (root && typeof root.data === 'object' && root.data) {
+            const data = root.data as any;
+            if (typeof data.apiKey === 'string') {
+              apiKey = data.apiKey;
+            }
+            if (typeof data.email === 'string') {
+              email = data.email;
+            } else if (typeof data.phone === 'string') {
+              email = data.phone;
+            }
+          }
+
+          if (apiKey && apiKey.trim()) {
+            (tokenResponse as any).apiKey = apiKey.trim();
+            // 兼容 CLIProxyAPI 的字段命名
+            (tokenResponse as any).api_key = apiKey.trim();
+          }
+          if (email && email.trim()) {
+            (tokenResponse as any).email = email.trim();
           }
         }
       } catch (error) {
@@ -486,8 +509,9 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     const tokenObj = token as any;
 
     // 优先使用API密钥（如果存在）
-    if (tokenObj.apiKey && tokenObj.apiKey.trim()) {
-      return `Bearer ${tokenObj.apiKey}`;
+    const apiKey = (tokenObj.apiKey || tokenObj.api_key || '').trim();
+    if (apiKey) {
+      return `Bearer ${apiKey}`;
     }
 
     const tokenType = tokenObj.token_type || 'Bearer';

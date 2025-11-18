@@ -1000,30 +1000,14 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('field-mapping', this.createFieldMappingModule);
     // Standard V2 compatibility wrapper (single entry)
     this.registry.registerModule('compatibility', this.createStandardCompatibilityModule);
-    this.registry.registerModule('iflow-provider', this.createIFlowProviderModule);
-    this.registry.registerModule('glm-http-provider', this.createGLMHTTPProviderModule);
-    this.registry.registerModule('generic-openai-provider', this.createGenericOpenAIProviderModule);
-    this.registry.registerModule('qwen-provider', this.createQwenProviderModule);
-    // Add alias for configuration compatibility
-    this.registry.registerModule('qwen', this.createQwenProviderModule);
-    // Provider family aliases → concrete provider modules (V2)
-    this.registry.registerModule('glm', this.createGLMHTTPProviderModule);
+    // Provider V2: HTTP-only families（按协议族拆分）
+    this.registry.registerModule('openai-http-provider', this.createOpenAIProviderModule);
+    this.registry.registerModule('responses-http-provider', this.createOpenAIProviderModule);
+    this.registry.registerModule('anthropic-http-provider', this.createOpenAIProviderModule);
+    // Family aliases → 归一到 V2 Provider 工厂（兼容现有 pipeline_assembler 输出）
     this.registry.registerModule('openai', this.createOpenAIProviderModule);
-    // Responses provider (real SSE passthrough) → uses ProviderFactory to build ResponsesProvider
     this.registry.registerModule('responses', this.createOpenAIProviderModule);
-    // Anthropic Messages provider family（标准 /v1/messages wire）
     this.registry.registerModule('anthropic', this.createOpenAIProviderModule);
-    this.registry.registerModule('lmstudio', this.createLMStudioHTTPModule);
-    this.registry.registerModule('iflow', this.createIFlowProviderModule);
-    this.registry.registerModule('generic_responses', this.createGenericResponsesProviderModule);
-    this.registry.registerModule('generic-http', this.createGenericHTTPModule);
-    this.registry.registerModule('lmstudio-http', this.createLMStudioHTTPModule);
-    this.registry.registerModule('openai-provider', this.createOpenAIProviderModule);
-    this.registry.registerModule('generic-responses', this.createGenericResponsesProviderModule);
-
-    // Register LM Studio module factories
-    // Remove legacy compatibility module registrations: only use standard wrapper
-    
 
     this.logger.logPipeline('manager', 'module-registry-initialized', {
       moduleTypes: this.registry.getAvailableTypes(),
@@ -1236,71 +1220,6 @@ export class PipelineManager implements RCCBaseModule {
     return new StandardCompatibility(config, dependencies);
   };
 
-  private createQwenCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { QwenCompatibility } = await import('../modules/compatibility/qwen-compatibility.js');
-    return new QwenCompatibility(config, dependencies);
-  };
-
-  private createQwenProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
-    const v2Config = this.toV2ProviderConfig(config);
-    const validation = ProviderFactory.validateConfig(v2Config);
-    if (!validation.isValid) {
-      throw new Error(`Invalid V2 Qwen provider configuration: ${validation.errors.join(', ')}`);
-    }
-    return ProviderFactory.createProvider(v2Config, dependencies);
-  };
-
-  private createIFlowProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
-    const v2Config = this.toV2ProviderConfig(config);
-    const validation = ProviderFactory.validateConfig(v2Config);
-    if (!validation.isValid) {
-      throw new Error(`Invalid V2 iFlow provider configuration: ${validation.errors.join(', ')}`);
-    }
-    return ProviderFactory.createProvider(v2Config, dependencies);
-  };
-
-  private createGLMHTTPProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
-    const v2Config = this.toV2ProviderConfig(config);
-    const validation = ProviderFactory.validateConfig(v2Config);
-    if (!validation.isValid) {
-      throw new Error(`Invalid V2 GLM provider configuration: ${validation.errors.join(', ')}`);
-    }
-    return ProviderFactory.createProvider(v2Config, dependencies);
-  };
-
-  private createGenericOpenAIProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
-    const v2Config = this.toV2ProviderConfig(config);
-    const validation = ProviderFactory.validateConfig(v2Config);
-    if (!validation.isValid) {
-      throw new Error(`Invalid V2 Generic OpenAI provider configuration: ${validation.errors.join(', ')}`);
-    }
-    return ProviderFactory.createProvider(v2Config, dependencies);
-  };
-
-  private createGenericHTTPModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
-    const v2Config = this.toV2ProviderConfig(config);
-    const validation = ProviderFactory.validateConfig(v2Config);
-    if (!validation.isValid) {
-      throw new Error(`Invalid V2 generic HTTP provider configuration: ${validation.errors.join(', ')}`);
-    }
-    return ProviderFactory.createProvider(v2Config, dependencies);
-  };
-
-  private createLMStudioHTTPModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
-    const v2Config = this.toV2ProviderConfig(config);
-    const validation = ProviderFactory.validateConfig(v2Config);
-    if (!validation.isValid) {
-      throw new Error(`Invalid V2 LMStudio provider configuration: ${validation.errors.join(', ')}`);
-    }
-    return ProviderFactory.createProvider(v2Config, dependencies);
-  };
-
   private createOpenAIProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
     const v2Config = this.toV2ProviderConfig(config);
@@ -1311,22 +1230,22 @@ export class PipelineManager implements RCCBaseModule {
     return ProviderFactory.createProvider(v2Config, dependencies);
   };
 
-  private createGenericResponsesProviderModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { ProviderFactory } = await import('../modules/provider/v2/core/provider-factory.js');
-    const v2Config = this.toV2ProviderConfig(config);
-    const validation = ProviderFactory.validateConfig(v2Config);
-    if (!validation.isValid) {
-      throw new Error(`Invalid V2 generic responses provider configuration: ${validation.errors.join(', ')}`);
-    }
-    return ProviderFactory.createProvider(v2Config, dependencies);
-  };
-
   /**
    * 将组装后的 ModuleConfig 直接转换为 V2 OpenAIStandardConfig（不再走 V1 兼容路径）。
    * 严格要求 provider.config.providerType 存在；不做推测与回退。
    */
   private toV2ProviderConfig(config: ModuleConfig): import('../modules/provider/v2/api/provider-config.js').OpenAIStandardConfig {
     const cfg = (config?.config || {}) as Record<string, unknown>;
+    const moduleType = typeof config.type === 'string' ? config.type.trim() : 'openai-standard';
+
+    // 新的 HTTP Provider 模块类型（按协议族拆分），其余路径仍走 openai-standard 统一实现
+    const v2Type: import('../modules/provider/v2/api/provider-config.js').OpenAIStandardConfig['type'] =
+      moduleType === 'openai-http-provider' ||
+      moduleType === 'responses-http-provider' ||
+      moduleType === 'anthropic-http-provider'
+        ? (moduleType as any)
+        : 'openai-standard';
+
     const providerType = typeof cfg['providerType'] === 'string' ? (cfg['providerType'] as string).trim() : '';
     if (!providerType) {
       throw new Error(`Missing required field: provider.config.providerType for module type '${config.type}'`);
@@ -1342,22 +1261,29 @@ export class PipelineManager implements RCCBaseModule {
     const timeout = (cfg['timeout'] as number) || undefined;
     const maxRetries = (cfg['maxRetries'] as number) || undefined;
     const headers = (cfg['headers'] as Record<string, string>) || undefined;
+    const authCapabilities = (cfg['authCapabilities'] as { required?: string[]; optional?: string[] }) || undefined;
     const model = typeof cfg['model'] === 'string' ? (cfg['model'] as string) : undefined;
+    const defaultModel = typeof cfg['defaultModel'] === 'string' ? (cfg['defaultModel'] as string) : undefined;
 
     const overrides: Record<string, unknown> = {};
     if (endpoint) overrides['endpoint'] = endpoint;
     if (typeof timeout === 'number') overrides['timeout'] = timeout;
     if (typeof maxRetries === 'number') overrides['maxRetries'] = maxRetries;
     if (headers && Object.keys(headers).length) overrides['headers'] = headers;
+    if (defaultModel) overrides['defaultModel'] = defaultModel;
+
+    const extensions = (cfg['extensions'] as Record<string, unknown>) || undefined;
 
     const v2: any = {
-      type: 'openai-standard',
+      type: v2Type,
       config: {
         providerType,
         auth,
         ...(baseUrl ? { baseUrl } : {}),
         ...(model ? { model } : {}),
-        ...(Object.keys(overrides).length ? { overrides } : {})
+        ...(Object.keys(overrides).length ? { overrides } : {}),
+        ...(authCapabilities ? { authCapabilities } : {}),
+        ...(extensions ? { extensions } : {})
       }
     };
     return v2;

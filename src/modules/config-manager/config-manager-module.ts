@@ -195,11 +195,42 @@ export class ConfigManagerModule extends BaseModule {
                   : '');
           if (!provId) continue;
 
-          const auth = providerAuthMap[provId];
-          if (auth) {
-            cfg.auth = auth;
-            providerModule.config = cfg;
+          const rawAuth = providerAuthMap[provId] as any;
+          if (!rawAuth || typeof rawAuth !== 'object' || !('type' in rawAuth)) continue;
+
+          const rawType = String(rawAuth.type || '').toLowerCase();
+          // 将高层别名类型（iflow-oauth / qwen-oauth）归一为标准 OAuthAuth，
+          // 并附带 providerId 以便 OAuth 流程选择正确的默认配置。
+          if (rawType === 'iflow-oauth' || rawType === 'qwen-oauth') {
+            const family = rawType === 'iflow-oauth' ? 'iflow' : 'qwen';
+            const tfRaw = typeof rawAuth.tokenFile === 'string' && rawAuth.tokenFile.trim()
+              ? rawAuth.tokenFile.trim()
+              : (family === 'iflow'
+                  ? path.join(homedir(), '.routecodex', 'auth', 'iflow-oauth.json')
+                  : path.join(homedir(), '.routecodex', 'auth', 'qwen-oauth.json'));
+            const scopes = Array.isArray(rawAuth.scopes) ? rawAuth.scopes : undefined;
+            const clientId = typeof rawAuth.clientId === 'string' && rawAuth.clientId.trim()
+              ? rawAuth.clientId.trim()
+              : undefined;
+
+            (cfg as any).auth = {
+              type: 'oauth',
+              clientId,
+              // 其余端点/headers 由 provider-oauth-configs 的默认表提供；这里仅允许显式覆盖
+              ...(typeof rawAuth.tokenUrl === 'string' && rawAuth.tokenUrl.trim() ? { tokenUrl: rawAuth.tokenUrl.trim() } : {}),
+              ...(typeof rawAuth.deviceCodeUrl === 'string' && rawAuth.deviceCodeUrl.trim() ? { deviceCodeUrl: rawAuth.deviceCodeUrl.trim() } : {}),
+              ...(typeof rawAuth.userInfoUrl === 'string' && rawAuth.userInfoUrl.trim() ? { userInfoUrl: rawAuth.userInfoUrl.trim() } : {}),
+              ...(scopes ? { scopes } : {}),
+              tokenFile: tfRaw
+            };
+            // 为 OAuth 注入专用 providerId，避免与 protocol family 混淆
+            const ext = (cfg as any).extensions || {};
+            ext.oauthProviderId = family;
+            (cfg as any).extensions = ext;
+          } else {
+            (cfg as any).auth = rawAuth;
           }
+          providerModule.config = cfg;
         }
       }
     } catch { /* non-fatal auth injection */ }

@@ -97,12 +97,12 @@ src/modules/pipeline/
 │   ├── compatibility/                # Compatibility实现
 │   │   ├── field-mapping.ts          # 字段映射实现
 │   │   └── lmstudio-compatibility.ts  # LM Studio兼容性处理
-│   └── providers/                    # Provider实现
-│       ├── base-provider.ts          # 基础Provider类
-│       ├── qwen-http-provider.ts     # Qwen HTTP Provider
-│       ├── lmstudio-provider.ts      # LM Studio Provider
-│       ├── generic-http-provider.ts   # 通用HTTP Provider
-│       └── openai-provider.ts        # OpenAI Provider
+│   └── providers/                    # Provider实现（V2 HTTP家族）
+│       ├── base-provider.ts              # 基础Provider类
+│       ├── openai-standard.ts           # 统一实现基类（内部使用）
+│       ├── openai-http-provider.ts      # OpenAI Chat HTTP Provider
+│       ├── responses-http-provider.ts   # OpenAI Responses HTTP Provider
+│       └── anthropic-http-provider.ts   # Anthropic Messages HTTP Provider
 ├── types/                            # 类型定义
 │   ├── pipeline-types.ts             # 流水线类型
 │   ├── transformation-types.ts       # 转换类型
@@ -126,13 +126,13 @@ src/modules/pipeline/
   LLMSwitch(OpenAI→OpenAI规范化) +
   Workflow(流控) +
   Compatibility(Qwen适配) +
-  Provider(Qwen实现)
+  Provider(HTTP家族: openai-http-provider)
 
 源协议: OpenAI + 目标Provider: LM Studio =
   LLMSwitch(OpenAI→OpenAI规范化) +
   Workflow(流控) +
   Compatibility(LM Studio Tools API适配) +
-  Provider(LM Studio实现)
+  Provider(HTTP家族: openai-http-provider)
 ```
 
 ### 模块层次 (原则7: 功能分离 & 原则2: 最小兼容层)
@@ -195,127 +195,14 @@ const pipeline = pipelineManager.selectPipeline({
 const response = await pipeline.processRequest(request);
 ```
 
-### LM Studio集成示例
+> 提示：旧文档中的 `lmstudio-http` / `qwen-provider` / `openai-provider` 等 Provider 模块类型已经废弃。  
+> 现在所有 Provider 只通过 config-core 生成的 `pipeline_assembler.config.pipelines[].modules.provider` 中的类型：
+> - `openai-http-provider`
+> - `responses-http-provider`
+> - `anthropic-http-provider`
 
-LM Studio集成支持Tools API和完整的工具调用功能：
-
-```typescript
-// 创建LM Studio流水线
-const lmStudioPipeline = {
-  id: 'lmstudio.llama2-7b-chat',
-  provider: {
-    type: 'lmstudio',
-    baseUrl: 'http://localhost:1234',
-    protocol: 'openai',
-    compatibility: {
-      enabled: true,
-      toolsApi: true,
-      requestMappings: [
-        {
-          sourcePath: 'tools',
-          targetPath: 'tools',
-          transform: 'lmstudio-tools'
-        },
-        {
-          sourcePath: 'model',
-          targetPath: 'model',
-          transform: 'mapping',
-          mapping: {
-            'gpt-4': 'llama2-7b-chat',
-            'gpt-3.5-turbo': 'llama2-7b-chat'
-          }
-        }
-      ]
-    },
-    config: {
-      baseUrl: 'http://localhost:1234',
-      auth: {
-        type: 'apikey',
-        apiKey: '${LM_STUDIO_API_KEY}'
-      },
-      models: {
-        'llama2-7b-chat': {
-          maxTokens: 4096,
-          temperature: 0.7,
-          toolsEnabled: true
-        }
-      }
-    }
-  },
-  modules: {
-    llmSwitch: { type: 'llmswitch-openai-openai' },
-    workflow: { type: 'streaming-control' },
-    compatibility: { type: 'lmstudio-compatibility' },
-    provider: { type: 'lmstudio-http' }
-  }
-};
-
-// 使用工具调用
-const toolCallRequest = {
-  messages: [
-    { role: 'user', content: 'What is the weather in Beijing?' }
-  ],
-  tools: [
-    {
-      type: 'function',
-      function: {
-        name: 'get_weather',
-        description: 'Get weather information for a location',
-        parameters: {
-          type: 'object',
-          properties: {
-            location: {
-              type: 'string',
-              description: 'The city and state, e.g. San Francisco, CA'
-            }
-          },
-          required: ['location']
-        }
-      }
-    }
-  ]
-};
-
-const response = await pipeline.processRequest(toolCallRequest);
-```
-
-### Provider配置示例
-
-```typescript
-const qwenProviderConfig = {
-  id: 'qwen-provider',
-  type: 'qwen',
-  protocol: 'openai',
-  compatibility: {
-    enabled: true,
-    requestMappings: [
-      {
-        sourcePath: 'model',
-        targetPath: 'model',
-        transform: 'mapping',
-        mapping: {
-          'gpt-4': 'qwen3-coder-plus',
-          'gpt-3.5-turbo': 'qwen3-coder'
-        }
-      }
-    ],
-    responseMappings: [
-      {
-        sourcePath: 'usage.prompt_tokens',
-        targetPath: 'usage.prompt_tokens',
-        transform: 'direct'
-      }
-    ]
-  },
-  config: {
-    baseUrl: 'https://portal.qwen.ai/v1',
-    auth: {
-      type: 'apikey',
-      apiKey: '${QWEN_API_KEY}'
-    }
-  }
-};
-```
+Provider 的“名字”（例如 `glm` / `qwen` / `lmstudio`）只作为 `providerId` 出现在 config-core 的 canonical / merged-config 中，  
+协议族和行为（baseUrl/endpoint/defaultModel/timeout/headers/authCapabilities）完全由 config-core 决定。
 
 ## 配置选项
 

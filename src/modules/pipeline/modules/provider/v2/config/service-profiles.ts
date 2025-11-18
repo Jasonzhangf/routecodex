@@ -101,8 +101,9 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
   },
 
   iflow: {
+    // 对齐最新 iflow API：apis.iflow.cn/v1
     // 避免 baseUrl 已含 /v1 时 endpoint 再次携带 /v1 导致 /v1/v1 重复
-    defaultBaseUrl: 'https://api.iflow.ai/v1',
+    defaultBaseUrl: 'https://apis.iflow.cn/v1',
     defaultEndpoint: '/chat/completions',
     defaultModel: 'kimi',
     requiredAuth: ['oauth'],
@@ -123,7 +124,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     headers: {
       'Content-Type': 'application/json'
     },
-    timeout: 300000,
+    // LM Studio 默认请求超时时间：500s（与长上下文/本地模型加载行为对齐）
+    timeout: 500000,
     maxRetries: 3
   }
 };
