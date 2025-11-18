@@ -9,6 +9,7 @@ import { ResponsesProvider } from './responses-provider.js';
 import { OpenAIHttpProvider } from './openai-http-provider.js';
 import { ResponsesHttpProvider } from './responses-http-provider.js';
 import { AnthropicHttpProvider } from './anthropic-http-provider.js';
+import { iFlowHttpProvider } from './iflow-http-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import crypto from 'node:crypto';
 import type { IProviderV2 } from '../api/provider-types.js';
@@ -45,12 +46,15 @@ export class ProviderFactory {
       provider = new ResponsesHttpProvider(config, dependencies);
     } else if (moduleType === 'anthropic-http-provider') {
       provider = new AnthropicHttpProvider(config, dependencies);
+    } else if (ptype === 'iflow') {
+      // iFlow 使用专用的 HTTP Provider，支持 OAuth
+      provider = new iFlowHttpProvider(config, dependencies);
     } else if (ptype === 'responses') {
       // 2) 兼容旧路径：仍使用 ResponsesProvider（真实 Responses wire /v1/responses）
       provider = new ResponsesProvider(config, dependencies);
     } else {
       // 3) 默认：OpenAI 标准 Provider：
-      //  - providerType='openai'/'glm'/'qwen'/'iflow'/'lmstudio' → Chat 形状；
+      //  - providerType='openai'/'glm'/'qwen'/'lmstudio' → Chat 形状；
       //  - providerType='anthropic' → 通过 ServiceProfile 选择 /v1/messages wire（协议转换由 llmswitch-core 处理）。
       provider = new OpenAIStandard(config, dependencies);
     }
