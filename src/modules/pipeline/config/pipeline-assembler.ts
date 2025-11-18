@@ -380,7 +380,7 @@ export class PipelineAssembler {
       const modBlock: Record<string, unknown> = {
         // provider 模块类型使用归一化后的 providerTypeForPipeline（openai/glm/qwen/iflow/lmstudio/responses 等），
         // 而不是原始 config.provider.type，确保能命中已注册的 Provider module 工厂。
-        provider: { type: provider.type, config: provCfg },
+        provider: { type: providerTypeForPipeline, config: provCfg },
       };
 
       // Attach compatibility respecting explicit submodule types.
