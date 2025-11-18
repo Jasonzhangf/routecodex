@@ -735,7 +735,11 @@ export class QwenCompatibility implements CompatibilityModule {
    * Initialize transformation rules for Qwen API
    */
   private initializeTransformationRules(): TransformationRule[] {
-    const compatibilityConfig = this.config.config as Record<string, unknown>;
+    // 配置为可选：未提供 moduleConfig 时，退回空对象，避免在读取 customRules 等字段时抛出异常。
+    const compatibilityConfig: Record<string, unknown> =
+      (this.config && typeof (this.config as any).config === 'object')
+        ? ((this.config as any).config as Record<string, unknown>)
+        : {};
 
     // Default transformation rules for Qwen API
     const transformationRules = [
@@ -777,9 +781,10 @@ export class QwenCompatibility implements CompatibilityModule {
       // Temperature and max_tokens pass-through are optional; defaults handled by provider
     ];
 
-    // Add custom rules from configuration
-    if (compatibilityConfig.customRules && Array.isArray(compatibilityConfig.customRules)) {
-      transformationRules.push(...compatibilityConfig.customRules);
+    // Add custom rules from configuration（可选）
+    const customRules = (compatibilityConfig as any)?.customRules;
+    if (Array.isArray(customRules)) {
+      transformationRules.push(...customRules);
     }
 
     this.logger.logModule(this.id, 'transformation-rules-initialized', {

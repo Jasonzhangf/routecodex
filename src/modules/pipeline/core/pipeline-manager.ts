@@ -59,9 +59,12 @@ export class PipelineManager implements RCCBaseModule {
   private pipelineHealthManager: PipelineHealthManager;
   // Dynamic route-pool state (in-memory): routePools and per-pipeline 429/cooldown/ban
   private routePools: Record<string, string[]> = {};
-  private pipeline429State: Map<string, { step: number; consecutive: number; firstAt: number; lastAt: number; cooldownUntil?: number; bannedToday?: boolean; bannedReason?: string }>=new Map();
+  private pipeline429State: Map<string, { step: number; consecutive: number; firstAt: number; lastAt: number; cooldownUntil?: number; bannedToday?: boolean; bannedReason?: string }> = new Map();
   // Model-level 429 state (cross-route/cross-pool): keyed by providerId::modelId
   private model429State: Map<string, { step: number; consecutive: number; lastAt: number; cooldownUntil: number }> = new Map();
+  // 聚合器熔断状态（与 429 独立）：按“上游端点维度”记录 openai_error/bad_response_status_code 错误次数与冷却窗口，
+  // 并在冷却期间对请求进行排队与合并。
+  private meltdownState: Map<string, { consecutive: number; step: number; cooldownUntil: number; draining: boolean; queue: Array<{ request: PipelineRequest; resolve: (res: PipelineResponse) => void; reject: (err: unknown) => void }> }> = new Map();
 
   constructor(
     config: PipelineManagerConfig,
@@ -270,6 +273,22 @@ export class PipelineManager implements RCCBaseModule {
     };
 
     try {
+      // 熔断入口：若该上游端点处于 meltdown 冷却期或正在 drain 队列，则将请求加入队列，由“队长”统一在冷却结束后发起单次上游调用。
+      try {
+        const meltdownKey = this.buildMeltdownKeyFromRequest(request);
+        if (meltdownKey) {
+          const state = this.meltdownState.get(meltdownKey);
+          const now = Date.now();
+          const inCooldown = !!state && state.cooldownUntil > now;
+          const draining = !!state && state.draining;
+          if (inCooldown || draining) {
+            return await this.enqueueDuringMeltdown(meltdownKey, request);
+          }
+        }
+      } catch {
+        // 熔断键推导失败时，不影响正常请求
+      }
+
       // Enhanced request logging
       if (this.isEnhanced) {
         this.publishManagerEvent('request-start', requestContext);
@@ -622,19 +641,16 @@ export class PipelineManager implements RCCBaseModule {
       // On success, record success and clear 429 consecutive state for this pipeline
       this.pipelineHealthManager.recordSuccess(pipeline.pipelineId);
       try { this.reset429State(pipeline.pipelineId); } catch { /* ignore */ }
+      // 成功响应会清理端点级熔断状态（视为“恢复正常”）
+      try {
+        const meltdownKey = this.buildMeltdownKeyFromRequest(request);
+        if (meltdownKey && this.meltdownState.has(meltdownKey)) {
+          this.meltdownState.delete(meltdownKey);
+        }
+      } catch { /* ignore */ }
 
       return response;
     } catch (error) {
-      // 禁止 Anthropic (/v1/messages) 的任何自动重试，直接抛出错误（零回退策略）
-      try {
-        const ep = String(((request as any)?.metadata?.entryEndpoint) || '').toLowerCase();
-        if (ep === '/v1/messages') {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          this.pipelineHealthManager.recordError(pipeline.pipelineId, errorMessage);
-          throw error;
-        }
-      } catch { /* ignore and continue */ }
-
       // Check if it's a 429 error (robust detection)
       const errorObj = error as Record<string, unknown>;
       const status = (errorObj['statusCode'] as any) || (errorObj['status'] as any) || (errorObj as any)?.response?.status;
@@ -668,27 +684,38 @@ export class PipelineManager implements RCCBaseModule {
         }
         return false;
       })();
+      // 429：沿用原有模型级退避与熔断逻辑（HTTP 429 模型熔断）。
       if (looks429) {
-        // 429 视为上游模型熔断信号：按 providerId+modelId 记录退避状态，并立即向客户端返回结构化429
-        const modelKey = this.getModelKeyForRequest(pipeline, request);
-        const retryAfterMs = this.updateModel429State(modelKey);
-
-        const e: any = new Error('Upstream model cooling down due to previous 429s');
-        e.statusCode = 429;
-        e.code = 'HTTP_429_MODEL_COOLDOWN';
-        if (retryAfterMs > 0) {
-          e.retryAfterMs = retryAfterMs;
-        }
-        e.context = {
-          providerId: request.route.providerId,
-          modelId: request.route.modelId,
-          modelKey
-        };
-        this.pipelineHealthManager.recordError(pipeline.pipelineId, e.message);
-        throw e;
+        try {
+          const modelKey = this.getModelKeyForRequest(pipeline, request);
+          const retryAfterMs = this.updateModel429State(modelKey);
+          const msg = error instanceof Error ? error.message : String(error);
+          this.pipelineHealthManager.recordError(pipeline.pipelineId, `${msg} (cooldown ${retryAfterMs}ms)`);
+        } catch { /* ignore cooldown bookkeeping errors */ }
       }
 
-      // For other errors, handle special cases (401/403) → ban today; otherwise record error
+      // 聚合器错误（openai_error / bad_response_status_code）：
+      // 按“上游端点维度”（meltdownKey）做熔断计数，3 次连续错误后进入 5s/10s/30s 冷却。
+      try {
+        const meltdownKey = this.buildMeltdownKeyFromRequest(request, error);
+        if (meltdownKey) {
+          const msg = typeof (error as any)?.message === 'string'
+            ? (error as any).message
+            : String((error as any)?.message ?? '');
+          const codeStrs = codeCandidatesRaw.map(v => String(v || '').toLowerCase());
+          const hasMeltdownCode = codeStrs.some(s => s.includes('bad_response_status_code'));
+          const isMeltdownError = /openai_error/i.test(msg) || hasMeltdownCode;
+          if (isMeltdownError) {
+            const { consecutive, step, cooldownUntil } = this.updateMeltdownState(meltdownKey);
+            const now = Date.now();
+            const cooldownInfo = cooldownUntil > now ? ` (endpoint cooldown ${cooldownUntil - now}ms)` : '';
+            const logMsg = error instanceof Error ? error.message : String(error);
+            this.pipelineHealthManager.recordError(pipeline.pipelineId, `${logMsg}${cooldownInfo}`);
+          }
+        }
+      } catch { /* ignore meltdown bookkeeping errors */ }
+
+      // For non-429 errors（或已标记冷却的429/熔断），handle special cases (401/403) → ban today; otherwise record error
       const errorMessage = error instanceof Error ? error.message : String(error);
       try {
         const status = (error as any)?.statusCode || (error as any)?.status || (error as any)?.response?.status;
@@ -698,6 +725,195 @@ export class PipelineManager implements RCCBaseModule {
       } catch { /* ignore */ }
       this.pipelineHealthManager.recordError(pipeline.pipelineId, errorMessage);
       throw error;
+    }
+  }
+
+  /**
+   * 针对聚合器错误更新 meltdown 状态：返回最新的计数与冷却窗口。
+   */
+  private updateMeltdownState(meltdownKey: string): { consecutive: number; step: number; cooldownUntil: number } {
+    const now = Date.now();
+    const existing = this.meltdownState.get(meltdownKey) || {
+      consecutive: 0,
+      step: 0,
+      cooldownUntil: 0,
+      draining: false,
+      queue: [] as Array<{ request: PipelineRequest; resolve: (res: PipelineResponse) => void; reject: (err: unknown) => void }>
+    };
+
+    const consecutive = (existing.consecutive || 0) + 1;
+    let step = existing.step || 0;
+    let cooldownUntil = existing.cooldownUntil || 0;
+
+    if (consecutive >= 3) {
+      const schedule = this.getBackoffSchedule();
+      step = Math.min(step + 1, 3);
+      const idx = Math.max(0, Math.min(step - 1, schedule.length - 1));
+      const delay = schedule[idx] ?? 5000;
+      cooldownUntil = now + delay;
+    }
+
+    const next = {
+      consecutive,
+      step,
+      cooldownUntil,
+      draining: existing.draining === true,
+      queue: existing.queue || []
+    };
+    this.meltdownState.set(meltdownKey, next);
+    return { consecutive, step, cooldownUntil };
+  }
+
+  /**
+   * 构建 meltdownKey：优先使用错误对象上的标记，其次退回到 providerId + entryEndpoint。
+   */
+  private buildMeltdownKeyFromRequest(request: PipelineRequest, error?: unknown): string | null {
+    try {
+      const errAny = error as any;
+      if (errAny && typeof errAny.meltdownKey === 'string' && errAny.meltdownKey.trim()) {
+        return String(errAny.meltdownKey).trim();
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
+      const providerId = String(request.route.providerId || 'unknown').toLowerCase();
+      const ep = String(((request as any)?.metadata?.entryEndpoint) || '').toLowerCase();
+      if (!ep) return null;
+      return `${providerId}::${ep}`;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 冷却期请求排队 + 合并：仅在 meltdown 冷却或 drain 中调用。
+   * 所有排队请求会共享同一次上游调用结果（leader）。
+   */
+  private async enqueueDuringMeltdown(meltdownKey: string, request: PipelineRequest): Promise<PipelineResponse> {
+    return await new Promise<PipelineResponse>((resolve, reject) => {
+      const now = Date.now();
+      const existing = this.meltdownState.get(meltdownKey) || {
+        consecutive: 0,
+        step: 0,
+        cooldownUntil: now,
+        draining: false,
+        queue: [] as Array<{ request: PipelineRequest; resolve: (res: PipelineResponse) => void; reject: (err: unknown) => void }>
+      };
+
+      const queue = existing.queue || [];
+      queue.push({ request, resolve, reject });
+
+      const next = {
+        consecutive: existing.consecutive,
+        step: existing.step,
+        cooldownUntil: existing.cooldownUntil,
+        draining: existing.draining,
+        queue
+      };
+      this.meltdownState.set(meltdownKey, next);
+
+      // 若当前没有 drain 协程，则当前请求成为“队长”，负责在冷却结束后触发一次上游调用并广播结果。
+      if (!next.draining) {
+        next.draining = true;
+        this.meltdownState.set(meltdownKey, next);
+        // 异步启动 drain，不阻塞当前 Promise 构造
+        void this.drainMeltdownQueue(meltdownKey);
+      }
+    });
+  }
+
+  /**
+   * 在冷却结束后 drain meltdown 队列：仅向上游发起一次请求，并将结果广播给所有排队请求。
+   */
+  private async drainMeltdownQueue(meltdownKey: string): Promise<void> {
+    let state = this.meltdownState.get(meltdownKey);
+    if (!state) {
+      return;
+    }
+
+    // 等待冷却窗口结束
+    const now = Date.now();
+    const waitMs = Math.max(0, state.cooldownUntil - now);
+    if (waitMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+    }
+
+    // 再次读取最新 state，获取队列快照
+    state = this.meltdownState.get(meltdownKey);
+    if (!state || !state.queue || state.queue.length === 0) {
+      // 无请求需要处理，标记为非 draining
+      if (state) {
+        this.meltdownState.set(meltdownKey, { ...state, draining: false });
+      }
+      return;
+    }
+
+    const queue = state.queue;
+    const leader = queue.shift()!;
+    const followers = queue.splice(0);
+
+    // 清空队列，但保留 meltdown 计数与 cooldown，draining 标记在 finally 中重置。
+    this.meltdownState.set(meltdownKey, {
+      consecutive: state.consecutive,
+      step: state.step,
+      cooldownUntil: state.cooldownUntil,
+      draining: true,
+      queue: []
+    });
+
+    let leaderResponse: PipelineResponse | null = null;
+    let leaderError: unknown = null;
+
+    try {
+      const pipeline = this.selectPipeline({
+        providerId: leader.request.route.providerId,
+        modelId: leader.request.route.modelId,
+        requestId: leader.request.route.requestId
+      } as any);
+
+      leaderResponse = await this.processRequestWithPipeline(pipeline, leader.request);
+
+      // 成功：视为端点恢复，清理 meltdown 状态
+      this.meltdownState.delete(meltdownKey);
+    } catch (error) {
+      leaderError = error;
+      // 失败：更新 meltdown 状态以进入下一轮冷却
+      try {
+        this.updateMeltdownState(meltdownKey);
+      } catch {
+        // ignore meltdown bookkeeping errors
+      }
+    } finally {
+      const latest = this.meltdownState.get(meltdownKey);
+      if (latest) {
+        this.meltdownState.set(meltdownKey, {
+          ...latest,
+          draining: false,
+          queue: latest.queue || []
+        });
+      }
+    }
+
+    if (leaderResponse) {
+      leader.resolve(leaderResponse);
+      for (const follower of followers) {
+        try {
+          follower.resolve(leaderResponse);
+        } catch {
+          // ignore individual resolution errors
+        }
+      }
+    } else {
+      leader.reject(leaderError);
+      for (const follower of followers) {
+        try {
+          follower.reject(leaderError);
+        } catch {
+          // ignore
+        }
+      }
     }
   }
 
@@ -735,9 +951,10 @@ export class PipelineManager implements RCCBaseModule {
     const cfgSchedule = ((this.config?.settings as any)?.rateLimit?.backoffMs as number[] | undefined) || [];
     let schedule = Array.isArray(cfgSchedule) ? cfgSchedule.filter(v => Number.isFinite(v) && v > 0) : [];
     if (!schedule.length) {
-      const s1 = Number(process.env.RCC_429_BACKOFF_MS_1 || process.env.ROUTECODEX_429_BACKOFF_MS_1 || 30000);
-      const s2 = Number(process.env.RCC_429_BACKOFF_MS_2 || process.env.ROUTECODEX_429_BACKOFF_MS_2 || 60000);
-      const s3 = Number(process.env.RCC_429_BACKOFF_MS_3 || process.env.ROUTECODEX_429_BACKOFF_MS_3 || 120000);
+      // 默认冷却节奏：5s, 10s, 30s（可通过环境变量覆盖）
+      const s1 = Number(process.env.RCC_429_BACKOFF_MS_1 || process.env.ROUTECODEX_429_BACKOFF_MS_1 || 5000);
+      const s2 = Number(process.env.RCC_429_BACKOFF_MS_2 || process.env.ROUTECODEX_429_BACKOFF_MS_2 || 10000);
+      const s3 = Number(process.env.RCC_429_BACKOFF_MS_3 || process.env.ROUTECODEX_429_BACKOFF_MS_3 || 30000);
       schedule = [s1, s2, s3].filter(v => Number.isFinite(v) && v > 0);
     }
     return schedule;

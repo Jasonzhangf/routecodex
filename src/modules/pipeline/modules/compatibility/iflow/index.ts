@@ -6,8 +6,11 @@ import type { ModuleDependencies } from '../../../../../types/module.types.js';
 import { CompatibilityModuleFactory } from '../compatibility-factory.js';
 import { iFlowCompatibility } from './iflow-compatibility.js';
 
-// 注册iFlow模块类型到工厂（仅标准模块名，无历史别名）
+// 注册iFlow模块类型到工厂：
+// - 'iflow'               → 新的模块化实现（用于标准兼容配置）
+// - 'iflow-compatibility' → 兼容旧配置的别名（指向同一实现）
 CompatibilityModuleFactory.registerModuleType('iflow', iFlowCompatibility);
+CompatibilityModuleFactory.registerModuleType('iflow-compatibility', iFlowCompatibility);
 
 // 导出模块和组件
 export { iFlowCompatibility } from './iflow-compatibility.js';

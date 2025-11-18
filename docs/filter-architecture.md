@@ -44,3 +44,36 @@ Testing
 - Snapshot A/B using captured req_* payloads
 - 1210 guard checks for GLM (arguments stringified, tool_choice rules)
 - SSE logs assert arguments deltas swallowed; final full arguments appear once
+
+Offline Testing Tool
+--------------------
+
+为方便在不启动 RouteCodex 服务器的前提下验证 FilterEngine 与工具治理链路，主仓库提供了一个基于 llmswitch-core 的离线测试脚本：
+
+- 脚本路径：`tools/run-llmswitch-chat.mjs`（位于 RouteCodex 根目录）
+- 依赖：`sharedmodule/llmswitch-core/dist/v2/conversion/index.js` 导出的 `runStandardChatRequestFilters`
+- 输入：
+  - 直接的 OpenAI Chat 请求（`{ model, messages, tools, ... }`）
+  - 或 provider-request 快照 JSON（包含 `data.body` 字段），脚本会自动提取 `data.body` 作为 Chat 请求
+- 调用示例：
+
+```bash
+# 直接重放 Chat 请求
+node tools/run-llmswitch-chat.mjs path/to/chat-request.json
+
+# 使用 snapshot provider-request 作为输入
+node tools/run-llmswitch-chat.mjs \
+  ~/.routecodex/codex-samples/openai-chat/req_1763203765922_xxxxx_provider-request.json
+
+# 指定入口端点（仅影响 FilterContext.endpoint）
+node tools/run-llmswitch-chat.mjs path/to/chat-request.json /v1/messages
+```
+
+该工具会：
+- 构造最小的 `ConversionProfile/ConversionContext`
+- 调用 `runStandardChatRequestFilters`，依次执行 `request_pre`/`request_map`/`request_post`/`request_finalize` 阶段的所有 Filter（包括工具治理与后置约束）
+- 将最终发送给 Provider 的 Chat 请求以 JSON 形式输出到 stdout
+
+典型用途：
+- 对历史错误样本做 A/B 回归（例如校验新加的 ToolPostConstraintsFilter 是否正确剪掉 schema 校验不过的工具）
+- 在不影响运行中 RouteCodex 服务器的情况下，快速迭代和验证新的 Filter 组合或治理规则

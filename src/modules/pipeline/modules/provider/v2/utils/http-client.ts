@@ -307,8 +307,21 @@ export class HttpClient {
       return false;
     }
 
-    // 网络错误通常可以重试
     const err = error as any;
+
+    // 某些上游聚合器（特别是 Anthropic 兼容层）会将“非 2xx 状态码”包装为
+    // OpenAI 风格的错误对象，message 中包含 openai_error / bad_response_status_code。
+    // 这些属于“逻辑错误”，而不是瞬时网络问题，必须直接失败，避免在 HTTP 客户端层重试形成风暴。
+    try {
+      const msg = typeof err?.message === 'string' ? err.message : String(err ?? '');
+      if (/openai_error/i.test(msg) || /bad_response_status_code/i.test(msg)) {
+        return false;
+      }
+    } catch {
+      // ignore parse errors
+    }
+
+    // 网络错误通常可以重试
     if (err.name === 'TypeError' || err.code === 'ECONNREFUSED') {
       return true;
     }
