@@ -369,10 +369,15 @@ export class ConfigRequestClassifier {
       const protocolConfig = this.config.protocolMapping[protocol];
       const rawMessages = (request as Record<string, unknown>)[protocolConfig.messageField] as unknown;
       const rawTools = (request as Record<string, unknown>)[protocolConfig.toolsField] as unknown;
-      const messages = Array.isArray(rawMessages) ? (rawMessages as any[]) : undefined;
       const tools = Array.isArray(rawTools) ? (rawTools as any[]) : undefined;
 
-      const result = toolDetector.detect(tools as any, messages as any);
+      // 只使用最后一条消息进行工具分析，但保留所有消息用于其他用途（例如Token计算）
+      const allMessages = Array.isArray(rawMessages) ? (rawMessages as any[]) : undefined;
+      const lastMessage = allMessages && allMessages.length > 0
+        ? [allMessages[allMessages.length - 1]]
+        : undefined;
+
+      const result = toolDetector.detect(tools as any, lastMessage as any);
       return { success: true, result };
     } catch (error) {
       return { success: false, result: { hasTools: false, toolTypes: [], toolCount: 0, toolCategories: { webSearch: false, codeExecution: false, fileSearch: false, dataAnalysis: false, general: false }, complexity: { low: 0, medium: 0, high: 0 }, recommendations: { suggestedRoute: 'default', reasoning: 'error', confidence: 0 }, configBased: true } };
