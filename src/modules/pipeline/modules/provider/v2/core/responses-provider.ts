@@ -7,13 +7,13 @@
 
 import { OpenAIStandard } from './openai-standard.js';
 import type { ServiceProfile } from '../api/provider-types.js';
-import type { UnknownObject } from '../../../../../../types/common-types.js';
-import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
-import { buildResponsesRequestFromChat } from '../../../../../llmswitch/bridge.js';
 
 export class ResponsesProvider extends OpenAIStandard {
   /**
    * 使用 OpenAI 基础档案，但将默认 endpoint 改为 /responses。
+   *
+   * 注意：一律走统一 JSON 请求路径，禁止上游 SSE 直通，
+   * 流式语义由 llmswitch-core 在 Chat 层统一合成。
    */
   protected override getServiceProfile(): ServiceProfile {
     const base = super.getServiceProfile();
@@ -21,128 +21,6 @@ export class ResponsesProvider extends OpenAIStandard {
       ...base,
       defaultEndpoint: '/responses'
     } as ServiceProfile;
-  }
-
-  /**
-   * 覆写内部发送：/v1/responses 入口时强制使用上游 SSE（postStream）。
-   */
-  protected override async sendRequestInternal(request: UnknownObject): Promise<unknown> {
-    // 对于 Responses provider，默认使用上游 SSE 直通：
-    //  - 始终通过 postStream 打 /responses（或有效 endpoint）
-    //  - 不再依赖额外 env/config 开关
-    // Build endpoint and headers
-    const endpoint = (this as any).getEffectiveEndpoint();
-    const headers = await (this as any).buildRequestHeaders();
-    const context = (this as any).createProviderContext(); // private in base; access via any
-    const targetUrl = `${(this as any).getEffectiveBaseUrl().replace(/\/$/, '')}/${String(endpoint).startsWith('/') ? String(endpoint).slice(1) : String(endpoint)}`;
-
-    // Flatten body (copy of base logic)
-    const finalBody = (() => {
-      const r: any = request || {};
-      const dataObj: any = (r && typeof r === 'object' && 'data' in r && typeof r.data === 'object') ? r.data : r;
-      const body: any = { ...dataObj };
-      const cfgModel = (this.config as any)?.config?.model;
-      const cfgModelId = (this.config as any)?.config?.modelId;
-      // Responses provider 始终以配置的实际模型为准：
-      //  - 优先使用 config.model（若显式提供）
-      //  - 否则回退到 config.modelId（canonical 中的 actualModelId，例如 'gpt-5.1'）
-      //  - 若仍无配置，则使用 serviceProfile.defaultModel
-      const upstreamModel =
-        (typeof cfgModel === 'string' && cfgModel.trim())
-          ? cfgModel.trim()
-          : (typeof cfgModelId === 'string' && cfgModelId.trim())
-            ? cfgModelId.trim()
-            : (this as any).serviceProfile.defaultModel;
-      body.model = upstreamModel;
-      try {
-        const reqMt = Number((dataObj as any)?.max_tokens ?? (dataObj as any)?.maxTokens ?? NaN);
-        const cfgMt = Number((this.config as any)?.config?.overrides?.maxTokens ?? NaN);
-        const envMt = Number(process.env.ROUTECODEX_DEFAULT_MAX_TOKENS || process.env.RCC_DEFAULT_MAX_TOKENS || NaN);
-        const fallback = Number.isFinite(cfgMt) && cfgMt > 0 ? cfgMt : (Number.isFinite(envMt) && envMt > 0 ? envMt : 8192);
-        const effective = Number.isFinite(reqMt) && reqMt > 0 ? reqMt : fallback;
-        (body as any).max_tokens = effective;
-        if ('maxTokens' in body) delete (body as any).maxTokens;
-      } catch { /* ignore */ }
-      try { if ('metadata' in body) { delete body.metadata; } } catch { /* ignore */ }
-      return body;
-    })();
-
-    // 若当前请求仍为 Chat 形状（messages 存在且 input 不存在），使用 llmswitch-core 做 Chat → Responses 请求编码
-    try {
-      const looksResponses = Array.isArray((finalBody as any).input) || typeof (finalBody as any).instructions === 'string';
-      const looksChat = Array.isArray((finalBody as any).messages);
-      if (!looksResponses && looksChat) {
-        const res = await buildResponsesRequestFromChat(finalBody);
-        const reqObj = res && typeof res === 'object' && 'request' in res ? (res.request as any) : res;
-        if (!reqObj || typeof reqObj !== 'object') {
-          throw new Error('buildResponsesRequestFromChat did not return a valid request object');
-        }
-        // 用 Responses 形状覆盖原始 body（保持 model 为上游模型）
-        const currentModel = (finalBody as any).model;
-        for (const k of Object.keys(finalBody)) {
-          delete (finalBody as any)[k];
-        }
-        Object.assign(finalBody as any, reqObj);
-        if (currentModel) {
-          (finalBody as any).model = currentModel;
-        }
-      }
-    } catch (e) {
-      // 按 Fail Fast 替代旧的静默回退：直接抛出结构化错误，方便从 provider-error 快照定位
-      const err = new Error(`[responses-provider] Chat→Responses request encoding failed: ${(e as any)?.message || String(e)}`);
-      (err as any).code = 'responses_request_encoding_error';
-      throw err;
-    }
-
-    // Ensure stream flag for upstream SSE
-    (finalBody as any).stream = true;
-
-    // Snapshot provider-request (best-effort)
-    try {
-      await writeProviderSnapshot({
-        phase: 'provider-request',
-        requestId: context.requestId,
-        data: finalBody,
-        headers,
-        url: targetUrl
-      });
-    } catch { /* ignore */ }
-
-    // Perform upstream SSE POST
-    try {
-      const stream = await (this as any).httpClient.postStream(endpoint, finalBody, { ...headers, Accept: 'text/event-stream' });
-      // 记录一个简单的 provider-response 快照，标记为 SSE
-      try {
-        await writeProviderSnapshot({
-          phase: 'provider-response',
-          requestId: context.requestId,
-          data: { mode: 'sse', model: (finalBody as any)?.model ?? null },
-          headers,
-          url: targetUrl
-        });
-      } catch { /* non-blocking */ }
-      // Return a stream token object for BasePipeline to convert to Responses SSE
-      return { __sse_stream: stream } as any;
-    } catch (error) {
-      // 将错误形状化并写入 provider-error 快照，便于分析上游 4xx/5xx
-      try {
-        const err: any = error;
-        const msg = typeof err?.message === 'string' ? err.message : String(err || '');
-        const m = msg.match(/HTTP\s+(\d{3})/i);
-        const statusCode = m ? parseInt(m[1], 10) : undefined;
-        await writeProviderSnapshot({
-          phase: 'provider-error',
-          requestId: context.requestId,
-          data: {
-            status: statusCode ?? null,
-            error: msg
-          },
-          headers,
-          url: targetUrl
-        });
-      } catch { /* non-blocking */ }
-      throw error;
-    }
   }
 }
 
