@@ -307,7 +307,20 @@ export class PipelineAssembler {
       //  - 若 canonical 已提供 provider.config.providerType 且属于协议族集合（openai/responses/anthropic/...），则直接信任；
       //  - 否则才根据 provider.type / routeMeta.providerId 做最小推断，且只输出协议族，而不是 glm/qwen/iflow/lmstudio 这类家族名。
       {
-        const protocolFamilies = new Set(['openai', 'responses', 'anthropic', 'gemini']);
+        // 协议族 + 服务族：
+        // - openai/responses/anthropic/gemini：协议族（决定 providerProtocol）
+        // - glm/qwen/iflow/lmstudio：服务族（共享 openai-chat 协议形状，但在 ServiceProfile 中拥有独立配置）
+        const protocolFamilies = new Set([
+          'openai',
+          'responses',
+          'anthropic',
+          'gemini',
+          'iflow',
+          // 预留服务族，统一走 openai-chat 协议
+          'glm',
+          'qwen',
+          'lmstudio',
+        ]);
         const provCfgObj = this.asRecord(provider?.config || {});
         const existing = String((provCfgObj as any).providerType || '').toLowerCase();
         if (existing && protocolFamilies.has(existing)) {
@@ -319,11 +332,11 @@ export class PipelineAssembler {
             if (t.includes('openai') || t.includes('generic-openai') || t.includes('modelscope')) return 'openai';
             if (t.includes('responses')) return 'responses';
             if (t.includes('anthropic')) return 'anthropic';
-            // glm/qwen/iflow/lmstudio 等家族一律归到 openai 协议族
-            if (t.includes('glm') || t.includes('zhipu') || t.includes('qwen') || t.includes('dashscope') || t.includes('aliyun') ||
-                t.includes('iflow') || t.includes('lmstudio') || t.includes('lm-studio')) {
-              return 'openai';
-            }
+            // glm/qwen/iflow/lmstudio 等服务家族共享 openai-chat 协议，但在 ServiceProfile 中拥有独立配置
+            if (t.includes('glm') || t.includes('zhipu')) return 'glm';
+            if (t.includes('qwen') || t.includes('dashscope') || t.includes('aliyun')) return 'qwen';
+            if (t.includes('iflow')) return 'iflow';
+            if (t.includes('lmstudio') || t.includes('lm-studio')) return 'lmstudio';
             return '' as any;
           };
           const fromCfgTypeRaw = String((provCfgObj as any).type || '').toLowerCase();
@@ -380,7 +393,7 @@ export class PipelineAssembler {
       const modBlock: Record<string, unknown> = {
         // provider 模块类型使用归一化后的 providerTypeForPipeline（openai/glm/qwen/iflow/lmstudio/responses 等），
         // 而不是原始 config.provider.type，确保能命中已注册的 Provider module 工厂。
-        provider: { type: providerTypeForPipeline, config: provCfg },
+        provider: { type: String((provCfg as any).providerType || provider.type || "").trim(), config: provCfg },
       };
 
       // Attach compatibility respecting explicit submodule types.

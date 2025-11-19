@@ -294,10 +294,13 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
       try { console.log('[HTTP][SSE] piping core stream for /v1/responses', { requestId }); } catch {}
       stopPreHeartbeat();
       try {
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control','no-cache');
-        res.setHeader('Connection','keep-alive');
-        res.setHeader('X-Accel-Buffering','no');
+        // 预心跳阶段已发送过 SSE 头，此处仅在尚未发送响应时补充，避免重复设置触发 ERR_HTTP_HEADERS_SENT
+        if (!res.headersSent) {
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control','no-cache');
+          res.setHeader('Connection','keep-alive');
+          res.setHeader('X-Accel-Buffering','no');
+        }
       } catch (error) {
         void logNonBlockingError(
           { component: 'http.responses-handler', operation: 'sse.set-headers-fallback', requestId, entryEndpoint },
@@ -319,10 +322,12 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
     if (wantsSSE) {
       stopPreHeartbeat();
       try {
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control','no-cache');
-        res.setHeader('Connection','keep-alive');
-        res.setHeader('X-Accel-Buffering','no');
+        if (!res.headersSent) {
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control','no-cache');
+          res.setHeader('Connection','keep-alive');
+          res.setHeader('X-Accel-Buffering','no');
+        }
       } catch {}
       try {
         const s1 = `event: response.error\n`;
@@ -345,7 +350,13 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
     try {
       const expectsSSE = (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream')) || (req.body && (req.body as any).stream === true);
       if (expectsSSE) {
-        try { res.setHeader('Content-Type', 'text/event-stream'); res.setHeader('Cache-Control','no-cache'); res.setHeader('Connection','keep-alive'); } catch {}
+        try {
+          if (!res.headersSent) {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control','no-cache');
+            res.setHeader('Connection','keep-alive');
+          }
+        } catch {}
         try {
           const s1 = `event: response.error\n`;
           const s2 = `data: ${JSON.stringify({ type:'response.error', error: { message: String(error?.message || 'Upstream error'), code: String((error as any)?.code || 'UPSTREAM_ERROR'), type: 'upstream_error' } })}\n\n`;

@@ -33,7 +33,7 @@
   },
   "scripts": {
     "build": "node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs",
-    "build:dev": "npm run clean && node scripts/build-core.mjs && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs",
+    "build:dev": "npm run clean && node scripts/build-core.mjs && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && chmod +x dist/cli.js || true",
     "build:min": "node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-configs.mjs",
     "prepack": "echo skip-prepack",
     "postbuild": "chmod +x dist/cli.js || true",
