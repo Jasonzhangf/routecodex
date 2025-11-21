@@ -221,8 +221,19 @@ class RouteCodexApp {
       }
       (this.httpServer as any).attachPipelineManager(manager);
       (this.httpServer as any).attachRoutePools(routePools);
+      // 同步 routePools/routeMeta 到 PipelineManager（用于 RR 与健康过滤）
+      try {
+        if (typeof (manager as any).attachRoutePools === 'function') {
+          (manager as any).attachRoutePools(routePools);
+        }
+      } catch { /* ignore */ }
       if (routeMeta) {
         (this.httpServer as any).attachRouteMeta(routeMeta);
+        try {
+          if (typeof (manager as any).attachRouteMeta === 'function') {
+            (manager as any).attachRouteMeta(routeMeta);
+          }
+        } catch { /* ignore */ }
       }
       try {
         const def = Array.isArray((routePools as any)?.default) ? (routePools as any).default[0] : undefined;
