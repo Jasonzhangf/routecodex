@@ -40,3 +40,17 @@ declare module 'rcc-errorhandling' {
     destroy(): Promise<void>;
   }
 }
+
+// Core bridge optional modules without typings
+declare module 'rcc-llmswitch-core/v2/utils/token-counter' {
+  export const estimateTextTokens: (text: string, model?: string) => Promise<number>;
+  export class TokenCounter {
+    static calculateRequestTokensStrict(req: Record<string, unknown>, model?: string): Promise<{ inputTokens: number; toolTokens?: number }>
+  }
+}
+
+// Core conversion for Responses↔Chat (shadow conversion)
+declare module 'rcc-llmswitch-core/v2/conversion/responses/responses-openai-bridge' {
+  export function buildChatRequestFromResponses(payload: Record<string, unknown>, context?: Record<string, unknown>): { request: Record<string, unknown> };
+  export function captureResponsesContext(payload: Record<string, unknown>, dto?: { route?: { requestId?: string } }): Record<string, unknown>;
+}

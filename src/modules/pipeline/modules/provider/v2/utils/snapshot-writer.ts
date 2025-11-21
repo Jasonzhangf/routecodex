@@ -5,9 +5,13 @@ import { writeSnapshotViaHooks } from '../../../../../llmswitch/bridge.js';
 
 type Phase = 'provider-request' | 'provider-response' | 'provider-error';
 
-function mapFolder(): string {
-  // Provider层缺少明确端点上下文时，默认归入 openai-chat 目录（与既有样本保持一致）
-  return 'openai-chat';
+function resolveFolderByUrl(url?: string): string {
+  try {
+    const u = String(url || '').toLowerCase();
+    if (u.includes('/responses')) return 'openai-responses';
+    if (u.includes('/messages')) return 'anthropic-messages';
+    return 'openai-chat';
+  } catch { return 'openai-chat'; }
 }
 
 async function ensureDir(dir: string): Promise<void> {
@@ -56,31 +60,33 @@ export async function writeProviderSnapshot(options: {
         data: payload,
         verbosity: 'verbose'
       });
-      return;
+      // 同步写一份本地文件，方便快速定位（不依赖 hooks 是否启用）
     } catch {
       // 回退：直接写本地文件
-      const base = path.join(os.homedir(), '.routecodex', 'codex-samples');
-      const folder = mapFolder();
-      const dir = path.join(base, folder);
-      await ensureDir(dir);
-      const suffix = options.phase === 'provider-request'
-        ? 'provider-request'
-        : options.phase === 'provider-response'
-          ? 'provider-response'
-          : 'provider-error';
-      const file = path.join(dir, `${options.requestId}_${suffix}.json`);
-      const payload = {
-        meta: {
-          stage: suffix,
-          version: String(process.env.ROUTECODEX_VERSION || 'dev'),
-          buildTime: String(process.env.ROUTECODEX_BUILD_TIME || new Date().toISOString())
-        },
-        url: options.url,
-        headers: maskHeaders(options.headers || {}),
-        ...(typeof options.data === 'string' ? { bodyText: options.data } : { body: options.data })
-      };
-      await fsp.writeFile(file, JSON.stringify(payload, null, 2), 'utf-8');
+      // no-op, 将在下方本地写盘
     }
+    // 始终写本地文件一份（按 URL 归档到对应端点目录）
+    const base = path.join(os.homedir(), '.routecodex', 'codex-samples');
+    const folder = resolveFolderByUrl(options.url);
+    const dir = path.join(base, folder);
+    await ensureDir(dir);
+    const suffix = options.phase === 'provider-request'
+      ? 'provider-request'
+      : options.phase === 'provider-response'
+        ? 'provider-response'
+        : 'provider-error';
+    const file = path.join(dir, `${options.requestId}_${suffix}.json`);
+    const payload = {
+      meta: {
+        stage: suffix,
+        version: String(process.env.ROUTECODEX_VERSION || 'dev'),
+        buildTime: String(process.env.ROUTECODEX_BUILD_TIME || new Date().toISOString())
+      },
+      url: options.url,
+      headers: maskHeaders(options.headers || {}),
+      ...(typeof options.data === 'string' ? { bodyText: options.data } : { body: options.data })
+    };
+    await fsp.writeFile(file, JSON.stringify(payload, null, 2), 'utf-8');
   } catch {
     // non-blocking
   }
@@ -107,7 +113,7 @@ export async function writeProviderRetrySnapshot(options: {
       return;
     } catch {
       const base = path.join(os.homedir(), '.routecodex', 'codex-samples');
-      const dir = path.join(base, 'openai-chat');
+      const dir = path.join(base, resolveFolderByUrl(options.url));
       await ensureDir(dir);
       const suffix = options.type === 'request' ? 'provider-request.retry' : 'provider-response.retry';
       const file = path.join(dir, `${options.requestId}_${suffix}.json`);

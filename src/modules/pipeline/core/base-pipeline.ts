@@ -23,7 +23,7 @@ import type {
 } from '../interfaces/pipeline-interfaces.js';
 import { PipelineErrorIntegration } from '../utils/error-integration.js';
 import { PipelineDebugLogger } from '../utils/debug-logger.js';
-import { DebugEventBus } from '../../debugcenter/debug-event-bus-shim.js';
+import { DebugEventBus } from '../../../logging/debug-event-bus-shim.js';
 import type { SharedPipelineRequest, SharedPipelineResponse } from '../../../types/shared-dtos.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 
@@ -186,70 +186,34 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
       timings.providerEnd = Date.now();
       debugStages.push('provider');
 
-      // Streaming fast-path: only allow when inbound/outbound are both Responses
-      // (i.e., entry endpoint is '/v1/responses'). Otherwise, do not use upstream
-      // SSE direct conversion to keep path consistent with Chat finalize.
+      // Streaming routing and synthesis via stream-router (centralized)
       try {
-        const anyProv: any = providerPayload as any;
-        // Derive entryEndpoint before deciding fast-path
-        const __processedMeta = (processedRequest && typeof processedRequest === 'object' && (processedRequest as any).metadata)
-          ? (processedRequest as any).metadata as Record<string, unknown>
-          : {};
-        const __originalMeta = ((request as any)?.metadata && typeof (request as any).metadata === 'object')
-          ? (request as any).metadata as Record<string, unknown>
-          : {};
-        const __entryEndpoint = (__processedMeta as any).entryEndpoint
-          ?? (__originalMeta as any).entryEndpoint
-          ?? (request as any)?.entryEndpoint
-          ?? (request as any)?.data?.metadata?.entryEndpoint;
-
-        const allowResponsesFastPath = String(__entryEndpoint || '').toLowerCase() === '/v1/responses';
-
-        if (allowResponsesFastPath && anyProv && typeof anyProv === 'object' && anyProv.__sse_stream) {
-          const upstream = anyProv.__sse_stream;
-          const providerType = String(this.config.provider?.type || '').toLowerCase();
-
-          if (providerType === 'responses') {
-            // Responses provider：上游已经是 Responses SSE，直接透传，不再按 OpenAI Chat SSE 转换
-            const processingTime = Date.now() - startTime;
-            this.updateMetrics(processingTime, true);
-            const response: PipelineResponse = {
-              data: { __sse_responses: upstream },
-              metadata: {
-                pipelineId: this.pipelineId,
-                processingTime,
-                stages: debugStages,
-                requestId: request.route?.requestId || 'unknown'
-              },
-              debug: undefined
-            } as any;
-            this.debugLogger.logResponse(request.route?.requestId || 'unknown', 'pipeline-success-stream', { note: 'responses upstream SSE passthrough' });
-            this._status.state = 'ready';
-            return response;
-          } else {
-            // Chat 型 provider：OpenAI Chat SSE → Responses SSE（保持原有转换逻辑，由 llmswitch-core 统一实现）
-            const { createResponsesSSEStreamFromOpenAI } = await import('../../llmswitch/bridge.js');
-            const fn: any = createResponsesSSEStreamFromOpenAI;
-            if (typeof fn === 'function') {
-              const tools = ((processedRequest as any)?.data as any)?.tools;
-              const sse = fn(upstream, { requestId, model: String(((processedRequest as any)?.data as any)?.model || 'unknown'), tools });
-              const processingTime = Date.now() - startTime;
-              this.updateMetrics(processingTime, true);
-              const response: PipelineResponse = {
-                data: { __sse_responses: sse },
-                metadata: {
-                  pipelineId: this.pipelineId,
-                  processingTime,
-                  stages: debugStages,
-                  requestId: request.route?.requestId || 'unknown'
-                },
-                debug: undefined
-              } as any;
-              this.debugLogger.logResponse(request.route?.requestId || 'unknown', 'pipeline-success-stream', { note: 'core transformed SSE' });
-              this._status.state = 'ready';
-              return response;
-            }
-          }
+        const { tryHandleStreamingFastPath, trySynthesizeResponsesFromJson } = await import('./stream-router.js');
+        let routed = await tryHandleStreamingFastPath(
+          { providerPayload, processedRequest, originalRequest: request },
+          {
+            entryEndpoint: (processedRequest as any)?.metadata?.entryEndpoint || (request as any)?.metadata?.entryEndpoint,
+            providerType: String(this.config.provider?.type || ''),
+            requestId,
+            startTime,
+            pipelineId: this.pipelineId
+          },
+          debugStages
+        );
+        if (!routed) {
+          routed = await trySynthesizeResponsesFromJson(providerPayload, processedRequest, request as any, {
+            entryEndpoint: (processedRequest as any)?.metadata?.entryEndpoint || (request as any)?.metadata?.entryEndpoint,
+            providerType: String(this.config.provider?.type || ''),
+            requestId,
+            startTime,
+            pipelineId: this.pipelineId
+          }, debugStages);
+        }
+        if (routed) {
+          this.updateMetrics(Date.now() - startTime, true);
+          this.debugLogger.logResponse(request.route?.requestId || 'unknown', 'pipeline-success-stream', { note: 'stream-router' });
+          this._status.state = 'ready';
+          return routed as any;
         }
       } catch { /* ignore */ }
 

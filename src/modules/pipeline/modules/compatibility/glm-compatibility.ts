@@ -300,6 +300,7 @@ export class GLMCompatibility implements CompatibilityModule {
         }
       }
       processedRequest = preflight.payload as UnknownObject;
+      // 不再在 GLM 兼容层处理 max_tokens；按架构要求改由 Chat→Responses 转换时统一过滤。
 
       // Write compat-post snapshot
       try {

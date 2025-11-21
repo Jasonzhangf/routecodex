@@ -16,6 +16,7 @@ import './lmstudio/index.js';
 import './passthrough/index.js';
 import './iflow/index.js';
 import './qwen/index.js';
+import './responses/index.js';
 
 /**
  * 兼容性模块API

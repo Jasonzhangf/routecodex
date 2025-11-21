@@ -1,11 +1,9 @@
 import type { Request, Response } from 'express';
-import os from 'os';
-import path from 'path';
-import fsp from 'fs/promises';
 import type { HandlerContext } from './types.js';
 import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { getTransparentMonitorConfigForResponses } from '../utils/monitor-transparent.js';
 import { logNonBlockingError, runNonBlocking } from '../utils/non-blocking-error-logger.js';
+import { wantsSSE, createSSELogger, startPreHeartbeat, pipeUpstreamSSE, synthesizeResponsesSSE, sendResponsesSSEError } from '../utils/sse-utils.js';
 
 // Responses endpoint: /v1/responses (OpenAI Responses SSE with named events)
 export async function handleResponses(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
@@ -183,10 +181,10 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
       { component: 'http.responses-handler', operation: 'snapshot.http-request', requestId, entryEndpoint },
       () => writeServerSnapshot({ phase: 'http-request', requestId, data: payload, entryEndpoint })
     );
-    const wantsSSE = (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream')) || payload.stream === true;
+    const expectsSSE = wantsSSE(req, payload);
     try {
       const meta = (payload.metadata && typeof payload.metadata === 'object') ? payload.metadata : {};
-      payload.metadata = { ...meta, entryEndpoint, stream: wantsSSE };
+      payload.metadata = { ...meta, entryEndpoint, stream: expectsSSE };
     } catch (error) {
       await logNonBlockingError(
         { component: 'http.responses-handler', operation: 'payload.attach-metadata', requestId, entryEndpoint },
@@ -198,89 +196,12 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
     const sharedReq: any = {
       data: payload,
       route: { providerId: 'unknown', modelId: String(payload?.model || 'unknown'), requestId, timestamp: Date.now() },
-      metadata: { entryEndpoint, endpoint: entryEndpoint, stream: wantsSSE, routeName },
+      metadata: { entryEndpoint, endpoint: entryEndpoint, stream: expectsSSE, routeName },
       debug: { enabled: false, stages: {} },
       entryEndpoint
     };
-    sseLogger = (() => {
-      try {
-        const dir = path.join(os.homedir(), '.routecodex', 'logs', 'sse');
-        const ensure = async () => {
-          try {
-            await fsp.mkdir(dir, { recursive: true });
-          } catch (error) {
-            await logNonBlockingError(
-              { component: 'http.responses-handler', operation: 'sse.ensure-dir', requestId, entryEndpoint },
-              error
-            );
-          }
-        };
-        const file = path.join(dir, `${requestId}_server.sse.log`);
-        return {
-          async write(s: string) {
-            try {
-              await ensure();
-              await fsp.appendFile(file, `[${new Date().toISOString()}] ${s}`, 'utf-8');
-            } catch (error) {
-              await logNonBlockingError(
-                { component: 'http.responses-handler', operation: 'sse.append-log', requestId, entryEndpoint },
-                error
-              );
-            }
-          }
-        };
-      } catch (error) {
-        void logNonBlockingError(
-          { component: 'http.responses-handler', operation: 'sse.logger-init', requestId, entryEndpoint },
-          error
-        );
-        return { async write(_s: string) { /* noop */ } };
-      }
-    })();
-    // Pre heartbeat
-    let hbTimer: NodeJS.Timeout | null = null;
-    const startPreHeartbeat = () => {
-      try {
-        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-        res.setHeader('Cache-Control', 'no-cache, no-transform');
-        res.setHeader('Connection', 'keep-alive');
-        res.setHeader('X-Accel-Buffering', 'no');
-        (res as any).flushHeaders?.();
-      } catch (error) {
-        void logNonBlockingError(
-          { component: 'http.responses-handler', operation: 'sse.set-headers', requestId, entryEndpoint },
-          error
-        );
-      }
-      const iv = Math.max(1000, Number(process.env.ROUTECODEX_STREAM_HEARTBEAT_MS || process.env.RCC_STREAM_HEARTBEAT_MS || 15000));
-      const writeBeat = () => {
-        try {
-          const s = `: pre-heartbeat ${Date.now()}\n\n`;
-          res.write(s);
-          sseLogger.write(s).catch(()=>{});
-        } catch (error) {
-          void logNonBlockingError(
-            { component: 'http.responses-handler', operation: 'sse.heartbeat', requestId, entryEndpoint, level: 'debug' },
-            error
-          );
-        }
-      };
-      writeBeat(); hbTimer = setInterval(writeBeat, iv);
-    };
-    const stopPreHeartbeat = () => {
-      try {
-        if (hbTimer) {
-          clearInterval(hbTimer);
-          hbTimer = null;
-        }
-      } catch (error) {
-        void logNonBlockingError(
-          { component: 'http.responses-handler', operation: 'sse.heartbeat-stop', requestId, entryEndpoint, level: 'debug' },
-          error
-        );
-      }
-    };
-    if (wantsSSE) startPreHeartbeat();
+    sseLogger = createSSELogger(requestId, entryEndpoint);
+    const stopPreHeartbeat = expectsSSE ? startPreHeartbeat(res, sseLogger) : () => {};
 
     // Snapshot: routing-selected（由虚拟路由器决策 routeName）
     await runNonBlocking(
@@ -289,53 +210,17 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
     );
     const response = await ctx.pipelineManager.processRequest(sharedReq);
     const out = (response && typeof response === 'object' && 'data' in response) ? (response as any).data : response;
-    // 优先：核心返回了 __sse_responses → 无条件按 SSE 输出（零回退）
+    // 分支1：入口为 SSE 且核心返回 __sse_responses → 直通
     if (out && typeof out === 'object' && (out as any).__sse_responses) {
-      try { console.log('[HTTP][SSE] piping core stream for /v1/responses', { requestId }); } catch {}
       stopPreHeartbeat();
-      try {
-        // 预心跳阶段已发送过 SSE 头，此处仅在尚未发送响应时补充，避免重复设置触发 ERR_HTTP_HEADERS_SENT
-        if (!res.headersSent) {
-          res.setHeader('Content-Type', 'text/event-stream');
-          res.setHeader('Cache-Control','no-cache');
-          res.setHeader('Connection','keep-alive');
-          res.setHeader('X-Accel-Buffering','no');
-        }
-      } catch (error) {
-        void logNonBlockingError(
-          { component: 'http.responses-handler', operation: 'sse.set-headers-fallback', requestId, entryEndpoint },
-          error
-        );
-      }
-      try {
-        const { PassThrough } = await import('node:stream');
-        const tee = new PassThrough();
-        (out as any).__sse_responses.pipe(tee);
-        tee.on('data', (chunk: Buffer) => { try { sseLogger.write(chunk.toString()).catch(()=>{}); } catch {} });
-        tee.pipe(res);
-      } catch {
-        (out as any).__sse_responses.pipe(res);
-      }
+      await pipeUpstreamSSE(res, (out as any).__sse_responses, sseLogger);
       return;
     }
-    // 其次：客户端期待 SSE 但核心未给出流 → 输出最小错误帧 + [DONE]
-    if (wantsSSE) {
+    // 分支2：入口为 SSE 且非直通 → 不再在server合成，返回最小错误帧（合成由pipeline负责）
+    if (expectsSSE) {
+      sendResponsesSSEError(res, 502, new Error('pipeline did not produce SSE stream'), sseLogger);
       stopPreHeartbeat();
-      try {
-        if (!res.headersSent) {
-          res.setHeader('Content-Type', 'text/event-stream');
-          res.setHeader('Cache-Control','no-cache');
-          res.setHeader('Connection','keep-alive');
-          res.setHeader('X-Accel-Buffering','no');
-        }
-      } catch {}
-      try {
-        const s1 = `event: response.error\n`;
-        const s2 = `data: ${JSON.stringify({ type:'response.error', error: { message: 'NO_CORE_SSE', code: 'NO_CORE_SSE', type: 'pipeline_error' } })}\n\n`;
-        res.write(s1); res.write(s2); sseLogger.write(s1).catch(()=>{}); sseLogger.write(s2).catch(()=>{});
-        const done = 'data: [DONE]\n\n'; res.write(done); sseLogger.write(done).catch(()=>{});
-      } catch {}
-      try { res.end(); } catch {}
+      try { res.end(); } catch { /* ignore */ }
       return;
     }
     // Non-SSE
@@ -346,27 +231,26 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
     );
     res.status(200).json(out);
   } catch (error: any) {
-    // SSE error path
-    try {
-      const expectsSSE = (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream')) || (req.body && (req.body as any).stream === true);
-      if (expectsSSE) {
-        try {
-          if (!res.headersSent) {
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control','no-cache');
-            res.setHeader('Connection','keep-alive');
-          }
-        } catch {}
-        try {
-          const s1 = `event: response.error\n`;
-          const s2 = `data: ${JSON.stringify({ type:'response.error', error: { message: String(error?.message || 'Upstream error'), code: String((error as any)?.code || 'UPSTREAM_ERROR'), type: 'upstream_error' } })}\n\n`;
-          res.write(s1); res.write(s2); sseLogger.write(s1).catch(()=>{}); sseLogger.write(s2).catch(()=>{});
-          const done = 'data: [DONE]\n\n'; res.write(done); sseLogger.write(done).catch(()=>{});
-        } catch {}
-        try { res.end(); } catch {}
-        return;
-      }
-    } catch {}
+    // helper: extract http status from error object
+    const extractStatus = (err: any): number => {
+      try {
+        const direct = Number(err?.statusCode || err?.status || err?.response?.status || NaN);
+        if (Number.isFinite(direct) && direct >= 100 && direct <= 599) return direct;
+        const candidates: string[] = [];
+        if (typeof err?.code === 'string') candidates.push(err.code);
+        if (typeof err?.name === 'string') candidates.push(err.name);
+        if (typeof err?.message === 'string') candidates.push(err.message);
+        try { if (typeof err?.response?.data?.error?.code === 'string') candidates.push(String(err.response.data.error.code)); } catch {}
+        try { if (typeof err?.response?.data?.error?.message === 'string') candidates.push(String(err.response.data.error.message)); } catch {}
+        for (const s of candidates) {
+          const m = String(s).match(/\b(\d{3})\b/);
+          if (m) { const n = Number(m[1]); if (n >= 100 && n <= 599) return n; }
+        }
+      } catch {}
+      return 500;
+    };
+    // SSE error path（入口为 SSE 时，无条件以 SSE 返回）
+    try { if (wantsSSE(req, req.body)) { sendResponsesSSEError(res, extractStatus(error), error, sseLogger); return; } } catch { /* ignore */ }
     await runNonBlocking(
       { component: 'http.responses-handler', operation: 'snapshot.http-response-error', entryEndpoint },
       () => writeServerSnapshot({
@@ -376,7 +260,10 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
         entryEndpoint
       })
     );
-    if (!res.headersSent) res.status(500).json({ error: { message: error?.message || String(error) } });
+    if (!res.headersSent) {
+      const status = extractStatus(error);
+      res.status(status).json({ error: { message: error?.message || String(error), code: (error as any)?.code || undefined } });
+    }
   }
 }
 

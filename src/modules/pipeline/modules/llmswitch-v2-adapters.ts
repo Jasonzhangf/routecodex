@@ -106,11 +106,34 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
     if (!providerProtocol) {
       providerProtocol = this.pickProtocol(ctx);
     }
-    const result = await bridgeProcessIncoming(request, {
+    let result = await bridgeProcessIncoming(request, {
       processMode,
       providerProtocol,
       profilesPath: 'config/conversion/llmswitch-profiles.json'
     });
+    // 临时策略A：仅在 Chat→Responses 转换链路中过滤 max_tokens
+    // 条件：入口为 /v1/chat/completions 且目标 providerProtocol 为 openai-responses
+    try {
+      const ep = String(ctx.entryEndpoint || ctx.endpoint || '').toLowerCase();
+      if (ep === '/v1/chat/completions' && String(providerProtocol).toLowerCase() === 'openai-responses' && result) {
+        // 支持两种返回形态：
+        // 1) 直接返回 OpenAI Responses 请求对象
+        // 2) 返回 DTO：{ data, route, metadata, ... }
+        const prune = (obj: any) => {
+          if (obj && typeof obj === 'object') {
+            if ('max_tokens' in obj) delete (obj as any).max_tokens;
+            if ('maxTokens' in obj) delete (obj as any).maxTokens;
+          }
+        };
+        if ((result as any).data && typeof (result as any).data === 'object') {
+          prune((result as any).data);
+        } else {
+          prune(result as any);
+        }
+      }
+    } catch { /* best-effort */ }
+
+    // （已改为在 llmswitch-core 内处理 Responses→Chat 的 max_tokens 移除与 skip 提示）
     // Normalize: some core bridge versions may return an envelope like
     // { payload, pipelineId, ... }. Downstream expects plain Chat JSON
     // (BasePipeline will wrap it into DTO). Keep DTO if already returned.

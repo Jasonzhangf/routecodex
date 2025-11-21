@@ -88,7 +88,8 @@ export class HttpClient {
     headers?: Record<string, string>
   ): Promise<any> {
     const fullUrl = this.buildUrl(url);
-    const finalHeaders = this.buildHeaders({ 'Accept': 'text/event-stream', ...(headers || {}) });
+    // Ensure Accept:text/event-stream wins over any existing Accept header
+    const finalHeaders = this.buildHeaders({ ...(headers || {}), 'Accept': 'text/event-stream' });
 
     const controller = new AbortController();
     const timeout = this.defaultConfig.timeout;
@@ -244,10 +245,102 @@ export class HttpClient {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
+        const err: any = new Error(`HTTP ${response.status}: ${errorText}`);
+        err.status = response.status;
+        err.contentType = response.headers.get('content-type') || '';
+        throw err;
       }
 
-      const responseData = await response.json();
+      // 尝试以 JSON 解析；若失败，进行有限的健壮解析（不改变语义）：
+      // - 去除 BOM/不可见空白
+      // - 处理尾部噪声：截取首个起始括号到最近一次完整闭合的 JSON 片段
+      // - 支持 NDJSON：逐行尝试解析最后一个完整 JSON
+      // 若仍失败，抛出包含原始文本片段的结构化错误，避免出现 “Unexpected end of JSON input”。
+      const rawText = await response.text();
+      let responseData: unknown;
+      try {
+        const ct = (response.headers.get('content-type') || '').toLowerCase();
+        const looksJsonish = ct.includes('application/json') || /^[\s\uFEFF\u200B]*[\[{]/.test(rawText);
+        if (!looksJsonish) {
+          const snippet = rawText.slice(0, 256);
+          const err: any = new Error(`UPSTREAM_NON_JSON_BODY (HTTP ${response.status}): ${snippet}`);
+          err.status = response.status;
+          err.contentType = ct;
+          err.bodySnippet = snippet;
+          throw err;
+        }
+        const clean = rawText.replace(/^\uFEFF/, '').trim();
+        const tryParse = (s: string): any => JSON.parse(s);
+        const tryNdjson = (s: string): any | null => {
+          const lines = s.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+          for (let i = lines.length - 1; i >= 0; i--) {
+            try { return JSON.parse(lines[i]); } catch { /* continue */ }
+          }
+          return null;
+        };
+        const tryBracketRepair = (s: string): any | null => {
+          const startIdx = (() => {
+            const i1 = s.indexOf('{');
+            const i2 = s.indexOf('[');
+            if (i1 === -1 && i2 === -1) return -1;
+            if (i1 === -1) return i2; if (i2 === -1) return i1; return Math.min(i1, i2);
+          })();
+          if (startIdx < 0) return null;
+          let best: string | null = null;
+          let stack: string[] = [];
+          for (let i = startIdx; i < s.length; i++) {
+            const ch = s[i];
+            if (ch === '{' || ch === '[') stack.push(ch);
+            else if (ch === '}' || ch === ']') {
+              const last = stack[stack.length - 1];
+              if ((last === '{' && ch === '}') || (last === '[' && ch === ']')) stack.pop();
+            }
+            if (stack.length === 0) {
+              best = s.slice(startIdx, i + 1);
+            }
+          }
+          if (best) {
+            try { return JSON.parse(best); } catch { return null; }
+          }
+          return null;
+        };
+        if (!clean) {
+          responseData = {} as unknown;
+        } else {
+          try {
+            responseData = tryParse(clean);
+          } catch {
+            responseData = tryBracketRepair(clean) ?? tryNdjson(clean);
+            if (responseData == null) {
+              // 仅在 2xx 且响应体“明显不是 JSON（无括号/仅控制字符）”时，降级为空对象，避免上游偶发噪声导致解析失败
+              const onlyCtl = /^[\u0000-\u001F\s]*$/.test(clean);
+              const hasBraces = /[\{\[]/.test(clean);
+              if (response.status >= 200 && response.status < 300 && (!hasBraces || onlyCtl)) {
+                responseData = {} as unknown;
+              } else {
+                const snippet = clean.slice(0, 256);
+                const err: any = new Error(`UPSTREAM_MALFORMED_JSON (HTTP ${response.status}): ${snippet}`);
+                err.status = response.status;
+                err.contentType = ct;
+                err.bodySnippet = snippet;
+                throw err;
+              }
+            }
+          }
+        }
+      } catch (parseErr) {
+        // 2xx 严格降级为空对象，避免解析异常中断流水线；同时保留快照用于诊断
+        if (response.status >= 200 && response.status < 300) {
+          responseData = {} as unknown;
+        } else {
+          const snippet = rawText.slice(0, 256);
+          const err: any = new Error(`UPSTREAM_MALFORMED_JSON (HTTP ${response.status}): ${snippet}`);
+          err.status = response.status;
+          err.contentType = response.headers.get('content-type') || '';
+          err.bodySnippet = snippet;
+          throw err;
+        }
+      }
 
       // 手动转换Headers对象为普通对象
       const headersObj: Record<string, string> = {};

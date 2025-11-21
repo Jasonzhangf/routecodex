@@ -106,7 +106,7 @@ const logger = {
   debug: (msg: string) => console.log(`${chalk.gray('◉')  } ${  msg}`)
 };
 
-// Ensure llmswitch-core is resolvable（dev/worktree 场景下由 pipeline 加载 vendor）
+// Ensure llmswitch-core is resolvable（仅通过已安装的 rcc-llmswitch-core 包加载，禁止 vendor 目录）
 async function dynamicImport(p: string): Promise<any> {
   // Avoid TypeScript/ESM static resolution so we can probe optional entries safely
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
@@ -116,9 +116,9 @@ async function dynamicImport(p: string): Promise<any> {
 
 async function ensureCoreOrFail(): Promise<void> {
   // 在当前 worktree/dev 场景下：
-  // - llmswitch-core 已通过 sharedmodule/llmswitch-core 构建，并由 vendor/rcc-llmswitch-core/dist 提供；
+  // - llmswitch-core 通过 sharedmodule/llmswitch-core 构建，并以 rcc-llmswitch-core tgz 形式出现在依赖中；
   // - 实际加载在 pipeline/server 模块内部完成；
-  // 这里不再做额外的模块解析探测，避免因为本地 node_modules 结构差异导致 CLI 直接失败。
+  // 不做额外解析探测，避免因为本地 node_modules 结构差异导致 CLI 失败。
   return;
 }
 

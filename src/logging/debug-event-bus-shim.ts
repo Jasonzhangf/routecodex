@@ -1,8 +1,8 @@
 /**
- * Minimal DebugEventBus shim.
+ * Minimal DebugEventBus shim (no-op).
  *
- * 用于替代 rcc-debugcenter 的 DebugEventBus，仅在 dev/worktree 场景下
- * 提供基本的事件发布接口，默认静默（可按需开启 console.debug）。
+ * 目标：彻底去除对 debugcenter 模块的依赖，但保留统一的事件发布接口，
+ * 以满足现有代码的类型与调用约定。默认静默；仅用于本地 dev/worktree。
  */
 
 export interface DebugEventPayload {
@@ -24,11 +24,12 @@ export class DebugEventBus {
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   publish(_event: DebugEventPayload): void {
-    // 本地 dev 环境默认静默；如需调试可改为 console.debug
+    // 默认静默。如需调试，可临时改为 console.debug
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   subscribe(_subscriptionId: string, _handler: (event: DebugEventPayload) => void): void {
-    // 订阅接口占位，实现上保持静默
+    // 接口占位，保持静默
   }
 }
+

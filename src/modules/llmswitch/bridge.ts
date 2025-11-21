@@ -7,20 +7,9 @@ type AnyRecord = Record<string, unknown>;
 // 其它代码（pipeline/provider/server/virtual-router/snapshot）都只能通过这里暴露的统一接口访问 llmswitch-core。
 
 async function importCoreDist(subpath: string): Promise<any> {
+  // 仅依赖已安装的 rcc-llmswitch-core 包；禁止使用 vendor 目录
   const clean = subpath.replace(/\.js$/i, '');
-  const filename = `${clean}.js`;
-  // 优先 vendor/rcc-llmswitch-core/dist
-  const __filename = fileURLToPath(import.meta.url);
-  const pkgRoot = path.resolve(path.dirname(__filename), '../../..');
-  const vendor = path.join(pkgRoot, 'vendor', 'rcc-llmswitch-core', 'dist');
-  const candidate = path.join(vendor, filename);
-  try {
-    const url = pathToFileURL(candidate).href;
-    return await import(url);
-  } catch {
-    // 回退到已安装的 rcc-llmswitch-core 包（用于全局安装场景）
-    return await import('rcc-llmswitch-core/' + clean.replace(/\\/g, '/'));
-  }
+  return await import('rcc-llmswitch-core/' + clean.replace(/\\/g, '/'));
 }
 
 export type BridgeProcessOptions = {
@@ -71,6 +60,50 @@ export async function createResponsesSSEStreamFromOpenAI(chatJson: AnyRecord, ct
     throw new Error('[llmswitch-bridge] createResponsesSSEStreamFromOpenAI not available');
   }
   return await fn(chatJson, ctx);
+}
+
+export async function createChatSSEStreamFromChatJson(chatJson: AnyRecord, ctx: AnyRecord): Promise<any> {
+  const mod = await importCoreDist('v2/conversion/streaming/json-to-chat-sse');
+  const fn = (mod as any)?.createChatSSEStreamFromChatJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] createChatSSEStreamFromChatJson not available');
+  }
+  return await fn(chatJson, ctx);
+}
+
+export async function aggregateOpenAIChatSSEToJSON(readable: any): Promise<any> {
+  const mod = await importCoreDist('v2/conversion/streaming/openai-chat-sse-to-json');
+  const fn = (mod as any)?.aggregateOpenAIChatSSEToJSON;
+  if (typeof fn !== 'function') throw new Error('[llmswitch-bridge] aggregateOpenAIChatSSEToJSON not available');
+  return await fn(readable);
+}
+
+export async function createResponsesSSEFromUpstreamChat(upstream: any, ctx: AnyRecord): Promise<any> {
+  const mod = await importCoreDist('v2/conversion/streaming/openai-to-responses-bridge');
+  const fn = (mod as any)?.createResponsesSSEFromUpstreamChat;
+  if (typeof fn !== 'function') throw new Error('[llmswitch-bridge] createResponsesSSEFromUpstreamChat not available');
+  return await fn(upstream, ctx);
+}
+
+export async function createResponsesSSEFromResponsesJson(respJson: AnyRecord, ctx: AnyRecord): Promise<any> {
+  const mod = await importCoreDist('v2/conversion/streaming/responses-json-to-sse');
+  const fn = (mod as any)?.createResponsesSSEStreamFromResponsesJson;
+  if (typeof fn !== 'function') throw new Error('[llmswitch-bridge] createResponsesSSEFromResponsesJson not available');
+  return await fn(respJson, ctx);
+}
+
+export async function aggregateOpenAIResponsesSSEToJSON(readable: any): Promise<any> {
+  const mod = await importCoreDist('v2/conversion/streaming/openai-responses-sse-to-json');
+  const fn = (mod as any)?.aggregateOpenAIResponsesSSEToJSON;
+  if (typeof fn !== 'function') throw new Error('[llmswitch-bridge] aggregateOpenAIResponsesSSEToJSON not available');
+  return await fn(readable);
+}
+
+export async function aggregateAnthropicSSEToJSON(readable: any): Promise<any> {
+  const mod = await importCoreDist('v2/conversion/streaming/anthropic-messages-sse-to-json');
+  const fn = (mod as any)?.aggregateAnthropicSSEToJSON;
+  if (typeof fn !== 'function') throw new Error('[llmswitch-bridge] aggregateAnthropicSSEToJSON not available');
+  return await fn(readable);
 }
 
 export async function buildResponsesRequestFromChat(chatRequest: AnyRecord): Promise<any> {

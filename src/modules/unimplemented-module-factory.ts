@@ -4,7 +4,7 @@
  */
 
 import { RCCUnimplementedModule, type UnimplementedModuleConfig } from './unimplemented-module.js';
-import { DebugEventBus } from 'rcc-debugcenter';
+import { DebugEventBus } from '../logging/debug-event-bus-shim.js';
 import { ErrorHandlingCenter, type ErrorContext } from 'rcc-errorhandling';
 
 /**

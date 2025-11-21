@@ -1,0 +1,19 @@
+{
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "search",
+        "description": "Web search by query string",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "q": { "type": "string", "description": "query terms" }
+          },
+          "required": ["q"]
+        }
+      }
+    }
+  ]
+}
+

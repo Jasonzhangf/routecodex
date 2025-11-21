@@ -5,7 +5,8 @@
  */
 
 import { BaseModule, type ModuleInfo } from 'rcc-basemodule';
-import * as debugcenter from 'rcc-debugcenter';
+// Remove runtime dependency on rcc-debugcenter; use local no-op shim instead
+import { DebugEventBus as DebugEventBusShim } from '../logging/debug-event-bus-shim.js';
 import * as errorhandling from 'rcc-errorhandling';
 import type { ErrorContext } from 'rcc-errorhandling';
 // import { Logger } from '../utils/logger.js';
@@ -90,11 +91,8 @@ export class RCCUnimplementedModule extends BaseModule {
       ...config,
     };
 
-    const deb: any = (debugcenter as any).DebugEventBus;
-    const DebugEventBusObj = deb && typeof deb.getInstance === 'function'
-      ? deb
-      : { getInstance: () => ({ publish: (_evt: unknown) => {}, subscribe: (_: any, __: any) => {} }) };
-    this.debugEventBus = DebugEventBusObj.getInstance();
+    // Cast to a loose shape to avoid typing differences between shim and legacy
+    this.debugEventBus = DebugEventBusShim.getInstance() as unknown as { publish: (evt: unknown) => void };
 
     const ErrorHandlingCenterClass: new () => {
       initialize: () => Promise<void>;

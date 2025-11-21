@@ -12,7 +12,7 @@
 import express, { type Application, type Request, type Response } from 'express';
 import { BaseModule, type ModuleInfo } from '../../modules/config-manager/base-module-shim.js';
 import { ErrorHandlingCenter } from '../../modules/errorhandling/error-handling-center-shim.js';
-import { DebugEventBus } from '../../modules/debugcenter/debug-event-bus-shim.js';
+import { DebugEventBus } from '../../logging/debug-event-bus-shim.js';
 import type { UnknownObject } from '../../types/common-types.js';
 import { ServerV2HookIntegration, type ServerV2HookContext } from '../hooks/server-v2-hook-integration.js';
 import { ServerRequestLoggingHook } from '../hooks/impl/server-request-logging-hook.js';
@@ -777,6 +777,12 @@ export class RouteCodexServerV2 extends BaseModule {
   public attachRouteMeta(routeMeta: Record<string, { providerId: string; modelId: string; keyId: string }>): void {
     (globalThis as any).routeMeta = routeMeta;
     this.routeMeta = routeMeta || ({} as any);
+    try {
+      const mgr: any = this.pipelineManager as any;
+      if (mgr && typeof mgr.attachRouteMeta === 'function') {
+        mgr.attachRouteMeta(this.routeMeta);
+      }
+    } catch { /* ignore */ }
   }
 
   public attachRoutingClassifierConfig(config: unknown): void {

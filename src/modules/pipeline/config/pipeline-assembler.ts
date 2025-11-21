@@ -315,11 +315,6 @@ export class PipelineAssembler {
           'responses',
           'anthropic',
           'gemini',
-          'iflow',
-          // 预留服务族，统一走 openai-chat 协议
-          'glm',
-          'qwen',
-          'lmstudio',
         ]);
         const provCfgObj = this.asRecord(provider?.config || {});
         const existing = String((provCfgObj as any).providerType || '').toLowerCase();
@@ -332,11 +327,11 @@ export class PipelineAssembler {
             if (t.includes('openai') || t.includes('generic-openai') || t.includes('modelscope')) return 'openai';
             if (t.includes('responses')) return 'responses';
             if (t.includes('anthropic')) return 'anthropic';
-            // glm/qwen/iflow/lmstudio 等服务家族共享 openai-chat 协议，但在 ServiceProfile 中拥有独立配置
-            if (t.includes('glm') || t.includes('zhipu')) return 'glm';
-            if (t.includes('qwen') || t.includes('dashscope') || t.includes('aliyun')) return 'qwen';
-            if (t.includes('iflow')) return 'iflow';
-            if (t.includes('lmstudio') || t.includes('lm-studio')) return 'lmstudio';
+            // glm/qwen/iflow/lmstudio 等服务家族统一映射为 openai 协议族
+            if (t.includes('glm') || t.includes('zhipu')) return 'openai';
+            if (t.includes('qwen') || t.includes('dashscope') || t.includes('aliyun')) return 'openai';
+            if (t.includes('iflow')) return 'openai';
+            if (t.includes('lmstudio') || t.includes('lm-studio')) return 'openai';
             return '' as any;
           };
           const fromCfgTypeRaw = String((provCfgObj as any).type || '').toLowerCase();
@@ -432,7 +427,7 @@ export class PipelineAssembler {
         const mtLower = moduleType.toLowerCase();
         if (!mtLower) {
           // 不写 moduleType → 默认 passthrough-compatibility
-          moduleType = 'passthrough-compatibility';
+          moduleType = (providerType === 'responses') ? 'responses-compatibility' : 'passthrough-compatibility';
         } else if (mtLower === 'passthrough') {
           // 允许简写 'passthrough'
           moduleType = 'passthrough-compatibility';
@@ -482,13 +477,33 @@ export class PipelineAssembler {
       // Do not infer provider module type; honor the type already provided in pipeline definition
       // (modBlock.provider already set above)
 
-    const providerTypeForPipeline = String((provCfg as any).providerType || provider.type || '').trim();
+    let providerTypeForPipeline = String((provCfg as any).providerType || '').trim();
+    // 优先使用 provider.config.providerType；仅在缺失时才回退到 provider.type（避免将 providerId 误当类型）
+    if (!providerTypeForPipeline) {
+      providerTypeForPipeline = String(provider.type || '').trim();
+    }
+    // 归一别名到注册的 providerType
+    const tAlias = providerTypeForPipeline.toLowerCase();
+    if (tAlias === 'openai-standard') {
+      providerTypeForPipeline = 'openai-http-provider';
+    }
     if (!providerTypeForPipeline) {
       throw new Error(`PipelineAssembler(V2): provider.type/providerType is required for pipeline '${id}'（禁止兜底为 openai）`);
     }
 
-    // 将 modules.provider 的模块类型同步为归一化后的 providerTypeForPipeline，保证能够命中 Registry 中注册的模块工厂
-    (modBlock as any).provider = { type: providerTypeForPipeline, config: provCfg };
+    // 将模块类型限制在4个HTTP族（openai/responses/anthropic/gemini）；
+    // iflow/qwen 等家族归一到 openai HTTP 族
+    const moduleType = (() => {
+      let t = providerTypeForPipeline.toLowerCase();
+      if (t === 'iflow' || t === 'qwen') t = 'openai';
+      if (t === 'openai' || t === 'openai-http-provider') return 'openai-http-provider';
+      if (t === 'responses' || t === 'responses-http-provider') return 'responses-http-provider';
+      if (t === 'anthropic' || t === 'anthropic-http-provider') return 'anthropic-http-provider';
+      if (t === 'gemini' || t === 'gemini-http-provider') return 'gemini-http-provider';
+      // Fail Fast：遇到未知 providerType，直接报错，避免注册额外族
+      throw new Error(`Unknown providerType '${providerTypeForPipeline}'. Expected one of: openai, responses, anthropic, gemini`);
+    })();
+    (modBlock as any).provider = { type: moduleType, config: provCfg };
 
     // 根据 providerType 决定出口协议（providerProtocol），传入 llmSwitch 配置：
     //  - openai/glm/qwen/iflow/lmstudio → openai-chat

@@ -14,9 +14,9 @@
     },
     "topLevel": {
       "conditional": [
-        { "when": { "tools": "empty" }, "remove": ["tool_choice"] }
+        { "when": { "tools": "empty" }, "remove": ["tool_choice"] },
+        { "when": { "always": true }, "remove": [] }
       ]
     }
   }
 }
-

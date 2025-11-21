@@ -7,7 +7,7 @@
 // 在 dev/worktree 场景下，直接使用本仓库提供的 shim 实现，
 // 避免对 rcc-debugcenter / rcc-errorhandling 的运行时依赖。
 import { ErrorHandlingCenter } from '../modules/errorhandling/error-handling-center-shim.js';
-import { DebugEventBus } from '../modules/debugcenter/debug-event-bus-shim.js';
+import { DebugEventBus } from '../logging/debug-event-bus-shim.js';
 
 // Define ErrorContext interface locally
 interface ErrorContext {

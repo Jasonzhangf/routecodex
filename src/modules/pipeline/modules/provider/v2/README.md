@@ -142,7 +142,7 @@ const iflowConfig = {
 };
 
 // 2. 首次使用会触发浏览器授权
-const provider = new OpenAIStandard(iflowConfig, dependencies);
+const provider = new iFlowHttpProvider(iflowConfig, dependencies);
 await provider.initialize(); // → 打开浏览器 → 授权 → 获取 API Key
 
 // 3. 后续使用直接读取本地 token 文件
@@ -176,4 +176,3 @@ const response = await provider.processIncoming({
 - `IFLOW_CLIENT_ID`：覆盖默认 clientId（高级用法）
 - `IFLOW_CLIENT_SECRET`：覆盖默认 clientSecret（高级用法）
 - `ROUTECODEX_OAUTH_AUTO_OPEN=0`：禁用自动打开浏览器（手动授权）
-

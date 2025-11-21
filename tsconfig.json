@@ -3,6 +3,12 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "paths": {
+      "../../../../types/module.types": ["src/types/module.types.ts"],
+      "../../../../types/common-types": ["src/types/common-types.ts"],
+      "../../../../types/module.types.js": ["src/types/module.types.ts"],
+      "../../../../types/common-types.js": ["src/types/common-types.ts"]
+    },
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "strict": true,

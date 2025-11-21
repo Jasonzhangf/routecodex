@@ -5,7 +5,7 @@
  * significantly improving startup performance and enabling efficient resource utilization.
  */
 
-import { DebugEventBus } from 'rcc-debugcenter';
+import { DebugEventBus } from '../../logging/debug-event-bus-shim.js';
 import type { DebugCenter } from '../pipeline/types/external-types.js';
 
 /**
