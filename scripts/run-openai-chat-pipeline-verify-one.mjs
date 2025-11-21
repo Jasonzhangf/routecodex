@@ -82,7 +82,24 @@ async function main() {
   const out = await manager.processRequest(req);
   const sse = out?.data?.__sse_responses;
   if (!sse) { console.log('[verify-one] FAIL reason=no-sse'); process.exit(4); }
-  const text = await collect(sse);
+
+  // 增量读取：检测到 finish_reason 或 [DONE] 即提前结束，避免等待上游 keep-alive
+  let buf = '';
+  let finished = false;
+  const timer = setTimeout(() => { try { sse.destroy(); } catch {} }, 60000);
+  sse.on('data', (c) => {
+    if (finished) return;
+    const chunk = String(c);
+    buf += chunk;
+    if (/\ndata:\s*\[DONE\]\s*\n/.test(buf) || /"finish_reason"\s*:\s*"(stop|length|tool_calls)"/i.test(buf)) {
+      finished = true;
+      try { sse.destroy(); } catch {}
+    }
+  });
+  await new Promise((resolve) => { sse.on('end', resolve); sse.on('close', resolve); sse.on('error', resolve); });
+  clearTimeout(timer);
+
+  const text = buf;
   const hasDoneToken = /\ndata:\s*\[DONE\]\s*\n/.test(text) || text.trim().endsWith('[DONE]');
   let jsonOk = false; let parsed = null;
   try { parsed = await aggregateOpenAIChatSSEToJSON(toReadable(text)); jsonOk = true; } catch { jsonOk = false; }

@@ -4,6 +4,7 @@ coverage/
 
 # Local caches and packs
 .npm-cache/
+.npm-cache-local/
 *.tgz
 
 # Local debug payloads
