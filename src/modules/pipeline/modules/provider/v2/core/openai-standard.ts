@@ -626,6 +626,21 @@ export class OpenAIStandard extends BaseProvider {
       } catch { /* ignore max_tokens resolution errors */ }
       // Remove metadata/envelope fields that upstream doesn't accept
       try { if ('metadata' in body) { delete body.metadata; } } catch { /* ignore */ }
+      // Responses request minimal filter: drop non-standard max token variants (maxtoken/maxToken/maxTokens)
+      try {
+        const entryEp = (processedRequest as any)?.metadata?.entryEndpoint || (processedRequest as any)?.entryEndpoint;
+        if (typeof entryEp === 'string' && String(entryEp).toLowerCase() === '/v1/responses') {
+          for (const key of Object.keys(body)) {
+            const lower = key.toLowerCase();
+            if (lower === 'maxtoken' || lower === 'maxtokens') {
+              delete (body as any)[key];
+            }
+            if (key === 'maxToken' || key === 'maxTokens') {
+              delete (body as any)[key];
+            }
+          }
+        }
+      } catch { /* ignore */ }
       // Provider 不再按入口端点做流控或形状处理；上层已统一非流式
       return body;
     })();

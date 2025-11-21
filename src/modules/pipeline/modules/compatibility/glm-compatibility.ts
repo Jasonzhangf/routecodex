@@ -17,6 +17,7 @@ import type { UnknownObject, /* LogData */ } from '../../../../types/common-type
 import type { CompatibilityContext } from './compatibility-interface.js';
 import { sanitizeAndValidateOpenAIChat } from '../../utils/preflight-validator.js';
 import { stripThinkingTags } from '../../../../server/utils/text-filters.js';
+import { normalizeThinkingConfig, getModelId, resolveReasoningPolicy, flattenAnthropicContent } from './compatibility/glm/utils/thinking-utils.js';
 import { ErrorContextBuilder, EnhancedRouteCodexError } from '../../../../server/utils/error-context.js';
 
 // Import new modular components
@@ -48,7 +49,7 @@ export class GLMCompatibility implements CompatibilityModule {
     this.config = config;
     // Initialize compat/thinking policies (parity with legacy GLM compat)
     this.forceDisableThinking = String(process.env.RCC_GLM_DISABLE_THINKING || '0') === '1';
-    this.thinkingDefaults = this.normalizeThinkingConfig((this.config as any)?.config?.thinking);
+    this.thinkingDefaults = normalizeThinkingConfig((this.config as any)?.config?.thinking);
     const compatCfg = (((this.config as any)?.config || {}) as any).compat || {};
     const envRemove = String(process.env.RCC_GLM_REMOVE_FUNCTION_STRICT || '1') !== '0';
     const envNormalize = String(process.env.RCC_GLM_USE_CORE_NORMALIZE || '0') === '1';
@@ -264,43 +265,15 @@ export class GLMCompatibility implements CompatibilityModule {
         await writeCompatSnapshot({ phase: 'compat-pre', requestId: reqId, data: request as UnknownObject, entryEndpoint });
       } catch { /* non-blocking */ }
 
-      // Pre-guard: apply provider JSON shape filter directly (配置驱动的字段级规则)，确保关键字段规范（如删除 assistant.tool_calls）
-      // 仍在兼容层内执行，符合“唯一入口/最小兼容层”原则
-      let preFiltered = request as UnknownObject;
+      // 通过独立转换函数执行 GLM 请求侧转换（最小兼容 + 预检）
+      let processedRequest: UnknownObject;
       try {
-        const { fileURLToPath } = await import('url');
-        const { dirname, join } = await import('path');
-        const __filename = fileURLToPath(import.meta.url);
-        const __dirname = dirname(__filename);
-        const shapePath = join(__dirname, 'glm', 'config', 'shape-filters.json');
-        const filter = new UniversalShapeFilter({ configPath: shapePath });
-        await filter.initialize();
-        preFiltered = await filter.applyRequestFilter(preFiltered);
-        // Blacklist sanitizer: remove provider-incompatible fields before manager processing
-        try {
-          const blacklistPath = join(__dirname, 'glm', 'config', 'blacklist-rules.json');
-          const bl = new BlacklistSanitizer({ configPath: blacklistPath });
-          await bl.initialize();
-          preFiltered = await bl.apply(preFiltered);
-        } catch { /* ignore blacklist errors */ }
-      } catch { /* best-effort; fall back to manager */ }
-
-      // Process using modular compatibility manager（包含字段映射、校验、hooks 等）
-      let processedRequest = await this.compatibilityManager.processRequest(this.moduleId, preFiltered, context);
-
-      // Final preflight for GLM: enforce last-user policy and sanitize payload to avoid upstream 1214
-      const preflight = sanitizeAndValidateOpenAIChat(processedRequest as any, { target: 'glm', enableTools: true, glmPolicy: 'compat' });
-      if (Array.isArray(preflight.issues) && preflight.issues.length) {
-        const errs = preflight.issues.filter(i => i.level === 'error');
-        if (errs.length) {
-          const detail = errs.map(e => e.code).join(',');
-          const baseError = new Error(`compat-validation-failed: ${detail}`);
-          // Wrap in EnhancedRouteCodexError for unified error pipeline
-          throw new EnhancedRouteCodexError(baseError, { module: 'GLMCompatibility', function: 'processIncoming', requestId: context.requestId, additional: { issues: preflight.issues } } as any);
-        }
+        const { glmRequestTransform } = await import('./compatibility/glm/transforms/request-transform.js');
+        processedRequest = await glmRequestTransform(this.compatibilityManager, this.moduleId, request as UnknownObject, context);
+      } catch (e: any) {
+        const baseError = e instanceof Error ? e : new Error(String(e));
+        throw new EnhancedRouteCodexError(baseError, { module: 'GLMCompatibility', function: 'processIncoming', requestId: context.requestId } as any);
       }
-      processedRequest = preflight.payload as UnknownObject;
-      // 不再在 GLM 兼容层处理 max_tokens；按架构要求改由 Chat→Responses 转换时统一过滤。
 
       // Write compat-post snapshot
       try {
@@ -369,12 +342,9 @@ export class GLMCompatibility implements CompatibilityModule {
         await writeCompatSnapshot({ phase: 'compat-pre', requestId: reqId, data: payload as UnknownObject, entryEndpoint });
       } catch { /* ignore */ }
 
-      // Process response using new modular compatibility manager
-      const processedResponse = await this.compatibilityManager.processResponse(
-        this.moduleId,
-        payload as UnknownObject,
-        context
-      );
+      // 通过独立转换函数执行 GLM 响应侧转换
+      const { glmResponseTransform } = await import('./compatibility/glm/transforms/response-transform.js');
+      const processedResponse = await glmResponseTransform(this.compatibilityManager, this.moduleId, payload as UnknownObject, context);
 
       // Write compat-post snapshot for outgoing
       try {
@@ -397,72 +367,7 @@ export class GLMCompatibility implements CompatibilityModule {
   }
 
   // Helpers (parity with legacy implementation)
-  private normalizeThinkingConfig(value: any): ThinkingConfig | null {
-    if (!value || typeof value !== 'object') return null;
-    const cfg = value as UnknownObject;
-    return {
-      enabled: cfg.enabled !== false,
-      payload: this.clonePayload(cfg.payload),
-      models: this.normalizePerModel(cfg.models)
-    };
-  }
-
-  private normalizePerModel(value: any): Record<string, ThinkingModelConfig> | null {
-    if (!value || typeof value !== 'object') return null;
-    const map: Record<string, ThinkingModelConfig> = {};
-    for (const [model, raw] of Object.entries(value as UnknownObject)) {
-      if (!raw || typeof raw !== 'object') continue;
-      const cfg = raw as UnknownObject;
-      map[model] = {
-        enabled: cfg.enabled !== false,
-        payload: this.clonePayload(cfg.payload)
-      };
-    }
-    return Object.keys(map).length ? map : null;
-  }
-
-  private clonePayload(payload: any): UnknownObject | null {
-    if (!payload || typeof payload !== 'object') return { type: 'enabled' } as any;
-    try { return JSON.parse(JSON.stringify(payload)) as UnknownObject; } catch { return { type: 'enabled' } as any; }
-  }
-
-  private getModelId(request: Record<string, unknown>): string | null {
-    if (request && typeof request === 'object' && request !== null) {
-      if ('route' in request && typeof (request as any).route?.modelId === 'string') {
-        return (request as any).route.modelId;
-      }
-      if (typeof (request as any).model === 'string') return (request as any).model;
-    }
-    return null;
-  }
-
-  private resolveReasoningPolicy(entryEndpointRaw: string): 'strip' | 'preserve' {
-    const policy = String(process.env.RCC_REASONING_POLICY || 'auto').trim().toLowerCase();
-    const ep = String(entryEndpointRaw || '').toLowerCase();
-    if (policy === 'strip') return 'strip';
-    if (policy === 'preserve') return 'preserve';
-    if (ep.includes('/v1/responses')) return 'preserve';
-    if (ep.includes('/v1/chat/completions')) return 'strip';
-    if (ep.includes('/v1/messages')) return 'strip';
-    return 'strip';
-  }
-
-  private flattenAnthropicContent(blocks: any[]): string[] {
-    const texts: string[] = [];
-    for (const block of blocks) {
-      if (!block) continue;
-      if (typeof block === 'string') { const t = block.trim(); if (t) texts.push(t); continue; }
-      if (typeof block === 'object') {
-        const type = String((block as any).type || '').toLowerCase();
-        if ((type === 'text' || type === 'input_text' || type === 'output_text') && typeof (block as any).text === 'string') {
-          const t = (block as any).text.trim(); if (t) texts.push(t); continue;
-        }
-        if (Array.isArray((block as any).content)) { texts.push(...this.flattenAnthropicContent((block as any).content)); continue; }
-        if (typeof (block as any).content === 'string') { const t = (block as any).content.trim(); if (t) texts.push(t); continue; }
-      }
-    }
-    return texts;
-  }
+  // utility methods moved to utils/thinking-utils.ts
 
   // Added: missing methods (migrated from broken tail section)
   async cleanup(): Promise<void> {
