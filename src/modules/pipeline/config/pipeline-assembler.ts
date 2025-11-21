@@ -487,8 +487,24 @@ export class PipelineAssembler {
       throw new Error(`PipelineAssembler(V2): provider.type/providerType is required for pipeline '${id}'（禁止兜底为 openai）`);
     }
 
-    // 将 modules.provider 的模块类型同步为归一化后的 providerTypeForPipeline，保证能够命中 Registry 中注册的模块工厂
-    (modBlock as any).provider = { type: providerTypeForPipeline, config: provCfg };
+    // 将第三方provider type映射到已注册的标准provider模块（配置驱动）
+    const mapProviderTypeToRegisteredModule = (type: string): string => {
+      const t = type.toLowerCase();
+      // 已注册的标准provider types
+      const registeredTypes = new Set(['openai', 'responses', 'anthropic']);
+
+      if (registeredTypes.has(t)) {
+        return t;
+      }
+
+      // 第三方provider（glm/qwen/iflow/lmstudio等）全部映射到openai（使用OpenAI兼容协议）
+      return 'openai';
+    };
+
+    const mappedProviderType = mapProviderTypeToRegisteredModule(providerTypeForPipeline);
+
+    // 将 modules.provider 的模块类型同步为映射后的类型，保证能够命中 Registry 中注册的模块工厂
+    (modBlock as any).provider = { type: mappedProviderType, config: provCfg };
 
     // 根据 providerType 决定出口协议（providerProtocol），传入 llmSwitch 配置：
     //  - openai/glm/qwen/iflow/lmstudio → openai-chat

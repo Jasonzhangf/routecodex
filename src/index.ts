@@ -44,10 +44,18 @@ if (!process.env.ROUTECODEX_VERSION) {
  * Default modules configuration path
  */
 function getDefaultModulesConfigPath(): string {
+  // 获取当前执行文件的目录（用于找到打包后的modules.json）
+  const execDir = path.dirname(process.argv[1] || process.execPath);
+
   const possiblePaths = [
     process.env.ROUTECODEX_MODULES_CONFIG,
+    // 优先查找打包后的modules.json（在npm包中）
+    path.join(execDir, 'config', 'modules.json'),
+    // 开发环境的相对路径
     './config/modules.json',
+    // 当前工作目录
     path.join(process.cwd(), 'config', 'modules.json'),
+    // 用户主目录
     path.join(homedir(), '.routecodex', 'config', 'modules.json')
   ];
 

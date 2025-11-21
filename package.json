@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.81.56",
+  "version": "0.82.000",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -32,7 +32,7 @@
     "node": ">=20 <26"
   },
   "scripts": {
-    "build": "node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs",
+    "build": "node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs",
     "build:dev": "npm run clean && node scripts/build-core.mjs && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && chmod +x dist/cli.js || true",
     "build:min": "node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-configs.mjs",
     "prepack": "echo skip-prepack",

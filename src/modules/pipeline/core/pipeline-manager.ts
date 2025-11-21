@@ -1225,8 +1225,6 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('openai', this.createOpenAIProviderModule);
     this.registry.registerModule('responses', this.createOpenAIProviderModule);
     this.registry.registerModule('anthropic', this.createOpenAIProviderModule);
-    // Service-family alias for iFlow（使用 iflow ServiceProfile + OAuth）
-    this.registry.registerModule('iflow', this.createOpenAIProviderModule);
     // Family-specific compatibility modules
     this.registry.registerModule("iflow-compatibility", this.createIFlowCompatibilityModule);
 
