@@ -1,11 +1,16 @@
 import type { Request, Response } from 'express';
 import type { HandlerContext } from './types.js';
+import { isEntryStreamingAllowed } from '../utils/streaming-flags.js';
 
 // Shared handler for OpenAI Responses continuation:
 // POST /v1/responses/:id/submit_tool_outputs
 // Accepts { tool_outputs: [{ tool_call_id, output }], stream?: boolean, model?: string }
 // Maps to next-round Responses request: { model, input: [{ type:'tool_result', tool_call_id, output }], stream:true, previous_response_id }
 export async function handleSubmitToolOutputs(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
+  const entryEndpoint = '/v1/responses';
+  const streamingAllowed = isEntryStreamingAllowed(entryEndpoint);
+  let clientRequestsSSE = false;
+  let expectsSSE = false;
   const emitErrorSSE = (message: string, model: string) => {
     try { res.setHeader('Content-Type', 'text/event-stream'); res.setHeader('Cache-Control','no-cache'); res.setHeader('Connection','keep-alive'); } catch {}
     const writeEvt = (ev: string, data: any) => { try { res.write(`event: ${ev}\n`); res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {} };
@@ -22,7 +27,8 @@ export async function handleSubmitToolOutputs(req: Request, res: Response, ctx: 
     const responseId = String(req.params.id || '');
     const body = (req.body && typeof req.body === 'object') ? (req.body as any) : {};
     const toolOutputs = Array.isArray(body.tool_outputs) ? body.tool_outputs : [];
-    const wantsSSE = body.stream === true || (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream'));
+    clientRequestsSSE = body.stream === true || (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream'));
+    expectsSSE = streamingAllowed && clientRequestsSSE;
     let model: string = String(body.model || req.query.model || '').trim();
 
     // Best-effort: if model is absent, try infer from codex-samples snapshot by response id
@@ -52,24 +58,31 @@ export async function handleSubmitToolOutputs(req: Request, res: Response, ctx: 
       tool_call_id: String((t && (t.tool_call_id || t.call_id || t.id)) || ''),
       output: (t && t.output != null) ? String(t.output) : ''
     }));
-    const payload = { model: model || 'unknown', input, stream: true, previous_response_id: responseId } as any;
+    const payload = { model: model || 'unknown', input, stream: expectsSSE, previous_response_id: responseId } as any;
 
     if (!ctx.pipelineManager) {
-      return emitErrorSSE('Pipeline manager not attached', model || 'unknown');
+      if (expectsSSE) {
+        return emitErrorSSE('Pipeline manager not attached', model || 'unknown');
+      }
+      res.status(503).json({ error: { message: 'Pipeline manager not attached' } });
+      return;
     }
 
     try {
-      const routing = await ctx.selectRouting(payload, '/v1/responses');
+      const routing = await ctx.selectRouting(payload, entryEndpoint);
       const routeName = routing.routeName;
       const sharedReq = {
         data: payload,
         route: { providerId: 'unknown', modelId: String(payload.model||'unknown'), requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, timestamp: Date.now(), ...(routing.pipelineId ? { pipelineId: routing.pipelineId } : {}) },
-        metadata: { entryEndpoint: '/v1/responses', endpoint: '/v1/responses', stream: wantsSSE, routeName },
+        metadata: { entryEndpoint, endpoint: entryEndpoint, stream: expectsSSE, routeName },
         debug: { enabled: false, stages: {} }
       } as any;
       const response = await (ctx.pipelineManager as any).processRequest(sharedReq);
       const out = (response && typeof response === 'object' && 'data' in response) ? (response as any).data : response;
-      if (wantsSSE) {
+      if (!streamingAllowed && clientRequestsSSE) {
+        try { res.setHeader('X-RouteCodex-Streaming-Disabled', '1'); } catch { /* ignore */ }
+      }
+      if (expectsSSE) {
         if (out && typeof out === 'object' && (out as any).__sse_responses) {
           try { res.setHeader('Content-Type', 'text/event-stream'); res.setHeader('Cache-Control','no-cache'); res.setHeader('Connection','keep-alive'); } catch {}
           (out as any).__sse_responses.pipe(res); return;
@@ -86,7 +99,11 @@ export async function handleSubmitToolOutputs(req: Request, res: Response, ctx: 
       }
     } catch (err: any) {
       const msg = String(err?.message || 'Upstream or pipeline error');
-      return emitErrorSSE(msg, model || 'unknown');
+      if (expectsSSE) {
+        return emitErrorSSE(msg, model || 'unknown');
+      }
+      res.status(502).json({ error: { message: msg, type: 'upstream_error' } });
+      return;
     }
   } catch (error: any) {
     const status = typeof error?.statusCode === 'number' ? error.statusCode : 500;

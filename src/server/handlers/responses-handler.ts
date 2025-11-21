@@ -4,11 +4,15 @@ import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { getTransparentMonitorConfigForResponses } from '../utils/monitor-transparent.js';
 import { logNonBlockingError, runNonBlocking } from '../utils/non-blocking-error-logger.js';
 import { wantsSSE, createSSELogger, startPreHeartbeat, pipeUpstreamSSE, synthesizeResponsesSSE, sendResponsesSSEError } from '../utils/sse-utils.js';
+import { isEntryStreamingAllowed } from '../utils/streaming-flags.js';
 
 // Responses endpoint: /v1/responses (OpenAI Responses SSE with named events)
 export async function handleResponses(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
   let sseLogger: { write: (line: string) => Promise<void> } = { write: async () => {} } as any;
   const entryEndpoint = '/v1/responses';
+  const streamingAllowed = isEntryStreamingAllowed(entryEndpoint);
+  let clientRequestsSSE = false;
+  let expectsSSE = false;
   const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
   const payload = (req.body || {}) as any;
 
@@ -181,10 +185,12 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
       { component: 'http.responses-handler', operation: 'snapshot.http-request', requestId, entryEndpoint },
       () => writeServerSnapshot({ phase: 'http-request', requestId, data: payload, entryEndpoint })
     );
-    const expectsSSE = wantsSSE(req, payload);
+    clientRequestsSSE = wantsSSE(req, payload);
+    expectsSSE = streamingAllowed && clientRequestsSSE;
     try {
       const meta = (payload.metadata && typeof payload.metadata === 'object') ? payload.metadata : {};
       payload.metadata = { ...meta, entryEndpoint, stream: expectsSSE };
+      payload.stream = expectsSSE;
     } catch (error) {
       await logNonBlockingError(
         { component: 'http.responses-handler', operation: 'payload.attach-metadata', requestId, entryEndpoint },
@@ -202,6 +208,9 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
       entryEndpoint
     };
     sseLogger = createSSELogger(requestId, entryEndpoint);
+    if (!streamingAllowed && clientRequestsSSE) {
+      try { res.setHeader('X-RouteCodex-Streaming-Disabled', '1'); } catch { /* ignore */ }
+    }
     const stopPreHeartbeat = expectsSSE ? startPreHeartbeat(res, sseLogger) : () => {};
 
     // Snapshot: routing-selected（由虚拟路由器决策 routeName）
@@ -250,8 +259,8 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
       } catch {}
       return 500;
     };
-    // SSE error path（入口为 SSE 时，无条件以 SSE 返回）
-    try { if (wantsSSE(req, req.body)) { sendResponsesSSEError(res, extractStatus(error), error, sseLogger); return; } } catch { /* ignore */ }
+    // SSE error path（仅在当前入口允许且客户端请求时采用 SSE 返回）
+    try { if (expectsSSE) { sendResponsesSSEError(res, extractStatus(error), error, sseLogger); return; } } catch { /* ignore */ }
     await runNonBlocking(
       { component: 'http.responses-handler', operation: 'snapshot.http-response-error', entryEndpoint },
       () => writeServerSnapshot({

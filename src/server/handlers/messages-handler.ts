@@ -5,11 +5,15 @@ import fsp from 'fs/promises';
 import type { HandlerContext } from './types.js';
 import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { logNonBlockingError, runNonBlocking } from '../utils/non-blocking-error-logger.js';
+import { isEntryStreamingAllowed } from '../utils/streaming-flags.js';
 
 // Anthropic Messages endpoint: /v1/messages (Anthropic SSE with named events)
 export async function handleMessages(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
   let sseLogger: { write: (line: string) => Promise<void> } = { write: async () => {} } as any;
   const entryEndpoint = '/v1/messages';
+  const streamingAllowed = isEntryStreamingAllowed(entryEndpoint);
+  let clientRequestsSSE = false;
+  let expectsSSE = false;
   // Lazy schema validator cache (Anthropic Messages request)
   // 本地 dev 环境下，为避免依赖 ajv 的 dist 形态差异导致启动失败，
   // 这里使用一个永远通过的占位验证器；真实形状验证由上游 Anthropic 负责。
@@ -28,10 +32,12 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       { component: 'http.messages-handler', operation: 'snapshot.http-request', requestId, entryEndpoint },
       () => writeServerSnapshot({ phase: 'http-request', requestId, data: payload, entryEndpoint })
     );
-    const wantsSSE = (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream')) || payload.stream === true;
+    clientRequestsSSE = (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream')) || payload.stream === true;
+    expectsSSE = streamingAllowed && clientRequestsSSE;
     try {
       const meta = (payload.metadata && typeof payload.metadata === 'object') ? payload.metadata : {};
-      payload.metadata = { ...meta, entryEndpoint, stream: wantsSSE };
+      payload.metadata = { ...meta, entryEndpoint, stream: expectsSSE };
+      payload.stream = expectsSSE;
     } catch (error) {
       await logNonBlockingError(
         { component: 'http.messages-handler', operation: 'payload.attach-metadata', requestId, entryEndpoint },
@@ -64,7 +70,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
           details
         } as any;
         // SSE path
-        if (wantsSSE) {
+        if (expectsSSE) {
           // Stop pre-heartbeat if started later
           try { /* stop below if started */ } catch {}
           try {
@@ -96,7 +102,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     const sharedReq: any = {
       data: payload,
       route: { providerId: 'unknown', modelId: String(payload?.model || 'unknown'), requestId, timestamp: Date.now(), ...(routing.pipelineId ? { pipelineId: routing.pipelineId } : {}) },
-      metadata: { entryEndpoint, endpoint: entryEndpoint, stream: wantsSSE, routeName },
+      metadata: { entryEndpoint, endpoint: entryEndpoint, stream: expectsSSE, routeName },
       debug: { enabled: false, stages: {} },
       entryEndpoint
     };
@@ -179,7 +185,10 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
         );
       }
     };
-    if (wantsSSE) startPreHeartbeat();
+    if (!streamingAllowed && clientRequestsSSE) {
+      try { res.setHeader('X-RouteCodex-Streaming-Disabled', '1'); } catch { /* ignore */ }
+    }
+    if (expectsSSE) startPreHeartbeat();
 
     // Snapshot: pipeline-entry（HTTP server 视角下进入流水线的共享请求 DTO）
     await runNonBlocking(
@@ -222,7 +231,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       }
       return;
     }
-    if (wantsSSE) {
+    if (expectsSSE) {
       stopPreHeartbeat();
       try {
         res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -248,7 +257,6 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     res.status(200).json(out);
   } catch (error: any) {
     try {
-      const expectsSSE = (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream')) || (req.body && (req.body as any).stream === true);
       if (expectsSSE) {
         try {
           res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');

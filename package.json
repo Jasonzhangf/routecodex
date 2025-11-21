@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.81.69",
+  "version": "0.81.70",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -154,7 +154,7 @@
     "rcc-basemodule": "^0.2.7",
     "rcc-config-core": "file:../../github/sharedmodule/config-core/rcc-config-core-0.1.11.tgz",
     "rcc-errorhandling": "^1.0.10",
-    "rcc-llmswitch-core": "file:sharedmodule/llmswitch-core/rcc-llmswitch-core-0.3.27.tgz",
+    "rcc-llmswitch-core": "file:sharedmodule/llmswitch-core/rcc-llmswitch-core-0.3.28.tgz",
     "socket.io": "^4.8.1",
     "zod": "^3.23.8"
   },

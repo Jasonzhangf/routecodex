@@ -86,7 +86,9 @@ async function main() {
   // 增量读取：检测到 finish_reason 或 [DONE] 即提前结束，避免等待上游 keep-alive
   let buf = '';
   let finished = false;
-  const timer = setTimeout(() => { try { sse.destroy(); } catch {} }, 60000);
+  let resolveDone;
+  const donePromise = new Promise((resolve) => { resolveDone = resolve; });
+  const timer = setTimeout(() => { if (!finished) { finished = true; try { sse.destroy(); } catch {} resolveDone(); } }, 60000);
   sse.on('data', (c) => {
     if (finished) return;
     const chunk = String(c);
@@ -94,9 +96,12 @@ async function main() {
     if (/\ndata:\s*\[DONE\]\s*\n/.test(buf) || /"finish_reason"\s*:\s*"(stop|length|tool_calls)"/i.test(buf)) {
       finished = true;
       try { sse.destroy(); } catch {}
+      resolveDone();
     }
   });
-  await new Promise((resolve) => { sse.on('end', resolve); sse.on('close', resolve); sse.on('error', resolve); });
+  sse.on('error', () => { if (!finished) { finished = true; resolveDone(); } });
+  sse.on('close', () => { if (!finished) { finished = true; resolveDone(); } });
+  await donePromise;
   clearTimeout(timer);
 
   const text = buf;

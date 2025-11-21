@@ -11,11 +11,15 @@ import {
   sendChatSSEError,
   synthesizeChatSSE,
 } from '../utils/sse-utils.js';
+import { isEntryStreamingAllowed } from '../utils/streaming-flags.js';
 
 // Chat endpoint: /v1/chat/completions (OpenAI Chat SSE shape)
 export async function handleChatCompletions(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
   let sseLogger = { write: async () => {} } as { write: (line: string) => Promise<void> };
   const entryEndpoint = '/v1/chat/completions';
+  const streamingAllowed = isEntryStreamingAllowed(entryEndpoint);
+  let clientRequestsSSE = false;
+  let expectsSSE = false;
   try {
     if (!ctx.pipelineManager) { res.status(503).json({ error: { message: 'Pipeline manager not attached' } }); return; }
     const payload = (req.body || {}) as any;
@@ -25,12 +29,16 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       { component: 'http.chat-handler', operation: 'snapshot.http-request', requestId, entryEndpoint },
       () => writeServerSnapshot({ phase: 'http-request', requestId, data: payload, entryEndpoint })
     );
-    const expectsSSE = wantsSSE(req, payload);
+    clientRequestsSSE = wantsSSE(req, payload);
+    expectsSSE = streamingAllowed && clientRequestsSSE;
 
     // Attach endpoint metadata into payload for downstream selection（失败仅记录，不阻断请求）
     try {
       const meta = (payload.metadata && typeof payload.metadata === 'object') ? payload.metadata : {};
       payload.metadata = { ...meta, entryEndpoint, stream: expectsSSE };
+      if (!expectsSSE) {
+        try { payload.stream = false; } catch { /* ignore */ }
+      }
     } catch (error) {
       await logNonBlockingError(
         { component: 'http.chat-handler', operation: 'payload.attach-metadata', requestId, entryEndpoint },
@@ -44,12 +52,16 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
     const sharedReq: any = {
       data: payload,
       route: { providerId: 'unknown', modelId: String(payload?.model || 'unknown'), requestId, timestamp: Date.now(), ...(routing.pipelineId ? { pipelineId: routing.pipelineId } : {}) },
-      metadata: { entryEndpoint, endpoint: entryEndpoint, stream: wantsSSE, routeName },
+      metadata: { entryEndpoint, endpoint: entryEndpoint, stream: expectsSSE, routeName },
       debug: { enabled: false, stages: {} },
       entryEndpoint
     };
 
     sseLogger = createSSELogger(requestId, entryEndpoint);
+
+    if (!streamingAllowed && clientRequestsSSE) {
+      try { res.setHeader('X-RouteCodex-Streaming-Disabled', '1'); } catch { /* ignore */ }
+    }
 
     // SSE pre-heartbeat
     const stopPreHeartbeat = expectsSSE ? startPreHeartbeat(res, sseLogger) : () => {};
@@ -99,8 +111,8 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       } catch {}
       return 500;
     };
-    // SSE error path（入口为 SSE 时，无条件以 SSE 返回）
-    try { if (wantsSSE(req, req.body)) { sendChatSSEError(res, extractStatus(error), error, sseLogger); return; } } catch { /* ignore */ }
+    // SSE error path（仅在当前入口允许且客户端请求时采用 SSE 返回）
+    try { if (expectsSSE) { sendChatSSEError(res, extractStatus(error), error, sseLogger); return; } } catch { /* ignore */ }
     await runNonBlocking(
       { component: 'http.chat-handler', operation: 'snapshot.http-response-error', entryEndpoint },
       () => writeServerSnapshot({
