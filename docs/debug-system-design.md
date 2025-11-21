@@ -10,7 +10,7 @@
 - 支持渐进式模块增强
 
 ### 1.2 核心设计原则
-- **最小侵入性**：利用现有DebugEventBus和ErrorHandlingCenter，不重建基础设施
+- **最小侵入性**：利用 Server V2 Hooks 快照与 ErrorHandlingCenter，不重建基础设施
 - **适配器模式**：通过ModuleDebugAdapter扩展现有模块，避免直接修改
 - **渐进式增强**：支持一个模块一个模块地逐步改造
 - **标准化格式**：统一所有模块的调试信息格式
@@ -37,7 +37,7 @@
 │                       │                                  │       │
 │                       ▼                                  ▼       │
 │            ┌─────────────────────────────────────────────────────┐│
-│            │           DebugEventBus (现有)                     ││
+│            │        Snapshot Writer (Hooks)                    ││
 │            └─────────────────────┬───────────────────────────────┘│
 │                                  │                               │
 │                                  ▼                               │
@@ -91,12 +91,12 @@ interface EnhancedDebugEvent extends DebugEvent {
 ```typescript
 abstract class ModuleDebugAdapter {
   protected moduleId: string;
-  protected debugEventBus: DebugEventBus;
+  // DebugCenter/DebugEventBus 已废弃；由 Server V2 Hooks 统一落盘
   protected enabled: boolean;
 
   constructor(moduleId: string, enabled: boolean = true) {
     this.moduleId = moduleId;
-    this.debugEventBus = DebugEventBus.getInstance();
+    // snapshots handled by server hooks; no-op here
     this.enabled = enabled;
   }
 
@@ -138,13 +138,13 @@ abstract class ModuleDebugAdapter {
 ```typescript
 class DebugAPIExtension {
   private app: Express;
-  private debugEventBus: DebugEventBus;
+  // DebugEventBus removed
   private wsServer: WebSocket.Server;
   private clients: Set<WebSocket> = new Set();
 
   constructor(app: Express, server: http.Server) {
     this.app = app;
-    this.debugEventBus = DebugEventBus.getInstance();
+    // snapshots handled by server hooks; no-op here
     this.wsServer = new WebSocket.Server({ server });
     this.setupEventHandlers();
     this.setupAPIRoutes();
@@ -574,7 +574,7 @@ interface DebugConfig {
 ### 4.3 错误处理策略
 
 #### 4.3.1 分层错误处理
-1. **模块层**：捕获模块内部错误，发布到DebugEventBus
+1. **模块层**：捕获模块内部错误，错误信息由 ErrorHandlingCenter 归一化；IO 由 Hooks 快照记录
 2. **适配器层**：包装模块方法，统一错误格式
 3. **API层**：处理API调用错误，返回标准错误响应
 4. **WebSocket层**：处理连接和消息错误，记录日志

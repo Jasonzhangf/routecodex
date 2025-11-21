@@ -54,6 +54,5 @@ curl -i -sS -H 'Content-Type: application/json' \
 ## 日志与追踪
 
 - 运行日志：`server-modelscope.log`
-- DebugCenter：`~/.routecodex/logs/debug-center.log`
+- 快照目录：`~/.routecodex/codex-samples/`（按 endpoint/requestId 分类记入 entry/provider/response/error）
 - 关联方式：使用响应头 `x-request-id` 在日志中检索对应请求链路
-

@@ -11,7 +11,7 @@ The RouteCodex Progressive Module Enhancement System provides a simple, declarat
 - **Progressive rollout**: Add debugging to modules one at a time
 - **Type-safe**: Full TypeScript support with comprehensive type definitions
 - **Performance-aware**: Configurable logging levels and performance tracking
-- **Integration-ready**: Seamlessly integrates with existing DebugCenter and DebugEventBus
+- **Integration-ready**: Works with Server V2 Hook snapshots（DebugCenter/DebugEventBus 已废弃）
 
 ## Architecture
 
@@ -29,10 +29,10 @@ The enhancement system consists of several key components:
 
 ```typescript
 import { ModuleEnhancementFactory } from '../src/modules/enhancement/module-enhancement-factory.js';
-import { DebugCenter } from 'rcc-debugcenter';
+// DebugCenter 已废弃：调试与 IO 观测统一使用 Server V2 Hooks 快照
 
 // Create factory
-const factory = new ModuleEnhancementFactory(debugCenter);
+const factory = new ModuleEnhancementFactory(); // no DebugCenter dependency
 
 // Enhance your module
 const enhanced = factory.createEnhancedModule(
@@ -57,7 +57,7 @@ await enhanced.enhanced.processIncoming(request);
 import { EnhancementConfigManager } from '../src/modules/enhancement/enhancement-config-manager.js';
 
 // Create configuration manager
-const configManager = new EnhancementConfigManager(debugCenter);
+const configManager = new EnhancementConfigManager(); // no DebugCenter dependency
 
 // Enhance using configuration
 const enhanced = await configManager.enhanceModule(
@@ -86,7 +86,7 @@ node scripts/enhance-module.js disable lmstudio-provider
 
 ## Configuration
 
-### JSON Configuration File
+### JSON Configuration File（debugCenter 字段已弃用）
 
 The system uses a JSON configuration file (`enhancement-config.json`) to control debugging behavior:
 
@@ -99,7 +99,7 @@ The system uses a JSON configuration file (`enhancement-config.json`) to control
       "enabled": true,
       "level": "detailed",
       "consoleLogging": true,
-      "debugCenter": true,
+      "debugCenter": false,
       "maxLogEntries": 1000,
       "performanceTracking": true,
       "requestLogging": true,
@@ -113,7 +113,7 @@ The system uses a JSON configuration file (`enhancement-config.json`) to control
         "enabled": true,
         "level": "detailed",
         "consoleLogging": true,
-        "debugCenter": true
+        "debugCenter": false
       },
       "pipeline-manager": {
         "moduleId": "pipeline-manager",
@@ -121,7 +121,7 @@ The system uses a JSON configuration file (`enhancement-config.json`) to control
         "enabled": true,
         "level": "verbose",
         "consoleLogging": true,
-        "debugCenter": true
+        "debugCenter": false
       }
     },
     "autoDetection": {
@@ -152,7 +152,7 @@ The system uses a JSON configuration file (`enhancement-config.json`) to control
         "enabled": true,
         "level": "verbose",
         "consoleLogging": true,
-        "debugCenter": true
+        "debugCenter": false
       }
     },
     "production": {
@@ -161,7 +161,7 @@ The system uses a JSON configuration file (`enhancement-config.json`) to control
         "enabled": false,
         "level": "basic",
         "consoleLogging": false,
-        "debugCenter": true
+        "debugCenter": false
       }
     }
   }

@@ -66,8 +66,7 @@ This document describes the standardized LM Studio pipeline implementation in Ro
 
 ## Debug & IO Logging
 
-- PipelineDebugLogger publishes transformation/provider IO to DebugEventBus
-- Your DebugCenter records per‑port sessions with operation input/output
+- 调试与 IO 观测由 Server V2 Hooks 快照统一记录（默认开启）
 - Server log also prints transformation stages (compatibility/workflow/llm‑switch) and provider timing
 
 ## End‑to‑End Tool Calling

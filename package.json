@@ -62,6 +62,7 @@
     "verify:stream:responses:fixtures": "jest src/__tests__/streaming/responses-fixture-loopback.test.ts",
     "verify:stream:chat:pipeline": "node scripts/run-chat-pipeline-live-loopback.mjs",
     "verify:stream:responses:pipeline": "node scripts/run-responses-pipeline-live-loopback.mjs",
+    "verify:stream:responses:pipeline:tools": "jest src/__tests__/streaming/responses-pipeline-tool-roundtrip.test.ts",
     "stream:chat:sample": "node scripts/stream-chat-sample.mjs",
     "capture:openai:chat:sse": "node scripts/capture-openai-chat-sse.mjs",
     "validate:chat:fixture": "node scripts/validate-chat-fixture.mjs",

@@ -99,7 +99,7 @@ class PipelineManager {
 
 **职责**:
 - 定义统一的流水线处理接口
-- 集成DebugCenter和ErrorHandling
+- 集成 Hooks 快照和 ErrorHandling（DebugCenter 已废弃）
 - 协调各个处理模块
 
 **处理流程**:
