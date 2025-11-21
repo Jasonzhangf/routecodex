@@ -230,7 +230,7 @@ class RouteCodexApp {
       } catch { /* ignore */ }
       // Attach classifier config if present
       const classifierConfig = (mergedConfig as any)?.modules?.virtualrouter?.config?.classificationConfig;
-      if (classifierConfig) {
+      if (classifierConfig && (this.httpServer as any)?.attachRoutingClassifierConfig) {
         (this.httpServer as any).attachRoutingClassifierConfig(classifierConfig);
       }
       pipelinesAttached = true;

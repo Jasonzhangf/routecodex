@@ -192,10 +192,11 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
       );
     }
 
-    const routeName = await ctx.selectRouteName(payload, entryEndpoint);
+    const routing = await ctx.selectRouting(payload, entryEndpoint);
+    const routeName = routing.routeName;
     const sharedReq: any = {
       data: payload,
-      route: { providerId: 'unknown', modelId: String(payload?.model || 'unknown'), requestId, timestamp: Date.now() },
+      route: { providerId: 'unknown', modelId: String(payload?.model || 'unknown'), requestId, timestamp: Date.now(), ...(routing.pipelineId ? { pipelineId: routing.pipelineId } : {}) },
       metadata: { entryEndpoint, endpoint: entryEndpoint, stream: expectsSSE, routeName },
       debug: { enabled: false, stages: {} },
       entryEndpoint

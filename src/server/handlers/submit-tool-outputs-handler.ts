@@ -59,10 +59,11 @@ export async function handleSubmitToolOutputs(req: Request, res: Response, ctx: 
     }
 
     try {
-      const routeName = await ctx.selectRouteName(payload, '/v1/responses');
+      const routing = await ctx.selectRouting(payload, '/v1/responses');
+      const routeName = routing.routeName;
       const sharedReq = {
         data: payload,
-        route: { providerId: 'unknown', modelId: String(payload.model||'unknown'), requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, timestamp: Date.now() },
+        route: { providerId: 'unknown', modelId: String(payload.model||'unknown'), requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, timestamp: Date.now(), ...(routing.pipelineId ? { pipelineId: routing.pipelineId } : {}) },
         metadata: { entryEndpoint: '/v1/responses', endpoint: '/v1/responses', stream: wantsSSE, routeName },
         debug: { enabled: false, stages: {} }
       } as any;

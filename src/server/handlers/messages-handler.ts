@@ -40,7 +40,8 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     }
 
     // 使用虚拟路由器决策具体 pipelineId（首选路径）
-    const routeName = await ctx.selectRouteName(payload, entryEndpoint);
+    const routing = await ctx.selectRouting(payload, entryEndpoint);
+    const routeName = routing.routeName;
 
     // Pre-validate anthropic messages request shape (fail fast with detailed errors)
     try {
@@ -94,7 +95,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     }
     const sharedReq: any = {
       data: payload,
-      route: { providerId: 'unknown', modelId: String(payload?.model || 'unknown'), requestId, timestamp: Date.now() },
+      route: { providerId: 'unknown', modelId: String(payload?.model || 'unknown'), requestId, timestamp: Date.now(), ...(routing.pipelineId ? { pipelineId: routing.pipelineId } : {}) },
       metadata: { entryEndpoint, endpoint: entryEndpoint, stream: wantsSSE, routeName },
       debug: { enabled: false, stages: {} },
       entryEndpoint
