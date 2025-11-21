@@ -188,12 +188,12 @@ class RouteCodexApp {
         bindPort = typeof portRaw === 'number' ? portRaw : parseInt(String(portRaw), 10);
         if (!Number.isFinite(bindPort)) bindPort = port;
       } catch { /* keep defaults */ }
-      const { RouteCodexServerV2 } = await import('./server-v2/core/route-codex-server-v2.js');
+      const { RouteCodexServer } = await import('./server/core/routecodex-server.js');
       // V2 hooks 开关：默认开启；可通过 ROUTECODEX_V2_HOOKS=0/false/no 关闭
       const hooksEnv = String(process.env.ROUTECODEX_V2_HOOKS || process.env.RCC_V2_HOOKS || '').trim().toLowerCase();
       const hooksOff = hooksEnv === '0' || hooksEnv === 'false' || hooksEnv === 'no';
       const hooksOn = !hooksOff;
-      this.httpServer = new RouteCodexServerV2({ server: { host: bindHost, port: bindPort, useV2: true }, logging: { level: 'debug', enableConsole: true }, providers: {}, v2Config: { enableHooks: hooksOn } }) as any;
+      this.httpServer = new RouteCodexServer({ server: { host: bindHost, port: bindPort }, logging: { level: 'debug', enableConsole: true }, v2Config: { enableHooks: hooksOn } }) as any;
       await (this.httpServer as any).initializeWithMergedConfig(mergedConfig);
 
       // 4.1 校验 merged-config 的装配输入（V2严格：必须存在 assembler pipelines，不再兜底）

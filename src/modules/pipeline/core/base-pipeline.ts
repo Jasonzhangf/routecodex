@@ -832,7 +832,18 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
           metadata: (request as any)?.metadata as any
         });
       } catch { /* ignore */ }
-      const responsePayload = await this.modules.provider.processIncoming(dataWithMeta);
+      // 将入口的流式意图与端点标记通过 envelope 传递给 Provider，便于其选择 post/postStream；
+      // Provider 在实际发出 HTTP 前会移除 body.metadata，确保上游不受影响。
+      const wantsStream: boolean = !!((request as any)?.metadata?.stream === true);
+      const entryEndpoint: string | undefined = (request as any)?.metadata?.entryEndpoint;
+      const providerEnvelope: any = {
+        ...dataWithMeta,
+        ...(wantsStream || entryEndpoint
+          ? { metadata: { ...(dataWithMeta as any)?.metadata, ...(entryEndpoint ? { entryEndpoint } : {}), stream: wantsStream } }
+          : {})
+      };
+
+      const responsePayload = await this.modules.provider.processIncoming(providerEnvelope);
       this.debugLogger.logProviderRequest(this.pipelineId, 'request-start', request, responsePayload);
       try {
         const { writePipelineSnapshot } = await import('../utils/pipeline-snapshot-writer.js');

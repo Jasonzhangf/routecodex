@@ -588,7 +588,12 @@ export class OpenAIStandard extends BaseProvider {
       context
     );
 
-    const processedRequest = httpRequestResult.data as UnknownObject;
+    // Hook 结果兜底：若未返回有效对象，则回退为原始入参，避免丢失 metadata.stream/entryEndpoint
+    const processedRequestRaw = httpRequestResult.data as UnknownObject;
+    const processedRequest: UnknownObject =
+      (processedRequestRaw && typeof processedRequestRaw === 'object' && Object.keys(processedRequestRaw).length > 0)
+        ? processedRequestRaw
+        : (request as UnknownObject);
 
     // Flatten request body to standard OpenAI Chat JSON
     let finalBody: any = (() => {

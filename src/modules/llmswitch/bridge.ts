@@ -99,6 +99,12 @@ export async function aggregateOpenAIResponsesSSEToJSON(readable: any): Promise<
   return await fn(readable);
 }
 
+// Bridge upstream Responses SSE → aggregate to Responses JSON → synthesize normalized Responses SSE
+export async function createResponsesSSEFromUpstreamResponses(upstream: any, ctx: AnyRecord): Promise<any> {
+  const json = await aggregateOpenAIResponsesSSEToJSON(upstream);
+  return await createResponsesSSEFromResponsesJson(json, ctx);
+}
+
 export async function aggregateAnthropicSSEToJSON(readable: any): Promise<any> {
   const mod = await importCoreDist('v2/conversion/streaming/anthropic-messages-sse-to-json');
   const fn = (mod as any)?.aggregateAnthropicSSEToJSON;

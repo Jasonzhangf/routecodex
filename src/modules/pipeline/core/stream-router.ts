@@ -34,9 +34,16 @@ export async function tryHandleStreamingFastPath(
   const anyProv: any = providerPayload as any;
   if (anyProv && typeof anyProv === 'object' && anyProv.__sse_stream) {
     const upstream: Readable = anyProv.__sse_stream;
-    // Responses passthrough (same-protocol)
+    // Responses SSE bridge (normalize shapes, ensure usage) instead of raw passthrough
     if (allowResponses && providerType === 'responses') {
-      return wrapStream(upstream, ctx, debugStages, 'responses upstream SSE passthrough');
+      try {
+        const { createResponsesSSEFromUpstreamResponses } = await import('../../llmswitch/bridge.js');
+        const bridged = await (createResponsesSSEFromUpstreamResponses as any)(upstream, { requestId: ctx.requestId });
+        return wrapStream(bridged as any, ctx, debugStages, 'responses upstream SSE bridged');
+      } catch {
+        // Fallback to passthrough if bridge fails (fail fast upstream)
+        return wrapStream(upstream, ctx, debugStages, 'responses upstream SSE passthrough');
+      }
     }
     // Chat passthrough (same-protocol)
     if (allowChat) {

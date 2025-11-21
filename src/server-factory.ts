@@ -118,10 +118,10 @@ export class ServerFactory {
       console.log('[ServerFactory] Creating V2 server instance');
 
       try {
-        // 动态导入V2实现
-        const { RouteCodexServerV2 } = await import('./server-v2/core/route-codex-server-v2.js');
+        // 统一 Server 实现
+        const { RouteCodexServer } = await import('./server/core/routecodex-server.js');
 
-        // 合并V2配置
+        // 合并配置
         const v2Config: ServerConfigV2 = {
           ...config,
           v2Config: {
@@ -131,7 +131,7 @@ export class ServerFactory {
           }
         };
 
-        ServerFactory.v2Instance = new RouteCodexServerV2(v2Config);
+        ServerFactory.v2Instance = new RouteCodexServer(v2Config);
         console.log('[ServerFactory] V2 server instance created');
       } catch (error) {
         console.error('[ServerFactory] Failed to create V2 server:', error);
