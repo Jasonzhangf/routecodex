@@ -25,7 +25,6 @@ export type {
   LogWriterStatus,
   FileLogWriter,
   ConsoleLogWriter,
-  DebugCenterLogWriter,
   ConsoleLogStyle,
   LogParser,
   LogQueryEngine,

@@ -16,14 +16,7 @@ declare module 'rcc-basemodule' {
   }
 }
 
-declare module 'rcc-debugcenter' {
-  export class DebugCenter {}
-  export class DebugEventBus {
-    static getInstance(): DebugEventBus;
-    publish(_event: UnknownObject): void;
-    subscribe(topic: string, _handler: (_event: UnknownObject) => void): void;
-  }
-}
+// debugcenter 已移除：不再声明 'rcc-debugcenter'
 
 declare module 'rcc-errorhandling' {
   export type ErrorContext = {

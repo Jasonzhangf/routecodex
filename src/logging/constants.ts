@@ -41,8 +41,7 @@ export const DEFAULT_CONFIG = {
   /** 默认是否启用文件日志 */
   ENABLE_FILE: true,
 
-  /** 默认是否启用DebugCenter集成 */
-  ENABLE_DEBUG_CENTER: false,
+  // DebugCenter 已移除
 
   /** 默认是否启用压缩 */
   ENABLE_COMPRESSION: true,

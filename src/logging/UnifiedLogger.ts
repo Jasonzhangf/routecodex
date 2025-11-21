@@ -55,7 +55,8 @@ export class UnifiedModuleLogger extends EventEmitter implements UnifiedLogger {
       logLevel: config.logLevel || DEFAULT_CONFIG.LOG_LEVEL,
       enableConsole: config.enableConsole ?? DEFAULT_CONFIG.ENABLE_CONSOLE,
       enableFile: config.enableFile ?? DEFAULT_CONFIG.ENABLE_FILE,
-      enableDebugCenter: config.enableDebugCenter ?? DEFAULT_CONFIG.ENABLE_DEBUG_CENTER,
+      // DebugCenter removed; always false to satisfy legacy type
+      enableDebugCenter: false,
       maxHistory: config.maxHistory || DEFAULT_CONFIG.MAX_HISTORY,
       logDirectory: config.logDirectory || DEFAULT_CONFIG.LOG_DIRECTORY,
       maxFileSize: config.maxFileSize || DEFAULT_CONFIG.MAX_FILE_SIZE,

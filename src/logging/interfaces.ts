@@ -203,25 +203,7 @@ export interface ConsoleLogStyle {
   maxMessageLength?: number;
 }
 
-/**
- * DebugCenter集成接口
- */
-export interface DebugCenterLogWriter extends LogWriter {
-  /**
-   * 设置DebugCenter连接
-   */
-  setConnection(connection: any): void;
-
-  /**
-   * 获取连接状态
-   */
-  getConnectionStatus(): 'connected' | 'disconnected' | 'error';
-
-  /**
-   * 重新连接DebugCenter
-   */
-  reconnect(): Promise<void>;
-}
+// DebugCenter 已移除：不再定义 DebugCenterLogWriter
 
 /**
  * 日志解析器接口

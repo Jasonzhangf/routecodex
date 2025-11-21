@@ -31,22 +31,6 @@
         }
       }
     },
-    "debugcenter": {
-      "enabled": true,
-      "config": {
-        "moduleType": "debug-center",
-        "eventQueueSize": 1000,
-        "logLevels": [
-          "debug",
-          "info",
-          "warn",
-          "error"
-        ],
-        "enableConsole": true,
-        "enableFile": true,
-        "filePath": "~/.routecodex/logs/debug-center.log"
-      }
-    },
     "httpserver": {
       "enabled": true,
       "config": {

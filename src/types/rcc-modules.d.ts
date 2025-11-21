@@ -22,25 +22,7 @@ declare module 'rcc-basemodule' {
   }
 }
 
-declare module 'rcc-debugcenter' {
-  import { UnknownObject } from './common-types';
-  
-  export interface DebugEvent {
-    sessionId: string;
-    moduleId: string;
-    operationId: string;
-    timestamp: number;
-    type: 'start' | 'end' | 'error';
-    position: 'start' | 'middle' | 'end';
-    data?: UnknownObject;
-  }
-
-  export class DebugEventBus {
-    static getInstance(): DebugEventBus;
-    publish(event: DebugEvent): void;
-    subscribe(eventType: string, callback: Function): void;
-  }
-}
+// debugcenter 已移除：不再声明 'rcc-debugcenter'
 
 declare module 'rcc-errorhandling' {
   import { UnknownObject } from './common-types';

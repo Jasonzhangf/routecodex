@@ -115,21 +115,14 @@ export interface ConfigManagerConfig {
 /**
  * 调试中心模块配置
  */
-export interface DebugCenterConfig {
-  moduleType: 'debug-center';
-  logLevel: 'debug' | 'info' | 'warn' | 'error';
-  enableConsole: boolean;
-  enableFile: boolean;
-  eventQueueSize?: number;
-  filePath?: string;
-}
+// DebugCenter 已移除
 
 /**
  * 通用模块配置
  */
 export interface ModuleConfig {
   enabled: boolean;
-  config: VirtualRouterConfig | HttpServerConfig | ConfigManagerConfig | DebugCenterConfig | Record<string, unknown>;
+  config: VirtualRouterConfig | HttpServerConfig | ConfigManagerConfig | Record<string, unknown>;
 }
 
 /**
@@ -179,11 +172,7 @@ export interface UserConfig {
     timeout?: number;
     bodyLimit?: string;
   };
-  debugcenter?: {
-    logLevel?: string;
-    enableConsole?: boolean;
-    enableFile?: boolean;
-  };
+  // debugcenter 已移除
   configmanager?: {
     mergedConfigPath?: string;
     autoReload?: boolean;

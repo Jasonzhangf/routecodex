@@ -29,20 +29,6 @@
         }
       }
     },
-    "debugcenter": {
-      "enabled": true,
-      "config": {
-        "moduleType": "debug-center",
-        "eventQueueSize": 1000,
-        "logLevels": ["info", "warn", "error"],
-        "enableConsole": true,
-        "enableFile": true,
-        "filePath": "~/.routecodex/logs/debug-center.log",
-        "maxFileSize": "10MB",
-        "maxFiles": 5,
-        "enableRotation": true
-      }
-    },
     "httpserver": {
       "enabled": true,
       "config": {

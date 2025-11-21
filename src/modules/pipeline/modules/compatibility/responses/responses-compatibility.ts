@@ -26,7 +26,8 @@ export class ResponsesCompatibility implements CompatibilityModule {
       const data = (dto && typeof dto === 'object') ? (dto.data || dto) : dto;
       const meta = (dto && typeof dto === 'object') ? (dto.metadata || (dto.data ? (dto.data as any).metadata : {})) : {};
       const entry = String((meta?.entryEndpoint || '') as string).toLowerCase();
-      const isResponses = entry === '/v1/responses';
+      const targetProtocol = String((_ctx?.metadata as any)?.targetProtocol || '').toLowerCase();
+      const isResponses = targetProtocol === 'openai-responses' || entry === '/v1/responses';
       if (!isResponses) return request;
 
       // 最小兼容（请求侧）：

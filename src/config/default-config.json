@@ -281,10 +281,6 @@
     "errorhandling": {
       "enabled": true,
       "config": {}
-    },
-    "debugcenter": {
-      "enabled": true,
-      "config": {}
     }
   }
 }

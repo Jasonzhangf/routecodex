@@ -5,8 +5,18 @@
  * including all interfaces, enums, and structures required for the debugging infrastructure.
  */
 
-import type { DebugEvent } from 'rcc-debugcenter';
 import type { UnknownObject } from './common-types';
+
+// Local DebugEvent type (debugcenter removed)
+export interface DebugEvent {
+  sessionId?: string;
+  moduleId: string;
+  operationId: string;
+  timestamp: number;
+  type: 'start' | 'end' | 'error';
+  position: 'start' | 'middle' | 'end';
+  data?: UnknownObject;
+}
 
 /**
  * Debug system initialization options
