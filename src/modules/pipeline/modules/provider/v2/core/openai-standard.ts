@@ -462,14 +462,9 @@ export class OpenAIStandard extends BaseProvider {
           this.config.config.overrides?.defaultModel ||
           this.serviceProfile.defaultModel;
 
-    // 流式开关：基础 Provider 统一移除入口层的 stream 标记，
-    // 具体协议（如 Responses/Anthropic）的真实流控由各自独立 Provider 处理
-    try {
-      // 统一：所有入口均移除 stream=true（Provider 始终走非流式），SSE 由上层合成
-      if ((processedRequest as any).stream === true) {
-        delete (processedRequest as any).stream;
-      }
-    } catch { /* ignore */ }
+    // 保留入口层的 stream 标记与 entryEndpoint（用于决定上游是否走 SSE 直连）。
+    // 不在此处移除，具体发送阶段根据该标记选择 post 或 postStream。
+    try { /* no-op: keep processedRequest.metadata.stream */ } catch { /* ignore */ }
 
     // 获取Hook管理器（新的统一系统）
     const hookManager = this.hookSystemIntegration.getBidirectionalHookManager() as any;
@@ -626,21 +621,8 @@ export class OpenAIStandard extends BaseProvider {
       } catch { /* ignore max_tokens resolution errors */ }
       // Remove metadata/envelope fields that upstream doesn't accept
       try { if ('metadata' in body) { delete body.metadata; } } catch { /* ignore */ }
-      // Responses request minimal filter: drop non-standard max token variants (maxtoken/maxToken/maxTokens)
-      try {
-        const entryEp = (processedRequest as any)?.metadata?.entryEndpoint || (processedRequest as any)?.entryEndpoint;
-        if (typeof entryEp === 'string' && String(entryEp).toLowerCase() === '/v1/responses') {
-          for (const key of Object.keys(body)) {
-            const lower = key.toLowerCase();
-            if (lower === 'maxtoken' || lower === 'maxtokens') {
-              delete (body as any)[key];
-            }
-            if (key === 'maxToken' || key === 'maxTokens') {
-              delete (body as any)[key];
-            }
-          }
-        }
-      } catch { /* ignore */ }
+      // 请求侧安全修剪（如删除非标准 max token 变体）统一迁移到 Compatibility 层；
+      // Provider 层不再做该类字段删除，保持纯 HTTP 职责。
       // Provider 不再按入口端点做流控或形状处理；上层已统一非流式
       return body;
     })();
@@ -659,16 +641,25 @@ export class OpenAIStandard extends BaseProvider {
     // 发送HTTP请求（统一非流式）
     let response: unknown;
     try {
-      response = await this.httpClient.post(endpoint, finalBody, headers);
+      // 根据入口是否为流式请求，选择上游 SSE 或 JSON
+      const wantsStream = !!((processedRequest as any)?.metadata?.stream === true || (processedRequest as any)?.stream === true);
+      const entryEp = String((processedRequest as any)?.metadata?.entryEndpoint || (processedRequest as any)?.entryEndpoint || '').toLowerCase();
+      const shouldUseSSE = wantsStream && (entryEp === '/v1/chat/completions' || entryEp === '/v1/responses' || entryEp === '/v1/messages');
+
+      if (shouldUseSSE) {
+        // 调整 Accept 头为 SSE
+        const sseHeaders = { ...headers, Accept: 'text/event-stream' } as Record<string, string>;
+        const stream = await this.httpClient.postStream(endpoint, finalBody, sseHeaders);
+        // 返回特殊标记，交由上层 stream-router 直通或转换
+        response = { __sse_stream: stream, __sse_meta: { url: targetUrl } } as any;
+      } else {
+        response = await this.httpClient.post(endpoint, finalBody, headers);
+      }
       // 快照：provider-response
       try {
-        await writeProviderSnapshot({
-          phase: 'provider-response',
-          requestId: context.requestId,
-          data: response,
-          headers,
-          url: targetUrl
-        });
+        // 流式路径仅记录最小元信息，避免消耗流
+        const respData = (response as any)?.__sse_stream ? { sse: true } : response;
+        await writeProviderSnapshot({ phase: 'provider-response', requestId: context.requestId, data: respData, headers, url: targetUrl });
       } catch { /* non-blocking */ }
     } catch (error) {
       // OAuth token 失效：尝试刷新/重获并重试一次
@@ -841,7 +832,8 @@ export class OpenAIStandard extends BaseProvider {
       ...authHeaders
     };
 
-    // 禁用上游SSE：设置 Accept 为 application/json（若未被显式覆盖）
+    // 默认禁用上游SSE：设置 Accept 为 application/json（若未被显式覆盖）；
+    // 真正的 SSE 路径在 sendRequestInternal 中根据请求标记覆盖为 text/event-stream
     if (!('Accept' in finalHeaders) && !('accept' in finalHeaders)) {
       finalHeaders['Accept'] = 'application/json';
     }

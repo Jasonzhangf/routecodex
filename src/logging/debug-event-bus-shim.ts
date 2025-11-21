@@ -15,8 +15,11 @@ export interface DebugEventPayload {
   data: Record<string, unknown>;
 }
 
+import { isDebugCenterEnabled } from './flags.js';
+
 export class DebugEventBus {
   private static instance: DebugEventBus = new DebugEventBus();
+  private warnedDisabled = false;
 
   static getInstance(): DebugEventBus {
     return DebugEventBus.instance;
@@ -24,7 +27,14 @@ export class DebugEventBus {
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   publish(_event: DebugEventPayload): void {
-    // 默认静默。如需调试，可临时改为 console.debug
+    // 默认静默；当明确开启了 DebugCenter（通过变量），但 shim 仍在工作，给出一次性提示。
+    try {
+      if (isDebugCenterEnabled() && !this.warnedDisabled) {
+        this.warnedDisabled = true;
+        // eslint-disable-next-line no-console
+        console.warn('[DebugCenter] DebugCenter is marked enabled but real backend is not wired (shim active). Using no-op.');
+      }
+    } catch { /* ignore */ }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -32,4 +42,3 @@ export class DebugEventBus {
     // 接口占位，保持静默
   }
 }
-

@@ -40,6 +40,24 @@ if (!process.env.ROUTECODEX_VERSION) {
   process.env.ROUTECODEX_VERSION = resolvedVersion;
 }
 
+// Normalize feature flags at process start
+try {
+  // DebugCenter flag: prefer ROUTECODEX_DEBUGCENTER_ENABLED, map to legacy ROUTECODEX_ENABLE_DEBUGCENTER
+  if (process.env.ROUTECODEX_DEBUGCENTER_ENABLED != null) {
+    const v = String(process.env.ROUTECODEX_DEBUGCENTER_ENABLED).trim().toLowerCase();
+    process.env.ROUTECODEX_ENABLE_DEBUGCENTER = (v === '1' || v === 'true' || v === 'yes') ? '1' : '0';
+  } else if (process.env.ROUTECODEX_ENABLE_DEBUGCENTER == null) {
+    // default OFF
+    process.env.ROUTECODEX_ENABLE_DEBUGCENTER = '0';
+  }
+
+  // Snapshots flag: prefer ROUTECODEX_SNAPSHOT_ENABLED, map to ROUTECODEX_SNAPSHOTS
+  if (process.env.ROUTECODEX_SNAPSHOT_ENABLED != null) {
+    const v = String(process.env.ROUTECODEX_SNAPSHOT_ENABLED).trim().toLowerCase();
+    process.env.ROUTECODEX_SNAPSHOTS = (v === '1' || v === 'true' || v === 'yes') ? '1' : '0';
+  }
+} catch { /* ignore */ }
+
 /**
  * Default modules configuration path
  */

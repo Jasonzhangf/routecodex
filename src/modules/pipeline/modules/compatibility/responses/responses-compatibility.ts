@@ -29,7 +29,8 @@ export class ResponsesCompatibility implements CompatibilityModule {
       const isResponses = entry === '/v1/responses';
       if (!isResponses) return request;
 
-      // 最小兼容：规范 response_format.text.verbosity → 'high'（按要求统一设置）
+      // 最小兼容（请求侧）：
+      // 1) 统一调整 response_format.text.verbosity → 'high'
       try {
         const rf = (data as UnknownObject).response_format as UnknownObject | undefined;
         const rtext = rf && typeof rf === 'object' ? (rf as any).text as UnknownObject | undefined : undefined;
@@ -41,6 +42,20 @@ export class ResponsesCompatibility implements CompatibilityModule {
           }
         }
       } catch { /* ignore normalization errors */ }
+
+      // 2) 删除非标准/冲突的 max token 变体（SSE/非SSE一致执行）：
+      try {
+        const drop = (obj: any) => {
+          if (!obj || typeof obj !== 'object') return;
+          for (const k of Object.keys(obj)) {
+            const lower = k.toLowerCase();
+            if (lower === 'maxtoken' || lower === 'maxtokens' || k === 'maxToken' || k === 'maxTokens' || k === 'max_tokens') {
+              delete (obj as any)[k];
+            }
+          }
+        };
+        drop(data);
+      } catch { /* ignore safe-prune errors */ }
 
       return request;
     } catch (e) {
