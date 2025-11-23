@@ -23,8 +23,20 @@ RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配�
   - Responses：从 Chat 反向映射 required_action/items（仅映射，不治理）
 
 文档与代码参考：
-- 核心实现与详细说明：`vendor/rcc-llmswitch-core/`
-- 源码文档（本地）：`/Users/fanzhang/Documents/github/sharedmodule/llmswitch-core/README.md`
+- 核心实现与详细说明：`sharedmodule/llmswitch-core/`
+- 源码文档：`sharedmodule/llmswitch-core/README.md`
+
+### Conversion V3 节点架构（唯一入口）
+
+- **唯一入口**：服务器所有请求/响应都只能通过 `src/modules/llmswitch/bridge.ts` → `sharedmodule/llmswitch-core/dist/v2/bridge/routecodex-adapter` 进入 conversion v3，不允许其它地方直接 import core。
+- **配置驱动流水线**：`config/llmswitch/pipeline-config.json` 指定每条入/出站线路的节点序列：`SSE Input → Provider Input → Chat Process → Provider Output → SSE Output`，Responses/Anthropic 同构。
+- **节点职责**
+  - `nodes/sse/*`：SSE JSON 化/序列化、旁路透传。
+  - `nodes/input/*`：解析 OpenAI Chat / Responses / Anthropic 请求，输出 canonical `standardizedRequest`。
+  - `nodes/process/chat-process-node`：唯一的工具治理点，负责 tool_calls 修复、MCP 规则、上下文与 streaming 决策。
+  - `nodes/output/*`：把 `processedRequest` 还原为 Provider 协议响应，生成 usage/metadata。
+  - `nodes/response/*`：出站入口，把 Provider 响应转换为 canonical，再经 output/sse 节点返回。
+- **工具治理原则**：除了 Compatibility 层为补齐 OpenAI 形状做的最小字段修剪外，所有工具读写（解析、修复、透传、执行）只能发生在 `process` 链路；Input/Output/SSE/Response 节点只做格式转换，不触碰工具语义。
 
 ## 快照排查指南（命令行）
 
@@ -297,7 +309,7 @@ npm run install:global
 
 如果遇到权限问题，请参考 [INSTALL.md](./INSTALL.md) 中的详细说明。
 
-> 说明：统一使用 `scripts/install-global.sh`，支持自动权限处理和旧安装清理。
+> 说明：统一使用 `scripts/install-global.sh`，支持自动权限处理和旧安装清理。安装脚本会在安装完成后自动使用 `~/.routecodex/provider/glm/config.v1.json` 启动一次服务器，并向模型发送“列出本地文件目录”的工具请求来验证端到端链路，请保证该配置文件存在且有效。
 
 ### 基础配置
 
@@ -784,6 +796,109 @@ routecodex/
 ├── docs/                      # 文档
 ├── tests/                     # 测试文件
 └── vendor/                    # 第三方依赖
+```
+
+### 🏗️ 兼容层架构重构
+
+#### 概述
+
+RouteCodex V2架构已完成兼容层的函数化重构，实现了两层架构设计，大幅提升了代码可维护性和模块化程度。
+
+#### 两层架构设计
+
+**第一层：接口兼容层**
+- 保持现有接口完全不变
+- 确保与PipelineManager的集成无任何破坏性改动
+- 提供向后兼容性和稳定性
+
+**第二层：函数化实现层**
+- 将复杂逻辑拆分为纯函数
+- 单一职责原则，每个函数专注特定功能
+- 易于测试、维护和扩展
+
+#### 重构成果
+
+**代码减少统计**
+- GLM兼容模块：234行 → 141行（减少40%）
+- iFlow兼容模块：201行 → 115行（减少43%）
+- 总计减少冗余代码：约740行
+
+**架构优化**
+- 移除重复wrapper实现
+- 统一适配器模式（`CompatibilityToPipelineAdapter`）
+- 正确的上下文传递和元数据管理
+- 完整的模块注册机制
+
+#### 核心文件结构
+
+```
+src/modules/pipeline/modules/compatibility/
+├── compatibility-interface.ts           # 兼容层接口定义
+├── compatibility-adapter.ts             # PipelineModule适配器
+├── base-compatibility.ts                # 基础兼容抽象类
+├── glm/                                 # GLM兼容模块
+│   ├── glm-compatibility.ts            # GLM兼容模块主类
+│   ├── functions/glm-processor.ts      # GLM函数化实现
+│   └── field-mapping/                  # 字段映射处理
+└── iflow/                               # iFlow兼容模块
+    ├── iflow-compatibility.ts          # iFlow兼容模块主类
+    ├── functions/iflow-processor.ts    # iFlow函数化实现
+    └── field-mapping/                  # 字段映射处理
+```
+
+#### 函数化实现模式
+
+每个Provider模块采用统一的函数化模式：
+
+```typescript
+// 函数化处理器（functions/provider-processor.ts）
+export const processProviderIncoming = async (request, config, context) => {
+  // 请求处理逻辑
+};
+
+export const processProviderOutgoing = async (response, config, context) => {
+  // 响应处理逻辑
+};
+
+export const sanitizeProviderToolsSchema = async (tools, config, context) => {
+  // 工具schema清理
+};
+
+// 兼容模块主类（provider/provider-compatibility.ts）
+export class ProviderCompatibility implements CompatibilityModule {
+  async processIncoming(request: UnknownObject, context: CompatibilityContext): Promise<UnknownObject> {
+    return await processProviderIncoming(request, this.processConfig, context);
+  }
+}
+```
+
+#### 关键技术修复
+
+1. **模块注册修复**：在PipelineManager中正确注册GLM和iFlow模块
+2. **上下文传递修复**：从SharedPipelineRequest.route.requestId提取真实ID
+3. **端点识别修复**：在CompatibilityContext顶层设置entryEndpoint
+4. **接口扩展**：为CompatibilityContext添加entryEndpoint字段
+
+#### 使用示例
+
+**创建新的Provider兼容模块**
+
+```typescript
+// 1. 创建functions/processor.ts
+export const processNewProviderIncoming = async (request, config, context) => {
+  // 实现新Provider的请求转换逻辑
+};
+
+// 2. 创建兼容模块主类
+export class NewProviderCompatibility implements CompatibilityModule {
+  // 实现CompatibilityModule接口
+  async processIncoming(request: UnknownObject, context: CompatibilityContext): Promise<UnknownObject> {
+    return await processNewProviderIncoming(request, this.processConfig, context);
+  }
+}
+
+// 3. 在PipelineManager中注册
+this.registry.registerModule("new-provider", this.createNewProviderCompatibilityModule);
 ```
 
 ### 构建和开发

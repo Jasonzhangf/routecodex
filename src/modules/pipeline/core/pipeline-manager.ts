@@ -1226,7 +1226,10 @@ export class PipelineManager implements RCCBaseModule {
     this.registry.registerModule('responses', this.createOpenAIProviderModule);
     this.registry.registerModule('anthropic', this.createOpenAIProviderModule);
     // Family-specific compatibility modules
+    this.registry.registerModule("glm-compatibility", this.createGLMCompatibilityModule);
+    this.registry.registerModule("glm", this.createGLMCompatibilityModule);
     this.registry.registerModule("iflow-compatibility", this.createIFlowCompatibilityModule);
+    this.registry.registerModule("iflow", this.createIFlowCompatibilityModule);
 
     this.logger.logPipeline('manager', 'module-registry-initialized', {
       moduleTypes: this.registry.getAvailableTypes(),
@@ -1518,9 +1521,24 @@ export class PipelineManager implements RCCBaseModule {
     return new PassthroughCompatibility(config, dependencies);
   };
 
+  private createGLMCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
+    const { GLMCompatibility } = await import('../modules/compatibility/glm/glm-compatibility.js');
+    const { CompatibilityToPipelineAdapter } = await import('../modules/compatibility/compatibility-adapter.js');
+    const compatibilityModule = new GLMCompatibility(dependencies);
+    if (typeof compatibilityModule.setConfig === 'function') {
+      compatibilityModule.setConfig(config);
+    }
+    return new CompatibilityToPipelineAdapter(compatibilityModule, config);
+  };
+
   private createIFlowCompatibilityModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { iFlowCompatibility } = await import('../modules/compatibility/iflow-compatibility.js');
-    return new iFlowCompatibility(config, dependencies);
+    const { iFlowCompatibility } = await import('../modules/compatibility/iflow/iflow-compatibility.js');
+    const { CompatibilityToPipelineAdapter } = await import('../modules/compatibility/compatibility-adapter.js');
+    const compatibilityModule = new iFlowCompatibility(dependencies);
+    if (typeof compatibilityModule.setConfig === 'function') {
+      compatibilityModule.setConfig(config);
+    }
+    return new CompatibilityToPipelineAdapter(compatibilityModule, config);
   };
 
   /**

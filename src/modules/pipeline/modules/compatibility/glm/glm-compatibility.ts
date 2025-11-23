@@ -3,7 +3,12 @@ import type { UnknownObject } from '../../../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../../../types/module.types.js';
 import { GLMFieldMappingProcessor } from './field-mapping/field-mapping-processor.js';
 import { BaseCompatibility } from '../base-compatibility.js';
-import { sanitizeAndValidateOpenAIChat } from '../../../utils/preflight-validator.js';
+import {
+  processGLMIncoming,
+  processGLMOutgoing,
+  createGLMProcessConfig,
+  type GLMProcessConfig
+} from './functions/glm-processor.js';
 
 /**
  * GLM兼容模块
@@ -18,6 +23,8 @@ export class GLMCompatibility implements CompatibilityModule {
   private dependencies: ModuleDependencies;
   private baseCompat: BaseCompatibility | null = null;
   private injectedConfig: any = null; // via setConfig
+  private processConfig: GLMProcessConfig | null = null; // 函数化处理配置
+
   getConfig(): any { return this.injectedConfig; }
 
   constructor(dependencies: ModuleDependencies) {
@@ -84,6 +91,15 @@ export class GLMCompatibility implements CompatibilityModule {
     });
     await this.baseCompat.initialize();
 
+    // 创建函数化处理配置
+    this.processConfig = await createGLMProcessConfig(
+      this.dependencies,
+      this.injectedConfig,
+      this.fieldMappingProcessor,
+      this.baseCompat,
+      this.id
+    );
+
     this.dependencies.logger?.logModule('glm-compatibility', 'initialized', {
       compatibilityId: this.id,
       providerType: this.providerType
@@ -91,96 +107,21 @@ export class GLMCompatibility implements CompatibilityModule {
   }
 
   async processIncoming(request: UnknownObject, context: CompatibilityContext): Promise<UnknownObject> {
-    const reqId = (context as any)?.requestId || 'unknown';
-    this.dependencies.logger?.logModule('glm-compatibility', 'processIncoming-start', {
-      compatibilityId: this.id,
-      requestId: reqId
-    });
-
-    try {
-      // 仅在 GLM Chat provider 上生效：
-      // - providerType !== 'glm'（例如 anthropic/responses 等协议型 provider）时，直接透传，避免错误地将
-      //   Anthropic/Responses 形状当作 OpenAI Chat 进行预检与重写。
-      const providerFamily = String((context as any)?.providerType || '').toLowerCase();
-      if (providerFamily && providerFamily !== 'glm') {
-        return request;
-      }
-
-      // Extract DTO payload if present
-      const isDto = request && typeof request === 'object' && (
-        Object.prototype.hasOwnProperty.call(request as Record<string, unknown>, 'data') ||
-        Object.prototype.hasOwnProperty.call(request as Record<string, unknown>, 'route') ||
-        Object.prototype.hasOwnProperty.call(request as Record<string, unknown>, 'metadata')
-      );
-      const payloadIn: UnknownObject = (isDto && (request as any).data && typeof (request as any).data === 'object')
-        ? ((request as any).data as UnknownObject)
-        : (request as UnknownObject);
-
-      let out = await this.baseCompat!.processIncoming(payloadIn as UnknownObject, context);
-      // 最后一公里：再次收敛 tools schema，移除 oneOf，统一 shell.command 为 string[]（GLM更友好）
-      this.sanitizeGLMToolsSchema(out);
-      // 可选预检：严格策略仅在配置启用时生效；不猜，不默认
-      try {
-        const enabled = Boolean((this as any)?.config?.config?.policy?.preflight === true);
-        if (enabled) {
-          const pre = sanitizeAndValidateOpenAIChat(out as any, { target: 'glm', enableTools: true, glmPolicy: 'compat' });
-          if (Array.isArray(pre.issues) && pre.issues.length) {
-            const errs = pre.issues.filter(i => i.level === 'error');
-            if (errs.length) {
-              const detail = errs.map(e => `${e.code}`).join(',');
-              const err: any = new Error(`compat-validation-failed: ${detail}`);
-              err.status = 400;
-              err.code = 'compat_validation_failed';
-              throw err;
-            }
-            this.dependencies.logger?.logModule('glm-compatibility', 'preflight-warnings', { requestId: reqId, count: pre.issues.length });
-          }
-          out = pre.payload as UnknownObject;
-        }
-      } catch (e) {
-        throw e;
-      }
-      this.dependencies.logger?.logModule('glm-compatibility', 'processIncoming-success', { compatibilityId: this.id, requestId: reqId });
-      // Re-wrap into DTO if needed
-      if (isDto) {
-        const dto: any = request || {};
-        return { ...dto, data: out } as UnknownObject;
-      }
-      return out;
-    } catch (error) {
-      this.dependencies.logger?.logError?.(error as Error, {
-        compatibilityId: this.id,
-        requestId: reqId,
-        stage: 'processIncoming'
-      });
-      throw error;
+    if (!this.processConfig) {
+      throw new Error('GLMCompatibility not properly initialized - processConfig missing');
     }
+
+    // 委托给函数化实现，保持接口完全不变
+    return await processGLMIncoming(request, this.processConfig, context);
   }
 
   async processOutgoing(response: UnknownObject, context: CompatibilityContext): Promise<UnknownObject> {
-    const reqId = (context as any)?.requestId || 'unknown';
-    this.dependencies.logger?.logModule('glm-compatibility', 'processOutgoing-start', {
-      compatibilityId: this.id,
-      requestId: reqId
-    });
-
-    try {
-      const providerFamily = String((context as any)?.providerType || '').toLowerCase();
-      if (providerFamily && providerFamily !== 'glm') {
-        return response;
-      }
-
-      const out = await this.baseCompat!.processOutgoing(response as UnknownObject, context);
-      this.dependencies.logger?.logModule('glm-compatibility', 'processOutgoing-success', { compatibilityId: this.id, requestId: reqId });
-      return out;
-    } catch (error) {
-      this.dependencies.logger?.logError?.(error as Error, {
-        compatibilityId: this.id,
-        requestId: reqId,
-        stage: 'processOutgoing'
-      });
-      throw error;
+    if (!this.processConfig) {
+      throw new Error('GLMCompatibility not properly initialized - processConfig missing');
     }
+
+    // 委托给函数化实现，保持接口完全不变
+    return await processGLMOutgoing(response, this.processConfig, context);
   }
 
   async cleanup(): Promise<void> {
@@ -191,49 +132,11 @@ export class GLMCompatibility implements CompatibilityModule {
     // 清理各个组件（仅映射器）
     await this.fieldMappingProcessor.cleanup();
 
+    // 清理函数化配置
+    this.processConfig = null;
+
     this.dependencies.logger?.logModule('glm-compatibility', 'cleanup-complete', {
       compatibilityId: this.id
     });
-  }
-
-  // 本地收敛（与字段映射器中的逻辑一致）：去掉 oneOf，统一为数组字符串
-  private sanitizeGLMToolsSchema(data: UnknownObject): void {
-    try {
-      const tools = (data as any)?.tools;
-      if (!Array.isArray(tools)) return;
-      for (const t of tools) {
-        if (!t || typeof t !== 'object') continue;
-        const fn = (t as any).function;
-        // 移除 OpenAI 扩展字段 strict（GLM 不接受）
-        try { if (fn && typeof fn === 'object' && 'strict' in fn) { delete (fn as any).strict; } } catch { /* ignore */ }
-        const name = typeof fn?.name === 'string' ? fn.name : undefined;
-        const params = fn?.parameters && typeof fn.parameters === 'object' ? fn.parameters : undefined;
-        if (!params || !name) continue;
-        const props = (params as any).properties && typeof (params as any).properties === 'object' ? (params as any).properties : undefined;
-        if (!props) continue;
-        if (name === 'shell' && props.command) {
-          const cmd = props.command as any;
-          if (cmd && typeof cmd === 'object') {
-            delete cmd.oneOf;
-            cmd.type = 'array';
-            cmd.items = { type: 'string' };
-            if (typeof cmd.description !== 'string' || !cmd.description) {
-              cmd.description = 'Shell command argv tokens. Use ["bash","-lc","<cmd>"] form.';
-            }
-          } else {
-            (props as any).command = {
-              description: 'Shell command argv tokens. Use ["bash","-lc","<cmd>"] form.',
-              type: 'array',
-              items: { type: 'string' }
-            };
-          }
-          if (!Array.isArray((params as any).required)) (params as any).required = [];
-          const req: string[] = (params as any).required;
-          if (!req.includes('command')) req.push('command');
-          if (typeof (params as any).type !== 'string') (params as any).type = 'object';
-          if (typeof (params as any).additionalProperties !== 'boolean') (params as any).additionalProperties = false;
-        }
-      }
-    } catch { /* ignore */ }
   }
 }

@@ -13,6 +13,7 @@ export interface CompatibilityContext {
   executionId: string;
   timestamp: number;
   startTime: number;
+  entryEndpoint?: string; // 端点信息，用于BaseCompatibility决策
   metadata: {
     dataSize: number;
     dataKeys: string[];

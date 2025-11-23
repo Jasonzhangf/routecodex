@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.82.000",
+  "version": "0.82.002",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -18,7 +18,6 @@
     "dist/",
     "config/",
     "scripts/",
-    "vendor/rcc-llmswitch-core/",
     "rcc",
     "README.md",
     "LICENSE"
@@ -75,6 +74,7 @@
     "debug:responses": "tsx tools/responses-debug-client/src/index.ts",
     "debug:responses:lmstudio:text": "tsx tools/responses-debug-client/src/index.ts --file tools/responses-debug-client/payloads/lmstudio-text.json --baseURL ${LMSTUDIO_BASEURL:-http://127.0.0.1:1234/v1}",
     "debug:responses:lmstudio:tool": "tsx tools/responses-debug-client/src/index.ts --file tools/responses-debug-client/payloads/lmstudio-tool.json --baseURL ${LMSTUDIO_BASEURL:-http://127.0.0.1:1234/v1}",
+    "capture:responses:lmstudio": "node scripts/capture-responses-sse.mjs --file tools/responses-debug-client/payloads/lmstudio-tool.json",
     "start:verify:fg": "node scripts/start-verify.mjs --mode fg --timeout 90",
     "dry-run": "node scripts/dry-run-cli.mjs",
     "dry-run:rr-429": "node scripts/dry-run-rr-429.mjs",
@@ -131,10 +131,10 @@
     "openai": "^5.23.0",
     "ora": "^9.0.0",
     "rcc-basemodule": "^0.2.7",
-    "rcc-config-core": "file:../../github/sharedmodule/config-core/rcc-config-core-0.1.11.tgz",
+    "rcc-config-core": "file:sharedmodule/config-core",
     "rcc-debugcenter": "^0.1.6",
     "rcc-errorhandling": "^1.0.10",
-    "rcc-llmswitch-core": "file:sharedmodule/llmswitch-core/rcc-llmswitch-core-0.3.21.tgz",
+    "rcc-llmswitch-core": "file:sharedmodule/llmswitch-core/rcc-llmswitch-core-0.3.34.tgz",
     "socket.io": "^4.8.1",
     "zod": "^3.23.8"
   },
