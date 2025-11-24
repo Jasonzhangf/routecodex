@@ -54,15 +54,7 @@ export class ResponsesProvider extends OpenAIStandard {
             ? cfgModelId.trim()
             : (this as any).serviceProfile.defaultModel;
       body.model = upstreamModel;
-      try {
-        const reqMt = Number((dataObj as any)?.max_tokens ?? (dataObj as any)?.maxTokens ?? NaN);
-        const cfgMt = Number((this.config as any)?.config?.overrides?.maxTokens ?? NaN);
-        const envMt = Number(process.env.ROUTECODEX_DEFAULT_MAX_TOKENS || process.env.RCC_DEFAULT_MAX_TOKENS || NaN);
-        const fallback = Number.isFinite(cfgMt) && cfgMt > 0 ? cfgMt : (Number.isFinite(envMt) && envMt > 0 ? envMt : 8192);
-        const effective = Number.isFinite(reqMt) && reqMt > 0 ? reqMt : fallback;
-        (body as any).max_tokens = effective;
-        if ('maxTokens' in body) delete (body as any).maxTokens;
-      } catch { /* ignore */ }
+      // Responses provider 不在此处处理 max_tokens；保持 llmswitch-core 兼容层的唯一治理入口
       try { if ('metadata' in body) { delete body.metadata; } } catch { /* ignore */ }
       return body;
     })();

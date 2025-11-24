@@ -82,12 +82,11 @@ build_project() {
     # 构建项目
     echo "🔨 编译TypeScript..."
     # dev 包：显式使用 BUILD_MODE=dev 以便在编译期区分 dev/release
-    BUILD_MODE=dev timeout 300 npm run build || {
-        echo "❌ 构建超时或失败"
-        echo "💡 尝试手动构建：npm run build"
-        exit 1
-    }
-
+   BUILD_MODE=dev timeout 300 npm run build || {
+       echo "❌ 构建超时或失败"
+       echo "💡 尝试手动构建：npm run build"
+       exit 1
+   }
     # 确保CLI可执行
     chmod +x dist/cli.js
 
@@ -148,6 +147,20 @@ verify_install() {
     fi
 }
 
+verify_server_health() {
+    local HEALTH_LOG="/tmp/routecodex-install-health-$(date +%s).log"
+    echo ""
+    echo "🩺 执行服务器健康检查..."
+    if node scripts/verify-health.mjs >"$HEALTH_LOG" 2>&1; then
+        echo "✅ 健康检查通过"
+        rm -f "$HEALTH_LOG" || true
+        return
+    fi
+    echo "❌ 健康检查失败，请查看日志: $HEALTH_LOG"
+    tail -n 160 "$HEALTH_LOG" 2>/dev/null || true
+    exit 1
+}
+
 # 清理旧安装
 cleanup_old_install() {
     echo "🧹 检查并清理旧安装..."
@@ -186,6 +199,7 @@ main() {
     build_project
     global_install
     verify_install
+    verify_server_health
 
     echo ""
     echo "🎉 全局安装完成!"

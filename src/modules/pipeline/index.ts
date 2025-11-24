@@ -28,7 +28,6 @@ export type {
   TransformationLog,
   PipelineStatus,
   LLMSwitchModule,
-  WorkflowModule,
   CompatibilityModule,
   ProviderModule
 } from './interfaces/pipeline-interfaces.js';
@@ -38,6 +37,16 @@ export { PipelineModuleRegistryImpl } from './core/pipeline-registry.js';
 
 // Configuration management
 export { PipelineConfigManager } from './config/pipeline-config-manager.js';
+export { PipelineBlueprintManager } from './orchestrator/pipeline-blueprint-manager.js';
+export { PipelineOrchestrator } from './orchestrator/pipeline-orchestrator.js';
+export { PipelineNodeRegistry } from './orchestrator/node-registry.js';
+export { PipelineNodeExecutor } from './orchestrator/node-executor.js';
+export type {
+  PipelineBlueprint,
+  PipelinePhase,
+  PipelineNodeDescriptor,
+  PipelineDescriptor as PipelineBlueprintDescriptor
+} from './orchestrator/types.js';
 
 // Debug logging and error handling
 export { PipelineDebugLogger } from './utils/debug-logger.js';

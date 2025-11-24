@@ -26,18 +26,15 @@ function usage() {
 }
 
 async function importCoreFetcher() {
-  // Prefer local sharedmodule path if exists; fallback to vendored node_modules
-  const local = '/Users/fanzhang/Documents/github/sharedmodule/llmswitch-core/dist/v2/tools/web-fetch-html.js';
+  // Prefer local sharedmodule path if exists; fallback to installed package
+  const __filename = fileURLToPath(import.meta.url);
+  const repoRoot = path.resolve(path.dirname(__filename), '../..');
+  const local = path.resolve(repoRoot, 'sharedmodule/llmswitch-core/dist/v2/tools/web-fetch-html.js');
   try {
     const mod = await import(pathToFileURL(local).href);
-    if (mod && typeof mod.fetchRawHtml === 'function') return mod.fetchRawHtml;
+    if (typeof mod?.fetchRawHtml === 'function') return mod.fetchRawHtml;
   } catch {}
-  // Fallback to vendored
-  const vendored = path.resolve(process.cwd(), 'vendor/rcc-llmswitch-core/dist/v2/tools/web-fetch-html.js');
-  const nm = path.resolve(process.cwd(), 'node_modules/rcc-llmswitch-core/dist/v2/tools/web-fetch-html.js');
-  try { const mod = await import(pathToFileURL(vendored).href); if (mod?.fetchRawHtml) return mod.fetchRawHtml; } catch {}
-  try { const mod = await import(pathToFileURL(nm).href); if (mod?.fetchRawHtml) return mod.fetchRawHtml; } catch {}
-  throw new Error('Cannot locate fetchRawHtml in llmswitch-core dist');
+  throw new Error('Cannot locate fetchRawHtml in sharedmodule/llmswitch-core/dist。请先构建 sharedmodule/llmswitch-core。');
 }
 
 async function main() {
@@ -66,4 +63,3 @@ async function main() {
 }
 
 main().catch((e) => { console.error(e); process.exit(99); });
-

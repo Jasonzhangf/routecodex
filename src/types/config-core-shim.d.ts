@@ -5,6 +5,7 @@ declare module 'rcc-config-core' {
   export const exportAssemblerConfigV2: any;
   export const writeJsonPretty: any;
   export const writeArtifacts: any;
+  export const writeConversionArtifacts: any;
   export const buildMergedConfig: any;
   export const writeMerged: any;
   const _default: any;

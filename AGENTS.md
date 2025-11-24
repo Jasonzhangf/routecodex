@@ -4,6 +4,13 @@ RouteCodex V2架构开发规范，基于9大核心架构原则。包含个人开
 
 ## 🏗️ 项目功能定义
 
+> **模块源代码注意事项**
+>
+> - `sharedmodule/llmswitch-core` 是指向 `/Users/fanzhang/Documents/github/sharedmodule/llmswitch-core` 的符号链接。
+> - `sharedmodule/config-core` 位于 `/Users/fanzhang/Documents/router-worktree/ref/refactor-main/sharedmodule/config-core`（仓库副本）。
+> - 修改上述 sharedmodule 目录时，只能编辑源代码（`src/`、`interpreter/`、`exporters/` 等），禁止触碰 `dist/`、`.tgz` 等构建物，也不要通过 vendor/拷贝构建产物。
+> - 所有变更需在源仓库完成编译/发布，再同步到 RouteCodex。
+
 RouteCodex是一个功能强大的多提供商OpenAI代理服务器，提供统一的AI服务接口和完整的调试生态系统。
 
 ### 核心功能
@@ -198,6 +205,26 @@ sharedmodule/
 **1. API层 (`src/v2/api/`)**
 - 类型定义和接口规范
 - 配置管理和验证
+
+### Conversion V3（唯一流程管线）
+
+llmswitch-core v3 的 conversion 模块是**工具治理与协议转换的唯一流水线**，所有请求/响应都必须通过此管线：
+
+- **入口约束**：RouteCodex 仅通过 `src/modules/llmswitch/bridge.ts` 调用 sharedmodule 的 `v2/bridge/routecodex-adapter`。任何模块想使用 llmswitch-core 都必须走这一个入口，禁止平行实现。
+- **配置驱动**：`config/pipeline-config.generated.json` 中的 `llmSwitch.pipelineConfig` 通过 `PipelineConfigManager` 注入，定义入站/出站每条线路（chat/messages/responses）的节点序列以及 SSE 旁路节点。
+- **节点分层**
+  - `nodes/sse/*`: 负责把入站 SSE 转换成 JSON、或把输出 JSON 序列化为 SSE；`sse-passthrough` 仅记录元数据，不做治理。
+  - `nodes/input/*`: 解析各 Provider 的请求（OpenAI Chat、Responses、Anthropic Messages），严格校验 `model/messages` 并输出 canonical `standardizedRequest`。
+  - `nodes/process/*`: 当前唯一的 `chat-process-node`，在这里集中处理工具调用、MCP 决策、上下文推理、streaming 策略。这是**唯一允许修改工具结构的地方**。
+  - `nodes/output/*`: 把 `processedRequest` 重新映射为 Provider 协议（OpenAI、Anthropic、Responses），附带 usage/metadata。
+  - `nodes/response/*`: 出站方向入口，把 Provider 响应转换回 canonical，之后仍流经 output/sse 节点。
+- **工具治理原则**
+  - 工具解析、修复、透传、二轮执行等逻辑只允许出现在 `process` 链路（即 `chat-process-node` 及其子流程）中。
+  - Input/Output/SSE/Response 节点只做格式转换或序列化，禁止触碰工具语义。
+  - 唯一例外是 Compatibility 层为了让 Provider payload 满足 OpenAI 形状所做的最小字段修剪；该层只能补齐/删减不符合 OpenAI 标准的字段，不能更改工具内容。
+  - 任何新功能若需要操作工具，必须新增 Process 子模块或在 `chat-process-node` 里实现，并通过配置开启。
+
+保持这套结构可确保三条链路（入站 JSON/SSE、出站 JSON/SSE）共享一份逻辑，排查和扩展都围绕单一 Ground Truth。
 - V1兼容性接口
 
 **2. 核心引擎 (`src/v2/core/`)**
@@ -610,6 +637,7 @@ npm run install:global
 - 卸载全局旧版 routecodex（若存在）
 - 使用 npm 默认全局路径执行 `npm install -g .` 安装新版本 dev 包（只导出 `routecodex` 命令）
 - 验证安装（打印 `routecodex --version`）
+- 背景执行 `scripts/install-verify.mjs --config ~/.routecodex/provider/glm/config.v1.json`（`gtimeout/timeout` 保护，日志写入 `/tmp/routecodex-install-verify-*.log`），向服务器发送“列出本地文件目录”工具请求并完成一轮工具响应；如失败立即终止安装
 
 注意：不修改 npm prefix、不使用自定义 cache，完全遵循 npm 默认全局安装路径。
 
@@ -629,6 +657,7 @@ npm run install:release
 - 在临时目录再次 `npm pack` 生成 `rcc-<version>.tgz`
 - 卸载已有全局 rcc（若存在），再对 `rcc-<version>.tgz` 执行 `npm install -g`
 - 验证安装（打印 `rcc --version`）
+- 背景执行 `scripts/install-verify.mjs --launcher cli --cli-binary rcc --config ~/.routecodex/provider/glm/config.v1.json`（`gtimeout/timeout` 保护，日志写入 `/tmp/routecodex-release-verify-*.log`），通过全局 `rcc start` 发起“列出本地文件目录”工具请求，确保 release 包具备完整的端到端能力
 
 约束与原则：
 - 默认安装脚本 **只安装 dev 包 routecodex**，release `rcc` 必须显式执行 `npm run install:release`
@@ -651,5 +680,5 @@ npm run install:release
 
 ---
 
-**最后更新**: 2025-11-15
-**版本**: 0.81.29
+**最后更新**: 2025-11-22
+**版本**: 0.82.001

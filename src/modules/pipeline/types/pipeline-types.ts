@@ -28,7 +28,6 @@ export interface ModuleTypeMapping {
   // LLMSwitch 使用本地 V2 适配器，避免 v1 依赖
   'llmswitch-openai-openai': import('../modules/llmswitch-v2-adapters.js').OpenAIOpenAIAdapter;
   'llmswitch-anthropic-openai': import('../modules/llmswitch-v2-adapters.js').AnthropicOpenAIAdapter;
-  'streaming-control': import('../modules/workflow/streaming-control.js').StreamingControlWorkflow;
   'field-mapping': import('../modules/compatibility/field-mapping.js').FieldMappingCompatibility;
   // 'qwen-provider': import('../modules/provider/v2/core/qwen-provider.js').QwenProvider;
   // 'generic-http': import('../modules/provider/v2/core/generic-http-provider.js').GenericHTTPProvider;
@@ -40,7 +39,6 @@ export interface ModuleTypeMapping {
 export type PipelineModuleConfig =
   | { type: 'llmswitch-openai-openai'; config: Record<string, any> }
   | { type: 'llmswitch-anthropic-openai'; config: Record<string, any> }
-  | { type: 'streaming-control'; config: Record<string, any> }
   | { type: 'field-mapping'; config: { rules: TransformationRule[] } }
   | { type: 'qwen-provider'; config: Record<string, any> }
   | { type: 'generic-http'; config: Record<string, any> };
@@ -126,7 +124,6 @@ export interface PipelineHealthStatus {
   /** Component health */
   components: {
     llmSwitch: 'healthy' | 'degraded' | 'unhealthy';
-    workflow: 'healthy' | 'degraded' | 'unhealthy';
     compatibility: 'healthy' | 'degraded' | 'unhealthy';
     provider: 'healthy' | 'degraded' | 'unhealthy';
   };

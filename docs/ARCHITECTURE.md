@@ -159,6 +159,26 @@ RouteCodex 是一个多 Provider OpenAI 代理服务器，支持动态路由、�
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## Conversion V3 流水线架构（llmswitch-core）
+
+conversion v3 是 sharedmodule/llmswitch-core 提供的唯一转换与工具治理流水线，具备以下约束：
+
+- **单一入口**：RouteCodex 仅通过 `src/modules/llmswitch/bridge.ts` → `sharedmodule/llmswitch-core/dist/v2/bridge/routecodex-adapter` 调用 conversion v3；禁止旁路 import core。
+- **配置驱动节点链**：`config/pipeline-config.generated.json`（可被环境变量覆盖）中的 `llmSwitch.pipelineConfig` 定义每条入站/出站线路的节点序列：`SSE Input → Provider Input → Chat Process → Provider Output → SSE Output`，Responses/Anthropic 线路也遵循相同结构。自 V3 起，每条线路都会携带显式的 `processMode`（`chat` / `passthrough`）与 `mode`（是否 Passthrough）字段，`PipelineConfigManager` 会在匹配入口端点后优先筛选 provider protocol，再根据 `processMode` 命中对应流水线，彻底移除任何自动兜底。
+- **Compatibility 回归 host 模块**：llmswitch-core 的流程节点只负责输入/处理/输出，不再加载 `compatibility-process`。所有 Provider 特定 patch（tool schema、GLM 字段裁剪等）都在 `src/modules/pipeline/modules/compatibility` 内按 providerId/providerType 命中，llmswitch 仅提供标准化请求与响应。
+- **节点职责**
+  - `nodes/sse/*`：SSE 入口/出口/直通节点，仅做 JSON ↔ SSE 序列化与元数据记录。
+  - `nodes/input/*`：OpenAI Chat、OpenAI Responses、Anthropic Messages 入站解析器，校验 `model/messages` 并输出 canonical `standardizedRequest`。
+  - `nodes/process/*`（当前为 `chat-process-node`）：唯一的工具治理点，处理 tool_calls 修复、上下文归一、MCP 规则、streaming 策略等。
+  - `nodes/output/*`：按 Provider 协议生成响应（choices、usage、content blocks 等）。
+  - `nodes/response/*`：出站入口节点，把 Provider 响应转换为 canonical，再交由 output/sse 节点返回。
+- **工具治理原则**
+  - 除 Compatibility 层为满足 OpenAI 协议做的最小字段修剪外，任何模块都不得修改工具语义。
+  - 工具解析、修复、透传、执行判定必须发生在 `process` 链路；Input/Output/SSE/Response 节点只做格式转换或序列化。
+  - 新增功能如需触碰工具，必须作为 `chat-process-node` 的子流程或新的 process 节点，并在 pipeline 配置中显式启用。
+
+该架构确保三条链路（OpenAI/Anthropic/Responses、SSE/JSON）共享同一份逻辑，调试与快照都仅需关注 conversion v3 输出。
+
 ## 技术栈
 
 ### 核心技术

@@ -11,9 +11,11 @@ import { homedir } from 'os';
 import net from 'net';
 import { spawn } from 'child_process';
 import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
 import { ConfigManagerModule } from './modules/config-manager/config-manager-module.js';
 import { buildInfo } from './build-info.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
+import { generatePipelineConfiguration } from './modules/config/pipeline-config-generator.js';
 
 // Polyfill CommonJS require for ESM runtime to satisfy dependencies that call require()
 let moduleRequire: ((moduleId: string) => unknown) | null = null;
@@ -71,6 +73,19 @@ function getDefaultModulesConfigPath(): string {
   return './config/modules.json';
 }
 
+function resolveAppBaseDir(): string {
+  const env = String(process.env.ROUTECODEX_BASEDIR || process.env.RCC_BASEDIR || '').trim();
+  if (env) {
+    return path.resolve(env);
+  }
+  try {
+    const __filename = fileURLToPath(import.meta.url);
+    return path.resolve(path.dirname(__filename), '..');
+  } catch {
+    return process.cwd();
+  }
+}
+
 /**
  * Main application class
  */
@@ -80,6 +95,7 @@ class RouteCodexApp {
   private modulesConfigPath: string;
   private _isRunning: boolean = false;
   private mergedConfigPath: string = path.join(process.cwd(), 'config', 'merged-config.json');
+  private readonly baseDir: string;
 
   constructor(modulesConfigPath?: string) {
     this.modulesConfigPath = modulesConfigPath || getDefaultModulesConfigPath();
@@ -94,6 +110,7 @@ class RouteCodexApp {
     }
 
     this.configManager = new ConfigManagerModule();
+    this.baseDir = resolveAppBaseDir();
     this.httpServer = null; // 将在初始化时设置
   }
 
@@ -178,6 +195,15 @@ class RouteCodexApp {
         bindPort = typeof portRaw === 'number' ? portRaw : parseInt(String(portRaw), 10);
         if (!Number.isFinite(bindPort)) bindPort = port;
       } catch { /* keep defaults */ }
+      const pipelineConfigPath = await generatePipelineConfiguration({
+        baseDir: this.baseDir,
+        systemConfigPath: this.modulesConfigPath,
+        userConfigPath,
+        port: bindPort
+      });
+      process.env.ROUTECODEX_PIPELINE_CONFIG_PATH = pipelineConfigPath;
+      process.env.RCC_PIPELINE_CONFIG_PATH = pipelineConfigPath;
+
       const { RouteCodexServerV2 } = await import('./server-v2/core/route-codex-server-v2.js');
       // V2 hooks 开关：默认开启；可通过 ROUTECODEX_V2_HOOKS=0/false/no 关闭
       const hooksEnv = String(process.env.ROUTECODEX_V2_HOOKS || process.env.RCC_V2_HOOKS || '').trim().toLowerCase();
@@ -194,7 +220,7 @@ class RouteCodexApp {
           console.log(`🧱 Pipelines in merged (assembler): ${pac.pipelines.length}`);
           try { const ids = pac.pipelines.map((p: any) => p?.id).filter(Boolean); console.log('🔎 Pipeline IDs:', ids); } catch {}
         } else {
-          throw new Error(`No assembler pipelines found in ${this.mergedConfigPath}. 请使用 'npm run config:core:run' 生成 V2 装配配置`);
+          throw new Error(`No assembler pipelines found in ${this.mergedConfigPath}. 自动生成配置缺失，请检查 ~/.routecodex/config.json 是否完整`);
         }
       } catch (e: any) {
         console.error('❌ Pipeline validation error:', e?.message || String(e));

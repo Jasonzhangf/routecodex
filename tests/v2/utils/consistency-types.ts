@@ -20,8 +20,6 @@ export interface V1ProcessingData {
 }
 
 export interface V2ProcessingData {
-  workflowPre?: any;
-  workflowPost?: any;
   providerRequest?: any;
   providerResponse?: any;
   finalResponse?: any;

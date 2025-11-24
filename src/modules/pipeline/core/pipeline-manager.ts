@@ -25,6 +25,8 @@ import { ErrorHandlerRegistry } from '../../../utils/error-handler-registry.js';
 import { DebugEventBus } from '../../debugcenter/debug-event-bus-shim.js';
 import { Key429Tracker, /* type Key429ErrorRecord */ } from '../../../utils/key-429-tracker.js';
 import { PipelineHealthManager } from '../../../utils/pipeline-health-manager.js';
+import { PipelineOrchestrator, type PipelineResolveOptions } from '../orchestrator/pipeline-orchestrator.js';
+import type { PipelineBlueprint } from '../orchestrator/types.js';
 
 const APP_VERSION = String(process.env.ROUTECODEX_VERSION || 'dev');
 
@@ -65,6 +67,7 @@ export class PipelineManager implements RCCBaseModule {
   // 聚合器熔断状态（与 429 独立）：按“上游端点维度”记录 openai_error/bad_response_status_code 错误次数与冷却窗口，
   // 并在冷却期间对请求进行排队与合并。
   private meltdownState: Map<string, { consecutive: number; step: number; cooldownUntil: number; draining: boolean; queue: Array<{ request: PipelineRequest; resolve: (res: PipelineResponse) => void; reject: (err: unknown) => void }> }> = new Map();
+  private orchestrator: PipelineOrchestrator;
 
   constructor(
     config: PipelineManagerConfig,
@@ -77,6 +80,7 @@ export class PipelineManager implements RCCBaseModule {
     this.config = config;
     this.logger = new PipelineDebugLogger(debugCenter);
     this.registry = new PipelineModuleRegistryImpl();
+    this.orchestrator = new PipelineOrchestrator();
 
     // Initialize 429 error handling components
     this.key429Tracker = new Key429Tracker();
@@ -100,6 +104,20 @@ export class PipelineManager implements RCCBaseModule {
 
       // Pre-create all pipelines
       await this.createPipelines();
+
+      // Warm up pipeline blueprint orchestrator so downstream modules可以按需读取
+      try {
+        await this.orchestrator.initialize();
+        const blueprints = await this.orchestrator.listBlueprints();
+        this.logger.logPipeline('manager', 'orchestrator-warmup', {
+          blueprintCount: blueprints.length,
+          configSource: this.orchestrator.getSourcePath()
+        });
+      } catch (error) {
+        this.logger.logPipeline('manager', 'orchestrator-warmup-error', {
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
 
       // After creation, expose a concise summary for consistency checks
       try {
@@ -137,6 +155,39 @@ export class PipelineManager implements RCCBaseModule {
    */
   public getPipelineIds(): string[] {
     return Array.from(this.pipelines.keys());
+  }
+
+  public async getPipelineBlueprint(pipelineId: string): Promise<PipelineBlueprint | null> {
+    await this.orchestrator.initialize();
+    return this.orchestrator.getPipelineById(pipelineId);
+  }
+
+  public async resolvePipelineBlueprint(entryEndpoint: string, options: PipelineResolveOptions = {}): Promise<PipelineBlueprint | null> {
+    await this.orchestrator.initialize();
+    return this.orchestrator.resolve(entryEndpoint, options);
+  }
+
+  private async resolveBlueprintSet(config: PipelineConfig): Promise<{ request?: PipelineBlueprint | null; response?: PipelineBlueprint | null }> {
+    await this.orchestrator.initialize();
+    const providerProtocol = this.extractProviderProtocolFromConfig(config);
+    const processMode = this.extractProcessModeFromConfig(config);
+    const { requestEndpoint, responseEndpoint } = this.mapProtocolToEndpoints(providerProtocol);
+
+    const requestBlueprint = await this.orchestrator.resolve(requestEndpoint, {
+      phase: 'request',
+      providerProtocol,
+      processMode
+    });
+    const responseBlueprint = await this.orchestrator.resolve(responseEndpoint, {
+      phase: 'response',
+      providerProtocol,
+      processMode
+    });
+
+    return {
+      request: requestBlueprint ?? null,
+      response: responseBlueprint ?? null
+    };
   }
 
   /**
@@ -552,11 +603,26 @@ export class PipelineManager implements RCCBaseModule {
       };
 
       // Create and initialize pipeline
+      const blueprints = await this.resolveBlueprintSet(config);
+      if (!blueprints.request) {
+        this.logger.logPipeline('manager', 'blueprint-missing', {
+          pipelineId,
+          phase: 'request'
+        });
+      }
+      if (!blueprints.response) {
+        this.logger.logPipeline('manager', 'blueprint-missing', {
+          pipelineId,
+          phase: 'response'
+        });
+      }
+
       const pipeline = new BasePipeline(
         config,
         this.errorHandlingCenter,
         this.debugCenter,
-        moduleFactory
+        moduleFactory,
+        blueprints
       );
 
       await pipeline.initialize();
@@ -582,7 +648,10 @@ export class PipelineManager implements RCCBaseModule {
       this.logger.logPipeline('manager', 'pipeline-added', {
         pipelineId,
         totalPipelines: this.pipelines.size,
-        enhanced: this.isEnhanced
+        enhanced: this.isEnhanced,
+        requestBlueprintId: blueprints.request?.id,
+        responseBlueprintId: blueprints.response?.id,
+        blueprintProcessMode: blueprints.request?.processMode
       });
 
     } catch (error) {
@@ -636,6 +705,48 @@ export class PipelineManager implements RCCBaseModule {
     request: PipelineRequest
   ): Promise<PipelineResponse> {
     try {
+      try {
+        const provConfig = (pipeline.config.modules?.provider?.config || {}) as Record<string, unknown>;
+        const route = (request as any).route || {};
+        if (typeof provConfig.providerId === 'string' && provConfig.providerId.trim()) {
+          route.providerId = provConfig.providerId.trim();
+        }
+        if (typeof provConfig.modelId === 'string' && provConfig.modelId.trim()) {
+          route.modelId = provConfig.modelId.trim();
+        } else {
+          const modelCfg = (pipeline.config as any)?.model;
+          if (modelCfg && typeof modelCfg.actualModelId === 'string' && modelCfg.actualModelId.trim()) {
+            route.modelId = modelCfg.actualModelId.trim();
+          }
+        }
+        route.pipelineId = pipeline.pipelineId;
+        route.timestamp = typeof route.timestamp === 'number' ? route.timestamp : Date.now();
+        (request as any).route = route;
+        const meta = ((request as any).metadata && typeof (request as any).metadata === 'object')
+          ? (request as any).metadata
+          : ((request as any).metadata = {});
+        if (typeof route.providerId === 'string') {
+          meta.providerId = route.providerId;
+          meta.provider = route.providerId;
+        }
+        if (typeof route.modelId === 'string') {
+          meta.modelId = route.modelId;
+        }
+        meta.pipelineId = pipeline.pipelineId;
+        if (typeof provConfig.providerType === 'string' && provConfig.providerType.trim()) {
+          meta.providerType = provConfig.providerType.trim();
+        }
+        if (typeof provConfig.protocol === 'string' && provConfig.protocol.trim()) {
+          meta.providerProtocol = provConfig.protocol.trim();
+        }
+        if (typeof provConfig.baseUrl === 'string' && provConfig.baseUrl.trim()) {
+          meta.providerBaseUrl = provConfig.baseUrl.trim();
+        }
+        if (typeof provConfig.endpoint === 'string' && provConfig.endpoint.trim()) {
+          meta.providerEndpoint = provConfig.endpoint.trim();
+        }
+      } catch { /* best-effort */ }
+
       const response = await pipeline.processRequest(request);
 
       // On success, record success and clear 429 consecutive state for this pipeline
@@ -1150,11 +1261,26 @@ export class PipelineManager implements RCCBaseModule {
           return this.registry.createModule(moduleConfig, dependencies);
         };
 
+        const blueprints = await this.resolveBlueprintSet(config);
+        if (!blueprints.request) {
+          this.logger.logPipeline('manager', 'blueprint-missing', {
+            pipelineId: config.id,
+            phase: 'request'
+          });
+        }
+        if (!blueprints.response) {
+          this.logger.logPipeline('manager', 'blueprint-missing', {
+            pipelineId: config.id,
+            phase: 'response'
+          });
+        }
+
         const pipeline = new BasePipeline(
           config,
           this.errorHandlingCenter,
           this.debugCenter,
-          moduleFactory
+          moduleFactory,
+          blueprints
         );
 
         await pipeline.initialize();
@@ -1163,7 +1289,10 @@ export class PipelineManager implements RCCBaseModule {
         this.logger.logPipeline('manager', 'pipeline-created', {
           pipelineId: config.id,
           providerType: config.provider.type,
-          modules: Object.keys(config.modules)
+          modules: Object.keys(config.modules),
+          requestBlueprintId: blueprints.request?.id,
+          responseBlueprintId: blueprints.response?.id,
+          blueprintProcessMode: blueprints.request?.processMode
         });
 
         return { ok: true, id: config.id } as const;
@@ -1205,15 +1334,11 @@ export class PipelineManager implements RCCBaseModule {
     // Route legacy openai normalizer type to conversion router to ensure single entrypoint
     this.registry.registerModule('llmswitch-openai-openai', this.createConversionRouterModule);
     this.registry.registerModule('llmswitch-anthropic-openai', this.createConversionRouterModule);
-    this.registry.registerModule('llmswitch-response-chat', this.createConversionRouterModule);
     this.registry.registerModule('llmswitch-conversion-router', this.createConversionRouterModule);
-    this.registry.registerModule('llmswitch-responses-passthrough', this.createConversionRouterModule);
     // unified switch removed; use llmswitch-conversion-router instead
     // Aliases for backward compatibility (map to conversion-router to keep single path)
     this.registry.registerModule('openai-normalizer', this.createConversionRouterModule);
     this.registry.registerModule('anthropic-openai-converter', this.createConversionRouterModule);
-    this.registry.registerModule('responses-chat-switch', this.createConversionRouterModule);
-    this.registry.registerModule('streaming-control', this.createStreamingControlModule);
     this.registry.registerModule('field-mapping', this.createFieldMappingModule);
     // Standard V2 compatibility wrapper (single entry)
     this.registry.registerModule('compatibility', this.createStandardCompatibilityModule);
@@ -1409,16 +1534,6 @@ export class PipelineManager implements RCCBaseModule {
     return new AnthropicOpenAIAdapter(config, dependencies) as unknown as PipelineModule;
   };
 
-  private createResponsesChatLLMSwitchModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { ResponsesToChatAdapter } = await import('../modules/llmswitch-v2-adapters.js');
-    return new ResponsesToChatAdapter(config, dependencies) as unknown as PipelineModule;
-  };
-
-  private createResponsesPassthroughLLMSwitchModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { ResponsesPassthroughAdapter } = await import('../modules/llmswitch-v2-adapters.js');
-    return new ResponsesPassthroughAdapter(config, dependencies) as unknown as PipelineModule;
-  };
-
   private createConversionRouterModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { ConversionRouterAdapter } = await import('../modules/llmswitch-v2-adapters.js');
     // Dynamic router: choose codec by entryEndpoint (/v1/messages → anthropic, /v1/responses → responses)
@@ -1426,11 +1541,6 @@ export class PipelineManager implements RCCBaseModule {
   };
 
   // unified switch factory removed
-
-  private createStreamingControlModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
-    const { StreamingControlWorkflow } = await import('../modules/workflow/streaming-control.js');
-    return new StreamingControlWorkflow(config, dependencies);
-  };
 
   private createFieldMappingModule = async (config: ModuleConfig, dependencies: ModuleDependencies): Promise<PipelineModule> => {
     const { FieldMappingCompatibility } = await import('../modules/compatibility/field-mapping.js');
@@ -1540,6 +1650,63 @@ export class PipelineManager implements RCCBaseModule {
     }
     return new CompatibilityToPipelineAdapter(compatibilityModule, config);
   };
+
+  private extractProviderProtocolFromConfig(config: PipelineConfig): string | undefined {
+    try {
+      const providerCfg = config.modules?.provider?.config as Record<string, unknown> | undefined;
+      const llmSwitchCfg = config.modules?.llmSwitch?.config as Record<string, unknown> | undefined;
+      const protocolCandidates = [
+        llmSwitchCfg?.providerProtocol,
+        providerCfg?.protocol,
+        providerCfg?.providerProtocol
+      ];
+      for (const candidate of protocolCandidates) {
+        if (typeof candidate === 'string' && candidate.trim().length) {
+          return candidate.trim().toLowerCase();
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return undefined;
+  }
+
+  private extractProcessModeFromConfig(config: PipelineConfig): 'chat' | 'passthrough' {
+    try {
+      const llmSwitchCfg = config.modules?.llmSwitch?.config as Record<string, unknown> | undefined;
+      const candidates = [
+        llmSwitchCfg?.process,
+        llmSwitchCfg?.requestProcess
+      ];
+      for (const candidate of candidates) {
+        if (typeof candidate === 'string') {
+          const normalized = candidate.trim().toLowerCase();
+          if (normalized === 'passthrough') return 'passthrough';
+          if (normalized === 'chat') return 'chat';
+        }
+      }
+      const moduleType = typeof config.modules?.llmSwitch?.type === 'string' ? config.modules.llmSwitch.type.toLowerCase() : '';
+      if (moduleType.includes('passthrough')) {
+        return 'passthrough';
+      }
+    } catch {
+      // ignore
+    }
+    return 'chat';
+  }
+
+  private mapProtocolToEndpoints(protocol?: string): { requestEndpoint: string; responseEndpoint: string } {
+    const normalized = (protocol || '').trim().toLowerCase();
+    switch (normalized) {
+      case 'openai-responses':
+        return { requestEndpoint: '/v1/responses', responseEndpoint: '/v1/responses#response' };
+      case 'anthropic-messages':
+        return { requestEndpoint: '/v1/messages', responseEndpoint: '/v1/messages#response' };
+      case 'openai-chat':
+      default:
+        return { requestEndpoint: '/v1/chat/completions', responseEndpoint: '/v1/chat/completions#response' };
+    }
+  }
 
   /**
    * Generate pipeline ID from provider and model

@@ -14,8 +14,7 @@ function summarizeModules(p: any) {
   return {
     provider: m.provider?.type,
     compatibility: m.compatibility?.type,
-    llmSwitch: m.llmSwitch?.type,
-    workflow: m.workflow?.type,
+    llmSwitch: m.llmSwitch?.type
   };
 }
 
@@ -72,4 +71,3 @@ function main() {
 }
 
 main();
-

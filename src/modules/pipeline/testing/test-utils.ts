@@ -5,12 +5,14 @@
 import { LOCAL_HOSTS, HTTP_PROTOCOLS, DEFAULT_CONFIG } from "../../../constants/index.js";import type { PipelineConfig, ModuleDependencies } from '../interfaces/pipeline-interfaces.js';
 import { BasePipeline } from '../core/base-pipeline.js';
 import type { ErrorHandlingCenter, DebugCenter } from '../types/external-types.js';
+import type { PipelineBlueprint } from '../orchestrator/types.js';
 
 /**
  * Create a mock pipeline for testing
  */
 export async function createMockPipeline(
-  config?: Partial<PipelineConfig>
+  config?: Partial<PipelineConfig>,
+  blueprint?: PipelineBlueprint
 ): Promise<BasePipeline> {
   const mockConfig: PipelineConfig = {
     id: 'test-pipeline',
@@ -21,10 +23,6 @@ export async function createMockPipeline(
     },
     modules: {
       llmSwitch: {
-        type: 'mock',
-        config: {}
-      },
-      workflow: {
         type: 'mock',
         config: {}
       },
@@ -49,7 +47,8 @@ export async function createMockPipeline(
     mockDebugCenter,
     async (_moduleConfig, _dependencies) => {
       throw new Error('Mock module factory not implemented');
-    }
+    },
+    blueprint ? { request: blueprint } : undefined
   );
 
   await pipeline.initialize();
@@ -69,10 +68,6 @@ export function createTestPipelineConfig(overrides?: Partial<PipelineConfig>): P
     },
     modules: {
       llmSwitch: {
-        type: 'test',
-        config: {}
-      },
-      workflow: {
         type: 'test',
         config: {}
       },

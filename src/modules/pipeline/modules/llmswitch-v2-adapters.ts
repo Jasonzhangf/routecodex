@@ -1,8 +1,11 @@
 import type { ModuleConfig, ModuleDependencies, PipelineModule } from '../interfaces/pipeline-interfaces.js';
-import path from 'path';
-// Orchestration moved into llmswitch-core; adapters delegate to bridge module
-import { fileURLToPath } from 'url';
-import { bridgeProcessIncoming, bridgeProcessOutgoing } from '../../llmswitch/bridge.js';
+import {
+  bridgeProcessIncoming,
+  bridgeProcessInboundResponse,
+  bridgeProcessOutboundRequest,
+  bridgeProcessOutboundResponse
+} from '../../llmswitch/bridge.js';
+import { llmswitchPipelineRegistry, type PipelineResolution } from '../../llmswitch/pipeline-registry.js';
 
 type Ctx = {
   requestId?: string;
@@ -48,17 +51,6 @@ abstract class BaseV2Adapter implements PipelineModule {
   abstract processOutgoing(response: any): Promise<unknown>;
 }
 
-function resolveProcessMode(rawMode: unknown, typeLower: string): 'chat' | 'passthrough' {
-  const v = typeof rawMode === 'string' ? rawMode.toLowerCase() : '';
-  if (v === 'passthrough') return 'passthrough';
-  if (v === 'chat') return 'chat';
-  // 兼容旧配置：responses 直通模块默认采用 passthrough
-  if (typeLower === 'llmswitch-responses-passthrough') return 'passthrough';
-  // 默认按 chat 处理（完整 Anth↔Chat/Responses↔Chat 编解码链）
-  return 'chat';
-}
-
-// Dynamic router: choose proper codec by entryEndpoint
 export class ConversionRouterAdapter extends BaseV2Adapter {
   private orchestrator: any;
   private readonly deps: ModuleDependencies;
@@ -81,35 +73,16 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
   // For unified behavior: default Responses → Chat bridge unless explicit passthrough module is used
   // No per-adapter codec instantiation here; delegate strictly to core bridge
 
-  private pickProtocol(ctx: Ctx): 'openai-chat' | 'openai-responses' | 'anthropic-messages' {
-    const ep = String(ctx.entryEndpoint || ctx.endpoint || '').toLowerCase();
-    try { console.log('[LLMSWITCH.pick] ctx=', ctx); } catch { /* ignore */ }
-    if (ep === '/v1/messages') return 'anthropic-messages';
-    if (ep === '/v1/responses') return 'openai-responses';
-    if (ep === '/v1/chat/completions' || ep === '/v1/completions') return 'openai-chat';
-    // Unknown endpoint: mark for 404 by throwing a structured error
-    const err: any = new Error(`Unsupported endpoint for conversion router: ${ep}`);
-    err.status = 404; err.code = 'not_found';
-    throw err;
-  }
-
   async processIncoming(request: any): Promise<unknown> {
     if (!this.initialized) await this.initialize();
     const ctx = this.buildContext(request);
-    const typeLower = String(this.config.type || '').toLowerCase();
-    const cfg: any = (this.config as any)?.config || {};
-    // 请求侧优先使用 requestProcess，其次回退到通用 process
-    const rawModeIn = (typeof cfg.requestProcess === 'string' ? cfg.requestProcess : cfg.process) as string | undefined;
-    const processMode = resolveProcessMode(rawModeIn, typeLower);
-    // providerProtocol 优先来自配置（由 config-core / assembler 注入），缺失时按入口端点推断
-    let providerProtocol = String(cfg.providerProtocol || '').toLowerCase();
-    if (!providerProtocol) {
-      providerProtocol = this.pickProtocol(ctx);
-    }
+    const descriptor = this.resolveDescriptor('inbound', 'request', ctx, request);
+    this.applyDescriptorMetadata(ctx, descriptor);
     const result = await bridgeProcessIncoming(request, {
-      processMode,
-      providerProtocol,
-      profilesPath: 'config/conversion/llmswitch-profiles.json'
+      processMode: descriptor.processMode,
+      providerProtocol: descriptor.providerProtocol,
+      profilesPath: 'config/conversion/llmswitch-profiles.json',
+      entryEndpoint: ctx.entryEndpoint || descriptor.entryEndpoint
     });
     // Normalize: some core bridge versions may return an envelope like
     // { payload, pipelineId, ... }. Downstream expects plain Chat JSON
@@ -127,20 +100,69 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
     return result;
   }
 
+  private normalizeRequestDto(original: any, transformed: any): any {
+    try {
+      if (transformed && typeof transformed === 'object') {
+        const obj: any = transformed as any;
+        if ('data' in obj && 'metadata' in obj) {
+          return { ...(original as any), ...(obj as any), route: (original as any)?.route };
+        }
+      }
+    } catch { /* ignore */ }
+    return {
+      ...original,
+      data: transformed
+    };
+  }
+
+  private normalizeResponseDto(original: any, transformed: any): any {
+    try {
+      if (transformed && typeof transformed === 'object') {
+        const obj: any = transformed as any;
+        if ('data' in obj && 'metadata' in obj) {
+          return obj;
+        }
+      }
+    } catch { /* ignore */ }
+    return {
+      ...original,
+      data: transformed
+    };
+  }
+
+  async transformRequest(request: any): Promise<unknown> {
+    if (!this.initialized) await this.initialize();
+    const ctx = this.buildContext(request);
+    const descriptor = this.resolveDescriptor('outbound', 'request', ctx, request);
+    this.applyDescriptorMetadata(ctx, descriptor);
+    const result = await bridgeProcessOutboundRequest(request, {
+      processMode: descriptor.processMode,
+      providerProtocol: descriptor.providerProtocol,
+      profilesPath: 'config/conversion/llmswitch-profiles.json',
+      entryEndpoint: ctx.entryEndpoint || descriptor.entryEndpoint
+    });
+    return this.normalizeRequestDto(request, result);
+  }
+
+  async transformResponse(response: any): Promise<unknown> {
+    if (!this.initialized) await this.initialize();
+    const ctx = this.buildContext(response);
+    const descriptor = this.resolveDescriptor('inbound', 'response', ctx, response);
+    this.applyDescriptorMetadata(ctx, descriptor);
+    const result = await bridgeProcessInboundResponse(response, {
+      processMode: descriptor.processMode,
+      providerProtocol: descriptor.providerProtocol,
+      profilesPath: 'config/conversion/llmswitch-profiles.json',
+      entryEndpoint: ctx.entryEndpoint || descriptor.entryEndpoint
+    });
+    return this.normalizeResponseDto(response, result);
+  }
+
   async processOutgoing(response: any): Promise<unknown> {
     if (!this.initialized) await this.initialize();
     const ctx = this.buildContext(response);
-    // entryEndpoint is required; no inference here
-    const typeLower = String(this.config.type || '').toLowerCase();
-    const cfg: any = (this.config as any)?.config || {};
-    // 响应侧优先使用 responseProcess，其次回退到通用 process
-    const rawModeOut = (typeof cfg.responseProcess === 'string' ? cfg.responseProcess : cfg.process) as string | undefined;
-    const processMode = resolveProcessMode(rawModeOut, typeLower);
-    // 响应侧同样需要 providerProtocol，用于确定 Chat→Anth/Chat→Responses 的出口编码
-    let providerProtocol = String(cfg.providerProtocol || '').toLowerCase();
-    if (!providerProtocol) {
-      providerProtocol = this.pickProtocol(ctx);
-    }
+    const descriptor = this.resolveDescriptor('outbound', 'response', ctx, response);
+    this.applyDescriptorMetadata(ctx, descriptor);
     const invokeSecondRound = async (dto: any, _ctx: any) => {
       try {
         // Build a SharedPipelineRequest and re-enter pipeline (non-streaming second round)
@@ -164,12 +186,93 @@ export class ConversionRouterAdapter extends BaseV2Adapter {
         return { data: dto?.body };
       }
     };
-    return await bridgeProcessOutgoing(response, {
-      processMode,
-      providerProtocol,
+    return await bridgeProcessOutboundResponse(response, {
+      processMode: descriptor.processMode,
+      providerProtocol: descriptor.providerProtocol,
       profilesPath: 'config/conversion/llmswitch-profiles.json',
-      invokeSecondRound
+      invokeSecondRound,
+      entryEndpoint: ctx.entryEndpoint || descriptor.entryEndpoint
     });
+  }
+
+  private getModuleConfig(): Record<string, unknown> {
+    return ((this.config as any)?.config || {}) as Record<string, unknown>;
+  }
+
+  private resolveDescriptor(stage: 'inbound' | 'outbound', phase: 'request' | 'response', ctx: Ctx, envelope?: any): PipelineResolution {
+    const cfg = this.getModuleConfig();
+    const entryEndpoint = ctx.entryEndpoint || ctx.endpoint;
+    if (!entryEndpoint || !String(entryEndpoint).trim()) {
+      throw new Error('[LLMSWITCH] 请求缺少 entryEndpoint，无法匹配流水线');
+    }
+    const processPreference = this.readProcessPreference(cfg, phase);
+    const providerHint = this.readProviderProtocolHint(cfg, ctx, envelope);
+    const descriptor = llmswitchPipelineRegistry.resolve(entryEndpoint, {
+      stage,
+      providerProtocol: providerHint,
+      processMode: processPreference
+    });
+    if (!descriptor) {
+      throw new Error(`[LLMSWITCH] 未在 pipeline-config 中找到 ${entryEndpoint} (stage=${stage}, phase=${phase}) 的流水线`);
+    }
+    if (!descriptor.providerProtocol) {
+      const fallback = this.normalizeProtocol(providerHint);
+      if (!fallback) {
+        throw new Error(`[LLMSWITCH] 流水线 ${descriptor.id} 缺少 providerProtocol，且配置未提供 fallback`);
+      }
+      descriptor.providerProtocol = fallback;
+    }
+    return descriptor;
+  }
+
+  private applyDescriptorMetadata(ctx: Ctx, descriptor: PipelineResolution): void {
+    if (!ctx.entryEndpoint) {
+      ctx.entryEndpoint = descriptor.entryEndpoint;
+    }
+    const meta = ctx.metadata && typeof ctx.metadata === 'object' ? ctx.metadata : {};
+    meta.providerProtocol = descriptor.providerProtocol;
+    meta.pipelineId = descriptor.id;
+    if (descriptor.streaming === 'always') {
+      meta.stream = true;
+    } else if (descriptor.streaming === 'never') {
+      meta.stream = false;
+    }
+    ctx.metadata = meta;
+  }
+
+  private readProcessPreference(cfg: Record<string, unknown>, phase: 'request' | 'response'): string | undefined {
+    const key = phase === 'request' ? 'requestProcess' : 'responseProcess';
+    const raw = typeof cfg[key] === 'string' && (cfg[key] as string).trim() ? String(cfg[key]).trim() : undefined;
+    if (raw) return raw;
+    const fallback = typeof cfg.process === 'string' && cfg.process.trim() ? cfg.process.trim() : undefined;
+    return fallback;
+  }
+
+  private readProviderProtocolHint(cfg: Record<string, unknown>, ctx: Ctx, envelope?: any): string | undefined {
+    if (typeof cfg.providerProtocol === 'string' && cfg.providerProtocol.trim()) {
+      return cfg.providerProtocol.trim();
+    }
+    const meta = ctx.metadata || {};
+    if (typeof (meta as any).providerProtocol === 'string' && (meta as any).providerProtocol.trim()) {
+      return (meta as any).providerProtocol.trim();
+    }
+    if (envelope && typeof envelope === 'object') {
+      const envMeta = (envelope as any).metadata;
+      if (envMeta && typeof envMeta === 'object' && typeof envMeta.providerProtocol === 'string' && envMeta.providerProtocol.trim()) {
+        return envMeta.providerProtocol.trim();
+      }
+      const route = (envelope as any).route;
+      if (route && typeof route === 'object' && typeof route.providerProtocol === 'string' && route.providerProtocol.trim()) {
+        return route.providerProtocol.trim();
+      }
+    }
+    return undefined;
+  }
+
+  private normalizeProtocol(value?: string): string | undefined {
+    if (!value || typeof value !== 'string') return undefined;
+    const trimmed = value.trim().toLowerCase();
+    return trimmed || undefined;
   }
 }
 
@@ -244,48 +347,4 @@ export class AnthropicOpenAIAdapter extends BaseV2Adapter {
     const profile = { outgoingProtocol: 'openai-chat' } as any;
     return await this.codec.convertResponse(response.data ?? response, profile, ctx as any);
   }
-}
-
-export class ResponsesToChatAdapter extends BaseV2Adapter {
-  private codec: any;
-
-  constructor(config: ModuleConfig, _dependencies: ModuleDependencies) {
-    super('llmswitch-response-chat', config);
-    this.codec = null;
-  }
-
-  private async ensureCodec(): Promise<void> {
-    if (this.codec) return;
-    const mod = await import('../../llmswitch/bridge.js');
-    this.codec = (mod as any).responsesCodec ?? null;
-  }
-
-  async processIncoming(request: any): Promise<unknown> {
-    if (!this.initialized) await this.initialize();
-    await this.ensureCodec();
-    const ctx = this.buildContext(request);
-    const profile = { outgoingProtocol: 'openai-chat' } as any;
-    const converted = await this.codec.convertRequest(request.data ?? request, profile, ctx as any);
-    const obj = converted as any;
-    if (obj && typeof obj === 'object' && 'payload' in obj && obj.payload && typeof obj.payload === 'object') {
-      return obj.payload;
-    }
-    return converted;
-  }
-
-  async processOutgoing(response: any): Promise<unknown> {
-    if (!this.initialized) await this.initialize();
-    await this.ensureCodec();
-    const ctx = this.buildContext(response);
-    const profile = { outgoingProtocol: 'openai-chat' } as any;
-    return await this.codec.convertResponse(response.data ?? response, profile, ctx as any);
-  }
-}
-
-export class ResponsesPassthroughAdapter extends BaseV2Adapter {
-  constructor(config: ModuleConfig, _dependencies: ModuleDependencies) {
-    super('llmswitch-responses-passthrough', config);
-  }
-  async processIncoming(request: any): Promise<unknown> { return request; }
-  async processOutgoing(response: any): Promise<unknown> { return response; }
 }

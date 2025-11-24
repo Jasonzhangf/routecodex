@@ -1,6 +1,8 @@
 # Build artifacts
 dist/
 coverage/
+config/pipeline-config.generated.json
+config/llmswitch/
 
 # Local caches and packs
 .npm-cache/

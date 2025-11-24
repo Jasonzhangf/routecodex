@@ -10,6 +10,7 @@ import path from 'path';
 import type { MergedConfig } from '../../../config/merged-config-types.js';
 import type { PipelineManagerConfig, PipelineConfig, ModuleConfig } from '../interfaces/pipeline-interfaces.js';
 import { PipelineManager } from '../core/pipeline-manager.js';
+import { ensureLlmswitchPipelineRegistry } from '../../llmswitch/pipeline-registry.js';
 
 export interface AssembledPipelines {
   manager: PipelineManager;
@@ -23,7 +24,7 @@ export class PipelineAssembler {
   }
 
   private static validatePc(
-    pc: { provider?: { type?: string }; model?: { actualModelId?: string }; llmSwitch?: { type?: string }; compatibility?: { type?: string }; workflow?: { type?: string } },
+    pc: { provider?: { type?: string }; model?: { actualModelId?: string }; llmSwitch?: { type?: string }; compatibility?: { type?: string } },
     context: { routeName: string; targetKey: string }
   ): { ok: boolean; errors: string[] } {
     const errors: string[] = [];
@@ -44,6 +45,10 @@ export class PipelineAssembler {
   }
 
   static async assemble(mergedConfig: unknown): Promise<AssembledPipelines> {
+    await ensureLlmswitchPipelineRegistry().catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`[PipelineAssembler] 无法加载 llmswitch pipeline-config：${message}`);
+    });
     const mc = this.asRecord(mergedConfig);
     const pac = this.asRecord(this.asRecord(mc.pipeline_assembler).config);
     const compatCfg = this.asRecord(mc.compatibilityConfig || {});
@@ -103,7 +108,6 @@ export class PipelineAssembler {
 
       const provider = (modules.provider as { type?: string; config?: Record<string, unknown> });
       let llmSwitch = (modules.llmSwitch as { type?: string; config?: Record<string, unknown> } | undefined);
-      const workflow = (modules.workflow as { type?: string; config?: Record<string, unknown> } | undefined);
       // Compatibility: 仅使用显式声明
       let compatibility = (modules.compatibility as { type?: string; config?: Record<string, unknown> } | undefined);
 
@@ -453,9 +457,7 @@ export class PipelineAssembler {
       const allowedSwitches = new Set([
         'llmswitch-anthropic-openai',
         'llmswitch-openai-openai',
-        'llmswitch-response-chat',
-        'llmswitch-conversion-router',
-        'llmswitch-responses-passthrough',
+        'llmswitch-conversion-router'
       ]);
 
       if (llmSwitch?.type) {
@@ -473,11 +475,6 @@ export class PipelineAssembler {
       } else {
         // 未指定 llmSwitch 时，使用转换路由器
         modBlock.llmSwitch = { type: 'llmswitch-conversion-router', config: {} };
-      }
-      if (workflow?.type) {
-        modBlock.workflow = { type: workflow.type, config: workflow.config || {} };
-      } else {
-        modBlock.workflow = { type: 'streaming-control', config: {} };
       }
       // Do not infer provider module type; honor the type already provided in pipeline definition
       // (modBlock.provider already set above)

@@ -58,7 +58,6 @@ export interface PipelineConfig {
   // Optional module declarations for pipeline assembly
   compatibility?: { type: string; config?: Record<string, unknown> };
   llmSwitch?: { type: string; config?: Record<string, unknown> };
-  workflow?: { type: string; config?: Record<string, unknown>; enabled?: boolean };
 }
 
 /**

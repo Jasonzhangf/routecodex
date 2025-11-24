@@ -5,13 +5,29 @@ import { writeSnapshotViaHooks } from '../../../../../llmswitch/bridge.js';
 
 type Phase = 'provider-request' | 'provider-response' | 'provider-error';
 
-function mapFolder(): string {
-  // Provider层缺少明确端点上下文时，默认归入 openai-chat 目录（与既有样本保持一致）
-  return 'openai-chat';
-}
+const SNAPSHOT_BASE = path.join(os.homedir(), '.routecodex', 'codex-samples');
 
 async function ensureDir(dir: string): Promise<void> {
   try { await fsp.mkdir(dir, { recursive: true }); } catch { /* ignore */ }
+}
+
+function normalizeRequestId(requestId?: string): string {
+  if (!requestId || typeof requestId !== 'string') {
+    return `req_${Date.now()}`;
+  }
+  const safe = requestId.startsWith('req_') ? requestId : `req_${requestId}`;
+  return safe.replace(/[^\w.-]/g, '_');
+}
+
+function resolveEndpoint(url?: string): { endpoint: string; folder: string } {
+  const rawUrl = String(url || '').toLowerCase();
+  if (rawUrl.includes('/responses')) {
+    return { endpoint: '/v1/responses', folder: 'openai-responses' };
+  }
+  if (rawUrl.includes('/messages')) {
+    return { endpoint: '/v1/messages', folder: 'anthropic-messages' };
+  }
+  return { endpoint: '/v1/chat/completions', folder: 'openai-chat' };
 }
 
 function maskHeaders(headers: Record<string, unknown> | undefined | null): Record<string, unknown> {
@@ -30,6 +46,30 @@ function maskHeaders(headers: Record<string, unknown> | undefined | null): Recor
   return result;
 }
 
+function buildSnapshotPayload(options: {
+  stage: string;
+  data: unknown;
+  headers?: Record<string, unknown>;
+  url?: string;
+}) {
+  return {
+    meta: {
+      stage: options.stage,
+      version: String(process.env.ROUTECODEX_VERSION || 'dev'),
+      buildTime: String(process.env.ROUTECODEX_BUILD_TIME || new Date().toISOString())
+    },
+    url: options.url,
+    headers: maskHeaders(options.headers || {}),
+    ...(typeof options.data === 'string' ? { bodyText: options.data } : { body: options.data })
+  };
+}
+
+function fallbackFilePath(folder: string, requestId: string, stage: string): string {
+  const dir = path.join(SNAPSHOT_BASE, folder);
+  const safeStage = stage.replace(/[^\w.-]/g, '_');
+  return path.join(dir, `${requestId}_${safeStage}.json`);
+}
+
 export async function writeProviderSnapshot(options: {
   phase: Phase;
   requestId: string;
@@ -37,52 +77,27 @@ export async function writeProviderSnapshot(options: {
   headers?: Record<string, unknown>;
   url?: string;
 }): Promise<void> {
+  const { endpoint, folder } = resolveEndpoint(options.url);
+  const stage = options.phase;
+  const requestId = normalizeRequestId(options.requestId);
+  const payload = buildSnapshotPayload({ stage, data: options.data, headers: options.headers, url: options.url });
+
   try {
-    // 优先通过 llmswitch-core hooks 快照通道写入（与核心一致）
-    try {
-      // 解析 endpoint：从 url 推断
-      const rawUrl = String(options.url || '').toLowerCase();
-      const endpoint = rawUrl.includes('/responses') ? '/v1/responses' : (rawUrl.includes('/messages') ? '/v1/messages' : '/v1/chat/completions');
-      const stage = options.phase; // provider-request|provider-response|provider-error
-      const payload = {
-        url: options.url,
-        headers: maskHeaders(options.headers || {}),
-        ...(typeof options.data === 'string' ? { bodyText: options.data } : { body: options.data })
-      };
-      await writeSnapshotViaHooks('provider', {
-        endpoint,
-        stage,
-        requestId: options.requestId,
-        data: payload,
-        verbosity: 'verbose'
-      });
-      return;
-    } catch {
-      // 回退：直接写本地文件
-      const base = path.join(os.homedir(), '.routecodex', 'codex-samples');
-      const folder = mapFolder();
-      const dir = path.join(base, folder);
-      await ensureDir(dir);
-      const suffix = options.phase === 'provider-request'
-        ? 'provider-request'
-        : options.phase === 'provider-response'
-          ? 'provider-response'
-          : 'provider-error';
-      const file = path.join(dir, `${options.requestId}_${suffix}.json`);
-      const payload = {
-        meta: {
-          stage: suffix,
-          version: String(process.env.ROUTECODEX_VERSION || 'dev'),
-          buildTime: String(process.env.ROUTECODEX_BUILD_TIME || new Date().toISOString())
-        },
-        url: options.url,
-        headers: maskHeaders(options.headers || {}),
-        ...(typeof options.data === 'string' ? { bodyText: options.data } : { body: options.data })
-      };
-      await fsp.writeFile(file, JSON.stringify(payload, null, 2), 'utf-8');
-    }
+    await writeSnapshotViaHooks({
+      endpoint,
+      stage,
+      requestId,
+      data: payload,
+      verbosity: 'verbose'
+    });
+    return;
   } catch {
-    // non-blocking
+    try {
+      await ensureDir(path.join(SNAPSHOT_BASE, folder));
+      await fsp.writeFile(fallbackFilePath(folder, requestId, stage), JSON.stringify(payload, null, 2), 'utf-8');
+    } catch {
+      // non-blocking fallback failure
+    }
   }
 }
 
@@ -93,38 +108,27 @@ export async function writeProviderRetrySnapshot(options: {
   headers?: Record<string, unknown>;
   url?: string;
 }): Promise<void> {
+  const { endpoint, folder } = resolveEndpoint(options.url);
+  const stage = options.type === 'request' ? 'provider-request.retry' : 'provider-response.retry';
+  const requestId = normalizeRequestId(options.requestId);
+  const payload = buildSnapshotPayload({ stage, data: options.data, headers: options.headers, url: options.url });
+
   try {
-    try {
-      const rawUrl = String(options.url || '').toLowerCase();
-      const endpoint = rawUrl.includes('/responses') ? '/v1/responses' : (rawUrl.includes('/messages') ? '/v1/messages' : '/v1/chat/completions');
-      const stage = options.type === 'request' ? 'provider-request.retry' : 'provider-response.retry';
-      const payload = {
-        url: options.url,
-        headers: maskHeaders(options.headers || {}),
-        ...(typeof options.data === 'string' ? { bodyText: options.data } : { body: options.data })
-      };
-      await writeSnapshotViaHooks('provider', { endpoint, stage, requestId: options.requestId, data: payload, verbosity: 'verbose' } as any);
-      return;
-    } catch {
-      const base = path.join(os.homedir(), '.routecodex', 'codex-samples');
-      const dir = path.join(base, 'openai-chat');
-      await ensureDir(dir);
-      const suffix = options.type === 'request' ? 'provider-request.retry' : 'provider-response.retry';
-      const file = path.join(dir, `${options.requestId}_${suffix}.json`);
-      const payload = {
-        meta: {
-          stage: suffix,
-          version: String(process.env.ROUTECODEX_VERSION || 'dev'),
-          buildTime: String(process.env.ROUTECODEX_BUILD_TIME || new Date().toISOString())
-        },
-        url: options.url,
-        headers: maskHeaders(options.headers || {}),
-        ...(typeof options.data === 'string' ? { bodyText: options.data } : { body: options.data })
-      };
-      await fsp.writeFile(file, JSON.stringify(payload, null, 2), 'utf-8');
-    }
+    await writeSnapshotViaHooks({
+      endpoint,
+      stage,
+      requestId,
+      data: payload,
+      verbosity: 'verbose'
+    });
+    return;
   } catch {
-    // non-blocking
+    try {
+      await ensureDir(path.join(SNAPSHOT_BASE, folder));
+      await fsp.writeFile(fallbackFilePath(folder, requestId, stage), JSON.stringify(payload, null, 2), 'utf-8');
+    } catch {
+      // non-blocking fallback failure
+    }
   }
 }
 
@@ -133,10 +137,9 @@ export async function writeRepairFeedbackSnapshot(options: {
   feedback: unknown;
 }): Promise<void> {
   try {
-    const base = path.join(os.homedir(), '.routecodex', 'codex-samples');
-    const dir = path.join(base, 'openai-chat');
+    const dir = path.join(SNAPSHOT_BASE, 'openai-chat');
     await ensureDir(dir);
-    const file = path.join(dir, `${options.requestId}_repair-feedback.json`);
+    const requestId = normalizeRequestId(options.requestId);
     const payload = {
       meta: {
         stage: 'repair-feedback',
@@ -145,7 +148,7 @@ export async function writeRepairFeedbackSnapshot(options: {
       },
       feedback: options.feedback
     };
-    await fsp.writeFile(file, JSON.stringify(payload, null, 2), 'utf-8');
+    await fsp.writeFile(path.join(dir, `${requestId}_repair-feedback.json`), JSON.stringify(payload, null, 2), 'utf-8');
   } catch {
     // non-blocking
   }

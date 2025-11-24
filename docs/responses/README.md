@@ -2,9 +2,11 @@
 
 本节记录当前已经验证 **可以和 `https://www.fakercode.top/v1/responses` 正常通信** 的典型请求形状，方便后续实现 Responses provider 和 llmswitch-core 路由时参考。
 
-> 真实原始样本快照文件（已有）：  
-> `~/.routecodex/codex-samples/openai-responses/req_req-v2-1763210807098-758t06r1s_request_1_validation_pre.json`  
-> 其中 `data.originalData` 即为发送给 FC 的完整请求体。
+> 最新直通黄金样本：  
+> - `~/.routecodex/codex-samples/openai-responses/req_req-v2-1763955655135-2z91vfddh_request_1_validation_pre.json`（llmswitch 输入）  
+> - `~/.routecodex/codex-samples/openai-responses/req_1763955655139_mhw2j6ao_http-request.json`（/v1/responses 入口）  
+> - `~/.routecodex/codex-samples/openai-responses/req_1763955655143_24f5h9qsj_provider-request.json`（Responses Provider 直通）  
+> 同一时间窗的前序样本（`req_1763955649860_832l5215_http-request.json`、`req_1763955649865_drd7xwttl_provider-request.json` 等）记录了相同请求在路由/Provider 侧的视角，可一起对照，`data` 或 `data.originalData` 即为发送给 FC 的最终载荷。
 
 ### 1. 已验证成功的请求形状（摘要）
 
@@ -118,7 +120,7 @@
 ```bash
 FC_API_KEY=... FC_MODEL=gpt-5.1 \
 node scripts/fc-responses-from-snapshot.mjs \
-  ~/.routecodex/codex-samples/openai-responses/req_req-v2-1763210807098-758t06r1s_request_1_validation_pre.json
+  ~/.routecodex/codex-samples/openai-responses/req_req-v2-1763955655135-2z91vfddh_request_1_validation_pre.json
 ```
 
 在成功场景下，SDK 报告的事件分布如下（节选）：

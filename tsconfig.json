@@ -25,17 +25,16 @@
     "baseUrl": ".",
       "paths": {
         "rcc-llmswitch-core/api": [
-          "sharedmodule/llmswitch-core/dist/api.d.ts",
-          "node_modules/rcc-llmswitch-core/dist/api.d.ts"
+          "sharedmodule/llmswitch-core/dist/api.d.ts"
         ],
-        "rcc-llmswitch-core/guidance": ["node_modules/rcc-llmswitch-core/dist/guidance/index.d.ts"],
+        "rcc-llmswitch-core/guidance": [
+          "sharedmodule/llmswitch-core/dist/guidance/index.d.ts"
+        ],
         "rcc-llmswitch-core/v2": [
-          "sharedmodule/llmswitch-core/dist/v2/index.d.ts",
-          "node_modules/rcc-llmswitch-core/dist/v2/index.d.ts"
+          "sharedmodule/llmswitch-core/dist/v2/index.d.ts"
         ],
         "rcc-llmswitch-core/v2/*": [
-          "sharedmodule/llmswitch-core/dist/v2/*",
-          "node_modules/rcc-llmswitch-core/dist/v2/*"
+          "sharedmodule/llmswitch-core/dist/v2/*"
         ]
       }
   },

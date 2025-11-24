@@ -4,7 +4,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,11 +41,21 @@ async function main() {
     process.exit(2);
   }
 
-  // Prefer vendor dist build of llmswitch-core
-  const coreBase = path.resolve(__dirname, '../vendor/rcc-llmswitch-core/dist/v2/conversion');
-  const finalizeMod = await import(path.join(coreBase, 'shared/openai-finalizer.js'));
-  const bridgeMod = await import(path.join(coreBase, 'responses/responses-openai-bridge.js'));
-  const sseMod = await import(path.join(coreBase, 'streaming/json-to-responses-sse.js'));
+  // 仅允许本地 sharedmodule 构建
+  const repoRoot = path.resolve(__dirname, '..');
+  const localBase = path.join(repoRoot, 'sharedmodule', 'llmswitch-core', 'dist', 'v2', 'conversion');
+  try {
+    await fs.access(localBase);
+  } catch {
+    console.error('未找到 sharedmodule/llmswitch-core/dist。请先在 sharedmodule/llmswitch-core 内运行 npm run build。');
+    process.exit(3);
+  }
+
+  const importCore = async (relPath) => import(pathToFileURL(path.join(localBase, relPath)).href);
+
+  const finalizeMod = await importCore(path.join('shared', 'openai-finalizer.js'));
+  const bridgeMod = await importCore(path.join('responses', 'responses-openai-bridge.js'));
+  const sseMod = await importCore(path.join('streaming', 'json-to-responses-sse.js'));
 
   const requestId = (() => {
     const bn = path.basename(abs).replace(/\.json$/i, '');

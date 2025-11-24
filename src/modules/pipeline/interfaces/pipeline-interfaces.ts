@@ -92,7 +92,6 @@ export interface PipelineConfig {
   /** Module configurations */
   readonly modules: {
     llmSwitch: ModuleConfig;
-    workflow: ModuleConfig; // required in strict mode
     compatibility: ModuleConfig;
     provider: ModuleConfig;
   };
@@ -218,29 +217,6 @@ export interface LLMSwitchModule extends PipelineModule {
    * Transform response from target protocol
    */
   transformResponse(response: any): Promise<unknown>;
-}
-
-/**
- * Workflow module interface
- */
-export interface WorkflowModule extends PipelineModule {
-  /** Workflow type */
-  readonly workflowType: string;
-
-  /**
-   * Process streaming control
-   */
-  processStreamingControl(request: SharedPipelineRequest): Promise<SharedPipelineRequest>;
-
-  /**
-   * Handle streaming response
-   */
-  handleStreamingResponse(response: any): Promise<unknown>;
-
-  /**
-   * Process incoming request
-   */
-  processIncoming(request: SharedPipelineRequest): Promise<SharedPipelineRequest>;
 }
 
 /**

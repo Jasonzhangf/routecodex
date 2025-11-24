@@ -85,9 +85,6 @@ async function startServer(){
       try {
         const pipes = Array.isArray(j.pipelines) ? j.pipelines : [];
         for (const p of pipes) {
-          if (p && p.modules && !p.modules.workflow) {
-            p.modules.workflow = { type: 'streaming-control', config: {} };
-          }
           if (p && p.modules && p.modules.provider && p.modules.provider.config) {
             // Ensure providerType exists for V2 provider factory
             if (!p.modules.provider.config.providerType) {
@@ -100,7 +97,7 @@ async function startServer(){
         j.pipelines = pipes;
       } catch {}
       await fs.writeFile(pTest, JSON.stringify(j, null, 2), 'utf-8');
-      console.log(`[e2e] wrote merged-config.${PORT}.json with workflow & port=${PORT}`);
+      console.log(`[e2e] wrote merged-config.${PORT}.json with port=${PORT}`);
     }
   } catch { /* ignore */ }
   const env = {

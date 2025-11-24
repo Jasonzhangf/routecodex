@@ -497,9 +497,6 @@ export class PipelineConfigManager {
         errors.push(`Pipeline ${pipeline.id} must have llmSwitch module configuration`);
       }
 
-      if (!modules.workflow) {
-        errors.push(`Pipeline ${pipeline.id} must have workflow module configuration`);
-      }
 
       if (!modules.provider) {
         errors.push(`Pipeline ${pipeline.id} must have provider module configuration`);

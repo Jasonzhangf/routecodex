@@ -29,7 +29,7 @@ RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配�
 ### Conversion V3 节点架构（唯一入口）
 
 - **唯一入口**：服务器所有请求/响应都只能通过 `src/modules/llmswitch/bridge.ts` → `sharedmodule/llmswitch-core/dist/v2/bridge/routecodex-adapter` 进入 conversion v3，不允许其它地方直接 import core。
-- **配置驱动流水线**：`config/llmswitch/pipeline-config.json` 指定每条入/出站线路的节点序列：`SSE Input → Provider Input → Chat Process → Provider Output → SSE Output`，Responses/Anthropic 同构。
+- **配置驱动流水线**：`config/pipeline-config.generated.json` 中的 `llmSwitch.pipelineConfig` 指定每条入/出站线路的节点序列：`SSE Input → Provider Input → Chat Process → Provider Output → SSE Output`，Responses/Anthropic 同构。
 - **节点职责**
   - `nodes/sse/*`：SSE JSON 化/序列化、旁路透传。
   - `nodes/input/*`：解析 OpenAI Chat / Responses / Anthropic 请求，输出 canonical `standardizedRequest`。

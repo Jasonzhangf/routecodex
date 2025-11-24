@@ -189,51 +189,5 @@ export const mockCompatibilityData = {
       completion_tokens: 18,
       total_tokens: 38
     }
-  },
-
-  v2WorkflowPre: {
-    request: {
-      model: 'gpt-4',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a helpful assistant.'
-        },
-        {
-          role: 'user',
-          content: 'Hello, how are you?'
-        }
-      ],
-      temperature: 0.7,
-      max_tokens: 1000
-    },
-    context: {
-      stage: 'workflow-pre',
-      timestamp: Date.now()
-    }
-  },
-
-  v2WorkflowPost: {
-    response: {
-      choices: [
-        {
-          index: 0,
-          message: {
-            role: 'assistant',
-            content: 'Hello! I am doing well, thank you for asking. How can I assist you today?'
-          },
-          finish_reason: 'stop'
-        }
-      ],
-      usage: {
-        prompt_tokens: 20,
-        completion_tokens: 18,
-        total_tokens: 38
-      }
-    },
-    context: {
-      stage: 'workflow-post',
-      timestamp: Date.now()
-    }
   }
 };

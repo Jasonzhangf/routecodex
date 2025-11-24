@@ -112,10 +112,17 @@ async function main() {
   const anthReq = extractAnthRequestFromServerPre(reqFile);
   const anthResp = extractAnthResponseFromProviderPost(respFile);
 
-  // 动态引入 llmswitch-core（优先 vendor）
+  // 动态引入 llmswitch-core：仅允许 sharedmodule/llmswitch-core/dist
   const root = path.resolve(__dirname, '..');
-  const vendor = path.join(root, 'vendor', 'rcc-llmswitch-core', 'dist');
-  const coreMod = await import(url.pathToFileURL(path.join(vendor, 'v2', 'conversion', 'codecs', 'anthropic-openai-codec.js')).href);
+  const localCore = path.join(root, 'sharedmodule', 'llmswitch-core', 'dist');
+  const codecPath = path.join(localCore, 'v2', 'conversion', 'codecs', 'anthropic-openai-codec.js');
+  let coreMod = null;
+  try {
+    coreMod = await import(url.pathToFileURL(codecPath).href);
+  } catch {
+    console.error('无法定位 llmswitch-core Anthropic 编解码实现。请先在 sharedmodule/llmswitch-core 运行 `npm run build`。');
+    process.exit(3);
+  }
   const Codec = coreMod.AnthropicOpenAIConversionCodec;
   const buildAnthReq = coreMod.buildAnthropicRequestFromOpenAIChat;
 
