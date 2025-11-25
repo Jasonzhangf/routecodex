@@ -247,6 +247,44 @@ export class HttpClient {
         throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
+      // 根据 Content-Type 判断响应类型
+      const ct = (response.headers.get('content-type') || response.headers.get('Content-Type') || '').toLowerCase();
+      // 事件流（SSE）：在非显式流式模式下禁止透传，直接抛错交由上层处理（避免静默失败/挂起）
+      if (ct.includes('text/event-stream')) {
+        const headersObj: Record<string, string> = {};
+        response.headers.forEach((value, key) => { headersObj[key] = value; });
+        let peek = '';
+        try {
+          const body: any = (response as any).body;
+          if (body && typeof body.getReader === 'function') {
+            const reader = body.getReader();
+            const { value } = await reader.read();
+            if (value) peek = new TextDecoder().decode(value).slice(0, 256);
+          } else {
+            peek = (await response.text()).slice(0, 256);
+          }
+        } catch { /* ignore */ }
+        const err: any = new Error(`UPSTREAM_SSE_NOT_ALLOWED: received text/event-stream while expecting JSON. peek=${peek}`);
+        err.code = 'UPSTREAM_SSE_NOT_ALLOWED';
+        err.statusCode = response.status;
+        err.headers = headersObj;
+        throw err;
+      }
+
+      // 非 JSON：返回纯文本
+      if (!ct.includes('application/json')) {
+        const textData = await response.text();
+        const headersObj: Record<string, string> = {};
+        response.headers.forEach((value, key) => { headersObj[key] = value; });
+        return {
+          data: textData,
+          status: response.status,
+          statusText: response.statusText,
+          headers: headersObj,
+          url
+        };
+      }
+
       const responseData = await response.json();
 
       // 手动转换Headers对象为普通对象

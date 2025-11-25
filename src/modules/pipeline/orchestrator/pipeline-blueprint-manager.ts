@@ -79,9 +79,8 @@ export class PipelineBlueprintManager {
   }
 
   private async loadDocument(options: LoadOptions): Promise<{ doc: PipelineConfigDocument; source: string }> {
-    const baseDir = options.baseDir
-      ? path.resolve(options.baseDir)
-      : resolveBaseDir();
+    // 仅消费标准生成路径或显式覆盖路径
+    const baseDir = options.baseDir ? path.resolve(options.baseDir) : resolveBaseDir();
     const candidates = resolvePipelineConfigCandidates(baseDir, options.configPath);
     let lastError: unknown;
     for (const candidate of candidates) {
@@ -219,16 +218,11 @@ function inferPhase(entryEndpoints: string[] = []): PipelinePhase {
 }
 
 function extractPipelineDocument(source: unknown): PipelineConfigDocument | null {
+  // 严格模式：只接受顶层 { pipelines: [...] } 结构，不再从 llmSwitch/pipelineConfig 递归解析
   if (!source || typeof source !== 'object') return null;
   const candidate = source as Record<string, any>;
   if (Array.isArray(candidate.pipelines)) {
     return candidate as PipelineConfigDocument;
-  }
-  if (candidate.llmSwitch && typeof candidate.llmSwitch === 'object') {
-    return extractPipelineDocument(candidate.llmSwitch);
-  }
-  if (candidate.pipelineConfig && typeof candidate.pipelineConfig === 'object') {
-    return extractPipelineDocument(candidate.pipelineConfig);
   }
   return null;
 }

@@ -87,13 +87,17 @@ export class LlmswitchNode implements PipelineNode {
     const payload = runtime.currentData;
     const metadata = {
       ...context.metadata,
-      phase: context.phase
+      phase: context.phase,
+      // 标记方向，供 llmswitch 输出节点区分 request/response 分支
+      direction: context.phase === 'response' ? 'response' : 'request'
     } as Record<string, unknown>;
+    this.normalizeStreamingMetadata(context, metadata);
     const request: Record<string, unknown> = {
       id: context.metadata.requestId,
       timestamp: Date.now(),
       endpoint: context.metadata.entryEndpoint,
       payload,
+      metadata,
       context: {
         entryEndpoint: context.metadata.entryEndpoint,
         metadata
@@ -119,6 +123,53 @@ export class LlmswitchNode implements PipelineNode {
       nodeConfig: this.nodeConfig,
       callbacks: null
     } as NodeContext;
+  }
+  private normalizeStreamingMetadata(context: PipelineContext, metadata: Record<string, unknown>): void {
+    const resolvedStream = this.resolveStreamingPreference(context);
+    const ctxMeta = context.metadata as unknown as Record<string, unknown>;
+    metadata.stream = resolvedStream;
+    if (typeof metadata.clientStream !== 'boolean') {
+      const clientPref = ctxMeta.clientStream;
+      metadata.clientStream = typeof clientPref === 'boolean' ? clientPref : resolvedStream;
+    }
+    if (typeof metadata.streaming !== 'string') {
+      metadata.streaming = resolvedStream ? 'always' : 'never';
+    }
+    if (typeof metadata.streamingMode === 'undefined' && typeof ctxMeta.streamingMode !== 'undefined') {
+      metadata.streamingMode = ctxMeta.streamingMode;
+    }
+  }
+
+  private resolveStreamingPreference(context: PipelineContext): boolean {
+    const meta = context.metadata as unknown as Record<string, unknown>;
+    if (typeof meta.stream === 'boolean') {
+      return meta.stream;
+    }
+    if (typeof meta.stream === 'string') {
+      const lowered = meta.stream.toLowerCase();
+      if (lowered === 'true' || lowered === '1' || lowered === 'yes' || lowered === 'always') {
+        return true;
+      }
+      if (lowered === 'false' || lowered === '0' || lowered === 'never') {
+        return false;
+      }
+    }
+    if (typeof meta.streaming === 'string') {
+      const normalized = meta.streaming.toLowerCase();
+      if (normalized === 'always') {
+        return true;
+      }
+      if (normalized === 'never') {
+        return false;
+      }
+      if (normalized === 'auto' && meta.clientStream === true) {
+        return true;
+      }
+    }
+    if (meta.clientStream === true) {
+      return true;
+    }
+    return false;
   }
 
   private getRuntimeState(context: PipelineContext): LlmswitchRuntimeState {

@@ -622,7 +622,8 @@ export class PipelineManager implements RCCBaseModule {
         this.errorHandlingCenter,
         this.debugCenter,
         moduleFactory,
-        blueprints
+        blueprints,
+        this.orchestrator
       );
 
       await pipeline.initialize();

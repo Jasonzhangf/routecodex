@@ -500,11 +500,16 @@ export class OpenAIStandard extends BaseProvider {
   }
 
   protected async postprocessResponse(response: unknown, context: ProviderContext): Promise<unknown> {
-    // 流式短路：保持原始流对象上行，不进入后处理链
+    // 流式短路：若上游仍返回 SSE，则统一包装为 __sse_responses，交由 HTTP 层原样透传
     try {
       const r: any = response as any;
-      if (r && typeof r === 'object' && r.__sse_stream) {
-        return r;
+      if (r && typeof r === 'object') {
+        if ((r as any).__sse_stream) {
+          return { __sse_responses: (r as any).__sse_stream };
+        }
+        if ((r as any).data && typeof (r as any).data === 'object' && (r as any).data.__sse_stream) {
+          return { __sse_responses: (r as any).data.__sse_stream };
+        }
       }
     } catch { /* ignore */ }
     const processingTime = Date.now() - context.startTime;
@@ -626,6 +631,8 @@ export class OpenAIStandard extends BaseProvider {
       } catch { /* ignore max_tokens resolution errors */ }
       // Remove metadata/envelope fields that upstream doesn't accept
       try { if ('metadata' in body) { delete body.metadata; } } catch { /* ignore */ }
+      // 统一非流：强制移除 body.stream，以避免上游返回 SSE
+      try { if (body && typeof body === 'object' && (body as any).stream === true) { delete (body as any).stream; } } catch { /* ignore */ }
       // Provider 不再按入口端点做流控或形状处理；上层已统一非流式
       return body;
     })();

@@ -38,6 +38,15 @@ import { PipelineSnapshotRecorder } from '../utils/pipeline-snapshot-recorder.js
 import type { SharedPipelineRequest, SharedPipelineResponse } from '../../../types/shared-dtos.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { PipelineBlueprint } from '../orchestrator/types.js';
+import { PipelineOrchestrator } from '../orchestrator/pipeline-orchestrator.js';
+
+type StreamingMode = 'auto' | 'always' | 'never';
+
+interface StreamingPreference {
+  mode: StreamingMode;
+  client: boolean;
+  enabled: boolean;
+}
 
 /**
  * Base pipeline implementation that orchestrates all modules
@@ -100,6 +109,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     response?: PipelineBlueprint | null;
   };
   private readonly passthroughPipeline: boolean;
+  private readonly orchestrator: PipelineOrchestrator;
 
   constructor(
     config: PipelineConfig,
@@ -109,7 +119,8 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     blueprints?: {
       request?: PipelineBlueprint | null;
       response?: PipelineBlueprint | null;
-    }
+    },
+    orchestrator?: PipelineOrchestrator
   ) {
     this.pipelineId = config.id;
     this.config = config;
@@ -121,6 +132,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
       response: blueprints?.response ?? null
     };
     this.passthroughPipeline = this.detectPassthroughMode(config, this.blueprints.request ?? null);
+    this.orchestrator = orchestrator || new PipelineOrchestrator();
     this.nodeRegistry = new PipelineNodeRegistry();
     this.nodeExecutor = new PipelineNodeExecutor(this.nodeRegistry);
     this.registerBuiltInNodes();
@@ -253,22 +265,27 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
       this.requestCount++;
       this._status.state = 'processing';
 
-      let processedRequest = request as SharedPipelineRequest;
-      if (this.passthroughPipeline) {
-        processedRequest = this.preparePassthroughRequest(processedRequest, snapshotRecorder);
-      }
-      this.applyBlueprintMetadata(processedRequest);
-      const requestPipelineContext = this.createPipelineContext('request', {
-        request: processedRequest,
-        requestId,
-        entryEndpoint: normalizedEntryEndpoint,
-        providerId: request.route?.providerId,
-        modelId: request.route?.modelId,
-        providerProtocol: this.extractProviderProtocol(processedRequest),
-        routeName: (request as any)?.routeName,
-        snapshotRecorder
-      });
-      await this.executePipelineNodes(requestPipelineContext);
+    let processedRequest = request as SharedPipelineRequest;
+    if (this.passthroughPipeline) {
+      processedRequest = this.preparePassthroughRequest(processedRequest, snapshotRecorder);
+    }
+    const streamingMode = this.getModuleStreamingMode();
+    const streamingPreference = this.applyStreamingPreference(processedRequest, streamingMode);
+    this.applyBlueprintMetadata(processedRequest);
+    const requestPipelineContext = await this.createPipelineContext('request', {
+      request: processedRequest,
+      requestId,
+      entryEndpoint: normalizedEntryEndpoint,
+      providerId: request.route?.providerId,
+      modelId: request.route?.modelId,
+      providerProtocol: this.extractProviderProtocol(processedRequest),
+      routeName: (request as any)?.routeName,
+      snapshotRecorder
+    });
+    if (requestPipelineContext) {
+      this.applyStreamingMetadataToContext(requestPipelineContext, streamingPreference);
+    }
+    await this.executePipelineNodes(requestPipelineContext);
 
       // Stage 4: Provider - Service execution
       currentStageLabel = 'provider.request';
@@ -299,20 +316,28 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
         responseDto = fallbackArtifacts.response;
       }
 
-      const responsePipelineContext = this.createPipelineContext('response', {
-        requestId,
-        entryEndpoint: normalizedEntryEndpoint,
-        response: responseDto,
-        providerId: request.route?.providerId,
-        modelId: request.route?.modelId,
-        providerProtocol: this.extractProviderProtocol(processedRequest),
-        routeName: (request as any)?.routeName,
-        snapshotRecorder
-      });
-      await this.executePipelineNodes(responsePipelineContext);
-      if (responsePipelineContext?.response) {
-        responseDto = responsePipelineContext.response;
+    const responsePipelineContext = await this.createPipelineContext('response', {
+      requestId,
+      entryEndpoint: normalizedEntryEndpoint,
+      response: responseDto,
+      providerId: request.route?.providerId,
+      modelId: request.route?.modelId,
+      providerProtocol: this.extractProviderProtocol(processedRequest),
+      routeName: (request as any)?.routeName,
+      snapshotRecorder
+    });
+    if (responsePipelineContext) {
+      this.applyStreamingMetadataToContext(responsePipelineContext, streamingPreference);
+    }
+    await this.executePipelineNodes(responsePipelineContext);
+    if (responsePipelineContext?.response) {
+      responseDto = responsePipelineContext.response;
+      if (responseDto.metadata && typeof responseDto.metadata === 'object') {
+        (responseDto.metadata as Record<string, unknown>).stream = streamingPreference.enabled;
+        (responseDto.metadata as Record<string, unknown>).clientStream = streamingPreference.client;
+        (responseDto.metadata as Record<string, unknown>).streamingMode = streamingPreference.mode;
       }
+    }
 
       const processingTime = Date.now() - startTime;
 
@@ -321,14 +346,18 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
 
       // Create response
       const stageTimings = this.calculateTimings(timings);
+      const responseMetadata = {
+        pipelineId: this.pipelineId,
+        processingTime,
+        stages: debugStages,
+        requestId: request.route?.requestId || 'unknown',
+        stream: streamingPreference.enabled,
+        streamingMode: streamingPreference.mode,
+        clientStream: streamingPreference.client
+      };
       const response: PipelineResponse = {
         data: responseDto.data,
-        metadata: {
-          pipelineId: this.pipelineId,
-          processingTime,
-          stages: debugStages,
-          requestId: request.route?.requestId || 'unknown'
-        },
+        metadata: responseMetadata,
         debug: request.debug.enabled ? {
           request: request.data,
           response: responseDto.data,
@@ -959,6 +988,65 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     };
   }
 
+  private getModuleStreamingMode(): StreamingMode {
+    try {
+      const cfg = this.config.modules?.llmSwitch?.config;
+      if (cfg && typeof (cfg as Record<string, unknown>).streaming === 'string') {
+        return this.normalizeStreamingMode((cfg as Record<string, unknown>).streaming as string);
+      }
+    } catch {
+      /* ignore */
+    }
+    return 'auto';
+  }
+
+  private normalizeStreamingMode(value: string): StreamingMode {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'always' || normalized === 'never') {
+      return normalized;
+    }
+    return 'auto';
+  }
+
+  private ensureMutableMetadata(request: SharedPipelineRequest): Record<string, any> {
+    if (!request.metadata || typeof request.metadata !== 'object') {
+      (request as any).metadata = {};
+    }
+    return request.metadata as Record<string, any>;
+  }
+
+  private applyStreamingPreference(
+    request: SharedPipelineRequest,
+    mode: StreamingMode
+  ): StreamingPreference {
+    const metadata = this.ensureMutableMetadata(request);
+    const clientStream = metadata.stream === true || metadata.clientStream === true;
+    const enabled = mode === 'always'
+      ? true
+      : mode === 'never'
+        ? false
+        : clientStream;
+    metadata.clientStream = clientStream;
+    metadata.stream = enabled;
+    metadata.streamingMode = mode;
+    return {
+      mode,
+      client: clientStream,
+      enabled
+    };
+  }
+
+  private applyStreamingMetadataToContext(
+    context: PipelineContext,
+    preference: StreamingPreference
+  ): void {
+    context.metadata.streaming = preference.enabled ? 'always' : 'never';
+    const metadataRecord = context.metadata as unknown as Record<string, unknown>;
+    metadataRecord.stream = preference.enabled;
+    metadataRecord.clientStream = preference.client;
+    metadataRecord.streamingMode = preference.mode;
+  }
+
   private applyBlueprintMetadata(request: SharedPipelineRequest): void {
     const blueprint = this.blueprints.request;
     if (!blueprint) return;
@@ -979,7 +1067,7 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     }
   }
 
-  private createPipelineContext(
+  private async createPipelineContext(
     phase: PipelinePhase,
     options: {
       requestId: string;
@@ -992,8 +1080,17 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
       routeName?: string;
       snapshotRecorder?: PipelineSnapshotRecorder;
     }
-  ): PipelineContext | null {
-    const blueprint = this.blueprints[phase];
+  ): Promise<PipelineContext | null> {
+    // Dynamic blueprint resolution per request (no static fallback)
+    const resolvedEndpoint = phase === 'response'
+      ? `${options.entryEndpoint}#response`
+      : options.entryEndpoint;
+    const blueprint = await this.resolveDynamicBlueprint(
+      phase,
+      resolvedEndpoint,
+      options.providerProtocol,
+      this.blueprints.request?.processMode ?? (this.passthroughPipeline ? 'passthrough' : 'chat')
+    );
     if (!blueprint || blueprint.phase !== phase) {
       return null;
     }
@@ -1034,6 +1131,23 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     return context;
   }
 
+  private async resolveDynamicBlueprint(
+    phase: PipelinePhase,
+    entryEndpoint: string,
+    providerProtocol?: string,
+    processMode?: 'chat' | 'passthrough'
+  ): Promise<PipelineBlueprint | null> {
+    try {
+      const ep = String(entryEndpoint || '').trim();
+      if (!ep) return null;
+      await this.orchestrator.initialize();
+      const resolved = await this.orchestrator.resolve(ep, { phase, providerProtocol, processMode });
+      return (resolved as unknown as PipelineBlueprint) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   private async executePipelineNodes(context: PipelineContext | null): Promise<void> {
     if (!context) return;
     await this.nodeExecutor.execute(context);
@@ -1046,19 +1160,32 @@ export class BasePipeline implements IBasePipeline, RCCBaseModule {
     if (!runtime || typeof runtime !== 'object') return;
     const currentData = runtime['currentData'];
     if (!currentData || typeof currentData !== 'object') return;
-    if (context.phase === 'request' && !context.extra.providerPayload) {
-      context.extra.providerPayload = currentData;
+    if (context.phase === 'request') {
+      if (!context.extra.providerPayload) {
+        context.extra.providerPayload = currentData;
+      } else {
+        // merge conservatively
+        const merged = { ...(context.extra.providerPayload as Record<string, unknown>), ...currentData };
+        (context.extra as any).providerPayload = merged;
+      }
+      return;
     }
-    if (context.phase === 'response' && !context.response) {
-      context.response = {
-        data: currentData as Record<string, unknown>,
-        metadata: {
-          pipelineId: context.metadata.pipelineId || this.pipelineId,
-          processingTime: 0,
-          stages: []
-        }
-      } as SharedPipelineResponse;
+    // response phase: always merge llmswitch runtime output到 response.data（不得静默丢弃 SSE）
+    const baseMeta = {
+      pipelineId: context.metadata.pipelineId || this.pipelineId,
+      processingTime: 0,
+      stages: [] as string[]
+    };
+    if (!context.response) {
+      context.response = { data: currentData as Record<string, unknown>, metadata: baseMeta } as SharedPipelineResponse;
+      return;
     }
+    // 合并：把 __sse_responses / format / passthrough 等顶层塞入 data；保留原 provider 包装
+    const existingData = (context.response.data && typeof context.response.data === 'object')
+      ? (context.response.data as Record<string, unknown>)
+      : {};
+    const mergedData = { ...existingData, ...(currentData as Record<string, unknown>) };
+    (context.response as any).data = mergedData;
   }
 
   private createFallbackProviderMetadata(options: {

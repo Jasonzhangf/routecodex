@@ -210,12 +210,42 @@ export abstract class BaseProvider implements IProviderV2 {
   }
 
   private handleRequestError(error: unknown, context: ProviderContext): void {
-    const errorInfo: ProviderError = error instanceof Error ? error as ProviderError : new Error(String(error)) as ProviderError;
+    const now = Date.now();
+    const err: ProviderError = (error instanceof Error ? error : new Error(String(error))) as ProviderError;
+    const msg = typeof err.message === 'string' ? err.message : String(error ?? 'unknown error');
+    let statusCode: number | undefined;
+    try {
+      const m = msg.match(/HTTP\s+(\d{3})/i);
+      if (m) statusCode = parseInt(m[1], 10);
+    } catch { /* ignore */ }
 
+    // 统一错误日志
     this.dependencies.logger?.logModule(this.id, 'request-error', {
       requestId: context.requestId,
-      error: errorInfo.message,
-      processingTime: Date.now() - context.startTime
+      error: msg,
+      statusCode,
+      providerType: this.providerType,
+      processingTime: now - context.startTime
     });
+
+    // 统一错误中心上报（禁止静默失败）
+    try {
+      const eh = (this.dependencies as any)?.errorHandlingCenter;
+      if (eh && typeof eh.handleError === 'function') {
+        const ctx = {
+          stage: 'provider',
+          action: 'request-error',
+          providerId: this.id,
+          providerType: this.providerType,
+          requestId: context.requestId,
+          statusCode,
+          retryable: (err as any)?.retryable === true,
+          details: (err as any)?.details || undefined,
+          timestamp: now
+        };
+        // 允许 error center 自行聚合统计
+        eh.handleError(err, ctx).catch(() => {});
+      }
+    } catch { /* ignore error center failures */ }
   }
 }

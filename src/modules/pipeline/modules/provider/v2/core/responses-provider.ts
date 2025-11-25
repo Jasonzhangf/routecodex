@@ -6,6 +6,7 @@
  */
 
 import { OpenAIStandard } from './openai-standard.js';
+import path from 'node:path';
 import type { ServiceProfile } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../../../../types/common-types.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
@@ -24,7 +25,9 @@ export class ResponsesProvider extends OpenAIStandard {
   }
 
   /**
-   * 覆写内部发送：/v1/responses 入口时强制使用上游 SSE（postStream）。
+   * 覆写内部发送：/v1/responses 入口时按配置选择上游 SSE 或 JSON。
+   * 根据架构约束：Responses 上游不支持 JSON，统一使用 SSE 与上游通信，
+   * 但 Provider 必须将上游 SSE 解析为 JSON 再返回 Host（对内一律 JSON）。
    */
   protected override async sendRequestInternal(request: UnknownObject): Promise<unknown> {
     // 对于 Responses provider，默认使用上游 SSE 直通：
@@ -86,7 +89,7 @@ export class ResponsesProvider extends OpenAIStandard {
       throw err;
     }
 
-    // Ensure stream flag for upstream SSE
+    // Responses 上游仅支持 SSE：强制启用 stream=true
     (finalBody as any).stream = true;
 
     // Snapshot provider-request (best-effort)
@@ -100,21 +103,26 @@ export class ResponsesProvider extends OpenAIStandard {
       });
     } catch { /* ignore */ }
 
-    // Perform upstream SSE POST
+    // 发送请求
     try {
+      // 上游 SSE：使用 llmswitch-core 的 ResponsesSseToJsonConverter 解析为 JSON
       const stream = await (this as any).httpClient.postStream(endpoint, finalBody, { ...headers, Accept: 'text/event-stream' });
-      // 记录一个简单的 provider-response 快照，标记为 SSE
+      // 动态引入转换器（避免编译期硬依赖路径问题）
+      const modPath = path.resolve(
+        process.cwd(),
+        'sharedmodule/llmswitch-core/dist/v2/conversion/conversion-v3/sse/sse-to-json/index.js'
+      );
+      const { ResponsesSseToJsonConverter } = await import(modPath);
+      const converter = new (ResponsesSseToJsonConverter as any)();
+      const json = await converter.convertSseToJson(stream as any, {
+        requestId: context.requestId,
+        model: (finalBody as any)?.model || 'unknown'
+      });
       try {
-        await writeProviderSnapshot({
-          phase: 'provider-response',
-          requestId: context.requestId,
-          data: { mode: 'sse', model: (finalBody as any)?.model ?? null },
-          headers,
-          url: targetUrl
-        });
+        await writeProviderSnapshot({ phase: 'provider-response', requestId: context.requestId, data: json ?? null, headers, url: targetUrl });
       } catch { /* non-blocking */ }
-      // Return a stream token object for BasePipeline to convert to Responses SSE
-      return { __sse_stream: stream } as any;
+      // 统一返回 JSON（对内语义）：与 httpClient.post 返回结构保持一致
+      return { data: json, status: 200, statusText: 'OK', headers: { 'x-upstream-mode': 'sse' }, url: targetUrl } as any;
     } catch (error) {
       // 将错误形状化并写入 provider-error 快照，便于分析上游 4xx/5xx
       try {

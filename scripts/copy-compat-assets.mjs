@@ -28,16 +28,7 @@ async function main() {
         copied.push(rel);
       }
     }
-    // 确保 pipeline-config.generated.json 一并出现在 dist/config
-    const pipelineConfigSrc = path.resolve(process.cwd(), 'config', 'pipeline-config.generated.json');
-    const pipelineConfigDest = path.resolve(process.cwd(), 'dist', 'config', 'pipeline-config.generated.json');
-    try {
-      await ensureDir(path.dirname(pipelineConfigDest));
-      await fs.copyFile(pipelineConfigSrc, pipelineConfigDest);
-      copied.push(path.relative(process.cwd(), pipelineConfigDest));
-    } catch (err) {
-      console.warn('[copy-compat-assets] warn: failed to copy pipeline-config.generated.json:', err?.message || err);
-    }
+    // 不再复制 pipeline-config.generated.json 到 dist；统一从 ~/.routecodex/config/generated 读取
     console.log(`[copy-compat-assets] copied ${copied.length} JSON assets`);
   } catch (err) {
     console.error('[copy-compat-assets] failed:', err?.message || String(err));

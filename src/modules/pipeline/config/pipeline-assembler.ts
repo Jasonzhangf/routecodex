@@ -525,6 +525,11 @@ export class PipelineAssembler {
         if (typeof rawProcess === 'string' && rawProcess.trim() && !cfg.process) {
           (cfg as any).process = rawProcess.trim();
         }
+        const streamingMode = PipelineAssembler.normalizeStreamingMode(
+          (cfg as any).streaming ?? (provCfg as any)?.streaming,
+          PipelineAssembler.deriveDefaultStreamingMode(providerTypeForPipeline)
+        );
+        (cfg as any).streaming = streamingMode;
         (modBlock as any).llmSwitch = {
           type: lsBlock.type || 'llmswitch-conversion-router',
           config: cfg
@@ -703,5 +708,27 @@ export class PipelineAssembler {
     }
 
     return { manager, routePools, routeMeta };
+  }
+
+  private static normalizeStreamingMode(
+    value: unknown,
+    fallback: 'auto' | 'always' | 'never' = 'auto'
+  ): 'auto' | 'always' | 'never' {
+    if (typeof value !== 'string') {
+      return fallback;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'always' || normalized === 'never' || normalized === 'auto') {
+      return normalized as 'auto' | 'always' | 'never';
+    }
+    return fallback;
+  }
+
+  private static deriveDefaultStreamingMode(providerType: string): 'auto' | 'always' | 'never' {
+    const normalized = providerType.trim().toLowerCase();
+    if (normalized === 'responses') {
+      return 'always';
+    }
+    return 'auto';
   }
 }

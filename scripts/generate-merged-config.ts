@@ -1,5 +1,7 @@
 // Use built JS from dist to avoid ts-node/tsx dependency
 import { ConfigManagerModule } from '../dist/modules/config-manager/config-manager-module.js';
+import path from 'path';
+import { getPortLabel } from '../dist/modules/config/pipeline-config-path.js';
 
 function resolveConfigPathFromArgs(): string {
   const argv = process.argv.slice(2);
@@ -12,7 +14,9 @@ function resolveConfigPathFromArgs(): string {
 
 async function main() {
   const cfgPath = resolveConfigPathFromArgs();
-  const outPath = './config/merged-config.generated.json';
+  const portLabel = getPortLabel();
+  const outName = portLabel ? `merged-config.${portLabel}.json` : 'merged-config.generated.json';
+  const outPath = path.join('./config', outName);
 
   const manager = new ConfigManagerModule();
   await manager.initialize({

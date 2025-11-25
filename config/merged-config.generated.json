@@ -206,19 +206,1086 @@
   },
   "_metadata": {
     "version": "0.1.0",
-    "builtAt": 1763940866096,
+    "builtAt": 1763987664466,
     "keyDimension": "perKey"
   },
-  "compatibilityConfig": {
-    "keyMappings": {
-      "providers": {
-        "glm": {
-          "key1": "6484fedc2cc9429e892dde8abf4c0bb8.es5PmJPf8XPvttZB"
+  "conversionV3": {
+    "pipelineConfig": {
+      "pipelineConfigVersion": "1.0.0",
+      "generatedAt": "2025-11-24T12:34:24.465Z",
+      "pipelines": [
+        {
+          "id": "pipeline-openai-chat",
+          "name": "OpenAI Chat Request Pipeline",
+          "entryEndpoints": [
+            "/v1/chat/completions",
+            "/v1/completions",
+            "/chat/completions"
+          ],
+          "providerProtocols": [
+            "openai-chat"
+          ],
+          "processMode": "chat",
+          "streaming": "never",
+          "nodes": [
+            {
+              "id": "chat-sse-input",
+              "kind": "sse-input",
+              "implementation": "sse-input"
+            },
+            {
+              "id": "chat-input-node",
+              "kind": "input",
+              "implementation": "chat-input"
+            },
+            {
+              "id": "chat-process-node",
+              "kind": "process",
+              "implementation": "chat-process"
+            },
+            {
+              "id": "chat-request-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "request"
+                }
+              }
+            },
+            {
+              "id": "chat-request-compat-glm",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "glm",
+                  "direction": "request",
+                  "providerMatch": [
+                    "glm"
+                  ],
+                  "protocolMatch": [
+                    "openai-chat"
+                  ]
+                }
+              }
+            },
+            {
+              "id": "chat-request-compat-qwen",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "qwen",
+                  "direction": "request",
+                  "providerMatch": [
+                    "qwen"
+                  ],
+                  "protocolMatch": [
+                    "openai-chat"
+                  ]
+                }
+              }
+            },
+            {
+              "id": "chat-output-node",
+              "kind": "output",
+              "implementation": "openai-output"
+            },
+            {
+              "id": "chat-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
         },
-        "kimi": {
-          "key1": "${KIMI_API_KEY}"
+        {
+          "id": "pipeline-openai-chat-response",
+          "name": "OpenAI Chat Response Pipeline",
+          "entryEndpoints": [
+            "/v1/chat/completions#response",
+            "/v1/completions#response",
+            "/chat/completions#response"
+          ],
+          "processMode": "chat",
+          "nodes": [
+            {
+              "id": "chat-response-input-node",
+              "kind": "input",
+              "implementation": "openai-response-input"
+            },
+            {
+              "id": "chat-response-process-node",
+              "kind": "process",
+              "implementation": "response-process"
+            },
+            {
+              "id": "chat-response-response-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "response"
+                }
+              }
+            },
+            {
+              "id": "chat-response-response-compat-glm",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "glm",
+                  "direction": "response",
+                  "providerMatch": [
+                    "glm"
+                  ],
+                  "protocolMatch": [
+                    "openai-chat"
+                  ]
+                }
+              }
+            },
+            {
+              "id": "chat-response-response-compat-qwen",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "qwen",
+                  "direction": "response",
+                  "providerMatch": [
+                    "qwen"
+                  ],
+                  "protocolMatch": [
+                    "openai-chat"
+                  ]
+                }
+              }
+            },
+            {
+              "id": "chat-response-output-node",
+              "kind": "output",
+              "implementation": "openai-output"
+            },
+            {
+              "id": "chat-response-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
+        },
+        {
+          "id": "pipeline-responses",
+          "name": "OpenAI Responses Request Pipeline",
+          "entryEndpoints": [
+            "/v1/responses",
+            "/responses"
+          ],
+          "providerProtocols": [
+            "openai-responses"
+          ],
+          "processMode": "chat",
+          "streaming": "always",
+          "nodes": [
+            {
+              "id": "responses-sse-input",
+              "kind": "sse-input",
+              "implementation": "sse-input"
+            },
+            {
+              "id": "responses-input-node",
+              "kind": "input",
+              "implementation": "responses-input"
+            },
+            {
+              "id": "responses-process-node",
+              "kind": "process",
+              "implementation": "chat-process"
+            },
+            {
+              "id": "responses-request-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "request"
+                }
+              }
+            },
+            {
+              "id": "responses-output-node",
+              "kind": "output",
+              "implementation": "responses-output"
+            },
+            {
+              "id": "responses-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
+        },
+        {
+          "id": "pipeline-responses-response",
+          "name": "OpenAI Responses Response Pipeline",
+          "entryEndpoints": [
+            "/v1/responses#response",
+            "/responses#response"
+          ],
+          "processMode": "chat",
+          "nodes": [
+            {
+              "id": "responses-response-input-node",
+              "kind": "input",
+              "implementation": "responses-response-input"
+            },
+            {
+              "id": "responses-response-process-node",
+              "kind": "process",
+              "implementation": "response-process"
+            },
+            {
+              "id": "responses-response-response-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "response"
+                }
+              }
+            },
+            {
+              "id": "responses-response-output-node",
+              "kind": "output",
+              "implementation": "responses-output"
+            },
+            {
+              "id": "responses-response-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
+        },
+        {
+          "id": "pipeline-anthropic",
+          "name": "Anthropic Messages Request Pipeline",
+          "entryEndpoints": [
+            "/v1/messages",
+            "/messages"
+          ],
+          "providerProtocols": [
+            "anthropic-messages"
+          ],
+          "processMode": "chat",
+          "streaming": "never",
+          "nodes": [
+            {
+              "id": "anthropic-sse-input",
+              "kind": "sse-input",
+              "implementation": "sse-input"
+            },
+            {
+              "id": "anthropic-input-node",
+              "kind": "input",
+              "implementation": "anthropic-input"
+            },
+            {
+              "id": "anthropic-process-node",
+              "kind": "process",
+              "implementation": "chat-process"
+            },
+            {
+              "id": "anthropic-request-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "request"
+                }
+              }
+            },
+            {
+              "id": "anthropic-output-node",
+              "kind": "output",
+              "implementation": "anthropic-output"
+            },
+            {
+              "id": "anthropic-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
+        },
+        {
+          "id": "pipeline-anthropic-response",
+          "name": "Anthropic Messages Response Pipeline",
+          "entryEndpoints": [
+            "/v1/messages#response",
+            "/messages#response"
+          ],
+          "processMode": "chat",
+          "nodes": [
+            {
+              "id": "anthropic-response-input-node",
+              "kind": "input",
+              "implementation": "anthropic-response-input"
+            },
+            {
+              "id": "anthropic-response-process-node",
+              "kind": "process",
+              "implementation": "response-process"
+            },
+            {
+              "id": "anthropic-response-response-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "response"
+                }
+              }
+            },
+            {
+              "id": "anthropic-response-output-node",
+              "kind": "output",
+              "implementation": "anthropic-output"
+            },
+            {
+              "id": "anthropic-response-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
+        },
+        {
+          "id": "pipeline-chat-to-responses",
+          "name": "OpenAI Chat Request Pipeline → OpenAI Responses Request Pipeline (Bridge)",
+          "entryEndpoints": [
+            "/v1/chat/completions",
+            "/v1/completions",
+            "/chat/completions"
+          ],
+          "providerProtocols": [
+            "openai-responses"
+          ],
+          "processMode": "chat",
+          "streaming": "never",
+          "nodes": [
+            {
+              "id": "chat-sse-input",
+              "kind": "sse-input",
+              "implementation": "sse-input"
+            },
+            {
+              "id": "chat-input-node",
+              "kind": "input",
+              "implementation": "chat-input"
+            },
+            {
+              "id": "chat-process-node",
+              "kind": "process",
+              "implementation": "chat-process"
+            },
+            {
+              "id": "chat-request-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "request"
+                }
+              }
+            },
+            {
+              "id": "responses-output-node",
+              "kind": "output",
+              "implementation": "responses-output"
+            },
+            {
+              "id": "responses-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
+        },
+        {
+          "id": "pipeline-responses-to-chat-response",
+          "name": "OpenAI Responses Response Pipeline → OpenAI Chat Response Pipeline (Bridge)",
+          "entryEndpoints": [
+            "/v1/chat/completions#response",
+            "/v1/completions#response",
+            "/chat/completions#response"
+          ],
+          "providerProtocols": [
+            "openai-responses"
+          ],
+          "processMode": "chat",
+          "streaming": "never",
+          "nodes": [
+            {
+              "id": "responses-response-input-node",
+              "kind": "input",
+              "implementation": "responses-response-input"
+            },
+            {
+              "id": "responses-response-process-node",
+              "kind": "process",
+              "implementation": "response-process"
+            },
+            {
+              "id": "responses-response-response-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "response"
+                }
+              }
+            },
+            {
+              "id": "chat-response-output-node",
+              "kind": "output",
+              "implementation": "openai-output"
+            },
+            {
+              "id": "chat-response-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
+        },
+        {
+          "id": "pipeline-chat-to-anthropic",
+          "name": "OpenAI Chat Request Pipeline → Anthropic Messages Request Pipeline (Bridge)",
+          "entryEndpoints": [
+            "/v1/chat/completions",
+            "/v1/completions",
+            "/chat/completions"
+          ],
+          "providerProtocols": [
+            "anthropic-messages"
+          ],
+          "processMode": "chat",
+          "streaming": "never",
+          "nodes": [
+            {
+              "id": "chat-sse-input",
+              "kind": "sse-input",
+              "implementation": "sse-input"
+            },
+            {
+              "id": "chat-input-node",
+              "kind": "input",
+              "implementation": "chat-input"
+            },
+            {
+              "id": "chat-process-node",
+              "kind": "process",
+              "implementation": "chat-process"
+            },
+            {
+              "id": "chat-request-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "request"
+                }
+              }
+            },
+            {
+              "id": "anthropic-output-node",
+              "kind": "output",
+              "implementation": "anthropic-output"
+            },
+            {
+              "id": "anthropic-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
+        },
+        {
+          "id": "pipeline-anthropic-to-chat-response",
+          "name": "Anthropic Messages Response Pipeline → OpenAI Chat Response Pipeline (Bridge)",
+          "entryEndpoints": [
+            "/v1/chat/completions#response",
+            "/v1/completions#response",
+            "/chat/completions#response"
+          ],
+          "providerProtocols": [
+            "anthropic-messages"
+          ],
+          "processMode": "chat",
+          "streaming": "never",
+          "nodes": [
+            {
+              "id": "anthropic-response-input-node",
+              "kind": "input",
+              "implementation": "anthropic-response-input"
+            },
+            {
+              "id": "anthropic-response-process-node",
+              "kind": "process",
+              "implementation": "response-process"
+            },
+            {
+              "id": "anthropic-response-response-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "response"
+                }
+              }
+            },
+            {
+              "id": "chat-response-output-node",
+              "kind": "output",
+              "implementation": "openai-output"
+            },
+            {
+              "id": "chat-response-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
+        },
+        {
+          "id": "pipeline-responses-to-chat",
+          "name": "OpenAI Responses Request Pipeline → OpenAI Chat Request Pipeline (Bridge)",
+          "entryEndpoints": [
+            "/v1/responses",
+            "/responses"
+          ],
+          "providerProtocols": [
+            "openai-chat"
+          ],
+          "processMode": "chat",
+          "streaming": "always",
+          "nodes": [
+            {
+              "id": "responses-sse-input",
+              "kind": "sse-input",
+              "implementation": "sse-input"
+            },
+            {
+              "id": "responses-input-node",
+              "kind": "input",
+              "implementation": "responses-input"
+            },
+            {
+              "id": "responses-process-node",
+              "kind": "process",
+              "implementation": "chat-process"
+            },
+            {
+              "id": "responses-request-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "request"
+                }
+              }
+            },
+            {
+              "id": "responses-request-compat-glm",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "glm",
+                  "direction": "request",
+                  "providerMatch": [
+                    "glm"
+                  ],
+                  "protocolMatch": [
+                    "openai-chat"
+                  ]
+                }
+              }
+            },
+            {
+              "id": "responses-request-compat-qwen",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "qwen",
+                  "direction": "request",
+                  "providerMatch": [
+                    "qwen"
+                  ],
+                  "protocolMatch": [
+                    "openai-chat"
+                  ]
+                }
+              }
+            },
+            {
+              "id": "chat-output-node",
+              "kind": "output",
+              "implementation": "openai-output"
+            },
+            {
+              "id": "chat-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
+        },
+        {
+          "id": "pipeline-chat-to-responses-response",
+          "name": "OpenAI Chat Response Pipeline → OpenAI Responses Response Pipeline (Bridge)",
+          "entryEndpoints": [
+            "/v1/responses#response",
+            "/responses#response"
+          ],
+          "providerProtocols": [
+            "openai-chat"
+          ],
+          "processMode": "chat",
+          "streaming": "always",
+          "nodes": [
+            {
+              "id": "chat-response-input-node",
+              "kind": "input",
+              "implementation": "openai-response-input"
+            },
+            {
+              "id": "chat-response-process-node",
+              "kind": "process",
+              "implementation": "response-process"
+            },
+            {
+              "id": "chat-response-response-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "response"
+                }
+              }
+            },
+            {
+              "id": "chat-response-response-compat-glm",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "glm",
+                  "direction": "response",
+                  "providerMatch": [
+                    "glm"
+                  ],
+                  "protocolMatch": [
+                    "openai-chat"
+                  ]
+                }
+              }
+            },
+            {
+              "id": "chat-response-response-compat-qwen",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "qwen",
+                  "direction": "response",
+                  "providerMatch": [
+                    "qwen"
+                  ],
+                  "protocolMatch": [
+                    "openai-chat"
+                  ]
+                }
+              }
+            },
+            {
+              "id": "responses-response-output-node",
+              "kind": "output",
+              "implementation": "responses-output"
+            },
+            {
+              "id": "responses-response-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
+        },
+        {
+          "id": "pipeline-responses-to-anthropic",
+          "name": "OpenAI Responses Request Pipeline → Anthropic Messages Request Pipeline (Bridge)",
+          "entryEndpoints": [
+            "/v1/responses",
+            "/responses"
+          ],
+          "providerProtocols": [
+            "anthropic-messages"
+          ],
+          "processMode": "chat",
+          "streaming": "always",
+          "nodes": [
+            {
+              "id": "responses-sse-input",
+              "kind": "sse-input",
+              "implementation": "sse-input"
+            },
+            {
+              "id": "responses-input-node",
+              "kind": "input",
+              "implementation": "responses-input"
+            },
+            {
+              "id": "responses-process-node",
+              "kind": "process",
+              "implementation": "chat-process"
+            },
+            {
+              "id": "responses-request-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "request"
+                }
+              }
+            },
+            {
+              "id": "anthropic-output-node",
+              "kind": "output",
+              "implementation": "anthropic-output"
+            },
+            {
+              "id": "anthropic-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
+        },
+        {
+          "id": "pipeline-anthropic-to-responses-response",
+          "name": "Anthropic Messages Response Pipeline → OpenAI Responses Response Pipeline (Bridge)",
+          "entryEndpoints": [
+            "/v1/responses#response",
+            "/responses#response"
+          ],
+          "providerProtocols": [
+            "anthropic-messages"
+          ],
+          "processMode": "chat",
+          "streaming": "always",
+          "nodes": [
+            {
+              "id": "anthropic-response-input-node",
+              "kind": "input",
+              "implementation": "anthropic-response-input"
+            },
+            {
+              "id": "anthropic-response-process-node",
+              "kind": "process",
+              "implementation": "response-process"
+            },
+            {
+              "id": "anthropic-response-response-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "response"
+                }
+              }
+            },
+            {
+              "id": "responses-response-output-node",
+              "kind": "output",
+              "implementation": "responses-output"
+            },
+            {
+              "id": "responses-response-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
+        },
+        {
+          "id": "pipeline-anthropic-to-chat",
+          "name": "Anthropic Messages Request Pipeline → OpenAI Chat Request Pipeline (Bridge)",
+          "entryEndpoints": [
+            "/v1/messages",
+            "/messages"
+          ],
+          "providerProtocols": [
+            "openai-chat"
+          ],
+          "processMode": "chat",
+          "streaming": "never",
+          "nodes": [
+            {
+              "id": "anthropic-sse-input",
+              "kind": "sse-input",
+              "implementation": "sse-input"
+            },
+            {
+              "id": "anthropic-input-node",
+              "kind": "input",
+              "implementation": "anthropic-input"
+            },
+            {
+              "id": "anthropic-process-node",
+              "kind": "process",
+              "implementation": "chat-process"
+            },
+            {
+              "id": "anthropic-request-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "request"
+                }
+              }
+            },
+            {
+              "id": "anthropic-request-compat-glm",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "glm",
+                  "direction": "request",
+                  "providerMatch": [
+                    "glm"
+                  ],
+                  "protocolMatch": [
+                    "openai-chat"
+                  ]
+                }
+              }
+            },
+            {
+              "id": "anthropic-request-compat-qwen",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "qwen",
+                  "direction": "request",
+                  "providerMatch": [
+                    "qwen"
+                  ],
+                  "protocolMatch": [
+                    "openai-chat"
+                  ]
+                }
+              }
+            },
+            {
+              "id": "chat-output-node",
+              "kind": "output",
+              "implementation": "openai-output"
+            },
+            {
+              "id": "chat-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
+        },
+        {
+          "id": "pipeline-chat-to-anthropic-response",
+          "name": "OpenAI Chat Response Pipeline → Anthropic Messages Response Pipeline (Bridge)",
+          "entryEndpoints": [
+            "/v1/messages#response",
+            "/messages#response"
+          ],
+          "providerProtocols": [
+            "openai-chat"
+          ],
+          "processMode": "chat",
+          "streaming": "never",
+          "nodes": [
+            {
+              "id": "chat-response-input-node",
+              "kind": "input",
+              "implementation": "openai-response-input"
+            },
+            {
+              "id": "chat-response-process-node",
+              "kind": "process",
+              "implementation": "response-process"
+            },
+            {
+              "id": "chat-response-response-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "response"
+                }
+              }
+            },
+            {
+              "id": "chat-response-response-compat-glm",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "glm",
+                  "direction": "response",
+                  "providerMatch": [
+                    "glm"
+                  ],
+                  "protocolMatch": [
+                    "openai-chat"
+                  ]
+                }
+              }
+            },
+            {
+              "id": "chat-response-response-compat-qwen",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "qwen",
+                  "direction": "response",
+                  "providerMatch": [
+                    "qwen"
+                  ],
+                  "protocolMatch": [
+                    "openai-chat"
+                  ]
+                }
+              }
+            },
+            {
+              "id": "anthropic-response-output-node",
+              "kind": "output",
+              "implementation": "anthropic-output"
+            },
+            {
+              "id": "anthropic-response-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
+        },
+        {
+          "id": "pipeline-anthropic-to-responses",
+          "name": "Anthropic Messages Request Pipeline → OpenAI Responses Request Pipeline (Bridge)",
+          "entryEndpoints": [
+            "/v1/messages",
+            "/messages"
+          ],
+          "providerProtocols": [
+            "openai-responses"
+          ],
+          "processMode": "chat",
+          "streaming": "never",
+          "nodes": [
+            {
+              "id": "anthropic-sse-input",
+              "kind": "sse-input",
+              "implementation": "sse-input"
+            },
+            {
+              "id": "anthropic-input-node",
+              "kind": "input",
+              "implementation": "anthropic-input"
+            },
+            {
+              "id": "anthropic-process-node",
+              "kind": "process",
+              "implementation": "chat-process"
+            },
+            {
+              "id": "anthropic-request-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "request"
+                }
+              }
+            },
+            {
+              "id": "responses-output-node",
+              "kind": "output",
+              "implementation": "responses-output"
+            },
+            {
+              "id": "responses-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
+        },
+        {
+          "id": "pipeline-responses-to-anthropic-response",
+          "name": "OpenAI Responses Response Pipeline → Anthropic Messages Response Pipeline (Bridge)",
+          "entryEndpoints": [
+            "/v1/messages#response",
+            "/messages#response"
+          ],
+          "providerProtocols": [
+            "openai-responses"
+          ],
+          "processMode": "chat",
+          "streaming": "never",
+          "nodes": [
+            {
+              "id": "responses-response-input-node",
+              "kind": "input",
+              "implementation": "responses-response-input"
+            },
+            {
+              "id": "responses-response-process-node",
+              "kind": "process",
+              "implementation": "response-process"
+            },
+            {
+              "id": "responses-response-response-compat-default",
+              "kind": "process",
+              "implementation": "compatibility-process",
+              "options": {
+                "compatibility": {
+                  "profile": "default",
+                  "direction": "response"
+                }
+              }
+            },
+            {
+              "id": "anthropic-response-output-node",
+              "kind": "output",
+              "implementation": "anthropic-output"
+            },
+            {
+              "id": "anthropic-response-sse-output",
+              "kind": "sse-output",
+              "implementation": "sse-output"
+            }
+          ]
         }
-      }
+      ]
     }
   },
   "pipeline_assembler": {
@@ -261,7 +1328,9 @@
             },
             "llmSwitch": {
               "type": "llmswitch-conversion-router",
-              "config": {}
+              "config": {
+                "process": "chat"
+              }
             },
             "workflow": {
               "type": "streaming-control",
@@ -308,10 +1377,7 @@
                     "apikey"
                   ]
                 },
-                "modelId": "qwen3-coder-plus",
-                "auth": {
-                  "type": "oauth"
-                }
+                "modelId": "qwen3-coder-plus"
               }
             },
             "compatibility": {
@@ -320,7 +1386,9 @@
             },
             "llmSwitch": {
               "type": "llmswitch-conversion-router",
-              "config": {}
+              "config": {
+                "process": "chat"
+              }
             },
             "workflow": {
               "type": "streaming-control",
@@ -352,14 +1420,7 @@
                 "providerType": "iflow",
                 "baseUrl": "https://apis.iflow.cn/v1",
                 "headers": {},
-                "modelId": "kimi-k2-thinking",
-                "auth": {
-                  "type": "oauth",
-                  "tokenFile": "~/.routecodex/auth/iflow-oauth.json"
-                },
-                "extensions": {
-                  "oauthProviderId": "iflow"
-                }
+                "modelId": "kimi-k2-thinking"
               }
             },
             "compatibility": {
@@ -368,7 +1429,9 @@
             },
             "llmSwitch": {
               "type": "llmswitch-conversion-router",
-              "config": {}
+              "config": {
+                "process": "chat"
+              }
             },
             "workflow": {
               "type": "streaming-control",
@@ -400,14 +1463,7 @@
                 "providerType": "iflow",
                 "baseUrl": "https://apis.iflow.cn/v1",
                 "headers": {},
-                "modelId": "minimax-m2",
-                "auth": {
-                  "type": "oauth",
-                  "tokenFile": "~/.routecodex/auth/iflow-oauth.json"
-                },
-                "extensions": {
-                  "oauthProviderId": "iflow"
-                }
+                "modelId": "minimax-m2"
               }
             },
             "compatibility": {
@@ -416,7 +1472,9 @@
             },
             "llmSwitch": {
               "type": "llmswitch-conversion-router",
-              "config": {}
+              "config": {
+                "process": "chat"
+              }
             },
             "workflow": {
               "type": "streaming-control",
@@ -448,14 +1506,7 @@
                 "providerType": "iflow",
                 "baseUrl": "https://apis.iflow.cn/v1",
                 "headers": {},
-                "modelId": "qwen3-vl-plus",
-                "auth": {
-                  "type": "oauth",
-                  "tokenFile": "~/.routecodex/auth/iflow-oauth.json"
-                },
-                "extensions": {
-                  "oauthProviderId": "iflow"
-                }
+                "modelId": "qwen3-vl-plus"
               }
             },
             "compatibility": {
@@ -464,7 +1515,9 @@
             },
             "llmSwitch": {
               "type": "llmswitch-conversion-router",
-              "config": {}
+              "config": {
+                "process": "chat"
+              }
             },
             "workflow": {
               "type": "streaming-control",

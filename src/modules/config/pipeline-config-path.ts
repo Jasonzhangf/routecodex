@@ -1,4 +1,5 @@
 import path from 'path';
+import os from 'os';
 
 const DEFAULT_FILENAME = 'pipeline-config.generated.json';
 
@@ -21,8 +22,9 @@ export function getPipelineConfigFilename(portLabel?: string): string {
   return portLabel ? `pipeline-config.${portLabel}.generated.json` : DEFAULT_FILENAME;
 }
 
-export function resolvePipelineConfigCandidates(baseDir: string, override?: string): string[] {
-  const candidates: string[] = [];
+// 新路径规范：仅消费由 config-core 生成的标准位置
+// ~/.routecodex/config/generated/pipeline-config.<port>.generated.json
+export function resolvePipelineConfigCandidates(_baseDir: string, override?: string): string[] {
   const overridePath = override && override.trim() ? path.resolve(override.trim()) : undefined;
   const envPathRaw =
     process.env.ROUTECODEX_PIPELINE_CONFIG_PATH ||
@@ -30,13 +32,13 @@ export function resolvePipelineConfigCandidates(baseDir: string, override?: stri
     process.env.RCC_PIPELINE_CONFIG_PATH;
   const envPath = envPathRaw && envPathRaw.trim() ? path.resolve(envPathRaw.trim()) : undefined;
   const portLabel = getPortLabel();
-  const portFile = portLabel ? path.join(baseDir, 'config', getPipelineConfigFilename(portLabel)) : undefined;
-  const defaultPath = path.join(baseDir, 'config', DEFAULT_FILENAME);
+  const home = os.homedir();
+  const generatedDir = path.join(home, '.routecodex', 'config', 'generated');
+  const standard = path.join(generatedDir, getPipelineConfigFilename(portLabel));
 
+  const candidates: string[] = [];
   if (overridePath) candidates.push(overridePath);
   if (envPath) candidates.push(envPath);
-  if (portFile) candidates.push(portFile);
-  candidates.push(defaultPath);
-
+  candidates.push(standard);
   return Array.from(new Set(candidates));
 }

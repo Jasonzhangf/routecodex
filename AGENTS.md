@@ -6,10 +6,10 @@ RouteCodex V2架构开发规范，基于9大核心架构原则。包含个人开
 
 > **模块源代码注意事项**
 >
-> - `sharedmodule/llmswitch-core` 是指向 `/Users/fanzhang/Documents/github/sharedmodule/llmswitch-core` 的符号链接。
-> - `sharedmodule/config-core` 位于 `/Users/fanzhang/Documents/router-worktree/ref/refactor-main/sharedmodule/config-core`（仓库副本）。
-> - 修改上述 sharedmodule 目录时，只能编辑源代码（`src/`、`interpreter/`、`exporters/` 等），禁止触碰 `dist/`、`.tgz` 等构建物，也不要通过 vendor/拷贝构建产物。
-> - 所有变更需在源仓库完成编译/发布，再同步到 RouteCodex。
+> - `sharedmodule/llmswitch-core` → 符号链接指向源仓库：`/Users/fanzhang/Documents/github/sharedmodule/llmswitch-core`
+> - `sharedmodule/config-core`   → 符号链接指向源仓库：`/Users/fanzhang/Documents/github/sharedmodule/config-core`
+> - 修改上述 sharedmodule 目录时，只能编辑“源代码”目录（如 `src/`、`interpreter/`、`exporters/` 等），严禁修改或提交任何构建物（`dist/`、`.tgz` 等），也禁止通过 `vendor/` 拷贝构建产物。
+> - 所有变更必须在源仓库完成编译/发布，再同步到 RouteCodex。
 
 RouteCodex是一个功能强大的多提供商OpenAI代理服务器，提供统一的AI服务接口和完整的调试生态系统。
 
@@ -433,6 +433,25 @@ llmswitch-core → 根包 → 运行时
 - 工具处理逻辑
 - 格式转换
 - 业务逻辑
+
+## ⚡ SSE 策略与边界（强制）
+
+- inbound（入站）与 outbound（出站）完全解耦：
+  - inbound 仅用于与“客户端”沟通，标记客户端期望的返回方式（SSE 或 JSON），作为“向客户端返回”时的输出策略标记；
+  - outbound 仅由“配置”决定如何与“上游 Provider”通信（JSON 或 SSE），两者互不影响。
+- SSE 的职责归属：
+  - 客户端方向（入/出站）：SSE 只允许在 llmswitch-core 节点族中出现：
+    - `nodes/sse-input/*`：解析客户端入站 SSE → 标准 JSON；
+    - `nodes/sse-output/*`：将标准 JSON 序列化为返回给客户端的 SSE；
+  - 上游 Provider 方向：Provider 层可以按配置发起 SSE 请求；但必须将上游 SSE 解析为 JSON 后再返回给 Host（即“Provider 对 Host 一律返回 JSON”），禁止将 `__sse_stream` 透传到 Host。
+- Provider 与 HTTP 层约束：
+  - Provider 对外（上游）可 JSON/SSE（由 pipeline-config 决定）；对内（返回给 Host）一律 JSON；
+  - HTTP handlers 对客户端可 SSE/JSON（由客户端请求决定）；对 llmswitch 入站一律 JSON；
+  - 非 200/网络/超时/SSE 解析错误统一送入 Error Center，禁止静默失败与隐式重试。
+- 配置驱动：是否向客户端输出 SSE，以及是否对上游使用 SSE，仅以 `config-core` 生成的 `pipeline-config.generated.json` 为唯一真理来源；运行时推断与兜底一律移除。
+- 生产限制：
+  - 直通/监控类的 `sse-passthrough` 仅用于专项调试，不得进入生产蓝图；默认采用标准编解码链路，保证请求/响应双向对称。
+
 
 ## 🚨 开发指导原则
 

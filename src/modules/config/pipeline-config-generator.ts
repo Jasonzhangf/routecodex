@@ -65,20 +65,19 @@ function resolveSystemConfigPath(explicit?: string, baseDir?: string): string {
   return path.join(root, 'config', 'modules.json');
 }
 
-async function writeUnifiedPipelineConfig(targetPath: string, assemblerConfig: unknown, canonical: any): Promise<void> {
+async function writeUnifiedPipelineConfig(targetPath: string, _assemblerConfig: unknown, canonical: any): Promise<void> {
   const conversion = (canonical && typeof canonical === 'object')
     ? (canonical.conversionV3 || canonical.conversion || {})
     : {};
   const pipelineConfig = conversion?.pipelineConfig;
   if (!pipelineConfig || typeof pipelineConfig !== 'object' || !Array.isArray(pipelineConfig.pipelines) || !pipelineConfig.pipelines.length) {
-    throw new Error('[config-core] canonical.conversionV3.pipelineConfig 缺失或无效（无法写出 llmswitch pipeline 配置）');
+    throw new Error('[config-core] canonical.conversionV3.pipelineConfig 缺失或无效（无法写出标准 pipeline-config）');
   }
   ensureProviderProtocols(pipelineConfig.pipelines);
   const payload = {
-    assemblerConfig,
-    llmSwitch: {
-      pipelineConfig
-    }
+    pipelineConfigVersion: String(pipelineConfig.pipelineConfigVersion || '1.0.0'),
+    generatedAt: new Date().toISOString(),
+    pipelines: pipelineConfig.pipelines
   };
   await fs.mkdir(path.dirname(targetPath), { recursive: true });
   await fs.writeFile(targetPath, JSON.stringify(payload, null, 2), 'utf-8');
@@ -101,13 +100,15 @@ export async function generatePipelineConfiguration(options: GenerateOptions = {
   const canonical = buildCanonical(sys, usr, { keyDimension: DEFAULT_KEY_DIMENSION });
   const assemblerConfig = exportAssemblerConfigV2(canonical);
 
-  const configDir = path.join(baseDir, 'config');
+  // 统一输出到用户目录：~/.routecodex/config/generated
+  const generatedDir = path.join(os.homedir(), '.routecodex', 'config', 'generated');
   const primaryFilename = getPipelineConfigFilename(portLabel);
-  const primaryPath = path.join(configDir, primaryFilename);
+  const primaryPath = path.join(generatedDir, primaryFilename);
   await writeUnifiedPipelineConfig(primaryPath, assemblerConfig, canonical);
-  await writeLlmswitchConversionArtifacts(configDir, canonical);
+  await writeLlmswitchConversionArtifacts(generatedDir, canonical);
+  await writeMergedGenerated(generatedDir, portLabel, canonical, assemblerConfig);
   if (portLabel) {
-    const defaultPath = path.join(configDir, getPipelineConfigFilename(undefined));
+    const defaultPath = path.join(generatedDir, getPipelineConfigFilename(undefined));
     if (defaultPath !== primaryPath) {
       await writeUnifiedPipelineConfig(defaultPath, assemblerConfig, canonical).catch(() => {});
     }
@@ -140,6 +141,41 @@ async function writeLlmswitchConversionArtifacts(configDir: string, canonical: a
   }
 }
 
+async function writeMergedGenerated(outDir: string, portLabel: string | undefined, canonical: any, assemblerConfig: unknown): Promise<string> {
+  const primaryName = portLabel ? `merged-config.${portLabel}.json` : 'merged-config.generated.json';
+  const primaryPath = path.join(outDir, primaryName);
+  const fallbackPath = path.join(outDir, 'merged-config.generated.json');
+  const compatKeyMappings = buildCompatibilityKeyMappingsFromCanonical(canonical);
+  const compatSection = Object.keys(compatKeyMappings.providers).length ? { compatibilityConfig: { keyMappings: compatKeyMappings } } : {};
+  const mergedPayload = {
+    ...(canonical && typeof canonical === 'object' ? canonical : {}),
+    pipeline_assembler: { config: assemblerConfig },
+    ...compatSection
+  };
+  await fs.mkdir(path.dirname(primaryPath), { recursive: true });
+  await fs.writeFile(primaryPath, JSON.stringify(mergedPayload, null, 2), 'utf-8');
+  if (primaryPath !== fallbackPath) {
+    await fs.writeFile(fallbackPath, JSON.stringify(mergedPayload, null, 2), 'utf-8').catch(() => {});
+  }
+  return primaryPath;
+}
+
+function buildCompatibilityKeyMappingsFromCanonical(canonical: any): { providers: Record<string, Record<string, string>> } {
+  const out: { providers: Record<string, Record<string, string>> } = { providers: {} };
+  try {
+    const vault = canonical && typeof canonical === 'object' ? (canonical.keyVault || {}) : {};
+    for (const [provId, keys] of Object.entries(vault as Record<string, any>)) {
+      const m: Record<string, string> = {};
+      for (const [keyId, meta] of Object.entries((keys as Record<string, any>) || {})) {
+        const val = meta && typeof meta.value === 'string' ? meta.value.trim() : '';
+        if (val) { m[keyId] = val; }
+      }
+      if (Object.keys(m).length) out.providers[provId] = m;
+    }
+  } catch { /* ignore */ }
+  return out;
+}
+
 function ensureProviderProtocols(pipelines: any[]): void {
   for (const pipeline of pipelines) {
     if (Array.isArray(pipeline.providerProtocols) && pipeline.providerProtocols.length > 0) {
@@ -158,6 +194,10 @@ function inferProtocolFromPipeline(pipeline: any): string | undefined {
     const endpoints = Array.isArray(pipeline?.entryEndpoints)
       ? pipeline.entryEndpoints.map((ep: unknown) => (typeof ep === 'string' ? ep.toLowerCase() : ''))
       : [];
+    // Gemini generateContent endpoints
+    if (id.includes('gemini') || endpoints.some((ep: string) => ep.includes('/v1beta/models:generatecontent'))) {
+      return 'gemini-chat';
+    }
     if (id.includes('responses') || endpoints.some((ep: string) => ep.includes('/responses'))) {
       return 'openai-responses';
     }

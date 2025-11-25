@@ -44,6 +44,7 @@ export class ConfigManagerModule extends BaseModule {
   private systemConfigPath: string;
   private mergedConfigPath: string;
   private authFileResolver: AuthFileResolver;
+  private serverPort: number = 0;
 
   constructor(configPath?: string) {
     super({ id: 'config-manager', name: 'Configuration Manager', version: '2.0.0', description: 'Manages configuration (config-core only)' });
@@ -58,6 +59,7 @@ export class ConfigManagerModule extends BaseModule {
     if (typeof cfg['configPath'] === 'string') this.configPath = cfg['configPath'] as string;
     if (typeof cfg['mergedConfigPath'] === 'string') this.mergedConfigPath = cfg['mergedConfigPath'] as string;
     if (typeof cfg['systemModulesPath'] === 'string') this.systemConfigPath = cfg['systemModulesPath'] as string;
+    if (typeof (cfg as any)['port'] === 'number') this.serverPort = (cfg as any)['port'] as number;
 
     await this.authFileResolver.ensureAuthDir();
     await this.generateMergedConfigViaCore();
@@ -238,7 +240,23 @@ export class ConfigManagerModule extends BaseModule {
     // ⚠️ process/requestProcess/responseProcess 的注入逻辑统一移交给 config-core；
     // ConfigManager 仅负责写回 config-core 生成的 assemblerConfig，不再修改 llmSwitch.config.*
     const mergedWithPac = { ...built.merged, pipeline_assembler: { config: assemblerConfig } } as Record<string, unknown>;
-    await (core as any).writeJsonPretty(this.mergedConfigPath, mergedWithPac);
+    // 标准输出位置：~/.routecodex/config/generated
+    try {
+      const outDir = path.join(homedir(), '.routecodex', 'config', 'generated');
+      await (await import('fs/promises')).mkdir(outDir, { recursive: true });
+      const port = (this.serverPort && Number.isFinite(this.serverPort)) ? this.serverPort : 0;
+      const primary = port > 0 ? path.join(outDir, `merged-config.${port}.json`) : path.join(outDir, 'merged-config.generated.json');
+      const alias = path.join(outDir, 'merged-config.generated.json');
+      await (core as any).writeJsonPretty(primary, mergedWithPac);
+      if (alias !== primary) {
+        await (core as any).writeJsonPretty(alias, mergedWithPac);
+      }
+      // 还原 this.mergedConfigPath 指向 alias，供宿主 loadMergedConfig()
+      this.mergedConfigPath = alias;
+    } catch (e) {
+      // 回落到旧路径，但不再做兜底：由上层读取器去 fail-fast
+      await (core as any).writeJsonPretty(this.mergedConfigPath, mergedWithPac);
+    }
   }
 
   getStatus(): UnknownObject {

@@ -146,8 +146,14 @@ class RouteCodexApp {
         return resolveRouteCodexConfigPath();
       }
       const userConfigPath = pickUserConfigPath();
-      const mergedDir = path.dirname(userConfigPath);
-      this.mergedConfigPath = path.join(mergedDir, `merged-config.${port}.json`);
+      // 将 mergedConfigPath 固定到用户配置目录的标准生成位置，避免本地推测
+      try {
+        const home = homedir();
+        this.mergedConfigPath = path.join(home, '.routecodex', 'config', 'generated', 'merged-config.generated.json');
+      } catch {
+        const mergedDir = path.dirname(userConfigPath);
+        this.mergedConfigPath = path.join(mergedDir, 'merged-config.generated.json');
+      }
 
       // Honor serverTools toggle strictly by config.json (single source of truth)
       // Set ROUTECODEX_SERVER_TOOLS env based on user config, so core replacement logic
@@ -172,6 +178,7 @@ class RouteCodexApp {
         configPath: userConfigPath,
         mergedConfigPath: this.mergedConfigPath,
         systemModulesPath: this.modulesConfigPath,
+        port,
         autoReload: true,
         watchInterval: 5000
       };
@@ -201,8 +208,21 @@ class RouteCodexApp {
         userConfigPath,
         port: bindPort
       });
+      // 仅设置供下游读取，不再做本地注入/回退推测
       process.env.ROUTECODEX_PIPELINE_CONFIG_PATH = pipelineConfigPath;
       process.env.RCC_PIPELINE_CONFIG_PATH = pipelineConfigPath;
+
+      // 直接从标准生成路径读取 merged-config.<port>.json（不再注入/重载回退）
+      try {
+        const home = homedir();
+        const mergedPath = path.join(home, '.routecodex', 'config', 'generated', `merged-config.${bindPort}.json`);
+        const raw = await fs.readFile(mergedPath, 'utf-8');
+        mergedConfig = JSON.parse(raw);
+        this.mergedConfigPath = mergedPath;
+      } catch (e) {
+        console.error('❌ Failed to read merged-config from standard generated path:', (e as any)?.message || String(e));
+        throw e;
+      }
 
       const { RouteCodexServerV2 } = await import('./server-v2/core/route-codex-server-v2.js');
       // V2 hooks 开关：默认开启；可通过 ROUTECODEX_V2_HOOKS=0/false/no 关闭
