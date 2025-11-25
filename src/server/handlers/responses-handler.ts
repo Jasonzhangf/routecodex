@@ -58,7 +58,8 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
     const wantsSSE = (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream')) || payload.stream === true;
     try {
       const meta = (payload.metadata && typeof payload.metadata === 'object') ? payload.metadata : {};
-      payload.metadata = { ...meta, entryEndpoint, stream: wantsSSE };
+      // 对响应端点，明确标注 providerProtocol，避免蓝图误选 chat 链路
+      payload.metadata = { ...meta, entryEndpoint, stream: wantsSSE, providerProtocol: 'openai-responses' };
     } catch (error) {
       await logNonBlockingError(
         { component: 'http.responses-handler', operation: 'payload.attach-metadata', requestId, entryEndpoint },
@@ -70,7 +71,7 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
     const sharedReq: any = {
       data: payload,
       route: { providerId: 'unknown', modelId: String(payload?.model || 'unknown'), requestId, timestamp: Date.now() },
-      metadata: { entryEndpoint, endpoint: entryEndpoint, stream: wantsSSE, routeName },
+      metadata: { entryEndpoint, endpoint: entryEndpoint, stream: wantsSSE, routeName, providerProtocol: 'openai-responses' },
       debug: { enabled: false, stages: {} },
       entryEndpoint
     };
@@ -152,7 +153,6 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
         );
       }
     };
-    if (wantsSSE) startPreHeartbeat();
 
     // Snapshot: routing-selected（由虚拟路由器决策 routeName）
     await runNonBlocking(
@@ -161,10 +161,9 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
     );
     const response = await ctx.pipelineManager.processRequest(sharedReq);
     const out = (response && typeof response === 'object' && 'data' in response) ? (response as any).data : response;
-    // 优先：核心返回了 __sse_responses → 无条件按 SSE 输出（零回退）
+    // 仅当核心返回了 __sse_responses 时，才以 SSE 输出
     if (out && typeof out === 'object' && (out as any).__sse_responses) {
       try { console.log('[HTTP][SSE] piping core stream for /v1/responses', { requestId }); } catch {}
-      stopPreHeartbeat();
       try {
         // 预心跳阶段已发送过 SSE 头，此处仅在尚未发送响应时补充，避免重复设置触发 ERR_HTTP_HEADERS_SENT
         if (!res.headersSent) {
@@ -190,55 +189,14 @@ export async function handleResponses(req: Request, res: Response, ctx: HandlerC
       }
       return;
     }
-    // 其次：客户端期待 SSE 但核心未给出流 → 输出最小错误帧 + [DONE]
-    if (wantsSSE) {
-      stopPreHeartbeat();
-      try {
-        if (!res.headersSent) {
-          res.setHeader('Content-Type', 'text/event-stream');
-          res.setHeader('Cache-Control','no-cache');
-          res.setHeader('Connection','keep-alive');
-          res.setHeader('X-Accel-Buffering','no');
-        }
-      } catch {}
-      try {
-        const s1 = `event: response.error\n`;
-        const s2 = `data: ${JSON.stringify({ type:'response.error', error: { message: 'NO_CORE_SSE', code: 'NO_CORE_SSE', type: 'pipeline_error' } })}\n\n`;
-        res.write(s1); res.write(s2); sseLogger.write(s1).catch(()=>{}); sseLogger.write(s2).catch(()=>{});
-        const done = 'data: [DONE]\n\n'; res.write(done); sseLogger.write(done).catch(()=>{});
-      } catch {}
-      try { res.end(); } catch {}
-      return;
-    }
-    // Non-SSE
-    stopPreHeartbeat();
+    // 无核心SSE：统一按 JSON 返回（即使客户端声明 SSE）
     await runNonBlocking(
       { component: 'http.responses-handler', operation: 'snapshot.http-response', requestId, entryEndpoint },
       () => writeServerSnapshot({ phase: 'http-response', requestId, data: out, entryEndpoint })
     );
     res.status(200).json(out);
   } catch (error: any) {
-    // SSE error path
-    try {
-      const expectsSSE = (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream')) || (req.body && (req.body as any).stream === true);
-      if (expectsSSE) {
-        try {
-          if (!res.headersSent) {
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control','no-cache');
-            res.setHeader('Connection','keep-alive');
-          }
-        } catch {}
-        try {
-          const s1 = `event: response.error\n`;
-          const s2 = `data: ${JSON.stringify({ type:'response.error', error: { message: String(error?.message || 'Upstream error'), code: String((error as any)?.code || 'UPSTREAM_ERROR'), type: 'upstream_error' } })}\n\n`;
-          res.write(s1); res.write(s2); sseLogger.write(s1).catch(()=>{}); sseLogger.write(s2).catch(()=>{});
-          const done = 'data: [DONE]\n\n'; res.write(done); sseLogger.write(done).catch(()=>{});
-        } catch {}
-        try { res.end(); } catch {}
-        return;
-      }
-    } catch {}
+    // 错误：统一返回 JSON 错误
     await runNonBlocking(
       { component: 'http.responses-handler', operation: 'snapshot.http-response-error', entryEndpoint },
       () => writeServerSnapshot({

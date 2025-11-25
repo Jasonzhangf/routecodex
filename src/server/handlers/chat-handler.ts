@@ -8,7 +8,7 @@ import { logNonBlockingError, runNonBlocking } from '../utils/non-blocking-error
 
 // Chat endpoint: /v1/chat/completions (OpenAI Chat SSE shape)
 export async function handleChatCompletions(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
-  // Per‑request SSE logger
+  // SSE piping日志（仅当核心返回 __sse_responses 时使用）
   let sseLogger: { write: (line: string) => Promise<void> } = { write: async () => {} } as any;
   const entryEndpoint = '/v1/chat/completions';
   try {
@@ -25,7 +25,9 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
     // Attach endpoint metadata into payload for downstream selection（失败仅记录，不阻断请求）
     try {
       const meta = (payload.metadata && typeof payload.metadata === 'object') ? payload.metadata : {};
-      payload.metadata = { ...meta, entryEndpoint, stream: wantsSSE };
+      // 将客户端期望的 SSE 标记为 clientStream，仅用于 HTTP 输出层；
+      // 上游 Provider 不再读取该标记，避免入/出站耦合。
+      payload.metadata = { ...meta, entryEndpoint, clientStream: wantsSSE };
     } catch (error) {
       await logNonBlockingError(
         { component: 'http.chat-handler', operation: 'payload.attach-metadata', requestId, entryEndpoint },
@@ -81,51 +83,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       }
     })();
 
-    // Pre‑heartbeat for SSE
-    let hbTimer: NodeJS.Timeout | null = null;
-    const startPreHeartbeat = () => {
-      try {
-        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-        res.setHeader('Cache-Control', 'no-cache, no-transform');
-        res.setHeader('Connection', 'keep-alive');
-        res.setHeader('X-Accel-Buffering', 'no');
-        (res as any).flushHeaders?.();
-      } catch (error) {
-        void logNonBlockingError(
-          { component: 'http.chat-handler', operation: 'sse.set-headers', requestId, entryEndpoint },
-          error
-        );
-      }
-      const iv = Math.max(1000, Number(process.env.ROUTECODEX_STREAM_HEARTBEAT_MS || process.env.RCC_STREAM_HEARTBEAT_MS || 15000));
-      const writeBeat = () => {
-        try {
-          const s = `: pre-heartbeat ${Date.now()}\n\n`;
-          res.write(s);
-          sseLogger.write(s).catch(() => {});
-        } catch (error) {
-          void logNonBlockingError(
-            { component: 'http.chat-handler', operation: 'sse.heartbeat', requestId, entryEndpoint, level: 'debug' },
-            error
-          );
-        }
-      };
-      writeBeat();
-      hbTimer = setInterval(writeBeat, iv);
-    };
-    const stopPreHeartbeat = () => {
-      try {
-        if (hbTimer) {
-          clearInterval(hbTimer);
-          hbTimer = null;
-        }
-      } catch (error) {
-        void logNonBlockingError(
-          { component: 'http.chat-handler', operation: 'sse.heartbeat-stop', requestId, entryEndpoint, level: 'debug' },
-          error
-        );
-      }
-    };
-    if (wantsSSE) startPreHeartbeat();
+    // 不再由HTTP层发送任何预心跳/兜底SSE，SSE仅由核心节点输出
 
     // Snapshot: routing-selected（由虚拟路由器决策 routeName）
     await runNonBlocking(
@@ -134,15 +92,16 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
     );
     const response = await ctx.pipelineManager.processRequest(sharedReq);
     const out = (response && typeof response === 'object' && 'data' in response) ? (response as any).data : response;
-    // 优先：核心返回了 __sse_responses → 无条件按 SSE 输出（零回退）
+    // 仅当核心返回 __sse_responses 时，才以 SSE 形式输出
     if (out && typeof out === 'object' && (out as any).__sse_responses) {
       try { console.log('[HTTP][SSE] piping core stream for /v1/chat/completions', { requestId }); } catch {}
-      stopPreHeartbeat();
       try {
-        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-        res.setHeader('Cache-Control','no-cache, no-transform');
-        res.setHeader('Connection','keep-alive');
-        res.setHeader('X-Accel-Buffering','no');
+        if (!res.headersSent) {
+          res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+          res.setHeader('Cache-Control','no-cache, no-transform');
+          res.setHeader('Connection','keep-alive');
+          res.setHeader('X-Accel-Buffering','no');
+        }
       } catch (error) {
         void logNonBlockingError(
           { component: 'http.chat-handler', operation: 'sse.set-headers-core-stream', requestId, entryEndpoint },
@@ -169,90 +128,14 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       }
       return;
     }
-    // 其次：客户端期待 SSE 但核心未给出流 → 输出最小错误帧 + [DONE]
-    if (wantsSSE) {
-      stopPreHeartbeat();
-      try {
-        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-        res.setHeader('Cache-Control','no-cache, no-transform');
-        res.setHeader('Connection','keep-alive');
-        res.setHeader('X-Accel-Buffering','no');
-      } catch (error) {
-        void logNonBlockingError(
-          { component: 'http.chat-handler', operation: 'sse.set-headers-fallback', requestId, entryEndpoint },
-          error
-        );
-      }
-      try {
-        const s = `data: ${JSON.stringify({ error: { message: 'NO_CORE_SSE', code: 'NO_CORE_SSE' } })}\n\n`;
-        res.write(s);
-        sseLogger.write(s).catch(()=>{});
-      } catch (error) {
-        void logNonBlockingError(
-          { component: 'http.chat-handler', operation: 'sse.write-fallback', requestId, entryEndpoint },
-          error
-        );
-      }
-      try {
-        const done = 'data: [DONE]\n\n';
-        res.write(done);
-        sseLogger.write(done).catch(()=>{});
-      } catch (error) {
-        void logNonBlockingError(
-          { component: 'http.chat-handler', operation: 'sse.write-fallback-done', requestId, entryEndpoint },
-          error
-        );
-      }
-      try { res.end(); } catch {}
-      return;
-    }
-    // Non‑SSE
-    stopPreHeartbeat();
+    // 无核心SSE：统一按 JSON 返回（即便客户端声明了 SSE）
     await runNonBlocking(
       { component: 'http.chat-handler', operation: 'snapshot.http-response', requestId, entryEndpoint },
       () => writeServerSnapshot({ phase: 'http-response', requestId, data: out, entryEndpoint })
     );
     res.status(200).json(out);
   } catch (error: any) {
-    // SSE error path (zero fallback)
-    try {
-      const expectsSSE = (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream')) || (req.body && (req.body as any).stream === true);
-      if (expectsSSE) {
-        try {
-          res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-          res.setHeader('Cache-Control','no-cache, no-transform');
-          res.setHeader('Connection','keep-alive');
-          res.setHeader('X-Accel-Buffering','no');
-        } catch (setErr) {
-          void logNonBlockingError(
-            { component: 'http.chat-handler', operation: 'sse.error.set-headers', entryEndpoint },
-            setErr
-          );
-        }
-        try {
-          const s = `data: ${JSON.stringify({ error: { message: String(error?.message || 'Upstream error'), code: String((error as any)?.code || 'UPSTREAM_ERROR') } })}\n\n`;
-          res.write(s);
-          sseLogger.write(s).catch(()=>{});
-        } catch (writeErr) {
-          void logNonBlockingError(
-            { component: 'http.chat-handler', operation: 'sse.error.write', entryEndpoint },
-            writeErr
-          );
-        }
-        try {
-          const done = 'data: [DONE]\n\n';
-          res.write(done);
-          sseLogger.write(done).catch(()=>{});
-        } catch (doneErr) {
-          void logNonBlockingError(
-            { component: 'http.chat-handler', operation: 'sse.error.write-done', entryEndpoint },
-            doneErr
-          );
-        }
-        try { res.end(); } catch {}
-        return;
-      }
-    } catch {}
+    // 错误：统一返回 JSON 错误，不做 SSE 兜底
     await runNonBlocking(
       { component: 'http.chat-handler', operation: 'snapshot.http-response-error', entryEndpoint },
       () => writeServerSnapshot({

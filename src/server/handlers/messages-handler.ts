@@ -99,7 +99,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       debug: { enabled: false, stages: {} },
       entryEndpoint
     };
-    // SSE logger
+    // SSE logger（仅用于核心返回 __sse_responses 时记录流量）
     sseLogger = (() => {
       try {
         const dir = path.join(os.homedir(), '.routecodex', 'logs', 'sse');
@@ -178,7 +178,6 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
         );
       }
     };
-    if (wantsSSE) startPreHeartbeat();
 
     // Snapshot: pipeline-entry（HTTP server 视角下进入流水线的共享请求 DTO）
     await runNonBlocking(
@@ -203,7 +202,6 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     );
     if (out && typeof out === 'object' && (out as any).__sse_responses) {
       try { console.log('[HTTP][SSE] piping core stream for /v1/messages', { requestId }); } catch {}
-      stopPreHeartbeat();
       try {
         res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
         res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -221,46 +219,14 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       }
       return;
     }
-    if (wantsSSE) {
-      stopPreHeartbeat();
-      try {
-        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-        res.setHeader('Cache-Control','no-cache, no-transform');
-        res.setHeader('Connection','keep-alive');
-        res.setHeader('X-Accel-Buffering','no');
-      } catch (error) {
-        void logNonBlockingError(
-          { component: 'http.messages-handler', operation: 'sse.set-headers-fallback', requestId, entryEndpoint },
-          error
-        );
-      }
-      try { const s = `data: ${JSON.stringify({ error: { message: 'NO_CORE_SSE', code: 'NO_CORE_SSE' } })}\n\n`; res.write(s); sseLogger.write(s).catch(()=>{}); } catch {}
-      try { const done = 'data: [DONE]\n\n'; res.write(done); sseLogger.write(done).catch(()=>{}); } catch {}
-      try { res.end(); } catch {}
-      return;
-    }
-    stopPreHeartbeat();
+    // 无核心SSE：统一 JSON 返回
     await runNonBlocking(
       { component: 'http.messages-handler', operation: 'snapshot.http-response', requestId, entryEndpoint },
       () => writeServerSnapshot({ phase: 'http-response', requestId, data: out, entryEndpoint })
     );
     res.status(200).json(out);
   } catch (error: any) {
-    try {
-      const expectsSSE = (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream')) || (req.body && (req.body as any).stream === true);
-      if (expectsSSE) {
-        try {
-          res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-          res.setHeader('Cache-Control','no-cache, no-transform');
-          res.setHeader('Connection','keep-alive');
-          res.setHeader('X-Accel-Buffering','no');
-        } catch {}
-        try { const s1 = `event: error\n`; const s2 = `data: ${JSON.stringify({ type:'error', error: { message: String(error?.message || 'Upstream error') } })}\n\n`; res.write(s1); res.write(s2); sseLogger.write(s1).catch(()=>{}); sseLogger.write(s2).catch(()=>{}); } catch {}
-        try { const done = 'data: [DONE]\n\n'; res.write(done); sseLogger.write(done).catch(()=>{}); } catch {}
-        try { res.end(); } catch {}
-        return;
-      }
-    } catch {}
+    // 错误：统一 JSON 错误
     await runNonBlocking(
       { component: 'http.messages-handler', operation: 'snapshot.http-response-error', entryEndpoint },
       () => writeServerSnapshot({
