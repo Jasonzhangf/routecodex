@@ -36,6 +36,13 @@ export class ResponsesProvider extends OpenAIStandard {
     // Build endpoint and headers
     const endpoint = (this as any).getEffectiveEndpoint();
     const headers = await (this as any).buildRequestHeaders();
+    // Ensure Responses beta header is present for upstream compatibility
+    try {
+      const hasBeta = Object.keys(headers || {}).some(k => k.toLowerCase() === 'openai-beta');
+      if (!hasBeta) {
+        (headers as any)['OpenAI-Beta'] = 'responses-2024-12-17';
+      }
+    } catch { /* ignore header injection errors */ }
     const context = (this as any).createProviderContext(); // private in base; access via any
     const targetUrl = `${(this as any).getEffectiveBaseUrl().replace(/\/$/, '')}/${String(endpoint).startsWith('/') ? String(endpoint).slice(1) : String(endpoint)}`;
 
@@ -89,7 +96,7 @@ export class ResponsesProvider extends OpenAIStandard {
       throw err;
     }
 
-    // Responses 上游仅支持 SSE：强制启用 stream=true
+    // Responses 上游通常通过 SSE：优先启用 stream=true
     (finalBody as any).stream = true;
 
     // Snapshot provider-request (best-effort)
@@ -103,7 +110,7 @@ export class ResponsesProvider extends OpenAIStandard {
       });
     } catch { /* ignore */ }
 
-    // 发送请求
+    // 发送请求（仅使用上游 SSE → 核心转换模块解析为 JSON；不做 JSON 兜底）
     try {
       // 上游 SSE：使用 llmswitch-core 的 ResponsesSseToJsonConverter 解析为 JSON
       const stream = await (this as any).httpClient.postStream(endpoint, finalBody, { ...headers, Accept: 'text/event-stream' });

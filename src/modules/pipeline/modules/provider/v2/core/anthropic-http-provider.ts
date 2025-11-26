@@ -23,4 +23,3 @@ export class AnthropicHttpProvider extends OpenAIStandard {
     super(cfg, dependencies);
   }
 }
-

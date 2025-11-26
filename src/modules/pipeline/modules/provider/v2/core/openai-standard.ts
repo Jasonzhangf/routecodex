@@ -18,6 +18,7 @@ import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ProviderContext, ServiceProfile, ProviderType } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../../interfaces/pipeline-interfaces.js';
+import { ProviderComposite } from '../composite/provider-composite.js';
 
 
 /**
@@ -496,6 +497,20 @@ export class OpenAIStandard extends BaseProvider {
 
     // Provider 层不再修改工具 schema；统一入口在 llmswitch-core/兼容层
 
+    // 新增：ProviderComposite.compat.request（协议敏感；Fail Fast）
+    try {
+      processedRequest = await ProviderComposite.applyRequest(processedRequest, {
+        providerType: this.providerType,
+        dependencies: this.dependencies
+      });
+    } catch (e) {
+      // 暴露问题，不兜底
+      this.dependencies.logger?.logModule?.(this.id, 'compat-request-error', {
+        error: e instanceof Error ? e.message : String(e)
+      });
+      throw e;
+    }
+
     return processedRequest;
   }
 
@@ -548,6 +563,20 @@ export class OpenAIStandard extends BaseProvider {
     );
 
     processedResponse = postprocessResult.data;
+
+    // 新增：ProviderComposite.compat.response（在封装/模型名还原之前）
+    try {
+      processedResponse = await ProviderComposite.applyResponse(processedResponse, undefined, {
+        providerType: this.providerType,
+        dependencies: this.dependencies,
+        runtime: (context as any)?.runtimeMetadata
+      });
+    } catch (e) {
+      this.dependencies.logger?.logModule?.(this.id, 'compat-response-error', {
+        error: e instanceof Error ? e.message : String(e)
+      });
+      throw e;
+    }
 
     // 响应模型名还原为入站模型（仅对外展示层；上游快照保持原样）
     try {
@@ -880,11 +909,20 @@ export class OpenAIStandard extends BaseProvider {
   // （工具自动修复辅助函数已删除）
 
   private createProviderContext(): ProviderContext {
+    const runtime = this.getCurrentRuntimeMetadata();
     return {
-      requestId: `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      providerType: this.providerType as ProviderType,
+      requestId: runtime?.requestId || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      providerType: (runtime?.providerType as ProviderType) || (this.providerType as ProviderType),
       startTime: Date.now(),
-      profile: this.serviceProfile
+      profile: this.serviceProfile,
+      routeName: runtime?.routeName,
+      providerId: runtime?.providerId,
+      providerKey: runtime?.providerKey,
+      providerProtocol: runtime?.providerProtocol,
+      metadata: runtime?.metadata,
+      target: runtime?.target,
+      runtimeMetadata: runtime,
+      pipelineId: runtime?.pipelineId
     };
   }
 }
