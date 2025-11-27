@@ -9,7 +9,6 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS, DEFAULT_CONFIG, API_ENDPOINTS } from "./constants/index.js";import fs from 'fs';
 import { buildInfo } from './build-info.js';
-import { generatePipelineConfiguration } from './modules/config/pipeline-config-generator.js';
 // Spinner wrapper (lazy-loaded to avoid hard dependency on ora/restore-cursor issues)
 type Spinner = {
   start(text?: string): Spinner;
@@ -581,21 +580,6 @@ program
         resolvedPort = port;
       }
 
-      // 动态生成最新的 pipeline-config（每次启动前执行）
-      try {
-        const pkgRoot = path.resolve(__dirname, '..');
-        await generatePipelineConfiguration({
-          baseDir: pkgRoot,
-          userConfigPath: configPath,
-          port: resolvedPort
-        });
-        logger.info('Pipeline configuration regenerated successfully before start');
-      } catch (error) {
-        spinner.fail('Failed to generate pipeline configuration');
-        logger.error(error instanceof Error ? error.message : String(error));
-        process.exit(1);
-      }
-
       // Ensure port state aligns with requested behavior (always take over to avoid duplicates)
       await ensurePortAvailable(resolvedPort, spinner, { restart: true });
 
@@ -619,6 +603,7 @@ program
       const env = { ...process.env } as NodeJS.ProcessEnv;
       // Ensure server process picks the intended user config path
       env.ROUTECODEX_CONFIG = configPath;
+      env.ROUTECODEX_CONFIG_PATH = configPath;
       // 对 dev 包（routecodex），强制通过环境变量传递端口，确保服务器与 CLI 使用同一个 5555/自定义端口
       if (IS_DEV_PACKAGE) {
         env.ROUTECODEX_PORT = String(resolvedPort);

@@ -6,6 +6,7 @@ export interface ProviderRuntimeMetadata {
   routeName?: string;
   providerId?: string;
   providerKey?: string;
+  runtimeKey?: string;
   providerType?: string;
   providerProtocol?: string;
   modelId?: string;

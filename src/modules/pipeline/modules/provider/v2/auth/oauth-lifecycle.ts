@@ -194,7 +194,8 @@ export async function ensureValidOAuthToken(
   // - 其他：优先 apiKey，其次 access_token，只要不过期即可
   let validAccess = false;
   if (provider === 'iflow') {
-    validAccess = hasApiKey && !isExpiredOrNear;
+    // once apiKey is captured, continue using it even if OAuth token metadata is stale
+    validAccess = hasApiKey || (!isExpiredOrNear && hasAccess);
   } else if (provider === 'qwen') {
     validAccess = (hasApiKey || hasAccess) && !isExpiredOrNear;
   } else {

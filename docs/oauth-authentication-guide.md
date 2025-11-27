@@ -110,7 +110,7 @@ const iflowConfig = {
 };
 
 // 2. 首次使用会触发浏览器授权
-const provider = new OpenAIStandard(iflowConfig, dependencies);
+const provider = new ChatHttpProvider(iflowConfig, dependencies);
 await provider.initialize(); // → 打开浏览器 → 授权 → 获取 API Key
 
 // 3. 后续使用直接读取本地 token 文件

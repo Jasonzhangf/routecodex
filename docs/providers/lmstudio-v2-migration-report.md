@@ -21,7 +21,7 @@
 
 **Compatibility Responsibilities**
 - Keep compatibility minimal, provider‑agnostic, and confined to the Compatibility layer:
-  - Normalize `tool_choice` to LM Studio’s expected strings when an OpenAI object is provided, forcing `'required'` in that case (src/modules/pipeline/modules/compatibility/lmstudio-compatibility.ts:76-85).
+  - Normalize `tool_choice` to LM Studio’s expected strings when an OpenAI object is provided, forcing `'required'` in that case (src/modules/pipeline/modules/provider/v2/compatibility/lmstudio-compatibility.ts:76-85).
   - Preserve OpenAI tool shape (direct mapping of `tools` and `choices[].message.tool_calls`).
   - Maintain `object` values like `chat.completion` and `chat.completion.chunk` in responses.
 - Do not duplicate llmswitch-core tool governance (canonicalization/harvest/repair) in Compatibility per AGENTS.md.
@@ -71,7 +71,7 @@
   - Reuse `openai-standard` end‑to‑end; select `ServiceProfile('lmstudio')` for defaults. No tool logic here.
   - For Responses passthrough, use the dedicated `responses` profile if routing `/v1/responses` to LM Studio’s OpenAI‑compatible Responses endpoint.
 - Compatibility
-  - Ensure LM Studio module is available and registered (type: `lmstudio-compatibility`). It performs only light normalization/mapping; notably `tool_choice` normalization (src/modules/pipeline/modules/compatibility/lmstudio-compatibility.ts:76-85) and direct mapping rules for tools/tool_calls.
+  - Ensure LM Studio module is available and registered (type: `lmstudio-compatibility`). It performs only light normalization/mapping; notably `tool_choice` normalization (src/modules/pipeline/modules/provider/v2/compatibility/lmstudio-compatibility.ts:76-85) and direct mapping rules for tools/tool_calls.
   - Keep response `object` and tool call shapes intact (see same file, response rules section around id `tool-calls-response`).
 - llmswitch-core
   - Tool canonicalization, harvesting from text, and argument repair remain centralized per AGENTS.md; do not reimplement in Compatibility/Provider.
@@ -93,7 +93,7 @@
 **References**
 - `src/modules/pipeline/modules/provider/v2/api/provider-config.ts:103` — maps `lmstudio-provider-simple` to `openai-standard`.
 - `src/modules/pipeline/modules/provider/v2/config/service-profiles.ts:92` — LM Studio service profile defaults.
-- `src/modules/pipeline/modules/compatibility/lmstudio-compatibility.ts:76` — `tool_choice` normalization logic.
+- `src/modules/pipeline/modules/provider/v2/compatibility/lmstudio-compatibility.ts:76` — `tool_choice` normalization logic.
 - `docs/lmstudio-tool-calling.md:1` — LM Studio tool calling shape and examples.
 - `docs/transformation-tables/claude-code-router-openai-to-lmstudio.json:1` — direct mappings for OpenAI↔LM Studio.
 - `docs/responses-passthrough-provider-design.md:3` — Responses SSE passthrough design.

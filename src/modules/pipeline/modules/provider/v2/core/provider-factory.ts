@@ -4,15 +4,16 @@
  * 提供统一的Provider实例创建和管理功能
  */
 
-import { OpenAIStandard } from './openai-standard.js';
 import { ResponsesProvider } from './responses-provider.js';
 import { OpenAIHttpProvider } from './openai-http-provider.js';
 import { ResponsesHttpProvider } from './responses-http-provider.js';
 import { AnthropicHttpProvider } from './anthropic-http-provider.js';
 import { iFlowHttpProvider } from './iflow-http-provider.js';
+import { ChatHttpProvider } from './chat-http-provider.js';
+import { GeminiHttpProvider } from './gemini-http-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import crypto from 'node:crypto';
-import type { IProviderV2 } from '../api/provider-types.js';
+import type { IProviderV2, ProviderRuntimeProfile, ProviderRuntimeAuth } from '../api/provider-types.js';
 import type { ModuleDependencies } from '../../../../interfaces/pipeline-interfaces.js';
 
 /**
@@ -26,8 +27,31 @@ export class ProviderFactory {
   /**
    * 创建Provider实例
    */
-  static createProvider(config: OpenAIStandardConfig, dependencies: ModuleDependencies): IProviderV2 {
-    const instanceId = this.generateInstanceId(config);
+  static createProvider(
+    config: OpenAIStandardConfig,
+    dependencies: ModuleDependencies,
+    runtime?: ProviderRuntimeProfile
+  ): IProviderV2 {
+    return this.createProviderInternal(config, dependencies, runtime);
+  }
+
+  /**
+   * 通过 runtime profile 创建 Provider 实例
+   */
+  static createProviderFromRuntime(
+    runtime: ProviderRuntimeProfile,
+    dependencies: ModuleDependencies
+  ): IProviderV2 {
+    const config = this.buildConfigFromRuntime(runtime);
+    return this.createProviderInternal(config, dependencies, runtime);
+  }
+
+  private static createProviderInternal(
+    config: OpenAIStandardConfig,
+    dependencies: ModuleDependencies,
+    runtime?: ProviderRuntimeProfile
+  ): IProviderV2 {
+    const instanceId = this.generateInstanceId(config, runtime);
 
     // 检查是否已存在实例
     if (this.instances.has(instanceId)) {
@@ -35,29 +59,55 @@ export class ProviderFactory {
     }
 
     // 创建新实例
-    const ptype = String(config?.config?.providerType || '').toLowerCase();
+    const rawType = String(config?.config?.providerType || '').toLowerCase();
     const moduleType = String(config?.type || '').toLowerCase();
+    let ptype = rawType as string;
+
+    // 兼容旧配置：glm/qwen/iflow/lmstudio 一律规范化为 openai（品牌名仅作为 providerId 使用）
+    const legacyFamilies = new Set(['glm', 'qwen', 'lmstudio', 'openai-standard']);
+    if (legacyFamilies.has(ptype)) {
+      try {
+        console.warn(`[ProviderFactory] deprecated providerType='${ptype}', normalizing to 'openai'`);
+      } catch { /* ignore */ }
+      ptype = 'openai';
+      if (config?.config) {
+        (config.config as Record<string, unknown>).providerType = 'openai';
+      }
+    }
+
     let provider: IProviderV2;
 
-    // 1) 新的 HTTP Provider 模块（按协议族拆分）
-    if (moduleType === 'openai-http-provider') {
-      provider = new OpenAIHttpProvider(config, dependencies);
-    } else if (moduleType === 'responses-http-provider') {
-      provider = new ResponsesHttpProvider(config, dependencies);
-    } else if (moduleType === 'anthropic-http-provider') {
-      provider = new AnthropicHttpProvider(config, dependencies);
-    } else if (ptype === 'iflow') {
-      // iFlow 使用专用的 HTTP Provider，支持 OAuth
-      provider = new iFlowHttpProvider(config, dependencies);
+    // 首选：按协议类型创建
+    if (ptype === 'openai') {
+      provider = new ChatHttpProvider(config, dependencies);
     } else if (ptype === 'responses') {
-      // 2) 兼容旧路径：仍使用 ResponsesProvider（真实 Responses wire /v1/responses）
-      provider = new ResponsesProvider(config, dependencies);
+      provider = new ResponsesHttpProvider(config, dependencies);
+    } else if (ptype === 'anthropic') {
+      provider = new AnthropicHttpProvider(config, dependencies);
+    } else if (ptype === 'gemini') {
+      provider = new GeminiHttpProvider(config, dependencies);
     } else {
-      // 3) 默认：OpenAI 标准 Provider：
-      //  - providerType='openai'/'glm'/'qwen'/'lmstudio' → Chat 形状；
-      //  - providerType='anthropic' → 通过 ServiceProfile 选择 /v1/messages wire（协议转换由 llmswitch-core 处理）。
-      provider = new OpenAIStandard(config, dependencies);
+      // 兼容保留：模块类型直选（老配置）；不再做“最终回退”，未知类型直接失败（Fail Fast）
+      if (moduleType === 'openai-http-provider' || moduleType === 'openai-standard') {
+        provider = new OpenAIHttpProvider(config, dependencies);
+      } else if (moduleType === 'responses-http-provider') {
+        provider = new ResponsesHttpProvider(config, dependencies);
+      } else if (moduleType === 'anthropic-http-provider') {
+        provider = new AnthropicHttpProvider(config, dependencies);
+      } else if (ptype === 'iflow') {
+        provider = new iFlowHttpProvider(config, dependencies);
+      } else if (ptype === 'responses') {
+        provider = new ResponsesProvider(config, dependencies);
+      } else {
+        const err: any = new Error(`[ProviderFactory] Unsupported providerType='${ptype}' and moduleType='${moduleType}'`);
+        err.code = 'ERR_UNSUPPORTED_PROVIDER_TYPE';
+        throw err;
+      }
     }
+    if (provider && typeof (provider as any).setRuntimeProfile === 'function' && runtime) {
+      (provider as any).setRuntimeProfile(runtime);
+    }
+
     this.instances.set(instanceId, provider);
 
     return provider;
@@ -66,8 +116,8 @@ export class ProviderFactory {
   /**
    * 获取现有Provider实例
    */
-  static getProvider(config: OpenAIStandardConfig): IProviderV2 | null {
-    const instanceId = this.generateInstanceId(config);
+  static getProvider(config: OpenAIStandardConfig, runtime?: ProviderRuntimeProfile): IProviderV2 | null {
+    const instanceId = this.generateInstanceId(config, runtime);
     return this.instances.get(instanceId) || null;
   }
 
@@ -122,19 +172,91 @@ export class ProviderFactory {
   /**
    * 生成实例ID
    */
-  private static generateInstanceId(config: OpenAIStandardConfig): string {
+  private static generateInstanceId(config: OpenAIStandardConfig, runtime?: ProviderRuntimeProfile): string {
+    const configRuntimeKey = (config?.config as any)?.runtimeKey;
+    if (runtime?.runtimeKey) {
+      return runtime.runtimeKey;
+    }
+    if (typeof configRuntimeKey === 'string' && configRuntimeKey.trim()) {
+      return configRuntimeKey.trim();
+    }
     const providerType = config?.config?.providerType || 'unknown';
     const baseUrl = config?.config?.baseUrl || '';
-    const authType = config?.config?.auth?.type || '';
-    const input = `${providerType}:${baseUrl}:${authType}`;
+    const authType = String(config?.config?.auth?.type || '').toLowerCase();
+    const authSignature =
+      authType === 'apikey'
+        ? ((config.config.auth as any)?.secretRef || '')
+        : ((config.config.auth as any)?.tokenFile || '');
+    const input = `${providerType}:${baseUrl}:${authType}:${authSignature}`;
     return crypto.createHash('sha256').update(input).digest('hex').substring(0, 16);
+  }
+
+  private static buildConfigFromRuntime(runtime: ProviderRuntimeProfile): OpenAIStandardConfig {
+    const baseUrl = (runtime.baseUrl || runtime.endpoint || '').trim();
+    if (!baseUrl || !baseUrl.trim()) {
+      throw new Error(`[ProviderFactory] runtime ${runtime.runtimeKey} missing baseUrl`);
+    }
+    const authConfig = this.mapRuntimeAuthToConfig(runtime.auth, runtime.runtimeKey);
+    const endpointOverride =
+      runtime.endpoint && !/^https?:\/\//i.test(runtime.endpoint.trim())
+        ? runtime.endpoint.trim()
+        : undefined;
+    const overrides: Record<string, unknown> = {
+      defaultModel: runtime.defaultModel,
+      headers: runtime.headers,
+      ...(endpointOverride ? { endpoint: endpointOverride } : {})
+    };
+    return {
+      type: this.mapProviderModule(runtime.providerType),
+      config: {
+        providerType: runtime.providerType,
+        baseUrl,
+        auth: authConfig,
+        overrides
+      }
+    };
+  }
+
+  private static mapRuntimeAuthToConfig(auth: ProviderRuntimeAuth, runtimeKey: string) {
+    if (auth.type === 'apikey') {
+      if (!auth.value || !auth.value.trim()) {
+        throw new Error(`[ProviderFactory] runtime ${runtimeKey} missing inline apiKey value`);
+      }
+      return {
+        type: 'apikey' as const,
+        apiKey: auth.value.trim()
+      };
+    }
+    if (!auth.clientId || !auth.tokenUrl) {
+      throw new Error(`[ProviderFactory] runtime ${runtimeKey} missing OAuth client configuration`);
+    }
+    return {
+      type: 'oauth' as const,
+      clientId: auth.clientId,
+      clientSecret: auth.clientSecret,
+      scopes: auth.scopes,
+      tokenFile: auth.tokenFile,
+      tokenUrl: auth.tokenUrl,
+      deviceCodeUrl: auth.deviceCodeUrl
+    };
+  }
+
+  private static mapProviderModule(
+    providerType: string
+  ): OpenAIStandardConfig['type'] {
+    const normalized = (providerType || '').toLowerCase();
+    if (normalized === 'responses') return 'responses-http-provider';
+    if (normalized === 'anthropic') return 'anthropic-http-provider';
+    if (normalized === 'gemini') return 'gemini-http-provider';
+    if (normalized === 'iflow') return 'iflow-http-provider';
+    return 'openai-http-provider';
   }
 }
 
 /**
  * 便捷函数 - 创建Provider实例
  */
-export function createOpenAIStandard(
+export function createChatHttpProvider(
   config: OpenAIStandardConfig,
   dependencies: ModuleDependencies
 ): IProviderV2 {

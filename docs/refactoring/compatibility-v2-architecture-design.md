@@ -41,7 +41,7 @@ graph TB
 
 ### 完整目录结构
 ```
-src/modules/pipeline/modules/compatibility/v2/
+src/modules/pipeline/modules/provider/v2/compatibility/v2/
 ├── core/                           # 核心抽象层
 │   ├── base-compatibility.ts       # 基础兼容性抽象类
 │   ├── compatibility-factory.ts    # 兼容性工厂
@@ -59,7 +59,7 @@ src/modules/pipeline/modules/compatibility/v2/
 │   ├── compatibility-hooks.ts      # 兼容性专用hooks
 │   └── hook-executor.ts            # Hook执行器
 ├── strategies/                     # 转换策略
-│   ├── openai-standard.ts          # OpenAI标准策略
+│   ├── chat-http-provider.ts       # OpenAI Chat 协议 Provider
 │   ├── glm-strategy.ts             # GLM特定策略
 │   ├── qwen-strategy.ts            # Qwen特定策略
 │   └── iflow-strategy.ts           # Iflow特定策略
@@ -81,7 +81,7 @@ src/modules/pipeline/modules/compatibility/v2/
 
 ### 1. BaseCompatibility 基础抽象类
 
-**文件**: `src/modules/pipeline/modules/compatibility/v2/core/base-compatibility.ts`
+**文件**: `src/modules/pipeline/modules/provider/v2/compatibility/v2/core/base-compatibility.ts`
 **职责**: 提供兼容性模块的通用抽象实现
 
 ```typescript
@@ -173,9 +173,12 @@ export abstract class BaseCompatibility implements ICompatibilityV2 {
 }
 ```
 
+> 注：自 ProviderComposite 引入后，生产蓝图不再显式编排 compatibility 节点，兼容处理在 Provider 内部通过 composite 执行；
+> 现有兼容模块（GLM/LMStudio/iFlow 等）可被 openai-family 聚合器以“适配器”方式复用，职责保持为最小字段修剪/映射/黑名单，避免工具语义和 SSE 路径改动。
+
 ### 2. 配置驱动转换引擎
 
-**文件**: `src/modules/pipeline/modules/compatibility/v2/engine/transformation-engine.ts`
+**文件**: `src/modules/pipeline/modules/provider/v2/compatibility/v2/engine/transformation-engine.ts`
 **职责**: 基于配置表的双向转换引擎
 
 ```typescript
@@ -227,7 +230,7 @@ export class TransformationEngine {
 
 ### 3. 双向转换表配置
 
-**文件**: `src/modules/pipeline/modules/compatibility/v2/config/transformation-tables.ts`
+**文件**: `src/modules/pipeline/modules/provider/v2/compatibility/v2/config/transformation-tables.ts`
 **职责**: 定义输入输出双向转换配置
 
 ```typescript
@@ -344,7 +347,7 @@ export const GLM_TRANSFORMATION_TABLES: Record<string, TransformationTable> = {
 
 ### 4. Hook系统集成
 
-**文件**: `src/modules/pipeline/modules/compatibility/v2/hooks/hooks-integration.ts`
+**文件**: `src/modules/pipeline/modules/provider/v2/compatibility/v2/hooks/hooks-integration.ts`
 **职责**: 集成兼容性模块的hook系统
 
 ```typescript
@@ -446,7 +449,7 @@ export class HookIntegration {
 
 ### 5. Provider策略实现
 
-**文件**: `src/modules/pipeline/modules/compatibility/v2/strategies/glm-strategy.ts`
+**文件**: `src/modules/pipeline/modules/provider/v2/compatibility/v2/strategies/glm-strategy.ts`
 **职责**: GLM特定转换策略实现
 
 ```typescript
@@ -526,7 +529,7 @@ export class GLMStrategy implements TransformationStrategy {
 
 ### V1到V2迁移适配器
 
-**文件**: `src/modules/pipeline/modules/compatibility/v2/core/v1-adapter.ts`
+**文件**: `src/modules/pipeline/modules/provider/v2/compatibility/v2/core/v1-adapter.ts`
 **职责**: 确保现有V1兼容性模块无缝迁移到V2
 
 ```typescript

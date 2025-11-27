@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Direct provider test (no server): use OpenAIStandard provider with iFlow profile (OAuth)
+// Direct provider test (no server): use ChatHttpProvider with iFlow profile (OAuth)
 
 import os from 'os';
 import path from 'path';
@@ -60,8 +60,8 @@ async function run() {
   }
 
   // 3) Create provider and send a chat request
-  const { OpenAIStandard } = await import('../dist/modules/pipeline/modules/provider/v2/core/openai-standard.js');
-  const provider = new OpenAIStandard(cfg, {});
+  const { ChatHttpProvider } = await import('../dist/modules/pipeline/modules/provider/v2/core/chat-http-provider.js');
+  const provider = new ChatHttpProvider(cfg, {});
   await provider.initialize();
   const body = { model, messages: [{ role:'user', content:text }], stream:false };
   const out = await provider.sendRequest(body);

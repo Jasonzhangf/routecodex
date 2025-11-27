@@ -76,18 +76,6 @@
         }
       }
     },
-    "configmanager": {
-      "enabled": true,
-      "config": {
-        "moduleType": "config-manager",
-        "configPath": "./routecodex.json",
-        "watchMode": true,
-        "validation": {
-          "strict": true,
-          "allowUnknown": false
-        }
-      }
-    },
     "providermanager": {
       "enabled": true,
       "config": {

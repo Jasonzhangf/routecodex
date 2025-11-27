@@ -12,3 +12,13 @@ declare module 'rcc-llmswitch-core/api' {
   export const buildSystemToolGuidance: any;
   export const SchemaValidator: any;
 }
+
+declare module '../../../sharedmodule/llmswitch-core/dist/v2/conversion/conversion-v3/sse/json-to-sse/index.js' {
+  export class ChatJsonToSseConverter {
+    convertResponseToJsonToSse(payload: unknown, options?: Record<string, unknown>): Promise<import('node:stream').Readable>;
+  }
+
+  export class ResponsesJsonToSseConverter {
+    convertResponseToJsonToSse(payload: unknown, options?: Record<string, unknown>): Promise<import('node:stream').Readable>;
+  }
+}

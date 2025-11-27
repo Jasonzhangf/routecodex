@@ -26,17 +26,17 @@ RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配�
 - 核心实现与详细说明：`sharedmodule/llmswitch-core/`
 - 源码文档：`sharedmodule/llmswitch-core/README.md`
 
-### Conversion V3 节点架构（唯一入口）
+### Super Pipeline 架构（唯一入口）
 
-- **唯一入口**：服务器所有请求/响应都只能通过 `src/modules/llmswitch/bridge.ts` → `sharedmodule/llmswitch-core/dist/v2/bridge/routecodex-adapter` 进入 conversion v3，不允许其它地方直接 import core。
-- **配置驱动流水线**：`config/pipeline-config.generated.json` 中的 `llmSwitch.pipelineConfig` 指定每条入/出站线路的节点序列：`SSE Input → Provider Input → Chat Process → Provider Output → SSE Output`，Responses/Anthropic 同构。
-- **节点职责**
-  - `nodes/sse/*`：SSE JSON 化/序列化、旁路透传。
-  - `nodes/input/*`：解析 OpenAI Chat / Responses / Anthropic 请求，输出 canonical `standardizedRequest`。
-  - `nodes/process/chat-process-node`：唯一的工具治理点，负责 tool_calls 修复、MCP 规则、上下文与 streaming 决策。
-  - `nodes/output/*`：把 `processedRequest` 还原为 Provider 协议响应，生成 usage/metadata。
-  - `nodes/response/*`：出站入口，把 Provider 响应转换为 canonical，再经 output/sse 节点返回。
-- **工具治理原则**：除了 Compatibility 层为补齐 OpenAI 形状做的最小字段修剪外，所有工具读写（解析、修复、透传、执行）只能发生在 `process` 链路；Input/Output/SSE/Response 节点只做格式转换，不触碰工具语义。
+- **唯一入口**：HTTP handler 直接调用 `sharedmodule/llmswitch-core/dist/v2/conversion/conversion-v3/pipelines/super-pipeline`，本仓库不再维护自研 pipeline/blueprint。
+- **配置流**：`routecodex-config-loader` 读取用户配置，传给 `bootstrapVirtualRouterConfig`，由 llmswitch-core 输出 `VirtualRouterConfig + targetRuntime` 并注入 Super Pipeline。
+- **节点链路（由 llmswitch-core 内部维护）**
+  - `SSE Input`：SSE ↔ JSON 转换、旁路透传。
+  - `Input Nodes`：解析 Chat / Responses / Messages 请求，生成 canonical `standardizedRequest`。
+  - `Chat Process`：唯一工具治理点，处理 tool_calls、MCP 规则、上下文压缩。
+  - `Virtual Router Process`：分类、熔断、挑选 provider，并覆写 `request.model`、写入 `target.runtimeKey`。
+  - `Output/SSE Nodes`：把 `processedRequest` 还原为目标协议，生成 usage、SSE 流和最终响应。
+- **Host 职责**：`RouteCodexHttpServer` 只负责 HTTP/SSE 封装与 Provider runtime 映射，工具治理与路由决策全部在 llmswitch-core 完成。
 
 ## 快照排查指南（命令行）
 
@@ -55,7 +55,7 @@ RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配�
 ### 🏗️ V2 核心组件
 
 - **Compatibility V2（配置驱动）**
-  - 位置：`src/modules/pipeline/modules/compatibility/glm/*`（模块化 + Hook 系统）
+  - 位置：`src/modules/pipeline/modules/provider/v2/compatibility/glm/*`（模块化 + Hook 系统）
   - 职责：仅做 Provider 特定的最小字段标准化与 reasoning_content 处理
   - 特性：配置驱动字段映射、GLM 专用最小清理与 1210/1214 错误兼容
   - 工具治理：统一在 llmswitch-core v2 处理；兼容层不进行工具语义修复/文本收割
@@ -89,7 +89,7 @@ RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配�
   - 1210/1214 最小兼容（GLM）
   - 请求侧最小黑名单（例如 GLM 删除 `tools[].function.strict`；无 tools 删除 `tool_choice`）
   - 响应侧最小黑名单（仅非流式）：默认仅删 `usage.prompt_tokens_details.cached_tokens`
-    - 配置：`src/modules/pipeline/modules/compatibility/<provider>/config/response-blacklist.json`
+    - 配置：`src/modules/pipeline/modules/provider/v2/compatibility/<provider>/config/response-blacklist.json`
     - 关键字段保护：status/output/output_text/required_action/choices[].message.content/tool_calls/finish_reason
 - Don't
   - 工具语义修复或文本收割（统一由 llmswitch-core 处理）
@@ -325,9 +325,10 @@ cp config/examples/basic-config.json ~/.routecodex/config.json
   "version": "1.0",
   "providers": {
     "glm-provider": {
-      "type": "openai-standard",
+      "type": "chat-http-provider",
       "config": {
-        "providerType": "glm",
+        "providerType": "openai",
+        "providerId": "glm",
         "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
         "auth": {
           "type": "apikey",
@@ -342,13 +343,17 @@ cp config/examples/basic-config.json ~/.routecodex/config.json
       }
     },
     "qwen-provider": {
-      "type": "openai-standard",
+      "type": "chat-http-provider",
       "config": {
-        "providerType": "qwen",
+        "providerType": "openai",
+        "extensions": {
+          "oauthProviderId": "qwen"
+        },
         "auth": {
           "type": "oauth",
           "clientId": "${QWEN_CLIENT_ID}",
-          "clientSecret": "${QWEN_CLIENT_SECRET}"
+          "clientSecret": "${QWEN_CLIENT_SECRET}",
+          "tokenFile": "${HOME}/.routecodex/auth/qwen-oauth.json"
         }
       }
     }
@@ -361,7 +366,7 @@ cp config/examples/basic-config.json ~/.routecodex/config.json
       "modules": {
         "llmSwitch": { "type": "llmswitch-v2" },
         "compatibility": { "type": "glm-compatibility" },
-        "provider": { "type": "openai-standard-v2" }
+        "provider": { "type": "chat-http-provider" }
       }
     }
   ],
@@ -631,6 +636,7 @@ curl http://localhost:5506/api/debug/export/json > monitoring-data.json
 - **双向统一接口**: 标准化的Provider实现，支持双向请求响应
 - **双向认证管理**: API Key、OAuth、会话管理
 - **双向连接管理**: 连接池、重试机制、健康检查、双向HTTP通信
+- **协议化实现**: `chat-http-provider.ts`、`responses-http-provider.ts`、`anthropic-http-provider.ts`、`gemini-http-provider.ts` 分别对应四大协议，通过 ProviderComposite 执行最小兼容，再交由 Provider Runtime Profile 注入 baseURL/headers/auth。
 
 #### 4. External AI Service层
 - **双向多提供商支持**: 统一的AI服务接口，双向数据流
@@ -653,9 +659,11 @@ curl http://localhost:5506/api/debug/export/json > monitoring-data.json
   },
   "providers": {
     "provider-id": {
-      "type": "openai-standard|anthropic|qwen|glm|lmstudio",
+      "type": "chat-http-provider|responses-http-provider|anthropic-http-provider|gemini-http-provider",
       "enabled": true,
       "config": {
+        "providerType": "openai|responses|anthropic|gemini",
+        "providerId": "glm|qwen|c4m",
         "baseUrl": "https://api.provider.com/v1",
         "auth": {
           "type": "apikey|oauth",
@@ -798,6 +806,13 @@ routecodex/
 └── vendor/                    # 第三方依赖
 ```
 
+#### HTTP服务器职责（精简版）
+
+- 服务器只负责 **HTTP ↔ SuperPipeline** 转发：`/v1/chat`、`/v1/messages`、`/v1/responses` handler 将请求封装为 `SuperPipelineRequest`，调用 `superPipeline.execute()`，然后把返回的 provider payload/runtimeKey 交给对应 Provider。
+- ProviderPool、兼容层、Virtual Router、工具治理都由 llmswitch-core 完成。Host 只在启动时执行 `bootstrapVirtualRouterConfig`、构造 SuperPipeline，并根据 `targetRuntime` 初始化 Provider 实例。
+- Provider runtime map 是唯一的数据来源：`bootstrapVirtualRouterConfig` 会输出 `targetRuntime[providerKey]`，Server 把该 profile 注入 `ChatHttpProvider`/`ResponsesHttpProvider`/`AnthropicHttpProvider`，同时通过 `attachProviderRuntimeMetadata` 把 `providerKey/runtimeKey/routeName` 写入请求体，确保错误上报与熔断都能定位到具体 key-alias。
+- SSE/JSON 序列化、错误处理、日志快照均由 llmswitch-core 的节点链完成，HTTP handler 不再负责心跳/重试等逻辑，真正实现“瘦”外壳，便于未来接入自定义编排。
+
 ### 🏗️ 兼容层架构重构
 
 #### 概述
@@ -832,7 +847,7 @@ RouteCodex V2架构已完成兼容层的函数化重构，实现了两层架构�
 #### 核心文件结构
 
 ```
-src/modules/pipeline/modules/compatibility/
+src/modules/pipeline/modules/provider/v2/compatibility/
 ├── compatibility-interface.ts           # 兼容层接口定义
 ├── compatibility-adapter.ts             # PipelineModule适配器
 ├── base-compatibility.ts                # 基础兼容抽象类
@@ -950,6 +965,17 @@ npm run test:coverage
 # 运行性能测试
 npm run test:performance
 ```
+
+#### Provider 专项测试
+
+| 测试文件 | 作用 |
+| --- | --- |
+| `tests/provider/provider-outbound-provider.test.ts` | 使用黄金样本（openai-chat/responses）验证 `ChatHttpProvider`/`ResponsesHttpProvider` 的请求整形、兼容层开关以及 HTTP 头部/模型注入。 |
+| `tests/provider/provider-outbound-param.test.ts` | 从 `~/.routecodex/codex-samples` 按需加载聊天快照，分别对 openai/responses/anthropic 协议执行出站整形，确保三条链路共用相同 payload。 |
+| `tests/provider/provider-composite-guards.test.ts` | 覆盖 ProviderComposite 的协议守卫（protocol ↔ providerType），模拟 ErrorCenter 回调，确保 mismatch 会 fail fast。 |
+| `tests/provider/provider-factory.test.ts` | 校验 ProviderFactory 的 Fail-Fast 行为，未知 `providerType/moduleType` 会直接抛错，防止静默回退。 |
+
+> 建议在跑专项测试前设置 `RCC_TEST_FAKE_OPENAI_COMPAT=1` 等 mock 环境变量，以避免真实兼容模块加载 import.meta。
 
 ### 代码规范
 

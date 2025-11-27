@@ -162,15 +162,6 @@ export class ModuleConfigReader {
             enableHealthChecks: true,
           },
         },
-        configmanager: {
-          enabled: true,
-          config: {
-            moduleType: 'config-manager',
-            // Align with ConfigManager default user config path
-            configPath: '~/.routecodex/config.json',
-            watchMode: true,
-          },
-        },
         providermanager: {
           enabled: true,
           config: {

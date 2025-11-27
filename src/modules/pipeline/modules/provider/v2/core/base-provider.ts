@@ -4,11 +4,23 @@
  * 提供Provider的通用实现和抽象方法定义
  */
 
-import type { IProviderV2, ProviderContext, ProviderError, ServiceProfile } from '../api/provider-types.js';
+import type {
+  IProviderV2,
+  ProviderContext,
+  ProviderError,
+  ServiceProfile,
+  ProviderType,
+  ProviderRuntimeProfile
+} from '../api/provider-types.js';
 import type { IAuthProvider } from '../auth/auth-interface.js';
 import type { ModuleDependencies } from '../../../../interfaces/pipeline-interfaces.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { UnknownObject } from '../../../../../../types/common-types.js';
+import { extractProviderRuntimeMetadata, type ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
+import {
+  emitProviderError,
+  buildRuntimeFromProviderContext
+} from '../utils/provider-error-reporter.js';
 
 /**
  * 基础Provider抽象类
@@ -26,12 +38,22 @@ export abstract class BaseProvider implements IProviderV2 {
   protected requestCount = 0;
   protected errorCount = 0;
   protected lastActivity: number = Date.now();
+  private lastRuntimeMetadata?: ProviderRuntimeMetadata;
+  private runtimeProfile?: ProviderRuntimeProfile;
 
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     this.id = `provider-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     this.config = config;
     this.providerType = config.config.providerType;
     this.dependencies = dependencies;
+  }
+
+  public setRuntimeProfile(runtime: ProviderRuntimeProfile): void {
+    this.runtimeProfile = runtime;
+  }
+
+  protected getRuntimeProfile(): ProviderRuntimeProfile | undefined {
+    return this.runtimeProfile;
   }
 
   // 抽象方法 - 子类必须实现
@@ -198,54 +220,105 @@ export abstract class BaseProvider implements IProviderV2 {
   }
 
   // 私有辅助方法
+  protected getCurrentRuntimeMetadata(): ProviderRuntimeMetadata | undefined {
+    return this.lastRuntimeMetadata;
+  }
+
   private createContext(request: UnknownObject): ProviderContext {
-    return {
-      requestId: `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      providerType: this.providerType as any,
+    const runtimeMetadata = extractProviderRuntimeMetadata(request);
+    this.lastRuntimeMetadata = runtimeMetadata;
+    const providerType = (runtimeMetadata?.providerType || this.providerType) as ProviderType;
+    const runtimeProfile = this.getRuntimeProfile();
+    const context: ProviderContext = {
+      requestId: runtimeMetadata?.requestId || `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      providerType: (runtimeProfile?.providerType as ProviderType) || providerType,
       startTime: Date.now(),
-      model: (request as any).model,
+      model: (request as any).model ?? runtimeMetadata?.target?.model,
       hasTools: !!(request as any).tools,
-      metadata: {}
+      metadata: runtimeMetadata?.metadata || {},
+      providerId: runtimeMetadata?.providerId || runtimeMetadata?.providerKey || runtimeProfile?.providerId,
+      providerKey: runtimeMetadata?.providerKey || runtimeProfile?.providerKey,
+      providerProtocol: runtimeMetadata?.providerProtocol,
+      routeName: runtimeMetadata?.routeName,
+      target: runtimeMetadata?.target,
+      runtimeMetadata,
+      pipelineId: runtimeMetadata?.pipelineId
     };
+    return context;
   }
 
   private handleRequestError(error: unknown, context: ProviderContext): void {
     const now = Date.now();
     const err: ProviderError = (error instanceof Error ? error : new Error(String(error))) as ProviderError;
     const msg = typeof err.message === 'string' ? err.message : String(error ?? 'unknown error');
-    let statusCode: number | undefined;
-    try {
-      const m = msg.match(/HTTP\s+(\d{3})/i);
-      if (m) statusCode = parseInt(m[1], 10);
-    } catch { /* ignore */ }
+    let statusCode: number | undefined = err.statusCode;
+    if (!statusCode) {
+      try {
+        const m = msg.match(/HTTP\s+(\d{3})/i);
+        if (m) statusCode = parseInt(m[1], 10);
+      } catch { /* ignore */ }
+    }
+    const upstream = (err as any)?.response?.data;
+    const upstreamCode = (err as any)?.code || upstream?.error?.code;
+    const upstreamMessage = upstream?.error?.message;
+    const isRateLimit = statusCode === 429;
+    const isTransient = isRateLimit || (err as any)?.retryable === true;
+
+    const runtimeProfile = this.getRuntimeProfile();
 
     // 统一错误日志
-    this.dependencies.logger?.logModule(this.id, 'request-error', {
-      requestId: context.requestId,
-      error: msg,
-      statusCode,
-      providerType: this.providerType,
-      processingTime: now - context.startTime
-    });
+      this.dependencies.logger?.logModule(this.id, 'request-error', {
+        requestId: context.requestId,
+        error: msg,
+        statusCode,
+        upstreamCode,
+        upstreamMessage,
+        providerType: context.providerType,
+        providerId: context.providerId,
+        providerProtocol: context.providerProtocol,
+        providerKey: context.providerKey || runtimeProfile?.providerKey,
+        runtimeKey: runtimeProfile?.runtimeKey,
+        processingTime: now - context.startTime
+      });
 
-    // 统一错误中心上报（禁止静默失败）
-    try {
-      const eh = (this.dependencies as any)?.errorHandlingCenter;
-      if (eh && typeof eh.handleError === 'function') {
-        const ctx = {
-          stage: 'provider',
-          action: 'request-error',
-          providerId: this.id,
-          providerType: this.providerType,
-          requestId: context.requestId,
-          statusCode,
-          retryable: (err as any)?.retryable === true,
-          details: (err as any)?.details || undefined,
-          timestamp: now
-        };
-        // 允许 error center 自行聚合统计
-        eh.handleError(err, ctx).catch(() => {});
-      }
-    } catch { /* ignore error center failures */ }
+    const enrichedDetails = {
+      providerId: this.id,
+      providerKey: context.providerKey || runtimeProfile?.providerKey,
+      providerType: context.providerType,
+      routeName: context.routeName,
+      runtimeKey: runtimeProfile?.runtimeKey,
+      upstreamCode,
+      upstreamMessage,
+      requestContext: context.runtimeMetadata,
+      meta: (err as any)?.details
+    };
+    const enrichedError = err as ProviderError & Record<string, unknown>;
+    if (!enrichedError.requestId) {
+      enrichedError.requestId = context.requestId;
+    }
+    enrichedError.providerKey = context.providerKey;
+    enrichedError.providerId = context.providerId;
+    enrichedError.providerType = context.providerType;
+    enrichedError.routeName = context.routeName;
+    enrichedError.details = {
+      ...(enrichedError.details || {}),
+      ...enrichedDetails,
+      providerKey: enrichedDetails.providerKey,
+      providerType: context.providerType,
+      routeName: context.routeName,
+      status: statusCode,
+      requestId: context.requestId
+    };
+
+    emitProviderError({
+      error: err,
+      stage: 'provider.http',
+      runtime: buildRuntimeFromProviderContext(context),
+      dependencies: this.dependencies,
+      statusCode,
+      recoverable: isTransient,
+      affectsHealth: !isTransient,
+      details: enrichedDetails
+    });
   }
 }

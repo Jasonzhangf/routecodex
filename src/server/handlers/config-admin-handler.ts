@@ -4,14 +4,8 @@ import fsSync from 'fs';
 import path from 'path';
 import { homedir } from 'os';
 import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
-import { ConfigManagerModule } from '../../modules/config-manager/config-manager-module.js';
+import { loadRouteCodexConfig } from '../../config/routecodex-config-loader.js';
 import { ServerFactory } from '../../server-factory.js';
-
-type LoadResult<T = unknown> = { ok: true; data: T } | { ok: false; errors: string[] };
-
-function isOk<T>(r: LoadResult<T>): r is { ok: true; data: T } {
-  return !!r && (r as any).ok === true;
-}
 
 /**
  * 与 index.ts 中逻辑对齐：解析用户配置文件路径。
@@ -35,41 +29,6 @@ function pickUserConfigPath(): string {
     }
   }
   return resolveRouteCodexConfigPath();
-}
-
-/**
- * 与 index.ts 中 getDefaultModulesConfigPath 对齐：
- * 解析 system modules 配置路径（供 rcc-config-core 使用）。
- */
-function pickSystemModulesPath(): string {
-  const envPath = process.env.ROUTECODEX_MODULES_CONFIG;
-  if (envPath) {
-    try {
-      if (fsSync.existsSync(envPath) && fsSync.statSync(envPath).isFile()) {
-        return envPath;
-      }
-    } catch {
-      // fall through to defaults
-    }
-  }
-
-  const candidates = [
-    './config/modules.json',
-    path.join(process.cwd(), 'config', 'modules.json'),
-    path.join(homedir(), '.routecodex', 'config', 'modules.json')
-  ];
-
-  for (const p of candidates) {
-    try {
-      if (fsSync.existsSync(p) && fsSync.statSync(p).isFile()) {
-        return p;
-      }
-    } catch {
-      // ignore
-    }
-  }
-  // 回退到项目内默认路径
-  return './config/modules.json';
 }
 
 /**
@@ -169,7 +128,7 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
       // provider 目录不存在或不可读时，视为无独立 Provider
     }
 
-    // 3) 内置模板集合：仅提供最少字段，具体校验交由 config-core
+    // 3) 内置模板集合：仅提供最少字段，具体校验交由客户端完成
     const templates = [
       {
         id: 'openai-standard',
@@ -185,7 +144,7 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
         id: 'qwen-oauth',
         label: 'Qwen OAuth 模板',
         type: 'openai',
-        description: 'Qwen OAuth provider 模板（auth.type=oauth，具体 OAuth 行为由 config-core/host 决定）',
+        description: 'Qwen OAuth provider 模板（auth.type=oauth）',
         defaults: {
           type: 'openai',
           auth: { type: 'oauth' }
@@ -219,29 +178,13 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
 
 export async function handleValidateUserConfig(req: Request, res: Response): Promise<void> {
   try {
-    const systemPath = pickSystemModulesPath();
     const draftConfig = (req.body && typeof req.body === 'object') ? req.body : {};
-
-    const core = await import('rcc-config-core');
-    const sys: LoadResult = await core.loadSystemConfig(systemPath);
-    const usrDraft: LoadResult = { ok: true, data: draftConfig };
-
-    const canonical = core.buildCanonical(
-      isOk(sys) ? sys : { ok: true, data: {} },
-      usrDraft,
-      { keyDimension: 'perKey' } as any
-    );
-
-    // 尝试导出装配配置：若抛错则视为配置结构不合法
-    try {
-      core.exportAssemblerConfigV2(canonical);
-    } catch (e: any) {
-      const msg = e?.message || String(e ?? 'Unknown assembler error');
-      res.status(400).json({ ok: false, errors: [msg] });
-      return;
+    const errors = validateUserConfig(draftConfig);
+    if (errors.length) {
+      res.status(400).json({ ok: false, errors });
+    } else {
+      res.json({ ok: true });
     }
-
-    res.json({ ok: true });
   } catch (error: any) {
     res.status(500).json({
       ok: false,
@@ -254,90 +197,28 @@ export async function handleSaveUserConfig(req: Request, res: Response): Promise
   try {
     const userConfigPath = pickUserConfigPath();
     const draftConfig = (req.body && typeof req.body === 'object') ? req.body : {};
-
-    // 写入前进行一次完整校验，避免生成不可用配置
-    const systemPath = pickSystemModulesPath();
-    const core = await import('rcc-config-core');
-    const sys: LoadResult = await core.loadSystemConfig(systemPath);
-    const usrDraft: LoadResult = { ok: true, data: draftConfig };
-    const canonical = core.buildCanonical(
-      isOk(sys) ? sys : { ok: true, data: {} },
-      usrDraft,
-      { keyDimension: 'perKey' } as any
-    );
-    try {
-      core.exportAssemblerConfigV2(canonical);
-    } catch (e: any) {
-      const msg = e?.message || String(e ?? 'Unknown assembler error');
-      res.status(400).json({ ok: false, errors: [msg] });
+    const errors = validateUserConfig(draftConfig);
+    if (errors.length) {
+      res.status(400).json({ ok: false, errors });
       return;
     }
 
-    // 校验通过后，写入用户配置文件（pretty JSON）
-    await core.writeJsonPretty(userConfigPath, draftConfig);
+    await fs.writeFile(userConfigPath, JSON.stringify(draftConfig, null, 2), 'utf-8');
 
-    // 写入成功后，基于最新配置重新生成 merged-config 并热重载流水线
+    // 写入成功后，基于最新配置重新生成虚拟路由配置并热重载流水线
     try {
-      const systemPath = pickSystemModulesPath();
-
-      // 1) 使用 ConfigManagerModule 重新生成 merged-config.<port>.json
       const v2 = ServerFactory.getV2Instance() as any;
-      let port: number | null = null;
-      try {
-        const cfg = typeof v2?.getServerConfig === 'function' ? v2.getServerConfig() : null;
-        if (cfg && typeof cfg.port === 'number') {
-          port = cfg.port;
-        }
-      } catch {
-        port = null;
+      if (!v2 || typeof v2.reloadRuntime !== 'function') {
+        throw new Error('RouteCodex V2 server does not expose runtime reload');
       }
-
-      // 若无法从运行中服务器获取端口，则回退到默认端口推断（dev 默认 5555）
-      if (!port || !Number.isFinite(port)) {
-        const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
-        port = !Number.isNaN(envPort) && envPort > 0 ? envPort : 5555;
-      }
-
-      const mergedDir = path.dirname(userConfigPath);
-      const mergedConfigPath = path.join(mergedDir, `merged-config.${port}.json`);
-
-      const cfgMgr = new ConfigManagerModule(userConfigPath);
-      await cfgMgr.initialize({
-        configPath: userConfigPath,
-        mergedConfigPath,
-        systemModulesPath: systemPath
-      });
-
-      // 2) 读取最新 merged-config，并用 PipelineAssembler 重新组装流水线
-      const mergedContent = await fs.readFile(mergedConfigPath, 'utf-8');
-      const mergedConfig = JSON.parse(mergedContent);
-
-      const pac = (mergedConfig as any)?.pipeline_assembler?.config;
-      const hasAssemblerPipes = !!(pac && Array.isArray(pac.pipelines) && pac.pipelines.length > 0);
-      if (!hasAssemblerPipes) {
-        throw new Error(`No assembler pipelines found in ${mergedConfigPath}`);
-      }
-
-      const { PipelineAssembler } = await import('../../modules/pipeline/config/pipeline-assembler.js');
-      const { manager, routePools, routeMeta } = await PipelineAssembler.assemble(mergedConfig);
-
-      if (v2 && typeof v2.attachPipelineManager === 'function') {
-        v2.attachPipelineManager(manager);
-        v2.attachRoutePools(routePools);
-        if (routeMeta) {
-          v2.attachRouteMeta(routeMeta);
-        }
-        const classifierConfig = (mergedConfig as any)?.modules?.virtualrouter?.config?.classificationConfig;
-        if (classifierConfig) {
-          v2.attachRoutingClassifierConfig(classifierConfig);
-        }
-      }
+      const { userConfig: latestConfig } = await loadRouteCodexConfig(userConfigPath);
+      await v2.reloadRuntime(latestConfig);
     } catch (reloadError: any) {
-      // 配置文件已写入，但流水线重载失败，向调用方明确返回错误信息
+      // 配置文件已写入，但运行时重载失败，向调用方明确返回错误信息
       res.status(500).json({
         ok: false,
         errors: [
-          'Config saved but pipeline reload failed',
+          'Config saved but runtime reload failed',
           reloadError?.message || String(reloadError)
         ]
       });
@@ -351,4 +232,56 @@ export async function handleSaveUserConfig(req: Request, res: Response): Promise
       errors: [error?.message || String(error)]
     });
   }
+}
+
+function validateUserConfig(config: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  if (!config || typeof config !== 'object') {
+    errors.push('Configuration must be an object');
+    return errors;
+  }
+  const providers = resolveProviders(config);
+  const routing = resolveRouting(config);
+  if (!Object.keys(providers).length) {
+    errors.push('virtualrouter.providers (or providers) must include at least one provider entry');
+  }
+  if (!Object.keys(routing).length) {
+    errors.push('virtualrouter.routing (or routing) must define at least one route');
+  }
+  for (const [routeName, entries] of Object.entries(routing)) {
+    if (!Array.isArray(entries) || !entries.length) {
+      errors.push(`Route "${routeName}" must list at least one provider key`);
+      continue;
+    }
+    for (const key of entries) {
+      if (typeof key !== 'string' || !key.trim()) {
+        errors.push(`Route "${routeName}" contains invalid provider key`);
+        continue;
+      }
+      const providerId = key.split('.')[0];
+      if (!providers[providerId]) {
+        errors.push(`Route "${routeName}" references unknown provider "${providerId}"`);
+      }
+    }
+  }
+  return errors;
+}
+
+function resolveProviders(config: Record<string, unknown>): Record<string, unknown> {
+  const vr = config && typeof config === 'object' ? (config as any).virtualrouter : {};
+  const providers = (vr && typeof vr === 'object' && vr.providers) ? vr.providers : (config as any).providers;
+  return providers && typeof providers === 'object' ? providers : {};
+}
+
+function resolveRouting(config: Record<string, unknown>): Record<string, string[]> {
+  const vr = config && typeof config === 'object' ? (config as any).virtualrouter : {};
+  const routing = (vr && typeof vr === 'object' && vr.routing) ? vr.routing : (config as any).routing;
+  if (routing && typeof routing === 'object') {
+    const normalized: Record<string, string[]> = {};
+    for (const [route, list] of Object.entries(routing)) {
+      normalized[route] = Array.isArray(list) ? list.map((item) => String(item).trim()).filter(Boolean) : [];
+    }
+    return normalized;
+  }
+  return {};
 }

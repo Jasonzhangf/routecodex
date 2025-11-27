@@ -5,16 +5,34 @@
 import type { UnknownObject } from '../../../../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../../interfaces/pipeline-interfaces.js';
 import { extractProviderRuntimeMetadata, type ProviderRuntimeMetadata } from '../core/provider-runtime-metadata.js';
+import type { TargetMetadata } from '../../../../orchestrator/pipeline-context.js';
+import { emitProviderError, buildRuntimeFromCompatContext } from '../utils/provider-error-reporter.js';
 
 // 协议族与协议映射（与 AGENTS.md 一致）
 const FAMILY_TO_PROTOCOL: Record<string, string> = {
   openai: 'openai-chat',
+  glm: 'openai-chat',
+  qwen: 'openai-chat',
+  iflow: 'openai-chat',
+  lmstudio: 'openai-chat',
+  kimi: 'openai-chat',
+  modelscope: 'openai-chat',
   responses: 'openai-responses',
   anthropic: 'anthropic-messages',
   gemini: 'gemini-chat'
 };
 
-export type ProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini';
+export type ProviderType =
+  | 'openai'
+  | 'glm'
+  | 'qwen'
+  | 'iflow'
+  | 'lmstudio'
+  | 'kimi'
+  | 'modelscope'
+  | 'responses'
+  | 'anthropic'
+  | 'gemini';
 export type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
 
 export interface CompositeContext {
@@ -24,7 +42,7 @@ export interface CompositeContext {
   providerType: ProviderType;
   providerProtocol: ProviderProtocol;
   routeName?: string;
-  target?: unknown;
+  target?: TargetMetadata;
   pipelineId?: string;
 }
 
@@ -81,11 +99,25 @@ function assertProtocol(ctx: CompositeContext, where: string): void {
   }
 }
 
+function buildShapeDetails(payload: any): Record<string, unknown> | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const keys = Object.keys(payload).slice(0, 12);
+  let preview: string | undefined;
+  try {
+    preview = JSON.stringify(payload);
+    if (preview.length > 400) preview = `${preview.slice(0, 400)}…`;
+  } catch {
+    preview = undefined;
+  }
+  return { keys, preview };
+}
+
 function assertShape(payload: any, protocol: ProviderProtocol, where: string): void {
   try {
     if (payload === null || typeof payload !== 'object') {
       const err = new Error(`[${where}] ERR_COMPAT_PROTOCOL_DRIFT: non-json payload`);
       (err as any).code = 'ERR_COMPAT_PROTOCOL_DRIFT';
+      (err as any).details = { protocol, payload: buildShapeDetails(payload) };
       throw err;
     }
     if (protocol === 'openai-chat') {
@@ -95,6 +127,7 @@ function assertShape(payload: any, protocol: ProviderProtocol, where: string): v
       if (!hasMsgs && !hasChoices) {
         const err = new Error(`[${where}] ERR_COMPAT_PROTOCOL_DRIFT: openai-chat shape missing (messages/choices)`);
         (err as any).code = 'ERR_COMPAT_PROTOCOL_DRIFT';
+        (err as any).details = { protocol, payload: buildShapeDetails(payload) };
         throw err;
       }
     } else if (protocol === 'openai-responses') {
@@ -106,6 +139,7 @@ function assertShape(payload: any, protocol: ProviderProtocol, where: string): v
       if (!ok) {
         const err = new Error(`[${where}] ERR_COMPAT_PROTOCOL_DRIFT: openai-responses shape missing`);
         (err as any).code = 'ERR_COMPAT_PROTOCOL_DRIFT';
+        (err as any).details = { protocol, payload: buildShapeDetails(payload) };
         throw err;
       }
     } else if (protocol === 'anthropic-messages' || protocol === 'gemini-chat') {
@@ -116,6 +150,7 @@ function assertShape(payload: any, protocol: ProviderProtocol, where: string): v
       if (!ok) {
         const err = new Error(`[${where}] ERR_COMPAT_PROTOCOL_DRIFT: ${protocol} shape missing`);
         (err as any).code = 'ERR_COMPAT_PROTOCOL_DRIFT';
+        (err as any).details = { protocol, payload: buildShapeDetails(payload) };
         throw err;
       }
     }
@@ -130,6 +165,14 @@ function assertShape(payload: any, protocol: ProviderProtocol, where: string): v
 async function loadCompat(ctx: CompositeContext): Promise<CompatAdapter<any>> {
   switch (ctx.providerProtocol) {
     case 'openai-chat': {
+      if (process.env.RCC_TEST_FAKE_OPENAI_COMPAT === '1') {
+        const shim: CompatAdapter<'openai-chat'> = {
+          protocol: 'openai-chat',
+          request: async (body: any) => body,
+          response: async (wire: any) => wire
+        };
+        return shim;
+      }
       const mod = await import('./compat/openai-compat-aggregator.js');
       return mod.createOpenAICompatAggregator();
     }
@@ -163,20 +206,30 @@ export class ProviderComposite {
   ): Promise<UnknownObject> {
     const runtime = extractProviderRuntimeMetadata(body);
     const ctx = normalizeContext(runtime, opts.providerType);
-    assertProtocol(ctx, 'composite.request');
-    const compat = await loadCompat(ctx);
-    // 允许上层使用 { data: {...} } envelope：仅对 data 部分做治理
-    const hasEnvelope = body && typeof body === 'object' && 'data' in (body as any) && typeof (body as any).data === 'object';
-    const source = hasEnvelope ? ((body as any).data as any) : (body as any);
-    const wireCore = await compat.request(source, ctx, opts.dependencies);
-    // 最小形状断言（若 compat 做了不当改动，快速失败）
-    assertShape(wireCore, ctx.providerProtocol, 'composite.request');
-    if (hasEnvelope) {
-      const next: any = { ...(body as any) };
-      next.data = wireCore;
-      return next as UnknownObject;
+    try {
+      assertProtocol(ctx, 'composite.request');
+      const compat = await loadCompat(ctx);
+      // 允许上层使用 { data: {...} } envelope：仅对 data 部分做治理
+      const hasEnvelope = body && typeof body === 'object' && 'data' in (body as any) && typeof (body as any).data === 'object';
+      const source = hasEnvelope ? ((body as any).data as any) : (body as any);
+      const wireCore = await compat.request(source, ctx, opts.dependencies);
+      // 最小形状断言（若 compat 做了不当改动，快速失败）
+      assertShape(wireCore, ctx.providerProtocol, 'composite.request');
+      if (hasEnvelope) {
+        const next: any = { ...(body as any) };
+        next.data = wireCore;
+        return next as UnknownObject;
+      }
+      return wireCore as UnknownObject;
+    } catch (e) {
+      emitProviderError({
+        error: e,
+        stage: 'compat.request',
+        runtime: buildRuntimeFromCompatContext(ctx),
+        dependencies: opts.dependencies
+      });
+      throw e;
     }
-    return wireCore as UnknownObject;
   }
 
   /**
@@ -190,13 +243,23 @@ export class ProviderComposite {
   ): Promise<unknown> {
     const runtime = opts.runtime || extractProviderRuntimeMetadata(metaSource || {}) || undefined;
     const ctx = normalizeContext(runtime, opts.providerType);
-    assertProtocol(ctx, 'composite.response');
-    const compat = await loadCompat(ctx);
-    const std = await compat.response(response, ctx, opts.dependencies);
-    // 最小形状断言（对 std 侧，应该是“标准化后的上游 JSON”，允许是 data 外壳内部）；SSE 遮罩允许（responses 协议）
-    const root: any = (std as any)?.data ?? std;
-    assertShape(root, ctx.providerProtocol, 'composite.response');
-    return std;
+    try {
+      assertProtocol(ctx, 'composite.response');
+      const compat = await loadCompat(ctx);
+      const std = await compat.response(response, ctx, opts.dependencies);
+      // 最小形状断言（对 std 侧，应该是“标准化后的上游 JSON”，允许是 data 外壳内部）；SSE 遮罩允许（responses 协议）
+      const root: any = (std as any)?.data ?? std;
+      assertShape(root, ctx.providerProtocol, 'composite.response');
+      return std;
+    } catch (e) {
+      emitProviderError({
+        error: e,
+        stage: 'compat.response',
+        runtime: buildRuntimeFromCompatContext(ctx),
+        dependencies: opts.dependencies
+      });
+      throw e;
+    }
   }
 }
 

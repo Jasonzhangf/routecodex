@@ -7,8 +7,9 @@ This roadmap outlines the implementation plan for V2 pipeline architecture with 
 1. **V2 Basic Architecture** - Core virtual pipeline components
 2. **Dynamic Connection System** - Runtime module connection
 3. **V1/V2 Migration System** - Gradual switching mechanism
-4. **Configuration & Validation** - Migration tools and validation
-5. **Testing & Optimization** - Comprehensive testing and performance tuning
+4. **ProviderComposite (3.5)** - Internalize compatibility into Provider with protocol guards, type-only providers
+5. **Configuration & Validation** - Migration tools and validation
+6. **Testing & Optimization** - Comprehensive testing and performance tuning
 
 ## 🚀 Phase 1: V2 Basic Architecture (3-4 days)
 
@@ -167,6 +168,22 @@ This roadmap outlines the implementation plan for V2 pipeline architecture with 
 - No auto recovery; errors surface immediately with full context
 
 ## ⚙️ Phase 4: Configuration & Validation (1-2 days)
+
+### 3.5 ProviderComposite & Type-only Providers
+**Files**: `src/modules/pipeline/modules/provider/v2/composite/*`, `src/modules/pipeline/modules/provider/v2/core/*`, `docs/providers/*`
+
+**Tasks**:
+- [x] Internalize compatibility into Provider (ProviderComposite)
+- [x] Add protocol guards and minimal shape checks (Fail Fast)
+- [x] OpenAI-family aggregator (glm/lmstudio/iflow reuse; qwen safe path)
+- [x] Factory protocol-first selection; normalize legacy providerType
+- [x] Docs for design/testing/migration
+
+**Acceptance Criteria**:
+- Pipeline no longer needs explicit compatibility nodes
+- Provider reads runtime metadata and enforces protocol guards
+- SSE boundary respected (Provider→Host JSON only)
+- Legacy configs run with warnings; brand handled via providerId/extensions
 
 ### 4.1 Configuration Schema Implementation
 **Files**: `src/config/v2-config-schema.ts`

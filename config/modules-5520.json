@@ -21,14 +21,6 @@
         "enablePipeline": true
       }
     },
-    "configmanager": {
-      "enabled": true,
-      "config": {
-        "moduleType": "config-manager",
-        "configPath": "./routecodex.json",
-        "watchMode": true
-      }
-    },
     "providermanager": {
       "enabled": true,
       "config": {

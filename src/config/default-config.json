@@ -254,10 +254,6 @@
       "enabled": true,
       "config": {}
     },
-    "configmanager": {
-      "enabled": true,
-      "config": {}
-    },
     "providermanager": {
       "enabled": true,
       "config": {}

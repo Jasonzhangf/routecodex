@@ -1,8 +1,13 @@
-# Provider Module - 统一OpenAI标准实现
+# Provider V2 模块 & ProviderComposite
 
 ## 🎯 设计概述
 
-本模块基于RouteCodex 9大核心架构原则，提供统一的OpenAI标准实现。通过配置驱动的方式支持多种OpenAI兼容服务，包括GLM、Qwen、OpenAI、iFlow和LM Studio等，同时保持与V1版本的完全接口兼容性。
+Provider V2 负责“HTTP ↔ 上游”全部逻辑：`chat-http-provider.ts`、`responses-http-provider.ts`、`anthropic-http-provider.ts`、`gemini-http-provider.ts` 等协议化类统一封装了认证、Header 构造、快照与错误处理；`ProviderComposite` 是唯一的兼容入口，把家族差异（GLM/Qwen/iFlow 等）托管在 `provider/v2/compatibility/**` 下，再通过 runtime metadata 精准注入到每次请求中。
+
+核心目标：
+- **协议化**：按 `providerType ∈ {openai,responses,anthropic,gemini}` 选择对应 Provider，实现“统一 HTTP + 最小兼容”。
+- **Runtime 驱动**：Host 通过 `bootstrapVirtualRouterConfig` 产出的 runtime profile（baseUrl/headers/auth/runtimeKey），在请求体上调用 `attachProviderRuntimeMetadata`，Provider 负责读回这些字段。
+- **单入口兼容**：所有工具修复、字段修剪、家族特性仅允许在 `ProviderComposite` 内执行，防止再出现兼容节点漂移。
 
 ## 🏗️ 核心架构
 
@@ -16,7 +21,7 @@
 ├─────────────────────────────────────────────────┤
 │                  核心实现层 (v2/core/)            │
 ├─────────────────────────────────────────────────┤
-│  基础抽象类  │  标准实现  │  实例工厂       │
+│  基础抽象类  │  Chat/Responses/Anthropic/Gemini  │  实例工厂 │
 ├─────────────────────────────────────────────────┤
 │                  认证模块 (v2/auth/)            │
 ├─────────────────────────────────────────────────┤
@@ -29,6 +34,11 @@
 │                  工具模块 (v2/utils/)             │
 ├─────────────────────────────────────────────────┤
 │  HTTP客户端 │  请求标准化 │ 响应标准化      │
+├─────────────────────────────────────────────────┤
+│          兼容模块 (v2/compatibility/**)          │
+├─────────────────────────────────────────────────┤
+│  GLM/Qwen/iFlow/LmStudio 函数化实现 & hooks      │
+│  ProviderComposite 统一加载 → 最小修剪           │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -43,14 +53,21 @@ Do（应做）
 - 配置驱动：baseUrl/timeout/retry/headers。
 
 Don't（不应做）
-- 工具语义修复/参数归一（例如改写 `shell.command`）。
+- 工具语义修复/参数归一（例如改写 `shell.command`），应留在 llmswitch-core process node。
 - 工具文本收割或 JSON/JSON5 修复（统一在 llmswitch-core）。
-- 业务逻辑或协议转换（委托给上层）。
+- 引入新的兼容路径（必须通过 ProviderComposite 调用 `provider/v2/compatibility/**`）。
 
 可选能力
 - Responses 上游真流式直通（默认关闭）：
   - 开关：`ROUTECODEX_RESPONSES_UPSTREAM_SSE=1` 或 `RCC_RESPONSES_UPSTREAM_SSE=1`
   - 未启用时 Provider 保持统一非流式 JSON；流式合成交由 llmswitch-core。
+- Gemini/Anthropic 等协议新增时，只需要扩展 `chat-http-provider.ts` 同级实现 + 在 `ProviderComposite` 注册相应 compat，Host 无需改动。
+
+### ProviderComposite 与兼容模块
+
+- 兼容实现统一位于 `src/modules/pipeline/modules/provider/v2/compatibility/**`，涵盖 GLM/Qwen/iFlow/LmStudio 等函数化处理、字段映射与 hooks。
+- `ProviderComposite.applyRequest/Response` 会根据 runtime metadata 中的 `providerType/providerId` 选择兼容模块，并把 `runtimeKey/requestId/routeName` 注入 Error Center 事件，遵循 Fail-Fast 原则。
+- 任何新的兼容逻辑必须以“纯函数 + ProviderComposite”方式实现，禁止在 HTTP handler/host 层重复处理。
 
 ## 🔐 iFlow OAuth 实现详解
 
@@ -142,7 +159,7 @@ const iflowConfig = {
 };
 
 // 2. 首次使用会触发浏览器授权
-const provider = new OpenAIStandard(iflowConfig, dependencies);
+const provider = new ChatHttpProvider(iflowConfig, dependencies);
 await provider.initialize(); // → 打开浏览器 → 授权 → 获取 API Key
 
 // 3. 后续使用直接读取本地 token 文件
@@ -177,3 +194,13 @@ const response = await provider.processIncoming({
 - `IFLOW_CLIENT_SECRET`：覆盖默认 clientSecret（高级用法）
 - `ROUTECODEX_OAUTH_AUTO_OPEN=0`：禁用自动打开浏览器（手动授权）
 
+## ✅ 测试指南
+
+| 测试脚本 | 场景 |
+| --- | --- |
+| `npm test -- tests/provider/provider-outbound-provider.test.ts --runInBand` | 使用黄金样本验证 Chat/Responses Provider 出站整形、兼容开关及 Header/模型注入。 |
+| `npm test -- tests/provider/provider-outbound-param.test.ts --runInBand` | 枚举 `~/.routecodex/codex-samples`，复用同一 Chat 负载测试 openai/responses/anthropic 三条链路。 |
+| `npm test -- tests/provider/provider-composite-guards.test.ts --runInBand` | 协议守卫 + Error Center 快速失败。 |
+| `npm test -- tests/provider/provider-factory.test.ts --runInBand` | ProviderFactory Fail-Fast 行为。 |
+
+> 建议在 provider 单测里设置 `RCC_TEST_FAKE_*` 环境变量，避免 real compat 模块加载 `import.meta`，并保持测试纯粹。

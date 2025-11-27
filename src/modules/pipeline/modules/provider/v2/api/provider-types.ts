@@ -8,6 +8,8 @@ import type { ProviderModule } from '../../../../interfaces/pipeline-interfaces.
 import type { UnknownObject } from '../../../../../../types/common-types.js';
 import type { OpenAIStandardConfig } from './provider-config.js';
 import type { ProviderHooks } from '../config/provider-hooks.js';
+import type { TargetMetadata } from '../../../../orchestrator/pipeline-context.js';
+import type { ProviderRuntimeMetadata } from '../core/provider-runtime-metadata.js';
 
 // Re-export ProviderHooks for external use
 export type { ProviderHooks } from '../config/provider-hooks.js';
@@ -39,7 +41,7 @@ export interface IProviderV2 extends ProviderModule {
  * - 'anthropic'  : Anthropic Messages wire（/v1/messages）
  * - 其余为具体兼容族（glm/qwen/iflow/lmstudio）
  */
-export type ProviderType = 'openai' | 'glm' | 'qwen' | 'iflow' | 'lmstudio' | 'responses' | 'anthropic';
+export type ProviderType = 'openai' | 'glm' | 'qwen' | 'iflow' | 'lmstudio' | 'responses' | 'anthropic' | 'gemini';
 
 /**
  * 服务类型映射
@@ -87,6 +89,37 @@ export interface ProviderMetrics {
   timestamp: number;
 }
 
+export interface ProviderRuntimeAuth {
+  type: 'apikey' | 'oauth';
+  value?: string;
+  secretRef?: string;
+  tokenFile?: string;
+  tokenUrl?: string;
+  deviceCodeUrl?: string;
+  clientId?: string;
+  clientSecret?: string;
+  scopes?: string[];
+}
+
+export interface ProviderRuntimeProfile {
+  runtimeKey: string;
+  providerId: string;
+  providerKey?: string;
+  keyAlias?: string;
+  providerType: ProviderType;
+  /**
+   * Upstream endpoint/base URL emitted by virtual router runtime.
+   * When only endpoint is provided, host/provider should treat it as baseUrl.
+   */
+  endpoint: string;
+  baseUrl?: string;
+  headers?: Record<string, string>;
+  auth: ProviderRuntimeAuth;
+  compatibilityProfile?: string;
+  outboundProfile?: string;
+  defaultModel?: string;
+}
+
 /**
  * Provider上下文
  */
@@ -97,6 +130,13 @@ export interface ProviderContext {
   model?: string;
   hasTools?: boolean;
   metadata?: Record<string, unknown>;
+  providerId?: string;
+  providerKey?: string;
+  providerProtocol?: string;
+  routeName?: string;
+  target?: TargetMetadata;
+  runtimeMetadata?: ProviderRuntimeMetadata;
+  pipelineId?: string;
   profile?: ServiceProfile;
 }
 

@@ -380,8 +380,8 @@ data: [DONE]
 
 ## 相关文档
 
-- [RouteCodex GLM兼容性文档](../src/modules/pipeline/modules/compatibility/glm-api.md)
-- [GLM兼容性实现](../src/modules/pipeline/modules/compatibility/glm-compatibility.ts)
+- [RouteCodex GLM兼容性文档](../src/modules/pipeline/modules/provider/v2/compatibility/glm-api.md)
+- [GLM兼容性实现](../src/modules/pipeline/modules/provider/v2/compatibility/glm-compatibility.ts)
 - [智谱AI官方文档](https://docs.bigmodel.cn/)
 
 ---

@@ -57,7 +57,7 @@
 - GLM 响应 → OpenAI 映射：
   - 统一返回工具调用与文本，避免 “nrr/no response requested”；
   - SSE 维持标准事件序列；
-- 实现位置：`src/modules/pipeline/modules/compatibility/glm-compatibility.ts`
+- 实现位置：`src/modules/pipeline/modules/provider/v2/compatibility/glm-compatibility.ts`
 
 5) 主包内引用与注册清理
 - 清除/替换主包对本地 llmswitch 的引入与注册：

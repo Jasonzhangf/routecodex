@@ -37,7 +37,7 @@
 #### 拆分方案
 
 ##### 1.1 GLM Thinking配置模块
-**文件**: `src/modules/pipeline/modules/compatibility/glm-specialized/thinking-config.ts`
+**文件**: `src/modules/pipeline/modules/provider/v2/compatibility/glm-specialized/thinking-config.ts`
 **职责**: 仅处理GLM特有的thinking模式配置
 **行数**: ~80行
 
@@ -55,7 +55,7 @@ export class GLMThinkingConfig {
 ```
 
 ##### 1.2 GLM响应标准化模块
-**文件**: `src/modules/pipeline/modules/compatibility/glm-specialized/response-normalizer.ts`
+**文件**: `src/modules/pipeline/modules/provider/v2/compatibility/glm-specialized/response-normalizer.ts`
 **职责**: 处理GLM特有的响应字段标准化
 **行数**: ~120行
 
@@ -73,7 +73,7 @@ export class GLMResponseNormalizer {
 ```
 
 ##### 1.3 GLM字段清理模块
-**文件**: `src/modules/pipeline/modules/compatibility/glm-specialized/field-cleaner.ts`
+**文件**: `src/modules/pipeline/modules/provider/v2/compatibility/glm-specialized/field-cleaner.ts`
 **职责**: 清理GLM响应中的冗余和特殊字段
 **行数**: ~60行
 
@@ -91,7 +91,7 @@ export class GLMFieldCleaner {
 ```
 
 ##### 1.4 GLM兼容性协调器
-**文件**: `src/modules/pipeline/modules/compatibility/glm-specialized/glm-compatibility-coordinator.ts`
+**文件**: `src/modules/pipeline/modules/provider/v2/compatibility/glm-specialized/glm-compatibility-coordinator.ts`
 **职责**: 协调各个GLM专用模块，保持向后兼容
 **行数**: ~90行
 
@@ -188,7 +188,7 @@ export class GLMCompatibility {
 ```
 
 #### 精简方案
-**文件**: `src/modules/pipeline/modules/compatibility/field-mapping.ts`
+**文件**: `src/modules/pipeline/modules/provider/v2/compatibility/field-mapping.ts`
 **保留3种核心类型**:
 
 ```typescript

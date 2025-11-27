@@ -1,18 +1,18 @@
 /**
  * ResponsesProvider - 真实 OpenAI Responses SSE 透传 Provider
  *
- * 最小实现：继承 OpenAIStandard，覆写 ServiceProfile 与发送路径，
+ * 最小实现：继承 ChatHttpProvider，覆写 ServiceProfile 与发送路径，
  * 在 /v1/responses 入口下一律走上游 /responses 并使用 SSE（Accept: text/event-stream）。
  */
 
-import { OpenAIStandard } from './openai-standard.js';
+import { ChatHttpProvider } from './chat-http-provider.js';
 import path from 'node:path';
 import type { ServiceProfile } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../../../../types/common-types.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
 import { buildResponsesRequestFromChat } from '../../../../../llmswitch/bridge.js';
 
-export class ResponsesProvider extends OpenAIStandard {
+export class ResponsesProvider extends ChatHttpProvider {
   /**
    * 使用 OpenAI 基础档案，但将默认 endpoint 改为 /responses。
    */

@@ -1,48 +1,25 @@
-import crypto from 'crypto';
-import net from 'net';
-import path from 'path';
-import { homedir } from 'os';
+import net from 'node:net';
 
-import { LOCAL_HOSTS } from "../../../constants/index.js";export function generateCodeVerifier(): string {
-  const bytes = crypto.randomBytes(32);
-  return bytes.toString('base64url');
-}
-
-export function generateCodeChallenge(codeVerifier: string): string {
-  const hash = crypto.createHash('sha256').update(codeVerifier).digest();
-  return hash.toString('base64url');
-}
-
-export function generatePKCEPair(): { codeVerifier: string; codeChallenge: string } {
-  const codeVerifier = generateCodeVerifier();
-  const codeChallenge = generateCodeChallenge(codeVerifier);
-  return { codeVerifier, codeChallenge };
-}
-
-export function normalizePath(p: string): string {
-  try {
-    let out = p;
-    if (typeof out === 'string' && out.startsWith('~')) {
-      out = path.join(homedir(), out.slice(1));
+export async function findOpenPort(start = 3000, end = 3999): Promise<number> {
+  for (let port = start; port <= end; port++) {
+    const isFree = await checkPort(port);
+    if (isFree) {
+      return port;
     }
-    if (!path.isAbsolute(out)) {
-      out = path.resolve(process.cwd(), out);
-    }
-    return out;
-  } catch {
-    return p;
   }
+  throw new Error('No available port found');
 }
 
-export async function findOpenPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
+function checkPort(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
     const server = net.createServer();
-    server.on('error', reject);
-    server.listen(0, LOCAL_HOSTS.IPV4, () => {
-      const address = server.address();
-      const port = typeof address === 'object' && address ? address.port : 0;
-      server.close(() => resolve(port));
+    server.once('error', () => {
+      server.close();
+      resolve(false);
     });
+    server.once('listening', () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, '127.0.0.1');
   });
 }
-

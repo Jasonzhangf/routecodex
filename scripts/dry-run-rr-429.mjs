@@ -124,8 +124,6 @@ async function main() {
   const cfgPath = await writeProviderConfig(tmpDir, 9911);
 
   console.log('[dry-run] starting routecodex with', cfgPath);
-  // 为了避免依赖 config-core 的装配差异，强制走 ConfigManager 的最小装配器（带 perKey 映射）
-  // 这样 pipeline_assembler.config 会包含 authMappings/keyMappings，确保按 keyN 选择正确密钥
   const child = spawn(
     'node',
     [path.join(process.cwd(), 'dist', 'cli.js'), 'start', '--config', cfgPath],
@@ -133,7 +131,6 @@ async function main() {
       stdio: 'inherit',
       env: {
         ...process.env,
-        ROUTECODEX_CONFIG_CORE: '1', // 强制使用 config-core 装配，验证 assembler 输出
         RCC_PIPELINE_MODE: 'v2'      // 显式使用 V2 装配与路由池
       }
     }

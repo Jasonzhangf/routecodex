@@ -7,7 +7,8 @@ const root = process.cwd();
 const skip = String(process.env.ROUTECODEX_SKIP_CORE_BUILD || process.env.SKIP_CORE_BUILD || '').trim().toLowerCase();
 const tsc = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
 const proj = path.join(root, 'sharedmodule', 'llmswitch-core', 'tsconfig.json');
-const outDir = path.join(root, 'sharedmodule', 'llmswitch-core', 'dist');
+const coreRoot = path.join(root, 'sharedmodule', 'llmswitch-core');
+const outDir = path.join(coreRoot, 'dist');
 const requiredOutputs = [
   path.join(outDir, 'v2', 'bridge', 'routecodex-adapter.js'),
   path.join(outDir, 'v2', 'conversion', 'conversion-v3', 'config', 'index.js')
@@ -18,6 +19,56 @@ function fail(msg){ console.error(`[build-core] ${msg}`); process.exit(2); }
 function distIsValid() {
   if (!fs.existsSync(outDir)) return false;
   return requiredOutputs.every(file => fs.existsSync(file));
+}
+
+function getFileMtime(filePath) {
+  try {
+    return fs.statSync(filePath).mtimeMs || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function walkLatestMtime(entry) {
+  let latest = 0;
+  if (!fs.existsSync(entry)) return latest;
+  const stat = fs.statSync(entry);
+  if (stat.isDirectory()) {
+    const entries = fs.readdirSync(entry, { withFileTypes: true });
+    for (const dirent of entries) {
+      if (dirent.name === 'dist' || dirent.name === 'node_modules' || dirent.name.startsWith('.')) continue;
+      latest = Math.max(latest, walkLatestMtime(path.join(entry, dirent.name)));
+    }
+  } else {
+    latest = Math.max(latest, stat.mtimeMs || 0);
+  }
+  return latest;
+}
+
+function latestSourceMtime() {
+  const candidates = [
+    path.join(coreRoot, 'src'),
+    path.join(coreRoot, 'interpreter'),
+    path.join(coreRoot, 'exporters'),
+    path.join(coreRoot, 'package.json'),
+    path.join(coreRoot, 'tsconfig.json')
+  ];
+  return candidates.reduce((max, candidate) => Math.max(max, walkLatestMtime(candidate)), 0);
+}
+
+function earliestDistMtime() {
+  const times = requiredOutputs.map(getFileMtime).filter(Boolean);
+  if (!times.length) return 0;
+  return Math.min(...times);
+}
+
+function shouldSkipBuild() {
+  if (!distIsValid()) return false;
+  const srcMtime = latestSourceMtime();
+  if (!srcMtime) return false;
+  const distMtime = earliestDistMtime();
+  if (!distMtime) return false;
+  return distMtime >= srcMtime;
 }
 
 if (!fs.existsSync(tsc)) fail('TypeScript not installed in root node_modules. Run npm i.');
@@ -31,8 +82,8 @@ if (skip === '1' || skip === 'true' || skip === 'yes') {
   console.log('[build-core] skip requested by env (ROUTECODEX_SKIP_CORE_BUILD/SKIP_CORE_BUILD)');
   process.exit(0);
 }
-if (distIsValid()) {
-  console.log('[build-core] dist already built; skip rebuild:', outDir);
+if (shouldSkipBuild()) {
+  console.log('[build-core] dist up-to-date; skip rebuild:', outDir);
   process.exit(0);
 }
 

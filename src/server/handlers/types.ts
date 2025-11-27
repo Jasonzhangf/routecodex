@@ -1,10 +1,25 @@
 import type { Request, Response } from 'express';
+import type { ErrorHandlingCenter } from '../../modules/errorhandling/error-handling-center-shim.js';
+
+export interface PipelineExecutionInput {
+  entryEndpoint: string;
+  method: string;
+  requestId: string;
+  headers: Record<string, unknown>;
+  query: Record<string, unknown>;
+  body: unknown;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PipelineExecutionResult {
+  status?: number;
+  headers?: Record<string, string>;
+  body?: unknown;
+}
 
 export interface HandlerContext {
-  pipelineManager: any;
-  routePools: Record<string, string[]>;
-  // 虚拟路由器决策的“路由池名称”（例如 default/coding/websearch 等）
-  selectRouteName: (payload: any, entryEndpoint: string) => Promise<string>;
+  executePipeline: ((input: PipelineExecutionInput) => Promise<PipelineExecutionResult>) | null;
+  errorHandling?: ErrorHandlingCenter | null;
 }
 
 export type EndpointHandler = (req: Request, res: Response, ctx: HandlerContext) => Promise<void>;

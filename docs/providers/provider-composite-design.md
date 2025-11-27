@@ -34,7 +34,7 @@ output/* → Provider.preprocessRequest(compat.request) → HTTP Provider → Pr
   - `src/modules/pipeline/modules/provider/v2/composite/compat/{responses,anthropic,gemin i}.ts`
 
 - 复用（保持原路径）：
-  - 现有 `src/modules/pipeline/modules/compatibility/*` 模块作为旧实现，按需由 openai-compat-aggregator 适配调用（GLM/LM Studio/iFlow）。
+  - 现有 `src/modules/pipeline/modules/provider/v2/compatibility/*` 模块作为旧实现，按需由 openai-compat-aggregator 适配调用（GLM/LM Studio/iFlow）。
 
 ## 协议守卫与自动加载
 
@@ -58,7 +58,7 @@ output/* → Provider.preprocessRequest(compat.request) → HTTP Provider → Pr
 
 ## 与 BaseProvider 的集成
 
-- Chat 协议 Provider（旧 `OpenAIStandard`，将重命名为 `ChatHttpProvider`）在以下两处调用：
+- Chat 协议 Provider（`ChatHttpProvider`，原 `OpenAIStandard`）在以下两处调用：
   - `preprocessRequest` 末尾：`compat.request`
   - `postprocessResponse` 封装前：`compat.response`
 - Responses/Anthropic Provider 可按需接入（初期保持 passthrough）。
@@ -70,6 +70,7 @@ output/* → Provider.preprocessRequest(compat.request) → HTTP Provider → Pr
   - `ERR_COMPAT_PROTOCOL_DRIFT`：compat 改变协议形状。
   - `ERR_UNSUPPORTED_PROVIDER_TYPE`：未注册协议族。
   - `ERR_PROVIDER_HTTP`：HTTP 层错误（保留）。
+- 上报路径：Compat/Provider 每次捕获异常时必须调用 `emitProviderError()`（封装在 `provider-error-reporter.ts`），将错误统一转换为 `ProviderErrorEvent` 并提交给 sharedmodule/llmswitch-core 的 `providerErrorCenter`，同时调用 `errorHandlingCenter.handleError()`。虚拟路由器依赖这些事件执行熔断，禁止吞掉任何异常或在本地兜底。
 - 快照：
   - `compat-pre/compat-post`（request/response）、`provider-request/provider-response/provider-error`；均脱敏，best-effort。
 
@@ -77,7 +78,7 @@ output/* → Provider.preprocessRequest(compat.request) → HTTP Provider → Pr
 
 - Provider 仅按协议类型划分：`openai`、`responses`、`anthropic`、`gemini`。
 - Factory 按类型创建：
-  - `openai` → Chat 协议 Provider（当前类：OpenAIStandard，将逐步对齐为 ChatHttpProvider）；
+  - `openai` → Chat 协议 Provider（当前类：ChatHttpProvider）；
   - `responses` → ResponsesHttpProvider（上游 SSE→JSON 解析）；
   - `anthropic` → AnthropicHttpProvider；
   - `gemini` → 预留。
@@ -137,6 +138,6 @@ ProviderComposite 与 Hook/HTTP 层依赖 `BasePipeline` 回写的元数据：
 ## 执行步骤（本次提交范围）
 
 1) 添加 ProviderComposite 与 openai 聚合器骨架文件；
-2) 在 Chat 协议 Provider（现 `openai-standard.ts`）植入 compat.request/compat.response 调用；
+2) 在 Chat 协议 Provider（`chat-http-provider.ts`）植入 compat.request/compat.response 调用；
 3) Factory 由 `protocol-first` 选择 Provider（保持与旧配置兼容的规范化通道）；
 4) 回归：`npm test -- tests/pipeline/blueprint-regression.test.ts --runInBand`。

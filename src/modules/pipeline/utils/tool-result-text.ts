@@ -1,22 +1,16 @@
-/**
- * Tool result text extraction.
- * Direct pass-through strategy: preserve the original result as-is.
- */
-
-export function extractToolText(value: unknown): string {
-  // Strategy: direct pass-through without processing
-  if (typeof value === 'string') {
-    return value;
+export function extractToolText(content: unknown): string {
+  if (typeof content === 'string') {
+    return content;
   }
-
-  // Convert non-string values to string representation
-  if (value === null || value === undefined) {
-    return '';
+  if (Array.isArray(content)) {
+    return content.map((part) => (typeof part === 'string' ? part : JSON.stringify(part))).join('');
   }
-
-  try {
-    return String(value);
-  } catch {
-    return '';
+  if (content && typeof content === 'object') {
+    try {
+      return JSON.stringify(content);
+    } catch {
+      return '';
+    }
   }
+  return content == null ? '' : String(content);
 }

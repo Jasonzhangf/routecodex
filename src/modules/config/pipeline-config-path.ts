@@ -2,6 +2,8 @@ import path from 'path';
 import os from 'os';
 
 const DEFAULT_FILENAME = 'pipeline-config.generated.json';
+const DEFAULT_VR_FILENAME = 'virtual-router-config.generated.json';
+const DEFAULT_KEY_VAULT_FILENAME = 'key-vault.generated.json';
 
 function sanitizePortLabel(value: string): string | undefined {
   const trimmed = value.trim();
@@ -22,6 +24,18 @@ export function getPipelineConfigFilename(portLabel?: string): string {
   return portLabel ? `pipeline-config.${portLabel}.generated.json` : DEFAULT_FILENAME;
 }
 
+export function getVirtualRouterConfigFilename(portLabel?: string): string {
+  return portLabel ? `virtual-router-config.${portLabel}.generated.json` : DEFAULT_VR_FILENAME;
+}
+
+export function getKeyVaultFilename(portLabel?: string): string {
+  return portLabel ? `key-vault.${portLabel}.generated.json` : DEFAULT_KEY_VAULT_FILENAME;
+}
+
+export function getGeneratedConfigDir(): string {
+  return path.join(os.homedir(), '.routecodex', 'config', 'generated');
+}
+
 // 新路径规范：仅消费由 config-core 生成的标准位置
 // ~/.routecodex/config/generated/pipeline-config.<port>.generated.json
 export function resolvePipelineConfigCandidates(_baseDir: string, override?: string): string[] {
@@ -32,8 +46,7 @@ export function resolvePipelineConfigCandidates(_baseDir: string, override?: str
     process.env.RCC_PIPELINE_CONFIG_PATH;
   const envPath = envPathRaw && envPathRaw.trim() ? path.resolve(envPathRaw.trim()) : undefined;
   const portLabel = getPortLabel();
-  const home = os.homedir();
-  const generatedDir = path.join(home, '.routecodex', 'config', 'generated');
+  const generatedDir = getGeneratedConfigDir();
   const standard = path.join(generatedDir, getPipelineConfigFilename(portLabel));
 
   const candidates: string[] = [];

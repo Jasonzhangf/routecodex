@@ -7,15 +7,15 @@
  * - 不在内部切换协议族，providerType 始终为 'openai'
  *
  * 说明：
- * - 当前实现直接复用 OpenAIStandard 的能力，但通过固定 providerType='openai'
+ * - 当前实现直接复用 ChatHttpProvider 的能力，但通过固定 providerType='openai'
  *   将其约束为单一协议族的 HTTP Provider，便于后续平滑迁移。
  */
 
-import { OpenAIStandard } from './openai-standard.js';
+import { ChatHttpProvider } from './chat-http-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ModuleDependencies } from '../../../../interfaces/pipeline-interfaces.js';
 
-export class OpenAIHttpProvider extends OpenAIStandard {
+export class OpenAIHttpProvider extends ChatHttpProvider {
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     const cfg: OpenAIStandardConfig = {
       ...config,
@@ -27,4 +27,3 @@ export class OpenAIHttpProvider extends OpenAIStandard {
     super(cfg, dependencies);
   }
 }
-

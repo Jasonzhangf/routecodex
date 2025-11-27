@@ -180,10 +180,7 @@ async function ensurePipelineConfig(): Promise<void> {
         }
         const configDoc = await loadPipelineConfig();
         PipelineConfigManager.setConfig(configDoc);
-        const compatDoc = await loadCompatibilityProfiles();
-        if (compatDoc) {
-          await registerLlmswitchCompatibilityProfiles(compatDoc);
-        }
+        // Compatibility profiles are optional in V2; host no longer loads external files here.
         pipelineConfigReady = true;
       } catch (error) {
         console.error('[llmswitch-bridge] Failed to initialize pipeline config:', error);
@@ -218,26 +215,6 @@ async function readPipelineConfigFromFile(target: string): Promise<PipelineConfi
     throw new Error(`File ${target} does not contain a valid pipelineConfig section`);
   }
   return extracted;
-}
-
-async function loadCompatibilityProfiles(): Promise<Record<string, CompatibilityProfileInput> | null> {
-  const overridePath = process.env.LLMSWITCH_COMPATIBILITY_PROFILES;
-  const baseDir = resolveBaseDir();
-  const defaultPath = path.join(baseDir, 'config', 'llmswitch', 'compatibility-profiles.json');
-  const target = overridePath || defaultPath;
-  try {
-    const raw = await fs.readFile(target, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') {
-      if (parsed.profiles && typeof parsed.profiles === 'object') {
-        return parsed.profiles as Record<string, CompatibilityProfileInput>;
-      }
-      return parsed as Record<string, CompatibilityProfileInput>;
-    }
-  } catch (error) {
-    console.warn(`[llmswitch-bridge] Unable to read compatibility profiles at ${target}:`, error instanceof Error ? error.message : error);
-  }
-  return null;
 }
 
 function extractPipelineConfig(source: unknown): PipelineConfigDocument | null {

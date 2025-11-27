@@ -10,12 +10,16 @@ import type { CompositeContext } from '../provider-composite.js';
 import type { ModuleDependencies } from '../../../../../interfaces/pipeline-interfaces.js';
 import type { UnknownObject } from '../../../../../../../types/common-types.js';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
 // 简单缓存，避免每次创建兼容模块实例
 const glmCache = new Map<string, any>();
 const lmstudioCache = new Map<string, any>();
 const iflowCache = new Map<string, any>();
+
+const compatModuleDir = typeof __dirname === 'string'
+  ? __dirname
+  : path.dirname(fileURLToPath(import.meta.url));
 
 async function importGLM(deps: ModuleDependencies) {
   let mod = glmCache.get('default');
@@ -50,9 +54,9 @@ async function importGLM(deps: ModuleDependencies) {
       if (process.env.JEST_WORKER_ID) {
         // ts-jest 环境：直接 require TS 源文件
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        m = require('../../../../../compatibility/glm/glm-compatibility.ts');
+        m = require('../../compatibility/glm/glm-compatibility.ts');
       } else {
-        const resolved = path.resolve(__dirname, '../../../../../compatibility/glm/glm-compatibility.js');
+        const resolved = path.resolve(compatModuleDir, '../../compatibility/glm/glm-compatibility.js');
         m = await import(pathToFileURL(resolved).href);
       }
       mod = new (m as any).GLMCompatibility(deps);
@@ -82,9 +86,9 @@ async function importLMStudio(deps: ModuleDependencies) {
       let m: any;
       if (process.env.JEST_WORKER_ID) {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        m = require('../../../../../compatibility/lmstudio-compatibility.ts');
+        m = require('../../compatibility/lmstudio-compatibility.ts');
       } else {
-        const resolved = path.resolve(__dirname, '../../../../../compatibility/lmstudio-compatibility.js');
+        const resolved = path.resolve(compatModuleDir, '../../compatibility/lmstudio-compatibility.js');
         m = await import(pathToFileURL(resolved).href);
       }
       mod = new (m as any).LMStudioCompatibility(deps);
@@ -114,9 +118,9 @@ async function importIFlow(deps: ModuleDependencies) {
       let m: any;
       if (process.env.JEST_WORKER_ID) {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        m = require('../../../../../compatibility/iflow/iflow-compatibility.ts');
+        m = require('../../compatibility/iflow/iflow-compatibility.ts');
       } else {
-        const resolved = path.resolve(__dirname, '../../../../../compatibility/iflow/iflow-compatibility.js');
+        const resolved = path.resolve(compatModuleDir, '../../compatibility/iflow/iflow-compatibility.js');
         m = await import(pathToFileURL(resolved).href);
       }
       mod = new (m as any).iFlowCompatibility(deps);

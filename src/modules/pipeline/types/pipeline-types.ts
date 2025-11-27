@@ -28,7 +28,7 @@ export interface ModuleTypeMapping {
   // LLMSwitch 使用本地 V2 适配器，避免 v1 依赖
   'llmswitch-openai-openai': import('../modules/llmswitch-v2-adapters.js').OpenAIOpenAIAdapter;
   'llmswitch-anthropic-openai': import('../modules/llmswitch-v2-adapters.js').AnthropicOpenAIAdapter;
-  'field-mapping': import('../modules/compatibility/field-mapping.js').FieldMappingCompatibility;
+  'field-mapping': import('../modules/provider/v2/compatibility/field-mapping.js').FieldMappingCompatibility;
   // 'qwen-provider': import('../modules/provider/v2/core/qwen-provider.js').QwenProvider;
   // 'generic-http': import('../modules/provider/v2/core/generic-http-provider.js').GenericHTTPProvider;
 }

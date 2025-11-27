@@ -4,6 +4,19 @@
 
 RouteCodex 是一个多 Provider OpenAI 代理服务器，支持动态路由、负载均衡和兼容性处理。系统采用模块化设计，支持主题订阅、错误处理、调试中心等高级功能。
 
+## 与 sharedmodule/llmswitch-core 的职责边界
+
+| 责任层 | RouteCodex Host (本仓库) | sharedmodule/llmswitch-core |
+| --- | --- | --- |
+| 配置解析 | 读取用户配置文件，调用 `bootstrapVirtualRouterConfig`，将 `virtualRouterArtifacts.config` 传给 `SuperPipeline` | 验证 routing/providers/classifier，展开 provider.keyAlias.model，输出 `targetRuntime` |
+| HTTP 请求 | `/v1/chat`/`/v1/responses`/`/v1/messages` handler 将 HTTP/SSE 载荷封装为 `SuperPipelineRequest` | SSE Input → Chat Process → Virtual Router → Output，生成 `providerPayload` + `target` |
+| Provider 初始化 | 根据 `virtualRouterArtifacts.targetRuntime` 或 `superPipeline.getProviderRuntimeMap()` 初始化 Provider 实例，绑定 auth/baseURL/compat profile | 不直接创建 Provider 客户端，仅输出 runtime 元数据 |
+| Provider 调用 | 使用 runtimeKey 查找 Provider 实例，向上游发送请求，记录日志/快照 | 输出 `target.runtimeKey`，供 host 查表；捕获 `ProviderErrorEvent` 以管理熔断 |
+| 错误处理 | Provider/Compatibility 抛错 → `errorHandlingCenter.handleError` → 上报 `providerErrorCenter`，并映射为 HTTP 响应 | Virtual Router 接收 `ProviderErrorEvent`、执行熔断/降级；Super Pipeline 将错误冒泡给 host |
+| 热更新 | 监听配置变更 → 调用 `superPipeline.updateVirtualRouterConfig(newArtifacts)`，并刷新 Provider runtime | 在内部替换 Virtual Router 配置并继续输出最新的 routing/runtime 状态 |
+
+> **落地要求**：Host 不再解析旧的 merged-config 蓝图，也不在 Provider 层做“模型选择”；所有模型替换/目标决策由 Virtual Router 执行，Host 仅负责“把 HTTP/SSE 转交给 Super Pipeline + 根据 runtimeKey 调用 Provider”，从而保证单一职责和无兜底策略。
+
 ## 系统架构
 
 ### 核心组件
@@ -159,25 +172,18 @@ RouteCodex 是一个多 Provider OpenAI 代理服务器，支持动态路由、�
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Conversion V3 流水线架构（llmswitch-core）
+## Super Pipeline 集成（llmswitch-core）
 
-conversion v3 是 sharedmodule/llmswitch-core 提供的唯一转换与工具治理流水线，具备以下约束：
+RouteCodex 现在完全依赖 sharedmodule/llmswitch-core 的 Super Pipeline，实现“HTTP ↔ 标准化请求 ↔ Virtual Router ↔ Provider”全链路处理：
 
-- **单一入口**：RouteCodex 仅通过 `src/modules/llmswitch/bridge.ts` → `sharedmodule/llmswitch-core/dist/v2/bridge/routecodex-adapter` 调用 conversion v3；禁止旁路 import core。
-- **配置驱动节点链**：`config/pipeline-config.generated.json`（可被环境变量覆盖）中的 `llmSwitch.pipelineConfig` 定义每条入站/出站线路的节点序列：`SSE Input → Provider Input → Chat Process → Provider Output → SSE Output`，Responses/Anthropic 线路也遵循相同结构。自 V3 起，每条线路都会携带显式的 `processMode`（`chat` / `passthrough`）与 `mode`（是否 Passthrough）字段，`PipelineConfigManager` 会在匹配入口端点后优先筛选 provider protocol，再根据 `processMode` 命中对应流水线，彻底移除任何自动兜底。
-- **Compatibility 回归 host 模块**：llmswitch-core 的流程节点只负责输入/处理/输出，不再加载 `compatibility-process`。所有 Provider 特定 patch（tool schema、GLM 字段裁剪等）都在 `src/modules/pipeline/modules/compatibility` 内按 providerId/providerType 命中，llmswitch 仅提供标准化请求与响应。
-- **节点职责**
-  - `nodes/sse/*`：SSE 入口/出口/直通节点，仅做 JSON ↔ SSE 序列化与元数据记录。
-  - `nodes/input/*`：OpenAI Chat、OpenAI Responses、Anthropic Messages 入站解析器，校验 `model/messages` 并输出 canonical `standardizedRequest`。
-  - `nodes/process/*`（当前为 `chat-process-node`）：唯一的工具治理点，处理 tool_calls 修复、上下文归一、MCP 规则、streaming 策略等。
-  - `nodes/output/*`：按 Provider 协议生成响应（choices、usage、content blocks 等）。
-  - `nodes/response/*`：出站入口节点，把 Provider 响应转换为 canonical，再交由 output/sse 节点返回。
-- **工具治理原则**
-  - 除 Compatibility 层为满足 OpenAI 协议做的最小字段修剪外，任何模块都不得修改工具语义。
-  - 工具解析、修复、透传、执行判定必须发生在 `process` 链路；Input/Output/SSE/Response 节点只做格式转换或序列化。
-  - 新增功能如需触碰工具，必须作为 `chat-process-node` 的子流程或新的 process 节点，并在 pipeline 配置中显式启用。
+- **唯一入口**：服务器通过 `RouteCodexHttpServer` 调用 `sharedmodule/llmswitch-core/dist/v2/conversion/conversion-v3/pipelines/super-pipeline`，禁止旁路加载核心模块。
+- **配置来源**：`routecodex-config-loader` 读取用户配置后调用 `bootstrapVirtualRouterConfig`。该工具会校验 routing/providers、展开 `provider.keyAlias.model`、生成 `targetRuntime` 映射（endpoint、headers、auth、compat profile），Super Pipeline 构造函数直接接受该结果。
+- **节点链路**：Super Pipeline 在内部组成 `SSE Input → Input Node → Chat Process → Virtual Router → (Compatibility，可选) → Output/SSE`。Host 不关心节点细节，只需要把 HTTP 请求封装成 `SuperPipelineRequest`。
+- **工具治理**：唯一的工具治理点位于 `chat-process-node`。Compatibility 层被下沉到 Provider 运行时（`src/modules/pipeline/modules/provider/v2/compatibility`），仅做 Provider 特定的最小字段修剪。
+- **Provider 调度**：Virtual Router 负责分类、熔断、负载均衡，并把 `target.runtimeKey` 写入请求。Host 使用 `superPipeline.getProviderRuntimeMap()` 把 runtimeKey 映射到具体 Provider 实例（包含 OAuth/apiKey 配置、baseURL、compat profile）。
+- **错误流**：Provider/Compatibility 报错后调用 `errorHandlingCenter.handleError`，同时通过 `providerErrorCenter.emit` 把 `ProviderErrorEvent` 交还给 Virtual Router，以便执行熔断和健康统计。
 
-该架构确保三条链路（OpenAI/Anthropic/Responses、SSE/JSON）共享同一份逻辑，调试与快照都仅需关注 conversion v3 输出。
+借助 Super Pipeline，HTTP 层只需关注请求封装与 Provider runtime 生命周期，核心能力全部收敛在 sharedmodule 中，实现“入口单一、无兜底”的目标。
 
 ## 技术栈
 

@@ -94,7 +94,7 @@ const iflowConfig = {
 };
 
 // 2. 首次使用会触发浏览器授权
-const provider = new OpenAIStandard(iflowConfig, dependencies);
+const provider = new ChatHttpProvider(iflowConfig, dependencies);
 await provider.initialize(); // → 打开浏览器 → 授权 → 获取 API Key
 
 // 3. 后续使用直接读取本地 token 文件
@@ -150,4 +150,3 @@ iFlow OAuth 实现完全对齐 CLIProxyAPI 的设计：
 - ✅ **配置驱动**：所有参数外部化，无硬编码
 - ✅ **CLIProxyAPI 兼容**：字段名、端点、错误处理完全一致
 - ✅ **生产就绪**：经过完整测试验证，支持自动刷新和错误恢复
-

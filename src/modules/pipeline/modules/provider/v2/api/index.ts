@@ -5,8 +5,8 @@
  */
 
 // 核心实现
-export { OpenAIStandard } from '../core/openai-standard.js';
-export { ProviderFactory, createOpenAIStandard } from '../core/provider-factory.js';
+export { ChatHttpProvider } from '../core/chat-http-provider.js';
+export { ProviderFactory, createChatHttpProvider } from '../core/provider-factory.js';
 
 // 配置类型
 export type { OpenAIStandardConfig } from './provider-config.js';
@@ -38,9 +38,9 @@ export type { UnknownObject } from '../../../../../../types/common-types.js';
 /**
  * V2主要导出摘要：
  *
- * 1. OpenAIStandard - 统一的OpenAI兼容Provider实现
+ * 1. ChatHttpProvider - 统一的 OpenAI Chat 兼容 Provider 实现
  * 2. ProviderFactory - Provider实例工厂
- * 3. createOpenAIStandard - 便捷创建函数
+ * 3. createChatHttpProvider - 便捷创建函数
  * 4. OpenAIStandardConfig - 统一配置接口
  * 5. fromV1Config - V1到V2配置转换
  * 6. ApiKeyAuthProvider/OAuthAuthProvider - 认证模块

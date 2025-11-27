@@ -12,10 +12,9 @@ import net from 'net';
 import { spawn } from 'child_process';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
-import { ConfigManagerModule } from './modules/config-manager/config-manager-module.js';
 import { buildInfo } from './build-info.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
-import { generatePipelineConfiguration } from './modules/config/pipeline-config-generator.js';
+import { loadRouteCodexConfig } from './config/routecodex-config-loader.js';
 
 // Polyfill CommonJS require for ESM runtime to satisfy dependencies that call require()
 let moduleRequire: ((moduleId: string) => unknown) | null = null;
@@ -91,10 +90,9 @@ function resolveAppBaseDir(): string {
  */
 class RouteCodexApp {
   private httpServer: unknown;
-  private configManager: ConfigManagerModule;
   private modulesConfigPath: string;
   private _isRunning: boolean = false;
-  private mergedConfigPath: string = path.join(process.cwd(), 'config', 'merged-config.json');
+  private configPath: string = path.join(process.cwd(), 'config', 'config.json');
   private readonly baseDir: string;
 
   constructor(modulesConfigPath?: string) {
@@ -109,7 +107,6 @@ class RouteCodexApp {
       throw new Error(`Modules configuration path must be a file: ${this.modulesConfigPath}`);
     }
 
-    this.configManager = new ConfigManagerModule();
     this.baseDir = resolveAppBaseDir();
     this.httpServer = null; // 将在初始化时设置
   }
@@ -127,7 +124,7 @@ class RouteCodexApp {
       // 1. 初始化配置管理器
       const port = await this.detectServerPort(this.modulesConfigPath);
 
-      // mergedConfigPath will be resolved after determining userConfigPath below
+      // config path reference will be set after resolving user config below
 
       // 确定用户配置文件路径，优先使用环境变量（RCC4_CONFIG_PATH / ROUTECODEX_CONFIG / ROUTECODEX_CONFIG_PATH），否则回退到共享解析
       function pickUserConfigPath(): string {
@@ -146,22 +143,16 @@ class RouteCodexApp {
         return resolveRouteCodexConfigPath();
       }
       const userConfigPath = pickUserConfigPath();
-      // 将 mergedConfigPath 固定到用户配置目录的标准生成位置，避免本地推测
-      try {
-        const home = homedir();
-        this.mergedConfigPath = path.join(home, '.routecodex', 'config', 'generated', 'merged-config.generated.json');
-      } catch {
-        const mergedDir = path.dirname(userConfigPath);
-        this.mergedConfigPath = path.join(mergedDir, 'merged-config.generated.json');
-      }
+      this.configPath = userConfigPath;
 
       // Honor serverTools toggle strictly by config.json (single source of truth)
       // Set ROUTECODEX_SERVER_TOOLS env based on user config, so core replacement logic
       // relies only on config, avoiding cwd/path ambiguity.
+      const { userConfig, configPath: resolvedConfigPath } = await loadRouteCodexConfig(userConfigPath);
+      this.configPath = resolvedConfigPath;
+
       try {
-        const rawCfg = await fs.readFile(userConfigPath, 'utf-8');
-        const cfg = JSON.parse(rawCfg || '{}');
-        const st = (cfg && typeof cfg === 'object') ? (cfg as any).serverTools : null;
+        const st = (userConfig && typeof userConfig === 'object') ? (userConfig as any).serverTools : null;
         const enabled = !!(st && st.enabled === true && st.replace && st.replace.web_fetch && st.replace.web_fetch.enabled === true);
         // 单一判断来源：严格以用户配置为准，强制覆盖核心的其他推断路径
         const val = enabled ? '1' : '0';
@@ -174,21 +165,13 @@ class RouteCodexApp {
         process.env.RCC_SERVER_TOOLS = '0';
       }
 
-      const configManagerConfig = {
-        configPath: userConfigPath,
-        mergedConfigPath: this.mergedConfigPath,
-        systemModulesPath: this.modulesConfigPath,
-        port,
-        autoReload: true,
-        watchInterval: 5000
-      };
+      if (!process.env.ROUTECODEX_STAGE_LOG || process.env.ROUTECODEX_STAGE_LOG.trim() === '') {
+        if (buildInfo.mode === 'dev') {
+          process.env.ROUTECODEX_STAGE_LOG = '1';
+        }
+      }
 
-      let mergedConfig: any | null = null;
-      // 2. 运行时自动生成 merged-config.<port>.json（动态装配），不再要求预生成
-      //    使用配置管理模块基于用户配置与系统模块配置生成合并配置
-      //    注意：放在端口可用性检查之前，以确保即使端口被占用也会重建合并配置
-      await this.configManager.initialize(configManagerConfig as any);
-      mergedConfig = await this.loadMergedConfig();
+      console.log(`ℹ RouteCodex version: ${buildInfo.version} (${buildInfo.mode} build)`);
 
       // 3. 初始化服务器（V1/V2可切换，默认动态V2）
       // 3. 初始化服务器（仅使用 V2 动态流水线架构）
@@ -196,81 +179,32 @@ class RouteCodexApp {
       let bindHost = '0.0.0.0';
       let bindPort = port;
       try {
-        const http = (mergedConfig as any)?.httpserver || (mergedConfig as any)?.modules?.httpserver?.config || {};
+        const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
+        const http = (userConfig as any)?.httpserver || (userConfig as any)?.modules?.httpserver?.config || {};
         bindHost = String(http.host || '0.0.0.0');
-        const portRaw = http.port ?? (mergedConfig as any)?.server?.port ?? port;
-        bindPort = typeof portRaw === 'number' ? portRaw : parseInt(String(portRaw), 10);
+        const portRaw = http.port ?? (userConfig as any)?.server?.port ?? port;
+        if (Number.isFinite(envPort) && envPort > 0) {
+          bindPort = envPort;
+        } else {
+          bindPort = typeof portRaw === 'number' ? portRaw : parseInt(String(portRaw), 10);
+        }
         if (!Number.isFinite(bindPort)) bindPort = port;
       } catch { /* keep defaults */ }
-      const pipelineConfigPath = await generatePipelineConfiguration({
-        baseDir: this.baseDir,
-        systemConfigPath: this.modulesConfigPath,
-        userConfigPath,
-        port: bindPort
-      });
-      // 仅设置供下游读取，不再做本地注入/回退推测
-      process.env.ROUTECODEX_PIPELINE_CONFIG_PATH = pipelineConfigPath;
-      process.env.RCC_PIPELINE_CONFIG_PATH = pipelineConfigPath;
-
-      // 直接从标准生成路径读取 merged-config.<port>.json（不再注入/重载回退）
-      try {
-        const home = homedir();
-        const mergedPath = path.join(home, '.routecodex', 'config', 'generated', `merged-config.${bindPort}.json`);
-        const raw = await fs.readFile(mergedPath, 'utf-8');
-        mergedConfig = JSON.parse(raw);
-        this.mergedConfigPath = mergedPath;
-      } catch (e) {
-        console.error('❌ Failed to read merged-config from standard generated path:', (e as any)?.message || String(e));
-        throw e;
-      }
-
-      const { RouteCodexServerV2 } = await import('./server-v2/core/route-codex-server-v2.js');
+      const { RouteCodexHttpServer } = await import('./server/runtime/http-server.js');
       // V2 hooks 开关：默认开启；可通过 ROUTECODEX_V2_HOOKS=0/false/no 关闭
       const hooksEnv = String(process.env.ROUTECODEX_V2_HOOKS || process.env.RCC_V2_HOOKS || '').trim().toLowerCase();
       const hooksOff = hooksEnv === '0' || hooksEnv === 'false' || hooksEnv === 'no';
       const hooksOn = !hooksOff;
-      this.httpServer = new RouteCodexServerV2({ server: { host: bindHost, port: bindPort, useV2: true }, logging: { level: 'debug', enableConsole: true }, providers: {}, v2Config: { enableHooks: hooksOn } }) as any;
-      await (this.httpServer as any).initializeWithMergedConfig(mergedConfig);
+      this.httpServer = new RouteCodexHttpServer({ server: { host: bindHost, port: bindPort, useV2: true }, logging: { level: 'debug', enableConsole: true }, providers: {}, v2Config: { enableHooks: hooksOn } }) as any;
+      await (this.httpServer as any).initializeWithUserConfig(userConfig);
 
-      // 4.1 校验 merged-config 的装配输入（V2严格：必须存在 assembler pipelines，不再兜底）
-      try {
-        const pac = (mergedConfig as any)?.pipeline_assembler?.config;
-        const hasAssemblerPipes = !!(pac && Array.isArray(pac.pipelines) && pac.pipelines.length > 0);
-        if (hasAssemblerPipes) {
-          console.log(`🧱 Pipelines in merged (assembler): ${pac.pipelines.length}`);
-          try { const ids = pac.pipelines.map((p: any) => p?.id).filter(Boolean); console.log('🔎 Pipeline IDs:', ids); } catch {}
-        } else {
-          throw new Error(`No assembler pipelines found in ${this.mergedConfigPath}. 自动生成配置缺失，请检查 ~/.routecodex/config.json 是否完整`);
-        }
-      } catch (e: any) {
-        console.error('❌ Pipeline validation error:', e?.message || String(e));
-        throw e;
+      // 4.1 校验 virtualrouter 配置
+      const vrSection = (userConfig as any)?.virtualrouter;
+      if (!vrSection || !vrSection.routing || !Object.keys(vrSection.routing).length) {
+        throw new Error(`user config 缺少 virtualrouter.routing，无法启动`);
       }
-
-      // 5. 按 merged-config 组装流水线并注入（完全配置驱动，无硬编码），透明模式下可跳过
-      let pipelinesAttached = false;
-      const { PipelineAssembler } = await import('./modules/pipeline/config/pipeline-assembler.js');
-      const { manager, routePools, routeMeta } = await PipelineAssembler.assemble(mergedConfig);
-      const poolsCount = Object.values(routePools || {}).reduce((acc: number, v: any) => acc + (Array.isArray(v) ? v.length : 0), 0);
-      if (!poolsCount) {
-        console.warn('⚠️  No route pools assembled; server will start without active pipelines');
-      }
-      (this.httpServer as any).attachPipelineManager(manager);
-      (this.httpServer as any).attachRoutePools(routePools);
-      if (routeMeta) {
-        (this.httpServer as any).attachRouteMeta(routeMeta);
-      }
-      try {
-        const def = Array.isArray((routePools as any)?.default) ? (routePools as any).default[0] : undefined;
-        console.log(`🧭 Default pipeline: ${def || '(none)'}`);
-      } catch { /* ignore */ }
-      // Attach classifier config if present
-      const classifierConfig = (mergedConfig as any)?.modules?.virtualrouter?.config?.classificationConfig;
-      if (classifierConfig) {
-        (this.httpServer as any).attachRoutingClassifierConfig(classifierConfig);
-      }
-      pipelinesAttached = true;
-      console.log('🧩 Pipeline assembled from merged-config and attached to server.');
+      console.log(`🧱 Virtual router routes: ${Object.keys(vrSection.routing).length}`);
+      console.log(`🔑 Provider targets: ${Object.keys((vrSection.routing || {})).reduce((acc, key) => acc + (Array.isArray(vrSection.routing[key]) ? vrSection.routing[key].length : 0), 0)}`);
 
       // 6. 启动服务器（若端口被占用，先尝试优雅释放；确保在合并配置已生成之后）
       // Ensure the port is available before continuing. Attempt graceful shutdown first.
@@ -309,7 +243,7 @@ class RouteCodexApp {
 
       console.log(`✅ RouteCodex server started successfully!`);
       console.log(`🌐 Server URL: http://${serverConfig.host}:${serverConfig.port}`);
-      if (pipelinesAttached) { console.log(`🗂️ Merged config: ${this.mergedConfigPath}`); } else { console.log('🗂️ Running with transparent analysis (no pipelines).'); }
+      console.log(`🗂️ User config: ${this.configPath}`);
       console.log(`📊 Health check: http://${serverConfig.host}:${serverConfig.port}/health`);
       console.log(`🔧 Configuration: http://${serverConfig.host}:${serverConfig.port}/config`);
       console.log(`📖 OpenAI API: http://${serverConfig.host}:${serverConfig.port}/v1/openai`);
@@ -357,19 +291,6 @@ class RouteCodexApp {
       status: 'stopped',
       message: 'Server not initialized'
     };
-  }
-
-  /**
-   * Load merged configuration
-   */
-  private async loadMergedConfig(): Promise<any> {
-    try {
-      const configContent = await fs.readFile(this.mergedConfigPath, 'utf-8');
-      return JSON.parse(configContent);
-    } catch (error) {
-      console.error('Failed to load merged configuration:', error);
-      throw error;
-    }
   }
 
   /**

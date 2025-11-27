@@ -1,151 +1,46 @@
 import type { Request, Response } from 'express';
-import os from 'os';
-import path from 'path';
-import fsp from 'fs/promises';
 import type { HandlerContext } from './types.js';
-import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
-import { logNonBlockingError, runNonBlocking } from '../utils/non-blocking-error-logger.js';
+import {
+  nextRequestId,
+  respondWithPipelineError,
+  sendPipelineResponse,
+  logRequestStart,
+  logRequestComplete,
+  logRequestError
+} from './handler-utils.js';
+import { ensureSsePipelineResult } from '../utils/sse-response-normalizer.js';
 
-// Chat endpoint: /v1/chat/completions (OpenAI Chat SSE shape)
 export async function handleChatCompletions(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
-  // SSE piping日志（仅当核心返回 __sse_responses 时使用）
-  let sseLogger: { write: (line: string) => Promise<void> } = { write: async () => {} } as any;
   const entryEndpoint = '/v1/chat/completions';
+  const requestId = nextRequestId(req.headers['x-request-id']);
   try {
-    if (!ctx.pipelineManager) { res.status(503).json({ error: { message: 'Pipeline manager not attached' } }); return; }
-    const payload = (req.body || {}) as any;
-    const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-    // Snapshot: http-request（非阻塞，错误记录到内部日志）
-    await runNonBlocking(
-      { component: 'http.chat-handler', operation: 'snapshot.http-request', requestId, entryEndpoint },
-      () => writeServerSnapshot({ phase: 'http-request', requestId, data: payload, entryEndpoint })
-    );
-    const wantsSSE = (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream')) || payload.stream === true;
-
-    // Attach endpoint metadata into payload for downstream selection（失败仅记录，不阻断请求）
-    try {
-      const meta = (payload.metadata && typeof payload.metadata === 'object') ? payload.metadata : {};
-      // 将客户端期望的 SSE 标记为 clientStream，仅用于 HTTP 输出层；
-      // 上游 Provider 不再读取该标记，避免入/出站耦合。
-      payload.metadata = { ...meta, entryEndpoint, clientStream: wantsSSE };
-    } catch (error) {
-      await logNonBlockingError(
-        { component: 'http.chat-handler', operation: 'payload.attach-metadata', requestId, entryEndpoint },
-        error
-      );
-    }
-
-    const routeName = await ctx.selectRouteName(payload, entryEndpoint);
-
-    const sharedReq: any = {
-      data: payload,
-      route: { providerId: 'unknown', modelId: String(payload?.model || 'unknown'), requestId, timestamp: Date.now() },
-      metadata: { entryEndpoint, endpoint: entryEndpoint, stream: wantsSSE, routeName },
-      debug: { enabled: false, stages: {} },
-      entryEndpoint
-    };
-
-    // SSE raw log sink
-    sseLogger = (() => {
-      try {
-        const dir = path.join(os.homedir(), '.routecodex', 'logs', 'sse');
-        const ensure = async () => {
-          try {
-            await fsp.mkdir(dir, { recursive: true });
-          } catch (error) {
-            await logNonBlockingError(
-              { component: 'http.chat-handler', operation: 'sse.ensure-dir', requestId, entryEndpoint },
-              error
-            );
-          }
-        };
-        const file = path.join(dir, `${requestId}_server.sse.log`);
-        return {
-          async write(s: string) {
-            try {
-              await ensure();
-              await fsp.appendFile(file, `[${new Date().toISOString()}] ${s}`, 'utf-8');
-            } catch (error) {
-              await logNonBlockingError(
-                { component: 'http.chat-handler', operation: 'sse.append-log', requestId, entryEndpoint },
-                error
-              );
-            }
-          }
-        };
-      } catch (error) {
-        // 创建 SSE 日志失败时，仅记录内部错误，继续使用空 logger
-        void logNonBlockingError(
-          { component: 'http.chat-handler', operation: 'sse.logger-init', requestId, entryEndpoint },
-          error
-        );
-        return { async write(_s: string) { /* noop */ } };
-      }
-    })();
-
-    // 不再由HTTP层发送任何预心跳/兜底SSE，SSE仅由核心节点输出
-
-    // Snapshot: routing-selected（由虚拟路由器决策 routeName）
-    await runNonBlocking(
-      { component: 'http.chat-handler', operation: 'snapshot.routing-selected', requestId, entryEndpoint },
-      () => writeServerSnapshot({ phase: 'routing-selected', requestId, data: { routeName }, entryEndpoint })
-    );
-    const response = await ctx.pipelineManager.processRequest(sharedReq);
-    const out = (response && typeof response === 'object' && 'data' in response) ? (response as any).data : response;
-    // 仅当核心返回 __sse_responses 时，才以 SSE 形式输出
-    if (out && typeof out === 'object' && (out as any).__sse_responses) {
-      try { console.log('[HTTP][SSE] piping core stream for /v1/chat/completions', { requestId }); } catch {}
-      try {
-        if (!res.headersSent) {
-          res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-          res.setHeader('Cache-Control','no-cache, no-transform');
-          res.setHeader('Connection','keep-alive');
-          res.setHeader('X-Accel-Buffering','no');
-        }
-      } catch (error) {
-        void logNonBlockingError(
-          { component: 'http.chat-handler', operation: 'sse.set-headers-core-stream', requestId, entryEndpoint },
-          error
-        );
-      }
-      try {
-        const { PassThrough } = await import('node:stream');
-        const tee = new PassThrough();
-        (out as any).__sse_responses.pipe(tee);
-        tee.on('data', (chunk: Buffer) => {
-          try {
-            sseLogger.write(chunk.toString()).catch(() => {});
-          } catch (error) {
-            void logNonBlockingError(
-              { component: 'http.chat-handler', operation: 'sse.pipe-log', requestId, entryEndpoint },
-              error
-            );
-          }
-        });
-        tee.pipe(res);
-      } catch {
-        (out as any).__sse_responses.pipe(res);
-      }
+    if (!ctx.executePipeline) {
+      res.status(503).json({ error: { message: 'Super pipeline runtime not initialized' } });
       return;
     }
-    // 无核心SSE：统一按 JSON 返回（即便客户端声明了 SSE）
-    await runNonBlocking(
-      { component: 'http.chat-handler', operation: 'snapshot.http-response', requestId, entryEndpoint },
-      () => writeServerSnapshot({ phase: 'http-response', requestId, data: out, entryEndpoint })
-    );
-    res.status(200).json(out);
+    const payload = (req.body || {}) as any;
+    const wantsSSE = (typeof req.headers['accept'] === 'string' && (req.headers['accept'] as string).includes('text/event-stream')) || payload.stream === true;
+    logRequestStart(entryEndpoint, requestId, { stream: wantsSSE, model: payload?.model });
+    const result = await ctx.executePipeline({
+      entryEndpoint,
+      method: req.method,
+      requestId,
+      headers: req.headers as Record<string, unknown>,
+      query: req.query as Record<string, unknown>,
+      body: payload,
+      metadata: {
+        stream: wantsSSE
+      }
+    });
+    const finalResult = wantsSSE
+      ? await ensureSsePipelineResult(result, requestId)
+      : result;
+    logRequestComplete(entryEndpoint, requestId, finalResult.status ?? 200);
+    sendPipelineResponse(res, finalResult, requestId, { forceSSE: wantsSSE });
   } catch (error: any) {
-    // 错误：统一返回 JSON 错误，不做 SSE 兜底
-    await runNonBlocking(
-      { component: 'http.chat-handler', operation: 'snapshot.http-response-error', entryEndpoint },
-      () => writeServerSnapshot({
-        phase: 'http-response.error',
-        requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
-        data: { message: error?.message || String(error) },
-        entryEndpoint
-      })
-    );
-    if (!res.headersSent) res.status(500).json({ error: { message: error?.message || String(error) } });
+    logRequestError(entryEndpoint, requestId, error);
+    if (res.headersSent) return;
+    await respondWithPipelineError(res, ctx, error, entryEndpoint, requestId);
   }
 }
 

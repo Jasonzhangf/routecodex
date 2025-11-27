@@ -9,6 +9,14 @@
  *   - handleError 简单输出到控制台，避免吞掉错误。
  */
 
+type ErrorContextPayload = {
+  error?: unknown;
+  source?: string;
+  severity?: unknown;
+  timestamp?: number;
+  [key: string]: unknown;
+};
+
 export class ErrorHandlingCenter {
   async initialize(): Promise<void> {
     // no-op for local dev
@@ -18,10 +26,45 @@ export class ErrorHandlingCenter {
     // no-op for local dev
   }
 
-  async handleError(error: Error, context: string): Promise<void> {
-    // 基本错误输出，方便本地调试
+  async handleError(error: unknown, context?: unknown): Promise<void> {
+    const prefix = '[ErrorHandlingCenter]';
+
+    if (this.isErrorContextPayload(error)) {
+      // eslint-disable-next-line no-console
+      console.error(prefix, { context, errorContext: error });
+      return;
+    }
+
+    const normalizedError = this.normalizeError(error);
+
+    if (typeof context === 'string' && context.trim().length > 0) {
+      // eslint-disable-next-line no-console
+      console.error(`${prefix}[${context}]`, normalizedError);
+      return;
+    }
+
     // eslint-disable-next-line no-console
-    console.error(`[ErrorHandlingCenter][${context}]`, error);
+    console.error(prefix, { context, error: normalizedError });
+  }
+
+  private normalizeError(error: unknown): Error {
+    if (error instanceof Error) {
+      return error;
+    }
+    if (typeof error === 'string') {
+      return new Error(error);
+    }
+    try {
+      return new Error(JSON.stringify(error));
+    } catch {
+      return new Error(String(error));
+    }
+  }
+
+  private isErrorContextPayload(payload: unknown): payload is ErrorContextPayload {
+    if (!payload || typeof payload !== 'object') {
+      return false;
+    }
+    return 'error' in payload && 'source' in payload;
   }
 }
-

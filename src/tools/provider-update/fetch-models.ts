@@ -138,6 +138,16 @@ export async function fetchModelsFromUpstream(provider: ProviderInputConfig, ver
   // Normalize: OpenAI style {object:'list', data:[{id:'...'}]}
   const models: string[] = [];
   try {
+    // Gemini: { models: [ { name: 'models/gemini-2.5-flash-lite', ... }, ... ] }
+    if (json && typeof json === 'object' && Array.isArray((json as any).models)) {
+      for (const it of (json as any).models) {
+        const name = typeof it?.name === 'string' ? it.name : undefined;
+        if (name) {
+          const id = name.startsWith('models/') ? name.slice('models/'.length) : name;
+          models.push(String(id));
+        }
+      }
+    }
     if (Array.isArray(json)) {
       for (const it of json) {
         const id = typeof it?.id === 'string' ? it.id : (typeof it === 'string' ? it : undefined);

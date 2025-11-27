@@ -183,11 +183,6 @@ export interface UserConfig {
     enableConsole?: boolean;
     enableFile?: boolean;
   };
-  configmanager?: {
-    mergedConfigPath?: string;
-    autoReload?: boolean;
-    watchInterval?: number;
-  };
   [key: string]: unknown;
 }
 

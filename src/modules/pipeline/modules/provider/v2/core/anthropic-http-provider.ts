@@ -7,11 +7,11 @@
  * - providerType 始终为 'anthropic'
  */
 
-import { OpenAIStandard } from './openai-standard.js';
+import { ChatHttpProvider } from './chat-http-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ModuleDependencies } from '../../../../interfaces/pipeline-interfaces.js';
 
-export class AnthropicHttpProvider extends OpenAIStandard {
+export class AnthropicHttpProvider extends ChatHttpProvider {
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     const cfg: OpenAIStandardConfig = {
       ...config,

@@ -119,7 +119,7 @@ export class ServerFactory {
 
       try {
         // 动态导入V2实现
-        const { RouteCodexServerV2 } = await import('./server-v2/core/route-codex-server-v2.js');
+        const { RouteCodexHttpServer } = await import('./server/runtime/http-server.js');
 
         // 合并V2配置
         const v2Config: ServerConfigV2 = {
@@ -131,7 +131,7 @@ export class ServerFactory {
           }
         };
 
-        ServerFactory.v2Instance = new RouteCodexServerV2(v2Config);
+        ServerFactory.v2Instance = new RouteCodexHttpServer(v2Config);
         console.log('[ServerFactory] V2 server instance created');
       } catch (error) {
         console.error('[ServerFactory] Failed to create V2 server:', error);

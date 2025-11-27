@@ -53,8 +53,8 @@ export class HttpClient {
     this.defaultConfig = {
       baseUrl: config.baseUrl || '',
       timeout: config.timeout || 60000,
-      maxRetries: config.maxRetries || 3,
-      retryDelay: config.retryDelay || 1000,
+      maxRetries: 0,
+      retryDelay: 0,
       defaultHeaders: {
         'Content-Type': 'application/json'
       }
@@ -177,43 +177,15 @@ export class HttpClient {
       method: method as any,
       headers: this.buildHeaders(headers),
       timeout: this.defaultConfig.timeout,
-      maxRetries: this.defaultConfig.maxRetries,
-      retryDelay: this.defaultConfig.retryDelay
+      maxRetries: 0,
+      retryDelay: 0
     };
 
-    return this.sendRequestWithRetry(fullUrl, data, requestConfig);
-  }
-
-  /**
-   * 带重试的请求发送
-   */
-  private async sendRequestWithRetry(
-    url: string,
-    data: unknown,
-    config: HttpRequestConfig
-  ): Promise<HttpResponse> {
-    let lastError: unknown;
-
-    for (let attempt = 0; attempt <= config.maxRetries!; attempt++) {
-      try {
-        return await this.sendSingleRequest(url, data, config);
-      } catch (error) {
-        lastError = error;
-
-        // 检查是否应该重试
-        if (!this.shouldRetry(error, attempt, config.maxRetries!)) {
-          break;
-        }
-
-        // 等待重试延迟
-        if (config.retryDelay && attempt < config.maxRetries!) {
-          const delay = config.retryDelay * Math.pow(2, attempt); // 指数退避
-          await this.delay(delay);
-        }
-      }
+    try {
+      return await this.sendSingleRequest(fullUrl, data, requestConfig);
+    } catch (error) {
+      throw this.createProviderError(error);
     }
-
-    throw this.createProviderError(lastError);
   }
 
   /**
@@ -244,7 +216,24 @@ export class HttpClient {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
+        let parsed: unknown;
+        try {
+          parsed = errorText ? JSON.parse(errorText) : undefined;
+        } catch {
+          parsed = undefined;
+        }
+        const err: any = new Error(`HTTP ${response.status}: ${errorText}`);
+        err.status = response.status;
+        err.statusCode = response.status;
+        if (parsed && typeof parsed === 'object' && (parsed as any).error) {
+          err.code = (parsed as any).error?.code || (parsed as any).error?.type;
+        }
+        err.response = {
+          data: parsed,
+          raw: errorText
+        };
+        err.retryable = false;
+        throw err;
       }
 
       // 根据 Content-Type 判断响应类型
@@ -340,11 +329,7 @@ export class HttpClient {
   /**
    * 判断是否应该重试
    */
-  private shouldRetry(error: unknown, attempt: number, maxRetries: number): boolean {
-    if (attempt >= maxRetries) {
-      return false;
-    }
-
+  private shouldRetry(error: unknown): boolean {
     const err = error as any;
 
     // 某些上游聚合器（特别是 Anthropic 兼容层）会将“非 2xx 状态码”包装为
@@ -369,10 +354,14 @@ export class HttpClient {
       const statusMatch = err.message.match(/HTTP (\d{3})/);
       if (statusMatch) {
         const status = parseInt(statusMatch[1]);
-        // 仅 5xx 服务器错误可在 HTTP 客户端层重试；
-        // 429 的退避与切换由 PipelineManager 统一处理（避免重复策略）。
         return status >= 500;
       }
+    }
+    if (typeof err.status === 'number') {
+      return err.status >= 500;
+    }
+    if (typeof err.statusCode === 'number') {
+      return err.statusCode >= 500;
     }
 
     // AbortError（超时）可以重试
@@ -403,25 +392,31 @@ export class HttpClient {
 
     // 提取状态码
     const statusMatch = err.message?.match(/HTTP (\d{3})/);
+    let statusCode: number | undefined;
     if (statusMatch) {
-      providerError.statusCode = parseInt(statusMatch[1]);
+      statusCode = parseInt(statusMatch[1]);
+    } else if (typeof err?.status === 'number') {
+      statusCode = err.status;
+    } else if (typeof err?.statusCode === 'number') {
+      statusCode = err.statusCode;
+    }
+    if (statusCode) {
+      providerError.statusCode = statusCode;
+    }
+    if (err?.code && typeof err.code === 'string') {
+      (providerError as ProviderError & { code?: string }).code = err.code;
     }
 
     // 设置重试标记
-    providerError.retryable = this.shouldRetry(error, 0, 0);
+    providerError.retryable = this.shouldRetry(typeof statusCode === 'number' ? { ...err, statusCode } : error);
 
     // 设置错误详情
     providerError.details = {
-      originalError: error
+      originalError: error,
+      response: err?.response
     };
 
     return providerError;
   }
 
-  /**
-   * 延迟执行
-   */
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
 }
