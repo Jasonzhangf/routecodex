@@ -15,19 +15,10 @@ function findRepoRoot(startDir: string): string {
 }
 
 export function resolveRepoRoot(currentModuleUrl: string): string {
-  try {
-    const current = fileURLToPath(currentModuleUrl);
-    const dirname = path.dirname(current);
-    return findRepoRoot(dirname);
-  } catch {
-    try {
-      const fallbackCurrent = fileURLToPath(import.meta.url);
-      const fallbackDir = path.dirname(fallbackCurrent);
-      return findRepoRoot(fallbackDir);
-    } catch {
-      return process.cwd();
-    }
-  }
+  const sourceUrl = currentModuleUrl || import.meta.url;
+  const current = fileURLToPath(sourceUrl);
+  const dirname = path.dirname(current);
+  return findRepoRoot(dirname);
 }
 
 export async function loadLlmswitchModule<T = any>(repoRoot: string, subpath: string): Promise<T> {
