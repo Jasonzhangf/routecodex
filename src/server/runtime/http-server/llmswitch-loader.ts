@@ -20,7 +20,13 @@ export function resolveRepoRoot(currentModuleUrl: string): string {
     const dirname = path.dirname(current);
     return findRepoRoot(dirname);
   } catch {
-    return process.cwd();
+    try {
+      const fallbackCurrent = fileURLToPath(import.meta.url);
+      const fallbackDir = path.dirname(fallbackCurrent);
+      return findRepoRoot(fallbackDir);
+    } catch {
+      return process.cwd();
+    }
   }
 }
 
