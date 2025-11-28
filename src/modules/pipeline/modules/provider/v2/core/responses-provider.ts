@@ -6,7 +6,9 @@
  */
 
 import { ChatHttpProvider } from './chat-http-provider.js';
+import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { ServiceProfile } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../../../../types/common-types.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
@@ -115,11 +117,19 @@ export class ResponsesProvider extends ChatHttpProvider {
       // 上游 SSE：使用 llmswitch-core 的 ResponsesSseToJsonConverter 解析为 JSON
       const stream = await (this as any).httpClient.postStream(endpoint, finalBody, { ...headers, Accept: 'text/event-stream' });
       // 动态引入转换器（避免编译期硬依赖路径问题）
-      const modPath = path.resolve(
-        process.cwd(),
-        'sharedmodule/llmswitch-core/dist/v2/conversion/conversion-v3/sse/sse-to-json/index.js'
+      const modPath = path.join(
+        PACKAGE_ROOT,
+        'sharedmodule',
+        'llmswitch-core',
+        'dist',
+        'v2',
+        'conversion',
+        'conversion-v3',
+        'sse',
+        'sse-to-json',
+        'index.js'
       );
-      const { ResponsesSseToJsonConverter } = await import(modPath);
+      const { ResponsesSseToJsonConverter } = await import(pathToFileURL(modPath).href);
       const converter = new (ResponsesSseToJsonConverter as any)();
       const json = await converter.convertSseToJson(stream as any, {
         requestId: context.requestId,
@@ -154,3 +164,22 @@ export class ResponsesProvider extends ChatHttpProvider {
 }
 
 export default ResponsesProvider;
+function findPackageRoot(startDir: string): string {
+  let dir = startDir;
+  const root = path.parse(dir).root;
+  while (dir && dir !== root) {
+    if (fs.existsSync(path.join(dir, 'package.json'))) {
+      return dir;
+    }
+    dir = path.resolve(dir, '..');
+  }
+  return startDir;
+}
+
+function resolveModuleRoot(currentModuleUrl: string): string {
+  const current = fileURLToPath(currentModuleUrl || import.meta.url);
+  const dirname = path.dirname(current);
+  return findPackageRoot(dirname);
+}
+
+const PACKAGE_ROOT = resolveModuleRoot(import.meta.url);
