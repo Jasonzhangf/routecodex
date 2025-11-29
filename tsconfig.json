@@ -35,6 +35,12 @@
         ],
         "rcc-llmswitch-core/v2/*": [
           "sharedmodule/llmswitch-core/dist/v2/*"
+        ],
+        "../../../../../../../sharedmodule/llmswitch-core/dist/v2/router/virtual-router/error-center.js": [
+          "sharedmodule/llmswitch-core/dist/v2/router/virtual-router/error-center.d.ts"
+        ],
+        "../../../../../../../sharedmodule/llmswitch-core/dist/v2/router/virtual-router/types.js": [
+          "sharedmodule/llmswitch-core/dist/v2/router/virtual-router/types.d.ts"
         ]
       }
   },
@@ -58,7 +64,6 @@
     "src/migration/**/*",
     "src/core/request-handler.ts",
     "src/core/provider-manager.ts",
-    "src/modules/hooks/**/*",
     "src/modules/pipeline/modules/provider/legacy/**/*",
     "src/server-v2/**/*",
     "src/server-v2/**",

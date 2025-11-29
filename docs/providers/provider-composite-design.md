@@ -83,12 +83,12 @@ output/* → Provider.preprocessRequest(compat.request) → HTTP Provider → Pr
   - `anthropic` → AnthropicHttpProvider；
   - `gemini` → 预留。
 - 旧配置兼容（规范化）：
-  - 若发现 `providerType` ∈ {`glm`,`qwen`,`iflow`,`lmstudio`}，运行时规范化为 `openai` 并记录告警；品牌保留在 `providerId` 或 `extensions.oauthProviderId`。
+  - 若发现 `providerType` ∈ {`glm`,`qwen`,`iflow`,`lmstudio`}，运行时规范化为 `openai` 并记录告警；品牌保留在 `providerId`，OAuth 方案通过 `auth.type = "<provider>-oauth"` 显式声明。
   - 不在 `llmswitch-core` 内判断品牌，品牌差异仅由 compat 聚合器处理（最小清理）。
 
 ## 迁移与兼容
 
-- 配置：将旧 `providerType: 'qwen'|'glm'|'iflow'|'lmstudio'` 规范化为 `providerType: 'openai'`，并通过 `providerId`/`extensions.oauthProviderId` 表达家族；保留警告日志。
+- 配置：将旧 `providerType: 'qwen'|'glm'|'iflow'|'lmstudio'` 规范化为 `providerType: 'openai'`，并通过 `providerId` + `auth.type = '<provider>-oauth'` 表达家族；保留警告日志。
 - Qwen：默认走 OpenAI 兼容端点 `/v1/chat/completions`；如需 native wire，需新增协议 id 与 codec，不能在 `openai-chat` 协议下改形状。
 
 ### 配置示例（OAuth 品牌）
@@ -99,8 +99,7 @@ output/* → Provider.preprocessRequest(compat.request) → HTTP Provider → Pr
   "config": {
     "providerType": "openai",
     "baseUrl": "https://portal.qwen.ai/v1",
-    "auth": { "type": "oauth" },
-    "extensions": { "oauthProviderId": "qwen" },
+    "auth": { "type": "qwen-oauth" },
     "models": ["qwen3-coder-plus"]
   }
 }

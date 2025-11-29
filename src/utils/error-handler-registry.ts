@@ -6,8 +6,7 @@
 
 // 在 dev/worktree 场景下，直接使用本仓库提供的 shim 实现，
 // 避免对 rcc-debugcenter / rcc-errorhandling 的运行时依赖。
-import { ErrorHandlingCenter } from '../modules/errorhandling/error-handling-center-shim.js';
-import { DebugEventBus } from '../modules/debugcenter/debug-event-bus-shim.js';
+import { ErrorHandlingCenter } from 'rcc-errorhandling';
 
 // Define ErrorContext interface locally
 interface ErrorContext {
@@ -53,14 +52,12 @@ export interface ErrorHandlerRegistration {
 export class ErrorHandlerRegistry {
   private static instance: ErrorHandlerRegistry;
   private errorHandlingCenter: unknown;
-  private debugEventBus: unknown;
   private messageTemplates: Map<string, ErrorMessageTemplate> = new Map();
   private errorHandlers: Map<string, ErrorHandlerFunction[]> = new Map();
   private initialized: boolean = false;
 
   private constructor() {
     this.errorHandlingCenter = new ErrorHandlingCenter();
-    this.debugEventBus = DebugEventBus.getInstance();
   }
 
   /**
@@ -88,17 +85,9 @@ export class ErrorHandlerRegistry {
 
       this.initialized = true;
 
-      (this.debugEventBus as { publish: (evt: unknown) => void }).publish({
-        sessionId: `session_${Date.now()}`,
-        moduleId: 'error-handler-registry',
-        operationId: 'error_handler_registry_initialized',
-        timestamp: Date.now(),
-        type: 'start',
-        position: 'middle',
-        data: {
-          messageTemplateCount: this.messageTemplates.size,
-          handlerCount: this.errorHandlers.size,
-        },
+      this.logDebugEvent('error_handler_registry_initialized', {
+        messageTemplateCount: this.messageTemplates.size,
+        handlerCount: this.errorHandlers.size,
       });
     } catch (error) {
       console.error('Failed to initialize Error Handler Registry:', error);
@@ -119,18 +108,10 @@ export class ErrorHandlerRegistry {
 
     // Only publish debug events during normal operation (not during initialization)
     if (this.initialized) {
-      (this.debugEventBus as { publish: (evt: unknown) => void }).publish({
-        sessionId: `session_${Date.now()}`,
-        moduleId: 'error-handler-registry',
-        operationId: 'error_message_registered',
-        timestamp: Date.now(),
-        type: 'start',
-        position: 'middle',
-        data: {
-          errorCode: template.code,
-          severity: template.severity,
-          category: template.category,
-        },
+      this.logDebugEvent('error_message_registered', {
+        errorCode: template.code,
+        severity: template.severity,
+        category: template.category,
       });
     }
   }
@@ -165,18 +146,10 @@ export class ErrorHandlerRegistry {
 
     // Only publish debug events during normal operation (not during initialization)
     if (this.initialized) {
-      (this.debugEventBus as { publish: (evt: unknown) => void }).publish({
-        sessionId: `session_${Date.now()}`,
-        moduleId: 'error-handler-registry',
-        operationId: 'error_handler_registered',
-        timestamp: Date.now(),
-        type: 'start',
-        position: 'middle',
-        data: {
-          errorCode: registration.errorCode,
-          priority: registration.priority,
-          description: registration.description,
-        },
+      this.logDebugEvent('error_handler_registered', {
+        errorCode: registration.errorCode,
+        priority: registration.priority,
+        description: registration.description,
       });
     }
   }
@@ -488,6 +461,14 @@ export class ErrorHandlerRegistry {
     });
   }
 
+  private logDebugEvent(operationId: string, data: Record<string, unknown>): void {
+    try {
+      console.debug('[error-handler-registry]', operationId, data);
+    } catch {
+      // ignore logging failures
+    }
+  }
+
   /**
    * Get all registered error message templates
    */
@@ -512,15 +493,7 @@ export class ErrorHandlerRegistry {
       await (this.errorHandlingCenter as { destroy: () => Promise<void> }).destroy();
       this.initialized = false;
 
-      (this.debugEventBus as { publish: (evt: unknown) => void }).publish({
-        sessionId: `session_${Date.now()}`,
-        moduleId: 'error-handler-registry',
-        operationId: 'error_handler_registry_destroyed',
-        timestamp: Date.now(),
-        type: 'end',
-        position: 'middle',
-        data: {},
-      });
+      this.logDebugEvent('error_handler_registry_destroyed', {});
     } catch (error) {
       console.error('Failed to destroy Error Handler Registry:', error);
     }

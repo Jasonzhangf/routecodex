@@ -9,7 +9,7 @@
   - `responses`（OpenAI Responses wire）
   - `anthropic`（Anthropic Messages wire）
   - `gemini`（预留）
-- 品牌/家族名仅作为 `providerId` 或 OAuth `extensions.oauthProviderId` 使用。
+- 品牌/家族名仅通过 `providerId` 标识；OAuth 方案使用 `auth.type = "<provider>-oauth"` 显式声明。
 - `providerProtocol` 由 BasePipeline 路由阶段注入，Provider/Composite 只做守卫，不自行推断。
 
 ## 迁移规则
@@ -17,8 +17,8 @@
 1. 配置层
    - 将原 `providerType: 'glm'|'qwen'|'iflow'|'lmstudio'` 替换为 `providerType: 'openai'`。
    - 将家族名写入：
-     - `providerId`（路由家族）；或
-     - `config.extensions.oauthProviderId`（OAuth 场景）。
+     - `providerId`（路由家族）；
+     - `auth.type = "<provider>-oauth"`（OAuth 场景）。
    - Responses/Anthropic 按照协议类型分别设置 `providerType: 'responses' | 'anthropic'`。
 
 2. 代码层
@@ -35,8 +35,7 @@
   "config": {
     "providerType": "openai",
     "baseUrl": "https://portal.qwen.ai/v1",
-    "auth": { "type": "oauth" },
-    "extensions": { "oauthProviderId": "qwen" },
+    "auth": { "type": "qwen-oauth" },
     "models": ["qwen3-coder-plus"]
   }
 }
@@ -64,8 +63,7 @@
   "config": {
     "providerType": "openai",
     "baseUrl": "https://api.iflow.com/v1",
-    "auth": { "type": "oauth" },
-    "extensions": { "oauthProviderId": "iflow" },
+    "auth": { "type": "iflow-oauth" },
     "models": ["iflow-gpt4-1106"]
   }
 }
@@ -111,4 +109,3 @@
 ```
 
 ProviderComposite 在出/入站两侧校验 `providerType → providerProtocol`，并对协议形状做最小断言，快速暴露错配。
-

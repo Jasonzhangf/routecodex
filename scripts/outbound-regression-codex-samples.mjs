@@ -222,7 +222,10 @@ function findProviderConfigs() {
   const files = [];
   for (const d of dirs) {
     const dir = path.join(PROVIDER_DIR, d.name);
-    const list = fs.readdirSync(dir).filter(f => /config\.(?:json|v1\.json)$/.test(f) || /^merged-config\..*\.json$/.test(f));
+    const list = fs.readdirSync(dir).filter(f =>
+      /config\.(?:json|v1\.json)$/.test(f) ||
+      /^virtual-router-config\..*\.generated\.json$/.test(f)
+    );
     for (const f of list) files.push(path.join(dir, f));
   }
   return files;
@@ -233,7 +236,7 @@ function readJson(p) { try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } c
 function extractProviderEntries(file) {
   const raw = readJson(file); if (!raw) return [];
   const out = [];
-  // merged-config
+  // pipeline artifacts
   try {
     const pipelines = raw?.pipeline_assembler?.config?.pipelines;
     if (Array.isArray(pipelines) && pipelines.length) {

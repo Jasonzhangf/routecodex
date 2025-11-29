@@ -14,7 +14,7 @@ function ensureDir(p) { fs.mkdirSync(p, { recursive: true }); }
 
 function findProviderConfig(providerId) {
   const dir = path.join(PROVIDER_DIR, providerId);
-  const files = ['merged-config.5555.json', 'config.v1.json', 'config.json'];
+  const files = ['config.v1.json', 'config.json'];
   for (const f of files) { const p = path.join(dir, f); if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf-8')); }
   throw new Error(`no provider config for ${providerId}`);
 }

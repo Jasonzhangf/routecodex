@@ -81,8 +81,7 @@
 
 ## 配置情况
 
-- `config/modules.json` 定义了包括 `virtualrouter`、`httpserver` 等在内的模块。合并配置时会把路由目标与流水线配置合入，但 HTTP 请求链路目前并未消费这些配置。
-  - 合并器注入 `routeTargets/pipelineConfigs`：`src/modules/config-manager/merged-config-generator.ts:40`
+- `config/config.json` + 用户 `~/.routecodex/config.json` 由 `bootstrapVirtualRouterConfig` 直接解析，得到 `virtualRouter` + `targetRuntime`，HTTP 服务按该结果构造 Super Pipeline 与 Provider。
 - OpenAI Router 中的 `targetUrl` 由构造参数/默认值直接决定，并非来自 `modules.json`：
   - `src/server/protocol-handler.ts:89`
 
@@ -93,7 +92,6 @@
 - Virtual Router 模块提供：
   - 配置驱动的请求分类（default/longContext/thinking/coding/webSearch 等）。
   - 基于 provider.model 与 key 的负载均衡。
-  - 通过 ModelFieldConverter 进行字段转换。
 - 代表性位置：
   - 模块入口：`src/modules/virtual-router/virtual-router-module.ts:19`
   - 分类与路由选择：`src/modules/virtual-router/virtual-router-module.ts:288`
@@ -170,7 +168,7 @@
 
 - 配置
   - 模块配置：`config/modules.json`
-  - 合并配置注入：`src/modules/config-manager/merged-config-generator.ts:40`
+  - 虚拟路由引导：`src/config/routecodex-config-loader.ts` + `llmswitch-core/v2/router/virtual-router/bootstrap.ts`
 
 ---
 

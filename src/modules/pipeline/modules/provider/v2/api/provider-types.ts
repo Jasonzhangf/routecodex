@@ -99,6 +99,11 @@ export interface ProviderRuntimeAuth {
   clientId?: string;
   clientSecret?: string;
   scopes?: string[];
+  authorizationUrl?: string;
+  userInfoUrl?: string;
+  refreshUrl?: string;
+  oauthProviderId?: string;
+  rawType?: string;
 }
 
 export interface ProviderRuntimeProfile {

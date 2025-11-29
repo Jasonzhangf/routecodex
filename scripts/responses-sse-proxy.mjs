@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Standalone SSE passthrough proxy for /v1/responses.
-// Captures inbound/outbound SSE streams and forwards them to the configured provider.
+// Standalone SSE passthrough proxy / mock for /v1/responses.
+// When RCC_RESP_REPLAY_LOG is set, replays a captured SSE log instead of forwarding to a live provider.
+// Otherwise, forwards requests to the configured provider and logs both inbound/outbound streams.
 
 import http from 'node:http';
 import fs from 'node:fs';
@@ -12,6 +13,7 @@ import { PassThrough } from 'node:stream';
 const DEFAULT_PORT = Number(process.env.RCC_RESP_PROXY_PORT || 9550);
 const DEFAULT_HOST = process.env.RCC_RESP_PROXY_HOST || '127.0.0.1';
 const providerId = process.env.RCC_RESP_PROV || getArg('--provider') || 'fai';
+const replayLog = process.env.RCC_RESP_REPLAY_LOG || getArg('--replay');
 const port = Number(getArg('--port') || DEFAULT_PORT);
 const host = getArg('--host') || DEFAULT_HOST;
 
@@ -65,15 +67,42 @@ function buildHeaders(entry) {
   return headers;
 }
 
+function replayFromFile(logPath, res) {
+  const stream = fs.createReadStream(logPath, 'utf-8');
+  let buffer = '';
+  stream.on('data', chunk => {
+    buffer += chunk;
+    const parts = buffer.split(/\n\n/);
+    buffer = parts.pop() || '';
+    for (const frame of parts) {
+      res.write(frame + '\n\n');
+    }
+  });
+  stream.on('end', () => {
+    if (buffer.trim()) {
+      res.write(buffer + '\n\n');
+    }
+    res.end();
+  });
+  stream.on('error', err => {
+    res.write(`event: error\ndata: ${JSON.stringify({ message: err.message })}\n\n`);
+    res.end();
+  });
+}
+
 async function main() {
   ensureDir(CAPTURE_ROOT);
-  const providerEntry = loadProviderConfig(providerId);
-  const baseUrl = normalizeBaseUrl(providerEntry);
-  const endpoint = '/responses';
-  const headers = buildHeaders(providerEntry);
-  const httpClientPath = pathToFileURL(path.join(process.cwd(), 'dist/modules/pipeline/modules/provider/v2/utils/http-client.js')).href;
-  const { HttpClient } = await import(httpClientPath);
-  const client = new HttpClient({ baseUrl, timeout: 300000 });
+  let baseUrl, endpoint = '/responses', headers, client;
+  if (!replayLog) {
+    const providerEntry = loadProviderConfig(providerId);
+    baseUrl = normalizeBaseUrl(providerEntry);
+    headers = buildHeaders(providerEntry);
+    const httpClientPath = pathToFileURL(path.join(process.cwd(), 'dist/modules/pipeline/modules/provider/v2/utils/http-client.js')).href;
+    const { HttpClient } = await import(httpClientPath);
+    client = new HttpClient({ baseUrl, timeout: 300000 });
+  } else {
+    console.log(`[responses-sse-proxy] replay mode enabled: ${replayLog}`);
+  }
 
   const server = http.createServer(async (req, res) => {
     if (req.method !== 'POST' || !(req.url || '').startsWith('/v1/responses')) {
@@ -89,7 +118,7 @@ async function main() {
       requestId,
       time: new Date().toISOString(),
       clientHeaders: req.headers,
-      upstream: `${baseUrl}${endpoint}`
+      upstream: replayLog ? `[replay] ${replayLog}` : `${baseUrl}${endpoint}`
     };
     fs.writeFileSync(path.join(captureDir, 'meta.json'), JSON.stringify(meta, null, 2));
 
@@ -107,6 +136,17 @@ async function main() {
       upstreamStream.destroy(error);
       reqLog.end();
     });
+
+    if (replayLog) {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
+      });
+      replayFromFile(replayLog, res);
+      console.log(`[responses-sse-proxy] replayed ${replayLog} for ${requestId}`);
+      return;
+    }
 
     try {
       const upstream = await client.postStreamRaw(endpoint, upstreamStream, headers);

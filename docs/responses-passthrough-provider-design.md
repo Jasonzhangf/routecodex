@@ -101,6 +101,7 @@
    - `src/server/http-server.ts`：
      - `/v1/responses` 收到 `__sse_stream` 时 tee+pipe（当前分支已具备 tee 基础，补 flushHeaders/X-Accel-Buffering）。
      - `/v1/responses/:id/submit_tool_outputs` 直通处理（沿用现有结构，接 provider 方法）。
+     - submit 路径新增对 `llmswitch-core` 的 `resumeResponsesConversation()` 调用，server 侧仅负责读取 `response_id` / `tool_outputs` 并交给核心缓存生成完整 payload，成功后再进 Super Pipeline，失败返回 400（表示响应已过期或丢失）。
 
 4) 配置示例（你已要求，已生成在用户目录）：
    - `~/.routecodex/config.responses.json`（不改仓库内默认 config）。

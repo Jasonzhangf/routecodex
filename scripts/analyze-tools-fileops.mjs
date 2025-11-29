@@ -91,8 +91,10 @@ function guessPortFromJson(obj){
     for (const k of Object.keys(v)){
       const val = v[k];
       if (typeof val === 'string'){
-        const m1 = val.match(/merged-config\.(\d{2,5})\.json/);
+        const m1 = val.match(/virtual-router-config\.(\d{2,5})\.generated\.json/);
         if (m1) return Number(m1[1]);
+        const m1b = val.match(/pipeline-config\.(\d{2,5})\.generated\.json/);
+        if (m1b) return Number(m1b[1]);
         const m2 = val.match(/http:\/\/(?:127\.0\.0\.1|localhost):(\d{2,5})/i);
         if (m2) return Number(m2[1]);
       } else if (val && typeof val === 'object') stack.push(val);

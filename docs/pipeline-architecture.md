@@ -10,17 +10,15 @@ downstream workflow/compatibility/provider modules.
 ```
 rcc start
 └─ routecodex/dist/index.js
-   ├─ ConfigManager.generateMergedConfig()
-   │   ├─ loads system config (config/config.json)
-   │   ├─ loads user overrides (~/.routecodex/config.json)
-   │   ├─ calls routecodex-config-compat.CompatibilityEngine.processCompatibility()
-   │   │   └─ produces compatibilityConfig with pipelineConfigs + routeTargets
-   │   ├─ calls buildPipelineAssemblerConfig(compatibilityConfig)
-   │   │   └─ MUST return canonical pipeline_assembler.config
-   │   └─ writes merged-config.5520.json + modules-5520.json + pipeline_assembler.config
-   └─ PipelineManager.initialize()
-       └─ PipelineAssembler.assemble(pipeline_assembler.config)
-           └─ instantiates BasePipeline per entry (llmSwitch → workflow → compatibility → provider)
+   ├─ loadRouteCodexConfig()
+   │   ├─ reads repo config defaults (config/config.json)
+   │   └─ merges user overrides (~/.routecodex/config.json)
+   ├─ bootstrapVirtualRouterConfig(userConfig.virtualrouter ?? userConfig)
+   │   ├─ validates routing/providers/classifiers
+   │   ├─ outputs `{ virtualRouter, targetRuntime }`
+   │   └─ infers compatibility profiles + provider runtime metadata
+   ├─ new SuperPipeline({ virtualRouter })
+   └─ ProviderFactory.initializeFromRuntime(targetRuntime)
 ```
 
 ### No Fallbacks
@@ -78,6 +76,22 @@ Each codec implements the request/response transformation pair while enforcing s
 5. Compatibility module sanitizes payloads for the target provider (GLM, Qwen, etc).
 6. Provider module issues the HTTP call. Request/response snapshots are persisted under `~/.routecodex/codex-samples/...`.
 7. LLMSwitch `processOutgoing` reconstructs the protocol-native response before returning to the HTTP layer.
+
+### 3.1 SSE Integration (host → llmswitch-core)
+
+LLMSwitch v3 统一了所有 SSE ↔ JSON 转换，host 侧只需要保证入站 metadata 和出站传输契约：
+
+- **入站**：handler 在把请求交给 `executePipeline` 之前要写入：
+  - `metadata.entryEndpoint`：`/v1/chat/completions` / `/v1/responses` / `/v1/messages`；
+  - `stream`, `clientStream`, `inboundStream`, `outboundStream`（布尔）：来源是客户端 `stream` 字段 + `Accept: text/event-stream`；
+  - `__raw_request_body`、`clientHeaders`（快照用，可选）。
+ 这样 `SSEInputNode` 会调用 `defaultSseCodecRegistry`，把任意 SSE 流聚合成对应协议的 JSON，再映射为内部 Chat 请求。host **不再** 需要对 SSE 进行本地解析。
+
+- **出站**：`SuperPipeline.execute` 若决定返回 SSE，会在 `result.body.__sse_responses` 写入一个 Node Readable（或 AsyncIterable）。handler 只需检测该字段并设置 SSE 头；若请求声明 `stream=true` 但结果缺少 `__sse_responses`，应视为 502。  
+  - 不管 provider 返回 JSON 还是 SSE，llmswitch-core 都会根据入口端点的 streaming 标记决定是否调用 `defaultSseCodecRegistry.convertJsonToSse` 去 synthesize SSE；
+  - host 不得再调用 `sse-response-normalizer`/`openai-sse-normalizer` 之类的历史兜底逻辑——这些文件已经移除。
+
+- **唯一事实来源**：入口端点 + 入站 streaming 标记是响应阶段是否 SSE 的唯一决策点；providerType 只能决定 inbound converter 与 provider 调用，不得覆盖 outbound 的协议类型。
 
 ## 4. Required Configuration
 

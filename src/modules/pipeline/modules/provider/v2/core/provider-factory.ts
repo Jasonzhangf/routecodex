@@ -61,24 +61,13 @@ export class ProviderFactory {
     // 创建新实例
     const rawType = String(config?.config?.providerType || '').toLowerCase();
     const moduleType = String(config?.type || '').toLowerCase();
-    let ptype = rawType as string;
-
-    // 兼容旧配置：glm/qwen/iflow/lmstudio 一律规范化为 openai（品牌名仅作为 providerId 使用）
-    const legacyFamilies = new Set(['glm', 'qwen', 'lmstudio', 'openai-standard']);
-    if (legacyFamilies.has(ptype)) {
-      try {
-        console.warn(`[ProviderFactory] deprecated providerType='${ptype}', normalizing to 'openai'`);
-      } catch { /* ignore */ }
-      ptype = 'openai';
-      if (config?.config) {
-        (config.config as Record<string, unknown>).providerType = 'openai';
-      }
-    }
+    const ptype = rawType as string;
 
     let provider: IProviderV2;
 
     // 首选：按协议类型创建
-    if (ptype === 'openai') {
+    const chatProviderTypes = new Set(['openai', 'glm', 'qwen', 'lmstudio']);
+    if (chatProviderTypes.has(ptype)) {
       provider = new ChatHttpProvider(config, dependencies);
     } else if (ptype === 'responses') {
       provider = new ResponsesHttpProvider(config, dependencies);
@@ -86,6 +75,8 @@ export class ProviderFactory {
       provider = new AnthropicHttpProvider(config, dependencies);
     } else if (ptype === 'gemini') {
       provider = new GeminiHttpProvider(config, dependencies);
+    } else if (ptype === 'iflow') {
+      provider = new iFlowHttpProvider(config, dependencies);
     } else {
       // 兼容保留：模块类型直选（老配置）；不再做“最终回退”，未知类型直接失败（Fail Fast）
       if (moduleType === 'openai-http-provider' || moduleType === 'openai-standard') {
@@ -94,10 +85,6 @@ export class ProviderFactory {
         provider = new ResponsesHttpProvider(config, dependencies);
       } else if (moduleType === 'anthropic-http-provider') {
         provider = new AnthropicHttpProvider(config, dependencies);
-      } else if (ptype === 'iflow') {
-        provider = new iFlowHttpProvider(config, dependencies);
-      } else if (ptype === 'responses') {
-        provider = new ResponsesProvider(config, dependencies);
       } else {
         const err: any = new Error(`[ProviderFactory] Unsupported providerType='${ptype}' and moduleType='${moduleType}'`);
         err.code = 'ERR_UNSUPPORTED_PROVIDER_TYPE';
@@ -206,13 +193,18 @@ export class ProviderFactory {
       headers: runtime.headers,
       ...(endpointOverride ? { endpoint: endpointOverride } : {})
     };
+    const extensions: Record<string, unknown> = {};
+    if (runtime.auth?.oauthProviderId) {
+      extensions.oauthProviderId = runtime.auth.oauthProviderId;
+    }
     return {
       type: this.mapProviderModule(runtime.providerType),
       config: {
         providerType: runtime.providerType,
         baseUrl,
         auth: authConfig,
-        overrides
+        overrides,
+        ...(Object.keys(extensions).length ? { extensions } : {})
       }
     };
   }
@@ -227,17 +219,22 @@ export class ProviderFactory {
         apiKey: auth.value.trim()
       };
     }
-    if (!auth.clientId || !auth.tokenUrl) {
-      throw new Error(`[ProviderFactory] runtime ${runtimeKey} missing OAuth client configuration`);
-    }
+    const authType = typeof auth.rawType === 'string' && auth.rawType.trim()
+      ? auth.rawType.trim()
+      : 'oauth';
     return {
-      type: 'oauth' as const,
+      type: authType as any,
       clientId: auth.clientId,
       clientSecret: auth.clientSecret,
       scopes: auth.scopes,
       tokenFile: auth.tokenFile,
       tokenUrl: auth.tokenUrl,
-      deviceCodeUrl: auth.deviceCodeUrl
+      deviceCodeUrl: auth.deviceCodeUrl,
+      authorizationUrl: auth.authorizationUrl,
+      userInfoUrl: auth.userInfoUrl,
+      refreshUrl: auth.refreshUrl,
+      oauthProviderId: auth.oauthProviderId,
+      rawType: auth.rawType
     };
   }
 

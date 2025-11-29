@@ -5,9 +5,9 @@ function readJson(p: string): any { return JSON.parse(fs.readFileSync(p, 'utf-8'
 function hostPortOfUrl(u: string): string | null { try { const { host } = new URL(u); return host; } catch { return null; } }
 
 function main() {
-  const mergedPath = process.argv[2] || path.join(process.cwd(), 'config', 'merged-config.json');
-  if (!fs.existsSync(mergedPath)) { console.error('[loop-check] merged config not found:', mergedPath); process.exit(2); }
-  const m = readJson(mergedPath);
+  const configPath = process.argv[2] || path.join(process.cwd(), 'config', 'config.json');
+  if (!fs.existsSync(configPath)) { console.error('[loop-check] config not found:', configPath); process.exit(2); }
+  const m = readJson(configPath);
   const http = m.httpserver || (m.modules?.httpserver?.config) || {};
   const selfHost = String(http.host || '0.0.0.0');
   const selfPort = Number(http.port || 0);
@@ -15,7 +15,7 @@ function main() {
   const issues: Array<{ providerId: string; baseUrl: string; reason: string }>
     = [];
 
-  const providers = m.providers || {};
+  const providers = m.virtualrouter?.providers || m.providers || {};
   for (const [pid, p] of Object.entries<any>(providers)) {
     const baseUrl = String(p.baseUrl || p.baseURL || '');
     if (!baseUrl) continue;
@@ -35,4 +35,3 @@ function main() {
 }
 
 main();
-

@@ -1,9 +1,10 @@
 import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { writeSnapshotViaHooks } from '../../../../../llmswitch/bridge.js';
+import { writeSnapshotViaHooks } from '../../../../../../modules/llmswitch/bridge.js';
 
 type Phase = 'provider-request' | 'provider-response' | 'provider-error';
+type ClientPhase = 'client-request';
 
 const SNAPSHOT_BASE = path.join(os.homedir(), '.routecodex', 'codex-samples');
 
@@ -51,12 +52,14 @@ function buildSnapshotPayload(options: {
   data: unknown;
   headers?: Record<string, unknown>;
   url?: string;
+  extraMeta?: Record<string, unknown>;
 }) {
   return {
     meta: {
       stage: options.stage,
       version: String(process.env.ROUTECODEX_VERSION || 'dev'),
-      buildTime: String(process.env.ROUTECODEX_BUILD_TIME || new Date().toISOString())
+      buildTime: String(process.env.ROUTECODEX_BUILD_TIME || new Date().toISOString()),
+      ...(options.extraMeta || {})
     },
     url: options.url,
     headers: maskHeaders(options.headers || {}),
@@ -149,6 +152,50 @@ export async function writeRepairFeedbackSnapshot(options: {
       feedback: options.feedback
     };
     await fsp.writeFile(path.join(dir, `${requestId}_repair-feedback.json`), JSON.stringify(payload, null, 2), 'utf-8');
+  } catch {
+    // non-blocking
+  }
+}
+
+export async function writeClientSnapshot(options: {
+  entryEndpoint: string;
+  requestId: string;
+  headers?: Record<string, unknown>;
+  body: unknown;
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    const stage: ClientPhase = 'client-request';
+    const { endpoint, folder } = resolveEndpoint(options.entryEndpoint);
+    const requestId = normalizeRequestId(options.requestId);
+    const snapshotPayload = {
+      body: options.body,
+      metadata: options.metadata || {}
+    };
+    const payload = buildSnapshotPayload({
+      stage,
+      data: snapshotPayload,
+      headers: options.headers,
+      url: endpoint,
+      extraMeta: {
+        entryEndpoint: endpoint,
+        stream: options.metadata?.stream,
+        userAgent: options.metadata?.userAgent
+      }
+    });
+    try {
+      await writeSnapshotViaHooks({
+        endpoint,
+        stage,
+        requestId,
+        data: payload,
+        verbosity: 'verbose'
+      });
+      return;
+    } catch {
+      await ensureDir(path.join(SNAPSHOT_BASE, folder));
+      await fsp.writeFile(fallbackFilePath(folder, requestId, stage), JSON.stringify(payload, null, 2), 'utf-8');
+    }
   } catch {
     // non-blocking
   }

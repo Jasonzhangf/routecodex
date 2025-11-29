@@ -1,7 +1,7 @@
 import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { writeSnapshotViaHooks } from '../../../../llmswitch/bridge.js';
+import { writeSnapshotViaHooks } from '../../../../../../llmswitch/bridge.js';
 
 type Phase = 'compat-pre' | 'compat-post';
 

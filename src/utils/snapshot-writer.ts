@@ -16,7 +16,7 @@ export type ServerSnapshotPhase =
   | string;
 
 export function isSnapshotsEnabled(): boolean {
-  // 优先使用运行时全局覆盖（由服务器根据 merged-config 注入）
+  // 优先使用运行时全局覆盖（由服务器根据 virtualRouter config 注入）
   try {
     const g: any = globalThis as any;
     if (typeof g.rccSnapshotsEnabled === 'boolean') return g.rccSnapshotsEnabled;

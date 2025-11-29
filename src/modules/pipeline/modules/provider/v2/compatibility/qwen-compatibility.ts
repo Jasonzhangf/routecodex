@@ -8,7 +8,6 @@
 import type { CompatibilityModule, ModuleConfig, ModuleDependencies, TransformationRule } from '../../interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest } from '../../../../types/shared-dtos.js';
 import type { /* TransformationEngine */ } from '../../utils/transformation-engine.js';
-import { DebugEventBus } from '../../../debugcenter/debug-event-bus-shim.js';
 import type { PipelineDebugLogger as PipelineDebugLoggerInterface } from '../../interfaces/pipeline-interfaces.js';
 import type { UnknownObject, /* LogData */ } from '../../../../types/common-types.js';
 
@@ -24,10 +23,7 @@ export class QwenCompatibility implements CompatibilityModule {
   private isInitialized = false;
   private logger: PipelineDebugLoggerInterface;
   private transformationEngine: any; // TransformationEngine instance
-
-  // Debug enhancement properties
-  private debugEventBus: DebugEventBus | null = null;
-  private isDebugEnhanced = false;
+  private readonly isDebugEnhanced = false;
   private compatibilityMetrics: Map<string, { values: any[]; lastUpdated: number }> = new Map();
   private transformationHistory: any[] = [];
   private errorHistory: any[] = [];
@@ -38,9 +34,6 @@ export class QwenCompatibility implements CompatibilityModule {
     this.id = `compatibility-${Date.now()}`;
     this.config = {} as ModuleConfig;
     this.rules = this.initializeTransformationRules();
-
-    // Initialize debug enhancements
-    this.initializeDebugEnhancements();
   }
 
   /**
@@ -50,146 +43,26 @@ export class QwenCompatibility implements CompatibilityModule {
     (this as any).config = config;
   }
 
-  /**
-   * Initialize debug enhancements
-   */
-  private initializeDebugEnhancements(): void {
-    try {
-      this.debugEventBus = DebugEventBus.getInstance();
-      this.isDebugEnhanced = true;
-      console.log('Qwen Compatibility debug enhancements initialized');
-    } catch (error) {
-      console.warn('Failed to initialize Qwen Compatibility debug enhancements:', error);
-      this.isDebugEnhanced = false;
-    }
-  }
-
-  /**
-   * Record compatibility metric
-   */
-  private recordCompatibilityMetric(operation: string, data: any): void {
-    if (!this.compatibilityMetrics.has(operation)) {
-      this.compatibilityMetrics.set(operation, {
-        values: [],
-        lastUpdated: Date.now()
-      });
-    }
-
-    const metric = this.compatibilityMetrics.get(operation)!;
-    metric.values.push(data);
-    metric.lastUpdated = Date.now();
-
-    // Keep only last 50 measurements
-    if (metric.values.length > 50) {
-      metric.values.shift();
-    }
-  }
-
-  /**
-   * Add to transformation history
-   */
-  private addToTransformationHistory(transformation: any): void {
-    this.transformationHistory.push(transformation);
-
-    // Keep only recent history
-    if (this.transformationHistory.length > this.maxHistorySize) {
-      this.transformationHistory.shift();
-    }
-  }
-
-  /**
-   * Add to error history
-   */
-  private addToErrorHistory(error: any): void {
-    this.errorHistory.push(error);
-
-    // Keep only recent history
-    if (this.errorHistory.length > this.maxHistorySize) {
-      this.errorHistory.shift();
-    }
-  }
-
-  /**
-   * Publish debug event
-   */
   private publishDebugEvent(type: string, data: any): void {
-    if (!this.isDebugEnhanced || !this.debugEventBus) {return;}
-
     try {
-      this.debugEventBus.publish({
-        sessionId: `session_${Date.now()}`,
-        moduleId: 'qwen-compatibility',
-        operationId: type,
-        timestamp: Date.now(),
-        type: "start",
-        position: 'middle',
-        data: {
-          ...(typeof data === 'object' && data !== null ? data as Record<string, unknown> : {}),
-          compatibilityId: this.id,
-          source: 'qwen-compatibility'
-        }
-      });
-    } catch (error) {
-      // Silent fail if debug event bus is not available
+      this.logger.logDebug(`[qwen-compatibility] ${type}`, data);
+    } catch {
+      // ignore logging failures
     }
   }
 
-  /**
-   * Get debug status with enhanced information
-   */
-  getDebugStatus(): any {
-    const baseStatus = {
-      compatibilityId: this.id,
-      isInitialized: this.isInitialized,
-      type: this.type,
-      isEnhanced: this.isDebugEnhanced
-    };
-
-    if (!this.isDebugEnhanced) {
-      return baseStatus;
-    }
-
-    return {
-      ...baseStatus,
-      debugInfo: this.getDebugInfo(),
-      compatibilityMetrics: this.getCompatibilityMetrics(),
-      transformationHistory: [...this.transformationHistory.slice(-10)], // Last 10 transformations
-      errorHistory: [...this.errorHistory.slice(-10)] // Last 10 errors
-    };
+  private recordCompatibilityMetric(_operation: string, _data: any): void {
+    // metrics disabled
   }
 
-  /**
-   * Get detailed debug information
-   */
-  private getDebugInfo(): any {
-    return {
-      compatibilityId: this.id,
-      compatibilityType: this.type,
-      enhanced: this.isDebugEnhanced,
-      eventBusAvailable: !!this.debugEventBus,
-      transformationHistorySize: this.transformationHistory.length,
-      errorHistorySize: this.errorHistory.length,
-      rulesCount: this.rules.length,
-      hasTransformationEngine: !!this.transformationEngine
-    };
+  private addToTransformationHistory(_entry: any): void {
+    // history disabled
   }
 
-  /**
-   * Get compatibility metrics
-   */
-  private getCompatibilityMetrics(): any {
-    const metrics: Record<string, unknown> = {};
-
-    for (const [operation, metric] of this.compatibilityMetrics.entries()) {
-      metrics[operation] = {
-        count: Array.isArray(metric.values) ? metric.values.length : 0,
-        lastUpdated: metric.lastUpdated,
-        recentValues: Array.isArray(metric.values) ? metric.values.slice(-5) : [] // Last 5 values
-      };
-    }
-
-    return metrics;
+  private addToErrorHistory(_entry: any): void {
+    // history disabled
   }
+
 
   /**
    * Initialize the compatibility module

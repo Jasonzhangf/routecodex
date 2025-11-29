@@ -54,35 +54,32 @@
 - `default.json`: 默认配置模板
 
 ### 配置类型定义
-- `merged-config-types.ts`: **新增** - 合并配置类型定义
 - `user-config-types.ts`: **新增** - 用户配置类型定义
 - `system-config-types.ts`: **新增** - 系统配置类型定义
 - `module-config-types.ts`: **新增** - 模块配置类型定义
 
-### 配置处理器 (v2.0 新增)
-- `user-config-parser.ts`: **新增** - 用户配置解析器，解析用户配置为模块格式
-- `config-merger.ts`: **新增** - 配置合并器，合并系统配置和用户配置
+### 配置处理器 (v2.2)
+- `routecodex-config-loader.ts`: **核心** - 解析用户配置并填充缺省结构
 - `auth-file-resolver.ts`: **新增** - AuthFile解析器，处理密钥文件解析
-- `refactoring-agent.ts`: **新增** - 重构代理，自动化代码生成和重构
+- `unified-config-paths.ts`: **新增** - 统一配置路径解析
+- `tool-mapping-loader.ts`: **新增** - 工具映射加载器
 
 ### 遗留文件 (待重构)
 - `config-types.ts`: **旧版** - 配置类型定义
 - `config-loader.ts`: **旧版** - 配置加载器
 - `config-validator.ts`: **旧版** - 配置验证器
 
-## 配置系统架构 (v2.0)
+## 配置系统架构 (v2.2)
 
 ### 分层配置系统
 ```
 用户配置 (~/.routecodex/config.json)
-    ↓ 解析和转换
-UserConfigParser
-    ↓ 生成路由目标池和流水线配置
-ConfigMerger
-    ↓ 合并系统配置
-./config/merged-config.json
-    ↓ 模块加载
-各个系统模块
+    ↓ 解析与补全
+routecodex-config-loader
+    ↓ 虚拟路由引导
+bootstrapVirtualRouterConfig
+    ↓ VirtualRouterArtifacts
+SuperPipeline / Provider Runtime 初始化
 ```
 
 ## 🆕 兼容性字段处理 (v2.1 新增)
@@ -202,16 +199,14 @@ const routeTargets = parser.parseRouteTargets(userConfig);
 const pipelineConfigs = parser.parsePipelineConfigs(userConfig);
 ```
 
-### 配置合并
+### 配置解析与引导
 ```typescript
-import { ConfigMerger } from './config-merger';
+import { loadRouteCodexConfig } from './routecodex-config-loader';
+import { bootstrapVirtualRouterConfig } from 'sharedmodule/llmswitch-core/dist/v2/router/virtual-router/bootstrap.js';
 
-const merger = new ConfigMerger();
-const mergedConfig = await merger.mergeConfigs(
-  './config/modules.json',     // 系统配置
-  '~/.routecodex/config.json', // 用户配置
-  parsedUserConfig            // 解析后的用户配置
-);
+const { userConfig } = await loadRouteCodexConfig('~/.routecodex/config.json');
+const artifacts = await bootstrapVirtualRouterConfig(userConfig.virtualrouter ?? userConfig);
+// artifacts.config 交给 SuperPipeline，artifacts.targetRuntime 用于 Provider 初始化
 ```
 
 ### 重构代理使用
@@ -228,7 +223,7 @@ await agent.executeRefactoring();
 ### 用户配置
 - **主配置**: `~/.routecodex/config.json`
 - **AuthFile目录**: `~/.routecodex/auth/`
-- **合并配置**: `./config/merged-config.json`
+- **虚拟路由快照**: `~/.routecodex/config/generated/virtual-router-config.<port>.json`（仅调试用，可选）
 
 ### 系统配置
 - **模块配置**: `./config/modules.json`

@@ -16,7 +16,11 @@ import type { IAuthProvider } from '../auth/auth-interface.js';
 import type { ModuleDependencies } from '../../../../interfaces/pipeline-interfaces.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { UnknownObject } from '../../../../../../types/common-types.js';
-import { extractProviderRuntimeMetadata, type ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
+import {
+  attachProviderRuntimeMetadata,
+  extractProviderRuntimeMetadata,
+  type ProviderRuntimeMetadata
+} from './provider-runtime-metadata.js';
 import {
   emitProviderError,
   buildRuntimeFromProviderContext
@@ -88,6 +92,7 @@ export abstract class BaseProvider implements IProviderV2 {
     }
 
     const context = this.createContext(request);
+    const runtimeMetadata = context.runtimeMetadata;
 
     try {
       this.requestCount++;
@@ -101,6 +106,7 @@ export abstract class BaseProvider implements IProviderV2 {
 
       // 预处理请求
       const processedRequest = await this.preprocessRequest(request);
+      this.reattachRuntimeMetadata(processedRequest, runtimeMetadata);
 
       // 发送请求 (子类实现)
       const response = await this.sendRequest(processedRequest);
@@ -133,6 +139,7 @@ export abstract class BaseProvider implements IProviderV2 {
     }
 
     const context = this.createContext(request as UnknownObject);
+    const runtimeMetadata = context.runtimeMetadata;
 
     try {
       this.requestCount++;
@@ -140,6 +147,7 @@ export abstract class BaseProvider implements IProviderV2 {
 
       // 预处理请求
       const processedRequest = await this.preprocessRequest(request as UnknownObject);
+      this.reattachRuntimeMetadata(processedRequest, runtimeMetadata);
 
       // 发送请求 (子类实现)
       const response = await this.sendRequestInternal(processedRequest);
@@ -245,6 +253,13 @@ export abstract class BaseProvider implements IProviderV2 {
       pipelineId: runtimeMetadata?.pipelineId
     };
     return context;
+  }
+
+  private reattachRuntimeMetadata(payload: UnknownObject, metadata?: ProviderRuntimeMetadata): void {
+    if (!metadata || !payload || typeof payload !== 'object') {
+      return;
+    }
+    attachProviderRuntimeMetadata(payload as Record<string, unknown>, metadata);
   }
 
   private handleRequestError(error: unknown, context: ProviderContext): void {

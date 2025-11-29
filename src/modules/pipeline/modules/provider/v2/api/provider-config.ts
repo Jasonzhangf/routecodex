@@ -56,18 +56,25 @@ export interface ApiKeyAuth {
 }
 
 /**
+ * OAuth认证类型
+ */
+export type OAuthAuthType = 'oauth' | `${string}-oauth`;
+
+/**
  * OAuth认证配置
  */
 export interface OAuthAuth {
-  type: 'oauth';
-  clientId: string;
+  type: OAuthAuthType;
+  clientId?: string;
   clientSecret?: string;
-  tokenUrl: string;
+  tokenUrl?: string;
   deviceCodeUrl?: string;
   scopes?: string[];
   tokenFile?: string;
   refreshUrl?: string;
   pkce?: boolean;          // 启用PKCE (默认false)
+  authorizationUrl?: string;
+  userInfoUrl?: string;
 }
 
 /**

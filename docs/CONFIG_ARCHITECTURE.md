@@ -6,15 +6,15 @@
 ```
 用户配置层 (~/.routecodex/config.json)
     ↓
-系统配置层 (./config/modules.json)
+系统默认 (./config/config.json)
     ↓
-配置解析器 (UserConfigParser)
+配置解析器 (routecodex-config-loader)
     ↓
-配置合并器 (ConfigMerger)
+虚拟路由引导 (bootstrapVirtualRouterConfig)
     ↓
-合并后配置 (~/.routecodex/merged-config.json)
+VirtualRouterArtifacts (virtualRouter + targetRuntime)
     ↓
-模块初始化 (Module Initialization)
+模块初始化 (SuperPipeline + Provider Runtime)
 ```
 
 ### 1.2 核心设计原则
@@ -77,6 +77,12 @@
 }
 ```
 
+#### 2.1.1 Provider `process` 模式
+- `process` 是 provider 节点的顶层字段，控制 RouteCodex 是否需要介入编解码。
+- 取值 `chat`（默认）：进入 Chat → Virtual Router → Provider 的标准链路，允许跨协议转换（如 `/v1/messages` → Responses）。
+- 取值 `passthrough`：RouteCodex 仅负责路由/鉴权/日志，**请求与响应会原样透传**。为了避免协议错配，要求入口协议必须与 provider 类型一致（例如 providerType=`responses` 只能在 `/v1/responses` 入口透传），否则启动时直接抛错。
+- Passthrough 模式仍然会写入 `client-request` / `provider-request` / `provider-response` 快照，便于审计，但不会再注入模型、stream、instruction 等治理字段。
+
 ### 2.2 系统配置文件 (./config/modules.json)
 
 ```json
@@ -107,36 +113,25 @@
 }
 ```
 
-### 2.3 合并后配置文件 (~/.routecodex/merged-config.json)
+### 2.3 虚拟路由产物 (VirtualRouterArtifacts)
 
-```json
-{
-  "version": "1.0.0",
-  "mergedAt": "2025-09-22T08:00:00.000Z",
-  "modules": {
-    "virtualrouter": {
-      "enabled": true,
-      "config": {
-        "moduleType": "virtual-router",
-        "timeout": 30000,
-        "inputProtocol": "openai",
-        "outputProtocol": "openai",
-        "routeTargets": {
-          "default": [...],
-          "longContext": [...]
-        },
-        "pipelineConfigs": {
-          "openai.gpt-4.sk-your-openai-key-here": {...}
-        },
-        "userConfigDefaults": {
-          "maxContext": 128000,
-          "maxTokens": 32000
-        }
-      }
-    }
-  }
-}
+`bootstrapVirtualRouterConfig` 输出对象包含两部分：
+
+```ts
+type VirtualRouterArtifacts = {
+  config: {
+    routing: Record<string, Array<{ providerKey: string; weight?: number }>>;
+    providers: Record<string, any>;
+    classifiers?: Record<string, any>;
+  };
+  targetRuntime: Record<string, ProviderRuntimeProfile>;
+};
 ```
+
+- `config`: 由 Super Pipeline 消费，包含虚拟路由、分类器、provider 描述等。
+- `targetRuntime`: host 初始化 Provider 实例所需的资料（baseUrl、headers、auth、compatProfile、runtimeKey）。
+
+该对象在内存中直接传递，**不再写入旧版“合并配置”蓝图文件**。任何磁盘快照仅用于调试，不参与运行时决策。
 
 ## 3. 配置解析和合并机制
 
@@ -284,12 +279,9 @@ class VirtualRouterModule {
 #### 4.2.1 配置文件管理
 ```typescript
 class ConfigManagerModule {
-  async loadMergedConfig(): Promise<MergedConfig> {
-    // 从 ~/.routecodex/merged-config.json 加载
-  }
-
-  async reloadConfig(): Promise<void> {
-    // 重新解析和合并配置
+  async loadVirtualRouterArtifacts(): Promise<VirtualRouterArtifacts> {
+    const { userConfig } = await loadRouteCodexConfig();
+    return bootstrapVirtualRouterConfig(userConfig.virtualrouter ?? userConfig);
   }
 }
 ```

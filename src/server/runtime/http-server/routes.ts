@@ -63,8 +63,12 @@ export function registerHttpRoutes(options: RouteOptions): void {
   app.post('/v1/responses', async (req, res) => {
     await handleResponses(req, res, buildHandlerContext());
   });
-  app.post('/v1/responses/:id/submit_tool_outputs', async (_req, res) => {
-    res.status(501).json({ error: { message: 'submit_tool_outputs is not supported in virtual-router mode' } });
+  app.post('/v1/responses/:id/submit_tool_outputs', async (req, res) => {
+    await handleResponses(req, res, buildHandlerContext(), {
+      entryEndpoint: '/v1/responses.submit_tool_outputs',
+      forceStream: true,
+      responseIdFromPath: req.params?.id
+    });
   });
 
   app.use('*', (_req: Request, res: Response) => {

@@ -2,7 +2,7 @@
 
 目标
 - 在 `/v1/responses` 下提供一条“严格透传”的 Responses 流水线：请求/响应完全遵循 OpenAI Responses 规范，无跨协议转换、无兜底。
-- 在 `./sharedmodule` 的配置模块中新增 provider 家族 `generic_responses`，由配置引擎解析 `config.toml` 并产出 merged-config；本仓仅消费 merged-config 并完成模块接线。
+- 在 `./sharedmodule` 的配置模块中新增 provider 家族 `generic_responses`，由配置引擎解析 `config.toml` 并产出 `virtualRouter`/`targetRuntime`（经 `bootstrapVirtualRouterConfig` 生成）；本仓仅消费该产物并完成模块接线。
 
 配置（config.toml 输入）
 - provider
@@ -36,15 +36,16 @@ sharedmodule 改动（配置引擎与兼容映射）
 - config-testkit（如有）
   - 新增用例：最小配置、缺失 routes.responses、env_key 注入校验。
 
-merged-config 期望（关键片段）
-- `pipeline_assembler.config.pipelines` 包含：
+virtualRouter 期望（关键片段）
+- `virtualRouter.routing["/v1/responses"]` 指向 `openai.responses.generic`。
+- `virtualRouter.pipelines` 包含：
   - id: `openai.responses.generic`
   - modules:
     - `compatibility: { type: "passthrough-compatibility", config: {} }`
     - `llmSwitch: { type: "llmswitch-responses-passthrough", config: {} }`
     - `provider: { type: "generic-responses", config: { baseUrl, auth: { apiKey } } }`
-- `pipeline_assembler.config.routePools["/v1/responses"] = ["openai.responses.generic"]`。
-- `compatibilityConfig.keyMappings.providers.generic_responses.key1 = "${GENERIC_RESPONSES_API_KEY}"`。
+- `targetRuntime["openai.responses.generic"]` = `{ providerId: "generic_responses", modelId: "responses", keyId: "key1", ... }`。
+- `keyMappings.providers.generic_responses.key1 = "${GENERIC_RESPONSES_API_KEY}"`。
 
 本仓接线与运行时模块
 - Provider：`generic-responses`
@@ -59,9 +60,9 @@ merged-config 期望（关键片段）
 - 模块注册
   - `src/modules/pipeline/core/pipeline-registry.ts` 注册 `generic-responses` 与 `llmswitch-responses-passthrough`。
 - 装配器消费
-  - `src/modules/pipeline/config/pipeline-assembler.ts` 放行上述类型（仅消费 merged-config，严禁默认回退）。
+  - `src/modules/pipeline/config/pipeline-assembler.ts` 放行上述类型（仅消费 bootstrap 产出的 virtualRouter，严禁默认回退）。
 - Handler 路由
-  - `src/server/handlers/responses.ts` 严格按 merged-config 选取 `openai.responses.generic` 管线处理 `/v1/responses`，禁用任何转换兜底。
+  - `src/server/handlers/responses.ts` 严格按 virtualRouter 配置选取 `openai.responses.generic` 管线处理 `/v1/responses`，禁用任何转换兜底。
 - Streaming
   - `src/server/utils/streaming-manager.ts` 透传 Responses SSE 事件序列（不拼接、不改序）。
 
@@ -88,4 +89,3 @@ merged-config 期望（关键片段）
    - 新增 `scripts/verify-responses-passthrough.mjs`、`scripts/replay-responses.mjs`；准备 10 非流 + 10 流式样本自检。
 5) 文档与发布：
    - 更新 README/变更日志；bump 版本，构建与全局安装（不自启动）。
-

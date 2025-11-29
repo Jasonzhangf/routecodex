@@ -1,17 +1,34 @@
 import { Readable } from 'node:stream';
 import type { Response } from 'express';
+import type { IncomingHttpHeaders } from 'http';
 import type { HandlerContext, PipelineExecutionResult } from './types.js';
 import { mapErrorToHttp } from '../utils/http-error-mapper.js';
 import { logPipelineStage } from '../utils/stage-logger.js';
-import { hasSsePayload, wrapBodyInFallbackSse } from '../utils/sse-response-normalizer.js';
-
 const BLOCKED_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection', 'content-encoding']);
+const CLIENT_HEADER_DENYLIST = new Set([
+  'host',
+  'connection',
+  'content-length',
+  'accept-encoding',
+  'authorization',
+  'proxy-authorization',
+  'upgrade',
+  'te'
+]);
 
 interface DispatchOptions {
   forceSSE?: boolean;
 }
 
 type RequestLogMeta = Record<string, unknown> | undefined;
+
+interface SsePayloadShape {
+  __sse_responses?: Readable;
+}
+
+function hasSsePayload(body: unknown): body is SsePayloadShape {
+  return Boolean(body && typeof body === 'object' && '__sse_responses' in (body as Record<string, unknown>));
+}
 
 export function nextRequestId(candidate?: unknown): string {
   if (typeof candidate === 'string' && candidate.trim().length > 0) {
@@ -36,8 +53,9 @@ export function sendPipelineResponse(
   let expectsStream = hasSsePayload(body);
 
   if (forceSSE && !expectsStream) {
-    body = wrapBodyInFallbackSse(body, requestLabel);
-    expectsStream = true;
+    logPipelineStage('response.sse.missing', requestLabel, { status });
+    res.status(502).json({ error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' } });
+    return;
   }
 
   logPipelineStage('response.dispatch.start', requestLabel, { status, stream: expectsStream, forced: forceSSE });
@@ -194,6 +212,22 @@ function toNodeReadable(streamLike: unknown): Readable | null {
     return Readable.from(streamLike as AsyncIterable<unknown>);
   }
   return null;
+}
+
+export function captureClientHeaders(headers: IncomingHttpHeaders | undefined): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (!headers) return result;
+  for (const [key, value] of Object.entries(headers)) {
+    if (!value) continue;
+    const normalized = key.toLowerCase();
+    if (CLIENT_HEADER_DENYLIST.has(normalized)) continue;
+    if (Array.isArray(value)) {
+      if (value[0]) result[key] = String(value[0]);
+    } else if (typeof value === 'string') {
+      result[key] = value;
+    }
+  }
+  return result;
 }
 
 function normalizeError(error: unknown, requestId: string, endpoint: string): Error & Record<string, unknown> {

@@ -390,7 +390,7 @@ const recommendations = analytics.getImplementationRecommendations();
 ### 数据流架构
 ```
 配置流:
-用户配置 → UserConfigParser → ConfigMerger → 合并配置 → 各模块
+用户配置 → routecodex-config-loader → bootstrapVirtualRouterConfig → VirtualRouterArtifacts → 各模块
 
 请求流:
 HTTP请求 → 虚拟路由 → 流水线选择 → 4层处理 → Provider调用 → 响应返回
@@ -415,9 +415,8 @@ src/modules/
 │   ├── route-target-pool.ts
 │   ├── pipeline-config-manager.ts
 │   └── protocol-manager.ts
-├── config-manager/                 # 配置管理 (别名生成)
-│   ├── config-manager-module.ts
-│   ├── merged-config-generator.ts
+├── config-manager/                 # 运行时配置监控
+│   ├── base-module-shim.ts
 │   └── config-watcher.ts
 ├── pipeline/                       # 4层流水线系统
 │   ├── core/                       # 核心流水线实现
@@ -432,7 +431,7 @@ src/modules/
 #### `debug-enhancement-manager.ts`
 - **用途**: 统一调试增强管理器实现
 - **导出**: `DebugEnhancementManager`, `DebugEnhancement`, `DebugEnhancementConfig`
-- **依赖**: `rcc-debugcenter`, `rcc-errorhandling`, `Logger`
+- **依赖**: `rcc-errorhandling`, `Logger`
 - **关键类**: `DebugEnhancementManager` (单例)
 - **核心功能**: 全局调试管理、性能度量、历史记录
 
@@ -813,7 +812,6 @@ The `EnhancedProviderManager` automatically:
 
 All unimplemented modules integrate with:
 - `rcc-errorhandling` for consistent error processing
-- `rcc-debugcenter` for debug event publishing
 - Standard logging through the `Logger` utility
 
 ### Configuration Integration
@@ -828,7 +826,6 @@ The system integrates with RouteCodex's configuration system:
 
 ### Internal Dependencies
 - **rcc-basemodule**: Base module functionality and interfaces
-- **rcc-debugcenter**: Debug event publishing and monitoring
 - **rcc-errorhandling**: Consistent error processing and reporting
 - **Logger**: Centralized logging utility
 

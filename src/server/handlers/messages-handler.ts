@@ -6,9 +6,9 @@ import {
   sendPipelineResponse,
   logRequestStart,
   logRequestComplete,
-  logRequestError
+  logRequestError,
+  captureClientHeaders
 } from './handler-utils.js';
-import { ensureSsePipelineResult } from '../utils/sse-response-normalizer.js';
 
 export async function handleMessages(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
   const entryEndpoint = '/v1/messages';
@@ -19,8 +19,25 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       return;
     }
     const payload = (req.body || {}) as any;
-    const wantsStream = Boolean(payload?.stream);
-    logRequestStart(entryEndpoint, requestId, { stream: wantsStream, model: payload?.model });
+    const originalPayload =
+      payload && typeof payload === 'object' ? JSON.parse(JSON.stringify(payload)) : payload;
+    const clientHeaders = captureClientHeaders(req.headers);
+    const acceptsSse = typeof req.headers['accept'] === 'string'
+      && (req.headers['accept'] as string).includes('text/event-stream');
+    const originalStream = payload?.stream === true;
+    const inboundStream = acceptsSse || originalStream;
+    const outboundStream = originalStream;
+    if (acceptsSse && payload && typeof payload === 'object' && !originalStream) {
+      payload.stream = true;
+    }
+    const wantsStream = inboundStream;
+    logRequestStart(entryEndpoint, requestId, {
+      inboundStream: wantsStream,
+      outboundStream,
+      clientAcceptsSse: acceptsSse,
+      originalStream,
+      model: payload?.model
+    });
     const result = await ctx.executePipeline({
       entryEndpoint,
       method: req.method,
@@ -29,14 +46,16 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       query: req.query as Record<string, unknown>,
       body: payload,
       metadata: {
-        stream: wantsStream
+        stream: wantsStream,
+        clientStream: acceptsSse || undefined,
+        inboundStream: wantsStream,
+        outboundStream,
+        __raw_request_body: originalPayload,
+        clientHeaders
       }
     });
-    const finalResult = wantsStream
-      ? await ensureSsePipelineResult(result, requestId)
-      : result;
-    logRequestComplete(entryEndpoint, requestId, finalResult.status ?? 200);
-    sendPipelineResponse(res, finalResult, requestId, { forceSSE: wantsStream });
+    logRequestComplete(entryEndpoint, requestId, result.status ?? 200);
+    sendPipelineResponse(res, result, requestId, { forceSSE: wantsStream });
   } catch (error: any) {
     logRequestError(entryEndpoint, requestId, error);
     if (res.headersSent) return;

@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import type { ErrorHandlingCenter } from '../../modules/errorhandling/error-handling-center-shim.js';
+import type { ErrorHandlingCenter } from 'rcc-errorhandling';
 
 export interface PipelineExecutionInput {
   entryEndpoint: string;

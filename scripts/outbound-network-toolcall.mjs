@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // One-click outbound network toolcall tests against openai-compatible providers.
-// Reads provider configs under ~/.routecodex/provider/*/config*.json or merged-config.*.json
+// Reads provider configs under ~/.routecodex/provider/*/config*.json
 // Sends a function-calling prompt and reports whether a functionCall/tool_calls is returned.
 
 import fs from 'fs';
@@ -45,7 +45,10 @@ function findProviderConfigs() {
   const files = [];
   for (const d of dirs) {
     const dir = path.join(root, d.name);
-    const list = fs.readdirSync(dir).filter(f => /config\.(?:json|v1\.json)$/.test(f) || /^merged-config\..*\.json$/.test(f));
+    const list = fs.readdirSync(dir).filter(f =>
+      /config\.(?:json|v1\.json)$/.test(f) ||
+      /^virtual-router-config\..*\.generated\.json$/.test(f)
+    );
     for (const f of list) files.push(path.join(dir, f));
   }
   let filtered = files;
@@ -63,7 +66,7 @@ function readJson(p) { try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } c
 function extractProviderConfigs(raw, filename) {
   const out = [];
   if (!raw || typeof raw !== 'object') return out;
-  // Case A: merged-config.*.json (pipeline_assembler)
+  // Case A: pipeline_assembler.*.json (legacy/recorded snapshots)
   try {
     const pipelines = raw?.pipeline_assembler?.config?.pipelines;
     if (Array.isArray(pipelines) && pipelines.length) {

@@ -15,7 +15,7 @@ RouteCodex 是一个多 Provider OpenAI 代理服务器，支持动态路由、�
 | 错误处理 | Provider/Compatibility 抛错 → `errorHandlingCenter.handleError` → 上报 `providerErrorCenter`，并映射为 HTTP 响应 | Virtual Router 接收 `ProviderErrorEvent`、执行熔断/降级；Super Pipeline 将错误冒泡给 host |
 | 热更新 | 监听配置变更 → 调用 `superPipeline.updateVirtualRouterConfig(newArtifacts)`，并刷新 Provider runtime | 在内部替换 Virtual Router 配置并继续输出最新的 routing/runtime 状态 |
 
-> **落地要求**：Host 不再解析旧的 merged-config 蓝图，也不在 Provider 层做“模型选择”；所有模型替换/目标决策由 Virtual Router 执行，Host 仅负责“把 HTTP/SSE 转交给 Super Pipeline + 根据 runtimeKey 调用 Provider”，从而保证单一职责和无兜底策略。
+> **落地要求**：Host 不再解析旧的“合并配置”蓝图，也不在 Provider 层做“模型选择”；所有模型替换/目标决策由 Virtual Router 执行，Host 仅负责“把 HTTP/SSE 转交给 Super Pipeline + 根据 runtimeKey 调用 Provider”，从而保证单一职责和无兜底策略。
 
 ## 系统架构
 
@@ -147,7 +147,7 @@ RouteCodex 是一个多 Provider OpenAI 代理服务器，支持动态路由、�
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐  │
-│  │   RouteCodex    │    │  rcc-debugcenter │    │ rcc-errorhandling│  │
+│  │   RouteCodex    │    │  rcc-errorhandling │  │
 │  │                 │    │                 │    │                 │  │
 │  │  • 主应用        │    │  • 调试中心      │    │  • 错误处理      │  │
 │  │  • 服务器        │    │  • 主题订阅      │    │  • 异常管理      │  │
@@ -316,11 +316,11 @@ RouteCodex 现在完全依赖 sharedmodule/llmswitch-core 的 Super Pipeline，�
     "topics": {
       "debug-events": {
         "description": "Debug events topic",
-        "subscribers": ["debugcenter", "monitoring"]
+        "subscribers": ["monitoring"]
       },
       "system-events": {
         "description": "System events topic",
-        "subscribers": ["debugcenter", "errorhandler"]
+        "subscribers": ["errorhandler"]
       },
       "user-events": {
         "description": "User events topic",
@@ -328,7 +328,7 @@ RouteCodex 现在完全依赖 sharedmodule/llmswitch-core 的 Super Pipeline，�
       }
     },
     "wildcardEnabled": true,
-    "wildcardSubscribers": ["debugcenter"]
+    "wildcardSubscribers": []
   }
 }
 ```

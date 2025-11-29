@@ -10,7 +10,7 @@
  */
 
 import express, { type Application } from 'express';
-import { ErrorHandlingCenter } from '../../../modules/errorhandling/error-handling-center-shim.js';
+import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { HandlerContext, PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
 import { ProviderFactory } from '../../../modules/pipeline/modules/provider/v2/core/provider-factory.js';
@@ -23,12 +23,13 @@ import { emitProviderError } from '../../../modules/pipeline/modules/provider/v2
 import { isStageLoggingEnabled, logPipelineStage } from '../../utils/stage-logger.js';
 import { registerDefaultMiddleware } from './middleware.js';
 import { registerHttpRoutes } from './routes.js';
-import { mapProviderProtocol, normalizeProviderType, asRecord } from './provider-utils.js';
+import { mapProviderProtocol, mapProviderResponseType, normalizeProviderType, asRecord } from './provider-utils.js';
 import { resolveRepoRoot, loadLlmswitchModule } from './llmswitch-loader.js';
 import type { ProviderHandle, ProviderProtocol, RequestContextV2, ServerConfigV2, ServerStatusV2, SuperPipeline, SuperPipelineCtor, VirtualRouterArtifacts } from './types.js';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - llmswitch-core dist does not ship ambient types
 import { ProviderResponseConverter, type ProviderResponseType } from '../../../../sharedmodule/llmswitch-core/dist/v2/conversion/conversion-v3/response/provider-response-converter.js';
+import { writeClientSnapshot } from '../../../modules/pipeline/modules/provider/v2/utils/snapshot-writer.js';
 
 /**
  * RouteCodex Server V2
@@ -103,7 +104,7 @@ export class RouteCodexHttpServer {
 
   private normalizeAuthType(input: unknown): 'apikey' | 'oauth' {
     const value = typeof input === 'string' ? input.toLowerCase() : '';
-    if (value === 'oauth' || value === 'iflow-oauth' || value === 'qwen-oauth') {
+    if (value.includes('oauth')) {
       return 'oauth';
     }
     return 'apikey';
@@ -339,6 +340,10 @@ export class RouteCodexHttpServer {
     runtime: ProviderRuntimeProfile
   ): Promise<ProviderHandle> {
     const providerType = normalizeProviderType(runtime.providerType);
+    const providerProtocol =
+      (typeof runtime.outboundProfile === 'string' && runtime.outboundProfile.trim()
+        ? (runtime.outboundProfile.trim() as ProviderProtocol)
+        : undefined) ?? mapProviderProtocol(providerType);
     const instance = ProviderFactory.createProviderFromRuntime(runtime, this.getModuleDependencies());
     await instance.initialize();
     const providerId = runtime.providerId || runtimeKey.split('.')[0];
@@ -346,7 +351,7 @@ export class RouteCodexHttpServer {
       runtimeKey,
       providerId,
       providerType,
-      providerProtocol: mapProviderProtocol(providerType),
+      providerProtocol,
       runtime,
       instance
     };
@@ -377,31 +382,66 @@ export class RouteCodexHttpServer {
   private async resolveRuntimeAuth(runtime: ProviderRuntimeProfile): Promise<ProviderRuntimeProfile['auth']> {
     const auth = runtime.auth || { type: 'apikey' };
     const authType = this.normalizeAuthType(auth.type);
+    const pickString = (...candidates: unknown[]): string | undefined => {
+      for (const candidate of candidates) {
+        if (typeof candidate === 'string') {
+          const trimmed = candidate.trim();
+          if (trimmed) {
+            return trimmed;
+          }
+        }
+      }
+      return undefined;
+    };
+    const pickStringArray = (value: unknown): string[] | undefined => {
+      if (!value) return undefined;
+      if (Array.isArray(value)) {
+        const normalized = value
+          .map((item) => pickString(item))
+          .filter((item): item is string => typeof item === 'string');
+        return normalized.length ? normalized : undefined;
+      }
+      if (typeof value === 'string' && value.trim()) {
+        const normalized = value
+          .split(/[,\s]+/)
+          .map((item) => item.trim())
+          .filter(Boolean);
+        return normalized.length ? normalized : undefined;
+      }
+      return undefined;
+    };
 
     if (authType === 'apikey') {
       const value = await this.resolveApiKeyValue(runtime, auth);
       return { ...auth, type: 'apikey', value };
     }
 
-    const clientId = auth.clientId || auth.client_id;
-    const tokenUrl = auth.tokenUrl || auth.token_url;
-    if (!clientId || !tokenUrl) {
-      throw new Error(`Provider runtime "${runtime.runtimeKey || runtime.providerId}" missing OAuth client configuration`);
-    }
-    const tokenFile =
-      (typeof auth.tokenFile === 'string' && auth.tokenFile.trim())
-        ? auth.tokenFile.trim()
-        : auth.secretRef
-          ? await this.resolveSecretValue(auth.secretRef)
-          : undefined;
-
-    return {
-      ...auth,
+    const resolved: ProviderRuntimeProfile['auth'] = {
       type: 'oauth',
-      clientId,
-      tokenUrl,
-      tokenFile
+      secretRef: auth.secretRef,
+      value: auth.value,
+      oauthProviderId: auth.oauthProviderId,
+      rawType: auth.rawType,
+      tokenFile: pickString((auth as any).tokenFile ?? (auth as any).token_file),
+      tokenUrl: pickString((auth as any).tokenUrl ?? (auth as any).token_url),
+      deviceCodeUrl: pickString((auth as any).deviceCodeUrl ?? (auth as any).device_code_url),
+      clientId: pickString((auth as any).clientId ?? (auth as any).client_id),
+      clientSecret: pickString((auth as any).clientSecret ?? (auth as any).client_secret),
+      authorizationUrl: pickString(
+        (auth as any).authorizationUrl ?? (auth as any).authorization_url ?? (auth as any).authUrl
+      ),
+      userInfoUrl: pickString((auth as any).userInfoUrl ?? (auth as any).user_info_url),
+      refreshUrl: pickString((auth as any).refreshUrl ?? (auth as any).refresh_url),
+      scopes: pickStringArray((auth as any).scopes ?? (auth as any).scope)
     };
+
+    let tokenFile = resolved.tokenFile;
+    if (!tokenFile && typeof auth.secretRef === 'string' && auth.secretRef.trim()) {
+      tokenFile = await this.resolveSecretValue(auth.secretRef.trim());
+    }
+    resolved.tokenFile = tokenFile;
+
+    return resolved;
   }
 
   private async resolveApiKeyValue(runtime: ProviderRuntimeProfile, auth: ProviderRuntimeProfile['auth']): Promise<string> {
@@ -444,6 +484,23 @@ export class RouteCodexHttpServer {
       stream: input.metadata?.stream === true
     });
     const metadata = this.buildRequestMetadata(input);
+    try {
+      const headerUa =
+        (typeof input.headers?.['user-agent'] === 'string' && input.headers['user-agent']) ||
+        (typeof input.headers?.['User-Agent'] === 'string' && input.headers['User-Agent']);
+      await writeClientSnapshot({
+        entryEndpoint: input.entryEndpoint,
+        requestId: input.requestId,
+        headers: asRecord(input.headers),
+        body: input.body,
+        metadata: {
+          ...metadata,
+          userAgent: headerUa
+        }
+      });
+    } catch {
+      // snapshot failure should not block request path
+    }
     this.logStage('super.start', input.requestId, { endpoint: input.entryEndpoint, stream: metadata.stream });
     const originalRequestSnapshot = this.cloneRequestPayload(input.body);
     const result = await this.superPipeline.execute({
@@ -607,8 +664,11 @@ export class RouteCodexHttpServer {
     originalRequest?: Record<string, unknown> | undefined;
     response: PipelineExecutionResult;
   }): Promise<PipelineExecutionResult> {
-    const entry = options.entryEndpoint || '';
-    if (!entry.includes('/v1/messages')) {
+    const entry = (options.entryEndpoint || '').toLowerCase();
+    const needsAnthropicConversion = entry.includes('/v1/messages');
+    const needsResponsesConversion = entry.includes('/v1/responses');
+    const needsChatConversion = options.wantsStream && entry.includes('/v1/chat/completions');
+    if (!needsAnthropicConversion && !needsResponsesConversion && !needsChatConversion) {
       return options.response;
     }
     const body = options.response.body;
@@ -618,7 +678,7 @@ export class RouteCodexHttpServer {
     try {
       const converted = await this.responseConverter.convert({
         entryEndpoint: entry,
-        providerType: (normalizeProviderType(options.providerType) as ProviderResponseType) ?? 'openai',
+        providerType: mapProviderResponseType(options.providerType),
         providerResponse: body as Record<string, unknown>,
         requestId: options.requestId,
         wantsStream: options.wantsStream,

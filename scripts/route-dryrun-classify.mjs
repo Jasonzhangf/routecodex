@@ -158,21 +158,25 @@ async function loadAnthropicRequests() {
 async function main() {
   const ConfigRequestClassifier = await loadClassifier();
 
-  // Try to load formal routingClassifierConfig from merged-config
-  const mergedDir = path.join(process.cwd(), 'config');
+  // Try to load formal routingClassifierConfig from generated virtual-router config
+  const mergedDir = path.join(os.homedir(), '.routecodex', 'config', 'generated');
   let classifierConfig = null;
   try {
-    const primary = path.join(mergedDir, 'merged-config.json');
+    const primary = path.join(mergedDir, 'virtual-router-config.generated.json');
     const candidates = [primary];
-    const list = await fsp.readdir(mergedDir);
-    for (const f of list) {
-      if (/^merged-config\..*\.json$/.test(f)) candidates.push(path.join(mergedDir, f));
-    }
+    try {
+      const list = await fsp.readdir(mergedDir);
+      for (const f of list) {
+        if (/^virtual-router-config\..*\.generated\.json$/.test(f)) {
+          candidates.push(path.join(mergedDir, f));
+        }
+      }
+    } catch {}
     for (const p of candidates) {
       try {
         const txt = await fsp.readFile(p, 'utf-8');
         const j = JSON.parse(txt);
-        const c = j?.modules?.virtualrouter?.config?.classificationConfig;
+        const c = j?.virtualrouter?.classificationConfig;
         if (c && typeof c === 'object') { classifierConfig = c; break; }
       } catch {}
     }
@@ -180,9 +184,9 @@ async function main() {
 
   const cfg = classifierConfig || buildClassifierConfig();
   if (!classifierConfig) {
-    console.log('[route-dryrun-classify] Using built-in minimal classifier config (merged-config not found).');
+    console.log('[route-dryrun-classify] Using built-in minimal classifier config (no generated virtual-router config).');
   } else {
-    console.log('[route-dryrun-classify] Loaded classifier config from merged-config.');
+    console.log('[route-dryrun-classify] Loaded classifier config from generated virtual-router config.');
   }
   const cls = ConfigRequestClassifier.fromModuleConfig(cfg);
 

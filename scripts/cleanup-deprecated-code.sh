@@ -20,11 +20,6 @@ echo "📦 创建清理前备份..."
 BACKUP_DIR="cleanup-backup-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BACKUP_DIR"
 
-# 备份关键配置
-if [[ -f "config/merged-config.json" ]]; then
-    cp config/merged-config.json "$BACKUP_DIR/"
-fi
-
 echo "✅ 备份完成: $BACKUP_DIR"
 echo ""
 
@@ -65,16 +60,9 @@ echo ""
 # 阶段2: 配置清理（需用户确认）
 echo "🟡 阶段2: 配置文件清理..."
 
-# 备份配置文件
-echo "📦 备份配置文件..."
-if [[ -f "config/merged-config.json" ]]; then
-    cp config/merged-config.json "config/merged-config.backup.$(date +%Y%m%d).json"
-    echo "  已备份: merged-config.backup.$(date +%Y%m%d).json"
-fi
-
 # 删除旧配置快照
 echo "🗑️ 删除旧配置快照..."
-find config/ -name "merged-config.55*.json" -delete -print 2>/dev/null || true
+find config/ -name "virtual-router-config.*.generated.json.bak" -delete -print 2>/dev/null || true
 
 # 删除旧版本tgz包
 echo "🗑️ 删除旧版本tgz包..."
@@ -143,7 +131,7 @@ cat > "$REPORT_FILE" << EOF
 - 临时调试文件: $((TEMP_FILES_BEFORE - TEMP_FILES_AFTER)) 个
 - 测试输出目录: tests/output/
 - 构建产物目录: dist/
-- 旧配置快照: merged-config.55*.json
+- 旧配置快照: virtual-router-config.<port>.generated.json.bak
 - 旧版本包: rcc-llmswitch-core-0.1.3[7-9].tgz
 
 ## 构建验证

@@ -55,8 +55,8 @@ async function waitForHealth() {
 async function resolveTestModel() {
   const home = os.homedir();
   const candidates = [
-    path.join(home, '.routecodex', 'config', 'generated', `merged-config.${port}.json`),
-    path.join(home, '.routecodex', 'config', 'generated', 'merged-config.generated.json'),
+    path.join(home, '.routecodex', 'config', 'generated', `virtual-router-config.${port}.generated.json`),
+    path.join(home, '.routecodex', 'config', 'generated', 'virtual-router-config.generated.json'),
   ];
   for (const file of candidates) {
     try {

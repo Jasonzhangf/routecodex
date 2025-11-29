@@ -2,7 +2,11 @@ import type { ModuleDependencies } from '../../../../interfaces/pipeline-interfa
 import type { ProviderContext } from '../api/provider-types.js';
 import type { TargetMetadata } from '../../../../orchestrator/pipeline-context.js';
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore - llmswitch-core local dist does not ship ambient types for router modules
 import { providerErrorCenter } from '../../../../../../../sharedmodule/llmswitch-core/dist/v2/router/virtual-router/error-center.js';
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore - llmswitch-core local dist does not ship ambient types for router modules
 import type { ProviderErrorEvent, ProviderErrorRuntimeMetadata } from '../../../../../../../sharedmodule/llmswitch-core/dist/v2/router/virtual-router/types.js';
 
 type CompatContext = {

@@ -1,51 +1,58 @@
 import type { ProviderProtocol } from './types.js';
 
 export function normalizeProviderType(input?: string): string {
-  const value = (input || '').toLowerCase();
-  if (value.includes('anthropic') || value.includes('claude')) return 'anthropic';
-  if (value.includes('responses')) return 'responses';
-  if (value.includes('gemini')) return 'gemini';
-  return 'openai';
+  if (typeof input !== 'string') {
+    throw new Error('[ProviderType] providerType is required');
+  }
+  const value = input.trim().toLowerCase();
+  if (!value) {
+    throw new Error('[ProviderType] providerType is required');
+  }
+  return value;
 }
 
 export function mapProviderModule(providerType: string): string {
-  switch (normalizeProviderType(providerType)) {
-    case 'responses':
-      return 'responses-http-provider';
-    case 'anthropic':
-      return 'anthropic-http-provider';
-    case 'gemini':
-      return 'gemini-http-provider';
-    default:
-      return 'openai-http-provider';
+  const normalized = normalizeProviderType(providerType);
+  if (normalized === 'responses') return 'responses-http-provider';
+  if (normalized === 'anthropic') return 'anthropic-http-provider';
+  if (normalized === 'gemini') return 'gemini-http-provider';
+  if (normalized === 'iflow') return 'iflow-http-provider';
+  if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'lmstudio') {
+    return 'openai-http-provider';
   }
+  throw new Error(`[ProviderType] Unsupported providerType '${providerType}'`);
 }
 
 export function mapProviderProtocol(providerType?: string): ProviderProtocol {
   const normalized = normalizeProviderType(providerType);
-  switch (normalized) {
-    case 'responses':
-      return 'openai-responses';
-    case 'anthropic':
-      return 'anthropic-messages';
-    case 'gemini':
-      return 'gemini-chat';
-    default:
-      return 'openai-chat';
+  if (normalized === 'responses') return 'openai-responses';
+  if (normalized === 'anthropic') return 'anthropic-messages';
+  if (normalized === 'gemini') return 'gemini-chat';
+  if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'iflow' || normalized === 'lmstudio') {
+    return 'openai-chat';
   }
+  throw new Error(`[ProviderType] Unsupported providerType '${providerType}'`);
+}
+
+export function mapProviderResponseType(providerType?: string): 'openai' | 'anthropic' | 'responses' {
+  const normalized = normalizeProviderType(providerType);
+  if (normalized === 'anthropic') return 'anthropic';
+  if (normalized === 'responses') return 'responses';
+  if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'iflow' || normalized === 'lmstudio') {
+    return 'openai';
+  }
+  throw new Error(`[ProviderType] Unsupported providerType '${providerType}'`);
 }
 
 export function defaultEndpointForProvider(providerType?: string): string {
-  switch (normalizeProviderType(providerType)) {
-    case 'responses':
-      return '/v1/responses';
-    case 'anthropic':
-      return '/v1/messages';
-    case 'gemini':
-      return '/v1beta/models';
-    default:
-      return '/v1/chat/completions';
+  const normalized = normalizeProviderType(providerType);
+  if (normalized === 'responses') return '/v1/responses';
+  if (normalized === 'anthropic') return '/v1/messages';
+  if (normalized === 'gemini') return '/v1beta/models';
+  if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'iflow' || normalized === 'lmstudio') {
+    return '/v1/chat/completions';
   }
+  throw new Error(`[ProviderType] Unsupported providerType '${providerType}'`);
 }
 
 export function extractFirstString(value: unknown): string | undefined {

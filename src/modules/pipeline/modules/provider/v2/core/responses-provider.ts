@@ -53,18 +53,12 @@ export class ResponsesProvider extends ChatHttpProvider {
       const r: any = request || {};
       const dataObj: any = (r && typeof r === 'object' && 'data' in r && typeof r.data === 'object') ? r.data : r;
       const body: any = { ...dataObj };
-      const cfgModel = (this.config as any)?.config?.model;
-      const cfgModelId = (this.config as any)?.config?.modelId;
-      // Responses provider 始终以配置的实际模型为准：
-      //  - 优先使用 config.model（若显式提供）
-      //  - 否则回退到 config.modelId（canonical 中的 actualModelId，例如 'gpt-5.1'）
-      //  - 若仍无配置，则使用 serviceProfile.defaultModel
+      const routeModel = (context?.target as any)?.modelId;
+      // Responses provider 始终以路由目标提供的实际模型为准，不再依赖 config.model 或默认值
       const upstreamModel =
-        (typeof cfgModel === 'string' && cfgModel.trim())
-          ? cfgModel.trim()
-          : (typeof cfgModelId === 'string' && cfgModelId.trim())
-            ? cfgModelId.trim()
-            : (this as any).serviceProfile.defaultModel;
+        (typeof routeModel === 'string' && routeModel.trim())
+          ? routeModel.trim()
+          : (this as any).serviceProfile.defaultModel;
       body.model = upstreamModel;
       // Responses provider 不在此处处理 max_tokens；保持 llmswitch-core 兼容层的唯一治理入口
       try { if ('metadata' in body) { delete body.metadata; } } catch { /* ignore */ }
@@ -164,12 +158,24 @@ export class ResponsesProvider extends ChatHttpProvider {
 }
 
 export default ResponsesProvider;
+function hasSharedmodule(dir: string): boolean {
+  try {
+    return fs.existsSync(path.join(dir, 'sharedmodule', 'llmswitch-core'));
+  } catch {
+    return false;
+  }
+}
+
 function findPackageRoot(startDir: string): string {
   let dir = startDir;
   const root = path.parse(dir).root;
-  while (dir && dir !== root) {
-    if (fs.existsSync(path.join(dir, 'package.json'))) {
+  while (true) {
+    const hasPackageJson = fs.existsSync(path.join(dir, 'package.json'));
+    if (hasPackageJson || hasSharedmodule(dir)) {
       return dir;
+    }
+    if (dir === root) {
+      break;
     }
     dir = path.resolve(dir, '..');
   }

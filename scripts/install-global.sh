@@ -150,14 +150,14 @@ verify_install() {
 verify_server_health() {
     local HEALTH_LOG="/tmp/routecodex-install-health-$(date +%s).log"
     echo ""
-    echo "🩺 执行服务器健康检查..."
-    if node scripts/verify-health.mjs >"$HEALTH_LOG" 2>&1; then
-        echo "✅ 健康检查通过"
+    echo "🩺 执行服务器健康&端到端检查 (chat + anthropic SSE)..."
+    if node scripts/verify-install-e2e.mjs >"$HEALTH_LOG" 2>&1; then
+        echo "✅ 全局 CLI 端到端检查通过"
         rm -f "$HEALTH_LOG" || true
         return
     fi
-    echo "❌ 健康检查失败，请查看日志: $HEALTH_LOG"
-    tail -n 160 "$HEALTH_LOG" 2>/dev/null || true
+    echo "❌ 端到端检查失败，请查看日志: $HEALTH_LOG"
+    tail -n 200 "$HEALTH_LOG" 2>/dev/null || true
     exit 1
 }
 

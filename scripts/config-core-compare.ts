@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 
 function readJson(p: string): any {
   const abs = p.startsWith('.') || !path.isAbsolute(p) ? path.resolve(process.cwd(), p) : p;
@@ -20,18 +21,20 @@ function summarizeModules(p: any) {
 
 function main() {
   const corePacPath = './config/pipeline_assembler.core.json';
-  const legacyMergedPath = './config/merged-config.generated.json';
+  const generatedPipelinePath =
+    process.argv[2] ||
+    path.join(os.homedir(), '.routecodex', 'config', 'generated', 'pipeline-config.generated.json');
   if (!fs.existsSync(corePacPath)) {
     console.error('[compare] core assembler not found:', corePacPath);
     process.exit(2);
   }
-  if (!fs.existsSync(legacyMergedPath)) {
-    console.error('[compare] legacy merged not found:', legacyMergedPath);
+  if (!fs.existsSync(generatedPipelinePath)) {
+    console.error('[compare] generated pipeline config not found:', generatedPipelinePath);
     process.exit(2);
   }
 
   const core = readJson(corePacPath);
-  const legacy = readJson(legacyMergedPath);
+  const legacy = readJson(generatedPipelinePath);
   const corePac = core?.config || core;
   const legacyPac = legacy?.pipeline_assembler?.config || {};
 

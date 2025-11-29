@@ -346,11 +346,8 @@ cp config/examples/basic-config.json ~/.routecodex/config.json
       "type": "chat-http-provider",
       "config": {
         "providerType": "openai",
-        "extensions": {
-          "oauthProviderId": "qwen"
-        },
         "auth": {
-          "type": "oauth",
+          "type": "qwen-oauth",
           "clientId": "${QWEN_CLIENT_ID}",
           "clientSecret": "${QWEN_CLIENT_SECRET}",
           "tokenFile": "${HOME}/.routecodex/auth/qwen-oauth.json"

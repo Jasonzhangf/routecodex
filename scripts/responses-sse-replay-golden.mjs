@@ -20,11 +20,14 @@ function nowStamp() { return new Date().toISOString().replace(/[:.]/g, '-'); }
 
 function findProviderConfig(providerId) {
   const dir = path.join(PROVIDER_DIR, providerId);
-  const merged = path.join(dir, 'merged-config.5555.json');
-  const v1 = path.join(dir, 'config.v1.json');
-  const config = fs.existsSync(merged) ? merged : (fs.existsSync(v1) ? v1 : null);
-  if (!config) throw new Error(`No provider config for ${providerId}`);
-  return JSON.parse(fs.readFileSync(config, 'utf-8'));
+  const candidates = ['config.v1.json', 'config.json'];
+  for (const name of candidates) {
+    const p = path.join(dir, name);
+    if (fs.existsSync(p)) {
+      return JSON.parse(fs.readFileSync(p, 'utf-8'));
+    }
+  }
+  throw new Error(`No provider config for ${providerId}`);
 }
 
 function extractProviderEntry(doc, providerId) {
@@ -133,4 +136,3 @@ async function main() {
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
-

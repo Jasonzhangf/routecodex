@@ -29,7 +29,7 @@ The enhancement system consists of several key components:
 
 ```typescript
 import { ModuleEnhancementFactory } from '../src/modules/enhancement/module-enhancement-factory.js';
-import { DebugCenter } from 'rcc-debugcenter';
+import { DebugCenter } from 'rcc-errorhandling';
 
 // Create factory
 const factory = new ModuleEnhancementFactory(debugCenter);

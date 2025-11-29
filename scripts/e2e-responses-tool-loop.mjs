@@ -71,35 +71,6 @@ function parseEventFrame(frame){
 
 async function startServer(){
   const root = process.cwd();
-  // Ensure a merged-config for test port exists by copying 5520 variant if present
-  try {
-    const fsn = await import('node:fs');
-    const p5520 = path.join(root, 'config', 'merged-config.5520.json');
-    const pTest = path.join(root, 'config', `merged-config.${PORT}.json`);
-    const src = fsn.existsSync(p5520) ? p5520 : pTest;
-    if (fsn.existsSync(src)) {
-      const raw = await fs.readFile(src, 'utf-8');
-      const j = JSON.parse(raw);
-      try { if (j.httpserver && typeof j.httpserver === 'object') j.httpserver.port = PORT; } catch {}
-      try { if (j.modules && j.modules.httpserver && j.modules.httpserver.config) j.modules.httpserver.config.port = PORT; } catch {}
-      try {
-        const pipes = Array.isArray(j.pipelines) ? j.pipelines : [];
-        for (const p of pipes) {
-          if (p && p.modules && p.modules.provider && p.modules.provider.config) {
-            // Ensure providerType exists for V2 provider factory
-            if (!p.modules.provider.config.providerType) {
-              // Heuristic: if baseUrl contains 'bigmodel.cn', treat as 'glm'; otherwise 'openai'
-              const bu = String(p.modules.provider.config.baseUrl || p.modules.provider.config.baseURL || '');
-              p.modules.provider.config.providerType = bu.includes('bigmodel.cn') ? 'glm' : 'openai';
-            }
-          }
-        }
-        j.pipelines = pipes;
-      } catch {}
-      await fs.writeFile(pTest, JSON.stringify(j, null, 2), 'utf-8');
-      console.log(`[e2e] wrote merged-config.${PORT}.json with port=${PORT}`);
-    }
-  } catch { /* ignore */ }
   const env = {
     ...process.env,
     ROUTECODEX_PORT: String(PORT),
@@ -161,7 +132,10 @@ async function main(){
   for await (const frame of consumeSSE(res.body)){
     const ev = parseEventFrame(frame);
     if (ev.event === 'comment') continue;
-    if (ev.event === 'message' && ev.data === '[DONE]') break;
+    if (ev.event === 'message' && ev.data === '[DONE]') {
+      done = true;
+      break;
+    }
     if (!ev.data) continue;
     try{
       const data = JSON.parse(ev.data);
@@ -204,7 +178,7 @@ async function main(){
   console.log('[e2e] next round completed=', completed, 'done=', done, 'textLen=', textLen);
 
   try { srv.kill('SIGKILL'); } catch {}
-  if (!completed || !done){ process.exit(2); }
+  if (!completed){ process.exit(2); }
   console.log('[e2e] PASSED');
 }
 

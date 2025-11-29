@@ -59,7 +59,7 @@ export async function ensureValidOAuthToken(
   opts: EnsureOpts = {}
 ): Promise<void> {
   // Non-oauth callers should not route here
-  if (!auth || auth.type !== 'oauth') return;
+  if (!auth || typeof auth.type !== 'string' || !auth.type.toLowerCase().includes('oauth')) return;
 
   const tokenFilePath = resolveTokenFilePath(auth, providerType);
   const k = keyFor(providerType, tokenFilePath);

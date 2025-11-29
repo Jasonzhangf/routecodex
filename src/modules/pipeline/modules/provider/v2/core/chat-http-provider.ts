@@ -65,13 +65,11 @@ export class ChatHttpProvider extends BaseProvider {
         try {
           const cfgAny: any = (this.config as any) ?? {};
           const auth: any = cfgAny?.config?.auth;
-          if (auth && auth.type === 'oauth') {
-            const extensions = (cfgAny.config && typeof cfgAny.config.extensions === 'object')
-              ? (cfgAny.config.extensions as any)
-              : {};
-            const oauthProviderId: string = typeof extensions.oauthProviderId === 'string' && extensions.oauthProviderId.trim()
-              ? String(extensions.oauthProviderId).trim()
-              : this.providerType;
+          const extensions = (cfgAny.config && typeof cfgAny.config.extensions === 'object')
+            ? (cfgAny.config.extensions as any)
+            : {};
+          if (auth && this.normalizeAuthMode(auth.type) === 'oauth') {
+            const oauthProviderId = this.ensureOAuthProviderId(auth as any, extensions);
             const forceReauthorize = false; // 初始化阶段：读取→必要时刷新；不强制重授权
             const tokenFileHint = (auth as any)?.tokenFile || '(default)';
             // 明确打印初始化 OAuth 日志（不依赖 Hook 系统）
@@ -350,22 +348,7 @@ export class ChatHttpProvider extends BaseProvider {
       return baseProfile;
     }
 
-    // 未注册的 providerType：构造一个通用的 OpenAI 兼容配置，
-    // 仅依赖显式提供的 baseUrl / model / auth；不注入任何模型回退。
-    const baseUrl = (this.config.config.baseUrl || '').trim();
-    const model = (this.config.config as any).model;
-    return {
-      defaultBaseUrl: baseUrl || 'https://api.openai.com/v1',
-      defaultEndpoint: '/chat/completions',
-      defaultModel: typeof model === 'string' && model.trim() ? String(model) : '',
-      requiredAuth: [],
-      optionalAuth: ['apikey', 'oauth'],
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      timeout: 300000,
-      maxRetries: 3
-    };
+    throw new Error(`Unknown providerType='${this.providerType}' (no service profile registered)`);
   }
 
   protected createAuthProvider(): IAuthProvider {
@@ -374,16 +357,15 @@ export class ChatHttpProvider extends BaseProvider {
     const extensions = (cfgAny.config && typeof cfgAny.config.extensions === 'object')
       ? (cfgAny.config.extensions as any)
       : {};
-    // 对于 OAuth，优先使用扩展中的 oauthProviderId（iflow/qwen 等家族），否则退回协议族 providerType
-    const providerIdForAuth =
-      auth.type === 'oauth' && typeof extensions.oauthProviderId === 'string' && extensions.oauthProviderId.trim()
-        ? String(extensions.oauthProviderId).trim()
-        : this.providerType;
+    const authMode = this.normalizeAuthMode(auth.type);
+    const providerIdForAuth = authMode === 'oauth'
+      ? this.ensureOAuthProviderId(auth as any, extensions)
+      : this.providerType;
 
     // 验证认证配置（按 providerIdForAuth 选择服务档案）
     const validation = ServiceProfileValidator.validateServiceProfile(
       providerIdForAuth,
-      auth.type
+      authMode
     );
 
     if (!validation.isValid) {
@@ -393,9 +375,9 @@ export class ChatHttpProvider extends BaseProvider {
     }
 
     // 根据认证类型创建对应的认证提供者
-    if (auth.type === 'apikey') {
-      return new ApiKeyAuthProvider(auth);
-    } else if (auth.type === 'oauth') {
+    if (authMode === 'apikey') {
+      return new ApiKeyAuthProvider(auth as any);
+    } else if (authMode === 'oauth') {
       // For providers like Qwen where public OAuth client may not be available,
       // allow reading tokens produced by external login tools (CLIProxyAPI)
       const useTokenFile =
@@ -404,9 +386,9 @@ export class ChatHttpProvider extends BaseProvider {
         !(auth as any).tokenUrl &&
         !(auth as any).deviceCodeUrl;
       if (useTokenFile) {
-        return new TokenFileAuthProvider(auth);
+        return new TokenFileAuthProvider(auth as any);
       }
-      return new OAuthAuthProvider(auth, providerIdForAuth);
+      return new OAuthAuthProvider(auth as any, providerIdForAuth);
     } else {
       throw new Error(`Unsupported auth type: ${(auth as any).type}`);
     }
@@ -705,7 +687,7 @@ export class ChatHttpProvider extends BaseProvider {
       // OAuth token 失效：尝试刷新/重获并重试一次
       try {
         const auth: any = (this.config as any)?.config?.auth;
-        if (auth && auth.type === 'oauth') {
+        if (auth && this.normalizeAuthMode(auth.type) === 'oauth') {
           const shouldRetry = await handleUpstreamInvalidOAuthToken(this.providerType, auth as any, error);
           if (shouldRetry) {
             const retryHeaders = await this.buildRequestHeaders();
@@ -797,10 +779,11 @@ export class ChatHttpProvider extends BaseProvider {
   private validateConfig(): void {
     const profile = this.serviceProfile;
     const auth = this.config.config.auth;
+    const authMode = this.normalizeAuthMode(auth.type);
 
     // 验证认证类型
     const supportedAuthTypes = [...profile.requiredAuth, ...profile.optionalAuth];
-    if (!supportedAuthTypes.includes(auth.type)) {
+    if (!supportedAuthTypes.includes(authMode)) {
       throw new Error(
         `Auth type '${auth.type}' not supported for provider '${this.providerType}'. ` +
         `Supported types: ${supportedAuthTypes.join(', ')}`
@@ -830,13 +813,8 @@ export class ChatHttpProvider extends BaseProvider {
     try {
       const cfgAny: any = (this.config as any) ?? {};
       const auth: any = cfgAny?.config?.auth;
-      if (auth && auth.type === 'oauth') {
-        const extensions = (cfgAny.config && typeof cfgAny.config.extensions === 'object')
-          ? (cfgAny.config.extensions as any)
-          : {};
-        const oauthProviderId: string = typeof extensions.oauthProviderId === 'string' && extensions.oauthProviderId.trim()
-          ? String(extensions.oauthProviderId).trim()
-          : this.providerType;
+      if (auth && this.normalizeAuthMode(auth.type) === 'oauth') {
+        const oauthProviderId = this.ensureOAuthProviderId(auth.type);
         console.log('[OAuth] [headers] ensureValid start (openBrowser=true, forceReauth=false)');
         try {
           await ensureValidOAuthToken(oauthProviderId, auth as any, {
@@ -963,5 +941,53 @@ export class ChatHttpProvider extends BaseProvider {
       runtimeMetadata: runtime,
       pipelineId: runtime?.pipelineId
     };
+  }
+
+  private normalizeAuthMode(type: unknown): 'apikey' | 'oauth' {
+    return typeof type === 'string' && type.toLowerCase().includes('oauth') ? 'oauth' : 'apikey';
+  }
+
+  private resolveOAuthProviderId(type: unknown): string | undefined {
+    if (typeof type !== 'string') return undefined;
+    const match = type.toLowerCase().match(/^([a-z0-9._-]+)-oauth$/);
+    return match ? match[1] : undefined;
+  }
+
+  private ensureOAuthProviderId(auth: any, extensions?: Record<string, unknown>): string {
+    const fromExtension =
+      typeof extensions?.oauthProviderId === 'string' && extensions.oauthProviderId.trim()
+        ? extensions.oauthProviderId.trim()
+        : undefined;
+    if (fromExtension) {
+      return fromExtension;
+    }
+    const fromAuthField =
+      typeof auth?.oauthProviderId === 'string' && auth.oauthProviderId.trim()
+        ? auth.oauthProviderId.trim()
+        : undefined;
+    if (fromAuthField) {
+      return fromAuthField;
+    }
+    const providerId = this.resolveOAuthProviderId(auth?.rawType ?? auth?.type);
+    if (providerId) {
+      return providerId;
+    }
+    const fallback = this.resolveOAuthProviderId(auth?.type);
+    if (fallback) {
+      return fallback;
+    }
+    throw new Error(
+      `OAuth auth.type must be declared as "<provider>-oauth" (received ${typeof auth?.rawType === 'string' ? auth.rawType : auth?.type ?? 'unknown'})`
+    );
+  }
+
+  private ensureOAuthProviderIdLegacy(type: unknown): string {
+    const providerId = this.resolveOAuthProviderId(type);
+    if (!providerId) {
+      throw new Error(
+        `OAuth auth.type must be declared as "<provider>-oauth" (received ${typeof type === 'string' ? type : 'unknown'})`
+      );
+    }
+    return providerId;
   }
 }

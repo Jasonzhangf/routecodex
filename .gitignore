@@ -19,7 +19,6 @@ node_modules/
 config/assemblerConfig.json
 config/canonical.json
 config/local-*.json
-config/merged-config*.json
 config/systemParsed.json
 config/userParsed.json
 config/merged.json
@@ -29,8 +28,6 @@ verified-configs/
 demo-results/
 
 # Shared module local builds
-sharedmodule/config-core/
-
 # Development and test scripts
 scripts/install-verify.mjs
 scripts/start-verify.mjs

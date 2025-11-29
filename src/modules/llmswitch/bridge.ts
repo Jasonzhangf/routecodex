@@ -156,6 +156,19 @@ export async function calculateRequestTokensStrict(request: AnyRecord, model?: s
   );
 }
 
+export async function resumeResponsesConversation(
+  responseId: string,
+  submitPayload: AnyRecord,
+  options?: { requestId?: string }
+): Promise<{ payload: AnyRecord; meta: AnyRecord }> {
+  const mod = await importCoreDist('v2/conversion/shared/responses-conversation-store');
+  const fn = (mod as any)?.resumeResponsesConversation;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] resumeResponsesConversation not available');
+  }
+  return await fn(responseId, submitPayload, options);
+}
+
 function resolveBaseDir(): string {
   const env = String(process.env.ROUTECODEX_BASEDIR || process.env.RCC_BASEDIR || '').trim();
   if (env) return env;
