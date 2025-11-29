@@ -69,6 +69,7 @@
     "replay:toolcall": "node scripts/replay-recorded-toolcall.mjs",
     "replay:responses": "node scripts/replay-responses-sse.mjs",
     "build:smoke": "npm run build && node scripts/protocol-smoke.mjs",
+    "verify:sse-loop": "node scripts/verify-sse-loop.mjs",
     "snapshot:inspect": "node scripts/snapshot-inspect.mjs",
     "probe:toon": "node scripts/toon-suite.mjs",
     "debug:responses": "tsx tools/responses-debug-client/src/index.ts",

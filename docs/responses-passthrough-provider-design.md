@@ -140,6 +140,19 @@
 - 模块化：新增文件均 <500 行；职责单一。
 - 配置驱动：所有开关通过 provider 配置与路由选择生效，不写死。
 
+## 10. SSE 环回校验
+
+- 命令：`npm run verify:sse-loop`
+  - 统一触发 Responses、Chat（LMStudio）和 Anthropic（GLM-Anthropic）的官方 SDK → RouteCodex 对比。
+  - 需要提前在 `~/.routecodex/provider/<providerId>/` 配置相应上游；RouteCodex 本地实例需已启动（默认 `http://127.0.0.1:5555/v1`）。
+- 环境变量：
+  - `RCC_LOOP_RESP_PROVIDER` / `RCC_LOOP_RESP_MODEL`
+  - `RCC_LOOP_CHAT_MODEL`
+  - `RCC_LOOP_ANTHROPIC_PROVIDER` / `RCC_LOOP_ANTHROPIC_MODEL`
+  - `RCC_LOOP_ROUTECODEX_BASE` / `RCC_LOOP_ROUTECODEX_KEY`
+  - 运行参数 `--skip-responses|--skip-chat|--skip-anthropic` 可跳过部分检查。
+- 校验方式：脚本使用官方 SDK 与 LMStudio/GLM-Anthropic 建立 SSE 流，再以完全相同 payload 命中 RouteCodex，逐事件比对（忽略 `id/created_at/timestamp` 等波动字段）。一旦发现差异会打印首个不同事件，确保“转换后 = 透传”的红线被持续监控。
+
 ---
 
 附：配置示例（已生成在用户目录）
