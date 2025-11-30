@@ -100,6 +100,7 @@
 - **metadata 可以保留 RouteCodex 自己的统计字段**，对上游兼容无明显影响。  
 - **stream=true + SSE**：该请求在 FC 上下游是以 Responses SSE 事件流的形式返回（`response.created` / `response.output_text.delta` / `response.completed` 等事件）。
 - **工具结果配对只依赖 `call_id`**：OpenAI Responses 规范要求 `function_call` 与 `function_call_output` 仅通过同一 `call_id` 关联，并不会额外携带 `tool_call_id`。RouteCodex 在转换为 Chat 形状时会把 `call_id` 临时映射为 Chat 所需的 `tool_call_id`，但在发给上游或回传客户端前必须把结构还原为“只有 `call_id` 的官方形状”，否则像 c4m / Fai 这类严格实现会直接报 `Unknown parameter: input[].tool_call_id`。
+- **强制开启 streaming：在用户 Provider 配置（例如 `~/.routecodex/provider/fc/config.v1.json`）的 Responses 提供者下添加 `"responses": { "process": "passthrough", "streaming": "always" }`，这样 `ResponsesHttpProvider` 会通过 `responses.streaming` 判定为 `always`，即使入口是 Anthropic/Messages 也会对上游（如 Fai/c4m）以 SSE 模式发送请求。**
 
 ### 2. 失败的简化请求形状（对比）
 

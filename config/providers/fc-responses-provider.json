@@ -9,7 +9,8 @@
     },
     "model": "gpt-5.1",
     "responses": {
-      "process": "passthrough"
+      "process": "passthrough",
+      "streaming": "always"
     }
   }
 }
