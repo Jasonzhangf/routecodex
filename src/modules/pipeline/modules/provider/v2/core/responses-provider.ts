@@ -13,6 +13,8 @@ import type { ServiceProfile } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../../../../types/common-types.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
 import { buildResponsesRequestFromChat } from '../../../../../llmswitch/bridge.js';
+// @ts-ignore - llmswitch-core dist has no ambient types
+import { ensureResponsesInstructions } from '../../../../../../../sharedmodule/llmswitch-core/dist/v2/conversion/shared/responses-instructions.js';
 
 export class ResponsesProvider extends ChatHttpProvider {
   /**
@@ -70,6 +72,10 @@ export class ResponsesProvider extends ChatHttpProvider {
       try { if ('metadata' in body) { delete body.metadata; } } catch { /* ignore */ }
       return body;
     })();
+
+    try {
+      ensureResponsesInstructions(finalBody as Record<string, unknown>);
+    } catch { /* ignore */ }
 
     let upstreamStream = initialStreamFlag || Boolean((finalBody as any)?.stream);
     if (settings.streaming === 'always') upstreamStream = true;
