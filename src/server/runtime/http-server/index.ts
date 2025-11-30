@@ -543,8 +543,6 @@ export class RouteCodexHttpServer {
       (target.outboundProfile as ProviderProtocol) ||
       handle.providerProtocol;
 
-    (providerPayload as any).providerType = handle.providerType;
-
     this.logStage('provider.prepare', input.requestId, {
       providerKey: target.providerKey,
       runtimeKey,
@@ -560,7 +558,8 @@ export class RouteCodexHttpServer {
       pipelineId: target.providerKey,
       routeName: result.routingDecision?.routeName,
       runtimeKey,
-      target
+      target,
+      metadata
     });
 
     this.logStage('provider.send.start', input.requestId, {

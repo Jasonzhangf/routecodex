@@ -49,6 +49,12 @@ export class ResponsesProvider extends ChatHttpProvider {
     const targetUrl = `${(this as any).getEffectiveBaseUrl().replace(/\/$/, '')}/${String(endpoint).startsWith('/') ? String(endpoint).slice(1) : String(endpoint)}`;
 
     // Flatten body (copy of base logic)
+    const settings = this.getResponsesSettings();
+    const inboundClientStream = this.normalizeStreamFlag((context?.metadata as any)?.stream);
+    const initialStreamFlag = this.normalizeStreamFlag((context?.metadata as any)?.inboundStream)
+      ?? inboundClientStream
+      ?? this.normalizeStreamFlag((request as any)?.stream);
+
     const finalBody = (() => {
       const r: any = request || {};
       const dataObj: any = (r && typeof r === 'object' && 'data' in r && typeof r.data === 'object') ? r.data : r;
@@ -64,6 +70,24 @@ export class ResponsesProvider extends ChatHttpProvider {
       try { if ('metadata' in body) { delete body.metadata; } } catch { /* ignore */ }
       return body;
     })();
+
+    let upstreamStream = initialStreamFlag || Boolean((finalBody as any)?.stream);
+    if (settings.streaming === 'always') upstreamStream = true;
+    if (settings.streaming === 'never') upstreamStream = false;
+
+    if (upstreamStream) {
+      (finalBody as any).stream = true;
+    } else {
+      try { delete (finalBody as any).stream; } catch { /* ignore */ }
+    }
+
+    const clientRequestedStream = inboundClientStream === true;
+
+    this.dependencies.logger?.logModule?.(this.id, 'responses-provider-stream-flag', {
+      requestId: context.requestId,
+      inboundClientStream,
+      outboundStream: upstreamStream
+    });
 
     // 若当前请求仍为 Chat 形状（messages 存在且 input 不存在），使用 llmswitch-core 做 Chat → Responses 请求编码
     try {
@@ -92,9 +116,6 @@ export class ResponsesProvider extends ChatHttpProvider {
       throw err;
     }
 
-    // Responses 上游通常通过 SSE：优先启用 stream=true
-    (finalBody as any).stream = true;
-
     // Snapshot provider-request (best-effort)
     try {
       await writeProviderSnapshot({
@@ -110,6 +131,11 @@ export class ResponsesProvider extends ChatHttpProvider {
     try {
       // 上游 SSE：使用 llmswitch-core 的 ResponsesSseToJsonConverter 解析为 JSON
       const stream = await (this as any).httpClient.postStream(endpoint, finalBody, { ...headers, Accept: 'text/event-stream' });
+
+      if (clientRequestedStream) {
+        return { __sse_stream: stream };
+      }
+
       // 动态引入转换器（避免编译期硬依赖路径问题）
       const modPath = path.join(
         PACKAGE_ROOT,
@@ -155,9 +181,47 @@ export class ResponsesProvider extends ChatHttpProvider {
       throw error;
     }
   }
+
+  private getResponsesSettings(): ResponsesSettings {
+    const cfg = extractResponsesConfig(this.config as any);
+    return {
+      streaming: cfg.streaming ?? 'auto'
+    };
+  }
+
+  private normalizeStreamFlag(value: unknown): boolean | undefined {
+    if (value === true || value === false) return value;
+    if (typeof value === 'string') {
+      const lowered = value.trim().toLowerCase();
+      if (['true', '1', 'yes'].includes(lowered)) return true;
+      if (['false', '0', 'no'].includes(lowered)) return false;
+    }
+    return undefined;
+  }
 }
 
 export default ResponsesProvider;
+
+type StreamPref = 'auto' | 'always' | 'never';
+
+interface ResponsesSettings {
+  streaming: StreamPref;
+}
+
+function parseStreamPref(value: unknown): StreamPref {
+  if (value === 'always' || value === 'never') {
+    return value;
+  }
+  return 'auto';
+}
+
+function extractResponsesConfig(config: any): Partial<ResponsesSettings> {
+  const responsesCfg = config?.config?.responses;
+  if (!responsesCfg || typeof responsesCfg !== 'object') return {};
+  return {
+    streaming: parseStreamPref(responsesCfg.streaming)
+  };
+}
 function hasSharedmodule(dir: string): boolean {
   try {
     return fs.existsSync(path.join(dir, 'sharedmodule', 'llmswitch-core'));

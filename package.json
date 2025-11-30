@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.84.0",
+  "version": "0.84.1",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -83,6 +83,7 @@
     "rc-config": "node scripts/rc-config.mjs",
     "config:validate:providers": "node scripts/validate-config-providers.mjs",
     "verify:e2e-toolcall": "node scripts/verify-e2e-toolcall.mjs",
+    "replay:codex-sample": "node scripts/replay-codex-sample.mjs",
     "config:update:providers": "node scripts/update-config-providers.mjs",
     "models:update": "node scripts/update-models.mjs",
     "models:update:qwen": "node scripts/update-models.mjs --provider qwen-provider --write",
@@ -135,7 +136,7 @@
     "rcc-basemodule": "^0.2.7",
     "rcc-debugcenter": "^0.1.6",
     "rcc-errorhandling": "^1.0.10",
-    "rcc-llmswitch-core": "file:sharedmodule/llmswitch-core",
+    "rcc-llmswitch-core": "^0.3.44",
     "socket.io": "^4.8.1",
     "zod": "^3.23.8"
   },

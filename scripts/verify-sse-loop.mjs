@@ -13,6 +13,8 @@ const RESP_MODEL = process.env.RCC_LOOP_RESP_MODEL;
 const CHAT_MODEL = process.env.RCC_LOOP_CHAT_MODEL;
 const ANTH_PROVIDER_ID = process.env.RCC_LOOP_ANTHROPIC_PROVIDER || 'glm-anthropic';
 const ANTH_MODEL = process.env.RCC_LOOP_ANTHROPIC_MODEL;
+const USE_PROXY_CAPTURE = process.env.RCC_LOOP_USE_PROXY === '1' || process.argv.includes('--use-proxy-capture');
+const PROXY_CAPTURE_ROOT = process.env.RCC_LOOP_PROXY_CAPTURE_DIR || path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-responses', 'sse-proxy');
 
 const ENABLE_RESPONSES = !process.argv.includes('--skip-responses');
 const ENABLE_CHAT = !process.argv.includes('--skip-chat');
@@ -92,6 +94,106 @@ function compareStreams(label, reference, candidate) {
   }
 }
 
+function compareRawFrames(label, reference, candidate) {
+  if (reference.length !== candidate.length) {
+    throw new Error(`${label}: frame length mismatch (upstream=${reference.length}, routecodex=${candidate.length})`);
+  }
+  for (let i = 0; i < reference.length; i++) {
+    const ref = reference[i];
+    const cand = candidate[i];
+    if (ref !== cand) {
+      throw new Error(`${label}: frame #${i + 1} mismatch\nUpstream: ${ref}\nRouteCodex: ${cand}`);
+    }
+  }
+}
+
+function listProxyCaptures() {
+  try {
+    const entries = fs.readdirSync(PROXY_CAPTURE_ROOT, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(PROXY_CAPTURE_ROOT, entry.name));
+  } catch {
+    return [];
+  }
+}
+
+function splitSseFrames(text) {
+  if (!text) return [];
+  return text
+    .split(/\n\s*\n/g)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+}
+
+async function waitForNewProxyCapture(prevList, timeoutMs = 15000) {
+  const prevSet = new Set(prevList);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const entries = fs.readdirSync(PROXY_CAPTURE_ROOT, { withFileTypes: true });
+      const dirs = entries.filter((e) => e.isDirectory()).map((e) => path.join(PROXY_CAPTURE_ROOT, e.name));
+      const candidate = dirs.find((dir) => !prevSet.has(dir));
+      if (candidate) {
+        const logPath = path.join(candidate, 'response.sse.log');
+        if (fs.existsSync(logPath)) {
+          const content = fs.readFileSync(logPath, 'utf8');
+          return {
+            id: path.basename(candidate),
+            events: splitSseFrames(content)
+          };
+        }
+      }
+    } catch {
+      /* ignore read errors */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error('Timed out waiting for proxy capture; ensure responses-sse-proxy is running and provider baseURL points to it.');
+}
+
+async function captureRouteSseFrames(payload) {
+  const routeUrl = `${ROUTECODEX_BASE}/responses`;
+  const headers = {
+    'Content-Type': 'application/json',
+    'Accept': 'text/event-stream',
+    'Authorization': `Bearer ${ROUTECODEX_KEY}`,
+    'OpenAI-Beta': 'responses-2024-12-17',
+    'X-Route-Hint': 'default'
+  };
+  const res = await fetch(routeUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`RouteCodex responses request failed (${res.status}): ${text}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const frames = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const chunk = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 2);
+      if (chunk) {
+        frames.push(chunk);
+      }
+    }
+  }
+  buffer += decoder.decode(new Uint8Array(), { stream: false });
+  if (buffer.trim()) {
+    frames.push(buffer.trim());
+  }
+  return frames;
+}
+
 async function captureResponsesStream(client, payload, label) {
   const stream = await client.responses.stream(payload);
   const events = [];
@@ -133,6 +235,8 @@ function buildResponsesPayload(modelId) {
         ]
       }
     ],
+    temperature: 0,
+    top_p: 0.1,
     stream: true
   };
 }
@@ -188,6 +292,15 @@ async function verifyResponsesFlow() {
   }
   console.log(`Responses loop: provider=${RESP_PROVIDER_ID} model=${modelId}`);
   const payload = buildResponsesPayload(modelId);
+  if (USE_PROXY_CAPTURE) {
+    const prevCaptures = listProxyCaptures();
+    const routedFrames = await captureRouteSseFrames(payload);
+    console.log(`RouteCodex responses: captured ${routedFrames.length} SSE frames (raw)`);
+    const capture = await waitForNewProxyCapture(prevCaptures);
+    console.log(`Proxy capture: ${capture.id} (${capture.events.length} frames)`);
+    compareRawFrames('Responses SSE (proxy)', capture.events, routedFrames);
+    return;
+  }
   const providerClient = createOpenAIClient(provider.baseUrl, provider.apiKey, provider.headers);
   const routeClient = createOpenAIClient(ROUTECODEX_BASE, ROUTECODEX_KEY);
   const upstreamEvents = await captureResponsesStream(providerClient, payload, 'Provider responses');

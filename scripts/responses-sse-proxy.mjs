@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { PassThrough } from 'node:stream';
+import { Readable } from 'node:stream';
 
 const DEFAULT_PORT = Number(process.env.RCC_RESP_PROXY_PORT || 9550);
 const DEFAULT_HOST = process.env.RCC_RESP_PROXY_HOST || '127.0.0.1';
@@ -58,7 +58,7 @@ function buildHeaders(entry) {
   const headers = {
     'OpenAI-Beta': 'responses-2024-12-17',
     'Accept': 'text/event-stream',
-    'Content-Type': 'text/event-stream'
+    'Content-Type': 'application/json'
   };
   const auth = entry?.auth;
   if (auth?.type === 'apikey' && auth.apiKey) {
@@ -122,66 +122,81 @@ async function main() {
     };
     fs.writeFileSync(path.join(captureDir, 'meta.json'), JSON.stringify(meta, null, 2));
 
-    const upstreamStream = new PassThrough();
     const reqLog = fs.createWriteStream(path.join(captureDir, 'request.sse.log'));
-    req.on('data', (chunk) => {
-      upstreamStream.write(chunk);
-      reqLog.write(chunk);
-    });
-    req.on('end', () => {
-      upstreamStream.end();
-      reqLog.end();
-    });
-    req.on('error', (error) => {
-      upstreamStream.destroy(error);
-      reqLog.end();
-    });
-
-    if (replayLog) {
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive'
-      });
-      replayFromFile(replayLog, res);
-      console.log(`[responses-sse-proxy] replayed ${replayLog} for ${requestId}`);
-      return;
-    }
-
-    try {
-      const upstream = await client.postStreamRaw(endpoint, upstreamStream, headers);
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive'
-      });
-      const respLog = fs.createWriteStream(path.join(captureDir, 'response.sse.log'));
-      upstream.on('data', (chunk) => {
-        respLog.write(chunk);
-        res.write(chunk);
-      });
-      upstream.on('end', () => {
-        respLog.end();
-        res.end();
-        console.log(`[responses-sse-proxy] completed ${requestId}`);
-      });
-      upstream.on('error', (error) => {
-        respLog.end();
-        if (!res.writableEnded) {
-          res.write(`event: error\ndata: ${JSON.stringify({ message: error.message })}\n\n`);
-          res.end();
-        }
-      });
-      req.on('close', () => {
-        upstream.destroy();
-      });
-    } catch (error) {
+    const rawChunks = [];
+    const finishWithError = (error) => {
       if (!res.headersSent) {
         res.statusCode = 502;
         res.setHeader('Content-Type', 'application/json');
       }
       res.end(JSON.stringify({ error: { message: error instanceof Error ? error.message : String(error) } }));
-    }
+    };
+
+    req.on('data', (chunk) => {
+      rawChunks.push(chunk);
+      reqLog.write(chunk);
+    });
+
+    req.on('error', (error) => {
+      reqLog.end();
+      finishWithError(error);
+    });
+
+    req.on('end', async () => {
+      reqLog.end();
+      const rawBody = Buffer.concat(rawChunks).toString('utf8');
+
+      if (replayLog) {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive'
+        });
+        replayFromFile(replayLog, res);
+        console.log(`[responses-sse-proxy] replayed ${replayLog} for ${requestId}`);
+        return;
+      }
+
+      try {
+        const upstreamResponse = await fetch(`${baseUrl}${endpoint}`, {
+          method: 'POST',
+          headers,
+          body: rawBody
+        });
+        if (!upstreamResponse.ok || !upstreamResponse.body) {
+          const errText = await upstreamResponse.text();
+          throw new Error(`HTTP ${upstreamResponse.status}: ${errText}`);
+        }
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive'
+        });
+        const respLog = fs.createWriteStream(path.join(captureDir, 'response.sse.log'));
+        const upstreamStream = Readable.fromWeb(upstreamResponse.body);
+        upstreamStream.on('data', (chunk) => {
+          respLog.write(chunk);
+          res.write(chunk);
+        });
+        upstreamStream.on('end', () => {
+          respLog.end();
+          res.end();
+          console.log(`[responses-sse-proxy] completed ${requestId}`);
+        });
+        upstreamStream.on('error', (error) => {
+          respLog.end();
+          if (!res.writableEnded) {
+            res.write(`event: error\ndata: ${JSON.stringify({ message: error.message })}\n\n`);
+            res.end();
+          }
+        });
+        req.on('close', () => {
+          upstreamStream.destroy();
+        });
+      } catch (error) {
+        finishWithError(error);
+      }
+    });
   });
 
   server.listen(port, host, () => {

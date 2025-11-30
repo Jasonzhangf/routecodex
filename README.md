@@ -140,6 +140,7 @@ npm pack && npm i -g ./routecodex-*.tgz
 - 环境变量：`ROUTECODEX_HOOKS_VERBOSITY=verbose`
 - 快照路径：`~/.routecodex/codex-samples/{openai-chat|openai-responses|anthropic-messages}`
 - 完整链路：raw-request → pre-llmswitch → post-llmswitch → compat-pre → provider-request → provider-response → compat-post
+- 回放样本：`npm run replay:codex-sample -- --sample <sample.json>`（详见 `docs/codex-samples-replay.md`）可将 codex-samples 请求重新送入本地 RouteCodex，并生成对应的 JSON/SSE 日志。
 
 ## 🔀 选择静态/动态流水线（V1/V2）
 
