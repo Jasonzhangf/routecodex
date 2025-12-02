@@ -34,16 +34,6 @@ export function mapProviderProtocol(providerType?: string): ProviderProtocol {
   throw new Error(`[ProviderType] Unsupported providerType '${providerType}'`);
 }
 
-export function mapProviderResponseType(providerType?: string): 'openai' | 'anthropic' | 'responses' {
-  const normalized = normalizeProviderType(providerType);
-  if (normalized === 'anthropic') return 'anthropic';
-  if (normalized === 'responses') return 'responses';
-  if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'iflow' || normalized === 'lmstudio') {
-    return 'openai';
-  }
-  throw new Error(`[ProviderType] Unsupported providerType '${providerType}'`);
-}
-
 export function defaultEndpointForProvider(providerType?: string): string {
   const normalized = normalizeProviderType(providerType);
   if (normalized === 'responses') return '/v1/responses';

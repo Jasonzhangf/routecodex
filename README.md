@@ -28,7 +28,7 @@ RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配�
 
 ### Super Pipeline 架构（唯一入口）
 
-- **唯一入口**：HTTP handler 直接调用 `sharedmodule/llmswitch-core/dist/v2/conversion/conversion-v3/pipelines/super-pipeline`，本仓库不再维护自研 pipeline/blueprint。
+- **唯一入口**：HTTP handler 直接调用 `sharedmodule/llmswitch-core/dist/conversion/conversion-v3/pipelines/super-pipeline`，本仓库不再维护自研 pipeline/blueprint。
 - **配置流**：`routecodex-config-loader` 读取用户配置，传给 `bootstrapVirtualRouterConfig`，由 llmswitch-core 输出 `VirtualRouterConfig + targetRuntime` 并注入 Super Pipeline。
 - **节点链路（由 llmswitch-core 内部维护）**
   - `SSE Input`：SSE ↔ JSON 转换、旁路透传。

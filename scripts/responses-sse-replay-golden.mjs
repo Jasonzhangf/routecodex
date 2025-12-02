@@ -96,8 +96,8 @@ async function main() {
 
   const httpPath = pathToFileURL(path.join(process.cwd(), 'dist/modules/pipeline/modules/provider/v2/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
-  const convPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/v2/conversion/conversion-v3/sse/sse-to-json/index.js')).href;
-  const bridgePath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/v2/conversion/responses/responses-openai-bridge.js')).href;
+  const convPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/sse-to-json/index.js')).href;
+  const bridgePath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js')).href;
   const { ResponsesSseToJsonConverter } = await import(convPath);
   const { buildChatResponseFromResponses } = await import(bridgePath);
 

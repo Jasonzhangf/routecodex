@@ -51,7 +51,7 @@ Offline Testing Tool
 为方便在不启动 RouteCodex 服务器的前提下验证 FilterEngine 与工具治理链路，主仓库提供了一个基于 llmswitch-core 的离线测试脚本：
 
 - 脚本路径：`tools/run-llmswitch-chat.mjs`（位于 RouteCodex 根目录）
-- 依赖：`sharedmodule/llmswitch-core/dist/v2/conversion/index.js` 导出的 `runStandardChatRequestFilters`
+- 依赖：`sharedmodule/llmswitch-core/dist/conversion/index.js` 导出的 `runStandardChatRequestFilters`
 - 输入：
   - 直接的 OpenAI Chat 请求（`{ model, messages, tools, ... }`）
   - 或 provider-request 快照 JSON（包含 `data.body` 字段），脚本会自动提取 `data.body` 作为 Chat 请求

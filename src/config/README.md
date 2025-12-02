@@ -202,7 +202,7 @@ const pipelineConfigs = parser.parsePipelineConfigs(userConfig);
 ### 配置解析与引导
 ```typescript
 import { loadRouteCodexConfig } from './routecodex-config-loader';
-import { bootstrapVirtualRouterConfig } from 'sharedmodule/llmswitch-core/dist/v2/router/virtual-router/bootstrap.js';
+import { bootstrapVirtualRouterConfig } from 'sharedmodule/llmswitch-core/dist/router/virtual-router/bootstrap.js';
 
 const { userConfig } = await loadRouteCodexConfig('~/.routecodex/config.json');
 const artifacts = await bootstrapVirtualRouterConfig(userConfig.virtualrouter ?? userConfig);

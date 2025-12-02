@@ -29,7 +29,7 @@ async function importCoreFetcher() {
   // Prefer local sharedmodule path if exists; fallback to installed package
   const __filename = fileURLToPath(import.meta.url);
   const repoRoot = path.resolve(path.dirname(__filename), '../..');
-  const local = path.resolve(repoRoot, 'sharedmodule/llmswitch-core/dist/v2/tools/web-fetch-html.js');
+  const local = path.resolve(repoRoot, 'sharedmodule/llmswitch-core/dist/tools/web-fetch-html.js');
   try {
     const mod = await import(pathToFileURL(local).href);
     if (typeof mod?.fetchRawHtml === 'function') return mod.fetchRawHtml;

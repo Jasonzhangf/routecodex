@@ -162,14 +162,16 @@ export async function respondWithPipelineError(
   const errorHandler = ctx.errorHandling?.handleError;
   if (typeof errorHandler === 'function') {
     try {
-      await (errorHandler as unknown as (err: unknown, context?: unknown) => Promise<void> | void)(
-        normalizedError,
-        {
-          stage: 'http-handler',
-          endpoint: entryEndpoint,
-          requestId
+      await (errorHandler as unknown as (payload: unknown) => Promise<void> | void)({
+        error: normalizedError,
+        source: 'http-handler',
+        severity: 'error',
+        moduleId: 'http-handler',
+        requestId,
+        metadata: {
+          endpoint: entryEndpoint
         }
-      );
+      });
     } catch {
       /* ignore error center failures */
     }

@@ -4,10 +4,10 @@ import type { TargetMetadata } from '../../../../orchestrator/pipeline-context.j
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - llmswitch-core local dist does not ship ambient types for router modules
-import { providerErrorCenter } from '../../../../../../../sharedmodule/llmswitch-core/dist/v2/router/virtual-router/error-center.js';
+import { providerErrorCenter } from '../../../../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/error-center.js';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - llmswitch-core local dist does not ship ambient types for router modules
-import type { ProviderErrorEvent, ProviderErrorRuntimeMetadata } from '../../../../../../../sharedmodule/llmswitch-core/dist/v2/router/virtual-router/types.js';
+import type { ProviderErrorEvent, ProviderErrorRuntimeMetadata } from '../../../../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/types.js';
 
 type CompatContext = {
   requestId: string;
@@ -55,21 +55,26 @@ export function emitProviderError(options: EmitOptions): void {
 
   const center = options.dependencies.errorHandlingCenter;
   if (center?.handleError) {
-    center
-      .handleError(err, {
-        stage: options.stage,
-        providerKey: options.runtime.providerKey,
-        providerId: options.runtime.providerId,
-        providerType: options.runtime.providerType,
-        requestId: options.runtime.requestId,
-        routeName: options.runtime.routeName,
-        pipelineId: options.runtime.pipelineId,
+    const severity = status && status >= 500 ? 'error' : 'warn';
+    const payload = {
+      error: err,
+      source: options.stage,
+      severity,
+      moduleId: options.runtime.providerId,
+      requestId: options.runtime.requestId,
+      providerKey: options.runtime.providerKey,
+      providerType: options.runtime.providerType,
+      routeName: options.runtime.routeName,
+      metadata: {
         status,
-        code
-      })
-      .catch((handlerError: unknown) => {
-        console.error('[provider-error-reporter] error center handleError failed', handlerError);
-      });
+        code,
+        runtime: options.runtime,
+        details: options.details
+      }
+    };
+    Promise.resolve(center.handleError(payload)).catch((handlerError: unknown) => {
+      console.error('[provider-error-reporter] error center handleError failed', handlerError);
+    });
   }
 }
 

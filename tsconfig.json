@@ -23,26 +23,20 @@
     "typeRoots": ["./node_modules/@types", "./src/types"],
     "incremental": false,
     "baseUrl": ".",
-      "paths": {
-        "rcc-llmswitch-core/api": [
-          "sharedmodule/llmswitch-core/dist/api.d.ts"
-        ],
-        "rcc-llmswitch-core/guidance": [
-          "sharedmodule/llmswitch-core/dist/guidance/index.d.ts"
-        ],
-        "rcc-llmswitch-core/v2": [
-          "sharedmodule/llmswitch-core/dist/v2/index.d.ts"
-        ],
-        "rcc-llmswitch-core/v2/*": [
-          "sharedmodule/llmswitch-core/dist/v2/*"
-        ],
-        "../../../../../../../sharedmodule/llmswitch-core/dist/v2/router/virtual-router/error-center.js": [
-          "sharedmodule/llmswitch-core/dist/v2/router/virtual-router/error-center.d.ts"
-        ],
-        "../../../../../../../sharedmodule/llmswitch-core/dist/v2/router/virtual-router/types.js": [
-          "sharedmodule/llmswitch-core/dist/v2/router/virtual-router/types.d.ts"
-        ]
-      }
+    "paths": {
+      "rcc-llmswitch-core/api": [
+        "sharedmodule/llmswitch-core/dist/api.d.ts"
+      ],
+      "rcc-llmswitch-core/guidance": [
+        "sharedmodule/llmswitch-core/dist/guidance/index.d.ts"
+      ],
+      "../../../../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/error-center.js": [
+        "sharedmodule/llmswitch-core/dist/router/virtual-router/error-center.d.ts"
+      ],
+      "../../../../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/types.js": [
+        "sharedmodule/llmswitch-core/dist/router/virtual-router/types.d.ts"
+      ]
+    }
   },
   "include": ["src/**/*"],
   "exclude": [

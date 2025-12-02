@@ -28,7 +28,7 @@ class FakeHttpClient {
 
 function loadGolden(providerId: string, proto: string): any | null {
   const base = process.env.RCC_GOLDEN_DIR
-    || path.join(process.env.HOME || '', '.routecodex', 'golden_samples', 'provider_golen_samples');
+    || path.join(process.env.HOME || '', '.routecodex', 'golden_samples', 'provider_golden_samples');
   try {
     const p = path.join(base, providerId, proto, 'request.sample.json');
     if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf-8'));

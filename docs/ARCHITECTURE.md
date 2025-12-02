@@ -176,7 +176,7 @@ RouteCodex 是一个多 Provider OpenAI 代理服务器，支持动态路由、�
 
 RouteCodex 现在完全依赖 sharedmodule/llmswitch-core 的 Super Pipeline，实现“HTTP ↔ 标准化请求 ↔ Virtual Router ↔ Provider”全链路处理：
 
-- **唯一入口**：服务器通过 `RouteCodexHttpServer` 调用 `sharedmodule/llmswitch-core/dist/v2/conversion/conversion-v3/pipelines/super-pipeline`，禁止旁路加载核心模块。
+- **唯一入口**：服务器通过 `RouteCodexHttpServer` 调用 `sharedmodule/llmswitch-core/dist/conversion/conversion-v3/pipelines/super-pipeline`，禁止旁路加载核心模块。
 - **配置来源**：`routecodex-config-loader` 读取用户配置后调用 `bootstrapVirtualRouterConfig`。该工具会校验 routing/providers、展开 `provider.keyAlias.model`、生成 `targetRuntime` 映射（endpoint、headers、auth、compat profile），Super Pipeline 构造函数直接接受该结果。
 - **节点链路**：Super Pipeline 在内部组成 `SSE Input → Input Node → Chat Process → Virtual Router → (Compatibility，可选) → Output/SSE`。Host 不关心节点细节，只需要把 HTTP 请求封装成 `SuperPipelineRequest`。
 - **工具治理**：唯一的工具治理点位于 `chat-process-node`。Compatibility 层被下沉到 Provider 运行时（`src/modules/pipeline/modules/provider/v2/compatibility`），仅做 Provider 特定的最小字段修剪。

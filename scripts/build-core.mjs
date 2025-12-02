@@ -10,8 +10,8 @@ const proj = path.join(root, 'sharedmodule', 'llmswitch-core', 'tsconfig.json');
 const coreRoot = path.join(root, 'sharedmodule', 'llmswitch-core');
 const outDir = path.join(coreRoot, 'dist');
 const requiredOutputs = [
-  path.join(outDir, 'v2', 'bridge', 'routecodex-adapter.js'),
-  path.join(outDir, 'v2', 'conversion', 'conversion-v3', 'config', 'index.js')
+  path.join(outDir, 'bridge', 'routecodex-adapter.js'),
+  path.join(outDir, 'conversion', 'hub', 'response', 'provider-response.js')
 ];
 
 function fail(msg){ console.error(`[build-core] ${msg}`); process.exit(2); }

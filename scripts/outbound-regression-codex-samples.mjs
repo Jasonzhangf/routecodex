@@ -23,8 +23,8 @@ const TARGET_PROTOCOLS = new Set(
 );
 
 const baseDir = process.cwd();
-const anthropicCodecPath = pathToFileURL(path.resolve(baseDir, 'sharedmodule/llmswitch-core/dist/v2/conversion/codecs/anthropic-openai-codec.js')).href;
-const responsesBridgePath = pathToFileURL(path.resolve(baseDir, 'sharedmodule/llmswitch-core/dist/v2/conversion/responses/responses-openai-bridge.js')).href;
+const anthropicCodecPath = pathToFileURL(path.resolve(baseDir, 'sharedmodule/llmswitch-core/dist/conversion/codecs/anthropic-openai-codec.js')).href;
+const responsesBridgePath = pathToFileURL(path.resolve(baseDir, 'sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js')).href;
 
 let conversionsLoaded = null;
 let responsesInstructionsCache = null;

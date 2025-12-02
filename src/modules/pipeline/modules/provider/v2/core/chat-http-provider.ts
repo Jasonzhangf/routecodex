@@ -658,6 +658,8 @@ export class ChatHttpProvider extends BaseProvider {
       return body;
     })();
 
+    const entryEndpoint = (processedRequest as any)?.metadata?.entryEndpoint as string | undefined;
+
     // 快照：provider-request（默认开启，脱敏headers）
     try {
       await writeProviderSnapshot({
@@ -665,7 +667,8 @@ export class ChatHttpProvider extends BaseProvider {
         requestId: context.requestId,
         data: finalBody,
         headers,
-        url: targetUrl
+        url: targetUrl,
+        entryEndpoint
       });
     } catch { /* non-blocking */ }
 
@@ -680,7 +683,8 @@ export class ChatHttpProvider extends BaseProvider {
           requestId: context.requestId,
           data: response,
           headers,
-          url: targetUrl
+          url: targetUrl,
+          entryEndpoint
         });
       } catch { /* non-blocking */ }
     } catch (error) {
@@ -693,14 +697,15 @@ export class ChatHttpProvider extends BaseProvider {
             const retryHeaders = await this.buildRequestHeaders();
             response = await this.httpClient.post(endpoint, finalBody, retryHeaders);
             try {
-              await writeProviderSnapshot({
-                phase: 'provider-response',
-                requestId: context.requestId,
-                data: response,
-                headers: retryHeaders,
-                url: targetUrl
-              });
-            } catch { /* non-blocking */ }
+          await writeProviderSnapshot({
+            phase: 'provider-response',
+            requestId: context.requestId,
+            data: response,
+            headers: retryHeaders,
+            url: targetUrl,
+            entryEndpoint
+          });
+        } catch { /* non-blocking */ }
             return response;
           }
         }
@@ -751,7 +756,8 @@ export class ChatHttpProvider extends BaseProvider {
             error: typeof normalized?.message === 'string' ? normalized.message : String(normalized || '')
           },
           headers,
-          url: targetUrl
+          url: targetUrl,
+          entryEndpoint
         });
       } catch { /* non-blocking */ }
 

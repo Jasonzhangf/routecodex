@@ -1,3 +1,4 @@
+import type { Readable } from 'node:stream';
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
 import type { ProviderRuntimeProfile } from '../../../modules/pipeline/modules/provider/v2/api/provider-types.js';
 
@@ -7,6 +8,9 @@ export interface ServerConfigV2 {
     host: string;
     timeout?: number;
     useV2?: boolean;
+  };
+  pipeline?: {
+    useHubPipeline?: boolean;
   };
   logging: {
     level: 'debug' | 'info' | 'warn' | 'error';
@@ -81,3 +85,25 @@ export interface VirtualRouterArtifacts {
   config: unknown;
   targetRuntime?: Record<string, ProviderRuntimeProfile>;
 }
+
+export interface HubPipelineExecutionResult {
+  providerPayload?: Record<string, unknown>;
+  target?: {
+    providerKey: string;
+    providerType: string;
+    outboundProfile: string;
+    runtimeKey?: string;
+    processMode?: string;
+  };
+  routingDecision?: { routeName?: string };
+  metadata: Record<string, unknown>;
+}
+
+export interface HubPipeline {
+  execute(
+    request: PipelineExecutionInput & { payload: Record<string, unknown> | { readable?: Readable } | Readable }
+  ): Promise<HubPipelineExecutionResult>;
+  updateVirtualRouterConfig(config: unknown): void;
+}
+
+export type HubPipelineCtor = new (config: { virtualRouter: unknown }) => HubPipeline;

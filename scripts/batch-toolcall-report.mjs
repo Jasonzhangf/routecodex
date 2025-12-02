@@ -82,8 +82,8 @@ async function runResponses(providerId) {
 
   const httpPath = pathToFileURL(path.join(process.cwd(), 'dist/modules/pipeline/modules/provider/v2/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
-  const convPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/v2/conversion/conversion-v3/sse/sse-to-json/index.js')).href;
-  const bridgePath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/v2/conversion/responses/responses-openai-bridge.js')).href;
+  const convPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/sse-to-json/index.js')).href;
+  const bridgePath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js')).href;
   const { ResponsesSseToJsonConverter } = await import(convPath);
   const { buildChatResponseFromResponses } = await import(bridgePath);
 
@@ -126,7 +126,7 @@ async function runAnthropic(providerId='glm-anthropic') {
     model = route?.split('.')?.[1] || 'glm-4.6';
   }
   if (!apiKey) throw new Error('no apikey');
-  const codecPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/v2/conversion/codecs/anthropic-openai-codec.js')).href;
+  const codecPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/conversion/codecs/anthropic-openai-codec.js')).href;
   const { buildAnthropicRequestFromOpenAIChat, buildOpenAIChatFromAnthropic } = await import(codecPath);
   const chat = { model:'dummy', messages:[{ role:'user', content:'Using tools, call add with {"a":2,"b":3}. Return only a function call.' }], tools:[{ type:'function', function:{ name:'add', description:'add two numbers', parameters:{ type:'object', properties:{ a:{type:'number'}, b:{type:'number'}}, required:['a','b'] } } }], tool_choice:'auto' };
   const req = buildAnthropicRequestFromOpenAIChat(chat);
@@ -145,7 +145,7 @@ async function runAnthropic(providerId='glm-anthropic') {
   }
   const sseText = events.map(ev => `event: ${ev.event}\n`+`data: ${JSON.stringify(ev.data)}\n\n`).join('');
   fs.writeFileSync(sseLog, sseText, 'utf-8');
-  const convPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/v2/conversion/conversion-v3/sse/sse-to-json/anthropic-sse-to-json-converter.js')).href;
+  const convPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/sse-to-json/anthropic-sse-to-json-converter.js')).href;
   const { AnthropicSseToJsonConverter } = await import(convPath);
   async function* gen(){ yield sseText; }
   const conv = new AnthropicSseToJsonConverter();

@@ -23,12 +23,24 @@ import { emitProviderError } from '../../../modules/pipeline/modules/provider/v2
 import { isStageLoggingEnabled, logPipelineStage } from '../../utils/stage-logger.js';
 import { registerDefaultMiddleware } from './middleware.js';
 import { registerHttpRoutes } from './routes.js';
-import { mapProviderProtocol, mapProviderResponseType, normalizeProviderType, asRecord } from './provider-utils.js';
+import { mapProviderProtocol, normalizeProviderType, asRecord } from './provider-utils.js';
 import { resolveRepoRoot, loadLlmswitchModule } from './llmswitch-loader.js';
-import type { ProviderHandle, ProviderProtocol, RequestContextV2, ServerConfigV2, ServerStatusV2, SuperPipeline, SuperPipelineCtor, VirtualRouterArtifacts } from './types.js';
+import type {
+  HubPipeline,
+  HubPipelineCtor,
+  ProviderHandle,
+  ProviderProtocol,
+  RequestContextV2,
+  ServerConfigV2,
+  ServerStatusV2,
+  SuperPipeline,
+  SuperPipelineCtor,
+  VirtualRouterArtifacts
+} from './types.js';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - llmswitch-core dist does not ship ambient types
-import { ProviderResponseConverter, type ProviderResponseType } from '../../../../sharedmodule/llmswitch-core/dist/v2/conversion/conversion-v3/response/provider-response-converter.js';
+import { convertProviderResponse } from '../../../../sharedmodule/llmswitch-core/dist/conversion/hub/response/provider-response.js';
+import { createSnapshotRecorder } from '../../../../sharedmodule/llmswitch-core/dist/conversion/hub/snapshot-recorder.js';
 import { writeClientSnapshot } from '../../../modules/pipeline/modules/provider/v2/utils/snapshot-writer.js';
 
 /**
@@ -46,16 +58,19 @@ export class RouteCodexHttpServer {
 
   // Runtime state
   private superPipeline: SuperPipeline | null = null;
+  private hubPipeline: HubPipeline | null = null;
   private providerHandles: Map<string, ProviderHandle> = new Map();
   private providerKeyToRuntimeKey: Map<string, string> = new Map();
   private pipelineLogger: PipelineDebugLogger = createNoopPipelineLogger();
-  private responseConverter = new ProviderResponseConverter();
   private authResolver = new AuthFileResolver();
   private userConfig: UnknownObject = {};
   private moduleDependencies: ModuleDependencies | null = null;
   private superPipelineCtor: SuperPipelineCtor | null = null;
+  private hubPipelineCtor: HubPipelineCtor | null = null;
   private readonly stageLoggingEnabled: boolean;
   private readonly repoRoot: string;
+  private readonly useHubPipeline: boolean;
+  private currentRouterArtifacts: VirtualRouterArtifacts | null = null;
 
   constructor(config: ServerConfigV2) {
     this.config = config;
@@ -63,8 +78,12 @@ export class RouteCodexHttpServer {
     this.errorHandling = new ErrorHandlingCenter();
     this.stageLoggingEnabled = isStageLoggingEnabled();
     this.repoRoot = resolveRepoRoot(import.meta.url);
+    const envFlag = (process.env.ROUTECODEX_USE_HUB_PIPELINE || '').trim().toLowerCase();
+    this.useHubPipeline = Boolean(config.pipeline?.useHubPipeline) || envFlag === '1' || envFlag === 'true';
 
-    console.log('[RouteCodexHttpServer] Initialized');
+    console.log(
+      `[RouteCodexHttpServer] Initialized (pipeline=${this.useHubPipeline ? 'hub' : 'super'})`
+    );
   }
 
   private resolveVirtualRouterInput(userConfig: UnknownObject): UnknownObject {
@@ -140,7 +159,7 @@ export class RouteCodexHttpServer {
     if (this.superPipelineCtor) {
       return this.superPipelineCtor;
     }
-    const mod = await loadLlmswitchModule<any>(this.repoRoot, 'v2/conversion/conversion-v3/pipelines/super-pipeline.js');
+    const mod = await loadLlmswitchModule<any>(this.repoRoot, 'conversion/conversion-v3/pipelines/super-pipeline.js');
     if (!mod?.SuperPipeline) {
       throw new Error('Unable to load SuperPipeline implementation from llmswitch-core');
     }
@@ -149,12 +168,28 @@ export class RouteCodexHttpServer {
   }
 
   private async bootstrapVirtualRouter(input: UnknownObject): Promise<VirtualRouterArtifacts> {
-    const mod = await loadLlmswitchModule<any>(this.repoRoot, 'v2/router/virtual-router/bootstrap.js');
+    const mod = await loadLlmswitchModule<any>(this.repoRoot, 'router/virtual-router/bootstrap.js');
     const fn = mod?.bootstrapVirtualRouterConfig;
     if (typeof fn !== 'function') {
       throw new Error('llmswitch-core missing bootstrapVirtualRouterConfig');
     }
     return fn(input) as VirtualRouterArtifacts;
+  }
+
+  private async ensureHubPipelineCtor(): Promise<HubPipelineCtor> {
+    if (this.hubPipelineCtor) {
+      return this.hubPipelineCtor;
+    }
+    const mod = await loadLlmswitchModule<any>(this.repoRoot, 'conversion/hub/pipeline/hub-pipeline.js');
+    if (!mod?.HubPipeline) {
+      throw new Error('Unable to load HubPipeline implementation from llmswitch-core');
+    }
+    this.hubPipelineCtor = mod.HubPipeline as HubPipelineCtor;
+    return this.hubPipelineCtor;
+  }
+
+  private isPipelineReady(): boolean {
+    return this.useHubPipeline ? Boolean(this.hubPipeline) : Boolean(this.superPipeline);
   }
 
   /**
@@ -172,7 +207,7 @@ export class RouteCodexHttpServer {
         app: this.app,
         config: this.config,
         buildHandlerContext: () => this.buildHandlerContext(),
-        getSuperPipelineReady: () => Boolean(this.superPipeline),
+        getSuperPipelineReady: () => this.isPipelineReady(),
         handleError: (error, context) => this.handleError(error, context)
       });
 
@@ -301,13 +336,25 @@ export class RouteCodexHttpServer {
     this.userConfig = asRecord(userConfig);
     const routerInput = this.resolveVirtualRouterInput(this.userConfig);
     const bootstrapArtifacts = await this.bootstrapVirtualRouter(routerInput);
-    const superPipelineCtor = await this.ensureSuperPipelineCtor();
-    if (!this.superPipeline) {
-      this.superPipeline = new superPipelineCtor({ virtualRouter: bootstrapArtifacts });
+    this.currentRouterArtifacts = bootstrapArtifacts;
+    if (this.useHubPipeline) {
+      const hubCtor = await this.ensureHubPipelineCtor();
+      if (!this.hubPipeline) {
+        this.hubPipeline = new hubCtor({ virtualRouter: bootstrapArtifacts.config });
+      } else {
+        this.hubPipeline.updateVirtualRouterConfig(bootstrapArtifacts.config);
+      }
+      this.superPipeline = null;
     } else {
-      this.superPipeline.updateVirtualRouterConfig(bootstrapArtifacts);
+      const superPipelineCtor = await this.ensureSuperPipelineCtor();
+      if (!this.superPipeline) {
+        this.superPipeline = new superPipelineCtor({ virtualRouter: bootstrapArtifacts });
+      } else {
+        this.superPipeline.updateVirtualRouterConfig(bootstrapArtifacts);
+      }
+      this.hubPipeline = null;
     }
-    await this.initializeProviderRuntimes();
+    await this.initializeProviderRuntimes(bootstrapArtifacts);
   }
 
   private buildHandlerContext(): HandlerContext {
@@ -317,9 +364,13 @@ export class RouteCodexHttpServer {
     };
   }
 
-  private async initializeProviderRuntimes(): Promise<void> {
-    if (!this.superPipeline) return;
-    const runtimeMap = this.superPipeline.getProviderRuntimeMap();
+  private async initializeProviderRuntimes(artifacts?: VirtualRouterArtifacts): Promise<void> {
+    const runtimeMap = this.useHubPipeline
+      ? artifacts?.targetRuntime ?? this.currentRouterArtifacts?.targetRuntime ?? undefined
+      : this.superPipeline?.getProviderRuntimeMap();
+    if (!runtimeMap) {
+      return;
+    }
     await this.disposeProviders();
     this.providerKeyToRuntimeKey.clear();
 
@@ -476,8 +527,10 @@ export class RouteCodexHttpServer {
   }
 
   private async executePipeline(input: PipelineExecutionInput): Promise<PipelineExecutionResult> {
-    if (!this.superPipeline) {
-      throw new Error('Super pipeline runtime is not initialized');
+    if (!this.isPipelineReady()) {
+      throw new Error(
+        this.useHubPipeline ? 'Hub pipeline runtime is not initialized' : 'Super pipeline runtime is not initialized'
+      );
     }
     this.logStage('request.received', input.requestId, {
       endpoint: input.entryEndpoint,
@@ -501,21 +554,22 @@ export class RouteCodexHttpServer {
     } catch {
       // snapshot failure should not block request path
     }
-    this.logStage('super.start', input.requestId, { endpoint: input.entryEndpoint, stream: metadata.stream });
-    const originalRequestSnapshot = this.cloneRequestPayload(input.body);
-    const result = await this.superPipeline.execute({
+    const pipelineLabel = this.useHubPipeline ? 'hub' : 'super';
+    this.logStage(`${pipelineLabel}.start`, input.requestId, {
       endpoint: input.entryEndpoint,
-      id: input.requestId,
-      payload: input.body,
-      metadata
+      stream: metadata.stream
     });
-    this.logStage('super.completed', input.requestId, {
-      route: result.routingDecision?.routeName,
-      target: result.target?.providerKey
+    const originalRequestSnapshot = this.cloneRequestPayload(input.body);
+    const pipelineResult = this.useHubPipeline
+      ? await this.runHubPipeline(input, metadata)
+      : await this.runSuperPipeline(input, metadata);
+    this.logStage(`${pipelineLabel}.completed`, input.requestId, {
+      route: pipelineResult.routingDecision?.routeName,
+      target: pipelineResult.target?.providerKey
     });
 
-    const providerPayload = result.providerPayload;
-    const target = result.target;
+    const providerPayload = pipelineResult.providerPayload;
+    const target = pipelineResult.target;
     if (!providerPayload || !target?.providerKey) {
       throw Object.assign(new Error('Virtual router did not produce a provider target'), {
         code: 'ERR_NO_PROVIDER_TARGET',
@@ -556,7 +610,7 @@ export class RouteCodexHttpServer {
       providerType: handle.providerType,
       providerProtocol,
       pipelineId: target.providerKey,
-      routeName: result.routingDecision?.routeName,
+      routeName: pipelineResult.routingDecision?.routeName,
       runtimeKey,
       target,
       metadata
@@ -584,6 +638,7 @@ export class RouteCodexHttpServer {
         requestId: input.requestId,
         wantsStream: Boolean(input.metadata?.inboundStream ?? input.metadata?.stream),
         originalRequest: originalRequestSnapshot,
+        processMode: pipelineResult.processMode,
         response: normalized
       });
     } catch (error) {
@@ -600,7 +655,7 @@ export class RouteCodexHttpServer {
           providerId: handle.providerId,
           providerType: handle.providerType,
           providerProtocol,
-          routeName: result.routingDecision?.routeName,
+          routeName: pipelineResult.routingDecision?.routeName,
           pipelineId: target.providerKey,
           runtimeKey,
           target
@@ -609,6 +664,85 @@ export class RouteCodexHttpServer {
       });
       throw error;
     }
+  }
+
+  private async runSuperPipeline(
+    input: PipelineExecutionInput,
+    metadata: Record<string, unknown>
+  ): Promise<{
+    providerPayload: Record<string, unknown>;
+    target: {
+      providerKey: string;
+      providerType: string;
+      outboundProfile: string;
+      runtimeKey?: string;
+      processMode?: string;
+    };
+    routingDecision?: { routeName?: string };
+    processMode: string;
+  }> {
+    if (!this.superPipeline) {
+      throw new Error('Super pipeline runtime is not initialized');
+    }
+    const result = await this.superPipeline.execute({
+      endpoint: input.entryEndpoint,
+      id: input.requestId,
+      payload: input.body,
+      metadata
+    });
+    if (!result.providerPayload || !result.target?.providerKey) {
+      throw Object.assign(new Error('Virtual router did not produce a provider target'), {
+        code: 'ERR_NO_PROVIDER_TARGET',
+        requestId: input.requestId
+      });
+    }
+    const processMode = (result.metadata?.processMode as string | undefined) ?? 'chat';
+    return {
+      providerPayload: result.providerPayload,
+      target: result.target,
+      routingDecision: result.routingDecision ?? undefined,
+      processMode
+    };
+  }
+
+  private async runHubPipeline(
+    input: PipelineExecutionInput,
+    metadata: Record<string, unknown>
+  ): Promise<{
+    providerPayload: Record<string, unknown>;
+    target: {
+      providerKey: string;
+      providerType: string;
+      outboundProfile: string;
+      runtimeKey?: string;
+      processMode?: string;
+    };
+    routingDecision?: { routeName?: string };
+    processMode: string;
+  }> {
+    if (!this.hubPipeline) {
+      throw new Error('Hub pipeline runtime is not initialized');
+    }
+    const payload = asRecord(input.body);
+    const result = await this.hubPipeline.execute({
+      endpoint: input.entryEndpoint,
+      id: input.requestId,
+      payload,
+      metadata
+    });
+    if (!result.providerPayload || !result.target?.providerKey) {
+      throw Object.assign(new Error('Virtual router did not produce a provider target'), {
+        code: 'ERR_NO_PROVIDER_TARGET',
+        requestId: input.requestId
+      });
+    }
+    const processMode = (result.metadata?.processMode as string | undefined) ?? 'chat';
+    return {
+      providerPayload: result.providerPayload,
+      target: result.target,
+      routingDecision: result.routingDecision ?? undefined,
+      processMode
+    };
   }
 
   private buildRequestMetadata(input: PipelineExecutionInput): Record<string, unknown> {
@@ -661,12 +795,16 @@ export class RouteCodexHttpServer {
     requestId: string;
     wantsStream: boolean;
     originalRequest?: Record<string, unknown> | undefined;
+    processMode?: string;
     response: PipelineExecutionResult;
   }): Promise<PipelineExecutionResult> {
+    if (options.processMode === 'passthrough') {
+      return options.response;
+    }
     const entry = (options.entryEndpoint || '').toLowerCase();
     const needsAnthropicConversion = entry.includes('/v1/messages');
     const needsResponsesConversion = entry.includes('/v1/responses');
-    const needsChatConversion = options.wantsStream && entry.includes('/v1/chat/completions');
+    const needsChatConversion = entry.includes('/v1/chat/completions');
     if (!needsAnthropicConversion && !needsResponsesConversion && !needsChatConversion) {
       return options.response;
     }
@@ -675,17 +813,30 @@ export class RouteCodexHttpServer {
       return options.response;
     }
     try {
-      const converted = await this.responseConverter.convert({
-        entryEndpoint: entry,
-        providerType: mapProviderResponseType(options.providerType),
-        providerResponse: body as Record<string, unknown>,
+      const providerProtocol = mapProviderProtocol(options.providerType);
+      const adapterContext = {
         requestId: options.requestId,
+        entryEndpoint: options.entryEndpoint || entry,
+        providerProtocol
+      };
+      const stageRecorder = createSnapshotRecorder(adapterContext, adapterContext.entryEndpoint);
+      const converted = await convertProviderResponse({
+        providerProtocol,
+        providerResponse: body as Record<string, unknown>,
+        context: adapterContext,
+        entryEndpoint: options.entryEndpoint || entry,
         wantsStream: options.wantsStream,
-        originalRequest: options.originalRequest
+        stageRecorder
       });
+      if (converted.__sse_responses) {
+        return {
+          ...options.response,
+          body: { __sse_responses: converted.__sse_responses }
+        };
+      }
       return {
         ...options.response,
-        body: converted
+        body: converted.body ?? body
       };
     } catch (error) {
       console.error('[RouteCodexHttpServer] Failed to convert provider response via llmswitch-core', error);

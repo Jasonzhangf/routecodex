@@ -8,7 +8,7 @@ import { pathToFileURL } from 'url';
 
 const PROVIDER_ID = process.env.RCC_RESP_PROV || 'fai';
 const PROVIDER_DIR = path.join(os.homedir(), '.routecodex', 'provider');
-const OUT_DIR = path.join(os.homedir(), '.routecodex', 'golden_samples', 'provider_golen_samples', 'responses', PROVIDER_ID);
+const OUT_DIR = path.join(os.homedir(), '.routecodex', 'golden_samples', 'provider_golden_samples', 'responses', PROVIDER_ID);
 
 function ensureDir(p) { fs.mkdirSync(p, { recursive: true }); }
 
@@ -75,7 +75,7 @@ async function main() {
 
   const httpPath = pathToFileURL(path.join(process.cwd(), 'dist/modules/pipeline/modules/provider/v2/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
-  const convPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/v2/conversion/conversion-v3/sse/sse-to-json/index.js')).href;
+  const convPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/sse-to-json/index.js')).href;
   const { ResponsesSseToJsonConverter } = await import(convPath);
 
   const headers = { 'Content-Type':'application/json', 'OpenAI-Beta':'responses-2024-12-17', 'Authorization':`Bearer ${apiKey}`, 'User-Agent': 'RouteCodex/2.0 (+https://github.com/routecodex)'};

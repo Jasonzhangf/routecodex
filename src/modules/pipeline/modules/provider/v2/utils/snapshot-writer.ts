@@ -79,11 +79,18 @@ export async function writeProviderSnapshot(options: {
   data: unknown;
   headers?: Record<string, unknown>;
   url?: string;
+  entryEndpoint?: string;
 }): Promise<void> {
-  const { endpoint, folder } = resolveEndpoint(options.url);
+  const { endpoint, folder } = resolveEndpoint(options.entryEndpoint || options.url);
   const stage = options.phase;
   const requestId = normalizeRequestId(options.requestId);
-  const payload = buildSnapshotPayload({ stage, data: options.data, headers: options.headers, url: options.url });
+  const payload = buildSnapshotPayload({
+    stage,
+    data: options.data,
+    headers: options.headers,
+    url: options.url,
+    extraMeta: options.entryEndpoint ? { entryEndpoint: options.entryEndpoint } : undefined
+  });
 
   try {
     await writeSnapshotViaHooks({

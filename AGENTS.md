@@ -15,7 +15,7 @@ This document replaces the old “architecture novel” with a concise set of ru
 | Layer | Source | What it does | What it must **not** do |
 |-------|--------|--------------|--------------------------|
 | HTTP server | `src/server/runtime/http-server/` | Express wiring, middleware, route handlers, delegating to Super Pipeline, managing provider runtimes | Tool/route logic, manual SSE bridging, configuration munging |
-| Super Pipeline (llmswitch-core) | `sharedmodule/llmswitch-core/dist/v2/...` | Tool canonicalization, routing, compatibility orchestration, SSE conversion | Direct HTTP calls, auth, provider-specific behavior |
+| Super Pipeline (llmswitch-core) | `sharedmodule/llmswitch-core/dist/...` | Tool canonicalization, routing, compatibility orchestration, SSE conversion | Direct HTTP calls, auth, provider-specific behavior |
 | Provider V2 | `src/modules/pipeline/modules/provider/v2/` | Auth resolution, request shaping, error reporting, compatibility adapters | Tool extraction, routing, configuration merges |
 | Compatibility (if needed) | `src/modules/pipeline/modules/provider/v2/compatibility/` | Minimal field remap/cleanup per upstream contract | Tool decoding, fallback routing, catch-all try/catch |
 

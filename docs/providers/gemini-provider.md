@@ -59,5 +59,4 @@ GEMINI_API_KEY=**** node scripts/gemini-smoke.mjs
 
 ## 测试建议
 - 单元：按 docs/providers/provider-composite-testing.md 中“协议守卫/形状漂移”用例增加 `gemini-chat` 断言；已允许 `candidates` 通过。
-- 集成：在 provider_golen_samples 中增加 `gemini-chat` 的 request/response 样例（可按真实 wire 形状扩展），并在蓝图回归中启用 gemini 路径。
-
+- 集成：在 provider_golden_samples 中增加 `gemini-chat` 的 request/response 样例（可按真实 wire 形状扩展），并在蓝图回归中启用 gemini 路径。

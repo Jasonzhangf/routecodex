@@ -105,8 +105,8 @@ async function main() {
   const cfg = { type: provEntry.type, config: provEntry.config };
   const httpPath = pathToFileURL(path.join(BASEDIR, 'dist/modules/pipeline/modules/provider/v2/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
-  const bridgePath = pathToFileURL(path.join(BASEDIR, 'sharedmodule/llmswitch-core/dist/v2/conversion/responses/responses-openai-bridge.js')).href;
-  const converterPath = pathToFileURL(path.join(BASEDIR, 'sharedmodule/llmswitch-core/dist/v2/conversion/conversion-v3/sse/sse-to-json/index.js')).href;
+  const bridgePath = pathToFileURL(path.join(BASEDIR, 'sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js')).href;
+  const converterPath = pathToFileURL(path.join(BASEDIR, 'sharedmodule/llmswitch-core/dist/sse/sse-to-json/index.js')).href;
   const { buildResponsesRequestFromChat, buildChatResponseFromResponses } = await import(bridgePath);
   const { ResponsesSseToJsonConverter } = await import(converterPath);
 

@@ -23,8 +23,8 @@ modules/
 
 ### LLMSwitch实现
 - 实现来源：`rcc-llmswitch-core`（避免本地重复实现）
-- OpenAI 规范化：`rcc-llmswitch-core/v2/conversion`
-- Anthropic ↔ OpenAI：`rcc-llmswitch-core/v2/conversion`
+- OpenAI 规范化：`rcc-llmswitch-core/conversion`
+- Anthropic ↔ OpenAI：`rcc-llmswitch-core/conversion`
 
 ### Workflow实现
 - **streaming-control.ts**: 流式控制实现，处理流式/非流式转换

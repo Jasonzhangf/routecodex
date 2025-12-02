@@ -56,7 +56,7 @@ async function main() {
     tool_choice: 'auto'
   };
 
-  const codecPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/v2/conversion/codecs/anthropic-openai-codec.js')).href;
+  const codecPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/conversion/codecs/anthropic-openai-codec.js')).href;
   const { buildAnthropicRequestFromOpenAIChat, buildOpenAIChatFromAnthropic } = await import(codecPath);
   const req = buildAnthropicRequestFromOpenAIChat(chat);
   req.model = model;
@@ -101,7 +101,7 @@ async function main() {
     .replace(/\n(?=event:)/g, '\n\n');
   fs.writeFileSync(sseLog, sseText, 'utf-8');
 
-  const convPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/v2/conversion/conversion-v3/sse/sse-to-json/anthropic-sse-to-json-converter.js')).href;
+  const convPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/sse-to-json/anthropic-sse-to-json-converter.js')).href;
   const { AnthropicSseToJsonConverter } = await import(convPath);
   async function* gen() { yield sseText; }
   const conv = new AnthropicSseToJsonConverter();

@@ -6,7 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import url from 'url';
-import { runStandardChatRequestFilters } from '../sharedmodule/llmswitch-core/dist/v2/conversion/index.js';
+import { runStandardChatRequestFilters } from '../sharedmodule/llmswitch-core/dist/conversion/index.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 

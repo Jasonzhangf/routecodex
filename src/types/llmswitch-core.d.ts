@@ -1,4 +1,4 @@
-declare module '../../../../../../../sharedmodule/llmswitch-core/dist/v2/router/virtual-router/error-center.js' {
+declare module '../../../../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/error-center.js' {
   export interface ProviderErrorEvent {
     code: string;
     message: string;
@@ -26,7 +26,7 @@ declare module '../../../../../../../sharedmodule/llmswitch-core/dist/v2/router/
   };
 }
 
-declare module '../../../../../../../sharedmodule/llmswitch-core/dist/v2/router/virtual-router/types.js' {
+declare module '../../../../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/types.js' {
   export interface ProviderErrorRuntimeMetadata {
     requestId: string;
     providerKey?: string;
@@ -48,4 +48,15 @@ declare module '../../../../../../../sharedmodule/llmswitch-core/dist/v2/router/
     timestamp: number;
     details?: Record<string, unknown>;
   }
+}
+
+declare module '../../../../../../../sharedmodule/llmswitch-core/dist/conversion/hub/response/provider-response.js' {
+  import type { Readable } from 'stream';
+  export function convertProviderResponse(options: {
+    providerProtocol: string;
+    providerResponse: Record<string, unknown>;
+    context: Record<string, unknown>;
+    entryEndpoint: string;
+    wantsStream: boolean;
+  }): Promise<{ body?: Record<string, unknown>; __sse_responses?: Readable; format?: string }>;
 }

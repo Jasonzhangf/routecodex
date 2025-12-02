@@ -14,7 +14,7 @@ import type { UnknownObject } from '../../../../../../types/common-types.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
 import { buildResponsesRequestFromChat } from '../../../../../llmswitch/bridge.js';
 // @ts-ignore - llmswitch-core dist has no ambient types
-import { ensureResponsesInstructions } from '../../../../../../../sharedmodule/llmswitch-core/dist/v2/conversion/shared/responses-instructions.js';
+import { ensureResponsesInstructions } from '../../../../../../../sharedmodule/llmswitch-core/dist/conversion/shared/responses-instructions.js';
 
 export class ResponsesProvider extends ChatHttpProvider {
   /**
@@ -73,9 +73,17 @@ export class ResponsesProvider extends ChatHttpProvider {
       return body;
     })();
 
+    const entryEndpoint =
+      (request as any)?.metadata?.entryEndpoint ||
+      (context?.metadata as any)?.entryEndpoint ||
+      undefined;
+
     try {
       ensureResponsesInstructions(finalBody as Record<string, unknown>);
     } catch { /* ignore */ }
+    if (settings.instructionsMode === 'inline') {
+      (finalBody as Record<string, unknown>).__rcc_inline_system_instructions = true;
+    }
 
     let upstreamStream = initialStreamFlag || Boolean((finalBody as any)?.stream);
     if (settings.streaming === 'always') upstreamStream = true;
@@ -129,7 +137,8 @@ export class ResponsesProvider extends ChatHttpProvider {
         requestId: context.requestId,
         data: finalBody,
         headers,
-        url: targetUrl
+        url: targetUrl,
+        entryEndpoint
       });
     } catch { /* ignore */ }
 
@@ -148,9 +157,6 @@ export class ResponsesProvider extends ChatHttpProvider {
         'sharedmodule',
         'llmswitch-core',
         'dist',
-        'v2',
-        'conversion',
-        'conversion-v3',
         'sse',
         'sse-to-json',
         'index.js'
@@ -162,7 +168,14 @@ export class ResponsesProvider extends ChatHttpProvider {
         model: (finalBody as any)?.model || 'unknown'
       });
       try {
-        await writeProviderSnapshot({ phase: 'provider-response', requestId: context.requestId, data: json ?? null, headers, url: targetUrl });
+        await writeProviderSnapshot({
+          phase: 'provider-response',
+          requestId: context.requestId,
+          data: json ?? null,
+          headers,
+          url: targetUrl,
+          entryEndpoint
+        });
       } catch { /* non-blocking */ }
       // 统一返回 JSON（对内语义）：与 httpClient.post 返回结构保持一致
       return { data: json, status: 200, statusText: 'OK', headers: { 'x-upstream-mode': 'sse' }, url: targetUrl } as any;
@@ -181,7 +194,8 @@ export class ResponsesProvider extends ChatHttpProvider {
             error: msg
           },
           headers,
-          url: targetUrl
+          url: targetUrl,
+          entryEndpoint
         });
       } catch { /* non-blocking */ }
       throw error;
@@ -191,7 +205,8 @@ export class ResponsesProvider extends ChatHttpProvider {
   private getResponsesSettings(): ResponsesSettings {
     const cfg = extractResponsesConfig(this.config as any);
     return {
-      streaming: cfg.streaming ?? 'auto'
+      streaming: cfg.streaming ?? 'auto',
+      instructionsMode: cfg.instructionsMode ?? 'default'
     };
   }
 
@@ -209,9 +224,11 @@ export class ResponsesProvider extends ChatHttpProvider {
 export default ResponsesProvider;
 
 type StreamPref = 'auto' | 'always' | 'never';
+type InstructionsMode = 'default' | 'inline';
 
 interface ResponsesSettings {
   streaming: StreamPref;
+  instructionsMode: InstructionsMode;
 }
 
 function parseStreamPref(value: unknown): StreamPref {
@@ -221,11 +238,17 @@ function parseStreamPref(value: unknown): StreamPref {
   return 'auto';
 }
 
+function parseInstructionsMode(value: unknown): InstructionsMode {
+  if (value === 'inline') return 'inline';
+  return 'default';
+}
+
 function extractResponsesConfig(config: any): Partial<ResponsesSettings> {
   const responsesCfg = config?.config?.responses;
   if (!responsesCfg || typeof responsesCfg !== 'object') return {};
   return {
-    streaming: parseStreamPref(responsesCfg.streaming)
+    streaming: parseStreamPref(responsesCfg.streaming),
+    instructionsMode: parseInstructionsMode(responsesCfg.instructionsMode)
   };
 }
 function hasSharedmodule(dir: string): boolean {

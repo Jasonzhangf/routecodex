@@ -62,17 +62,19 @@ function loadSnapshot(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
-function extractContainer(snapshot) {
+function extractPayload(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') return {};
-  return snapshot.data && typeof snapshot.data === 'object' ? snapshot.data : snapshot;
-}
-
-function unwrapBody(snapshot) {
-  const container = extractContainer(snapshot);
-  if (!container || typeof container !== 'object') {
-    return {};
+  const data = snapshot.data && typeof snapshot.data === 'object' ? snapshot.data : snapshot;
+  if (data.body && typeof data.body === 'object') {
+    if (data.body.body && typeof data.body.body === 'object') {
+      return data.body.body;
+    }
+    return data.body;
   }
-  return container.body ?? {};
+  if (snapshot.body && typeof snapshot.body === 'object') {
+    return snapshot.body;
+  }
+  return data;
 }
 
 function summarizeValue(value) {
@@ -137,24 +139,82 @@ function main() {
 
   const clientSnapshot = loadSnapshot(clientPath);
   const providerSnapshot = loadSnapshot(providerPath);
-  const clientContainer = extractContainer(clientSnapshot);
-  const providerContainer = extractContainer(providerSnapshot);
 
   console.log(`Client snapshot: ${clientPath}`);
   console.log(`Provider snapshot: ${providerPath}`);
 
-  const clientBodyContainer = unwrapBody(clientSnapshot);
-  const providerBody = unwrapBody(providerSnapshot);
-  const clientPayload = clientBodyContainer?.body ?? clientBodyContainer;
-  const clientMeta = clientBodyContainer?.metadata ?? {};
+  const clientPayload = extractPayload(clientSnapshot);
+  const providerPayload = extractPayload(providerSnapshot);
 
   listCounts('Client', clientPayload);
-  listCounts('Provider', providerBody);
+  listCounts('Provider', providerPayload);
 
-  diffObjects('Headers diff', clientContainer.headers || {}, providerContainer.headers || {});
-  diffObjects('Payload diff (top-level)', clientPayload || {}, providerBody || {});
+  const diffs = diffPayloads(pruneUndefined(clientPayload), pruneUndefined(providerPayload));
+  if (!diffs.length) {
+    console.log('\nPayload diff: none (exact match)');
+  } else {
+    console.log('\nPayload diff (first 50):');
+    diffs.slice(0, 50).forEach((entry) => {
+      console.log(`  - ${entry.path}: client=${summarizeValue(entry.expected)} | provider=${summarizeValue(entry.actual)}`);
+    });
+    if (diffs.length > 50) {
+      console.log(`  ... ${diffs.length - 50} more differences`);
+    }
+  }
+}
 
-  console.log('\nClient metadata:', JSON.stringify(clientMeta, null, 2));
+function pruneUndefined(value) {
+  if (Array.isArray(value)) return value.map(pruneUndefined);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (entry === undefined) continue;
+      out[key] = pruneUndefined(entry);
+    }
+    return out;
+  }
+  return value;
+}
+
+function diffPayloads(expected, actual, path = '<root>') {
+  if (Object.is(expected, actual)) return [];
+  if (typeof expected !== typeof actual) {
+    return [{ path, expected, actual }];
+  }
+  if (Array.isArray(expected) && Array.isArray(actual)) {
+    const max = Math.max(expected.length, actual.length);
+    const diffs = [];
+    for (let i = 0; i < max; i += 1) {
+      if (i >= expected.length) {
+        diffs.push({ path: `${path}[${i}]`, expected: undefined, actual: actual[i] });
+        continue;
+      }
+      if (i >= actual.length) {
+        diffs.push({ path: `${path}[${i}]`, expected: expected[i], actual: undefined });
+        continue;
+      }
+      diffs.push(...diffPayloads(expected[i], actual[i], `${path}[${i}]`));
+    }
+    return diffs;
+  }
+  if (expected && typeof expected === 'object' && actual && typeof actual === 'object') {
+    const keys = new Set([...Object.keys(expected), ...Object.keys(actual)]);
+    const diffs = [];
+    for (const key of keys) {
+      const next = path === '<root>' ? key : `${path}.${key}`;
+      if (!(key in actual)) {
+        diffs.push({ path: next, expected: expected[key], actual: undefined });
+        continue;
+      }
+      if (!(key in expected)) {
+        diffs.push({ path: next, expected: undefined, actual: actual[key] });
+        continue;
+      }
+      diffs.push(...diffPayloads(expected[key], actual[key], next));
+    }
+    return diffs;
+  }
+  return [{ path, expected, actual }];
 }
 
 main();
