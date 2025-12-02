@@ -53,10 +53,6 @@ export class ResponsesProvider extends ChatHttpProvider {
     // Flatten body (copy of base logic)
     const settings = this.getResponsesSettings();
     const inboundClientStream = this.normalizeStreamFlag((context?.metadata as any)?.stream);
-    const initialStreamFlag =
-      this.normalizeStreamFlag((context?.metadata as any)?.inboundStream) ??
-      inboundClientStream ??
-      this.normalizeStreamFlag((request as any)?.stream);
 
     const finalBody = (() => {
       const r: any = request || {};
@@ -86,25 +82,20 @@ export class ResponsesProvider extends ChatHttpProvider {
       (finalBody as Record<string, unknown>).__rcc_inline_system_instructions = true;
     }
 
-    let upstreamStream: boolean | undefined =
-      typeof initialStreamFlag === 'boolean'
-        ? initialStreamFlag
-        : this.normalizeStreamFlag((finalBody as any)?.stream);
-    if (typeof upstreamStream === 'undefined') {
-      upstreamStream = true;
-    }
-
-    if (settings.streaming === 'always') upstreamStream = true;
-    if (settings.streaming === 'never') upstreamStream = false;
-
-    const useSse = upstreamStream !== false;
+    const upstreamStream = settings.streaming === 'never' ? false : true;
+    const useSse = upstreamStream;
     if (useSse) {
       (finalBody as any).stream = true;
     } else {
       try { delete (finalBody as any).stream; } catch { /* ignore */ }
     }
 
-    const clientRequestedStream = inboundClientStream === true;
+    const clientRequestedStream =
+      settings.streaming === 'always'
+        ? true
+        : settings.streaming === 'never'
+          ? false
+          : inboundClientStream === true;
 
     this.dependencies.logger?.logModule?.(this.id, 'responses-provider-stream-flag', {
       requestId: context.requestId,
