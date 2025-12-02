@@ -79,7 +79,7 @@ routecodex-config-loader
     ↓ 虚拟路由引导
 bootstrapVirtualRouterConfig
     ↓ VirtualRouterArtifacts
-SuperPipeline / Provider Runtime 初始化
+Hub Pipeline / Provider Runtime 初始化
 ```
 
 ## 🆕 兼容性字段处理 (v2.1 新增)
@@ -206,7 +206,7 @@ import { bootstrapVirtualRouterConfig } from 'sharedmodule/llmswitch-core/dist/r
 
 const { userConfig } = await loadRouteCodexConfig('~/.routecodex/config.json');
 const artifacts = await bootstrapVirtualRouterConfig(userConfig.virtualrouter ?? userConfig);
-// artifacts.config 交给 SuperPipeline，artifacts.targetRuntime 用于 Provider 初始化
+// artifacts.config 交给 Hub Pipeline，artifacts.targetRuntime 用于 Provider 初始化
 ```
 
 ### 重构代理使用

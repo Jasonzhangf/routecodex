@@ -10,6 +10,7 @@ import {
   captureClientHeaders
 } from './handler-utils.js';
 import { resumeResponsesConversation } from '../../modules/llmswitch/bridge.js';
+import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
 
 interface ResponsesHandlerOptions {
   entryEndpoint?: string;
@@ -27,7 +28,7 @@ export async function handleResponses(
   const requestId = nextRequestId(req.headers['x-request-id']);
   try {
     if (!ctx.executePipeline) {
-      res.status(503).json({ error: { message: 'Super pipeline runtime not initialized' } });
+      res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' } });
       return;
     }
     let payload = (req.body || {}) as any;
@@ -65,6 +66,11 @@ export async function handleResponses(
       payload.stream = true;
     }
     const wantsStream = options.forceStream ?? inboundStream;
+
+    if (entryEndpoint === '/v1/responses') {
+      applySystemPromptOverride(entryEndpoint, payload);
+    }
+
     logRequestStart(entryEndpoint, requestId, {
       inboundStream: wantsStream,
       outboundStream,

@@ -14,7 +14,7 @@
     ↓
 VirtualRouterArtifacts (virtualRouter + targetRuntime)
     ↓
-模块初始化 (SuperPipeline + Provider Runtime)
+模块初始化 (Hub Pipeline + Provider Runtime)
 ```
 
 ### 1.2 核心设计原则
@@ -128,7 +128,7 @@ type VirtualRouterArtifacts = {
 };
 ```
 
-- `config`: 由 Super Pipeline 消费，包含虚拟路由、分类器、provider 描述等。
+- `config`: 由 Hub Pipeline 消费，包含虚拟路由、分类器、provider 描述等。
 - `targetRuntime`: host 初始化 Provider 实例所需的资料（baseUrl、headers、auth、compatProfile、runtimeKey）。
 
 该对象在内存中直接传递，**不再写入旧版“合并配置”蓝图文件**。任何磁盘快照仅用于调试，不参与运行时决策。

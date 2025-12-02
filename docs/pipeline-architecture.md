@@ -17,7 +17,7 @@ rcc start
    │   ├─ validates routing/providers/classifiers
    │   ├─ outputs `{ virtualRouter, targetRuntime }`
    │   └─ infers compatibility profiles + provider runtime metadata
-   ├─ new SuperPipeline({ virtualRouter })
+   ├─ new HubPipeline({ virtualRouter })
    └─ ProviderFactory.initializeFromRuntime(targetRuntime)
 ```
 
@@ -87,7 +87,7 @@ LLMSwitch v3 统一了所有 SSE ↔ JSON 转换，host 侧只需要保证入站
   - `__raw_request_body`、`clientHeaders`（快照用，可选）。
  这样 `SSEInputNode` 会调用 `defaultSseCodecRegistry`，把任意 SSE 流聚合成对应协议的 JSON，再映射为内部 Chat 请求。host **不再** 需要对 SSE 进行本地解析。
 
-- **出站**：`SuperPipeline.execute` 若决定返回 SSE，会在 `result.body.__sse_responses` 写入一个 Node Readable（或 AsyncIterable）。handler 只需检测该字段并设置 SSE 头；若请求声明 `stream=true` 但结果缺少 `__sse_responses`，应视为 502。  
+- **出站**：`HubPipeline.execute` 若决定返回 SSE，会在 `result.body.__sse_responses` 写入一个 Node Readable（或 AsyncIterable）。handler 只需检测该字段并设置 SSE 头；若请求声明 `stream=true` 但结果缺少 `__sse_responses`，应视为 502。  
   - 不管 provider 返回 JSON 还是 SSE，llmswitch-core 都会根据入口端点的 streaming 标记决定是否调用 `defaultSseCodecRegistry.convertJsonToSse` 去 synthesize SSE；
   - host 不得再调用 `sse-response-normalizer`/`openai-sse-normalizer` 之类的历史兜底逻辑——这些文件已经移除。
 

@@ -26,10 +26,10 @@ RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配�
 - 核心实现与详细说明：`sharedmodule/llmswitch-core/`
 - 源码文档：`sharedmodule/llmswitch-core/README.md`
 
-### Super Pipeline 架构（唯一入口）
+### Hub Pipeline 架构（唯一入口）
 
-- **唯一入口**：HTTP handler 直接调用 `sharedmodule/llmswitch-core/dist/conversion/conversion-v3/pipelines/super-pipeline`，本仓库不再维护自研 pipeline/blueprint。
-- **配置流**：`routecodex-config-loader` 读取用户配置，传给 `bootstrapVirtualRouterConfig`，由 llmswitch-core 输出 `VirtualRouterConfig + targetRuntime` 并注入 Super Pipeline。
+- **唯一入口**：HTTP handler 直接调用 `sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/hub-pipeline`，本仓库不再维护自研 pipeline/blueprint。
+- **配置流**：`routecodex-config-loader` 读取用户配置，传给 `bootstrapVirtualRouterConfig`，由 llmswitch-core 输出 `VirtualRouterConfig + targetRuntime` 并注入 Hub Pipeline。
 - **节点链路（由 llmswitch-core 内部维护）**
   - `SSE Input`：SSE ↔ JSON 转换、旁路透传。
   - `Input Nodes`：解析 Chat / Responses / Messages 请求，生成 canonical `standardizedRequest`。
@@ -806,8 +806,8 @@ routecodex/
 
 #### HTTP服务器职责（精简版）
 
-- 服务器只负责 **HTTP ↔ SuperPipeline** 转发：`/v1/chat`、`/v1/messages`、`/v1/responses` handler 将请求封装为 `SuperPipelineRequest`，调用 `superPipeline.execute()`，然后把返回的 provider payload/runtimeKey 交给对应 Provider。
-- ProviderPool、兼容层、Virtual Router、工具治理都由 llmswitch-core 完成。Host 只在启动时执行 `bootstrapVirtualRouterConfig`、构造 SuperPipeline，并根据 `targetRuntime` 初始化 Provider 实例。
+- 服务器只负责 **HTTP ↔ Hub Pipeline** 转发：`/v1/chat`、`/v1/messages`、`/v1/responses` handler 将请求封装为 `HubPipelineRequest`，调用 `hubPipeline.execute()`，然后把返回的 provider payload/runtimeKey 交给对应 Provider。
+- ProviderPool、兼容层、Virtual Router、工具治理都由 llmswitch-core 完成。Host 只在启动时执行 `bootstrapVirtualRouterConfig`、构造 Hub Pipeline，并根据 `targetRuntime` 初始化 Provider 实例。
 - Provider runtime map 是唯一的数据来源：`bootstrapVirtualRouterConfig` 会输出 `targetRuntime[providerKey]`，Server 把该 profile 注入 `ChatHttpProvider`/`ResponsesHttpProvider`/`AnthropicHttpProvider`，同时通过 `attachProviderRuntimeMetadata` 把 `providerKey/runtimeKey/routeName` 写入请求体，确保错误上报与熔断都能定位到具体 key-alias。
 - SSE/JSON 序列化、错误处理、日志快照均由 llmswitch-core 的节点链完成，HTTP handler 不再负责心跳/重试等逻辑，真正实现“瘦”外壳，便于未来接入自定义编排。
 

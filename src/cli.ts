@@ -513,10 +513,10 @@ program
           spinner.fail('Flags --codex and --claude are mutually exclusive');
           process.exit(1);
         }
-        if (options.codex) {
-          process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = 'codex';
-        } else if (options.claude) {
-          process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = 'claude';
+        const promptFlag = options.codex ? 'codex' : (options.claude ? 'claude' : null);
+        if (promptFlag) {
+          process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = promptFlag;
+          process.env.ROUTECODEX_SYSTEM_PROMPT_ENABLE = '1';
         }
       } catch { /* ignore */ }
 
@@ -1063,11 +1063,10 @@ program
         spinner.fail('Flags --codex and --claude are mutually exclusive');
         process.exit(1);
       }
-      if (options.codex) { process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = 'codex'; }
-      else if (options.claude) { process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = 'claude'; }
-      else if (!process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE) {
-        // Default to Codex system prompt source if not specified
-        process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = 'codex';
+      const restartPrompt = options.codex ? 'codex' : (options.claude ? 'claude' : null);
+      if (restartPrompt) {
+        process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = restartPrompt;
+        process.env.ROUTECODEX_SYSTEM_PROMPT_ENABLE = '1';
       }
 
       const modulesConfigPath = getModulesConfigPath();

@@ -9,12 +9,12 @@ interface RouteOptions {
   app: Application;
   config: ServerConfigV2;
   buildHandlerContext: () => HandlerContext;
-  getSuperPipelineReady: () => boolean;
+  getPipelineReady: () => boolean;
   handleError: (error: Error, context: string) => Promise<void>;
 }
 
 export function registerHttpRoutes(options: RouteOptions): void {
-  const { app, config, buildHandlerContext, getSuperPipelineReady, handleError } = options;
+  const { app, config, buildHandlerContext, getPipelineReady, handleError } = options;
 
   console.log('[RouteCodexHttpServer] Setting up routes...');
 
@@ -48,7 +48,7 @@ export function registerHttpRoutes(options: RouteOptions): void {
 
   app.get('/debug/runtime', (_req: Request, res: Response) => {
     try {
-      res.status(200).json({ superPipelineReady: getSuperPipelineReady() });
+      res.status(200).json({ pipelineReady: getPipelineReady() });
     } catch (e: any) {
       res.status(500).json({ error: { message: e?.message || String(e) } });
     }

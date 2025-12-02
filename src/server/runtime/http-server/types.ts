@@ -10,7 +10,7 @@ export interface ServerConfigV2 {
     useV2?: boolean;
   };
   pipeline?: {
-    useHubPipeline?: boolean;
+    useHubPipeline?: boolean; // legacy flag (hub is always enabled)
   };
   logging: {
     level: 'debug' | 'info' | 'warn' | 'error';
@@ -59,27 +59,6 @@ export interface ProviderHandle {
     processIncoming(payload: Record<string, unknown>): Promise<unknown>;
   };
 }
-
-export type SuperPipelineExecuteResult = PipelineExecutionResult & {
-  providerPayload?: Record<string, unknown>;
-  target?: {
-    providerKey: string;
-    runtimeKey?: string;
-    providerType: string;
-    outboundProfile: string;
-    compatibilityProfile?: string;
-    defaultModel?: string;
-  };
-  routingDecision?: { routeName?: string };
-};
-
-export interface SuperPipeline {
-  execute(request: PipelineExecutionInput & { payload: unknown }): Promise<SuperPipelineExecuteResult>;
-  updateVirtualRouterConfig(config: unknown): void;
-  getProviderRuntimeMap(): Record<string, ProviderRuntimeProfile>;
-}
-
-export type SuperPipelineCtor = new (config: { virtualRouter: unknown }) => SuperPipeline;
 
 export interface VirtualRouterArtifacts {
   config: unknown;

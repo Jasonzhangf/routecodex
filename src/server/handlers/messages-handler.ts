@@ -9,13 +9,14 @@ import {
   logRequestError,
   captureClientHeaders
 } from './handler-utils.js';
+import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
 
 export async function handleMessages(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
   const entryEndpoint = '/v1/messages';
   const requestId = nextRequestId(req.headers['x-request-id']);
   try {
     if (!ctx.executePipeline) {
-      res.status(503).json({ error: { message: 'Super pipeline runtime not initialized' } });
+      res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' } });
       return;
     }
     const payload = (req.body || {}) as any;
@@ -31,6 +32,8 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       payload.stream = true;
     }
     const wantsStream = inboundStream;
+    applySystemPromptOverride(entryEndpoint, payload);
+
     logRequestStart(entryEndpoint, requestId, {
       inboundStream: wantsStream,
       outboundStream,

@@ -88,8 +88,8 @@ export async function writeSnapshotViaHooks(
   channelOrOptions: string | AnyRecord,
   payload?: AnyRecord
 ): Promise<void> {
-  // hooks-integration 由 core 提供；桥接层只负责调用。
-  const mod = await importCoreDist('hooks/hooks-integration').catch(() => null);
+  // Snapshot hooks shim lives inside llmswitch-core conversion shared modules.
+  const mod = await importCoreDist('conversion/shared/snapshot-hooks').catch(() => null);
   const hooks = mod as any;
   if (!hooks || typeof hooks.writeSnapshotViaHooks !== 'function') return;
 
@@ -100,25 +100,6 @@ export async function writeSnapshotViaHooks(
 
   if (!options || typeof options !== 'object') return;
   await hooks.writeSnapshotViaHooks(options);
-}
-
-export async function estimateTokens(text: string, model?: string): Promise<number> {
-  const mod = await importCoreDist('utils/token-counter').catch(() => null);
-  const tc = mod as any;
-  if (!tc || typeof tc.estimateTextTokens !== 'function') return 0;
-  return await tc.estimateTextTokens(text, model);
-}
-
-export async function calculateRequestTokensStrict(request: AnyRecord, model?: string): Promise<{ inputTokens: number; toolTokens?: number }> {
-  const mod = await importCoreDist('utils/token-counter');
-  const TokenCounter = (mod as any)?.TokenCounter;
-  if (!TokenCounter || typeof TokenCounter.calculateRequestTokensStrict !== 'function') {
-    throw new Error('[llmswitch-bridge] TokenCounter.calculateRequestTokensStrict not available');
-  }
-  return await TokenCounter.calculateRequestTokensStrict(
-    request,
-    typeof model === 'string' && model.trim() ? model.trim() : 'gpt-3.5-turbo'
-  );
 }
 
 export async function resumeResponsesConversation(

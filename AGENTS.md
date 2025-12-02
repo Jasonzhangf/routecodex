@@ -4,8 +4,8 @@ This document replaces the old “architecture novel” with a concise set of ru
 
 ## 1. Core Principles
 
-1. **Single execution path** – All traffic flows `HTTP server → llmswitch-core Super Pipeline → Provider V2 → upstream AI`. No side channels, no bypasses.
-2. **llmswitch-core owns tools & routing** – Host/server/provider code must never repair tool calls, rewrite arguments, or decide routes. Use the Super Pipeline APIs only.
+1. **Single execution path** – All traffic flows `HTTP server → llmswitch-core Hub Pipeline → Provider V2 → upstream AI`. No side channels, no bypasses.
+2. **llmswitch-core owns tools & routing** – Host/server/provider code must never repair tool calls, rewrite arguments, or decide routes. Use the Hub Pipeline APIs only.
 3. **Provider layer = transport** – V2 providers handle auth, HTTP, retries, and compatibility hooks. They do not inspect user payload semantics.
 4. **Fail fast** – Any upstream error (HTTP, auth, compat) is bubbled via `providerErrorCenter` + `errorHandlingCenter`. No silent fallbacks.
 5. **Config-driven** – Host consumes `bootstrapVirtualRouterConfig` output only. Do not reassemble “merged configs” or patch runtime data on the fly.
@@ -14,8 +14,8 @@ This document replaces the old “architecture novel” with a concise set of ru
 
 | Layer | Source | What it does | What it must **not** do |
 |-------|--------|--------------|--------------------------|
-| HTTP server | `src/server/runtime/http-server/` | Express wiring, middleware, route handlers, delegating to Super Pipeline, managing provider runtimes | Tool/route logic, manual SSE bridging, configuration munging |
-| Super Pipeline (llmswitch-core) | `sharedmodule/llmswitch-core/dist/...` | Tool canonicalization, routing, compatibility orchestration, SSE conversion | Direct HTTP calls, auth, provider-specific behavior |
+| HTTP server | `src/server/runtime/http-server/` | Express wiring, middleware, route handlers, delegating to Hub Pipeline, managing provider runtimes | Tool/route logic, manual SSE bridging, configuration munging |
+| Hub Pipeline (llmswitch-core) | `sharedmodule/llmswitch-core/dist/...` | Tool canonicalization, routing, compatibility orchestration, SSE conversion | Direct HTTP calls, auth, provider-specific behavior |
 | Provider V2 | `src/modules/pipeline/modules/provider/v2/` | Auth resolution, request shaping, error reporting, compatibility adapters | Tool extraction, routing, configuration merges |
 | Compatibility (if needed) | `src/modules/pipeline/modules/provider/v2/compatibility/` | Minimal field remap/cleanup per upstream contract | Tool decoding, fallback routing, catch-all try/catch |
 
@@ -34,7 +34,7 @@ This document replaces the old “architecture novel” with a concise set of ru
 ## 5. Configuration Rules
 
 1. Read user configs through `src/config/routecodex-config-loader.ts` only.
-2. Immediately call `bootstrapVirtualRouterConfig(virtualrouter)` and pass the resulting `virtualRouter` + `targetRuntime` into the Super Pipeline and Provider bootstrap.
+2. Immediately call `bootstrapVirtualRouterConfig(virtualrouter)` and pass the resulting `virtualRouter` + `targetRuntime` into the Hub Pipeline and Provider bootstrap.
 3. Runtime auth secrets are resolved in the host via env vars or `authfile-*` references; never store decrypted secrets back into configs.
 
 ## 6. Testing Checklist (per change)

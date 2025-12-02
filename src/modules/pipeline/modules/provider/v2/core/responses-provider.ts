@@ -53,9 +53,10 @@ export class ResponsesProvider extends ChatHttpProvider {
     // Flatten body (copy of base logic)
     const settings = this.getResponsesSettings();
     const inboundClientStream = this.normalizeStreamFlag((context?.metadata as any)?.stream);
-    const initialStreamFlag = this.normalizeStreamFlag((context?.metadata as any)?.inboundStream)
-      ?? inboundClientStream
-      ?? this.normalizeStreamFlag((request as any)?.stream);
+    const initialStreamFlag =
+      this.normalizeStreamFlag((context?.metadata as any)?.inboundStream) ??
+      inboundClientStream ??
+      this.normalizeStreamFlag((request as any)?.stream);
 
     const finalBody = (() => {
       const r: any = request || {};
@@ -85,11 +86,19 @@ export class ResponsesProvider extends ChatHttpProvider {
       (finalBody as Record<string, unknown>).__rcc_inline_system_instructions = true;
     }
 
-    let upstreamStream = initialStreamFlag || Boolean((finalBody as any)?.stream);
+    let upstreamStream: boolean | undefined =
+      typeof initialStreamFlag === 'boolean'
+        ? initialStreamFlag
+        : this.normalizeStreamFlag((finalBody as any)?.stream);
+    if (typeof upstreamStream === 'undefined') {
+      upstreamStream = true;
+    }
+
     if (settings.streaming === 'always') upstreamStream = true;
     if (settings.streaming === 'never') upstreamStream = false;
 
-    if (upstreamStream) {
+    const useSse = upstreamStream !== false;
+    if (useSse) {
       (finalBody as any).stream = true;
     } else {
       try { delete (finalBody as any).stream; } catch { /* ignore */ }
@@ -142,16 +151,16 @@ export class ResponsesProvider extends ChatHttpProvider {
       });
     } catch { /* ignore */ }
 
-    // 发送请求（仅使用上游 SSE → 核心转换模块解析为 JSON；不做 JSON 兜底）
-    try {
-      // 上游 SSE：使用 llmswitch-core 的 ResponsesSseToJsonConverter 解析为 JSON
-      const stream = await (this as any).httpClient.postStream(endpoint, finalBody, { ...headers, Accept: 'text/event-stream' });
+    const sendSse = async () => {
+      const stream = await (this as any).httpClient.postStream(endpoint, finalBody, {
+        ...headers,
+        Accept: 'text/event-stream'
+      });
 
       if (clientRequestedStream) {
         return { __sse_stream: stream };
       }
 
-      // 动态引入转换器（避免编译期硬依赖路径问题）
       const modPath = path.join(
         PACKAGE_ROOT,
         'sharedmodule',
@@ -177,10 +186,36 @@ export class ResponsesProvider extends ChatHttpProvider {
           entryEndpoint
         });
       } catch { /* non-blocking */ }
-      // 统一返回 JSON（对内语义）：与 httpClient.post 返回结构保持一致
-      return { data: json, status: 200, statusText: 'OK', headers: { 'x-upstream-mode': 'sse' }, url: targetUrl } as any;
+      return {
+        data: json,
+        status: 200,
+        statusText: 'OK',
+        headers: { 'x-upstream-mode': 'sse' },
+        url: targetUrl
+      } as any;
+    };
+
+    try {
+      if (useSse) {
+        return await sendSse();
+      }
+
+      const jsonResponse = await (this as any).httpClient.post(endpoint, finalBody, {
+        ...headers,
+        Accept: 'application/json'
+      });
+      try {
+        await writeProviderSnapshot({
+          phase: 'provider-response',
+          requestId: context.requestId,
+          data: jsonResponse,
+          headers,
+          url: targetUrl,
+          entryEndpoint
+        });
+      } catch { /* non-blocking */ }
+      return jsonResponse;
     } catch (error) {
-      // 将错误形状化并写入 provider-error 快照，便于分析上游 4xx/5xx
       try {
         const err: any = error;
         const msg = typeof err?.message === 'string' ? err.message : String(err || '');
@@ -232,6 +267,15 @@ interface ResponsesSettings {
 }
 
 function parseStreamPref(value: unknown): StreamPref {
+  if (value === true) return 'always';
+  if (value === false) return 'never';
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'always') return 'always';
+    if (normalized === 'never') return 'never';
+    if (['true', '1', 'yes'].includes(normalized)) return 'always';
+    if (['false', '0', 'no'].includes(normalized)) return 'never';
+  }
   if (value === 'always' || value === 'never') {
     return value;
   }

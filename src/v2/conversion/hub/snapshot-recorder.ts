@@ -1,5 +1,5 @@
 import type { StageRecorder } from 'rcc-llmswitch-core/conversion/hub/format-adapters/index';
-import { writeSnapshotViaHooks } from 'rcc-llmswitch-core/hooks/hooks-integration';
+import { writeSnapshotViaHooks } from 'rcc-llmswitch-core/conversion/shared/snapshot-hooks';
 import type { AdapterContext } from 'rcc-llmswitch-core/conversion/hub/types/chat-envelope';
 
 export interface SnapshotStageRecorderOptions {

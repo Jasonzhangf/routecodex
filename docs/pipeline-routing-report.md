@@ -81,7 +81,7 @@
 
 ## 配置情况
 
-- `config/config.json` + 用户 `~/.routecodex/config.json` 由 `bootstrapVirtualRouterConfig` 直接解析，得到 `virtualRouter` + `targetRuntime`，HTTP 服务按该结果构造 Super Pipeline 与 Provider。
+- `config/config.json` + 用户 `~/.routecodex/config.json` 由 `bootstrapVirtualRouterConfig` 直接解析，得到 `virtualRouter` + `targetRuntime`，HTTP 服务按该结果构造 Hub Pipeline 与 Provider。
 - OpenAI Router 中的 `targetUrl` 由构造参数/默认值直接决定，并非来自 `modules.json`：
   - `src/server/protocol-handler.ts:89`
 
