@@ -52,12 +52,44 @@ export class ResponsesC4MCompatibility implements CompatibilityModule {
         removed.push(key);
       }
     }
+
+    if (typeof (clone as Record<string, unknown>).instructions === 'string') {
+      const {
+        sanitized,
+        mutations
+      } = this.sanitizeInstructions((clone as Record<string, unknown>).instructions as string);
+      if (mutations.length) {
+        (clone as Record<string, unknown>).instructions = sanitized;
+        removed.push(...mutations.map(flag => `instructions:${flag}`));
+      }
+    }
+
     if ((clone as Record<string, unknown>).data && typeof (clone as Record<string, unknown>).data === 'object') {
       const inner = this.stripUnsupportedFields((clone as Record<string, unknown>).data as UnknownObject);
       (clone as Record<string, unknown>).data = inner.sanitized;
       removed.push(...inner.removed);
     }
     return { sanitized: clone, removed };
+  }
+
+  private sanitizeInstructions(input: string): { sanitized: string; mutations: string[] } {
+    const mutations: string[] = [];
+    let sanitized = input;
+    const stripped = sanitized.replace(/<\/?[A-Za-z][^>]*>/g, '');
+    if (stripped !== sanitized) {
+      sanitized = stripped;
+      mutations.push('angle-brackets');
+    }
+    const envLimitRaw =
+      process.env.ROUTECODEX_C4M_INSTRUCTIONS_MAX ??
+      process.env.RCC_C4M_INSTRUCTIONS_MAX ??
+      process.env.ROUTECODEX_COMPAT_INSTRUCTIONS_MAX;
+    const maxLength = typeof envLimitRaw === 'string' ? Number(envLimitRaw) : NaN;
+    if (Number.isFinite(maxLength) && maxLength > 0 && sanitized.length > maxLength) {
+      sanitized = sanitized.slice(0, Math.floor(maxLength));
+      mutations.push('trimmed');
+    }
+    return { sanitized, mutations };
   }
 }
 
