@@ -6,7 +6,7 @@
 
 ```
 modules/
-├── llm-switch/          # LLMSwitch（由 rcc-llmswitch-core 提供实现）
+├── llm-switch/          # LLMSwitch（由 @jsonstudio/llms 提供实现）
 │   └── README.md
 ├── workflow/            # Workflow实现
 │   └── streaming-control.ts
@@ -22,9 +22,9 @@ modules/
 ## 模块说明
 
 ### LLMSwitch实现
-- 实现来源：`rcc-llmswitch-core`（避免本地重复实现）
-- OpenAI 规范化：`rcc-llmswitch-core/conversion`
-- Anthropic ↔ OpenAI：`rcc-llmswitch-core/conversion`
+- 实现来源：`@jsonstudio/llms`（避免本地重复实现）
+- OpenAI 规范化：`@jsonstudio/llms/conversion`
+- Anthropic ↔ OpenAI：`@jsonstudio/llms/conversion`
 
 ### Workflow实现
 - **streaming-control.ts**: 流式控制实现，处理流式/非流式转换

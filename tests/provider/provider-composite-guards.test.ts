@@ -1,11 +1,11 @@
 import { ProviderComposite } from '../../src/modules/pipeline/modules/provider/v2/composite/provider-composite.js';
 import { attachProviderRuntimeMetadata } from '../../src/modules/pipeline/modules/provider/v2/core/provider-runtime-metadata.ts';
 
-jest.mock('rcc-llmswitch-core/dist/router/virtual-router/error-center.js', () => ({
+jest.mock('@jsonstudio/llms/dist/router/virtual-router/error-center.js', () => ({
   providerErrorCenter: { emit: jest.fn() }
 }), { virtual: true });
 
-jest.mock('rcc-llmswitch-core/dist/router/virtual-router/types.js', () => ({}), { virtual: true });
+jest.mock('@jsonstudio/llms/dist/router/virtual-router/types.js', () => ({}), { virtual: true });
 
 const mockDeps = () => ({ errorHandlingCenter: { handleError: jest.fn(async () => {}) } } as any);
 

@@ -15,7 +15,7 @@ import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
 import { buildResponsesRequestFromChat } from '../../../../../llmswitch/bridge.js';
 import { importCoreModule } from '../../../../../llmswitch/core-loader.js';
 
-type EnsureResponsesInstructionsFn = typeof import('rcc-llmswitch-core/dist/conversion/shared/responses-instructions.js')['ensureResponsesInstructions'];
+type EnsureResponsesInstructionsFn = typeof import('@jsonstudio/llms/dist/conversion/shared/responses-instructions.js')['ensureResponsesInstructions'];
 let ensureResponsesInstructionsFn: EnsureResponsesInstructionsFn | null = null;
 
 async function loadEnsureResponsesInstructions(): Promise<EnsureResponsesInstructionsFn> {

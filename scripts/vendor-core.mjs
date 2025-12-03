@@ -13,7 +13,8 @@ async function rmrf(p) {
 async function main() {
   const root = process.cwd();
   const sharedDist = path.join(root, 'sharedmodule', 'llmswitch-core', 'dist');
-  const vendorDir = path.join(root, 'vendor', 'rcc-llmswitch-core');
+  const legacyVendorDir = path.join(root, 'vendor', 'rcc-llmswitch-core');
+  const scopedVendorDir = path.join(root, 'vendor', '@jsonstudio', 'llms');
 
   if (!await exists(sharedDist)) {
     console.error('[vendor-core] ERROR: 未找到 sharedmodule/llmswitch-core/dist');
@@ -21,9 +22,13 @@ async function main() {
     process.exit(2);
   }
 
-  if (await exists(vendorDir)) {
-    await rmrf(vendorDir);
+  if (await exists(legacyVendorDir)) {
+    await rmrf(legacyVendorDir);
     console.log('[vendor-core] removed legacy vendor/rcc-llmswitch-core directory');
+  }
+  if (await exists(scopedVendorDir)) {
+    await rmrf(scopedVendorDir);
+    console.log('[vendor-core] removed legacy vendor/@jsonstudio/llms directory');
   }
 
   console.log('[vendor-core] sharedmodule/llmswitch-core/dist 将被直接引用，已停止生成 vendor 副本。');

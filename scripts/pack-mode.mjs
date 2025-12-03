@@ -41,7 +41,7 @@ try {
       ...(original.dependencies || {}),
       "ajv": original.dependencies?.ajv || "^8.17.1",
       "zod": original.dependencies?.zod || "^3.23.8",
-      "rcc-llmswitch-core": original.dependencies?.["rcc-llmswitch-core"] || "^0.3.12"
+      "@jsonstudio/llms": original.dependencies?.["@jsonstudio/llms"] || "^0.4.3"
     };
   }
   fs.writeFileSync(pkgPath, JSON.stringify(mutated, null, 2));

@@ -37,7 +37,7 @@ function resolveCoreDistPath(subpath: string): string {
   const distDir = path.join(resolveCorePackageDir(), 'dist');
   const candidate = path.join(distDir, `${clean}.js`);
   if (!fs.existsSync(candidate)) {
-    throw new Error(`[llmswitch-core-loader] 未找到 ${candidate}，请确认 rcc-llmswitch-core 发布版本包含该模块。`);
+    throw new Error(`[llmswitch-core-loader] 未找到 ${candidate}，请确认 @jsonstudio/llms 发布版本包含该模块。`);
   }
   return candidate;
 }

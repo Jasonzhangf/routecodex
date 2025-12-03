@@ -1,4 +1,4 @@
-declare module 'rcc-llmswitch-core/dist/router/virtual-router/error-center.js' {
+declare module '@jsonstudio/llms/dist/router/virtual-router/error-center.js' {
   export interface ProviderErrorEvent {
     code: string;
     message: string;
@@ -26,7 +26,7 @@ declare module 'rcc-llmswitch-core/dist/router/virtual-router/error-center.js' {
   };
 }
 
-declare module 'rcc-llmswitch-core/dist/router/virtual-router/types.js' {
+declare module '@jsonstudio/llms/dist/router/virtual-router/types.js' {
   export interface ProviderErrorRuntimeMetadata {
     requestId: string;
     providerKey?: string;
@@ -50,7 +50,7 @@ declare module 'rcc-llmswitch-core/dist/router/virtual-router/types.js' {
   }
 }
 
-declare module 'rcc-llmswitch-core/dist/conversion/hub/response/provider-response.js' {
+declare module '@jsonstudio/llms/dist/conversion/hub/response/provider-response.js' {
   import type { Readable } from 'stream';
   export function convertProviderResponse(options: {
     providerProtocol: string;
@@ -61,6 +61,6 @@ declare module 'rcc-llmswitch-core/dist/conversion/hub/response/provider-respons
   }): Promise<{ body?: Record<string, unknown>; __sse_responses?: Readable; format?: string }>;
 }
 
-declare module 'rcc-llmswitch-core/dist/conversion/shared/responses-instructions.js' {
+declare module '@jsonstudio/llms/dist/conversion/shared/responses-instructions.js' {
   export function ensureResponsesInstructions(payload: Record<string, unknown>): void;
 }

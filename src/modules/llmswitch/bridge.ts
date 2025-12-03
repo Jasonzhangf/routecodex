@@ -6,7 +6,7 @@ type AnyRecord = Record<string, unknown>;
 
 // 单一桥接模块：这是全项目中唯一允许直接 import llmswitch-core 的地方。
 // 其它代码（pipeline/provider/server/virtual-router/snapshot）都只能通过这里暴露的统一接口访问 llmswitch-core。
-// 默认引用 rcc-llmswitch-core（来自 npm 发布版本）。仓库开发场景可通过 scripts/link-llmswitch.mjs 将该依赖 link 到本地 sharedmodule。
+// 默认引用 @jsonstudio/llms（来自 npm 发布版本）。仓库开发场景可通过 scripts/link-llmswitch.mjs 将该依赖 link 到本地 sharedmodule。
 
 async function importCoreDist(subpath: string): Promise<any> {
   try {
@@ -14,7 +14,7 @@ async function importCoreDist(subpath: string): Promise<any> {
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `[llmswitch-bridge] Unable to load core module "${subpath}". 请确认 rcc-llmswitch-core 依赖已安装（npm install）。${detail ? ` (${detail})` : ''}`
+      `[llmswitch-bridge] Unable to load core module "${subpath}". 请确认 @jsonstudio/llms 依赖已安装（npm install）。${detail ? ` (${detail})` : ''}`
     );
   }
 }

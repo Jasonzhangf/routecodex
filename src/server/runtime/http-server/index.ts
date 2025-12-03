@@ -38,8 +38,8 @@ import type {
 } from './types.js';
 import { writeClientSnapshot } from '../../../modules/pipeline/modules/provider/v2/utils/snapshot-writer.js';
 
-type ConvertProviderResponseFn = typeof import('rcc-llmswitch-core/dist/conversion/hub/response/provider-response.js')['convertProviderResponse'];
-type SnapshotRecorderFactory = typeof import('rcc-llmswitch-core/dist/conversion/hub/snapshot-recorder.js')['createSnapshotRecorder'];
+type ConvertProviderResponseFn = typeof import('@jsonstudio/llms/dist/conversion/hub/response/provider-response.js')['convertProviderResponse'];
+type SnapshotRecorderFactory = typeof import('@jsonstudio/llms/dist/conversion/hub/snapshot-recorder.js')['createSnapshotRecorder'];
 
 let convertProviderResponseFn: ConvertProviderResponseFn | null = null;
 async function loadConvertProviderResponse(): Promise<ConvertProviderResponseFn> {

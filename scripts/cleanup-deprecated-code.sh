@@ -67,6 +67,7 @@ find config/ -name "virtual-router-config.*.generated.json.bak" -delete -print 2
 # 删除旧版本tgz包
 echo "🗑️ 删除旧版本tgz包..."
 find sharedmodule/llmswitch-core/ -name "rcc-llmswitch-core-0.1.3[7-9].tgz" -delete -print 2>/dev/null || true
+find sharedmodule/llmswitch-core/ -name "jsonstudio-llms-0.1.3[7-9].tgz" -delete -print 2>/dev/null || true
 
 echo "✅ 阶段2完成"
 echo ""
@@ -132,7 +133,7 @@ cat > "$REPORT_FILE" << EOF
 - 测试输出目录: tests/output/
 - 构建产物目录: dist/
 - 旧配置快照: virtual-router-config.<port>.generated.json.bak
-- 旧版本包: rcc-llmswitch-core-0.1.3[7-9].tgz
+- 旧版本包: rcc-llmswitch-core-0.1.3[7-9].tgz / jsonstudio-llms-0.1.3[7-9].tgz
 
 ## 构建验证
 ✅ 构建成功

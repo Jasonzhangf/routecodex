@@ -1,4 +1,4 @@
-declare module 'rcc-llmswitch-core/api' {
+declare module '@jsonstudio/llms/api' {
   export const SwitchOrchestrator: any;
   export const processChatRequestTools: any;
   export const processChatResponseTools: any;
@@ -13,7 +13,7 @@ declare module 'rcc-llmswitch-core/api' {
   export const SchemaValidator: any;
 }
 
-declare module 'rcc-llmswitch-core/dist/sse/json-to-sse/index.js' {
+declare module '@jsonstudio/llms/dist/sse/json-to-sse/index.js' {
   export class ChatJsonToSseConverter {
     convertResponseToJsonToSse(payload: unknown, options?: Record<string, unknown>): Promise<import('node:stream').Readable>;
   }

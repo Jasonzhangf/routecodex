@@ -1,6 +1,6 @@
-import type { StageRecorder } from 'rcc-llmswitch-core/conversion/hub/format-adapters/index';
-import { writeSnapshotViaHooks } from 'rcc-llmswitch-core/conversion/shared/snapshot-hooks';
-import type { AdapterContext } from 'rcc-llmswitch-core/conversion/hub/types/chat-envelope';
+import type { StageRecorder } from '@jsonstudio/llms/conversion/hub/format-adapters/index';
+import { writeSnapshotViaHooks } from '@jsonstudio/llms/conversion/shared/snapshot-hooks';
+import type { AdapterContext } from '@jsonstudio/llms/conversion/hub/types/chat-envelope';
 
 export interface SnapshotStageRecorderOptions {
   context: AdapterContext;

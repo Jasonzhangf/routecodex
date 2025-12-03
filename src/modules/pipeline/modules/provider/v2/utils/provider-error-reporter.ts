@@ -4,7 +4,7 @@ import type { TargetMetadata } from '../../../../orchestrator/pipeline-context.j
 import type {
   ProviderErrorEvent,
   ProviderErrorRuntimeMetadata
-} from 'rcc-llmswitch-core/dist/router/virtual-router/types.js';
+} from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { importCoreModule } from '../../../../../llmswitch/core-loader.js';
 
 type ProviderErrorCenterExports = {
@@ -19,7 +19,7 @@ const providerErrorCenterModule = await importCoreModule<ProviderErrorCenterExpo
 );
 const providerErrorCenterResolved = providerErrorCenterModule?.providerErrorCenter;
 if (!providerErrorCenterResolved) {
-  throw new Error('[provider-error-reporter] 无法加载 llmswitch-core providerErrorCenter（请确认 rcc-llmswitch-core 可用）');
+  throw new Error('[provider-error-reporter] 无法加载 llmswitch-core providerErrorCenter（请确认 @jsonstudio/llms 可用）');
 }
 const providerErrorCenter = providerErrorCenterResolved;
 

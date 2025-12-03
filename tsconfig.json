@@ -24,10 +24,10 @@
     "incremental": false,
     "baseUrl": ".",
     "paths": {
-      "rcc-llmswitch-core/api": [
+      "@jsonstudio/llms/api": [
         "sharedmodule/llmswitch-core/dist/api.d.ts"
       ],
-      "rcc-llmswitch-core/guidance": [
+      "@jsonstudio/llms/guidance": [
         "sharedmodule/llmswitch-core/dist/guidance/index.d.ts"
       ],
       "../../../../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/error-center.js": [
