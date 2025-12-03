@@ -102,9 +102,9 @@ export class GeminiHttpProvider extends BaseProvider {
     const headers = await this.buildRequestHeaders();
 
     const bodyAny: any = (request as any)?.data || (request as any) || {};
-    const model = (bodyAny?.model || (this.config as any)?.config?.model || this.serviceProfile.defaultModel || '').trim();
+    const model = typeof bodyAny?.model === 'string' ? bodyAny.model.trim() : '';
     if (!model) {
-      throw new Error('gemini-provider: model is required');
+      throw new Error('provider-runtime-error: missing model from virtual router');
     }
 
     // 构造 URL: /models/{model}:generateContent

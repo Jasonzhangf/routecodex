@@ -25,6 +25,8 @@ This document replaces the old “architecture novel” with a concise set of ru
 2. **Host build** – Run `npm run build:dev` (use `ROUTECODEX_VERIFY_SKIP=1` only if the verification provider config is known broken). This regenerates `dist/` and `src/build-info.ts`.
 3. **Global install/test** – `npm run install:global` to validate the CLI, followed by any targeted smoke tests (providers, responses SSE, etc.).
 4. **Never commit build artifacts** – `dist/` is emitted during CI, sharedmodule dist files track the upstream repo, and tarballs stay out of git.
+5. **Release vs. Dev 依赖** – Release 构建一律依赖 npm 上的 `@jsonstudio/llms`（通过 `npm install` 获取）；开发流程使用 `npm run llmswitch:link` 将 `sharedmodule/llmswitch-core` 符号链接到 `node_modules/@jsonstudio/llms`，两种路径互不覆盖。
+6. **CLI 包隔离** – 发布 CLI 包只有 `@jsonstudio/rcc`，本地/调试 CLI 仍使用 `routecodex`。不要尝试覆盖历史的 `rcc` 顶级包名，保持 release/dev 两个 npm 包并存。
 
 ## 4. Error Reporting
 

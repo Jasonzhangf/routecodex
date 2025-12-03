@@ -5,11 +5,15 @@ import path from 'node:path';
 const mode = (process.argv[2] || 'link').toLowerCase();
 const root = process.cwd();
 const source = path.join(root, 'sharedmodule', 'llmswitch-core');
-const dest = path.join(root, 'node_modules', 'rcc-llmswitch-core');
+const scopeDir = path.join(root, 'node_modules', '@jsonstudio');
+const dest = path.join(scopeDir, 'llms');
 
 function ensureNodeModules() {
   if (!fs.existsSync(path.join(root, 'node_modules'))) {
     fs.mkdirSync(path.join(root, 'node_modules'), { recursive: true });
+  }
+  if (!fs.existsSync(scopeDir)) {
+    fs.mkdirSync(scopeDir, { recursive: true });
   }
 }
 
@@ -34,14 +38,14 @@ if (mode === 'link') {
   ensureNodeModules();
   removeDest();
   fs.symlinkSync(source, dest);
-  console.log('[llmswitch-link] linked node_modules/rcc-llmswitch-core -> sharedmodule/llmswitch-core');
+  console.log('[llmswitch-link] linked node_modules/@jsonstudio/llms -> sharedmodule/llmswitch-core');
   process.exit(0);
 }
 
 if (mode === 'unlink') {
   if (fs.existsSync(dest)) {
     removeDest();
-    console.log('[llmswitch-link] removed link at node_modules/rcc-llmswitch-core');
+    console.log('[llmswitch-link] removed link at node_modules/@jsonstudio/llms');
   } else {
     console.log('[llmswitch-link] nothing to unlink');
   }

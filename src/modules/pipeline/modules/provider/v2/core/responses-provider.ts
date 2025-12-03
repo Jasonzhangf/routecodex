@@ -72,13 +72,11 @@ export class ResponsesProvider extends ChatHttpProvider {
       const r: any = request || {};
       const dataObj: any = (r && typeof r === 'object' && 'data' in r && typeof r.data === 'object') ? r.data : r;
       const body: any = { ...dataObj };
-      const routeModel = (context?.target as any)?.modelId;
-      // Responses provider 始终以路由目标提供的实际模型为准，不再依赖 config.model 或默认值
-      const upstreamModel =
-        (typeof routeModel === 'string' && routeModel.trim())
-          ? routeModel.trim()
-          : (this as any).serviceProfile.defaultModel;
-      body.model = upstreamModel;
+      const inboundModel = typeof body.model === 'string' ? body.model.trim() : '';
+      if (!inboundModel) {
+        throw new Error('provider-runtime-error: missing model from virtual router');
+      }
+      body.model = inboundModel;
       // Responses provider 不在此处处理 max_tokens；保持 llmswitch-core 兼容层的唯一治理入口
       try { if ('metadata' in body) { delete body.metadata; } } catch { /* ignore */ }
       return body;

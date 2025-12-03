@@ -554,6 +554,8 @@ export class RouteCodexHttpServer {
     });
     const originalRequestSnapshot = this.cloneRequestPayload(input.body);
     const pipelineResult = await this.runHubPipeline(input, metadata);
+    const pipelineMetadata = pipelineResult.metadata ?? {};
+    const mergedMetadata = { ...metadata, ...pipelineMetadata };
     this.logStage(`${pipelineLabel}.completed`, input.requestId, {
       route: pipelineResult.routingDecision?.routeName,
       target: pipelineResult.target?.providerKey
@@ -604,7 +606,7 @@ export class RouteCodexHttpServer {
       routeName: pipelineResult.routingDecision?.routeName,
       runtimeKey,
       target,
-      metadata
+      metadata: mergedMetadata
     });
 
     this.logStage('provider.send.start', input.requestId, {
@@ -630,7 +632,8 @@ export class RouteCodexHttpServer {
         wantsStream: Boolean(input.metadata?.inboundStream ?? input.metadata?.stream),
         originalRequest: originalRequestSnapshot,
         processMode: pipelineResult.processMode,
-        response: normalized
+        response: normalized,
+        pipelineMetadata: mergedMetadata
       });
     } catch (error) {
       this.logStage('provider.send.error', input.requestId, {
@@ -749,6 +752,7 @@ export class RouteCodexHttpServer {
     originalRequest?: Record<string, unknown> | undefined;
     processMode?: string;
     response: PipelineExecutionResult;
+    pipelineMetadata?: Record<string, unknown>;
   }): Promise<PipelineExecutionResult> {
     if (options.processMode === 'passthrough') {
       return options.response;
@@ -766,10 +770,13 @@ export class RouteCodexHttpServer {
     }
     try {
       const providerProtocol = mapProviderProtocol(options.providerType);
+      const metadataBag = options.pipelineMetadata || {};
+      const originalModelId = this.extractClientModelId(metadataBag, options.originalRequest);
       const adapterContext = {
         requestId: options.requestId,
         entryEndpoint: options.entryEndpoint || entry,
-        providerProtocol
+        providerProtocol,
+        originalModelId
       };
       const [convertProviderResponse, createSnapshotRecorder] = await Promise.all([
         loadConvertProviderResponse(),
@@ -798,6 +805,31 @@ export class RouteCodexHttpServer {
       console.error('[RouteCodexHttpServer] Failed to convert provider response via llmswitch-core', error);
       return options.response;
     }
+  }
+
+  private extractClientModelId(
+    metadata: Record<string, unknown>,
+    originalRequest?: Record<string, unknown>
+  ): string | undefined {
+    const candidates = [
+      metadata.clientModelId,
+      metadata.originalModelId,
+      (metadata.target && typeof metadata.target === 'object'
+        ? (metadata.target as Record<string, unknown>).clientModelId
+        : undefined),
+      originalRequest && typeof originalRequest === 'object'
+        ? (originalRequest as Record<string, unknown>).model
+        : undefined,
+      originalRequest && typeof originalRequest === 'object'
+        ? (originalRequest as Record<string, unknown>).originalModelId
+        : undefined
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+    return undefined;
   }
 
   private cloneRequestPayload(payload: unknown): Record<string, unknown> | undefined {

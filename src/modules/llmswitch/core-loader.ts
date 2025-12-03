@@ -2,16 +2,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
+const PACKAGE_CANDIDATES = [
+  path.join('node_modules', '@jsonstudio', 'llms'),
+  path.join('node_modules', 'rcc-llmswitch-core')
+];
+
 let corePackageDir: string | null = null;
 
 function resolveCorePackageDir(): string {
   if (corePackageDir) return corePackageDir;
   let currentDir = path.dirname(fileURLToPath(import.meta.url));
   while (true) {
-    const candidate = path.join(currentDir, 'node_modules', 'rcc-llmswitch-core');
-    if (fs.existsSync(candidate)) {
-      corePackageDir = candidate;
-      return corePackageDir;
+    for (const pkgPath of PACKAGE_CANDIDATES) {
+      const candidate = path.join(currentDir, pkgPath);
+      if (fs.existsSync(candidate)) {
+        corePackageDir = candidate;
+        return corePackageDir;
+      }
     }
     const parent = path.dirname(currentDir);
     if (parent === currentDir) {
@@ -19,7 +26,10 @@ function resolveCorePackageDir(): string {
     }
     currentDir = parent;
   }
-  throw new Error('[llmswitch-core-loader] 无法定位 rcc-llmswitch-core 包，请先执行 npm install。');
+  const targets = PACKAGE_CANDIDATES.map((pkg) => path.join('<project>', pkg)).join(' 或 ');
+  throw new Error(
+    `[llmswitch-core-loader] 无法定位 llmswitch 核心库，请执行 npm install 或 npm run llmswitch:link 以确保 ${targets} 存在。`
+  );
 }
 
 function resolveCoreDistPath(subpath: string): string {
