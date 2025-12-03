@@ -401,7 +401,7 @@ export class ChatHttpProvider extends BaseProvider {
     const envTimeout = Number(process.env.ROUTECODEX_PROVIDER_TIMEOUT_MS || process.env.RCC_PROVIDER_TIMEOUT_MS || NaN);
     const effectiveTimeout = Number.isFinite(envTimeout) && envTimeout > 0
       ? envTimeout
-      : (this.config.config.overrides?.timeout ?? profile.timeout ?? 60000);
+      : (this.config.config.overrides?.timeout ?? profile.timeout ?? 300000);
     const envRetries = Number(process.env.ROUTECODEX_PROVIDER_RETRIES || process.env.RCC_PROVIDER_RETRIES || NaN);
     const effectiveRetries = Number.isFinite(envRetries) && envRetries >= 0
       ? envRetries
@@ -431,7 +431,6 @@ export class ChatHttpProvider extends BaseProvider {
 
     // 初始请求预处理
     const runtime = this.getRuntimeProfile();
-    const pipelineModel = runtime?.defaultModel || (this.config.config as any)?.model;
     let processedRequest: UnknownObject = { ...request };
     ensureRuntimeMetadata(processedRequest);
     // 记录入站原始模型，便于响应阶段还原（不影响上游请求体）
@@ -446,14 +445,6 @@ export class ChatHttpProvider extends BaseProvider {
         __origModel: inboundModel
       };
     } catch { /* ignore */ }
-    // 发送前覆盖为流水线配置的上游模型（若存在），否则保留原值或使用默认
-    (processedRequest as any).model =
-      (typeof pipelineModel === 'string' && pipelineModel.trim())
-        ? pipelineModel.trim()
-        : (processedRequest as any).model ||
-          this.config.config.overrides?.defaultModel ||
-          this.serviceProfile.defaultModel;
-
     // 流式开关：基础 Provider 统一移除入口层的 stream 标记，
     // 具体协议（如 Responses/Anthropic）的真实流控由各自独立 Provider 处理
     try {
@@ -582,17 +573,6 @@ export class ChatHttpProvider extends BaseProvider {
       throw e;
     }
 
-    // 响应模型名还原为入站模型（仅对外展示层；上游快照保持原样）
-    try {
-      const root: any = (processedResponse as any)?.data?.data || (processedResponse as any)?.data || processedResponse;
-      if (root && typeof root === 'object' && typeof (root as any).model === 'string') {
-        const inboundModel = (context as any)?.model || (processedResponse as any)?.metadata?.__origModel;
-        if (typeof inboundModel === 'string' && inboundModel.trim()) {
-          (root as any).model = inboundModel.trim();
-        }
-      }
-    } catch { /* ignore */ }
-
     return {
       data: (processedResponse as any).data || processedResponse,
       status: (processedResponse as any).status || (response as any).status,
@@ -638,13 +618,12 @@ export class ChatHttpProvider extends BaseProvider {
       const r: any = processedRequest || {};
       const dataObj: any = (r && typeof r === 'object' && 'data' in r && typeof r.data === 'object') ? r.data : r;
       const body: any = { ...dataObj };
-      // Require model: 禁止默认回退
-      const cfgModel = (this.config as any)?.config?.model;
-      if (typeof cfgModel === 'string' && cfgModel.trim()) {
-        body.model = cfgModel.trim();
-      } else if (typeof body.model !== 'string' || !body.model) {
-        throw new Error('provider-config-error: model is required (no default fallback)');
+      // Require model: 只接受虚拟路由器写入的模型，不再回退配置
+      const inboundModel = typeof body.model === 'string' ? body.model.trim() : '';
+      if (!inboundModel) {
+        throw new Error('provider-runtime-error: missing model from virtual router');
       }
+      body.model = inboundModel;
       // Resolve max_tokens according to priority:
       // 1) request.max_tokens (number > 0) or request.maxTokens (camelCase)
       // 2) provider overrides (config.config.overrides.maxTokens) if provided and > 0

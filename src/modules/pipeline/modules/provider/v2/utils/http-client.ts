@@ -52,7 +52,7 @@ export class HttpClient {
     this.config = config;
     this.defaultConfig = {
       baseUrl: config.baseUrl || '',
-      timeout: config.timeout || 60000,
+      timeout: config.timeout || 300000,
       maxRetries: 0,
       retryDelay: 0,
       defaultHeaders: {
