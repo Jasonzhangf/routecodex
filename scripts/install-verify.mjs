@@ -13,10 +13,12 @@ import path from 'node:path';
 import { spawn, spawnSync, execSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Readable } from 'node:stream';
+import { createRequire } from 'node:module';
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const __filename = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(__filename), '..');
+const require = createRequire(import.meta.url);
 
 const state = {
   serverProc: null,
@@ -27,39 +29,84 @@ const state = {
 let shuttingDown = false;
 let responsesSseParser = null;
 
+const manualSamples = {
+  responses: path.join(repoRoot, 'scripts', 'verification', 'samples', 'openai-responses-list-local-files.json'),
+  chat: path.join(repoRoot, 'scripts', 'verification', 'samples', 'openai-chat-list-local-files.json'),
+  anthropic: path.join(repoRoot, 'scripts', 'verification', 'samples', 'anthropic-messages-list-local-files.json')
+};
+
+function clonePayload(payload) {
+  return JSON.parse(JSON.stringify(payload));
+}
+
+function loadManualSample(kind) {
+  const filePath = manualSamples[kind];
+  if (!filePath) {
+    throw new Error(`未知的验证样例类型: ${kind}`);
+  }
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`缺少验证样例文件: ${filePath}`);
+  }
+  return readJson(filePath);
+}
+
+async function importResponsesSseModule() {
+  const npmSpecifiers = [
+    'rcc-llmswitch-core/dist/sse/sse-to-json/index.js',
+    'rcc-llmswitch-core/dist/v2/conversion/conversion-v3/sse/index.js'
+  ];
+  const resolvedNpmSpecifiers = npmSpecifiers
+    .map((specifier) => {
+      try {
+        return pathToFileURL(require.resolve(specifier)).href;
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+  const localSpecifiers = npmSpecifiers
+    .map((specifier) => {
+      const relative = specifier.replace('rcc-llmswitch-core/dist/', '');
+      const localPath = path.join(repoRoot, 'sharedmodule', 'llmswitch-core', 'dist', relative);
+      if (fs.existsSync(localPath)) {
+        return pathToFileURL(localPath).href;
+      }
+      return null;
+    })
+    .filter(Boolean);
+  for (const specifier of [...resolvedNpmSpecifiers, ...localSpecifiers]) {
+    try {
+      return await import(specifier);
+    } catch (error) {
+      if (resolvedNpmSpecifiers.includes(specifier)) continue;
+      console.warn('⚠️ 加载 Responses SSE 模块失败:', error instanceof Error ? error.message : error);
+    }
+  }
+  return null;
+}
+
 async function getResponsesSseParser() {
   if (responsesSseParser) return responsesSseParser;
-  const sseModulePath = path.join(
-    repoRoot,
-    'sharedmodule',
-    'llmswitch-core',
-    'dist',
-    'v2',
-    'conversion',
-    'conversion-v3',
-    'sse',
-    'index.js'
-  );
-  try {
-    const mod = await import(pathToFileURL(sseModulePath).href);
-    if (typeof mod.createResponsesConverters === 'function') {
-      const converters = mod.createResponsesConverters();
-      responsesSseParser = converters.sseToJson;
-      return responsesSseParser;
-    }
-    if (mod.responsesConverters?.sseToJson) {
-      responsesSseParser = mod.responsesConverters.sseToJson;
-      return responsesSseParser;
-    }
+  const mod = await importResponsesSseModule();
+  if (!mod) {
     console.warn('⚠️ 无法找到 llmswitch-core Responses SSE 转换器导出，跳过解析。');
     return null;
-  } catch (error) {
-    console.warn(
-      '⚠️ 加载 llmswitch-core Responses SSE 转换器失败:',
-      error instanceof Error ? error.message : error
-    );
-    return null;
   }
+  if (typeof mod.createResponsesConverters === 'function') {
+    const converters = mod.createResponsesConverters();
+    responsesSseParser = converters.sseToJson;
+    return responsesSseParser;
+  }
+  if (mod.responsesConverters?.sseToJson) {
+    responsesSseParser = mod.responsesConverters.sseToJson;
+    return responsesSseParser;
+  }
+  if (typeof mod.ResponsesSseToJsonConverter === 'function') {
+    responsesSseParser = new mod.ResponsesSseToJsonConverter();
+    return responsesSseParser;
+  }
+  console.warn('⚠️ 无法从 Responses SSE 模块解析转换器，跳过解析。');
+  return null;
 }
 
 async function parseResponsesSsePayload(rawText) {
@@ -113,6 +160,61 @@ async function parseResponsesSsePayload(rawText) {
   }
 
   return null;
+}
+
+async function performResponsesRequest({ url, body, timeoutMs, label }) {
+  const resp = await postResponsesSse(url, body, timeoutMs);
+  if (!resp.ok) {
+    throw new Error(`${label || 'responses'} 请求失败: HTTP ${resp.status} ${(resp.text || '').slice(0, 200)}`);
+  }
+  const payload = await extractResponsesPayload(resp, label || 'responses');
+  return { payload, rawText: resp.text };
+}
+
+async function extractResponsesPayload(resp, label) {
+  const tryObjects = [];
+  if (resp.json && typeof resp.json === 'object') {
+    tryObjects.push(resp.json);
+  }
+  const parsed = parsePossibleSseJson(resp.text);
+  if (parsed && typeof parsed === 'object') {
+    tryObjects.push(parsed);
+  }
+  for (const candidate of tryObjects) {
+    if (!candidate) continue;
+    if (candidate.response && typeof candidate.response === 'object') {
+      return candidate.response;
+    }
+    if (candidate.id || candidate.required_action) {
+      return candidate;
+    }
+  }
+  if (resp.text) {
+    const fromSse = await parseResponsesSsePayload(resp.text);
+    if (fromSse) {
+      return fromSse;
+    }
+  }
+  throw new Error(`无法解析 Responses 响应 (${label})`);
+}
+
+function needsResponsesToolOutputs(payload) {
+  const required = payload?.required_action;
+  return Boolean(required && required.type === 'submit_tool_outputs');
+}
+
+function collectResponsesToolOutputs(toolCalls) {
+  if (!Array.isArray(toolCalls) || !toolCalls.length) {
+    throw new Error('Responses required_action 未包含 tool_calls');
+  }
+  return toolCalls.map((call, index) => {
+    const result = runShellToolCall(call);
+    console.log(`🛠️  Responses 工具调用 #${index + 1}: ${result.command} (cwd=${result.cwd})`);
+    return {
+      tool_call_id: result.toolCallId,
+      output: result.output,
+    };
+  });
 }
 
 function regeneratePipelineConfig({ port, configPath }) {
@@ -223,169 +325,50 @@ function readJson(filePath) {
   }
 }
 
-function resolveResponsesSamplePath() {
-  const fromEnv = process.env.ROUTECODEX_VERIFY_RESPONSES_SAMPLE;
-  if (fromEnv && fromEnv.trim()) return path.resolve(fromEnv.trim());
-  const golden = resolveGoldenResponsesSample();
-  if (golden) return golden;
-  const legacy = resolveLegacyResponsesSample();
-  if (legacy) return legacy;
-  throw new Error('未找到可用的 Responses 样例文件');
-}
 
-const goldenRequestCache = new Map();
+async function verifyResponsesSample(baseUrl, timeoutMs, model) {
+  const sample = loadManualSample('responses');
+  const payload = clonePayload(sample.payload);
+  payload.model = model || payload.model;
+  payload.stream = true;
+  console.log(`🧪  responses 链路验证 (样例: ${sample.name || 'unknown'})`);
+  let current = await performResponsesRequest({
+    url: `${baseUrl}/v1/responses`,
+    body: payload,
+    timeoutMs,
+    label: 'responses.initial'
+  });
+  let responsePayload = current.payload;
+  let rounds = 1;
 
-function resolveGoldenResponsesSample() {
-  const root = path.join(os.homedir(), '.routecodex', 'golden_samples', 'responses');
-  if (!fs.existsSync(root)) return null;
-  const dirs = fs
-    .readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => {
-      const dirPath = path.join(root, entry.name);
-      let mtime = 0;
-      try {
-        const stat = fs.statSync(dirPath);
-        mtime = stat.mtimeMs || 0;
-      } catch { /* ignore */ }
-      return { dirPath, mtime };
-    })
-    .filter((item) => fs.existsSync(path.join(item.dirPath, 'golden-samples.json')))
-    .sort((a, b) => b.mtime - a.mtime);
-  for (const dir of dirs) {
-    try {
-      const summaryPath = path.join(dir.dirPath, 'golden-samples.json');
-      const payload = readJson(summaryPath);
-      if (!payload?.samples || !Array.isArray(payload.samples)) continue;
-      const preferred = payload.samples.find(
-        (sample) => sample.success && sample.request && Array.isArray(sample.request.tools) && sample.request.tools.length
-      );
-      const fallback = payload.samples.find((sample) => sample.success && sample.request);
-      const target = preferred || fallback;
-      if (target?.request) {
-        const virtualFile = `${summaryPath}#${target.name || 'sample'}`;
-        goldenRequestCache.set(virtualFile, JSON.parse(JSON.stringify(target.request)));
-        return virtualFile;
-      }
-    } catch (error) {
-      console.warn('⚠️ 读取 golden-samples 失败:', error instanceof Error ? error.message : error);
+  while (needsResponsesToolOutputs(responsePayload)) {
+    if (!responsePayload.id) {
+      throw new Error('Responses 响应缺少 id，无法提交工具输出');
     }
-  }
-  return null;
-}
-
-function resolveLegacyResponsesSample() {
-  const baseDir = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-responses');
-  if (!fs.existsSync(baseDir)) return null;
-  const entries = fs.readdirSync(baseDir, { withFileTypes: true });
-  const candidates = entries
-    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.json'))
-    .map((entry) => {
-      const filePath = path.join(baseDir, entry.name);
-      let mtime = 0;
-      try {
-        const stat = fs.statSync(filePath);
-        mtime = stat.mtimeMs || 0;
-      } catch { /* ignore */ }
-      return { filePath, name: entry.name, mtime };
-    })
-    .filter((item) => item.mtime > 0);
-  if (!candidates.length) return null;
-  const httpCandidates = candidates.filter((item) => /http-request\.json$/i.test(item.name));
-  const targetPool = httpCandidates.length ? httpCandidates : candidates;
-  targetPool.sort((a, b) => b.mtime - a.mtime);
-  return targetPool[0].filePath;
-}
-
-function loadResponsesSamplePayload() {
-  const samplePath = resolveResponsesSamplePath();
-  let raw;
-  if (goldenRequestCache.has(samplePath)) {
-    raw = { request: goldenRequestCache.get(samplePath) };
-  } else {
-    if (!fs.existsSync(samplePath)) {
-      throw new Error(`Responses 验证样例不存在: ${samplePath}`);
-    }
-    raw = readJson(samplePath);
-  }
-  const data = extractSamplePayload(raw);
-  if (!data || typeof data !== 'object') {
-    throw new Error(`Responses 样例格式错误: ${samplePath}`);
-  }
-  const payload = JSON.parse(JSON.stringify(data));
-  try { delete payload.metadata; } catch { /* ignore */ }
-  if (!payload.input) {
-    throw new Error(`Responses 样例缺少 input 字段: ${samplePath}`);
-  }
-  return { payload, samplePath };
-}
-
-function extractSamplePayload(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  if (raw.request && typeof raw.request === 'object') {
-    return raw.request;
-  }
-  const candidates = [
-    raw.data,
-    raw.payload,
-    raw.body,
-    raw.request && typeof raw.request === 'object' ? (raw.request.body || raw.request.payload) : null,
-    raw.httpRequest && typeof raw.httpRequest === 'object' ? raw.httpRequest.body : null,
-    raw.http_request && typeof raw.http_request === 'object' ? raw.http_request.body : null
-  ];
-  for (const candidate of candidates) {
-    if (candidate && typeof candidate === 'object') {
-      return candidate;
-    }
-  }
-  return raw;
-}
-
-async function verifyResponsesSample(baseUrl, timeoutMs) {
-  const { payload, samplePath } = loadResponsesSamplePayload();
-  console.log(`🧪  responses 链路验证 (样例: ${samplePath})`);
-  const enforcedPayload = {
-    ...payload,
-    stream: true
-  };
-  const resp = await postResponsesSse(
-    `${baseUrl}/v1/responses`,
-    enforcedPayload,
-    timeoutMs
-  );
-  if (!resp.ok) {
-    throw new Error(`Responses 样例验证失败: HTTP ${resp.status} ${(resp.text || '').slice(0, 200)}`);
-  }
-  const parsed = resp.json ?? parsePossibleSseJson(resp.text);
-  let responsePayload = parsed?.response ?? parsed;
-  let required = responsePayload?.required_action;
-  let toolCalls = required?.submit_tool_outputs?.tool_calls;
-
-  if ((!required || !Array.isArray(toolCalls) || toolCalls.length === 0) && resp.text) {
-    const parsedFromSse = await parseResponsesSsePayload(resp.text);
-    if (parsedFromSse) {
-      responsePayload = parsedFromSse;
-      required = responsePayload?.required_action;
-      toolCalls = required?.submit_tool_outputs?.tool_calls;
+    const toolCalls = responsePayload.required_action?.submit_tool_outputs?.tool_calls || [];
+    const toolOutputs = collectResponsesToolOutputs(toolCalls);
+    const submitBody = {
+      tool_outputs: toolOutputs,
+      stream: true
+    };
+    console.log(`📨 Responses 提交工具输出: responseId=${responsePayload.id}, count=${toolOutputs.length}`);
+    current = await performResponsesRequest({
+      url: `${baseUrl}/v1/responses/${encodeURIComponent(responsePayload.id)}/submit_tool_outputs`,
+      body: submitBody,
+      timeoutMs,
+      label: `responses.submit#${rounds}`
+    });
+    responsePayload = current.payload;
+    rounds += 1;
+    if (rounds > 4) {
+      throw new Error('Responses 工具循环超过 4 轮，可能存在异常');
     }
   }
 
-  const fallbackDetected =
-    (!required || !Array.isArray(toolCalls) || toolCalls.length === 0) &&
-    resp.text &&
-    resp.text.includes('"required_action"');
-
-  if (!required || required.type !== 'submit_tool_outputs' || !Array.isArray(toolCalls) || toolCalls.length === 0) {
-    if (!fallbackDetected) {
-      throw new Error('Responses 样例未触发 required_action.submit_tool_outputs');
-    }
+  if (responsePayload.required_action?.type === 'submit_tool_outputs') {
+    throw new Error('Responses 工具输出提交后仍然需要下一轮，验证未完成');
   }
-
-  const toolCallCount = Array.isArray(toolCalls) && toolCalls.length > 0 ? toolCalls.length : 'unknown';
-  if (fallbackDetected && toolCallCount === 'unknown') {
-    console.warn('⚠️ Responses SSE 包含 required_action，但无法解析出完整结构，按成功处理');
-  }
-  console.log(`✅ Responses 样例验证通过 (tool_calls=${toolCallCount})`);
+  console.log(`✅ Responses 样例验证通过 (rounds=${rounds})`);
 }
 
 async function verifyChatEntryWithResponsesProvider(baseUrl, timeoutMs, model) {
@@ -504,35 +487,75 @@ function safeParseArguments(raw) {
 }
 
 function normalizeCommandTokens(value) {
-  if (Array.isArray(value)) return value.map((item) => String(item));
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+  }
   if (typeof value === 'string') {
-    return value.trim().split(/\s+/).filter(Boolean);
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.map((item) => String(item ?? '').trim()).filter(Boolean);
+        }
+      } catch { /* ignore malformed JSON */ }
+    }
+    return trimmed.split(/\s+/).filter(Boolean);
+  }
+  if (typeof value === 'object' && value !== null && Array.isArray(value.command)) {
+    return value.command.map((item) => String(item ?? '').trim()).filter(Boolean);
   }
   return [];
 }
 
 function isSafeLsCommand(tokens) {
-  if (tokens.length === 0) return null;
+  if (!Array.isArray(tokens) || tokens.length === 0) return null;
   const riskyPattern = /(;|\|\||&&)/;
-  const joined = tokens.join(' ');
+  const cleaned = tokens.map((token) => String(token ?? '').trim()).filter(Boolean);
+  if (!cleaned.length) return null;
+  const joined = cleaned.join(' ');
   if (riskyPattern.test(joined)) return null;
-  if (tokens[0] === 'bash' && tokens[1] === '-lc' && typeof tokens[2] === 'string') {
-    const inner = tokens.slice(2).join(' ').trim();
+
+  const cleanToken = (value) => value.replace(/^['"]|['"]$/g, '');
+  const first = cleanToken(cleaned[0]);
+  if (first === 'bash' && cleaned[1] === '-lc') {
+    const inner = cleanToken(cleaned.slice(2).join(' ').trim());
     if (/^ls(\s|$)/.test(inner) && !riskyPattern.test(inner)) {
       return inner;
     }
     return null;
   }
-  if (/\/?ls$/.test(tokens[0])) {
-    return joined;
+
+  const isLsBinary = /^([./]*|.*\/)?ls$/.test(first);
+  if (isLsBinary) {
+    const rest = cleaned.slice(1).join(' ');
+    const candidate = cleanToken([first, rest].filter(Boolean).join(' ').trim());
+    if (/^ls(\s|$)/.test(candidate) && !riskyPattern.test(candidate)) {
+      return candidate;
+    }
   }
   return null;
 }
 
-function executeLs(command) {
+function resolveWorkingDirectory(requested) {
+  if (!requested || typeof requested !== 'string') return repoRoot;
+  const normalized = requested.trim();
+  if (!normalized) return repoRoot;
+  try {
+    const stat = fs.statSync(normalized);
+    if (stat.isDirectory()) {
+      return normalized;
+    }
+  } catch { /* ignore */ }
+  return repoRoot;
+}
+
+function executeLs(command, options = {}) {
   const started = Date.now();
+  const cwd = resolveWorkingDirectory(options.cwd);
   const exec = spawnSync('bash', ['-lc', command], {
-    cwd: repoRoot,
+    cwd,
     encoding: 'utf-8',
     timeout: 15000,
     maxBuffer: 1024 * 1024,
@@ -545,6 +568,38 @@ function executeLs(command) {
     output: output.split('\n').slice(0, 80).join('\n'),
     exitCode: Number.isInteger(exec.status) ? exec.status : 0,
     durationSeconds: Math.round((durationMs / 1000) * 1000) / 1000,
+    cwd,
+  };
+}
+
+function isShellToolFunctionName(name) {
+  const normalized = String(name || '').toLowerCase();
+  return normalized === 'shell' || normalized === 'shell_command';
+}
+
+function runShellToolCall(toolCall) {
+  if (!toolCall || typeof toolCall !== 'object') {
+    throw new Error('工具调用缺失');
+  }
+  const fn = toolCall.function || {};
+  if (!isShellToolFunctionName(fn.name)) {
+    throw new Error(`当前仅支持 shell/shell_command 工具调用，收到: ${fn.name || 'unknown'}`);
+  }
+  const argsObj = safeParseArguments(fn.arguments);
+  const normalized = normalizeCommandTokens(argsObj?.command);
+  const command = isSafeLsCommand(normalized);
+  if (!command) {
+    throw new Error(`工具调用未提供受支持的 ls 命令: ${JSON.stringify(argsObj)}`);
+  }
+  const result = executeLs(command, { cwd: argsObj?.workdir });
+  return {
+    command,
+    cwd: result.cwd,
+    output: result.output,
+    exitCode: result.exitCode ?? 0,
+    durationSeconds: result.durationSeconds ?? 0,
+    toolCallId: String(toolCall.id || toolCall.call_id || `call_${Date.now()}`),
+    rawCall: toolCall,
   };
 }
 
@@ -573,7 +628,7 @@ async function postJson(url, body, timeoutMs, extraHeaders = {}) {
   }
 }
 
-async function postResponsesSse(url, body, timeoutMs) {
+async function postSseRequest(url, body, timeoutMs, extraHeaders = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -582,7 +637,8 @@ async function postResponsesSse(url, body, timeoutMs) {
       headers: {
         'Content-Type': 'application/json',
         Accept: 'text/event-stream',
-        Authorization: 'Bearer install-verify'
+        Authorization: 'Bearer install-verify',
+        ...extraHeaders
       },
       body: JSON.stringify(body),
       signal: controller.signal
@@ -611,13 +667,20 @@ async function postResponsesSse(url, body, timeoutMs) {
       text = await res.text();
     }
     let json = null;
-    try { json = JSON.parse(text); } catch { /* ignore non-JSON SSE bodies */ }
+    const trimmed = typeof text === 'string' ? text.trim() : '';
+    if (trimmed && (trimmed.startsWith('{') || trimmed.startsWith('['))) {
+      try { json = JSON.parse(trimmed); } catch { /* ignore */ }
+    }
     return { status: res.status, ok: res.ok, json, text };
   } catch (error) {
     throw new Error(`请求失败: ${(error && error.message) || error}`);
   } finally {
     clearTimeout(timer);
   }
+}
+
+function postResponsesSse(url, body, timeoutMs) {
+  return postSseRequest(url, body, timeoutMs);
 }
 
 function unwrapFirstChoice(payload) {
@@ -701,19 +764,19 @@ function extractFromSseContainer(candidate, sourceLabel) {
   return null;
 }
 
-async function verifyChatStreaming(baseUrl, model, timeoutMs) {
+async function verifyChatStreaming(baseUrl, model, timeoutMs, samplePayload, chatTools, chatMessages) {
   const streamingPayload = {
+    ...clonePayload(samplePayload || {}),
     model,
-    messages: [
-      { role: 'system', content: '你是一个只需返回一句话的机器人。' },
-      { role: 'user', content: '请用中文告诉我你正在进行流式输出。' }
-    ],
-    stream: true
+    messages: Array.isArray(chatMessages) ? chatMessages : [],
+    tools: chatTools,
+    stream: true,
+    tool_choice: samplePayload?.tool_choice || 'auto'
   };
-  console.log('📡 发送 Chat SSE 请求以验证流式输出...');
-  const sseResponse = await postJson(`${baseUrl}/v1/chat/completions`, streamingPayload, timeoutMs);
+  console.log('📡 发送 Chat 样例 SSE 请求...');
+  const sseResponse = await postSseRequest(`${baseUrl}/v1/chat/completions`, streamingPayload, timeoutMs);
   if (!sseResponse.ok) {
-    throw new Error(`Chat SSE 请求失败: HTTP ${sseResponse.status} ${sseResponse.text?.slice(0, 200) || ''}`);
+    throw new Error(`Chat SSE 请求失败: HTTP ${sseResponse.status} ${(sseResponse.text || '').slice(0, 200)}`);
   }
   const payloadText = sseResponse.text || '';
   if (!payloadText.includes('data:')) {
@@ -777,46 +840,23 @@ function detectAnthropicSupport(config) {
   return false;
 }
 
-async function verifyAnthropicBasic(baseUrl, config, timeoutMs) {
-  // Try to pick a model; fall back to 'claude-3-5-sonnet-latest'
-  const model = resolveModel(config) || 'claude-3-5-sonnet-latest';
-  const payload = {
-    model,
-    messages: [
-      { role: 'user', content: '用中文简要回答：现在在进行安装验证。' }
-    ],
-    max_tokens: 64,
-    stream: false
-  };
-  console.log('📡 发送 Anthropic /v1/messages 请求...');
-  const resp = await postJson(`${baseUrl}/v1/messages`, payload, timeoutMs);
+async function verifyAnthropicBasic(baseUrl, timeoutMs, model) {
+  const sample = loadManualSample('anthropic');
+  const payload = clonePayload(sample.payload);
+  if (model) {
+    payload.model = model;
+  }
+  payload.stream = true;
+  console.log(`📡 发送 Anthropic 样例请求 (${sample.name || 'anthropic'})...`);
+  const resp = await postSseRequest(`${baseUrl}/v1/messages`, payload, timeoutMs);
   if (!resp.ok) {
     throw new Error(`Anthropic 请求失败: HTTP ${resp.status} ${(resp.text || '').slice(0, 200)}`);
   }
-  const data = resp.json ? resp.json : safeJson(resp.text);
-  if (!data || !Array.isArray(data?.content)) {
-    throw new Error('Anthropic 响应不包含 content 数组');
+  const text = resp.text || '';
+  if (!text || (!text.includes('message_start') && !text.includes('content_block')) || text.includes('Instructions are not valid')) {
+    throw new Error('Anthropic SSE 响应未找到 message_start/content_block 事件');
   }
-  const text = collectAnthropicText(data);
-  if (!text) {
-    throw new Error('Anthropic 响应未返回文本');
-  }
-  console.log('✅ Anthropic 基础链路验证通过');
-}
-
-function safeJson(text) {
-  try { return JSON.parse(text); } catch { return null; }
-}
-
-function collectAnthropicText(resp) {
-  try {
-    const parts = Array.isArray(resp?.content) ? resp.content : [];
-    const texts = parts
-      .filter((p) => p && typeof p === 'object' && (p.type === 'text' || typeof p.text === 'string'))
-      .map((p) => String(p.text || ''))
-      .filter(Boolean);
-    return texts.join('\n');
-  } catch { return ''; }
+  console.log('✅ Anthropic 样例 SSE 验证通过');
 }
 
 async function printLogTail() {
@@ -832,8 +872,11 @@ async function printLogTail() {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const configPath = path.resolve(args.config || path.join(os.homedir(), '.routecodex', 'provider', 'glm', 'config.v1.json'));
-  const prompt = args.prompt || '列出本地文件目录';
+  const configPath = path.resolve(
+    args.config ||
+    process.env.ROUTECODEX_INSTALL_VERIFY_CONFIG ||
+    path.join(os.homedir(), '.routecodex', 'provider', 'glm', 'config.v1.json')
+  );
   const timeoutValue = Number.isFinite(args.timeout) ? Number(args.timeout) : null;
   const timeoutMs = timeoutValue == null
     ? 60000
@@ -926,18 +969,20 @@ async function main() {
   ];
 
   if (runChatVerify) {
+    const chatSample = loadManualSample('chat');
+    const chatPayloadBase = clonePayload(chatSample.payload);
+    const chatTools = Array.isArray(chatPayloadBase.tools) && chatPayloadBase.tools.length ? chatPayloadBase.tools : tools;
+    const chatMessages = Array.isArray(chatPayloadBase.messages) ? chatPayloadBase.messages : [];
     const firstPayload = {
+      ...chatPayloadBase,
       model,
-      messages: [
-        { role: 'system', content: '你可以使用名为 shell 的工具来执行 ls 命令。只返回命令输出。' },
-        { role: 'user', content: prompt },
-      ],
-      tools,
-      tool_choice: 'auto',
+      messages: chatMessages,
+      tools: chatTools,
       stream: false,
+      tool_choice: chatPayloadBase.tool_choice || 'auto'
     };
 
-    console.log('📨 发送初始 Chat 请求...');
+    console.log(`📨 发送 Chat 样例请求 (${chatSample.name || 'chat'})...`);
     const firstRes = await postJson(`${baseUrl}/v1/chat/completions`, firstPayload, timeoutMs);
     if (!firstRes.ok) {
       throw new Error(`首次请求失败: HTTP ${firstRes.status} ${firstRes.text?.slice(0, 200) || ''}`);
@@ -945,7 +990,7 @@ async function main() {
 
     const { firstChoice: initialChoice } = unwrapChoiceFromResponse(firstRes);
     const toolCalls = initialChoice?.message?.tool_calls || [];
-    const shellCall = toolCalls.find((tc) => String(tc?.function?.name || '').toLowerCase() === 'shell');
+    const shellCall = toolCalls.find((tc) => isShellToolFunctionName(tc?.function?.name));
     if (!shellCall) {
       const preview = firstRes.json
         ? JSON.stringify(firstRes.json).slice(0, 400)
@@ -954,13 +999,7 @@ async function main() {
     }
     console.log(`🛠️  收到 shell 工具调用: ${JSON.stringify(shellCall).slice(0, 200)}`);
 
-    const argsObj = safeParseArguments(shellCall.function?.arguments);
-    const normalized = normalizeCommandTokens(argsObj?.command);
-    const lsCommand = isSafeLsCommand(normalized);
-    if (!lsCommand) {
-      throw new Error(`模型未返回可执行的 ls 命令: ${JSON.stringify(normalized)}`);
-    }
-    const toolResult = executeLs(lsCommand);
+    const toolResult = runShellToolCall(shellCall);
     console.log('📁 工具输出 (前几行):');
     console.log(toolResult.output.split('\n').slice(0, 10).join('\n'));
 
@@ -971,20 +1010,22 @@ async function main() {
     };
     const toolMsg = {
       role: 'tool',
-      tool_call_id: String(shellCall.id || shellCall.call_id || 'call_1'),
+      tool_call_id: toolResult.toolCallId,
       content: JSON.stringify({
         output: toolResult.output,
         metadata: {
           exit_code: toolResult.exitCode ?? 0,
           duration_seconds: Number.isFinite(toolResult.durationSeconds) ? toolResult.durationSeconds : 0,
+          cwd: toolResult.cwd,
         },
       }),
     };
 
     const secondPayload = {
+      ...chatPayloadBase,
       model,
-      messages: [...firstPayload.messages, assistantMsg, toolMsg],
-      tools,
+      messages: [...chatMessages, assistantMsg, toolMsg],
+      tools: chatTools,
       stream: false,
     };
 
@@ -1002,13 +1043,13 @@ async function main() {
     console.log(finalText.split('\n').slice(0, 12).join('\n'));
     console.log('✅ Chat 工具链路验证通过');
 
-    await verifyChatStreaming(baseUrl, model, timeoutMs);
+    await verifyChatStreaming(baseUrl, model, timeoutMs, chatPayloadBase, chatTools, chatMessages);
   } else {
     console.log('⏭️  跳过 Chat 工具验证（mode !== chat）');
   }
 
   if (runResponsesVerify) {
-    await verifyResponsesSample(baseUrl, timeoutMs);
+    await verifyResponsesSample(baseUrl, timeoutMs, model);
   } else {
     console.log('⏭️  跳过 Responses 验证（mode !== responses）');
   }
@@ -1018,7 +1059,7 @@ async function main() {
     if (!hasAnthropic) {
       console.log('⏭️  跳过 Anthropic 验证（当前配置未声明 anthropic provider）');
     } else {
-      await verifyAnthropicBasic(baseUrl, config, timeoutMs);
+      await verifyAnthropicBasic(baseUrl, timeoutMs, model);
     }
   }
 
