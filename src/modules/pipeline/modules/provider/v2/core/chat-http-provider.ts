@@ -19,6 +19,7 @@ import type { ProviderContext, ProviderRuntimeProfile, ServiceProfile, ProviderT
 import type { UnknownObject } from '../../../../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../../interfaces/pipeline-interfaces.js';
 import { ProviderComposite } from '../composite/provider-composite.js';
+import { attachProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 
 
 /**
@@ -421,11 +422,18 @@ export class ChatHttpProvider extends BaseProvider {
 
   protected async preprocessRequest(request: UnknownObject): Promise<UnknownObject> {
     const context = this.createProviderContext();
+    const runtimeMetadata = context.runtimeMetadata;
+
+    const ensureRuntimeMetadata = (payload: UnknownObject): void => {
+      if (!runtimeMetadata || !payload || typeof payload !== 'object') return;
+      attachProviderRuntimeMetadata(payload as Record<string, unknown>, runtimeMetadata);
+    };
 
     // 初始请求预处理
     const runtime = this.getRuntimeProfile();
     const pipelineModel = runtime?.defaultModel || (this.config.config as any)?.model;
     let processedRequest: UnknownObject = { ...request };
+    ensureRuntimeMetadata(processedRequest);
     // 记录入站原始模型，便于响应阶段还原（不影响上游请求体）
     try {
       const inboundModel = (request as any)?.model;
@@ -467,6 +475,7 @@ export class ChatHttpProvider extends BaseProvider {
     );
 
     processedRequest = preprocessResult.data as UnknownObject;
+    ensureRuntimeMetadata(processedRequest);
 
     // 🔍 Hook 2: 请求验证阶段
     const validationResult = await hookManager.executeHookChain(
@@ -477,6 +486,7 @@ export class ChatHttpProvider extends BaseProvider {
     );
 
     processedRequest = validationResult.data as UnknownObject;
+    ensureRuntimeMetadata(processedRequest);
 
     // Provider 层不再修改工具 schema；统一入口在 llmswitch-core/兼容层
 
@@ -485,10 +495,12 @@ export class ChatHttpProvider extends BaseProvider {
       const compatProfile = (runtime?.compatibilityProfile || '').toLowerCase();
       const shouldRunCompat = compatProfile !== 'none';
       if (shouldRunCompat) {
+        ensureRuntimeMetadata(processedRequest);
         processedRequest = await ProviderComposite.applyRequest(processedRequest, {
           providerType: runtime?.providerType || this.providerType,
           dependencies: this.dependencies
         });
+        ensureRuntimeMetadata(processedRequest);
       }
     } catch (e) {
       // 暴露问题，不兜底

@@ -9,135 +9,48 @@ import type { CompatAdapter } from '../provider-composite.js';
 import type { CompositeContext } from '../provider-composite.js';
 import type { ModuleDependencies } from '../../../../../interfaces/pipeline-interfaces.js';
 import type { UnknownObject } from '../../../../../../../types/common-types.js';
-import path from 'node:path';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import type { CompatibilityModule } from '../../compatibility/compatibility-interface.js';
+import { CompatibilityModuleFactory } from '../../compatibility/compatibility-factory.js';
 
-// 简单缓存，避免每次创建兼容模块实例
-const glmCache = new Map<string, any>();
-const lmstudioCache = new Map<string, any>();
-const iflowCache = new Map<string, any>();
+const compatModuleCache = new Map<string, Promise<CompatibilityModule | null>>();
 
-const compatModuleDir = typeof __dirname === 'string'
-  ? __dirname
-  : path.dirname(fileURLToPath(import.meta.url));
-
-async function importGLM(deps: ModuleDependencies) {
-  let mod = glmCache.get('default');
-  if (!mod) {
-    try {
-      if (String(process.env.RCC_TEST_FAKE_GLM || '') === '1') {
-        const shim = {
-          async initialize() {},
-          async processIncoming(request: any) {
-            const out: any = JSON.parse(JSON.stringify(request || {}));
-            try {
-              const tools = Array.isArray(out.tools) ? out.tools : [];
-              for (const t of tools) {
-                if (t && typeof t === 'object' && t.function && typeof t.function === 'object') {
-                  delete (t.function as any).strict;
-                }
-              }
-              if (!out.tools || out.tools.length === 0) {
-                if ('tool_choice' in out) delete out.tool_choice;
-              }
-            } catch { /* ignore */ }
-            return out;
-          },
-          async processOutgoing(response: any) {
-            return response;
-          }
-        } as any;
-        glmCache.set('default', shim);
-        return shim;
-      }
-      let m: any;
-      if (process.env.JEST_WORKER_ID) {
-        // ts-jest 环境：直接 require TS 源文件
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        m = require('../../compatibility/glm/glm-compatibility.ts');
-      } else {
-        const resolved = path.resolve(compatModuleDir, '../../compatibility/glm/glm-compatibility.js');
-        m = await import(pathToFileURL(resolved).href);
-      }
-      mod = new (m as any).GLMCompatibility(deps);
-      await mod.initialize?.();
-      glmCache.set('default', mod);
-    } catch (e) {
-      console.error('[openai-compat] Failed to load GLMCompatibility:', e);
-      throw e;
-    }
+async function loadCompatModule(profile: string, deps: ModuleDependencies): Promise<CompatibilityModule | null> {
+  if (!profile || profile === 'none') return null;
+  if (!CompatibilityModuleFactory.isTypeRegistered(profile)) return null;
+  if (!compatModuleCache.has(profile)) {
+    const promise = CompatibilityModuleFactory.createModule(
+      {
+        id: `${profile}-${Date.now()}`,
+        type: profile,
+        providerType: 'openai'
+      },
+      deps
+    )
+      .then(module => module)
+      .catch(error => {
+        deps.logger?.logModule?.('openai-compat', 'load-error', {
+          profile,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        return null;
+      });
+    compatModuleCache.set(profile, promise);
   }
-  return mod;
+  return compatModuleCache.get(profile) || null;
 }
 
-async function importLMStudio(deps: ModuleDependencies) {
-  let mod = lmstudioCache.get('default');
-  if (!mod) {
-    try {
-      if (String(process.env.RCC_TEST_FAKE_LMSTUDIO || '') === '1') {
-        const shim = {
-          async initialize() {},
-          async processIncoming(request: any) { return request; },
-          async processOutgoing(response: any) { return response; }
-        } as any;
-        lmstudioCache.set('default', shim);
-        return shim;
-      }
-      let m: any;
-      if (process.env.JEST_WORKER_ID) {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        m = require('../../compatibility/lmstudio-compatibility.ts');
-      } else {
-        const resolved = path.resolve(compatModuleDir, '../../compatibility/lmstudio-compatibility.js');
-        m = await import(pathToFileURL(resolved).href);
-      }
-      mod = new (m as any).LMStudioCompatibility(deps);
-      await mod.initialize?.();
-      lmstudioCache.set('default', mod);
-    } catch (e) {
-      console.error('[openai-compat] Failed to load LMStudioCompatibility:', e);
-      throw e;
-    }
-  }
-  return mod;
-}
-
-async function importIFlow(deps: ModuleDependencies) {
-  let mod = iflowCache.get('default');
-  if (!mod) {
-    try {
-      if (String(process.env.RCC_TEST_FAKE_IFLOW || '') === '1') {
-        const shim = {
-          async initialize() {},
-          async processIncoming(request: any) { return request; },
-          async processOutgoing(response: any) { return response; }
-        } as any;
-        iflowCache.set('default', shim);
-        return shim;
-      }
-      let m: any;
-      if (process.env.JEST_WORKER_ID) {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        m = require('../../compatibility/iflow/iflow-compatibility.ts');
-      } else {
-        const resolved = path.resolve(compatModuleDir, '../../compatibility/iflow/iflow-compatibility.js');
-        m = await import(pathToFileURL(resolved).href);
-      }
-      mod = new (m as any).iFlowCompatibility(deps);
-      await mod.initialize?.();
-      iflowCache.set('default', mod);
-    } catch (e) {
-      console.error('[openai-compat] Failed to load iFlowCompatibility:', e);
-      throw e;
-    }
-  }
-  return mod;
-}
-
-function buildCompatContext(ctx: CompositeContext, direction: 'incoming' | 'outgoing') {
+function buildCompatContext(
+  ctx: CompositeContext,
+  direction: 'incoming' | 'outgoing',
+  profileId?: string
+) {
+  const profileLabel =
+    (typeof profileId === 'string' && profileId.trim().length > 0 && profileId !== 'default')
+      ? profileId
+      : (ctx.pipelineId || ctx.routeName || 'default');
   return {
     compatibilityId: `compat_${ctx.requestId}`,
-    profileId: ctx.pipelineId || ctx.routeName || 'default',
+    profileId: profileLabel,
     providerType: (ctx.providerId || 'openai'),
     direction,
     stage: 'provider-composite',
@@ -161,63 +74,44 @@ function minimalOpenAIRequest(body: UnknownObject): UnknownObject {
 function minimalOpenAIResponse(wire: unknown): unknown { return wire; }
 function passthrough<T>(x: T): T { return x; }
 
+function resolveCompatProfile(ctx: CompositeContext): string {
+  const raw = (ctx.target as any)?.compatibilityProfile;
+  if (typeof raw === 'string' && raw.trim().length > 0) {
+    return raw.trim().toLowerCase();
+  }
+  return '';
+}
+
 export function createOpenAICompatAggregator(): CompatAdapter<'openai-chat'> {
   return {
     protocol: 'openai-chat',
     async request(body, ctx, deps) {
-      const family = (ctx.providerId || ctx.providerKey || '').toLowerCase();
-      if (family === 'glm') {
-        try {
-          const mod = await importGLM(deps);
-          const compatCtx = buildCompatContext(ctx, 'incoming');
-          return await mod.processIncoming(minimalOpenAIRequest(body), compatCtx);
-        } catch { return minimalOpenAIRequest(body); }
-      }
-      if (family === 'lmstudio') {
-        try {
-          const mod = await importLMStudio(deps);
-          const compatCtx = buildCompatContext(ctx, 'incoming');
-          return await mod.processIncoming(minimalOpenAIRequest(body), compatCtx);
-        } catch { return minimalOpenAIRequest(body); }
-      }
-      if (family === 'iflow') {
-        try {
-          const mod = await importIFlow(deps);
-          const compatCtx = buildCompatContext(ctx, 'incoming');
-          return await mod.processIncoming(minimalOpenAIRequest(body), compatCtx);
-        } catch { return minimalOpenAIRequest(body); }
-      }
-      if (family === 'qwen') {
-        // 保持 OpenAI 形状，不启用旧 qwen-compat 的改形状逻辑
-        return minimalOpenAIRequest(body);
+      const profile = resolveCompatProfile(ctx);
+      if (profile && profile !== 'default') {
+        const module = await loadCompatModule(profile, deps);
+        if (module) {
+          try {
+            const compatCtx = buildCompatContext(ctx, 'incoming', profile);
+            return await module.processIncoming(minimalOpenAIRequest(body), compatCtx);
+          } catch {
+            return minimalOpenAIRequest(body);
+          }
+        }
       }
       return passthrough(body);
     },
     async response(wire, ctx, deps) {
-      const family = (ctx.providerId || ctx.providerKey || '').toLowerCase();
-      if (family === 'glm') {
-        try {
-          const mod = await importGLM(deps);
-          const compatCtx = buildCompatContext(ctx, 'outgoing');
-          return await mod.processOutgoing(wire, compatCtx);
-        } catch { return minimalOpenAIResponse(wire); }
-      }
-      if (family === 'lmstudio') {
-        try {
-          const mod = await importLMStudio(deps);
-          const compatCtx = buildCompatContext(ctx, 'outgoing');
-          return await mod.processOutgoing(wire, compatCtx);
-        } catch { return minimalOpenAIResponse(wire); }
-      }
-      if (family === 'iflow') {
-        try {
-          const mod = await importIFlow(deps);
-          const compatCtx = buildCompatContext(ctx, 'outgoing');
-          return await mod.processOutgoing(wire, compatCtx);
-        } catch { return minimalOpenAIResponse(wire); }
-      }
-      if (family === 'qwen') {
-        return minimalOpenAIResponse(wire);
+      const profile = resolveCompatProfile(ctx);
+      if (profile && profile !== 'default') {
+        const module = await loadCompatModule(profile, deps);
+        if (module) {
+          try {
+            const compatCtx = buildCompatContext(ctx, 'outgoing', profile);
+            return await module.processOutgoing(wire, compatCtx);
+          } catch {
+            return minimalOpenAIResponse(wire);
+          }
+        }
       }
       return passthrough(wire);
     }

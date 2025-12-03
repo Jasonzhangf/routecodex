@@ -25,12 +25,9 @@ export class ResponsesC4MCompatibility implements CompatibilityModule {
   }
 
   async processIncoming(request: UnknownObject, context: CompatibilityContext): Promise<UnknownObject> {
-    const sanitized = this.stripUnsupportedFields(request);
-    if (sanitized !== request) {
-      this.dependencies.logger?.logModule?.(this.id, 'strip-fields', {
-        requestId: context.requestId,
-        removed: ['max_tokens', 'maxTokens']
-      });
+    const { sanitized, removed } = this.stripUnsupportedFields(request);
+    if (removed.length) {
+      this.dependencies.logger?.logModule?.(this.id, 'strip-fields', { requestId: context.requestId, removed });
     }
     return sanitized;
   }
@@ -39,26 +36,28 @@ export class ResponsesC4MCompatibility implements CompatibilityModule {
     return response;
   }
 
-  private stripUnsupportedFields(payload: UnknownObject): UnknownObject {
+  private stripUnsupportedFields(payload: UnknownObject): { sanitized: UnknownObject; removed: string[] } {
     if (!payload || typeof payload !== 'object') {
-      return payload;
+      return { sanitized: payload, removed: [] };
     }
+    const removed: string[] = [];
     const clone = Array.isArray(payload)
-      ? (payload.map(item => this.stripUnsupportedFields(item as UnknownObject)) as unknown as UnknownObject)
+      ? (payload.map(item => this.stripUnsupportedFields(item as UnknownObject).sanitized) as unknown as UnknownObject)
       : { ...(payload as Record<string, unknown>) };
 
-    if ('max_tokens' in clone) {
-      delete (clone as Record<string, unknown>).max_tokens;
-    }
-    if ('maxTokens' in clone) {
-      delete (clone as Record<string, unknown>).maxTokens;
+    const dropKeys = ['max_tokens', 'maxTokens', 'max_output_tokens', 'maxOutputTokens'];
+    for (const key of dropKeys) {
+      if (key in clone) {
+        delete (clone as Record<string, unknown>)[key as keyof typeof clone];
+        removed.push(key);
+      }
     }
     if ((clone as Record<string, unknown>).data && typeof (clone as Record<string, unknown>).data === 'object') {
-      (clone as Record<string, unknown>).data = this.stripUnsupportedFields(
-        (clone as Record<string, unknown>).data as UnknownObject
-      );
+      const inner = this.stripUnsupportedFields((clone as Record<string, unknown>).data as UnknownObject);
+      (clone as Record<string, unknown>).data = inner.sanitized;
+      removed.push(...inner.removed);
     }
-    return clone;
+    return { sanitized: clone, removed };
   }
 }
 

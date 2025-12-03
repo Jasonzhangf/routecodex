@@ -5,5 +5,6 @@ export interface TargetMetadata {
   runtimeKey?: string;
   routeName?: string;
   defaultModel?: string;
+  compatibilityProfile?: string;
   [key: string]: unknown;
 }

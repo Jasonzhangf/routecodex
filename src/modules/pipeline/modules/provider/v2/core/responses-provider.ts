@@ -75,11 +75,11 @@ export class ResponsesProvider extends ChatHttpProvider {
       (context?.metadata as any)?.entryEndpoint ||
       undefined;
 
+    try {
+      ensureResponsesInstructions(finalBody as Record<string, unknown>);
+    } catch { /* ignore */ }
     if (settings.instructionsMode === 'inline') {
-      try {
-        ensureResponsesInstructions(finalBody as Record<string, unknown>);
-        (finalBody as Record<string, unknown>).__rcc_inline_system_instructions = true;
-      } catch { /* ignore */ }
+      (finalBody as Record<string, unknown>).__rcc_inline_system_instructions = true;
     }
 
     const upstreamStream = settings.streaming === 'never' ? false : true;

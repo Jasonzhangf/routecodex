@@ -7,6 +7,7 @@ import type { ModuleDependencies } from '../../../../interfaces/pipeline-interfa
 import { extractProviderRuntimeMetadata, type ProviderRuntimeMetadata } from '../core/provider-runtime-metadata.js';
 import type { TargetMetadata } from '../../../../orchestrator/pipeline-context.js';
 import { emitProviderError, buildRuntimeFromCompatContext } from '../utils/provider-error-reporter.js';
+import '../compatibility/index.js'; // ensure configuration-declared compat modules register before use
 
 // 协议族与协议映射（与 AGENTS.md 一致）
 const FAMILY_TO_PROTOCOL: Record<string, string> = {

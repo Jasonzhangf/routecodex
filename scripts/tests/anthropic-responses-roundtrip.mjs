@@ -120,6 +120,8 @@ async function main() {
 
   validateToolCalls(baseResponsesPayload, responsesRoundtrip);
   validateToolCalls(responsesRoundtrip, baseResponsesPayload);
+  validatePrimaryFields(baseResponsesPayload, responsesRoundtrip);
+  validatePrimaryFields(responsesRoundtrip, baseResponsesPayload);
 
   console.log('[anthropic-roundtrip] responses → chat → anthropic → chat → responses 闭环校验通过');
 }
@@ -158,6 +160,134 @@ function validateToolCalls(original, candidate) {
     fs.writeFileSync(outB, JSON.stringify(candidate, null, 2));
     console.error(`详情已写入:\n  ${outA}\n  ${outB}`);
     throw new Error('roundtrip tool call mismatch');
+  }
+}
+
+const PRIMARY_KEYS = [
+  'object',
+  'model',
+  'status',
+  'output_text',
+  'instructions',
+  'temperature',
+  'top_p',
+  'max_tokens',
+  'max_output_tokens',
+  'tool_choice',
+  'parallel_tool_calls',
+  'response_format',
+  'user',
+  'tools',
+  'required_action',
+  'output',
+  'usage'
+];
+
+const DROP_KEYS = new Set([
+  'id',
+  'created',
+  'created_at',
+  'response_id',
+  'item_id',
+  'chunk_id',
+  'request_id',
+  'requestId',
+  'entryEndpoint',
+  'annotations',
+  'system_fingerprint'
+]);
+
+function sanitizeNode(value) {
+  if (Array.isArray(value)) {
+    return value.map(v => sanitizeNode(v));
+  }
+  if (!isObject(value)) return value;
+  const out = {};
+  for (const key of Object.keys(value).sort()) {
+    if (DROP_KEYS.has(key)) continue;
+    if (key === 'metadata') continue;
+    const sanitized = sanitizeNode(value[key]);
+    if (sanitized === undefined) continue;
+    out[key] = sanitized;
+  }
+  return out;
+}
+
+function unwrapResponsesPayload(payload) {
+  let current = payload;
+  const visited = new Set();
+  while (isObject(current) && !visited.has(current)) {
+    visited.add(current);
+    if (current.object === 'response') return current;
+    if (isObject(current.response)) {
+      current = current.response;
+      continue;
+    }
+    if (isObject(current.data)) {
+      current = current.data;
+      continue;
+    }
+    break;
+  }
+  return payload;
+}
+
+function extractPrimaryFields(payload) {
+  if (!isObject(payload)) return {};
+  const base = unwrapResponsesPayload(payload);
+  const picked = {};
+  for (const key of PRIMARY_KEYS) {
+    if (base[key] === undefined) continue;
+    if (key === 'output') {
+      if (Array.isArray(base.output)) {
+        picked.output = base.output
+          .filter(item => {
+            const t = typeof (item && item.type) === 'string' ? String(item.type).toLowerCase() : '';
+            return t !== 'reasoning';
+          })
+          .map(item => sanitizeNode(item));
+      } else {
+        picked.output = [];
+      }
+      continue;
+    }
+    picked[key] = sanitizeNode(base[key]);
+    if (key === 'usage' && isObject(picked[key])) {
+      const details = picked[key].prompt_tokens_details;
+      if (isObject(details) && Object.keys(details).length === 0) {
+        delete picked[key].prompt_tokens_details;
+      }
+      if (picked[key].output_tokens !== undefined) delete picked[key].output_tokens;
+      if (picked[key].input_tokens !== undefined) delete picked[key].input_tokens;
+    }
+  }
+  return picked;
+}
+
+function normalizeForCompare(value) {
+  if (Array.isArray(value)) return value.map(normalizeForCompare);
+  if (!isObject(value)) return value;
+  const out = {};
+  for (const key of Object.keys(value).sort()) {
+    out[key] = normalizeForCompare(value[key]);
+  }
+  return out;
+}
+
+function validatePrimaryFields(original, candidate) {
+  const orig = normalizeForCompare(extractPrimaryFields(original || {}));
+  const next = normalizeForCompare(extractPrimaryFields(candidate || {}));
+  const origStr = JSON.stringify(orig);
+  const nextStr = JSON.stringify(next);
+  if (origStr !== nextStr) {
+    console.error('[anthropic-roundtrip] primary field drift detected');
+    const diffDir = path.join(process.cwd(), 'tmp');
+    try { fs.mkdirSync(diffDir, { recursive: true }); } catch { /* ignore */ }
+    const outA = path.join(diffDir, 'responses-roundtrip-primary-original.json');
+    const outB = path.join(diffDir, 'responses-roundtrip-primary-result.json');
+    fs.writeFileSync(outA, JSON.stringify(orig, null, 2));
+    fs.writeFileSync(outB, JSON.stringify(next, null, 2));
+    throw new Error('roundtrip primary field mismatch');
   }
 }
 

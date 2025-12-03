@@ -280,6 +280,8 @@ export abstract class BaseProvider implements IProviderV2 {
     const isTransient = isRateLimit || (err as any)?.retryable === true;
 
     const runtimeProfile = this.getRuntimeProfile();
+    const isClientError = typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500 && statusCode !== 429;
+    const affectsHealth = isClientError ? false : !isTransient;
 
     // 统一错误日志
       this.dependencies.logger?.logModule(this.id, 'request-error', {
@@ -332,7 +334,7 @@ export abstract class BaseProvider implements IProviderV2 {
       dependencies: this.dependencies,
       statusCode,
       recoverable: isTransient,
-      affectsHealth: !isTransient,
+      affectsHealth,
       details: enrichedDetails
     });
   }

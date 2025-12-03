@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.85.2",
+  "version": "0.85.5",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -76,6 +76,8 @@
     "debug:responses:lmstudio:text": "tsx tools/responses-debug-client/src/index.ts --file tools/responses-debug-client/payloads/lmstudio-text.json --baseURL ${LMSTUDIO_BASEURL:-http://127.0.0.1:1234/v1}",
     "debug:responses:lmstudio:tool": "tsx tools/responses-debug-client/src/index.ts --file tools/responses-debug-client/payloads/lmstudio-tool.json --baseURL ${LMSTUDIO_BASEURL:-http://127.0.0.1:1234/v1}",
     "capture:responses:lmstudio": "node scripts/capture-responses-sse.mjs --file tools/responses-debug-client/payloads/lmstudio-tool.json",
+    "llmswitch:link": "node scripts/link-llmswitch.mjs",
+    "llmswitch:unlink": "node scripts/link-llmswitch.mjs unlink",
     "start:verify:fg": "node scripts/start-verify.mjs --mode fg --timeout 90",
     "dry-run": "node scripts/dry-run-cli.mjs",
     "dry-run:rr-429": "node scripts/dry-run-rr-429.mjs",
@@ -137,7 +139,7 @@
     "rcc-basemodule": "^0.2.7",
     "rcc-debugcenter": "^0.1.6",
     "rcc-errorhandling": "^1.0.10",
-    "rcc-llmswitch-core": "^0.4.0",
+    "rcc-llmswitch-core": "^0.4.1",
     "socket.io": "^4.8.1",
     "zod": "^3.23.8"
   },
