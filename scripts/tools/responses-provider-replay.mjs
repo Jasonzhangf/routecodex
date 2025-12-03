@@ -201,7 +201,7 @@ async function convertSampleToChat(samplePath, modules) {
   return { chat: deepClone(info.payload), entryEndpoint, payloadKind: 'chat' };
 }
 
-async function initProvider(configPath, target) {
+function resolveProviderRuntime(configPath, target) {
   const config = readJson(configPath);
   const [providerId, modelId = 'gpt-5.1'] = target.split('.');
   const providerDef = config?.virtualrouter?.providers?.[providerId];
@@ -209,18 +209,24 @@ async function initProvider(configPath, target) {
   const auth = providerDef.auth || {};
   const apiKey = auth.apiKey || auth.value || process.env.C4M_API_KEY;
   if (!apiKey) throw new Error(`Missing API key for ${providerId}. set in config or C4M_API_KEY env`);
-  const runtime = {
-    runtimeKey: `${providerId}.replay.${Date.now()}`,
-    providerId,
-    providerKey: `${providerId}.replay`,
-    keyAlias: 'replay',
-    providerType: (providerDef.type || 'responses').toLowerCase(),
+  return {
+    runtime: {
+      runtimeKey: `${providerId}.replay.${Date.now()}`,
+      providerId,
+      providerKey: `${providerId}.replay`,
+      keyAlias: 'replay',
+      providerType: (providerDef.type || 'responses').toLowerCase(),
     endpoint: providerDef.baseURL || providerDef.baseUrl || providerDef.endpoint || 'https://api.example.net/v1',
     auth: { type: 'apikey', value: apiKey },
     compatibilityProfile: providerDef.compat || 'default',
-    outboundProfile: 'openai-responses',
-    defaultModel: modelId
+      outboundProfile: 'openai-responses',
+      defaultModel: modelId
+    },
+    providerDef
   };
+}
+
+async function initProvider(runtime) {
   const { ProviderFactory } = await import(pathToFileURL(
     path.join(ROOT, 'dist/modules/pipeline/modules/provider/v2/core/provider-factory.js')
   ).href);
@@ -246,7 +252,7 @@ async function initProvider(configPath, target) {
 async function main() {
   const options = parseArgs();
   const modules = await loadCoreModules();
-  const { provider, runtime, runtimeHelpers } = await initProvider(options.config, options.target);
+  const runtime = resolveProviderRuntime(options.config, options.target).runtime;
   try {
     const subject = await convertSampleToChat(options.sample, modules);
     let replayChat = deepClone(subject.chat);
@@ -283,7 +289,7 @@ async function main() {
     };
 
     const requestId = `replay-${Date.now()}`;
-    runtimeHelpers.attachProviderRuntimeMetadata(providerRequest, {
+    const providerMetadata = {
       requestId,
       providerId: runtime.providerId,
       providerKey: runtime.providerKey,
@@ -301,25 +307,39 @@ async function main() {
         stream: responsesRequest.stream === true,
         entryEndpoint: providerRequest.metadata.entryEndpoint
       }
-    });
+    };
 
     if (options.dryRun) {
       console.log('[replay] dry-run preprocess only');
-      const sanitized = await provider.preprocessRequest(providerRequest);
-      console.log(JSON.stringify(sanitized?.data || sanitized, null, 2));
+      const { createDebugToolkit } = await import(pathToFileURL(path.join(ROOT, 'dist/debug/index.js')).href);
+      const toolkit = createDebugToolkit({ snapshotDirectory: path.join(ROOT, 'logs', 'debug') });
+      const result = await toolkit.dryRunner.runProviderPreprocess({
+        runtime,
+        request: providerRequest,
+        metadata: providerMetadata,
+        sessionId: process.env.REPLAY_SESSION_ID || undefined,
+        nodeId: 'provider.replay'
+      });
+      console.log(JSON.stringify(result.processed?.data || result.processed, null, 2));
       return;
     }
 
-    console.log('[replay] sending request to provider…');
-    const response = await provider.processIncoming(providerRequest);
-    console.log('✅ provider responded');
-    const status = response?.status ?? response?.data?.status ?? 'unknown';
-    console.log(` - status: ${status}`);
-    const dumpFile = path.join(process.cwd(), `replay_${requestId}_response.json`);
-    fs.writeFileSync(dumpFile, JSON.stringify(response, null, 2));
-    console.log(` - saved response to ${dumpFile}`);
-  } finally {
-    await provider.cleanup().catch(() => {});
+    const { provider, runtimeHelpers } = await initProvider(runtime);
+    try {
+      runtimeHelpers.attachProviderRuntimeMetadata(providerRequest, providerMetadata);
+      console.log('[replay] sending request to provider…');
+      const response = await provider.processIncoming(providerRequest);
+      console.log('✅ provider responded');
+      const status = response?.status ?? response?.data?.status ?? 'unknown';
+      console.log(` - status: ${status}`);
+      const dumpFile = path.join(process.cwd(), `replay_${requestId}_response.json`);
+      fs.writeFileSync(dumpFile, JSON.stringify(response, null, 2));
+      console.log(` - saved response to ${dumpFile}`);
+    } finally {
+      await provider.cleanup().catch(() => {});
+    }
+  } catch (error) {
+    throw error;
   }
 }
 
