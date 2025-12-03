@@ -1,6 +1,6 @@
 import fetch from 'node-fetch';
 import path from 'path';
-import { createProviderOAuthStrategy } from '../../modules/pipeline/modules/provider/v2/config/provider-oauth-configs.js';
+import { createProviderOAuthStrategy } from '../../providers/core/config/provider-oauth-configs.js';
 import { buildAuthHeaders } from './auth-headers.js';
 import { normalizeBaseUrlForModels } from './url-normalize.js';
 import type { ModelsList, ProviderInputConfig } from './types.js';

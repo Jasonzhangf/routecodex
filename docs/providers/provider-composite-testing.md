@@ -25,8 +25,8 @@
 伪代码示例：
 
 ```ts
-import { ProviderComposite } from '../../src/modules/pipeline/modules/provider/v2/composite/provider-composite.js';
-import { attachProviderRuntimeMetadata } from '../../src/modules/pipeline/modules/provider/v2/core/provider-runtime-metadata.js';
+import { ProviderComposite } from '../../src/providers/core/composite/provider-composite.js';
+import { attachProviderRuntimeMetadata } from '../../src/providers/core/runtime/provider-runtime-metadata.js';
 
 test('protocol mismatch fails fast', async () => {
   const body: any = { model: 'gpt-4o', messages: [] };

@@ -55,13 +55,13 @@ RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配�
 ### 🏗️ V2 核心组件
 
 - **Compatibility V2（配置驱动）**
-  - 位置：`src/modules/pipeline/modules/provider/v2/compatibility/glm/*`（模块化 + Hook 系统）
+  - 位置：`src/providers/compat/glm/*`（模块化 + Hook 系统）
   - 职责：仅做 Provider 特定的最小字段标准化与 reasoning_content 处理
   - 特性：配置驱动字段映射、GLM 专用最小清理与 1210/1214 错误兼容
   - 工具治理：统一在 llmswitch-core v2 处理；兼容层不进行工具语义修复/文本收割
 
 - **Provider V2（统一OpenAI标准）**
-  - 位置：`src/modules/pipeline/modules/provider/v2/*`
+  - 位置：`src/providers/*`
   - 能力：统一 HTTP 发送、认证管理、请求/响应快照
   - 支持服务：OpenAI、GLM、Qwen、iFlow、LM Studio
   - 策略：Fail Fast 原则，无隐藏兜底机制
@@ -89,7 +89,7 @@ RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配�
   - 1210/1214 最小兼容（GLM）
   - 请求侧最小黑名单（例如 GLM 删除 `tools[].function.strict`；无 tools 删除 `tool_choice`）
   - 响应侧最小黑名单（仅非流式）：默认仅删 `usage.prompt_tokens_details.cached_tokens`
-    - 配置：`src/modules/pipeline/modules/provider/v2/compatibility/<provider>/config/response-blacklist.json`
+    - 配置：`src/providers/compat/<provider>/config/response-blacklist.json`
     - 关键字段保护：status/output/output_text/required_action/choices[].message.content/tool_calls/finish_reason
 - Don't
   - 工具语义修复或文本收割（统一由 llmswitch-core 处理）
@@ -845,7 +845,7 @@ RouteCodex V2架构已完成兼容层的函数化重构，实现了两层架构�
 #### 核心文件结构
 
 ```
-src/modules/pipeline/modules/provider/v2/compatibility/
+src/providers/compat/
 ├── compatibility-interface.ts           # 兼容层接口定义
 ├── compatibility-adapter.ts             # PipelineModule适配器
 ├── base-compatibility.ts                # 基础兼容抽象类

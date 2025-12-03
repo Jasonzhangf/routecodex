@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 // Stubs and mocks
-jest.mock('../../src/modules/pipeline/modules/provider/v2/utils/snapshot-writer.ts', () => ({
+jest.mock('../../src/providers/core/utils/snapshot-writer.ts', () => ({
   writeProviderSnapshot: async () => {}
 }), { virtual: true });
 
@@ -16,12 +16,12 @@ jest.mock('../../src/modules/llmswitch/bridge.ts', () => ({
   }
 }), { virtual: true });
 
-import { ChatHttpProvider } from '../../src/modules/pipeline/modules/provider/v2/core/chat-http-provider.ts';
-import { AnthropicHttpProvider } from '../../src/modules/pipeline/modules/provider/v2/core/anthropic-http-provider.ts';
-import { attachProviderRuntimeMetadata } from '../../src/modules/pipeline/modules/provider/v2/core/provider-runtime-metadata.ts';
+import { ChatHttpProvider } from '../../src/providers/core/runtime/chat-http-provider.ts';
+import { AnthropicHttpProvider } from '../../src/providers/core/runtime/anthropic-http-provider.ts';
+import { attachProviderRuntimeMetadata } from '../../src/providers/core/runtime/provider-runtime-metadata.ts';
 
 // Lazy import for Responses to allow mock above
-const importResponsesProvider = async () => (await import('../../src/modules/pipeline/modules/provider/v2/core/responses-http-provider.ts')).ResponsesHttpProvider as any;
+const importResponsesProvider = async () => (await import('../../src/providers/core/runtime/responses-http-provider.ts')).ResponsesHttpProvider as any;
 
 const deps: any = { logger: { logModule: () => {}, logProviderRequest: () => {} }, errorHandlingCenter: { handleError: async () => {} } };
 

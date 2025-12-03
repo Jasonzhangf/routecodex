@@ -222,7 +222,7 @@ async function initProvider(configPath, target) {
     defaultModel: modelId
   };
   const { ProviderFactory } = await import(pathToFileURL(
-    path.join(ROOT, 'dist/modules/pipeline/modules/provider/v2/core/provider-factory.js')
+    path.join(ROOT, 'dist/providers/core/runtime/provider-factory.js')
   ).href);
   const provider = ProviderFactory.createProviderFromRuntime(runtime, {
     logger: {
@@ -238,7 +238,7 @@ async function initProvider(configPath, target) {
   });
   await provider.initialize();
   const runtimeHelpers = await import(pathToFileURL(
-    path.join(ROOT, 'dist/modules/pipeline/modules/provider/v2/core/provider-runtime-metadata.js')
+    path.join(ROOT, 'dist/providers/core/runtime/provider-runtime-metadata.js')
   ).href);
   return { provider, runtime, runtimeHelpers };
 }

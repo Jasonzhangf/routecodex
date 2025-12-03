@@ -14,11 +14,18 @@ if [[ ! -f "$RAW_FILE" ]]; then
   exit 2
 fi
 
-BASE_URL=$(jq -r '.virtualrouter.providers.glm.baseURL' config/config.json)
-API_KEY=$(jq -r '.virtualrouter.providers.glm.apiKey[0]' config/config.json)
-if [[ -z "${BASE_URL}" || -z "${API_KEY}" || "${BASE_URL}" == "null" || "${API_KEY}" == "null" ]]; then
-  echo "Missing baseURL or apiKey in config/config.json" >&2
+CONFIG_PATH="${ROUTECODEX_CONFIG_PATH:-${ROUTECODEX_CONFIG:-$HOME/.routecodex/config.json}}"
+CONFIG_PATH="${CONFIG_PATH/#\~\//$HOME/}"
+if [[ ! -f "$CONFIG_PATH" ]]; then
+  echo "Config not found: $CONFIG_PATH" >&2
   exit 3
+}
+
+BASE_URL=$(jq -r '.virtualrouter.providers.glm.baseURL' "$CONFIG_PATH")
+API_KEY=$(jq -r '.virtualrouter.providers.glm.apiKey[0]' "$CONFIG_PATH")
+if [[ -z "${BASE_URL}" || -z "${API_KEY}" || "${BASE_URL}" == "null" || "${API_KEY}" == "null" ]]; then
+  echo "Missing baseURL or apiKey in $CONFIG_PATH" >&2
+  exit 4
 fi
 
 ORIG_PAY="/tmp/${REQ_ID}_orig.json"
@@ -94,4 +101,3 @@ curl -sS -X POST \
   "${BASE_URL}/chat/completions" -w "\nHTTP_STATUS:%{http_code}\n" | tee "/tmp/${REQ_ID}_drop_tool.out"
 
 echo "\nOutputs saved under /tmp/${REQ_ID}_*.{json,out}"
-

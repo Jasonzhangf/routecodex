@@ -79,18 +79,18 @@ api_key → Authorization: Bearer <api_key> → 聊天完成接口
 
 ### 代码实现位置
 
-1. **OAuth 生命周期管理**：`src/modules/pipeline/modules/provider/v2/auth/oauth-lifecycle.ts`
+1. **OAuth 生命周期管理**：`src/providers/auth/oauth-lifecycle.ts`
    - 在 `ensureValidOAuthToken()` 中，iFlow 认证成功后会自动调用 `fetchIFlowUserInfo()`
    - 将返回的 `api_key` 和 `email` 合并到 token 数据中并重新保存
 
-2. **API Key 提取逻辑**：`src/modules/pipeline/modules/provider/v2/auth/iflow-userinfo-helper.ts`
+2. **API Key 提取逻辑**：`src/providers/auth/iflow-userinfo-helper.ts`
    - `fetchIFlowUserInfo()`：调用 `https://iflow.cn/api/oauth/getUserInfo`
    - `mergeIFlowTokenData()`：将 OAuth token 与用户信息合并
 
-3. **认证提供者**：`src/modules/pipeline/modules/provider/v2/auth/tokenfile-auth.ts`
+3. **认证提供者**：`src/providers/auth/tokenfile-auth.ts`
    - `TokenFileAuthProvider.buildHeaders()`：优先使用 `api_key`，回退到 `access_token`
 
-4. **服务配置**：`src/modules/pipeline/modules/provider/v2/config/service-profiles.ts`
+4. **服务配置**：`src/providers/core/config/service-profiles.ts`
    - iFlow 默认端点：`https://apis.iflow.cn/v1/chat/completions`
    - 默认模型：`kimi`
 

@@ -1,6 +1,6 @@
 import type { Readable } from 'node:stream';
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
-import type { ProviderRuntimeProfile } from '../../../modules/pipeline/modules/provider/v2/api/provider-types.js';
+import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 
 export interface ServerConfigV2 {
   server: {

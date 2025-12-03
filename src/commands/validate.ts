@@ -56,8 +56,9 @@ async function ensureServer(configPath: string, verbose = false): Promise<{ base
 }
 
 function samplePayload(endpoint: string, scenario: string, model: string): any {
+  const normalizedScenario = scenario?.toLowerCase?.() || '';
   // 仅生成形状示例，具体 model 由调用者在配置中指定（若提供则填入）
-  if (endpoint === 'chat' && scenario === 'webfetch') {
+  if (endpoint === 'chat' && (normalizedScenario === 'basic' || !normalizedScenario)) {
     return {
       model: model || '',
       messages: [
@@ -66,7 +67,7 @@ function samplePayload(endpoint: string, scenario: string, model: string): any {
       stream: false
     };
   }
-  if (endpoint === 'chat' && scenario === 'listfiles') {
+  if (endpoint === 'chat' && normalizedScenario === 'listfiles') {
     return {
       model: model || '',
       tools: [
@@ -94,7 +95,7 @@ function samplePayload(endpoint: string, scenario: string, model: string): any {
       stream: false
     };
   }
-  if (endpoint === 'responses' && scenario === 'webfetch') {
+  if (endpoint === 'responses' && (normalizedScenario === 'basic' || !normalizedScenario)) {
     return {
       model: model || '',
       input: [
@@ -156,36 +157,14 @@ async function sendRequest(base: string, endpoint: string, payload: any, timeout
   }
 }
 
-function findSnapshotAssertWebFetch(): { ok: boolean; reason?: string } {
-  try {
-    const root = path.join(homedir(), '.routecodex', 'codex-samples');
-    if (!fs.existsSync(root)) return { ok: false, reason: 'no snapshots root' };
-    const entries = fs.readdirSync(root).flatMap(dir => {
-      const full = path.join(root, dir);
-      try { return fs.statSync(full).isDirectory() ? fs.readdirSync(full).map(f => path.join(full, f)) : []; } catch { return []; }
-    });
-    const candidates = entries.filter(f => /provider\.response\.post\.json$/.test(f));
-    candidates.sort((a,b)=> fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-    for (const f of candidates.slice(0, 20)) {
-      try {
-        const j = JSON.parse(fs.readFileSync(f, 'utf-8'));
-        const s = JSON.stringify(j);
-        if (s.includes('"web_fetch"')) return { ok: true };
-      } catch { /* ignore */ }
-    }
-    return { ok: false, reason: 'no recent web_fetch in provider.response.post' };
-  } catch { return { ok: false, reason: 'snapshot scan error' }; }
-}
-
 export function createValidateCommand(): Command {
   return new Command('validate')
     .description('Validate end-to-end pipeline behavior (auto-start server if needed)')
     .option('-c, --config <config>', 'Configuration file path')
     .option('-e, --endpoint <ep>', 'Endpoint: chat|responses|messages', 'chat')
-    .option('-s, --scenario <name>', 'Scenario: webfetch|text', 'webfetch')
+    .option('-s, --scenario <name>', 'Scenario: basic|listfiles', 'basic')
     .option('-p, --payload <file>', 'Custom payload JSON file')
     .option('--timeout <ms>', 'Request timeout in ms', '45000')
-    .option('--print-snapshots', 'Print snapshot check result', false)
     .option('--verbose', 'Verbose logs', false)
     .action(async (opts) => {
       try {
@@ -193,7 +172,7 @@ export function createValidateCommand(): Command {
         const verbose = !!opts.verbose;
         const { base } = await ensureServer(cfg, verbose);
         const endpoint = String(opts.endpoint || 'chat');
-        const scenario = String(opts.scenario || 'webfetch');
+        const scenario = String(opts.scenario || 'basic');
         const defaultModel = resolveDefaultModelFromConfig(cfg, endpoint);
         const payload = (() => {
           if (opts.payload && fs.existsSync(opts.payload)) {
@@ -268,9 +247,6 @@ export function createValidateCommand(): Command {
           console.error(`[validate] FAILED: ${reason}`);
           process.exit(1);
         }
-        // Snapshot assert web_fetch present (best-effort)
-        const snap = findSnapshotAssertWebFetch();
-        if (opts.printSnapshots) console.log(`[validate] snapshot check: ${snap.ok ? 'ok' : 'miss'}${snap.reason ? ` (${snap.reason})` : ''}`);
         console.log('[validate] PASS');
       } catch (e: any) {
         console.error('[validate] ERROR:', e?.message || String(e));

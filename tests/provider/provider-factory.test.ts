@@ -1,4 +1,4 @@
-import { ProviderFactory } from '../../src/modules/pipeline/modules/provider/v2/core/provider-factory.js';
+import { ProviderFactory } from '../../src/providers/core/runtime/provider-factory.js';
 
 describe('ProviderFactory no fallback', () => {
   test('unknown providerType/moduleType throws', () => {
@@ -6,7 +6,7 @@ describe('ProviderFactory no fallback', () => {
     expect(() => ProviderFactory.createProvider(cfg, { logger: {} as any } as any)).toThrow();
   });
 });
-jest.mock('../../src/modules/pipeline/modules/provider/v2/utils/snapshot-writer.ts', () => ({
+jest.mock('../../src/providers/core/utils/snapshot-writer.ts', () => ({
   writeProviderSnapshot: async () => {}
 }), { virtual: true });
 jest.mock('../../src/modules/llmswitch/bridge.ts', () => ({

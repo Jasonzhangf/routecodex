@@ -13,7 +13,7 @@
 ## 背景：runtime metadata 统一输入
 
 - BasePipeline 在构建 request/response context 时，将虚拟路由回写的 `providerType`/`providerProtocol`/`providerKey`/`routeName`/`target` 等以不可枚举属性写入请求体。
-- 模块：`src/modules/pipeline/modules/provider/v2/core/provider-runtime-metadata.ts`
+- 模块：`src/providers/core/runtime/provider-runtime-metadata.ts`
 - 读取：`extractProviderRuntimeMetadata()`（BaseProvider 已缓存最近一次 metadata，并在日志/错误中心附带字段）。
 
 ## 新拓扑（出站与返回）
@@ -29,12 +29,12 @@ output/* → Provider.preprocessRequest(compat.request) → HTTP Provider → Pr
 ## 类与文件
 
 - 新增（Provider 内）：
-  - `src/modules/pipeline/modules/provider/v2/composite/provider-composite.ts`
-  - `src/modules/pipeline/modules/provider/v2/composite/compat/openai-compat-aggregator.ts`
-  - `src/modules/pipeline/modules/provider/v2/composite/compat/{responses,anthropic,gemin i}.ts`
+  - `src/providers/core/composite/provider-composite.ts`
+  - `src/providers/core/composite/compat/openai-compat-aggregator.ts`
+  - `src/providers/core/composite/compat/{responses,anthropic,gemin i}.ts`
 
 - 复用（保持原路径）：
-  - 现有 `src/modules/pipeline/modules/provider/v2/compatibility/*` 模块作为旧实现，按需由 openai-compat-aggregator 适配调用（GLM/LM Studio/iFlow）。
+  - 现有 `src/providers/compat/*` 模块作为旧实现，按需由 openai-compat-aggregator 适配调用（GLM/LM Studio/iFlow）。
 
 ## 协议守卫与自动加载
 

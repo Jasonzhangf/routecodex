@@ -3,12 +3,12 @@ import path from 'path';
 
 // Under test
 // Mock snapshot writer to avoid ESM import.meta in llmswitch bridge during tests
-jest.mock('../../src/modules/pipeline/modules/provider/v2/utils/snapshot-writer.ts', () => ({
+jest.mock('../../src/providers/core/utils/snapshot-writer.ts', () => ({
   writeProviderSnapshot: async () => {}
 }), { virtual: true });
 
-import { ChatHttpProvider } from '../../src/modules/pipeline/modules/provider/v2/core/chat-http-provider.ts';
-import { attachProviderRuntimeMetadata } from '../../src/modules/pipeline/modules/provider/v2/core/provider-runtime-metadata.ts';
+import { ChatHttpProvider } from '../../src/providers/core/runtime/chat-http-provider.ts';
+import { attachProviderRuntimeMetadata } from '../../src/providers/core/runtime/provider-runtime-metadata.ts';
 
 // Minimal dependencies stub
 const deps: any = {
@@ -180,7 +180,7 @@ describe('Provider outbound → upstream (responses wire)', () => {
   test('responses: chat→responses encoding before postStream', async () => {
     const golden = loadGolden('fc', 'openai-responses') || null; // for shape hints; not required
     const chatReq = loadGolden('glm', 'openai-chat') || { messages: [{ role: 'user', content: 'hi' }] };
-    const { ResponsesHttpProvider } = await import('../../src/modules/pipeline/modules/provider/v2/core/responses-http-provider.ts');
+    const { ResponsesHttpProvider } = await import('../../src/providers/core/runtime/responses-http-provider.ts');
     const provider = new (ResponsesHttpProvider as any)({
       type: 'responses-http-provider',
       config: {

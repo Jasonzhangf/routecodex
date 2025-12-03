@@ -59,7 +59,7 @@
 
 - Compatibility（格式转换）
   - 已有：LM Studio 兼容模块与 JSON 规则驱动的变换引擎。
-    - `src/modules/pipeline/modules/provider/v2/compatibility/lmstudio-compatibility.ts:16`
+    - `src/providers/compat/lmstudio-compatibility.ts:16`
     - `src/modules/pipeline/utils/transformation-engine.ts`
   - 现状：HTTP 服务未调用。
 
@@ -81,7 +81,7 @@
 
 ## 配置情况
 
-- `config/config.json` + 用户 `~/.routecodex/config.json` 由 `bootstrapVirtualRouterConfig` 直接解析，得到 `virtualRouter` + `targetRuntime`，HTTP 服务按该结果构造 Hub Pipeline 与 Provider。
+- 用户 `~/.routecodex/config.json`（或 `ROUTECODEX_CONFIG_PATH` 指定的文件）由 `bootstrapVirtualRouterConfig` 直接解析，得到 `virtualRouter` + `targetRuntime`，HTTP 服务按该结果构造 Hub Pipeline 与 Provider。
 - OpenAI Router 中的 `targetUrl` 由构造参数/默认值直接决定，并非来自 `modules.json`：
   - `src/server/protocol-handler.ts:89`
 
@@ -157,7 +157,7 @@
 - 流水线（已实现但未接入 HTTP 路径）
   - BasePipeline 主链路：`src/modules/pipeline/core/base-pipeline.ts:119`
   - LLM Switch（OpenAI 直通）：`src/modules/pipeline/modules/llmswitch/openai-passthrough.ts:15`
-  - 兼容层（LM Studio）：`src/modules/pipeline/modules/provider/v2/compatibility/lmstudio-compatibility.ts:16`
+  - 兼容层（LM Studio）：`src/providers/compat/lmstudio-compatibility.ts:16`
   - Provider（LM Studio）：`src/modules/pipeline/modules/provider/lmstudio-provider.ts:15`
 - 智能选择（格式识别/选择）：`src/server/http-server.ts` 提供的 `ConfigRequestClassifier` + RR 组合逻辑
 

@@ -145,25 +145,8 @@ class RouteCodexApp {
       const userConfigPath = pickUserConfigPath();
       this.configPath = userConfigPath;
 
-      // Honor serverTools toggle strictly by config.json (single source of truth)
-      // Set ROUTECODEX_SERVER_TOOLS env based on user config, so core replacement logic
-      // relies only on config, avoiding cwd/path ambiguity.
       const { userConfig, configPath: resolvedConfigPath } = await loadRouteCodexConfig(userConfigPath);
       this.configPath = resolvedConfigPath;
-
-      try {
-        const st = (userConfig && typeof userConfig === 'object') ? (userConfig as any).serverTools : null;
-        const enabled = !!(st && st.enabled === true && st.replace && st.replace.web_fetch && st.replace.web_fetch.enabled === true);
-        // 单一判断来源：严格以用户配置为准，强制覆盖核心的其他推断路径
-        const val = enabled ? '1' : '0';
-        process.env.ROUTECODEX_SERVER_TOOLS = val;
-        process.env.RCC_SERVER_TOOLS = val;
-        try { console.log(`[ServerTools] web_fetch replacement = ${enabled ? 'ENABLED' : 'DISABLED'} (from ${userConfigPath})`); } catch {}
-      } catch {
-        // 配置缺失则明确关闭
-        process.env.ROUTECODEX_SERVER_TOOLS = '0';
-        process.env.RCC_SERVER_TOOLS = '0';
-      }
 
       if (!process.env.ROUTECODEX_STAGE_LOG || process.env.ROUTECODEX_STAGE_LOG.trim() === '') {
         if (buildInfo.mode === 'dev') {

@@ -170,7 +170,7 @@ This roadmap outlines the implementation plan for V2 pipeline architecture with 
 ## ⚙️ Phase 4: Configuration & Validation (1-2 days)
 
 ### 3.5 ProviderComposite & Type-only Providers
-**Files**: `src/modules/pipeline/modules/provider/v2/composite/*`, `src/modules/pipeline/modules/provider/v2/core/*`, `docs/providers/*`
+**Files**: `src/providers/core/composite/*`, `src/providers/core/runtime/*`, `docs/providers/*`
 
 **Tasks**:
 - [x] Internalize compatibility into Provider (ProviderComposite)

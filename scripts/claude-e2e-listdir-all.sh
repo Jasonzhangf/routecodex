@@ -5,9 +5,9 @@
 
 set -euo pipefail
 
-CONF="$HOME/.routecodex/config.json"
-READ_CONF="$HOME/.routecodex/config/config.json"
-export CONF READ_CONF
+CONF="${ROUTECODEX_CONFIG_PATH:-${ROUTECODEX_CONFIG:-$HOME/.routecodex/config.json}}"
+CONF="${CONF/#\~\//$HOME/}"
+export CONF
 if [ ! -f "$CONF" ]; then
   echo "Config not found: $CONF" >&2
   exit 2
@@ -40,7 +40,7 @@ unset ANTHROPIC_TOKEN ANTHROPIC_AUTH_TOKEN || true
 
 echo "=== Providers from source config ==="
 node - <<'NODE'
-const fs=require('fs'); const p=fs.existsSync(process.env.READ_CONF)?process.env.READ_CONF:process.env.CONF;
+const fs=require('fs'); const p=process.env.CONF;
 const j=JSON.parse(fs.readFileSync(p,'utf8'));
 const prov=Object.keys(j?.virtualrouter?.providers||{});
 console.log(prov.join('\n'));
@@ -48,7 +48,7 @@ NODE
 
 echo "=== Begin E2E (Claude CLI) ==="
 node - <<'NODE'
-const fs=require('fs'); const p=fs.existsSync(process.env.READ_CONF)?process.env.READ_CONF:process.env.CONF;
+const fs=require('fs'); const p=process.env.CONF;
 const j=JSON.parse(fs.readFileSync(p,'utf8'));
 const prov=j?.virtualrouter?.providers||{};
 for(const pid of Object.keys(prov)){
@@ -59,11 +59,10 @@ for(const pid of Object.keys(prov)){
 NODE
 
 # Iterate providers with first model
-SRC_LIST="$READ_CONF"; [ -f "$SRC_LIST" ] || SRC_LIST="$CONF"
+SRC_LIST="$CONF"
 while IFS= read -r pid; do
   [ -z "$pid" ] && continue
-  srcc=$READ_CONF; [ -f "$srcc" ] || srcc="$CONF"
-  model=$(jq -r --arg P "$pid" '.virtualrouter.providers[$P].models | keys[0] // empty' "$srcc")
+  model=$(jq -r --arg P "$pid" '.virtualrouter.providers[$P].models | keys[0] // empty' "$CONF")
   [ -z "$model" ] && continue
   echo "\n-- Testing $pid model=$model"
   P="$pid" M="$model" K="key1" CONF="$CONF" set_routing >/dev/null

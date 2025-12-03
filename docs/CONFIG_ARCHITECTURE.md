@@ -6,7 +6,7 @@
 ```
 用户配置层 (~/.routecodex/config.json)
     ↓
-系统默认 (./config/config.json)
+系统模块默认 (./config/modules.json)
     ↓
 配置解析器 (routecodex-config-loader)
     ↓
@@ -83,7 +83,7 @@ VirtualRouterArtifacts (virtualRouter + targetRuntime)
 - 取值 `passthrough`：RouteCodex 仅负责路由/鉴权/日志，**请求与响应会原样透传**。为了避免协议错配，要求入口协议必须与 provider 类型一致（例如 providerType=`responses` 只能在 `/v1/responses` 入口透传），否则启动时直接抛错。
 - Passthrough 模式仍然会写入 `client-request` / `provider-request` / `provider-response` 快照，便于审计，但不会再注入模型、stream、instruction 等治理字段。
 
-### 2.2 系统配置文件 (./config/modules.json)
+### 2.2 系统模块默认 (./config/modules.json)
 
 ```json
 {

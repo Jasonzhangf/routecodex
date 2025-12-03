@@ -6,7 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { ProviderFactory } from '../dist/modules/pipeline/modules/provider/v2/core/provider-factory.js';
+import { ProviderFactory } from '../dist/providers/core/runtime/provider-factory.js';
 
 const root = path.join(os.homedir(), '.routecodex', 'provider');
 const MAX_PROVIDERS = parseInt(process.env.RCC_NET_MAX_PROVIDERS || '5', 10);

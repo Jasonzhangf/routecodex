@@ -11,8 +11,7 @@ downstream workflow/compatibility/provider modules.
 rcc start
 └─ routecodex/dist/index.js
    ├─ loadRouteCodexConfig()
-   │   ├─ reads repo config defaults (config/config.json)
-   │   └─ merges user overrides (~/.routecodex/config.json)
+   │   └─ reads user config (~/.routecodex/config.json or ROUTECODEX_CONFIG_PATH)
    ├─ bootstrapVirtualRouterConfig(userConfig.virtualrouter ?? userConfig)
    │   ├─ validates routing/providers/classifiers
    │   ├─ outputs `{ virtualRouter, targetRuntime }`
@@ -51,8 +50,8 @@ llmswitch-conversion-router
 
 ### Responses Conversion Router
 
-`llmswitch-conversion-router` consults `config/conversion/llmswitch-profiles.json` to map entry endpoints to the
-appropriate codec:
+`llmswitch-conversion-router` consults the built-in profile registry shipped with `@jsonstudio/llms`
+to map entry endpoints to the appropriate codec:
 
 ```
 profiles:

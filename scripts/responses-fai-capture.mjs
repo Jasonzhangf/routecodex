@@ -73,7 +73,7 @@ async function main() {
   const model = prov.model || prov.modelId || prov.defaultModel || 'gpt-5.1';
   if (!apiKey) throw new Error('no apikey');
 
-  const httpPath = pathToFileURL(path.join(process.cwd(), 'dist/modules/pipeline/modules/provider/v2/utils/http-client.js')).href;
+  const httpPath = pathToFileURL(path.join(process.cwd(), 'dist/providers/core/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
   const convPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/sse-to-json/index.js')).href;
   const { ResponsesSseToJsonConverter } = await import(convPath);

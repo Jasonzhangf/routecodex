@@ -45,7 +45,7 @@ async function run() {
   let tok0 = await loadLocalToken();
   if (process.env.IFLOW_FORCE_OAUTH === '1' || !tok0 || isExpired(tok0)) {
     console.log(`[iflow] obtaining token via device-code flow... (${tokenFile})`);
-    const { createProviderOAuthStrategy } = await import('../dist/modules/pipeline/modules/provider/v2/config/provider-oauth-configs.js');
+    const { createProviderOAuthStrategy } = await import('../dist/providers/core/config/provider-oauth-configs.js');
     const strat = createProviderOAuthStrategy('iflow', {
       flowType: 'device_code',
       endpoints: { deviceCodeUrl: 'https://iflow.cn/oauth/device/code', tokenUrl: 'https://iflow.cn/oauth/token', userInfoUrl: 'https://iflow.cn/api/oauth/getUserInfo' },
@@ -60,7 +60,7 @@ async function run() {
   }
 
   // 3) Create provider and send a chat request
-  const { ChatHttpProvider } = await import('../dist/modules/pipeline/modules/provider/v2/core/chat-http-provider.js');
+  const { ChatHttpProvider } = await import('../dist/providers/core/runtime/chat-http-provider.js');
   const provider = new ChatHttpProvider(cfg, {});
   await provider.initialize();
   const body = { model, messages: [{ role:'user', content:text }], stream:false };

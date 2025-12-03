@@ -97,7 +97,7 @@ async function main() {
     const providerEntry = loadProviderConfig(providerId);
     baseUrl = normalizeBaseUrl(providerEntry);
     headers = buildHeaders(providerEntry);
-    const httpClientPath = pathToFileURL(path.join(process.cwd(), 'dist/modules/pipeline/modules/provider/v2/utils/http-client.js')).href;
+    const httpClientPath = pathToFileURL(path.join(process.cwd(), 'dist/providers/core/utils/http-client.js')).href;
     const { HttpClient } = await import(httpClientPath);
     client = new HttpClient({ baseUrl, timeout: 300000 });
   } else {

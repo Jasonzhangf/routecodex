@@ -179,7 +179,7 @@ RouteCodex 现在完全依赖 sharedmodule/llmswitch-core 的 Hub Pipeline，实
 - **唯一入口**：服务器通过 `RouteCodexHttpServer` 调用 `sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/hub-pipeline`，禁止旁路加载核心模块。
 - **配置来源**：`routecodex-config-loader` 读取用户配置后调用 `bootstrapVirtualRouterConfig`。该工具会校验 routing/providers、展开 `provider.keyAlias.model`、生成 `targetRuntime` 映射（endpoint、headers、auth、compat profile），Hub Pipeline 构造函数直接接受该结果。
 - **节点链路**：Hub Pipeline 在内部组成 `SSE Input → Input Node → Chat Process → Virtual Router → (Compatibility，可选) → Output/SSE`。Host 不关心节点细节，只需要把 HTTP 请求封装成标准化的 Hub 请求。
-- **工具治理**：唯一的工具治理点位于 `chat-process-node`。Compatibility 层被下沉到 Provider 运行时（`src/modules/pipeline/modules/provider/v2/compatibility`），仅做 Provider 特定的最小字段修剪。
+- **工具治理**：唯一的工具治理点位于 `chat-process-node`。Compatibility 层被下沉到 Provider 运行时（`src/providers/compatibility`），仅做 Provider 特定的最小字段修剪。
 - **Provider 调度**：Virtual Router 负责分类、熔断、负载均衡，并把 `target.runtimeKey` 写入请求。Host 使用 `bootstrapVirtualRouterConfig` 输出的 `targetRuntime` 把 runtimeKey 映射到具体 Provider 实例（包含 OAuth/apiKey 配置、baseURL、compat profile）。
 - **错误流**：Provider/Compatibility 报错后调用 `errorHandlingCenter.handleError`，同时通过 `providerErrorCenter.emit` 把 `ProviderErrorEvent` 交还给 Virtual Router，以便执行熔断和健康统计。
 

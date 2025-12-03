@@ -15,8 +15,8 @@ async function ensureDir(p) {
 }
 
 async function main() {
-  const SRC = path.resolve(process.cwd(), 'src/modules/pipeline/modules/provider/v2/compatibility');
-  const DIST = path.resolve(process.cwd(), 'dist/modules/pipeline/modules/provider/v2/compatibility');
+  const SRC = path.resolve(process.cwd(), 'src/providers/compat');
+  const DIST = path.resolve(process.cwd(), 'dist/providers/compat');
   const PROMPT_SRC = path.resolve(process.cwd(), 'src/config/system-prompts');
   const PROMPT_DIST = path.resolve(process.cwd(), 'dist/config/system-prompts');
   const copied = [];

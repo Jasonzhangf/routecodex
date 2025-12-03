@@ -25,7 +25,7 @@
 
 ### 3.1 新 Provider：`responses-standard`（真实 SSE 透传）
 
-- 文件：`src/modules/pipeline/modules/provider/v2/core/responses-standard-provider.ts`
+- 文件：`src/providers/core/runtime/responses-standard-provider.ts`
 - 类型：`responses-standard`
 - 关键点：
   - 从 provider 配置读取 `baseUrl`、`auth.apiKey`、`overrides.timeout`，构造请求。
@@ -89,9 +89,9 @@
 ## 5. 任务拆解与文件清单
 
 1) Provider：responses
-   - 新增：`src/modules/pipeline/modules/provider/v2/core/responses-provider.ts`
+   - 新增：`src/providers/core/runtime/responses-provider.ts`
    - 注册：`src/modules/pipeline/core/pipeline-manager.ts` → `this.registry.registerModule('responses', this.createResponsesProviderModule)`
-   - ServiceProfile（可选）：`src/modules/pipeline/modules/provider/v2/config/service-profiles.ts` → `responses` 默认 `defaultEndpoint: '/responses'`
+   - ServiceProfile（可选）：`src/providers/core/config/service-profiles.ts` → `responses` 默认 `defaultEndpoint: '/responses'`
 
 2) LLM Switch 直通模块
    - 新增：`src/modules/pipeline/modules/llmswitch/llmswitch-responses-passthrough.ts`

@@ -15,10 +15,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../..');
 
 const ProviderFactory = (await import(pathToFileURL(
-  path.join(ROOT, 'dist/modules/pipeline/modules/provider/v2/core/provider-factory.js')
+  path.join(ROOT, 'dist/providers/core/runtime/provider-factory.js')
 ).href)).ProviderFactory;
 const { attachProviderRuntimeMetadata, extractProviderRuntimeMetadata } = await import(pathToFileURL(
-  path.join(ROOT, 'dist/modules/pipeline/modules/provider/v2/core/provider-runtime-metadata.js')
+  path.join(ROOT, 'dist/providers/core/runtime/provider-runtime-metadata.js')
 ).href);
 
 function usage(err) {

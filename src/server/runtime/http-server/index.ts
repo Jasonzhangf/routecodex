@@ -13,13 +13,13 @@ import express, { type Application } from 'express';
 import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { HandlerContext, PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
-import { ProviderFactory } from '../../../modules/pipeline/modules/provider/v2/core/provider-factory.js';
+import { ProviderFactory } from '../../../providers/core/runtime/provider-factory.js';
 import type { ModuleDependencies, PipelineDebugLogger } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { DebugCenter } from '../../../modules/pipeline/types/external-types.js';
-import { attachProviderRuntimeMetadata } from '../../../modules/pipeline/modules/provider/v2/core/provider-runtime-metadata.js';
+import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import { AuthFileResolver } from '../../../config/auth-file-resolver.js';
-import type { ProviderRuntimeProfile } from '../../../modules/pipeline/modules/provider/v2/api/provider-types.js';
-import { emitProviderError } from '../../../modules/pipeline/modules/provider/v2/utils/provider-error-reporter.js';
+import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
+import { emitProviderError } from '../../../providers/core/utils/provider-error-reporter.js';
 import { isStageLoggingEnabled, logPipelineStage } from '../../utils/stage-logger.js';
 import { registerDefaultMiddleware } from './middleware.js';
 import { registerHttpRoutes } from './routes.js';
@@ -36,7 +36,7 @@ import type {
   ServerStatusV2,
   VirtualRouterArtifacts
 } from './types.js';
-import { writeClientSnapshot } from '../../../modules/pipeline/modules/provider/v2/utils/snapshot-writer.js';
+import { writeClientSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
 
 type ConvertProviderResponseFn = typeof import('rcc-llmswitch-core/dist/conversion/hub/response/provider-response.js')['convertProviderResponse'];
 type SnapshotRecorderFactory = typeof import('rcc-llmswitch-core/dist/conversion/hub/snapshot-recorder.js')['createSnapshotRecorder'];

@@ -16,8 +16,8 @@ This document replaces the old “architecture novel” with a concise set of ru
 |-------|--------|--------------|--------------------------|
 | HTTP server | `src/server/runtime/http-server/` | Express wiring, middleware, route handlers, delegating to Hub Pipeline, managing provider runtimes | Tool/route logic, manual SSE bridging, configuration munging |
 | Hub Pipeline (llmswitch-core) | `sharedmodule/llmswitch-core/dist/...` | Tool canonicalization, routing, compatibility orchestration, SSE conversion | Direct HTTP calls, auth, provider-specific behavior |
-| Provider V2 | `src/modules/pipeline/modules/provider/v2/` | Auth resolution, request shaping, error reporting, compatibility adapters | Tool extraction, routing, configuration merges |
-| Compatibility (if needed) | `src/modules/pipeline/modules/provider/v2/compatibility/` | Minimal field remap/cleanup per upstream contract | Tool decoding, fallback routing, catch-all try/catch |
+| Provider V2 | `src/providers/` | Auth resolution, request shaping, error reporting, compatibility adapters | Tool extraction, routing, configuration merges |
+| Compatibility (if needed) | `src/providers/compat/` | Minimal field remap/cleanup per upstream contract | Tool decoding, fallback routing, catch-all try/catch |
 
 ## 3. Build & Release Workflow
 

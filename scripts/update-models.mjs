@@ -1,19 +1,21 @@
 #!/usr/bin/env node
 /**
- * Update provider models from /v1/models endpoint and write into config/config.json
+ * Update provider models from /v1/models endpoint and write into the user's
+ * RouteCodex config (defaults to ~/.routecodex/config.json).
  *
  * Usage:
- *   node scripts/update-models.mjs --provider qwen-provider [--write]
+ *   node scripts/update-models.mjs --provider qwen-provider [--write] [--config path]
  */
 import fs from 'node:fs';
 import path from 'node:path';
 
 function parseArgs(argv){
-  const out={ provider:null, write:false };
+  const out={ provider:null, write:false, config:null };
   for(let i=2;i<argv.length;i++){
     const a=argv[i];
     if((a==='--provider'||a==='-p') && i+1<argv.length){ out.provider=argv[++i]; continue; }
     if(a==='--write'){ out.write=true; continue; }
+    if((a==='--config'||a==='-c') && i+1<argv.length){ out.config=argv[++i]; continue; }
     if(a==='--help'||a==='-h'){ out.help=true; }
   }
   return out;
@@ -21,7 +23,17 @@ function parseArgs(argv){
 
 function readJson(p){ try { return JSON.parse(fs.readFileSync(p,'utf8')); } catch { return null; } }
 function writeJson(p,obj){ fs.writeFileSync(p, JSON.stringify(obj,null,2)); }
-function expandHome(p){ return p.startsWith('~/')? p.replace(/^~\//, `${process.env.HOME||''}/`): p; }
+function expandHome(p){ return p && p.startsWith('~/')? p.replace(/^~\//, `${process.env.HOME||''}/`): p; }
+
+function resolveConfigPath(explicit){
+  const envPath = process.env.ROUTECODEX_CONFIG_PATH || process.env.ROUTECODEX_CONFIG;
+  const fallback = path.join(process.env.HOME || '', '.routecodex', 'config.json');
+  const candidate = expandHome(explicit || envPath || fallback);
+  if (!candidate) {
+    throw new Error('Unable to resolve configuration path');
+  }
+  return path.resolve(candidate);
+}
 
 function findQwenToken(){
   const home=process.env.HOME||'';
@@ -61,11 +73,11 @@ async function fetchModels(baseURL, auth){
 async function main(){
   const args=parseArgs(process.argv);
   if(args.help || !args.provider){
-    console.log('Usage: node scripts/update-models.mjs --provider <provider-id> [--write]');
+    console.log('Usage: node scripts/update-models.mjs --provider <provider-id> [--write] [--config <path>]');
     process.exit(args.help?0:1);
   }
 
-  const cfgPath = path.resolve('config','config.json');
+  const cfgPath = resolveConfigPath(args.config);
   const cfg = readJson(cfgPath);
   if(!cfg){ throw new Error(`Cannot read ${cfgPath}`); }
   const vr = cfg.virtualrouter || {};

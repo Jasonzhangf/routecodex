@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { GeminiHttpProvider } from '../dist/modules/pipeline/modules/provider/v2/core/gemini-http-provider.js';
+import { GeminiHttpProvider } from '../dist/providers/core/runtime/gemini-http-provider.js';
 import { fileURLToPath } from 'url';
 
 const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;

@@ -7,7 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { pathToFileURL } from 'url';
-import { ProviderFactory } from '../dist/modules/pipeline/modules/provider/v2/core/provider-factory.js';
+import { ProviderFactory } from '../dist/providers/core/runtime/provider-factory.js';
 
 const CODEx_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
 const RESPONSES_SAMPLE_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-responses');

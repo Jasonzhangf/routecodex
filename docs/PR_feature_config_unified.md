@@ -5,7 +5,7 @@
 
 ## 变更摘要（本批次）
 - 配置驱动的上下文预算（contextBudget）：
-  - 模型级：`config/config.json -> virtualrouter.providers.*.models[modelId].maxContext`
+  - 模型级：`~/.routecodex/config.json -> virtualrouter.providers.*.models[modelId].maxContext`
   - 模块默认：`config/modules.json -> modules.virtualrouter.config.contextBudget.{defaultMaxContextBytes,safetyRatio}`
   - 环境覆盖：`ROUTECODEX_CONTEXT_BUDGET_BYTES` / `RCC_CONTEXT_BUDGET_BYTES`；`RCC_CONTEXT_BUDGET_SAFETY`
 - llmswitch-core 唯一入口执行预算约束：
