@@ -1,13 +1,27 @@
 import type { ModuleDependencies } from '../../../../interfaces/pipeline-interfaces.js';
 import type { ProviderContext } from '../api/provider-types.js';
 import type { TargetMetadata } from '../../../../orchestrator/pipeline-context.js';
+import type {
+  ProviderErrorEvent,
+  ProviderErrorRuntimeMetadata
+} from 'rcc-llmswitch-core/dist/router/virtual-router/types.js';
+import { importCoreModule } from '../../../../../llmswitch/core-loader.js';
 
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore - llmswitch-core local dist does not ship ambient types for router modules
-import { providerErrorCenter } from '../../../../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/error-center.js';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore - llmswitch-core local dist does not ship ambient types for router modules
-import type { ProviderErrorEvent, ProviderErrorRuntimeMetadata } from '../../../../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/types.js';
+type ProviderErrorCenterExports = {
+  providerErrorCenter?: {
+    emit(event: ProviderErrorEvent): void;
+    subscribe?(handler: (event: ProviderErrorEvent) => void): () => void;
+  };
+};
+
+const providerErrorCenterModule = await importCoreModule<ProviderErrorCenterExports>(
+  'router/virtual-router/error-center'
+);
+const providerErrorCenterResolved = providerErrorCenterModule?.providerErrorCenter;
+if (!providerErrorCenterResolved) {
+  throw new Error('[provider-error-reporter] 无法加载 llmswitch-core providerErrorCenter（请确认 rcc-llmswitch-core 可用）');
+}
+const providerErrorCenter = providerErrorCenterResolved;
 
 type CompatContext = {
   requestId: string;

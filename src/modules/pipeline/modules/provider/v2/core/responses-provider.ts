@@ -13,8 +13,22 @@ import type { ServiceProfile } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../../../../types/common-types.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
 import { buildResponsesRequestFromChat } from '../../../../../llmswitch/bridge.js';
-// @ts-ignore - llmswitch-core dist has no ambient types
-import { ensureResponsesInstructions } from '../../../../../../../sharedmodule/llmswitch-core/dist/conversion/shared/responses-instructions.js';
+import { importCoreModule } from '../../../../../llmswitch/core-loader.js';
+
+type EnsureResponsesInstructionsFn = typeof import('rcc-llmswitch-core/dist/conversion/shared/responses-instructions.js')['ensureResponsesInstructions'];
+let ensureResponsesInstructionsFn: EnsureResponsesInstructionsFn | null = null;
+
+async function loadEnsureResponsesInstructions(): Promise<EnsureResponsesInstructionsFn> {
+  if (ensureResponsesInstructionsFn) return ensureResponsesInstructionsFn;
+  const mod = await importCoreModule<{ ensureResponsesInstructions?: EnsureResponsesInstructionsFn }>(
+    'conversion/shared/responses-instructions'
+  );
+  if (!mod?.ensureResponsesInstructions) {
+    throw new Error('[responses-provider] 无法加载 llmswitch-core ensureResponsesInstructions');
+  }
+  ensureResponsesInstructionsFn = mod.ensureResponsesInstructions;
+  return ensureResponsesInstructionsFn;
+}
 
 export class ResponsesProvider extends ChatHttpProvider {
   /**
@@ -76,8 +90,11 @@ export class ResponsesProvider extends ChatHttpProvider {
       undefined;
 
     try {
+      const ensureResponsesInstructions = await loadEnsureResponsesInstructions();
       ensureResponsesInstructions(finalBody as Record<string, unknown>);
-    } catch { /* ignore */ }
+    } catch {
+      // ignore if core module unavailable or validation fails
+    }
     if (settings.instructionsMode === 'inline') {
       (finalBody as Record<string, unknown>).__rcc_inline_system_instructions = true;
     }

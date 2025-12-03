@@ -24,7 +24,7 @@ declare module 'rcc-llmswitch-core/conversion/hub/types/chat-envelope' {
   }
 }
 
-declare module '../../../../sharedmodule/llmswitch-core/dist/conversion/hub/snapshot-recorder.js' {
+declare module 'rcc-llmswitch-core/dist/conversion/hub/snapshot-recorder.js' {
   import type { StageRecorder } from 'rcc-llmswitch-core/conversion/hub/format-adapters/index';
   import type { AdapterContext } from 'rcc-llmswitch-core/conversion/hub/types/chat-envelope';
   export function createSnapshotRecorder(context: AdapterContext, endpoint: string): StageRecorder;

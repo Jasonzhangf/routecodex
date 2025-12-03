@@ -39,29 +39,8 @@ if [ ! -d "${PKG_DIR}" ]; then
   exit 1
 fi
 
-# 为 release rcc 包优先内嵌本地 llmswitch-core tgz（独立核心仓库标准构建产物）
-CORE_REL_ROOT=""
-CORE_REL_PATH=""
-CORE_VERSION=$(node -p "require('./sharedmodule/llmswitch-core/package.json').version" 2>/dev/null || echo "")
-if [ -n "${CORE_VERSION}" ]; then
-  CORE_REL_ROOT="sharedmodule"
-  CORE_REL_PATH="sharedmodule/llmswitch-core/rcc-llmswitch-core-${CORE_VERSION}.tgz"
-  SRC_TGZ_PATH="sharedmodule/llmswitch-core/rcc-llmswitch-core-${CORE_VERSION}.tgz"
-  DST_TGZ_PATH="${PKG_DIR}/${CORE_REL_PATH}"
-
-  if [ -f "${SRC_TGZ_PATH}" ]; then
-    echo "📦 使用本地 rcc-llmswitch-core tgz: ${SRC_TGZ_PATH}，打包到 release 中..."
-    mkdir -p "$(dirname "${DST_TGZ_PATH}")"
-    cp "${SRC_TGZ_PATH}" "${DST_TGZ_PATH}"
-  else
-    echo "⚠️  未找到本地 rcc-llmswitch-core tgz (${SRC_TGZ_PATH})，release 将依赖 npm registry 中 rcc-llmswitch-core@${CORE_VERSION}"
-    CORE_REL_ROOT=""
-    CORE_REL_PATH=""
-  fi
-fi
-
 echo "🛠️  重写临时包为 rcc (release)..."
-CORE_REL_ROOT="${CORE_REL_ROOT}" CORE_REL_PATH="${CORE_REL_PATH}" node - <<'EOF' "${PKG_DIR}"
+node - <<'EOF' "${PKG_DIR}"
 const fs = require('fs');
 const path = require('path');
 const pkgDir = process.argv[2];
@@ -69,23 +48,6 @@ const pkgPath = path.join(pkgDir, 'package.json');
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 pkg.name = 'rcc';
 pkg.bin = { rcc: './dist/cli.js' };
-
-// 如果存在本地 rcc-llmswitch-core tgz，将其作为 file: 依赖并把所在根目录加入 files，确保 npm pack 时带上该文件
-const coreRelRoot = process.env.CORE_REL_ROOT;
-const coreRelPath = process.env.CORE_REL_PATH;
-
-if (coreRelPath) {
-  if (!pkg.dependencies) pkg.dependencies = {};
-  pkg.dependencies['rcc-llmswitch-core'] = `file:${coreRelPath}`;
-}
-
-if (Array.isArray(pkg.files) && coreRelRoot) {
-  const rootEntry = coreRelRoot.endsWith('/') ? coreRelRoot : coreRelRoot + '/';
-  if (!pkg.files.includes(rootEntry)) {
-    pkg.files.push(rootEntry);
-  }
-}
-
 fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
 EOF
 
@@ -156,7 +118,11 @@ verify_server_request() {
   echo "✅ 工具请求验证完成"
 }
 
-verify_server_request
+if [ "${ROUTECODEX_INSTALL_VERIFY_SKIP:-0}" = "1" ]; then
+  echo "⚠️  已设置 ROUTECODEX_INSTALL_VERIFY_SKIP=1，跳过 release 安装端到端验证"
+else
+  verify_server_request
+fi
 
 echo ""
 echo "🎉 release 安装完成！"

@@ -1,25 +1,21 @@
 import path from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
+import { importCoreModule } from './core-loader.js';
 
 type AnyRecord = Record<string, unknown>;
 
 // 单一桥接模块：这是全项目中唯一允许直接 import llmswitch-core 的地方。
 // 其它代码（pipeline/provider/server/virtual-router/snapshot）都只能通过这里暴露的统一接口访问 llmswitch-core。
-// 默认且唯一引用 sharedmodule/llmswitch-core/dist，本地缺失视为配置错误，直接 fail。
+// 默认引用 rcc-llmswitch-core（来自 npm 发布版本）。仓库开发场景可通过 scripts/link-llmswitch.mjs 将该依赖 link 到本地 sharedmodule。
 
 async function importCoreDist(subpath: string): Promise<any> {
-  const clean = subpath.replace(/\.js$/i, '');
-  const filename = `${clean}.js`;
-  // 仅允许 sharedmodule/llmswitch-core/dist
-  const __filename = fileURLToPath(import.meta.url);
-  const pkgRoot = path.resolve(path.dirname(__filename), '../../..');
-  const localDist = path.join(pkgRoot, 'sharedmodule', 'llmswitch-core', 'dist');
-  const candidate = path.join(localDist, filename);
   try {
-    const url = pathToFileURL(candidate).href;
-    return await import(url);
-  } catch {
-    throw new Error(`[llmswitch-bridge] Unable to load core module "${clean}" from ${candidate}. 请先构建 sharedmodule/llmswitch-core。`);
+    return await importCoreModule(subpath);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `[llmswitch-bridge] Unable to load core module "${subpath}". 请确认 rcc-llmswitch-core 依赖已安装（npm install）。${detail ? ` (${detail})` : ''}`
+    );
   }
 }
 

@@ -25,6 +25,7 @@ import { registerDefaultMiddleware } from './middleware.js';
 import { registerHttpRoutes } from './routes.js';
 import { mapProviderProtocol, normalizeProviderType, asRecord } from './provider-utils.js';
 import { resolveRepoRoot, loadLlmswitchModule } from './llmswitch-loader.js';
+import { importCoreModule } from '../../../modules/llmswitch/core-loader.js';
 import type {
   HubPipeline,
   HubPipelineCtor,
@@ -35,11 +36,36 @@ import type {
   ServerStatusV2,
   VirtualRouterArtifacts
 } from './types.js';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore - llmswitch-core dist does not ship ambient types
-import { convertProviderResponse } from '../../../../sharedmodule/llmswitch-core/dist/conversion/hub/response/provider-response.js';
-import { createSnapshotRecorder } from '../../../../sharedmodule/llmswitch-core/dist/conversion/hub/snapshot-recorder.js';
 import { writeClientSnapshot } from '../../../modules/pipeline/modules/provider/v2/utils/snapshot-writer.js';
+
+type ConvertProviderResponseFn = typeof import('rcc-llmswitch-core/dist/conversion/hub/response/provider-response.js')['convertProviderResponse'];
+type SnapshotRecorderFactory = typeof import('rcc-llmswitch-core/dist/conversion/hub/snapshot-recorder.js')['createSnapshotRecorder'];
+
+let convertProviderResponseFn: ConvertProviderResponseFn | null = null;
+async function loadConvertProviderResponse(): Promise<ConvertProviderResponseFn> {
+  if (convertProviderResponseFn) return convertProviderResponseFn;
+  const mod = await importCoreModule<{ convertProviderResponse?: ConvertProviderResponseFn }>(
+    'conversion/hub/response/provider-response'
+  );
+  if (!mod?.convertProviderResponse) {
+    throw new Error('[RouteCodexHttpServer] llmswitch-core 缺少 convertProviderResponse 实现');
+  }
+  convertProviderResponseFn = mod.convertProviderResponse;
+  return convertProviderResponseFn;
+}
+
+let createSnapshotRecorderFn: SnapshotRecorderFactory | null = null;
+async function loadSnapshotRecorderFactory(): Promise<SnapshotRecorderFactory> {
+  if (createSnapshotRecorderFn) return createSnapshotRecorderFn;
+  const mod = await importCoreModule<{ createSnapshotRecorder?: SnapshotRecorderFactory }>(
+    'conversion/hub/snapshot-recorder'
+  );
+  if (!mod?.createSnapshotRecorder) {
+    throw new Error('[RouteCodexHttpServer] llmswitch-core 缺少 createSnapshotRecorder 实现');
+  }
+  createSnapshotRecorderFn = mod.createSnapshotRecorder;
+  return createSnapshotRecorderFn;
+}
 
 /**
  * RouteCodex Server V2
@@ -745,6 +771,10 @@ export class RouteCodexHttpServer {
         entryEndpoint: options.entryEndpoint || entry,
         providerProtocol
       };
+      const [convertProviderResponse, createSnapshotRecorder] = await Promise.all([
+        loadConvertProviderResponse(),
+        loadSnapshotRecorderFactory()
+      ]);
       const stageRecorder = createSnapshotRecorder(adapterContext, adapterContext.entryEndpoint);
       const converted = await convertProviderResponse({
         providerProtocol,

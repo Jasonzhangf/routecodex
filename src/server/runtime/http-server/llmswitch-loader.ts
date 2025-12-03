@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
+import { importCoreModule } from '../../../modules/llmswitch/core-loader.js';
 
 function findRepoRoot(startDir: string): string {
   let dir = startDir;
@@ -21,8 +22,6 @@ export function resolveRepoRoot(currentModuleUrl: string): string {
   return findRepoRoot(dirname);
 }
 
-export async function loadLlmswitchModule<T = any>(repoRoot: string, subpath: string): Promise<T> {
-  const target = path.join(repoRoot, 'sharedmodule', 'llmswitch-core', 'dist', subpath);
-  const url = pathToFileURL(target).href;
-  return (await import(url)) as T;
+export async function loadLlmswitchModule<T = any>(_repoRoot: string, subpath: string): Promise<T> {
+  return await importCoreModule(subpath);
 }

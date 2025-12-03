@@ -116,6 +116,25 @@ async function parseResponsesSsePayload(rawText) {
 }
 
 function regeneratePipelineConfig({ port, configPath }) {
+  const skip = String(process.env.ROUTECODEX_INSTALL_SKIP_PIPELINE_REGEN || '').trim() === '1';
+  if (skip) {
+    console.warn('⚠️  跳过 pipeline 配置再生成（ROUTECODEX_INSTALL_SKIP_PIPELINE_REGEN=1）');
+    return;
+  }
+
+  let hasScript = false;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8'));
+    hasScript = Boolean(pkg?.scripts && pkg.scripts['config:core:run']);
+  } catch (error) {
+    console.warn('⚠️  读取 package.json 失败，跳过 pipeline 配置再生成:', error instanceof Error ? error.message : error);
+  }
+
+  if (!hasScript) {
+    console.warn('⚠️  package.json 未定义 config:core:run，跳过 pipeline 配置再生成');
+    return;
+  }
+
   const env = { ...process.env, ROUTECODEX_PORT: String(port), ROUTECODEX_CONFIG: configPath };
   const result = spawnSync('npm', ['run', '-s', 'config:core:run'], {
     cwd: repoRoot,
@@ -426,7 +445,8 @@ function resolveModel(config) {
   try {
     const firstRoute = config?.virtualrouter?.routing?.default?.[0];
     if (typeof firstRoute === 'string' && firstRoute.includes('.')) {
-      const [, modelPart] = firstRoute.split('.', 2);
+      const [, ...rest] = firstRoute.split('.');
+      const modelPart = rest.join('.');
       if (modelPart) return modelPart.split('__')[0];
     }
   } catch { /* ignore */ }
