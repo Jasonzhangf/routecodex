@@ -12,7 +12,7 @@ import type {
   TransformationRule,
   PipelineDebugLogger as PipelineDebugLoggerInterface
 } from '../../modules/pipeline/interfaces/pipeline-interfaces.js';
-import type { SharedPipelineRequest } from '../../modules/pipeline/types/shared-dtos.js';
+import type { SharedPipelineRequest, SharedPipelineResponse } from '../../modules/pipeline/types/shared-dtos.js';
 import type { /* TransformationEngine */ } from '../core/utils/transformation-engine.js';
 import type { UnknownObject, /* LogData */ } from '../../modules/pipeline/types/common-types.js';
 
@@ -285,7 +285,9 @@ export class QwenCompatibility implements CompatibilityModule {
   /**
    * Process outgoing response - Transform Qwen format to OpenAI format
    */
-  async processOutgoing(response: any): Promise<unknown> {
+  async processOutgoing(response: SharedPipelineResponse): Promise<SharedPipelineResponse>;
+  async processOutgoing(response: SharedPipelineResponse | Record<string, unknown>): Promise<SharedPipelineResponse>;
+  async processOutgoing(response: SharedPipelineResponse | Record<string, unknown>): Promise<SharedPipelineResponse> {
     const startTime = Date.now();
     const responseId = `response_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -315,7 +317,7 @@ export class QwenCompatibility implements CompatibilityModule {
 
     try {
       const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
-      const payload = isDto ? (response as Record<string, unknown>).data : response;
+      const payload = isDto ? (response as SharedPipelineResponse).data : response;
       this.logger.logModule(this.id, 'transform-response-start', { originalFormat: 'qwen', targetFormat: 'openai' });
 
       // Transform response back to OpenAI format
@@ -370,7 +372,17 @@ export class QwenCompatibility implements CompatibilityModule {
         responseId: typeof transformedObj.id === 'string' ? transformedObj.id : undefined
       });
 
-      return isDto ? { ...(response as Record<string, unknown>), data: transformed } : transformed;
+      if (isDto) {
+        return { ...(response as SharedPipelineResponse), data: transformed };
+      }
+      return {
+        data: transformed,
+        metadata: {
+          pipelineId: 'qwen-compatibility',
+          processingTime: totalTime,
+          stages: []
+        }
+      };
 
     } catch (error) {
       const totalTime = Date.now() - startTime;
@@ -620,7 +632,7 @@ export class QwenCompatibility implements CompatibilityModule {
         : {};
 
     // Default transformation rules for Qwen API
-    const transformationRules = [
+    const transformationRules: TransformationRule[] = [
       // Model name mapping
       {
         id: 'map-model-names',
@@ -669,7 +681,7 @@ export class QwenCompatibility implements CompatibilityModule {
       ruleCount: transformationRules.length
     });
 
-    return transformationRules as TransformationRule[];
+    return transformationRules;
   }
 
   /**

@@ -13,7 +13,7 @@ import type {
   TransformationRule,
   PipelineDebugLogger as PipelineDebugLoggerInterface
 } from '../../modules/pipeline/interfaces/pipeline-interfaces.js';
-import type { SharedPipelineRequest } from '../../modules/pipeline/types/shared-dtos.js';
+import type { SharedPipelineRequest, SharedPipelineResponse } from '../../modules/pipeline/types/shared-dtos.js';
 import type { UnknownObject, /* LogData */ } from '../../modules/pipeline/types/common-types.js';
 
 /**
@@ -154,14 +154,16 @@ export class LMStudioCompatibility implements CompatibilityModule {
   /**
    * Process outgoing response - Apply reverse compatibility transformations
    */
-  async processOutgoing(response: any): Promise<unknown> {
+  async processOutgoing(response: SharedPipelineResponse): Promise<SharedPipelineResponse>;
+  async processOutgoing(response: SharedPipelineResponse | UnknownObject): Promise<SharedPipelineResponse>;
+  async processOutgoing(response: SharedPipelineResponse | UnknownObject): Promise<SharedPipelineResponse> {
     if (!this.isInitialized) {
       throw new Error('LM Studio Compatibility module is not initialized');
     }
 
     try {
       const isDto = this.isPipelineResponse(response);
-      const payload = isDto ? (response as UnknownObject).data : response;
+      const payload = isDto ? (response as SharedPipelineResponse).data : response;
       const payloadObj = payload as UnknownObject;
       this.logger.logModule(this.id, 'processing-response-start', {
         hasToolCalls: !!payloadObj?.tool_calls,
@@ -181,7 +183,17 @@ export class LMStudioCompatibility implements CompatibilityModule {
         transformationCount: this.getResponseTransformationRules().length
       });
 
-      return isDto ? { ...(response as UnknownObject), data: transformedResponse } : transformedResponse;
+      if (isDto) {
+        return { ...(response as SharedPipelineResponse), data: transformedResponse };
+      }
+      return {
+        data: transformedResponse,
+        metadata: {
+          pipelineId: 'lmstudio-compatibility',
+          processingTime: 0,
+          stages: []
+        }
+      };
 
     } catch (error) {
       this.logger.logModule(this.id, 'processing-response-error', { error });
@@ -472,7 +484,7 @@ export class LMStudioCompatibility implements CompatibilityModule {
   /**
    * Type guard for pipeline response (has data and metadata)
    */
-  private isPipelineResponse(obj: any): obj is UnknownObject {
+  private isPipelineResponse(obj: any): obj is SharedPipelineResponse {
     return obj !== null && 
            typeof obj === 'object' && 
            'data' in obj && 

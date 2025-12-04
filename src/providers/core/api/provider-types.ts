@@ -30,30 +30,29 @@ export interface IProviderV2 extends ProviderModule {
   cleanup(): Promise<void>;
 
   // V2扩展方法
-  processIncoming(request: UnknownObject): Promise<unknown>;
+  processIncoming(request: UnknownObject): Promise<UnknownObject>;
   processOutgoing(response: UnknownObject): Promise<UnknownObject>;
 }
 
 /**
- * 支持的Provider类型
- * - 'openai'     : OpenAI Chat 兼容族
+ * 支持的Provider协议类型
+ * - 'openai'     : OpenAI Chat wire
  * - 'responses'  : OpenAI Responses wire（/v1/responses）
  * - 'anthropic'  : Anthropic Messages wire（/v1/messages）
- * - 其余为具体兼容族（glm/qwen/iflow/lmstudio）
+ * - 'gemini'     : Gemini Chat wire
+ *
+ * 注意：品牌/家族（glm、qwen、iflow 等）通过 providerId/providerFamily 表达，禁止写入 providerType。
  */
-export type ProviderType = 'openai' | 'glm' | 'qwen' | 'iflow' | 'lmstudio' | 'responses' | 'anthropic' | 'gemini';
+export type ProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini';
 
 /**
- * 服务类型映射
+ * 服务协议类型映射
  */
 export const PROVIDER_TYPE_MAP = {
   OPENAI: 'openai',
-  GLM: 'glm',
-  QWEN: 'qwen',
-  IFLOW: 'iflow',
-  LMSTUDIO: 'lmstudio',
   RESPONSES: 'responses',
-  ANTHROPIC: 'anthropic'
+  ANTHROPIC: 'anthropic',
+  GEMINI: 'gemini'
 } as const;
 
 /**
@@ -113,6 +112,7 @@ export interface ProviderRuntimeProfile {
   keyAlias?: string;
   providerType: ProviderType;
   providerFamily?: string;
+  providerProtocol?: string;
   /**
    * Upstream endpoint/base URL emitted by virtual router runtime.
    * When only endpoint is provided, host/provider should treat it as baseUrl.

@@ -7,7 +7,7 @@
 
 import type { RCCBaseModule, ErrorHandlingCenter, DebugCenter } from '../types/external-types.js';
 import type { BaseProviderConfig, BaseTransformationRule } from '../types/base-types.js';
-import type { LogData } from '../../../types/common-types.js';
+import type { LogData, UnknownObject, JsonValue } from '../../../types/common-types.js';
 import type { SharedPipelineRequest, SharedPipelineResponse, SharedPipelineError, SharedRouteRequest } from '../../../types/shared-dtos.js';
 import type {
   DebugLogEntry,
@@ -38,7 +38,7 @@ export type PipelineError = SharedPipelineError;
 /**
  * Module interface for all pipeline modules
  */
-export interface PipelineModule {
+export interface PipelineModule<TIncoming = SharedPipelineRequest, TOutgoing = SharedPipelineResponse> {
   /** Module identifier */
   readonly id: string;
   /** Module type */
@@ -54,12 +54,12 @@ export interface PipelineModule {
   /**
    * Process incoming request
    */
-  processIncoming(request: any): Promise<unknown>;
+  processIncoming(request: TIncoming): Promise<TIncoming>;
 
   /**
    * Process outgoing response
    */
-  processOutgoing(response: any): Promise<unknown>;
+  processOutgoing(response: TOutgoing): Promise<TOutgoing>;
 
   /**
    * Clean up resources
@@ -74,7 +74,7 @@ export interface ModuleConfig {
   /** Module type */
   type: string;
   /** Module-specific configuration */
-  config: Record<string, any>;
+  config: Record<string, unknown>;
   /** Enable/disable module */
   enabled?: boolean;
   /** Module priority */
@@ -88,7 +88,7 @@ export interface PipelineConfig {
   /** Pipeline identifier */
   readonly id: string;
   /** Provider configuration */
-  readonly provider: any; // ProviderConfig;
+  readonly provider: ProviderConfig;
   /** Module configurations */
   readonly modules: {
     llmSwitch: ModuleConfig;
@@ -146,9 +146,9 @@ export interface TransformationLog {
   /** Target path */
   readonly targetPath: string;
   /** Original value */
-  readonly originalValue: any;
+  readonly originalValue: JsonValue | UnknownObject;
   /** Transformed value */
-  readonly transformedValue: any;
+  readonly transformedValue: JsonValue | UnknownObject;
   /** Transformation time */
   readonly duration: number;
 }
@@ -199,7 +199,7 @@ export interface PipelineStatus {
 /**
  * LLM Switch module interface
  */
-export interface LLMSwitchModule extends PipelineModule {
+export interface LLMSwitchModule extends PipelineModule<SharedPipelineRequest, SharedPipelineResponse> {
   /** Protocol type */
   readonly protocol: string;
 
@@ -211,12 +211,12 @@ export interface LLMSwitchModule extends PipelineModule {
   /**
    * Transform request to target protocol
    */
-  transformRequest(request: any): Promise<unknown>;
+  transformRequest(request: UnknownObject): Promise<UnknownObject>;
 
   /**
    * Transform response from target protocol
    */
-  transformResponse(response: any): Promise<unknown>;
+  transformResponse(response: UnknownObject): Promise<UnknownObject>;
 }
 
 /**
@@ -240,7 +240,7 @@ export interface CompatibilityModule extends PipelineModule {
 /**
  * Provider module interface
  */
-export interface ProviderModule extends PipelineModule {
+export interface ProviderModule extends PipelineModule<UnknownObject, UnknownObject> {
   /** Provider type */
   readonly providerType: string;
 

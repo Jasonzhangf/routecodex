@@ -25,6 +25,11 @@ import {
   emitProviderError,
   buildRuntimeFromProviderContext
 } from '../utils/provider-error-reporter.js';
+import {
+  normalizeProviderFamily,
+  normalizeProviderType,
+  providerTypeToProtocol
+} from '../utils/provider-type-utils.js';
 
 /**
  * 基础Provider抽象类
@@ -64,7 +69,7 @@ export abstract class BaseProvider implements IProviderV2 {
   protected abstract getServiceProfile(): ServiceProfile;
   protected abstract createAuthProvider(): IAuthProvider;
   protected abstract preprocessRequest(request: UnknownObject): UnknownObject | Promise<UnknownObject>;
-  protected abstract postprocessResponse(response: unknown, context: ProviderContext): unknown | Promise<any>;
+  protected abstract postprocessResponse(response: unknown, context: ProviderContext): UnknownObject | Promise<UnknownObject>;
 
   // 通用实现方法
   async initialize(): Promise<void> {
@@ -86,7 +91,7 @@ export abstract class BaseProvider implements IProviderV2 {
     }
   }
 
-  async processIncoming(request: UnknownObject): Promise<unknown> {
+  async processIncoming(request: UnknownObject): Promise<UnknownObject> {
     if (!this.isInitialized) {
       throw new Error('Provider is not initialized');
     }
@@ -236,17 +241,23 @@ export abstract class BaseProvider implements IProviderV2 {
     const runtimeMetadata = extractProviderRuntimeMetadata(request);
     this.lastRuntimeMetadata = runtimeMetadata;
     const runtimeProfile = this.getRuntimeProfile();
-    const providerType = (
+    const providerType = normalizeProviderType(
       runtimeMetadata?.providerType ||
       runtimeProfile?.providerType ||
-      (this.providerType as ProviderType)
-    ) as ProviderType;
-    const providerFamily = (
-      runtimeMetadata?.providerFamily ||
-      runtimeProfile?.providerFamily ||
-      (this.providerType as ProviderType)
-    ) as ProviderType;
-    const providerProtocol = runtimeMetadata?.providerProtocol;
+      this.providerType
+    );
+    const providerFamily = normalizeProviderFamily(
+      runtimeMetadata?.providerFamily,
+      runtimeMetadata?.providerId,
+      runtimeMetadata?.providerKey,
+      runtimeProfile?.providerFamily,
+      runtimeProfile?.providerId,
+      this.config.config.providerId,
+      this.config.config.providerType
+    );
+    const providerProtocol =
+      runtimeMetadata?.providerProtocol ||
+      providerTypeToProtocol(providerType);
     const context: ProviderContext = {
       requestId: runtimeMetadata?.requestId || `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       providerType,

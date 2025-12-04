@@ -6,11 +6,12 @@
 
 import type { BaseProviderConfig } from './base-types.js';
 import type { ModuleConfig } from '../interfaces/pipeline-interfaces.js';
+import type { JsonValue, UnknownObject } from '../../../types/common-types.js';
 
 /**
  * Provider configuration interface
  */
-export interface ProviderConfig extends BaseProviderConfig {}
+export interface ProviderConfig extends BaseProviderConfig, UnknownObject {}
 
 /**
  * Provider type variants
@@ -97,7 +98,7 @@ export interface CustomProviderConfig extends ProviderConfig {
   auth: AuthConfig;
   models: Record<string, CustomModelConfig>;
   compatibility?: CustomCompatibilityConfig;
-  customSettings?: Record<string, any>;
+  customSettings?: Record<string, JsonValue | UnknownObject>;
 }
 
 /**
@@ -113,7 +114,7 @@ export type AuthConfig =
 /**
  * API key authentication configuration
  */
-export interface APIKeyAuthConfig {
+export interface APIKeyAuthConfig extends UnknownObject {
   type: 'apikey';
   apiKey: string;
   headerName?: string;
@@ -124,7 +125,7 @@ export interface APIKeyAuthConfig {
 /**
  * OAuth authentication configuration
  */
-export interface OAuthAuthConfig {
+export interface OAuthAuthConfig extends UnknownObject {
   type: 'oauth';
   clientId: string;
   clientSecret?: string;
@@ -139,7 +140,7 @@ export interface OAuthAuthConfig {
 /**
  * Bearer token authentication configuration
  */
-export interface BearerAuthConfig {
+export interface BearerAuthConfig extends UnknownObject {
   type: 'bearer';
   token: string;
   refreshUrl?: string;
@@ -149,7 +150,7 @@ export interface BearerAuthConfig {
 /**
  * Basic authentication configuration
  */
-export interface BasicAuthConfig {
+export interface BasicAuthConfig extends UnknownObject {
   type: 'basic';
   username: string;
   password: string;
@@ -158,16 +159,16 @@ export interface BasicAuthConfig {
 /**
  * Custom authentication configuration
  */
-export interface CustomAuthConfig {
+export interface CustomAuthConfig extends UnknownObject {
   type: 'custom';
   implementation: string; // path to custom auth implementation
-  config: Record<string, any>;
+  config: Record<string, unknown>;
 }
 
 /**
  * Model configuration interface
  */
-export interface BaseModelConfig {
+export interface BaseModelConfig extends UnknownObject {
   id: string;
   name: string;
   description?: string;
@@ -175,7 +176,7 @@ export interface BaseModelConfig {
   supportsStreaming: boolean;
   supportsFunctions: boolean;
   supportsVision: boolean;
-  parameters: Record<string, any>;
+  parameters: Record<string, JsonValue>;
   pricing?: {
     input: number; // per 1k tokens
     output: number; // per 1k tokens
@@ -223,16 +224,16 @@ export interface CohereModelConfig extends BaseModelConfig {
  */
 export interface CustomModelConfig extends BaseModelConfig {
   type: 'custom';
-  customParameters: Record<string, any>;
+  customParameters: Record<string, JsonValue>;
 }
 
 /**
  * Compatibility configuration interface
  */
-export interface BaseCompatibilityConfig {
+export interface BaseCompatibilityConfig extends UnknownObject {
   enabled: boolean;
-  requestMappings?: any[];
-  responseMappings?: any[];
+  requestMappings?: UnknownObject[];
+  responseMappings?: UnknownObject[];
   toolAdaptation?: boolean;
   streamingAdaptation?: boolean;
 }
@@ -278,7 +279,7 @@ export interface CohereCompatibilityConfig extends BaseCompatibilityConfig {
  */
 export interface CustomCompatibilityConfig extends BaseCompatibilityConfig {
   targetProtocol: string;
-  customMappings?: Record<string, any>;
+  customMappings?: Record<string, UnknownObject>;
 }
 
 /**
@@ -289,8 +290,8 @@ export interface AuthContext {
   token?: string;
   expiresAt?: number;
   refreshToken?: string;
-  credentials: Record<string, any>;
-  metadata?: Record<string, any>;
+  credentials: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -331,7 +332,7 @@ export interface ProviderRequestOptions {
  * Provider response interface
  */
 export interface ProviderResponse {
-  data: any;
+  data: UnknownObject | JsonValue;
   status: number;
   headers: Record<string, string>;
   metadata?: {
@@ -340,7 +341,7 @@ export interface ProviderResponse {
     tokensUsed?: number;
     model: string;
   };
-  tool_calls?: any[];
+  tool_calls?: UnknownObject[];
 }
 
 /**
@@ -349,7 +350,7 @@ export interface ProviderResponse {
 export interface ProviderError extends Error {
   type: 'authentication' | 'rate_limit' | 'timeout' | 'network' | 'validation' | 'server' | 'unknown';
   statusCode?: number;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
   retryable: boolean;
 }
 
@@ -425,7 +426,7 @@ export interface ProviderStatus {
   /** Error message if status is error */
   error?: string;
   /** Additional status information */
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -454,7 +455,7 @@ export interface ProviderContext {
   timestamp: number;
   auth: AuthContext;
   options: ProviderRequestOptions;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
 }
 
 /**
@@ -472,18 +473,18 @@ export type ProviderEventType =
 /**
  * Provider event interface
  */
-export interface ProviderEvent<T = any> {
+export interface ProviderEvent<T = UnknownObject> {
   type: ProviderEventType;
   timestamp: number;
   providerId: string;
   data: T;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 /**
  * Provider event handler
  */
-export type ProviderEventHandler<T = any> = (event: ProviderEvent<T>) => void | Promise<void>;
+export type ProviderEventHandler<T = UnknownObject> = (event: ProviderEvent<T>) => void | Promise<void>;
 
 /**
  * Provider interface
@@ -504,7 +505,7 @@ export interface Provider {
   /**
    * Send request to provider
    */
-  sendRequest(request: any, options?: ProviderRequestOptions): Promise<ProviderResponse>;
+  sendRequest(request: UnknownObject, options?: ProviderRequestOptions): Promise<ProviderResponse>;
 
   /**
    * Check provider health

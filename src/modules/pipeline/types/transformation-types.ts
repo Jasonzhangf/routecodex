@@ -6,6 +6,9 @@
 
 import type { TransformationLog } from '../interfaces/pipeline-interfaces.js';
 import type { TransformationRule as TransformationRuleInterface } from '../interfaces/pipeline-interfaces.js';
+import type { JsonValue, UnknownObject } from '../../../types/common-types.js';
+
+type TransformationData = JsonValue;
 
 /**
  * Base transformation rule interface (local copy to avoid circular dependency)
@@ -20,19 +23,19 @@ export interface BaseTransformationRule {
   /** Target path (JSON path) */
   readonly targetPath?: string;
   /** Mapping configuration */
-  readonly mapping?: Record<string, any>;
+  readonly mapping?: Record<string, JsonValue>;
   /** Default value */
-  readonly defaultValue?: any;
+  readonly defaultValue?: JsonValue;
   /** Condition for transformation */
   readonly condition?: {
     field: string;
     operator: 'equals' | 'contains' | 'exists' | 'gt' | 'lt' | 'regex';
-    value: any;
+    value: JsonValue;
   };
   /** Whether to remove source after transformation */
   readonly removeSource?: boolean;
   /** Structure configuration for structure transformations */
-  readonly structure?: Record<string, any>;
+  readonly structure?: Record<string, JsonValue>;
   /** Source paths for combine transformations */
   readonly sourcePaths?: string[];
   /** Combiner configuration for combine transformations */
@@ -73,17 +76,17 @@ export type TransformationOperation =
 /**
  * Transformation function type
  */
-export type TransformationFunction = (value: any, context: TransformationContext) => Promise<any>;
+export type TransformationFunction = (value: TransformationData, context: TransformationContext) => Promise<TransformationData>;
 
 /**
  * Transformation condition type
  */
-export type TransformationCondition = (data: any, context: TransformationContext) => Promise<boolean>;
+export type TransformationCondition = (data: TransformationData, context: TransformationContext) => Promise<boolean>;
 
 /**
  * Transformation mapping type
  */
-export type TransformationMapping = Record<string, any> | Map<string, any>;
+export type TransformationMapping = Record<string, JsonValue> | Map<string, JsonValue>;
 
 /**
  * Transformation rule variants
@@ -102,10 +105,10 @@ export type TransformationRuleVariant =
  */
 export interface MappingTransformationRule extends TransformationRule {
   transform: 'mapping';
-  mapping: Record<string, any>;
+  mapping: Record<string, JsonValue>;
   sourcePath: JSONPath;
   targetPath: JSONPath;
-  defaultValue?: any;
+  defaultValue?: JsonValue;
 }
 
 /**
@@ -148,7 +151,7 @@ export interface ConditionalTransformationRule extends TransformationRule {
   condition: {
     field: JSONPath;
     operator: 'equals' | 'contains' | 'exists' | 'gt' | 'lt' | 'regex';
-    value: any;
+    value: JsonValue;
   };
   thenRule: TransformationRuleVariant;
   elseRule?: TransformationRuleVariant;
@@ -160,7 +163,7 @@ export interface ConditionalTransformationRule extends TransformationRule {
 export interface CustomTransformationRule extends TransformationRule {
   transform: 'custom';
   customFunction: TransformationFunction;
-  context?: Record<string, any>;
+  context?: Record<string, TransformationData>;
 }
 
 /**
@@ -168,7 +171,7 @@ export interface CustomTransformationRule extends TransformationRule {
  */
 export interface StructureTransformationRule extends TransformationRule {
   transform: 'structure';
-  structure: Record<string, any>;
+  structure: Record<string, JsonValue>;
   preserveUnknown?: boolean;
   strict?: boolean;
 }
@@ -190,7 +193,7 @@ export interface TransformationContext {
     attempt: number;
   };
   /** Shared state */
-  state: Record<string, any>;
+  state: Record<string, TransformationData>;
   /** Logger function */
   logger: (message: string, level?: 'info' | 'warn' | 'error') => void;
 }
@@ -224,7 +227,7 @@ export interface TransformationValidationRule {
   /** Target path */
   targetPath: JSONPath;
   /** Validation parameters */
-  parameters: Record<string, any>;
+  parameters: Record<string, TransformationData>;
   /** Error message */
   errorMessage: string;
 }
@@ -232,7 +235,7 @@ export interface TransformationValidationRule {
 /**
  * Transformation result interface
  */
-export interface TransformationResult<T = any> {
+export interface TransformationResult<T = TransformationData> {
   /** Transformed data */
   data: T;
   /** Transformation logs */
@@ -247,7 +250,7 @@ export interface TransformationResult<T = any> {
     cacheHits: number;
     cacheMisses: number;
   };
-  tools?: any[];
+  tools?: UnknownObject[];
 }
 
 /**
@@ -261,7 +264,7 @@ export interface ValidationResult {
   /** Error message */
   errorMessage?: string;
   /** Validation context */
-  context: Record<string, any>;
+  context: Record<string, TransformationData>;
 }
 
 /**
@@ -289,9 +292,9 @@ export interface TransformationItem {
   /** Item identifier */
   id: string;
   /** Item data */
-  data: any;
+  data: TransformationData;
   /** Item metadata */
-  metadata?: Record<string, any>;
+  metadata?: Record<string, TransformationData>;
 }
 
 /**
@@ -321,7 +324,7 @@ export interface TransformationItemResult {
   /** Whether transformation was successful */
   success: boolean;
   /** Transformed data */
-  data?: any;
+  data?: TransformationData;
   /** Error message */
   error?: string;
   /** Transformation logs */
@@ -445,12 +448,12 @@ export interface TransformationEngine {
   /**
    * Apply transformation rules to data
    */
-  transform(data: any, rules: TransformationRuleVariant[], context?: Partial<TransformationContext>): Promise<TransformationResult>;
+  transform(data: TransformationData, rules: TransformationRuleVariant[], context?: Partial<TransformationContext>): Promise<TransformationResult>;
 
   /**
    * Validate data against schema
    */
-  validate(data: any, schema: TransformationSchema): Promise<ValidationResult[]>;
+  validate(data: TransformationData, schema: TransformationSchema): Promise<ValidationResult[]>;
 
   /**
    * Process transformation batch

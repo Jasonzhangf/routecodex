@@ -93,9 +93,11 @@ export class GeminiHttpProvider extends BaseProvider {
     return rebuilt as UnknownObject;
   }
 
-  protected async postprocessResponse(response: unknown, _context: ProviderContext): Promise<unknown> {
-    // 保持上游 JSON 原样返回；Composite 在响应侧仅做形状守卫（允许 candidates/content 等）
-    return response;
+  protected async postprocessResponse(response: unknown, _context: ProviderContext): Promise<UnknownObject> {
+    if (response && typeof response === 'object') {
+      return response as UnknownObject;
+    }
+    return { data: response } as UnknownObject;
   }
 
   protected async sendRequestInternal(request: UnknownObject): Promise<unknown> {

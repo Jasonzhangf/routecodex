@@ -12,7 +12,7 @@ import type {
   TransformationRule,
   PipelineDebugLogger as PipelineDebugLoggerInterface
 } from '../../modules/pipeline/interfaces/pipeline-interfaces.js';
-import type { SharedPipelineRequest } from '../../modules/pipeline/types/shared-dtos.js';
+import type { SharedPipelineRequest, SharedPipelineResponse } from '../../modules/pipeline/types/shared-dtos.js';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 
 /**
@@ -96,14 +96,16 @@ export class PassthroughCompatibility implements CompatibilityModule {
   /**
    * Process outgoing response - Pass through without transformation
    */
-  async processOutgoing(response: any): Promise<unknown> {
+  async processOutgoing(response: SharedPipelineResponse): Promise<SharedPipelineResponse>;
+  async processOutgoing(response: SharedPipelineResponse | UnknownObject): Promise<SharedPipelineResponse>;
+  async processOutgoing(response: SharedPipelineResponse | UnknownObject): Promise<SharedPipelineResponse> {
     if (!this.isInitialized) {
       throw new Error('Passthrough Compatibility module is not initialized');
     }
 
     try {
       const isDto = this.isPipelineResponse(response);
-      const payload = isDto ? (response as UnknownObject).data : response;
+      const payload = isDto ? (response as SharedPipelineResponse).data : response;
       this.logger.logModule(this.id, 'processing-response-start', { hasChoices: !!(payload as any)?.choices });
 
       // Minimal normalization to satisfy OpenAI Chat client schema
@@ -129,7 +131,18 @@ export class PassthroughCompatibility implements CompatibilityModule {
         transformationCount: 0
       });
 
-      return isDto ? { ...(response as UnknownObject), data: result } : result;
+      if (isDto) {
+        return { ...(response as SharedPipelineResponse), data: result };
+      }
+
+      return {
+        data: result,
+        metadata: {
+          pipelineId: 'passthrough-compatibility',
+          processingTime: 0,
+          stages: []
+        }
+      };
 
     } catch (error) {
       this.logger.logModule(this.id, 'processing-response-error', { error });
@@ -198,8 +211,8 @@ export class PassthroughCompatibility implements CompatibilityModule {
   /**
    * Check if object is a PipelineResponse
    */
-  private isPipelineResponse(obj: any): obj is UnknownObject {
-    return typeof obj === 'object' && obj !== null && 'data' in obj;
+  private isPipelineResponse(obj: any): obj is SharedPipelineResponse {
+    return typeof obj === 'object' && obj !== null && 'data' in obj && 'metadata' in obj;
   }
 
   /**

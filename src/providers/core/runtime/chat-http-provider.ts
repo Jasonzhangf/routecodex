@@ -231,6 +231,7 @@ export class ChatHttpProvider extends BaseProvider {
 
   protected getServiceProfile(): ServiceProfile {
     const cfg: any = (this.config as any)?.config || {};
+    const profileKey = this.resolveProfileKey(cfg);
 
     // Feature flag: 优先/强制使用 config-core 输出的 provider 行为字段
     const useConfigCoreEnv = String(
@@ -264,7 +265,9 @@ export class ChatHttpProvider extends BaseProvider {
       !!headersFromCfg;
 
     // 先从 service-profiles 取出基础 profile（用于补全缺失字段/校验）
-    const baseProfile = DynamicProfileLoader.buildServiceProfile(this.providerType);
+    const baseProfile =
+      DynamicProfileLoader.buildServiceProfile(profileKey) ||
+      DynamicProfileLoader.buildServiceProfile(this.providerType);
 
     // 如果 config-core 已提供字段，或强制要求使用 config-core，则以 config-core 为主
     if (hasConfigCoreProfile || forceConfigCoreDefaults) {
@@ -272,12 +275,12 @@ export class ChatHttpProvider extends BaseProvider {
         // 严格模式下，关键字段缺失直接 Fail Fast
         if (!baseFromCfg) {
           throw new Error(
-            `Provider config-core defaults missing baseUrl for providerType=${this.providerType}`
+            `Provider config-core defaults missing baseUrl for providerId=${profileKey}`
           );
         }
         if (!endpointFromCfg && !baseProfile?.defaultEndpoint) {
           throw new Error(
-            `Provider config-core defaults missing endpoint for providerType=${this.providerType}`
+            `Provider config-core defaults missing endpoint for providerId=${profileKey}`
           );
         }
       }
@@ -488,7 +491,8 @@ export class ChatHttpProvider extends BaseProvider {
       if (shouldRunCompat) {
         ensureRuntimeMetadata(processedRequest);
         processedRequest = await ProviderComposite.applyRequest(processedRequest, {
-          providerType: runtime?.providerFamily || runtime?.providerType || this.providerType,
+          providerType: runtime?.providerType || this.providerType,
+          providerFamily: runtime?.providerFamily || runtime?.providerId || runtime?.providerKey,
           dependencies: this.dependencies
         });
         ensureRuntimeMetadata(processedRequest);
@@ -504,7 +508,7 @@ export class ChatHttpProvider extends BaseProvider {
     return processedRequest;
   }
 
-  protected async postprocessResponse(response: unknown, context: ProviderContext): Promise<unknown> {
+  protected async postprocessResponse(response: unknown, context: ProviderContext): Promise<UnknownObject> {
     const runtime = this.getRuntimeProfile();
     // 流式短路：若上游仍返回 SSE，则统一包装为 __sse_responses，交由 HTTP 层原样透传
     try {
@@ -561,7 +565,8 @@ export class ChatHttpProvider extends BaseProvider {
       const shouldRunCompat = compatProfile !== 'none';
       if (shouldRunCompat) {
         processedResponse = await ProviderComposite.applyResponse(processedResponse, undefined, {
-          providerType: runtime?.providerFamily || runtime?.providerType || this.providerType,
+          providerType: runtime?.providerType || this.providerType,
+          providerFamily: runtime?.providerFamily || runtime?.providerId || runtime?.providerKey,
           dependencies: this.dependencies,
           runtime: (context as any)?.runtimeMetadata
         });
@@ -590,7 +595,7 @@ export class ChatHttpProvider extends BaseProvider {
           postprocess: postprocessResult.metrics
         }
       }
-    };
+    } as UnknownObject;
   }
 
   protected async sendRequestInternal(request: UnknownObject): Promise<unknown> {
@@ -775,6 +780,8 @@ export class ChatHttpProvider extends BaseProvider {
   // 私有方法
   private validateConfig(): void {
     const profile = this.serviceProfile;
+    const cfg: any = (this.config as any)?.config || {};
+    const profileKey = this.resolveProfileKey(cfg);
     const auth = this.config.config.auth;
     const authMode = this.normalizeAuthMode(auth.type);
 
@@ -782,7 +789,7 @@ export class ChatHttpProvider extends BaseProvider {
     const supportedAuthTypes = [...profile.requiredAuth, ...profile.optionalAuth];
     if (!supportedAuthTypes.includes(authMode)) {
       throw new Error(
-        `Auth type '${auth.type}' not supported for provider '${this.providerType}'. ` +
+        `Auth type '${auth.type}' not supported for provider '${profileKey}'. ` +
         `Supported types: ${supportedAuthTypes.join(', ')}`
       );
     }
@@ -938,6 +945,13 @@ export class ChatHttpProvider extends BaseProvider {
       runtimeMetadata: runtime,
       pipelineId: runtime?.pipelineId
     };
+  }
+
+  private resolveProfileKey(config: Record<string, unknown>): string {
+    const direct = typeof config?.providerId === 'string' && config.providerId.trim()
+      ? config.providerId.trim().toLowerCase()
+      : '';
+    return direct || this.providerType;
   }
 
   private normalizeAuthMode(type: unknown): 'apikey' | 'oauth' {
