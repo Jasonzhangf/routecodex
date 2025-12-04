@@ -48,23 +48,19 @@ virtualRouter 期望（关键片段）
 - `keyMappings.providers.generic_responses.key1 = "${GENERIC_RESPONSES_API_KEY}"`。
 
 本仓接线与运行时模块
-- Provider：`generic-responses`
-  - 文件：`src/modules/pipeline/modules/provider/generic-responses.ts`。
-  - 非流：POST `${baseUrl}/responses`；流式：同 URL + `Accept: text/event-stream`。
-  - 认证：`Authorization: Bearer ${GENERIC_RESPONSES_API_KEY}`；头：`OpenAI-Beta: responses-2024-12-17`（允许 env 覆盖）。
-  - 错误：原样透传上游 `{"error":{...}}`。
-  - 可选快照：`~/.routecodex/codex-samples/responses-replay/provider-out-generic_*.json`、`sse-events-<RID>.log`。
+- Provider：
+  - `src/providers/core/runtime/responses-provider.ts`：完整 Responses SSE 透传实现，负责 real-time `/responses` 请求、上游 SSE → Host JSON 的转换，以及快照写入。
+  - `src/providers/core/runtime/responses-http-provider.ts`：OpenAI Responses HTTP 直连 Provider（继承 `ChatHttpProvider`，统一通过 provider 层发送请求）。
 - LLMSwitch：`llmswitch-responses-passthrough`
-  - 文件：`src/modules/pipeline/modules/llmswitch/llmswitch-responses-passthrough.ts`。
-  - transformRequest/Response：严格透传，仅做形状校验；失败 400；不做 Responses↔Chat 转换。
+  - 逻辑位于 `sharedmodule/llmswitch-core`，Host 仅通过 `src/modules/llmswitch/bridge.ts` 间接调用，保持“llmswitch-core owns routing/tools”的约束。
 - 模块注册
-  - `src/modules/pipeline/core/pipeline-registry.ts` 注册 `generic-responses` 与 `llmswitch-responses-passthrough`。
+  - 由 llmswitch-core 的 pipeline registry 统一管理，Host 不再手动注册 Provider/LLMSwitch 组合，避免与 `bootstrapVirtualRouterConfig` 产物冲突。
 - 装配器消费
-  - `src/modules/pipeline/config/pipeline-assembler.ts` 放行上述类型（仅消费 bootstrap 产出的 virtualRouter，严禁默认回退）。
+  - 管线装配逻辑也在 llmswitch-core 内，Host 仅接收 virtualRouter + targetRuntime 并实例化 provider/runtime。
 - Handler 路由
-  - `src/server/handlers/responses.ts` 严格按 virtualRouter 配置选取 `openai.responses.generic` 管线处理 `/v1/responses`，禁用任何转换兜底。
+  - `src/server/handlers/responses-handler.ts` 按 virtualRouter pipelines 选择 `openai.responses.*` 管线处理 `/v1/responses`，禁用兜底。
 - Streaming
-  - `src/server/utils/streaming-manager.ts` 透传 Responses SSE 事件序列（不拼接、不改序）。
+  - Responses SSE 的透传/解析由 `src/providers/core/runtime/responses-provider.ts` 直接处理（Provider 层解析 SSE，再回写 JSON 响应）。
 
 校验与错误策略
 - 请求：缺失必填字段/类型不符 → 400（conversion_error），不 fallback 到 Chat。

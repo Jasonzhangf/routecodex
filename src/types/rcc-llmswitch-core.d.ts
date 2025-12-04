@@ -1,7 +1,7 @@
-declare module 'rcc-llmswitch-core' { const anyModule: any; export = anyModule; }
+declare module '@jsonstudio/llms' { const anyModule: any; export = anyModule; }
 // V1 conversion exports removed
-declare module 'rcc-llmswitch-core/guidance' { const anyModule: any; export = anyModule; }
-declare module 'rcc-llmswitch-core/conversion/shared/snapshot-hooks' {
+declare module '@jsonstudio/llms/guidance' { const anyModule: any; export = anyModule; }
+declare module '@jsonstudio/llms/conversion/shared/snapshot-hooks' {
   export function writeSnapshotViaHooks(options: {
     endpoint: string;
     stage: string;
@@ -11,21 +11,21 @@ declare module 'rcc-llmswitch-core/conversion/shared/snapshot-hooks' {
   }): Promise<void>;
 }
 
-declare module 'rcc-llmswitch-core/conversion/hub/format-adapters/index' {
+declare module '@jsonstudio/llms/conversion/hub/format-adapters/index' {
   export interface StageRecorder {
     record(stage: string, payload: unknown): void;
   }
 }
 
-declare module 'rcc-llmswitch-core/conversion/hub/types/chat-envelope' {
+declare module '@jsonstudio/llms/conversion/hub/types/chat-envelope' {
   export interface AdapterContext {
     requestId: string;
     [key: string]: unknown;
   }
 }
 
-declare module 'rcc-llmswitch-core/dist/conversion/hub/snapshot-recorder.js' {
-  import type { StageRecorder } from 'rcc-llmswitch-core/conversion/hub/format-adapters/index';
-  import type { AdapterContext } from 'rcc-llmswitch-core/conversion/hub/types/chat-envelope';
+declare module '@jsonstudio/llms/dist/conversion/hub/snapshot-recorder.js' {
+  import type { StageRecorder } from '@jsonstudio/llms/conversion/hub/format-adapters/index';
+  import type { AdapterContext } from '@jsonstudio/llms/conversion/hub/types/chat-envelope';
   export function createSnapshotRecorder(context: AdapterContext, endpoint: string): StageRecorder;
 }

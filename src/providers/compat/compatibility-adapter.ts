@@ -1,4 +1,4 @@
-import type { PipelineModule, ModuleConfig, ModuleDependencies } from '../../modules/pipeline/modules/provider/interfaces/pipeline-interfaces.js';
+import type { PipelineModule, ModuleConfig, ModuleDependencies } from '../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { CompatibilityModule, CompatibilityContext } from './compatibility-interface.js';
 
 /**

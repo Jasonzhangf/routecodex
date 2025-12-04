@@ -235,18 +235,29 @@ export abstract class BaseProvider implements IProviderV2 {
   private createContext(request: UnknownObject): ProviderContext {
     const runtimeMetadata = extractProviderRuntimeMetadata(request);
     this.lastRuntimeMetadata = runtimeMetadata;
-    const providerType = (runtimeMetadata?.providerType || this.providerType) as ProviderType;
     const runtimeProfile = this.getRuntimeProfile();
+    const providerType = (
+      runtimeMetadata?.providerType ||
+      runtimeProfile?.providerType ||
+      (this.providerType as ProviderType)
+    ) as ProviderType;
+    const providerFamily = (
+      runtimeMetadata?.providerFamily ||
+      runtimeProfile?.providerFamily ||
+      (this.providerType as ProviderType)
+    ) as ProviderType;
+    const providerProtocol = runtimeMetadata?.providerProtocol;
     const context: ProviderContext = {
       requestId: runtimeMetadata?.requestId || `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      providerType: (runtimeProfile?.providerType as ProviderType) || providerType,
+      providerType,
+      providerFamily,
       startTime: Date.now(),
       model: (request as any).model ?? runtimeMetadata?.target?.model,
       hasTools: !!(request as any).tools,
       metadata: runtimeMetadata?.metadata || {},
       providerId: runtimeMetadata?.providerId || runtimeMetadata?.providerKey || runtimeProfile?.providerId,
       providerKey: runtimeMetadata?.providerKey || runtimeProfile?.providerKey,
-      providerProtocol: runtimeMetadata?.providerProtocol,
+      providerProtocol,
       routeName: runtimeMetadata?.routeName,
       target: runtimeMetadata?.target,
       runtimeMetadata,
@@ -291,6 +302,7 @@ export abstract class BaseProvider implements IProviderV2 {
         upstreamCode,
         upstreamMessage,
         providerType: context.providerType,
+        providerFamily: context.providerFamily,
         providerId: context.providerId,
         providerProtocol: context.providerProtocol,
         providerKey: context.providerKey || runtimeProfile?.providerKey,
@@ -302,6 +314,7 @@ export abstract class BaseProvider implements IProviderV2 {
       providerId: this.id,
       providerKey: context.providerKey || runtimeProfile?.providerKey,
       providerType: context.providerType,
+      providerFamily: context.providerFamily,
       routeName: context.routeName,
       runtimeKey: runtimeProfile?.runtimeKey,
       upstreamCode,
@@ -316,12 +329,14 @@ export abstract class BaseProvider implements IProviderV2 {
     enrichedError.providerKey = context.providerKey;
     enrichedError.providerId = context.providerId;
     enrichedError.providerType = context.providerType;
+    (enrichedError as any).providerFamily = context.providerFamily;
     enrichedError.routeName = context.routeName;
     enrichedError.details = {
       ...(enrichedError.details || {}),
       ...enrichedDetails,
       providerKey: enrichedDetails.providerKey,
       providerType: context.providerType,
+      providerFamily: context.providerFamily,
       routeName: context.routeName,
       status: statusCode,
       requestId: context.requestId

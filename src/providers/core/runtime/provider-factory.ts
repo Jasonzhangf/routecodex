@@ -13,7 +13,7 @@ import { ChatHttpProvider } from './chat-http-provider.js';
 import { GeminiHttpProvider } from './gemini-http-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import crypto from 'node:crypto';
-import type { IProviderV2, ProviderRuntimeProfile, ProviderRuntimeAuth } from '../api/provider-types.js';
+import type { IProviderV2, ProviderRuntimeProfile, ProviderRuntimeAuth, ProviderType } from '../api/provider-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 
 /**
@@ -183,6 +183,8 @@ export class ProviderFactory {
     if (!baseUrl || !baseUrl.trim()) {
       throw new Error(`[ProviderFactory] runtime ${runtime.runtimeKey} missing baseUrl`);
     }
+    const providerProtocol = runtime.providerType;
+    const providerFamily = (runtime.providerFamily || providerProtocol) as ProviderType;
     const authConfig = this.mapRuntimeAuthToConfig(runtime.auth, runtime.runtimeKey);
     const endpointOverride =
       runtime.endpoint && !/^https?:\/\//i.test(runtime.endpoint.trim())
@@ -197,10 +199,11 @@ export class ProviderFactory {
     if (runtime.auth?.oauthProviderId) {
       extensions.oauthProviderId = runtime.auth.oauthProviderId;
     }
+    extensions.providerProtocol = providerProtocol;
     return {
-      type: this.mapProviderModule(runtime.providerType),
+      type: this.mapProviderModule(providerFamily),
       config: {
-        providerType: runtime.providerType,
+        providerType: providerFamily,
         baseUrl,
         auth: authConfig,
         overrides,

@@ -488,7 +488,7 @@ export class ChatHttpProvider extends BaseProvider {
       if (shouldRunCompat) {
         ensureRuntimeMetadata(processedRequest);
         processedRequest = await ProviderComposite.applyRequest(processedRequest, {
-          providerType: runtime?.providerType || this.providerType,
+          providerType: runtime?.providerFamily || runtime?.providerType || this.providerType,
           dependencies: this.dependencies
         });
         ensureRuntimeMetadata(processedRequest);
@@ -561,7 +561,7 @@ export class ChatHttpProvider extends BaseProvider {
       const shouldRunCompat = compatProfile !== 'none';
       if (shouldRunCompat) {
         processedResponse = await ProviderComposite.applyResponse(processedResponse, undefined, {
-          providerType: runtime?.providerType || this.providerType,
+          providerType: runtime?.providerFamily || runtime?.providerType || this.providerType,
           dependencies: this.dependencies,
           runtime: (context as any)?.runtimeMetadata
         });

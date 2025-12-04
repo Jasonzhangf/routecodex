@@ -1,1 +1,1 @@
-declare module 'rcc-llmswitch-core/dist/v3/index.js';
+declare module '@jsonstudio/llms/dist/v3/index.js';

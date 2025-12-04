@@ -3,7 +3,7 @@ import type { UnknownObject } from '../../../../modules/pipeline/types/common-ty
 import type { ModuleDependencies } from '../../../../modules/pipeline/types/module.types.js';
 import { BaseHook } from './base-hook.js';
 // 统一的工具结果文本提取器：保证 tool 消息 content 为非空字符串
-import { extractToolText } from '../../../../modules/pipeline/modules/provider/utils/tool-result-text.js';
+import { extractToolText } from '../../../core/utils/tool-result-text.js';
 
 /**
  * 消息接口

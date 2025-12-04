@@ -8,6 +8,7 @@ export interface ProviderRuntimeMetadata {
   providerKey?: string;
   runtimeKey?: string;
   providerType?: string;
+  providerFamily?: string;
   providerProtocol?: string;
   modelId?: string;
   metadata?: Record<string, unknown>;

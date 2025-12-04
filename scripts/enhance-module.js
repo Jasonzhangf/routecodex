@@ -71,7 +71,7 @@ COMMANDS:
 
 EXAMPLES:
   # Add enhancement to LM Studio provider
-  node enhance-module.js add src/modules/pipeline/modules/provider/lmstudio-provider-simple.ts
+  node enhance-module.js add src/providers/core/runtime/chat-http-provider.ts
 
   # Add enhancement with custom ID and type
   node enhance-module.js add ./my-module.ts my-module provider

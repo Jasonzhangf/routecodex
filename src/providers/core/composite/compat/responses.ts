@@ -1,5 +1,5 @@
 import type { CompatAdapter, CompositeContext } from '../provider-composite.js';
-import type { ModuleDependencies } from '../../../../modules/pipeline/modules/provider/interfaces/pipeline-interfaces.js';
+import type { ModuleDependencies } from '../../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { CompatibilityModule } from '../../../compat/compatibility-interface.js';
 import { CompatibilityModuleFactory } from '../../../compat/compatibility-factory.js';
 

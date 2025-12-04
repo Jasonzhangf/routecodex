@@ -211,8 +211,8 @@ export async function handleSaveUserConfig(req: Request, res: Response): Promise
       if (!v2 || typeof v2.reloadRuntime !== 'function') {
         throw new Error('RouteCodex V2 server does not expose runtime reload');
       }
-      const { userConfig: latestConfig } = await loadRouteCodexConfig(userConfigPath);
-      await v2.reloadRuntime(latestConfig);
+      const { userConfig: latestConfig, providerProfiles } = await loadRouteCodexConfig(userConfigPath);
+      await v2.reloadRuntime(latestConfig, { providerProfiles });
     } catch (reloadError: any) {
       // 配置文件已写入，但运行时重载失败，向调用方明确返回错误信息
       res.status(500).json({

@@ -1,5 +1,20 @@
 import type { ProviderProtocol } from './types.js';
 
+const CANONICAL_PROVIDER_TYPES = new Set(['openai', 'responses', 'anthropic', 'gemini']);
+const FAMILY_TO_CANONICAL: Record<string, 'openai' | 'responses' | 'anthropic' | 'gemini'> = {
+  openai: 'openai',
+  glm: 'openai',
+  qwen: 'openai',
+  iflow: 'openai',
+  lmstudio: 'openai',
+  chat: 'openai',
+  responses: 'responses',
+  'openai-responses': 'responses',
+  anthropic: 'anthropic',
+  claude: 'anthropic',
+  gemini: 'gemini'
+};
+
 export function normalizeProviderType(input?: string): string {
   if (typeof input !== 'string') {
     throw new Error('[ProviderType] providerType is required');
@@ -9,6 +24,33 @@ export function normalizeProviderType(input?: string): string {
     throw new Error('[ProviderType] providerType is required');
   }
   return value;
+}
+
+function canonicalizeProviderType(input?: string): 'openai' | 'responses' | 'anthropic' | 'gemini' {
+  if (!input || !input.trim()) {
+    return 'openai';
+  }
+  const normalized = input.trim().toLowerCase();
+  if (CANONICAL_PROVIDER_TYPES.has(normalized)) {
+    return normalized as 'openai' | 'responses' | 'anthropic' | 'gemini';
+  }
+  return FAMILY_TO_CANONICAL[normalized] || 'openai';
+}
+
+export function resolveProviderIdentity(
+  rawType?: string,
+  existingFamily?: string
+): { providerType: 'openai' | 'responses' | 'anthropic' | 'gemini'; providerFamily: string } {
+  const familyCandidate = typeof existingFamily === 'string' && existingFamily.trim()
+    ? existingFamily.trim().toLowerCase()
+    : undefined;
+  const normalizedRaw = rawType && rawType.trim() ? rawType.trim().toLowerCase() : familyCandidate;
+  const providerType = canonicalizeProviderType(normalizedRaw || 'openai');
+  const providerFamily = familyCandidate || (normalizedRaw ?? providerType) || providerType;
+  return {
+    providerType,
+    providerFamily
+  };
 }
 
 export function mapProviderModule(providerType: string): string {

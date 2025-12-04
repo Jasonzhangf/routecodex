@@ -5,10 +5,14 @@
  * without any transformations. Used when no format conversion is needed.
  */
 
-import type { CompatibilityModule, ModuleConfig, ModuleDependencies } from '../../modules/pipeline/modules/provider/interfaces/pipeline-interfaces.js';
+import type {
+  CompatibilityModule,
+  ModuleConfig,
+  ModuleDependencies,
+  TransformationRule,
+  PipelineDebugLogger as PipelineDebugLoggerInterface
+} from '../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest } from '../../modules/pipeline/types/shared-dtos.js';
-import type { TransformationRule } from '../../modules/pipeline/modules/provider/interfaces/pipeline-interfaces.js';
-import type { PipelineDebugLogger as PipelineDebugLoggerInterface } from '../../modules/pipeline/modules/provider/interfaces/pipeline-interfaces.js';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 
 /**

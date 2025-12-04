@@ -58,7 +58,12 @@ function normalizeContext(
   providerTypeFromNode?: string
 ): CompositeContext {
   const rid = runtime?.requestId || `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const family = (runtime?.providerType || providerTypeFromNode || 'openai').toLowerCase();
+  const family = (
+    runtime?.providerFamily ||
+    runtime?.providerType ||
+    providerTypeFromNode ||
+    'openai'
+  ).toLowerCase();
   const protocol = (runtime?.providerProtocol || FAMILY_TO_PROTOCOL[family] || 'openai-chat') as ProviderProtocol;
   return {
     requestId: rid,

@@ -51,6 +51,7 @@ export interface ProviderHandle {
   runtimeKey: string;
   providerId: string;
   providerType: string;
+  providerFamily: string;
   providerProtocol: ProviderProtocol;
   runtime: ProviderRuntimeProfile;
   instance: {

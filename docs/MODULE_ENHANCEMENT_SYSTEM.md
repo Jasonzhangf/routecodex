@@ -71,7 +71,7 @@ const enhanced = await configManager.enhanceModule(
 
 ```bash
 # Add enhancement to a module
-node scripts/enhance-module.js add src/modules/pipeline/modules/provider/lmstudio-provider-simple.ts
+node scripts/enhance-module.js add src/providers/core/runtime/chat-http-provider.ts
 
 # Auto-detect modules
 node scripts/enhance-module.js auto-detect
@@ -341,7 +341,7 @@ class MyModule {
 
 ```bash
 # Basic enhancement
-node scripts/enhance-module.js add src/modules/pipeline/modules/provider/my-provider.ts
+node scripts/enhance-module.js add src/providers/core/runtime/my-provider.ts
 
 # With custom module ID and type
 node scripts/enhance-module.js add ./my-module.ts my-module provider

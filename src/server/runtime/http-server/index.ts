@@ -19,11 +19,13 @@ import type { DebugCenter } from '../../../modules/pipeline/types/external-types
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import { AuthFileResolver } from '../../../config/auth-file-resolver.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
+import type { ProviderProfile, ProviderProfileCollection } from '../../../providers/profile/provider-profile.js';
+import { buildProviderProfiles } from '../../../providers/profile/provider-profile-loader.js';
 import { emitProviderError } from '../../../providers/core/utils/provider-error-reporter.js';
 import { isStageLoggingEnabled, logPipelineStage } from '../../utils/stage-logger.js';
 import { registerDefaultMiddleware } from './middleware.js';
 import { registerHttpRoutes } from './routes.js';
-import { mapProviderProtocol, normalizeProviderType, asRecord } from './provider-utils.js';
+import { mapProviderProtocol, normalizeProviderType, resolveProviderIdentity, asRecord } from './provider-utils.js';
 import { resolveRepoRoot, loadLlmswitchModule } from './llmswitch-loader.js';
 import { importCoreModule } from '../../../modules/llmswitch/core-loader.js';
 import type {
@@ -36,10 +38,11 @@ import type {
   ServerStatusV2,
   VirtualRouterArtifacts
 } from './types.js';
+import type { ProviderErrorRuntimeMetadata } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { writeClientSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
 
-type ConvertProviderResponseFn = typeof import('rcc-llmswitch-core/dist/conversion/hub/response/provider-response.js')['convertProviderResponse'];
-type SnapshotRecorderFactory = typeof import('rcc-llmswitch-core/dist/conversion/hub/snapshot-recorder.js')['createSnapshotRecorder'];
+type ConvertProviderResponseFn = typeof import('@jsonstudio/llms/dist/conversion/hub/response/provider-response.js')['convertProviderResponse'];
+type SnapshotRecorderFactory = typeof import('@jsonstudio/llms/dist/conversion/hub/snapshot-recorder.js')['createSnapshotRecorder'];
 
 let convertProviderResponseFn: ConvertProviderResponseFn | null = null;
 async function loadConvertProviderResponse(): Promise<ConvertProviderResponseFn> {
@@ -92,6 +95,7 @@ export class RouteCodexHttpServer {
   private readonly stageLoggingEnabled: boolean;
   private readonly repoRoot: string;
   private currentRouterArtifacts: VirtualRouterArtifacts | null = null;
+  private providerProfileIndex: Map<string, ProviderProfile> = new Map();
 
   constructor(config: ServerConfigV2) {
     this.config = config;
@@ -132,6 +136,96 @@ export class RouteCodexHttpServer {
       logModule: () => {},
       processDebugEvent: () => {},
       getLogs: () => []
+    };
+  }
+
+  private updateProviderProfiles(collection?: ProviderProfileCollection, rawConfig?: UnknownObject): void {
+    this.providerProfileIndex.clear();
+    const source = collection ?? this.tryBuildProfiles(rawConfig);
+    if (!source) return;
+    for (const profile of source.profiles) {
+      if (profile && typeof profile.id === 'string' && profile.id.trim()) {
+        this.providerProfileIndex.set(profile.id.trim(), profile);
+      }
+    }
+  }
+
+  private ensureProviderProfilesFromUserConfig(): void {
+    if (this.providerProfileIndex.size > 0) {
+      return;
+    }
+    const fallback = this.tryBuildProfiles(this.userConfig);
+    if (!fallback) return;
+    for (const profile of fallback.profiles) {
+      if (profile && typeof profile.id === 'string' && profile.id.trim()) {
+        this.providerProfileIndex.set(profile.id.trim(), profile);
+      }
+    }
+  }
+
+  private tryBuildProfiles(config: UnknownObject | undefined): ProviderProfileCollection | null {
+    if (!config) return null;
+    try {
+      return buildProviderProfiles(config);
+    } catch {
+      return null;
+    }
+  }
+
+  private findProviderProfile(runtime: ProviderRuntimeProfile): ProviderProfile | undefined {
+    const candidates = new Set<string>();
+    const pushCandidate = (value?: string) => {
+      if (typeof value === 'string' && value.trim()) {
+        candidates.add(value.trim());
+      }
+    };
+    pushCandidate(runtime.providerId);
+    if (runtime.providerKey && runtime.providerKey.includes('.')) {
+      pushCandidate(runtime.providerKey.split('.')[0]);
+    }
+    if (runtime.runtimeKey && runtime.runtimeKey.includes('.')) {
+      pushCandidate(runtime.runtimeKey.split('.')[0]);
+    }
+    for (const candidate of candidates) {
+      const profile = this.providerProfileIndex.get(candidate);
+      if (profile) return profile;
+    }
+    return undefined;
+  }
+
+  private applyProviderProfileOverrides(runtime: ProviderRuntimeProfile): ProviderRuntimeProfile {
+    const profile = this.findProviderProfile(runtime);
+    if (!profile) {
+      return this.canonicalizeRuntimeProvider(runtime);
+    }
+    const patched: ProviderRuntimeProfile = { ...runtime };
+    const originalFamily = patched.providerFamily || patched.providerType;
+    patched.providerFamily = originalFamily;
+    patched.providerType = profile.protocol as ProviderRuntimeProfile['providerType'];
+    if (!patched.baseUrl && profile.transport.baseUrl) {
+      patched.baseUrl = profile.transport.baseUrl;
+    }
+    if (!patched.endpoint && profile.transport.endpoint) {
+      patched.endpoint = profile.transport.endpoint;
+    }
+    if (!patched.headers && profile.transport.headers) {
+      patched.headers = profile.transport.headers;
+    }
+    if (!patched.compatibilityProfile && profile.compatibilityProfiles.length > 0) {
+      patched.compatibilityProfile = profile.compatibilityProfiles[0];
+    }
+    if (!patched.defaultModel && profile.metadata?.defaultModel) {
+      patched.defaultModel = profile.metadata.defaultModel;
+    }
+    return this.canonicalizeRuntimeProvider(patched);
+  }
+
+  private canonicalizeRuntimeProvider(runtime: ProviderRuntimeProfile): ProviderRuntimeProfile {
+    const { providerType, providerFamily } = resolveProviderIdentity(runtime.providerType, runtime.providerFamily);
+    return {
+      ...runtime,
+      providerType: providerType as ProviderRuntimeProfile['providerType'],
+      providerFamily
     };
   }
 
@@ -332,16 +426,25 @@ export class RouteCodexHttpServer {
   }
 
   // --- V1 parity helpers and attach methods ---
-  public async initializeWithUserConfig(userConfig: any): Promise<void> {
+  public async initializeWithUserConfig(
+    userConfig: any,
+    context?: { providerProfiles?: ProviderProfileCollection }
+  ): Promise<void> {
+    this.updateProviderProfiles(context?.providerProfiles, userConfig);
     await this.setupRuntime(userConfig);
   }
 
-  public async reloadRuntime(userConfig: any): Promise<void> {
+  public async reloadRuntime(
+    userConfig: any,
+    context?: { providerProfiles?: ProviderProfileCollection }
+  ): Promise<void> {
+    this.updateProviderProfiles(context?.providerProfiles, userConfig);
     await this.setupRuntime(userConfig);
   }
 
   private async setupRuntime(userConfig: any): Promise<void> {
     this.userConfig = asRecord(userConfig);
+    this.ensureProviderProfilesFromUserConfig();
     const routerInput = this.resolveVirtualRouterInput(this.userConfig);
     const bootstrapArtifacts = await this.bootstrapVirtualRouter(routerInput);
     this.currentRouterArtifacts = bootstrapArtifacts;
@@ -374,7 +477,8 @@ export class RouteCodexHttpServer {
       const runtimeKey = runtime.runtimeKey || providerKey;
       if (!this.providerHandles.has(runtimeKey)) {
         const resolvedRuntime = await this.materializeRuntimeProfile(runtime);
-        const handle = await this.createProviderHandle(runtimeKey, resolvedRuntime);
+        const patchedRuntime = this.applyProviderProfileOverrides(resolvedRuntime);
+        const handle = await this.createProviderHandle(runtimeKey, patchedRuntime);
         this.providerHandles.set(runtimeKey, handle);
       }
       this.providerKeyToRuntimeKey.set(providerKey, runtimeKey);
@@ -385,18 +489,20 @@ export class RouteCodexHttpServer {
     runtimeKey: string,
     runtime: ProviderRuntimeProfile
   ): Promise<ProviderHandle> {
-    const providerType = normalizeProviderType(runtime.providerType);
+    const protocolType = normalizeProviderType(runtime.providerType);
+    const providerFamily = runtime.providerFamily || protocolType;
     const providerProtocol =
       (typeof runtime.outboundProfile === 'string' && runtime.outboundProfile.trim()
         ? (runtime.outboundProfile.trim() as ProviderProtocol)
-        : undefined) ?? mapProviderProtocol(providerType);
+        : undefined) ?? mapProviderProtocol(protocolType);
     const instance = ProviderFactory.createProviderFromRuntime(runtime, this.getModuleDependencies());
     await instance.initialize();
     const providerId = runtime.providerId || runtimeKey.split('.')[0];
     return {
       runtimeKey,
       providerId,
-      providerType,
+      providerType: protocolType,
+      providerFamily,
       providerProtocol,
       runtime,
       instance
@@ -406,11 +512,12 @@ export class RouteCodexHttpServer {
   private async materializeRuntimeProfile(runtime: ProviderRuntimeProfile): Promise<ProviderRuntimeProfile> {
     const auth = await this.resolveRuntimeAuth(runtime);
     const baseUrl = this.normalizeRuntimeBaseUrl(runtime);
-    const providerType = normalizeProviderType(runtime.providerType);
+    const identity = resolveProviderIdentity(runtime.providerType, runtime.providerFamily);
     return {
       ...runtime,
       ...(baseUrl ? { baseUrl } : {}),
-      providerType,
+      providerType: identity.providerType as ProviderRuntimeProfile['providerType'],
+      providerFamily: identity.providerFamily,
       auth
     };
   }
@@ -593,7 +700,9 @@ export class RouteCodexHttpServer {
     this.logStage('provider.prepare', input.requestId, {
       providerKey: target.providerKey,
       runtimeKey,
-      protocol: providerProtocol
+      protocol: providerProtocol,
+      providerType: handle.providerType,
+      providerFamily: handle.providerFamily
     });
 
     attachProviderRuntimeMetadata(providerPayload, {
@@ -601,6 +710,7 @@ export class RouteCodexHttpServer {
       providerId: handle.providerId,
       providerKey: target.providerKey,
       providerType: handle.providerType,
+      providerFamily: handle.providerFamily,
       providerProtocol,
       pipelineId: target.providerKey,
       routeName: pipelineResult.routingDecision?.routeName,
@@ -612,7 +722,9 @@ export class RouteCodexHttpServer {
     this.logStage('provider.send.start', input.requestId, {
       providerKey: target.providerKey,
       runtimeKey,
-      protocol: providerProtocol
+      protocol: providerProtocol,
+      providerType: handle.providerType,
+      providerFamily: handle.providerFamily
     });
 
     try {
@@ -622,7 +734,9 @@ export class RouteCodexHttpServer {
         : undefined;
       this.logStage('provider.send.completed', input.requestId, {
         providerKey: target.providerKey,
-        status: responseStatus
+        status: responseStatus,
+        providerType: handle.providerType,
+        providerFamily: handle.providerFamily
       });
       const normalized = this.normalizeProviderResponse(providerResponse);
       return await this.convertProviderResponseIfNeeded({
@@ -638,22 +752,26 @@ export class RouteCodexHttpServer {
     } catch (error) {
       this.logStage('provider.send.error', input.requestId, {
         providerKey: target.providerKey,
-        message: error instanceof Error ? error.message : String(error ?? 'Unknown error')
+        message: error instanceof Error ? error.message : String(error ?? 'Unknown error'),
+        providerType: handle.providerType,
+        providerFamily: handle.providerFamily
       });
+      const runtimeMetadata: ProviderErrorRuntimeMetadata & { providerFamily?: string } = {
+        requestId: input.requestId,
+        providerKey: target.providerKey,
+        providerId: handle.providerId,
+        providerType: handle.providerType,
+        providerProtocol,
+        routeName: pipelineResult.routingDecision?.routeName,
+        pipelineId: target.providerKey,
+        runtimeKey,
+        target
+      };
+      runtimeMetadata.providerFamily = handle.providerFamily;
       emitProviderError({
         error,
         stage: 'provider.send',
-        runtime: {
-          requestId: input.requestId,
-          providerKey: target.providerKey,
-          providerId: handle.providerId,
-          providerType: handle.providerType,
-          providerProtocol,
-          routeName: pipelineResult.routingDecision?.routeName,
-          pipelineId: target.providerKey,
-          runtimeKey,
-          target
-        },
+        runtime: runtimeMetadata,
         dependencies: this.getModuleDependencies()
       });
       throw error;

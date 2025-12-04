@@ -4,7 +4,7 @@ import type { TargetMetadata } from '../../../modules/pipeline/orchestrator/pipe
 import type {
   ProviderErrorEvent,
   ProviderErrorRuntimeMetadata
-} from 'rcc-llmswitch-core/dist/router/virtual-router/types.js';
+} from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { importCoreModule } from '../../../modules/llmswitch/core-loader.js';
 
 type ProviderErrorCenterExports = {
@@ -19,7 +19,7 @@ const providerErrorCenterModule = await importCoreModule<ProviderErrorCenterExpo
 );
 const providerErrorCenterResolved = providerErrorCenterModule?.providerErrorCenter;
 if (!providerErrorCenterResolved) {
-  throw new Error('[provider-error-reporter] 无法加载 llmswitch-core providerErrorCenter（请确认 rcc-llmswitch-core 可用）');
+  throw new Error('[provider-error-reporter] 无法加载 llmswitch-core providerErrorCenter（请确认 @jsonstudio/llms 可用）');
 }
 const providerErrorCenter = providerErrorCenterResolved;
 
@@ -28,6 +28,7 @@ type CompatContext = {
   providerKey?: string;
   providerId?: string;
   providerType?: string;
+  providerFamily?: string;
   providerProtocol?: string;
   routeName?: string;
   pipelineId?: string;
@@ -78,6 +79,7 @@ export function emitProviderError(options: EmitOptions): void {
       requestId: options.runtime.requestId,
       providerKey: options.runtime.providerKey,
       providerType: options.runtime.providerType,
+      providerFamily: (options.runtime as any)?.providerFamily,
       routeName: options.runtime.routeName,
       metadata: {
         status,
@@ -104,6 +106,7 @@ export function buildRuntimeFromProviderContext(ctx: ProviderContext): ProviderE
     target: ctx.target as any
   };
   (runtime as any).runtimeKey = ctx.runtimeMetadata?.runtimeKey || (ctx.target as any)?.runtimeKey;
+  (runtime as any).providerFamily = ctx.providerFamily;
   return runtime;
 }
 
@@ -119,6 +122,7 @@ export function buildRuntimeFromCompatContext(ctx: CompatContext): ProviderError
     target: ctx.target as any
   };
   (runtime as any).runtimeKey = ctx.target && typeof ctx.target === 'object' ? (ctx.target as any).runtimeKey : undefined;
+  (runtime as any).providerFamily = ctx.providerFamily || ctx.providerType;
   return runtime;
 }
 

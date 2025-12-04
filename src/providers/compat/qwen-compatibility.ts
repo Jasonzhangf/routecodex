@@ -5,10 +5,15 @@
  * Implements protocol translation and tool calling format conversion.
  */
 
-import type { CompatibilityModule, ModuleConfig, ModuleDependencies, TransformationRule } from '../../modules/pipeline/modules/provider/interfaces/pipeline-interfaces.js';
+import type {
+  CompatibilityModule,
+  ModuleConfig,
+  ModuleDependencies,
+  TransformationRule,
+  PipelineDebugLogger as PipelineDebugLoggerInterface
+} from '../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { SharedPipelineRequest } from '../../modules/pipeline/types/shared-dtos.js';
-import type { /* TransformationEngine */ } from '../../modules/pipeline/modules/provider/utils/transformation-engine.js';
-import type { PipelineDebugLogger as PipelineDebugLoggerInterface } from '../../modules/pipeline/modules/provider/interfaces/pipeline-interfaces.js';
+import type { /* TransformationEngine */ } from '../core/utils/transformation-engine.js';
 import type { UnknownObject, /* LogData */ } from '../../modules/pipeline/types/common-types.js';
 
 /**

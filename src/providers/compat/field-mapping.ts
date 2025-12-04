@@ -6,10 +6,15 @@
  * combination, and conditional transformations.
  */
 
-import type { CompatibilityModule, ModuleConfig, ModuleDependencies, TransformationRule } from '../../modules/pipeline/modules/provider/interfaces/pipeline-interfaces.js';
-import { TransformationEngine } from '../../modules/pipeline/modules/provider/utils/transformation-engine.js';
+import type {
+  CompatibilityModule,
+  ModuleConfig,
+  ModuleDependencies,
+  TransformationRule
+} from '../../modules/pipeline/interfaces/pipeline-interfaces.js';
+import { TransformationEngine } from '../core/utils/transformation-engine.js';
 import type { SharedPipelineRequest } from '../../modules/pipeline/types/shared-dtos.js';
-import { PipelineDebugLogger } from '../../modules/pipeline/modules/provider/utils/debug-logger.js';
+import { PipelineDebugLogger } from '../core/utils/debug-logger.js';
 
 /**
  * Field Mapping Compatibility Module

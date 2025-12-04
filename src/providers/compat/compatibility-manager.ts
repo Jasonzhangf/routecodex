@@ -3,6 +3,7 @@ import type { UnknownObject } from '../../modules/pipeline/types/common-types.js
 import type { ModuleDependencies } from '../../modules/pipeline/types/module.types.js';
 import type { CompatibilityModuleConfig, CompatibilityModuleInstance } from './compatibility-factory.js';
 import { CompatibilityModuleFactory } from './compatibility-factory.js';
+import { resolveCompatSearchDirs, loadCompatibilityModulesFromDirs } from './compat-directory-loader.js';
 
 /**
  * 兼容性模块管理器
@@ -25,6 +26,8 @@ export class CompatibilityManager {
 
     // 注册内置模块类型
     this.registerBuiltinModules();
+    const searchDirs = resolveCompatSearchDirs();
+    await loadCompatibilityModulesFromDirs(searchDirs, this.dependencies.logger);
 
     this.isInitialized = true;
     this.dependencies.logger?.logModule('compatibility-manager', 'initialized', {

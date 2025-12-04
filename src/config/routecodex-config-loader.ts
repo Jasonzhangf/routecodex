@@ -2,12 +2,15 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { resolveRouteCodexConfigPath } from './config-paths.js';
+import { buildProviderProfiles } from '../providers/profile/provider-profile-loader.js';
+import type { ProviderProfileCollection } from '../providers/profile/provider-profile.js';
 
 type UnknownRecord = Record<string, unknown>;
 
 export interface LoadedRouteCodexConfig {
   configPath: string;
   userConfig: UnknownRecord;
+  providerProfiles: ProviderProfileCollection;
 }
 
 export async function loadRouteCodexConfig(explicitPath?: string): Promise<LoadedRouteCodexConfig> {
@@ -22,9 +25,12 @@ export async function loadRouteCodexConfig(explicitPath?: string): Promise<Loade
     userConfig.virtualrouter = { providers, routing };
   }
 
+  const providerProfiles = buildProviderProfiles(userConfig);
+
   return {
     configPath,
-    userConfig
+    userConfig,
+    providerProfiles
   };
 }
 

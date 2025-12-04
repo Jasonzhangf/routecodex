@@ -1,9 +1,9 @@
-import type { ModuleConfig } from '../../modules/pipeline/modules/provider/interfaces/pipeline-interfaces.js';
-import type { PipelineModule } from '../../modules/pipeline/modules/provider/interfaces/pipeline-interfaces.js';
+import type { ModuleConfig, PipelineModule } from '../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { ModuleDependencies } from '../../modules/pipeline/types/module.types.js';
 import type { SharedPipelineRequest, SharedPipelineResponse } from '../../modules/pipeline/types/shared-dtos.js';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import { CompatibilityManager } from './compatibility-manager.js';
+import { resolveCompatibilityModuleTypes } from './standard-compatibility-utils.js';
 // Ensure built-in compatibility submodules (legacy path) register with the factory
 import './index.js';
 
@@ -33,24 +33,33 @@ export class StandardCompatibility implements PipelineModule {
     this.manager = new CompatibilityManager(this.deps);
     await this.manager.initialize();
 
-    // 仅保留 legacy 子模块路径：按 moduleType 通过工厂创建子模块（保持 V1 行为）
     try {
       const cc: any = (this.config as any)?.config || {};
-      const moduleType: string | undefined = typeof cc.moduleType === 'string' && cc.moduleType.trim() ? String(cc.moduleType).trim() : undefined;
-      const moduleCfg: Record<string, unknown> = (cc.moduleConfig && typeof cc.moduleConfig === 'object') ? (cc.moduleConfig as Record<string, unknown>) : {};
-      const providerType: string = typeof cc.providerType === 'string' ? String(cc.providerType) : (moduleType || 'generic');
-
-      const createCfg: any = {
-        id: `${moduleType || 'compat'}-${Date.now()}`,
-        type: moduleType || 'passthrough-compatibility',
-        providerType,
-        enabled: true,
-        priority: 1,
-        config: moduleCfg
-      };
-      const moduleId = await this.manager.createModule(createCfg);
-      this.loadedModuleIds.push(moduleId);
-      this.deps.logger?.logModule(this.id, 'module-loaded', { moduleId, moduleType, providerType });
+      const moduleCfg: Record<string, unknown> =
+        cc.moduleConfig && typeof cc.moduleConfig === 'object'
+          ? (cc.moduleConfig as Record<string, unknown>)
+          : {};
+      const providerType: string =
+        typeof cc.providerType === 'string' && cc.providerType.trim()
+          ? cc.providerType.trim()
+          : 'generic';
+      const moduleTypes = resolveCompatibilityModuleTypes(cc);
+      if (moduleTypes.length === 0) {
+        this.deps.logger?.logModule(this.id, 'compatibility-skipped', { reason: 'no-modules-declared' });
+      }
+      for (const moduleType of moduleTypes) {
+        const createCfg: any = {
+          id: `${moduleType}-${Date.now()}`,
+          type: moduleType,
+          providerType,
+          enabled: true,
+          priority: 1,
+          config: moduleCfg
+        };
+        const moduleId = await this.manager.createModule(createCfg);
+        this.loadedModuleIds.push(moduleId);
+        this.deps.logger?.logModule(this.id, 'module-loaded', { moduleId, moduleType, providerType });
+      }
       this.isReady = true;
     } catch (error) {
       this.deps.logger?.logError?.(error as Error, { component: 'StandardCompatibility', stage: 'initialize' });

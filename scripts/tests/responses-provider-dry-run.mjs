@@ -1,10 +1,6 @@
 #!/usr/bin/env node
 /**
- * Responses provider dry-run harness.
- * Loads a provider config (default ~/.routecodex/provider/c4m/config.v1.json),
- * instantiates the Responses provider, and runs preprocessRequest to inspect
- * the sanitized payload (before HTTP send). Useful for verifying compatibility
- * stripping (e.g. max_output_tokens) without touching upstream APIs.
+ * Responses provider dry-run harness powered by the unified debug module.
  */
 
 import fs from 'node:fs';
@@ -14,12 +10,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../..');
 
-const ProviderFactory = (await import(pathToFileURL(
-  path.join(ROOT, 'dist/providers/core/runtime/provider-factory.js')
-).href)).ProviderFactory;
-const { attachProviderRuntimeMetadata, extractProviderRuntimeMetadata } = await import(pathToFileURL(
-  path.join(ROOT, 'dist/providers/core/runtime/provider-runtime-metadata.js')
-).href);
+const { createDebugToolkit } = await import(
+  pathToFileURL(path.join(ROOT, 'dist/debug/index.js')).href
+);
 
 function usage(err) {
   const msg = err ? `❌ ${err}\n` : '';
@@ -43,7 +36,6 @@ const runtime = {
   runtimeKey: `${providerId}.dry`,
   providerId,
   providerKey: `${providerId}.dry`,
-  keyAlias: 'dry',
   providerType: (providerDef.type || 'openai').toLowerCase(),
   endpoint: providerDef.baseURL || providerDef.baseUrl || providerDef.endpoint || 'https://example.local/v1',
   auth: {
@@ -54,33 +46,6 @@ const runtime = {
   outboundProfile: providerDef.type === 'responses' ? 'openai-responses' : 'openai-chat',
   defaultModel: modelId
 };
-
-const dependencies = {
-  logger: {
-    logModule: (module, event, data) => {
-      if (process.env.DRY_LOG_VERBOSE === '1') {
-        console.log(`[${module}] ${event}`, data || '');
-      }
-    },
-    logError: (error, ctx) => console.error('[dry-run] logError', error.message, ctx || {}),
-    logInfo: (msg, data) => {
-      if (process.env.DRY_LOG_VERBOSE === '1') {
-        console.log('[dry-run]', msg, data || {});
-      }
-    },
-    logProviderRequest: () => {},
-    logProviderResponse: () => {}
-  },
-  errorHandlingCenter: {
-    handleError: () => {}
-  },
-  debugCenter: {
-    log: () => {}
-  }
-};
-
-const provider = ProviderFactory.createProviderFromRuntime(runtime, dependencies);
-await provider.initialize();
 
 function buildSampleRequest() {
   return {
@@ -107,7 +72,7 @@ function buildSampleRequest() {
 }
 
 const request = buildSampleRequest();
-attachProviderRuntimeMetadata(request, {
+const metadata = {
   requestId: `dry-run-${Date.now()}`,
   providerId: runtime.providerId,
   providerKey: runtime.providerKey,
@@ -115,7 +80,7 @@ attachProviderRuntimeMetadata(request, {
   providerProtocol: runtime.outboundProfile === 'openai-responses' ? 'openai-responses' : 'openai-chat',
   routeName: 'default',
   target: {
-    providerKey: `${runtime.providerId}.${runtime.keyAlias}.${modelId}`,
+    providerKey: `${runtime.providerId}.dry.${modelId}`,
     providerType: runtime.providerType,
     compatibilityProfile: runtime.compatibilityProfile,
     runtimeKey: runtime.runtimeKey,
@@ -124,14 +89,18 @@ attachProviderRuntimeMetadata(request, {
   metadata: {
     stream: false
   }
+};
+
+const toolkit = createDebugToolkit({ snapshotDirectory: path.join(ROOT, 'logs', 'debug') });
+const dryRunner = toolkit.dryRunner;
+
+const result = await dryRunner.runProviderPreprocess({
+  runtime,
+  request,
+  metadata,
+  sessionId: process.env.DRY_RUN_SESSION_ID
 });
 
-console.log('runtime metadata detected before preprocess:', extractProviderRuntimeMetadata(request));
-if (typeof provider.createContext === 'function') {
-  provider.createContext(request);
-}
-const processed = await provider.preprocessRequest(request);
-console.log('runtime metadata after preprocess:', extractProviderRuntimeMetadata(processed));
-const body = processed?.data || processed;
+const body = result.processed?.data || result.processed;
 console.log('--- Sanitized request body ---');
 console.log(JSON.stringify(body, null, 2));

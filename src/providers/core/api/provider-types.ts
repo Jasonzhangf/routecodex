@@ -112,6 +112,7 @@ export interface ProviderRuntimeProfile {
   providerKey?: string;
   keyAlias?: string;
   providerType: ProviderType;
+  providerFamily?: string;
   /**
    * Upstream endpoint/base URL emitted by virtual router runtime.
    * When only endpoint is provided, host/provider should treat it as baseUrl.
@@ -131,6 +132,7 @@ export interface ProviderRuntimeProfile {
 export interface ProviderContext {
   requestId: string;
   providerType: ProviderType;
+  providerFamily?: string;
   startTime: number;
   model?: string;
   hasTools?: boolean;

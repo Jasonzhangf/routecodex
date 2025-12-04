@@ -3,7 +3,7 @@ import type { ModuleDependencies } from '../../../../modules/pipeline/types/modu
 import type { CompatibilityContext } from '../../compatibility-interface.js';
 import { GLMFieldMappingProcessor } from '../field-mapping/field-mapping-processor.js';
 import { BaseCompatibility } from '../../base-compatibility.js';
-import { sanitizeAndValidateOpenAIChat, type PreflightResult } from '../../../../modules/pipeline/modules/provider/utils/preflight-validator.js';
+import { sanitizeAndValidateOpenAIChat, type PreflightResult } from '../../../core/utils/preflight-validator.js';
 
 /**
  * GLM处理配置接口

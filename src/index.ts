@@ -145,7 +145,7 @@ class RouteCodexApp {
       const userConfigPath = pickUserConfigPath();
       this.configPath = userConfigPath;
 
-      const { userConfig, configPath: resolvedConfigPath } = await loadRouteCodexConfig(userConfigPath);
+      const { userConfig, configPath: resolvedConfigPath, providerProfiles } = await loadRouteCodexConfig(userConfigPath);
       this.configPath = resolvedConfigPath;
 
       if (!process.env.ROUTECODEX_STAGE_LOG || process.env.ROUTECODEX_STAGE_LOG.trim() === '') {
@@ -179,7 +179,7 @@ class RouteCodexApp {
       const hooksOff = hooksEnv === '0' || hooksEnv === 'false' || hooksEnv === 'no';
       const hooksOn = !hooksOff;
       this.httpServer = new RouteCodexHttpServer({ server: { host: bindHost, port: bindPort, useV2: true }, logging: { level: 'debug', enableConsole: true }, providers: {}, v2Config: { enableHooks: hooksOn } }) as any;
-      await (this.httpServer as any).initializeWithUserConfig(userConfig);
+      await (this.httpServer as any).initializeWithUserConfig(userConfig, { providerProfiles });
 
       // 4.1 校验 virtualrouter 配置
       const vrSection = (userConfig as any)?.virtualrouter;

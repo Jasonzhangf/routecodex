@@ -31,10 +31,10 @@
 3) Pass‑Through Provider（直通转发）
 - 目标地址为 `targetUrl + path`，默认 `targetUrl` 指向 OpenAI 官方 API（如未通过构造参数覆盖）：
   - 默认取值位置：`src/server/protocol-handler.ts:89`
-- Chat 请求通过 `forwardRequest('/chat/completions', ...)` 直接转发：
-  - `src/providers/pass-through-provider.ts:154`
+- Chat 请求通过 Provider 层 `forwardRequest('/chat/completions', ...)` 直接转发：
+  - `src/providers/core/runtime/chat-http-provider.ts:154`
 - 实际发起 HTTP 请求与头处理：
-  - `src/providers/pass-through-provider.ts:520`
+  - `src/providers/core/runtime/chat-http-provider.ts:520`
 - 如果原始请求头中带授权信息，会被透传。
 
 4) 流式（SSE）
@@ -64,11 +64,10 @@
   - 现状：HTTP 服务未调用。
 
 - Provider（标准 HTTP 通信、无格式转换）
-  - 已有：LM Studio Provider、Qwen HTTP Provider 等。
-    - `src/modules/pipeline/modules/provider/lmstudio-provider.ts:15`
-    - `src/modules/pipeline/modules/provider/qwen-http-provider.ts:15`
-  - 现状：HTTP 路径未使用这些模块化 Provider，而是使用独立的 `PassThroughProvider`：
-    - `src/providers/pass-through-provider.ts`
+  - 已有：统一的 Chat/Responses Provider 实现。
+    - `src/providers/core/runtime/chat-http-provider.ts:15`
+    - `src/providers/core/runtime/responses-http-provider.ts:15`
+  - 现状：HTTP 路径应直接复用上述 Provider（由 Hub Pipeline 装配器管理），避免额外的直连/PassThrough 实现。
 
 - 流水线编排
   - 已有：`BasePipeline` 将 LLM Switch → Workflow → Compatibility → Provider 串联，并在响应端做反向处理：
@@ -152,13 +151,13 @@
   - 响应写回：`src/server/protocol-handler.ts:269`
 
 - 直通 Provider
-  - 转发与 fetch：`src/providers/pass-through-provider.ts:520`
+  - 转发与 fetch：`src/providers/core/runtime/chat-http-provider.ts:520`
 
 - 流水线（已实现但未接入 HTTP 路径）
   - BasePipeline 主链路：`src/modules/pipeline/core/base-pipeline.ts:119`
   - LLM Switch（OpenAI 直通）：`src/modules/pipeline/modules/llmswitch/openai-passthrough.ts:15`
   - 兼容层（LM Studio）：`src/providers/compat/lmstudio-compatibility.ts:16`
-  - Provider（LM Studio）：`src/modules/pipeline/modules/provider/lmstudio-provider.ts:15`
+  - Provider（Chat/Responses）：`src/providers/core/runtime/chat-http-provider.ts:15`
 - 智能选择（格式识别/选择）：`src/server/http-server.ts` 提供的 `ConfigRequestClassifier` + RR 组合逻辑
 
 - Virtual Router 与分类
