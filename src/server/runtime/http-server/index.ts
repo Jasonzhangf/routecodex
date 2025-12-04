@@ -236,6 +236,33 @@ export class RouteCodexHttpServer {
     logPipelineStage(stage, requestId, details);
   }
 
+  private extractProviderModel(payload?: Record<string, unknown>): string | undefined {
+    if (!payload) {
+      return undefined;
+    }
+    const source =
+      payload.data && typeof payload.data === 'object'
+        ? (payload.data as Record<string, unknown>)
+        : payload;
+    const raw = (source as Record<string, unknown>).model;
+    if (typeof raw === 'string' && raw.trim()) {
+      return raw.trim();
+    }
+    return undefined;
+  }
+
+  private buildProviderLabel(providerKey?: string, model?: string): string | undefined {
+    const key = typeof providerKey === 'string' && providerKey.trim() ? providerKey.trim() : undefined;
+    const modelId = typeof model === 'string' && model.trim() ? model.trim() : undefined;
+    if (!key && !modelId) {
+      return undefined;
+    }
+    if (key && modelId) {
+      return `${key}.${modelId}`;
+    }
+    return key || modelId;
+  }
+
   private normalizeAuthType(input: unknown): 'apikey' | 'oauth' {
     const value = typeof input === 'string' ? input.toLowerCase() : '';
     if (value.includes('oauth')) {
@@ -697,12 +724,17 @@ export class RouteCodexHttpServer {
       (target.outboundProfile as ProviderProtocol) ||
       handle.providerProtocol;
 
+    const providerModel = this.extractProviderModel(providerPayload);
+    const providerLabel = this.buildProviderLabel(target.providerKey, providerModel);
+
     this.logStage('provider.prepare', input.requestId, {
       providerKey: target.providerKey,
       runtimeKey,
       protocol: providerProtocol,
       providerType: handle.providerType,
-      providerFamily: handle.providerFamily
+      providerFamily: handle.providerFamily,
+      model: providerModel,
+      providerLabel
     });
 
     attachProviderRuntimeMetadata(providerPayload, {
@@ -724,7 +756,9 @@ export class RouteCodexHttpServer {
       runtimeKey,
       protocol: providerProtocol,
       providerType: handle.providerType,
-      providerFamily: handle.providerFamily
+      providerFamily: handle.providerFamily,
+      model: providerModel,
+      providerLabel
     });
 
     try {
@@ -736,7 +770,9 @@ export class RouteCodexHttpServer {
         providerKey: target.providerKey,
         status: responseStatus,
         providerType: handle.providerType,
-        providerFamily: handle.providerFamily
+        providerFamily: handle.providerFamily,
+        model: providerModel,
+        providerLabel
       });
       const normalized = this.normalizeProviderResponse(providerResponse);
       return await this.convertProviderResponseIfNeeded({
@@ -754,7 +790,9 @@ export class RouteCodexHttpServer {
         providerKey: target.providerKey,
         message: error instanceof Error ? error.message : String(error ?? 'Unknown error'),
         providerType: handle.providerType,
-        providerFamily: handle.providerFamily
+        providerFamily: handle.providerFamily,
+        model: providerModel,
+        providerLabel
       });
       const runtimeMetadata: ProviderErrorRuntimeMetadata & { providerFamily?: string } = {
         requestId: input.requestId,

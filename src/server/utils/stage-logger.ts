@@ -33,11 +33,20 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
   if (!isStageLoggingEnabled()) {
     return;
   }
-  const suffix = details && Object.keys(details).length ? ` ${JSON.stringify(details)}` : '';
+  const providerLabel = typeof details?.providerLabel === 'string' ? details?.providerLabel : undefined;
+  const detailPayload = providerLabel
+    ? (() => {
+        const clone = { ...details } as Record<string, unknown>;
+        delete clone.providerLabel;
+        return clone;
+      })()
+    : details;
+  const suffix = detailPayload && Object.keys(detailPayload).length ? ` ${JSON.stringify(detailPayload)}` : '';
   const { scope, action } = parseStage(stage);
   const level = detectStageLevel(stage);
   const label = `[${scope}][${requestId}] ${action}`;
-  console.log(`${colorize(level, label)}${suffix}`);
+  const providerTag = providerLabel ? ` ${colorizeProviderLabel(level, providerLabel)}` : '';
+  console.log(`${colorize(level, label)}${providerTag}${suffix}`);
 }
 
 function parseStage(stage: string): { scope: string; action: string } {
@@ -76,4 +85,9 @@ function colorize(level: StageLevel, text: string): string {
     default:
       return `${COLOR_INFO}${text}${COLOR_RESET}`;
   }
+}
+
+function colorizeProviderLabel(level: StageLevel, label: string): string {
+  const color = level === 'error' ? COLOR_ERROR : COLOR_SUCCESS;
+  return `${color}[${label}]${COLOR_RESET}`;
 }
