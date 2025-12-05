@@ -1,7 +1,15 @@
 import type { CompatibilityContext } from '../../compatibility-interface.js';
 import type { UnknownObject } from '../../../../modules/pipeline/types/common-types.js';
-import type { ModuleDependencies } from '../../../../modules/pipeline/types/module.types.js';
 import { BaseHook } from './base-hook.js';
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+type UsageShape = Record<string, unknown> & {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+};
 
 /**
  * iFlow响应标准化Hook
@@ -46,7 +54,7 @@ export class iFlowResponseNormalizationHook extends BaseHook {
       }
 
       // 处理model字段
-      if (result.model && typeof result.model === 'string') {
+      if (typeof result.model === 'string') {
         result.model = this.normalizeModelName(result.model);
       }
 
@@ -59,11 +67,11 @@ export class iFlowResponseNormalizationHook extends BaseHook {
     }
   }
 
-  private normalizeUsageFields(usage: any): UnknownObject {
-    const normalizedUsage: any = { ...(usage as any) };
+  private normalizeUsageFields(usage: unknown): UnknownObject {
+    const normalizedUsage: UsageShape = isRecord(usage) ? { ...usage } : {};
 
     // iFlow可能使用不同的字段名
-    const fieldMappings = {
+    const fieldMappings: Record<string, string> = {
       input_tokens: 'prompt_tokens',
       output_tokens: 'completion_tokens',
       total_input_tokens: 'prompt_tokens',
@@ -71,46 +79,52 @@ export class iFlowResponseNormalizationHook extends BaseHook {
     };
 
     for (const [glmField, standardField] of Object.entries(fieldMappings)) {
-      if ((normalizedUsage as any)[glmField] !== undefined) {
-        (normalizedUsage as any)[standardField] = (normalizedUsage as any)[glmField];
-        delete (normalizedUsage as any)[glmField];
+      if (normalizedUsage[glmField] !== undefined) {
+        normalizedUsage[standardField] = normalizedUsage[glmField];
+        delete normalizedUsage[glmField];
       }
     }
 
     // 确保所有必需字段都存在
-    if ((normalizedUsage as any).prompt_tokens === undefined) {
-      (normalizedUsage as any).prompt_tokens = 0;
+    if (normalizedUsage.prompt_tokens === undefined) {
+      normalizedUsage.prompt_tokens = 0;
     }
 
-    if ((normalizedUsage as any).completion_tokens === undefined) {
-      (normalizedUsage as any).completion_tokens = 0;
+    if (normalizedUsage.completion_tokens === undefined) {
+      normalizedUsage.completion_tokens = 0;
     }
 
-    if ((normalizedUsage as any).total_tokens === undefined) {
-      (normalizedUsage as any).total_tokens =
-        ((normalizedUsage as any).prompt_tokens || 0) +
-        ((normalizedUsage as any).completion_tokens || 0);
+    if (normalizedUsage.total_tokens === undefined) {
+      const promptTokens = typeof normalizedUsage.prompt_tokens === 'number'
+        ? normalizedUsage.prompt_tokens
+        : 0;
+      const completionTokens = typeof normalizedUsage.completion_tokens === 'number'
+        ? normalizedUsage.completion_tokens
+        : 0;
+      normalizedUsage.total_tokens = promptTokens + completionTokens;
     }
 
     return normalizedUsage;
   }
 
-  private extractReasoningContent(reasoningContent: any): string {
+  private extractReasoningContent(reasoningContent: unknown): string {
     if (typeof reasoningContent === 'string') {
       return this.extractReasoningBlocks(reasoningContent);
     }
 
-    if (typeof reasoningContent === 'object' && reasoningContent !== null) {
+    if (isRecord(reasoningContent)) {
       // 处理对象形式的reasoning_content
-      const obj = reasoningContent as any;
-      if (obj.text) {
-        return this.extractReasoningBlocks(obj.text);
+      if (typeof reasoningContent.text === 'string') {
+        return this.extractReasoningBlocks(reasoningContent.text);
       }
-      if (obj.content) {
-        return this.extractReasoningBlocks(obj.content);
+      if (typeof reasoningContent.content === 'string') {
+        return this.extractReasoningBlocks(reasoningContent.content);
       }
-      if (obj.blocks) {
-        return Array.isArray(obj.blocks) ? obj.blocks.join('\n\n') : String(obj.blocks);
+      if (Array.isArray(reasoningContent.blocks)) {
+        return reasoningContent.blocks.join('\n\n');
+      }
+      if (reasoningContent.blocks !== undefined) {
+        return String(reasoningContent.blocks);
       }
       return JSON.stringify(reasoningContent);
     }
@@ -133,7 +147,7 @@ export class iFlowResponseNormalizationHook extends BaseHook {
       /\[THINKING\](.*?)\[\/THINKING\]/gs
     ];
 
-    let extractedBlocks: string[] = [];
+    const extractedBlocks: string[] = [];
 
     for (const pattern of reasoningPatterns) {
       const matches = content.match(pattern);
@@ -162,9 +176,9 @@ export class iFlowResponseNormalizationHook extends BaseHook {
         const trimmedLine = line.trim();
         if (reasoningKeywords.some(keyword =>
           trimmedLine.toLowerCase().startsWith(keyword.toLowerCase()))) {
-          const content = trimmedLine.substring(trimmedLine.indexOf(':') + 1).trim();
-          if (content.length > 0) {
-            extractedBlocks.push(content);
+          const extracted = trimmedLine.substring(trimmedLine.indexOf(':') + 1).trim();
+          if (extracted.length > 0) {
+            extractedBlocks.push(extracted);
           }
         }
       }
@@ -175,26 +189,21 @@ export class iFlowResponseNormalizationHook extends BaseHook {
   }
 
   private normalizeChoices(choices: unknown[]): unknown[] {
-    return choices.map((choice, index) => {
-      if (!choice || typeof choice !== 'object') {
+    return choices.map(choice => {
+      if (!isRecord(choice)) {
         return choice;
       }
 
-      const normalizedChoice = { ...choice };
+      const normalizedChoice: UnknownObject = { ...choice };
 
       // 标准化finish_reason
-      if ((normalizedChoice as any).finish_reason) {
-        (normalizedChoice as any).finish_reason = this.normalizeFinishReason(
-          (normalizedChoice as any).finish_reason
-        );
+      if (typeof normalizedChoice.finish_reason === 'string') {
+        normalizedChoice.finish_reason = this.normalizeFinishReason(normalizedChoice.finish_reason);
       }
 
       // 标准化message字段
-      if ((normalizedChoice as any).message) {
-        (normalizedChoice as any).message = this.normalizeChoiceMessage(
-          (normalizedChoice as any).message,
-          index
-        );
+      if (isRecord(normalizedChoice.message)) {
+        normalizedChoice.message = this.normalizeChoiceMessage(normalizedChoice.message);
       }
 
       return normalizedChoice;
@@ -217,27 +226,23 @@ export class iFlowResponseNormalizationHook extends BaseHook {
     return reasonMappings[finishReason] || finishReason;
   }
 
-  private normalizeChoiceMessage(message: UnknownObject, choiceIndex: number): UnknownObject {
+  private normalizeChoiceMessage(message: UnknownObject): UnknownObject {
     const normalizedMessage = { ...message };
 
     // 标准化content字段
-    if ((normalizedMessage as any).content !== undefined) {
-      (normalizedMessage as any).content = this.normalizeMessageContent(
-        (normalizedMessage as any).content
-      );
+    if ('content' in normalizedMessage) {
+      normalizedMessage.content = this.normalizeMessageContent(normalizedMessage.content);
     }
 
     // 标准化tool_calls字段
-    if ((normalizedMessage as any).tool_calls) {
-      (normalizedMessage as any).tool_calls = this.normalizeToolCalls(
-        (normalizedMessage as any).tool_calls
-      );
+    if ('tool_calls' in normalizedMessage) {
+      normalizedMessage.tool_calls = this.normalizeToolCalls(normalizedMessage.tool_calls);
     }
 
     return normalizedMessage;
   }
 
-  private normalizeMessageContent(content: unknown): unknown {
+  private normalizeMessageContent(content: unknown): string {
     if (typeof content === 'string') {
       return content;
     }
@@ -262,25 +267,24 @@ export class iFlowResponseNormalizationHook extends BaseHook {
     return String(content);
   }
 
-  private normalizeToolCalls(toolCalls: unknown[]): unknown[] {
+  private normalizeToolCalls(toolCalls: unknown): unknown {
     if (!Array.isArray(toolCalls)) {
       return toolCalls;
     }
 
-    return toolCalls.map((toolCall, index) => {
-      if (!toolCall || typeof toolCall !== 'object') {
+    return toolCalls.map(toolCall => {
+      if (!isRecord(toolCall)) {
         return toolCall;
       }
 
-      const normalizedToolCall = { ...toolCall };
+      const normalizedToolCall: UnknownObject = { ...toolCall };
 
       // 确保arguments字段是字符串
-      if ((normalizedToolCall as any).function?.arguments &&
-          typeof (normalizedToolCall as any).function.arguments !== 'string') {
+      const fnPayload = isRecord(normalizedToolCall.function) ? normalizedToolCall.function : undefined;
+      if (fnPayload && 'arguments' in fnPayload && typeof fnPayload.arguments !== 'string') {
         try {
-          (normalizedToolCall as any).function.arguments =
-            JSON.stringify((normalizedToolCall as any).function.arguments);
-        } catch (error) {
+          fnPayload.arguments = JSON.stringify(fnPayload.arguments);
+        } catch {
           // 如果序列化失败，保持原样
         }
       }

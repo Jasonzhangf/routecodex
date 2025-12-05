@@ -4,6 +4,7 @@ import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { CompatibilityModuleFactory } from './compatibility-factory.js';
 import type { ModuleDependencies } from '../../modules/pipeline/types/module.types.js';
+import type { CompatibilityModule } from './compatibility-interface.js';
 
 const SUPPORTED_EXTENSIONS = new Set(['.js', '.mjs', '.cjs']);
 
@@ -18,8 +19,12 @@ export function resolveCompatSearchDirs(): string[] {
   const combined = [...envDirs, ...defaults];
   const deduped: string[] = [];
   for (const dir of combined) {
-    if (!dir) continue;
-    if (!deduped.includes(dir)) deduped.push(dir);
+    if (!dir) {
+      continue;
+    }
+    if (!deduped.includes(dir)) {
+      deduped.push(dir);
+    }
   }
   return deduped;
 }
@@ -38,19 +43,25 @@ export async function loadCompatibilityModulesFromDirs(
 }
 
 async function registerModulesInDir(dir: string, logger?: ModuleDependencies['logger']): Promise<void> {
-  if (!dir) return;
+  if (!dir) {
+    return;
+  }
   let stats;
   try {
     stats = await fs.stat(dir);
   } catch {
     return;
   }
-  if (!stats.isDirectory()) return;
+  if (!stats.isDirectory()) {
+    return;
+  }
   const files = await fs.readdir(dir);
   for (const file of files) {
     const fullPath = path.join(dir, file);
     const ext = path.extname(fullPath).toLowerCase();
-    if (!SUPPORTED_EXTENSIONS.has(ext)) continue;
+    if (!SUPPORTED_EXTENSIONS.has(ext)) {
+      continue;
+    }
     try {
       const mod = await import(pathToFileURL(fullPath).href);
       await registerModuleExport(mod, logger, fullPath);
@@ -60,45 +71,75 @@ async function registerModulesInDir(dir: string, logger?: ModuleDependencies['lo
   }
 }
 
-type ExternalModuleExport =
-  | {
-    register?: (factory: typeof CompatibilityModuleFactory) => void;
-    registerCompatibility?: (factory: typeof CompatibilityModuleFactory) => void;
-    default?: CompatibilityModuleExportShape;
-    compatibilities?: CompatibilityModuleExportShape[];
-  }
-  | CompatibilityModuleExportShape;
+type CompatibilityModuleCtor = new (dependencies: ModuleDependencies) => CompatibilityModule;
 
-type CompatibilityModuleExportShape = {
+interface CompatibilityModuleExportShape {
   type?: string;
-  module?: new (...args: any[]) => any;
-};
+  module?: CompatibilityModuleCtor;
+}
+
+interface CompatibilityModuleNamespace {
+  register?: (factory: typeof CompatibilityModuleFactory) => void;
+  registerCompatibility?: (factory: typeof CompatibilityModuleFactory) => void;
+  default?: CompatibilityModuleExportShape;
+  compatibilities?: CompatibilityModuleExportShape[];
+  type?: string;
+  module?: CompatibilityModuleCtor;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isCompatibilityModuleNamespace(value: unknown): value is CompatibilityModuleNamespace {
+  return isRecord(value);
+}
+
+function isExportShape(shape: unknown): shape is CompatibilityModuleExportShape {
+  if (!isRecord(shape)) {
+    return false;
+  }
+  const type = typeof shape.type === 'string' ? shape.type.trim() : '';
+  return Boolean(type && typeof shape.module === 'function');
+}
+
+function collectExportShapes(namespace: CompatibilityModuleNamespace): CompatibilityModuleExportShape[] {
+  const shapes: CompatibilityModuleExportShape[] = [];
+  if (Array.isArray(namespace.compatibilities)) {
+    for (const compat of namespace.compatibilities) {
+      if (isExportShape(compat)) {
+        shapes.push(compat);
+      }
+    }
+  }
+  if (isExportShape(namespace.default)) {
+    shapes.push(namespace.default);
+  }
+  if (isExportShape(namespace)) {
+    shapes.push({ type: namespace.type, module: namespace.module });
+  }
+  return shapes;
+}
 
 async function registerModuleExport(
-  mod: ExternalModuleExport,
+  mod: unknown,
   logger: ModuleDependencies['logger'] | undefined,
   source: string
 ): Promise<void> {
-  if (!mod) return;
+  if (!isCompatibilityModuleNamespace(mod)) {
+    return;
+  }
   const factory = CompatibilityModuleFactory;
   try {
-    if (typeof (mod as any).registerCompatibility === 'function') {
-      (mod as any).registerCompatibility(factory);
+    if (typeof mod.registerCompatibility === 'function') {
+      mod.registerCompatibility(factory);
       return;
     }
-    if (typeof (mod as any).register === 'function') {
-      (mod as any).register(factory);
+    if (typeof mod.register === 'function') {
+      mod.register(factory);
       return;
     }
-    const exportShapes: CompatibilityModuleExportShape[] = [];
-    if (Array.isArray((mod as any).compatibilities)) {
-      exportShapes.push(...(mod as any).compatibilities);
-    }
-    if ((mod as any).default && typeof (mod as any).default === 'object') {
-      exportShapes.push((mod as any).default as CompatibilityModuleExportShape);
-    } else if ((mod as any).type || (mod as any).module) {
-      exportShapes.push(mod as CompatibilityModuleExportShape);
-    }
+    const exportShapes = collectExportShapes(mod);
     for (const entry of exportShapes) {
       const type = typeof entry.type === 'string' ? entry.type.trim() : '';
       const moduleCtor = entry.module;
@@ -109,7 +150,7 @@ async function registerModuleExport(
         });
         continue;
       }
-      factory.registerModuleType(type, moduleCtor as any);
+      factory.registerModuleType(type, moduleCtor);
     }
   } catch (error) {
     logger?.logError?.(error as Error, { component: 'compat-module-register', source });
@@ -117,10 +158,12 @@ async function registerModuleExport(
 }
 
 function expandHome(input: string): string {
-  if (!input.startsWith('~/')) return input;
+  if (!input.startsWith('~/')) {
+    return input;
+  }
   return path.join(os.homedir(), input.slice(2));
 }
 
-export async function registerCompatibilityModuleForTest(exported: ExternalModuleExport): Promise<void> {
+export async function registerCompatibilityModuleForTest(exported: unknown): Promise<void> {
   await registerModuleExport(exported, undefined, 'test');
 }

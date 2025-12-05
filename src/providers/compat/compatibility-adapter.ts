@@ -1,11 +1,39 @@
-import type { PipelineModule, ModuleConfig, ModuleDependencies } from '../../modules/pipeline/interfaces/pipeline-interfaces.js';
+import type { PipelineModule, ModuleConfig } from '../../modules/pipeline/interfaces/pipeline-interfaces.js';
+import type { SharedPipelineRequest } from '../../types/shared-dtos.js';
+import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import type { CompatibilityModule, CompatibilityContext } from './compatibility-interface.js';
+
+type PipelineRequestLike = Partial<SharedPipelineRequest> & UnknownObject;
+
+function isRecord(value: unknown): value is UnknownObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getStringProperty(source: UnknownObject | undefined, key: string): string | undefined {
+  if (!source) {
+    return undefined;
+  }
+  const value = source[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function normalizeMetadata(value: unknown): UnknownObject | undefined {
+  return isRecord(value) ? value : undefined;
+}
+
+function safeJsonSize(payload: UnknownObject): number {
+  try {
+    return JSON.stringify(payload).length;
+  } catch {
+    return 0;
+  }
+}
 
 /**
  * 适配器：将CompatibilityModule适配为PipelineModule接口
  * 用于PipelineManager中集成compatibility模块
  */
-export class CompatibilityToPipelineAdapter implements PipelineModule {
+export class CompatibilityToPipelineAdapter implements PipelineModule<UnknownObject, UnknownObject> {
   readonly id: string;
   readonly type: string;
   readonly config: ModuleConfig;
@@ -23,12 +51,19 @@ export class CompatibilityToPipelineAdapter implements PipelineModule {
     return await this.compatibilityModule.initialize();
   }
 
-  async processIncoming(request: any): Promise<unknown> {
-    // 从pipeline request中提取真实的元数据
-    const pipelineRequestId = request.route?.requestId || request.requestId || `req_${Date.now()}`;
-    const entryEndpoint = request.metadata?.entryEndpoint || request.route?.entryEndpoint || '';
+  async processIncoming(request: UnknownObject): Promise<UnknownObject> {
+    const pipelineRequest = request as PipelineRequestLike;
+    const route = isRecord(pipelineRequest.route) ? pipelineRequest.route : undefined;
+    const metadataObj = normalizeMetadata(pipelineRequest.metadata);
+    const pipelineRequestId =
+      getStringProperty(route, 'requestId') ||
+      getStringProperty(pipelineRequest, 'requestId') ||
+      `req_${Date.now()}`;
+    const entryEndpoint =
+      getStringProperty(metadataObj, 'entryEndpoint') ||
+      getStringProperty(route, 'entryEndpoint') ||
+      '';
 
-    // 创建CompatibilityContext
     const context: CompatibilityContext = {
       compatibilityId: this.compatibilityModule.id,
       profileId: `${this.compatibilityModule.providerType || 'default'}-${this.type}`,
@@ -39,24 +74,31 @@ export class CompatibilityToPipelineAdapter implements PipelineModule {
       executionId: `exec_${Date.now()}`,
       timestamp: Date.now(),
       startTime: Date.now(),
-      entryEndpoint, // 在顶层设置entryEndpoint
+      entryEndpoint,
       metadata: {
-        dataSize: JSON.stringify(request).length,
-        dataKeys: Object.keys(request),
+        dataSize: safeJsonSize(pipelineRequest),
+        dataKeys: Object.keys(pipelineRequest),
         config: this.config,
-        ...request.metadata
+        ...(metadataObj || {})
       }
     };
 
-    return await this.compatibilityModule.processIncoming(request, context);
+    return await this.compatibilityModule.processIncoming(pipelineRequest, context);
   }
 
-  async processOutgoing(response: any): Promise<unknown> {
-    // 从response中提取真实的元数据
-    const pipelineRequestId = response.route?.requestId || response.requestId || response.metadata?.requestId || `req_${Date.now()}`;
-    const entryEndpoint = response.metadata?.entryEndpoint || response.route?.entryEndpoint || '';
+  async processOutgoing(response: UnknownObject): Promise<UnknownObject> {
+    const responseRoute = isRecord(response.route) ? response.route : undefined;
+    const responseMetadata = normalizeMetadata(response.metadata);
+    const pipelineRequestId =
+      getStringProperty(responseRoute, 'requestId') ||
+      getStringProperty(response, 'requestId') ||
+      getStringProperty(responseMetadata, 'requestId') ||
+      `req_${Date.now()}`;
+    const entryEndpoint =
+      getStringProperty(responseMetadata, 'entryEndpoint') ||
+      getStringProperty(responseRoute, 'entryEndpoint') ||
+      '';
 
-    // 创建CompatibilityContext
     const context: CompatibilityContext = {
       compatibilityId: this.compatibilityModule.id,
       profileId: `${this.compatibilityModule.providerType || 'default'}-${this.type}`,
@@ -67,12 +109,12 @@ export class CompatibilityToPipelineAdapter implements PipelineModule {
       executionId: `exec_${Date.now()}`,
       timestamp: Date.now(),
       startTime: Date.now(),
-      entryEndpoint, // 在顶层设置entryEndpoint
+      entryEndpoint,
       metadata: {
-        dataSize: JSON.stringify(response).length,
+        dataSize: safeJsonSize(response),
         dataKeys: Object.keys(response),
         config: this.config,
-        ...response.metadata
+        ...(responseMetadata || {})
       }
     };
 

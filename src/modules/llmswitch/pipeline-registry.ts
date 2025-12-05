@@ -3,6 +3,15 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { resolvePipelineConfigCandidates } from '../config/pipeline-config-path.js';
 
+type UnknownRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): UnknownRecord | undefined {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as UnknownRecord;
+  }
+  return undefined;
+}
+
 type PipelineStage = 'inbound' | 'outbound';
 
 interface PipelineRouteConfig {
@@ -63,16 +72,22 @@ class LLMSwitchPipelineRegistry {
 
   resolve(entryEndpointRaw: string, options: ResolveOptions = {}): PipelineResolution | null {
     const entryEndpoint = this.normalizeEndpoint(entryEndpointRaw);
-    if (!entryEndpoint) return null;
+    if (!entryEndpoint) {
+      return null;
+    }
     const doc = this.document;
-    if (!doc) return null;
+    if (!doc) {
+      return null;
+    }
 
     const stage = options.stage;
     const providerProtocol = this.normalizeProtocol(options.providerProtocol);
     const preferredProcess = this.normalizeProcess(options.processMode);
 
     const endpointMatches = doc.pipelines.filter((pipe) => {
-      if (!Array.isArray(pipe.entryEndpoints) || pipe.entryEndpoints.length === 0) return false;
+      if (!Array.isArray(pipe.entryEndpoints) || pipe.entryEndpoints.length === 0) {
+        return false;
+      }
       return pipe.entryEndpoints.some((ep) => this.normalizeEndpoint(ep) === entryEndpoint);
     });
     if (!endpointMatches.length) {
@@ -94,7 +109,9 @@ class LLMSwitchPipelineRegistry {
       : [];
     const finalPool = processMatches.length ? processMatches : pool;
     const target = finalPool[0];
-    if (!target) return null;
+    if (!target) {
+      return null;
+    }
 
     const resolvedProcess = this.normalizeProcess(target.processMode) || preferredProcess || 'chat';
     const resolvedProtocol = this.pickProtocol(target, providerProtocol);
@@ -114,26 +131,38 @@ class LLMSwitchPipelineRegistry {
   }
 
   private normalizeEndpoint(value?: string): string {
-    if (!value) return '';
+    if (!value) {
+      return '';
+    }
     return value.trim().toLowerCase();
   }
 
   private normalizeProtocol(value?: string): string | undefined {
-    if (!value || typeof value !== 'string') return undefined;
+    if (!value || typeof value !== 'string') {
+      return undefined;
+    }
     const trimmed = value.trim().toLowerCase();
     return trimmed || undefined;
   }
 
   private normalizeProcess(value?: string): 'chat' | 'passthrough' | undefined {
-    if (!value || typeof value !== 'string') return undefined;
+    if (!value || typeof value !== 'string') {
+      return undefined;
+    }
     const normalized = value.trim().toLowerCase();
-    if (normalized === 'passthrough') return 'passthrough';
-    if (normalized === 'chat') return 'chat';
+    if (normalized === 'passthrough') {
+      return 'passthrough';
+    }
+    if (normalized === 'chat') {
+      return 'chat';
+    }
     return undefined;
   }
 
   private normalizeStreaming(value?: string): 'auto' | 'always' | 'never' | undefined {
-    if (!value || typeof value !== 'string') return undefined;
+    if (!value || typeof value !== 'string') {
+      return undefined;
+    }
     const normalized = value.trim().toLowerCase();
     if (normalized === 'auto' || normalized === 'always' || normalized === 'never') {
       return normalized;
@@ -142,16 +171,26 @@ class LLMSwitchPipelineRegistry {
   }
 
   private normalizeMode(value?: string): 'chat' | 'passthrough' | undefined {
-    if (!value || typeof value !== 'string') return undefined;
+    if (!value || typeof value !== 'string') {
+      return undefined;
+    }
     const normalized = value.trim().toLowerCase();
-    if (normalized === 'passthrough') return 'passthrough';
-    if (normalized === 'chat') return 'chat';
+    if (normalized === 'passthrough') {
+      return 'passthrough';
+    }
+    if (normalized === 'chat') {
+      return 'chat';
+    }
     return undefined;
   }
 
   private matchesProtocol(pipe: PipelineRouteConfig, protocol: string): boolean {
-    if (!protocol) return false;
-    if (!Array.isArray(pipe.providerProtocols) || pipe.providerProtocols.length === 0) return false;
+    if (!protocol) {
+      return false;
+    }
+    if (!Array.isArray(pipe.providerProtocols) || pipe.providerProtocols.length === 0) {
+      return false;
+    }
     return pipe.providerProtocols.some((p) => this.normalizeProtocol(p) === protocol);
   }
 
@@ -214,16 +253,27 @@ async function loadPipelineDocument(options?: { configPath?: string; baseDir?: s
 }
 
 function extractPipelineDocument(source: unknown): PipelineDocument | null {
-  if (!source || typeof source !== 'object') return null;
-  const candidate = source as Record<string, any>;
-  if (Array.isArray(candidate.pipelines)) {
-    return candidate as PipelineDocument;
+  const candidate = asRecord(source);
+  if (!candidate) {
+    return null;
   }
-  if (candidate.llmSwitch && typeof candidate.llmSwitch === 'object') {
-    return extractPipelineDocument(candidate.llmSwitch);
+  const pipelines = candidate.pipelines;
+  if (Array.isArray(pipelines)) {
+    const pipelineConfigVersion = typeof candidate.pipelineConfigVersion === 'string'
+      ? candidate.pipelineConfigVersion
+      : undefined;
+    return {
+      pipelineConfigVersion,
+      pipelines: pipelines as PipelineRouteConfig[]
+    };
   }
-  if (candidate.pipelineConfig && typeof candidate.pipelineConfig === 'object') {
-    return extractPipelineDocument(candidate.pipelineConfig);
+  const llmSwitch = asRecord(candidate.llmSwitch);
+  if (llmSwitch) {
+    return extractPipelineDocument(llmSwitch);
+  }
+  const pipelineConfig = asRecord(candidate.pipelineConfig);
+  if (pipelineConfig) {
+    return extractPipelineDocument(pipelineConfig);
   }
   return null;
 }

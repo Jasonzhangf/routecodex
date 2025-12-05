@@ -13,6 +13,14 @@ const PROMPT_FILES: Record<Source, string> = {
 
 const promptCache = new Map<Source, string | null>();
 
+type ClaudeSystemEntry = { type: string; text: string };
+
+type PromptAwarePayload = Record<string, unknown> & {
+  messages?: unknown[];
+  system?: ClaudeSystemEntry[];
+  instructions?: string;
+};
+
 /**
  * Basic tool guidance (router-style)
  */
@@ -56,10 +64,16 @@ export function shouldReplaceSystemPrompt(): Source | null {
 function getRequestedPromptSource(): Source | null {
   // Only enable when explicitly opted-in via ROUTECODEX_SYSTEM_PROMPT_ENABLE=1
   const enabled = String(process.env.ROUTECODEX_SYSTEM_PROMPT_ENABLE || '0') === '1';
-  if (!enabled) return null;
+  if (!enabled) {
+    return null;
+  }
   const sel = (process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE || '').toLowerCase();
-  if (sel === 'codex') {return 'codex';}
-  if (sel === 'claude') {return 'claude';}
+  if (sel === 'codex') {
+    return 'codex';
+  }
+  if (sel === 'claude') {
+    return 'claude';
+  }
   return null;
 }
 
@@ -81,9 +95,13 @@ function loadPromptFromFile(source: Source): string | null {
 
 export function getSystemPromptOverride(): { source: Source; prompt: string } | null {
   const source = getRequestedPromptSource();
-  if (!source) return null;
+  if (!source) {
+    return null;
+  }
   const prompt = loadPromptFromFile(source);
-  if (!prompt) return null;
+  if (!prompt) {
+    return null;
+  }
   return { source, prompt };
 }
 
@@ -91,7 +109,9 @@ export function getSystemPromptOverride(): { source: Source; prompt: string } | 
  * Replace or append system message in OpenAI messages
  */
 export function replaceSystemInOpenAIMessages(messages: unknown[], systemText: string): unknown[] {
-  if (!Array.isArray(messages)) {return messages;}
+  if (!Array.isArray(messages)) {
+    return messages;
+  }
   const out = [...messages];
 
   const idx = out.findIndex((m) => m && typeof m === 'object' && (m as Record<string, unknown>).role === 'system');
@@ -105,9 +125,11 @@ export function replaceSystemInOpenAIMessages(messages: unknown[], systemText: s
   return out;
 }
 
-export function applySystemPromptOverride(entryEndpoint: string, payload: any): void {
+export function applySystemPromptOverride(entryEndpoint: string, payload: PromptAwarePayload | null | undefined): void {
   const override = getSystemPromptOverride();
-  if (!override || !payload || typeof payload !== 'object') return;
+  if (!override || !payload || typeof payload !== 'object') {
+    return;
+  }
   switch (entryEndpoint) {
     case '/v1/chat/completions':
       if (Array.isArray(payload.messages)) {

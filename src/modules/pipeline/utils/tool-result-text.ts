@@ -12,5 +12,5 @@ export function extractToolText(content: unknown): string {
       return '';
     }
   }
-  return content == null ? '' : String(content);
+  return content === null || content === undefined ? '' : String(content);
 }

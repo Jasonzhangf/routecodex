@@ -5,21 +5,31 @@
  * 在 /v1/responses 入口下一律走上游 /responses 并使用 SSE（Accept: text/event-stream）。
  */
 
-import { ChatHttpProvider } from './chat-http-provider.js';
+import { HttpTransportProvider } from './http-transport-provider.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import type { ServiceProfile } from '../api/provider-types.js';
+import type { OpenAIStandardConfig } from '../api/provider-config.js';
+import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
+import type { ServiceProfile, ProviderContext } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
 import { buildResponsesRequestFromChat } from '../../../modules/llmswitch/bridge.js';
 import { importCoreModule } from '../../../modules/llmswitch/core-loader.js';
+import type { HttpClient } from '../utils/http-client.js';
+import { ResponsesProtocolClient } from '../../../client/responses/responses-protocol-client.js';
 
 type EnsureResponsesInstructionsFn = typeof import('@jsonstudio/llms/dist/conversion/shared/responses-instructions.js')['ensureResponsesInstructions'];
 let ensureResponsesInstructionsFn: EnsureResponsesInstructionsFn | null = null;
 
+type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'>;
+type ResponsesSseConverter = {
+  convertSseToJson(stream: unknown, options: { requestId: string; model: string }): Promise<unknown>;
+};
 async function loadEnsureResponsesInstructions(): Promise<EnsureResponsesInstructionsFn> {
-  if (ensureResponsesInstructionsFn) return ensureResponsesInstructionsFn;
+  if (ensureResponsesInstructionsFn) {
+    return ensureResponsesInstructionsFn;
+  }
   const mod = await importCoreModule<{ ensureResponsesInstructions?: EnsureResponsesInstructionsFn }>(
     'conversion/shared/responses-instructions'
   );
@@ -30,7 +40,18 @@ async function loadEnsureResponsesInstructions(): Promise<EnsureResponsesInstruc
   return ensureResponsesInstructionsFn;
 }
 
-export class ResponsesProvider extends ChatHttpProvider {
+export class ResponsesProvider extends HttpTransportProvider {
+  private readonly responsesClient: ResponsesProtocolClient;
+
+  constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
+    const responsesClient = new ResponsesProtocolClient({
+      streaming: extractResponsesConfig(config as unknown as UnknownObject).streaming ?? 'auto',
+      betaVersion: 'responses-2024-12-17'
+    });
+    super(config, dependencies, 'responses-http-provider', responsesClient);
+    this.responsesClient = responsesClient;
+  }
+
   /**
    * 使用 OpenAI 基础档案，但将默认 endpoint 改为 /responses。
    */
@@ -48,203 +69,78 @@ export class ResponsesProvider extends ChatHttpProvider {
    * 但 Provider 必须将上游 SSE 解析为 JSON 再返回 Host（对内一律 JSON）。
    */
   protected override async sendRequestInternal(request: UnknownObject): Promise<unknown> {
-    // 对于 Responses provider，默认使用上游 SSE 直通：
-    //  - 始终通过 postStream 打 /responses（或有效 endpoint）
-    //  - 不再依赖额外 env/config 开关
-    // Build endpoint and headers
-    const endpoint = (this as any).getEffectiveEndpoint();
-    const headers = await (this as any).buildRequestHeaders();
-    // Ensure Responses beta header is present for upstream compatibility
-    try {
-      const hasBeta = Object.keys(headers || {}).some(k => k.toLowerCase() === 'openai-beta');
-      if (!hasBeta) {
-        (headers as any)['OpenAI-Beta'] = 'responses-2024-12-17';
-      }
-    } catch { /* ignore header injection errors */ }
-    const context = (this as any).createProviderContext(); // private in base; access via any
-    const targetUrl = `${(this as any).getEffectiveBaseUrl().replace(/\/$/, '')}/${String(endpoint).startsWith('/') ? String(endpoint).slice(1) : String(endpoint)}`;
+    const endpoint = this.getEffectiveEndpoint();
+    const baseHeaders = await this.buildRequestHeaders();
+    const headers = await this.finalizeRequestHeaders(baseHeaders, request);
 
-    // Flatten body (copy of base logic)
+    const context = this.createProviderContext();
+    const targetUrl = this.buildTargetUrl(this.getEffectiveBaseUrl(), endpoint);
+
     const settings = this.getResponsesSettings();
-    const inboundClientStream = this.normalizeStreamFlag((context?.metadata as any)?.stream);
+    const inboundClientStream = this.normalizeStreamFlag(this.extractStreamFlag(context));
+    const finalBody = this.responsesClient.buildRequestBody(request);
+    const entryEndpoint = this.extractEntryEndpoint(request) ?? this.extractEntryEndpoint(context);
 
-    const finalBody = (() => {
-      const r: any = request || {};
-      const dataObj: any = (r && typeof r === 'object' && 'data' in r && typeof r.data === 'object') ? r.data : r;
-      const body: any = { ...dataObj };
-      const inboundModel = typeof body.model === 'string' ? body.model.trim() : '';
-      if (!inboundModel) {
-        throw new Error('provider-runtime-error: missing model from virtual router');
-      }
-      body.model = inboundModel;
-      // Responses provider 不在此处处理 max_tokens；保持 llmswitch-core 兼容层的唯一治理入口
-      try { if ('metadata' in body) { delete body.metadata; } } catch { /* ignore */ }
-      return body;
-    })();
+    await this.ensureResponsesInstructions(finalBody);
+    this.applyInstructionsMode(finalBody, settings.instructionsMode);
 
-    const entryEndpoint =
-      (request as any)?.metadata?.entryEndpoint ||
-      (context?.metadata as any)?.entryEndpoint ||
-      undefined;
-
-    try {
-      const ensureResponsesInstructions = await loadEnsureResponsesInstructions();
-      ensureResponsesInstructions(finalBody as Record<string, unknown>);
-    } catch {
-      // ignore if core module unavailable or validation fails
-    }
-    if (settings.instructionsMode === 'inline') {
-      (finalBody as Record<string, unknown>).__rcc_inline_system_instructions = true;
-    }
-
-    const upstreamStream = settings.streaming === 'never' ? false : true;
-    const useSse = upstreamStream;
-    if (useSse) {
-      (finalBody as any).stream = true;
-    } else {
-      try { delete (finalBody as any).stream; } catch { /* ignore */ }
-    }
-
-    const clientRequestedStream =
-      settings.streaming === 'always'
-        ? true
-        : settings.streaming === 'never'
-          ? false
-          : inboundClientStream === true;
+    const useSse = settings.streaming !== 'never';
+    this.responsesClient.ensureStreamFlag(finalBody, useSse);
+    const clientRequestedStream = this.resolveClientStreamPreference(settings.streaming, inboundClientStream);
 
     this.dependencies.logger?.logModule?.(this.id, 'responses-provider-stream-flag', {
       requestId: context.requestId,
       inboundClientStream,
-      outboundStream: upstreamStream
+      outboundStream: useSse
     });
 
-    // 若当前请求仍为 Chat 形状（messages 存在且 input 不存在），使用 llmswitch-core 做 Chat → Responses 请求编码
-    try {
-      const looksResponses = Array.isArray((finalBody as any).input) || typeof (finalBody as any).instructions === 'string';
-      const looksChat = Array.isArray((finalBody as any).messages);
-      if (!looksResponses && looksChat) {
-        const res = await buildResponsesRequestFromChat(finalBody);
-        const reqObj = res && typeof res === 'object' && 'request' in res ? (res.request as any) : res;
-        if (!reqObj || typeof reqObj !== 'object') {
-          throw new Error('buildResponsesRequestFromChat did not return a valid request object');
-        }
-        // 用 Responses 形状覆盖原始 body（保持 model 为上游模型）
-        const currentModel = (finalBody as any).model;
-        for (const k of Object.keys(finalBody)) {
-          delete (finalBody as any)[k];
-        }
-        Object.assign(finalBody as any, reqObj);
-        if (currentModel) {
-          (finalBody as any).model = currentModel;
-        }
-      }
-    } catch (e) {
-      // 按 Fail Fast 替代旧的静默回退：直接抛出结构化错误，方便从 provider-error 快照定位
-      const err = new Error(`[responses-provider] Chat→Responses request encoding failed: ${(e as any)?.message || String(e)}`);
-      (err as any).code = 'responses_request_encoding_error';
-      throw err;
-    }
+    await this.maybeConvertChatPayload(finalBody);
 
-    // Snapshot provider-request (best-effort)
-    try {
-      await writeProviderSnapshot({
-        phase: 'provider-request',
-        requestId: context.requestId,
-        data: finalBody,
-        headers,
-        url: targetUrl,
-        entryEndpoint
-      });
-    } catch { /* ignore */ }
-
-    const sendSse = async () => {
-      const stream = await (this as any).httpClient.postStream(endpoint, finalBody, {
-        ...headers,
-        Accept: 'text/event-stream'
-      });
-
-      if (clientRequestedStream) {
-        return { __sse_stream: stream };
-      }
-
-      const modPath = path.join(
-        PACKAGE_ROOT,
-        'sharedmodule',
-        'llmswitch-core',
-        'dist',
-        'sse',
-        'sse-to-json',
-        'index.js'
-      );
-      const { ResponsesSseToJsonConverter } = await import(pathToFileURL(modPath).href);
-      const converter = new (ResponsesSseToJsonConverter as any)();
-      const json = await converter.convertSseToJson(stream as any, {
-        requestId: context.requestId,
-        model: (finalBody as any)?.model || 'unknown'
-      });
-      try {
-        await writeProviderSnapshot({
-          phase: 'provider-response',
-          requestId: context.requestId,
-          data: json ?? null,
-          headers,
-          url: targetUrl,
-          entryEndpoint
-        });
-      } catch { /* non-blocking */ }
-      return {
-        data: json,
-        status: 200,
-        statusText: 'OK',
-        headers: { 'x-upstream-mode': 'sse' },
-        url: targetUrl
-      } as any;
-    };
+    await this.snapshotPhase('provider-request', context, finalBody, headers, targetUrl, entryEndpoint);
 
     try {
       if (useSse) {
-        return await sendSse();
+        return await this.sendSseRequest({
+          endpoint,
+          body: finalBody,
+          headers,
+          context,
+          targetUrl,
+          entryEndpoint,
+          clientRequestedStream,
+          httpClient: this.httpClient
+        });
       }
 
-      const jsonResponse = await (this as any).httpClient.post(endpoint, finalBody, {
-        ...headers,
-        Accept: 'application/json'
+      return await this.sendJsonRequest({
+        endpoint,
+        body: finalBody,
+        headers,
+        context,
+        targetUrl,
+        entryEndpoint,
+        httpClient: this.httpClient
       });
-      try {
-        await writeProviderSnapshot({
-          phase: 'provider-response',
-          requestId: context.requestId,
-          data: jsonResponse,
-          headers,
-          url: targetUrl,
-          entryEndpoint
-        });
-      } catch { /* non-blocking */ }
-      return jsonResponse;
     } catch (error) {
-      try {
-        const err: any = error;
-        const msg = typeof err?.message === 'string' ? err.message : String(err || '');
-        const m = msg.match(/HTTP\s+(\d{3})/i);
-        const statusCode = m ? parseInt(m[1], 10) : undefined;
-        await writeProviderSnapshot({
-          phase: 'provider-error',
-          requestId: context.requestId,
-          data: {
-            status: statusCode ?? null,
-            error: msg
-          },
-          headers,
-          url: targetUrl,
-          entryEndpoint
-        });
-      } catch { /* non-blocking */ }
-      throw error;
+      const normalizedError = this.normalizeUpstreamError(error);
+      await this.snapshotPhase(
+        'provider-error',
+        context,
+        {
+          status: normalizedError.statusCode ?? normalizedError.status ?? null,
+          code: normalizedError.code ?? null,
+          error: normalizedError.message
+        },
+        headers,
+        targetUrl,
+        entryEndpoint
+      );
+      throw normalizedError;
     }
   }
 
   private getResponsesSettings(): ResponsesSettings {
-    const cfg = extractResponsesConfig(this.config as any);
+    const cfg = extractResponsesConfig(this.config as unknown as UnknownObject);
     return {
       streaming: cfg.streaming ?? 'auto',
       instructionsMode: cfg.instructionsMode ?? 'default'
@@ -252,13 +148,239 @@ export class ResponsesProvider extends ChatHttpProvider {
   }
 
   private normalizeStreamFlag(value: unknown): boolean | undefined {
-    if (value === true || value === false) return value;
+    if (value === true || value === false) {
+      return value;
+    }
     if (typeof value === 'string') {
       const lowered = value.trim().toLowerCase();
-      if (['true', '1', 'yes'].includes(lowered)) return true;
-      if (['false', '0', 'no'].includes(lowered)) return false;
+      if (['true', '1', 'yes'].includes(lowered)) {
+        return true;
+      }
+      if (['false', '0', 'no'].includes(lowered)) {
+        return false;
+      }
     }
     return undefined;
+  }
+
+  private buildTargetUrl(baseUrl: string, endpoint: string): string {
+    const normalizedBase = baseUrl.replace(/\/$/, '');
+    const normalizedEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+    return `${normalizedBase}/${normalizedEndpoint}`;
+  }
+
+  private extractStreamFlag(context: ProviderContext): unknown {
+    const metadata = context.metadata;
+    if (metadata && typeof metadata === 'object' && 'stream' in metadata) {
+      return (metadata as Record<string, unknown>).stream;
+    }
+    return undefined;
+  }
+
+  private extractEntryEndpoint(source: unknown): string | undefined {
+    if (!source || typeof source !== 'object') {
+      return undefined;
+    }
+    const metadata = (source as { metadata?: unknown }).metadata;
+    if (metadata && typeof metadata === 'object' && 'entryEndpoint' in metadata) {
+      const value = (metadata as Record<string, unknown>).entryEndpoint;
+      return typeof value === 'string' ? value : undefined;
+    }
+    return undefined;
+  }
+
+  private async ensureResponsesInstructions(body: Record<string, unknown>): Promise<void> {
+    try {
+      const ensureFn = await loadEnsureResponsesInstructions();
+      ensureFn(body);
+    } catch {
+      // non-blocking
+    }
+  }
+
+  private applyInstructionsMode(body: Record<string, unknown>, mode: InstructionsMode): void {
+    if (mode === 'inline') {
+      (body as Record<string, unknown>).__rcc_inline_system_instructions = true;
+    }
+  }
+
+  private resolveClientStreamPreference(pref: StreamPref, inbound: boolean | undefined): boolean {
+    if (pref === 'always') {
+      return true;
+    }
+    if (pref === 'never') {
+      return false;
+    }
+    return inbound === true;
+  }
+
+  private async maybeConvertChatPayload(body: Record<string, unknown>): Promise<void> {
+    const looksResponses = Array.isArray(body.input as unknown[]) || typeof body.instructions === 'string';
+    const looksChat = Array.isArray(body.messages as unknown[]);
+    if (looksResponses || !looksChat) {
+      return;
+    }
+
+    const conversion = await buildResponsesRequestFromChat(body);
+    const requestObject = this.extractConvertedRequest(conversion);
+    if (!requestObject) {
+      throw new Error('buildResponsesRequestFromChat did not return a valid request object');
+    }
+    const currentModel = typeof body.model === 'string' ? body.model : undefined;
+    for (const key of Object.keys(body)) {
+      delete body[key];
+    }
+    Object.assign(body, requestObject);
+    if (currentModel) {
+      body.model = currentModel;
+    }
+  }
+
+  private extractConvertedRequest(conversion: unknown): Record<string, unknown> | null {
+    if (isRecord(conversion) && 'request' in conversion && isRecord((conversion as Record<string, unknown>).request)) {
+      return { ...(conversion as Record<string, unknown>).request as Record<string, unknown> };
+    }
+    if (isRecord(conversion)) {
+      return { ...conversion };
+    }
+    return null;
+  }
+
+  private async snapshotPhase(
+    phase: 'provider-request' | 'provider-response' | 'provider-error',
+    context: ProviderContext,
+    data: unknown,
+    headers: Record<string, string>,
+    url: string,
+    entryEndpoint?: string
+  ): Promise<void> {
+    try {
+      await writeProviderSnapshot({
+        phase,
+        requestId: context.requestId,
+        data,
+        headers,
+        url,
+        entryEndpoint
+      });
+    } catch {
+      // non-blocking
+    }
+  }
+
+  private async sendSseRequest(options: {
+    endpoint: string;
+    body: Record<string, unknown>;
+    headers: Record<string, string>;
+    context: ProviderContext;
+    targetUrl: string;
+    entryEndpoint?: string;
+    clientRequestedStream: boolean;
+    httpClient: ResponsesHttpClient;
+  }): Promise<unknown> {
+    const { endpoint, body, headers, context, targetUrl, entryEndpoint, clientRequestedStream, httpClient } = options;
+    const stream = await httpClient.postStream(endpoint, body, {
+      ...headers,
+      Accept: 'text/event-stream'
+    });
+
+    if (clientRequestedStream) {
+      return { __sse_stream: stream };
+    }
+
+    const converter = await this.loadResponsesSseConverter();
+    const json = await converter.convertSseToJson(stream, {
+      requestId: context.requestId,
+      model: typeof body.model === 'string' ? body.model : 'unknown'
+    });
+    await this.snapshotPhase('provider-response', context, json ?? null, headers, targetUrl, entryEndpoint);
+    return {
+      data: json,
+      status: 200,
+      statusText: 'OK',
+      headers: { 'x-upstream-mode': 'sse' },
+      url: targetUrl
+    };
+  }
+
+  private async sendJsonRequest(options: {
+    endpoint: string;
+    body: Record<string, unknown>;
+    headers: Record<string, string>;
+    context: ProviderContext;
+    targetUrl: string;
+    entryEndpoint?: string;
+    httpClient: ResponsesHttpClient;
+  }): Promise<unknown> {
+    const { endpoint, body, headers, context, targetUrl, entryEndpoint, httpClient } = options;
+    const response = await httpClient.post(endpoint, body, {
+      ...headers,
+      Accept: 'application/json'
+    });
+    await this.snapshotPhase('provider-response', context, response, headers, targetUrl, entryEndpoint);
+    return response;
+  }
+
+  private normalizeUpstreamError(error: unknown): Error & {
+    status?: number;
+    statusCode?: number;
+    code?: string;
+    response?: {
+      data?: {
+        error?: Record<string, unknown>;
+      };
+    };
+  } {
+    const normalized = error instanceof Error ? error : new Error(String(error ?? 'Unknown error'));
+    const err = normalized as Error & {
+      status?: number;
+      statusCode?: number;
+      code?: string;
+      response?: {
+        data?: {
+          error?: Record<string, unknown>;
+        };
+      };
+    };
+    const message = typeof err.message === 'string' ? err.message : String(err || '');
+    const match = message.match(/HTTP\s+(\d{3})/i);
+    const existing = typeof err.statusCode === 'number' ? err.statusCode : typeof err.status === 'number' ? err.status : undefined;
+    const statusCode = existing ?? (match ? Number(match[1]) : undefined);
+    if (typeof statusCode === 'number' && !Number.isNaN(statusCode)) {
+      err.statusCode = statusCode;
+      err.status = statusCode;
+      if (!err.code) {
+        err.code = `HTTP_${statusCode}`;
+      }
+    }
+    if (!err.response) {
+      err.response = {};
+    }
+    if (!err.response.data) {
+      err.response.data = {};
+    }
+    if (!err.response.data.error) {
+      err.response.data.error = {};
+    }
+    if (err.code && !err.response.data.error.code) {
+      err.response.data.error.code = err.code;
+    }
+    return err;
+  }
+
+  private async loadResponsesSseConverter(): Promise<ResponsesSseConverter> {
+    const modPath = path.join(
+      PACKAGE_ROOT,
+      'sharedmodule',
+      'llmswitch-core',
+      'dist',
+      'sse',
+      'sse-to-json',
+      'index.js'
+    );
+    const moduleUrl = pathToFileURL(modPath).href;
+    const { ResponsesSseToJsonConverter } = await import(moduleUrl);
+    return new ResponsesSseToJsonConverter();
   }
 }
 
@@ -273,14 +395,26 @@ interface ResponsesSettings {
 }
 
 function parseStreamPref(value: unknown): StreamPref {
-  if (value === true) return 'always';
-  if (value === false) return 'never';
+  if (value === true) {
+    return 'always';
+  }
+  if (value === false) {
+    return 'never';
+  }
   if (typeof value === 'string') {
     const normalized = value.trim().toLowerCase();
-    if (normalized === 'always') return 'always';
-    if (normalized === 'never') return 'never';
-    if (['true', '1', 'yes'].includes(normalized)) return 'always';
-    if (['false', '0', 'no'].includes(normalized)) return 'never';
+    if (normalized === 'always') {
+      return 'always';
+    }
+    if (normalized === 'never') {
+      return 'never';
+    }
+    if (['true', '1', 'yes'].includes(normalized)) {
+      return 'always';
+    }
+    if (['false', '0', 'no'].includes(normalized)) {
+      return 'never';
+    }
   }
   if (value === 'always' || value === 'never') {
     return value;
@@ -289,13 +423,22 @@ function parseStreamPref(value: unknown): StreamPref {
 }
 
 function parseInstructionsMode(value: unknown): InstructionsMode {
-  if (value === 'inline') return 'inline';
+  if (value === 'inline') {
+    return 'inline';
+  }
   return 'default';
 }
 
-function extractResponsesConfig(config: any): Partial<ResponsesSettings> {
-  const responsesCfg = config?.config?.responses;
-  if (!responsesCfg || typeof responsesCfg !== 'object') return {};
+function extractResponsesConfig(config: UnknownObject): Partial<ResponsesSettings> {
+  const providerConfig = isRecord((config as Record<string, unknown>).config)
+    ? ((config as Record<string, unknown>).config as Record<string, unknown>)
+    : undefined;
+  const responsesCfg = providerConfig && isRecord(providerConfig.responses)
+    ? (providerConfig.responses as Record<string, unknown>)
+    : undefined;
+  if (!responsesCfg) {
+    return {};
+  }
   return {
     streaming: parseStreamPref(responsesCfg.streaming),
     instructionsMode: parseInstructionsMode(responsesCfg.instructionsMode)
@@ -332,3 +475,7 @@ function resolveModuleRoot(currentModuleUrl: string): string {
 }
 
 const PACKAGE_ROOT = resolveModuleRoot(import.meta.url);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}

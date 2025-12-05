@@ -3,8 +3,10 @@
  */
 
 import type { ModuleDependencies } from '../../../modules/pipeline/types/module.types.js';
+import type { CompatibilityContext } from '../compatibility-interface.js';
+import type { UnknownObject } from '../../../modules/pipeline/types/common-types.js';
 import { CompatibilityModuleFactory } from '../compatibility-factory.js';
-import { GLMCompatibility } from './glm-compatibility.js';
+import { GLMCompatibility, type GLMCompatibilityConfig } from './glm-compatibility.js';
 
 // 注册GLM模块类型到工厂
 // - 标准模块名：'glm'
@@ -26,18 +28,18 @@ export { GLMResponseNormalizationHook } from './hooks/glm-response-normalization
  */
 export function createGLMCompatibilityModule(
   dependencies: ModuleDependencies,
-  config?: {
-    id?: string;
-    profileId?: string;
-  }
+  config?: GLMCompatibilityConfig
 ) {
   const module = new GLMCompatibility(dependencies);
+  if (config) {
+    module.setConfig(config);
+  }
 
   return {
     module,
     initialize: () => module.initialize(),
-    processIncoming: (request: any, context: any) => module.processIncoming(request, context),
-    processOutgoing: (response: any, context: any) => module.processOutgoing(response, context),
+    processIncoming: (request: UnknownObject, context: CompatibilityContext) => module.processIncoming(request, context),
+    processOutgoing: (response: UnknownObject, context: CompatibilityContext) => module.processOutgoing(response, context),
     cleanup: () => module.cleanup()
   };
 }

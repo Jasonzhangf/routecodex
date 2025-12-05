@@ -10,6 +10,9 @@ import {
   type iFlowProcessConfig
 } from './functions/iflow-processor.js';
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
 /**
  * iFlow兼容模块
  * 实现OpenAI格式与iFlow格式之间的双向转换
@@ -23,7 +26,7 @@ export class iFlowCompatibility implements CompatibilityModule {
   private dependencies: ModuleDependencies;
   private baseCompat: BaseCompatibility | null = null;
   private processConfig: iFlowProcessConfig | null = null; // 函数化处理配置
-  private injectedConfig: any = null;
+  private injectedConfig: UnknownObject | null = null;
 
   constructor(dependencies: ModuleDependencies) {
     this.id = `iflow-compatibility-${Date.now()}`;
@@ -34,15 +37,11 @@ export class iFlowCompatibility implements CompatibilityModule {
   }
 
   // 允许配置注入（与GLM模块保持一致）
-  setConfig(config: any) {
-    try {
-      this.injectedConfig = config && typeof config === 'object' ? config : null;
-    } catch {
-      this.injectedConfig = null;
-    }
+  setConfig(config: unknown): void {
+    this.injectedConfig = isRecord(config) ? { ...config } : null;
   }
 
-  getConfig(): any {
+  getConfig(): UnknownObject | null {
     return this.injectedConfig;
   }
 

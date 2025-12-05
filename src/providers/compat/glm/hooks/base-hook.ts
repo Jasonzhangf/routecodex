@@ -41,14 +41,14 @@ export abstract class BaseHook {
     }
   }
 
-  protected shouldExecute(data: UnknownObject, context: CompatibilityContext): boolean {
+  protected shouldExecute(_data: UnknownObject, context: CompatibilityContext): boolean {
     // 仅对GLM执行；当上游未传入上下文时，默认视为GLM（该Hook仅挂载于GLM兼容模块内）
-    const providerType = (context as any)?.providerType;
-    return providerType ? providerType === 'glm' : true;
+    const providerFamily = context.providerFamily?.toLowerCase() || context.providerId?.toLowerCase();
+    return providerFamily ? providerFamily === 'glm' : true;
   }
 
   protected logExecution(context: CompatibilityContext, additionalData?: UnknownObject): void {
-    const reqId = (context as any)?.requestId || 'unknown';
+    const reqId = context.requestId || 'unknown';
     this.dependencies.logger?.logModule('glm-hook', 'execute', {
       hookName: this.name,
       stage: this.stage,
@@ -58,7 +58,7 @@ export abstract class BaseHook {
   }
 
   protected logError(error: Error, context: CompatibilityContext, additionalData?: UnknownObject): void {
-    const reqId = (context as any)?.requestId || 'unknown';
+    const reqId = context.requestId || 'unknown';
     this.dependencies.logger?.logError?.(error, {
       hookName: this.name,
       stage: this.stage,

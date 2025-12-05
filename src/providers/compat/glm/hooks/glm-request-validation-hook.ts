@@ -1,7 +1,8 @@
 import type { CompatibilityContext } from '../../compatibility-interface.js';
 import type { UnknownObject } from '../../../../modules/pipeline/types/common-types.js';
-import type { ModuleDependencies } from '../../../../modules/pipeline/types/module.types.js';
 import { BaseHook } from './base-hook.js';
+
+const isRecord = (value: unknown): value is UnknownObject => typeof value === 'object' && value !== null;
 
 /**
  * 校验规则接口
@@ -178,7 +179,7 @@ export class GLMRequestValidationHook extends BaseHook {
     }
 
     // 检查条件校验
-    if (rule.conditional && !this.evaluateConditional(data, rule.conditional, rule.field)) {
+    if (rule.conditional && !this.evaluateConditional(data, rule.conditional)) {
       return;
     }
 
@@ -234,88 +235,65 @@ export class GLMRequestValidationHook extends BaseHook {
     }
   }
 
-  private getFieldValue(data: UnknownObject, fieldPath: string): any {
+  private getFieldValue(data: UnknownObject, fieldPath: string): unknown {
     // 处理通配符路径，如 messages[*].role
     if (fieldPath.includes('[*]')) {
       return this.getArrayFieldValues(data, fieldPath);
     }
 
     // 处理普通路径，如 model, messages
-    return fieldPath.split('.').reduce((current, key) => {
-      return current && current[key] !== undefined ? current[key] : undefined;
-    }, data as any);
+    return this.readNestedValue(data, fieldPath.split('.'));
   }
 
-  private getArrayFieldValues(data: UnknownObject, fieldPath: string): any[] {
-    const parts = fieldPath.split('[*]');
-    if (parts.length !== 2) {
-      return [];
-    }
-
-    const arrayPath = parts[0];
-    const fieldPathInArray = parts[1].replace(/^\./, ''); // 移除开头的点
-
-    const arrayValue = arrayPath.split('.').reduce((current, key) => {
-      return current && current[key] !== undefined ? current[key] : undefined;
-    }, data as any);
+  private getArrayFieldValues(data: UnknownObject, fieldPath: string): unknown[] {
+    const [arrayPath, nestedPathRaw = ''] = fieldPath.split('[*]');
+    const arrayValue = this.readNestedValue(data, arrayPath.split('.'));
 
     if (!Array.isArray(arrayValue)) {
       return [];
     }
 
-    return arrayValue.map(item => {
-      if (!fieldPathInArray) {
-        return item;
-      }
+    const nestedPath = nestedPathRaw.replace(/^\./, '');
+    if (!nestedPath) {
+      return [...arrayValue];
+    }
 
-      return fieldPathInArray.split('.').reduce((current, key) => {
-        return current && current[key] !== undefined ? current[key] : undefined;
-      }, item as any);
+    const segments = nestedPath.split('.').filter(Boolean);
+    return arrayValue.map(item => {
+      if (!isRecord(item)) {
+        return undefined;
+      }
+      return this.readNestedValue(item, segments);
     });
   }
 
-  private evaluateConditional(data: UnknownObject, conditional: any, currentField: string): boolean {
-    // 简单的条件评估
-    // 例如: "messages[i].role !== 'tool'"
+  private evaluateConditional(data: UnknownObject, conditional: ValidationRule['conditional']): boolean {
+    if (!conditional) {
+      return true;
+    }
 
-    // 获取当前字段对应的数组值
-    const arrayValues = this.getArrayFieldValues(data, currentField);
+    const statement = conditional.when?.trim();
+    if (!statement) {
+      return true;
+    }
 
-    for (let i = 0; i < arrayValues.length; i++) {
-      const condition = conditional.when.replace(/\bi\b/g, i.toString());
+    if (statement === "messages[i].role !== 'tool'") {
+      return this.hasRoleMatching(data, role => role !== 'tool');
+    }
 
-      // 替换字段引用
-      let evaluatedCondition = condition;
-
-      // 替换 messages[i].role 等引用
-      evaluatedCondition = evaluatedCondition.replace(
-        /messages\[i\]\.role/g,
-        `JSON.stringify(this.getArrayFieldValues(data, 'messages[*].role')[i])`
-      );
-
-      try {
-        // 简单的条件评估
-        if (evaluatedCondition.includes("!== 'tool'")) {
-          const roleValue = this.getArrayFieldValues(data, 'messages[*].role')[i];
-          if (roleValue === 'tool') {
-            return false;
-          }
-        }
-      } catch (error) {
-        // 条件评估失败，默认为不满足条件
-        return false;
-      }
+    if (statement === "messages[i].role === 'assistant'") {
+      return this.hasRoleMatching(data, role => role === 'assistant');
     }
 
     return true;
   }
 
-  private validateType(value: any, expectedType: string): boolean {
+  private validateType(value: unknown, expectedType: string): boolean {
     switch (expectedType) {
       case 'string':
         return typeof value === 'string';
       case 'number':
-        return typeof value === 'number' && !isNaN(value);
+        return typeof value === 'number' && !Number.isNaN(value);
       case 'boolean':
         return typeof value === 'boolean';
       case 'array':
@@ -325,5 +303,24 @@ export class GLMRequestValidationHook extends BaseHook {
       default:
         return true;
     }
+  }
+
+  private readNestedValue(source: unknown, segments: string[]): unknown {
+    let current: unknown = source;
+    for (const segment of segments) {
+      if (!segment) {
+        continue;
+      }
+      if (!isRecord(current)) {
+        return undefined;
+      }
+      current = current[segment];
+    }
+    return current;
+  }
+
+  private hasRoleMatching(data: UnknownObject, predicate: (role: string) => boolean): boolean {
+    const roles = this.getArrayFieldValues(data, 'messages[*].role');
+    return roles.some(role => typeof role === 'string' && predicate(role));
   }
 }

@@ -62,9 +62,10 @@ export class OAuthHybridFlowStrategy extends BaseOAuthFlowStrategy {
       }
 
       // 2. 如果令牌过期但可以刷新，则尝试刷新
-      if (existingToken && (existingToken as any).refresh_token) {
+      const refreshToken = this.extractRefreshToken(existingToken);
+      if (refreshToken) {
         console.log('Token expired, attempting refresh...');
-        const refreshedToken = await this.refreshToken((existingToken as any).refresh_token);
+        const refreshedToken = await this.refreshToken(refreshToken);
         await this.saveToken(refreshedToken);
         console.log('Token refreshed successfully');
         return refreshedToken;
@@ -115,6 +116,14 @@ export class OAuthHybridFlowStrategy extends BaseOAuthFlowStrategy {
    */
   async loadToken(): Promise<UnknownObject | null> {
     return this.strategy.loadToken();
+  }
+
+  private extractRefreshToken(token: UnknownObject | null): string | undefined {
+    if (!token) {
+      return undefined;
+    }
+    const candidate = (token as Record<string, unknown>).refresh_token;
+    return typeof candidate === 'string' ? candidate : undefined;
   }
 }
 

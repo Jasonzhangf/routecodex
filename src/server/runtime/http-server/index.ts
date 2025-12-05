@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * RouteCodex Server V2 - 渐进式重构版本
  *
@@ -10,12 +9,18 @@
  */
 
 import express, { type Application } from 'express';
+import type { Server } from 'http';
 import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { HandlerContext, PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
 import { ProviderFactory } from '../../../providers/core/runtime/provider-factory.js';
 import type { ModuleDependencies, PipelineDebugLogger } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { DebugCenter } from '../../../modules/pipeline/types/external-types.js';
+import type {
+  DebugLogEntry,
+  TransformationLogEntry,
+  ProviderRequestLogEntry
+} from '../../../modules/pipeline/utils/debug-logger.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import { AuthFileResolver } from '../../../config/auth-file-resolver.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
@@ -33,7 +38,6 @@ import type {
   HubPipelineCtor,
   ProviderHandle,
   ProviderProtocol,
-  RequestContextV2,
   ServerConfigV2,
   ServerStatusV2,
   VirtualRouterArtifacts
@@ -41,15 +45,46 @@ import type {
 import type { ProviderErrorRuntimeMetadata } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { writeClientSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
 
-type ConvertProviderResponseFn = typeof import('@jsonstudio/llms/dist/conversion/hub/response/provider-response.js')['convertProviderResponse'];
-type SnapshotRecorderFactory = typeof import('@jsonstudio/llms/dist/conversion/hub/snapshot-recorder.js')['createSnapshotRecorder'];
+type ConvertProviderResponseFn = (options: {
+  providerProtocol: string;
+  providerResponse: Record<string, unknown>;
+  context: Record<string, unknown>;
+  entryEndpoint: string;
+  wantsStream: boolean;
+  stageRecorder?: unknown;
+}) => Promise<Record<string, unknown> & { __sse_responses?: unknown; body?: unknown }>;
+type SnapshotRecorderFactory = (context: Record<string, unknown>, entryEndpoint: string) => unknown;
+type ConvertProviderModule = {
+  convertProviderResponse?: ConvertProviderResponseFn;
+};
+type SnapshotRecorderModule = {
+  createSnapshotRecorder?: SnapshotRecorderFactory;
+};
+type VirtualRouterBootstrapModule = {
+  bootstrapVirtualRouterConfig?: (input: UnknownObject) => VirtualRouterArtifacts;
+};
+type HubPipelineModule = {
+  HubPipeline?: HubPipelineCtor;
+};
+type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
+  token_file?: unknown;
+  token_url?: unknown;
+  device_code_url?: unknown;
+  client_id?: unknown;
+  client_secret?: unknown;
+  authorization_url?: unknown;
+  authUrl?: unknown;
+  user_info_url?: unknown;
+  refresh_url?: unknown;
+  scope?: unknown;
+};
 
 let convertProviderResponseFn: ConvertProviderResponseFn | null = null;
 async function loadConvertProviderResponse(): Promise<ConvertProviderResponseFn> {
-  if (convertProviderResponseFn) return convertProviderResponseFn;
-  const mod = await importCoreModule<{ convertProviderResponse?: ConvertProviderResponseFn }>(
-    'conversion/hub/response/provider-response'
-  );
+  if (convertProviderResponseFn) {
+    return convertProviderResponseFn;
+  }
+  const mod = await importCoreModule<ConvertProviderModule>('conversion/hub/response/provider-response');
   if (!mod?.convertProviderResponse) {
     throw new Error('[RouteCodexHttpServer] llmswitch-core 缺少 convertProviderResponse 实现');
   }
@@ -59,10 +94,10 @@ async function loadConvertProviderResponse(): Promise<ConvertProviderResponseFn>
 
 let createSnapshotRecorderFn: SnapshotRecorderFactory | null = null;
 async function loadSnapshotRecorderFactory(): Promise<SnapshotRecorderFactory> {
-  if (createSnapshotRecorderFn) return createSnapshotRecorderFn;
-  const mod = await importCoreModule<{ createSnapshotRecorder?: SnapshotRecorderFactory }>(
-    'conversion/hub/snapshot-recorder'
-  );
+  if (createSnapshotRecorderFn) {
+    return createSnapshotRecorderFn;
+  }
+  const mod = await importCoreModule<SnapshotRecorderModule>('conversion/hub/snapshot-recorder');
   if (!mod?.createSnapshotRecorder) {
     throw new Error('[RouteCodexHttpServer] llmswitch-core 缺少 createSnapshotRecorder 实现');
   }
@@ -77,7 +112,7 @@ async function loadSnapshotRecorderFactory(): Promise<SnapshotRecorderFactory> {
  */
 export class RouteCodexHttpServer {
   private app: Application;
-  private server?: unknown;
+  private server?: Server;
   private config: ServerConfigV2;
   private errorHandling: ErrorHandlingCenter;
   private _isInitialized: boolean = false;
@@ -96,6 +131,7 @@ export class RouteCodexHttpServer {
   private readonly repoRoot: string;
   private currentRouterArtifacts: VirtualRouterArtifacts | null = null;
   private providerProfileIndex: Map<string, ProviderProfile> = new Map();
+  private errorHandlingShim: ModuleDependencies['errorHandlingCenter'] | null = null;
 
   constructor(config: ServerConfigV2) {
     this.config = config;
@@ -121,12 +157,28 @@ export class RouteCodexHttpServer {
   private getModuleDependencies(): ModuleDependencies {
     if (!this.moduleDependencies) {
       this.moduleDependencies = {
-        errorHandlingCenter: this.errorHandling as any,
+        errorHandlingCenter: this.getErrorHandlingShim(),
         debugCenter: this.createDebugCenterShim(),
         logger: this.pipelineLogger
       };
     }
-    return this.moduleDependencies;
+    return this.moduleDependencies!;
+  }
+
+  private getErrorHandlingShim(): ModuleDependencies['errorHandlingCenter'] {
+    if (!this.errorHandlingShim) {
+      this.errorHandlingShim = {
+        handleError: async (errorPayload, contextPayload) => {
+          await this.errorHandling.handleError({
+            error: errorPayload,
+            context: contextPayload
+          });
+        },
+        createContext: () => ({}),
+        getStatistics: () => ({})
+      };
+    }
+    return this.errorHandlingShim;
   }
 
   private createDebugCenterShim(): DebugCenter {
@@ -142,7 +194,7 @@ export class RouteCodexHttpServer {
   private updateProviderProfiles(collection?: ProviderProfileCollection, rawConfig?: UnknownObject): void {
     this.providerProfileIndex.clear();
     const source = collection ?? this.tryBuildProfiles(rawConfig);
-    if (!source) return;
+    if (!source) {return;}
     for (const profile of source.profiles) {
       if (profile && typeof profile.id === 'string' && profile.id.trim()) {
         this.providerProfileIndex.set(profile.id.trim(), profile);
@@ -155,7 +207,7 @@ export class RouteCodexHttpServer {
       return;
     }
     const fallback = this.tryBuildProfiles(this.userConfig);
-    if (!fallback) return;
+    if (!fallback) {return;}
     for (const profile of fallback.profiles) {
       if (profile && typeof profile.id === 'string' && profile.id.trim()) {
         this.providerProfileIndex.set(profile.id.trim(), profile);
@@ -164,7 +216,7 @@ export class RouteCodexHttpServer {
   }
 
   private tryBuildProfiles(config: UnknownObject | undefined): ProviderProfileCollection | null {
-    if (!config) return null;
+    if (!config) {return null;}
     try {
       return buildProviderProfiles(config);
     } catch {
@@ -188,7 +240,7 @@ export class RouteCodexHttpServer {
     }
     for (const candidate of candidates) {
       const profile = this.providerProfileIndex.get(candidate);
-      if (profile) return profile;
+      if (profile) {return profile;}
     }
     return undefined;
   }
@@ -298,23 +350,29 @@ export class RouteCodexHttpServer {
   }
 
   private async bootstrapVirtualRouter(input: UnknownObject): Promise<VirtualRouterArtifacts> {
-    const mod = await loadLlmswitchModule<any>(this.repoRoot, 'router/virtual-router/bootstrap.js');
+    const mod = await loadLlmswitchModule<VirtualRouterBootstrapModule>(
+      this.repoRoot,
+      'router/virtual-router/bootstrap.js'
+    );
     const fn = mod?.bootstrapVirtualRouterConfig;
     if (typeof fn !== 'function') {
       throw new Error('llmswitch-core missing bootstrapVirtualRouterConfig');
     }
-    return fn(input) as VirtualRouterArtifacts;
+    return fn(input);
   }
 
   private async ensureHubPipelineCtor(): Promise<HubPipelineCtor> {
     if (this.hubPipelineCtor) {
       return this.hubPipelineCtor;
     }
-    const mod = await loadLlmswitchModule<any>(this.repoRoot, 'conversion/hub/pipeline/hub-pipeline.js');
+    const mod = await loadLlmswitchModule<HubPipelineModule>(
+      this.repoRoot,
+      'conversion/hub/pipeline/hub-pipeline.js'
+    );
     if (!mod?.HubPipeline) {
       throw new Error('Unable to load HubPipeline implementation from llmswitch-core');
     }
-    this.hubPipelineCtor = mod.HubPipeline as HubPipelineCtor;
+    this.hubPipelineCtor = mod.HubPipeline;
     return this.hubPipelineCtor;
   }
 
@@ -367,7 +425,7 @@ export class RouteCodexHttpServer {
         resolve();
       });
 
-      (this.server as any).on('error', async (error: Error) => {
+      this.server.on('error', async (error: Error) => {
         await this.handleError(error, 'server_start');
         reject(error);
       });
@@ -380,7 +438,7 @@ export class RouteCodexHttpServer {
   public async stop(): Promise<void> {
     if (this.server) {
       return new Promise(resolve => {
-        (this.server as any)?.close(async () => {
+        this.server?.close(async () => {
           this._isRunning = false;
 
           try {
@@ -454,7 +512,7 @@ export class RouteCodexHttpServer {
 
   // --- V1 parity helpers and attach methods ---
   public async initializeWithUserConfig(
-    userConfig: any,
+    userConfig: UnknownObject,
     context?: { providerProfiles?: ProviderProfileCollection }
   ): Promise<void> {
     this.updateProviderProfiles(context?.providerProfiles, userConfig);
@@ -462,14 +520,14 @@ export class RouteCodexHttpServer {
   }
 
   public async reloadRuntime(
-    userConfig: any,
+    userConfig: UnknownObject,
     context?: { providerProfiles?: ProviderProfileCollection }
   ): Promise<void> {
     this.updateProviderProfiles(context?.providerProfiles, userConfig);
     await this.setupRuntime(userConfig);
   }
 
-  private async setupRuntime(userConfig: any): Promise<void> {
+  private async setupRuntime(userConfig: UnknownObject): Promise<void> {
     this.userConfig = asRecord(userConfig);
     this.ensureProviderProfilesFromUserConfig();
     const routerInput = this.resolveVirtualRouterInput(this.userConfig);
@@ -500,7 +558,7 @@ export class RouteCodexHttpServer {
     this.providerKeyToRuntimeKey.clear();
 
     for (const [providerKey, runtime] of Object.entries(runtimeMap)) {
-      if (!runtime) continue;
+      if (!runtime) {continue;}
       const runtimeKey = runtime.runtimeKey || providerKey;
       if (!this.providerHandles.has(runtimeKey)) {
         const resolvedRuntime = await this.materializeRuntimeProfile(runtime);
@@ -561,6 +619,7 @@ export class RouteCodexHttpServer {
 
   private async resolveRuntimeAuth(runtime: ProviderRuntimeProfile): Promise<ProviderRuntimeProfile['auth']> {
     const auth = runtime.auth || { type: 'apikey' };
+    const authRecord = auth as LegacyAuthFields;
     const authType = this.normalizeAuthType(auth.type);
     const pickString = (...candidates: unknown[]): string | undefined => {
       for (const candidate of candidates) {
@@ -574,7 +633,7 @@ export class RouteCodexHttpServer {
       return undefined;
     };
     const pickStringArray = (value: unknown): string[] | undefined => {
-      if (!value) return undefined;
+      if (!value) {return undefined;}
       if (Array.isArray(value)) {
         const normalized = value
           .map((item) => pickString(item))
@@ -602,17 +661,15 @@ export class RouteCodexHttpServer {
       value: auth.value,
       oauthProviderId: auth.oauthProviderId,
       rawType: auth.rawType,
-      tokenFile: pickString((auth as any).tokenFile ?? (auth as any).token_file),
-      tokenUrl: pickString((auth as any).tokenUrl ?? (auth as any).token_url),
-      deviceCodeUrl: pickString((auth as any).deviceCodeUrl ?? (auth as any).device_code_url),
-      clientId: pickString((auth as any).clientId ?? (auth as any).client_id),
-      clientSecret: pickString((auth as any).clientSecret ?? (auth as any).client_secret),
-      authorizationUrl: pickString(
-        (auth as any).authorizationUrl ?? (auth as any).authorization_url ?? (auth as any).authUrl
-      ),
-      userInfoUrl: pickString((auth as any).userInfoUrl ?? (auth as any).user_info_url),
-      refreshUrl: pickString((auth as any).refreshUrl ?? (auth as any).refresh_url),
-      scopes: pickStringArray((auth as any).scopes ?? (auth as any).scope)
+      tokenFile: pickString(authRecord.tokenFile, authRecord.token_file),
+      tokenUrl: pickString(authRecord.tokenUrl, authRecord.token_url),
+      deviceCodeUrl: pickString(authRecord.deviceCodeUrl, authRecord.device_code_url),
+      clientId: pickString(authRecord.clientId, authRecord.client_id),
+      clientSecret: pickString(authRecord.clientSecret, authRecord.client_secret),
+      authorizationUrl: pickString(authRecord.authorizationUrl, authRecord.authorization_url, authRecord.authUrl),
+      userInfoUrl: pickString(authRecord.userInfoUrl, authRecord.user_info_url),
+      refreshUrl: pickString(authRecord.refreshUrl, authRecord.refresh_url),
+      scopes: pickStringArray(authRecord.scopes ?? authRecord.scope)
     };
 
     let tokenFile = resolved.tokenFile;
@@ -763,9 +820,7 @@ export class RouteCodexHttpServer {
 
     try {
       const providerResponse = await handle.instance.processIncoming(providerPayload);
-      const responseStatus = typeof (providerResponse as any)?.status === 'number'
-        ? (providerResponse as any).status
-        : undefined;
+      const responseStatus = this.extractResponseStatus(providerResponse);
       this.logStage('provider.send.completed', input.requestId, {
         providerKey: target.providerKey,
         status: responseStatus,
@@ -830,17 +885,18 @@ export class RouteCodexHttpServer {
     };
     routingDecision?: { routeName?: string };
     processMode: string;
+    metadata: Record<string, unknown>;
   }> {
     if (!this.hubPipeline) {
       throw new Error('Hub pipeline runtime is not initialized');
     }
     const payload = asRecord(input.body);
-    const result = await this.hubPipeline.execute({
-      endpoint: input.entryEndpoint,
-      id: input.requestId,
-      payload,
-      metadata
-    });
+    const pipelineInput: PipelineExecutionInput & { payload: Record<string, unknown> } = {
+      ...input,
+      metadata,
+      payload
+    };
+    const result = await this.hubPipeline.execute(pipelineInput);
     if (!result.providerPayload || !result.target?.providerKey) {
       throw Object.assign(new Error('Virtual router did not produce a provider target'), {
         code: 'ERR_NO_PROVIDER_TARGET',
@@ -852,7 +908,8 @@ export class RouteCodexHttpServer {
       providerPayload: result.providerPayload,
       target: result.target,
       routingDecision: result.routingDecision ?? undefined,
-      processMode
+      processMode,
+      metadata: result.metadata ?? {}
     };
   }
 
@@ -882,15 +939,28 @@ export class RouteCodexHttpServer {
     return undefined;
   }
 
-  private normalizeProviderResponse(response: any): PipelineExecutionResult {
-    const status = typeof response?.status === 'number' ? response.status : undefined;
-    const headers = this.normalizeProviderResponseHeaders(response?.headers);
-    const body = response?.data ?? response;
+  private extractResponseStatus(response: unknown): number | undefined {
+    if (!response || typeof response !== 'object') {
+      return undefined;
+    }
+    const candidate = (response as { status?: unknown }).status;
+    return typeof candidate === 'number' ? candidate : undefined;
+  }
+
+  private normalizeProviderResponse(response: unknown): PipelineExecutionResult {
+    const status = this.extractResponseStatus(response);
+    const headers = this.normalizeProviderResponseHeaders(
+      response && typeof response === 'object' ? (response as Record<string, unknown>).headers : undefined
+    );
+    const body =
+      response && typeof response === 'object' && 'data' in (response as Record<string, unknown>)
+        ? (response as Record<string, unknown>).data
+        : response;
     return { status, headers, body };
   }
 
   private normalizeProviderResponseHeaders(headers: unknown): Record<string, string> | undefined {
-    if (!headers || typeof headers !== 'object') return undefined;
+    if (!headers || typeof headers !== 'object') {return undefined;}
     const normalized: Record<string, string> = {};
     for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
       if (typeof value === 'string') {
@@ -989,7 +1059,7 @@ export class RouteCodexHttpServer {
   }
 
   private cloneRequestPayload(payload: unknown): Record<string, unknown> | undefined {
-    if (!payload || typeof payload !== 'object') return undefined;
+    if (!payload || typeof payload !== 'object') {return undefined;}
     try {
       return JSON.parse(JSON.stringify(payload));
     } catch {
@@ -1001,8 +1071,16 @@ export class RouteCodexHttpServer {
 
 function createNoopPipelineLogger(): PipelineDebugLogger {
   const noop = () => {};
-  const emptyLogs = () => ({ general: [], transformations: [], provider: [] }) as any;
-  const emptyList = () => [] as any;
+  const emptyLogs = (): {
+    general: DebugLogEntry[];
+    transformations: TransformationLogEntry[];
+    provider: ProviderRequestLogEntry[];
+  } => ({
+    general: [],
+    transformations: [],
+    provider: []
+  });
+  const emptyList = <T>(): T[] => [];
   const emptyStats = () => ({
     totalLogs: 0,
     logsByLevel: {},
@@ -1022,9 +1100,9 @@ function createNoopPipelineLogger(): PipelineDebugLogger {
     logProviderRequest: noop,
     getRequestLogs: emptyLogs,
     getPipelineLogs: emptyLogs,
-    getRecentLogs: emptyList,
-    getTransformationLogs: emptyList,
-    getProviderLogs: emptyList,
+    getRecentLogs: () => emptyList<DebugLogEntry>(),
+    getTransformationLogs: () => emptyList<TransformationLogEntry>(),
+    getProviderLogs: () => emptyList<ProviderRequestLogEntry>(),
     getStatistics: emptyStats,
     clearLogs: noop,
     exportLogs: () => ([]),

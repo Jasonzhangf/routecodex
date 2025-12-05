@@ -12,7 +12,6 @@ src/
 ├── config/            # 配置管理和验证
 ├── core/              # 核心组件和系统架构
 ├── debug/             # 调试和诊断工具
-├── logging/           # 日志系统
 ├── modules/           # 功能模块（流水线系统）
 ├── patches/           # 兼容性补丁
 ├── providers/         # AI 服务提供商适配器

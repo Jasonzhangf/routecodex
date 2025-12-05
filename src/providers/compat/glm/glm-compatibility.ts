@@ -10,6 +10,18 @@ import {
   type GLMProcessConfig
 } from './functions/glm-processor.js';
 
+type ShapeFilterOverrides = {
+  shapeFilterFile?: string;
+  shapeProfile?: string;
+};
+
+export interface GLMCompatibilityConfig extends Record<string, unknown> {
+  config?: ShapeFilterOverrides & Record<string, unknown>;
+  profileId?: string;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+
 /**
  * GLM兼容模块
  * 实现OpenAI格式与GLM格式之间的双向转换
@@ -19,13 +31,15 @@ export class GLMCompatibility implements CompatibilityModule {
   readonly type = 'glm';
   readonly providerType = 'glm';
 
-  private fieldMappingProcessor: GLMFieldMappingProcessor;
-  private dependencies: ModuleDependencies;
+  private readonly fieldMappingProcessor: GLMFieldMappingProcessor;
+  private readonly dependencies: ModuleDependencies;
   private baseCompat: BaseCompatibility | null = null;
-  private injectedConfig: any = null; // via setConfig
+  private injectedConfig: GLMCompatibilityConfig | null = null; // via setConfig
   private processConfig: GLMProcessConfig | null = null; // 函数化处理配置
 
-  getConfig(): any { return this.injectedConfig; }
+  getConfig(): GLMCompatibilityConfig | null {
+    return this.injectedConfig;
+  }
 
   constructor(dependencies: ModuleDependencies) {
     this.id = `glm-compatibility-${Date.now()}`;
@@ -36,10 +50,8 @@ export class GLMCompatibility implements CompatibilityModule {
   }
 
   // 允许 V2 工厂在创建后注入配置（与V1保持同一配置输入）
-  setConfig(config: any) {
-    try {
-      this.injectedConfig = config && typeof config === 'object' ? config : null;
-    } catch { this.injectedConfig = null; }
+  setConfig(config: unknown): void {
+    this.injectedConfig = isRecord(config) ? (config as GLMCompatibilityConfig) : null;
   }
 
   async initialize(): Promise<void> {
@@ -54,28 +66,13 @@ export class GLMCompatibility implements CompatibilityModule {
     // 基础兼容：通用逻辑 + GLM 配置 + hooks
     // 运行时路径：dist/providers/compat/glm/glm-compatibility.js
     // JSON 位于同级的 ./config/shape-filters.json
-    let shapePath: string | undefined = undefined;
+    let shapePath: string | undefined;
     try {
       const { fileURLToPath } = await import('url');
       const { dirname, join } = await import('path');
       const __filename = fileURLToPath(import.meta.url);
       const __dirname = dirname(__filename);
-      // 支持从配置选择特定形状过滤文件：
-      // 优先级：config.config.shapeFilterFile | config.config.shapeProfile | profileId | 默认
-      const shapeFile = (() => {
-        const cc = (this.injectedConfig && (this.injectedConfig as any).config) ? (this.injectedConfig as any).config : {};
-        if (typeof (cc as any).shapeFilterFile === 'string' && (cc as any).shapeFilterFile.trim()) {
-          return String((cc as any).shapeFilterFile).trim();
-        }
-        const profile = (typeof (cc as any).shapeProfile === 'string' && (cc as any).shapeProfile.trim())
-          ? String((cc as any).shapeProfile).trim()
-          : (typeof (this.injectedConfig as any)?.profileId === 'string' ? String((this.injectedConfig as any).profileId) : '');
-        if (profile) {
-          // 允许 'strict' → shape-filters.strict.json 这样的命名
-          return `shape-filters.${profile}.json`;
-        }
-        return 'shape-filters.json';
-      })();
+      const shapeFile = this.resolveShapeFilterFile();
       shapePath = join(__dirname, 'config', shapeFile);
 
     } catch { /* keep undefined to be safe */ }
@@ -84,8 +81,8 @@ export class GLMCompatibility implements CompatibilityModule {
       providerType: 'glm',
       shapeFilterConfigPath: shapePath || '',
       mapper: {
-        mapIncoming: async (req: UnknownObject) => await this.fieldMappingProcessor.mapIncoming(req),
-        mapOutgoing: async (res: UnknownObject) => await this.fieldMappingProcessor.mapOutgoing(res)
+        mapIncoming: (req: UnknownObject) => this.fieldMappingProcessor.mapIncoming(req),
+        mapOutgoing: (res: UnknownObject) => this.fieldMappingProcessor.mapOutgoing(res)
       },
       // hooks 留空，仅保留快照
     });
@@ -94,7 +91,7 @@ export class GLMCompatibility implements CompatibilityModule {
     // 创建函数化处理配置
     this.processConfig = await createGLMProcessConfig(
       this.dependencies,
-      this.injectedConfig,
+      this.injectedConfig ?? undefined,
       this.fieldMappingProcessor,
       this.baseCompat,
       this.id
@@ -138,5 +135,31 @@ export class GLMCompatibility implements CompatibilityModule {
     this.dependencies.logger?.logModule('glm-compatibility', 'cleanup-complete', {
       compatibilityId: this.id
     });
+  }
+
+  private resolveShapeFilterFile(): string {
+    const overrides: ShapeFilterOverrides | undefined = this.injectedConfig?.config;
+    const fileOverride = typeof overrides?.shapeFilterFile === 'string'
+      ? overrides.shapeFilterFile.trim()
+      : '';
+    if (fileOverride) {
+      return fileOverride;
+    }
+
+    const profileOverride = (() => {
+      if (typeof overrides?.shapeProfile === 'string' && overrides.shapeProfile.trim()) {
+        return overrides.shapeProfile.trim();
+      }
+      if (typeof this.injectedConfig?.profileId === 'string' && this.injectedConfig.profileId.trim()) {
+        return this.injectedConfig.profileId.trim();
+      }
+      return '';
+    })();
+
+    if (profileOverride) {
+      return `shape-filters.${profileOverride}.json`;
+    }
+
+    return 'shape-filters.json';
   }
 }

@@ -1,5 +1,4 @@
 import fs from 'fs';
-import path from 'path';
 import { fetchModelsFromUpstream } from './fetch-models.js';
 import { getBlacklistPath, getModelsCachePath, getProviderConfigOutputPath, getProviderRootDir } from './paths.js';
 import { readBlacklist, writeBlacklist } from './blacklist.js';
@@ -8,8 +7,87 @@ import { probeFirstWorkingKey } from './key-probe.js';
 import { formatUpdateSummary } from './diff.js';
 import type { ProviderInputConfig, UpdateOptions, UpdateResult } from './types.js';
 
-function readJson(file: string): any | null {
-  try { if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { /* ignore */ }
+type LegacyProviderConfigNode = {
+  providerId?: string;
+  id?: string;
+  type?: string;
+  providerType?: string;
+  baseUrl?: string;
+  baseURL?: string;
+  auth?: ProviderInputConfig['auth'];
+  apiKey?: Array<unknown> | string | null;
+  model?: string | null;
+  models?: Array<unknown>;
+};
+
+type OpenAIStandardProviderConfig = {
+  type: 'openai-standard';
+  config: LegacyProviderConfigNode;
+  providerId?: string;
+  id?: string;
+  [key: string]: unknown;
+};
+
+type ProviderConfigFile = LegacyProviderConfigNode | OpenAIStandardProviderConfig;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const isLegacyProviderConfig = (value: unknown): value is LegacyProviderConfigNode =>
+  isRecord(value);
+
+const isOpenAIStandardConfig = (value: unknown): value is OpenAIStandardProviderConfig =>
+  isRecord(value) && value.type === 'openai-standard' && isLegacyProviderConfig(value.config);
+
+const pickFirstString = (...values: Array<unknown>): string | null => {
+  for (const value of values) {
+    if (value === undefined || value === null) {continue;}
+    const str = String(value).trim();
+    if (str) {return str;}
+  }
+  return null;
+};
+
+const normalizeStringArray = (values: unknown): string[] | undefined => {
+  if (!Array.isArray(values)) {return undefined;}
+  const result: string[] = [];
+  for (const entry of values) {
+    const normalized = pickFirstString(entry);
+    if (normalized) {
+      result.push(normalized);
+    }
+  }
+  return result.length ? result : undefined;
+};
+
+const resolveSeedModels = (config: LegacyProviderConfigNode): string[] => {
+  const seeds = new Set<string>();
+  const push = (value: unknown): void => {
+    const normalized = pickFirstString(value);
+    if (normalized) {
+      seeds.add(normalized);
+    }
+  };
+  push(config.model);
+  if (Array.isArray(config.models)) {
+    for (const entry of config.models) {
+      push(entry);
+    }
+  }
+  return Array.from(seeds);
+};
+
+const ensureLegacyConfig = (config: ProviderConfigFile): LegacyProviderConfigNode =>
+  isOpenAIStandardConfig(config) ? config.config : config;
+
+function readJson<T>(file: string): T | null {
+  try {
+    if (fs.existsSync(file)) {
+      return JSON.parse(fs.readFileSync(file, 'utf-8')) as T;
+    }
+  } catch {
+    /* ignore */
+  }
   return null;
 }
 
@@ -17,31 +95,63 @@ function ensureDir(dir: string): void { try { fs.mkdirSync(dir, { recursive: tru
 
 export async function updateProviderModels(options: UpdateOptions): Promise<UpdateResult> {
   const input = options.configPath;
-  if (!input) throw new Error('--config is required');
-  const raw = readJson(input);
-  if (!raw || typeof raw !== 'object') throw new Error('invalid provider config JSON');
+  if (!input) {throw new Error('--config is required');}
+
+  const rawData = readJson<unknown>(input);
+  if (!rawData) {throw new Error('invalid provider config JSON');}
+
+  let raw: ProviderConfigFile;
+  if (isOpenAIStandardConfig(rawData)) {
+    raw = rawData;
+  } else if (isLegacyProviderConfig(rawData)) {
+    raw = rawData;
+  } else {
+    throw new Error('invalid provider config JSON');
+  }
+
   // Support both legacy flat configs and V2 openai-standard provider configs:
   // - Legacy: { providerId, type, baseUrl, auth, apiKey:[] }
   // - V2: { type: 'openai-standard', config: { providerType, baseUrl, auth, apiKey? } }
-  const openaiStdConfig = (raw as any).type === 'openai-standard' && (raw as any).config && typeof (raw as any).config === 'object'
-    ? (raw as any).config
-    : null;
-  const baseNode: any = openaiStdConfig || raw;
+  const baseNode = ensureLegacyConfig(raw);
 
-  const apiKeyList = Array.isArray(baseNode.apiKey)
-    ? (baseNode.apiKey as any[]).map((x)=>String(x))
-    : undefined;
+  const apiKeyList =
+    Array.isArray(baseNode.apiKey)
+      ? normalizeStringArray(baseNode.apiKey)
+      : (() => {
+        const single = pickFirstString(baseNode.apiKey);
+        return single ? [single] : undefined;
+      })();
+
+  const providerId =
+    pickFirstString(
+      options.providerId,
+      raw.providerId,
+      raw.id,
+      baseNode.providerId,
+      baseNode.id
+    ) ?? 'provider';
+
+  const providerType =
+    pickFirstString(
+      baseNode.providerType,
+      baseNode.type,
+      raw.type
+    ) ?? 'openai';
+
+  const baseUrl = pickFirstString(baseNode.baseUrl, baseNode.baseURL) ?? '';
+  const baseURL = pickFirstString(baseNode.baseURL, baseNode.baseUrl) ?? '';
+
   const provider: ProviderInputConfig = {
-    providerId: options.providerId || String(baseNode.providerId || baseNode.id || (raw as any).providerId || (raw as any).id || 'provider').trim(),
+    providerId,
     // For openai-standard configs, prefer config.providerType as the logical upstream family (e.g., 'qwen', 'glm')
-    type: String(baseNode.providerType || baseNode.type || (raw as any).type || 'openai'),
-    baseUrl: String(baseNode.baseUrl || baseNode.baseURL || ''),
-    baseURL: String(baseNode.baseURL || baseNode.baseUrl || ''),
+    type: providerType,
+    baseUrl,
+    baseURL,
     auth: baseNode.auth,
     apiKey: apiKeyList
   };
-  if (!provider.providerId) throw new Error('providerId missing');
-  if (!provider.baseUrl && !provider.baseURL) throw new Error('baseUrl/baseURL missing');
+  if (!provider.providerId) {throw new Error('providerId missing');}
+  if (!provider.baseUrl && !provider.baseURL) {throw new Error('baseUrl/baseURL missing');}
 
   const rootDir = getProviderRootDir(provider.providerId, options.outputDir);
   const blacklistPath = getBlacklistPath(provider.providerId, options.outputDir, options.blacklistFile);
@@ -50,56 +160,32 @@ export async function updateProviderModels(options: UpdateOptions): Promise<Upda
   ensureDir(rootDir);
 
   // Load/Update blacklist
-  let bl = readBlacklist(blacklistPath);
+  const bl = readBlacklist(blacklistPath);
   const add = options.blacklistAdd || [];
   const rem = options.blacklistRemove || [];
   if (add.length || rem.length) {
     const set = new Set(bl.models);
-    for (const m of add) set.add(m);
-    for (const m of rem) set.delete(m);
+    for (const m of add) {set.add(m);}
+    for (const m of rem) {set.delete(m);}
     bl.models = Array.from(set);
     writeBlacklist(blacklistPath, bl);
   }
 
   // Fetch models
   let modelsRemote: string[] = [];
-  let rawRemote: unknown = undefined;
   try {
     const r = await fetchModelsFromUpstream(provider, !!options.verbose);
     modelsRemote = r.models || [];
-    rawRemote = r.raw;
     fs.writeFileSync(cachePath, JSON.stringify(r, null, 2), 'utf-8');
   } catch (e) {
     // Fallback: if provider input declares a model or models list, use it as seed
-    const seedModels: string[] = (() => {
-      try {
-        if (typeof raw?.model === 'string' && raw.model.trim()) return [String(raw.model).trim()];
-      } catch { /* ignore */ }
-      try {
-        if (Array.isArray(raw?.models)) return (raw.models as any[]).map((x)=>String(x)).filter(Boolean);
-      } catch { /* ignore */ }
-      // 支持 openai-standard 配置：从 config.model / config.models 读取种子模型
-      try {
-        const cfg: any = (raw as any)?.config;
-        if (cfg) {
-          if (typeof cfg.model === 'string' && cfg.model.trim()) {
-            return [String(cfg.model).trim()];
-          }
-          if (Array.isArray(cfg.models)) {
-            return (cfg.models as any[]).map((x)=>String(x)).filter(Boolean);
-          }
-        }
-      } catch { /* ignore */ }
-      return [];
-    })();
+    const seedModels = resolveSeedModels(baseNode);
     if (seedModels.length > 0) {
       modelsRemote = seedModels;
-      rawRemote = { seeded: true };
     } else if (options.useCache) {
-      const cached = readJson(cachePath);
-      if (!cached?.models) throw e;
-      modelsRemote = Array.isArray(cached.models) ? cached.models : [];
-      rawRemote = cached.raw;
+      const cached = readJson<{ models?: string[] }>(cachePath);
+      if (!cached?.models || !Array.isArray(cached.models)) {throw e;}
+      modelsRemote = cached.models;
     } else {
       throw e;
     }
@@ -127,15 +213,15 @@ export async function updateProviderModels(options: UpdateOptions): Promise<Upda
   // Optional: probe apiKey list and set auth.apiKey to first working key
   if (options.probeKeys) {
     try {
-      const provNode = (config?.virtualrouter?.providers || {})[provider.providerId];
-      const keysInput: string[] = Array.isArray(provider.apiKey) ? provider.apiKey as string[] : [];
-      const keysExisting: string[] = Array.isArray(provNode?.apiKey) ? provNode.apiKey as string[] : [];
+      const provNode = config.virtualrouter.providers?.[provider.providerId];
+      const keysInput = Array.isArray(provider.apiKey) ? provider.apiKey : [];
+      const keysExisting = provNode && Array.isArray(provNode.apiKey) ? provNode.apiKey : [];
       const candidates = Array.from(new Set([...(keysInput || []), ...(keysExisting || [])])).filter(Boolean);
-      if (candidates.length) {
+      if (provNode && candidates.length) {
         const picked = await probeFirstWorkingKey(provider, candidates, !!options.verbose);
         if (picked) {
           provNode.auth = provNode.auth || { type: 'apikey' };
-          if (!provNode.auth.type) provNode.auth.type = 'apikey';
+          if (!provNode.auth.type) {provNode.auth.type = 'apikey';}
           provNode.auth.apiKey = picked;
         }
       }

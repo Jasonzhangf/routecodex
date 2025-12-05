@@ -7,14 +7,22 @@ type Phase = 'compat-pre' | 'compat-post';
 
 function mapEndpointToFolder(entryEndpoint?: string): string {
   const ep = String(entryEndpoint || '').toLowerCase();
-  if (ep.includes('/v1/responses')) return 'openai-responses';
-  if (ep.includes('/v1/messages') || ep.includes('/anthropic')) return 'anthropic-messages';
+  if (ep.includes('/v1/responses')) {
+    return 'openai-responses';
+  }
+  if (ep.includes('/v1/messages') || ep.includes('/anthropic')) {
+    return 'anthropic-messages';
+  }
   // default to Chat route when unknown
   return 'openai-chat';
 }
 
 async function ensureDir(dir: string): Promise<void> {
-  try { await fsp.mkdir(dir, { recursive: true }); } catch { /* ignore */ }
+  try {
+    await fsp.mkdir(dir, { recursive: true });
+  } catch {
+    // ignore
+  }
 }
 
 export async function writeCompatSnapshot(options: {
@@ -50,8 +58,8 @@ export async function writeCompatSnapshot(options: {
       const wrapped = {
         meta,
         data: options.data
-      } as any;
-      const payload = typeof wrapped === 'string' ? wrapped : JSON.stringify(wrapped, null, 2);
+      };
+      const payload = JSON.stringify(wrapped, null, 2);
       await fsp.writeFile(file, payload, 'utf-8');
     }
   } catch {

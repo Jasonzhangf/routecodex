@@ -7,11 +7,12 @@
  * - providerType 始终为 'anthropic'
  */
 
-import { ChatHttpProvider } from './chat-http-provider.js';
+import { HttpTransportProvider } from './http-transport-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
+import { AnthropicProtocolClient } from '../../../client/anthropic/anthropic-protocol-client.js';
 
-export class AnthropicHttpProvider extends ChatHttpProvider {
+export class AnthropicHttpProvider extends HttpTransportProvider {
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     const cfg: OpenAIStandardConfig = {
       ...config,
@@ -20,6 +21,6 @@ export class AnthropicHttpProvider extends ChatHttpProvider {
         providerType: 'anthropic'
       }
     };
-    super(cfg, dependencies);
+    super(cfg, dependencies, 'anthropic-http-provider', new AnthropicProtocolClient());
   }
 }

@@ -5,26 +5,108 @@
  * 同时提供增强的快照和监控功能
  */
 
-import type { OpenAIStandardConfig } from '../api/provider-config.js';
+import type { UnknownObject } from '../../../types/common-types.js';
+import { HookStage } from '../config/provider-debug-hooks.js';
 
-// 临时类型定义，避免导入路径问题
+interface LoggerModule {
+  logModule: (moduleId: string, event: string, data?: UnknownObject) => void;
+}
+
 interface ModuleDependencies {
-  logger?: {
-    logModule: (moduleId: string, event: string, data?: any) => void;
-  };
-  configEngine?: any;
-  errorHandlingCenter?: any;
-  debugCenter?: any;
+  logger?: LoggerModule;
+  configEngine?: unknown;
+  errorHandlingCenter?: unknown;
+  debugCenter?: unknown;
+}
+
+interface HookExecutionSummary {
+  success: boolean;
+  executionTime: number;
+}
+
+interface HookDescriptor {
+  name: string;
+  stage: string;
+  target: string;
+  priority: number;
+  isDebugHook?: boolean;
+  execute(context: unknown, data: unknown): Promise<HookExecutionSummary>;
+}
+
+interface HookManager {
+  registerHook(descriptor: HookDescriptor, namespace: string): void;
+}
+
+interface SnapshotService {
+  saveSnapshot(
+    namespace: string,
+    requestId: string,
+    stage: string,
+    executions: unknown[],
+    context: unknown
+  ): Promise<void>;
+}
+
+interface ProviderAdapter {
+  createLegacyManagerWrapper(): LegacyCompatibilityManager;
+}
+
+interface HooksSystem {
+  initialize(): Promise<void>;
+  hookManager: HookManager;
+  snapshotService?: SnapshotService;
+  providerAdapter: ProviderAdapter;
+  setDebugConfig?(config: unknown): void;
+  getStats?(): UnknownObject;
+  healthCheck?(): Promise<HookSystemHealth>;
+  start?(): Promise<void>;
+  stop?(): Promise<void>;
+  shutdown?(): Promise<void>;
+}
+
+interface HooksSystemFactory {
+  (config: {
+    maxConcurrentHooks: number;
+    executionTimeout: number;
+    enableHealthCheck: boolean;
+    healthCheckInterval: number;
+    snapshotEnabled: boolean;
+    snapshotConfig: UnknownObject;
+    debugMode: boolean;
+    logLevel: string;
+  }): HooksSystem;
+}
+
+interface HookSystemHealth {
+  healthy: boolean;
+  issues?: string[];
+}
+
+interface LegacyCompatibilityManager {
+  registerHook: (...args: unknown[]) => void;
+  unregisterHook: (...args: unknown[]) => void;
+  executeHookChain: (
+    stage: unknown,
+    target: unknown,
+    data: unknown,
+    context: unknown
+  ) => Promise<{ data: unknown; metrics: UnknownObject }>;
+  setDebugConfig: (config: UnknownObject) => void;
 }
 
 // 导入独立Hook系统（可选）。若不存在，则降级为兼容的空实现以保证启动成功。
-let createHooksSystem: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  ({ createHooksSystem } = require('../../../../hooks/index.js'));
-} catch (_err) {
-  createHooksSystem = null; // 在运行环境未构建 hooks 模块时，走兼容路径
+async function resolveHookSystemFactory(): Promise<HooksSystemFactory | null> {
+  try {
+    const moduleUrl = new URL('../../../../hooks/index.js', import.meta.url);
+    const hookModule = await import(moduleUrl.href);
+    const factory = (hookModule as { createHooksSystem?: HooksSystemFactory }).createHooksSystem;
+    return typeof factory === 'function' ? factory : null;
+  } catch {
+    return null;
+  }
 }
+
+const createHooksSystem: HooksSystemFactory | null = await resolveHookSystemFactory();
 
 /**
  * Hook系统集成配置
@@ -41,8 +123,8 @@ interface HookSystemIntegrationConfig {
  */
 export class HookSystemIntegration {
   private config: HookSystemIntegrationConfig;
-  private hooksSystem: any = null;
-  private legacyManager: any = null;
+  private hooksSystem: HooksSystem | null = null;
+  private legacyManager: LegacyCompatibilityManager | null = null;
   private dependencies: ModuleDependencies;
   private providerId: string;
 
@@ -137,21 +219,26 @@ export class HookSystemIntegration {
   private async registerProviderHooks(): Promise<void> {
     try {
       // 注册快照记录Hook
+      if (!this.hooksSystem) {
+        return;
+      }
       const orderedName = `${this.providerId ? this.providerId : 'provider'}.07.snapshot-recorder`;
-      this.hooksSystem.hookManager.registerHook({
+      const snapshotEnabled = this.config.snapshotEnabled;
+      const hooksSystem = this.hooksSystem;
+      hooksSystem.hookManager.registerHook({
         name: orderedName,
-        stage: 'response_postprocessing' as any,
+        stage: HookStage.RESPONSE_POSTPROCESSING,
         target: 'response',
         priority: 999, // 最低优先级，确保最后执行
         isDebugHook: false,
-        async execute(context: unknown, data: unknown) {
-          if (this.config.snapshotEnabled && this.hooksSystem.snapshotService) {
+        async execute(context: unknown): Promise<HookExecutionSummary> {
+          if (snapshotEnabled && hooksSystem.snapshotService) {
             try {
               // 保存快照
-              await this.hooksSystem.snapshotService.saveSnapshot(
+              await hooksSystem.snapshotService.saveSnapshot(
                 'provider-v2',
-                (context as any).requestId || 'unknown',
-                (context as any).stage,
+                (context as { requestId?: string } | undefined)?.requestId || 'unknown',
+                (context as { stage?: string } | undefined)?.stage || HookStage.RESPONSE_POSTPROCESSING,
                 [], // 执行结果将在其他地方收集
                 context
               );
@@ -173,7 +260,7 @@ export class HookSystemIntegration {
   /**
    * 获取BidirectionalHookManager（保持API兼容）
    */
-  getBidirectionalHookManager(): unknown {
+  getBidirectionalHookManager(): LegacyCompatibilityManager {
     if (!this.config.enabled) {
       // 如果Hook系统未启用，返回空的兼容实现
       return this.createLegacyCompatibilityManager();
@@ -185,12 +272,19 @@ export class HookSystemIntegration {
   /**
    * 创建传统兼容管理器
    */
-  private createLegacyCompatibilityManager(): unknown {
+  private createLegacyCompatibilityManager(): LegacyCompatibilityManager {
     return {
       registerHook: () => {},
       unregisterHook: () => {},
-      executeHookChain: async (stage: unknown, target: unknown, data: unknown, context: unknown) => {
-        return { data, metrics: { executionTime: 0, hookCount: 0, successCount: 0 } };
+      executeHookChain: async (_stage: unknown, _target: unknown, data: unknown, _context: unknown) => {
+        return {
+          data,
+          metrics: {
+            executionTime: 0,
+            hookCount: 0,
+            successCount: 0
+          }
+        };
       },
       setDebugConfig: () => {}
     };
@@ -219,7 +313,7 @@ export class HookSystemIntegration {
   /**
    * 执行健康检查
    */
-  async healthCheck(): Promise<any> {
+  async healthCheck(): Promise<HookSystemHealth> {
     if (!this.hooksSystem) {
       return { healthy: true, issues: ['Hook system not initialized'] };
     }

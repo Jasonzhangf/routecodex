@@ -1,505 +1,125 @@
 /**
  * Qwen Compatibility Module
  *
- * Handles OpenAI to Qwen API format transformations with OAuth authentication.
- * Implements protocol translation and tool calling format conversion.
+ * Translates between OpenAI-compatible requests/responses and Qwen's API
+ * payloads. The implementation keeps the public surface area of the previous
+ * version but removes the untyped instrumentation in favour of strictly typed
+ * helpers so the module can participate in the lint clean-up.
  */
 
 import type {
-  CompatibilityModule,
   ModuleConfig,
-  ModuleDependencies,
-  TransformationRule,
-  PipelineDebugLogger as PipelineDebugLoggerInterface
+  TransformationRule
 } from '../../modules/pipeline/interfaces/pipeline-interfaces.js';
-import type { SharedPipelineRequest, SharedPipelineResponse } from '../../modules/pipeline/types/shared-dtos.js';
-import type { /* TransformationEngine */ } from '../core/utils/transformation-engine.js';
-import type { UnknownObject, /* LogData */ } from '../../modules/pipeline/types/common-types.js';
+import type { ModuleDependencies } from '../../modules/pipeline/types/module.types.js';
+import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
+import type { CompatibilityContext, CompatibilityModule } from './compatibility-interface.js';
+import {
+  TransformationEngine,
+  type TransformationResult
+} from '../../modules/pipeline/utils/transformation-engine.js';
 
-/**
- * Qwen Compatibility Module
- */
+type QwenMessageChunk = Record<string, unknown>;
+type QwenToolCall = {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string;
+  };
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
 export class QwenCompatibility implements CompatibilityModule {
   readonly id: string;
   readonly type = 'qwen-compatibility';
-  readonly config: ModuleConfig;
-  readonly rules: TransformationRule[];
+  readonly providerType = 'qwen';
 
+  private readonly dependencies: ModuleDependencies;
+  private _config: ModuleConfig = {
+    type: 'qwen-compatibility',
+    config: {}
+  };
+  private transformationEngine: TransformationEngine | null = null;
+  private _rules: TransformationRule[] = [];
   private isInitialized = false;
-  private logger: PipelineDebugLoggerInterface;
-  private transformationEngine: any; // TransformationEngine instance
-  private readonly isDebugEnhanced = false;
-  private compatibilityMetrics: Map<string, { values: any[]; lastUpdated: number }> = new Map();
-  private transformationHistory: any[] = [];
-  private errorHistory: any[] = [];
-  private maxHistorySize = 50;
 
-  constructor(private dependencies: ModuleDependencies) {
-    this.logger = dependencies.logger;
-    this.id = `compatibility-${Date.now()}`;
-    this.config = {} as ModuleConfig;
-    this.rules = this.initializeTransformationRules();
+  constructor(dependencies: ModuleDependencies) {
+    this.dependencies = dependencies;
+    this.id = `qwen-compatibility-${Date.now()}`;
   }
 
-  /**
-   * 工厂注入配置（与其他兼容模块保持一致）
-   */
+  get config(): ModuleConfig {
+    return this._config;
+  }
+
+  get rules(): TransformationRule[] {
+    return this._rules;
+  }
+
   setConfig(config: ModuleConfig): void {
-    (this as any).config = config;
+    this._config = config;
   }
 
-  private publishDebugEvent(type: string, data: any): void {
-    try {
-      this.logger.logDebug(`[qwen-compatibility] ${type}`, data);
-    } catch {
-      // ignore logging failures
-    }
-  }
-
-  private recordCompatibilityMetric(_operation: string, _data: any): void {
-    // metrics disabled
-  }
-
-  private addToTransformationHistory(_entry: any): void {
-    // history disabled
-  }
-
-  private addToErrorHistory(_entry: any): void {
-    // history disabled
-  }
-
-
-  /**
-   * Initialize the compatibility module
-   */
   async initialize(): Promise<void> {
-    const startTime = Date.now();
-    const initId = `init_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    this.dependencies.logger?.logModule(this.id, 'initializing', {
+      providerType: this.providerType
+    });
 
-    // Debug: Record initialization start
-    if (this.isDebugEnhanced) {
-      this.recordCompatibilityMetric('initialization_start', {
-        initId,
-        rulesCount: this.rules.length,
-        timestamp: startTime
-      });
-      this.publishDebugEvent('initialization_start', {
-        initId,
-        rulesCount: this.rules.length,
-        timestamp: startTime
-      });
-    }
+    this.transformationEngine = new TransformationEngine();
+    await this.transformationEngine.initialize();
+    this._rules = this.initializeTransformationRules();
+    this.isInitialized = true;
 
-    try {
-      this.logger.logModule(this.id, 'initializing', {
-        config: this.config,
-        type: this.type
-      });
-
-      // Initialize transformation engine
-      const { TransformationEngine } = await import('../core/utils/transformation-engine.js');
-      this.transformationEngine = new TransformationEngine();
-
-      this.isInitialized = true;
-      this.logger.logModule(this.id, 'initialized');
-
-      const totalTime = Date.now() - startTime;
-
-      // Debug: Record initialization completion
-      if (this.isDebugEnhanced) {
-        this.recordCompatibilityMetric('initialization_complete', {
-          initId,
-          success: true,
-          totalTime,
-          hasTransformationEngine: !!this.transformationEngine
-        });
-        this.publishDebugEvent('initialization_complete', {
-          initId,
-          success: true,
-          totalTime,
-          hasTransformationEngine: !!this.transformationEngine
-        });
-      }
-
-    } catch (error) {
-      const totalTime = Date.now() - startTime;
-
-      // Debug: Record initialization failure
-      if (this.isDebugEnhanced) {
-        this.recordCompatibilityMetric('initialization_failed', {
-          initId,
-          error: error instanceof Error ? error.message : String(error),
-          totalTime
-        });
-        this.addToErrorHistory({
-          initId,
-          error,
-          startTime,
-          endTime: Date.now(),
-          totalTime,
-          operation: 'initialize'
-        });
-        this.publishDebugEvent('initialization_failed', {
-          initId,
-          error: error instanceof Error ? error.message : String(error),
-          totalTime
-        });
-      }
-
-      this.logger.logModule(this.id, 'initialization-error', { error });
-      throw error;
-    }
+    this.dependencies.logger?.logModule(this.id, 'initialized', {
+      ruleCount: this.rules.length
+    });
   }
 
-  /**
-   * Process incoming request - Transform OpenAI format to Qwen format
-   */
-  async processIncoming(requestParam: any): Promise<SharedPipelineRequest> {
-    const startTime = Date.now();
-    const transformId = `transform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  async processIncoming(
+    requestParam: UnknownObject,
+    _context: CompatibilityContext
+  ): Promise<UnknownObject> {
+    this.ensureInitialized();
+    const payload = isRecord(requestParam) ? requestParam : {};
+    const transformed = await this.applyRules(payload, this.rules);
+    const converted = this.convertToQwenRequest(transformed);
 
-    if (!this.isInitialized) {
-      throw new Error('Qwen Compatibility module is not initialized');
-    }
+    this.dependencies.logger?.logModule(this.id, 'transform-request-success', {
+      hasTools: Array.isArray((payload as { tools?: unknown }).tools),
+      ruleCount: this.rules.length
+    });
 
-    const isDto = this.isSharedPipelineRequest(requestParam);
-    const dto = isDto ? requestParam as SharedPipelineRequest : null;
-    const request = isDto ? (dto!.data as unknown) : requestParam;
-
-    // Debug: Record transformation start
-    if (this.isDebugEnhanced) {
-      const reqObj = (request as Record<string, unknown>) || {};
-      const hasTools = !!(reqObj as Record<string, unknown>).tools;
-      const model = (reqObj as Record<string, unknown>).model as unknown;
-      const msgs = Array.isArray(reqObj.messages as unknown) ? (reqObj.messages as unknown[]) : [];
-      this.recordCompatibilityMetric('transformation_start', {
-        transformId,
-        originalFormat: 'openai',
-        targetFormat: 'qwen',
-        hasTools,
-        model,
-        messageCount: msgs.length,
-        timestamp: startTime
-      });
-      this.publishDebugEvent('transformation_start', {
-        transformId,
-        request,
-        timestamp: startTime
-      });
-    }
-
-    try {
-      this.logger.logModule(this.id, 'transform-request-start', {
-        originalFormat: 'openai',
-        targetFormat: 'qwen',
-        hasTools: !!(request as UnknownObject).tools
-      });
-
-      // Apply transformation rules
-      if (!this.transformationEngine) {
-        throw new Error('Transformation engine not initialized');
-      }
-      const engine = this.transformationEngine as any;
-      const transformed = await engine.transform(request, this.rules);
-
-      const converted = this.convertToQwenRequest(this.extractTransformationResult(transformed));
-
-      const totalTime = Date.now() - startTime;
-
-      // Debug: Record transformation completion
-      if (this.isDebugEnhanced) {
-        const transformedObj = typeof transformed === 'object' && transformed !== null ? transformed as UnknownObject : {};
-        const convertedObj = typeof converted === 'object' && converted !== null ? converted as UnknownObject : {};
-        
-        this.recordCompatibilityMetric('transformation_complete', {
-          transformId,
-          success: true,
-          totalTime,
-          transformationCount: typeof transformedObj.transformationCount === 'number' ? transformedObj.transformationCount : 0,
-          hasInput: Array.isArray(convertedObj.input),
-          parameterKeys: convertedObj.parameters && typeof convertedObj.parameters === 'object' ? Object.keys(convertedObj.parameters) : [],
-          model: typeof convertedObj.model === 'string' ? convertedObj.model : undefined,
-          rulesApplied: this.rules.length
-        });
-        this.addToTransformationHistory({
-          transformId,
-          request,
-          result: converted,
-          startTime,
-          endTime: Date.now(),
-          totalTime,
-          success: true,
-          transformationCount: (transformed as UnknownObject).transformationCount || 0
-        });
-        this.publishDebugEvent('transformation_complete', {
-          transformId,
-          success: true,
-          totalTime,
-          transformed,
-          converted
-        });
-      }
-
-      const transformedObj = typeof transformed === 'object' && transformed !== null ? transformed as UnknownObject : {};
-      const convertedObj = typeof converted === 'object' && converted !== null ? converted as UnknownObject : {};
-      
-      this.logger.logModule(this.id, 'transform-request-success', {
-        transformationCount: typeof transformedObj.transformationCount === 'number' ? transformedObj.transformationCount : 0,
-        hasInput: Array.isArray(convertedObj.input),
-        parameterKeys: convertedObj.parameters && typeof convertedObj.parameters === 'object' ? Object.keys(convertedObj.parameters) : []
-      });
-
-      return isDto ? { ...dto!, data: converted } : { data: converted, route: { providerId: 'unknown', modelId: 'unknown', requestId: 'unknown', timestamp: Date.now() }, metadata: {}, debug: { enabled: false, stages: {} } } as SharedPipelineRequest;
-
-    } catch (error) {
-      const totalTime = Date.now() - startTime;
-
-      // Debug: Record transformation failure
-      if (this.isDebugEnhanced) {
-        this.recordCompatibilityMetric('transformation_failed', {
-          transformId,
-          error: error instanceof Error ? error.message : String(error),
-          totalTime
-        });
-        this.addToErrorHistory({
-          transformId,
-          error,
-          request,
-          startTime,
-          endTime: Date.now(),
-          totalTime,
-          operation: 'processIncoming'
-        });
-        this.publishDebugEvent('transformation_failed', {
-          transformId,
-          error: error instanceof Error ? error.message : String(error),
-          totalTime
-        });
-      }
-
-      this.logger.logModule(this.id, 'transformation-error', { error });
-      throw error;
-    }
+    return converted;
   }
 
-  /**
-   * Process outgoing response - Transform Qwen format to OpenAI format
-   */
-  async processOutgoing(response: SharedPipelineResponse): Promise<SharedPipelineResponse>;
-  async processOutgoing(response: SharedPipelineResponse | Record<string, unknown>): Promise<SharedPipelineResponse>;
-  async processOutgoing(response: SharedPipelineResponse | Record<string, unknown>): Promise<SharedPipelineResponse> {
-    const startTime = Date.now();
-    const responseId = `response_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  async processOutgoing(
+    responseParam: UnknownObject,
+    _context: CompatibilityContext
+  ): Promise<UnknownObject> {
+    this.ensureInitialized();
+    const payload = isRecord(responseParam) ? responseParam : {};
+    const transformed = this.transformQwenResponseToOpenAI(payload);
 
-    if (!this.isInitialized) {
-      throw new Error('Qwen Compatibility module is not initialized');
-    }
+    this.dependencies.logger?.logModule(this.id, 'transform-response-success', {
+      hasChoices: Array.isArray((transformed as { choices?: unknown[] }).choices)
+    });
 
-    // Debug: Record response transformation start
-    if (this.isDebugEnhanced) {
-      const respObj = (response as Record<string, unknown>) || {};
-      const dataObj = (respObj.data as Record<string, unknown> | undefined);
-      const hasChoices = Array.isArray((dataObj?.choices as unknown)) || Array.isArray((respObj.choices as unknown));
-      this.recordCompatibilityMetric('response_transform_start', {
-        responseId,
-        originalFormat: 'qwen',
-        targetFormat: 'openai',
-        hasData: !!dataObj,
-        hasChoices,
-        timestamp: startTime
-      });
-      this.publishDebugEvent('response_transform_start', {
-        responseId,
-        response,
-        timestamp: startTime
-      });
-    }
-
-    try {
-      const isDto = response && typeof response === 'object' && 'data' in response && 'metadata' in response;
-      const payload = isDto ? (response as SharedPipelineResponse).data : response;
-      this.logger.logModule(this.id, 'transform-response-start', { originalFormat: 'qwen', targetFormat: 'openai' });
-
-      // Transform response back to OpenAI format
-      const transformed = this.transformQwenResponseToOpenAI(payload);
-
-      const totalTime = Date.now() - startTime;
-
-      // Debug: Record response transformation completion
-      if (this.isDebugEnhanced) {
-        const transformedObj = typeof transformed === 'object' && transformed !== null ? transformed as Record<string, unknown> : {};
-        const choices = Array.isArray(transformedObj.choices) ? transformedObj.choices : [];
-        
-        this.recordCompatibilityMetric('response_transform_complete', {
-          responseId,
-          success: true,
-          totalTime,
-          transformedResponseId: typeof transformedObj.id === 'string' ? transformedObj.id : undefined,
-          hasChoices: Array.isArray(transformedObj.choices),
-          choiceCount: choices.length,
-          hasToolCalls: choices.some((c: any) => {
-            if (c && typeof c === 'object') {
-              const choiceObj = c as Record<string, unknown>;
-              if (choiceObj.message && typeof choiceObj.message === 'object') {
-                const messageObj = choiceObj.message as Record<string, unknown>;
-                return messageObj.tool_calls && Array.isArray(messageObj.tool_calls) && messageObj.tool_calls.length > 0;
-              }
-            }
-            return false;
-          })
-        });
-        this.addToTransformationHistory({
-          responseId,
-          request: response,
-          result: transformed,
-          startTime,
-          endTime: Date.now(),
-          totalTime,
-          success: true,
-          operation: 'processOutgoing'
-        });
-        this.publishDebugEvent('response_transform_complete', {
-          responseId,
-          success: true,
-          totalTime,
-          transformed
-        });
-      }
-
-      const transformedObj = typeof transformed === 'object' && transformed !== null ? transformed as Record<string, unknown> : {};
-      
-      this.logger.logModule(this.id, 'transform-response-success', {
-        responseId: typeof transformedObj.id === 'string' ? transformedObj.id : undefined
-      });
-
-      if (isDto) {
-        return { ...(response as SharedPipelineResponse), data: transformed };
-      }
-      return {
-        data: transformed,
-        metadata: {
-          pipelineId: 'qwen-compatibility',
-          processingTime: totalTime,
-          stages: []
-        }
-      };
-
-    } catch (error) {
-      const totalTime = Date.now() - startTime;
-
-      // Debug: Record response transformation failure
-      if (this.isDebugEnhanced) {
-        this.recordCompatibilityMetric('response_transform_failed', {
-          responseId,
-          error: error instanceof Error ? error.message : String(error),
-          totalTime
-        });
-        this.addToErrorHistory({
-          responseId,
-          error,
-          request: response,
-          startTime,
-          endTime: Date.now(),
-          totalTime,
-          operation: 'processOutgoing'
-        });
-        this.publishDebugEvent('response_transform_failed', {
-          responseId,
-          error: error instanceof Error ? error.message : String(error),
-          totalTime
-        });
-      }
-
-      this.logger.logModule(this.id, 'response-transformation-error', { error });
-      throw error;
-    }
+    return transformed;
   }
 
-  /**
-   * Clean up resources
-   */
   async cleanup(): Promise<void> {
-    const startTime = Date.now();
-    const cleanupId = `cleanup_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-    // Debug: Record cleanup start
-    if (this.isDebugEnhanced) {
-      this.recordCompatibilityMetric('cleanup_start', {
-        cleanupId,
-        isInitialized: this.isInitialized,
-        transformationHistorySize: this.transformationHistory.length,
-        errorHistorySize: this.errorHistory.length,
-        metricsCount: this.compatibilityMetrics.size,
-        timestamp: startTime
-      });
-      this.publishDebugEvent('cleanup_start', {
-        cleanupId,
-        isInitialized: this.isInitialized,
-        timestamp: startTime
-      });
+    if (!this.isInitialized) {
+      return;
     }
-
-    try {
-      this.logger.logModule(this.id, 'cleanup-start');
-
-      const wasInitialized = this.isInitialized;
-      this.isInitialized = false;
-
-      const totalTime = Date.now() - startTime;
-
-      // Debug: Record cleanup completion
-      if (this.isDebugEnhanced) {
-        this.recordCompatibilityMetric('cleanup_complete', {
-          cleanupId,
-          success: true,
-          totalTime,
-          wasInitialized,
-          finalTransformationHistorySize: this.transformationHistory.length,
-          finalErrorHistorySize: this.errorHistory.length,
-          finalMetricsCount: this.compatibilityMetrics.size
-        });
-        this.publishDebugEvent('cleanup_complete', {
-          cleanupId,
-          success: true,
-          totalTime,
-          wasInitialized
-        });
-      }
-
-      this.logger.logModule(this.id, 'cleanup-complete');
-    } catch (error) {
-      const totalTime = Date.now() - startTime;
-
-      // Debug: Record cleanup failure
-      if (this.isDebugEnhanced) {
-        this.recordCompatibilityMetric('cleanup_failed', {
-          cleanupId,
-          error: error instanceof Error ? error.message : String(error),
-          totalTime
-        });
-        this.addToErrorHistory({
-          cleanupId,
-          error,
-          startTime,
-          endTime: Date.now(),
-          totalTime,
-          operation: 'cleanup'
-        });
-        this.publishDebugEvent('cleanup_failed', {
-          cleanupId,
-          error: error instanceof Error ? error.message : String(error),
-          totalTime
-        });
-      }
-
-      this.logger.logModule(this.id, 'cleanup-error', { error });
-      throw error;
-    }
+    await this.transformationEngine?.cleanup();
+    this.transformationEngine = null;
+    this.isInitialized = false;
+    this.dependencies.logger?.logModule(this.id, 'cleanup-complete');
   }
 
-  /**
-   * Get compatibility module status
-   */
   getStatus(): {
     id: string;
     type: string;
@@ -516,124 +136,38 @@ export class QwenCompatibility implements CompatibilityModule {
     };
   }
 
-  /**
-   * Get transformation metrics
-   */
-  async getMetrics(): Promise<unknown> {
+  async getMetrics(): Promise<UnknownObject> {
     return {
-      transformationCount: 0,
-      successCount: 0,
-      errorCount: 0,
-      averageTransformationTime: 0,
       ruleCount: this.rules.length,
+      initialized: this.isInitialized,
       timestamp: Date.now()
     };
   }
 
-  /**
-   * Apply compatibility transformations
-   */
-  async applyTransformations(data: any, rules: TransformationRule[]): Promise<unknown> {
-    const startTime = Date.now();
-    const transformId = `custom_transform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  async applyTransformations(data: unknown, rules: TransformationRule[]): Promise<UnknownObject> {
+    this.ensureInitialized();
+    const payload = isRecord(data) ? data : {};
+    return this.applyRules(payload, rules);
+  }
 
-    // Debug: Record custom transformation start
-    if (this.isDebugEnhanced) {
-      this.recordCompatibilityMetric('custom_transformation_start', {
-        transformId,
-        rulesCount: rules.length,
-        dataType: typeof data,
-        timestamp: startTime
-      });
-      this.publishDebugEvent('custom_transformation_start', {
-        transformId,
-        data,
-        rules,
-        timestamp: startTime
-      });
-    }
+  // Helpers ----------------------------------------------------------------
 
-    try {
-      if (!this.transformationEngine) {
-        throw new Error('Transformation engine not initialized');
-      }
-      const engine = this.transformationEngine as any;
-      const result = await engine.transform(data, rules);
-      const totalTime = Date.now() - startTime;
-
-      // Debug: Record custom transformation completion
-      if (this.isDebugEnhanced) {
-        const resultObj = typeof result === 'object' && result !== null ? result as Record<string, unknown> : {};
-        
-        this.recordCompatibilityMetric('custom_transformation_complete', {
-          transformId,
-          success: true,
-          totalTime,
-          transformationCount: typeof resultObj.transformationCount === 'number' ? resultObj.transformationCount : 0,
-          hasData: !!resultObj.data
-        });
-        this.addToTransformationHistory({
-          transformId,
-          request: { data, rules },
-          result: resultObj.data || result,
-          startTime,
-          endTime: Date.now(),
-          totalTime,
-          success: true,
-          operation: 'applyTransformations'
-        });
-        this.publishDebugEvent('custom_transformation_complete', {
-          transformId,
-          success: true,
-          totalTime,
-          result
-        });
-      }
-
-      return result;
-    } catch (error) {
-      const totalTime = Date.now() - startTime;
-
-      // Debug: Record custom transformation failure
-      if (this.isDebugEnhanced) {
-        this.recordCompatibilityMetric('custom_transformation_failed', {
-          transformId,
-          error: error instanceof Error ? error.message : String(error),
-          totalTime
-        });
-        this.addToErrorHistory({
-          transformId,
-          error,
-          request: { data, rules },
-          startTime,
-          endTime: Date.now(),
-          totalTime,
-          operation: 'applyTransformations'
-        });
-        this.publishDebugEvent('custom_transformation_failed', {
-          transformId,
-          error: error instanceof Error ? error.message : String(error),
-          totalTime
-        });
-      }
-
-      throw error;
+  private ensureInitialized(): void {
+    if (!this.isInitialized || !this.transformationEngine) {
+      throw new Error('Qwen Compatibility module is not initialized');
     }
   }
 
-  /**
-   * Initialize transformation rules for Qwen API
-   */
-  private initializeTransformationRules(): TransformationRule[] {
-    // 配置为可选：未提供 moduleConfig 时，退回空对象，避免在读取 customRules 等字段时抛出异常。
-    const compatibilityConfig: Record<string, unknown> =
-      (this.config && typeof (this.config as any).config === 'object')
-        ? ((this.config as any).config as Record<string, unknown>)
-        : {};
+  private async applyRules(data: UnknownObject, rules: TransformationRule[]): Promise<UnknownObject> {
+    if (!this.transformationEngine) {
+      return data;
+    }
+    const result = await this.transformationEngine.transform<UnknownObject>(data, rules);
+    return this.extractTransformationResult(result);
+  }
 
-    // Default transformation rules for Qwen API
-    const transformationRules: TransformationRule[] = [
-      // Model name mapping
+  private initializeTransformationRules(): TransformationRule[] {
+    const baseRules: TransformationRule[] = [
       {
         id: 'map-model-names',
         transform: 'mapping',
@@ -646,290 +180,230 @@ export class QwenCompatibility implements CompatibilityModule {
           'gpt-4o': 'qwen3-coder-plus'
         }
       },
-      // Tools format conversion
       {
         id: 'ensure-tools-format',
         transform: 'mapping',
         sourcePath: 'tools',
         targetPath: 'tools',
         mapping: {
-          'type': 'type',
-          'function': 'function'
+          type: 'type',
+          function: 'function'
         }
       },
-      // Stream parameter mapping
       {
         id: 'map-stream-parameter',
         transform: 'mapping',
         sourcePath: 'stream',
         targetPath: 'stream',
         mapping: {
-          'true': true,
-          'false': false
+          true: true,
+          false: false
         }
-      },
-      // Temperature and max_tokens pass-through are optional; defaults handled by provider
+      }
     ];
 
-    // Add custom rules from configuration（可选）
-    const customRules = (compatibilityConfig as any)?.customRules;
+    const configPayload = this._config?.config;
+    const customRules = isRecord(configPayload) ? configPayload.customRules : undefined;
     if (Array.isArray(customRules)) {
-      transformationRules.push(...customRules);
+      baseRules.push(...customRules as TransformationRule[]);
     }
 
-    this.logger.logModule(this.id, 'transformation-rules-initialized', {
-      ruleCount: transformationRules.length
+    this.dependencies.logger?.logModule(this.id, 'transformation-rules-initialized', {
+      ruleCount: baseRules.length
     });
-
-    return transformationRules;
+    return baseRules;
   }
 
-  /**
-   * Transform Qwen response to OpenAI format
-   */
-  private transformQwenResponseToOpenAI(response: any): any {
-    // Handle different response formats
-    if (response && typeof response === 'object' && (response as Record<string, unknown>).data) {
-      // Provider response format
-      return this.transformProviderResponse((response as Record<string, unknown>).data);
-    } else {
-      // Direct response format
-      return this.transformProviderResponse(response);
+  private convertToQwenRequest(request: UnknownObject): UnknownObject {
+    const qwenRequest: UnknownObject = {};
+    const model = typeof request.model === 'string' ? request.model : undefined;
+    if (model) {
+      qwenRequest.model = model;
     }
-  }
 
-  /**
-   * Transform provider response to OpenAI format
-   */
-  private transformProviderResponse(data: any): any {
-    const dataObj = typeof data === 'object' && data !== null ? data as Record<string, unknown> : {};
-    
-    const transformed: Record<string, unknown> = {
-      id: dataObj.id || `chatcmpl-${Date.now()}`,
-      object: 'chat.completion',
-      created: Date.now(),
-      model: dataObj.model || 'qwen-turbo',
-      choices: [],
-      usage: dataObj.usage || {
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        total_tokens: 0
+    const messages = Array.isArray(request.messages) ? request.messages : [];
+    if (messages.length > 0) {
+      const normalizedMessages = messages
+        .map(message => this.normalizeMessage(message))
+        .filter((msg): msg is { role: string; content: QwenMessageChunk[] } => msg !== null);
+      if (normalizedMessages.length > 0) {
+        qwenRequest.messages = messages;
+        qwenRequest.input = normalizedMessages;
       }
-    };
-
-    // Transform choices
-    if (dataObj.choices && Array.isArray(dataObj.choices)) {
-      transformed.choices = dataObj.choices.map((choice: any) => {
-        const choiceObj = typeof choice === 'object' && choice !== null ? choice as Record<string, unknown> : {};
-        const messageObj = typeof choiceObj.message === 'object' && choiceObj.message !== null ? choiceObj.message as Record<string, unknown> : {};
-        
-        return {
-          index: choiceObj.index || 0,
-          message: {
-            role: messageObj.role || 'assistant',
-            content: messageObj.content || '',
-            tool_calls: this.transformToolCalls(messageObj.tool_calls as unknown[] | undefined)
-          },
-          finish_reason: this.transformFinishReason(typeof choiceObj.finish_reason === 'string' ? choiceObj.finish_reason : undefined)
-        };
-      });
     }
 
-    // Add transformation metadata
-    transformed._transformed = true;
-    transformed._originalFormat = 'qwen';
-    transformed._targetFormat = 'openai';
-
-    return transformed;
-  }
-
-  /**
-   * Transform tool calls from Qwen format to OpenAI format
-   */
-  private transformToolCalls(toolCalls: any[] | undefined): any[] {
-    if (!toolCalls || !Array.isArray(toolCalls)) {
-      return [];
-    }
-
-    return toolCalls.map((toolCall, index) => {
-      const toolCallObj = typeof toolCall === 'object' && toolCall !== null ? toolCall as Record<string, unknown> : {};
-      const functionObj = typeof toolCallObj.function === 'object' && toolCallObj.function !== null ? toolCallObj.function as Record<string, unknown> : {};
-      
-      return {
-        id: toolCallObj.id || `call_${Date.now()}_${index}`,
-        type: 'function',
-        function: {
-          name: functionObj.name || '',
-          arguments: typeof functionObj.arguments === 'string'
-            ? functionObj.arguments
-            : JSON.stringify(functionObj.arguments || {})
-        }
-      };
-    });
-  }
-
-  /**
-   * Transform finish reason from Qwen format to OpenAI format
-   */
-  private transformFinishReason(finishReason: string | undefined): string {
-    const reasonMap: { [key: string]: string } = {
-      'stop': 'stop',
-      'length': 'length',
-      'tool_calls': 'tool_calls',
-      'content_filter': 'content_filter'
-    };
-
-    return reasonMap[finishReason || ''] || finishReason || 'stop';
-  }
-
-  /**
-   * Convert OpenAI-style request into Qwen API payload
-   */
-  private convertToQwenRequest(request: any): any {
-    if (!request || typeof request !== 'object') {
-      return request;
-    }
-
-    // If request already has Qwen input structure, assume it is correct.
-    if (request && typeof request === 'object' && (request as Record<string, unknown>).input && Array.isArray((request as Record<string, unknown>).input)) {
-      return request;
-    }
-
-    const qwenRequest: Record<string, unknown> = {};
-
-    // Model mapping already handled by transformation rules, but ensure fallback
-    qwenRequest.model = request && typeof request === 'object' && (request as Record<string, unknown>).model ? (request as Record<string, unknown>).model : undefined;
-
-    // Convert messages -> input structure expected by Qwen portal API, but retain original messages field
-    if (request && typeof request === 'object' && (request as Record<string, unknown>).messages && Array.isArray((request as Record<string, unknown>).messages)) {
-      const msgs = (request as Record<string, unknown>).messages as unknown[];
-      qwenRequest.messages = msgs as unknown;
-      qwenRequest.input = msgs.map((message: any) => {
-        const normalizedContent = this.normalizeMessageContent(message && typeof message === 'object' && (message as Record<string, unknown>).content ? (message as Record<string, unknown>).content : undefined);
-        return {
-          role: message && typeof message === 'object' && (message as Record<string, unknown>).role ? (message as Record<string, unknown>).role : 'user',
-          content: normalizedContent
-        };
-      });
-    }
-
-    // Parameters block
-    const parameters: Record<string, unknown> = {};
-    if (request && typeof request === 'object' && typeof (request as Record<string, unknown>).temperature === 'number') {
-      parameters.temperature = (request as Record<string, unknown>).temperature;
-    }
-    if (request && typeof request === 'object' && typeof (request as Record<string, unknown>).top_p === 'number') {
-      parameters.top_p = (request as Record<string, unknown>).top_p;
-    }
-    if (request && typeof request === 'object' && typeof (request as Record<string, unknown>).frequency_penalty === 'number') {
-      parameters.frequency_penalty = (request as Record<string, unknown>).frequency_penalty;
-    }
-    if (request && typeof request === 'object' && typeof (request as Record<string, unknown>).presence_penalty === 'number') {
-      parameters.presence_penalty = (request as Record<string, unknown>).presence_penalty;
-    }
-    if (request && typeof request === 'object' && typeof (request as Record<string, unknown>).max_tokens === 'number') {
-      parameters.max_output_tokens = (request as Record<string, unknown>).max_tokens;
-    }
-    if (request && typeof request === 'object' && (request as Record<string, unknown>).stop !== undefined) {
-      const stops = Array.isArray((request as Record<string, unknown>).stop) ? (request as Record<string, unknown>).stop : [(request as Record<string, unknown>).stop];
-      parameters.stop_sequences = (stops as unknown[]).filter(Boolean);
-    }
-    if (request && typeof request === 'object' && typeof (request as Record<string, unknown>).stream === 'boolean') {
-      qwenRequest.stream = (request as Record<string, unknown>).stream;
-    }
-    if (request && typeof request === 'object' && typeof (request as Record<string, unknown>).debug === 'boolean') {
-      parameters.debug = (request as Record<string, unknown>).debug;
-    }
-
+    const parameters = this.extractParameters(request);
     if (Object.keys(parameters).length > 0) {
       qwenRequest.parameters = parameters;
     }
 
-    // Optional OpenAI fields that Qwen API also supports
-    if (request && typeof request === 'object' && typeof (request as Record<string, unknown>).stream === 'boolean') {
-      qwenRequest.stream = (request as Record<string, unknown>).stream;
+    if (typeof request.stream === 'boolean') {
+      qwenRequest.stream = request.stream;
     }
-    if (request && typeof request === 'object' && (request as Record<string, unknown>).response_format) {
-      qwenRequest.response_format = (request as Record<string, unknown>).response_format;
+    if (isRecord(request.response_format)) {
+      qwenRequest.response_format = request.response_format;
     }
-    if (request && typeof request === 'object' && typeof (request as Record<string, unknown>).user === 'string') {
-      qwenRequest.user = (request as Record<string, unknown>).user;
+    if (typeof request.user === 'string') {
+      qwenRequest.user = request.user;
     }
-
-    // Copy tool definitions if present (Qwen expects array under tools?)
-    if (request && typeof request === 'object' && (request as Record<string, unknown>).tools && Array.isArray((request as Record<string, unknown>).tools)) {
-      qwenRequest.tools = (request as Record<string, unknown>).tools;
+    if (Array.isArray(request.tools)) {
+      qwenRequest.tools = request.tools;
     }
-
-    // Attach metadata passthrough if present
-    if (request && typeof request === 'object' && (request as Record<string, unknown>).metadata && typeof (request as Record<string, unknown>).metadata === 'object') {
-      qwenRequest.metadata = (request as Record<string, unknown>).metadata;
+    if (isRecord(request.metadata)) {
+      qwenRequest.metadata = request.metadata;
     }
 
     return qwenRequest;
   }
 
-  /**
-   * Normalize message content into Qwen's expected format
-   */
-  private normalizeMessageContent(content: any): any[] {
+  private normalizeMessage(message: unknown): { role: string; content: QwenMessageChunk[] } | null {
+    if (!isRecord(message)) {
+      return null;
+    }
+    const role = typeof message.role === 'string' ? message.role : 'user';
+    const content = this.normalizeMessageContent(message.content);
+    return { role, content };
+  }
+
+  private extractParameters(request: UnknownObject): Record<string, unknown> {
+    const parameters: Record<string, unknown> = {};
+    const numericFields: Array<{ key: keyof typeof request; target: string }> = [
+      { key: 'temperature', target: 'temperature' },
+      { key: 'top_p', target: 'top_p' },
+      { key: 'frequency_penalty', target: 'frequency_penalty' },
+      { key: 'presence_penalty', target: 'presence_penalty' },
+      { key: 'max_tokens', target: 'max_output_tokens' }
+    ];
+
+    for (const field of numericFields) {
+      const value = request[field.key];
+      if (typeof value === 'number') {
+        parameters[field.target] = value;
+      }
+    }
+
+    if (request.stop !== undefined) {
+      const stops = Array.isArray(request.stop) ? request.stop : [request.stop];
+      parameters.stop_sequences = stops.filter(item => typeof item === 'string');
+    }
+    if (typeof request.debug === 'boolean') {
+      parameters.debug = request.debug;
+    }
+    return parameters;
+  }
+
+  private normalizeMessageContent(content: unknown): QwenMessageChunk[] {
     if (content === undefined || content === null) {
       return [{ text: '' }];
     }
-
-    if (Array.isArray(content)) {
-      return content.map(item => {
-        if (typeof item === 'string') {
-          return { text: item };
-        }
-        if (item && typeof item === 'object') {
-          if ('text' in item) {
-            return { text: String((item as Record<string, unknown>).text) };
-          }
-          if ('type' in item && (item as Record<string, unknown>).type === 'input_text' && 'text' in item) {
-            return { text: String((item as Record<string, unknown>).text) };
-          }
-          return item;
-        }
-        return { text: String(item) };
-      });
-    }
-
     if (typeof content === 'string') {
       return [{ text: content }];
     }
-
-    if (typeof content === 'object' && content !== null) {
-      if ('text' in content) {
-        return [{ text: String((content as Record<string, unknown>).text) }];
-      }
-      if ('type' in content && (content as Record<string, unknown>).type === 'input_text' && 'text' in content) {
-        return [{ text: String((content as Record<string, unknown>).text) }];
-      }
+    if (Array.isArray(content)) {
+      return content.map(item => this.normalizeContentChunk(item));
     }
-
-    return [{ text: String(content) }];
+    if (isRecord(content) && typeof content.text === 'string') {
+      return [{ text: content.text }];
+    }
+    return [{ text: JSON.stringify(content) }];
   }
 
-  /**
-   * Type guard for SharedPipelineRequest
-   */
-  private isSharedPipelineRequest(obj: any): obj is SharedPipelineRequest {
-    return obj !== null && 
-           typeof obj === 'object' && 
-           'data' in obj && 
-           'route' in obj &&
-           'metadata' in obj &&
-           'debug' in obj;
+  private normalizeContentChunk(chunk: unknown): QwenMessageChunk {
+    if (typeof chunk === 'string') {
+      return { text: chunk };
+    }
+    if (isRecord(chunk)) {
+      if (typeof chunk.text === 'string') {
+        return { text: chunk.text };
+      }
+      return chunk;
+    }
+    return { text: String(chunk) };
   }
 
-  /**
-   * Extract transformation result from engine response
-   */
-  private extractTransformationResult(result: any): any {
-    if (result && typeof result === 'object' && 'data' in result) {
-      return (result as UnknownObject).data;
+  private transformQwenResponseToOpenAI(response: UnknownObject): UnknownObject {
+    const data = isRecord(response.data) ? response.data as UnknownObject : response;
+    const usage = isRecord(data.usage) ? data.usage : {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0
+    };
+
+    const transformed: UnknownObject = {
+      id: typeof data.id === 'string' ? data.id : `chatcmpl-${Date.now()}`,
+      object: 'chat.completion',
+      created: typeof data.created === 'number' ? data.created : Date.now(),
+      model: typeof data.model === 'string' ? data.model : 'qwen-turbo',
+      choices: this.transformChoices(data.choices),
+      usage,
+      _transformed: true,
+      _originalFormat: 'qwen',
+      _targetFormat: 'openai'
+    };
+
+    return transformed;
+  }
+
+  private transformChoices(rawChoices: unknown): UnknownObject[] {
+    if (!Array.isArray(rawChoices)) {
+      return [];
     }
-    return result;
+    return rawChoices.map((choice, index) => {
+      const choiceObj = isRecord(choice) ? choice : {};
+      const messageObj = isRecord(choiceObj.message) ? choiceObj.message : {};
+      return {
+        index: typeof choiceObj.index === 'number' ? choiceObj.index : index,
+        message: {
+          role: typeof messageObj.role === 'string' ? messageObj.role : 'assistant',
+          content: typeof messageObj.content === 'string' ? messageObj.content : '',
+          tool_calls: this.transformToolCalls(messageObj.tool_calls)
+        },
+        finish_reason: this.transformFinishReason(
+          typeof choiceObj.finish_reason === 'string' ? choiceObj.finish_reason : undefined
+        )
+      };
+    });
+  }
+
+  private transformToolCalls(toolCalls: unknown): QwenToolCall[] {
+    if (!Array.isArray(toolCalls)) {
+      return [];
+    }
+    return toolCalls.map((toolCall, index) => {
+      const toolCallObj = isRecord(toolCall) ? toolCall : {};
+      const fnObj = isRecord(toolCallObj.function) ? toolCallObj.function : {};
+      const id = typeof toolCallObj.id === 'string'
+        ? toolCallObj.id
+        : `call_${Date.now()}_${index}`;
+      const name = typeof fnObj.name === 'string' ? fnObj.name : '';
+      const args = typeof fnObj.arguments === 'string'
+        ? fnObj.arguments
+        : JSON.stringify(fnObj.arguments ?? {});
+      return {
+        id,
+        type: 'function',
+        function: { name, arguments: args }
+      };
+    });
+  }
+
+  private transformFinishReason(finishReason: string | undefined): string {
+    const reasonMap: Record<string, string> = {
+      stop: 'stop',
+      length: 'length',
+      tool_calls: 'tool_calls',
+      content_filter: 'content_filter'
+    };
+    if (!finishReason) {
+      return 'stop';
+    }
+    return reasonMap[finishReason] ?? finishReason;
+  }
+
+  private extractTransformationResult(result: TransformationResult<UnknownObject> | UnknownObject): UnknownObject {
+    if (isRecord(result) && 'data' in result && isRecord(result.data)) {
+      return result.data;
+    }
+    return isRecord(result) ? result : {};
   }
 }

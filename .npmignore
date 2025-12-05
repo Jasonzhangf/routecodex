@@ -5,6 +5,7 @@ tests/
 *.test.ts
 *.spec.js
 *.spec.ts
+sharedmodule/
 
 # Development files
 tsconfig.json

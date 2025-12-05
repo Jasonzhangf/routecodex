@@ -1,234 +1,104 @@
 /**
- * Passthrough Compatibility Implementation
- *
- * Provides a compatibility layer that simply passes through requests
- * without any transformations. Used when no format conversion is needed.
- */
-
-import type {
-  CompatibilityModule,
-  ModuleConfig,
-  ModuleDependencies,
-  TransformationRule,
-  PipelineDebugLogger as PipelineDebugLoggerInterface
-} from '../../modules/pipeline/interfaces/pipeline-interfaces.js';
-import type { SharedPipelineRequest, SharedPipelineResponse } from '../../modules/pipeline/types/shared-dtos.js';
-import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
-
-/**
  * Passthrough Compatibility Module
+ *
+ * Minimal compatibility layer that simply returns the payload without
+ * modification. The new implementation keeps the previous hooks (tool metadata
+ * patching) that ensured OpenAI clients can consume the response, but does so
+ * with explicit typing to avoid `any`.
  */
+
+import type { ModuleConfig } from '../../modules/pipeline/interfaces/pipeline-interfaces.js';
+import type { ModuleDependencies } from '../../modules/pipeline/types/module.types.js';
+import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
+import type { CompatibilityContext, CompatibilityModule } from './compatibility-interface.js';
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
 export class PassthroughCompatibility implements CompatibilityModule {
   readonly id: string;
   readonly type = 'passthrough-compatibility';
-  readonly config: ModuleConfig;
-  readonly rules: TransformationRule[] = [];
+  readonly providerType = 'passthrough';
 
+  private readonly dependencies: ModuleDependencies;
+  private _config: ModuleConfig = {
+    type: 'passthrough-compatibility',
+    config: {}
+  };
   private isInitialized = false;
-  private logger!: PipelineDebugLoggerInterface;
-  private dependencies!: ModuleDependencies;
 
-  // 支持两种构造方式：new PassthroughCompatibility(config, deps) 或 new PassthroughCompatibility(deps)
-  constructor(configOrDependencies: ModuleConfig | ModuleDependencies, maybeDependencies?: ModuleDependencies) {
-    const isLegacy = (arg: any): arg is ModuleConfig => !!arg && typeof arg === 'object' && 'type' in arg && 'config' in arg;
-    if (isLegacy(configOrDependencies) && maybeDependencies) {
-      const config = configOrDependencies as ModuleConfig;
-      const dependencies = maybeDependencies as ModuleDependencies;
-      this.dependencies = dependencies;
-      this.logger = dependencies.logger;
-      this.id = `compatibility-passthrough-${Date.now()}`;
-      this.config = config;
-    } else {
-      const dependencies = configOrDependencies as ModuleDependencies;
-      this.dependencies = dependencies;
-      this.logger = dependencies.logger;
-      this.id = `compatibility-passthrough-${Date.now()}`;
-      this.config = { type: 'passthrough-compatibility', config: {} } as unknown as ModuleConfig;
-    }
+  constructor(dependencies: ModuleDependencies) {
+    this.dependencies = dependencies;
+    this.id = `passthrough-compatibility-${Date.now()}`;
   }
 
-  /**
-   * Initialize the compatibility module
-   */
+  get config(): ModuleConfig {
+    return this._config;
+  }
+
+  setConfig(config: ModuleConfig): void {
+    this._config = config;
+  }
+
   async initialize(): Promise<void> {
-    try {
-      this.logger.logModule(this.id, 'initialization-start');
-      
-      // Validate configuration
+    this.dependencies.logger?.logModule(this.id, 'initialization-start');
     this.validateConfig();
-      
-      this.isInitialized = true;
-      this.logger.logModule(this.id, 'initialization-complete');
-    } catch (error) {
-      this.logger.logModule(this.id, 'initialization-error', { error });
-      throw error;
-    }
+    this.isInitialized = true;
+    this.dependencies.logger?.logModule(this.id, 'initialization-complete');
   }
 
-  /**
-   * Process incoming request - Pass through without transformation
-   */
-  async processIncoming(request: SharedPipelineRequest): Promise<SharedPipelineRequest> {
-    if (!this.isInitialized) {
-      throw new Error('Passthrough Compatibility module is not initialized');
-    }
-
-    try {
-      const isDto = this.isSharedPipelineRequest(request);
-      const payload = isDto ? ((request as unknown as UnknownObject).data) : (request as unknown);
-      this.logger.logModule(this.id, 'processing-request-start', { hasModel: !!(payload as any)?.model });
-
-      // Simply return the request as-is (passthrough)
-      const result = payload;
-
-      this.logger.logModule(this.id, 'processing-request-complete', {
-        transformationCount: 0
-      });
-
-      return isDto ? { ...(request as unknown as UnknownObject), data: result } as SharedPipelineRequest : ({ data: result, route: (request as any).route, metadata: (request as any).metadata, debug: (request as any).debug } as SharedPipelineRequest);
-
-    } catch (error) {
-      this.logger.logModule(this.id, 'processing-request-error', { error });
-      throw error;
-    }
-  }
-
-  /**
-   * Process outgoing response - Pass through without transformation
-   */
-  async processOutgoing(response: SharedPipelineResponse): Promise<SharedPipelineResponse>;
-  async processOutgoing(response: SharedPipelineResponse | UnknownObject): Promise<SharedPipelineResponse>;
-  async processOutgoing(response: SharedPipelineResponse | UnknownObject): Promise<SharedPipelineResponse> {
-    if (!this.isInitialized) {
-      throw new Error('Passthrough Compatibility module is not initialized');
-    }
-
-    try {
-      const isDto = this.isPipelineResponse(response);
-      const payload = isDto ? (response as SharedPipelineResponse).data : response;
-      this.logger.logModule(this.id, 'processing-response-start', { hasChoices: !!(payload as any)?.choices });
-
-      // Minimal normalization to satisfy OpenAI Chat client schema
-      const result = payload as any;
-      try {
-        if (result && typeof result === 'object' && Array.isArray(result.choices)) {
-          if (result.object == null) {
-            result.object = 'chat.completion';
-          }
-          if (result.id == null) {
-            result.id = `chatcmpl_${Math.random().toString(36).slice(2)}`;
-          }
-          if (result.created == null) {
-            result.created = Math.floor(Date.now() / 1000);
-          }
-          if (result.model == null) {
-            result.model = 'unknown';
-          }
-        }
-      } catch { /* keep passthrough semantics if anything fails */ }
-
-      this.logger.logModule(this.id, 'processing-response-complete', {
-        transformationCount: 0
-      });
-
-      if (isDto) {
-        return { ...(response as SharedPipelineResponse), data: result };
-      }
-
-      return {
-        data: result,
-        metadata: {
-          pipelineId: 'passthrough-compatibility',
-          processingTime: 0,
-          stages: []
-        }
-      };
-
-    } catch (error) {
-      this.logger.logModule(this.id, 'processing-response-error', { error });
-      throw error;
-    }
-  }
-
-  /**
-   * Apply compatibility transformations
-   */
-  async applyTransformations(data: any, rules: TransformationRule[]): Promise<unknown> {
-    if (!this.isInitialized) {
-      throw new Error('Passthrough Compatibility module is not initialized');
-    }
-
-    // For passthrough, we don't apply any transformations
-    this.logger.logModule(this.id, 'apply-transformations', { 
-      ruleCount: rules.length,
-      transformationCount: 0 
+  async processIncoming(request: UnknownObject, _context: CompatibilityContext): Promise<UnknownObject> {
+    this.ensureInitialized();
+    this.dependencies.logger?.logModule(this.id, 'process-incoming', {
+      hasModel: typeof request.model === 'string'
     });
-    
-    return data;
+    return { ...request };
   }
 
-  /**
-   * Clean up resources
-   */
+  async processOutgoing(response: UnknownObject, _context: CompatibilityContext): Promise<UnknownObject> {
+    this.ensureInitialized();
+    const payload = { ...response };
+
+    if (isRecord(payload.choices)) {
+      // legacy responses shouldn’t have choices as object; keep semantics
+      payload.choices = Object.values(payload.choices);
+    }
+
+    const choices = Array.isArray(payload.choices) ? payload.choices : [];
+    if (choices.length > 0 && !payload.object) {
+      payload.object = 'chat.completion';
+    }
+    if (choices.length > 0 && !payload.id) {
+      payload.id = `chatcmpl_${Math.random().toString(36).slice(2)}`;
+    }
+    if (!payload.created) {
+      payload.created = Math.floor(Date.now() / 1000);
+    }
+    if (!payload.model) {
+      payload.model = 'unknown';
+    }
+
+    this.dependencies.logger?.logModule(this.id, 'process-outgoing', {
+      choiceCount: choices.length
+    });
+
+    return payload;
+  }
+
   async cleanup(): Promise<void> {
-    try {
-      this.logger.logModule(this.id, 'cleanup-start');
-      
-      this.isInitialized = false;
-      
-      this.logger.logModule(this.id, 'cleanup-complete');
-    } catch (error) {
-      this.logger.logModule(this.id, 'cleanup-error', { error });
-      throw error;
+    this.isInitialized = false;
+    this.dependencies.logger?.logModule(this.id, 'cleanup-complete');
+  }
+
+  private ensureInitialized(): void {
+    if (!this.isInitialized) {
+      throw new Error('Passthrough Compatibility module is not initialized');
     }
   }
 
-  /**
-   * Validate module configuration
-   */
   private validateConfig(): void {
-    const declared = this.config.config;
-    const allowed = ['enabled', 'priority'];
-    
-    for (const key of Object.keys(declared || {})) {
-      if (!allowed.includes(key)) {
-        this.logger.logModule(this.id, 'config-warning', {
-          message: `Unknown configuration property: ${key}`,
-          allowedProperties: allowed,
-          declaredProperties: Object.keys(declared || {})
-        });
-      }
+    if (this._config.type !== 'passthrough-compatibility') {
+      throw new Error('Invalid passthrough compatibility type');
     }
-  }
-
-  /**
-   * Check if object is a SharedPipelineRequest
-   */
-  private isSharedPipelineRequest(obj: any): obj is SharedPipelineRequest {
-    return typeof obj === 'object' && obj !== null && 'data' in obj && 'route' in obj && 'metadata' in obj;
-  }
-
-  /**
-   * Check if object is a PipelineResponse
-   */
-  private isPipelineResponse(obj: any): obj is SharedPipelineResponse {
-    return typeof obj === 'object' && obj !== null && 'data' in obj && 'metadata' in obj;
-  }
-
-  /**
-   * Get module status
-   */
-  getStatus(): {
-    id: string;
-    type: string;
-    initialized: boolean;
-    ruleCount: number;
-  } {
-    return {
-      id: this.id,
-      type: this.type,
-      initialized: this.isInitialized,
-      ruleCount: this.rules.length
-    };
   }
 }

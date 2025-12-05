@@ -55,10 +55,18 @@ export function resolveProviderIdentity(
 
 export function mapProviderModule(providerType: string): string {
   const normalized = normalizeProviderType(providerType);
-  if (normalized === 'responses') return 'responses-http-provider';
-  if (normalized === 'anthropic') return 'anthropic-http-provider';
-  if (normalized === 'gemini') return 'gemini-http-provider';
-  if (normalized === 'iflow') return 'iflow-http-provider';
+  if (normalized === 'responses') {
+    return 'responses-http-provider';
+  }
+  if (normalized === 'anthropic') {
+    return 'anthropic-http-provider';
+  }
+  if (normalized === 'gemini') {
+    return 'gemini-http-provider';
+  }
+  if (normalized === 'iflow') {
+    return 'iflow-http-provider';
+  }
   if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'lmstudio') {
     return 'openai-http-provider';
   }
@@ -67,9 +75,15 @@ export function mapProviderModule(providerType: string): string {
 
 export function mapProviderProtocol(providerType?: string): ProviderProtocol {
   const normalized = normalizeProviderType(providerType);
-  if (normalized === 'responses') return 'openai-responses';
-  if (normalized === 'anthropic') return 'anthropic-messages';
-  if (normalized === 'gemini') return 'gemini-chat';
+  if (normalized === 'responses') {
+    return 'openai-responses';
+  }
+  if (normalized === 'anthropic') {
+    return 'anthropic-messages';
+  }
+  if (normalized === 'gemini') {
+    return 'gemini-chat';
+  }
   if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'iflow' || normalized === 'lmstudio') {
     return 'openai-chat';
   }
@@ -78,9 +92,15 @@ export function mapProviderProtocol(providerType?: string): ProviderProtocol {
 
 export function defaultEndpointForProvider(providerType?: string): string {
   const normalized = normalizeProviderType(providerType);
-  if (normalized === 'responses') return '/v1/responses';
-  if (normalized === 'anthropic') return '/v1/messages';
-  if (normalized === 'gemini') return '/v1beta/models';
+  if (normalized === 'responses') {
+    return '/v1/responses';
+  }
+  if (normalized === 'anthropic') {
+    return '/v1/messages';
+  }
+  if (normalized === 'gemini') {
+    return '/v1beta/models';
+  }
   if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'iflow' || normalized === 'lmstudio') {
     return '/v1/chat/completions';
   }

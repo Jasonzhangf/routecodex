@@ -1,5 +1,10 @@
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 
+export interface CompatibilityMetadata extends Record<string, unknown> {
+  dataSize: number;
+  dataKeys: string[];
+}
+
 /**
  * 兼容性上下文接口
  */
@@ -7,6 +12,8 @@ export interface CompatibilityContext {
   compatibilityId: string;
   profileId: string;
   providerType: string;
+  providerFamily?: string;
+  providerId?: string;
   direction: 'incoming' | 'outgoing';
   stage: string;
   requestId: string;
@@ -14,11 +21,7 @@ export interface CompatibilityContext {
   timestamp: number;
   startTime: number;
   entryEndpoint?: string; // 端点信息，用于BaseCompatibility决策
-  metadata: {
-    dataSize: number;
-    dataKeys: string[];
-    [key: string]: any;
-  };
+  metadata: CompatibilityMetadata;
 }
 
 /**

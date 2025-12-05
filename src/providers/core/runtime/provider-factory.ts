@@ -4,17 +4,30 @@
  * 提供统一的Provider实例创建和管理功能
  */
 
-import { ResponsesProvider } from './responses-provider.js';
 import { OpenAIHttpProvider } from './openai-http-provider.js';
 import { ResponsesHttpProvider } from './responses-http-provider.js';
 import { AnthropicHttpProvider } from './anthropic-http-provider.js';
 import { iFlowHttpProvider } from './iflow-http-provider.js';
 import { ChatHttpProvider } from './chat-http-provider.js';
 import { GeminiHttpProvider } from './gemini-http-provider.js';
-import type { OpenAIStandardConfig } from '../api/provider-config.js';
+import type { OpenAIStandardConfig, ApiKeyAuth, OAuthAuth, OAuthAuthType } from '../api/provider-config.js';
 import crypto from 'node:crypto';
 import type { IProviderV2, ProviderRuntimeProfile, ProviderRuntimeAuth, ProviderType } from '../api/provider-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
+import {
+  normalizeProviderFamily,
+  normalizeProviderType,
+  providerTypeToProtocol
+} from '../utils/provider-type-utils.js';
+
+type RuntimeAwareProvider = IProviderV2 & {
+  setRuntimeProfile?: (runtime: ProviderRuntimeProfile) => void;
+};
+
+const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
+type RuntimeAwareConfig = OpenAIStandardConfig['config'] & { runtimeKey?: string }; 
+type ApiKeyAuthExtended = ApiKeyAuth & { secretRef?: string };
+type OAuthAuthExtended = OAuthAuth & { oauthProviderId?: string };
 
 /**
  * Provider工厂类
@@ -53,46 +66,16 @@ export class ProviderFactory {
   ): IProviderV2 {
     const instanceId = this.generateInstanceId(config, runtime);
 
-    // 检查是否已存在实例
     if (this.instances.has(instanceId)) {
       return this.instances.get(instanceId)!;
     }
 
-    // 创建新实例
-    const rawType = String(config?.config?.providerType || '').toLowerCase();
+    const providerType = normalizeProviderType(config?.config?.providerType);
     const moduleType = String(config?.type || '').toLowerCase();
-    const ptype = rawType as string;
 
-    let provider: IProviderV2;
-
-    // 首选：按协议类型创建
-    const chatProviderTypes = new Set(['openai', 'glm', 'qwen', 'lmstudio']);
-    if (chatProviderTypes.has(ptype)) {
-      provider = new ChatHttpProvider(config, dependencies);
-    } else if (ptype === 'responses') {
-      provider = new ResponsesHttpProvider(config, dependencies);
-    } else if (ptype === 'anthropic') {
-      provider = new AnthropicHttpProvider(config, dependencies);
-    } else if (ptype === 'gemini') {
-      provider = new GeminiHttpProvider(config, dependencies);
-    } else if (ptype === 'iflow') {
-      provider = new iFlowHttpProvider(config, dependencies);
-    } else {
-      // 兼容保留：模块类型直选（老配置）；不再做“最终回退”，未知类型直接失败（Fail Fast）
-      if (moduleType === 'openai-http-provider' || moduleType === 'openai-standard') {
-        provider = new OpenAIHttpProvider(config, dependencies);
-      } else if (moduleType === 'responses-http-provider') {
-        provider = new ResponsesHttpProvider(config, dependencies);
-      } else if (moduleType === 'anthropic-http-provider') {
-        provider = new AnthropicHttpProvider(config, dependencies);
-      } else {
-        const err: any = new Error(`[ProviderFactory] Unsupported providerType='${ptype}' and moduleType='${moduleType}'`);
-        err.code = 'ERR_UNSUPPORTED_PROVIDER_TYPE';
-        throw err;
-      }
-    }
-    if (provider && typeof (provider as any).setRuntimeProfile === 'function' && runtime) {
-      (provider as any).setRuntimeProfile(runtime);
+    const provider = this.instantiateProvider(providerType, moduleType, config, dependencies);
+    if (runtime) {
+      this.applyRuntimeProfile(provider, runtime);
     }
 
     this.instances.set(instanceId, provider);
@@ -160,7 +143,8 @@ export class ProviderFactory {
    * 生成实例ID
    */
   private static generateInstanceId(config: OpenAIStandardConfig, runtime?: ProviderRuntimeProfile): string {
-    const configRuntimeKey = (config?.config as any)?.runtimeKey;
+    const runtimeConfig = config?.config as RuntimeAwareConfig;
+    const configRuntimeKey = runtimeConfig?.runtimeKey;
     if (runtime?.runtimeKey) {
       return runtime.runtimeKey;
     }
@@ -169,11 +153,9 @@ export class ProviderFactory {
     }
     const providerType = config?.config?.providerType || 'unknown';
     const baseUrl = config?.config?.baseUrl || '';
-    const authType = String(config?.config?.auth?.type || '').toLowerCase();
-    const authSignature =
-      authType === 'apikey'
-        ? ((config.config.auth as any)?.secretRef || '')
-        : ((config.config.auth as any)?.tokenFile || '');
+    const auth = config?.config?.auth;
+    const authType = String(auth?.type || '').toLowerCase();
+    const authSignature = auth ? this.getAuthSignature(auth) : '';
     const input = `${providerType}:${baseUrl}:${authType}:${authSignature}`;
     return crypto.createHash('sha256').update(input).digest('hex').substring(0, 16);
   }
@@ -183,8 +165,13 @@ export class ProviderFactory {
     if (!baseUrl || !baseUrl.trim()) {
       throw new Error(`[ProviderFactory] runtime ${runtime.runtimeKey} missing baseUrl`);
     }
-    const providerProtocol = runtime.providerType;
-    const providerFamily = (runtime.providerFamily || providerProtocol) as ProviderType;
+    const providerType = normalizeProviderType(runtime.providerType);
+    const providerFamily = normalizeProviderFamily(
+      runtime.providerFamily,
+      runtime.providerId,
+      runtime.providerKey,
+      providerType
+    );
     const authConfig = this.mapRuntimeAuthToConfig(runtime.auth, runtime.runtimeKey);
     const endpointOverride =
       runtime.endpoint && !/^https?:\/\//i.test(runtime.endpoint.trim())
@@ -199,11 +186,12 @@ export class ProviderFactory {
     if (runtime.auth?.oauthProviderId) {
       extensions.oauthProviderId = runtime.auth.oauthProviderId;
     }
-    extensions.providerProtocol = providerProtocol;
+    extensions.providerProtocol = runtime.providerProtocol || providerTypeToProtocol(providerType);
     return {
-      type: this.mapProviderModule(providerFamily),
+      type: this.mapProviderModule(providerType),
       config: {
-        providerType: providerFamily,
+        providerType,
+        providerId: providerFamily,
         baseUrl,
         auth: authConfig,
         overrides,
@@ -214,19 +202,22 @@ export class ProviderFactory {
 
   private static mapRuntimeAuthToConfig(auth: ProviderRuntimeAuth, runtimeKey: string) {
     if (auth.type === 'apikey') {
-      if (!auth.value || !auth.value.trim()) {
+      if (!isNonEmptyString(auth.value)) {
         throw new Error(`[ProviderFactory] runtime ${runtimeKey} missing inline apiKey value`);
       }
-      return {
-        type: 'apikey' as const,
+      const apiKeyAuth: ApiKeyAuth = {
+        type: 'apikey',
         apiKey: auth.value.trim()
       };
+      return apiKeyAuth;
     }
-    const authType = typeof auth.rawType === 'string' && auth.rawType.trim()
-      ? auth.rawType.trim()
+
+    const oauthType: OAuthAuthType = isNonEmptyString(auth.rawType)
+      ? (auth.rawType.trim() as OAuthAuthType)
       : 'oauth';
-    return {
-      type: authType as any,
+
+    const oauthAuth: OAuthAuthExtended = {
+      type: oauthType,
       clientId: auth.clientId,
       clientSecret: auth.clientSecret,
       scopes: auth.scopes,
@@ -235,21 +226,95 @@ export class ProviderFactory {
       deviceCodeUrl: auth.deviceCodeUrl,
       authorizationUrl: auth.authorizationUrl,
       userInfoUrl: auth.userInfoUrl,
-      refreshUrl: auth.refreshUrl,
-      oauthProviderId: auth.oauthProviderId,
-      rawType: auth.rawType
+      refreshUrl: auth.refreshUrl
     };
+
+    if (auth.oauthProviderId) {
+      oauthAuth.oauthProviderId = auth.oauthProviderId;
+    }
+
+    return oauthAuth;
   }
 
   private static mapProviderModule(
-    providerType: string
+    providerType: ProviderType
   ): OpenAIStandardConfig['type'] {
-    const normalized = (providerType || '').toLowerCase();
-    if (normalized === 'responses') return 'responses-http-provider';
-    if (normalized === 'anthropic') return 'anthropic-http-provider';
-    if (normalized === 'gemini') return 'gemini-http-provider';
-    if (normalized === 'iflow') return 'iflow-http-provider';
+    if (providerType === 'responses') {
+      return 'responses-http-provider';
+    }
+    if (providerType === 'anthropic') {
+      return 'anthropic-http-provider';
+    }
+    if (providerType === 'gemini') {
+      return 'gemini-http-provider';
+    }
     return 'openai-http-provider';
+  }
+
+  private static instantiateProvider(
+    providerType: ProviderType,
+    moduleType: string,
+    config: OpenAIStandardConfig,
+    dependencies: ModuleDependencies
+  ): IProviderV2 {
+    switch (providerType) {
+      case 'openai':
+        return new ChatHttpProvider(config, dependencies);
+      case 'responses':
+        return new ResponsesHttpProvider(config, dependencies);
+      case 'anthropic':
+        return new AnthropicHttpProvider(config, dependencies);
+      case 'gemini':
+        return new GeminiHttpProvider(config, dependencies);
+      default:
+        break;
+    }
+
+    if (moduleType === 'openai-http-provider' || moduleType === 'openai-standard') {
+      return new OpenAIHttpProvider(config, dependencies);
+    }
+    if (moduleType === 'responses-http-provider') {
+      return new ResponsesHttpProvider(config, dependencies);
+    }
+    if (moduleType === 'anthropic-http-provider') {
+      return new AnthropicHttpProvider(config, dependencies);
+    }
+    if (moduleType === 'iflow-http-provider') {
+      return new iFlowHttpProvider(config, dependencies);
+    }
+
+    const error = new Error(`[ProviderFactory] Unsupported providerType='${providerType}' and moduleType='${moduleType}'`);
+    (error as Error & { code?: string }).code = 'ERR_UNSUPPORTED_PROVIDER_TYPE';
+    throw error;
+  }
+
+  private static applyRuntimeProfile(provider: IProviderV2, runtime: ProviderRuntimeProfile): void {
+    const candidate = provider as RuntimeAwareProvider;
+    if (typeof candidate.setRuntimeProfile === 'function') {
+      candidate.setRuntimeProfile(runtime);
+    }
+  }
+
+  private static getAuthSignature(auth: ApiKeyAuth | OAuthAuth): string {
+    if (auth.type === 'apikey') {
+      const apiKeyAuth = auth as ApiKeyAuthExtended;
+      if (isNonEmptyString(apiKeyAuth.secretRef)) {
+        return apiKeyAuth.secretRef.trim();
+      }
+      return apiKeyAuth.apiKey.trim();
+    }
+
+    const tokenFile = isNonEmptyString(auth.tokenFile) ? auth.tokenFile.trim() : '';
+    if (tokenFile) {
+      return tokenFile;
+    }
+    if (isNonEmptyString(auth.clientId)) {
+      return auth.clientId.trim();
+    }
+    if (isNonEmptyString(auth.authorizationUrl)) {
+      return auth.authorizationUrl.trim();
+    }
+    return auth.type;
   }
 }
 

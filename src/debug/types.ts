@@ -1,4 +1,7 @@
 import type { ModuleDependencies } from '../modules/pipeline/interfaces/pipeline-interfaces.js';
+import type { ProviderRuntimeProfile } from '../providers/core/api/provider-types.js';
+import type { ProviderRuntimeMetadata } from '../providers/core/runtime/provider-runtime-metadata.js';
+import type { TargetMetadata } from '../modules/pipeline/orchestrator/pipeline-context.js';
 
 export type DebugSessionMode = 'capture' | 'replay';
 
@@ -48,27 +51,17 @@ export interface ExecutionHarness<TInput = unknown, TResult = unknown> {
   executeBackward?(output: TResult, context?: HarnessExecuteContext): Promise<TInput>;
 }
 
-export interface ProviderHarnessRuntime extends Record<string, unknown> {
-  runtimeKey: string;
-  providerId: string;
-  providerKey: string;
-  providerType: string;
-  endpoint: string;
-  auth: Record<string, unknown>;
-  compatibilityProfile?: string;
-  outboundProfile?: string;
-  defaultModel: string;
-}
+export type ProviderHarnessRuntime = ProviderRuntimeProfile & Record<string, unknown>;
 
-export interface ProviderHarnessMetadata extends Record<string, unknown> {
+export interface ProviderHarnessMetadata extends ProviderRuntimeMetadata {
   requestId: string;
   providerId: string;
   providerKey: string;
   providerType: string;
   providerProtocol: string;
   routeName: string;
-  target: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
+  target: TargetMetadata;
+  runtime?: ProviderHarnessRuntime;
 }
 
 export interface ProviderHarnessExecuteInput {

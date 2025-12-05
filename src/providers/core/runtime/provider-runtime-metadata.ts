@@ -21,7 +21,9 @@ export function attachProviderRuntimeMetadata(
   payload: Record<string, unknown>,
   metadata: ProviderRuntimeMetadata
 ): void {
-  if (!payload || typeof payload !== 'object') return;
+  if (!payload || typeof payload !== 'object') {
+    return;
+  }
   const previous = Reflect.get(payload, PROVIDER_RUNTIME_SYMBOL) as ProviderRuntimeMetadata | undefined;
   const merged = previous ? { ...previous, ...metadata } : { ...metadata };
   Object.defineProperty(payload, PROVIDER_RUNTIME_SYMBOL, {
@@ -33,7 +35,9 @@ export function attachProviderRuntimeMetadata(
 }
 
 export function extractProviderRuntimeMetadata(source: unknown): ProviderRuntimeMetadata | undefined {
-  if (!source || typeof source !== 'object') return undefined;
+  if (!source || typeof source !== 'object') {
+    return undefined;
+  }
   const meta = Reflect.get(source as object, PROVIDER_RUNTIME_SYMBOL);
   return meta && typeof meta === 'object' ? (meta as ProviderRuntimeMetadata) : undefined;
 }

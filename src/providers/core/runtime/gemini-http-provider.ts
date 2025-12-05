@@ -8,23 +8,37 @@
  * - 形状转换：在 preprocessRequest 做最小映射（OpenAI Chat → Gemini contents）；若已经是 Gemini 形状（contents/systemInstruction）则透传。
  */
 
-import { BaseProvider } from './base-provider.js';
-import { HttpClient } from '../utils/http-client.js';
+import { HttpTransportProvider } from './http-transport-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ProviderContext, ServiceProfile, ProviderType } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
+import { GeminiProtocolClient } from '../../../client/gemini/gemini-protocol-client.js';
 
-export class GeminiHttpProvider extends BaseProvider {
-  readonly type = 'gemini-http-provider';
+type DataEnvelope = UnknownObject & { data?: UnknownObject };
 
-  private httpClient!: HttpClient;
-  private serviceProfile: ServiceProfile;
+type OpenAIChatMessage = {
+  role?: string;
+  content?: unknown;
+};
 
+type MutablePayload = Record<string, unknown> & {
+  messages?: unknown;
+  stream?: unknown;
+  model?: unknown;
+  generationConfig?: Record<string, unknown>;
+};
+
+export class GeminiHttpProvider extends HttpTransportProvider {
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
-    super({ ...config, config: { ...config.config, providerType: 'gemini' as ProviderType } }, dependencies);
-    this.serviceProfile = this.getServiceProfile();
-    this.createHttpClient();
+    const cfg: OpenAIStandardConfig = {
+      ...config,
+      config: {
+        ...config.config,
+        providerType: 'gemini' as ProviderType
+      }
+    };
+    super(cfg, dependencies, 'gemini-http-provider', new GeminiProtocolClient());
   }
 
   protected getServiceProfile(): ServiceProfile {
@@ -40,123 +54,112 @@ export class GeminiHttpProvider extends BaseProvider {
     };
   }
 
-  protected createAuthProvider(): any {
-    // 复用 ApiKeyAuthProvider；允许使用自定义 headerName（x-goog-api-key）
-    const auth = (this.config as any)?.config?.auth || { type: 'apikey' };
-    const { ApiKeyAuthProvider } = require('../auth/apikey-auth.js');
-    // 若未设置 headerName，允许后续在 headers 构建时将 Authorization 转换为 x-goog-api-key
-    return new ApiKeyAuthProvider(auth);
-  }
+  protected override async preprocessRequest(request: UnknownObject): Promise<UnknownObject> {
+    const adapter = this.resolvePayload(request);
+    const payload = adapter.payload;
 
-  protected async preprocessRequest(request: UnknownObject): Promise<UnknownObject> {
-    const r: any = request || {};
-    const body: any = (r && typeof r === 'object' && r.data && typeof r.data === 'object') ? r.data : r;
-
-    // 如果已经是 Gemini 形状（存在 contents 或 systemInstruction），透传
-    if (Array.isArray(body?.contents) || body?.systemInstruction) {
+    if (this.isGeminiPayload(payload)) {
       return request;
     }
 
-    // OpenAI Chat → Gemini contents 映射（最小化，仅文本）
-    const messages: any[] = Array.isArray(body?.messages) ? body.messages : [];
-    const systemMsgs = messages.filter((m) => m?.role === 'system' && typeof m?.content === 'string');
-    const userOrAsst = messages.filter((m) => m?.role === 'user' || m?.role === 'assistant');
-    const contents = userOrAsst.map((m) => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }]
+    const messages = Array.isArray(payload.messages) ? payload.messages.filter(this.isChatMessage) : [];
+    const systemMsgs = messages.filter((m) => m.role === 'system' && typeof m.content === 'string');
+    const userOrAssistant = messages.filter((m) => m.role === 'user' || m.role === 'assistant');
+    const contents = userOrAssistant.map((message) => ({
+      role: message.role === 'assistant' ? 'model' as const : 'user' as const,
+      parts: [{ text: this.normalizeMessageText(message.content) }]
     }));
     const systemInstruction = systemMsgs.length > 0
-      ? { role: 'system', parts: [{ text: systemMsgs.map((s)=>s.content).join('\n') }] }
+      ? { role: 'system', parts: [{ text: systemMsgs.map((msg) => String(msg.content)).join('\n') }] }
       : undefined;
 
-    const generationConfig: any = {};
-    if (typeof body.max_tokens === 'number') generationConfig.maxOutputTokens = body.max_tokens;
-    if (typeof body.temperature === 'number') generationConfig.temperature = body.temperature;
-    if (typeof body.top_p === 'number') generationConfig.topP = body.top_p;
+    const generationConfig = this.buildGenerationConfig(payload);
 
-    const rebuilt = {
-      ...body,
+    const rebuilt: MutablePayload = {
+      ...payload,
       contents,
       ...(systemInstruction ? { systemInstruction } : {}),
-      ...(Object.keys(generationConfig).length ? { generationConfig } : {})
+      ...(generationConfig ? { generationConfig } : {})
     };
 
-    // 删除 OpenAI 专属字段
-    delete (rebuilt as any).messages;
-    delete (rebuilt as any).stream;
+    delete rebuilt.messages;
+    delete rebuilt.stream;
 
-    // 回写到 request
-    if (r && typeof r === 'object' && r.data && typeof r.data === 'object') {
-      r.data = rebuilt;
-      return r as UnknownObject;
-    }
-    return rebuilt as UnknownObject;
+    return adapter.assign(rebuilt);
   }
 
-  protected async postprocessResponse(response: unknown, _context: ProviderContext): Promise<UnknownObject> {
+  protected override async postprocessResponse(response: unknown, _context: ProviderContext): Promise<UnknownObject> {
     if (response && typeof response === 'object') {
       return response as UnknownObject;
     }
     return { data: response } as UnknownObject;
   }
 
-  protected async sendRequestInternal(request: UnknownObject): Promise<unknown> {
-    const headers = await this.buildRequestHeaders();
-
-    const bodyAny: any = (request as any)?.data || (request as any) || {};
-    const model = typeof bodyAny?.model === 'string' ? bodyAny.model.trim() : '';
-    if (!model) {
-      throw new Error('provider-runtime-error: missing model from virtual router');
+  private resolvePayload(source: UnknownObject): {
+    payload: MutablePayload;
+    assign(updated: MutablePayload): UnknownObject;
+  } {
+    if (this.hasDataEnvelope(source)) {
+      const envelope = source as DataEnvelope;
+      const dataRecord = (envelope.data && typeof envelope.data === 'object')
+        ? envelope.data as MutablePayload
+        : {};
+      if (!envelope.data || typeof envelope.data !== 'object') {
+        envelope.data = dataRecord;
+      }
+      return {
+        payload: dataRecord,
+        assign: (updated) => {
+          envelope.data = updated;
+          return source;
+        }
+      };
     }
-
-    // 构造 URL: /models/{model}:generateContent
-    const base = this.getEffectiveBaseUrl();
-    const path = `/models/${encodeURIComponent(model)}:generateContent`;
-    let url = `${base.replace(/\/$/, '')}${path}`;
-
-    // 删除 body.model，避免与路径重复
-    try { if ('model' in bodyAny) delete bodyAny.model; } catch { /* ignore */ }
-
-    // 发送 JSON 请求
-    const resp = await this.httpClient.post(url.replace(this.getEffectiveBaseUrl(), ''), bodyAny, headers);
-    return resp;
+    return {
+      payload: source as MutablePayload,
+      assign: (updated) => updated
+    };
   }
 
-  protected async onInitialize(): Promise<void> {
-    // 初始化 HTTP 客户端
-    this.createHttpClient();
-    // 初始化 Auth 提供者（使用基类）
-    try { (this as any).authProvider = this.createAuthProvider(); await (this as any).authProvider.initialize?.(); } catch { /* allow missing auth in init; build headers will throw */ }
+  private isGeminiPayload(payload: Record<string, unknown>): boolean {
+    const hasContents = Array.isArray(payload.contents);
+    const hasSystemInstruction = typeof payload.systemInstruction === 'object' && payload.systemInstruction !== null;
+    return hasContents || hasSystemInstruction;
   }
 
-  private createHttpClient(): void {
-    const profile = this.serviceProfile;
-    const baseUrl = this.getEffectiveBaseUrl();
-    const timeout = this.config.config.overrides?.timeout ?? profile.timeout ?? 300000;
-    const maxRetries = this.config.config.overrides?.maxRetries ?? profile.maxRetries ?? 2;
-    const headers = { ...(profile.headers||{}), ...(this.config.config.overrides?.headers||{}) } as Record<string, string>;
-    this.httpClient = new HttpClient({ baseUrl, timeout, maxRetries, defaultHeaders: headers });
-  }
-
-  private getEffectiveBaseUrl(): string {
-    return (
-      this.config.config.overrides?.baseUrl ||
-      this.config.config.baseUrl ||
-      this.serviceProfile.defaultBaseUrl
+  private isChatMessage(message: unknown): message is OpenAIChatMessage {
+    return Boolean(
+      message &&
+      typeof message === 'object' &&
+      ('role' in (message as Record<string, unknown>))
     );
   }
 
-  private async buildRequestHeaders(): Promise<Record<string, string>> {
-    const baseHeaders: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-    };
-    const serviceHeaders = this.serviceProfile.headers || {};
-    const overrideHeaders = (this.config as any)?.config?.overrides?.headers || {};
-    let authHeaders: Record<string, string> = {};
-    try { authHeaders = (this as any).authProvider?.buildHeaders?.() || {}; } catch { authHeaders = {}; }
-    return { ...baseHeaders, ...serviceHeaders, ...overrideHeaders, ...authHeaders };
+  private normalizeMessageText(content: unknown): string {
+    if (typeof content === 'string') {
+      return content;
+    }
+    return JSON.stringify(content ?? '');
   }
+
+  private buildGenerationConfig(payload: Record<string, unknown>): Record<string, unknown> | undefined {
+    const generationConfig = typeof payload.generationConfig === 'object' && payload.generationConfig !== null
+      ? { ...(payload.generationConfig as Record<string, unknown>) }
+      : {};
+
+    if (typeof payload.max_tokens === 'number') {
+      generationConfig.maxOutputTokens = payload.max_tokens;
+    }
+    if (typeof payload.temperature === 'number') {
+      generationConfig.temperature = payload.temperature;
+    }
+    if (typeof payload.top_p === 'number') {
+      generationConfig.topP = payload.top_p;
+    }
+
+    return Object.keys(generationConfig).length > 0 ? generationConfig : undefined;
+  }
+
 }
 
 export default GeminiHttpProvider;

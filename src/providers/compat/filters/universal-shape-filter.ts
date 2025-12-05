@@ -50,6 +50,27 @@ type FilterConfig = {
   };
 };
 
+type RequestConfig = FilterConfig['request'];
+type ResponseConfig = FilterConfig['response'];
+
+const DEFAULT_TOOL_OUTPUT = 'Command succeeded (no output).';
+
+function isRecord(value: unknown): value is UnknownObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function toRecord(value: unknown): UnknownObject {
+  return isRecord(value) ? value : {};
+}
+
+function toArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function hasArrayItems(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0;
+}
+
 export class UniversalShapeFilter {
   private cfg: FilterConfig | null = null;
   private readonly configPath?: string;
@@ -100,161 +121,75 @@ export class UniversalShapeFilter {
     } as FilterConfig;
   }
 
-  private shallowPick(obj: any, allow: string[]): any {
-    if (!obj || typeof obj !== 'object') return obj;
-    const out: any = {};
-    for (const k of allow) { if (Object.prototype.hasOwnProperty.call(obj, k)) out[k] = obj[k]; }
+  private shallowPick(obj: unknown, allow: string[]): UnknownObject {
+    if (!isRecord(obj)) {
+      return {};
+    }
+    const out: UnknownObject = {};
+    for (const key of allow) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        out[key] = obj[key];
+      }
+    }
     return out;
   }
 
-  private toObjectArgs(v: any): any {
-    if (v == null) return {};
-    if (typeof v === 'object') return v;
-    if (typeof v === 'string') { try { return JSON.parse(v); } catch { return { raw: v }; } }
+  private toObjectArgs(value: unknown): UnknownObject {
+    if (value === null || value === undefined) {
+      return {};
+    }
+    if (isRecord(value)) {
+      return value;
+    }
+    if (typeof value === 'string') {
+      try { return JSON.parse(value) as UnknownObject; }
+      catch { return { raw: value }; }
+    }
     return {};
+  }
+
+  private toStringArgs(value: unknown): string {
+    if (typeof value === 'string') {
+      return value;
+    }
+    try { return JSON.stringify(value ?? {}); }
+    catch { return '{}'; }
+  }
+
+  private normalizeToolContent(value: unknown): string {
+    if (typeof value === 'string') {
+      return value.trim().length ? value : DEFAULT_TOOL_OUTPUT;
+    }
+    if (value === null || value === undefined) {
+      return DEFAULT_TOOL_OUTPUT;
+    }
+    try {
+      const text = JSON.stringify(value);
+      return text && text.length ? text : DEFAULT_TOOL_OUTPUT;
+    } catch {
+      return DEFAULT_TOOL_OUTPUT;
+    }
   }
 
   async applyRequestFilter(payload: UnknownObject): Promise<UnknownObject> {
     const cfg = this.cfg!;
 
     const allow = new Set(cfg.request.allowTopLevel);
-    const src: any = payload || {};
-    const out: any = {};
-    for (const k of Object.keys(src)) { if (allow.has(k)) out[k] = src[k]; }
-
-    const msgs = Array.isArray(out.messages) ? out.messages : [];
-    const mapped = msgs.map((m: any) => {
-      const role = (typeof m?.role === 'string' && cfg.request.messages.allowedRoles.includes(m.role)) ? m.role : 'user';
-      const base: any = { role };
-      if (role === 'tool') {
-        const s = typeof m?.content === 'string' ? m.content : (m?.content != null ? JSON.stringify(m.content) : 'Command succeeded (no output).');
-        base.content = s && s.trim().length ? s : 'Command succeeded (no output).';
-      } else {
-        base.content = (m?.content != null) ? String(m.content) : '';
+    const src = toRecord(payload);
+    const out: UnknownObject = {};
+    for (const key of Object.keys(src)) {
+      if (allow.has(key)) {
+        out[key] = src[key];
       }
-      if (role === 'assistant' && Array.isArray(m?.tool_calls) && m.tool_calls.length) {
-        base.tool_calls = (m.tool_calls as any[]).map(tc => {
-          const fn = tc?.function || {};
-          const name = typeof fn?.name === 'string' ? fn.name : undefined;
-          const args = (cfg.request.assistantToolCalls?.functionArgumentsType === 'string') ? (typeof fn?.arguments === 'string' ? fn.arguments : JSON.stringify(fn?.arguments ?? {})) : this.toObjectArgs(fn?.arguments);
-          const outTc: any = { type: 'function', function: { ...(name?{name}:{ }), arguments: args } };
-          if (tc?.id) outTc.id = tc.id;
-          return outTc;
-        });
-        if (cfg.request.messages.assistantWithToolCallsContentNull) base.content = null;
-      }
-      if (role === 'tool') {
-        if (typeof m?.name === 'string') base.name = m.name;
-        if (typeof m?.tool_call_id === 'string') base.tool_call_id = m.tool_call_id;
-      }
-      return base;
-    });
-    // Apply generic messagesRules first (config-driven)
-    const rules = Array.isArray(cfg.request.messagesRules) ? cfg.request.messagesRules : [];
-    const applyRules = (arr: any[]): any[] => {
-      if (!rules.length) return arr;
-      const res: any[] = [];
-      for (const m of arr) {
-        let dropped = false;
-        for (const r of rules) {
-          const when = r.when || {};
-          const matchRole = when.role ? (m?.role === when.role) : true;
-          const hasTC = Array.isArray(m?.tool_calls) && m.tool_calls.length > 0;
-          const matchTC = (typeof when.hasToolCalls === 'boolean') ? (hasTC === when.hasToolCalls) : true;
-          const matched = matchRole && matchTC;
-          if (matched) {
-            if (r.action === 'drop') { dropped = true; break; }
-            if (r.action === 'set' && r.set && typeof r.set === 'object') {
-              Object.assign(m, r.set);
-            }
-            // keep = no-op
-          }
-        }
-        if (!dropped) res.push(m);
-      }
-      return res;
-    };
-    let filtered = applyRules(mapped);
-    // Back-compat: legacy boolean suppression if no rules provided
-    if (!rules.length && cfg.request.messages.suppressAssistantToolCalls) {
-      filtered = filtered.filter((m: any) => !(m?.role === 'assistant' && Array.isArray(m?.tool_calls) && m.tool_calls.length));
     }
-    // Drop provider error echo messages (e.g., Error: HTTP 400: {"error":{...}}) to avoid contaminating next turn
-    // Do not intercept/drop any request messages here.
 
-    // Pair tool results with function name using previous assistant tool_calls
-    try {
-      const nameById = new Map<string, string>();
-      for (const m of filtered) {
-        if (m && (m as any).role === 'assistant' && Array.isArray((m as any).tool_calls)) {
-          for (const tc of ((m as any).tool_calls as any[])) {
-            const id = typeof tc?.id === 'string' ? tc.id : undefined;
-            const fn = tc?.function || {};
-            const nm = typeof fn?.name === 'string' ? fn.name : undefined;
-            if (id && nm) { nameById.set(id, nm); }
-          }
-        }
-      }
-      for (const m of filtered) {
-        if (m && (m as any).role === 'tool') {
-          const hasName = typeof (m as any).name === 'string' && (m as any).name.trim().length > 0;
-          const tid = typeof (m as any).tool_call_id === 'string' ? (m as any).tool_call_id : undefined;
-          if (!hasName && tid && nameById.has(tid)) {
-            (m as any).name = nameById.get(tid);
-          }
-        }
-      }
-    } catch { /* ignore pairing errors */ }
+    const normalizedMessages = this.normalizeRequestMessages(out.messages, cfg.request);
+    out.messages = normalizedMessages;
 
-    out.messages = filtered;
+    this.normalizeTools(out, cfg.request);
+    this.cleanupToolChoice(out);
 
-    if (Array.isArray(out.tools) && cfg.request.tools?.normalize) {
-      const norm: any[] = [];
-      for (const t of out.tools) {
-        try {
-          const fnTop = { name: t?.name, description: t?.description, parameters: t?.parameters };
-          const fn = (t && typeof t.function === 'object') ? t.function : {};
-          const name = typeof fn?.name === 'string' ? fn.name : (typeof fnTop.name === 'string' ? fnTop.name : undefined);
-          const desc = typeof fn?.description === 'string' ? fn.description : (typeof fnTop.description === 'string' ? fnTop.description : undefined);
-          let params = (fn?.parameters !== undefined) ? fn.parameters : fnTop.parameters;
-          if (typeof params === 'string') { try { params = JSON.parse(params); } catch { params = undefined; } }
-          if (params && typeof params !== 'object') params = undefined;
-          // Minimal provider-side safeguard: ensure shell.command prefers string with array compatibility
-          try {
-            if (typeof name === 'string' && name.trim().toLowerCase() === 'shell' && params && typeof params === 'object') {
-              const pObj: any = params;
-              if (pObj && typeof pObj === 'object') {
-                if (typeof pObj.type !== 'string') pObj.type = 'object';
-                if (!pObj.properties || typeof pObj.properties !== 'object') pObj.properties = {};
-                const cmd = pObj.properties.command as any;
-                const hasOneOf = !!(cmd && typeof cmd === 'object' && Array.isArray(cmd.oneOf));
-                if (!hasOneOf) {
-                  const descText = (cmd && typeof cmd.description === 'string') ? cmd.description : 'Shell command. Prefer a single string; an array of argv tokens is also accepted.';
-                  pObj.properties.command = {
-                    description: descText,
-                    oneOf: [ { type: 'string' }, { type: 'array', items: { type: 'string' } } ]
-                  };
-                  const req: string[] = Array.isArray(pObj.required) ? pObj.required : [];
-                  if (!req.includes('command')) req.push('command');
-                  pObj.required = req;
-                  if (typeof pObj.additionalProperties !== 'boolean') pObj.additionalProperties = false;
-                  params = pObj;
-                }
-              }
-            }
-          } catch { /* keep original params on error */ }
-          norm.push({ type:'function', function:{ ...(name?{name}:{ }), ...(desc?{description:desc}:{ }), ...(params?{parameters:params}:{ }) } });
-        } catch { norm.push(t); }
-      }
-      out.tools = norm;
-      if (cfg.request.tools?.forceToolChoiceAuto) out.tool_choice = 'auto';
-    }
-    // If no tools present, drop tool_choice to avoid upstream 1210
-    try {
-      const hasTools = Array.isArray(out.tools) && (out.tools as any[]).length > 0;
-      if (!hasTools && Object.prototype.hasOwnProperty.call(out, 'tool_choice')) delete out.tool_choice;
-    } catch { /* ignore */ }
-    return out as UnknownObject;
+    return out;
   }
 
   async applyResponseFilter(payload: UnknownObject, _ctx?: CompatibilityContext): Promise<UnknownObject> {
@@ -263,53 +198,321 @@ export class UniversalShapeFilter {
     const envFlag = String(process.env.RCC_COMPAT_FILTER_OFF_RESPONSES || '1').toLowerCase();
     const envBypass = !(envFlag === '0' || envFlag === 'false' || envFlag === 'off');
     try {
-      const entry = String((_ctx as any)?.entryEndpoint || (_ctx as any)?.endpoint || '').toLowerCase();
+      const ctx = _ctx as (CompatibilityContext & { endpoint?: string }) | undefined;
+      const entryEndpoint = typeof ctx?.entryEndpoint === 'string' ? ctx.entryEndpoint : undefined;
+      const fallbackEndpoint = typeof ctx?.endpoint === 'string' ? ctx.endpoint : undefined;
+      const entry = String(entryEndpoint ?? fallbackEndpoint ?? '').toLowerCase();
       if (entry === '/v1/responses' || envBypass) {
         return payload;
       }
-    } catch { /* ignore */ if (envBypass) return payload; }
-    const cfg = this.cfg!;
-    const src: any = payload || {};
-    const out: any = this.shallowPick(src, cfg.response.allowTopLevel);
-
-    const choices = Array.isArray(src?.choices) ? src.choices : [];
-    out.choices = choices.map((c: any, idx: number) => {
-      const cc: any = { index: typeof c?.index === 'number' ? c.index : idx };
-      const msg = c?.message || {};
-      const m: any = {};
-      m.role = typeof msg?.role === 'string' ? msg.role : (cfg.response.choices.message.roleDefault || 'assistant');
-      if (Array.isArray(msg?.tool_calls) && msg.tool_calls.length) {
-        m.tool_calls = (msg.tool_calls as any[]).map(tc => {
-          const fn = tc?.function || {};
-          const name = typeof fn?.name === 'string' ? fn.name : undefined;
-          const argsObj = this.toObjectArgs(fn?.arguments);
-          let argsOut: any = argsObj;
-          if (cfg.response.choices.message.tool_calls?.function?.argumentsType === 'string') {
-            try { argsOut = JSON.stringify(argsObj ?? {}); } catch { argsOut = '{}'; }
-          }
-          const outTc: any = { type: tc?.type || 'function', function: { ...(name?{name}:{ }), arguments: argsOut } };
-          if (tc?.id) outTc.id = tc.id;
-          if (tc?.mcp) outTc._glm = { ...(outTc._glm||{}), mcp: tc.mcp };
-          return outTc;
-        });
-        if (cfg.response.choices.message.contentNullWhenToolCalls) {
-          m.content = null;
-        } else if (msg?.content != null) {
-          m.content = msg.content;
-        }
-      } else {
-        m.content = msg?.content ?? '';
+    } catch {
+      if (envBypass) {
+        return payload;
       }
-      if (typeof msg?.reasoning_content === 'string') m.reasoning_content = msg.reasoning_content;
-      if (msg?.audio) m.audio = msg.audio;
-      cc.message = m;
-      cc.finish_reason = c?.finish_reason || (Array.isArray(m.tool_calls) && m.tool_calls.length ? 'tool_calls' : (c?.finish_reason ?? null));
-      return cc;
-    });
+    }
+    const cfg = this.cfg!;
+    const src = toRecord(payload);
+    const out = this.shallowPick(src, cfg.response.allowTopLevel);
 
-    if (src?.usage && typeof src.usage === 'object') {
+    const choices = Array.isArray(src.choices) ? src.choices : [];
+    out.choices = choices.map((choice, idx) => this.normalizeResponseChoice(choice, idx, cfg.response));
+
+    if (src.usage && typeof src.usage === 'object') {
       out.usage = this.shallowPick(src.usage, cfg.response.usage?.allow || []);
     }
-    return out as UnknownObject;
+    return out;
+  }
+
+  private normalizeRequestMessages(messages: unknown, requestCfg: RequestConfig): UnknownObject[] {
+    const entries = toArray(messages);
+    const normalized = entries.map(entry => this.normalizeSingleMessage(entry, requestCfg));
+    const withRules = this.applyMessageRules(normalized, requestCfg);
+    this.pairToolResults(withRules);
+    return withRules;
+  }
+
+  private normalizeSingleMessage(message: unknown, requestCfg: RequestConfig): UnknownObject {
+    const msg = toRecord(message);
+    const allowedRoles = requestCfg.messages.allowedRoles;
+    const requestedRole = typeof msg.role === 'string' ? msg.role : undefined;
+    const role = (requestedRole && allowedRoles.includes(requestedRole)) ? requestedRole : 'user';
+    const normalized: UnknownObject = { role };
+
+    if (role === 'tool') {
+      normalized.content = this.normalizeToolContent(msg.content);
+      if (typeof msg.name === 'string') {
+        normalized.name = msg.name;
+      }
+      if (typeof msg.tool_call_id === 'string') {
+        normalized.tool_call_id = msg.tool_call_id;
+      }
+    } else {
+      normalized.content = (msg.content !== null && msg.content !== undefined) ? String(msg.content) : '';
+    }
+
+    if (role === 'assistant' && hasArrayItems(msg.tool_calls)) {
+      normalized.tool_calls = this.normalizeAssistantToolCalls(msg.tool_calls, requestCfg);
+      if (requestCfg.messages.assistantWithToolCallsContentNull) {
+        normalized.content = null;
+      }
+    }
+
+    return normalized;
+  }
+
+  private normalizeAssistantToolCalls(toolCalls: unknown, requestCfg: RequestConfig): UnknownObject[] {
+    const entries = toArray(toolCalls);
+    return entries.map(call => {
+      const tc = toRecord(call);
+      const fn = toRecord(tc.function);
+      const name = typeof fn.name === 'string' ? fn.name : undefined;
+      const argsValue = requestCfg.assistantToolCalls?.functionArgumentsType === 'string'
+        ? this.toStringArgs(fn.arguments)
+        : this.toObjectArgs(fn.arguments);
+      const normalized: UnknownObject = {
+        type: typeof tc.type === 'string' ? tc.type : 'function',
+        function: { ...(name ? { name } : {}), arguments: argsValue }
+      };
+      if (typeof tc.id === 'string') {
+        normalized.id = tc.id;
+      }
+      return normalized;
+    });
+  }
+
+  private applyMessageRules(messages: UnknownObject[], requestCfg: RequestConfig): UnknownObject[] {
+    const rules = Array.isArray(requestCfg.messagesRules) ? requestCfg.messagesRules : [];
+    if (!rules.length) {
+      if (requestCfg.messages.suppressAssistantToolCalls) {
+        return messages.filter(msg => !(msg.role === 'assistant' && hasArrayItems(msg.tool_calls)));
+      }
+      return messages;
+    }
+
+    const result: UnknownObject[] = [];
+    for (const message of messages) {
+      let dropped = false;
+      for (const rule of rules) {
+        const when = rule.when || {};
+        const matchRole = when.role ? message.role === when.role : true;
+        const hasTools = hasArrayItems(message.tool_calls);
+        const matchTools = typeof when.hasToolCalls === 'boolean' ? hasTools === when.hasToolCalls : true;
+        if (matchRole && matchTools) {
+          if (rule.action === 'drop') {
+            dropped = true;
+            break;
+          }
+          if (rule.action === 'set' && rule.set && typeof rule.set === 'object') {
+            Object.assign(message, rule.set);
+          }
+        }
+      }
+      if (!dropped) {
+        result.push(message);
+      }
+    }
+    return result;
+  }
+
+  private pairToolResults(messages: UnknownObject[]): void {
+    const nameById = new Map<string, string>();
+    for (const message of messages) {
+      if (message.role === 'assistant' && hasArrayItems(message.tool_calls)) {
+        for (const call of message.tool_calls as unknown[]) {
+          const toolCall = toRecord(call);
+          if (typeof toolCall.id !== 'string') {
+            continue;
+          }
+          const fn = toRecord(toolCall.function);
+          if (typeof fn.name === 'string') {
+            nameById.set(toolCall.id, fn.name);
+          }
+        }
+      }
+    }
+
+    for (const message of messages) {
+      if (message.role !== 'tool') {
+        continue;
+      }
+      const name = typeof message.name === 'string' ? message.name.trim() : '';
+      if (name) {
+        continue;
+      }
+      const toolCallId = typeof message.tool_call_id === 'string' ? message.tool_call_id : undefined;
+      if (toolCallId && nameById.has(toolCallId)) {
+        message.name = nameById.get(toolCallId);
+      }
+    }
+  }
+
+  private normalizeTools(container: UnknownObject, requestCfg: RequestConfig): void {
+    if (!Array.isArray(container.tools)) {
+      return;
+    }
+    if (!requestCfg.tools?.normalize) {
+      if (requestCfg.tools?.forceToolChoiceAuto) {
+        container.tool_choice = 'auto';
+      }
+      return;
+    }
+
+    const normalized: UnknownObject[] = [];
+    for (const toolEntry of container.tools as unknown[]) {
+      const normalizedTool = this.normalizeSingleTool(toolEntry);
+      normalized.push(normalizedTool);
+    }
+    container.tools = normalized;
+    if (requestCfg.tools?.forceToolChoiceAuto) {
+      container.tool_choice = 'auto';
+    }
+  }
+
+  private normalizeSingleTool(toolEntry: unknown): UnknownObject {
+    const tool = toRecord(toolEntry);
+    const fnTop = {
+      name: typeof tool.name === 'string' ? tool.name : undefined,
+      description: typeof tool.description === 'string' ? tool.description : undefined,
+      parameters: tool.parameters
+    };
+    const fn = toRecord(tool.function);
+    const name = typeof fn.name === 'string' ? fn.name : fnTop.name;
+    const description = typeof fn.description === 'string' ? fn.description : fnTop.description;
+    let parameters = fn.parameters !== undefined ? fn.parameters : fnTop.parameters;
+    parameters = this.normalizeToolParameters(parameters, name);
+
+    const normalizedFn: UnknownObject = {
+      ...(name ? { name } : {}),
+      ...(description ? { description } : {})
+    };
+    if (parameters !== undefined) {
+      normalizedFn.parameters = parameters;
+    }
+
+    return {
+      type: 'function',
+      function: normalizedFn
+    };
+  }
+
+  private normalizeToolParameters(input: unknown, name: string | undefined): UnknownObject | undefined {
+    if (input === null || input === undefined) {
+      return undefined;
+    }
+    let params: UnknownObject | undefined;
+    if (typeof input === 'string') {
+      try { params = JSON.parse(input) as UnknownObject; }
+      catch { params = undefined; }
+    } else if (isRecord(input)) {
+      params = input;
+    }
+    if (!params) {
+      return undefined;
+    }
+    if (name && name.trim().toLowerCase() === 'shell') {
+      return this.enforceShellSchema(params);
+    }
+    return params;
+  }
+
+  private enforceShellSchema(schema: UnknownObject): UnknownObject {
+    const next = { ...schema };
+    if (typeof next.type !== 'string') {
+      next.type = 'object';
+    }
+    if (!isRecord(next.properties)) {
+      next.properties = {};
+    }
+    const props = next.properties as UnknownObject;
+    const command = toRecord(props.command);
+    const hasOneOf = Array.isArray(command.oneOf);
+    if (!hasOneOf) {
+      const descText = typeof command.description === 'string'
+        ? command.description
+        : 'Shell command. Prefer a single string; an array of argv tokens is also accepted.';
+      props.command = {
+        description: descText,
+        oneOf: [
+          { type: 'string' },
+          { type: 'array', items: { type: 'string' } }
+        ]
+      };
+      const requiredList = Array.isArray(next.required)
+        ? (next.required as unknown[]).filter((item): item is string => typeof item === 'string')
+        : [];
+      if (!requiredList.includes('command')) {
+        requiredList.push('command');
+      }
+      next.required = requiredList;
+      if (typeof next.additionalProperties !== 'boolean') {
+        next.additionalProperties = false;
+      }
+    }
+    return next;
+  }
+
+  private cleanupToolChoice(container: UnknownObject): void {
+    const toolsArray = Array.isArray(container.tools) ? container.tools : [];
+    if (!toolsArray.length && Object.prototype.hasOwnProperty.call(container, 'tool_choice')) {
+      delete container.tool_choice;
+    }
+  }
+
+  private normalizeResponseChoice(choice: unknown, idx: number, responseCfg: ResponseConfig): UnknownObject {
+    const choiceRecord = toRecord(choice);
+    const normalized: UnknownObject = {
+      index: typeof choiceRecord.index === 'number' ? choiceRecord.index : idx
+    };
+    const message = toRecord(choiceRecord.message);
+    normalized.message = this.normalizeResponseMessage(message, responseCfg);
+    const hasToolCalls = hasArrayItems((normalized.message as UnknownObject).tool_calls);
+    normalized.finish_reason = choiceRecord.finish_reason ?? (hasToolCalls ? 'tool_calls' : null);
+    return normalized;
+  }
+
+  private normalizeResponseMessage(message: UnknownObject, responseCfg: ResponseConfig): UnknownObject {
+    const normalized: UnknownObject = {};
+    normalized.role = typeof message.role === 'string'
+      ? message.role
+      : (responseCfg.choices.message.roleDefault || 'assistant');
+
+    if (hasArrayItems(message.tool_calls)) {
+      normalized.tool_calls = this.normalizeResponseToolCalls(message.tool_calls, responseCfg);
+      normalized.content = responseCfg.choices.message.contentNullWhenToolCalls ? null : message.content ?? '';
+    } else {
+      normalized.content = message.content ?? '';
+    }
+    if (typeof message.reasoning_content === 'string') {
+      normalized.reasoning_content = message.reasoning_content;
+    }
+    if (message.audio) {
+      normalized.audio = message.audio;
+    }
+    return normalized;
+  }
+
+  private normalizeResponseToolCalls(toolCalls: unknown, responseCfg: ResponseConfig): UnknownObject[] {
+    const entries = toArray(toolCalls);
+    return entries.map(call => {
+      const tc = toRecord(call);
+      const fn = toRecord(tc.function);
+      const name = typeof fn.name === 'string' ? fn.name : undefined;
+      const argsObject = this.toObjectArgs(fn.arguments);
+      const argsValue = responseCfg.choices.message.tool_calls?.function?.argumentsType === 'string'
+        ? this.toStringArgs(argsObject)
+        : argsObject;
+      const normalized: UnknownObject = {
+        type: typeof tc.type === 'string' ? tc.type : 'function',
+        function: { ...(name ? { name } : {}), arguments: argsValue }
+      };
+      if (typeof tc.id === 'string') {
+        normalized.id = tc.id;
+      }
+      if (tc.mcp) {
+        const existing = isRecord(normalized._glm) ? normalized._glm : {};
+        normalized._glm = { ...existing, mcp: tc.mcp };
+      }
+      return normalized;
+    });
   }
 }

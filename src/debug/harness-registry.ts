@@ -1,7 +1,7 @@
 import type { ExecutionHarness } from './types.js';
 
 export class HarnessRegistry {
-  private readonly harnesses = new Map<string, ExecutionHarness<any, any>>();
+  private readonly harnesses = new Map<string, ExecutionHarness<unknown, unknown>>();
 
   register<TInput, TResult>(harness: ExecutionHarness<TInput, TResult>): void {
     this.harnesses.set(harness.id, harness);

@@ -11,6 +11,12 @@ import {
 } from './handler-utils.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
 
+type ChatCompletionPayload = {
+  stream?: boolean;
+  model?: string;
+  [key: string]: unknown;
+};
+
 export async function handleChatCompletions(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
   const entryEndpoint = '/v1/chat/completions';
   const requestId = nextRequestId(req.headers['x-request-id']);
@@ -19,16 +25,17 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' } });
       return;
     }
-    const payload = (req.body || {}) as any;
-    const originalPayload =
-      payload && typeof payload === 'object' ? JSON.parse(JSON.stringify(payload)) : payload;
+    const payload = (req.body && typeof req.body === 'object'
+      ? req.body
+      : {}) as ChatCompletionPayload;
+    const originalPayload = JSON.parse(JSON.stringify(payload)) as ChatCompletionPayload;
     const clientHeaders = captureClientHeaders(req.headers);
     const acceptsSse = typeof req.headers['accept'] === 'string'
       && (req.headers['accept'] as string).includes('text/event-stream');
     const originalStream = payload?.stream === true;
     const wantsSSE = acceptsSse || originalStream;
     const outboundStream = originalStream;
-    if (acceptsSse && payload && typeof payload === 'object' && !originalStream) {
+    if (acceptsSse && !originalStream) {
       payload.stream = true;
     }
     applySystemPromptOverride(entryEndpoint, payload);
@@ -58,9 +65,11 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
     });
     logRequestComplete(entryEndpoint, requestId, result.status ?? 200);
     sendPipelineResponse(res, result, requestId, { forceSSE: wantsSSE });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logRequestError(entryEndpoint, requestId, error);
-    if (res.headersSent) return;
+    if (res.headersSent) {
+      return;
+    }
     await respondWithPipelineError(res, ctx, error, entryEndpoint, requestId);
   }
 }

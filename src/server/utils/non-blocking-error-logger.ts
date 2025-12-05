@@ -32,8 +32,8 @@ function serializeError(error: unknown): Record<string, unknown> {
       name: error.name,
       message: error.message
     };
-    if ((error as any).code) {
-      out.code = (error as any).code;
+    if ('code' in error && (error as { code?: unknown }).code !== undefined) {
+      out.code = (error as { code?: unknown }).code;
     }
     if (error.stack) {
       out.stack = error.stack;
@@ -72,7 +72,7 @@ export async function logNonBlockingError(meta: NonBlockingErrorMeta, error: unk
       meta,
       error: serializeError(error)
     };
-    await fs.appendFile(logPath, JSON.stringify(record) + '\n', 'utf-8');
+    await fs.appendFile(logPath, `${JSON.stringify(record)}\n`, 'utf-8');
   } catch {
     // 最后兜底：不打断主流程，必要时可以考虑加一次性 console.error，但避免刷屏
   }
@@ -88,4 +88,3 @@ export async function runNonBlocking(meta: NonBlockingErrorMeta, fn: () => Promi
     await logNonBlockingError(meta, error);
   }
 }
-

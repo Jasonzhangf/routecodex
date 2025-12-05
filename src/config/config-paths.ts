@@ -1,6 +1,3 @@
-import fs from 'fs';
-import path from 'path';
-import { homedir } from 'os';
 import { UnifiedConfigPathResolver } from './unified-config-paths.js';
 
 /**

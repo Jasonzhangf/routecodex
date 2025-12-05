@@ -3,14 +3,12 @@
  *
  * 实现标准的OAuth 2.0授权码流程，支持PKCE
  */
-import { LOCAL_HOSTS } from "../../../constants/index.js";
 import type { UnknownObject } from '../../../types/common-types.js';
 import { BaseOAuthFlowStrategy, OAuthFlowType } from '../config/oauth-flows.js';
 import type { OAuthFlowConfig } from '../config/oauth-flows.js';
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
-import { findOpenPort } from '../../../modules/pipeline/utils/oauth-helpers.js';
 
 /**
  * 授权码令牌响应
@@ -26,12 +24,47 @@ interface AuthCodeTokenResponse {
   apiKey?: string;
 }
 
+type FlowStyle = 'web' | 'standard' | 'legacy';
+
+interface AuthCodeFlowState extends Record<string, unknown> {
+  authUrl: string;
+  state: string;
+  codeVerifier: string;
+  codeChallenge: string;
+  flowStyle: FlowStyle;
+  redirectUri?: string;
+  code?: string;
+}
+
+type UserInfoPayload = {
+  apiKey?: string;
+  data?: {
+    apiKey?: string;
+    email?: string;
+    phone?: string;
+  };
+} & Record<string, unknown>;
+
+type StoredToken = UnknownObject & AuthCodeTokenResponse & {
+  api_key?: string;
+  email?: string;
+  expires_at?: number;
+  expired?: string;
+};
+
+const normalizeFlowStyle = (value: string | undefined, fallback: FlowStyle): FlowStyle => {
+  if (value === 'web' || value === 'standard' || value === 'legacy') {
+    return value;
+  }
+  return fallback;
+};
+
 /**
  * OAuth授权码流程策略
  */
 export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
   private tokenFile: string;
-  private tokenStorage: UnknownObject | null = null;
+  private tokenStorage: StoredToken | null = null;
 
   constructor(config: OAuthFlowConfig, httpClient?: typeof fetch, tokenFile?: string) {
     super(config, httpClient);
@@ -49,17 +82,18 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
   async authenticate(options: { openBrowser?: boolean } = {}): Promise<UnknownObject> {
     try {
       // 1. 尝试加载现有令牌
-      const existingToken = await this.loadToken();
+      const existingToken = this.coerceStoredToken(await this.loadToken());
       if (existingToken && this.validateToken(existingToken)) {
         console.log('Using existing valid token');
         return existingToken;
       }
 
       // 2. 如果令牌过期但可以刷新，则尝试刷新
-      if (existingToken && (existingToken as any).refresh_token) {
+      if (existingToken?.refresh_token) {
         try {
           console.log('Token expired, attempting refresh...');
-          const refreshedToken = await this.refreshToken((existingToken as any).refresh_token);
+          const refreshedTokenRaw = await this.refreshToken(existingToken.refresh_token);
+          const refreshedToken = this.ensureStoredToken(refreshedTokenRaw);
           await this.saveToken(refreshedToken);
           console.log('Token refreshed successfully');
           return refreshedToken;
@@ -74,12 +108,12 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       const authCodeData = await this.initiateAuthCodeFlow();
 
       // 3.1 启动本地回调服务（固定 localhost:8080，路径 /oauth2callback）
-      const serverResult = await this.startCallbackServer((authCodeData as any).state as string, (authCodeData as any).codeVerifier as string);
+      const serverResult = await this.startCallbackServer(authCodeData.state, authCodeData.codeVerifier);
 
       // 3.2 更新授权URL中的重定向参数（与本地回调服务一致），再打开浏览器
       try {
-        const urlObj = new URL(authCodeData.authUrl as string);
-        const style = String((authCodeData as any).flowStyle || '').toLowerCase();
+        const urlObj = new URL(authCodeData.authUrl);
+        const style = authCodeData.flowStyle;
         if (style === 'web' || style === 'legacy') {
           // iflow web 登录样式：redirect=<redirectUri> & state=<state>
           // 由 URLSearchParams 负责一次性编码，避免双重编码；state 保持独立参数
@@ -87,8 +121,8 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
         } else {
           urlObj.searchParams.set('redirect_uri', serverResult.redirectUri);
         }
-        (authCodeData as any).authUrl = urlObj.toString();
-        ;(authCodeData as any).redirectUri = serverResult.redirectUri;
+        authCodeData.authUrl = urlObj.toString();
+        authCodeData.redirectUri = serverResult.redirectUri;
       } catch { /* ignore */ }
 
       await this.activate(authCodeData, options);
@@ -96,8 +130,8 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       // 3.3 等待回调，获取授权码
       try {
         const cb = await serverResult.callbackPromise;
-        (authCodeData as any).code = cb.code;
-        (authCodeData as any).codeVerifier = cb.verifier;
+        authCodeData.code = cb.code;
+        authCodeData.codeVerifier = cb.verifier;
       } catch (err) {
         console.error('OAuth authorization callback error:', err instanceof Error ? err.message : String(err));
         throw err;
@@ -124,7 +158,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
   /**
    * 初始化授权码流程
    */
-  private async initiateAuthCodeFlow(): Promise<UnknownObject> {
+  private async initiateAuthCodeFlow(): Promise<AuthCodeFlowState> {
     if (!this.config.endpoints.authorizationUrl) {
       throw new Error('Authorization URL is required for authorization code flow');
     }
@@ -137,11 +171,12 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     const state = this.generateState();
     const authUrl = new URL(this.config.endpoints.authorizationUrl);
     const isIflowHost = /(?:^|\.)iflow\.cn$/.test(authUrl.hostname);
-    const styleEnv = String(process.env.IFLOW_AUTH_STYLE || '').toLowerCase();
-    // iflow 默认使用 "web" 样式（你提供的实际页面参数），可用 IFLOW_AUTH_STYLE 覆盖为 standard/legacy
-    const style: 'web'|'standard'|'legacy' = (isIflowHost
-      ? (styleEnv === 'standard' || styleEnv === 'legacy' ? (styleEnv as any) : 'web')
-      : (styleEnv === 'legacy' ? 'legacy' : 'standard'));
+    const styleEnv = (process.env.IFLOW_AUTH_STYLE || '').toLowerCase();
+    const style: FlowStyle = isIflowHost
+      ? normalizeFlowStyle(styleEnv, 'web')
+      : styleEnv === 'legacy'
+        ? 'legacy'
+        : 'standard';
 
     if (style === 'web') {
       // 对齐你粘贴的 iflow 页面 URL：loginMethod=phone&type=phone&redirect=<encoded(redirectUri)>&state=<state>&client_id=...
@@ -176,13 +211,14 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
 
     // 记录样式供后续交换 token 逻辑使用
     const flowStyle = style;
-    return {
+    const flowState: AuthCodeFlowState = {
       authUrl: authUrl.toString(),
       state,
       codeVerifier,
       codeChallenge,
       flowStyle
-    } as UnknownObject;
+    };
+    return flowState;
   }
 
   /**
@@ -290,8 +326,8 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
   /**
    * 交换授权码获取令牌
    */
-  private async exchangeCodeForToken(authCodeData: UnknownObject): Promise<AuthCodeTokenResponse> {
-    const data = authCodeData as any;
+  private async exchangeCodeForToken(authCodeData: AuthCodeFlowState): Promise<AuthCodeTokenResponse> {
+    const data = authCodeData;
 
     // 如果还没有启动回调服务器，启动它
     if (!data.code) {
@@ -299,14 +335,14 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
 
       // 更新授权URL中的重定向参数
       const authUrl = new URL(data.authUrl);
-      const style = String((data as any).flowStyle || '').toLowerCase();
-      if (style === 'web' || style === 'legacy') {
+      if (data.flowStyle === 'web' || data.flowStyle === 'legacy') {
         // 由 URLSearchParams 统一编码，不手动 encodeURIComponent，避免双重编码
         authUrl.searchParams.set('redirect', serverResult.redirectUri);
       } else {
         authUrl.searchParams.set('redirect_uri', serverResult.redirectUri);
       }
       data.authUrl = authUrl.toString();
+      data.redirectUri = serverResult.redirectUri;
 
       // 等待回调
       const callbackResult = await serverResult.callbackPromise;
@@ -314,18 +350,21 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       data.codeVerifier = callbackResult.verifier;
     }
 
+    const redirectUri = data.redirectUri ?? this.config.client.redirectUri;
+    if (!data.code || !redirectUri) {
+      throw new Error('Authorization code or redirect URI missing during token exchange');
+    }
+
     const formData = new URLSearchParams({
       grant_type: 'authorization_code',
       code: data.code,
-      // Prefer dynamically bound callback URI when available
-      redirect_uri: (data.redirectUri || this.config.client.redirectUri!) as string,
+      redirect_uri: redirectUri,
       client_id: this.config.client.clientId
     });
 
     // 添加PKCE验证器（如果支持）：web/legacy 不添加 code_verifier
-    const style2 = String((data as any).flowStyle || '').toLowerCase();
-    if (this.config.features?.supportsPKCE && (data as any).codeVerifier && style2 !== 'web' && style2 !== 'legacy') {
-      formData.append('code_verifier', String((data as any).codeVerifier));
+    if (this.config.features?.supportsPKCE && data.codeVerifier && data.flowStyle !== 'web' && data.flowStyle !== 'legacy') {
+      formData.append('code_verifier', data.codeVerifier);
     }
 
     // 添加客户端密钥（如果存在）
@@ -362,13 +401,11 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
   /**
    * 处理令牌后激活（如API密钥交换）
    */
-  private async handlePostTokenActivation(tokenResponse: AuthCodeTokenResponse): Promise<UnknownObject> {
-    if (!this.config.features?.supportsApiKeyExchange) {
-      return tokenResponse as unknown as UnknownObject;
-    }
+  private async handlePostTokenActivation(tokenResponse: AuthCodeTokenResponse): Promise<StoredToken> {
+    const enrichedToken: StoredToken = { ...tokenResponse };
 
     // 尝试获取API密钥（如果有用户信息端点）
-    if (this.config.endpoints.userInfoUrl && tokenResponse.access_token) {
+    if (this.config.features?.supportsApiKeyExchange && this.config.endpoints.userInfoUrl && tokenResponse.access_token) {
       try {
         const userInfoResponse = await this.makeRequest(
           `${this.config.endpoints.userInfoUrl}?accessToken=${encodeURIComponent(tokenResponse.access_token)}`,
@@ -376,32 +413,25 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
         );
 
         if (userInfoResponse.ok) {
-          const userInfo = await userInfoResponse.json();
-          const root: any = userInfo;
-          let apiKey: string | undefined;
-          let email: string | undefined;
+          const userInfo = await userInfoResponse.json() as UserInfoPayload;
+          const apiKey = typeof userInfo.apiKey === 'string'
+            ? userInfo.apiKey
+            : typeof userInfo.data?.apiKey === 'string'
+              ? userInfo.data.apiKey
+              : undefined;
+          const email = typeof userInfo.data?.email === 'string'
+            ? userInfo.data.email
+            : typeof userInfo.data?.phone === 'string'
+              ? userInfo.data.phone
+              : undefined;
 
-          if (root && typeof root.apiKey === 'string') {
-            apiKey = root.apiKey;
-          } else if (root && typeof root.data === 'object' && root.data) {
-            const data = root.data as any;
-            if (typeof data.apiKey === 'string') {
-              apiKey = data.apiKey;
-            }
-            if (typeof data.email === 'string') {
-              email = data.email;
-            } else if (typeof data.phone === 'string') {
-              email = data.phone;
-            }
+          if (apiKey?.trim()) {
+            const trimmed = apiKey.trim();
+            enrichedToken.apiKey = trimmed;
+            enrichedToken.api_key = trimmed; // 兼容 CLIProxyAPI 的字段命名
           }
-
-          if (apiKey && apiKey.trim()) {
-            (tokenResponse as any).apiKey = apiKey.trim();
-            // 兼容 CLIProxyAPI 的字段命名
-            (tokenResponse as any).api_key = apiKey.trim();
-          }
-          if (email && email.trim()) {
-            (tokenResponse as any).email = email.trim();
+          if (email?.trim()) {
+            enrichedToken.email = email.trim();
           }
         }
       } catch (error) {
@@ -411,11 +441,28 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
 
     // 转换为标准格式
     const expiresAt = Date.now() + (tokenResponse.expires_in * 1000);
-    return {
-      ...tokenResponse,
-      expires_at: expiresAt,
-      expired: new Date(expiresAt).toISOString()
-    } as UnknownObject;
+    enrichedToken.expires_at = expiresAt;
+    enrichedToken.expired = new Date(expiresAt).toISOString();
+    return enrichedToken;
+  }
+
+  private coerceStoredToken(token: UnknownObject | null | undefined): StoredToken | null {
+    if (!token || typeof token !== 'object') {
+      return null;
+    }
+    const record = token as Record<string, unknown>;
+    if (typeof record.access_token === 'string' && typeof record.expires_in === 'number') {
+      return token as StoredToken;
+    }
+    return null;
+  }
+
+  private ensureStoredToken(token: UnknownObject): StoredToken {
+    const stored = this.coerceStoredToken(token);
+    if (!stored) {
+      throw new Error('Invalid token payload for OAuth authorization code flow');
+    }
+    return stored;
   }
 
   /**
@@ -455,16 +502,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
         }
 
         const tokenData = await response.json() as AuthCodeTokenResponse;
-
-        // 转换为标准格式并尝试补全 apiKey（对齐 iflow 行为）
-        const expiresAt = Date.now() + (tokenData.expires_in * 1000);
-        const base: UnknownObject = {
-          ...tokenData,
-          expires_at: expiresAt,
-          expired: new Date(expiresAt).toISOString()
-        } as UnknownObject;
-        const finalToken = await this.handlePostTokenActivation(base as any);
-        return finalToken;
+        return await this.handlePostTokenActivation(tokenData);
 
       } catch (error) {
         lastError = error;
@@ -479,26 +517,17 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
    * 验证令牌
    */
   validateToken(token: UnknownObject): boolean {
-    if (!token || typeof token !== 'object') {
+    const stored = this.coerceStoredToken(token);
+    if (!stored) {
       return false;
     }
-
-    const tokenObj = token as any;
-
-    // 检查必需字段
-    if (!tokenObj.access_token) {
-      return false;
-    }
-
-    // 检查过期时间
-    const expiresAt = tokenObj.expires_at || tokenObj.expired;
+    const expiresAt = stored.expires_at || stored.expired;
     if (expiresAt) {
       const expiryDate = new Date(expiresAt);
       if (expiryDate <= new Date()) {
         return false;
       }
     }
-
     return true;
   }
 
@@ -506,7 +535,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
    * 获取授权头部
    */
   getAuthHeader(token: UnknownObject): string {
-    const tokenObj = token as any;
+    const tokenObj = this.ensureStoredToken(token);
 
     // 优先使用API密钥（如果存在）
     const apiKey = (tokenObj.apiKey || tokenObj.api_key || '').trim();
@@ -522,11 +551,12 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
    * 保存令牌
    */
   async saveToken(token: UnknownObject): Promise<void> {
+    const stored = this.ensureStoredToken(token);
     try {
       const dir = path.dirname(this.tokenFile);
       await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(this.tokenFile, JSON.stringify(token, null, 2));
-      this.tokenStorage = token;
+      await fs.writeFile(this.tokenFile, JSON.stringify(stored, null, 2));
+      this.tokenStorage = stored;
       console.log(`[OAuth] [auth_code] Token saved to: ${this.tokenFile}`);
     } catch (error) {
       console.error('Failed to save token:', error instanceof Error ? error.message : String(error));
@@ -541,9 +571,10 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     try {
       const content = await fs.readFile(this.tokenFile, 'utf-8');
       const token = JSON.parse(content) as UnknownObject;
-      this.tokenStorage = token;
+      const stored = this.coerceStoredToken(token);
+      this.tokenStorage = stored;
       console.log(`[OAuth] [auth_code] Token loaded from: ${this.tokenFile}`);
-      return token;
+      return stored;
     } catch (error) {
       this.tokenStorage = null;
       return null;

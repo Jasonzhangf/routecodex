@@ -1,7 +1,8 @@
 import type { CompatibilityContext } from '../../compatibility-interface.js';
 import type { UnknownObject } from '../../../../modules/pipeline/types/common-types.js';
-import type { ModuleDependencies } from '../../../../modules/pipeline/types/module.types.js';
 import { BaseHook } from './base-hook.js';
+
+const isRecord = (value: unknown): value is UnknownObject => typeof value === 'object' && value !== null;
 
 /**
  * GLM响应校验Hook
@@ -79,12 +80,10 @@ export class GLMResponseValidationHook extends BaseHook {
   }
 
   private unwrapResponse(response: UnknownObject): UnknownObject {
-    try {
-      if (response && typeof response === 'object' && 'data' in response && (response as any).data) {
-        const d = (response as any).data;
-        if (d && typeof d === 'object') { return d as UnknownObject; }
-      }
-    } catch { /* ignore */ }
+    const payload = response.data;
+    if (isRecord(payload)) {
+      return payload;
+    }
     return response;
   }
 
@@ -225,13 +224,14 @@ export class GLMResponseValidationHook extends BaseHook {
     }
 
     // 检查arguments字段
-    if (!func.arguments || typeof func.arguments !== 'string') {
+    const args = func.arguments;
+    if (typeof args !== 'string') {
       errors.push(`choices[${choiceIndex}].message.tool_calls[${toolCallIndex}].function.arguments字段不能为空且必须是字符串`);
     } else {
       // 验证arguments是否为有效的JSON
       try {
-        JSON.parse(func.arguments as string);
-      } catch (error) {
+        JSON.parse(args);
+      } catch {
         errors.push(`choices[${choiceIndex}].message.tool_calls[${toolCallIndex}].function.arguments字段必须是有效的JSON字符串`);
       }
     }
@@ -239,43 +239,57 @@ export class GLMResponseValidationHook extends BaseHook {
     return errors;
   }
 
-  private validateUsage(usage: any): string[] {
+  private validateUsage(usage: unknown): string[] {
     const errors: string[] = [];
 
-    if (!usage || typeof usage !== 'object') {
+    if (!isRecord(usage)) {
       errors.push('usage字段必须是对象');
       return errors;
     }
 
-    // 检查prompt_tokens
-    if (usage.prompt_tokens !== undefined) {
-      if (typeof usage.prompt_tokens !== 'number' || usage.prompt_tokens < 0) {
-        errors.push('usage.prompt_tokens必须是非负数');
-      }
+    const promptTokens = usage.prompt_tokens;
+    const completionTokens = usage.completion_tokens;
+    const totalTokens = usage.total_tokens;
+
+    if (!this.validateTokenField(promptTokens)) {
+      errors.push('usage.prompt_tokens必须是非负数');
     }
 
     // 检查completion_tokens
-    if (usage.completion_tokens !== undefined) {
-      if (typeof usage.completion_tokens !== 'number' || usage.completion_tokens < 0) {
-        errors.push('usage.completion_tokens必须是非负数');
-      }
+    if (!this.validateTokenField(completionTokens)) {
+      errors.push('usage.completion_tokens必须是非负数');
     }
 
     // 检查total_tokens
-    if (usage.total_tokens !== undefined) {
-      if (typeof usage.total_tokens !== 'number' || usage.total_tokens < 0) {
-        errors.push('usage.total_tokens必须是非负数');
-      }
+    if (!this.validateTokenField(totalTokens)) {
+      errors.push('usage.total_tokens必须是非负数');
     }
 
     // 验证token数量的一致性
-    if (usage.prompt_tokens !== undefined && usage.completion_tokens !== undefined && usage.total_tokens !== undefined) {
-      const expectedTotal = usage.prompt_tokens + usage.completion_tokens;
-      if (usage.total_tokens !== expectedTotal) {
-        errors.push(`usage.total_tokens (${usage.total_tokens}) 应该等于 prompt_tokens (${usage.prompt_tokens}) + completion_tokens (${usage.completion_tokens})`);
+    if (
+      this.isNonNegativeNumber(promptTokens) &&
+      this.isNonNegativeNumber(completionTokens) &&
+      this.isNonNegativeNumber(totalTokens)
+    ) {
+      const expectedTotal = promptTokens + completionTokens;
+      if (totalTokens !== expectedTotal) {
+        errors.push(
+          `usage.total_tokens (${totalTokens}) 应该等于 prompt_tokens (${promptTokens}) + completion_tokens (${completionTokens})`
+        );
       }
     }
 
     return errors;
+  }
+
+  private validateTokenField(value: unknown): boolean {
+    if (value === undefined) {
+      return true;
+    }
+    return this.isNonNegativeNumber(value);
+  }
+
+  private isNonNegativeNumber(value: unknown): value is number {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0;
   }
 }

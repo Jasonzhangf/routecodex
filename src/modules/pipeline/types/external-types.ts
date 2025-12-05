@@ -1,3 +1,5 @@
+import type { UnknownObject } from '../../../types/common-types.js';
+
 /**
  * Mock types for external dependencies
  *
@@ -27,7 +29,7 @@ export interface RCCBaseModule {
   /**
    * Get module status
    */
-  getStatus(): any;
+  getStatus(): unknown;
 }
 
 /**
@@ -37,15 +39,15 @@ export interface ErrorHandlingCenter {
   /**
    * Handle error
    */
-  handleError(error: any, context?: any): Promise<void>;
+  handleError(error: unknown, context?: UnknownObject): Promise<void>;
   /**
    * Create error context
    */
-  createContext(module: string, action: string, data?: any): any;
+  createContext(module: string, action: string, data?: UnknownObject): UnknownObject;
   /**
    * Get error statistics
    */
-  getStatistics(): any;
+  getStatistics(): UnknownObject;
 }
 
 /**
@@ -55,15 +57,15 @@ export interface DebugCenter {
   /**
    * Log debug message
    */
-  logDebug(module: string, message: string, data?: any): void;
+  logDebug(module: string, message: string, data?: UnknownObject): void;
   /**
    * Log error
    */
-  logError(module: string, error: any, context?: any): void;
+  logError(module: string, error: unknown, context?: UnknownObject): void;
   /**
    * Log module action
    */
-  logModule(module: string, action: string, data?: any): void;
+  logModule(module: string, action: string, data?: UnknownObject): void;
   /**
    * Process debug event
    */
@@ -71,7 +73,7 @@ export interface DebugCenter {
   /**
    * Get debug logs
    */
-  getLogs(module?: string): any[];
+  getLogs(module?: string): DebugEvent[];
 }
 
 /**
@@ -91,7 +93,7 @@ export interface DebugEvent {
   /** Event position */
   position: 'start' | 'middle' | 'end';
   /** Event data */
-  data?: any;
+  data?: UnknownObject;
 }
 
 /**
@@ -101,7 +103,7 @@ export interface HttpClient {
   /**
    * Send HTTP request
    */
-  request(config: any): Promise<any>;
+  request(config: UnknownObject): Promise<UnknownObject>;
   /**
    * Set default headers
    */
@@ -119,15 +121,15 @@ export interface ConfigManager {
   /**
    * Get configuration value
    */
-  get(key: string): any;
+  get(key: string): unknown;
   /**
    * Set configuration value
    */
-  set(key: string, value: any): void;
+  set(key: string, value: unknown): void;
   /**
    * Get all configuration
    */
-  getAll(): Record<string, any>;
+  getAll(): Record<string, unknown>;
 }
 
 /**
@@ -137,19 +139,19 @@ export interface Logger {
   /**
    * Log info message
    */
-  info(message: string, data?: any): void;
+  info(message: string, data?: UnknownObject): void;
   /**
    * Log warning message
    */
-  warn(message: string, data?: any): void;
+  warn(message: string, data?: UnknownObject): void;
   /**
    * Log error message
    */
-  error(message: string, error?: any): void;
+  error(message: string, error?: unknown): void;
   /**
    * Log debug message
    */
-  debug(message: string, data?: any): void;
+  debug(message: string, data?: UnknownObject): void;
 }
 
 /**
@@ -173,7 +175,7 @@ export interface DispatchNotification {
   /** Notification status */
   status?: string;
   /** Notification details */
-  details?: any;
+  details?: UnknownObject;
   /** Notification timestamp */
   timestamp?: number;
 }

@@ -4,6 +4,10 @@
  * 提供统一的HTTP请求处理功能
  */
 
+import type {
+  ReadableStream as WebReadableStream,
+  ReadableStreamDefaultReader
+} from 'node:stream/web';
 import type { ProviderError } from '../api/provider-types.js';
 
 /**
@@ -44,6 +48,50 @@ export interface HttpClientConfig {
  *
  * 提供标准的HTTP请求处理，支持重试、超时等特性
  */
+type ErrorResponsePayload = {
+  data?: unknown;
+  raw?: string;
+};
+
+type UpstreamError = Error & {
+  status?: number;
+  statusCode?: number;
+  code?: string;
+  response?: ErrorResponsePayload;
+  retryable?: boolean;
+  headers?: Record<string, string>;
+};
+
+type Uint8ReadableStream = WebReadableStream<Uint8Array>;
+type Uint8ReadableStreamReader = ReadableStreamDefaultReader<Uint8Array>;
+
+type StreamBody = Uint8ReadableStream | NodeJS.ReadableStream | null;
+
+const isNodeReadable = (value: unknown): value is NodeJS.ReadableStream => {
+  return Boolean(value && typeof (value as NodeJS.ReadableStream).pipe === 'function');
+};
+
+const isWebReadableStream = (
+  value: unknown
+): value is Uint8ReadableStream => {
+  return Boolean(value && typeof (value as Uint8ReadableStream).getReader === 'function');
+};
+
+const peekReadableStream = async (
+  stream: Uint8ReadableStream
+): Promise<string> => {
+  const reader: Uint8ReadableStreamReader = stream.getReader();
+  try {
+    const { value } = await reader.read();
+    if (value) {
+      return new TextDecoder().decode(value).slice(0, 256);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return '';
+};
+
 export class HttpClient {
   private config: HttpClientConfig;
   private defaultConfig: Required<HttpClientConfig>;
@@ -86,7 +134,7 @@ export class HttpClient {
     url: string,
     data?: unknown,
     headers?: Record<string, string>
-  ): Promise<any> {
+  ): Promise<NodeJS.ReadableStream> {
     const fullUrl = this.buildUrl(url);
     const finalHeaders = this.buildHeaders({ 'Accept': 'text/event-stream', ...(headers || {}) });
 
@@ -95,14 +143,14 @@ export class HttpClient {
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     try {
-      const fetchOptions: any = {
+      const fetchOptions: RequestInit = {
         method: 'POST',
         headers: finalHeaders,
         body: data !== undefined ? JSON.stringify(data) : undefined,
         signal: controller.signal
       };
 
-      const response = await fetch(fullUrl, fetchOptions as any);
+      const response = await fetch(fullUrl, fetchOptions);
       if (!response.ok) {
         // 与非流式 request 保持一致：在错误中包含上游返回体，便于快照/日志分析
         const errorText = await response.text();
@@ -110,21 +158,24 @@ export class HttpClient {
       }
 
       // Convert WHATWG ReadableStream to Node.js Readable for pipeline streaming
-      const anyRes: any = response as any;
-      const body: any = (response as any).body;
-      if (body && typeof (body as any).getReader === 'function') {
-        try {
-          const { Readable } = await import('node:stream');
-          const nodeStream = (Readable as any).fromWeb ? (Readable as any).fromWeb(body) : undefined;
-          if (nodeStream && typeof nodeStream.pipe === 'function') {
-            return nodeStream; // streaming-manager expects .pipe()
+      const body = response.body as StreamBody;
+      if (body) {
+        if (isNodeReadable(body)) {
+          return body;
+        }
+        if (isWebReadableStream(body)) {
+          try {
+            const { Readable } = await import('node:stream');
+            if (typeof Readable.fromWeb === 'function') {
+              const nodeStream = Readable.fromWeb(body);
+              if (isNodeReadable(nodeStream)) {
+                return nodeStream;
+              }
+            }
+          } catch {
+            // ignore conversion errors and continue to fallback
           }
-        } catch { /* ignore conversion errors */ }
-      }
-
-      // If body is not a web stream or conversion failed, try lower-level access
-      if (anyRes && typeof anyRes.pipe === 'function') {
-        return anyRes; // already a Node readable
+        }
       }
 
       // As a last resort, throw to let caller decide (should not fallback silently)
@@ -167,14 +218,14 @@ export class HttpClient {
    * 通用请求方法
    */
   private async request(
-    method: string,
+    method: HttpRequestConfig['method'],
     url: string,
     data?: unknown,
     headers?: Record<string, string>
   ): Promise<HttpResponse> {
     const fullUrl = this.buildUrl(url);
     const requestConfig: HttpRequestConfig = {
-      method: method as any,
+      method,
       headers: this.buildHeaders(headers),
       timeout: this.defaultConfig.timeout,
       maxRetries: 0,
@@ -222,11 +273,14 @@ export class HttpClient {
         } catch {
           parsed = undefined;
         }
-        const err: any = new Error(`HTTP ${response.status}: ${errorText}`);
+        const err: UpstreamError = new Error(`HTTP ${response.status}: ${errorText}`) as UpstreamError;
         err.status = response.status;
         err.statusCode = response.status;
-        if (parsed && typeof parsed === 'object' && (parsed as any).error) {
-          err.code = (parsed as any).error?.code || (parsed as any).error?.type;
+        if (parsed && typeof parsed === 'object' && 'error' in parsed) {
+          const upstreamError = (parsed as { error?: { code?: string; type?: string } }).error;
+          if (upstreamError) {
+            err.code = upstreamError.code || upstreamError.type;
+          }
         }
         err.response = {
           data: parsed,
@@ -244,16 +298,14 @@ export class HttpClient {
         response.headers.forEach((value, key) => { headersObj[key] = value; });
         let peek = '';
         try {
-          const body: any = (response as any).body;
-          if (body && typeof body.getReader === 'function') {
-            const reader = body.getReader();
-            const { value } = await reader.read();
-            if (value) peek = new TextDecoder().decode(value).slice(0, 256);
+          const body = response.body as StreamBody;
+          if (body && isWebReadableStream(body)) {
+            peek = await peekReadableStream(body);
           } else {
             peek = (await response.text()).slice(0, 256);
           }
         } catch { /* ignore */ }
-        const err: any = new Error(`UPSTREAM_SSE_NOT_ALLOWED: received text/event-stream while expecting JSON. peek=${peek}`);
+        const err: UpstreamError = new Error(`UPSTREAM_SSE_NOT_ALLOWED: received text/event-stream while expecting JSON. peek=${peek}`) as UpstreamError;
         err.code = 'UPSTREAM_SSE_NOT_ALLOWED';
         err.statusCode = response.status;
         err.headers = headersObj;
@@ -330,7 +382,7 @@ export class HttpClient {
    * 判断是否应该重试
    */
   private shouldRetry(error: unknown): boolean {
-    const err = error as any;
+    const err = error as UpstreamError;
 
     // 某些上游聚合器（特别是 Anthropic 兼容层）会将“非 2xx 状态码”包装为
     // OpenAI 风格的错误对象，message 中包含 openai_error / bad_response_status_code。
@@ -345,12 +397,12 @@ export class HttpClient {
     }
 
     // 网络错误通常可以重试
-    if (err.name === 'TypeError' || err.code === 'ECONNREFUSED') {
+    if (err?.name === 'TypeError' || err?.code === 'ECONNREFUSED') {
       return true;
     }
 
     // HTTP状态码错误
-    if (err.message) {
+    if (err?.message) {
       const statusMatch = err.message.match(/HTTP (\d{3})/);
       if (statusMatch) {
         const status = parseInt(statusMatch[1]);
@@ -365,7 +417,7 @@ export class HttpClient {
     }
 
     // AbortError（超时）可以重试
-    if (err.name === 'AbortError') {
+    if (err?.name === 'AbortError') {
       return true;
     }
 
@@ -376,8 +428,9 @@ export class HttpClient {
    * 创建Provider错误
    */
   private createProviderError(error: unknown): ProviderError {
-    const providerError: ProviderError = error instanceof Error ? error as ProviderError : new Error(String(error)) as ProviderError;
-    const err = error as any;
+    const baseError = error instanceof Error ? error : new Error(String(error));
+    const providerError = baseError as ProviderError;
+    const err = baseError as UpstreamError;
 
     // 设置错误类型
     if (err.name === 'AbortError' || err.message?.includes('timeout')) {
@@ -404,11 +457,14 @@ export class HttpClient {
       providerError.statusCode = statusCode;
     }
     if (err?.code && typeof err.code === 'string') {
-      (providerError as ProviderError & { code?: string }).code = err.code;
+      providerError.code = err.code;
     }
 
     // 设置重试标记
-    providerError.retryable = this.shouldRetry(typeof statusCode === 'number' ? { ...err, statusCode } : error);
+    if (typeof statusCode === 'number') {
+      err.statusCode = statusCode;
+    }
+    providerError.retryable = this.shouldRetry(err);
 
     // 设置错误详情
     providerError.details = {

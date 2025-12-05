@@ -5,6 +5,12 @@ import type { CompatibilityModuleConfig, CompatibilityModuleInstance } from './c
 import { CompatibilityModuleFactory } from './compatibility-factory.js';
 import { resolveCompatSearchDirs, loadCompatibilityModulesFromDirs } from './compat-directory-loader.js';
 
+interface CompatibilityConfigFile {
+  compatibility?: {
+    modules?: CompatibilityModuleConfig[];
+  };
+}
+
 /**
  * 兼容性模块管理器
  * 负责管理所有兼容性模块的生命周期和调用
@@ -51,11 +57,13 @@ export class CompatibilityManager {
     try {
       const module = await CompatibilityModuleFactory.createModule(config, this.dependencies);
 
-      // 创建兼容性上下文
+      const profileId = config.profileId || config.id || `${config.providerType}-default`;
+
       const context: CompatibilityContext = {
         compatibilityId: module.id,
-        profileId: config.profileId || `${config.providerType}-default`,
+        profileId,
         providerType: config.providerType,
+        providerFamily: config.profileId,
         direction: 'incoming',
         stage: 'initialization',
         requestId: `init-${Date.now()}`,
@@ -113,9 +121,9 @@ export class CompatibilityManager {
       const configContent = await this.loadConfigFile(configPath);
       const moduleIds: string[] = [];
 
-      // 处理兼容性模块配置
-      if (configContent.compatibility && Array.isArray(configContent.compatibility.modules)) {
-        for (const moduleConfig of configContent.compatibility.modules) {
+      const modules = configContent.compatibility?.modules;
+      if (Array.isArray(modules)) {
+        for (const moduleConfig of modules) {
           const moduleId = await this.createModule(moduleConfig);
           moduleIds.push(moduleId);
         }
@@ -141,11 +149,15 @@ export class CompatibilityManager {
   /**
    * 加载配置文件（严格失败）
    */
-  private async loadConfigFile(configPath: string): Promise<any> {
+  private async loadConfigFile(configPath: string): Promise<CompatibilityConfigFile> {
     const fs = await import('fs/promises');
     try {
       const configContent = await fs.readFile(configPath, 'utf8');
-      return JSON.parse(configContent);
+      const parsed: unknown = JSON.parse(configContent);
+      if (!this.isValidCompatibilityConfig(parsed)) {
+        throw new Error('Invalid compatibility config schema');
+      }
+      return parsed;
     } catch (error) {
       throw new Error(`Failed to load config file: ${configPath}`);
     }
@@ -277,21 +289,23 @@ export class CompatibilityManager {
     direction: 'incoming' | 'outgoing',
     data: UnknownObject
   ): CompatibilityContext {
+    const metadata: CompatibilityContext['metadata'] = {
+      dataSize: JSON.stringify(data).length,
+      dataKeys: Object.keys(data),
+      moduleConfig: instance.config.config
+    };
     return {
       compatibilityId: instance.id,
       profileId: instance.config.profileId || `${instance.config.providerType}-default`,
       providerType: instance.config.providerType,
+      providerFamily: instance.config.profileId,
       direction,
       stage: direction === 'incoming' ? 'request_processing' : 'response_processing',
       requestId: `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       executionId: `exec-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       timestamp: Date.now(),
       startTime: Date.now(),
-      metadata: {
-        dataSize: JSON.stringify(data).length,
-        dataKeys: Object.keys(data),
-        moduleConfig: instance.config.config
-      }
+      metadata
     };
   }
 
@@ -355,8 +369,14 @@ export class CompatibilityManager {
   /**
    * 获取模块统计信息
    */
-  getStats(): UnknownObject {
-    const stats: any = {
+  getStats(): {
+    totalModules: number;
+    isInitialized: boolean;
+    registeredTypes: string[];
+    modulesByType: Record<string, number>;
+    modulesByProvider: Record<string, number>;
+  } {
+    const stats = {
       totalModules: this.moduleInstances.size,
       isInitialized: this.isInitialized,
       registeredTypes: CompatibilityModuleFactory.getRegisteredTypes(),
@@ -365,11 +385,11 @@ export class CompatibilityManager {
     };
 
     for (const instance of this.moduleInstances.values()) {
-      const t = (instance.module as any).type || 'unknown';
-      const p = (instance.module as any).providerType || instance.config.providerType || 'unknown';
-      stats.modulesByType[t] = (stats.modulesByType[t] || 0) + 1;
-      if (p) {
-        stats.modulesByProvider[p] = (stats.modulesByProvider[p] || 0) + 1;
+      const type = instance.module.type || 'unknown';
+      const provider = instance.module.providerType || instance.config.providerType || 'unknown';
+      stats.modulesByType[type] = (stats.modulesByType[type] || 0) + 1;
+      if (provider) {
+        stats.modulesByProvider[provider] = (stats.modulesByProvider[provider] || 0) + 1;
       }
     }
 
@@ -396,5 +416,23 @@ export class CompatibilityManager {
     } catch {
       // 忽略注册失败
     }
+  }
+
+  private isValidCompatibilityConfig(value: unknown): value is CompatibilityConfigFile {
+    if (!value || typeof value !== 'object') {
+      return false;
+    }
+    const compatSection = (value as CompatibilityConfigFile).compatibility;
+    if (compatSection === undefined) {
+      return true;
+    }
+    if (!compatSection || typeof compatSection !== 'object') {
+      return false;
+    }
+    const modules = compatSection.modules;
+    if (modules === undefined) {
+      return true;
+    }
+    return Array.isArray(modules);
   }
 }

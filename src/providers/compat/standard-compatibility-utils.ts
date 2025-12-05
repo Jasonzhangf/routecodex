@@ -1,12 +1,22 @@
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
 export function resolveCompatibilityModuleTypes(config: unknown): string[] {
-  if (!config || typeof config !== 'object') {
+  if (!isRecord(config)) {
     return ['passthrough-compatibility'];
   }
-  const cc = config as Record<string, unknown>;
+  const cc = config;
   const profileSources: unknown[] = [];
-  if (Array.isArray(cc.profiles)) profileSources.push(cc.profiles);
-  if (Array.isArray((cc.compatibility as any)?.profiles)) profileSources.push((cc.compatibility as any).profiles);
-  if (Array.isArray(cc.compatibilityProfiles)) profileSources.push(cc.compatibilityProfiles);
+  if (Array.isArray(cc.profiles)) {
+    profileSources.push(cc.profiles);
+  }
+  const compatibility = isRecord(cc.compatibility) ? cc.compatibility : undefined;
+  if (compatibility?.profiles) {
+    profileSources.push(compatibility.profiles);
+  }
+  if (Array.isArray(cc.compatibilityProfiles)) {
+    profileSources.push(cc.compatibilityProfiles);
+  }
   for (const source of profileSources) {
     const arr = normalizeProfileArray(source);
     if (arr.length > 0) {
@@ -21,7 +31,9 @@ export function resolveCompatibilityModuleTypes(config: unknown): string[] {
 }
 
 function normalizeProfileArray(value: unknown): string[] {
-  if (!value) return [];
+  if (!value) {
+    return [];
+  }
   if (Array.isArray(value)) {
     const names = value
       .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))

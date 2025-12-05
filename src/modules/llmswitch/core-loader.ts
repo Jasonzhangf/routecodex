@@ -10,7 +10,9 @@ const PACKAGE_CANDIDATES = [
 let corePackageDir: string | null = null;
 
 function resolveCorePackageDir(): string {
-  if (corePackageDir) return corePackageDir;
+  if (corePackageDir) {
+    return corePackageDir;
+  }
   let currentDir = path.dirname(fileURLToPath(import.meta.url));
   while (true) {
     for (const pkgPath of PACKAGE_CANDIDATES) {
@@ -47,7 +49,7 @@ export function resolveCoreModuleUrl(subpath: string): string {
   return pathToFileURL(modulePath).href;
 }
 
-export async function importCoreModule<T = any>(subpath: string): Promise<T> {
+export async function importCoreModule<T = unknown>(subpath: string): Promise<T> {
   const moduleUrl = resolveCoreModuleUrl(subpath);
   return (await import(moduleUrl)) as T;
 }

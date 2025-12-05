@@ -15,18 +15,55 @@ export interface HttpErrorPayload {
   };
 }
 
-export function mapErrorToHttp(err: any): HttpErrorPayload {
-  const baseMessage = typeof err?.message === 'string' ? err.message : String(err || 'Unknown error');
-  const statusFromErr = extractStatus(err);
-  const upstream = extractUpstreamError(err);
+type RawErrorDetails = {
+  status?: number;
+  requestId?: string;
+  request_id?: string;
+  providerKey?: string;
+  providerType?: string;
+  routeName?: string;
+  upstreamCode?: string;
+  upstreamMessage?: string;
+};
+
+type RawErrorPayload = {
+  message?: string;
+  status?: number;
+  statusCode?: number;
+  requestId?: string;
+  request_id?: string;
+  code?: string;
+  providerKey?: string;
+  providerType?: string;
+  routeName?: string;
+  details?: RawErrorDetails;
+  response?: {
+    data?: {
+      error?: {
+        code?: string;
+        message?: string;
+        status?: number;
+      };
+    };
+  };
+};
+
+export function mapErrorToHttp(err: unknown): HttpErrorPayload {
+  const error = normalizeErrorPayload(err);
+  const baseMessage = typeof error.message === 'string' ? error.message : String(err ?? 'Unknown error');
+  const statusFromErr = extractStatus(error);
+  const upstream = extractUpstreamError(error);
   const status = normalizeStatus(statusFromErr, upstream.status);
-  const requestId = extractRequestId(err);
-  const providerKey = extractString(err?.providerKey) || extractString(err?.details?.providerKey) || extractString(upstream.providerKey);
-  const providerType = extractString(err?.providerType) || extractString(err?.details?.providerType);
-  const routeName = extractString(err?.routeName) || extractString(err?.details?.routeName);
+  const requestId = extractRequestId(error);
+  const providerKey =
+    extractString(error.providerKey) ||
+    extractString(error.details?.providerKey) ||
+    extractString(upstream.providerKey);
+  const providerType = extractString(error.providerType) || extractString(error.details?.providerType);
+  const routeName = extractString(error.routeName) || extractString(error.details?.routeName);
   const upstreamCode = upstream.code;
   const upstreamMessage = upstream.message;
-  const effectiveCode = upstream.code || extractString(err?.code) || 'upstream_error';
+  const effectiveCode = upstream.code || extractString(error.code) || 'upstream_error';
 
   if (status === 429) {
     return formatPayload(429, {
@@ -83,29 +120,45 @@ export function mapErrorToHttp(err: any): HttpErrorPayload {
   });
 }
 
-function extractStatus(err: any): number | undefined {
-  if (typeof err?.status === 'number') return err.status;
-  if (typeof err?.statusCode === 'number') return err.statusCode;
-  if (typeof err?.details?.status === 'number') return err.details.status;
+function extractStatus(err: RawErrorPayload): number | undefined {
+  if (typeof err?.status === 'number') {
+    return err.status;
+  }
+  if (typeof err?.statusCode === 'number') {
+    return err.statusCode;
+  }
+  if (typeof err?.details?.status === 'number') {
+    return err.details.status;
+  }
   try {
     const msg = String(err?.message || err || '');
     const m = msg.match(/HTTP\s+(\d{3})/i);
-    if (m) return parseInt(m[1], 10);
+    if (m) {
+      return parseInt(m[1], 10);
+    }
   } catch {
     /* ignore parse errors */
   }
   return undefined;
 }
 
-function extractRequestId(err: any): string | undefined {
-  if (typeof err?.requestId === 'string') return err.requestId;
-  if (typeof err?.request_id === 'string') return err.request_id;
-  if (typeof err?.details?.requestId === 'string') return err.details.requestId;
-  if (typeof err?.details?.request_id === 'string') return err.details.request_id;
+function extractRequestId(err: RawErrorPayload): string | undefined {
+  if (typeof err?.requestId === 'string') {
+    return err.requestId;
+  }
+  if (typeof err?.request_id === 'string') {
+    return err.request_id;
+  }
+  if (typeof err?.details?.requestId === 'string') {
+    return err.details.requestId;
+  }
+  if (typeof err?.details?.request_id === 'string') {
+    return err.details.request_id;
+  }
   return undefined;
 }
 
-function extractUpstreamError(err: any): {
+function extractUpstreamError(err: RawErrorPayload): {
   code?: string;
   message?: string;
   status?: number;
@@ -137,6 +190,19 @@ function normalizeStatus(primary?: number, secondary?: number): number {
 
 function formatPayload(status: number, body: HttpErrorPayload['body']['error']): HttpErrorPayload {
   return { status, body: { error: body } };
+}
+
+function normalizeErrorPayload(err: unknown): RawErrorPayload {
+  if (err && typeof err === 'object') {
+    return err as RawErrorPayload;
+  }
+  if (typeof err === 'string') {
+    return { message: err };
+  }
+  if (err instanceof Error) {
+    return { message: err.message };
+  }
+  return { message: String(err ?? 'Unknown error') };
 }
 
 export default { mapErrorToHttp };

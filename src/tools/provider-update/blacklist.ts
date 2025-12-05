@@ -2,12 +2,17 @@ import fs from 'fs';
 import path from 'path';
 import type { BlacklistFile } from './types.js';
 
+type RawBlacklist = {
+  models?: unknown[];
+  updatedAt?: number;
+};
+
 export function readBlacklist(file: string): BlacklistFile {
   try {
     if (fs.existsSync(file)) {
       const txt = fs.readFileSync(file, 'utf-8');
-      const j = JSON.parse(txt);
-      const models = Array.isArray(j?.models) ? j.models.map((x: any) => String(x)) : [];
+      const j = JSON.parse(txt) as RawBlacklist;
+      const models = Array.isArray(j?.models) ? j.models.map((value) => String(value)) : [];
       return { models, updatedAt: Number(j?.updatedAt || Date.now()) };
     }
   } catch { /* ignore */ }

@@ -11,11 +11,11 @@
  *   将其约束为单一协议族的 HTTP Provider，便于后续平滑迁移。
  */
 
-import { ChatHttpProvider } from './chat-http-provider.js';
+import { HttpTransportProvider } from './http-transport-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 
-export class OpenAIHttpProvider extends ChatHttpProvider {
+export class OpenAIHttpProvider extends HttpTransportProvider {
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     const cfg: OpenAIStandardConfig = {
       ...config,
@@ -24,6 +24,6 @@ export class OpenAIHttpProvider extends ChatHttpProvider {
         providerType: 'openai'
       }
     };
-    super(cfg, dependencies);
+    super(cfg, dependencies, 'openai-http-provider');
   }
 }

@@ -7,7 +7,12 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS, DEFAULT_CONFIG, API_ENDPOINTS } from "./constants/index.js";import fs from 'fs';
+import fs from 'fs';
+import path from 'path';
+import { homedir } from 'os';
+import { spawnSync } from 'child_process';
+import { fileURLToPath } from 'url';
+import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS, DEFAULT_CONFIG, API_ENDPOINTS } from './constants/index.js';
 import { buildInfo } from './build-info.js';
 // Spinner wrapper (lazy-loaded to avoid hard dependency on ora/restore-cursor issues)
 type Spinner = {
@@ -19,28 +24,35 @@ type Spinner = {
   stop(): void;
   text: string;
 };
+type OraModule = {
+  default?: (text?: string) => Spinner;
+};
+
 async function createSpinner(text: string): Promise<Spinner> {
-  try {
-    const mod: any = await dynamicImport('ora');
-    const oraFn: any = mod?.default || mod;
-    if (typeof oraFn === 'function') {
-      const s = oraFn(text);
-      return s.start();
+  const mod = await dynamicImport<OraModule>('ora');
+  const oraFactory = typeof mod?.default === 'function' ? mod.default : undefined;
+  if (oraFactory) {
+    const instance = oraFactory(text);
+    if (typeof instance.start === 'function') {
+      instance.start(text);
+      return instance;
     }
-  } catch {
-    // fall through to stub
   }
-  // Fallback stub spinner that just logs messages
+
   let currentText = text;
   const log = (prefix: string, msg?: string) => {
-    const m = msg ?? currentText;
-    if (!m) return;
-    // eslint-disable-next-line no-console
-    console.log(`${prefix} ${m}`);
+    const message = msg ?? currentText;
+    if (!message) {
+      return;
+    }
+    console.log(`${prefix} ${message}`);
   };
-  const stub: any = {
+
+  const stub: Spinner = {
     start(msg?: string) {
-      if (msg) currentText = msg;
+      if (msg) {
+        currentText = msg;
+      }
       log('...', msg);
       return stub;
     },
@@ -50,14 +62,11 @@ async function createSpinner(text: string): Promise<Spinner> {
     info(msg?: string) { log('ℹ', msg); },
     stop() { /* no-op */ },
     get text() { return currentText; },
-    set text(v: string) { currentText = v; }
+    set text(value: string) { currentText = value; }
   };
-  return stub as Spinner;
+
+  return stub;
 }
-import path from "path";import { homedir } from 'os';
-import { spawnSync } from 'child_process';
-import { fileURLToPath, pathToFileURL } from 'url';
-import type { UnknownObject } from './types/common-types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -71,14 +80,11 @@ interface LoggingConfig {
   level: string;
 }
 
-interface ProvidersConfig {
-  [key: string]: unknown;
-}
-
-interface DefaultConfig {
-  server: ServerConfig;
-  logging: LoggingConfig;
-  providers: ProvidersConfig;
+interface EnvCommandConfig {
+  httpserver?: { port?: number; host?: string };
+  server?: { port?: number; host?: string };
+  port?: number;
+  host?: string;
 }
 
 interface TemplateConfig {
@@ -86,6 +92,24 @@ interface TemplateConfig {
   logging?: Partial<LoggingConfig>;
   [key: string]: unknown;
 }
+
+type CodeCommandOptions = {
+  port?: string;
+  host: string;
+  config?: string;
+  claudePath?: string;
+  cwd?: string;
+  model?: string;
+  profile?: string;
+  ensureServer?: boolean;
+};
+
+type EnvCommandOptions = {
+  port?: string;
+  host?: string;
+  config?: string;
+  json?: boolean;
+};
 
 // simple-log config type removed
 
@@ -107,11 +131,12 @@ const logger = {
 };
 
 // Ensure llmswitch-core is resolvable（dev/worktree 场景下由 pipeline 加载 vendor）
-async function dynamicImport(p: string): Promise<any> {
-  // Avoid TypeScript/ESM static resolution so we can probe optional entries safely
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  const fn = Function('p', 'return import(p)');
-  return fn(p);
+async function dynamicImport<T>(specifier: string): Promise<T | undefined> {
+  try {
+    return (await import(specifier)) as T;
+  } catch {
+    return undefined;
+  }
 }
 
 async function ensureCoreOrFail(): Promise<void> {
@@ -140,6 +165,8 @@ const pkgVersion: string = (() => {
   }
 })();
 
+const cliVersion = buildInfo?.version ?? pkgVersion;
+
 // Resolve package name for display / binary naming
 const pkgName: string = (() => {
   try {
@@ -163,7 +190,7 @@ const DEFAULT_DEV_PORT = 5555;
 program
   .name(pkgName === 'rcc' ? 'rcc' : 'routecodex')
   .description('RouteCodex CLI - Multi-provider OpenAI proxy server and Claude Code interface')
-  .version(pkgVersion);
+  .version(cliVersion);
 
 // Provider command group - update models and generate minimal provider config
 try {
@@ -193,9 +220,8 @@ program
   .argument('[extraArgs...]', 'Additional args to pass through to Claude')
   .allowUnknownOption(true)
   .allowExcessArguments(true)
-  .action(async (...cmdArgs) => {
-    const options = cmdArgs.pop() as any; // Commander passes options as last arg
-    const extraArgsFromCommander: string[] = Array.isArray(cmdArgs[0]) ? (cmdArgs[0] as string[]) : [];
+  .action(async (extraArgs: string[] = [], options: CodeCommandOptions) => {
+    const extraArgsFromCommander = Array.isArray(extraArgs) ? extraArgs : [];
     const spinner = await createSpinner('Preparing Claude Code with RouteCodex...');
 
     try {
@@ -252,7 +278,7 @@ program
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 3000);
-          const response = await fetch(`${serverUrl}/ready`, { signal: controller.signal, method: 'GET' } as any);
+          const response = await fetch(`${serverUrl}/ready`, { signal: controller.signal, method: 'GET' });
           clearTimeout(timeoutId);
           if (!response.ok) {throw new Error('Server not ready');}
           const j = await response.json().catch(() => ({}));
@@ -280,15 +306,18 @@ program
           for (let i = 0; i < 30; i++) {
             await sleep(1000);
             try {
-              const res = await fetch(`${serverUrl}/ready`, { method: 'GET' } as any);
+              const res = await fetch(`${serverUrl}/ready`, { method: 'GET' });
               if (res.ok) {
                 const jr = await res.json().catch(() => ({}));
                 if (jr?.status === 'ready') { ready = true; break; }
               }
             } catch { /* ignore */ }
           }
-          if (ready) {spinner.succeed('RouteCodex server is ready');}
-          else {spinner.warn('RouteCodex server may not be fully ready, continuing...');}
+        if (ready) {
+          spinner.succeed('RouteCodex server is ready');
+        } else {
+          spinner.warn('RouteCodex server may not be fully ready, continuing...');
+        }
         }
       }
 
@@ -306,8 +335,12 @@ program
         try {
           const d = options.cwd ? String(options.cwd) : process.cwd();
           const resolved = path.resolve(d);
-          if (fs.existsSync(resolved)) return resolved;
-        } catch {}
+        if (fs.existsSync(resolved)) {
+          return resolved;
+        }
+        } catch {
+          return process.cwd();
+        }
         return process.cwd();
       })();
       const claudeEnv = {
@@ -353,7 +386,12 @@ program
         const passThrough: string[] = [];
         for (let i = 0; i < tail.length; i++) {
           const tok = tail[i];
-          if (knownOpts.has(tok)) { if (requireValue.has(tok)) i++; continue; }
+          if (knownOpts.has(tok)) {
+            if (requireValue.has(tok)) {
+              i++;
+            }
+            continue;
+          }
           // 若是组合形式 --opt=value 且 opt 为已识别的，跳过
           if (tok.startsWith('--')) {
             const eq = tok.indexOf('=');
@@ -371,15 +409,22 @@ program
         pushUnique(extraArgsFromCommander);
         pushUnique(passThrough);
         if (merged.length) { claudeArgs.push(...merged); }
-      } catch { /* ignore passthrough errors */ }
+      } catch {
+        // ignore passthrough errors
+        void 0;
+      }
 
       // Launch Claude Code
       const { spawn } = await import('child_process');
       const claudeBin = ((): string => {
         try {
           const v = String(options?.claudePath || '').trim();
-          if (v) return v;
-        } catch {}
+          if (v) {
+            return v;
+          }
+        } catch {
+          // ignore
+        }
         const envPath = String(process.env.CLAUDE_PATH || '').trim();
         return envPath || 'claude';
       })();
@@ -414,7 +459,10 @@ program
       });
 
       // Keep process alive
-      await new Promise(() => {});
+      await new Promise<void>(() => {
+        // Keep process alive until interrupted
+        return;
+      });
 
     } catch (error) {
       spinner.fail('Failed to launch Claude Code');
@@ -431,35 +479,33 @@ program
   .option('-h, --host <host>', 'RouteCodex server host')
   .option('-c, --config <config>', 'RouteCodex configuration file path')
   .option('--json', 'Output JSON instead of shell exports')
-  .action(async (options) => {
+  .action(async (options: EnvCommandOptions) => {
     try {
-      let configPath = options.config as string | undefined;
-      if (!configPath) { configPath = path.join(homedir(), '.routecodex', 'config.json'); }
+      const configPath = options.config
+        ? options.config
+        : path.join(homedir(), '.routecodex', 'config.json');
 
-      let host = (options.host as string | undefined) || undefined;
-      let port = options.port ? parseInt(String(options.port), 10) : NaN;
+      let host = options.host;
+      let port = normalizePort(options.port);
 
       if (IS_DEV_PACKAGE) {
-        // dev 包：env>flag>5555，不从配置里解析端口
-        if (!Number.isFinite(port) || port <= 0) {
+        if (!Number.isFinite(port)) {
           const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
           port = Number.isFinite(envPort) && envPort > 0 ? envPort : DEFAULT_DEV_PORT;
         }
       } else {
-        // release 包：若未显式指定端口，则从配置解析
-        if (!Number.isFinite(port) || port <= 0) {
-          if (fs.existsSync(configPath)) {
-            try {
-              const raw = fs.readFileSync(configPath, 'utf8');
-              const cfg = JSON.parse(raw);
-              port = (cfg?.httpserver?.port ?? cfg?.server?.port ?? cfg?.port) || port;
-              host = (cfg?.httpserver?.host || cfg?.server?.host || cfg?.host || host);
-            } catch { /* ignore */ }
-          }
+        if (!Number.isFinite(port) && fs.existsSync(configPath)) {
+          const cfg = safeReadJson<EnvCommandConfig>(configPath);
+          port = normalizePort(cfg?.httpserver?.port ?? cfg?.server?.port ?? cfg?.port);
+          host = typeof cfg?.httpserver?.host === 'string'
+            ? cfg.httpserver.host
+            : typeof cfg?.server?.host === 'string'
+              ? cfg.server.host
+              : cfg?.host ?? host;
         }
       }
 
-      if (!Number.isFinite(port) || port <= 0) {
+      if (!Number.isFinite(port) || !port || port <= 0) {
         throw new Error('Missing port. Set via --port, env or config file');
       }
 
@@ -548,10 +594,10 @@ program
 
       // Load and validate configuration (non-dev packages rely on config port)
       let config;
-      try {
-        const configContent = fs.readFileSync(configPath, 'utf8');
-        config = JSON.parse(configContent);
-      } catch (error) {
+  try {
+    const configContent = fs.readFileSync(configPath, 'utf8');
+    config = JSON.parse(configContent);
+  } catch (error) {
         spinner.fail('Failed to parse configuration file');
         logger.error(`Invalid JSON in configuration file: ${configPath}`);
         process.exit(1);
@@ -675,7 +721,10 @@ program
       });
 
       // Do not exit parent; keep process alive to relay signals
-      await new Promise(() => {});
+      await new Promise<void>(() => {
+        // Keep supervisor alive until shutdown completes
+        return;
+      });
 
     } catch (error) {
       spinner.fail('Failed to start server');
@@ -933,7 +982,7 @@ async function initializeConfig(configPath: string, template?: string, force: bo
 program
   .command('stop')
   .description('Stop the RouteCodex server')
-  .action(async (options) => {
+  .action(async () => {
     const spinner = await createSpinner('Stopping RouteCodex server...');
     try {
       // Resolve config path and port
@@ -1113,7 +1162,10 @@ program
         else {process.exit(code ?? 0);}
       });
 
-      await new Promise(() => {});
+      await new Promise<void>(() => {
+        // Keep CLI alive (never resolves)
+        return;
+      });
     } catch (e) {
       spinner.fail(`Failed to restart: ${(e as Error).message}`);
       process.exit(1);
@@ -1366,21 +1418,6 @@ program
     console.log('');
   });
 
-function determinePort(configPath: string, fallback: number): number {
-  try {
-    const content = fs.readFileSync(configPath, 'utf8');
-    const config = JSON.parse(content);
-    const candidate = config?.server?.port ?? config?.httpserver?.port ?? config?.port;
-    const parsed = parseInt(candidate, 10);
-    if (!Number.isNaN(parsed) && parsed > 0) {
-      return parsed;
-    }
-  } catch {
-    // ignore parsing errors and fall back
-  }
-  return fallback;
-}
-
 async function ensurePortAvailable(port: number, parentSpinner: Spinner, opts: { restart?: boolean } = {}): Promise<void> {
   if (!port || Number.isNaN(port)) { return; }
 
@@ -1495,8 +1532,29 @@ function findListeningPids(port: number): number[] {
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number): Promise<void> =>
+  new Promise(resolve => setTimeout(resolve, ms));
+
+function normalizePort(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return NaN;
+}
+
+function safeReadJson<T = Record<string, unknown>>(filePath: string): T | null {
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    return JSON.parse(content) as T;
+  } catch {
+    return null;
+  }
 }
 
 // Fallback keypress setup: capture Ctrl+C and 'q' to trigger shutdown when SIGINT is not delivered
@@ -1527,8 +1585,13 @@ function setupKeypress(onInterrupt: () => void): () => void {
         try { stdin.pause?.(); } catch { /* ignore */ }
       };
     }
-  } catch { /* ignore */ }
-  return () => {};
+  } catch {
+    /* ignore */
+  }
+  return () => {
+    // No-op cleanup when stdin is not interactive
+    return;
+  };
 }
 
 async function isServerHealthyQuick(port: number): Promise<boolean> {
@@ -1589,7 +1652,11 @@ program
       } else {
         for (const pid of pids) {
           let cmd = '';
-          try { cmd = spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim(); } catch {}
+          try {
+            cmd = spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim();
+          } catch {
+            cmd = '';
+          }
           const origin = /node\s+.*routecodex-worktree/.test(cmd) ? 'local-dev' : (/node\s+.*lib\/node_modules\/routecodex/.test(cmd) ? 'global' : 'unknown');
           console.log(`  PID ${pid} [${origin}] ${cmd}`);
         }

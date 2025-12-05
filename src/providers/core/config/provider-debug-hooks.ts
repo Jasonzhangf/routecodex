@@ -40,7 +40,7 @@ export interface HookDataPacket {
   /** 数据元信息 */
   metadata: {
     /** 数据类型 */
-    dataType: 'request' | 'response' | 'headers' | 'config' | 'auth' | 'error';
+    dataType: 'request' | 'response' | 'headers' | 'config' | 'auth' | 'error' | 'all';
 
     /** 数据大小 */
     size: number;
@@ -257,7 +257,7 @@ export class BidirectionalHookManager {
    */
   static async executeHookChain(
     stage: HookStage,
-    target: string,
+    target: BidirectionalHook['target'],
     data: UnknownObject,
     context: Omit<HookExecutionContext, 'stage' | 'debugEnabled' | 'changeCount' | 'startTime' | 'executionId'>
   ): Promise<HookExecutionResult> {
@@ -305,7 +305,7 @@ export class BidirectionalHookManager {
         const dataPacket: HookDataPacket = {
           data: currentData,
           metadata: {
-            dataType: target as any,
+            dataType: target,
             size: this.calculateDataSize(currentData),
             changes: [],
             timestamp: Date.now(),

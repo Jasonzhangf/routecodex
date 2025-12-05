@@ -5,7 +5,74 @@
  */
 
 import type { BidirectionalHook, HookExecutionContext, HookDataPacket, DataChange } from '../config/provider-debug-hooks.js';
-import { HookStage } from '../config/provider-debug-hooks.js';
+import { HookStage, BidirectionalHookManager } from '../config/provider-debug-hooks.js';
+import type { UnknownObject } from '../../../types/common-types.js';
+
+function ensureRecord(value: unknown): UnknownObject {
+  return value && typeof value === 'object' ? (value as UnknownObject) : {};
+}
+
+interface RequestDebugPayload extends UnknownObject {
+  model?: string;
+  messages?: unknown[];
+  tools?: unknown[];
+  stream?: boolean;
+  max_tokens?: number;
+  _debugTimestamp?: number;
+  _traceId?: string;
+}
+
+interface AuthDebugPayload extends UnknownObject {
+  Authorization?: string;
+  _authTimestamp?: number;
+}
+
+interface ChoicePayload extends UnknownObject {
+  message?: {
+    content?: string;
+    tool_calls?: unknown[];
+  };
+  finish_reason?: string;
+}
+
+interface UsagePayload extends UnknownObject {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+}
+
+interface ResponseDataPayload extends UnknownObject {
+  choices?: ChoicePayload[];
+  usage?: UsagePayload;
+}
+
+interface ResponseDebugPayload extends UnknownObject {
+  status?: number;
+  headers?: UnknownObject;
+  data?: ResponseDataPayload;
+  metadata?: {
+    requestId?: string;
+    usage?: UsagePayload;
+    hookMetrics?: UnknownObject;
+    finalProcessingTimestamp?: number;
+    performanceMetrics?: {
+      totalProcessingTime?: number;
+      [key: string]: unknown;
+    };
+  };
+  _httpRequestTimestamp?: number;
+  _hookMetrics?: UnknownObject;
+  _errorHandlingTimestamp?: number;
+  _errorTrace?: UnknownObject;
+}
+
+type ResponseMetadata = NonNullable<ResponseDebugPayload['metadata']>;
+
+interface ErrorInfoPayload extends UnknownObject {
+  message?: string;
+  status?: number;
+  code?: string | number;
+}
 
 /**
  * 请求监控Hook - 监控请求预处理和验证阶段的数据变化
@@ -26,13 +93,16 @@ export const requestMonitoringHook: BidirectionalHook = {
     const metrics: Record<string, unknown> = {};
 
     // 记录请求基本信息
-    const request = data.data as any;
-    observations.push(`📥 请求监控: 模型=${request.model}, 消息数量=${request.messages?.length || 0}`);
+    const request = ensureRecord(data.data) as RequestDebugPayload;
+    const model = typeof request.model === 'string' ? request.model : 'unknown';
+    const messages = Array.isArray(request.messages) ? request.messages.length : 0;
+    observations.push(`📥 请求监控: 模型=${model}, 消息数量=${messages}`);
 
     // 记录工具信息
-    if (request.tools && request.tools.length > 0) {
-      observations.push(`🔧 请求包含 ${request.tools.length} 个工具`);
-      metrics.toolCount = request.tools.length;
+    const tools = Array.isArray(request.tools) ? request.tools : [];
+    if (tools.length > 0) {
+      observations.push(`🔧 请求包含 ${tools.length} 个工具`);
+      metrics.toolCount = tools.length;
     }
 
     // 记录请求大小
@@ -53,7 +123,7 @@ export const requestMonitoringHook: BidirectionalHook = {
     const modifiedData = data.data;
 
     // 添加调试时间戳
-    const debugData = modifiedData as any;
+    const debugData = ensureRecord(modifiedData) as RequestDebugPayload;
     const originalTimestamp = debugData._debugTimestamp;
     const newTimestamp = Date.now();
 
@@ -108,12 +178,13 @@ export const authenticationMonitoringHook: BidirectionalHook = {
     shouldContinue?: boolean;
   } {
     const observations: string[] = [];
-    const auth = data.data as any;
+    const auth = ensureRecord(data.data) as AuthDebugPayload;
 
     // 检查认证类型
-    if (auth.Authorization) {
-      const tokenType = auth.Authorization.split(' ')[0];
-      const tokenLength = auth.Authorization.length;
+    const authorization = typeof auth.Authorization === 'string' ? auth.Authorization : undefined;
+    if (authorization) {
+      const tokenType = authorization.split(' ')[0];
+      const tokenLength = authorization.length;
       observations.push(`🔑 认证类型: ${tokenType}, Token长度: ${tokenLength}`);
 
       // 安全检查：不记录完整token
@@ -125,7 +196,7 @@ export const authenticationMonitoringHook: BidirectionalHook = {
     return { observations };
   },
 
-  write(data: HookDataPacket, context: HookExecutionContext): {
+  write(data: HookDataPacket, _context: HookExecutionContext): {
     modifiedData: unknown;
     changes: DataChange[];
     observations: string[];
@@ -133,7 +204,7 @@ export const authenticationMonitoringHook: BidirectionalHook = {
   } {
     const observations: string[] = [];
     const changes: DataChange[] = [];
-    const modifiedData = data.data as any;
+    const modifiedData = ensureRecord(data.data) as AuthDebugPayload;
 
     // 添加认证时间戳
     if (!modifiedData._authTimestamp) {
@@ -172,11 +243,12 @@ export const httpRequestMonitoringHook: BidirectionalHook = {
     shouldContinue?: boolean;
   } {
     const observations: string[] = [];
-    const request = data.data as any;
+    const request = ensureRecord(data.data) as RequestDebugPayload;
     const metrics: Record<string, unknown> = {};
 
     // 记录最终请求信息
-    observations.push(`🌐 HTTP请求准备: 模型=${request.model}`);
+    const model = typeof request.model === 'string' ? request.model : 'unknown';
+    observations.push(`🌐 HTTP请求准备: 模型=${model}`);
 
     // 检查是否有streaming
     if (request.stream === true) {
@@ -185,9 +257,10 @@ export const httpRequestMonitoringHook: BidirectionalHook = {
     }
 
     // 检查max_tokens设置
-    if (request.max_tokens) {
-      observations.push(`🎯 最大Token限制: ${request.max_tokens}`);
-      metrics.maxTokens = request.max_tokens;
+    const maxTokens = typeof request.max_tokens === 'number' ? request.max_tokens : undefined;
+    if (typeof maxTokens === 'number') {
+      observations.push(`🎯 最大Token限制: ${maxTokens}`);
+      metrics.maxTokens = maxTokens;
     }
 
     // 记录请求头大小估算
@@ -196,7 +269,7 @@ export const httpRequestMonitoringHook: BidirectionalHook = {
     return { observations, metrics };
   },
 
-  transform(data: HookDataPacket, context: HookExecutionContext): {
+  transform(data: HookDataPacket, _context: HookExecutionContext): {
     data: unknown;
     changes: DataChange[];
     observations: string[];
@@ -204,7 +277,7 @@ export const httpRequestMonitoringHook: BidirectionalHook = {
   } {
     const observations: string[] = [];
     const changes: DataChange[] = [];
-    const modifiedData = data.data as any;
+    const modifiedData = ensureRecord(data.data) as RequestDebugPayload;
 
     // 添加请求发送时间戳
     changes.push({
@@ -242,7 +315,7 @@ export const httpResponseMonitoringHook: BidirectionalHook = {
     shouldContinue?: boolean;
   } {
     const observations: string[] = [];
-    const response = data.data as any;
+    const response = ensureRecord(data.data) as ResponseDebugPayload;
     const metrics: Record<string, unknown> = {};
 
     // 记录响应基本信息
@@ -264,18 +337,16 @@ export const httpResponseMonitoringHook: BidirectionalHook = {
           metrics.finishReason = choice.finish_reason;
         }
 
-        if (choice.message) {
-          const message = choice.message;
-          if (message.content) {
-            const contentLength = message.content.length;
-            observations.push(`📝 响应内容长度: ${contentLength} 字符`);
-            metrics.contentLength = contentLength;
-          }
+        const message = choice.message;
+        if (message?.content) {
+          const contentLength = message.content.length;
+          observations.push(`📝 响应内容长度: ${contentLength} 字符`);
+          metrics.contentLength = contentLength;
+        }
 
-          if (message.tool_calls && message.tool_calls.length > 0) {
-            observations.push(`🔧 响应包含 ${message.tool_calls.length} 个工具调用`);
-            metrics.toolCallCount = message.tool_calls.length;
-          }
+        if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
+          observations.push(`🔧 响应包含 ${message.tool_calls.length} 个工具调用`);
+          metrics.toolCallCount = message.tool_calls.length;
         }
       }
 
@@ -311,7 +382,7 @@ export const responsePostProcessingMonitoringHook: BidirectionalHook = {
     shouldContinue?: boolean;
   } {
     const observations: string[] = [];
-    const response = data.data as any;
+    const response = ensureRecord(data.data) as ResponseDebugPayload;
     const metrics: Record<string, unknown> = {};
 
     // 计算总处理时间
@@ -355,7 +426,9 @@ export const responsePostProcessingMonitoringHook: BidirectionalHook = {
   } {
     const observations: string[] = [];
     const changes: DataChange[] = [];
-    const modifiedData = data.data as any;
+    const modifiedData = ensureRecord(data.data) as ResponseDebugPayload;
+    const metadata = ensureRecord(modifiedData.metadata) as ResponseMetadata;
+    modifiedData.metadata = metadata;
 
     // 添加最终处理时间戳
     changes.push({
@@ -365,11 +438,7 @@ export const responsePostProcessingMonitoringHook: BidirectionalHook = {
       reason: '记录最终处理时间戳'
     });
 
-    if (!modifiedData.metadata) {
-      modifiedData.metadata = {};
-    }
-
-    modifiedData.metadata.finalProcessingTimestamp = Date.now();
+    metadata.finalProcessingTimestamp = Date.now();
     observations.push(`🏁 添加最终处理时间戳`);
 
     // 添加性能指标
@@ -385,7 +454,7 @@ export const responsePostProcessingMonitoringHook: BidirectionalHook = {
       reason: '记录性能指标'
     });
 
-    modifiedData.metadata.performanceMetrics = {
+    metadata.performanceMetrics = {
       totalProcessingTime: totalTime,
       dataSize: data.metadata.size,
       executionId: context.executionId
@@ -418,7 +487,7 @@ export const errorHandlingMonitoringHook: BidirectionalHook = {
     shouldContinue?: boolean;
   } {
     const observations: string[] = [];
-    const errorData = data.data as any;
+    const errorData = ensureRecord(data.data) as ResponseDebugPayload & ErrorInfoPayload & { error?: Error };
     const metrics: Record<string, unknown> = {};
 
     observations.push(`❌ 错误处理监控启动`);
@@ -427,16 +496,16 @@ export const errorHandlingMonitoringHook: BidirectionalHook = {
       const error = errorData.error;
       observations.push(`🚨 错误类型: ${error.constructor?.name || 'Unknown'}`);
       observations.push(`📝 错误消息: ${error.message}`);
+    }
 
-      if (error.status) {
-        observations.push(`🌐 HTTP状态码: ${error.status}`);
-        metrics.httpStatus = error.status;
-      }
+    if (typeof errorData.status === 'number') {
+      observations.push(`🌐 HTTP状态码: ${errorData.status}`);
+      metrics.httpStatus = errorData.status;
+    }
 
-      if (error.code) {
-        observations.push(`🔢 错误代码: ${error.code}`);
-        metrics.errorCode = error.code;
-      }
+    if (typeof errorData.code === 'string' || typeof errorData.code === 'number') {
+      observations.push(`🔢 错误代码: ${errorData.code}`);
+      metrics.errorCode = errorData.code;
     }
 
     // 记录错误发生时的上下文信息
@@ -459,7 +528,7 @@ export const errorHandlingMonitoringHook: BidirectionalHook = {
   } {
     const observations: string[] = [];
     const changes: DataChange[] = [];
-    const modifiedData = data.data as any;
+    const modifiedData = ensureRecord(data.data) as ResponseDebugPayload;
 
     // 添加错误处理时间戳
     changes.push({
@@ -504,8 +573,6 @@ export const errorHandlingMonitoringHook: BidirectionalHook = {
  * 注册所有调试示例Hooks
  */
 export function registerDebugExampleHooks(): void {
-  const { BidirectionalHookManager } = require('../config/provider-debug-hooks.js');
-
   // 注册所有监控Hook
   BidirectionalHookManager.registerHook(requestMonitoringHook);
   BidirectionalHookManager.registerHook(authenticationMonitoringHook);
@@ -521,8 +588,6 @@ export function registerDebugExampleHooks(): void {
  * 启用调试模式
  */
 export function enableDebugMode(level: 'basic' | 'detailed' | 'verbose' = 'detailed'): void {
-  const { BidirectionalHookManager } = require('../config/provider-debug-hooks.js');
-
   BidirectionalHookManager.setDebugConfig({
     enabled: true,
     level,
@@ -544,8 +609,6 @@ export function enableDebugMode(level: 'basic' | 'detailed' | 'verbose' = 'detai
  * 禁用调试模式
  */
 export function disableDebugMode(): void {
-  const { BidirectionalHookManager } = require('../config/provider-debug-hooks.js');
-
   BidirectionalHookManager.setDebugConfig({
     enabled: false,
     level: 'basic',

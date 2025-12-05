@@ -4,6 +4,14 @@ import type { CompatibilityContext } from '../../compatibility-interface.js';
 import { GLMFieldMappingProcessor } from '../field-mapping/field-mapping-processor.js';
 import { BaseCompatibility } from '../../base-compatibility.js';
 import { sanitizeAndValidateOpenAIChat, type PreflightResult } from '../../../core/utils/preflight-validator.js';
+import { sanitizeGLMToolsSchema } from '../utils/tool-schema-helpers.js';
+
+const isRecord = (value: unknown): value is UnknownObject => typeof value === 'object' && value !== null;
+
+interface ValidationError extends Error {
+  status?: number;
+  code?: string;
+}
 
 /**
  * GLM处理配置接口
@@ -14,24 +22,30 @@ export interface GLMProcessConfig {
   dependencies: ModuleDependencies;
   baseCompat: BaseCompatibility;
   preflightEnabled: boolean;
-  compatibilityId: string; // 用于日志跟踪的唯一ID
+  compatibilityId: string;
 }
+
+interface DtoEnvelope {
+  payload: UnknownObject;
+  isDto: boolean;
+  original: UnknownObject;
+}
+
+const hasDtoShape = (value: UnknownObject): boolean => (
+  'data' in value || 'route' in value || 'metadata' in value
+);
 
 /**
  * DTO解包函数
  */
-export const unwrapDTO = (request: UnknownObject): { payload: UnknownObject; isDto: boolean; original: UnknownObject } => {
-  const isDto = request && typeof request === 'object' && (
-    Object.prototype.hasOwnProperty.call(request as Record<string, unknown>, 'data') ||
-    Object.prototype.hasOwnProperty.call(request as Record<string, unknown>, 'route') ||
-    Object.prototype.hasOwnProperty.call(request as Record<string, unknown>, 'metadata')
-  );
+export const unwrapDTO = (request: UnknownObject): DtoEnvelope => {
+  const isDto = hasDtoShape(request);
+  if (isDto && isRecord((request as { data?: unknown }).data)) {
+    const payload = { ...(request as { data: UnknownObject }).data };
+    return { payload, isDto: true, original: request };
+  }
 
-  const payload: UnknownObject = (isDto && (request as any).data && typeof (request as any).data === 'object')
-    ? ((request as any).data as UnknownObject)
-    : (request as UnknownObject);
-
-  return { payload, isDto, original: request };
+  return { payload: request, isDto: false, original: request };
 };
 
 /**
@@ -39,74 +53,16 @@ export const unwrapDTO = (request: UnknownObject): { payload: UnknownObject; isD
  */
 export const rewrapDTO = (original: UnknownObject, payload: UnknownObject, isDto: boolean): UnknownObject => {
   if (isDto) {
-    const dto: any = original || {};
-    return { ...dto, data: payload } as UnknownObject;
+    return { ...original, data: payload };
   }
   return payload;
-};
-
-/**
- * GLM工具Schema清理函数
- */
-export const sanitizeGLMToolsSchema = (data: UnknownObject): UnknownObject => {
-  try {
-    const tools = (data as any)?.tools;
-    if (!Array.isArray(tools)) return data;
-
-    const result = { ...data, tools: [...tools] };
-
-    for (const t of result.tools) {
-      if (!t || typeof t !== 'object') continue;
-      const fn = (t as any).function;
-
-      // 移除 OpenAI 扩展字段 strict（GLM 不接受）
-      try {
-        if (fn && typeof fn === 'object' && 'strict' in fn) {
-          delete (fn as any).strict;
-        }
-      } catch { /* ignore */ }
-
-      const name = typeof fn?.name === 'string' ? fn.name : undefined;
-      const params = fn?.parameters && typeof fn.parameters === 'object' ? fn.parameters : undefined;
-      if (!params || !name) continue;
-
-      const props = (params as any).properties && typeof (params as any).properties === 'object' ? (params as any).properties : undefined;
-      if (!props) continue;
-
-      if (name === 'shell' && props.command) {
-        const cmd = props.command as any;
-        if (cmd && typeof cmd === 'object') {
-          delete cmd.oneOf;
-          cmd.type = 'array';
-          cmd.items = { type: 'string' };
-          if (typeof cmd.description !== 'string' || !cmd.description) {
-            cmd.description = 'Shell command argv tokens. Use ["bash","-lc","<cmd>"] form.';
-          }
-        } else {
-          (props as any).command = {
-            description: 'Shell command argv tokens. Use ["bash","-lc","<cmd>"] form.',
-            type: 'array',
-            items: { type: 'string' }
-          };
-        }
-
-        if (!Array.isArray((params as any).required)) (params as any).required = [];
-        const req: string[] = (params as any).required;
-        if (!req.includes('command')) req.push('command');
-        if (typeof (params as any).type !== 'string') (params as any).type = 'object';
-        if (typeof (params as any).additionalProperties !== 'boolean') (params as any).additionalProperties = false;
-      }
-    }
-
-    return result;
-  } catch (e) { throw e; }
 };
 
 /**
  * 检查Provider家族匹配
  */
 export const shouldSkipProvider = (context: CompatibilityContext, providerType: string): boolean => {
-  const providerFamily = String((context as any)?.providerType || '').toLowerCase();
+  const providerFamily = String(context.providerFamily || context.providerId || '').toLowerCase();
   return Boolean(providerFamily && providerFamily !== providerType);
 };
 
@@ -119,33 +75,29 @@ export const performGLMValidation = async (
   requestId: string,
   compatibilityId: string
 ): Promise<UnknownObject> => {
-  try {
-    const pre: PreflightResult = sanitizeAndValidateOpenAIChat(
-      data as any,
-      { target: 'glm', enableTools: true, glmPolicy: 'compat' }
-    );
+  const options = { target: 'glm', enableTools: true, glmPolicy: 'compat' } as UnknownObject;
+  const pre: PreflightResult = sanitizeAndValidateOpenAIChat(data, options);
 
-    if (Array.isArray(pre.issues) && pre.issues.length) {
-      const errs = pre.issues.filter((issue) => issue.level === 'error');
-      if (errs.length) {
-        const detail = errs.map((issue) => `${issue.code}`).join(',');
-        const err: any = new Error(`compat-validation-failed: ${detail}`);
-        err.status = 400;
-        err.code = 'compat_validation_failed';
-        throw err;
-      }
-      dependencies.logger?.logModule('glm-processor', 'preflight-warnings', {
-        compatibilityId,
-        requestId,
-        count: pre.issues.length
-      });
+  if (Array.isArray(pre.issues) && pre.issues.length) {
+    const errs = pre.issues.filter(issue => issue.level === 'error');
+    if (errs.length) {
+      const detail = errs.map(issue => issue.code).join(',');
+      const validationError: ValidationError = new Error(`compat-validation-failed: ${detail}`);
+      validationError.status = 400;
+      validationError.code = 'compat_validation_failed';
+      throw validationError;
     }
-
-    return pre.payload as UnknownObject;
-  } catch (e) {
-    throw e;
+    dependencies.logger?.logModule('glm-processor', 'preflight-warnings', {
+      compatibilityId,
+      requestId,
+      count: pre.issues.length
+    });
   }
+
+  return pre.payload as UnknownObject;
 };
+
+const sanitizeToolsSchema = (payload: UnknownObject): UnknownObject => sanitizeGLMToolsSchema(payload);
 
 /**
  * GLM请求处理核心函数
@@ -155,7 +107,7 @@ export const processGLMIncoming = async (
   config: GLMProcessConfig,
   context: CompatibilityContext
 ): Promise<UnknownObject> => {
-  const requestId = (context as any)?.requestId || 'unknown';
+  const requestId = context.requestId || 'unknown';
 
   config.dependencies.logger?.logModule('glm-processor', 'processIncoming-start', {
     compatibilityId: config.compatibilityId,
@@ -163,21 +115,15 @@ export const processGLMIncoming = async (
   });
 
   try {
-    // 检查Provider家族匹配
     if (shouldSkipProvider(context, 'glm')) {
       return request;
     }
 
-    // DTO解包
     const { payload, isDto, original } = unwrapDTO(request);
 
-    // BaseCompatibility处理（包含快照、字段映射等）
-    let processedPayload = await config.baseCompat.processIncoming(payload as UnknownObject, context);
+    let processedPayload = await config.baseCompat.processIncoming(payload, context);
+    processedPayload = sanitizeToolsSchema(processedPayload);
 
-    // GLM特定工具Schema清理
-    processedPayload = sanitizeGLMToolsSchema(processedPayload);
-
-    // 可选预检验证
     if (config.preflightEnabled) {
       processedPayload = await performGLMValidation(processedPayload, config.dependencies, requestId, config.compatibilityId);
     }
@@ -187,7 +133,6 @@ export const processGLMIncoming = async (
       requestId
     });
 
-    // DTO重新包装
     return rewrapDTO(original, processedPayload, isDto);
 
   } catch (error) {
@@ -208,7 +153,7 @@ export const processGLMOutgoing = async (
   config: GLMProcessConfig,
   context: CompatibilityContext
 ): Promise<UnknownObject> => {
-  const requestId = (context as any)?.requestId || 'unknown';
+  const requestId = context.requestId || 'unknown';
 
   config.dependencies.logger?.logModule('glm-processor', 'processOutgoing-start', {
     compatibilityId: config.compatibilityId,
@@ -216,13 +161,11 @@ export const processGLMOutgoing = async (
   });
 
   try {
-    // 检查Provider家族匹配
     if (shouldSkipProvider(context, 'glm')) {
       return response;
     }
 
-    // BaseCompatibility处理
-    const result = await config.baseCompat.processOutgoing(response as UnknownObject, context);
+    const result = await config.baseCompat.processOutgoing(response, context);
 
     config.dependencies.logger?.logModule('glm-processor', 'processOutgoing-success', {
       compatibilityId: config.compatibilityId,
@@ -246,16 +189,12 @@ export const processGLMOutgoing = async (
  */
 export const createGLMProcessConfig = async (
   dependencies: ModuleDependencies,
-  injectedConfig: any,
+  _injectedConfig: UnknownObject | undefined,
   fieldMappingProcessor: GLMFieldMappingProcessor,
   baseCompat: BaseCompatibility,
   compatibilityId: string
 ): Promise<GLMProcessConfig> => {
-  // 检查是否启用预检验证 - 保持与原始实现完全一致
-  // 原始逻辑：enabled = Boolean((this as any)?.config?.config?.policy?.preflight === true);
-  // 但this.config不存在，所以原始行为应该是preflight始终为false
-  // 这里保持原始行为以确保功能一致性
-  const preflightEnabled = false; // 保持原始行为，避免意外的preflight启用
+  const preflightEnabled = false;
 
   return {
     fieldMappingProcessor,

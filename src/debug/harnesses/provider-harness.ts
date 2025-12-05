@@ -5,7 +5,7 @@ import {
 } from '../../providers/core/runtime/provider-runtime-metadata.js';
 import type { ModuleDependencies } from '../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { PipelineDebugLogger } from '../../modules/pipeline/interfaces/pipeline-interfaces.js';
-import type { IProviderV2 } from '../../providers/core/api/provider-types.js';
+import type { IProviderV2, ProviderContext } from '../../providers/core/api/provider-types.js';
 import type {
   ExecutionHarness,
   ProviderHarnessExecuteInput,
@@ -69,24 +69,39 @@ function createDefaultDependencies(): ModuleDependencies {
     logger,
     errorHandlingCenter,
     debugCenter
-  } as ModuleDependencies;
+  };
 }
 
-type ProviderRuntimeInput = ProviderHarnessRuntime & Record<string, unknown>;
+type ProviderWithInternals = IProviderV2 & {
+  preprocessRequest?: (
+    request: Record<string, unknown>,
+    context?: ProviderContext
+  ) => Promise<Record<string, unknown>> | Record<string, unknown>;
+  postprocessResponse?: (response: Record<string, unknown>, context?: ProviderContext) => Promise<unknown>;
+  createContext?: (request: Record<string, unknown>) => ProviderContext;
+};
 
 export class ProviderPreprocessHarness
   implements ExecutionHarness<ProviderHarnessExecuteInput, ProviderHarnessResult>
 {
   readonly id = 'provider.preprocess';
-  private readonly providers = new Map<string, IProviderV2>();
+  private readonly providers = new Map<string, ProviderWithInternals>();
 
   constructor(private readonly defaultDependencies?: ModuleDependencies) {}
 
-  private async ensureProvider(runtime: ProviderRuntimeInput, dependencies?: ModuleDependencies): Promise<IProviderV2> {
+  private async ensureProvider(
+    runtime: ProviderHarnessRuntime,
+    dependencies?: ModuleDependencies
+  ): Promise<ProviderWithInternals> {
     const key = runtime.runtimeKey || `${runtime.providerKey}:${runtime.defaultModel}`;
     const cached = this.providers.get(key);
-    if (cached) return cached;
-    const provider = ProviderFactory.createProviderFromRuntime(runtime as any, dependencies ?? this.defaultDependencies ?? createDefaultDependencies());
+    if (cached) {
+      return cached;
+    }
+    const provider = ProviderFactory.createProviderFromRuntime(
+      runtime,
+      dependencies ?? this.defaultDependencies ?? createDefaultDependencies()
+    ) as ProviderWithInternals;
     if (typeof provider.initialize === 'function') {
       await provider.initialize();
     }
@@ -97,18 +112,18 @@ export class ProviderPreprocessHarness
   async executeForward(input: ProviderHarnessExecuteInput): Promise<ProviderHarnessResult> {
     const provider = await this.ensureProvider(input.runtime, input.dependencies);
     const cloned = deepClone(input.request);
-    attachProviderRuntimeMetadata(cloned, input.metadata as any);
-    const context = typeof (provider as any).createContext === 'function' ? (provider as any).createContext(cloned) : undefined;
-    if (input.action === 'postprocess' && typeof (provider as any).postprocessResponse === 'function') {
-      const payload = await (provider as any).postprocessResponse(cloned, context);
+    attachProviderRuntimeMetadata(cloned, input.metadata);
+    const context = typeof provider.createContext === 'function' ? provider.createContext(cloned) : undefined;
+    if (input.action === 'postprocess' && typeof provider.postprocessResponse === 'function') {
+      const payload = await provider.postprocessResponse(cloned, context);
       const runtimeMeta = extractProviderRuntimeMetadata(cloned);
-      return { payload, context: runtimeMeta ? ({ ...runtimeMeta } as Record<string, unknown>) : undefined };
+      return { payload, context: runtimeMeta ? { ...runtimeMeta } : undefined };
     }
     const payload =
-      typeof (provider as any).preprocessRequest === 'function'
-        ? await (provider as any).preprocessRequest(cloned, context)
+      typeof provider.preprocessRequest === 'function'
+        ? await provider.preprocessRequest(cloned, context)
         : cloned;
     const runtimeMeta = extractProviderRuntimeMetadata(cloned);
-    return { payload, context: runtimeMeta ? ({ ...runtimeMeta } as Record<string, unknown>) : undefined };
+    return { payload, context: runtimeMeta ? { ...runtimeMeta } : undefined };
   }
 }

@@ -5,6 +5,9 @@ import { iFlowFieldMappingProcessor } from '../field-mapping/iflow-field-mapping
 import { BaseCompatibility } from '../../base-compatibility.js';
 import { sanitizeAndValidateOpenAIChat, type PreflightResult } from '../../../core/utils/preflight-validator.js';
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
 /**
  * iFlow处理配置接口
  */
@@ -15,21 +18,22 @@ export interface iFlowProcessConfig {
   baseCompat: BaseCompatibility;
   preflightEnabled: boolean;
   compatibilityId: string; // 用于日志跟踪的唯一ID
+  profileId?: string;
 }
 
 /**
  * DTO解包函数
  */
 export const unwrapDTO = (request: UnknownObject): { payload: UnknownObject; isDto: boolean; original: UnknownObject } => {
-  const isDto = request && typeof request === 'object' && (
-    Object.prototype.hasOwnProperty.call(request as Record<string, unknown>, 'data') ||
-    Object.prototype.hasOwnProperty.call(request as Record<string, unknown>, 'route') ||
-    Object.prototype.hasOwnProperty.call(request as Record<string, unknown>, 'metadata')
-  );
+  const isDto =
+    isRecord(request) &&
+    ('data' in request || 'route' in request || 'metadata' in request);
 
-  const payload: UnknownObject = (isDto && (request as any).data && typeof (request as any).data === 'object')
-    ? ((request as any).data as UnknownObject)
-    : (request as UnknownObject);
+  const dataField = isDto && isRecord((request as Record<string, unknown>).data)
+    ? (request as Record<string, unknown>).data as UnknownObject
+    : undefined;
+
+  const payload: UnknownObject = dataField ?? request;
 
   return { payload, isDto, original: request };
 };
@@ -38,11 +42,13 @@ export const unwrapDTO = (request: UnknownObject): { payload: UnknownObject; isD
  * DTO重新包装函数
  */
 export const rewrapDTO = (original: UnknownObject, payload: UnknownObject, isDto: boolean): UnknownObject => {
-  if (isDto) {
-    const dto: any = original || {};
-    return { ...dto, data: payload } as UnknownObject;
+  if (!isDto) {
+    return payload;
   }
-  return payload;
+
+  const dto: UnknownObject = { ...original };
+  dto.data = payload;
+  return dto;
 };
 
 /**
@@ -50,64 +56,89 @@ export const rewrapDTO = (original: UnknownObject, payload: UnknownObject, isDto
  */
 export const sanitizeiFlowToolsSchema = (data: UnknownObject): UnknownObject => {
   try {
-    const tools = (data as any)?.tools;
-    if (!Array.isArray(tools)) return data;
+    const toolsCandidate = (data as { tools?: unknown }).tools;
+    if (!Array.isArray(toolsCandidate)) {
+      return data;
+    }
 
-    const result = { ...data, tools: [...tools] };
+    const normalizedTools = toolsCandidate.map(tool => (isRecord(tool) ? { ...tool } : tool));
+    const result: UnknownObject = { ...data, tools: normalizedTools };
 
-    for (const t of result.tools) {
-      if (!t || typeof t !== 'object') continue;
-      const fn = (t as any).function;
+    for (const toolItem of normalizedTools) {
+      if (!isRecord(toolItem)) {
+        continue;
+      }
 
-      // 移除 OpenAI 扩展字段 strict（iFlow 不接受）
-      try {
-        if (fn && typeof fn === 'object' && 'strict' in fn) {
-          delete (fn as any).strict;
-        }
-      } catch { /* ignore */ }
+      const fnCandidate = toolItem['function'];
+      const fn = isRecord(fnCandidate) ? fnCandidate : undefined;
+      if (!fn) {
+        continue;
+      }
 
-      const name = typeof fn?.name === 'string' ? fn.name : undefined;
-      const params = fn?.parameters && typeof fn.parameters === 'object' ? fn.parameters : undefined;
-      if (!params || !name) continue;
+      if ('strict' in fn) {
+        delete (fn as Record<string, unknown>).strict;
+      }
 
-      const props = (params as any).properties && typeof (params as any).properties === 'object' ? (params as any).properties : undefined;
-      if (!props) continue;
+      const name = typeof fn.name === 'string' ? fn.name : undefined;
+      const params = isRecord(fn.parameters) ? fn.parameters : undefined;
+      if (!params || !name) {
+        continue;
+      }
 
-      if (name === 'shell' && props.command) {
-        const cmd = props.command as any;
-        if (cmd && typeof cmd === 'object') {
-          delete cmd.oneOf;
-          cmd.type = 'array';
-          cmd.items = { type: 'string' };
-          if (typeof cmd.description !== 'string' || !cmd.description) {
-            cmd.description = 'Shell command argv tokens. Use ["bash","-lc","<cmd>"] form.';
+      const props = isRecord(params.properties) ? (params.properties as Record<string, unknown>) : undefined;
+      if (!props) {
+        continue;
+      }
+
+      if (name === 'shell') {
+        const commandSchema = props.command;
+        if (isRecord(commandSchema)) {
+          delete commandSchema.oneOf;
+          commandSchema.type = 'array';
+          commandSchema.items = { type: 'string' };
+          if (typeof commandSchema.description !== 'string' || commandSchema.description.length === 0) {
+            commandSchema.description = 'Shell command argv tokens. Use ["bash","-lc","<cmd>"] form.';
           }
         } else {
-          (props as any).command = {
+          props.command = {
             description: 'Shell command argv tokens. Use ["bash","-lc","<cmd>"] form.',
             type: 'array',
             items: { type: 'string' }
           };
         }
 
-        if (!Array.isArray((params as any).required)) (params as any).required = [];
-        const req: string[] = (params as any).required;
-        if (!req.includes('command')) req.push('command');
-        if (typeof (params as any).type !== 'string') (params as any).type = 'object';
-        if (typeof (params as any).additionalProperties !== 'boolean') (params as any).additionalProperties = false;
+        if (!Array.isArray(params.required)) {
+          params.required = [];
+        }
+        const required = params.required as unknown[];
+        if (!required.includes('command')) {
+          required.push('command');
+        }
+
+        if (typeof params.type !== 'string') {
+          params.type = 'object';
+        }
+        if (typeof params.additionalProperties !== 'boolean') {
+          params.additionalProperties = false;
+        }
       }
     }
 
     return result;
-  } catch { /* ignore */ return data; }
+  } catch {
+    return data;
+  }
 };
 
 /**
  * 检查Provider家族匹配
  */
-export const shouldSkipProvider = (context: CompatibilityContext, providerType: string): boolean => {
-  const providerFamily = String((context as any)?.providerType || '').toLowerCase();
-  return Boolean(providerFamily && providerFamily !== providerType);
+export const shouldSkipProvider = (context: CompatibilityContext, expectedProfile?: string): boolean => {
+  if (!expectedProfile) {
+    return false;
+  }
+  const profile = context.profileId?.toLowerCase();
+  return profile ? profile !== expectedProfile.toLowerCase() : false;
 };
 
 /**
@@ -119,33 +150,28 @@ export const performiFlowValidation = async (
   requestId: string,
   compatibilityId: string
 ): Promise<UnknownObject> => {
-  try {
-    // iFlow使用openai兼容的验证
-    const pre: PreflightResult = sanitizeAndValidateOpenAIChat(
-      data as any,
-      { target: 'openai', enableTools: true }
-    );
+  const pre: PreflightResult = sanitizeAndValidateOpenAIChat(
+    data,
+    { target: 'openai', enableTools: true }
+  );
 
-    if (Array.isArray(pre.issues) && pre.issues.length) {
-      const errs = pre.issues.filter((issue) => issue.level === 'error');
-      if (errs.length) {
-        const detail = errs.map((issue) => `${issue.code}`).join(',');
-        const err: any = new Error(`compat-validation-failed: ${detail}`);
-        err.status = 400;
-        err.code = 'compat_validation_failed';
-        throw err;
-      }
-      dependencies.logger?.logModule('iflow-processor', 'preflight-warnings', {
-        compatibilityId,
-        requestId,
-        count: pre.issues.length
-      });
+  if (Array.isArray(pre.issues) && pre.issues.length > 0) {
+    const errs = pre.issues.filter((issue) => issue.level === 'error');
+    if (errs.length) {
+      const detail = errs.map((issue) => `${issue.code}`).join(',');
+      const validationError = new Error(`compat-validation-failed: ${detail}`);
+      (validationError as { status?: number; code?: string }).status = 400;
+      (validationError as { status?: number; code?: string }).code = 'compat_validation_failed';
+      throw validationError;
     }
-
-    return pre.payload as UnknownObject;
-  } catch (e) {
-    throw e;
+    dependencies.logger?.logModule('iflow-processor', 'preflight-warnings', {
+      compatibilityId,
+      requestId,
+      count: pre.issues.length
+    });
   }
+
+  return pre.payload as UnknownObject;
 };
 
 /**
@@ -156,7 +182,7 @@ export const processiFlowIncoming = async (
   config: iFlowProcessConfig,
   context: CompatibilityContext
 ): Promise<UnknownObject> => {
-  const requestId = (context as any)?.requestId || 'unknown';
+  const requestId = context.requestId || 'unknown';
 
   config.dependencies.logger?.logModule('iflow-processor', 'processIncoming-start', {
     compatibilityId: config.compatibilityId,
@@ -173,7 +199,7 @@ export const processiFlowIncoming = async (
     const { payload, isDto, original } = unwrapDTO(request);
 
     // BaseCompatibility处理（包含快照、字段映射等）
-    let processedPayload = await config.baseCompat.processIncoming(payload as UnknownObject, context);
+    let processedPayload = await config.baseCompat.processIncoming(payload, context);
 
     // iFlow特定工具Schema清理
     processedPayload = sanitizeiFlowToolsSchema(processedPayload);
@@ -209,7 +235,7 @@ export const processiFlowOutgoing = async (
   config: iFlowProcessConfig,
   context: CompatibilityContext
 ): Promise<UnknownObject> => {
-  const requestId = (context as any)?.requestId || 'unknown';
+  const requestId = context.requestId || 'unknown';
 
   config.dependencies.logger?.logModule('iflow-processor', 'processOutgoing-start', {
     compatibilityId: config.compatibilityId,
@@ -223,7 +249,7 @@ export const processiFlowOutgoing = async (
     }
 
     // BaseCompatibility处理
-    const result = await config.baseCompat.processOutgoing(response as UnknownObject, context);
+    const result = await config.baseCompat.processOutgoing(response, context);
 
     config.dependencies.logger?.logModule('iflow-processor', 'processOutgoing-success', {
       compatibilityId: config.compatibilityId,

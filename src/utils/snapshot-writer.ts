@@ -15,22 +15,36 @@ export type ServerSnapshotPhase =
   | 'http-response.error'
   | string;
 
+type SnapshotGlobal = {
+  rccSnapshotsEnabled?: boolean;
+};
+
 export function isSnapshotsEnabled(): boolean {
   // 优先使用运行时全局覆盖（由服务器根据 virtualRouter config 注入）
   try {
-    const g: any = globalThis as any;
-    if (typeof g.rccSnapshotsEnabled === 'boolean') return g.rccSnapshotsEnabled;
-  } catch { /* ignore */ }
+    const globalScope = globalThis as SnapshotGlobal;
+    if (typeof globalScope.rccSnapshotsEnabled === 'boolean') {
+      return globalScope.rccSnapshotsEnabled;
+    }
+  } catch {
+    /* ignore */
+  }
   // 环境变量显式关闭：0/false/no → 禁用；否则默认开启（便于调试与回归）
   const envRaw = String(process.env.ROUTECODEX_SNAPSHOTS || process.env.RCC_SNAPSHOTS || '').trim().toLowerCase();
-  if (envRaw === '0' || envRaw === 'false' || envRaw === 'no') return false;
+  if (envRaw === '0' || envRaw === 'false' || envRaw === 'no') {
+    return false;
+  }
   return true;
 }
 
 function mapEndpointToFolder(entryEndpoint?: string): string {
   const ep = String(entryEndpoint || '').toLowerCase();
-  if (ep.includes('/v1/responses')) return 'openai-responses';
-  if (ep.includes('/v1/messages') || ep.includes('/anthropic')) return 'anthropic-messages';
+  if (ep.includes('/v1/responses')) {
+    return 'openai-responses';
+  }
+  if (ep.includes('/v1/messages') || ep.includes('/anthropic')) {
+    return 'anthropic-messages';
+  }
   return 'openai-chat';
 }
 
@@ -44,18 +58,20 @@ export async function writeServerSnapshot(options: {
   data: unknown;
   entryEndpoint?: string;
 }): Promise<void> {
-  if (!isSnapshotsEnabled()) return; // default OFF
+  if (!isSnapshotsEnabled()) {
+    return; // default OFF
+  }
   const endpoint = options.entryEndpoint || '/v1/chat/completions';
 
   // 1) 尝试通过 llmswitch-core hooks 写快照（供核心调试使用）
   try {
-    await writeSnapshotViaHooks(`server`, {
+    await writeSnapshotViaHooks('server', {
       endpoint,
       stage: String(options.phase),
       requestId: options.requestId,
       data: options.data,
       verbosity: 'verbose'
-    } as any);
+    });
   } catch {
     // ignore hook errors; always fall through to local file snapshot
   }

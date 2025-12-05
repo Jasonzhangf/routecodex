@@ -1,7 +1,9 @@
 import type { CompatibilityContext } from '../../compatibility-interface.js';
 import type { UnknownObject } from '../../../../modules/pipeline/types/common-types.js';
-import type { ModuleDependencies } from '../../../../modules/pipeline/types/module.types.js';
 import { BaseHook } from './base-hook.js';
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
 
 /**
  * 校验规则接口
@@ -234,19 +236,17 @@ export class iFlowRequestValidationHook extends BaseHook {
     }
   }
 
-  private getFieldValue(data: UnknownObject, fieldPath: string): any {
+  private getFieldValue(data: UnknownObject, fieldPath: string): unknown {
     // 处理通配符路径，如 messages[*].role
     if (fieldPath.includes('[*]')) {
       return this.getArrayFieldValues(data, fieldPath);
     }
 
     // 处理普通路径，如 model, messages
-    return fieldPath.split('.').reduce((current, key) => {
-      return current && current[key] !== undefined ? current[key] : undefined;
-    }, data as any);
+    return this.resolvePath(data, fieldPath);
   }
 
-  private getArrayFieldValues(data: UnknownObject, fieldPath: string): any[] {
+  private getArrayFieldValues(data: UnknownObject, fieldPath: string): unknown[] {
     const parts = fieldPath.split('[*]');
     if (parts.length !== 2) {
       return [];
@@ -255,9 +255,7 @@ export class iFlowRequestValidationHook extends BaseHook {
     const arrayPath = parts[0];
     const fieldPathInArray = parts[1].replace(/^\./, ''); // 移除开头的点
 
-    const arrayValue = arrayPath.split('.').reduce((current, key) => {
-      return current && current[key] !== undefined ? current[key] : undefined;
-    }, data as any);
+    const arrayValue = this.resolvePath(data, arrayPath);
 
     if (!Array.isArray(arrayValue)) {
       return [];
@@ -268,13 +266,19 @@ export class iFlowRequestValidationHook extends BaseHook {
         return item;
       }
 
-      return fieldPathInArray.split('.').reduce((current, key) => {
-        return current && current[key] !== undefined ? current[key] : undefined;
-      }, item as any);
+      return this.resolvePath(item, fieldPathInArray);
     });
   }
 
-  private evaluateConditional(data: UnknownObject, conditional: any, currentField: string): boolean {
+  private evaluateConditional(
+    data: UnknownObject,
+    conditional: ValidationRule['conditional'],
+    currentField: string
+  ): boolean {
+    if (!conditional) {
+      return true;
+    }
+
     // 简单的条件评估
     // 例如: "messages[i].role !== 'tool'"
 
@@ -310,12 +314,12 @@ export class iFlowRequestValidationHook extends BaseHook {
     return true;
   }
 
-  private validateType(value: any, expectedType: string): boolean {
+  private validateType(value: unknown, expectedType: string): boolean {
     switch (expectedType) {
       case 'string':
         return typeof value === 'string';
       case 'number':
-        return typeof value === 'number' && !isNaN(value);
+        return typeof value === 'number' && !Number.isNaN(value);
       case 'boolean':
         return typeof value === 'boolean';
       case 'array':
@@ -325,5 +329,20 @@ export class iFlowRequestValidationHook extends BaseHook {
       default:
         return true;
     }
+  }
+
+  private resolvePath(root: unknown, fieldPath: string): unknown {
+    if (!fieldPath) {
+      return root;
+    }
+    return fieldPath.split('.').reduce<unknown>((current, key) => {
+      if (!isRecord(current)) {
+        return undefined;
+      }
+      if (!(key in current)) {
+        return undefined;
+      }
+      return current[key];
+    }, root);
   }
 }

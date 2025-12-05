@@ -47,7 +47,6 @@
     "tests",
     "src/**/*.test.ts",
     "src/**/__tests__/**",
-    "src/commands/offline-log.ts",
     "src/components/pipeline-visualizer.bak",
     "src/examples/pipeline-visualizer-example.tsx.bak",
     "src/components/EnhancedJsonViewer.tsx.bak",
@@ -63,6 +62,6 @@
     "src/modules/pipeline/v2/**/*",
     "src/providers/compat/glm/glm-compatibility.ts",
     "src/server-factory.ts",
-    "src/migration/version-selector.ts",
-      ]
+    "src/migration/version-selector.ts"
+  ]
 }

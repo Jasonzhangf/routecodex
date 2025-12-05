@@ -1,3 +1,4 @@
+import type { ErrorContext } from 'rcc-errorhandling';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { ProviderContext } from '../api/provider-types.js';
 import type { TargetMetadata } from '../../../modules/pipeline/orchestrator/pipeline-context.js';
@@ -23,6 +24,26 @@ if (!providerErrorCenterResolved) {
 }
 const providerErrorCenter = providerErrorCenterResolved;
 
+type ExtendedRuntimeMetadata = ProviderErrorRuntimeMetadata & {
+  providerFamily?: string;
+  runtimeKey?: string;
+};
+
+type ProviderErrorEventExtended = ProviderErrorEvent & {
+  affectsHealth?: boolean;
+};
+
+type ErrorWithMetadata = Error & {
+  code?: string;
+  status?: number;
+  statusCode?: number;
+  retryable?: boolean;
+  details?: Record<string, unknown>;
+  response?: {
+    status?: number;
+  };
+};
+
 type CompatContext = {
   requestId: string;
   providerKey?: string;
@@ -38,7 +59,7 @@ type CompatContext = {
 interface EmitOptions {
   error: unknown;
   stage: string;
-  runtime: ProviderErrorRuntimeMetadata;
+  runtime: ExtendedRuntimeMetadata;
   dependencies: ModuleDependencies;
   statusCode?: number;
   recoverable?: boolean;
@@ -47,11 +68,11 @@ interface EmitOptions {
 }
 
 export function emitProviderError(options: EmitOptions): void {
-  const err = options.error instanceof Error ? options.error : new Error(String(options.error ?? 'Unknown error'));
-  const code = normalizeCode((err as any)?.code, options.stage);
+  const err = normalizeError(options.error);
+  const code = normalizeCode(err.code, options.stage);
   const status = determineStatusCode(err, options.statusCode);
-  const recoverable = options.recoverable ?? ((err as any)?.retryable === true);
-  const event: ProviderErrorEvent & { affectsHealth?: boolean } = {
+  const recoverable = options.recoverable ?? (err.retryable === true);
+  const event: ProviderErrorEventExtended = {
     code,
     message: err.message || code,
     stage: options.stage,
@@ -59,43 +80,44 @@ export function emitProviderError(options: EmitOptions): void {
     recoverable,
     runtime: options.runtime,
     timestamp: Date.now(),
-    details: options.details ?? ((err as any)?.details as Record<string, unknown> | undefined)
+    details: options.details ?? extractRecord(err.details)
   };
   event.affectsHealth = options.affectsHealth !== false;
   try {
-    providerErrorCenter.emit(event as ProviderErrorEvent);
+    providerErrorCenter.emit(event);
   } catch (emitError) {
     console.error('[provider-error-reporter] failed to emit provider error', emitError);
   }
 
   const center = options.dependencies.errorHandlingCenter;
   if (center?.handleError) {
-    const severity = status && status >= 500 ? 'error' : 'warn';
-    const payload = {
+    const severity: ErrorContext['severity'] = status && status >= 500 ? 'high' : 'medium';
+    const payload: ErrorContext = {
       error: err,
       source: options.stage,
       severity,
+      timestamp: Date.now(),
       moduleId: options.runtime.providerId,
-      requestId: options.runtime.requestId,
-      providerKey: options.runtime.providerKey,
-      providerType: options.runtime.providerType,
-      providerFamily: (options.runtime as any)?.providerFamily,
-      routeName: options.runtime.routeName,
-      metadata: {
+      context: {
+        requestId: options.runtime.requestId,
+        providerKey: options.runtime.providerKey,
+        providerType: options.runtime.providerType,
+        providerFamily: options.runtime.providerFamily,
+        routeName: options.runtime.routeName,
         status,
         code,
         runtime: options.runtime,
         details: options.details
       }
     };
-    Promise.resolve(center.handleError(payload)).catch((handlerError: unknown) => {
+    void center.handleError(payload).catch((handlerError: unknown) => {
       console.error('[provider-error-reporter] error center handleError failed', handlerError);
     });
   }
 }
 
-export function buildRuntimeFromProviderContext(ctx: ProviderContext): ProviderErrorRuntimeMetadata {
-  const runtime: ProviderErrorRuntimeMetadata = {
+export function buildRuntimeFromProviderContext(ctx: ProviderContext): ExtendedRuntimeMetadata {
+  const runtime: ExtendedRuntimeMetadata = {
     requestId: ctx.requestId,
     providerKey: ctx.providerKey,
     providerId: ctx.providerId,
@@ -103,15 +125,15 @@ export function buildRuntimeFromProviderContext(ctx: ProviderContext): ProviderE
     providerProtocol: ctx.providerProtocol,
     routeName: ctx.routeName,
     pipelineId: ctx.pipelineId,
-    target: ctx.target as any
+    target: ctx.target,
+    providerFamily: ctx.providerFamily,
+    runtimeKey: ctx.runtimeMetadata?.runtimeKey ?? ctx.target?.runtimeKey
   };
-  (runtime as any).runtimeKey = ctx.runtimeMetadata?.runtimeKey || (ctx.target as any)?.runtimeKey;
-  (runtime as any).providerFamily = ctx.providerFamily;
   return runtime;
 }
 
-export function buildRuntimeFromCompatContext(ctx: CompatContext): ProviderErrorRuntimeMetadata {
-  const runtime: ProviderErrorRuntimeMetadata = {
+export function buildRuntimeFromCompatContext(ctx: CompatContext): ExtendedRuntimeMetadata {
+  const runtime: ExtendedRuntimeMetadata = {
     requestId: ctx.requestId,
     providerKey: ctx.providerKey,
     providerId: ctx.providerId,
@@ -119,21 +141,34 @@ export function buildRuntimeFromCompatContext(ctx: CompatContext): ProviderError
     providerProtocol: ctx.providerProtocol,
     routeName: ctx.routeName,
     pipelineId: ctx.pipelineId,
-    target: ctx.target as any
+    target: ctx.target,
+    providerFamily: ctx.providerFamily ?? ctx.providerType,
+    runtimeKey: ctx.target?.runtimeKey
   };
-  (runtime as any).runtimeKey = ctx.target && typeof ctx.target === 'object' ? (ctx.target as any).runtimeKey : undefined;
-  (runtime as any).providerFamily = ctx.providerFamily || ctx.providerType;
   return runtime;
 }
 
-function determineStatusCode(error: any, fallback?: number): number | undefined {
-  if (typeof fallback === 'number') return fallback;
-  if (typeof error?.status === 'number') return error.status;
-  if (typeof error?.statusCode === 'number') return error.statusCode;
-  if (typeof error?.response?.status === 'number') return error.response.status;
-  if (typeof error?.details?.status === 'number') return error.details.status;
-  const match = typeof error?.message === 'string' ? error.message.match(/HTTP\s+(\d{3})/) : null;
-  if (match) return Number(match[1]);
+function determineStatusCode(error: ErrorWithMetadata, fallback?: number): number | undefined {
+  if (typeof fallback === 'number') {
+    return fallback;
+  }
+  if (typeof error.status === 'number') {
+    return error.status;
+  }
+  if (typeof error.statusCode === 'number') {
+    return error.statusCode;
+  }
+  if (typeof error.response?.status === 'number') {
+    return error.response.status;
+  }
+  const detailsStatus = extractStatus(error.details);
+  if (typeof detailsStatus === 'number') {
+    return detailsStatus;
+  }
+  const match = typeof error.message === 'string' ? error.message.match(/HTTP\s+(\d{3})/) : null;
+  if (match) {
+    return Number(match[1]);
+  }
   return undefined;
 }
 
@@ -141,7 +176,33 @@ function normalizeCode(rawCode: unknown, stage: string): string {
   if (typeof rawCode === 'string' && rawCode.trim()) {
     return rawCode.toUpperCase();
   }
-  if (stage.startsWith('compat')) return 'ERR_COMPATIBILITY';
-  if (stage.startsWith('provider')) return 'ERR_PROVIDER_FAILURE';
+  if (stage.startsWith('compat')) {
+    return 'ERR_COMPATIBILITY';
+  }
+  if (stage.startsWith('provider')) {
+    return 'ERR_PROVIDER_FAILURE';
+  }
   return 'ERR_PIPELINE_FAILURE';
+}
+
+function extractStatus(record?: Record<string, unknown>): number | undefined {
+  if (!record) {
+    return undefined;
+  }
+  const candidate = record.status;
+  return typeof candidate === 'number' ? candidate : undefined;
+}
+
+function extractRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value && typeof value === 'object') {
+    return value as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+function normalizeError(error: unknown): ErrorWithMetadata {
+  if (error instanceof Error) {
+    return error as ErrorWithMetadata;
+  }
+  return new Error(typeof error === 'string' ? error : 'Unknown error') as ErrorWithMetadata;
 }

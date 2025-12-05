@@ -1,3 +1,5 @@
+import type { JsonValue, UnknownObject } from '../../../types/common-types.js';
+
 /**
  * Pipeline Module - Base Type Definitions
  *
@@ -15,11 +17,11 @@ export interface BaseProviderConfig {
   /** Base URL */
   baseUrl: string;
   /** Authentication configuration */
-  auth: any;
+  auth: UnknownObject;
   /** Model configurations */
-  models?: Record<string, any>;
+  models?: Record<string, UnknownObject>;
   /** Compatibility configuration */
-  compatibility?: any;
+  compatibility?: UnknownObject;
 }
 
 /**
@@ -35,19 +37,19 @@ export interface BaseTransformationRule {
   /** Target path (JSON path) */
   readonly targetPath?: string;
   /** Mapping configuration */
-  readonly mapping?: Record<string, any>;
+  readonly mapping?: Record<string, JsonValue>;
   /** Default value */
-  readonly defaultValue?: any;
+  readonly defaultValue?: JsonValue;
   /** Condition for transformation */
   readonly condition?: {
     field: string;
     operator: 'equals' | 'contains' | 'exists' | 'gt' | 'lt' | 'regex';
-    value: any;
+    value: JsonValue;
   };
   /** Whether to remove source after transformation */
   readonly removeSource?: boolean;
   /** Structure configuration for structure transformations */
-  readonly structure?: Record<string, any>;
+  readonly structure?: Record<string, JsonValue>;
   /** Source paths for combine transformations */
   readonly sourcePaths?: string[];
   /** Combiner configuration for combine transformations */

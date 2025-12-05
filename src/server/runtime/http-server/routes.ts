@@ -32,25 +32,42 @@ export function registerHttpRoutes(options: RouteOptions): void {
 
   app.post('/shutdown', (req: Request, res: Response) => {
     try {
-      const ip = (req.socket && (req.socket as any).remoteAddress) || '';
+      const ip = req.socket?.remoteAddress || '';
       const allowed = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
       if (!allowed) {
         res.status(403).json({ error: { message: 'forbidden' } });
         return;
       }
       res.status(200).json({ ok: true });
-      setTimeout(() => { try { process.kill(process.pid, 'SIGTERM'); } catch {} }, 50);
+      setTimeout(() => {
+        try {
+          process.kill(process.pid, 'SIGTERM');
+        } catch {
+          return;
+        }
+      }, 50);
     } catch {
-      try { res.status(200).json({ ok: true }); } catch {}
-      setTimeout(() => { try { process.kill(process.pid, 'SIGTERM'); } catch {} }, 50);
+      try {
+        res.status(200).json({ ok: true });
+      } catch {
+        // ignore secondary response errors
+      }
+      setTimeout(() => {
+        try {
+          process.kill(process.pid, 'SIGTERM');
+        } catch {
+          return;
+        }
+      }, 50);
     }
   });
 
   app.get('/debug/runtime', (_req: Request, res: Response) => {
     try {
       res.status(200).json({ pipelineReady: getPipelineReady() });
-    } catch (e: any) {
-      res.status(500).json({ error: { message: e?.message || String(e) } });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message } });
     }
   });
 
@@ -81,14 +98,18 @@ export function registerHttpRoutes(options: RouteOptions): void {
     });
   });
 
-  app.use((error: any, _req: Request, res: Response) => {
-    handleError(error as Error, 'request_handler').catch(() => undefined);
-    const status = typeof error?.status === 'number' ? error.status : 500;
+  app.use((error: unknown, _req: Request, res: Response) => {
+    const normalizedError = error instanceof Error ? error : new Error(String(error));
+    handleError(normalizedError, 'request_handler').catch(() => undefined);
+    const status =
+      typeof (error as { status?: unknown })?.status === 'number'
+        ? Number((error as { status?: unknown }).status)
+        : 500;
     res.status(status).json({
       error: {
-        message: error?.message || 'Internal Server Error',
-        type: error?.type || 'internal_error',
-        code: error?.code || 'internal_error'
+        message: (error as { message?: string })?.message || 'Internal Server Error',
+        type: (error as { type?: string })?.type || 'internal_error',
+        code: (error as { code?: string })?.code || 'internal_error'
       }
     });
   });

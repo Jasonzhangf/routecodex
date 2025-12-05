@@ -7,7 +7,9 @@ const DEFAULT_KEY_VAULT_FILENAME = 'key-vault.generated.json';
 
 function sanitizePortLabel(value: string): string | undefined {
   const trimmed = value.trim();
-  if (!trimmed) return undefined;
+  if (!trimmed) {
+    return undefined;
+  }
   const sanitized = trimmed.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '');
   return sanitized || undefined;
 }
@@ -15,7 +17,9 @@ function sanitizePortLabel(value: string): string | undefined {
 export function getPortLabel(explicit?: number | string): string | undefined {
   const source =
     explicit ?? process.env.ROUTECODEX_PIPELINE_PORT ?? process.env.ROUTECODEX_PORT ?? process.env.RCC_PORT;
-  if (source === undefined || source === null) return undefined;
+  if (source === undefined || source === null) {
+    return undefined;
+  }
   const str = typeof source === 'number' ? String(source) : String(source);
   return sanitizePortLabel(str);
 }
@@ -50,8 +54,12 @@ export function resolvePipelineConfigCandidates(_baseDir: string, override?: str
   const standard = path.join(generatedDir, getPipelineConfigFilename(portLabel));
 
   const candidates: string[] = [];
-  if (overridePath) candidates.push(overridePath);
-  if (envPath) candidates.push(envPath);
+  if (overridePath) {
+    candidates.push(overridePath);
+  }
+  if (envPath) {
+    candidates.push(envPath);
+  }
   candidates.push(standard);
   return Array.from(new Set(candidates));
 }

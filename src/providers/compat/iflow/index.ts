@@ -3,6 +3,8 @@
  */
 
 import type { ModuleDependencies } from '../../../modules/pipeline/types/module.types.js';
+import type { UnknownObject } from '../../../modules/pipeline/types/common-types.js';
+import type { CompatibilityContext } from '../compatibility-interface.js';
 import { CompatibilityModuleFactory } from '../compatibility-factory.js';
 import { iFlowCompatibility } from './iflow-compatibility.js';
 
@@ -26,7 +28,7 @@ export { iFlowResponseNormalizationHook } from './hooks/iflow-response-normaliza
  */
 export function createiFlowCompatibilityModule(
   dependencies: ModuleDependencies,
-  config?: {
+  _config?: {
     id?: string;
     profileId?: string;
   }
@@ -36,8 +38,10 @@ export function createiFlowCompatibilityModule(
   return {
     module,
     initialize: () => module.initialize(),
-    processIncoming: (request: any, context: any) => module.processIncoming(request, context),
-    processOutgoing: (response: any, context: any) => module.processOutgoing(response, context),
+    processIncoming: (request: UnknownObject, context: CompatibilityContext) =>
+      module.processIncoming(request, context),
+    processOutgoing: (response: UnknownObject, context: CompatibilityContext) =>
+      module.processOutgoing(response, context),
     cleanup: () => module.cleanup()
   };
 }

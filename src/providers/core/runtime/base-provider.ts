@@ -9,7 +9,6 @@ import type {
   ProviderContext,
   ProviderError,
   ServiceProfile,
-  ProviderType,
   ProviderRuntimeProfile
 } from '../api/provider-types.js';
 import type { IAuthProvider } from '../../auth/auth-interface.js';
@@ -30,6 +29,28 @@ import {
   normalizeProviderType,
   providerTypeToProtocol
 } from '../utils/provider-type-utils.js';
+
+type RequestEnvelope = UnknownObject & { data?: UnknownObject };
+
+type ProviderErrorAugmented = ProviderError & {
+  code?: string;
+  retryable?: boolean;
+  response?: {
+    data?: {
+      error?: {
+        code?: string;
+        message?: string;
+      };
+    };
+  };
+  details?: Record<string, unknown>;
+  providerFamily?: string;
+  requestId?: string;
+  providerKey?: string;
+  providerId?: string;
+  providerType?: string;
+  routeName?: string;
+};
 
 /**
  * 基础Provider抽象类
@@ -241,6 +262,11 @@ export abstract class BaseProvider implements IProviderV2 {
     const runtimeMetadata = extractProviderRuntimeMetadata(request);
     this.lastRuntimeMetadata = runtimeMetadata;
     const runtimeProfile = this.getRuntimeProfile();
+    const payload = this.unwrapRequestPayload(request);
+    const runtimeModel = typeof runtimeMetadata?.target?.model === 'string'
+      ? runtimeMetadata.target.model
+      : undefined;
+    const payloadModel = typeof payload.model === 'string' ? payload.model : undefined;
     const providerType = normalizeProviderType(
       runtimeMetadata?.providerType ||
       runtimeProfile?.providerType ||
@@ -263,8 +289,8 @@ export abstract class BaseProvider implements IProviderV2 {
       providerType,
       providerFamily,
       startTime: Date.now(),
-      model: (request as any).model ?? runtimeMetadata?.target?.model,
-      hasTools: !!(request as any).tools,
+      model: payloadModel ?? runtimeModel,
+      hasTools: this.hasTools(payload),
       metadata: runtimeMetadata?.metadata || {},
       providerId: runtimeMetadata?.providerId || runtimeMetadata?.providerKey || runtimeProfile?.providerId,
       providerKey: runtimeMetadata?.providerKey || runtimeProfile?.providerKey,
@@ -281,7 +307,10 @@ export abstract class BaseProvider implements IProviderV2 {
     if (!metadata || !payload || typeof payload !== 'object') {
       return;
     }
-    attachProviderRuntimeMetadata(payload as Record<string, unknown>, metadata);
+    const target = this.hasDataEnvelope(payload) && payload.data && typeof payload.data === 'object'
+      ? payload.data
+      : payload;
+    attachProviderRuntimeMetadata(target as Record<string, unknown>, metadata);
   }
 
   private handleRequestError(error: unknown, context: ProviderContext): void {
@@ -292,34 +321,37 @@ export abstract class BaseProvider implements IProviderV2 {
     if (!statusCode) {
       try {
         const m = msg.match(/HTTP\s+(\d{3})/i);
-        if (m) statusCode = parseInt(m[1], 10);
+        if (m) {
+          statusCode = parseInt(m[1], 10);
+        }
       } catch { /* ignore */ }
     }
-    const upstream = (err as any)?.response?.data;
-    const upstreamCode = (err as any)?.code || upstream?.error?.code;
+    const augmentedError = err as ProviderErrorAugmented;
+    const upstream = augmentedError.response?.data;
+    const upstreamCode = augmentedError.code || upstream?.error?.code;
     const upstreamMessage = upstream?.error?.message;
     const isRateLimit = statusCode === 429;
-    const isTransient = isRateLimit || (err as any)?.retryable === true;
+    const isTransient = isRateLimit || augmentedError.retryable === true;
 
     const runtimeProfile = this.getRuntimeProfile();
     const isClientError = typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500 && statusCode !== 429;
     const affectsHealth = isClientError ? false : !isTransient;
 
     // 统一错误日志
-      this.dependencies.logger?.logModule(this.id, 'request-error', {
-        requestId: context.requestId,
-        error: msg,
-        statusCode,
-        upstreamCode,
-        upstreamMessage,
-        providerType: context.providerType,
-        providerFamily: context.providerFamily,
-        providerId: context.providerId,
-        providerProtocol: context.providerProtocol,
-        providerKey: context.providerKey || runtimeProfile?.providerKey,
-        runtimeKey: runtimeProfile?.runtimeKey,
-        processingTime: now - context.startTime
-      });
+    this.dependencies.logger?.logModule(this.id, 'request-error', {
+      requestId: context.requestId,
+      error: msg,
+      statusCode,
+      upstreamCode,
+      upstreamMessage,
+      providerType: context.providerType,
+      providerFamily: context.providerFamily,
+      providerId: context.providerId,
+      providerProtocol: context.providerProtocol,
+      providerKey: context.providerKey || runtimeProfile?.providerKey,
+      runtimeKey: runtimeProfile?.runtimeKey,
+      processingTime: now - context.startTime
+    });
 
     const enrichedDetails = {
       providerId: this.id,
@@ -331,16 +363,16 @@ export abstract class BaseProvider implements IProviderV2 {
       upstreamCode,
       upstreamMessage,
       requestContext: context.runtimeMetadata,
-      meta: (err as any)?.details
+      meta: augmentedError.details
     };
-    const enrichedError = err as ProviderError & Record<string, unknown>;
+    const enrichedError = augmentedError;
     if (!enrichedError.requestId) {
       enrichedError.requestId = context.requestId;
     }
     enrichedError.providerKey = context.providerKey;
     enrichedError.providerId = context.providerId;
     enrichedError.providerType = context.providerType;
-    (enrichedError as any).providerFamily = context.providerFamily;
+    enrichedError.providerFamily = context.providerFamily;
     enrichedError.routeName = context.routeName;
     enrichedError.details = {
       ...(enrichedError.details || {}),
@@ -363,5 +395,24 @@ export abstract class BaseProvider implements IProviderV2 {
       affectsHealth,
       details: enrichedDetails
     });
+  }
+
+  private unwrapRequestPayload(request: UnknownObject): Record<string, unknown> {
+    if (this.hasDataEnvelope(request) && request.data && typeof request.data === 'object') {
+      return request.data as Record<string, unknown>;
+    }
+    return request as Record<string, unknown>;
+  }
+
+  protected hasDataEnvelope(value: UnknownObject): value is RequestEnvelope {
+    return Boolean(value && typeof value === 'object' && 'data' in value);
+  }
+
+  private hasTools(payload: Record<string, unknown>): boolean {
+    const tools = payload['tools'];
+    if (Array.isArray(tools)) {
+      return tools.length > 0;
+    }
+    return Boolean(tools);
   }
 }

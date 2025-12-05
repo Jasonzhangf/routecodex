@@ -14,7 +14,9 @@ function parseLines(content: string): NodeSnapshot[] {
   const lines = content.split('\n');
   for (const line of lines) {
     const trimmed = line.trim();
-    if (!trimmed) continue;
+    if (!trimmed) {
+      continue;
+    }
     try {
       snapshots.push(JSON.parse(trimmed));
     } catch {
@@ -57,7 +59,9 @@ export class FileSnapshotStore implements SnapshotStore {
       }
       return snapshots;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return [];
+      }
       throw error;
     }
   }
@@ -66,7 +70,9 @@ export class FileSnapshotStore implements SnapshotStore {
     try {
       await fsp.rm(this.sessionFile(sessionId));
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
     }
   }
 

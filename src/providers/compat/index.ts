@@ -8,6 +8,10 @@ export type { CompatibilityContext, CompatibilityModule } from './compatibility-
 export type { CompatibilityModuleConfig } from './compatibility-factory.js';
 export { CompatibilityModuleFactory } from './compatibility-factory.js';
 export { CompatibilityManager } from './compatibility-manager.js';
+import type { ModuleDependencies } from '../../modules/pipeline/types/module.types.js';
+import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
+import type { CompatibilityContext as CompatCtx } from './compatibility-interface.js';
+import type { CompatibilityModuleConfig as CompatConfig } from './compatibility-factory.js';
 import { CompatibilityManager } from './compatibility-manager.js';
 
 // 导入GLM模块以触发注册
@@ -26,7 +30,7 @@ export class CompatibilityAPI {
   private manager: CompatibilityManager;
   private isInitialized = false;
 
-  constructor(dependencies: any) {
+  constructor(dependencies: ModuleDependencies) {
     this.manager = new CompatibilityManager(dependencies);
   }
 
@@ -45,7 +49,7 @@ export class CompatibilityAPI {
   /**
    * 创建兼容性模块
    */
-  async createModule(config: any): Promise<string> {
+  async createModule(config: CompatConfig): Promise<string> {
     if (!this.isInitialized) {
       throw new Error('CompatibilityAPI not initialized');
     }
@@ -56,7 +60,11 @@ export class CompatibilityAPI {
   /**
    * 处理请求
    */
-  async processRequest(moduleId: string, request: any, context: any): Promise<any> {
+  async processRequest(
+    moduleId: string,
+    request: UnknownObject,
+    context?: CompatCtx
+  ): Promise<UnknownObject> {
     if (!this.isInitialized) {
       throw new Error('CompatibilityAPI not initialized');
     }
@@ -67,7 +75,11 @@ export class CompatibilityAPI {
   /**
    * 处理响应
    */
-  async processResponse(moduleId: string, response: any, context: any): Promise<any> {
+  async processResponse(
+    moduleId: string,
+    response: UnknownObject,
+    context?: CompatCtx
+  ): Promise<UnknownObject> {
     if (!this.isInitialized) {
       throw new Error('CompatibilityAPI not initialized');
     }
@@ -103,6 +115,6 @@ export class CompatibilityAPI {
 /**
  * 创建兼容性API实例
  */
-export function createCompatibilityAPI(dependencies: any): CompatibilityAPI {
+export function createCompatibilityAPI(dependencies: ModuleDependencies): CompatibilityAPI {
   return new CompatibilityAPI(dependencies);
 }

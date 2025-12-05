@@ -4,6 +4,32 @@ import type { ModuleDependencies } from '../../../modules/pipeline/types/module.
 import type { CompatibilityContext } from '../compatibility-interface.js';
 import { BaseCompatibility } from '../base-compatibility.js';
 
+interface ConfigCompatibilitySettings {
+  shapeFilterConfigPath?: string;
+  providerAlias?: string;
+}
+
+type ProviderResponseWrapper = UnknownObject & {
+  data?: UnknownObject;
+  status?: number;
+  headers?: UnknownObject;
+};
+
+function isRecord(value: unknown): value is UnknownObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isProviderResponseWrapper(value: UnknownObject): value is ProviderResponseWrapper {
+  return ('data' in value) && ('status' in value || 'headers' in value);
+}
+
+function unwrapProviderResponse(payload: UnknownObject): UnknownObject {
+  if (isProviderResponseWrapper(payload) && isRecord(payload.data)) {
+    return payload.data;
+  }
+  return payload;
+}
+
 /**
  * 通用配置兼容模块（纯配置）
  * - 默认直通（不修改请求/响应）
@@ -14,14 +40,18 @@ export class ConfigCompatibility implements CompatibilityModule {
   readonly id: string;
   readonly type = 'config-compatibility';
 
-  private deps: ModuleDependencies;
+  private readonly deps: ModuleDependencies;
   private base: BaseCompatibility | null = null;
-  private cfg: { shapeFilterConfigPath?: string; providerAlias?: string };
+  private cfg: ConfigCompatibilitySettings;
 
   constructor(dependencies: ModuleDependencies, config?: { shapeFilterConfigPath?: string; providerAlias?: string }) {
     this.deps = dependencies;
     this.id = `compat-config-${Date.now()}`;
     this.cfg = config || {};
+  }
+
+  setConfig(config: unknown): void {
+    this.cfg = this.normalizeConfig(config);
   }
 
   async initialize(): Promise<void> {
@@ -55,14 +85,33 @@ export class ConfigCompatibility implements CompatibilityModule {
   }
 
   async processOutgoing(response: UnknownObject, context: CompatibilityContext): Promise<UnknownObject> {
-    // 兼容 provider 响应包装：{ data, status, headers }
-    let payload = response as any;
-    if (payload && typeof payload === 'object' && ('data' in payload) && ('status' in payload)) {
-      payload = (payload as any).data ?? payload;
-    }
+    const payload = unwrapProviderResponse(response);
     if (!this.base) { return payload; }
-    return await this.base.processOutgoing(payload as UnknownObject, context);
+    return await this.base.processOutgoing(payload, context);
   }
 
   async cleanup(): Promise<void> { /* no-op */ }
+
+  private normalizeConfig(config: unknown): ConfigCompatibilitySettings {
+    if (!isRecord(config)) {
+      return this.cfg || {};
+    }
+    if (isRecord(config.config)) {
+      return this.pickSettings(config.config);
+    }
+    return this.pickSettings(config);
+  }
+
+  private pickSettings(source: UnknownObject): ConfigCompatibilitySettings {
+    const settings: ConfigCompatibilitySettings = {};
+    const shapeValue = source.shapeFilterConfigPath;
+    if (typeof shapeValue === 'string' && shapeValue.length > 0) {
+      settings.shapeFilterConfigPath = shapeValue;
+    }
+    const aliasValue = source.providerAlias;
+    if (typeof aliasValue === 'string' && aliasValue.length > 0) {
+      settings.providerAlias = aliasValue;
+    }
+    return settings;
+  }
 }

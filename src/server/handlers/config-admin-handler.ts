@@ -6,6 +6,12 @@ import { homedir } from 'os';
 import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
 import { loadRouteCodexConfig } from '../../config/routecodex-config-loader.js';
 import { ServerFactory } from '../../server-factory.js';
+import type { ServerInstance } from '../../server-factory.js';
+
+type JsonObject = Record<string, unknown>;
+type ReloadableServerInstance = ServerInstance & {
+  reloadRuntime?: (config: JsonObject, options: { providerProfiles?: unknown }) => Promise<void>;
+};
 
 /**
  * 与 index.ts 中逻辑对齐：解析用户配置文件路径。
@@ -17,7 +23,7 @@ function pickUserConfigPath(): string {
     process.env.RCC4_CONFIG_PATH,
     process.env.ROUTECODEX_CONFIG,
     process.env.ROUTECODEX_CONFIG_PATH
-  ].filter(Boolean) as string[];
+  ].filter((value): value is string => typeof value === 'string' && value.length > 0);
 
   for (const p of envPaths) {
     try {
@@ -48,12 +54,21 @@ export async function handleGetUserConfig(req: Request, res: Response): Promise<
   try {
     const userConfigPath = pickUserConfigPath();
     const content = await fs.readFile(userConfigPath, 'utf-8');
-    const json = JSON.parse(content);
-    res.json({ path: userConfigPath, config: json });
-  } catch (error: any) {
+    const parsed = JSON.parse(content);
+    if (!isRecord(parsed)) {
+      res.status(500).json({
+        error: {
+          message: 'Configuration file root must be an object',
+          type: 'config_read_error'
+        }
+      });
+      return;
+    }
+    res.json({ path: userConfigPath, config: parsed });
+  } catch (error: unknown) {
     res.status(500).json({
       error: {
-        message: error?.message || String(error),
+        message: formatErrorMessage(error),
         type: 'config_read_error'
       }
     });
@@ -74,9 +89,9 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
     try {
       const userConfigPath = pickUserConfigPath();
       const content = await fs.readFile(userConfigPath, 'utf-8');
-      const json = JSON.parse(content);
-      const vr = json?.virtualrouter ?? {};
-      const providersRoot = vr.providers ?? json?.providers ?? {};
+      const parsed = JSON.parse(content);
+      const userConfig: JsonObject = isRecord(parsed) ? parsed : {};
+      const providersRoot = resolveProviders(userConfig);
       configuredProviderIds = new Set<string>(Object.keys(providersRoot || {}));
     } catch {
       // 若读取失败，不阻止模板列表返回；仅视为无绑定信息
@@ -97,20 +112,25 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
       if (fsSync.existsSync(providerDir) && fsSync.statSync(providerDir).isDirectory()) {
         const entries = await fs.readdir(providerDir, { withFileTypes: true });
         for (const entry of entries) {
-          if (!entry.isFile()) continue;
-          if (!entry.name.endsWith('.json')) continue;
+          if (!entry.isFile()) {
+            continue;
+          }
+          if (!entry.name.endsWith('.json')) {
+            continue;
+          }
           const fullPath = path.join(providerDir, entry.name);
           try {
             const content = await fs.readFile(fullPath, 'utf-8');
-            const json = JSON.parse(content);
-            const id =
-              json?.id ||
-              json?.providerId ||
-              path.basename(entry.name, '.json');
-            const type = json?.type || json?.providerType;
-            const baseURL = json?.baseURL || json?.baseUrl;
-            const authType = json?.auth?.type;
-            const boundToConfig = configuredProviderIds.has(id);
+            const parsed = JSON.parse(content);
+            if (!isRecord(parsed)) {
+              continue;
+            }
+            const fallbackId = path.basename(entry.name, '.json');
+            const id = readString(parsed.id) ?? readString(parsed.providerId) ?? fallbackId;
+            const type = readString(parsed.type) ?? readString(parsed.providerType);
+            const baseURL = readString(parsed.baseURL) ?? readString(parsed.baseUrl);
+            const authType = isRecord(parsed.auth) ? readString(parsed.auth.type) : undefined;
+            const boundToConfig = Boolean(id && configuredProviderIds.has(id));
             standalone.push({
               id,
               source: fullPath,
@@ -166,10 +186,10 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
       templates,
       standalone
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     res.status(500).json({
       error: {
-        message: error?.message || String(error),
+        message: formatErrorMessage(error),
         type: 'provider_templates_error'
       }
     });
@@ -178,17 +198,17 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
 
 export async function handleValidateUserConfig(req: Request, res: Response): Promise<void> {
   try {
-    const draftConfig = (req.body && typeof req.body === 'object') ? req.body : {};
+    const draftConfig: JsonObject = isRecord(req.body) ? req.body : {};
     const errors = validateUserConfig(draftConfig);
     if (errors.length) {
       res.status(400).json({ ok: false, errors });
     } else {
       res.json({ ok: true });
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     res.status(500).json({
       ok: false,
-      errors: [error?.message || String(error)]
+      errors: [formatErrorMessage(error)]
     });
   }
 }
@@ -196,7 +216,7 @@ export async function handleValidateUserConfig(req: Request, res: Response): Pro
 export async function handleSaveUserConfig(req: Request, res: Response): Promise<void> {
   try {
     const userConfigPath = pickUserConfigPath();
-    const draftConfig = (req.body && typeof req.body === 'object') ? req.body : {};
+    const draftConfig: JsonObject = isRecord(req.body) ? req.body : {};
     const errors = validateUserConfig(draftConfig);
     if (errors.length) {
       res.status(400).json({ ok: false, errors });
@@ -207,34 +227,34 @@ export async function handleSaveUserConfig(req: Request, res: Response): Promise
 
     // 写入成功后，基于最新配置重新生成虚拟路由配置并热重载流水线
     try {
-      const v2 = ServerFactory.getV2Instance() as any;
+      const v2 = ServerFactory.getV2Instance() as ReloadableServerInstance | undefined;
       if (!v2 || typeof v2.reloadRuntime !== 'function') {
         throw new Error('RouteCodex V2 server does not expose runtime reload');
       }
       const { userConfig: latestConfig, providerProfiles } = await loadRouteCodexConfig(userConfigPath);
       await v2.reloadRuntime(latestConfig, { providerProfiles });
-    } catch (reloadError: any) {
+    } catch (reloadError: unknown) {
       // 配置文件已写入，但运行时重载失败，向调用方明确返回错误信息
       res.status(500).json({
         ok: false,
         errors: [
           'Config saved but runtime reload failed',
-          reloadError?.message || String(reloadError)
+          formatErrorMessage(reloadError)
         ]
       });
       return;
     }
 
     res.json({ ok: true, path: userConfigPath });
-  } catch (error: any) {
+  } catch (error: unknown) {
     res.status(500).json({
       ok: false,
-      errors: [error?.message || String(error)]
+      errors: [formatErrorMessage(error)]
     });
   }
 }
 
-function validateUserConfig(config: Record<string, unknown>): string[] {
+function validateUserConfig(config: JsonObject): string[] {
   const errors: string[] = [];
   if (!config || typeof config !== 'object') {
     errors.push('Configuration must be an object');
@@ -267,21 +287,60 @@ function validateUserConfig(config: Record<string, unknown>): string[] {
   return errors;
 }
 
-function resolveProviders(config: Record<string, unknown>): Record<string, unknown> {
-  const vr = config && typeof config === 'object' ? (config as any).virtualrouter : {};
-  const providers = (vr && typeof vr === 'object' && vr.providers) ? vr.providers : (config as any).providers;
-  return providers && typeof providers === 'object' ? providers : {};
+function resolveProviders(config: JsonObject): Record<string, unknown> {
+  const virtualRouter = getVirtualRouter(config);
+  if (virtualRouter?.providers && isRecord(virtualRouter.providers)) {
+    return virtualRouter.providers;
+  }
+  if (isRecord((config as { providers?: unknown }).providers)) {
+    return (config as { providers: Record<string, unknown> }).providers;
+  }
+  return {};
 }
 
-function resolveRouting(config: Record<string, unknown>): Record<string, string[]> {
-  const vr = config && typeof config === 'object' ? (config as any).virtualrouter : {};
-  const routing = (vr && typeof vr === 'object' && vr.routing) ? vr.routing : (config as any).routing;
-  if (routing && typeof routing === 'object') {
+function resolveRouting(config: JsonObject): Record<string, string[]> {
+  const virtualRouter = getVirtualRouter(config);
+  const routingNode = virtualRouter?.routing ?? (config as { routing?: unknown }).routing;
+  if (routingNode && isRecord(routingNode)) {
     const normalized: Record<string, string[]> = {};
-    for (const [route, list] of Object.entries(routing)) {
-      normalized[route] = Array.isArray(list) ? list.map((item) => String(item).trim()).filter(Boolean) : [];
+    for (const [route, list] of Object.entries(routingNode)) {
+      normalized[route] = Array.isArray(list)
+        ? list.map((item) => String(item).trim()).filter(Boolean)
+        : [];
     }
     return normalized;
   }
   return {};
+}
+
+type VirtualRouterLike = JsonObject & {
+  providers?: Record<string, unknown>;
+  routing?: Record<string, unknown>;
+};
+
+function getVirtualRouter(config: JsonObject): VirtualRouterLike | undefined {
+  const candidate = (config as { virtualrouter?: unknown }).virtualrouter;
+  return isVirtualRouterLike(candidate) ? candidate : undefined;
+}
+
+function isVirtualRouterLike(value: unknown): value is VirtualRouterLike {
+  return isRecord(value);
+}
+
+function isRecord(value: unknown): value is JsonObject {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readString(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  return undefined;
+}
+
+function formatErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
 }

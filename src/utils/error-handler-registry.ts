@@ -18,6 +18,43 @@ interface ErrorContext {
   context: unknown;
 }
 
+interface DeferredHandler {
+  resolve: (value: unknown) => void;
+  reject: (reason?: unknown) => void;
+}
+
+interface RateLimitPipelineDescriptor {
+  pipelineId: string;
+  [key: string]: unknown;
+}
+
+interface RateLimitHookTelemetryEvent {
+  type: '429-backoff' | '429-final-fail';
+  timestamp: number;
+  pipelineId?: string;
+  delay?: number;
+  requestId?: string;
+  message?: string;
+}
+
+interface RateLimitHandlerHooks {
+  getAvailablePipelines?(exclude: Set<string>): RateLimitPipelineDescriptor[];
+  selectNextRoundRobin?(candidates: RateLimitPipelineDescriptor[]): RateLimitPipelineDescriptor;
+  processWithPipeline?(pipeline: RateLimitPipelineDescriptor): Promise<unknown>;
+  getPipelineById?(pipelineId: string): RateLimitPipelineDescriptor | undefined;
+  errorCenter?: {
+    handleError?(event: RateLimitHookTelemetryEvent): Promise<void>;
+  };
+}
+
+interface RateLimitHandlerContext {
+  hooks?: RateLimitHandlerHooks;
+  schedule?: number[];
+  attemptedPipelineIds?: string[];
+  deferred?: DeferredHandler;
+  request?: { route?: { requestId?: string } };
+}
+
 /**
  * Error handler function type
  */
@@ -401,21 +438,36 @@ export class ErrorHandlerRegistry {
       errorCode: 'rate_limit_error',
       handler: async (context: ErrorContext) => {
         try {
-          const ctx: any = context.context || {};
-          const hooks = ctx.hooks || {};
-          const schedule: number[] = Array.isArray(ctx.schedule) ? ctx.schedule as number[] : [30000, 60000, 120000];
-          const attempted: string[] = Array.isArray(ctx.attemptedPipelineIds) ? (ctx.attemptedPipelineIds as string[]) : [];
-          const deferred = (ctx.deferred || {}) as { resolve: (v: unknown) => void; reject: (e: unknown) => void };
+          const rateLimitContext = (context.context as RateLimitHandlerContext | undefined) ?? {};
+          const hooks = rateLimitContext.hooks ?? {};
+          const schedule: number[] =
+            Array.isArray(rateLimitContext.schedule) && rateLimitContext.schedule.length
+              ? rateLimitContext.schedule
+              : [30000, 60000, 120000];
+          const attempted: string[] = Array.isArray(rateLimitContext.attemptedPipelineIds)
+            ? rateLimitContext.attemptedPipelineIds
+            : [];
+          const deferred: DeferredHandler =
+            rateLimitContext.deferred ?? {
+              resolve: () => {},
+              reject: () => {}
+            };
 
           // Try pipeline switch first if available
           const exclude = new Set<string>(attempted);
-          let candidates: any[] = [];
-          try { candidates = hooks.getAvailablePipelines ? hooks.getAvailablePipelines(exclude) : []; } catch {}
+          let candidates: RateLimitPipelineDescriptor[] = [];
+          try {
+            candidates = hooks.getAvailablePipelines ? hooks.getAvailablePipelines(exclude) : [];
+          } catch {
+            candidates = [];
+          }
 
           if (Array.isArray(candidates) && candidates.length > 0) {
             try {
               const next = hooks.selectNextRoundRobin ? hooks.selectNextRoundRobin(candidates) : candidates[0];
-              const resp = await (hooks.processWithPipeline ? hooks.processWithPipeline(next) : Promise.reject(new Error('processWithPipeline not provided')));
+              const resp = await (hooks.processWithPipeline
+                ? hooks.processWithPipeline(next)
+                : Promise.reject(new Error('processWithPipeline not provided')));
               deferred.resolve(resp);
               return;
             } catch (e) {
@@ -435,25 +487,56 @@ export class ErrorHandlerRegistry {
           for (const delay of schedule) {
             try {
               // notify error center about backoff event (best-effort)
-              try { await hooks.errorCenter?.handleError?.({ type: '429-backoff', timestamp: Date.now(), pipelineId: pipeline.pipelineId, delay, requestId: ctx.request?.route?.requestId }); } catch {}
+              try {
+                await hooks.errorCenter?.handleError?.({
+                  type: '429-backoff',
+                  timestamp: Date.now(),
+                  pipelineId: pipeline.pipelineId,
+                  delay,
+                  requestId: rateLimitContext.request?.route?.requestId
+                });
+              } catch {
+                // ignore telemetry failures
+              }
               await new Promise(resolve => setTimeout(resolve, delay));
-              const resp = await (hooks.processWithPipeline ? hooks.processWithPipeline(pipeline) : Promise.reject(new Error('processWithPipeline not provided')));
+              const resp = await (hooks.processWithPipeline
+                ? hooks.processWithPipeline(pipeline)
+                : Promise.reject(new Error('processWithPipeline not provided')));
               deferred.resolve(resp);
               return;
             } catch (e) {
-              const code = (e as any)?.statusCode || (e as any)?.code || '';
-              const is429 = ((e as any)?.statusCode === 429 || String(code).toUpperCase() === 'HTTP_429');
-              if (!is429) { deferred.reject(e); return; }
+              const errorObject = (typeof e === 'object' && e !== null ? e : {}) as Record<string, unknown>;
+              const statusCode = typeof errorObject['statusCode'] === 'number' ? Number(errorObject['statusCode']) : undefined;
+              const code = errorObject['code'];
+              const is429 = statusCode === 429 || String(code ?? '').toUpperCase() === 'HTTP_429';
+              if (!is429) {
+                deferred.reject(e);
+                return;
+              }
               // else continue next delay
             }
           }
 
           // exhausted
-          try { await hooks.errorCenter?.handleError?.({ type: '429-final-fail', timestamp: Date.now(), pipelineId: pipeline.pipelineId, requestId: ctx.request?.route?.requestId, message: (context.error as any)?.message }); } catch {}
+          try {
+            await hooks.errorCenter?.handleError?.({
+              type: '429-final-fail',
+              timestamp: Date.now(),
+              pipelineId: pipeline.pipelineId,
+              requestId: rateLimitContext.request?.route?.requestId,
+              message: context.error instanceof Error ? context.error.message : undefined
+            });
+          } catch {
+            // ignore telemetry failures
+          }
           deferred.reject(context.error || new Error('429 handling exhausted'));
         } catch (e) {
           // If the handler itself fails, reject via deferred if present
-          try { (context.context as any)?.deferred?.reject?.(e); } catch {}
+          try {
+            (context.context as RateLimitHandlerContext | undefined)?.deferred?.reject?.(e);
+          } catch {
+            // ignore deferred rejection errors
+          }
         }
       },
       priority: 1,

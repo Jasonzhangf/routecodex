@@ -8,9 +8,13 @@
 import { LOCAL_HOSTS } from './constants/index.js';
 
 import type { ServerConfig } from './server/RouteCodexServer.js';
-// Avoid hard type coupling with V2 files to keep build green when V2 is excluded.
-// Use a lightweight structural alias instead of importing types from src/server-v2/*.
-type ServerConfigV2 = any;
+import type { ServerConfigV2 as HttpServerConfigV2 } from './server/runtime/http-server.js';
+
+type ServerConfigV2 = Partial<HttpServerConfigV2> & {
+  server?: Partial<HttpServerConfigV2['server']>;
+  logging?: Partial<HttpServerConfigV2['logging']>;
+  providers?: Record<string, unknown>;
+};
 
 /**
  * 服务器创建选项
@@ -31,7 +35,7 @@ export interface ServerInstance {
   initialize(): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
-  getStatus(): any;
+  getStatus(): unknown;
   isInitialized(): boolean;
   isRunning(): boolean;
 }
@@ -54,11 +58,21 @@ export class ServerFactory {
     // 新开关：ROUTECODEX_PIPELINE_MODE=dynamic|static（默认dynamic）
     const modeEnv = String(process.env.ROUTECODEX_PIPELINE_MODE || process.env.RCC_PIPELINE_MODE || '').trim().toLowerCase();
     const resolveUseV2 = (): boolean => {
-      if (modeEnv === 'dynamic' || modeEnv === 'v2') return true;
-      if (modeEnv === 'static' || modeEnv === 'v1') return false;
+      if (modeEnv === 'dynamic' || modeEnv === 'v2') {
+        return true;
+      }
+      if (modeEnv === 'static' || modeEnv === 'v1') {
+        return false;
+      }
       const legacy = String(process.env.ROUTECODEX_USE_V2 || '').trim().toLowerCase();
-      if (legacy === 'true' || legacy === '1') { console.warn('[ServerFactory] ROUTECODEX_USE_V2 已弃用，请使用 ROUTECODEX_PIPELINE_MODE=dynamic|static'); return true; }
-      if (legacy === 'false' || legacy === '0') { console.warn('[ServerFactory] ROUTECODEX_USE_V2 已弃用，请使用 ROUTECODEX_PIPELINE_MODE=dynamic|static'); return false; }
+      if (legacy === 'true' || legacy === '1') {
+        console.warn('[ServerFactory] ROUTECODEX_USE_V2 已弃用，请使用 ROUTECODEX_PIPELINE_MODE=dynamic|static');
+        return true;
+      }
+      if (legacy === 'false' || legacy === '0') {
+        console.warn('[ServerFactory] ROUTECODEX_USE_V2 已弃用，请使用 ROUTECODEX_PIPELINE_MODE=dynamic|static');
+        return false;
+      }
       return true; // 默认动态（V2）
     };
     const useV2 = options.useV2 ?? resolveUseV2();
@@ -79,7 +93,7 @@ export class ServerFactory {
         throw error;
       }
     } else {
-      return await this.createV1Server(config as ServerConfig, options);
+      return await this.createV1Server(config as ServerConfig);
     }
   }
 
@@ -88,7 +102,6 @@ export class ServerFactory {
    */
   static async createV1Server(
     config: ServerConfig,
-    options: ServerCreateOptions = {}
   ): Promise<ServerInstance> {
     if (!ServerFactory.v1Instance) {
       console.log('[ServerFactory] Creating V1 server instance');
@@ -102,6 +115,10 @@ export class ServerFactory {
         console.error('[ServerFactory] Failed to create V1 server:', error);
         throw new Error(`Failed to create V1 server: ${(error as Error).message}`);
       }
+    }
+
+    if (!ServerFactory.v1Instance) {
+      throw new Error('RouteCodex V1 server was not created');
     }
 
     return ServerFactory.v1Instance;
@@ -126,12 +143,12 @@ export class ServerFactory {
           ...config,
           v2Config: {
             enableHooks: options.config?.v2HooksEnabled ?? true,
-            enableMiddleware: options.config?.v2MiddlewareEnabled ?? true,
             ...config.v2Config
           }
         };
+        const normalizedConfig = ServerFactory.normalizeV2Config(v2Config);
 
-        ServerFactory.v2Instance = new RouteCodexHttpServer(v2Config);
+        ServerFactory.v2Instance = new RouteCodexHttpServer(normalizedConfig);
         console.log('[ServerFactory] V2 server instance created');
       } catch (error) {
         console.error('[ServerFactory] Failed to create V2 server:', error);
@@ -139,7 +156,35 @@ export class ServerFactory {
       }
     }
 
-    return ServerFactory.v2Instance!;
+    if (!ServerFactory.v2Instance) {
+      throw new Error('RouteCodex V2 server was not created');
+    }
+
+    return ServerFactory.v2Instance;
+  }
+
+  private static normalizeV2Config(config: ServerConfigV2): HttpServerConfigV2 {
+    const resolveLevel = (level?: unknown): HttpServerConfigV2['logging']['level'] => {
+      return level === 'info' || level === 'warn' || level === 'error' ? level : 'debug';
+    };
+
+    return {
+      server: {
+        port: Number.isFinite(config.server?.port) ? Number(config.server?.port) : 5521,
+        host: (typeof config.server?.host === 'string' && config.server.host.trim()) ? config.server.host : LOCAL_HOSTS.IPV4,
+        timeout: config.server?.timeout,
+        useV2: config.server?.useV2 ?? true
+      },
+      pipeline: config.pipeline ?? {},
+      logging: {
+        level: resolveLevel(config.logging?.level),
+        enableConsole: config.logging?.enableConsole ?? true,
+        enableFile: config.logging?.enableFile ?? false,
+        filePath: config.logging?.filePath
+      },
+      providers: config.providers ?? {},
+      v2Config: config.v2Config
+    };
   }
 
   /**
@@ -158,8 +203,7 @@ export class ServerFactory {
       },
       providers: {},
       v2Config: {
-        enableHooks: true,
-        enableMiddleware: true
+        enableHooks: true
       }
     };
 
@@ -171,7 +215,7 @@ export class ServerFactory {
    * 生产专用：创建V1服务器实例
    */
   static async createV1ServerForProduction(config: ServerConfig): Promise<ServerInstance> {
-    return await this.createV1Server(config, { useV2: false, fallbackToV1: false });
+    return await this.createV1Server(config);
   }
 
   /**

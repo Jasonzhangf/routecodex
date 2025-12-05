@@ -1,7 +1,9 @@
 import type { CompatibilityContext } from '../../compatibility-interface.js';
 import type { UnknownObject } from '../../../../modules/pipeline/types/common-types.js';
-import type { ModuleDependencies } from '../../../../modules/pipeline/types/module.types.js';
 import { BaseHook } from './base-hook.js';
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
 
 /**
  * iFlow响应校验Hook
@@ -79,12 +81,9 @@ export class iFlowResponseValidationHook extends BaseHook {
   }
 
   private unwrapResponse(response: UnknownObject): UnknownObject {
-    try {
-      if (response && typeof response === 'object' && 'data' in response && (response as any).data) {
-        const d = (response as any).data;
-        if (d && typeof d === 'object') { return d as UnknownObject; }
-      }
-    } catch { /* ignore */ }
+    if (isRecord(response) && 'data' in response && isRecord(response.data)) {
+      return response.data;
+    }
     return response;
   }
 
@@ -128,7 +127,7 @@ export class iFlowResponseValidationHook extends BaseHook {
     }
 
     // 检查message字段
-    if (!choice.message || typeof choice.message !== 'object') {
+    if (!isRecord(choice.message)) {
       errors.push(`choices[${index}].message字段必须是对象`);
     } else {
       const messageErrors = this.validateMessage(choice.message as UnknownObject, index);
@@ -144,7 +143,7 @@ export class iFlowResponseValidationHook extends BaseHook {
     // 检查role字段
     if (!message.role || typeof message.role !== 'string') {
       errors.push(`choices[${choiceIndex}].message.role字段必须是有效字符串`);
-    } else if (!['assistant', 'user', 'system', 'tool'].includes(message.role as string)) {
+    } else if (!['assistant', 'user', 'system', 'tool'].includes(message.role)) {
       errors.push(`choices[${choiceIndex}].message.role字段值无效`);
     }
 
@@ -206,7 +205,7 @@ export class iFlowResponseValidationHook extends BaseHook {
     }
 
     // 检查function字段
-    if (!toolCall.function || typeof toolCall.function !== 'object') {
+    if (!isRecord(toolCall.function)) {
       errors.push(`choices[${choiceIndex}].message.tool_calls[${toolCallIndex}].function字段必须是对象`);
     } else {
       const functionErrors = this.validateToolCallFunction(toolCall.function as UnknownObject, choiceIndex, toolCallIndex);
@@ -230,8 +229,8 @@ export class iFlowResponseValidationHook extends BaseHook {
     } else {
       // 验证arguments是否为有效的JSON
       try {
-        JSON.parse(func.arguments as string);
-      } catch (error) {
+        JSON.parse(func.arguments);
+      } catch {
         errors.push(`choices[${choiceIndex}].message.tool_calls[${toolCallIndex}].function.arguments字段必须是有效的JSON字符串`);
       }
     }
@@ -239,40 +238,47 @@ export class iFlowResponseValidationHook extends BaseHook {
     return errors;
   }
 
-  private validateUsage(usage: any): string[] {
+  private validateUsage(usage: unknown): string[] {
     const errors: string[] = [];
 
-    if (!usage || typeof usage !== 'object') {
+    if (!isRecord(usage)) {
       errors.push('usage字段必须是对象');
       return errors;
     }
 
     // 检查prompt_tokens
-    if (usage.prompt_tokens !== undefined) {
-      if (typeof usage.prompt_tokens !== 'number' || usage.prompt_tokens < 0) {
+    const promptTokens = usage.prompt_tokens;
+    if (promptTokens !== undefined && promptTokens !== null) {
+      if (typeof promptTokens !== 'number' || promptTokens < 0) {
         errors.push('usage.prompt_tokens必须是非负数');
       }
     }
 
     // 检查completion_tokens
-    if (usage.completion_tokens !== undefined) {
-      if (typeof usage.completion_tokens !== 'number' || usage.completion_tokens < 0) {
+    const completionTokens = usage.completion_tokens;
+    if (completionTokens !== undefined && completionTokens !== null) {
+      if (typeof completionTokens !== 'number' || completionTokens < 0) {
         errors.push('usage.completion_tokens必须是非负数');
       }
     }
 
     // 检查total_tokens
-    if (usage.total_tokens !== undefined) {
-      if (typeof usage.total_tokens !== 'number' || usage.total_tokens < 0) {
+    const totalTokens = usage.total_tokens;
+    if (totalTokens !== undefined && totalTokens !== null) {
+      if (typeof totalTokens !== 'number' || totalTokens < 0) {
         errors.push('usage.total_tokens必须是非负数');
       }
     }
 
     // 验证token数量的一致性
-    if (usage.prompt_tokens !== undefined && usage.completion_tokens !== undefined && usage.total_tokens !== undefined) {
-      const expectedTotal = usage.prompt_tokens + usage.completion_tokens;
-      if (usage.total_tokens !== expectedTotal) {
-        errors.push(`usage.total_tokens (${usage.total_tokens}) 应该等于 prompt_tokens (${usage.prompt_tokens}) + completion_tokens (${usage.completion_tokens})`);
+    if (
+      typeof promptTokens === 'number' &&
+      typeof completionTokens === 'number' &&
+      typeof totalTokens === 'number'
+    ) {
+      const expectedTotal = promptTokens + completionTokens;
+      if (totalTokens !== expectedTotal) {
+        errors.push(`usage.total_tokens (${totalTokens}) 应该等于 prompt_tokens (${promptTokens}) + completion_tokens (${completionTokens})`);
       }
     }
 

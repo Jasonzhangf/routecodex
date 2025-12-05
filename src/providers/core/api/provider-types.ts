@@ -72,6 +72,7 @@ export enum ProviderStatus {
 export interface ProviderError extends Error {
   type: 'network' | 'server' | 'authentication' | 'validation' | 'unknown';
   statusCode?: number;
+  code?: string;
   retryable: boolean;
   details: Record<string, unknown>;
 }

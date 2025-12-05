@@ -3,6 +3,8 @@ import type { ModuleDependencies } from '../../../../modules/pipeline/types/modu
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+
 /**
  * 字段映射配置接口
  */
@@ -215,7 +217,7 @@ export class iFlowFieldMappingProcessor {
   }
 
   private applyMappings(data: UnknownObject, mappings: FieldMapping[]): UnknownObject {
-    const result = { ...data };
+    const result: UnknownObject = { ...data };
 
     for (const mapping of mappings) {
       this.applyMapping(result, mapping);
@@ -231,44 +233,68 @@ export class iFlowFieldMappingProcessor {
    */
   private sanitizeiFlowToolsSchema(data: UnknownObject): void {
     try {
-      const tools = (data as any)?.tools;
-      if (!Array.isArray(tools)) return;
-      for (const t of tools) {
-        if (!t || typeof t !== 'object') continue;
-        const fn = (t as any).function;
-        // 移除 OpenAI 扩展字段 strict（iFlow 不接受）
-        try { if (fn && typeof fn === 'object' && 'strict' in fn) { delete (fn as any).strict; } } catch { /* ignore */ }
-        const name = typeof fn?.name === 'string' ? fn.name : undefined;
-        const params = fn?.parameters && typeof fn.parameters === 'object' ? fn.parameters : undefined;
-        if (!params || !name) continue;
-        const props = (params as any).properties && typeof (params as any).properties === 'object' ? (params as any).properties : undefined;
-        if (!props) continue;
+      const toolsCandidate = (data as { tools?: unknown }).tools;
+      if (!Array.isArray(toolsCandidate)) {
+        return;
+      }
 
-        // 仅对 shell.command 进行约束清理：去掉 oneOf，统一为数组字符串
-        if (name === 'shell' && props.command) {
-          const cmd = props.command;
-          // 删除 oneOf 等复杂结构
-          if (cmd && typeof cmd === 'object') {
-            delete (cmd as any).oneOf;
-            (cmd as any).type = 'array';
-            (cmd as any).items = { type: 'string' };
-            if (typeof (cmd as any).description !== 'string' || !(cmd as any).description) {
-              (cmd as any).description = 'Shell command argv tokens. Use ["bash","-lc","<cmd>"] form.';
+      for (const toolItem of toolsCandidate) {
+        if (!isRecord(toolItem)) {
+          continue;
+        }
+        const fnCandidate = toolItem['function'];
+        const fn = isRecord(fnCandidate) ? fnCandidate : undefined;
+        if (!fn) {
+          continue;
+        }
+
+        if ('strict' in fn) {
+          delete (fn as Record<string, unknown>).strict;
+        }
+
+        const name = typeof fn.name === 'string' ? fn.name : undefined;
+        const params = isRecord(fn.parameters) ? fn.parameters : undefined;
+        if (!params || !name) {
+          continue;
+        }
+
+        const props = isRecord(params.properties) ? (params.properties as Record<string, unknown>) : undefined;
+        if (!props) {
+          continue;
+        }
+
+        if (name === 'shell') {
+          const existingCommand = props.command;
+          if (isRecord(existingCommand)) {
+            delete existingCommand.oneOf;
+            existingCommand.type = 'array';
+            existingCommand.items = { type: 'string' };
+            if (typeof existingCommand.description !== 'string' || existingCommand.description.length === 0) {
+              existingCommand.description = 'Shell command argv tokens. Use ["bash","-lc","<cmd>"] form.';
             }
           } else {
-            // 若 props.command 不是对象，直接重建
-            (props as any).command = {
+            props.command = {
               description: 'Shell command argv tokens. Use ["bash","-lc","<cmd>"] form.',
               type: 'array',
               items: { type: 'string' }
             };
           }
-          // parameters.required 至少包含 command；additionalProperties 缺省为 false 以收敛形状
-          if (!Array.isArray((params as any).required)) (params as any).required = [];
-          const req: string[] = (params as any).required;
-          if (!req.includes('command')) req.push('command');
-          if (typeof (params as any).type !== 'string') (params as any).type = 'object';
-          if (typeof (params as any).additionalProperties !== 'boolean') (params as any).additionalProperties = false;
+
+          if (!Array.isArray(params.required)) {
+            params.required = [];
+          }
+          const required = params.required as unknown[];
+          if (!required.includes('command')) {
+            required.push('command');
+          }
+
+          if (typeof params.type !== 'string') {
+            params.type = 'object';
+          }
+
+          if (typeof params.additionalProperties !== 'boolean') {
+            params.additionalProperties = false;
+          }
         }
       }
     } catch {
@@ -279,22 +305,22 @@ export class iFlowFieldMappingProcessor {
   private applyMapping(data: UnknownObject, mapping: FieldMapping): void {
     const sourceValue = this.getNestedProperty(data, mapping.sourcePath);
 
-    if (sourceValue !== undefined) {
-      let transformedValue = sourceValue;
-
-      // 应用自定义转换
-      if (mapping.transform) {
-        transformedValue = this.applyTransform(transformedValue, mapping.transform);
-      }
-
-      // 应用类型转换
-      transformedValue = this.convertType(transformedValue, mapping.type);
-
-      this.setNestedProperty(data, mapping.targetPath, transformedValue);
+    if (sourceValue === undefined) {
+      return;
     }
+
+    let transformedValue: unknown = sourceValue;
+
+    if (mapping.transform) {
+      transformedValue = this.applyTransform(transformedValue, mapping.transform);
+    }
+
+    transformedValue = this.convertType(transformedValue, mapping.type);
+
+    this.setNestedProperty(data, mapping.targetPath, transformedValue);
   }
 
-  private getNestedProperty(obj: UnknownObject, path: string): any {
+  private getNestedProperty(obj: UnknownObject, path: string): unknown {
     const keys = path.split('.');
 
     // 处理通配符路径，如 choices[*].message.tool_calls
@@ -302,14 +328,17 @@ export class iFlowFieldMappingProcessor {
       return this.getWildcardProperty(obj, keys);
     }
 
-    return keys.reduce((current, key) => {
-      return current && current[key] !== undefined ? current[key] : undefined;
-    }, obj as any);
+    return keys.reduce<unknown>((current, key) => {
+      if (!isRecord(current)) {
+        return undefined;
+      }
+      return current[key];
+    }, obj);
   }
 
-  private getWildcardProperty(obj: UnknownObject, keys: string[]): any[] {
-    const results: any[] = [];
-    const processWildcard = (current: any, keyIndex: number, currentPath: any[] = []): void => {
+  private getWildcardProperty(obj: UnknownObject, keys: string[]): unknown[] {
+    const results: unknown[] = [];
+    const processWildcard = (current: unknown, keyIndex: number): void => {
       if (keyIndex >= keys.length) {
         results.push(current);
         return;
@@ -317,14 +346,16 @@ export class iFlowFieldMappingProcessor {
 
       const key = keys[keyIndex];
 
-      if (key === '[*]') {
-        if (Array.isArray(current)) {
-          current.forEach((item, index) => {
-            processWildcard(item, keyIndex + 1, [...currentPath, index]);
+      if (key.includes('[*]')) {
+        const baseKey = key.replace('[*]', '');
+        const target = baseKey ? (isRecord(current) ? current[baseKey] : undefined) : current;
+        if (Array.isArray(target)) {
+          target.forEach(item => {
+            processWildcard(item, keyIndex + 1);
           });
         }
-      } else if (current && typeof current === 'object' && current[key] !== undefined) {
-        processWildcard(current[key], keyIndex + 1, [...currentPath, key]);
+      } else if (isRecord(current) && current[key] !== undefined) {
+        processWildcard(current[key], keyIndex + 1);
       }
     };
 
@@ -332,7 +363,7 @@ export class iFlowFieldMappingProcessor {
     return results;
   }
 
-  private setNestedProperty(obj: UnknownObject, path: string, value: any): void {
+  private setNestedProperty(obj: UnknownObject, path: string, value: unknown): void {
     const keys = path.split('.');
 
     // 处理通配符路径，如 choices[*].message.tool_calls
@@ -343,23 +374,23 @@ export class iFlowFieldMappingProcessor {
 
     const lastKey = keys.pop()!;
 
-    const target = keys.reduce((current, key) => {
-      if (current[key] === undefined) {
+    const target = keys.reduce<UnknownObject>((current, key) => {
+      if (!isRecord(current[key])) {
         current[key] = {};
       }
-      return current[key];
-    }, obj as any);
+      return current[key] as UnknownObject;
+    }, obj);
 
     target[lastKey] = value;
   }
 
-  private setWildcardProperty(obj: UnknownObject, keys: string[], value: any): void {
-    const processSetWildcard = (current: any, keyIndex: number, valueToSet: any): void => {
+  private setWildcardProperty(obj: UnknownObject, keys: string[], value: unknown): void {
+    const processSetWildcard = (current: unknown, keyIndex: number, valueToSet: unknown): void => {
       if (keyIndex >= keys.length - 1) {
         const lastKey = keys[keyIndex].replace('[*]', '');
         if (Array.isArray(current)) {
           current.forEach(item => {
-            if (item && typeof item === 'object') {
+            if (isRecord(item)) {
               item[lastKey] = valueToSet;
             }
           });
@@ -369,13 +400,15 @@ export class iFlowFieldMappingProcessor {
 
       const key = keys[keyIndex];
 
-      if (key === '[*]') {
-        if (Array.isArray(current)) {
-          current.forEach(item => {
+      if (key.includes('[*]')) {
+        const baseKey = key.replace('[*]', '');
+        const target = baseKey ? (isRecord(current) ? current[baseKey] : undefined) : current;
+        if (Array.isArray(target)) {
+          target.forEach(item => {
             processSetWildcard(item, keyIndex + 1, valueToSet);
           });
         }
-      } else if (current && typeof current === 'object') {
+      } else if (isRecord(current)) {
         processSetWildcard(current[key], keyIndex + 1, valueToSet);
       }
     };
@@ -383,7 +416,7 @@ export class iFlowFieldMappingProcessor {
     processSetWildcard(obj, 0, value);
   }
 
-  private convertType(value: any, targetType: string): any {
+  private convertType(value: unknown, targetType: FieldMapping['type']): unknown {
     if (value === null || value === undefined) {
       return value;
     }
@@ -392,12 +425,14 @@ export class iFlowFieldMappingProcessor {
       case 'string':
         return String(value);
       case 'number':
-        const num = Number(value);
-        return isNaN(num) ? 0 : num;
+        {
+          const num = Number(value);
+          return Number.isNaN(num) ? 0 : num;
+        }
       case 'boolean':
         return Boolean(value);
       case 'object':
-        return typeof value === 'object' ? value : {};
+        return isRecord(value) ? value : {};
       case 'array':
         return Array.isArray(value) ? value : [value];
       default:
@@ -405,7 +440,7 @@ export class iFlowFieldMappingProcessor {
     }
   }
 
-  private applyTransform(value: any, transform: string): any {
+  private applyTransform(value: unknown, transform: string): unknown {
     switch (transform) {
       case 'timestamp':
         return typeof value === 'number' ? value : Date.now();
@@ -425,19 +460,20 @@ export class iFlowFieldMappingProcessor {
   }
 
   private extractReasoningBlocks(content: string): string {
-    // 提取推理内容块
     const reasoningPatterns = [
-      /<reasoning>([\s\S]*?)<\/reasoning>/gi,
-      /<thinking>([\s\S]*?)<\/thinking>/gi,
-      /\[REASONING\]([\s\S]*?)\[\/REASONIONG\]/gi,
-      /\[THINKING\]([\s\S]*?)\[\/THINKING\]/gi
+      /<reasoning>([\s\S]*?)<\/reasoning>/i,
+      /<thinking>([\s\S]*?)<\/thinking>/i,
+      /\[REASONING\]([\s\S]*?)\[\/REASONING\]/i,
+      /\[THINKING\]([\s\S]*?)\[\/THINKING\]/i
     ];
 
     for (const pattern of reasoningPatterns) {
-      const match = content.match(pattern);
-      if (match) {
+      const match = pattern.exec(content);
+      if (match?.[1]) {
+        pattern.lastIndex = 0;
         return match[1].trim();
       }
+      pattern.lastIndex = 0;
     }
     return content;
   }

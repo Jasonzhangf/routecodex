@@ -1,4 +1,5 @@
 import { Readable } from 'node:stream';
+import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { Response } from 'express';
 import type { IncomingHttpHeaders } from 'http';
 import type { HandlerContext, PipelineExecutionResult } from './types.js';
@@ -23,8 +24,13 @@ interface DispatchOptions {
 type RequestLogMeta = Record<string, unknown> | undefined;
 
 interface SsePayloadShape {
-  __sse_responses?: Readable;
+  __sse_responses?: unknown;
 }
+
+type FlushableResponse = Response & {
+  flushHeaders?: () => void;
+  flush?: () => void;
+};
 
 function hasSsePayload(body: unknown): body is SsePayloadShape {
   return Boolean(body && typeof body === 'object' && '__sse_responses' in (body as Record<string, unknown>));
@@ -47,10 +53,10 @@ export function sendPipelineResponse(
   options?: DispatchOptions
 ): void {
   const status = typeof result.status === 'number' ? result.status : 200;
-  let body = result.body;
+  const body = result.body;
   const requestLabel = requestId || 'unknown';
   const forceSSE = options?.forceSSE === true;
-  let expectsStream = hasSsePayload(body);
+  const expectsStream = hasSsePayload(body);
 
   if (forceSSE && !expectsStream) {
     logPipelineStage('response.sse.missing', requestLabel, { status });
@@ -61,7 +67,8 @@ export function sendPipelineResponse(
   logPipelineStage('response.dispatch.start', requestLabel, { status, stream: expectsStream, forced: forceSSE });
 
   if (expectsStream) {
-    const stream = toNodeReadable((body as any).__sse_responses);
+    const streamSource = body.__sse_responses;
+    const stream = toNodeReadable(streamSource);
     if (!stream) {
       logPipelineStage('response.sse.missing', requestLabel, {});
       res.status(502).json({ error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' } });
@@ -72,10 +79,11 @@ export function sendPipelineResponse(
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
-    if (typeof (res as any).flushHeaders === 'function') {
-      (res as any).flushHeaders();
-    } else if (typeof (res as any).flush === 'function') {
-      (res as any).flush();
+    const flushable = res as FlushableResponse;
+    if (typeof flushable.flushHeaders === 'function') {
+      flushable.flushHeaders();
+    } else if (typeof flushable.flush === 'function') {
+      flushable.flush();
     }
     console.log(`[sse][${requestLabel}] streaming response started (status=${status})`);
     logPipelineStage('response.sse.stream.start', requestLabel, { status });
@@ -105,15 +113,16 @@ export function sendPipelineResponse(
         /* ignore end errors */
       }
     });
-    stream.on('data', (chunk: any) => {
+    stream.on('data', (chunk: unknown) => {
       eventCount++;
       if (eventCount <= previewLimit) {
         try {
-          const text = typeof chunk === 'string' ? chunk : chunk?.toString?.('utf8');
-          if (text) {
-            const trimmed = text.length > 200 ? `${text.slice(0, 200)}…` : text;
-            console.log(`[sse][${requestLabel}] event #${eventCount}: ${trimmed}`);
+          const text = extractPreviewText(chunk);
+          if (!text) {
+            return;
           }
+          const trimmed = text.length > 200 ? `${text.slice(0, 200)}…` : text;
+          console.log(`[sse][${requestLabel}] event #${eventCount}: ${trimmed}`);
         } catch {
           /* ignore preview errors */
         }
@@ -188,29 +197,45 @@ function applyHeaders(res: Response, headers: Record<string, string> | undefined
     return;
   }
   for (const [key, value] of Object.entries(headers)) {
-    if (typeof value !== 'string') continue;
+    if (typeof value !== 'string') {
+      continue;
+    }
     const normalized = key.toLowerCase();
-    if (BLOCKED_HEADERS.has(normalized)) continue;
-    if (omitContentType && normalized === 'content-type') continue;
+    if (BLOCKED_HEADERS.has(normalized)) {
+      continue;
+    }
+    if (omitContentType && normalized === 'content-type') {
+      continue;
+    }
     res.setHeader(key, value);
   }
 }
+
+type PipeCapable = { pipe?: unknown };
+type WebReadable = { getReader?: () => unknown };
+type AsyncIterableLike = { [Symbol.asyncIterator]?: () => AsyncIterator<unknown> };
 
 function toNodeReadable(streamLike: unknown): Readable | null {
   if (!streamLike) {
     return null;
   }
-  if (typeof (streamLike as any).pipe === 'function') {
+  if (streamLike instanceof Readable) {
+    return streamLike;
+  }
+  const pipeCandidate = streamLike as PipeCapable;
+  if (pipeCandidate && typeof pipeCandidate.pipe === 'function') {
     return streamLike as Readable;
   }
-  if (typeof (streamLike as any).getReader === 'function') {
+  const webCandidate = streamLike as WebReadable;
+  if (webCandidate && typeof webCandidate.getReader === 'function') {
     try {
-      return Readable.fromWeb(streamLike as any);
+      return Readable.fromWeb(streamLike as NodeReadableStream);
     } catch {
       return null;
     }
   }
-  if (typeof (streamLike as any)[Symbol.asyncIterator] === 'function') {
+  const asyncIterable = streamLike as AsyncIterableLike;
+  if (asyncIterable && typeof asyncIterable[Symbol.asyncIterator] === 'function') {
     return Readable.from(streamLike as AsyncIterable<unknown>);
   }
   return null;
@@ -218,13 +243,21 @@ function toNodeReadable(streamLike: unknown): Readable | null {
 
 export function captureClientHeaders(headers: IncomingHttpHeaders | undefined): Record<string, string> {
   const result: Record<string, string> = {};
-  if (!headers) return result;
+  if (!headers) {
+    return result;
+  }
   for (const [key, value] of Object.entries(headers)) {
-    if (!value) continue;
+    if (!value) {
+      continue;
+    }
     const normalized = key.toLowerCase();
-    if (CLIENT_HEADER_DENYLIST.has(normalized)) continue;
+    if (CLIENT_HEADER_DENYLIST.has(normalized)) {
+      continue;
+    }
     if (Array.isArray(value)) {
-      if (value[0]) result[key] = String(value[0]);
+      if (value[0]) {
+        result[key] = String(value[0]);
+      }
     } else if (typeof value === 'string') {
       result[key] = value;
     }
@@ -235,8 +268,12 @@ export function captureClientHeaders(headers: IncomingHttpHeaders | undefined): 
 function normalizeError(error: unknown, requestId: string, endpoint: string): Error & Record<string, unknown> {
   const err = error instanceof Error ? error : new Error(String(error ?? 'Unknown error'));
   const enriched = err as Error & Record<string, unknown>;
-  if (!enriched.requestId) enriched.requestId = requestId;
-  if (!enriched.endpoint) enriched.endpoint = endpoint;
+  if (!enriched.requestId) {
+    enriched.requestId = requestId;
+  }
+  if (!enriched.endpoint) {
+    enriched.endpoint = endpoint;
+  }
   return enriched;
 }
 
@@ -248,4 +285,20 @@ function formatMeta(meta?: RequestLogMeta): string {
     .filter(([_, value]) => value !== undefined && value !== null && value !== '')
     .map(([key, value]) => `${key}=${typeof value === 'object' ? JSON.stringify(value) : value}`);
   return entries.length ? ` (${entries.join(', ')})` : '';
+}
+
+function extractPreviewText(chunk: unknown): string | null {
+  if (typeof chunk === 'string') {
+    return chunk;
+  }
+  if (typeof chunk === 'object' && chunk !== null) {
+    if (Buffer.isBuffer(chunk)) {
+      return chunk.toString('utf8');
+    }
+    const candidate = (chunk as { toString?: () => string }).toString?.();
+    if (typeof candidate === 'string') {
+      return candidate;
+    }
+  }
+  return null;
 }

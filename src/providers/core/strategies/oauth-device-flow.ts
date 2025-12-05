@@ -24,12 +24,39 @@ interface DeviceCodeTokenResponse {
   apiKey?: string;
 }
 
+interface DeviceCodeData extends Record<string, unknown> {
+  device_code: string;
+  user_code?: string;
+  verification_uri?: string;
+  verification_uri_complete?: string;
+  expires_in: number;
+  interval: number;
+  code_verifier?: string;
+}
+
+type UserInfoPayload = {
+  apiKey?: string;
+  data?: {
+    apiKey?: string;
+    email?: string;
+    phone?: string;
+  };
+} & Record<string, unknown>;
+
+type StoredToken = DeviceCodeTokenResponse & {
+  api_key?: string;
+  email?: string;
+  expires_at?: number;
+  expired?: string;
+  expiry_date?: number | string;
+} & UnknownObject;
+
 /**
  * OAuth设备码流程策略
  */
 export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
   private tokenFile: string;
-  private tokenStorage: UnknownObject | null = null;
+  private tokenStorage: StoredToken | null = null;
 
   constructor(config: OAuthFlowConfig, httpClient?: typeof fetch, tokenFile?: string) {
     super(config, httpClient);
@@ -47,17 +74,18 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
   async authenticate(options: { openBrowser?: boolean } = {}): Promise<UnknownObject> {
     try {
       // 1. 尝试加载现有令牌
-      const existingToken = await this.loadToken();
+      const existingToken = this.coerceStoredToken(await this.loadToken());
       if (existingToken && this.validateToken(existingToken)) {
         console.log('Using existing valid token');
         return existingToken;
       }
 
       // 2. 如果令牌过期但可以刷新，则尝试刷新
-      if (existingToken && (existingToken as any).refresh_token) {
+      if (existingToken?.refresh_token) {
         try {
           console.log('Token expired, attempting refresh...');
-          const refreshedToken = await this.refreshToken((existingToken as any).refresh_token);
+          const refreshedRaw = await this.refreshToken(existingToken.refresh_token);
+          const refreshedToken = this.ensureStoredToken(refreshedRaw);
           await this.saveToken(refreshedToken);
           console.log('Token refreshed successfully');
           return refreshedToken;
@@ -91,7 +119,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
   /**
    * 初始化设备码流程
    */
-  private async initiateDeviceCodeFlow(): Promise<UnknownObject> {
+  private async initiateDeviceCodeFlow(): Promise<DeviceCodeData> {
     if (!this.config.endpoints.deviceCodeUrl) {
       throw new Error('Device code URL is required for device code flow');
     }
@@ -128,7 +156,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
     }
 
     // 设备码端点尝试解析 JSON；若失败打印预览并中断
-    let raw: any;
+    let raw: unknown;
     try {
       raw = await response.json();
     } catch {
@@ -143,71 +171,80 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
     }
 
     // 兼容多种形状（顶层/ data / result；蛇形/驼峰；uri/url）
-    const d = (raw && typeof raw === 'object' && (raw.data || raw.result)) ? (raw.data || raw.result) : raw;
-    const map = (obj: any, keys: string[]): any => {
+    const rawObj = raw && typeof raw === 'object' ? raw as Record<string, unknown> : undefined;
+    const container = rawObj && (rawObj.data || rawObj.result)
+      ? (rawObj.data || rawObj.result)
+      : rawObj;
+    const mapped = container && typeof container === 'object' ? container as Record<string, unknown> : undefined;
+    const mapValue = (obj: Record<string, unknown> | undefined, keys: string[]): unknown => {
+      if (!obj) {
+        return undefined;
+      }
       for (const k of keys) {
-        if (obj && typeof obj === 'object' && obj[k] != null) return obj[k];
+        if (k in obj && obj[k] !== null && obj[k] !== undefined) {
+          return obj[k];
+        }
       }
       return undefined;
     };
 
-    const device_code = map(d, ['device_code', 'deviceCode', 'deviceCodeId']);
-    const user_code = map(d, ['user_code', 'userCode', 'user_code_text']);
-    const verification_uri = map(d, ['verification_uri', 'verification_url', 'verificationUri', 'verificationUrl']);
-    const verification_uri_complete = map(d, ['verification_uri_complete', 'verification_url_complete', 'verificationUriComplete', 'verificationUrlComplete']);
-    const expires_in = Number(map(d, ['expires_in', 'expiresIn'])) || 600;
-    const interval = Number(map(d, ['interval'])) || 5;
+    const device_code = mapValue(mapped, ['device_code', 'deviceCode', 'deviceCodeId']);
+    const user_code = mapValue(mapped, ['user_code', 'userCode', 'user_code_text']);
+    const verification_uri = mapValue(mapped, ['verification_uri', 'verification_url', 'verificationUri', 'verificationUrl']);
+    const verification_uri_complete = mapValue(mapped, ['verification_uri_complete', 'verification_url_complete', 'verificationUriComplete', 'verificationUrlComplete']);
+    const expires_in = Number(mapValue(mapped, ['expires_in', 'expiresIn'])) || 600;
+    const interval = Number(mapValue(mapped, ['interval'])) || 5;
 
     if (!verification_uri && !verification_uri_complete) {
-      throw new Error(`Device code JSON missing verification URL fields (keys present: ${Object.keys(d || {}).join(',')})`);
+      const keys = mapped ? Object.keys(mapped).join(',') : '';
+      throw new Error(`Device code JSON missing verification URL fields (keys present: ${keys})`);
     }
-    if (!device_code) {
+    if (!device_code || typeof device_code !== 'string') {
       throw new Error('Device code JSON missing device_code field');
     }
 
     // 友好提示
     console.log('Please visit the following URL to authorize the device:');
     console.log(verification_uri || verification_uri_complete);
-    if (user_code) console.log(`And enter the code: ${user_code}`);
+    if (user_code) {
+      console.log(`And enter the code: ${user_code}`);
+    }
     if (verification_uri_complete) {
       console.log('Or visit directly:');
       console.log(verification_uri_complete);
     }
 
-    const result: any = {
+    const result: DeviceCodeData = {
       device_code,
-      user_code,
-      verification_uri,
-      verification_uri_complete,
+      user_code: typeof user_code === 'string' ? user_code : undefined,
+      verification_uri: typeof verification_uri === 'string' ? verification_uri : undefined,
+      verification_uri_complete: typeof verification_uri_complete === 'string' ? verification_uri_complete : undefined,
       expires_in,
-      interval
+      interval,
+      code_verifier: codeVerifier
     };
 
-    if (codeVerifier) {
-      result.code_verifier = codeVerifier;
-    }
-
-    return result as UnknownObject;
+    return result;
   }
 
   /**
    * 激活设备码流程
    */
-  public async activate(deviceCodeData: UnknownObject, options: { openBrowser?: boolean } = {}): Promise<void> {
-    const url = (deviceCodeData as any).verification_uri_complete || (deviceCodeData as any).verification_uri;
-    const userCode = (deviceCodeData as any).user_code;
+  public async activate(deviceCodeData: DeviceCodeData, options: { openBrowser?: boolean } = {}): Promise<void> {
+    const url = deviceCodeData.verification_uri_complete || deviceCodeData.verification_uri;
+    const userCode = deviceCodeData.user_code;
     // 复用基类的跨平台打开逻辑（open/xdg-open/start），并打印URL与User Code
-    await super.activateWithBrowser({ verificationUri: url, userCode, authUrl: url } as any, options);
+    await super.activateWithBrowser({ verificationUri: url, userCode, authUrl: url }, options);
   }
 
   /**
    * 轮询获取令牌
    */
-  private async pollForToken(deviceCodeData: UnknownObject): Promise<DeviceCodeTokenResponse> {
+  private async pollForToken(deviceCodeData: DeviceCodeData): Promise<DeviceCodeTokenResponse> {
     const maxAttempts = this.config.polling?.maxAttempts || 60;
     const interval = (this.config.polling?.interval || 5) * 1000;
-    const deviceCode = (deviceCodeData as any).device_code;
-    const codeVerifier: string | undefined = (deviceCodeData as any).code_verifier;
+    const deviceCode = deviceCodeData.device_code;
+    const codeVerifier: string | undefined = deviceCodeData.code_verifier;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       if (attempt > 0) {
@@ -273,26 +310,20 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
   /**
    * 处理令牌后激活（如API密钥交换）
    */
-  private async handlePostTokenActivation(tokenResponse: DeviceCodeTokenResponse): Promise<UnknownObject> {
-    // 统一补标准过期字段，方便 validate 使用
-    const computeStandardShape = (payload: DeviceCodeTokenResponse & { apiKey?: string; api_key?: string; email?: string }): UnknownObject => {
+  private async handlePostTokenActivation(tokenResponse: DeviceCodeTokenResponse): Promise<StoredToken> {
+    const normalizeToken = (payload: StoredToken): StoredToken => {
       const expiresAt = Date.now() + (payload.expires_in * 1000);
       return {
         ...payload,
         expires_at: expiresAt,
         expired: new Date(expiresAt).toISOString(),
         expiry_date: expiresAt
-      } as UnknownObject;
+      };
     };
 
-    if (!this.config.features?.supportsApiKeyExchange) {
-      return computeStandardShape(tokenResponse);
-    }
+    const enriched: StoredToken = { ...tokenResponse };
 
-    const enriched: DeviceCodeTokenResponse & { apiKey?: string; api_key?: string; email?: string } = { ...tokenResponse };
-
-    // 尝试获取API密钥（如果有用户信息端点）
-    if (this.config.endpoints.userInfoUrl && tokenResponse.access_token) {
+    if (this.config.features?.supportsApiKeyExchange && this.config.endpoints.userInfoUrl && tokenResponse.access_token) {
       try {
         const userInfoResponse = await this.makeRequest(
           `${this.config.endpoints.userInfoUrl}?accessToken=${encodeURIComponent(tokenResponse.access_token)}`,
@@ -300,31 +331,24 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
         );
 
         if (userInfoResponse.ok) {
-          const userInfo = await userInfoResponse.json();
-          const root: any = userInfo;
-          let apiKey: string | undefined;
-          let email: string | undefined;
+          const userInfo = await userInfoResponse.json() as UserInfoPayload;
+          const apiKey = typeof userInfo.apiKey === 'string'
+            ? userInfo.apiKey
+            : typeof userInfo.data?.apiKey === 'string'
+              ? userInfo.data.apiKey
+              : undefined;
+          const email = typeof userInfo.data?.email === 'string'
+            ? userInfo.data.email
+            : typeof userInfo.data?.phone === 'string'
+              ? userInfo.data.phone
+              : undefined;
 
-          if (root && typeof root.apiKey === 'string') {
-            apiKey = root.apiKey;
-          } else if (root && typeof root.data === 'object' && root.data) {
-            const data = root.data as any;
-            if (typeof data.apiKey === 'string') {
-              apiKey = data.apiKey;
-            }
-            if (typeof data.email === 'string') {
-              email = data.email;
-            } else if (typeof data.phone === 'string') {
-              email = data.phone;
-            }
+          if (apiKey?.trim()) {
+            const trimmed = apiKey.trim();
+            enriched.apiKey = trimmed;
+            enriched.api_key = trimmed;
           }
-
-          if (apiKey && apiKey.trim()) {
-            enriched.apiKey = apiKey.trim();
-            // 兼容 CLIProxyAPI 的字段命名
-            enriched.api_key = apiKey.trim();
-          }
-          if (email && email.trim()) {
+          if (email?.trim()) {
             enriched.email = email.trim();
           }
         }
@@ -333,15 +357,13 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       }
     }
 
-    return {
-      ...computeStandardShape(enriched)
-    } as UnknownObject;
+    return normalizeToken(enriched);
   }
 
   /**
    * 刷新令牌
    */
-  async refreshToken(refreshToken: string): Promise<UnknownObject> {
+  async refreshToken(refreshToken: string): Promise<StoredToken> {
     const maxAttempts = this.config.retry?.maxAttempts || 3;
     let lastError: unknown;
 
@@ -375,16 +397,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
         }
 
         const tokenData = await response.json() as DeviceCodeTokenResponse;
-
-        // 转换为标准格式并尝试补全 apiKey（对齐 iflow 行为）
-        const expiresAt = Date.now() + (tokenData.expires_in * 1000);
-        const base: UnknownObject = {
-          ...tokenData,
-          expires_at: expiresAt,
-          expired: new Date(expiresAt).toISOString()
-        } as UnknownObject;
-        const finalToken = await this.handlePostTokenActivation(base as any);
-        return finalToken;
+        return await this.handlePostTokenActivation(tokenData);
 
       } catch (error) {
         lastError = error;
@@ -399,19 +412,18 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
    * 验证令牌
    */
   validateToken(token: UnknownObject): boolean {
-    if (!token || typeof token !== 'object') {
+    const stored = this.coerceStoredToken(token);
+    if (!stored) {
       return false;
     }
 
-    const tokenObj = token as any;
-
     // 检查必需字段
-    if (!tokenObj.access_token) {
+    if (!stored.access_token) {
       return false;
     }
 
     // 检查过期时间
-    const expiresAt = tokenObj.expires_at || tokenObj.expired || tokenObj.expiry_date;
+    const expiresAt = stored.expires_at || stored.expired || stored.expiry_date;
     if (expiresAt) {
       const expiryDate = new Date(expiresAt);
       if (expiryDate <= new Date()) {
@@ -426,7 +438,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
    * 获取授权头部
    */
   getAuthHeader(token: UnknownObject): string {
-    const tokenObj = token as any;
+    const tokenObj = this.ensureStoredToken(token);
 
     // 优先使用API密钥（如果存在）
     const apiKey = (tokenObj.apiKey || tokenObj.api_key || '').trim();
@@ -442,11 +454,12 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
    * 保存令牌
    */
   async saveToken(token: UnknownObject): Promise<void> {
+    const stored = this.ensureStoredToken(token);
     try {
       const dir = path.dirname(this.tokenFile);
       await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(this.tokenFile, JSON.stringify(token, null, 2));
-      this.tokenStorage = token;
+      await fs.writeFile(this.tokenFile, JSON.stringify(stored, null, 2));
+      this.tokenStorage = stored;
       console.log(`[OAuth] [device_code] Token saved to: ${this.tokenFile}`);
     } catch (error) {
       console.error('Failed to save token:', error instanceof Error ? error.message : String(error));
@@ -460,7 +473,8 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
   async loadToken(): Promise<UnknownObject | null> {
     try {
       const content = await fs.readFile(this.tokenFile, 'utf-8');
-      const token = JSON.parse(content) as UnknownObject;
+      const raw = JSON.parse(content) as UnknownObject;
+      const token = this.coerceStoredToken(raw);
       this.tokenStorage = token;
       console.log(`[OAuth] [device_code] Token loaded from: ${this.tokenFile}`);
       return token;
@@ -468,6 +482,25 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       this.tokenStorage = null;
       return null;
     }
+  }
+
+  private coerceStoredToken(token: UnknownObject | null | undefined): StoredToken | null {
+    if (!token || typeof token !== 'object') {
+      return null;
+    }
+    const record = token as Record<string, unknown>;
+    if (typeof record.access_token !== 'string' || typeof record.expires_in !== 'number') {
+      return null;
+    }
+    return record as StoredToken;
+  }
+
+  private ensureStoredToken(token: UnknownObject): StoredToken {
+    const stored = this.coerceStoredToken(token);
+    if (!stored) {
+      throw new Error('Invalid token payload for OAuth device code flow');
+    }
+    return stored;
   }
 }
 

@@ -1,17 +1,19 @@
 import type { CompatibilityContext } from '../../compatibility-interface.js';
 import type { UnknownObject } from '../../../../modules/pipeline/types/common-types.js';
-import type { ModuleDependencies } from '../../../../modules/pipeline/types/module.types.js';
 import { BaseHook } from './base-hook.js';
 // 统一的工具结果文本提取器：保证 tool 消息 content 为非空字符串
 import { extractToolText } from '../../../core/utils/tool-result-text.js';
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
 
 /**
  * 消息接口
  */
 interface Message {
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | null;
-  tool_calls?: any[];
+  role?: string;
+  content?: unknown;
+  tool_calls?: unknown;
 }
 
 /**
@@ -43,15 +45,15 @@ export class iFlowToolCleaningHook extends BaseHook {
     this.logExecution(context, { stage: 'tool-cleaning-start' });
 
     try {
-      const result: any = { ...(data as any) };
+      const result: UnknownObject = { ...data };
 
       // 处理messages字段
-      if (result.messages && Array.isArray(result.messages)) {
+      if (Array.isArray(result.messages)) {
         result.messages = this.cleanMessages(result.messages);
       }
 
       // 处理tools字段（最小清理：移除 function.strict，仅做噪声清理；规范化交由形状过滤器处理）
-      if (result.tools && Array.isArray(result.tools)) {
+      if (Array.isArray(result.tools)) {
         result.tools = this.cleanTools(result.tools);
       }
 
@@ -73,15 +75,19 @@ export class iFlowToolCleaningHook extends BaseHook {
     const cleanedMessages: Message[] = [];
 
     for (let i = 0; i < messages.length; i++) {
-      const message = messages[i] as Message;
-      const cleanedMessage = { ...message };
+      const message = this.coerceMessage(messages[i]);
+      if (!message) {
+        cleanedMessages.push(messages[i] as Message);
+        continue;
+      }
+      const cleanedMessage: Message = { ...message };
 
       // 对 role:'tool' 的消息，统一拍平为非空字符串（失败严格报错；禁止兜底/静默）
       if (cleanedMessage.role === 'tool') {
         const text = extractToolText(cleanedMessage.content);
         if (!(typeof text === 'string' && text.trim().length)) {
-          const err: any = new Error('ERR_COMPAT_TOOL_TEXT_EMPTY: tool message content is empty or invalid');
-          err.code = 'ERR_COMPAT_TOOL_TEXT_EMPTY';
+          const err = new Error('ERR_COMPAT_TOOL_TEXT_EMPTY: tool message content is empty or invalid');
+          (err as { code?: string }).code = 'ERR_COMPAT_TOOL_TEXT_EMPTY';
           throw err;
         }
         cleanedMessage.content = text.trim();
@@ -89,12 +95,16 @@ export class iFlowToolCleaningHook extends BaseHook {
 
       // 处理最后一条role=tool的消息（在文本拍平后，再做噪声清理与截断）
       if (this.isLastToolMessage(messages, i)) {
-        cleanedMessage.content = this.cleanToolContent(cleanedMessage.content || '');
+        const toolContent = typeof cleanedMessage.content === 'string'
+          ? cleanedMessage.content
+          : String(cleanedMessage.content ?? '');
+        cleanedMessage.content = this.cleanToolContent(toolContent);
       }
 
       // 处理assistant消息中的大段工具结果回灌
       if (message.role === 'assistant') {
-        cleanedMessage.content = this.cleanAssistantContent(cleanedMessage.content || '', messages, i);
+        const assistantContent = typeof cleanedMessage.content === 'string' ? cleanedMessage.content : '';
+        cleanedMessage.content = this.cleanAssistantContent(assistantContent, messages, i);
       }
 
       // 不在此处处理 tool_calls 参数形状；交由形状过滤器统一处理
@@ -122,28 +132,35 @@ export class iFlowToolCleaningHook extends BaseHook {
   private cleanTools(tools: unknown[]): unknown[] {
     // 最小清理：仅移除 tools[].function.strict（iFlow不识别），其余规范化由形状过滤器处理
     return tools.map(tool => {
-      const cleanedTool: any = { ...(tool as any) };
-      if (typeof cleanedTool === 'object' && cleanedTool !== null) {
-        const functionObj = (cleanedTool as any).function;
-        if (functionObj && typeof functionObj === 'object') {
-          const { strict, ...functionWithoutStrict } = functionObj;
-          (cleanedTool as any).function = functionWithoutStrict;
+      if (!isRecord(tool)) {
+        return tool;
+      }
+      const cleanedTool: UnknownObject = { ...tool };
+      const fn = isRecord(cleanedTool.function) ? { ...cleanedTool.function } : undefined;
+      if (fn) {
+        if ('strict' in fn) {
+          delete fn.strict;
         }
+        cleanedTool.function = fn;
       }
       return cleanedTool;
     });
   }
 
   private cleanToolCalls(toolCalls: unknown[]): unknown[] {
-    return (toolCalls as any[]).map(tc => {
-      const copy: any = { ...(tc || {}) };
-      const fn = copy.function || {};
-      const args = fn?.arguments;
+    return toolCalls.map(tc => {
+      if (!isRecord(tc)) {
+        return tc;
+      }
+      const copy: UnknownObject = { ...tc };
+      const fn: UnknownObject = isRecord(copy.function) ? { ...copy.function } : {};
+      const args = 'arguments' in fn ? fn.arguments : undefined;
       if (typeof args === 'string') {
-        try { fn.arguments = JSON.parse(args); }
-        catch {
-          const err: any = new Error('ERR_COMPAT_TOOLCALL_ARGS_INVALID: arguments not JSON');
-          err.code = 'ERR_COMPAT_TOOLCALL_ARGS_INVALID';
+        try {
+          fn.arguments = JSON.parse(args);
+        } catch {
+          const err = new Error('ERR_COMPAT_TOOLCALL_ARGS_INVALID: arguments not JSON');
+          (err as { code?: string }).code = 'ERR_COMPAT_TOOLCALL_ARGS_INVALID';
           throw err;
         }
       }
@@ -157,8 +174,8 @@ export class iFlowToolCleaningHook extends BaseHook {
       return false;
     }
 
-    const message = messages[index] as Message;
-    return message.role === 'tool';
+    const message = this.coerceMessage(messages[index]);
+    return message?.role === 'tool';
   }
 
   private cleanToolContent(content: string): string {
@@ -205,17 +222,20 @@ export class iFlowToolCleaningHook extends BaseHook {
   }
 
   private isLastToolCallAssistant(messages: unknown[], currentIndex: number): boolean {
-    const currentMessage = messages[currentIndex] as Message;
+    const currentMessage = this.coerceMessage(messages[currentIndex]);
+    if (!currentMessage || currentMessage.role !== 'assistant') {
+      return false;
+    }
 
     // 检查当前消息是否有tool_calls
-    if (!currentMessage.tool_calls || !Array.isArray(currentMessage.tool_calls)) {
+    if (!Array.isArray(currentMessage.tool_calls)) {
       return false;
     }
 
     // 检查是否是最后一个含tool_calls的assistant消息
     for (let i = currentIndex + 1; i < messages.length; i++) {
-      const message = messages[i] as Message;
-      if (message.role === 'assistant' && message.tool_calls && Array.isArray(message.tool_calls)) {
+      const message = this.coerceMessage(messages[i]);
+      if (message?.role === 'assistant' && Array.isArray(message.tool_calls)) {
         return false; // 后面还有含tool_calls的assistant消息
       }
     }
@@ -230,7 +250,7 @@ export class iFlowToolCleaningHook extends BaseHook {
       /function_result/i,
       /execution_result/i,
       /\{.*result.*\}/i,
-      /\"result\"\s*:/i
+      /"result"\s*:/i
     ];
 
     // 检查内容长度（大段文本）
@@ -263,5 +283,12 @@ export class iFlowToolCleaningHook extends BaseHook {
     }
 
     return strippedContent.trim();
+  }
+
+  private coerceMessage(candidate: unknown): Message | null {
+    if (!isRecord(candidate)) {
+      return null;
+    }
+    return candidate as Message;
   }
 }

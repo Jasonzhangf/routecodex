@@ -229,7 +229,7 @@ export interface CompatibilityModule extends PipelineModule {
   /**
    * Apply compatibility transformations
    */
-  applyTransformations(data: any, rules: TransformationRule[]): Promise<unknown>;
+  applyTransformations(data: UnknownObject | JsonValue, rules: TransformationRule[]): Promise<unknown>;
 
   /**
    * Process incoming request (DTO)
@@ -247,7 +247,7 @@ export interface ProviderModule extends PipelineModule<UnknownObject, UnknownObj
   /**
    * Send request to provider
    */
-  sendRequest(request: any): Promise<unknown>;
+  sendRequest(request: UnknownObject): Promise<unknown>;
 
   /**
    * Check provider health
@@ -301,6 +301,10 @@ export interface PipelineModuleRegistry {
  */
 export type ModuleFactory = (config: ModuleConfig, dependencies: ModuleDependencies) => Promise<PipelineModule>;
 
+export interface PipelineDispatchCenter {
+  dispatch(event: string, payload?: LogData): Promise<void> | void;
+}
+
 /**
  * Module dependencies interface
  */
@@ -308,7 +312,7 @@ export interface ModuleDependencies {
   errorHandlingCenter: ErrorHandlingCenter;
   debugCenter: DebugCenter;
   logger: PipelineDebugLogger;
-  dispatchCenter?: any; // Optional dispatch center for notifications
+  dispatchCenter?: PipelineDispatchCenter; // Optional dispatch center for notifications
 }
 
 /**
@@ -316,7 +320,7 @@ export interface ModuleDependencies {
  */
 export interface PipelineDebugLogger {
   logModule(module: string, action: string, data?: LogData): void;
-  logError(error: any, context?: LogData): void;
+  logError(error: unknown, context?: LogData): void;
   logDebug(message: string, data?: LogData): void;
   logPipeline(pipelineId: string, action: string, data?: LogData): void;
   logRequest(requestId: string, action: string, data?: LogData): void;
@@ -345,7 +349,7 @@ export interface PipelineDebugLogger {
     providerRequestCount: number;
   };
   clearLogs(): void;
-  exportLogs(format?: 'json' | 'csv'): any;
+  exportLogs(format?: 'json' | 'csv'): DebugLogEntry[] | string[];
   log(level: DebugLogEntry['level'], pipelineId: string, category: string, message: string, data?: LogData): void;
 }
 
@@ -366,12 +370,12 @@ export interface PipelineManager {
   /**
    * Get pipeline status
    */
-  getStatus(): any;
+  getStatus(): PipelineStatus | UnknownObject;
 
   /**
    * Get manager statistics
    */
-  getStatistics(): any;
+  getStatistics(): UnknownObject;
 
   /**
    * Clean up resources

@@ -8,6 +8,25 @@ import type { IAuthProvider, AuthStatus, IOAuthClient, TokenStorage } from './au
 import fs from 'fs/promises';
 import path from 'path';
 import type { OAuthAuth } from '../core/api/provider-config.js';
+import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
+
+type ExtendedOAuthAuth = OAuthAuth & {
+  tokenFile?: string;
+  authorizationUrl?: string;
+  userInfoUrl?: string;
+  redirectUri?: string;
+};
+
+type StoredOAuthToken = UnknownObject & {
+  access_token?: string;
+  api_key?: string;
+  apiKey?: string;
+  refresh_token?: string;
+  expires_at?: number | string;
+  expired?: number | string;
+  expiry_date?: number | string;
+};
+
 
 /**
  * 基础OAuth认证提供者
@@ -75,9 +94,8 @@ export class OAuthAuthProvider implements IAuthProvider {
     }
 
     // iFlow 等服务在 userInfo 返回 apiKey 时，优先使用 apiKey 作为 Bearer
-    const bearer = (tokenStorage as any).apiKey && String((tokenStorage as any).apiKey).trim()
-      ? String((tokenStorage as any).apiKey).trim()
-      : String(tokenStorage.access_token);
+    const extendedToken = tokenStorage as unknown as StoredOAuthToken;
+    const bearer = extractApiKey(extendedToken) || String(tokenStorage.access_token);
     const headers: Record<string, string> = {
       'Authorization': `Bearer ${bearer}`
     };
@@ -162,7 +180,7 @@ export class OAuthAuthProvider implements IAuthProvider {
    */
   async cleanup(): Promise<void> {
     try {
-      await this.oauthClient.saveToken(null as any);
+      await this.oauthClient.saveToken(null);
       this.isInitialized = false;
       this.updateStatus(false, false, 'OAuth provider cleaned up');
     } catch (error) {
@@ -271,23 +289,23 @@ export class OAuthAuthProvider implements IAuthProvider {
  * 基础OAuth客户端实现
  */
 class BaseOAuthClient implements IOAuthClient {
-  private config: OAuthAuth;
+  private config: ExtendedOAuthAuth;
   private providerType: string;
   private currentToken: TokenStorage | null = null;
   private tokenFilePath: string | null = null;
 
   constructor(config: OAuthAuth, providerType: string) {
-    this.config = config;
+    this.config = config as ExtendedOAuthAuth;
     this.providerType = providerType;
-    const tf = (this.config as any)?.tokenFile;
-    if (typeof tf === 'string' && tf.trim()) {
+    const tf = typeof this.config.tokenFile === 'string' ? this.config.tokenFile : undefined;
+    if (tf && tf.trim()) {
       this.tokenFilePath = tf.replace(/^~\//, `${process.env.HOME || ''}/`);
     } else {
       // default path: ~/.routecodex/tokens/<providerType>-default.json
       const home = process.env.HOME || '';
-      this.tokenFilePath = require('path').join(home, '.routecodex', 'tokens', `${this.providerType}-default.json`);
+      this.tokenFilePath = path.join(home, '.routecodex', 'tokens', `${this.providerType}-default.json`);
       // write back to config for downstream users if needed
-      (this.config as any).tokenFile = this.tokenFilePath;
+      this.config.tokenFile = this.tokenFilePath;
     }
   }
 
@@ -349,4 +367,16 @@ class BaseOAuthClient implements IOAuthClient {
     // 更新token存储
     Object.assign(storage, tokenData);
   }
+}
+
+function extractApiKey(token: StoredOAuthToken | null): string {
+  if (!token) {
+    return '';
+  }
+  const candidate = typeof token.apiKey === 'string' ? token.apiKey : token.api_key;
+  if (typeof candidate === 'string') {
+    const trimmed = candidate.trim();
+    return trimmed.length ? trimmed : '';
+  }
+  return '';
 }

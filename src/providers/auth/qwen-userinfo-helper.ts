@@ -1,3 +1,5 @@
+import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
+
 /**
  * Qwen UserInfo 获取API Key的辅助函数
  * 对齐CLIProxyAPI的实现，为Qwen OAuth流程添加API Key获取功能
@@ -90,29 +92,45 @@ export async function fetchQwenUserInfo(accessToken: string): Promise<QwenUserIn
  * 将OAuth token与用户信息合并，创建完整的Qwen token数据
  */
 export function mergeQwenTokenData(
-  oauthToken: Record<string, any>,
+  oauthToken: UnknownObject,
   userInfo: QwenUserInfo
 ): QwenTokenData {
+  const asString = (value: unknown, fallback = ''): string => {
+    return typeof value === 'string' && value.length ? value : fallback;
+  };
+  const asOptionalString = (value: unknown): string | undefined => {
+    return typeof value === 'string' && value.length ? value : undefined;
+  };
+  const asNumber = (value: unknown): number | undefined => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
+  };
+
   return {
     ...oauthToken,
     api_key: userInfo.apiKey,
     email: userInfo.email,
     type: 'qwen',
-    // 确保基本字段存在
-    access_token: oauthToken.access_token || '',
-    token_type: oauthToken.token_type || 'bearer',
-    refresh_token: oauthToken.refresh_token,
-    expires_in: oauthToken.expires_in,
-    scope: oauthToken.scope,
-    expires_at: oauthToken.expires_at,
-    expired: oauthToken.expired
+    access_token: asString(oauthToken.access_token),
+    token_type: asString(oauthToken.token_type, 'bearer'),
+    refresh_token: asOptionalString(oauthToken.refresh_token),
+    expires_in: asNumber(oauthToken.expires_in),
+    scope: asOptionalString(oauthToken.scope),
+    expires_at: asNumber(oauthToken.expires_at),
+    expired: asOptionalString(oauthToken.expired)
   };
 }
 
 /**
  * 检查Qwen token是否包含API Key
  */
-export function hasQwenApiKey(token: Record<string, any>): boolean {
-  const apiKey = (token as any).api_key || (token as any).apiKey || '';
-  return typeof apiKey === 'string' && apiKey.trim().length > 0;
+export function hasQwenApiKey(token: UnknownObject): boolean {
+  const candidate = token.api_key ?? token.apiKey;
+  return typeof candidate === 'string' && candidate.trim().length > 0;
 }

@@ -18,6 +18,13 @@ interface ResponsesHandlerOptions {
   responseIdFromPath?: string;
 }
 
+type ResponsesPayload = {
+  stream?: boolean;
+  response_id?: string;
+  type?: string;
+  [key: string]: unknown;
+};
+
 export async function handleResponses(
   req: Request,
   res: Response,
@@ -31,10 +38,11 @@ export async function handleResponses(
       res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' } });
       return;
     }
-    let payload = (req.body || {}) as any;
-    const originalPayload =
-      payload && typeof payload === 'object' ? JSON.parse(JSON.stringify(payload)) : payload;
-    if (options.responseIdFromPath && payload && typeof payload === 'object' && !payload.response_id) {
+    let payload = (req.body && typeof req.body === 'object'
+      ? req.body
+      : {}) as ResponsesPayload;
+    const originalPayload = JSON.parse(JSON.stringify(payload)) as ResponsesPayload;
+    if (options.responseIdFromPath && !payload.response_id) {
       payload.response_id = options.responseIdFromPath;
     }
     const clientHeaders = captureClientHeaders(req.headers);
@@ -54,18 +62,18 @@ export async function handleResponses(
       }
       try {
         const resumeResult = await resumeResponsesConversation(responseId, payload, { requestId });
-        payload = resumeResult.payload as typeof payload;
-        resumeMeta = resumeResult.meta as Record<string, unknown>;
-      } catch (error: any) {
-        const message = typeof error?.message === 'string' ? error.message : 'Unable to resume Responses conversation';
+        payload = (resumeResult.payload ?? {}) as ResponsesPayload;
+        resumeMeta = resumeResult.meta;
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unable to resume Responses conversation';
         res.status(400).json({ error: { message, type: 'invalid_request_error', code: 'responses_resume_failed' } });
         return;
       }
     }
-    if ((acceptsSse || options.forceStream) && payload && typeof payload === 'object' && (!originalStream || options.forceStream)) {
+    if ((acceptsSse || options.forceStream) && (!originalStream || options.forceStream)) {
       payload.stream = true;
     }
-    const wantsStream = options.forceStream ?? inboundStream;
+    const wantsStream = typeof options.forceStream === 'boolean' ? options.forceStream : inboundStream;
 
     if (entryEndpoint === '/v1/responses') {
       applySystemPromptOverride(entryEndpoint, payload);
@@ -97,9 +105,11 @@ export async function handleResponses(
     });
     logRequestComplete(entryEndpoint, requestId, result.status ?? 200);
     sendPipelineResponse(res, result, requestId, { forceSSE: wantsStream });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logRequestError(entryEndpoint, requestId, error);
-    if (res.headersSent) return;
+    if (res.headersSent) {
+      return;
+    }
     await respondWithPipelineError(res, ctx, error, entryEndpoint, requestId);
   }
 }

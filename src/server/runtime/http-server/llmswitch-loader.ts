@@ -22,6 +22,6 @@ export function resolveRepoRoot(currentModuleUrl: string): string {
   return findRepoRoot(dirname);
 }
 
-export async function loadLlmswitchModule<T = any>(_repoRoot: string, subpath: string): Promise<T> {
+export async function loadLlmswitchModule<T = unknown>(_repoRoot: string, subpath: string): Promise<T> {
   return await importCoreModule(subpath);
 }

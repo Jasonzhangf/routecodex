@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import process from 'node:process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 if (String(process.env.ROUTECODEX_VERIFY_SKIP || '').trim() === '1') {
   console.log('[verify:e2e-toolcall] 跳过（ROUTECODEX_VERIFY_SKIP=1）');
@@ -10,6 +13,17 @@ if (String(process.env.ROUTECODEX_VERIFY_SKIP || '').trim() === '1') {
 const VERIFY_PORT = process.env.ROUTECODEX_VERIFY_PORT || '5580';
 const VERIFY_BASE = process.env.ROUTECODEX_VERIFY_BASE_URL || `http://127.0.0.1:${VERIFY_PORT}`;
 const VERIFY_CONFIG = process.env.ROUTECODEX_VERIFY_CONFIG || '/Users/fanzhang/.routecodex/provider/glm/config.v1.json';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_AGENTS_PATH = path.resolve(__dirname, '..', 'AGENTS.md');
+const AGENTS_PATH = process.env.ROUTECODEX_VERIFY_AGENTS_PATH || DEFAULT_AGENTS_PATH;
+const AGENTS_INSTRUCTIONS = (() => {
+  try {
+    return fs.readFileSync(AGENTS_PATH, 'utf8').trim();
+  } catch {
+    return '';
+  }
+})();
 
 async function main() {
   if (!VERIFY_CONFIG) {
@@ -64,15 +78,18 @@ async function waitForServer(timeoutMs = 30000) {
 }
 
 async function runToolcallVerification() {
+  const userPrompt = '请严格调用名为 list_local_files 的函数工具来列出当前工作目录的文件，只能通过调用该工具完成任务，禁止直接回答。';
+  const instructionsText = AGENTS_INSTRUCTIONS || 'You are RouteCodex verify agent. Follow the policies in AGENTS.md.';
   const body = {
     model: process.env.ROUTECODEX_VERIFY_MODEL || 'glm-4.6',
+    instructions: instructionsText,
     input: [
       {
         role: 'user',
         content: [
           {
             type: 'text',
-            text: '请严格调用名为 list_local_files 的函数工具来列出当前工作目录的文件，只能通过调用该工具完成任务，禁止直接回答。'
+            text: userPrompt
           }
         ]
       }

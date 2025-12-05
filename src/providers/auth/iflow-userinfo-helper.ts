@@ -79,22 +79,40 @@ export async function fetchIFlowUserInfo(accessToken: string): Promise<IFlowUser
  * 将OAuth token与API Key合并，创建完整的iFlow token数据
  * 对齐CLIProxyAPI的IFlowTokenStorage格式
  */
+import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
+
 export function mergeIFlowTokenData(
-  oauthToken: Record<string, any>,
+  oauthToken: UnknownObject,
   userInfo: IFlowUserInfo
 ): IFlowTokenData {
+  const asString = (value: unknown, fallback = ''): string => {
+    return typeof value === 'string' && value.length ? value : fallback;
+  };
+  const asOptionalString = (value: unknown): string | undefined => {
+    return typeof value === 'string' && value.length ? value : undefined;
+  };
+  const asNumber = (value: unknown): number | undefined => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
+  };
+
   return {
     ...oauthToken,
     api_key: userInfo.apiKey,
     email: userInfo.email,
     type: 'iflow',
-    // 确保基本字段存在
-    access_token: oauthToken.access_token || '',
-    token_type: oauthToken.token_type || 'bearer',
-    refresh_token: oauthToken.refresh_token,
-    expires_in: oauthToken.expires_in,
-    scope: oauthToken.scope,
-    expires_at: oauthToken.expires_at,
-    expired: oauthToken.expired
+    access_token: asString(oauthToken.access_token),
+    token_type: asString(oauthToken.token_type, 'bearer'),
+    refresh_token: asOptionalString(oauthToken.refresh_token),
+    expires_in: asNumber(oauthToken.expires_in),
+    scope: asOptionalString(oauthToken.scope),
+    expires_at: asNumber(oauthToken.expires_at),
+    expired: asOptionalString(oauthToken.expired)
   };
 }

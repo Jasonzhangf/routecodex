@@ -8,6 +8,7 @@ import type { ModuleDependencies } from '../../../../modules/pipeline/types/modu
 export abstract class BaseHook {
   protected dependencies: ModuleDependencies;
   protected isInitialized = false;
+  protected targetProfile?: string;
 
   constructor(dependencies: ModuleDependencies) {
     this.dependencies = dependencies;
@@ -41,14 +42,20 @@ export abstract class BaseHook {
     }
   }
 
-  protected shouldExecute(data: UnknownObject, context: CompatibilityContext): boolean {
-    // 仅对iFlow执行；当上游未传入上下文时，默认视为iFlow（该Hook仅挂载于iFlow兼容模块内）
-    const providerType = (context as any)?.providerType;
-    return providerType ? providerType === 'glm' : true;
+  setTargetProfile(profileId?: string): void {
+    this.targetProfile = profileId?.toLowerCase();
+  }
+
+  protected shouldExecute(_data: UnknownObject, context: CompatibilityContext): boolean {
+    if (!this.targetProfile) {
+      return true;
+    }
+    const profile = context.profileId?.toLowerCase();
+    return profile === this.targetProfile;
   }
 
   protected logExecution(context: CompatibilityContext, additionalData?: UnknownObject): void {
-    const reqId = (context as any)?.requestId || 'unknown';
+    const reqId = context.requestId || 'unknown';
     this.dependencies.logger?.logModule('iflow-hook', 'execute', {
       hookName: this.name,
       stage: this.stage,
@@ -58,7 +65,7 @@ export abstract class BaseHook {
   }
 
   protected logError(error: Error, context: CompatibilityContext, additionalData?: UnknownObject): void {
-    const reqId = (context as any)?.requestId || 'unknown';
+    const reqId = context.requestId || 'unknown';
     this.dependencies.logger?.logError?.(error, {
       hookName: this.name,
       stage: this.stage,

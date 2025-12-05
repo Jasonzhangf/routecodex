@@ -7,6 +7,14 @@
 import type { UnknownObject } from '../../../types/common-types.js';
 import * as crypto from 'node:crypto';
 
+type BrowserOpener = (url: string) => Promise<void> | void;
+type OpenModule = {
+  default?: BrowserOpener;
+  open?: BrowserOpener;
+};
+type ShellExecOptions = { shell?: boolean | string };
+type ExecAsyncFn = (command: string, options?: ShellExecOptions) => Promise<{ stdout: string; stderr: string }>;
+
 /**
  * OAuth认证流程类型
  */
@@ -180,28 +188,39 @@ export abstract class BaseOAuthFlowStrategy {
       // Prefer npm 'open' for cross-platform behavior; fallback to OS-specific commands
       let opened = false;
       try {
-        const openMod: any = await import('open');
-        if (openMod && (openMod.default || openMod.open)) {
-          const opener = openMod.default || openMod.open;
+        const openImport = (await import('open')) as unknown;
+        let opener: BrowserOpener | undefined;
+        if (typeof openImport === 'function') {
+          opener = openImport as BrowserOpener;
+        } else {
+          const moduleRef = openImport as OpenModule;
+          opener = moduleRef.default ?? moduleRef.open;
+        }
+        if (typeof opener === 'function') {
           await opener(targetUrl);
           opened = true;
         }
-      } catch { /* ignore and fallback */ }
+      } catch {
+        /* ignore and fallback */
+      }
       if (!opened) {
         try {
-          const { exec } = await import('child_process');
-          const { promisify } = await import('util');
-          const execAsync: any = promisify(exec);
+          const { exec } = await import('node:child_process');
+          const { promisify } = await import('node:util');
+          const execAsync = promisify(exec) as ExecAsyncFn;
           // macOS
-          await execAsync(`open \"${targetUrl}\"`).catch(async () => {
+          await execAsync(`open "${targetUrl}"`).catch(async () => {
             // Linux
-            await execAsync(`xdg-open \"${targetUrl}\"`).catch(async () => {
+            await execAsync(`xdg-open "${targetUrl}"`).catch(async () => {
               // Windows
-              await execAsync(`start \"\" \"${targetUrl}\"`, { shell: true } as any);
+              const shellOptions: ShellExecOptions = { shell: true };
+              await execAsync(`start "" "${targetUrl}"`, shellOptions);
             });
           });
           opened = true;
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
       if (!opened) {
         console.log('Could not open browser automatically. Please manually visit the URL.');

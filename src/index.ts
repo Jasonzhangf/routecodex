@@ -3,7 +3,7 @@
  * Multi-provider OpenAI proxy server with configuration management
  */
 
-import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS } from "./constants/index.js";
+import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS } from './constants/index.js';
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
@@ -15,16 +15,71 @@ import { fileURLToPath } from 'url';
 import { buildInfo } from './build-info.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 import { loadRouteCodexConfig } from './config/routecodex-config-loader.js';
+import type { RouteCodexHttpServer } from './server/runtime/http-server.js';
+
+type NodeGlobalWithRequire = typeof globalThis & { require?: NodeJS.Require };
+type UnknownRecord = Record<string, unknown>;
 
 // Polyfill CommonJS require for ESM runtime to satisfy dependencies that call require()
-let moduleRequire: ((moduleId: string) => unknown) | null = null;
+let moduleRequire: NodeJS.Require | null = null;
 try {
   moduleRequire = createRequire(import.meta.url);
-  if (!(globalThis as any).require) {
-    (globalThis as any).require = moduleRequire;
+  const globalScope = globalThis as NodeGlobalWithRequire;
+  if (!globalScope.require) {
+    globalScope.require = moduleRequire;
   }
 } catch {
   moduleRequire = null;
+}
+
+function asRecord(value: unknown): UnknownRecord | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as UnknownRecord) : undefined;
+}
+
+function getNestedRecord(source: UnknownRecord, path: string[]): UnknownRecord | undefined {
+  let current: unknown = source;
+  for (const key of path) {
+    const record = asRecord(current);
+    if (!record) {
+      return undefined;
+    }
+    current = record[key];
+  }
+  return asRecord(current);
+}
+
+function readNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function readString(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  return undefined;
+}
+
+function readRecordNumber(record: UnknownRecord | undefined, key: string): number | undefined {
+  if (!record) {
+    return undefined;
+  }
+  return readNumber(record[key]);
+}
+
+function readRecordString(record: UnknownRecord | undefined, key: string): string | undefined {
+  if (!record) {
+    return undefined;
+  }
+  return readString(record[key]);
 }
 
 if (!process.env.ROUTECODEX_VERSION) {
@@ -89,7 +144,7 @@ function resolveAppBaseDir(): string {
  * Main application class
  */
 class RouteCodexApp {
-  private httpServer: unknown;
+  private httpServer: RouteCodexHttpServer | null = null;
   private modulesConfigPath: string;
   private _isRunning: boolean = false;
   private configPath: string = path.join(process.cwd(), 'config', 'config.json');
@@ -108,7 +163,6 @@ class RouteCodexApp {
     }
 
     this.baseDir = resolveAppBaseDir();
-    this.httpServer = null; // 将在初始化时设置
   }
 
   /**
@@ -126,27 +180,12 @@ class RouteCodexApp {
 
       // config path reference will be set after resolving user config below
 
-      // 确定用户配置文件路径，优先使用环境变量（RCC4_CONFIG_PATH / ROUTECODEX_CONFIG / ROUTECODEX_CONFIG_PATH），否则回退到共享解析
-      function pickUserConfigPath(): string {
-        const envPaths = [
-          process.env.RCC4_CONFIG_PATH,
-          process.env.ROUTECODEX_CONFIG,
-          process.env.ROUTECODEX_CONFIG_PATH,
-        ].filter(Boolean) as string[];
-        for (const p of envPaths) {
-          try {
-            if (p && fsSync.existsSync(p) && fsSync.statSync(p).isFile()) {
-              return p;
-            }
-          } catch { /* ignore */ }
-        }
-        return resolveRouteCodexConfigPath();
-      }
-      const userConfigPath = pickUserConfigPath();
+      const userConfigPath = this.resolveUserConfigPath();
       this.configPath = userConfigPath;
 
       const { userConfig, configPath: resolvedConfigPath, providerProfiles } = await loadRouteCodexConfig(userConfigPath);
       this.configPath = resolvedConfigPath;
+      const userConfigRecord = asRecord(userConfig) ?? {};
 
       if (!process.env.ROUTECODEX_STAGE_LOG || process.env.ROUTECODEX_STAGE_LOG.trim() === '') {
         if (buildInfo.mode === 'dev') {
@@ -159,51 +198,76 @@ class RouteCodexApp {
       // 3. 初始化服务器（V1/V2可切换，默认动态V2）
       // 3. 初始化服务器（仅使用 V2 动态流水线架构）
       // Resolve host/port from merged config for V2 constructor
-      let bindHost = '0.0.0.0';
+      let bindHost = readRecordString(getNestedRecord(userConfigRecord, ['httpserver']), 'host')
+        ?? readRecordString(getNestedRecord(userConfigRecord, ['modules', 'httpserver', 'config']), 'host')
+        ?? readRecordString(getNestedRecord(userConfigRecord, ['server']), 'host')
+        ?? '0.0.0.0';
       let bindPort = port;
       try {
         const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
-        const http = (userConfig as any)?.httpserver || (userConfig as any)?.modules?.httpserver?.config || {};
-        bindHost = String(http.host || '0.0.0.0');
-        const portRaw = http.port ?? (userConfig as any)?.server?.port ?? port;
+        const httpConfig =
+          getNestedRecord(userConfigRecord, ['httpserver']) ??
+          getNestedRecord(userConfigRecord, ['modules', 'httpserver', 'config']);
+        const serverConfig = getNestedRecord(userConfigRecord, ['server']);
+        const portRaw = readRecordNumber(httpConfig, 'port') ?? readRecordNumber(serverConfig, 'port');
         if (Number.isFinite(envPort) && envPort > 0) {
           bindPort = envPort;
-        } else {
-          bindPort = typeof portRaw === 'number' ? portRaw : parseInt(String(portRaw), 10);
+        } else if (typeof portRaw === 'number') {
+          bindPort = portRaw;
         }
-        if (!Number.isFinite(bindPort)) bindPort = port;
-      } catch { /* keep defaults */ }
+        if (!Number.isFinite(bindPort)) {
+          bindPort = port;
+        }
+      } catch {
+        bindHost = '0.0.0.0';
+        bindPort = port;
+      }
       const { RouteCodexHttpServer } = await import('./server/runtime/http-server.js');
       // V2 hooks 开关：默认开启；可通过 ROUTECODEX_V2_HOOKS=0/false/no 关闭
       const hooksEnv = String(process.env.ROUTECODEX_V2_HOOKS || process.env.RCC_V2_HOOKS || '').trim().toLowerCase();
       const hooksOff = hooksEnv === '0' || hooksEnv === 'false' || hooksEnv === 'no';
       const hooksOn = !hooksOff;
-      this.httpServer = new RouteCodexHttpServer({ server: { host: bindHost, port: bindPort, useV2: true }, logging: { level: 'debug', enableConsole: true }, providers: {}, v2Config: { enableHooks: hooksOn } }) as any;
-      await (this.httpServer as any).initializeWithUserConfig(userConfig, { providerProfiles });
+      this.httpServer = new RouteCodexHttpServer({
+        server: { host: bindHost, port: bindPort, useV2: true },
+        logging: { level: 'debug', enableConsole: true },
+        providers: {},
+        v2Config: { enableHooks: hooksOn }
+      });
+      await this.httpServer.initializeWithUserConfig(userConfig, { providerProfiles });
 
       // 4.1 校验 virtualrouter 配置
-      const vrSection = (userConfig as any)?.virtualrouter;
-      if (!vrSection || !vrSection.routing || !Object.keys(vrSection.routing).length) {
+      const virtualRouter = getNestedRecord(userConfigRecord, ['virtualrouter']);
+      const routing = getNestedRecord(virtualRouter ?? userConfigRecord, ['routing']);
+      const routingRecord: UnknownRecord = routing ?? {};
+      if (Object.keys(routingRecord).length === 0) {
         throw new Error(`user config 缺少 virtualrouter.routing，无法启动`);
       }
-      console.log(`🧱 Virtual router routes: ${Object.keys(vrSection.routing).length}`);
-      console.log(`🔑 Provider targets: ${Object.keys((vrSection.routing || {})).reduce((acc, key) => acc + (Array.isArray(vrSection.routing[key]) ? vrSection.routing[key].length : 0), 0)}`);
+      const routeEntries = Object.entries(routingRecord);
+      const targetCount = routeEntries.reduce((acc, [, value]) => {
+        if (Array.isArray(value)) {
+          return acc + value.length;
+        }
+        return acc;
+      }, 0);
+      console.log(`🧱 Virtual router routes: ${routeEntries.length}`);
+      console.log(`🔑 Provider targets: ${targetCount}`);
 
       // 6. 启动服务器（若端口被占用，先尝试优雅释放；确保在合并配置已生成之后）
       // Ensure the port is available before continuing. Attempt graceful shutdown first.
       await ensurePortAvailable(port, { attemptGraceful: true });
       try {
-        await (this.httpServer as any).start();
-      } catch (err: any) {
-        const code = (err && (err as any).code) || (err && (err as any).errno) || '';
-        const msg = (err instanceof Error ? err.message : String(err || ''));
+        await this.httpServer.start();
+      } catch (err) {
+        const nodeError = err as NodeJS.ErrnoException | undefined;
+        const code = nodeError?.code ?? nodeError?.errno ?? '';
+        const msg = err instanceof Error ? err.message : String(err ?? '');
         if (String(code) === 'EADDRINUSE' || /address already in use/i.test(msg)) {
           console.warn(`⚠ Port ${port} in use; attempting to free and retry...`);
           try {
             await ensurePortAvailable(port, { attemptGraceful: true });
-            await (this.httpServer as any).start();
+            await this.httpServer.start();
           } catch (e) {
-            throw err; // keep original error context
+            throw err;
           }
         } else {
           throw err;
@@ -216,13 +280,15 @@ class RouteCodexApp {
 
       // 7. 获取服务器状态（使用 HTTP 服务器解析后的最终绑定地址与端口）
       // 优先读取服务器自身解析结果，避免日志误导（例如 host 放在不同层级或为 0.0.0.0 时）
-      let serverConfig = { host: LOCAL_HOSTS.IPV4, port } as { host: string; port: number };
+      let serverConfig: { host: string; port: number } = { host: LOCAL_HOSTS.IPV4, port };
       try {
-        const resolved = await (this.httpServer as any).getServerConfig?.();
-        if (resolved && resolved.server) {
-          serverConfig = { host: String(resolved.server.host || LOCAL_HOSTS.IPV4), port: Number(resolved.server.port || port) };
+        const resolved = this.httpServer.getServerConfig();
+        if (resolved && resolved.host && resolved.port) {
+          serverConfig = resolved;
         }
-      } catch { /* ignore; fall back to defaults */ }
+      } catch {
+        /* ignore; fall back to defaults */
+      }
 
       console.log(`✅ RouteCodex server started successfully!`);
       console.log(`🌐 Server URL: http://${serverConfig.host}:${serverConfig.port}`);
@@ -251,7 +317,7 @@ class RouteCodexApp {
         console.log('🛑 Stopping RouteCodex server...');
 
         if (this.httpServer) {
-          await (this.httpServer as any).stop();
+          await this.httpServer.stop();
         }
 
         this._isRunning = false;
@@ -268,12 +334,33 @@ class RouteCodexApp {
    */
   getStatus(): unknown {
     if (this.httpServer) {
-      return (this.httpServer as any).getStatus();
+      return this.httpServer.getStatus();
     }
     return {
       status: 'stopped',
       message: 'Server not initialized'
     };
+  }
+
+  /**
+   * Detect server port from user configuration
+   */
+  private resolveUserConfigPath(): string {
+    const envPaths = [
+      process.env.RCC4_CONFIG_PATH,
+      process.env.ROUTECODEX_CONFIG,
+      process.env.ROUTECODEX_CONFIG_PATH
+    ].filter(Boolean) as string[];
+    for (const candidate of envPaths) {
+      try {
+        if (candidate && fsSync.existsSync(candidate) && fsSync.statSync(candidate).isFile()) {
+          return candidate;
+        }
+      } catch {
+        // ignore and fall back to the next candidate
+      }
+    }
+    return resolveRouteCodexConfigPath();
   }
 
   /**
@@ -406,20 +493,26 @@ async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boole
       // Give the server a moment to exit cleanly
       for (let i = 0; i < 10; i++) {
         await new Promise(r => setTimeout(r, 300));
-        if (await canBind(port)) return;
+        if (await canBind(port)) {
+          return;
+        }
       }
     }
   }
 
   // Fall back to SIGTERM/SIGKILL processes listening on the port (avoid self-kill by probing first)
   const pids = await listPidsOnPort(port);
-  if (!pids.length) return;
+  if (!pids.length) {
+    return;
+  }
   for (const pid of pids) {
     try { process.kill(Number(pid), 'SIGTERM'); } catch { /* ignore */ }
   }
   for (let i = 0; i < 10; i++) {
     await new Promise(r => setTimeout(r, 300));
-    if (await canBind(port)) return;
+    if (await canBind(port)) {
+      return;
+    }
   }
   const remain = await listPidsOnPort(port);
   for (const pid of remain) {
@@ -460,26 +553,11 @@ async function attemptHttpShutdown(port: number): Promise<boolean> {
     }, 1000);
     const res = await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${port}${API_PATHS.SHUTDOWN}`, {
       method: 'POST',
-      signal: (controller as any).signal
-    } as any).catch(() => null);
+      signal: controller.signal
+    }).catch(() => null);
     clearTimeout(timeout);
     return !!(res && res.ok);
   } catch { return false; }
-}
-
-/** Quick health probe to avoid killing a healthy server instance */
-async function isServerHealthy(port: number): Promise<boolean> {
-  try {
-    const controller = new AbortController();
-    const t = setTimeout(() => { try { controller.abort(); } catch { /* ignore */ } }, 800);
-    const res = await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${port}${API_PATHS.HEALTH}`, { method: 'GET', signal: (controller as any).signal } as any);
-    clearTimeout(t);
-    if (!res.ok) { return false; }
-    const data = await res.json().catch(() => null);
-    return !!data && (data.status === 'healthy' || data.status === 'ready');
-  } catch {
-    return false;
-  }
 }
 
 /**

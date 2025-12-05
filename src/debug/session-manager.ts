@@ -17,7 +17,9 @@ export class DebugSessionManager {
   startSession(options: StartSessionOptions = {}): DebugSession {
     const id = options.id || `dbg-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
     const existing = this.sessions.get(id);
-    if (existing) return existing;
+    if (existing) {
+      return existing;
+    }
     const session: DebugSession = {
       id,
       mode: options.mode ?? 'capture',
@@ -56,7 +58,9 @@ export class DebugSessionManager {
 
   async listSessions(): Promise<string[]> {
     const ids = new Set(this.sessions.keys());
-    for (const id of await this.store.listSessions()) ids.add(id);
+    for (const id of await this.store.listSessions()) {
+      ids.add(id);
+    }
     return Array.from(ids.values());
   }
 

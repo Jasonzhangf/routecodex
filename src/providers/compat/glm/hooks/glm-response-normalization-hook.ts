@@ -1,7 +1,24 @@
 import type { CompatibilityContext } from '../../compatibility-interface.js';
 import type { UnknownObject } from '../../../../modules/pipeline/types/common-types.js';
-import type { ModuleDependencies } from '../../../../modules/pipeline/types/module.types.js';
 import { BaseHook } from './base-hook.js';
+
+const isRecord = (value: unknown): value is UnknownObject => typeof value === 'object' && value !== null;
+
+type UsageRecord = Record<string, unknown> & {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+};
+
+interface ChoiceMessage extends UnknownObject {
+  content?: unknown;
+  tool_calls?: UnknownObject[];
+}
+
+interface ChoiceRecord extends UnknownObject {
+  finish_reason?: string;
+  message?: ChoiceMessage;
+}
 
 /**
  * GLM响应标准化Hook
@@ -24,29 +41,24 @@ export class GLMResponseNormalizationHook extends BaseHook {
     try {
       const result = { ...data };
 
-      // 标准化usage字段
-      if (result.usage) {
+      if (isRecord(result.usage)) {
         result.usage = this.normalizeUsageFields(result.usage);
       }
 
-      // 标准化时间戳
-      if (result.created_at) {
+      if (typeof result.created_at === 'number') {
         result.created = result.created_at;
         delete result.created_at;
       }
 
-      // 处理reasoning_content
-      if (result.reasoning_content) {
+      if (result.reasoning_content !== undefined) {
         result.reasoning_content = this.extractReasoningContent(result.reasoning_content);
       }
 
-      // 标准化choices字段
-      if (result.choices && Array.isArray(result.choices)) {
+      if (Array.isArray(result.choices)) {
         result.choices = this.normalizeChoices(result.choices);
       }
 
-      // 处理model字段
-      if (result.model && typeof result.model === 'string') {
+      if (typeof result.model === 'string') {
         result.model = this.normalizeModelName(result.model);
       }
 
@@ -59,11 +71,10 @@ export class GLMResponseNormalizationHook extends BaseHook {
     }
   }
 
-  private normalizeUsageFields(usage: any): UnknownObject {
-    const normalizedUsage: any = { ...(usage as any) };
+  private normalizeUsageFields(usage: UsageRecord): UsageRecord {
+    const normalizedUsage: UsageRecord = { ...usage };
 
-    // GLM可能使用不同的字段名
-    const fieldMappings = {
+    const fieldMappings: Record<string, keyof UsageRecord> = {
       input_tokens: 'prompt_tokens',
       output_tokens: 'completion_tokens',
       total_input_tokens: 'prompt_tokens',
@@ -71,59 +82,49 @@ export class GLMResponseNormalizationHook extends BaseHook {
     };
 
     for (const [glmField, standardField] of Object.entries(fieldMappings)) {
-      if ((normalizedUsage as any)[glmField] !== undefined) {
-        (normalizedUsage as any)[standardField] = (normalizedUsage as any)[glmField];
-        delete (normalizedUsage as any)[glmField];
+      const value = normalizedUsage[glmField];
+      if (typeof value === 'number') {
+        normalizedUsage[standardField] = value;
+        delete normalizedUsage[glmField];
       }
     }
 
-    // 确保所有必需字段都存在
-    if ((normalizedUsage as any).prompt_tokens === undefined) {
-      (normalizedUsage as any).prompt_tokens = 0;
-    }
+    normalizedUsage.prompt_tokens = typeof normalizedUsage.prompt_tokens === 'number'
+      ? normalizedUsage.prompt_tokens
+      : 0;
+    normalizedUsage.completion_tokens = typeof normalizedUsage.completion_tokens === 'number'
+      ? normalizedUsage.completion_tokens
+      : 0;
 
-    if ((normalizedUsage as any).completion_tokens === undefined) {
-      (normalizedUsage as any).completion_tokens = 0;
-    }
-
-    if ((normalizedUsage as any).total_tokens === undefined) {
-      (normalizedUsage as any).total_tokens =
-        ((normalizedUsage as any).prompt_tokens || 0) +
-        ((normalizedUsage as any).completion_tokens || 0);
+    if (typeof normalizedUsage.total_tokens !== 'number') {
+      normalizedUsage.total_tokens = normalizedUsage.prompt_tokens + normalizedUsage.completion_tokens;
     }
 
     return normalizedUsage;
   }
 
-  private extractReasoningContent(reasoningContent: any): string {
+  private extractReasoningContent(reasoningContent: unknown): string {
     if (typeof reasoningContent === 'string') {
       return this.extractReasoningBlocks(reasoningContent);
     }
 
-    if (typeof reasoningContent === 'object' && reasoningContent !== null) {
-      // 处理对象形式的reasoning_content
-      const obj = reasoningContent as any;
-      if (obj.text) {
-        return this.extractReasoningBlocks(obj.text);
+    if (isRecord(reasoningContent)) {
+      if (typeof reasoningContent.text === 'string') {
+        return this.extractReasoningBlocks(reasoningContent.text);
       }
-      if (obj.content) {
-        return this.extractReasoningBlocks(obj.content);
+      if (typeof reasoningContent.content === 'string') {
+        return this.extractReasoningBlocks(reasoningContent.content);
       }
-      if (obj.blocks) {
-        return Array.isArray(obj.blocks) ? obj.blocks.join('\n\n') : String(obj.blocks);
+      if (Array.isArray(reasoningContent.blocks)) {
+        return reasoningContent.blocks.map(block => String(block)).join('\n\n');
       }
       return JSON.stringify(reasoningContent);
     }
 
-    return String(reasoningContent);
+    return String(reasoningContent ?? '');
   }
 
   private extractReasoningBlocks(content: string): string {
-    if (typeof content !== 'string') {
-      return String(content);
-    }
-
-    // 提取各种格式的reasoning块
     const reasoningPatterns = [
       /```reasoning\n(.*?)\n```/gs,
       /```thinking\n(.*?)\n```/gs,
@@ -133,156 +134,123 @@ export class GLMResponseNormalizationHook extends BaseHook {
       /\[THINKING\](.*?)\[\/THINKING\]/gs
     ];
 
-    let extractedBlocks: string[] = [];
+    const extractedBlocks: string[] = [];
 
     for (const pattern of reasoningPatterns) {
-      const matches = content.match(pattern);
-      if (matches) {
-        extractedBlocks.push(
-          ...matches.map(match => {
-            // 移除标记符号，只保留内容
-            return match
-              .replace(/```(reasoning|thinking)\n/g, '')
-              .replace(/```$/g, '')
-              .replace(/<\/?(reasoning|thinking)>/g, '')
-              .replace(/\[\/?(REASONING|THINKING)\]/g, '')
-              .trim();
-          }).filter(block => block.length > 0)
-        );
+      const matches = content.matchAll(pattern);
+      for (const match of matches) {
+        const block = match[1] ?? '';
+        const normalized = String(block)
+          .replace(/```(reasoning|thinking)\n?/g, '')
+          .replace(/```$/g, '')
+          .trim();
+        if (normalized.length > 0) {
+          extractedBlocks.push(normalized);
+        }
       }
     }
 
-    // 如果没有找到格式化的块，尝试提取内容
     if (extractedBlocks.length === 0) {
-      // 检查是否包含reasoning相关的关键词
       const reasoningKeywords = ['reasoning:', 'thinking:', '分析:', '思考:', '推理:'];
       const lines = content.split('\n');
 
       for (const line of lines) {
         const trimmedLine = line.trim();
-        if (reasoningKeywords.some(keyword =>
-          trimmedLine.toLowerCase().startsWith(keyword.toLowerCase()))) {
-          const content = trimmedLine.substring(trimmedLine.indexOf(':') + 1).trim();
-          if (content.length > 0) {
-            extractedBlocks.push(content);
+        const keyword = reasoningKeywords.find(keyword => trimmedLine.toLowerCase().startsWith(keyword.toLowerCase()));
+        if (keyword) {
+          const idx = trimmedLine.indexOf(':');
+          const snippet = idx >= 0 ? trimmedLine.slice(idx + 1).trim() : trimmedLine;
+          if (snippet.length > 0) {
+            extractedBlocks.push(snippet);
           }
         }
       }
     }
 
-    // 去重并返回
     return [...new Set(extractedBlocks)].join('\n\n');
   }
 
-  private normalizeChoices(choices: unknown[]): unknown[] {
-    return choices.map((choice, index) => {
-      if (!choice || typeof choice !== 'object') {
-        return choice;
+  private normalizeChoices(choices: unknown[]): ChoiceRecord[] {
+    return choices.map(choice => {
+      if (!isRecord(choice)) {
+        return choice as ChoiceRecord;
       }
 
-      const normalizedChoice = { ...choice };
+      const normalizedChoice: ChoiceRecord = { ...choice };
 
-      // 标准化finish_reason
-      if ((normalizedChoice as any).finish_reason) {
-        (normalizedChoice as any).finish_reason = this.normalizeFinishReason(
-          (normalizedChoice as any).finish_reason
-        );
+      if (typeof normalizedChoice.finish_reason === 'string') {
+        normalizedChoice.finish_reason = this.normalizeFinishReason(normalizedChoice.finish_reason);
       }
 
-      // 标准化message字段
-      if ((normalizedChoice as any).message) {
-        (normalizedChoice as any).message = this.normalizeChoiceMessage(
-          (normalizedChoice as any).message,
-          index
-        );
+      if (isRecord(normalizedChoice.message)) {
+        normalizedChoice.message = this.normalizeChoiceMessage(normalizedChoice.message);
       }
 
       return normalizedChoice;
-    });
+    }) as ChoiceRecord[];
   }
 
   private normalizeFinishReason(finishReason: string): string {
-    // GLM可能使用不同的finish_reason值
     const reasonMappings: Record<string, string> = {
-      'stop': 'stop',
-      'length': 'length',
-      'function_call': 'function_call',
-      'tool_calls': 'tool_calls',
-      'content_filter': 'content_filter',
-      'eos': 'stop',
-      'max_tokens': 'length',
-      'tool': 'tool_calls'
+      stop: 'stop',
+      length: 'length',
+      function_call: 'function_call',
+      tool_calls: 'tool_calls',
+      content_filter: 'content_filter',
+      eos: 'stop',
+      max_tokens: 'length',
+      tool: 'tool_calls'
     };
 
-    return reasonMappings[finishReason] || finishReason;
+    return reasonMappings[finishReason] ?? finishReason;
   }
 
-  private normalizeChoiceMessage(message: UnknownObject, choiceIndex: number): UnknownObject {
-    const normalizedMessage = { ...message };
+  private normalizeChoiceMessage(message: ChoiceMessage): ChoiceMessage {
+    const normalizedMessage: ChoiceMessage = { ...message };
 
-    // 标准化content字段
-    if ((normalizedMessage as any).content !== undefined) {
-      (normalizedMessage as any).content = this.normalizeMessageContent(
-        (normalizedMessage as any).content
-      );
+    if (normalizedMessage.content !== undefined) {
+      normalizedMessage.content = this.normalizeMessageContent(normalizedMessage.content);
     }
 
-    // 标准化tool_calls字段
-    if ((normalizedMessage as any).tool_calls) {
-      (normalizedMessage as any).tool_calls = this.normalizeToolCalls(
-        (normalizedMessage as any).tool_calls
-      );
+    if (Array.isArray(normalizedMessage.tool_calls)) {
+      normalizedMessage.tool_calls = this.normalizeToolCalls(normalizedMessage.tool_calls);
     }
 
     return normalizedMessage;
   }
 
-  private normalizeMessageContent(content: unknown): unknown {
+  private normalizeMessageContent(content: unknown): string {
     if (typeof content === 'string') {
       return content;
     }
 
     if (Array.isArray(content)) {
-      // 将content数组扁平化为字符串
-      return content.map(item => {
-        if (typeof item === 'string') {
-          return item;
-        }
-        if (typeof item === 'object' && item !== null) {
-          return JSON.stringify(item);
-        }
-        return String(item);
-      }).join('');
+      return content.map(item => (typeof item === 'string' ? item : JSON.stringify(item))).join('');
     }
 
-    if (typeof content === 'object' && content !== null) {
+    if (isRecord(content)) {
       return JSON.stringify(content);
     }
 
-    return String(content);
+    return String(content ?? '');
   }
 
-  private normalizeToolCalls(toolCalls: unknown[]): unknown[] {
-    if (!Array.isArray(toolCalls)) {
-      return toolCalls;
-    }
-
-    return toolCalls.map((toolCall, index) => {
-      if (!toolCall || typeof toolCall !== 'object') {
+  private normalizeToolCalls(toolCalls: UnknownObject[]): UnknownObject[] {
+    return toolCalls.map(toolCall => {
+      if (!isRecord(toolCall)) {
         return toolCall;
       }
 
-      const normalizedToolCall = { ...toolCall };
+      const normalizedToolCall: UnknownObject = { ...toolCall };
+      const func = normalizedToolCall.function;
 
-      // 确保arguments字段是字符串
-      if ((normalizedToolCall as any).function?.arguments &&
-          typeof (normalizedToolCall as any).function.arguments !== 'string') {
+      if (isRecord(func) && func.arguments !== undefined && typeof func.arguments !== 'string') {
         try {
-          (normalizedToolCall as any).function.arguments =
-            JSON.stringify((normalizedToolCall as any).function.arguments);
-        } catch (error) {
-          // 如果序列化失败，保持原样
+          func.arguments = JSON.stringify(func.arguments);
+        } catch {
+          // 保持原状，交由后续环节处理
         }
+        normalizedToolCall.function = func;
       }
 
       return normalizedToolCall;
@@ -290,7 +258,6 @@ export class GLMResponseNormalizationHook extends BaseHook {
   }
 
   private normalizeModelName(model: string): string {
-    // 标准化模型名称
     const modelMappings: Record<string, string> = {
       'glm-4': 'glm-4',
       'glm-4-0520': 'glm-4',
@@ -304,6 +271,6 @@ export class GLMResponseNormalizationHook extends BaseHook {
       'glm-4v-plus': 'glm-4v'
     };
 
-    return modelMappings[model] || model;
+    return modelMappings[model] ?? model;
   }
 }

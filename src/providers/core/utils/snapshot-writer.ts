@@ -9,13 +9,15 @@ type ClientPhase = 'client-request';
 const SNAPSHOT_BASE = path.join(os.homedir(), '.routecodex', 'codex-samples');
 
 async function ensureDir(dir: string): Promise<void> {
-  try { await fsp.mkdir(dir, { recursive: true }); } catch { /* ignore */ }
+  try {
+    await fsp.mkdir(dir, { recursive: true });
+  } catch {
+    // ignore mkdir errors (non-blocking snapshot)
+  }
 }
 
 function normalizeRequestId(requestId?: string): string {
-  if (!requestId || typeof requestId !== 'string') {
-    return `req_${Date.now()}`;
-  }
+  if (!requestId || typeof requestId !== 'string') { return `req_${Date.now()}`; }
   const safe = requestId.startsWith('req_') ? requestId : `req_${requestId}`;
   return safe.replace(/[^\w.-]/g, '_');
 }
@@ -33,7 +35,9 @@ function resolveEndpoint(url?: string): { endpoint: string; folder: string } {
 
 function maskHeaders(headers: Record<string, unknown> | undefined | null): Record<string, unknown> {
   const result: Record<string, unknown> = {};
-  if (!headers || typeof headers !== 'object') return result;
+  if (!headers || typeof headers !== 'object') {
+    return result;
+  }
   for (const [k, v] of Object.entries(headers)) {
     const lower = k.toLowerCase();
     if (lower === 'authorization' || lower === 'x-api-key' || lower === 'api-key') {
@@ -41,7 +45,7 @@ function maskHeaders(headers: Record<string, unknown> | undefined | null): Recor
       const masked = raw.length > 12 ? `${raw.slice(0, 6)}****${raw.slice(-6)}` : '****';
       result[k] = masked;
     } else {
-      result[k] = v as any;
+      result[k] = v;
     }
   }
   return result;

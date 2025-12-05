@@ -165,7 +165,7 @@ export class PipelineDebugLogger {
     this.recentLogs.length = 0;
   }
 
-  exportLogs(format: 'json' | 'csv' = 'json'): any {
+  exportLogs(format: 'json' | 'csv' = 'json'): DebugLogEntry[] | string[] {
     if (format === 'csv') {
       return this.recentLogs.map(entry => `${entry.timestamp},${entry.level},${entry.category ?? ''},${entry.message ?? ''}`);
     }
@@ -202,7 +202,9 @@ export class PipelineDebugLogger {
     const result: Record<string, number> = {};
     for (const entry of this.recentLogs) {
       const key = String(entry[field] ?? '');
-      if (!key) continue;
+      if (!key) {
+        continue;
+      }
       result[key] = (result[key] || 0) + 1;
     }
     return result;

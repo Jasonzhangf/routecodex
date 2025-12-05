@@ -52,14 +52,14 @@ module.exports = {
     "node_modules/**",
     "dist/**",
     "coverage/**",
-    "src/commands/offline-log.ts",
+    "src/providers/compat/__tests__/**",
+    "src/providers/profile/__tests__/**",
     "web-interface/node_modules/**",
     "src/**/*.js"
   ],
   "overrides": [
     {
       "files": [
-        "src/logging/**/*.{ts,js}",
         "src/types/**/*.{ts,js}",
         "src/modules/enhancement/**/*.{ts,js}",
         "src/modules/resource/**/*.{ts,js}",

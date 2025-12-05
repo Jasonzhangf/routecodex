@@ -2,10 +2,8 @@ import type { UnknownObject } from '../../../../modules/pipeline/types/common-ty
 import type { ModuleDependencies } from '../../../../modules/pipeline/types/module.types.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { sanitizeGLMToolsSchemaInPlace } from '../utils/tool-schema-helpers.js';
 
-/**
- * 字段映射配置接口
- */
 interface FieldMapping {
   sourcePath: string;
   targetPath: string;
@@ -19,12 +17,16 @@ interface FieldMappingConfig {
   outgoingMappings: FieldMapping[];
 }
 
+const isRecord = (value: unknown): value is UnknownObject => typeof value === 'object' && value !== null;
+
+const cloneObject = (value: UnknownObject): UnknownObject => ({ ...value });
+
 /**
  * GLM字段映射处理器
  * 负责OpenAI格式与GLM格式之间的字段转换
  */
 export class GLMFieldMappingProcessor {
-  private dependencies: ModuleDependencies;
+  private readonly dependencies: ModuleDependencies;
   private config: FieldMappingConfig | null = null;
   private isInitialized = false;
 
@@ -60,8 +62,7 @@ export class GLMFieldMappingProcessor {
     });
 
     try {
-      // Provider-specific: sanitize GLM tools schema to avoid unsupported JSON Schema features (e.g., oneOf)
-      this.sanitizeGLMToolsSchema(request);
+      sanitizeGLMToolsSchemaInPlace(request);
       const result = this.applyMappings(request, this.config.incomingMappings);
 
       this.dependencies.logger?.logModule('glm-field-mapping', 'mapIncoming-success', {
@@ -117,10 +118,8 @@ export class GLMFieldMappingProcessor {
       const configData = await fs.readFile(configPath, 'utf-8');
       this.config = JSON.parse(configData) as FieldMappingConfig;
 
-      // 验证配置
       this.validateConfig();
     } catch (error) {
-      // 如果配置文件不存在，使用默认配置
       this.config = this.getDefaultConfig();
       this.dependencies.logger?.logModule('glm-field-mapping', 'using-default-config', {});
     }
@@ -139,7 +138,6 @@ export class GLMFieldMappingProcessor {
       throw new Error('outgoingMappings must be an array');
     }
 
-    // 验证每个映射配置
     for (const mapping of [...this.config.incomingMappings, ...this.config.outgoingMappings]) {
       if (!mapping.sourcePath || !mapping.targetPath) {
         throw new Error('Mapping must have sourcePath and targetPath');
@@ -150,7 +148,6 @@ export class GLMFieldMappingProcessor {
   private getDefaultConfig(): FieldMappingConfig {
     return {
       incomingMappings: [
-        // GLM格式 -> OpenAI格式的映射
         {
           sourcePath: 'usage.prompt_tokens',
           targetPath: 'usage.input_tokens',
@@ -184,7 +181,6 @@ export class GLMFieldMappingProcessor {
         }
       ],
       outgoingMappings: [
-        // OpenAI格式 -> GLM格式的映射
         {
           sourcePath: 'usage.input_tokens',
           targetPath: 'usage.prompt_tokens',
@@ -215,7 +211,7 @@ export class GLMFieldMappingProcessor {
   }
 
   private applyMappings(data: UnknownObject, mappings: FieldMapping[]): UnknownObject {
-    const result = { ...data };
+    const result = cloneObject(data);
 
     for (const mapping of mappings) {
       this.applyMapping(result, mapping);
@@ -224,92 +220,42 @@ export class GLMFieldMappingProcessor {
     return result;
   }
 
-  /**
-   * GLM 接受的工具 schema 比较保守：去掉 oneOf，使用明确的类型定义。
-   * 这里对 shell 工具的 parameters.properties.command 统一为 { type: 'array', items: { type: 'string' } }。
-   * 注意：这是 provider 层的 schema 约束标准化，不涉及工具调用的语义转换。
-   */
-  private sanitizeGLMToolsSchema(data: UnknownObject): void {
-    try {
-      const tools = (data as any)?.tools;
-      if (!Array.isArray(tools)) return;
-      for (const t of tools) {
-        if (!t || typeof t !== 'object') continue;
-        const fn = (t as any).function;
-        // 移除 OpenAI 扩展字段 strict（GLM 不接受）
-        try { if (fn && typeof fn === 'object' && 'strict' in fn) { delete (fn as any).strict; } } catch { /* ignore */ }
-        const name = typeof fn?.name === 'string' ? fn.name : undefined;
-        const params = fn?.parameters && typeof fn.parameters === 'object' ? fn.parameters : undefined;
-        if (!params || !name) continue;
-        const props = (params as any).properties && typeof (params as any).properties === 'object' ? (params as any).properties : undefined;
-        if (!props) continue;
-
-        // 仅对 shell.command 进行约束清理：去掉 oneOf，统一为数组字符串
-        if (name === 'shell' && props.command) {
-          const cmd = props.command;
-          // 删除 oneOf 等复杂结构
-          if (cmd && typeof cmd === 'object') {
-            delete (cmd as any).oneOf;
-            (cmd as any).type = 'array';
-            (cmd as any).items = { type: 'string' };
-            if (typeof (cmd as any).description !== 'string' || !(cmd as any).description) {
-              (cmd as any).description = 'Shell command argv tokens. Use ["bash","-lc","<cmd>"] form.';
-            }
-          } else {
-            // 若 props.command 不是对象，直接重建
-            (props as any).command = {
-              description: 'Shell command argv tokens. Use ["bash","-lc","<cmd>"] form.',
-              type: 'array',
-              items: { type: 'string' }
-            };
-          }
-          // parameters.required 至少包含 command；additionalProperties 缺省为 false 以收敛形状
-          if (!Array.isArray((params as any).required)) (params as any).required = [];
-          const req: string[] = (params as any).required;
-          if (!req.includes('command')) req.push('command');
-          if (typeof (params as any).type !== 'string') (params as any).type = 'object';
-          if (typeof (params as any).additionalProperties !== 'boolean') (params as any).additionalProperties = false;
-        }
-      }
-    } catch {
-      // 非关键路径，保守忽略
-    }
-  }
-
   private applyMapping(data: UnknownObject, mapping: FieldMapping): void {
     const sourceValue = this.getNestedProperty(data, mapping.sourcePath);
 
-    if (sourceValue !== undefined) {
-      let transformedValue = sourceValue;
-
-      // 应用自定义转换
-      if (mapping.transform) {
-        transformedValue = this.applyTransform(transformedValue, mapping.transform);
-      }
-
-      // 应用类型转换
-      transformedValue = this.convertType(transformedValue, mapping.type);
-
-      this.setNestedProperty(data, mapping.targetPath, transformedValue);
+    if (sourceValue === undefined) {
+      return;
     }
+
+    let transformedValue: unknown = sourceValue;
+
+    if (mapping.transform) {
+      transformedValue = this.applyTransform(transformedValue, mapping.transform);
+    }
+
+    transformedValue = this.convertType(transformedValue, mapping.type);
+
+    this.setNestedProperty(data, mapping.targetPath, transformedValue);
   }
 
-  private getNestedProperty(obj: UnknownObject, path: string): any {
-    const keys = path.split('.');
+  private getNestedProperty(obj: UnknownObject, pathExpression: string): unknown {
+    const keys = pathExpression.split('.');
 
-    // 处理通配符路径，如 choices[*].message.tool_calls
-    if (path.includes('[*]')) {
+    if (pathExpression.includes('[*]')) {
       return this.getWildcardProperty(obj, keys);
     }
 
-    return keys.reduce((current, key) => {
-      return current && current[key] !== undefined ? current[key] : undefined;
-    }, obj as any);
+    return keys.reduce<unknown>((current, key) => {
+      if (!isRecord(current)) {
+        return undefined;
+      }
+      return current[key];
+    }, obj);
   }
 
-  private getWildcardProperty(obj: UnknownObject, keys: string[]): any[] {
-    const results: any[] = [];
-    const processWildcard = (current: any, keyIndex: number, currentPath: any[] = []): void => {
+  private getWildcardProperty(obj: UnknownObject, keys: string[]): unknown[] {
+    const results: unknown[] = [];
+    const processWildcard = (current: unknown, keyIndex: number): void => {
       if (keyIndex >= keys.length) {
         results.push(current);
         return;
@@ -319,12 +265,13 @@ export class GLMFieldMappingProcessor {
 
       if (key === '[*]') {
         if (Array.isArray(current)) {
-          current.forEach((item, index) => {
-            processWildcard(item, keyIndex + 1, [...currentPath, index]);
-          });
+          current.forEach(item => processWildcard(item, keyIndex + 1));
         }
-      } else if (current && typeof current === 'object' && current[key] !== undefined) {
-        processWildcard(current[key], keyIndex + 1, [...currentPath, key]);
+        return;
+      }
+
+      if (isRecord(current) && current[key] !== undefined) {
+        processWildcard(current[key], keyIndex + 1);
       }
     };
 
@@ -332,35 +279,37 @@ export class GLMFieldMappingProcessor {
     return results;
   }
 
-  private setNestedProperty(obj: UnknownObject, path: string, value: any): void {
-    const keys = path.split('.');
+  private setNestedProperty(obj: UnknownObject, pathExpression: string, value: unknown): void {
+    const keys = pathExpression.split('.');
 
-    // 处理通配符路径，如 choices[*].message.tool_calls
-    if (path.includes('[*]')) {
+    if (pathExpression.includes('[*]')) {
       this.setWildcardProperty(obj, keys, value);
       return;
     }
 
-    const lastKey = keys.pop()!;
+    const lastKey = keys.pop();
+    if (!lastKey) {
+      return;
+    }
 
-    const target = keys.reduce((current, key) => {
-      if (current[key] === undefined) {
+    const target = keys.reduce<UnknownObject>((current, key) => {
+      if (!isRecord(current[key])) {
         current[key] = {};
       }
-      return current[key];
-    }, obj as any);
+      return current[key] as UnknownObject;
+    }, obj);
 
-    target[lastKey] = value;
+    target[lastKey] = value as unknown;
   }
 
-  private setWildcardProperty(obj: UnknownObject, keys: string[], value: any): void {
-    const processSetWildcard = (current: any, keyIndex: number, valueToSet: any): void => {
+  private setWildcardProperty(obj: UnknownObject, keys: string[], value: unknown): void {
+    const processSetWildcard = (current: unknown, keyIndex: number): void => {
       if (keyIndex >= keys.length - 1) {
-        const lastKey = keys[keyIndex].replace('[*]', '');
+        const lastKey = keys[keys.length - 1].replace('[*]', '');
         if (Array.isArray(current)) {
           current.forEach(item => {
-            if (item && typeof item === 'object') {
-              item[lastKey] = valueToSet;
+            if (isRecord(item)) {
+              item[lastKey] = value as unknown;
             }
           });
         }
@@ -371,19 +320,20 @@ export class GLMFieldMappingProcessor {
 
       if (key === '[*]') {
         if (Array.isArray(current)) {
-          current.forEach(item => {
-            processSetWildcard(item, keyIndex + 1, valueToSet);
-          });
+          current.forEach(item => processSetWildcard(item, keyIndex + 1));
         }
-      } else if (current && typeof current === 'object') {
-        processSetWildcard(current[key], keyIndex + 1, valueToSet);
+        return;
+      }
+
+      if (isRecord(current)) {
+        processSetWildcard(current[key], keyIndex + 1);
       }
     };
 
-    processSetWildcard(obj, 0, value);
+    processSetWildcard(obj, 0);
   }
 
-  private convertType(value: any, targetType: string): any {
+  private convertType(value: unknown, targetType: FieldMapping['type']): unknown {
     if (value === null || value === undefined) {
       return value;
     }
@@ -391,13 +341,14 @@ export class GLMFieldMappingProcessor {
     switch (targetType) {
       case 'string':
         return String(value);
-      case 'number':
+      case 'number': {
         const num = Number(value);
-        return isNaN(num) ? 0 : num;
+        return Number.isNaN(num) ? 0 : num;
+      }
       case 'boolean':
         return Boolean(value);
       case 'object':
-        return typeof value === 'object' ? value : {};
+        return isRecord(value) ? value : {};
       case 'array':
         return Array.isArray(value) ? value : [value];
       default:
@@ -405,7 +356,7 @@ export class GLMFieldMappingProcessor {
     }
   }
 
-  private applyTransform(value: any, transform: string): any {
+  private applyTransform(value: unknown, transform: string): unknown {
     switch (transform) {
       case 'timestamp':
         return typeof value === 'number' ? value : Date.now();
@@ -425,7 +376,6 @@ export class GLMFieldMappingProcessor {
   }
 
   private extractReasoningBlocks(content: string): string {
-    // 提取推理内容块
     const reasoningPatterns = [
       /<reasoning>([\s\S]*?)<\/reasoning>/gi,
       /<thinking>([\s\S]*?)<\/thinking>/gi,
@@ -435,15 +385,15 @@ export class GLMFieldMappingProcessor {
 
     for (const pattern of reasoningPatterns) {
       const match = content.match(pattern);
-      if (match) {
-        return match[1].trim();
+      if (match && match.length > 0) {
+        const captured = match[1] ?? match[0];
+        return typeof captured === 'string' ? captured.trim() : content;
       }
     }
     return content;
   }
 
   private normalizeFinishReason(reason: string): string {
-    // 标准化结束原因
     const reasonMap: Record<string, string> = {
       'tool_calls': 'tool_calls',
       'stop': 'stop',

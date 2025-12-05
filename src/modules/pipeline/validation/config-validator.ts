@@ -2,7 +2,7 @@
  * Configuration validation utilities
  */
 
-import type { PipelineConfig, ModuleConfig } from '../interfaces/pipeline-interfaces.js';
+import type { PipelineConfig, ModuleConfig, ProviderConfig } from '../interfaces/pipeline-interfaces.js';
 
 /**
  * Validate pipeline configuration
@@ -34,7 +34,7 @@ export function validateModuleConfig(config: ModuleConfig): void {
 /**
  * Validate provider configuration
  */
-export function validateProviderConfig(config: any): void {
+export function validateProviderConfig(config: ProviderConfig): void {
   if (!config.type) {
     throw new Error('Provider configuration must have a type');
   }

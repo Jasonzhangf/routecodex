@@ -32,7 +32,7 @@ export class ResponsesC4MCompatibility implements CompatibilityModule {
     return sanitized;
   }
 
-  async processOutgoing(response: UnknownObject): Promise<UnknownObject> {
+  async processOutgoing(response: UnknownObject, _context: CompatibilityContext): Promise<UnknownObject> {
     return response;
   }
 
@@ -54,13 +54,21 @@ export class ResponsesC4MCompatibility implements CompatibilityModule {
     }
 
     if (typeof (clone as Record<string, unknown>).instructions === 'string') {
-      const {
-        sanitized,
-        mutations
-      } = this.sanitizeInstructions((clone as Record<string, unknown>).instructions as string);
-      if (mutations.length) {
-        (clone as Record<string, unknown>).instructions = sanitized;
-        removed.push(...mutations.map(flag => `instructions:${flag}`));
+      const rawInstruction = ((clone as Record<string, unknown>).instructions as string).trim();
+      if (rawInstruction) {
+        const {
+          sanitized,
+          mutations
+        } = this.sanitizeInstructions(rawInstruction);
+        const moved = this.injectInstructionsIntoInput(clone as Record<string, unknown>, sanitized);
+        delete (clone as Record<string, unknown>).instructions;
+        removed.push(moved ? 'instructions:moved-to-input' : 'instructions:removed');
+        if (mutations.length) {
+          removed.push(...mutations.map(flag => `instructions:${flag}`));
+        }
+      } else {
+        delete (clone as Record<string, unknown>).instructions;
+        removed.push('instructions:empty');
       }
     }
 
@@ -70,6 +78,32 @@ export class ResponsesC4MCompatibility implements CompatibilityModule {
       removed.push(...inner.removed);
     }
     return { sanitized: clone, removed };
+  }
+
+  private injectInstructionsIntoInput(container: Record<string, unknown>, instructions: string): boolean {
+    if (!instructions.trim()) {
+      return false;
+    }
+    const messageBlock = {
+      type: 'message',
+      role: 'system',
+      content: [
+        {
+          type: 'input_text',
+          text: instructions
+        }
+      ]
+    };
+    if (!Array.isArray(container.input)) {
+      container.input = [];
+    }
+    try {
+      (container.input as Array<unknown>).unshift(messageBlock);
+      return true;
+    } catch {
+      container.input = [messageBlock];
+      return true;
+    }
   }
 
   private sanitizeInstructions(input: string): { sanitized: string; mutations: string[] } {

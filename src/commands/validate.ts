@@ -149,7 +149,12 @@ async function sendRequest(base: string, endpoint: string, payload: any, timeout
     const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test' }, body: JSON.stringify(payload), signal: controller.signal } as any);
     clearTimeout(t);
     const text = await res.text();
-    let json: any = null; try { json = JSON.parse(text); } catch {}
+    let json: any = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = null;
+    }
     return { ok: res.ok, data: json ?? null, status: res.status, text };
   } catch (e) {
     clearTimeout(t);
@@ -210,7 +215,13 @@ export function createValidateCommand(): Command {
           else {
             // Parse arguments and execute safe ls
             let argsObj: any = {};
-            try { argsObj = typeof shellCall.function.arguments === 'string' ? JSON.parse(shellCall.function.arguments) : (shellCall.function.arguments || {}); } catch {}
+            try {
+              argsObj = typeof shellCall.function.arguments === 'string'
+                ? JSON.parse(shellCall.function.arguments)
+                : (shellCall.function.arguments || {});
+            } catch {
+              argsObj = {};
+            }
             const cmdArr: string[] = Array.isArray(argsObj?.command) ? argsObj.command.map((x: any)=>String(x)) : [];
             const isSafeLs = ((): boolean => {
               if (cmdArr.length === 0) return false;

@@ -42,10 +42,18 @@ function resolveProtocol(id: string, raw: UnknownRecord): ProviderProtocol {
     return 'openai';
   }
   const normalized = rawType.trim().toLowerCase().replace(/-provider$/, '');
-  if (protocolAliases.openai.has(normalized)) return 'openai';
-  if (protocolAliases.responses.has(normalized)) return 'responses';
-  if (protocolAliases.anthropic.has(normalized)) return 'anthropic';
-  if (protocolAliases.gemini.has(normalized)) return 'gemini';
+  if (protocolAliases.openai.has(normalized)) {
+    return 'openai';
+  }
+  if (protocolAliases.responses.has(normalized)) {
+    return 'responses';
+  }
+  if (protocolAliases.anthropic.has(normalized)) {
+    return 'anthropic';
+  }
+  if (protocolAliases.gemini.has(normalized)) {
+    return 'gemini';
+  }
   throw new Error(`[provider-profiles] Provider "${id}" has unsupported type "${rawType}".`);
 }
 
@@ -68,11 +76,15 @@ function extractTransport(raw: UnknownRecord): ProviderTransportConfig {
 }
 
 function extractHeaders(value: unknown): Record<string, string> | undefined {
-  if (!isRecord(value)) return undefined;
+  if (!isRecord(value)) {
+    return undefined;
+  }
   const entries = Object.entries(value)
     .map(([key, raw]) => [key, pickString(raw)] as const)
     .filter((entry): entry is [string, string] => typeof entry[1] === 'string');
-  if (!entries.length) return undefined;
+  if (!entries.length) {
+    return undefined;
+  }
   return entries.reduce<Record<string, string>>((acc, [key, val]) => {
     acc[key] = val;
     return acc;
@@ -142,15 +154,21 @@ function normalizeAuthType(
 
 function extractCompatProfiles(raw: UnknownRecord): string[] {
   const direct = pickStringArray(raw.compatibilityProfiles);
-  if (direct) return direct;
+  if (direct) {
+    return direct;
+  }
   const compatNode = raw.compatibility;
   if (Array.isArray(compatNode)) {
     const arr = pickStringArray(compatNode);
-    if (arr) return arr;
+    if (arr) {
+      return arr;
+    }
   }
   if (isRecord(compatNode) && Array.isArray(compatNode.profiles)) {
     const arr = pickStringArray(compatNode.profiles);
-    if (arr) return arr;
+    if (arr) {
+      return arr;
+    }
   }
   return [];
 }
@@ -188,7 +206,9 @@ function pickNumber(value: unknown): number | undefined {
 }
 
 function pickStringArray(value: unknown): string[] | undefined {
-  if (!value) return undefined;
+  if (!value) {
+    return undefined;
+  }
   if (Array.isArray(value)) {
     const normalized = value
       .map((entry) => pickString(entry))
