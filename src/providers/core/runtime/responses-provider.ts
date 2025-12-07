@@ -255,17 +255,36 @@ export class ResponsesProvider extends HttpTransportProvider {
     entryEndpoint?: string
   ): Promise<void> {
     try {
+      const clientRequestId = this.extractClientRequestId(context);
       await writeProviderSnapshot({
         phase,
         requestId: context.requestId,
         data,
         headers,
         url,
-        entryEndpoint
+        entryEndpoint,
+        clientRequestId
       });
     } catch {
       // non-blocking
     }
+  }
+
+  private extractClientRequestId(context: ProviderContext): string | undefined {
+    const metaValue = context.metadata && typeof context.metadata === 'object'
+      ? (context.metadata as Record<string, unknown>).clientRequestId
+      : undefined;
+    if (typeof metaValue === 'string' && metaValue.trim().length) {
+      return metaValue.trim();
+    }
+    const runtimeMeta = context.runtimeMetadata?.metadata;
+    if (runtimeMeta && typeof runtimeMeta === 'object') {
+      const candidate = (runtimeMeta as Record<string, unknown>).clientRequestId;
+      if (typeof candidate === 'string' && candidate.trim().length) {
+        return candidate.trim();
+      }
+    }
+    return undefined;
   }
 
   private async sendSseRequest(options: {

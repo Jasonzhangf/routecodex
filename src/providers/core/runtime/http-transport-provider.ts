@@ -716,6 +716,8 @@ export class HttpTransportProvider extends BaseProvider {
 
     const entryEndpoint = this.getEntryEndpointFromPayload(processedRequest);
 
+    const clientRequestId = this.getClientRequestIdFromContext(context);
+
     // 快照：provider-request（默认开启，脱敏headers）
     try {
       await writeProviderSnapshot({
@@ -724,7 +726,8 @@ export class HttpTransportProvider extends BaseProvider {
         data: finalBody,
         headers: finalHeaders,
         url: targetUrl,
-        entryEndpoint
+        entryEndpoint,
+        clientRequestId
       });
     } catch { /* non-blocking */ }
 
@@ -740,7 +743,8 @@ export class HttpTransportProvider extends BaseProvider {
           data: response,
           headers: finalHeaders,
           url: targetUrl,
-          entryEndpoint
+          entryEndpoint,
+          clientRequestId
         });
       } catch { /* non-blocking */ }
     } catch (error) {
@@ -764,7 +768,8 @@ export class HttpTransportProvider extends BaseProvider {
                 data: response,
                 headers: finalRetryHeaders,
                 url: targetUrl,
-                entryEndpoint
+                entryEndpoint,
+                clientRequestId
               });
             } catch { /* non-blocking */ }
             return response;
@@ -831,7 +836,8 @@ export class HttpTransportProvider extends BaseProvider {
           },
           headers: finalHeaders,
           url: targetUrl,
-          entryEndpoint
+          entryEndpoint,
+          clientRequestId
         });
       } catch { /* non-blocking */ }
 
@@ -1088,6 +1094,26 @@ export class HttpTransportProvider extends BaseProvider {
     }
     if (record.data && record.data.usage && typeof record.data.usage === 'object') {
       return record.data.usage as UnknownObject;
+    }
+    return undefined;
+  }
+
+  private getClientRequestIdFromContext(context: ProviderContext): string | undefined {
+    const fromMetadata = this.extractClientId(context.metadata);
+    if (fromMetadata) {
+      return fromMetadata;
+    }
+    const runtimeMeta = context.runtimeMetadata?.metadata;
+    return this.extractClientId(runtimeMeta);
+  }
+
+  private extractClientId(source: Record<string, unknown> | undefined): string | undefined {
+    if (!source || typeof source !== 'object') {
+      return undefined;
+    }
+    const value = (source as Record<string, unknown>).clientRequestId;
+    if (typeof value === 'string' && value.trim().length) {
+      return value.trim();
     }
     return undefined;
   }

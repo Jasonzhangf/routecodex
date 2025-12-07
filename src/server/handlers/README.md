@@ -1,23 +1,31 @@
-# Server Handlers（HTTP 协议层）
+# Server Handlers
 
-本模块负责各 HTTP 端点的协议层处理与委托：/v1/chat/completions、/v1/responses、/v1/messages。
+HTTP 路由处理器仅负责：
+- Express 协议封装、SSE 心跳/错误帧。
+- 调用 Hub Pipeline 并将结果返回客户端。
 
-## 职责（Do）
-- HTTP 协议处理：入参读取、SSE 头设置、错误帧输出。
-- 认证/鉴权（按上层策略）。
-- SSE 预心跳与最小错误帧（`NO_CORE_SSE`）。
-- 委托：将请求封装为 SharedPipelineRequest 并交给 Pipeline 处理。
+## 路由与映射
+- `/v1/chat/completions` → `ChatHandler` → Hub Pipeline（Chat）
+- `/v1/responses` → `ResponsesHandler` → Hub Pipeline（Responses）
+- `/v1/messages` → `MessagesHandler` → Hub Pipeline（Anthropic）
 
-## 禁止（Don't）
-- 工具处理或工具语义修复（由 llmswitch-core 统一处理）。
-- 业务逻辑或 Provider/Compatibility 的字段修复。
-- 响应语义变更（仅协议层输出）。
+## 关键实现
+- `middleware.ts`：CORS、日志、错误映射。
+- `llmswitch-loader.ts`：加载并初始化 Hub Pipeline。
+- `provider-utils.ts`：注入 Provider runtime metadata。
+- `http-error-mapper.ts`：Provider 错误 → HTTP 响应。
 
-## 关键文件
-- chat-handler.ts：OpenAI Chat SSE 端点
-- responses-handler.ts：OpenAI Responses SSE 端点
-- messages-handler.ts：Anthropic Messages 端点
+## 职责边界
+**Do**
+- 仅处理 HTTP 协议与 SSE 封装。
+- 将请求体原样传递给 Hub Pipeline。
+- 统一错误帧与预心跳（`preSSEHeartbeatDelayMs`）。
 
-## 备注
-- /v1/responses：优先透传来自 core 的 `__sse_responses`；否则输出最小错误帧并 `[DONE]`。
+**Don't**
+- 不在 handler 中解析/修改 payload。
+- 不绕过 Hub Pipeline 直接调用 Provider。
+- 不做工具治理或兜底逻辑。
 
+## 调试
+- 请求快照：`http-request` 节点记录原始 body。
+- 错误帧：未开始 SSE 时返回 JSON；已开始则输出 `data: {"error":...}` + `[DONE]`。

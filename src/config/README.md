@@ -1,6 +1,6 @@
 # config/
 
-RouteCodex 的配置源来自用户目录 `~/.routecodex/`。`src/config/` 只保留少量运行时必须的帮助函数：
+RouteCodex 的配置源全部来自用户目录 `~/.routecodex/`。`src/config/` 只保留少量运行时帮助函数：
 
 | 文件 | 作用 |
 | --- | --- |
@@ -11,4 +11,16 @@ RouteCodex 的配置源来自用户目录 `~/.routecodex/`。`src/config/` 只�
 
 其余配置（provider 模板、tool mappings、默认 JSON 等）已经全部迁移到用户目录，不会再从 repo 读取。
 
-> **提示**：需要更新配置时，修改 `~/.routecodex/config.json` 并在 CLI 中重新启动即可；不要在 `src/config/` 下新增静态模板。***
+> **提示**：需要更新配置时，修改 `~/.routecodex/config.json` 并在 CLI 中重新启动即可；不要在 `src/config/` 下新增静态模板。
+
+## 配置加载流程
+```
+用户目录 → config-paths → routecodex-config-loader → bootstrapVirtualRouterConfig → Hub Pipeline
+```
+
+- `routecodex-config-loader` 负责 legacy 格式补全与 provider profile 生成。
+- `bootstrapVirtualRouterConfig` 在 `sharedmodule/llmswitch-core` 中，Host 不再手动合并运行时数据。
+
+## 调试
+- CLI 支持 `routecodex validate` 对配置进行 dry-run。
+- 配置加载失败时，检查 `ROUTECODEX_CONFIG` 环境变量与 `~/.routecodex/` 路径。

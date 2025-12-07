@@ -39,6 +39,31 @@ function diffKeys(a, b) {
   return { added, removed };
 }
 
+function unwrapPayload(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  if (obj.body && typeof obj.body === 'object') {
+    return obj.body;
+  }
+  if (obj.bodyText && typeof obj.bodyText === 'string') {
+    return { bodyText: obj.bodyText };
+  }
+  if (obj.data && typeof obj.data === 'object') {
+    if (obj.data.payload && typeof obj.data.payload === 'object') {
+      return obj.data.payload;
+    }
+    return obj.data;
+  }
+  return obj;
+}
+
+function inferStageFromName(name) {
+  if (!name) return undefined;
+  const trimmed = name.replace(/\.json$/i, '');
+  const idx = trimmed.indexOf('_');
+  if (idx === -1) return undefined;
+  return trimmed.slice(idx + 1);
+}
+
 async function readJson(p) {
   try {
     const raw = await fs.readFile(p, 'utf8');
@@ -68,22 +93,20 @@ async function main() {
   }
 
   const rid = args.rid;
-  const files = [
-    `${rid}_http-request.json`,
-    `${rid}_http-request.parsed.json`,
-    `${rid}_pipeline.llmswitch.request.post.json`,
-    `${rid}_pipeline.compatibility.request.post.json`,
-    `${rid}_pipeline.provider.request.pre.json`,
-    `${rid}_pipeline.provider.response.json`,
-  ];
+  const entries = await fs.readdir(baseDir);
+  const matchedFiles = entries.filter(name => name.includes(rid)).sort();
+  if (!matchedFiles.length) {
+    console.error('No snapshots found for RID:', rid, 'under', baseDir);
+    process.exit(3);
+  }
 
   const records = [];
-  for (const name of files) {
+  for (const name of matchedFiles) {
     const p = path.join(baseDir, name);
     const obj = await readJson(p);
     if (!obj) continue;
-    const keys = topKeys(obj?.data?.payload || obj);
-    const payload = obj?.data?.payload || obj;
+    const payload = unwrapPayload(obj);
+    const keys = topKeys(payload);
     const msg = summarizeMessages(payload);
     const flags = {
       has_data: hasKey(payload, 'data'),
@@ -91,18 +114,17 @@ async function main() {
       has_stream: hasKey(payload, 'stream'),
       has_messages: hasKey(payload, 'messages'),
     };
-    records.push({ name, path: p, keys, msg, flags });
-  }
-
-  if (!records.length) {
-    console.error('No snapshots found for RID:', rid, 'under', baseDir);
-    process.exit(3);
+    const stage = obj?.meta?.stage || inferStageFromName(name);
+    const clientRid = obj?.meta?.clientRequestId;
+    records.push({ name, path: p, keys, msg, flags, stage, clientRid });
   }
 
   console.log('Endpoint dir:', baseDir);
   for (const r of records) {
     console.log(`\n=== ${r.name} ===`);
     console.log('- path:', r.path);
+    if (r.stage) console.log('- stage:', r.stage);
+    if (r.clientRid) console.log('- clientRequestId:', r.clientRid);
     console.log('- topKeys:', r.keys.join(', ') || '(none)');
     console.log(`- messages: count=${r.msg.count}, roles=${JSON.stringify(r.msg.roles)}, hasUser=${r.msg.hasUser}`);
     const suspicious = [];
@@ -132,4 +154,3 @@ async function main() {
 }
 
 main().catch(err => { console.error(err); process.exit(99); });
-

@@ -1,189 +1,54 @@
 # RouteCodex 源代码目录
 
 ## 概述
-
-RouteCodex 是一个多提供商的 OpenAI 代理服务器，具有原生试运行能力。该项目的核心功能是将不同 AI 服务提供商的协议转换为统一的 OpenAI 兼容接口。
+RouteCodex Host 是“多提供商 OpenAI 代理服务器”的 HTTP 层与配置层，所有 AI 协议转换与工具治理均由共享的 `llmswitch-core` Hub Pipeline 完成。
 
 ## 目录结构
-
 ```
 src/
-├── commands/          # CLI 命令实现
-├── config/            # 配置管理和验证
-├── core/              # 核心组件和系统架构
-├── debug/             # 调试和诊断工具
-├── modules/           # 功能模块（流水线系统）
-├── patches/           # 兼容性补丁
-├── providers/         # AI 服务提供商适配器
-├── server/            # HTTP 服务器和 API 路由
-├── types/             # TypeScript 类型定义
-└── utils/             # 工具函数和辅助类
+├── commands/          # CLI 命令（validate、provider-update）
+├── config/            # 配置加载、路径解析、auth-file 解析
+├── debug/             # 快照、干跑、回放等调试工具
+├── modules/           # Hub Pipeline 桥接与配置辅助
+├── providers/         # Provider V2（HTTP 通信 + 最小兼容层）
+├── server/            # Express HTTP 服务器与路由
+├── types/             # 共享类型与 DTO
+└── utils/             # Host 工具（错误、负载、快照）
 ```
 
-## 核心架构
+## 核心原则（Do / Don't）
+**Do**
+- 所有请求必须通过 `llmswitch-core` Hub Pipeline，Host 不维护旁路。
+- 配置解析后立刻调用 `bootstrapVirtualRouterConfig` 并注入 Hub Pipeline。
+- Provider 仅负责 HTTP 通信、认证、快照，不做工具语义修复。
+- 兼容层只做最小字段修剪，所有治理归 Hub Pipeline。
 
-RouteCodex 采用 4 层管道架构：
+**Don't**
+- 不在 Host 内实现转换流水线或工具治理。
+- 不绕过 Hub Pipeline 直接调用 Provider。
+- 不手动合并 runtime 配置或 patch 路由决策。
 
-1. **LLM Switch** - 动态路由分类
-2. **Workflow** - 流程控制
-3. **Compatibility** - 格式转换和适配
-4. **Provider** - AI 服务提供商通信
-
-## 主要功能
-
-- **多提供商支持**: LM Studio、Qwen、iFlow、OpenAI、Anthropic 等
-- **工具调用**: 支持 AI 模型的工具调用功能
-- **流式响应**: 实时流式 AI 响应
-- **动态路由**: 根据请求内容智能选择处理路径
-- **配置驱动**: JSON 配置文件定义系统行为
-- **调试支持**: 完整的请求追踪和调试系统
-
-## 开发指南
-
-### 快速开始
-
+## 快速开始
 ```bash
-# 安装依赖
-npm install
+# 1. 先编译共享模块
+npm --prefix sharedmodule/llmswitch-core run build
 
-# 构建项目
+# 2. 编译主包
 npm run build
 
-# 开发模式
-npm run dev
-
-# 运行测试
-npm test
-```
-
-### 代码结构
-
-- **commands/**: CLI 命令行工具
-- **config/**: 配置文件管理和验证
-- **core/**: 系统核心组件
-- **modules/**: 可插拔的功能模块
-- **providers/**: AI 服务提供商适配器
-- **server/**: HTTP 服务器和 API 端点
-
-### 关键文件
-
-- `index.ts` - 主入口点
-- `cli.ts` - CLI 命令行接口
-- `server/http-server.ts` - HTTP 服务器实现
-- `modules/pipeline/` - 流水线系统实现
-
-## 构建和部署
-
-### 构建过程
-
-```bash
-# 清理构建目录
-npm run clean
-
-# 运行代码检查
-npm run lint
-
-# 构建项目
-npm run build
-```
-
-### 部署
-
-```bash
-# 全局安装
+# 3. 全局安装 dev 包
 npm run install:global
 
-# 启动服务
-routecodex start
+# 4. 启动
+routecodex start --config ~/.routecodex/config.json
 ```
 
-## 最近更新
-
-- 0.81.53: iFlow OAuth 流程对齐 CLIProxyAPI，在完成 OAuth 令牌交换后自动调用用户信息接口派生并持久化 API Key，优先使用 API Key 作为上游鉴权凭证，修复 40308 秒停问题。
-- 0.41.1: 修复 Anthropic 流式工具调用事件规范。现在会按照标准事件顺序输出工具输入（tool_use），避免在 Claude Code 中出现空参数工具调用导致的错误。
-
-## 配置
-
-RouteCodex 使用 JSON 配置文件来定义系统行为：
-
-- **用户基础配置**: `~/.routecodex/simple-log-config.json`
-- **系统配置**: 项目目录下的配置文件
-- **提供商配置**: 各 AI 服务的连接参数
-
-## 调试和测试
-
-### 调试模式
-
-```bash
-# 启用详细日志
-routecodex simple-log on --level debug
-
-# 启动调试模式
-npm run dev
-```
-
-### 测试
-
-```bash
-# 运行所有测试
-npm test
-
-# 运行集成测试
-npm run test:integration
-
-# 运行端到端测试
-npm run test:e2e
-```
-
-## 扩展开发
-
-### 添加新的提供商
-
-1. 在 `providers/` 目录创建新的提供商实现
-2. 在 `config/` 目录添加相应的配置验证
-3. 在 `types/` 目录添加类型定义
-4. 更新文档和测试
-
-### 添加新的模块
-
-1. 在 `modules/` 目录创建新模块
-2. 实现必要的接口
-3. 添加相应的配置和类型定义
-4. 编写测试用例
+## 调试
+- CLI：`npm run snapshot:inspect -- --rid <RID>` 查看各阶段快照。
+- 快照目录：`~/.routecodex/codex-samples/`。
+- Provider Harness：`src/debug/harnesses/provider-harness.ts` 支持干跑。
 
 ## 文档
-
-详细文档请参考：
-
-- [项目主文档](../../README.md)
-
-## 最近变更（重要）
-
-- GLM 1210 兼容：在发往 GLM 的最终载荷中，移除“非最后一条”消息的 `assistant.tool_calls` 字段，避免上游 400/1210。工具功能不受影响，`tools` 与 `tool` 角色消息仍保留。
-- 流式错误可见性：在 SSE 开始之前（`headersSent=false`）优先返回 JSON 错误（4xx/5xx）；若已开始 SSE，则输出包含错误信息的 SSE 块后 `[DONE]`，避免“静默停止”。
-- 预心跳优化：增加预心跳延迟窗口 `ROUTECODEX_PRE_SSE_HEARTBEAT_DELAY_MS`（默认 800ms），提升早期错误的可见性。
-- Anthropic 工具调用对齐：默认“信任 schema”，不更改工具名与参数字段（trustSchema=true）。OpenAI `tool_calls` → Anthropic `tool_use` 时，原样透传 `function.name/arguments`，确保与 Claude Code Router 等客户端的正确工具调用流程（`stop_reason=tool_use`）。
-- [架构文档](../../docs/)
-- [API 文档](../../docs/api/)
-- [配置指南](../../docs/configuration/)
-
-## 贡献指南
-
-### 精准定位与根因导向（强制）
-- 先精准定位问题来源与触发条件，不做兜底性宽松容错。
-- 目标是“避免问题出现”，而不是“事后容错”。
-- 每次准备修改代码前必须自问：
-  - 这是否真正的 root cause？
-  - 方案是否直击要害、无副作用、无重复处理？
-- 修改应在“唯一入口/唯一责任层”完成，避免在多处加护栏导致行为分散。
-- 修改后以最小可复现实验 + 真实样本交叉验证；验证不过不得合入。
-
-1. Fork 项目
-2. 创建功能分支
-3. 提交更改
-4. 推送到分支
-5. 创建 Pull Request
-
-## 许可证
-
-本项目采用 MIT 许可证 - 详见 [LICENSE](../../LICENSE) 文件。
+- 根目录 `AGENTS.md`：架构原则与职责边界。
+- `sharedmodule/llmswitch-core/README.md`：Hub Pipeline 详细说明。
+- 各子目录 `README.md`：模块使用与贡献指南。

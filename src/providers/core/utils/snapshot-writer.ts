@@ -17,9 +17,15 @@ async function ensureDir(dir: string): Promise<void> {
 }
 
 function normalizeRequestId(requestId?: string): string {
-  if (!requestId || typeof requestId !== 'string') { return `req_${Date.now()}`; }
-  const safe = requestId.startsWith('req_') ? requestId : `req_${requestId}`;
-  return safe.replace(/[^\w.-]/g, '_');
+  if (!requestId || typeof requestId !== 'string') {
+    return `req_${Date.now()}`;
+  }
+  const trimmed = requestId.trim();
+  if (!trimmed) {
+    return `req_${Date.now()}`;
+  }
+  const sanitized = trimmed.replace(/[^A-Za-z0-9_.-]/g, '_');
+  return sanitized || `req_${Date.now()}`;
 }
 
 function resolveEndpoint(url?: string): { endpoint: string; folder: string } {
@@ -84,6 +90,7 @@ export async function writeProviderSnapshot(options: {
   headers?: Record<string, unknown>;
   url?: string;
   entryEndpoint?: string;
+  clientRequestId?: string;
 }): Promise<void> {
   const { endpoint, folder } = resolveEndpoint(options.entryEndpoint || options.url);
   const stage = options.phase;
@@ -93,7 +100,10 @@ export async function writeProviderSnapshot(options: {
     data: options.data,
     headers: options.headers,
     url: options.url,
-    extraMeta: options.entryEndpoint ? { entryEndpoint: options.entryEndpoint } : undefined
+    extraMeta: {
+      ...(options.entryEndpoint ? { entryEndpoint: options.entryEndpoint } : {}),
+      ...(options.clientRequestId ? { clientRequestId: options.clientRequestId } : {})
+    }
   });
 
   try {
@@ -121,11 +131,18 @@ export async function writeProviderRetrySnapshot(options: {
   data: unknown;
   headers?: Record<string, unknown>;
   url?: string;
+  clientRequestId?: string;
 }): Promise<void> {
   const { endpoint, folder } = resolveEndpoint(options.url);
   const stage = options.type === 'request' ? 'provider-request.retry' : 'provider-response.retry';
   const requestId = normalizeRequestId(options.requestId);
-  const payload = buildSnapshotPayload({ stage, data: options.data, headers: options.headers, url: options.url });
+  const payload = buildSnapshotPayload({
+    stage,
+    data: options.data,
+    headers: options.headers,
+    url: options.url,
+    extraMeta: options.clientRequestId ? { clientRequestId: options.clientRequestId } : undefined
+  });
 
   try {
     await writeSnapshotViaHooks({

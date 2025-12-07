@@ -1,56 +1,8 @@
-# Module Implementations
+# Pipeline Modules
 
-流水线模块的具体实现，包含LLMSwitch、Workflow、Compatibility和Provider的具体实现。
+Host 仓库不再实现独立的 pipeline 节点。该目录只保留类型/接口，方便与 `llmswitch-core` Hub Pipeline 对齐。
 
-## 目录结构
+- `interfaces/`：模块接口类型。
+- `provider/`：Provider 相关类型与工具（与 runtime metadata 对应）。
 
-```
-modules/
-├── llm-switch/          # LLMSwitch（由 @jsonstudio/llms 提供实现）
-│   └── README.md
-├── workflow/            # Workflow实现
-│   └── streaming-control.ts
-├── compatibility/       # Compatibility实现
-│   └── field-mapping.ts
-└── providers/           # Provider实现
-    ├── base-provider.ts
-    ├── http-provider.ts
-    ├── apikey-provider.ts
-    └── oauth-provider.ts
-```
-
-## 模块说明
-
-### LLMSwitch实现
-- 实现来源：`@jsonstudio/llms`（避免本地重复实现）
-- OpenAI 规范化：`@jsonstudio/llms/conversion`
-- Anthropic ↔ OpenAI：`@jsonstudio/llms/conversion`
-
-### Workflow实现
-- **streaming-control.ts**: 流式控制实现，处理流式/非流式转换
-
-### Compatibility实现
-- **field-mapping.ts**: 基于JSON配置的字段映射实现
-
-### Provider实现
-- **base-provider.ts**: 所有Provider的基础类
-- **http-provider.ts**: HTTP请求的通用Provider实现
-- **apikey-provider.ts**: APIKey认证的Provider实现
-- **oauth-provider.ts**: OAuth认证的Provider实现
-
-## 扩展指南
-
-### 添加新的LLMSwitch
-1. 在`llm-switch/`目录下创建新文件
-2. 实现`LLMSwitchModule`接口
-3. 注册到模块注册表
-
-### 添加新的Provider
-1. 继承`BaseProvider`类
-2. 实现必要的认证和请求处理方法
-3. 在工厂中注册新类型
-
-### 添加新的Workflow
-1. 实现`WorkflowModule`接口
-2. 在工厂中添加创建逻辑
-3. 更新配置类型定义
+所有实际模块、节点与流程均在 `@jsonstudio/llms` 中，Host 只通过 `llmswitch/bridge.ts` 调用。

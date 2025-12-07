@@ -33,6 +33,7 @@ import { registerHttpRoutes } from './routes.js';
 import { mapProviderProtocol, normalizeProviderType, resolveProviderIdentity, asRecord } from './provider-utils.js';
 import { resolveRepoRoot, loadLlmswitchModule } from './llmswitch-loader.js';
 import { importCoreModule } from '../../../modules/llmswitch/core-loader.js';
+import { enhanceProviderRequestId } from '../../utils/request-id-manager.js';
 import type {
   HubPipeline,
   HubPipelineCtor,
@@ -716,7 +717,8 @@ export class RouteCodexHttpServer {
     if (!this.isPipelineReady()) {
       throw new Error('Hub pipeline runtime is not initialized');
     }
-    this.logStage('request.received', input.requestId, {
+    const clientRequestId = input.requestId;
+    this.logStage('request.received', clientRequestId, {
       endpoint: input.entryEndpoint,
       stream: input.metadata?.stream === true
     });
@@ -739,7 +741,7 @@ export class RouteCodexHttpServer {
       // snapshot failure should not block request path
     }
     const pipelineLabel = 'hub';
-    this.logStage(`${pipelineLabel}.start`, input.requestId, {
+    this.logStage(`${pipelineLabel}.start`, clientRequestId, {
       endpoint: input.entryEndpoint,
       stream: metadata.stream
     });
@@ -747,7 +749,7 @@ export class RouteCodexHttpServer {
     const pipelineResult = await this.runHubPipeline(input, metadata);
     const pipelineMetadata = pipelineResult.metadata ?? {};
     const mergedMetadata = { ...metadata, ...pipelineMetadata };
-    this.logStage(`${pipelineLabel}.completed`, input.requestId, {
+    this.logStage(`${pipelineLabel}.completed`, clientRequestId, {
       route: pipelineResult.routingDecision?.routeName,
       target: pipelineResult.target?.providerKey
     });
@@ -781,7 +783,24 @@ export class RouteCodexHttpServer {
       (target.outboundProfile as ProviderProtocol) ||
       handle.providerProtocol;
 
-    const providerModel = this.extractProviderModel(providerPayload);
+    const metadataModel =
+      mergedMetadata?.target && typeof mergedMetadata.target === 'object'
+        ? (mergedMetadata.target as Record<string, unknown>).clientModelId
+        : undefined;
+    const rawModel =
+      this.extractProviderModel(providerPayload) ||
+      (typeof metadataModel === 'string' ? metadataModel : undefined);
+    const providerIdToken = target.providerKey || handle.providerId || runtimeKey || 'unknown';
+    const enhancedRequestId = enhanceProviderRequestId(clientRequestId, {
+      entryEndpoint: input.entryEndpoint,
+      providerId: providerIdToken,
+      model: rawModel
+    });
+    if (enhancedRequestId !== input.requestId) {
+      input.requestId = enhancedRequestId;
+    }
+    mergedMetadata.clientRequestId = clientRequestId;
+    const providerModel = rawModel;
     const providerLabel = this.buildProviderLabel(target.providerKey, providerModel);
 
     this.logStage('provider.prepare', input.requestId, {
