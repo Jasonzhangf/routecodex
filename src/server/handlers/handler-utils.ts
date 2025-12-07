@@ -5,6 +5,10 @@ import type { IncomingHttpHeaders } from 'http';
 import type { HandlerContext, PipelineExecutionResult } from './types.js';
 import { mapErrorToHttp } from '../utils/http-error-mapper.js';
 import { logPipelineStage } from '../utils/stage-logger.js';
+import {
+  generateRequestIdentifiers,
+  resolveEffectiveRequestId
+} from '../utils/request-id-manager.js';
 const BLOCKED_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection', 'content-encoding']);
 const CLIENT_HEADER_DENYLIST = new Set([
   'host',
@@ -36,14 +40,22 @@ function hasSsePayload(body: unknown): body is SsePayloadShape {
   return Boolean(body && typeof body === 'object' && '__sse_responses' in (body as Record<string, unknown>));
 }
 
-export function nextRequestId(candidate?: unknown): string {
-  if (typeof candidate === 'string' && candidate.trim().length > 0) {
-    return candidate.trim();
-  }
-  if (Array.isArray(candidate) && candidate[0]) {
-    return String(candidate[0]);
-  }
-  return `req-v2-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+function formatRequestId(value?: string): string {
+  return resolveEffectiveRequestId(value);
+}
+
+export function nextRequestIdentifiers(
+  candidate?: unknown,
+  meta?: { entryEndpoint?: string; providerId?: string; model?: string }
+): { clientRequestId: string; providerRequestId: string } {
+  return generateRequestIdentifiers(candidate, meta);
+}
+
+export function nextRequestId(
+  candidate?: unknown,
+  meta?: { entryEndpoint?: string; providerId?: string; model?: string }
+): string {
+  return generateRequestIdentifiers(candidate, meta).providerRequestId;
 }
 
 export function sendPipelineResponse(
@@ -54,7 +66,7 @@ export function sendPipelineResponse(
 ): void {
   const status = typeof result.status === 'number' ? result.status : 200;
   const body = result.body;
-  const requestLabel = requestId || 'unknown';
+  const requestLabel = formatRequestId(requestId);
   const forceSSE = options?.forceSSE === true;
   const expectsStream = hasSsePayload(body);
 
@@ -85,7 +97,6 @@ export function sendPipelineResponse(
     } else if (typeof flushable.flush === 'function') {
       flushable.flush();
     }
-    console.log(`[sse][${requestLabel}] streaming response started (status=${status})`);
     logPipelineStage('response.sse.stream.start', requestLabel, { status });
 
     let eventCount = 0;
@@ -97,7 +108,6 @@ export function sendPipelineResponse(
       } catch {
         /* ignore cleanup errors */
       }
-      console.log(`[sse][${requestLabel}] streaming response finished (events=${eventCount})`);
       logPipelineStage('response.sse.stream.end', requestLabel, { events: eventCount, status });
     };
     stream.on('error', (error: Error) => {
@@ -122,7 +132,10 @@ export function sendPipelineResponse(
             return;
           }
           const trimmed = text.length > 200 ? `${text.slice(0, 200)}…` : text;
-          console.log(`[sse][${requestLabel}] event #${eventCount}: ${trimmed}`);
+          logPipelineStage('response.sse.preview', requestLabel, {
+            event: eventCount,
+            preview: trimmed
+          });
         } catch {
           /* ignore preview errors */
         }
@@ -148,16 +161,17 @@ export function sendPipelineResponse(
 
 export function logRequestStart(endpoint: string, requestId: string, meta?: RequestLogMeta): void {
   const suffix = formatMeta(meta);
-  console.log(`➡️  [${endpoint}] request ${requestId}${suffix}`);
+  console.log(`➡️  [${endpoint}] request ${formatRequestId(requestId)}${suffix}`);
 }
 
 export function logRequestComplete(endpoint: string, requestId: string, status: number): void {
-  console.log(`✅ [${endpoint}] request ${requestId} completed (status=${status})`);
+  console.log(`✅ [${endpoint}] request ${formatRequestId(requestId)} completed (status=${status})`);
 }
 
 export function logRequestError(endpoint: string, requestId: string, error: unknown): void {
+  const resolvedId = formatRequestId(requestId);
   const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
-  console.error(`❌ [${endpoint}] request ${requestId} failed: ${message}`);
+  console.error(`❌ [${endpoint}] request ${resolvedId} failed: ${message}`);
 }
 
 export async function respondWithPipelineError(
@@ -167,7 +181,8 @@ export async function respondWithPipelineError(
   entryEndpoint: string,
   requestId: string
 ): Promise<void> {
-  const normalizedError = normalizeError(error, requestId, entryEndpoint);
+  const effectiveRequestId = formatRequestId(requestId);
+  const normalizedError = normalizeError(error, effectiveRequestId, entryEndpoint);
   const errorHandler = ctx.errorHandling?.handleError;
   if (typeof errorHandler === 'function') {
     try {
@@ -176,7 +191,7 @@ export async function respondWithPipelineError(
         source: 'http-handler',
         severity: 'error',
         moduleId: 'http-handler',
-        requestId,
+        requestId: effectiveRequestId,
         metadata: {
           endpoint: entryEndpoint
         }
@@ -186,8 +201,8 @@ export async function respondWithPipelineError(
     }
   }
   const mapped = mapErrorToHttp(normalizedError);
-  if (requestId && mapped.body?.error && !mapped.body.error.request_id) {
-    mapped.body.error.request_id = requestId;
+  if (effectiveRequestId && mapped.body?.error && !mapped.body.error.request_id) {
+    mapped.body.error.request_id = effectiveRequestId;
   }
   res.status(mapped.status).json(mapped.body);
 }
