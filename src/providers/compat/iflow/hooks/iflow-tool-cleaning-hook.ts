@@ -118,11 +118,6 @@ export class iFlowToolCleaningHook extends BaseHook {
         ).join('');
       }
 
-      // Strip reasoning思考标签
-      if (typeof cleanedMessage.content === 'string') {
-        cleanedMessage.content = this.stripReasoningTags(cleanedMessage.content);
-      }
-
       cleanedMessages.push(cleanedMessage);
     }
 
@@ -266,23 +261,6 @@ export class iFlowToolCleaningHook extends BaseHook {
     }
 
     return false;
-  }
-
-  private stripReasoningTags(content: string): string {
-    // Strip reasoning思考标签
-    const reasoningPatterns = [
-      /<reasoning>[\s\S]*?<\/reasoning>/gi,
-      /<thinking>[\s\S]*?<\/thinking>/gi,
-      /\[REASONING\][\s\S]*?\[\/REASONING\]/gi,
-      /\[THINKING\][\s\S]*?\[\/THINKING\]/gi
-    ];
-
-    let strippedContent = content;
-    for (const pattern of reasoningPatterns) {
-      strippedContent = strippedContent.replace(pattern, '');
-    }
-
-    return strippedContent.trim();
   }
 
   private coerceMessage(candidate: unknown): Message | null {

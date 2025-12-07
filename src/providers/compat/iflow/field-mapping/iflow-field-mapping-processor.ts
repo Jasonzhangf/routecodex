@@ -176,13 +176,6 @@ export class iFlowFieldMappingProcessor {
           targetPath: 'created',
           type: 'number',
           direction: 'incoming'
-        },
-        {
-          sourcePath: 'reasoning_content',
-          targetPath: 'reasoning',
-          type: 'string',
-          direction: 'incoming',
-          transform: 'extract_blocks'
         }
       ],
       outgoingMappings: [
@@ -204,13 +197,6 @@ export class iFlowFieldMappingProcessor {
           targetPath: 'created_at',
           type: 'number',
           direction: 'outgoing'
-        },
-        {
-          sourcePath: 'reasoning',
-          targetPath: 'reasoning_content',
-          type: 'string',
-          direction: 'outgoing',
-          transform: 'wrap_blocks'
         }
       ]
     };
@@ -450,32 +436,11 @@ export class iFlowFieldMappingProcessor {
         return typeof value === 'string' ? value.toUpperCase() : value;
       case 'normalizeModelName':
         return typeof value === 'string' ? value.replace(/^gpt-/, 'iflow-') : value;
-      case 'extractReasoningBlocks':
-        return typeof value === 'string' ? this.extractReasoningBlocks(value) : value;
       case 'normalizeFinishReason':
         return typeof value === 'string' ? this.normalizeFinishReason(value) : value;
       default:
         return value;
     }
-  }
-
-  private extractReasoningBlocks(content: string): string {
-    const reasoningPatterns = [
-      /<reasoning>([\s\S]*?)<\/reasoning>/i,
-      /<thinking>([\s\S]*?)<\/thinking>/i,
-      /\[REASONING\]([\s\S]*?)\[\/REASONING\]/i,
-      /\[THINKING\]([\s\S]*?)\[\/THINKING\]/i
-    ];
-
-    for (const pattern of reasoningPatterns) {
-      const match = pattern.exec(content);
-      if (match?.[1]) {
-        pattern.lastIndex = 0;
-        return match[1].trim();
-      }
-      pattern.lastIndex = 0;
-    }
-    return content;
   }
 
   private normalizeFinishReason(reason: string): string {

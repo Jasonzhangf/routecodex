@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.86.0",
+  "version": "0.87.0",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -113,11 +113,14 @@
     "test:consistency": "node scripts/v2-consistency/run-consistency-test.mjs",
     "test:v2:tools": "node tests/v2/dist/tool-processing-test.js",
     "test:v2:protocol": "node tests/v2/dist/protocol-conversion-test.js",
-    "test:comprehensive": "node scripts/v2-consistency/comprehensive-consistency-test.mjs"
+    "test:comprehensive": "node scripts/v2-consistency/comprehensive-consistency-test.mjs",
+    "mock:extract": "node scripts/mock-provider/extract.mjs",
+    "mock:validate": "node scripts/mock-provider/validate.mjs",
+    "mock:clean": "node scripts/mock-provider/clean.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
-    "@jsonstudio/llms": "^0.4.3",
+    "@jsonstudio/llms": "^0.4.4",
     "@lmstudio/sdk": "^1.5.0",
     "@radix-ui/react-switch": "^1.2.6",
     "@types/socket.io": "^3.0.1",
@@ -154,7 +157,7 @@
     "@types/cors": "^2.8.13",
     "@types/express": "^4.17.17",
     "@types/jest": "^29.5.5",
-    "@types/node": "^20.19.21",
+    "@types/node": "^20.19.25",
     "@typescript-eslint/eslint-plugin": "^6.7.4",
     "@typescript-eslint/parser": "^6.7.4",
     "@typescript-eslint/typescript-estree": "^6.7.4",

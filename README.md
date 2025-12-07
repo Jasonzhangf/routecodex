@@ -6,7 +6,7 @@
 
 RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配置驱动的V2架构，支持原生dry-run调试能力、动态路由分类、4层管道架构和实时监控。提供统一的API接口，无缝集成多个AI服务提供商。
 
-当前开发版本：`0.81.54`
+当前开发版本：`0.87.0`
 
 ## LLM Switch（前后半段）总览
 
@@ -38,6 +38,13 @@ RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配�
   - `Output/SSE Nodes`：把 `processedRequest` 还原为目标协议，生成 usage、SSE 流和最终响应。
 - **Host 职责**：`RouteCodexHttpServer` 只负责 HTTP/SSE 封装与 Provider runtime 映射，工具治理与路由决策全部在 llmswitch-core 完成。
 
+### Reasoning / Tool 骨架
+
+- **入站统一拆分**：`sharedmodule/llmswitch-core/src/conversion/shared/reasoning-normalizer.ts` 会在 Chat/Responses/Anthropic/Gemini 入站阶段，把 `<think>/<reasoning>` 段落剥离到 `reasoning_content`，并同步处理 instructions/input/required_action。
+- **工具/理由写回**：`reasoning-tool-normalizer.ts` 与 `tool-call-utils.ts` 负责把 reasoning 文本中的工具片段转换为 `tool_calls`，处理 placeholder、capturedToolResults、metadata.extra-fields 等动作由 `bridge-actions.ts` 统一驱动。
+- **协议中性命名**：所有共享动作均使用 `messages.*`、`tools.*` 等协议无关名称（如 `messages.inject-system-instruction`、`tools.ensure-response-placeholders`）。兼容层不得新增带协议前缀的 helper。
+- **兼容层职责切换**：GLM/iFlow 等 compat hook 仅处理 usage、finish_reason、schema 轻量标准化，Reasoning 拆分/清理禁止下沉到 compat；若 Provider 需特殊字段，必须通过 JSON config 描述。
+
 ## 快照排查指南（命令行）
 
 - 快速查看某个请求 RID 在各阶段的顶层键/消息概况/可疑字段：
@@ -56,7 +63,7 @@ RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配�
 
 - **Compatibility V2（配置驱动）**
   - 位置：`src/providers/compat/glm/*`（模块化 + Hook 系统）
-  - 职责：仅做 Provider 特定的最小字段标准化与 reasoning_content 处理
+  - 职责：仅做 Provider 特定的最小字段标准化；reasoning/tool 清理统一由 conversion 骨架完成
   - 特性：配置驱动字段映射、GLM 专用最小清理与 1210/1214 错误兼容
   - 工具治理：统一在 llmswitch-core v2 处理；兼容层不进行工具语义修复/文本收割
 
@@ -85,14 +92,14 @@ RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配�
 
 ### Compatibility（最小兼容层）
 - Do
-  - Provider 字段标准化、reasoning_content 处理、配置驱动映射
+  - Provider 字段标准化（usage/finish_reason 等）、配置驱动映射，遵守 shared 骨架输出
   - 1210/1214 最小兼容（GLM）
   - 请求侧最小黑名单（例如 GLM 删除 `tools[].function.strict`；无 tools 删除 `tool_choice`）
   - 响应侧最小黑名单（仅非流式）：默认仅删 `usage.prompt_tokens_details.cached_tokens`
     - 配置：`src/providers/compat/<provider>/config/response-blacklist.json`
     - 关键字段保护：status/output/output_text/required_action/choices[].message.content/tool_calls/finish_reason
 - Don't
-  - 工具语义修复或文本收割（统一由 llmswitch-core 处理）
+  - 工具语义修复、reasoning 拆分或文本收割（统一由 llmswitch-core 骨架处理）
 
 ### Provider V2（HTTP 通信）
 - Do

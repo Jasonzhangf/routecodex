@@ -76,13 +76,6 @@
       "direction": "outgoing"
     },
     {
-      "sourcePath": "reasoning_content",
-      "targetPath": "reasoning_content",
-      "type": "string",
-      "direction": "outgoing",
-      "transform": "extractReasoningBlocks"
-    },
-    {
       "sourcePath": "choices[*].finish_reason",
       "targetPath": "choices[*].finish_reason",
       "type": "string",

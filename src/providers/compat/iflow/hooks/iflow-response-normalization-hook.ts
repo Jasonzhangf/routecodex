@@ -43,11 +43,6 @@ export class iFlowResponseNormalizationHook extends BaseHook {
         delete result.created_at;
       }
 
-      // 处理reasoning_content
-      if (result.reasoning_content) {
-        result.reasoning_content = this.extractReasoningContent(result.reasoning_content);
-      }
-
       // 标准化choices字段
       if (result.choices && Array.isArray(result.choices)) {
         result.choices = this.normalizeChoices(result.choices);
@@ -105,87 +100,6 @@ export class iFlowResponseNormalizationHook extends BaseHook {
     }
 
     return normalizedUsage;
-  }
-
-  private extractReasoningContent(reasoningContent: unknown): string {
-    if (typeof reasoningContent === 'string') {
-      return this.extractReasoningBlocks(reasoningContent);
-    }
-
-    if (isRecord(reasoningContent)) {
-      // 处理对象形式的reasoning_content
-      if (typeof reasoningContent.text === 'string') {
-        return this.extractReasoningBlocks(reasoningContent.text);
-      }
-      if (typeof reasoningContent.content === 'string') {
-        return this.extractReasoningBlocks(reasoningContent.content);
-      }
-      if (Array.isArray(reasoningContent.blocks)) {
-        return reasoningContent.blocks.join('\n\n');
-      }
-      if (reasoningContent.blocks !== undefined) {
-        return String(reasoningContent.blocks);
-      }
-      return JSON.stringify(reasoningContent);
-    }
-
-    return String(reasoningContent);
-  }
-
-  private extractReasoningBlocks(content: string): string {
-    if (typeof content !== 'string') {
-      return String(content);
-    }
-
-    // 提取各种格式的reasoning块
-    const reasoningPatterns = [
-      /```reasoning\n(.*?)\n```/gs,
-      /```thinking\n(.*?)\n```/gs,
-      /<reasoning>(.*?)<\/reasoning>/gs,
-      /<thinking>(.*?)<\/thinking>/gs,
-      /\[REASONING\](.*?)\[\/REASONING\]/gs,
-      /\[THINKING\](.*?)\[\/THINKING\]/gs
-    ];
-
-    const extractedBlocks: string[] = [];
-
-    for (const pattern of reasoningPatterns) {
-      const matches = content.match(pattern);
-      if (matches) {
-        extractedBlocks.push(
-          ...matches.map(match => {
-            // 移除标记符号，只保留内容
-            return match
-              .replace(/```(reasoning|thinking)\n/g, '')
-              .replace(/```$/g, '')
-              .replace(/<\/?(reasoning|thinking)>/g, '')
-              .replace(/\[\/?(REASONING|THINKING)\]/g, '')
-              .trim();
-          }).filter(block => block.length > 0)
-        );
-      }
-    }
-
-    // 如果没有找到格式化的块，尝试提取内容
-    if (extractedBlocks.length === 0) {
-      // 检查是否包含reasoning相关的关键词
-      const reasoningKeywords = ['reasoning:', 'thinking:', '分析:', '思考:', '推理:'];
-      const lines = content.split('\n');
-
-      for (const line of lines) {
-        const trimmedLine = line.trim();
-        if (reasoningKeywords.some(keyword =>
-          trimmedLine.toLowerCase().startsWith(keyword.toLowerCase()))) {
-          const extracted = trimmedLine.substring(trimmedLine.indexOf(':') + 1).trim();
-          if (extracted.length > 0) {
-            extractedBlocks.push(extracted);
-          }
-        }
-      }
-    }
-
-    // 去重并返回
-    return [...new Set(extractedBlocks)].join('\n\n');
   }
 
   private normalizeChoices(choices: unknown[]): unknown[] {

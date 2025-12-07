@@ -97,10 +97,6 @@ export class iFlowToolCleaningHook extends BaseHook {
         message.content = this.flattenLegacyContent(message.content);
       }
 
-      if (typeof message.content === 'string') {
-        message.content = this.stripReasoningTags(message.content);
-      }
-
       return message;
     });
   }
@@ -256,17 +252,6 @@ export class iFlowToolCleaningHook extends BaseHook {
     }
 
     return toolResultPatterns.some(pattern => pattern.test(content));
-  }
-
-  private stripReasoningTags(content: string): string {
-    const reasoningPatterns = [
-      /<reasoning>[\s\S]*?<\/reasoning>/gi,
-      /<thinking>[\s\S]*?<\/thinking>/gi,
-      /\[REASONING\][\s\S]*?\[\/REASONING\]/gi,
-      /\[THINKING\][\s\S]*?\[\/THINKING\]/gi
-    ];
-
-    return reasoningPatterns.reduce((acc, pattern) => acc.replace(pattern, ''), content).trim();
   }
 
   private flattenLegacyContent(items: unknown[]): string {

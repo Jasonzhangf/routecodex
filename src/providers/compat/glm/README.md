@@ -51,13 +51,12 @@ glm/
 - 强制串化tool_calls.function.arguments
 - 移除tools[].function.strict字段
 - 扁平化content数组
-- Strip reasoning思考标签
+- reasoning段落拆分由 llmswitch-core conversion 骨架处理，此处不再涉入
 
 ### 2. 标准字段映射
 - usage字段标准化: input_tokens ↔ prompt_tokens
 - 时间戳字段: created_at ↔ created
-- 模型名称标准化
-- reasoning_content处理
+- 模型名称标准化（其余引导信息由 conversion 骨架维护）
 
 ### 2.5. 形状过滤（基于 JSON 配置）
 - 配置文件：`config/shape-filters.json`
@@ -85,9 +84,8 @@ glm/
 
 ### 5. 响应标准化 (outgoing_postprocessing)
 - 标准化GLM特有的响应格式
-- 提取和格式化reasoning_content
 - 标准化finish_reason值
-- 确保字段格式一致性
+- 确保字段格式一致性；reasoning_content 已由 Hub Pipeline 生成
 
 ## 配置驱动
 

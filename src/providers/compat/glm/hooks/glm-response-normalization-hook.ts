@@ -50,10 +50,6 @@ export class GLMResponseNormalizationHook extends BaseHook {
         delete result.created_at;
       }
 
-      if (result.reasoning_content !== undefined) {
-        result.reasoning_content = this.extractReasoningContent(result.reasoning_content);
-      }
-
       if (Array.isArray(result.choices)) {
         result.choices = this.normalizeChoices(result.choices);
       }
@@ -103,73 +99,6 @@ export class GLMResponseNormalizationHook extends BaseHook {
     return normalizedUsage;
   }
 
-  private extractReasoningContent(reasoningContent: unknown): string {
-    if (typeof reasoningContent === 'string') {
-      return this.extractReasoningBlocks(reasoningContent);
-    }
-
-    if (isRecord(reasoningContent)) {
-      if (typeof reasoningContent.text === 'string') {
-        return this.extractReasoningBlocks(reasoningContent.text);
-      }
-      if (typeof reasoningContent.content === 'string') {
-        return this.extractReasoningBlocks(reasoningContent.content);
-      }
-      if (Array.isArray(reasoningContent.blocks)) {
-        return reasoningContent.blocks.map(block => String(block)).join('\n\n');
-      }
-      return JSON.stringify(reasoningContent);
-    }
-
-    return String(reasoningContent ?? '');
-  }
-
-  private extractReasoningBlocks(content: string): string {
-    const reasoningPatterns = [
-      /```reasoning\n(.*?)\n```/gs,
-      /```thinking\n(.*?)\n```/gs,
-      /<reasoning>(.*?)<\/reasoning>/gs,
-      /<thinking>(.*?)<\/thinking>/gs,
-      /\[REASONING\](.*?)\[\/REASONING\]/gs,
-      /\[THINKING\](.*?)\[\/THINKING\]/gs
-    ];
-
-    const extractedBlocks: string[] = [];
-
-    for (const pattern of reasoningPatterns) {
-      const matches = content.matchAll(pattern);
-      for (const match of matches) {
-        const block = match[1] ?? '';
-        const normalized = String(block)
-          .replace(/```(reasoning|thinking)\n?/g, '')
-          .replace(/```$/g, '')
-          .trim();
-        if (normalized.length > 0) {
-          extractedBlocks.push(normalized);
-        }
-      }
-    }
-
-    if (extractedBlocks.length === 0) {
-      const reasoningKeywords = ['reasoning:', 'thinking:', '分析:', '思考:', '推理:'];
-      const lines = content.split('\n');
-
-      for (const line of lines) {
-        const trimmedLine = line.trim();
-        const keyword = reasoningKeywords.find(keyword => trimmedLine.toLowerCase().startsWith(keyword.toLowerCase()));
-        if (keyword) {
-          const idx = trimmedLine.indexOf(':');
-          const snippet = idx >= 0 ? trimmedLine.slice(idx + 1).trim() : trimmedLine;
-          if (snippet.length > 0) {
-            extractedBlocks.push(snippet);
-          }
-        }
-      }
-    }
-
-    return [...new Set(extractedBlocks)].join('\n\n');
-  }
-
   private normalizeChoices(choices: unknown[]): ChoiceRecord[] {
     return choices.map(choice => {
       if (!isRecord(choice)) {
@@ -208,7 +137,7 @@ export class GLMResponseNormalizationHook extends BaseHook {
   private normalizeChoiceMessage(message: ChoiceMessage): ChoiceMessage {
     const normalizedMessage: ChoiceMessage = { ...message };
 
-    if (normalizedMessage.content !== undefined) {
+    if (normalizedMessage.content !== undefined && typeof normalizedMessage.content !== 'string') {
       normalizedMessage.content = this.normalizeMessageContent(normalizedMessage.content);
     }
 
@@ -244,17 +173,36 @@ export class GLMResponseNormalizationHook extends BaseHook {
       const normalizedToolCall: UnknownObject = { ...toolCall };
       const func = normalizedToolCall.function;
 
-      if (isRecord(func) && func.arguments !== undefined && typeof func.arguments !== 'string') {
-        try {
-          func.arguments = JSON.stringify(func.arguments);
-        } catch {
-          // 保持原状，交由后续环节处理
-        }
+      if (isRecord(func) && func.arguments !== undefined) {
+        func.arguments = this.normalizeToolArguments(func.arguments);
         normalizedToolCall.function = func;
       }
 
       return normalizedToolCall;
     });
+  }
+
+  private normalizeToolArguments(args: unknown): string {
+    let normalized = '';
+    if (typeof args === 'string') {
+      normalized = args;
+    } else {
+      try {
+        normalized = JSON.stringify(args ?? {});
+      } catch {
+        normalized = String(args ?? '');
+      }
+    }
+    const trimmed = normalized.trim();
+    if (!trimmed.length) {
+      return '';
+    }
+    try {
+      const parsed = JSON.parse(trimmed);
+      return JSON.stringify(parsed);
+    } catch {
+      return trimmed;
+    }
   }
 
   private normalizeModelName(model: string): string {

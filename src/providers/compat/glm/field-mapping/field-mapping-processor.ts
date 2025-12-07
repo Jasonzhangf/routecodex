@@ -171,13 +171,6 @@ export class GLMFieldMappingProcessor {
           targetPath: 'created',
           type: 'number',
           direction: 'incoming'
-        },
-        {
-          sourcePath: 'reasoning_content',
-          targetPath: 'reasoning',
-          type: 'string',
-          direction: 'incoming',
-          transform: 'extract_blocks'
         }
       ],
       outgoingMappings: [
@@ -198,13 +191,6 @@ export class GLMFieldMappingProcessor {
           targetPath: 'created_at',
           type: 'number',
           direction: 'outgoing'
-        },
-        {
-          sourcePath: 'reasoning',
-          targetPath: 'reasoning_content',
-          type: 'string',
-          direction: 'outgoing',
-          transform: 'wrap_blocks'
         }
       ]
     };
@@ -366,31 +352,11 @@ export class GLMFieldMappingProcessor {
         return typeof value === 'string' ? value.toUpperCase() : value;
       case 'normalizeModelName':
         return typeof value === 'string' ? value.replace(/^gpt-/, 'glm-') : value;
-      case 'extractReasoningBlocks':
-        return typeof value === 'string' ? this.extractReasoningBlocks(value) : value;
       case 'normalizeFinishReason':
         return typeof value === 'string' ? this.normalizeFinishReason(value) : value;
       default:
         return value;
     }
-  }
-
-  private extractReasoningBlocks(content: string): string {
-    const reasoningPatterns = [
-      /<reasoning>([\s\S]*?)<\/reasoning>/gi,
-      /<thinking>([\s\S]*?)<\/thinking>/gi,
-      /\[REASONING\]([\s\S]*?)\[\/REASONIONG\]/gi,
-      /\[THINKING\]([\s\S]*?)\[\/THINKING\]/gi
-    ];
-
-    for (const pattern of reasoningPatterns) {
-      const match = content.match(pattern);
-      if (match && match.length > 0) {
-        const captured = match[1] ?? match[0];
-        return typeof captured === 'string' ? captured.trim() : content;
-      }
-    }
-    return content;
   }
 
   private normalizeFinishReason(reason: string): string {
