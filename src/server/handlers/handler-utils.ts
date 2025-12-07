@@ -160,8 +160,11 @@ export function sendPipelineResponse(
 }
 
 export function logRequestStart(endpoint: string, requestId: string, meta?: RequestLogMeta): void {
+  const displayId = typeof meta?.clientRequestId === 'string' && meta.clientRequestId.trim()
+    ? meta.clientRequestId.trim()
+    : requestId;
   const suffix = formatMeta(meta);
-  console.log(`➡️  [${endpoint}] request ${formatRequestId(requestId)}${suffix}`);
+  console.log(`➡️  [${endpoint}] request ${formatRequestId(displayId)}${suffix}`);
 }
 
 export function logRequestComplete(endpoint: string, requestId: string, status: number): void {

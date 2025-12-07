@@ -717,12 +717,16 @@ export class RouteCodexHttpServer {
     if (!this.isPipelineReady()) {
       throw new Error('Hub pipeline runtime is not initialized');
     }
-    const clientRequestId = input.requestId;
-    this.logStage('request.received', clientRequestId, {
+    const metadata = this.buildRequestMetadata(input);
+    const providerRequestId = input.requestId;
+    const clientRequestId = typeof metadata.clientRequestId === 'string' && metadata.clientRequestId.trim()
+      ? metadata.clientRequestId.trim()
+      : providerRequestId;
+
+    this.logStage('request.received', providerRequestId, {
       endpoint: input.entryEndpoint,
       stream: input.metadata?.stream === true
     });
-    const metadata = this.buildRequestMetadata(input);
     try {
       const headerUa =
         (typeof input.headers?.['user-agent'] === 'string' && input.headers['user-agent']) ||
@@ -741,7 +745,7 @@ export class RouteCodexHttpServer {
       // snapshot failure should not block request path
     }
     const pipelineLabel = 'hub';
-    this.logStage(`${pipelineLabel}.start`, clientRequestId, {
+    this.logStage(`${pipelineLabel}.start`, providerRequestId, {
       endpoint: input.entryEndpoint,
       stream: metadata.stream
     });
@@ -749,7 +753,7 @@ export class RouteCodexHttpServer {
     const pipelineResult = await this.runHubPipeline(input, metadata);
     const pipelineMetadata = pipelineResult.metadata ?? {};
     const mergedMetadata = { ...metadata, ...pipelineMetadata };
-    this.logStage(`${pipelineLabel}.completed`, clientRequestId, {
+    this.logStage(`${pipelineLabel}.completed`, providerRequestId, {
       route: pipelineResult.routingDecision?.routeName,
       target: pipelineResult.target?.providerKey
     });
@@ -790,8 +794,14 @@ export class RouteCodexHttpServer {
     const rawModel =
       this.extractProviderModel(providerPayload) ||
       (typeof metadataModel === 'string' ? metadataModel : undefined);
-    const providerIdToken = target.providerKey || handle.providerId || runtimeKey || 'unknown';
-    const enhancedRequestId = enhanceProviderRequestId(clientRequestId, {
+    const providerIdToken = target.providerKey || handle.providerId || runtimeKey;
+    if (!providerIdToken) {
+      throw Object.assign(new Error('Provider identifier missing for request'), {
+        code: 'ERR_PROVIDER_ID_MISSING',
+        requestId: providerRequestId
+      });
+    }
+    const enhancedRequestId = enhanceProviderRequestId(providerRequestId, {
       entryEndpoint: input.entryEndpoint,
       providerId: providerIdToken,
       model: rawModel
