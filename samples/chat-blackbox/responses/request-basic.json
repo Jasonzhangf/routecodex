@@ -1,0 +1,80 @@
+{
+  "model": "gpt-5.1-codex",
+  "instructions": "You are RCC responses sentinel. Use the registered tools exactly as specified and never invent new arguments.",
+  "input": [
+    {
+      "role": "system",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "You are RCC responses sentinel."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Call describe_current_request and report metadata."
+        }
+      ]
+    },
+    {
+      "type": "function_call",
+      "id": "call_missing_output",
+      "name": "describe_current_request",
+      "arguments": "{\"query\":\"describe_current_request\"}"
+    },
+    {
+      "type": "function_call_output",
+      "id": "call_missing_output_result",
+      "call_id": "call_missing_output",
+      "output": "{\"request\":\"sample\"}"
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "describe_current_request",
+      "description": "Echoes metadata about the current request.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Literal command the user wants to run"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "type": "function",
+      "name": "list_mcp_resources",
+      "description": "Enumerate registered MCP resources",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "server": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": false,
+  "include": [
+    "reasoning.encrypted_content"
+  ],
+  "store": false,
+  "metadata": {
+    "sample": "requires_tool_output"
+  },
+  "parameters": {
+    "stream": true
+  }
+}
