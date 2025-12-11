@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "stage": "client-request",
+    "entryEndpoint": "/v1/messages",
+    "timestamp": 1735689600000
+  },
+  "body": {
+    "body": {
+      "model": "glm-4.6",
+      "messages": [
+        { "role": "system", "content": "system inst" },
+        { "role": "user", "content": "hello" },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_demo",
+              "type": "function",
+              "function": { "name": "test_tool", "arguments": "{\"ping\":true}" }
+            }
+          ]
+        }
+      ],
+      "clientRequestId": "req_1234560000_demo"
+    },
+    "clientHeaders": {
+      "accept": "application/json"
+    }
+  }
+}

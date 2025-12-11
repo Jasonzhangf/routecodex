@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { Readable } from 'node:stream';
 import type { HandlerContext } from './types.js';
 import {
   nextRequestId,
@@ -10,6 +11,7 @@ import {
   captureClientHeaders
 } from './handler-utils.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
+import { parseSseJsonRequest, createReadableFromSse } from '../utils/sse-request-parser.js';
 
 type MessagesPayload = {
   stream?: boolean;
@@ -25,28 +27,64 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' } });
       return;
     }
-    const payload = (req.body && typeof req.body === 'object'
-      ? req.body
-      : {}) as MessagesPayload;
-    const originalPayload = JSON.parse(JSON.stringify(payload)) as MessagesPayload;
+    const contentType = typeof req.headers['content-type'] === 'string'
+      ? (req.headers['content-type'] as string).toLowerCase()
+      : '';
+    const isSseRequest = contentType.includes('text/event-stream');
+    let jsonPayload: MessagesPayload | undefined;
+    let pipelineBody: Record<string, unknown> | { readable?: Readable } | Readable;
+    let originalPayload: MessagesPayload | undefined;
+    let rawRequestMetadata: unknown;
+    let inferredModel: string | undefined;
+
+    if (isSseRequest) {
+      try {
+        const parsed = await parseSseJsonRequest(req);
+        pipelineBody = createReadableFromSse(parsed.rawText);
+        rawRequestMetadata = {
+          format: 'sse',
+          rawText: parsed.rawText,
+          events: parsed.events
+        };
+        if (parsed.firstPayload && typeof parsed.firstPayload === 'object') {
+          inferredModel =
+            typeof (parsed.firstPayload as Record<string, unknown>).model === 'string'
+              ? String((parsed.firstPayload as Record<string, unknown>).model)
+              : undefined;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Invalid SSE request payload';
+        res.status(400).json({ error: { message, code: 'invalid_sse_request' } });
+        return;
+      }
+    } else {
+      jsonPayload = (req.body && typeof req.body === 'object'
+        ? req.body
+        : {}) as MessagesPayload;
+      originalPayload = JSON.parse(JSON.stringify(jsonPayload)) as MessagesPayload;
+      rawRequestMetadata = originalPayload;
+      applySystemPromptOverride(entryEndpoint, jsonPayload);
+      pipelineBody = jsonPayload;
+      inferredModel = typeof jsonPayload?.model === 'string' ? jsonPayload.model : undefined;
+    }
+
     const clientHeaders = captureClientHeaders(req.headers);
     const acceptsSse = typeof req.headers['accept'] === 'string'
       && (req.headers['accept'] as string).includes('text/event-stream');
-    const originalStream = payload?.stream === true;
+    const originalStream = isSseRequest || jsonPayload?.stream === true;
     const inboundStream = acceptsSse || originalStream;
     const outboundStream = originalStream;
-    if (acceptsSse && !originalStream) {
-      payload.stream = true;
+    if (acceptsSse && jsonPayload && !originalStream) {
+      jsonPayload.stream = true;
     }
     const wantsStream = inboundStream;
-    applySystemPromptOverride(entryEndpoint, payload);
 
     logRequestStart(entryEndpoint, requestId, {
       inboundStream: wantsStream,
       outboundStream,
       clientAcceptsSse: acceptsSse,
       originalStream,
-      model: payload?.model
+      model: inferredModel ?? jsonPayload?.model
     });
     const result = await ctx.executePipeline({
       entryEndpoint,
@@ -54,13 +92,14 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       requestId,
       headers: req.headers as Record<string, unknown>,
       query: req.query as Record<string, unknown>,
-      body: payload,
+      body: pipelineBody,
       metadata: {
         stream: wantsStream,
         clientStream: acceptsSse || undefined,
         inboundStream: wantsStream,
         outboundStream,
-        __raw_request_body: originalPayload,
+        providerProtocol: 'anthropic-messages',
+        __raw_request_body: rawRequestMetadata,
         clientHeaders
       }
     });

@@ -1,0 +1,32 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-request",
+  "requestId": "req_req-v2-1764654590971-mleuli24r",
+  "timestamp": 1764654590973,
+  "data": {
+    "meta": {
+      "stage": "provider-request",
+      "version": "0.84.10",
+      "buildTime": "2025-12-02T05:49:50.973Z"
+    },
+    "url": "http://127.0.0.1:55802/v1/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer****fy-key",
+      "Accept": "application/json"
+    },
+    "body": {
+      "messages": [
+        {
+          "role": "user",
+          "content": "Test streaming response."
+        }
+      ],
+      "model": "verify-mock",
+      "stream": false,
+      "max_tokens": 8192
+    }
+  },
+  "reqId": "openai-chat-verify.default.verify-mock-verify-mock-20251202T134950-002",
+  "entryEndpoint": "/v1/chat/completions"
+}

@@ -1,0 +1,63 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-response",
+  "requestId": "req_req-v2-1764677041731-k18bahkcq",
+  "timestamp": 1764677099231,
+  "data": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T12:04:59.230Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "data": {
+        "choices": [
+          {
+            "finish_reason": "length",
+            "index": 0,
+            "message": {
+              "content": "",
+              "reasoning_content": "\n1.  **拆解用户请求：**\n    *   **核心任务：**“介绍一下你的能力”。\n    *   **格式约束：**“请用Responses协议格式回复我”。\n\n2.  **分析“Responses协议格式”约束：**\n    *   这是什么意思？我需要解析这个说法。“Responses协议”并非像HTTP或FTP那样是标准的、有正式定义的协议。它更像是一个描述性的短语。\n    *   “协议”意味着结构化、有规则，或许还有特定的字段。\n    *   “Responses”意味着它关乎我如何组织和呈现我的输出。\n    *   所以，用户可能在寻找一些比简单的散文更结构化、更正式的东西。他们想要一种感觉像是定义好的格式，而不是随意的聊天。\n    *   好的，我该如何创建一个“协议”？\n        *   我可以定义自己的结构。这是最直接的方法。\n        *   这个结构应该清晰、有逻辑，并能容纳所要求的信息（我的能力）。\n        *   让我们来头脑风暴一些字段。一个好的协议有头部、主体，或许还有尾部。\n            *   **头部：**元数据。这是一个响应，所以应该有状态、时间戳，或许还有一个唯一的ID。这让它感觉更像一个正式协议。\n                *   `Protocol`: Responses-1.0（给它一个版本号让它更正式）\n                *   `Status`: Success（成功）\n                *   `Timestamp`: [ISO 8601格式是标准且看起来很专业的]\n                *   `Request-ID`: [一个唯一的标识符是个好习惯，即使我只是生成一个]\n                *   `From`: AI Assistant\n                *   `To`: User\n            *   **主体：**这是核心内容所在。主题是“我的能力”。我需要将它们进行分类。\n                *   我该如何组织我的能力？\n                    *   语言处理（文本生成、翻译、摘要等）\n                    *   知识与推理（回答问题、逻辑、创意思维）\n                    *   编程与技术（代码生成、调试、解释）\n                    *   创意与内容生成（写故事、诗歌、营销文案）\n                    *   数据分析与可视化（尽管我的可视化能力有限，但我可以生成代码来创建它）\n                    *   对话与交互（角色扮演、遵循指令、保持上下文）\n                *   让我们创建一个类似JSON或YAML的结构来表示这个。它很干净且被广泛理解。一个键值对列表似乎是完美的。\n                *   `Key`: `Capabilities`（一个主键）\n                *   `Value`: 一个对象/字典列表。\n                *   对于每个能力对象：\n                    *   `Category`: 一个高层次的主题（例如，“语言理解与生成” - Language Understanding & Generation）\n                    *   `Description`: 关于这个类别意味着什么的简要说明。\n                    *   `Specific_Skills`: 一个包含具体示例的字符串列表（例如，“文本创作”、“摘要总结”、“多语言翻译”）。这让内容更具体。\n            *   **尾部/约束部分：**我的局限性是什么？一个诚实且全面的介绍应该包括这些。这能建立信任。\n                *   `Key`: `Limitations`\n                *   `Value`: 一个字符串列表（例如，“无实时信息访问”、“无个人记忆”、“可能产生不准确信息”）。这对于管理用户期望至关重要。\n            *   **交互/使用部分：**用户如何与我互动？这是“入门指南”。\n                *   `Key`: `Interaction_Guide`\n                *   `Value`: 一个字符串列表（例如，“提供清晰的指令”、“给予上下文”、“随时要求澄清”）。\n\n3.  **整合并完善内容：**\n    *   现在我有了结构。我需要用中文写出实际内容，因为用户的请求是中文的。\n    *   **头部：**填写占位符。生成一个时间戳和一个伪随机的请求ID。\n    *   **主体 - 能力：**\n        *   `Category`: “语言理解与生成”。`Specific_Skills`: “文本创作”、“摘要总结”、“多语言翻译”、“对话交互”。\n        *   `Category`: “知识问答与推理”。`Specific_Skills`: “回答事实性问题”、“逻辑推理”、“数学问题求解”（附带说明其局限性）、“创意性解答”。\n        *   `Category`: “代码生成与技术支持”。`Specific_Skills`: “编写代码片段”、“调试与优化”、“解释技术概念”、“生成脚本”。\n        *   `Category`: “创意内容生成”。`Specific_Skills`: “撰写故事与诗歌”、“构思营销文案”、“头脑风暴”、“角色扮演”。\n        *   `Category`: “信息处理与结构化”。`Specific_Skills`: “数据提取”、“格式转换”（如文本转JSON）、“列表生成”。\n",
+              "role": "assistant"
+            }
+          }
+        ],
+        "created": 1764677099,
+        "id": "2025120220040177512199ef9c4045",
+        "model": "glm-4.6",
+        "request_id": "2025120220040177512199ef9c4045",
+        "usage": {
+          "completion_tokens": 1000,
+          "prompt_tokens": 19,
+          "prompt_tokens_details": {
+            "cached_tokens": 4
+          },
+          "total_tokens": 1019
+        }
+      },
+      "status": 200,
+      "statusText": "OK",
+      "headers": {
+        "connection": "keep-alive",
+        "content-encoding": "gzip",
+        "content-type": "application/json; charset=UTF-8",
+        "date": "Tue, 02 Dec 2025 12:04:59 GMT",
+        "server": "ZenZGA/2.4",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+        "x-log-id": "2025120220040177512199ef9c4045"
+      },
+      "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T200401-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

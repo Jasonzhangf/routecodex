@@ -1,0 +1,122 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-request",
+  "requestId": "req_req-v2-1764673879112-wzwi2nt81",
+  "timestamp": 1764673879115,
+  "data": {
+    "meta": {
+      "stage": "provider-request",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T11:11:19.115Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "messages": [
+        {
+          "role": "system",
+          "content": "你可以使用名为 shell 的工具来执行 ls 命令。只返回命令输出。"
+        },
+        {
+          "role": "user",
+          "content": "列出本地文件目录"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_-8116499314106494150",
+              "type": "function",
+              "function": {
+                "name": "shell",
+                "arguments": "{\"command\":[\"bash\",\"-lc\",\"ls\"]}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"output\":\"AGENTS.md\\najv-8.17.1.tgz\\nbin\\nCLAUDE.md\\nconfig\\ndist\\ndocs\\nexporters\\ninterpreter\\njest.config.js\\nlogs\\nnode_modules\\npackage\\npackage-lock.json\\npackage.json\\nrcc\\nrcc-0.81.21.tgz\\nrcc-basemodule-0.2.7.tgz\\nrcc-config-core-0.1.6.tgz\\nrcc-debugcenter-0.1.6.tgz\\nrcc-errorhandling-1.0.10.tgz\\nrcc-llmswitch-core-0.3.12.tgz\\nREADME.md\\nreplay\\nroutecodex-0.85.0.tgz\\nroutecodex.pid\\nscripts\\nsharedmodule\\nsharedmodule.backup-20251111221728\\nsignal-exit-4.1.0.tgz\\nsrc\\ntests\\ntools\\ntsconfig.json\\nvendor\\nverified-configs\\nWARP.md\",\"metadata\":{\"exit_code\":0,\"duration_seconds\":0.009}}",
+          "tool_call_id": "call_-8116499314106494150"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "shell",
+            "description": "执行安全的 shell 命令",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": true,
+              "required": [
+                "command"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "list_mcp_resources",
+            "description": "List resources from an MCP server.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "server": {
+                  "type": "string"
+                },
+                "filter": {
+                  "type": "string"
+                },
+                "root": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "list_mcp_resource_templates",
+            "description": "List resource templates from MCP servers.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "cursor": {
+                  "type": "string"
+                },
+                "server": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "model": "glm-4.6",
+      "stream": false,
+      "tool_choice": "auto",
+      "max_tokens": 8192
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T191119-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

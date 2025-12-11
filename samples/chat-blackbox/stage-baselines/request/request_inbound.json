@@ -1,0 +1,84 @@
+{
+  "messages": [
+    {
+      "content": "You are RCC sentinel.",
+      "role": "system"
+    },
+    {
+      "content": "Call describe_current_request and summarize the metadata.",
+      "role": "user"
+    },
+    {
+      "content": "",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"query\":\"describe_current_request\"}",
+            "name": "describe_current_request"
+          },
+          "id": "call_describe_request",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "{\"request\":\"sample\"}",
+      "role": "tool",
+      "tool_call_id": "call_describe_request"
+    }
+  ],
+  "metadata": {
+    "capturedContext": {
+      "__hub_capture": {
+        "context": {
+          "entryEndpoint": "/v1/chat/completions",
+          "profileId": "openai-openai",
+          "providerProtocol": "openai-chat",
+          "streamingHint": "disable"
+        },
+        "rawSystem": [
+          {
+            "text": "You are RCC sentinel.",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "originalEndpoint": "/v1/chat/completions",
+    "stream": false
+  },
+  "model": "glm-4.6",
+  "parameters": {
+    "model": "glm-4.6",
+    "stream": false
+  },
+  "tools": [
+    {
+      "function": {
+        "description": "Echo context",
+        "name": "describe_current_request",
+        "parameters": {
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Enumerate available MCP resources",
+        "name": "list_mcp_resources",
+        "parameters": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "type": "function"
+    }
+  ]
+}

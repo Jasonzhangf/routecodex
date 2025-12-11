@@ -1,0 +1,74 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-response",
+  "requestId": "req_req-v2-1764651234428-rccf7cnn5",
+  "timestamp": 1764651243978,
+  "data": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.84.9",
+      "buildTime": "2025-12-02T04:54:03.978Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "data": {
+        "choices": [
+          {
+            "finish_reason": "tool_calls",
+            "index": 0,
+            "message": {
+              "content": "\n",
+              "reasoning_content": "\n用户要求我严格调用名为 list_local_files 的函数工具来列出当前工作目录的文件，并且只能通过调用该工具完成任务，禁止直接回答。\n\n我需要调用 list_local_files 函数。根据函数定义：\n- 函数名：list_local_files\n- 参数：path（可选，默认\".\"表示当前目录）\n- 用户要求列出当前工作目录，所以我应该使用默认值或者显式传入\".\"\n\n用户说只能通过调用该工具完成任务，所以我应该直接调用函数，然后展示结果。",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{}",
+                    "name": "list_local_files"
+                  },
+                  "id": "call_-8116512302087726369",
+                  "index": 0,
+                  "type": "function"
+                }
+              ]
+            }
+          }
+        ],
+        "created": 1764651244,
+        "id": "202512021253554545717a01cc4861",
+        "model": "glm-4.6",
+        "request_id": "202512021253554545717a01cc4861",
+        "usage": {
+          "completion_tokens": 116,
+          "prompt_tokens": 336,
+          "prompt_tokens_details": {
+            "cached_tokens": 43
+          },
+          "total_tokens": 452
+        }
+      },
+      "status": 200,
+      "statusText": "OK",
+      "headers": {
+        "connection": "keep-alive",
+        "content-encoding": "gzip",
+        "content-type": "application/json; charset=UTF-8",
+        "date": "Tue, 02 Dec 2025 04:54:04 GMT",
+        "server": "ZenZGA/2.4",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+        "x-log-id": "202512021253554545717a01cc4861"
+      },
+      "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T125354-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

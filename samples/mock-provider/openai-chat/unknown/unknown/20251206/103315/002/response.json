@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.85.7",
+    "buildTime": "2025-12-03T09:01:22.636Z"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "RouteCodex/2.0",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "application/json"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "\n",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"command\":\"ls -la\",\"workdir\":\"/Users/fanzhang/Documents/github/uvcmirror\"}",
+                  "name": "shell_command"
+                },
+                "id": "call_-8102581524117736381",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1764752482,
+      "id": "20251203170112a425e6145fc849ec",
+      "model": "glm-4.6",
+      "request_id": "20251203170112a425e6145fc849ec",
+      "usage": {
+        "completion_tokens": 38,
+        "prompt_tokens": 10581,
+        "prompt_tokens_details": {
+          "cached_tokens": 54
+        },
+        "total_tokens": 10619
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 03 Dec 2025 09:01:22 GMT",
+      "server": "ZenZGA/2.4",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251203170112a425e6145fc849ec"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-chat-unknown-unknown-20251206T103315-002"
+}

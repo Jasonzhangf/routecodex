@@ -1,0 +1,63 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-response",
+  "requestId": "req_req-v2-1764677591775-doqyzojqr",
+  "timestamp": 1764677607633,
+  "data": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T12:13:27.633Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "data": {
+        "choices": [
+          {
+            "finish_reason": "length",
+            "index": 0,
+            "message": {
+              "content": "",
+              "reasoning_content": "\n1.  **拆解用户请求：**\n    *   **核心任务1：**“你好，请用Responses协议格式回复我”。\n    *   **核心任务2：**“并介绍一下你的能力”。\n\n2.  **分析“Responses协议格式”：**\n    *   这是一个关键短语。它不是一个像JSON或XML那样的标准、正式的协议。它更像是一个描述性术语，用户可能是在某个特定的上下文（比如另一个AI、一个特定的API文档或一篇技术博客文章）中遇到的。\n    *   一个“Responses协议格式”可能意味着什么？\n        *   **结构化：**它意味着一个组织良好的回复，而不仅仅是自由形式的文本。\n        *   **类似键值对：**它可能看起来像一个配置文件或一个API响应对象，比如 `{\"key\": \"value\"}` 或 `key: value`。\n        *   **模块化：**回复的不同部分被清晰地分开（例如，一个 `greeting` 部分，一个 `status` 部分，一个 `content` 部分）。\n        *   **元数据：**它可能包含关于响应本身的元数据，比如状态码、时间戳或响应类型。\n    *   **我的解读：**我将采用一种混合方法。我将使用一种清晰、结构化的格式，*看起来*像一个配置文件或一个简化的API响应。我将使用像 `[Greeting]`、`[Status]`、`[Metadata]` 和 `[Content]` 这样的键来模仿这种感觉。这是对用户可能意图的一种安全和稳健的解读。这比仅仅猜测一个他们可能没有指明的具体格式（如YAML或TOML）要好。我将使用方括号 `[]` 作为节标题，使其看起来像一个配置文件，这通常是一种“协议格式”。\n\n3.  **分析“介绍一下你的能力”：**\n    *   这是标准的“你是什么，你能做什么？”的问题。\n    *   我需要全面但简洁。我应该涵盖我的主要功能。\n    *   **头脑风暴我的能力：**\n        *   **核心语言处理：**理解和生成文本（对话、翻译、摘要、写作）。\n        *   **知识库：**回答各种主题的问题（科学、历史、技术等）。重要的是要加上免责声明，即我的知识有截止日期，我可能不知道非常近期的事件。\n        *   **代码生成与解释：**编写代码片段、调试、解释算法、在不同语言之间进行转换。\n        *   **创意任务：**写故事、诗歌、歌词、进行头脑风暴。\n        *   **推理与问题解决：**逻辑谜题、数学问题、规划任务。\n        *   **角色扮演：**扮演不同的角色或人设。\n        *   **数据处理（以文本形式）：**总结长文档、从文本中提取信息、格式化数据。\n        *   **安全与道德：**我应该提及我遵循安全准则，并且被设计得有益无害。这能建立信任。\n        *   **局限性：**提及局限性对于保持透明度至关重要。没有实时信息、可能产生幻觉（“一本正经地胡说八道”）、没有个人意识/情感、依赖于训练数据。\n\n4.  **综合并构建回复（遵循“Responses协议格式”）：**\n\n    *   **`[Greeting]`：**以一个简单、直接的问候开始。“你好！”是完美的。\n    *   **`[Status]`：**一个表示状态码的好地方。`200 OK` 是一个经典的HTTP状态码，表示成功，并且符合“协议”的主题。它被普遍理解。\n    *   **`[Metadata]`：**这是放置元数据的好地方。\n        *   `ResponseType: \"SelfIntroduction\"` - 清晰地说明这个回复是什么。\n        *   `Model: \"Google Large Language Model\"` - 透明地说明我是什么。\n        *   `Language: \"zh-CN\"` - 指明回复所用的语言，与用户的语言相匹配。\n        *   `Timestamp: \"[当前时间]\"` - 使用一个占位符来表示当前时间。这增加了一种很好的、动态的感觉。\n    *   **`[Content]`：**这是主要部分。我将进一步细分它，使其更具可读性。我将使用一个嵌套结构。\n        *   `Section: \"Core_Capabilities\"` - 为我的主要能力设置一个清晰的标题。\n        *   我将使用项目符号或编号列表来列出在第3步中头脑风暴出的能力。这比密集的段落更容易阅读。\n            *   `1. 自然语言理解与生成` - 解释对话、翻译、摘要。\n            *   `2. 知识问答与信息检索` - 提及广泛的主题，但也要说明知识截止日期。\n            *   `3. 代码",
+              "role": "assistant"
+            }
+          }
+        ],
+        "created": 1764677607,
+        "id": "20251202201312fdc392f75b1943a4",
+        "model": "glm-4.6",
+        "request_id": "20251202201312fdc392f75b1943a4",
+        "usage": {
+          "completion_tokens": 1000,
+          "prompt_tokens": 19,
+          "prompt_tokens_details": {
+            "cached_tokens": 4
+          },
+          "total_tokens": 1019
+        }
+      },
+      "status": 200,
+      "statusText": "OK",
+      "headers": {
+        "connection": "keep-alive",
+        "content-encoding": "gzip",
+        "content-type": "application/json; charset=UTF-8",
+        "date": "Tue, 02 Dec 2025 12:13:27 GMT",
+        "server": "ZenZGA/2.4",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+        "x-log-id": "20251202201312fdc392f75b1943a4"
+      },
+      "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T201311-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

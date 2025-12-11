@@ -1,0 +1,27 @@
+{
+  "request": {
+    "model": "models/gemini-2.5-flash-lite",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "简单说说你今天的状态，分三段回答。"
+          }
+        ]
+      }
+    ],
+    "stream": false
+  },
+  "response": {
+    "status": 404,
+    "json": {
+      "error": {
+        "message": "Not Found",
+        "type": "not_found_error",
+        "code": "not_found"
+      }
+    }
+  }
+}

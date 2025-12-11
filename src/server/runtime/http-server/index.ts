@@ -22,6 +22,7 @@ import type {
   ProviderRequestLogEntry
 } from '../../../modules/pipeline/utils/debug-logger.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
+import { extractAnthropicToolAliasMap } from './anthropic-tool-alias.js';
 import { AuthFileResolver } from '../../../config/auth-file-resolver.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import type { ProviderProfile, ProviderProfileCollection } from '../../../providers/profile/provider-profile.js';
@@ -1025,7 +1026,8 @@ export class RouteCodexHttpServer {
     }
     try {
       const providerProtocol = mapProviderProtocol(options.providerType);
-      const metadataBag = options.pipelineMetadata || {};
+      const metadataBag = asRecord(options.pipelineMetadata);
+      const aliasMap = extractAnthropicToolAliasMap(metadataBag);
       const originalModelId = this.extractClientModelId(metadataBag, options.originalRequest);
       const adapterContext = {
         requestId: options.requestId,
@@ -1033,6 +1035,9 @@ export class RouteCodexHttpServer {
         providerProtocol,
         originalModelId
       };
+      if (aliasMap) {
+        (adapterContext as Record<string, unknown>).anthropicToolNameMap = aliasMap;
+      }
       const [convertProviderResponse, createSnapshotRecorder] = await Promise.all([
         loadConvertProviderResponse(),
         loadSnapshotRecorderFactory()

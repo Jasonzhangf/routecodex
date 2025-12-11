@@ -1,0 +1,54 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-response",
+  "requestId": "req_req-v2-1764677621974-o077uvk00",
+  "timestamp": 1764677621978,
+  "data": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T12:13:41.978Z"
+    },
+    "url": "http://127.0.0.1:54653/v1/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer****fy-key",
+      "Accept": "application/json"
+    },
+    "body": {
+      "data": {
+        "id": "mock-1764677621",
+        "object": "chat.completion",
+        "created": 1764677621,
+        "model": "verify-mock",
+        "choices": [
+          {
+            "index": 0,
+            "finish_reason": "stop",
+            "message": {
+              "role": "assistant",
+              "content": "Mock response: Test streaming response."
+            }
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 5,
+          "completion_tokens": 5,
+          "total_tokens": 10
+        }
+      },
+      "status": 200,
+      "statusText": "OK",
+      "headers": {
+        "connection": "keep-alive",
+        "content-type": "application/json",
+        "date": "Tue, 02 Dec 2025 12:13:41 GMT",
+        "keep-alive": "timeout=5",
+        "transfer-encoding": "chunked"
+      },
+      "url": "http://127.0.0.1:54653/v1/chat/completions"
+    }
+  },
+  "reqId": "openai-chat-verify.default.verify-mock-verify-mock-20251202T201341-002",
+  "entryEndpoint": "/v1/chat/completions"
+}

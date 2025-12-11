@@ -1,0 +1,38 @@
+{
+  "reqId": "openai-responses-kimi.key1-kimi-for-coding-20251207T162754160-004",
+  "endpoint": "/v1/responses",
+  "providerId": "kimi.key1.kimi-for-coding",
+  "model": "kimi-for-coding",
+  "timestamp": "2025-12-07T16:27:54.160Z",
+  "body": {
+    "model": "kimi-for-coding",
+    "instructions": "工具链回归样本：验证工具 call_id 保持不变。",
+    "input": [
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "继续分析 shell_command:25 的执行结果"
+          }
+        ]
+      },
+      {
+        "type": "function_call",
+        "name": "shell_command",
+        "id": "shell_command:25",
+        "call_id": "shell_command:25",
+        "arguments": "{\"command\":\"ls configs\",\"workdir\":\"/Users/fanzhang/Documents/github/project\"}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "shell_command:25",
+        "output": "{\"stdout\":\"configs/electron-forge.config.js\",\"exit_code\":0}"
+      }
+    ],
+    "metadata": {
+      "notes": "回归样本：call_id 含冒号"
+    }
+  }
+}

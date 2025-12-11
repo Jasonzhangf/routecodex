@@ -1,0 +1,67 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.85.7",
+    "buildTime": "2025-12-03T08:27:43.360Z"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "RouteCodex/2.0",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "application/json"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "\n",
+            "reasoning_content": "\n用户要求我严格调用名为 list_local_files 的函数工具来列出当前工作目录的文件，并且只能通过调用该工具完成任务，禁止直接回答。\n\n我需要调用 list_local_files 函数。根据函数描述，它列出了服务器当前工作目录内的文件。参数中 path 是可选的，默认是 \".\"（当前目录），所以我不需要指定任何参数。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{}",
+                  "name": "list_local_files"
+                },
+                "id": "call_-8102515690856855977",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1764750463,
+      "id": "202512031627269ad0754e4f3241a5",
+      "model": "glm-4.6",
+      "request_id": "202512031627269ad0754e4f3241a5",
+      "usage": {
+        "completion_tokens": 87,
+        "prompt_tokens": 336,
+        "prompt_tokens_details": {
+          "cached_tokens": 335
+        },
+        "total_tokens": 423
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 03 Dec 2025 08:27:43 GMT",
+      "server": "ZenZGA/2.4",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512031627269ad0754e4f3241a5"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-chat-unknown-unknown-20251206T103315-001"
+}

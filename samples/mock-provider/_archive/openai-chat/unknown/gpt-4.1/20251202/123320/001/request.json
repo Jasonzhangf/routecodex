@@ -1,0 +1,83 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-request",
+  "requestId": "req_manual_toolcall",
+  "timestamp": 1764650000000,
+  "data": {
+    "meta": {
+      "stage": "provider-request",
+      "version": "test",
+      "buildTime": "2025-12-02T04:00:00Z"
+    },
+    "url": "https://api.local/v1/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer ****"
+    },
+    "body": {
+      "model": "gpt-4.1",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a helpful coding assistant."
+        },
+        {
+          "role": "user",
+          "content": "Use the shell tool to list files under /tmp and summarize the output."
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "toolcall_1",
+              "type": "function",
+              "function": {
+                "name": "shell",
+                "arguments": "{\"command\":[\"ls\"],\"workdir\":\"/tmp\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "toolcall_1",
+          "content": "{\"stdout\":\"file.txt\\nnotes.md\\n\",\"stderr\":\"\",\"exit_code\":0}"
+        },
+        {
+          "role": "assistant",
+          "content": "The directory contains file.txt and notes.md."
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "shell",
+            "description": "Runs a shell command",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "workdir": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "command",
+                "workdir"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "reqId": "openai-chat-unknown-gpt-4.1-20251202T123320-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

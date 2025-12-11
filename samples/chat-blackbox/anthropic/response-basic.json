@@ -1,0 +1,13 @@
+{
+  "id": "msg_regression_1",
+  "type": "message",
+  "role": "assistant",
+  "model": "glm-4.6",
+  "stop_reason": "end_turn",
+  "content": [
+    {
+      "type": "text",
+      "text": "Tool result acknowledged."
+    }
+  ]
+}

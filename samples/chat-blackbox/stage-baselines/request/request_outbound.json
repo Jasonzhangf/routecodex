@@ -1,0 +1,92 @@
+{
+  "messages": [
+    {
+      "content": "You are RCC sentinel.",
+      "role": "system"
+    },
+    {
+      "content": "Call describe_current_request and summarize the metadata.",
+      "role": "user"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"query\":\"describe_current_request\"}",
+            "name": "describe_current_request"
+          },
+          "id": "call_describe_request",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "{\"request\":\"sample\"}",
+      "role": "tool",
+      "tool_call_id": "call_describe_request"
+    }
+  ],
+  "model": "glm-4.6",
+  "stream": false,
+  "tool_choice": "auto",
+  "tools": [
+    {
+      "function": {
+        "description": "Echo context",
+        "name": "describe_current_request",
+        "parameters": {
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Enumerate available MCP resources",
+        "name": "list_mcp_resources",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "filter": {
+              "type": "string"
+            },
+            "root": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "List resource templates from MCP servers.",
+        "name": "list_mcp_resource_templates",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "function"
+    }
+  ]
+}

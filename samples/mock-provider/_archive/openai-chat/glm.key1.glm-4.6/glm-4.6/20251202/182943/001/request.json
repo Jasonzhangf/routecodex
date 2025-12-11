@@ -1,0 +1,46 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-request",
+  "requestId": "req_req-v2-1764671383084-9taf6hv9i",
+  "timestamp": 1764671383085,
+  "data": {
+    "meta": {
+      "stage": "provider-request",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T10:29:43.085Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are Claude Code, Anthropic's official CLI for Claude."
+        },
+        {
+          "role": "system",
+          "content": "Analyze if this message indicates a new conversation topic. If it does, extract a 2-3 word title that captures the new topic. Format your response as a JSON object with two fields: 'isNewTopic' (boolean) and 'title' (string, or null if isNewTopic is false). Only include these fields, no other text. ONLY generate the JSON object, no other text (eg. no markdown)."
+        },
+        {
+          "role": "user",
+          "content": "列出本地文件"
+        },
+        {
+          "role": "assistant",
+          "content": "{"
+        }
+      ],
+      "model": "glm-4.6",
+      "temperature": 1,
+      "max_tokens": 21333,
+      "stream": false
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T182943-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

@@ -10,8 +10,10 @@
 ```
 
 > **提示**：仓库内 `samples/chat-blackbox/anthropic/request-basic.json` 为上述样本的版本化拷贝，可在代码评审时直接 diff。
-> 若黄金回放需要更新，可运行 `node scripts/tools/capture-provider-goldens.mjs --update-golden`，脚本会在检测到
-> 字段差异时提示并可选择覆盖 `provider_golden_samples/` 下的请求副本。
+> 建议先用真实 provider 生成阶段快照，并把 `body` + `stageFile` 写入
+> `~/.routecodex/golden_samples/new/anthropic-messages/<providerId>/`。随后执行
+> `node scripts/tools/capture-provider-goldens.mjs --update-golden`，脚本会读取这些快照并同步
+> `provider_golden_samples/`，检测到字段差异时会提示是否覆盖。
 
 当前样本：
 

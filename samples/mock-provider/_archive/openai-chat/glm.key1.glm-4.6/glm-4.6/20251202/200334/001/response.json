@@ -1,0 +1,63 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-response",
+  "requestId": "req_req-v2-1764677014654-c5pmcw4mg",
+  "timestamp": 1764677041715,
+  "data": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T12:04:01.715Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "data": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "content": "\n我正在进行流式输出。",
+              "reasoning_content": "\n1.  **分析用户请求：**\n    *   用户用中文说：“请用中文告诉我你正在进行流式输出。”\n    *   翻译：“Please use Chinese to tell me that you are currently performing streaming output.”\n    *   用户对我*正在做*的事情提出了一个具体要求。该请求是元请求，是关于过程的。\n    *   至关重要的是，提示*也*包含一个严格的指令：“你是一个只需返回一句话的机器人。”（你是一个只应返回单个句子的机器人。）\n\n2.  **拆解约束条件：**\n    *   **约束条件1：语言：**必须是中文。\n    *   **约束条件2：内容：**必须传达“我正在进行流式输出”。\n    *   **约束条件3：长度/结构：**必须恰好是一句话。\n\n3.  **构思中文句子（并针对约束条件进行检查）：**\n\n    *   **想法1：直接翻译。**\n        *   “我正在进行流式输出。”\n        *   *检查：*是中文吗？是的。 convey the meaning吗？是的。是一句话吗？是的。\n        *   *评估：*这是一个非常有力的候选选项。它直接、准确，并满足所有约束条件。\n\n    *   **想法2：稍微更具描述性的版本。**\n        *   “我正在使用流式输出的方式与你对话。”\n        *   *检查：*是中文吗？是的。convey the meaning吗？是的，并且增加了一点上下文（“与你对话”）。是一句话吗？是的。\n        *   *评估：*这也是一个好的候选选项。它有点更健谈，这可能不错，但直接翻译更简洁，也许更符合“机器人”的人设。\n\n    *   **想法3：使用不同措辞的版本。**\n        *   “这段文字是以流式输出的形式生成的。”\n        *   *检查：*是中文吗？是的。convey the meaning吗？是的，它从文本的角度来构建。是一句话吗？是的。\n        *   *评估：*非常好。它稍微更具技术性/描述性。在内容和格式上仍然完全符合要求。\n\n    *   **想法4：一个更主动、更“现场”的版本。**\n        *   “你所看到的内容正在通过流式输出逐字生成。”\n        *   *检查：*是中文吗？是的。convey the meaning吗？是的，非常清晰。是一句话吗？是的。\n        *   *评估：*这个也非常出色。它具有描述性，并直接回应了用户正在看到的体验。\n\n4.  **选择最佳选项：**\n\n    *   我现在比较的是：\n        1.  我正在进行流式输出。（非常直接）\n        2.  我正在使用流式输出的方式与你对话。（稍微更健谈）\n        3.  这段文字是以流式输出的形式生成的。（技术性，关注文本）\n        4.  你所看到的内容正在通过流式输出逐字生成。（描述性，关注用户体验）\n\n    *   提示是一个非常简单、直接的请求。最直接、最简单的回答通常是最好的，特别是当人设是一个只需返回一句话的、极简主义的机器人时。\n    *   选项1，“我正在进行流式输出。”，是对用户请求最直接的回答。它没有添加不必要的信息，完全满足了所有约束条件，并且对于一个人设极其有限的机器人来说，完美地符合其“风格”。\n    *   选项4也很好，但稍微复杂一些。选项1最纯粹。\n    *   提示说“你是一个只需返回一句话的机器人。”这个人设是一个“机器人”，通常意味着直接和缺乏虚饰。选项1与这种机器人人设完美契合。\n\n5.  **最终决定：**\n\n    *   选择直接、简单、准确、完全符合所有规则的句子。\n    *   选定的句子：“我正在进行流式输出。”",
+              "role": "assistant"
+            }
+          }
+        ],
+        "created": 1764677041,
+        "id": "20251202200334e33804620b944b80",
+        "model": "glm-4.6",
+        "request_id": "20251202200334e33804620b944b80",
+        "usage": {
+          "completion_tokens": 835,
+          "prompt_tokens": 25,
+          "prompt_tokens_details": {
+            "cached_tokens": 5
+          },
+          "total_tokens": 860
+        }
+      },
+      "status": 200,
+      "statusText": "OK",
+      "headers": {
+        "connection": "keep-alive",
+        "content-encoding": "gzip",
+        "content-type": "application/json; charset=UTF-8",
+        "date": "Tue, 02 Dec 2025 12:04:01 GMT",
+        "server": "ZenZGA/2.4",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+        "x-log-id": "20251202200334e33804620b944b80"
+      },
+      "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T200334-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

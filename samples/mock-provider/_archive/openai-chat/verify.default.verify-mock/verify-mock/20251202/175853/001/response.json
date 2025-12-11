@@ -1,0 +1,54 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-response",
+  "requestId": "req_req-v2-1764669533558-jj81y2mat",
+  "timestamp": 1764669533587,
+  "data": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.84.11",
+      "buildTime": "2025-12-02T09:58:53.587Z"
+    },
+    "url": "http://127.0.0.1:58207/v1/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer****fy-key",
+      "Accept": "application/json"
+    },
+    "body": {
+      "data": {
+        "id": "mock-1764669533",
+        "object": "chat.completion",
+        "created": 1764669533,
+        "model": "verify-mock",
+        "choices": [
+          {
+            "index": 0,
+            "finish_reason": "stop",
+            "message": {
+              "role": "assistant",
+              "content": "Mock response: Say hello in one short sentence."
+            }
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 5,
+          "completion_tokens": 5,
+          "total_tokens": 10
+        }
+      },
+      "status": 200,
+      "statusText": "OK",
+      "headers": {
+        "connection": "keep-alive",
+        "content-type": "application/json",
+        "date": "Tue, 02 Dec 2025 09:58:53 GMT",
+        "keep-alive": "timeout=5",
+        "transfer-encoding": "chunked"
+      },
+      "url": "http://127.0.0.1:58207/v1/chat/completions"
+    }
+  },
+  "reqId": "openai-chat-verify.default.verify-mock-verify-mock-20251202T175853-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

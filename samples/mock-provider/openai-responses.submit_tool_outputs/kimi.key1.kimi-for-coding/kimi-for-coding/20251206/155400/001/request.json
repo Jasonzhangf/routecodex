@@ -1,0 +1,17 @@
+{
+  "reqId": "openai-responses.submit_tool_outputs-kimi.key1-kimi-for-coding-20251206T155400-001",
+  "endpoint": "/v1/responses.submit_tool_outputs",
+  "providerId": "kimi.key1.kimi-for-coding",
+  "model": "kimi-for-coding",
+  "timestamp": "2025-12-06T15:54:00.000Z",
+  "body": {
+    "response_id": "chatcmpl-z9fxuNC41kTIvb8zbajWti2k",
+    "tool_outputs": [
+      {
+        "tool_call_id": "shell_command:25",
+        "output": "Found matching JSON configs in ui-desktop/configs, electron-forge.config.js"
+      }
+    ],
+    "model": "kimi-for-coding"
+  }
+}

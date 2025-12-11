@@ -1,0 +1,62 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-response",
+  "requestId": "req_req-v2-1764651067670-h32wnwfpe",
+  "timestamp": 1764651072075,
+  "data": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.84.9",
+      "buildTime": "2025-12-02T04:51:12.075Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "data": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "content": "\n《静夜思》  \n明月照窗前，  \n清风拂柳眠。  \n远山含黛色，  \n思君到明天。",
+              "role": "assistant"
+            }
+          }
+        ],
+        "created": 1764651072,
+        "id": "20251202125109daa88090ca3d4dea",
+        "model": "glm-4.6",
+        "request_id": "20251202125109daa88090ca3d4dea",
+        "usage": {
+          "completion_tokens": 35,
+          "prompt_tokens": 6955,
+          "prompt_tokens_details": {
+            "cached_tokens": 51
+          },
+          "total_tokens": 6990
+        }
+      },
+      "status": 200,
+      "statusText": "OK",
+      "headers": {
+        "connection": "keep-alive",
+        "content-encoding": "gzip",
+        "content-type": "application/json; charset=UTF-8",
+        "date": "Tue, 02 Dec 2025 04:51:12 GMT",
+        "server": "ZenZGA/2.4",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+        "x-log-id": "20251202125109daa88090ca3d4dea"
+      },
+      "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T125107-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

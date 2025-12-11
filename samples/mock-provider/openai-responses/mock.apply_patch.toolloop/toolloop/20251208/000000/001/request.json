@@ -1,0 +1,27 @@
+{
+  "reqId": "openai-responses-mock.apply_patch.toolloop-20251208T000000-001",
+  "endpoint": "/v1/responses",
+  "providerId": "mock.apply_patch.toolloop",
+  "model": "toolloop",
+  "timestamp": "2025-12-08T00:00:00.000Z",
+  "body": {
+    "model": "toolloop",
+    "messages": [
+      {
+        "role": "user",
+        "content": "请为 README 中的 apply_patch 样例补充额外说明。"
+      }
+    ],
+    "metadata": {
+      "originalEndpoint": "openai-responses",
+      "stream": true
+    },
+    "processed": {
+      "timestamp": 1765200000000,
+      "appliedRules": [
+        "response-pipeline"
+      ],
+      "status": "success"
+    }
+  }
+}

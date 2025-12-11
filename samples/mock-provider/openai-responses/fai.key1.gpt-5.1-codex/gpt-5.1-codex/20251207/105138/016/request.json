@@ -1,0 +1,24 @@
+{
+  "reqId": "openai-responses-fai.key1-gpt-5.1-codex-20251207T105138-016",
+  "endpoint": "/v1/responses",
+  "providerId": "fai.key1.gpt-5.1-codex",
+  "model": "gpt-5.1-codex",
+  "timestamp": "2025-12-07T10:51:38.000Z",
+  "body": {
+    "model": "gpt-5.1-codex",
+    "input": [
+      {
+        "type": "function_call",
+        "id": "function_call_openai_responses_fai_key1_gpt_5_1_codex_20251207T105138871_016_001",
+        "name": "describe_current_request",
+        "arguments": "{\"query\":\"describe_current_request\"}"
+      }
+    ],
+    "parameters": {},
+    "metadata": {
+      "originalEndpoint": "openai-responses",
+      "stream": true,
+      "notes": "reproduces invalid input name (contains dots)"
+    }
+  }
+}

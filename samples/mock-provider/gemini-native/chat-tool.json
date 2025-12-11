@@ -1,0 +1,46 @@
+{
+  "request": {
+    "model": "models/gemini-2.5-flash-lite",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "list_local_files",
+          "description": "列出服务器当前工作目录内的文件",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "要列出的目录路径，默认 \".\""
+              }
+            }
+          }
+        }
+      }
+    ],
+    "tool_choice": "auto",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "请严格调用 list_local_files 工具列出当前目录，只能通过工具完成任务。"
+          }
+        ]
+      }
+    ],
+    "stream": false
+  },
+  "response": {
+    "status": 404,
+    "json": {
+      "error": {
+        "message": "Not Found",
+        "type": "not_found_error",
+        "code": "not_found"
+      }
+    }
+  }
+}

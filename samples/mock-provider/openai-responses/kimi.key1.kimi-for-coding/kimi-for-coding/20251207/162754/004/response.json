@@ -1,0 +1,35 @@
+{
+  "reqId": "openai-responses-kimi.key1-kimi-for-coding-20251207T162754160-004",
+  "endpoint": "/v1/responses",
+  "providerId": "kimi.key1.kimi-for-coding",
+  "model": "kimi-for-coding",
+  "timestamp": "2025-12-07T16:27:57.367Z",
+  "status": 200,
+  "body": {
+    "id": "resp-missing-call-id",
+    "object": "response",
+    "created_at": 1765096077,
+    "model": "kimi-for-coding",
+    "status": "completed",
+    "output": [
+      {
+        "id": "message_final",
+        "type": "message",
+        "status": "completed",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "工具输出已接收，继续执行剩余任务。"
+          }
+        ]
+      }
+    ],
+    "output_text": "工具输出已接收，继续执行剩余任务。"
+  },
+  "mockExpectations": {
+    "callIds": [
+      "shell_command:25"
+    ]
+  }
+}

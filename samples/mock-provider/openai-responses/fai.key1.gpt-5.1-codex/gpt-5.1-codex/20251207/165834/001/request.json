@@ -1,0 +1,33 @@
+{
+  "reqId": "openai-responses-fai.key1-gpt-5.1-codex-20251207T165834-001",
+  "endpoint": "/v1/responses",
+  "providerId": "fai.key1.gpt-5.1-codex",
+  "model": "gpt-5.1-codex",
+  "timestamp": "2025-12-07T16:58:34.250Z",
+  "body": {
+    "model": "gpt-5.1-codex",
+    "instructions": "回归样本：要求所有 function_call id 采用 fc_ 前缀。",
+    "input": [
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "请继续执行工具链。"
+          }
+        ]
+      },
+      {
+        "type": "function_call",
+        "id": "call_qxJE4wnt4NWCq4W3kdttHhpu",
+        "call_id": "call_qxJE4wnt4NWCq4W3kdttHhpu",
+        "name": "shell_command",
+        "arguments": "{\"command\":\"echo pending\"}"
+      }
+    ],
+    "metadata": {
+      "notes": "requires fc_* call ids"
+    }
+  }
+}

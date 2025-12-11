@@ -1,0 +1,8 @@
+{
+  "meta": { "stage": "compat-post", "timestamp": 1735689600200, "endpoint": "/v1/messages" },
+  "body": {
+    "content": "demo post",
+    "model": "glm-4.6",
+    "usage": { "prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110 }
+  }
+}

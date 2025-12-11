@@ -1,0 +1,63 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-response",
+  "requestId": "req_req-v2-1764673776019-buatp3wlw",
+  "timestamp": 1764673792558,
+  "data": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T11:09:52.558Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "data": {
+        "choices": [
+          {
+            "finish_reason": "length",
+            "index": 0,
+            "message": {
+              "content": "",
+              "reasoning_content": "\n1.  **拆解用户请求：**\n    *   **核心任务1：** \"用Responses协议格式回复我\"。这是主要的技术约束。\n    *   **核心任务2：** \"介绍一下你的能力\"。这是回复的内容。\n\n2.  **分析“Responses协议格式”：**\n    *   这是一个非常具体、技术性的术语。我的内部知识库需要将其与一个标准或通用格式关联起来。\n    *   “Responses协议”不像“HTTP”或“TCP/IP”那样是一个普遍公认的、正式的、标准化的协议。它更像是一个概念性或描述性的术语，通常在API或机器人框架的上下文中使用，以描述来自服务器的*响应结构*。\n    *   这种响应结构中的关键组件通常是什么？\n        *   一个状态或代码（例如，`success`、`error`、`200`、`404`）。\n        *   一条消息（供人类可读的解释）。\n        *   实际的*数据*或*载荷*。\n        *   有时，元数据（时间戳、请求ID等）。\n    *   因此，我需要创建一个*体现*这些原则的JSON（或类似JSON）结构。JSON是表示结构化数据最常见且可读性最强的格式，因此它是自然的选择。\n    *   我将设计一个简单、清晰的JSON结构。一个好的结构会是：\n        ```json\n        {\n          \"status\": \"success\",\n          \"message\": \"Request processed successfully.\",\n          \"data\": {\n            // 实际内容放在这里\n          },\n          \"metadata\": {\n            \"timestamp\": \"...\",\n            \"request_id\": \"...\"\n          }\n        }\n        ```\n    *   这种结构是稳健的、清晰的，并且符合“Responses协议”的精神。`status`字段至关重要。`message`为状态提供了上下文。`data`将容纳对用户第二个问题的回答。`metadata`增添了专业感，并且在现实世界的API中很常见。\n\n3.  **分析“介绍一下你的能力”：**\n    *   这是内容部分。我需要列出我的关键能力。我应该以结构化的方式来组织它们，以适应JSON的`data`字段。\n    *   我的主要能力是什么？\n        *   **语言处理：** 这是基础。我应将其进一步细分。\n            *   理解与生成（文本、代码）。\n            *   翻译。\n            *   摘要。\n            *   问答。\n            *   创意写作（诗歌、故事、剧本）。\n        *   **知识：** 我是一个大型语言模型。\n            *   回答关于广泛主题的问题。\n            *   解释复杂概念。\n            *   （隐式地）提及我的知识截止日期，但除非被问到，否则不需要明确说明。\n        *   **代码：** 一个非常重要的用例。\n            *   生成多种语言的代码。\n            *   调试代码。\n            *   解释代码。\n            *   编写测试。\n        *   **推理与解决问题：**\n            *   逻辑推理。\n            *   头脑风暴。\n            *   规划。\n        *   **遵循指令：** 这是对当前请求的一个元能力。我擅长遵循复杂、多部分的指令。\n        *   **安全与伦理：** 提及我的设计原则很重要。\n            *   有益且无害。\n            *   拒绝不当请求。\n\n4.  **综合并构建最终回复：**\n\n    *   **从JSON结构开始。** 我将使用我设计的那个。\n    *   **填充JSON字段：**\n        *   `status`：由于请求是有效的并且我能完成它，`\"success\"`是正确的值。\n        *   `message`：一个简单、积极的消息，如“根据您的要求，以Responses协议格式返回我的能力介绍。”是完美的。\n        *   `metadata`：\n            *   `timestamp`：我将生成一个当前的ISO 8601时间戳。\n            *   `request_id`：一个唯一的标识符是好的做法。我将生成一个看起来合理的UUID。\n            *   `protocol`：我将明确说明我正在解释的协议，`\"Responses Protocol (Conceptual)\"`，以澄清这不是一个正式标准。\n            *   `version`：一个版本号，如`\"1.0\"`，增添了专业感。\n    *   **填充`data`载荷：** 这是答案的核心。我将以结构化的方式呈现我的能力，可能是一个对象列表或一个分类对象。一个对象列表更清晰、更易于解析。\n        *   我将为每个类别创建一个对象：`\"核心语言能力\"`、`\"知识整合与问答\"`、`\"代码生成与技术支持\"`、`\"",
+              "role": "assistant"
+            }
+          }
+        ],
+        "created": 1764673792,
+        "id": "20251202190936176d7c1fac31455e",
+        "model": "glm-4.6",
+        "request_id": "20251202190936176d7c1fac31455e",
+        "usage": {
+          "completion_tokens": 1000,
+          "prompt_tokens": 19,
+          "prompt_tokens_details": {
+            "cached_tokens": 4
+          },
+          "total_tokens": 1019
+        }
+      },
+      "status": 200,
+      "statusText": "OK",
+      "headers": {
+        "connection": "keep-alive",
+        "content-encoding": "gzip",
+        "content-type": "application/json; charset=UTF-8",
+        "date": "Tue, 02 Dec 2025 11:09:52 GMT",
+        "server": "ZenZGA/2.4",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+        "x-log-id": "20251202190936176d7c1fac31455e"
+      },
+      "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T190936-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

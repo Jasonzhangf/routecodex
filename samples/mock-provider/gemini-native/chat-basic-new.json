@@ -1,0 +1,27 @@
+{
+  "request": {
+    "model": "gemini-2.5-flash-lite",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "用一两句话介绍一下你自己。"
+          }
+        ]
+      }
+    ],
+    "stream": false
+  },
+  "response": {
+    "status": 404,
+    "json": {
+      "error": {
+        "message": "Not Found",
+        "type": "not_found_error",
+        "code": "not_found"
+      }
+    }
+  }
+}

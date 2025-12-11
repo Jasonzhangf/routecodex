@@ -59,6 +59,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
         clientStream: acceptsSse || undefined,
         inboundStream: wantsSSE,
         outboundStream,
+        providerProtocol: 'openai-chat',
         __raw_request_body: originalPayload,
         clientHeaders
       }

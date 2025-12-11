@@ -1,0 +1,62 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-response",
+  "requestId": "req_req-v2-1764671386051-re6526vw1",
+  "timestamp": 1764671386748,
+  "data": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T10:29:46.748Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "data": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "content": "\nmacOS视频捕获双进程架构改进",
+              "role": "assistant"
+            }
+          }
+        ],
+        "created": 1764671386,
+        "id": "2025120218294641291de4a68641fa",
+        "model": "glm-4.6",
+        "request_id": "2025120218294641291de4a68641fa",
+        "usage": {
+          "completion_tokens": 13,
+          "prompt_tokens": 2484,
+          "prompt_tokens_details": {
+            "cached_tokens": 61
+          },
+          "total_tokens": 2497
+        }
+      },
+      "status": 200,
+      "statusText": "OK",
+      "headers": {
+        "connection": "keep-alive",
+        "content-encoding": "gzip",
+        "content-type": "application/json; charset=UTF-8",
+        "date": "Tue, 02 Dec 2025 10:29:46 GMT",
+        "server": "ZenZGA/2.4",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+        "x-log-id": "2025120218294641291de4a68641fa"
+      },
+      "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T182946-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

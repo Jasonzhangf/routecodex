@@ -1,0 +1,62 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-response",
+  "requestId": "req_req-v2-1764671388854-ad8odiagw",
+  "timestamp": 1764671389475,
+  "data": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T10:29:49.475Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "data": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "content": "\n本地目录列表查询中断",
+              "role": "assistant"
+            }
+          }
+        ],
+        "created": 1764671389,
+        "id": "202512021829498a679dd5df9f495f",
+        "model": "glm-4.6",
+        "request_id": "202512021829498a679dd5df9f495f",
+        "usage": {
+          "completion_tokens": 10,
+          "prompt_tokens": 103,
+          "prompt_tokens_details": {
+            "cached_tokens": 69
+          },
+          "total_tokens": 113
+        }
+      },
+      "status": 200,
+      "statusText": "OK",
+      "headers": {
+        "connection": "keep-alive",
+        "content-encoding": "gzip",
+        "content-type": "application/json; charset=UTF-8",
+        "date": "Tue, 02 Dec 2025 10:29:49 GMT",
+        "server": "ZenZGA/2.4",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+        "x-log-id": "202512021829498a679dd5df9f495f"
+      },
+      "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T182948-002",
+  "entryEndpoint": "/v1/chat/completions"
+}

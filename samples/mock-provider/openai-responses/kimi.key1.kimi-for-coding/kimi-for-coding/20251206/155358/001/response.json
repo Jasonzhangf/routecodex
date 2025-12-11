@@ -1,0 +1,47 @@
+{
+  "reqId": "openai-responses-kimi.key1-kimi-for-coding-20251206T155358-001",
+  "endpoint": "/v1/responses",
+  "providerId": "kimi.key1.kimi-for-coding",
+  "model": "kimi-for-coding",
+  "timestamp": "2025-12-06T15:53:59.000Z",
+  "status": 200,
+  "body": {
+    "id": "chatcmpl-z9fxuNC41kTIvb8zbajWti2k",
+    "object": "response",
+    "created_at": 1764757983,
+    "model": "kimi-for-coding",
+    "status": "requires_action",
+    "output": [
+      {
+        "id": "function_call_req-v2-1764757973042-kpbbmaieu_1",
+        "type": "function_call",
+        "status": "in_progress",
+        "name": "shell_command",
+        "call_id": "shell_command:25",
+        "arguments": "{\"command\":\"find ui-desktop -name \\\"*.json\\\" | grep -E \\\"(electron|forge)\\\"\",\"workdir\":\"/Users/fanzhang/Documents/github/zcammcp\"}"
+      }
+    ],
+    "output_text": "",
+    "usage": {
+      "prompt_tokens": 44073,
+      "completion_tokens": 48,
+      "total_tokens": 44121
+    },
+    "required_action": {
+      "type": "submit_tool_outputs",
+      "submit_tool_outputs": {
+        "tool_calls": [
+          {
+            "id": "shell_command:25",
+            "type": "function",
+            "function": {
+              "name": "shell_command",
+              "arguments": "{\"command\":\"find ui-desktop -name \\\"*.json\\\" | grep -E \\\"(electron|forge)\\\"\",\"workdir\":\"/Users/fanzhang/Documents/github/zcammcp\"}"
+            },
+            "tool_call_id": "shell_command:25"
+          }
+        ]
+      }
+    }
+  }
+}

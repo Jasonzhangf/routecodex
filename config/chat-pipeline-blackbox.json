@@ -1,0 +1,89 @@
+{
+  "legacyWorktree": "/Users/fanzhang/Documents/github/sharedmodule/llmswitch-core-worktree/legacy",
+  "samples": [
+    {
+      "name": "anthropic_request_basic",
+      "codec": "anthropic",
+      "mode": "request",
+      "path": "samples/chat-blackbox/anthropic/request-basic.json",
+      "stages": true,
+      "compareStages": false
+    },
+    {
+      "name": "anthropic_request_glm45_stream_20251209T202812462",
+      "codec": "anthropic",
+      "mode": "request",
+      "path": "samples/chat-blackbox/anthropic/legacy-glm4.5a-20251209T202812462.json",
+      "stages": true,
+      "compareStages": false
+    },
+    {
+      "name": "anthropic_request_glm46_stream_20251209T202812535",
+      "codec": "anthropic",
+      "mode": "request",
+      "path": "samples/chat-blackbox/anthropic/legacy-glm4.6a-20251209T202812535.json",
+      "stages": true,
+      "compareStages": false,
+      "comparePayload": false
+    },
+    {
+      "name": "anthropic_request_glm45_nostream_20251209T202814202",
+      "codec": "anthropic",
+      "mode": "request",
+      "path": "samples/chat-blackbox/anthropic/legacy-glm4.5b-20251209T202814202.json",
+      "stages": true,
+      "compareStages": false
+    },
+    {
+      "name": "anthropic_request_glm45_nostream_20251209T202846673",
+      "codec": "anthropic",
+      "mode": "request",
+      "path": "samples/chat-blackbox/anthropic/legacy-glm4.5c-20251209T202846673.json",
+      "stages": true,
+      "compareStages": false
+    },
+    {
+      "name": "anthropic_response_basic",
+      "codec": "anthropic",
+      "mode": "response",
+      "path": "samples/chat-blackbox/anthropic/response-basic.json",
+      "stages": true,
+      "compareStages": false
+    },
+    {
+      "name": "openai_request_basic",
+      "codec": "openai",
+      "mode": "request",
+      "path": "samples/chat-blackbox/openai/request-basic.json",
+      "stages": true
+    },
+    {
+      "name": "openai_response_basic",
+      "codec": "openai",
+      "mode": "response",
+      "path": "samples/chat-blackbox/openai/response-basic.json",
+      "stages": true
+    },
+    {
+      "name": "responses_request_basic",
+      "codec": "responses",
+      "mode": "request",
+      "path": "samples/chat-blackbox/responses/request-basic.json",
+      "stages": false
+    },
+    {
+      "name": "responses_request_toolcall_fc_ids",
+      "codec": "responses",
+      "mode": "request",
+      "path": "samples/chat-blackbox/responses/request-toolcall.json",
+      "stages": false
+    },
+    {
+      "name": "responses_response_basic",
+      "codec": "responses",
+      "mode": "response",
+      "path": "samples/chat-blackbox/responses/response-basic.json",
+      "stages": false
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-response",
+  "requestId": "req_req-v2-1764677541794-t4k8ehgmd",
+  "timestamp": 1764677545686,
+  "data": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T12:12:25.685Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "data": {
+        "choices": [
+          {
+            "finish_reason": "tool_calls",
+            "index": 0,
+            "message": {
+              "content": "\n",
+              "reasoning_content": "\n用户要求列出本地文件目录。用户明确提到可以使用shell工具来执行ls命令，并且只返回命令输出。我需要使用shell工具执行ls命令来列出当前目录的文件。\n\n让我执行ls命令：",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"command\":[\"ls\"]}",
+                    "name": "shell"
+                  },
+                  "id": "call_-8116501272611522233",
+                  "index": 0,
+                  "type": "function"
+                }
+              ]
+            }
+          }
+        ],
+        "created": 1764677545,
+        "id": "20251202201223c481caaf11ef4b6d",
+        "model": "glm-4.6",
+        "request_id": "20251202201223c481caaf11ef4b6d",
+        "usage": {
+          "completion_tokens": 63,
+          "prompt_tokens": 331,
+          "prompt_tokens_details": {
+            "cached_tokens": 43
+          },
+          "total_tokens": 394
+        }
+      },
+      "status": 200,
+      "statusText": "OK",
+      "headers": {
+        "connection": "keep-alive",
+        "content-encoding": "gzip",
+        "content-type": "application/json; charset=UTF-8",
+        "date": "Tue, 02 Dec 2025 12:12:25 GMT",
+        "server": "ZenZGA/2.4",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+        "x-log-id": "20251202201223c481caaf11ef4b6d"
+      },
+      "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T201221-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

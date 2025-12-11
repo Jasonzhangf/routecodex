@@ -2,10 +2,16 @@
 
 存放位置：`~/.routecodex/golden_samples/openai_requests/<slug>/`
 
-> **提示**：仓库内 `samples/chat-blackbox/openai/request-basic.json` 与 `samples/chat-blackbox/responses/request-basic.json`
-> 保存了同一场景的版本化副本，便于审查/更新。需要刷新 `provider_golden_samples` 时，执行
-> `node scripts/tools/capture-provider-goldens.mjs --update-golden`，脚本会使用这些请求并在检测到字段差异时
-> 强制报错或更新黄金文件。
+> **提示**：
+> - 自 0.87.21 起，chat 入口的 provider 专属样本统一存放在
+>   `~/.routecodex/golden_samples/new/<entryType>/<providerId>/`（例如 `new/openai-chat/glm`）。
+>   目录内包含 `request.sample.json`（直接从阶段快照复制的 `body`）以及 `meta.json`
+>   （指向原始 `*_stage2_format_build.json` 路径）。`scripts/tools/capture-provider-goldens.mjs`
+>   会优先读取这些“真实快照”，无需再回放 `samples/chat-blackbox/**/request-basic.json`。
+> - 仍需保留仓库内 `samples/chat-blackbox/*/request-basic.json`，用于快速审查/比较；当新增场景时，
+>   先运行真实请求生成阶段快照，再在 `new/<entryType>/<providerId>/` 放置 `request.sample` 与 `meta`，
+>   最后执行 `node scripts/tools/capture-provider-goldens.mjs --update-golden`，脚本会把同一份请求复制到
+>   `provider_golden_samples/`，供 mock/provider 单元测试使用。
 
 ```
 <slug>/

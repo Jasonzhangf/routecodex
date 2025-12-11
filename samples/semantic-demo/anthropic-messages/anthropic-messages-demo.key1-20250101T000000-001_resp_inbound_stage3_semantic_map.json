@@ -1,0 +1,32 @@
+{
+  "meta": {
+    "stage": "resp_inbound_stage3_semantic_map",
+    "timestamp": 1735689600100,
+    "endpoint": "/v1/messages"
+  },
+  "body": {
+    "choices": [
+      {
+        "finish_reason": "tool_calls",
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "demo",
+          "tool_calls": [
+            {
+              "id": "call_demo",
+              "type": "function",
+              "function": { "name": "test_tool", "arguments": "{\"ping\":true}" }
+            }
+          ]
+        }
+      }
+    ],
+    "model": "glm-4.6",
+    "usage": {
+      "prompt_tokens": 100,
+      "completion_tokens": 10,
+      "total_tokens": 110
+    }
+  }
+}

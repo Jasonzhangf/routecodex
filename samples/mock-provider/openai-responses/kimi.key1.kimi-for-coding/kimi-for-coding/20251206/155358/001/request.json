@@ -1,0 +1,46 @@
+{
+  "reqId": "openai-responses-kimi.key1-kimi-for-coding-20251206T155358-001",
+  "endpoint": "/v1/responses",
+  "providerId": "kimi.key1.kimi-for-coding",
+  "model": "kimi-for-coding",
+  "timestamp": "2025-12-06T15:53:58.000Z",
+  "body": {
+    "model": "kimi-for-coding",
+    "messages": [
+      {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "tool_xJ6orIZVZA3MtvSmYYzVd6us",
+            "type": "function",
+            "function": {
+              "name": "shell_command",
+              "arguments": "{\"command\":\"find ui-desktop -name \\\"*.json\\\" | grep -E \\\"(electron|forge)\\\"\",\"workdir\":\"/Users/fanzhang/Documents/github/zcammcp\"}"
+            }
+          }
+        ]
+      }
+    ],
+    "parameters": {},
+    "metadata": {
+      "originalEndpoint": "openai-chat",
+      "stream": true
+    },
+    "processed": {
+      "timestamp": 1764757984006,
+      "appliedRules": [
+        "response-pipeline"
+      ],
+      "status": "success"
+    },
+    "processingMetadata": {
+      "streaming": {
+        "enabled": true,
+        "chunkCount": 0,
+        "totalTokens": 48
+      },
+      "context": {}
+    }
+  }
+}

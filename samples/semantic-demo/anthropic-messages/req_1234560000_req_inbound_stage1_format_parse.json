@@ -1,0 +1,26 @@
+{
+  "meta": {
+    "stage": "req_inbound_stage1_format_parse",
+    "timestamp": 1735689600001,
+    "endpoint": "/v1/messages"
+  },
+  "body": {
+    "payload": {
+      "messages": [
+        { "role": "system", "content": "system inst" },
+        { "role": "user", "content": "hello" },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_demo",
+              "type": "function",
+              "function": { "name": "test_tool", "arguments": "{\"ping\":true}" }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "reqId": "openai-responses-fai.key1.gpt-5.1-codex-20251207T142810-001",
+  "endpoint": "/v1/responses",
+  "providerId": "fai.key1.gpt-5.1-codex",
+  "model": "gpt-5.1-codex",
+  "timestamp": "2025-12-07T14:28:10.114Z",
+  "body": {
+    "model": "gpt-5.1-codex",
+    "input": [
+      {
+        "role": "system",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "You are RCC regression sentinel. Always echo what happened."
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "call describe_current_request to fetch metadata."
+          }
+        ]
+      },
+      {
+        "type": "function_call",
+        "id": "call_missing_output",
+        "name": "describe_current_request",
+        "arguments": "{\"query\":\"describe_current_request\"}"
+      },
+      {
+        "type": "function_call_output",
+        "id": "call_missing_output_result",
+        "call_id": "call_missing_output"
+      }
+    ],
+    "metadata": {
+      "sample": "missing_output",
+      "notes": "ensures responses builder adds tool outputs"
+    },
+    "parameters": {
+      "stream": true
+    }
+  }
+}

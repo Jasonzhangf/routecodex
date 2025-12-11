@@ -1,0 +1,31 @@
+{
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "index": 0,
+      "message": {
+        "content": null,
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{}",
+              "name": "list_mcp_resources"
+            },
+            "id": "call_list_resources",
+            "type": "function"
+          }
+        ]
+      }
+    }
+  ],
+  "created": 1765253228,
+  "id": "chatcmpl_regression",
+  "model": "glm-4.6",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 12,
+    "prompt_tokens": 128,
+    "total_tokens": 140
+  }
+}

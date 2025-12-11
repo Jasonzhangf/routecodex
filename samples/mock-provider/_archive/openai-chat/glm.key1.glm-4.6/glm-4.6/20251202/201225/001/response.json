@@ -1,0 +1,63 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-response",
+  "requestId": "req_req-v2-1764677545706-zxpi6bn83",
+  "timestamp": 1764677550428,
+  "data": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T12:12:30.428Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "data": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "content": "\n当前目录下的文件和文件夹列表：\n\n- AGENTS.md\n- ajv-8.17.1.tgz\n- bin/\n- CLAUDE.md\n- config/\n- dist/\n- docs/\n- exporters/\n- interpreter/\n- jest.config.js\n- logs/\n- node_modules/\n- package/\n- package-lock.json\n- package.json\n- rcc/\n- rcc-0.81.21.tgz\n- rcc-basemodule-0.2.7.tgz\n- rcc-config-core-0.1.6.tgz\n- rcc-debugcenter-0.1.6.tgz\n- rcc-errorhandling-1.0.10.tgz\n- rcc-llmswitch-core-0.3.12.tgz\n- README.md\n- replay/\n- routecodex-0.85.0.tgz\n- routecodex.pid\n- scripts/\n- sharedmodule/\n- sharedmodule.backup-20251111221728\n- signal-exit-4.1.0.tgz\n- src/\n- tests/\n- tools/\n- tsconfig.json\n- vendor/\n- verified-configs/\n- WARP.md\n\n这似乎是一个Node.js项目的目录，包含了各种配置文件、源代码文件夹、依赖包和构建产物等。",
+              "reasoning_content": "\n用户要求列出本地文件目录，我已经使用shell工具执行了ls命令，并得到了结果。结果显示了当前目录下的所有文件和文件夹。我需要将这些结果展示给用户。",
+              "role": "assistant"
+            }
+          }
+        ],
+        "created": 1764677550,
+        "id": "20251202201226426405d78d6f423c",
+        "model": "glm-4.6",
+        "request_id": "20251202201226426405d78d6f423c",
+        "usage": {
+          "completion_tokens": 317,
+          "prompt_tokens": 593,
+          "prompt_tokens_details": {
+            "cached_tokens": 43
+          },
+          "total_tokens": 910
+        }
+      },
+      "status": 200,
+      "statusText": "OK",
+      "headers": {
+        "connection": "keep-alive",
+        "content-encoding": "gzip",
+        "content-type": "application/json; charset=UTF-8",
+        "date": "Tue, 02 Dec 2025 12:12:30 GMT",
+        "server": "ZenZGA/2.4",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+        "x-log-id": "20251202201226426405d78d6f423c"
+      },
+      "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T201225-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

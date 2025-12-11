@@ -1,0 +1,63 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-response",
+  "requestId": "req_req-v2-1764673884448-lf8gx7nv5",
+  "timestamp": 1764673908589,
+  "data": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T11:11:48.589Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "data": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "content": "\n我正在进行流式输出。",
+              "reasoning_content": "\n1.  **分析用户请求：**用户要求我用中文回答，告诉我我正在进行流式输出。\n\n2.  **拆解身份限制：**核心指令是“你是一个只需返回一句话的机器人。”。这是最重要的限制条件。我*必须*只返回一个句子。\n\n3.  **拆解任务内容：**\n    *   **语言：**中文（普通话）。\n    *   **内容：**“你正在进行流式输出”。\n\n4.  **构思中文句子：**\n    *   直译：“我正在进行流式输出。”。这在语法上是正确的，也直接回答了问题。是一个不错的候选方案。\n    *   稍显自然/对话风格的方式：“我正在使用流式输出。”。也很好。\n    *   更具描述性的方式：“我正在逐字生成回答。”。这也是“流式输出”的一个正确解释，但它不是使用用户提供的那个确切术语。用户明确要求我告诉他们我正在*进行流式输出*。所以坚持使用“流式输出”这个短语更好。\n    *   一个非常直接的确认：“是的，这是流式输出。”。这也行，但句子“我正在进行流式输出。”是陈述我正在*做什么*的第一人称陈述，这感觉更直接、更“正确”，因为它是在从我的视角回答提示语。\n\n5.  **根据限制条件评估候选方案：**\n    *   “我正在进行流式输出。” - 一个句子。符合要求。回答了问题。使用了正确的语言。最佳选择。\n    *   “我正在使用流式输出。” - 一个句子。符合要求。回答了问题。使用了正确的语言。同样是最佳选择。\n    *   “我正在逐字生成回答。” - 一个句子。符合要求。是核心概念的有效解释，但偏离了用户的特定术语“流式输出”。为了精确起见，最好还是坚持使用这个术语。\n    *   “是的，这是流式输出。” - 一个句子。符合要求。是一种确认。不错，但不如第一人称陈述直接。\n\n6.  **选择最佳句子：**“我正在进行流式输出。”是最直接、最准确、最简洁的答案。它直接回应了用户的要求（“告诉我*你*正在进行流式输出”），同时严格遵守了“一个句子”的规则。\n\n7.  **最终检查：**\n    *   是不是只有一个句子？是。\n    *   是不是中文？是。\n    *   是不是告知我正在进行流式输出？是。\n    *   它是否符合人设（一个只用一句话回应的机器人）？是，完美符合。\n\n这导向了最终答案：我正在进行流式输出。",
+              "role": "assistant"
+            }
+          }
+        ],
+        "created": 1764673908,
+        "id": "202512021911246c3bc43f81304abf",
+        "model": "glm-4.6",
+        "request_id": "202512021911246c3bc43f81304abf",
+        "usage": {
+          "completion_tokens": 563,
+          "prompt_tokens": 25,
+          "prompt_tokens_details": {
+            "cached_tokens": 24
+          },
+          "total_tokens": 588
+        }
+      },
+      "status": 200,
+      "statusText": "OK",
+      "headers": {
+        "connection": "keep-alive",
+        "content-encoding": "gzip",
+        "content-type": "application/json; charset=UTF-8",
+        "date": "Tue, 02 Dec 2025 11:11:48 GMT",
+        "server": "ZenZGA/2.4",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+        "x-log-id": "202512021911246c3bc43f81304abf"
+      },
+      "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T191124-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

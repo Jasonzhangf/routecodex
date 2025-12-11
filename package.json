@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.87.1",
+  "version": "0.89.0",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -83,6 +83,7 @@
     "rc-config": "node scripts/rc-config.mjs",
     "config:validate:providers": "node scripts/validate-config-providers.mjs",
     "verify:e2e-toolcall": "node scripts/verify-e2e-toolcall.mjs",
+    "test:anthropic-roundtrip": "node scripts/tests/anthropic-roundtrip.mjs",
     "replay:codex-sample": "node scripts/replay-codex-sample.mjs",
     "config:update:providers": "node scripts/update-config-providers.mjs",
     "models:update": "node scripts/update-models.mjs",
@@ -120,7 +121,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
-    "@jsonstudio/llms": "^0.4.4",
+    "@jsonstudio/llms": "^0.6.0",
     "@lmstudio/sdk": "^1.5.0",
     "@radix-ui/react-switch": "^1.2.6",
     "@types/socket.io": "^3.0.1",

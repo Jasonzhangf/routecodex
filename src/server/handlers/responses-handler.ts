@@ -98,6 +98,7 @@ export async function handleResponses(
         clientStream: acceptsSse || undefined,
         inboundStream: wantsStream,
         outboundStream,
+        providerProtocol: 'openai-responses',
         __raw_request_body: originalPayload,
         clientHeaders,
         responsesResume: resumeMeta

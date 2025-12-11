@@ -1,0 +1,42 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-request",
+  "requestId": "req_req-v2-1764671385787-l6btk2ex2",
+  "timestamp": 1764671385789,
+  "data": {
+    "meta": {
+      "stage": "provider-request",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T10:29:45.789Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are Claude Code, Anthropic's official CLI for Claude."
+        },
+        {
+          "role": "system",
+          "content": "Extract any file paths that this command reads or modifies. For commands like \"git diff\" and \"cat\", include the paths of files being shown. Use paths verbatim -- don't add any slashes or try to resolve them. Do not try to infer paths that were not explicitly listed in the command output.\n\nIMPORTANT: Commands that do not display the contents of the files should not return any filepaths. For eg. \"ls\", pwd\", \"find\". Even more complicated commands that don't display the contents should not be considered: eg \"find . -type f -exec ls -la {} + | sort -k5 -nr | head -5\"\n\nFirst, determine if the command displays the contents of the files. If it does, then <is_displaying_contents> tag should be true. If it does not, then <is_displaying_contents> tag should be false.\n\nFormat your response as:\n<is_displaying_contents>\ntrue\n</is_displaying_contents>\n\n<filepaths>\npath/to/file1\npath/to/file2\n</filepaths>\n\nIf no files are read or modified, return empty filepaths tags:\n<filepaths>\n</filepaths>\n\nDo not include any other text in your response."
+        },
+        {
+          "role": "user",
+          "content": "Command: ls -la\nOutput: total 144\ndrwxr-xr-x@  18 fanzhang  staff    576 Dec  2 09:34 .\ndrwxr-xr-x@  66 fanzhang  staff   2112 Dec  1 10:21 ..\ndrwx------@   3 fanzhang  staff     96 Dec  1 12:28 .claude\ndrwxr-xr-x@  14 fanzhang  staff    448 Dec  2 18:26 .git\n-rw-r--r--@   1 fanzhang  staff     94 Dec  2 09:34 .gitignore\ndrwxr-xr-x@   3 fanzhang  staff     96 Nov 28 15:19 .xinliu\n-rw-r--r--@   1 fanzhang  staff    977 Nov 28 13:47 AGENTS.md\n-rw-r--r--@   1 fanzhang  staff  55304 Dec  1 13:14 Cargo.lock\n-rw-r--r--@   1 fanzhang  staff    936 Nov 29 00:45 Cargo.toml\ndrwxr-xr-x@   5 fanzhang  staff    160 Nov 29 00:43 cmd\ndrwxr-xr-x@   8 fanzhang  staff    256 Nov 29 00:42 crates\ndrwxr-xr-x@   9 fanzhang  staff    288 Dec  1 10:31 docs\n-rw-r--r--@   1 fanzhang  staff   2414 Dec  2 09:32 README.md\ndrwxr-xr-x@   4 fanzhang  staff    128 Dec  2 09:32 scripts\ndrwxr-xr-x@ 101 fanzhang  staff   3232 Dec  1 17:27 snapshots\ndrwxr-xr-x@  73 fanzhang  staff   2336 Dec  1 17:27 snapshots-cli\ndrwxr-xr-x@   6 fanzhang  staff    192 Dec  2 09:33 target\ndrwxr-xr-x@  22 fanzhang  staff    704 Dec  1 17:26 video_output"
+        }
+      ],
+      "model": "glm-4.6",
+      "temperature": 1,
+      "max_tokens": 21333,
+      "stream": false
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T182945-002",
+  "entryEndpoint": "/v1/chat/completions"
+}

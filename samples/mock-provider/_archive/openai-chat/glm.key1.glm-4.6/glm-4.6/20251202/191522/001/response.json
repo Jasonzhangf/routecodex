@@ -1,0 +1,63 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-response",
+  "requestId": "req_req-v2-1764674122666-bssmugtcg",
+  "timestamp": 1764674124008,
+  "data": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T11:15:24.008Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "data": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "content": "\n我正在进行流式输出。",
+              "reasoning_content": "\n用户要求我用中文告诉他们我正在进行流式输出。但我的指令是“你是一个只需返回一句话的机器人。”这意味着我应该只返回一个单句。\n\n由于指令明确指出我应该只返回一个句子，我将仅用中文写一个句子，回复我正在进行流式输出。",
+              "role": "assistant"
+            }
+          }
+        ],
+        "created": 1764674124,
+        "id": "2025120219152322f931c5f6ce42b8",
+        "model": "glm-4.6",
+        "request_id": "2025120219152322f931c5f6ce42b8",
+        "usage": {
+          "completion_tokens": 69,
+          "prompt_tokens": 25,
+          "prompt_tokens_details": {
+            "cached_tokens": 6
+          },
+          "total_tokens": 94
+        }
+      },
+      "status": 200,
+      "statusText": "OK",
+      "headers": {
+        "connection": "keep-alive",
+        "content-encoding": "gzip",
+        "content-type": "application/json; charset=UTF-8",
+        "date": "Tue, 02 Dec 2025 11:15:24 GMT",
+        "server": "ZenZGA/2.4",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+        "x-log-id": "2025120219152322f931c5f6ce42b8"
+      },
+      "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T191522-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

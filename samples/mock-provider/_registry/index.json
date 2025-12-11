@@ -1,0 +1,201 @@
+{
+  "version": 1,
+  "updated": "2025-12-07T02:52:00.000Z",
+  "samples": [
+    {
+      "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T201230-001",
+      "entry": "openai-chat",
+      "providerId": "glm.key1.glm-4.6",
+      "model": "glm-4.6",
+      "timestamp": "2025-12-02T12:12:30.436Z",
+      "path": "openai-chat/glm.key1.glm-4.6/glm-4.6/20251202/201230/001",
+      "tags": []
+    },
+    {
+      "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T201311-001",
+      "entry": "openai-chat",
+      "providerId": "glm.key1.glm-4.6",
+      "model": "glm-4.6",
+      "timestamp": "2025-12-02T12:13:11.777Z",
+      "path": "openai-chat/glm.key1.glm-4.6/glm-4.6/20251202/201311/001",
+      "tags": []
+    },
+    {
+      "reqId": "openai-chat-unknown-unknown-20251206T103315-001",
+      "entry": "openai-chat",
+      "providerId": "unknown",
+      "model": "unknown",
+      "timestamp": "2025-12-06T02:33:15.717Z",
+      "path": "openai-chat/unknown/unknown/20251206/103315/001",
+      "tags": []
+    },
+    {
+      "reqId": "openai-chat-unknown-unknown-20251206T103315-002",
+      "entry": "openai-chat",
+      "providerId": "unknown",
+      "model": "unknown",
+      "timestamp": "2025-12-06T02:33:15.718Z",
+      "path": "openai-chat/unknown/unknown/20251206/103315/002",
+      "tags": []
+    },
+    {
+      "reqId": "openai-chat-verify.default.verify-mock-verify-mock-20251202T201341-001",
+      "entry": "openai-chat",
+      "providerId": "verify.default.verify-mock",
+      "model": "verify-mock",
+      "timestamp": "2025-12-02T12:13:41.949Z",
+      "path": "openai-chat/verify.default.verify-mock/verify-mock/20251202/201341/001",
+      "tags": []
+    },
+    {
+      "reqId": "openai-chat-verify.default.verify-mock-verify-mock-20251202T201341-002",
+      "entry": "openai-chat",
+      "providerId": "verify.default.verify-mock",
+      "model": "verify-mock",
+      "timestamp": "2025-12-02T12:13:41.976Z",
+      "path": "openai-chat/verify.default.verify-mock/verify-mock/20251202/201341/002",
+      "tags": []
+    },
+    {
+      "reqId": "openai-chat-verify.default.verify-mock-verify-mock-20251202T204126-001",
+      "entry": "openai-chat",
+      "providerId": "verify.default.verify-mock",
+      "model": "verify-mock",
+      "timestamp": "2025-12-02T12:41:26.792Z",
+      "path": "openai-chat/verify.default.verify-mock/verify-mock/20251202/204126/001",
+      "tags": []
+    },
+    {
+      "reqId": "openai-chat-verify.default.verify-mock-verify-mock-20251202T204126-002",
+      "entry": "openai-chat",
+      "providerId": "verify.default.verify-mock",
+      "model": "verify-mock",
+      "timestamp": "2025-12-02T12:41:26.819Z",
+      "path": "openai-chat/verify.default.verify-mock/verify-mock/20251202/204126/002",
+      "tags": []
+    },
+    {
+      "reqId": "openai-chat-verify.default.verify-mock-verify-mock-20251202T205045-001",
+      "entry": "openai-chat",
+      "providerId": "verify.default.verify-mock",
+      "model": "verify-mock",
+      "timestamp": "2025-12-02T12:50:45.260Z",
+      "path": "openai-chat/verify.default.verify-mock/verify-mock/20251202/205045/001",
+      "tags": []
+    },
+    {
+      "reqId": "openai-chat-verify.default.verify-mock-verify-mock-20251202T205045-002",
+      "entry": "openai-chat",
+      "providerId": "verify.default.verify-mock",
+      "model": "verify-mock",
+      "timestamp": "2025-12-02T12:50:45.288Z",
+      "path": "openai-chat/verify.default.verify-mock/verify-mock/20251202/205045/002",
+      "tags": []
+    },
+    {
+      "reqId": "openai-responses-glm.key1-glm-4.6-20251206T124702-001",
+      "entry": "openai-responses",
+      "providerId": "glm.key1.glm-4.6",
+      "model": "glm-4.6",
+      "timestamp": "2025-12-06T04:48:51.753Z",
+      "path": "openai-responses/glm.key1.glm-4.6/glm-4.6/20251206/124702/001",
+      "tags": [
+        "reasoning-only"
+      ]
+    },
+    {
+      "reqId": "openai-responses-kimi.key1-kimi-for-coding-20251206T155358-001",
+      "entry": "openai-responses",
+      "providerId": "kimi.key1.kimi-for-coding",
+      "model": "kimi-for-coding",
+      "timestamp": "2025-12-06T15:53:58.000Z",
+      "path": "openai-responses/kimi.key1.kimi-for-coding/kimi-for-coding/20251206/155358/001",
+      "tags": [
+        "tool-call",
+        "requires_submit"
+      ]
+    },
+    {
+      "reqId": "openai-responses-fai.key1-gpt-5.1-codex-20251207T105138-016",
+      "entry": "openai-responses",
+      "providerId": "fai.key1.gpt-5.1-codex",
+      "model": "gpt-5.1-codex",
+      "timestamp": "2025-12-07T10:51:38.000Z",
+      "path": "openai-responses/fai.key1.gpt-5.1-codex/gpt-5.1-codex/20251207/105138/016",
+      "tags": [
+        "invalid_name",
+        "regression"
+      ]
+    },
+    {
+      "reqId": "openai-responses-fai.key1.gpt-5.1-codex-20251207T142810-001",
+      "entry": "openai-responses",
+      "providerId": "fai.key1.gpt-5.1-codex",
+      "model": "gpt-5.1-codex",
+      "timestamp": "2025-12-07T14:28:10.114Z",
+      "path": "openai-responses/fai.key1.gpt-5.1-codex/gpt-5.1-codex/20251207/142810/001",
+      "tags": [
+        "missing_output",
+        "regression"
+      ]
+    },
+    {
+      "reqId": "openai-responses-fai.key1-gpt-5.1-codex-20251207T165834-001",
+      "entry": "openai-responses",
+      "providerId": "fai.key1.gpt-5.1-codex",
+      "model": "gpt-5.1-codex",
+      "timestamp": "2025-12-07T16:58:34.250Z",
+      "path": "openai-responses/fai.key1.gpt-5.1-codex/gpt-5.1-codex/20251207/165834/001",
+      "tags": [
+        "require_fc_call_ids",
+        "regression"
+      ]
+    },
+    {
+      "reqId": "openai-responses-kimi.key1-kimi-for-coding-20251207T162754160-004",
+      "entry": "openai-responses",
+      "providerId": "kimi.key1.kimi-for-coding",
+      "model": "kimi-for-coding",
+      "timestamp": "2025-12-07T16:27:54.160Z",
+      "path": "openai-responses/kimi.key1.kimi-for-coding/kimi-for-coding/20251207/162754/004",
+      "tags": [
+        "missing_tool_call_id",
+        "regression"
+      ]
+    },
+    {
+      "reqId": "openai-responses.submit_tool_outputs-kimi.key1-kimi-for-coding-20251206T155400-001",
+      "entry": "openai-responses.submit_tool_outputs",
+      "providerId": "kimi.key1.kimi-for-coding",
+      "model": "kimi-for-coding",
+      "timestamp": "2025-12-06T15:54:00.000Z",
+      "path": "openai-responses.submit_tool_outputs/kimi.key1.kimi-for-coding/kimi-for-coding/20251206/155400/001",
+      "tags": [
+        "submit_tool_outputs"
+      ]
+    },
+    {
+      "reqId": "openai-responses-mock.apply_patch.toolloop-20251208T000000-001",
+      "entry": "openai-responses",
+      "providerId": "mock.apply_patch.toolloop",
+      "model": "toolloop",
+      "timestamp": "2025-12-08T00:00:00.000Z",
+      "path": "openai-responses/mock.apply_patch.toolloop/toolloop/20251208/000000/001",
+      "tags": [
+        "apply_patch_loop",
+        "regression"
+      ]
+    },
+    {
+      "reqId": "openai-responses.submit_tool_outputs-mock.apply_patch.toolloop-20251208T000002-001",
+      "entry": "openai-responses.submit_tool_outputs",
+      "providerId": "mock.apply_patch.toolloop",
+      "model": "toolloop",
+      "timestamp": "2025-12-08T00:00:02.000Z",
+      "path": "openai-responses.submit_tool_outputs/mock.apply_patch.toolloop/toolloop/20251208/000002/001",
+      "tags": [
+        "apply_patch_loop_submit"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-response",
+  "requestId": "req_req-v2-1764673283028-ghgxzfzlf",
+  "timestamp": 1764673296081,
+  "data": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T11:01:36.081Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "data": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "content": "\n我正在进行流式输出。",
+              "reasoning_content": "\n1.  **分析用户请求：**\n    *   用户要求用中文说一件事：“请用中文告诉我你正在进行流式输出”。\n    *   我的核心指令是：“你是一个只需返回一句话的机器人”。\n\n2.  **拆解核心身份：**\n    *   “只需返回一句话”。这是一个硬性约束。我绝对不能返回超过一句话。没有段落，没有列表，没有问候语，只有一个句子。\n    *   “机器人”。这暗示了一种直接、功能性和略带非个人化的语气，除非内容另有要求。\n\n3.  **拆解内容请求：**\n    *   “用中文告诉我”。语言被指定了。我必须用中文回应。\n    *   “你正在进行流式输出”。这是要传达的具体信息。\n\n4.  **综合内容与约束：**\n    *   **内容：** 我正在流式输出。\n    *   **语言：** 中文。\n    *   **约束：** 仅一句话。\n\n5.  **构思可能的中文句子：**\n    *   “我正在进行流式输出。” - 这是一个直接、字面的翻译。它语法正确，且准确地传达了信息。它符合“一句话”的规则。\n    *   “我正在流式输出。” - 一个更短、稍微更自然的版本。也很好。\n    *   “这是流式输出。” - 这句话陈述了输出的性质，但不是以第一人称陈述“我正在进行它”的方式。这是一个很好的替代方案。\n    *   “我正在以流式方式生成这段文字。” - 更具描述性，但有点长。它仍然是一个句子。\n    *   “流式输出正在进行中。” - 有点被动，但仍然是一个句子。\n\n6.  **选择最佳选项：**\n    *   最直接和忠实的回答是“我正在进行流式输出。”。它直接回答了“告诉我”的部分（“我告诉你……”）。\n    *   “我正在流式输出。”更简洁自然，同时传达了完全相同的意思。它非常适合机器人般的角色设定。\n    *   “这是流式输出。”也非常出色。它简单、陈述性且直接。\n\n7.  **最终选择与优化：**\n    *   让我们考虑一下用户可能的意图。他们很可能是在测试我的能力或我的自我意识（模拟的）。一个简单、直接的陈述是最好的。\n    *   “我正在进行流式输出。”感觉很正式和精确。\n    *   “我正在流式输出。”感觉稍微更主动和自然。\n    *   “这是流式输出。”感觉像一个旁白，与提示中的“告诉我”（告诉我 *你* 正在做）这部分不太一致。\n\n    *   因此，“我正在进行流式输出。”或“我正在流式输出。”是最佳候选。我们选第一个，因为它是对用户提示最完整、语法最完美的回答。它直接翻译了他们要求我说的那个句子。它严格遵守“一句话”规则。它使用的是所要求的语言（中文）。它没有添加任何额外的废话。",
+              "role": "assistant"
+            }
+          }
+        ],
+        "created": 1764673296,
+        "id": "2025120219012316cde11a12f6443a",
+        "model": "glm-4.6",
+        "request_id": "2025120219012316cde11a12f6443a",
+        "usage": {
+          "completion_tokens": 632,
+          "prompt_tokens": 25,
+          "prompt_tokens_details": {
+            "cached_tokens": 6
+          },
+          "total_tokens": 657
+        }
+      },
+      "status": 200,
+      "statusText": "OK",
+      "headers": {
+        "connection": "keep-alive",
+        "content-encoding": "gzip",
+        "content-type": "application/json; charset=UTF-8",
+        "date": "Tue, 02 Dec 2025 11:01:36 GMT",
+        "server": "ZenZGA/2.4",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+        "x-log-id": "2025120219012316cde11a12f6443a"
+      },
+      "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T190123-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

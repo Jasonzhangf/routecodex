@@ -1,0 +1,32 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-request",
+  "requestId": "req_req-v2-1764652486505-blkrp8d6a",
+  "timestamp": 1764652486511,
+  "data": {
+    "meta": {
+      "stage": "provider-request",
+      "version": "0.84.9",
+      "buildTime": "2025-12-02T05:14:46.510Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "messages": [
+        {
+          "role": "user",
+          "content": "ping"
+        }
+      ],
+      "model": "glm-4.6",
+      "stream": false,
+      "max_tokens": 8192
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T131446-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

@@ -1,0 +1,36 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-request",
+  "requestId": "req_req-v2-1764653390508-x0e89q5js",
+  "timestamp": 1764653390514,
+  "data": {
+    "meta": {
+      "stage": "provider-request",
+      "version": "0.84.10",
+      "buildTime": "2025-12-02T05:29:50.514Z"
+    },
+    "url": "http://127.0.0.1:51269/v1/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer****fy-key",
+      "Accept": "application/json"
+    },
+    "body": {
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a test assistant."
+        },
+        {
+          "role": "user",
+          "content": "Say hello in one short sentence."
+        }
+      ],
+      "model": "verify-mock",
+      "stream": false,
+      "max_tokens": 8192
+    }
+  },
+  "reqId": "openai-chat-verify.default.verify-mock-verify-mock-20251202T132950-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

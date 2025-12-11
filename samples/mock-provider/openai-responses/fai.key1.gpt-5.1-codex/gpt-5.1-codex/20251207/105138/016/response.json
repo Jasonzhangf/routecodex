@@ -1,0 +1,38 @@
+{
+  "reqId": "openai-responses-fai.key1-gpt-5.1-codex-20251207T105138-016",
+  "endpoint": "/v1/responses",
+  "providerId": "fai.key1.gpt-5.1-codex",
+  "model": "gpt-5.1-codex",
+  "timestamp": "2025-12-07T10:51:39.000Z",
+  "status": 200,
+  "body": {
+    "id": "resp-1765080000000",
+    "object": "response",
+    "created_at": 1765080000,
+    "model": "gpt-5.1-codex",
+    "status": "completed",
+    "output": [
+      {
+        "id": "msg_016_output",
+        "type": "message",
+        "status": "completed",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "mock response (invalid tool names sanitized)."
+          }
+        ]
+      }
+    ],
+    "output_text": "mock response (invalid tool names sanitized).",
+    "usage": {
+      "prompt_tokens": 1024,
+      "completion_tokens": 64,
+      "total_tokens": 1088
+    },
+    "metadata": {
+      "sanitized_tool_names": true
+    }
+  }
+}

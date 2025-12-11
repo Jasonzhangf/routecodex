@@ -1,0 +1,72 @@
+{
+  "model": "glm-4.6",
+  "stream": true,
+  "system": [
+    {
+      "type": "text",
+      "text": "You are regression scout. Always keep tool ids." 
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "List the project files."
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "call_tool_1",
+          "name": "shell_command",
+          "input": {
+            "command": "ls"
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "call_tool_1",
+          "content": "README.md"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "shell_command",
+      "description": "Execute a shell command on linux",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
+      "name": "list_mcp_resources",
+      "description": "List registered MCP resources",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "metadata": {
+    "user_id": "legacy-regression"
+  }
+}

@@ -1,0 +1,122 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-request",
+  "requestId": "req_req-v2-1764674110577-krrflustb",
+  "timestamp": 1764674110579,
+  "data": {
+    "meta": {
+      "stage": "provider-request",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T11:15:10.579Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "messages": [
+        {
+          "role": "system",
+          "content": "你可以使用名为 shell 的工具来执行 ls 命令。只返回命令输出。"
+        },
+        {
+          "role": "user",
+          "content": "列出本地文件目录"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_-8116434408558289264",
+              "type": "function",
+              "function": {
+                "name": "shell",
+                "arguments": "{\"command\":[\"bash\",\"-lc\",\"ls -la\"]}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"output\":\"total 6584\\ndrwxr-xr-x@  54 fanzhang  staff     1728 Dec  2 19:14 .\\ndrwxr-xr-x@  10 fanzhang  staff      320 Nov 22 06:53 ..\\ndrwxr-xr-x@   3 fanzhang  staff       96 Nov 14 10:34 .claude\\n-rw-r--r--@   1 fanzhang  staff    10244 Nov 28 22:32 .DS_Store\\n-rw-r--r--@   1 fanzhang  staff     2377 Nov 17 14:06 .eslintrc.cjs\\n-rw-r--r--@   1 fanzhang  staff     2359 Nov 17 14:06 .eslintrc.json\\n-rw-r--r--@   1 fanzhang  staff       76 Nov 14 10:34 .git\\ndrwxr-xr-x@   3 fanzhang  staff       96 Nov 14 10:34 .github\\n-rw-r--r--@   1 fanzhang  staff      735 Dec  2 18:52 .gitignore\\ndrwxr-xr-x@   4 fanzhang  staff      128 Nov 17 14:06 .iflow\\ndrwxr-xr-x@   5 fanzhang  staff      160 Nov 17 14:06 .npm-cache-local\\n-rw-r--r--@   1 fanzhang  staff      737 Nov 17 14:06 .npmignore\\n-rw-r--r--@   1 fanzhang  staff        3 Nov 17 14:06 .nvmrc\\n-rw-r--r--@   1 fanzhang  staff      113 Nov 17 14:06 .prettierignore\\n-rw-r--r--@   1 fanzhang  staff      177 Nov 17 14:06 .prettierrc.json\\n-rw-r--r--@   1 fanzhang  staff     2060 Nov 17 14:06 .secrets.baseline\\n-rw-r--r--@   1 fanzhang  staff        6 Nov 17 14:06 .server5521.pid\\n-rw-r--r--@   1 fanzhang  staff     3955 Dec  2 18:52 AGENTS.md\\n-rw-r--r--@   1 fanzhang  staff   217137 Nov 14 11:12 ajv-8.17.1.tgz\\ndrwxr-xr-x@   4 fanzhang  staff      128 Nov 17 14:06 bin\\nlrwxr-xr-x@   1 fanzhang  staff        9 Nov 17 14:06 CLAUDE.md -> AGENTS.md\\ndrwxr-xr-x@  22 fanzhang  staff      704 Dec  2 18:52 config\\ndrwxr-xr-x@  24 fanzhang  staff      768 Dec  2 19:14 dist\\ndrwxr-xr-x@  45 fanzhang  staff     1440 Dec  2 18:52 docs\\ndrwxr-xr-x@   4 fanzhang  staff      128 Nov 17 14:06 exporters\\ndrwxr-xr-x@   4 fanzhang  staff      128 Nov 17 21:38 interpreter\\n-rw-r--r--@   1 fanzhang  staff     1490 Nov 17 14:06 jest.config.js\\ndrwxr-xr-x@   6 fanzhang  staff      192 Nov 17 14:06 logs\\ndrwxr-xr-x@ 519 fanzhang  staff    16608 Dec  2 18:24 node_modules\\ndrwxr-xr-x@   6 fanzhang  staff      192 Nov 17 14:06 package\\n-rw-r--r--@   1 fanzhang  staff   505755 Dec  2 18:52 package-lock.json\\n-rw-r--r--@   1 fanzhang  staff     8273 Dec  2 19:00 package.json\\nlrwxr-xr-x@   1 fanzhang  staff       11 Nov 17 14:06 rcc -> dist/cli.js\\n-rw-r--r--@   1 fanzhang  staff   391956 Nov 15 09:56 rcc-0.81.21.tgz\\n-rw-r--r--@   1 fanzhang  staff   181717 Nov 14 11:15 rcc-basemodule-0.2.7.tgz\\n-rw-r--r--@   1 fanzhang  staff     4574 Nov 14 11:18 rcc-config-core-0.1.6.tgz\\n-rw-r--r--@   1 fanzhang  staff   125476 Nov 14 11:20 rcc-debugcenter-0.1.6.tgz\\n-rw-r--r--@   1 fanzhang  staff     7804 Nov 14 11:19 rcc-errorhandling-1.0.10.tgz\\n-rw-r--r--@   1 fanzhang  staff   267252 Nov 14 11:08 rcc-llmswitch-core-0.3.12.tgz\\n-rw-r--r--@   1 fanzhang  staff    45905 Dec  2 18:52 README.md\\ndrwxr-xr-x@  10 fanzhang  staff      320 Nov 17 14:06 replay\\n-rw-r--r--@   1 fanzhang  staff  1500420 Dec  2 19:14 routecodex-0.85.0.tgz\\n-rw-r--r--@   1 fanzhang  staff        6 Nov 28 22:32 routecodex.pid\\ndrwxr-xr-x@  89 fanzhang  staff     2848 Dec  2 19:00 scripts\\ndrwxr-xr-x@   3 fanzhang  staff       96 Nov 17 14:06 sharedmodule\\ndrwxr-xr-x@  10 fanzhang  staff      320 Nov 17 14:06 sharedmodule.backup-20251111221728\\n-rw-r--r--@   1 fanzhang  staff    13369 Nov 14 11:10 signal-exit-4.1.0.tgz\\ndrwxr-xr-x@  18 fanzhang  staff      576 Dec  2 18:52 src\\ndrwxr-xr-x@   5 fanzhang  staff      160 Dec  2 18:52 tests\\ndrwxr-xr-x@   5 fanzhang  staff      160 Dec  2 18:52 tools\\n-rw-r--r--@   1 fanzhang  staff     2292 Dec  2 18:52 tsconfig.json\\ndrwxr-xr-x@   3 fanzhang  staff       96 Dec  2 18:53 vendor\\ndrwxr-xr-x@   4 fanzhang  staff      128 Nov 17 14:06 verified-configs\\nlrwxr-xr-x@   1 fanzhang  staff        9 Nov 17 21:38 WARP.md -> CLAUDE.md\",\"metadata\":{\"exit_code\":0,\"duration_seconds\":0.015}}",
+          "tool_call_id": "call_-8116434408558289264"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "shell",
+            "description": "执行安全的 shell 命令",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": true,
+              "required": [
+                "command"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "list_mcp_resources",
+            "description": "List resources from an MCP server.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "server": {
+                  "type": "string"
+                },
+                "filter": {
+                  "type": "string"
+                },
+                "root": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "list_mcp_resource_templates",
+            "description": "List resource templates from MCP servers.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "cursor": {
+                  "type": "string"
+                },
+                "server": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "model": "glm-4.6",
+      "stream": false,
+      "tool_choice": "auto",
+      "max_tokens": 8192
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T191510-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

@@ -1,0 +1,64 @@
+{
+  "model": "glm-4.6",
+  "stream": false,
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are RCC sentinel."
+    },
+    {
+      "role": "user",
+      "content": "Call describe_current_request and summarize the metadata."
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_describe_request",
+          "type": "function",
+          "function": {
+            "name": "describe_current_request",
+            "arguments": "{\"query\":\"describe_current_request\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_describe_request",
+      "content": "{\"request\":\"sample\"}"
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "describe_current_request",
+        "description": "Echo context",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_mcp_resources",
+        "description": "Enumerate available MCP resources",
+        "parameters": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    }
+  ],
+  "stageExpectations": {
+    "request_inbound": "samples/chat-blackbox/stage-baselines/request/request_inbound.json"
+  }
+}

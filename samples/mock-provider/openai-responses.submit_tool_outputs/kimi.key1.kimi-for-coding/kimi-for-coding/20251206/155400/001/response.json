@@ -1,0 +1,29 @@
+{
+  "reqId": "openai-responses.submit_tool_outputs-kimi.key1-kimi-for-coding-20251206T155400-001",
+  "endpoint": "/v1/responses.submit_tool_outputs",
+  "providerId": "kimi.key1.kimi-for-coding",
+  "model": "kimi-for-coding",
+  "timestamp": "2025-12-06T15:54:01.000Z",
+  "status": 200,
+  "body": {
+    "id": "resp-submit-1765009116101",
+    "object": "response",
+    "created_at": 1765009116,
+    "model": "kimi-for-coding",
+    "status": "completed",
+    "output": [
+      {
+        "id": "message_final",
+        "type": "message",
+        "status": "completed",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "扫描完成：已经找到 electron/forge 配置文件，请继续执行构建。"
+          }
+        ]
+      }
+    ]
+  }
+}

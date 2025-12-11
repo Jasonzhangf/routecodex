@@ -1,0 +1,34 @@
+{
+  "id": "chatcmpl_regression",
+  "object": "chat.completion",
+  "created": 1765253228,
+  "model": "glm-4.6",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_list_resources",
+            "type": "function",
+            "function": {
+              "name": "list_mcp_resources",
+              "arguments": "{}"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 128,
+    "completion_tokens": 12,
+    "total_tokens": 140
+  },
+  "stageExpectations": {
+    "response_outbound": "samples/chat-blackbox/stage-baselines/response/response_outbound.json"
+  }
+}

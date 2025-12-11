@@ -4,13 +4,73 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const ROOT = path.resolve(__dirname, '../..');
 
 const HOME = os.homedir();
 const PROVIDER_ROOT = path.join(HOME, '.routecodex', 'provider');
 const SNAPSHOT_ROOT = path.join(HOME, '.routecodex', 'golden_samples');
 const PROVIDER_GOLDEN_ROOT = path.join(SNAPSHOT_ROOT, 'provider_golden_samples');
+const CUSTOM_SAMPLE_ROOT = path.join(SNAPSHOT_ROOT, 'new');
 const TEMP_ROOT = path.join(process.cwd(), 'tmp', 'provider-captures');
+const STAGE_DIRS = {
+  'openai-chat': path.join(SNAPSHOT_ROOT, 'openai-chat'),
+  'openai-responses': path.join(SNAPSHOT_ROOT, 'openai-responses'),
+  'anthropic-messages': path.join(SNAPSHOT_ROOT, 'anthropic-messages')
+};
+const ENTRY_STAGE_MATRIX = {
+  'openai-chat': {
+    request: [
+      'req_inbound_stage2_semantic_map',
+      'req_process_tool_filters_request_pre',
+      'req_process_tool_filters_request_post',
+      'req_outbound_stage1_semantic_map'
+    ],
+    response: [
+      'resp_inbound_stage3_semantic_map',
+      'resp_process_tool_filters_response_pre',
+      'resp_process_tool_filters_response_post',
+      'resp_outbound_stage1_client_remap'
+    ]
+  },
+  'openai-responses': {
+    request: [
+      'req_inbound_stage2_semantic_map',
+      'req_process_stage1_tool_governance',
+      'req_process_stage2_route_select',
+      'req_outbound_stage1_semantic_map'
+    ],
+    response: [
+      'resp_inbound_stage3_semantic_map',
+      'resp_process_stage1_tool_governance',
+      'resp_process_stage2_finalize',
+      'resp_outbound_stage1_client_remap'
+    ]
+  },
+  'anthropic-messages': {
+    request: [
+      'req_inbound_stage2_semantic_map',
+      'req_process_stage1_tool_governance',
+      'req_process_stage2_route_select',
+      'req_outbound_stage1_semantic_map'
+    ],
+    response: [
+      'resp_inbound_stage3_semantic_map',
+      'resp_process_stage1_tool_governance',
+      'resp_process_stage2_finalize',
+      'resp_outbound_stage1_client_remap'
+    ]
+  }
+};
+const AUX_STAGE_NAMES = [
+  'req_inbound_stage1_format_parse',
+  'resp_inbound_stage2_format_parse'
+];
+const TRACKED_STAGE_NAMES = Array.from(new Set([...Object.values(ENTRY_STAGE_MATRIX).flatMap((group) => [...group.request, ...group.response]), ...AUX_STAGE_NAMES]));
 
 function usage() {
   console.log(`Usage: node scripts/tools/capture-provider-goldens.mjs [--update-golden]\n\n` +
@@ -35,10 +95,11 @@ const ENTRY_DEFS = {
     stageDir: 'openai-chat',
     endpoint: '/v1/chat/completions',
     samplePath: path.join(
-      SNAPSHOT_ROOT,
-      'openai_requests',
-      'chat-toolcall-20251209T225016004-002',
-      'request_payload.json'
+      ROOT,
+      'samples',
+      'chat-blackbox',
+      'openai',
+      'request-basic.json'
     ),
     extraHeaders: {}
   },
@@ -46,10 +107,11 @@ const ENTRY_DEFS = {
     stageDir: 'openai-responses',
     endpoint: '/v1/responses',
     samplePath: path.join(
-      SNAPSHOT_ROOT,
-      'openai_responses_requests',
-      'responses-toolcall-20251210T084118976-002',
-      'request_payload.json'
+      ROOT,
+      'samples',
+      'chat-blackbox',
+      'responses',
+      'request-basic.json'
     ),
     extraHeaders: { 'OpenAI-Beta': 'responses-2024-12-17' }
   },
@@ -57,10 +119,11 @@ const ENTRY_DEFS = {
     stageDir: 'anthropic-messages',
     endpoint: '/v1/messages',
     samplePath: path.join(
-      SNAPSHOT_ROOT,
-      'anthropic_requests',
-      'glm46-toolcall-20251209T223550158-010',
-      'request_payload.json'
+      ROOT,
+      'samples',
+      'chat-blackbox',
+      'anthropic',
+      'request-basic.json'
     ),
     extraHeaders: {}
   }
@@ -220,11 +283,38 @@ function diffJson(expected, actual, prefix = '<root>') {
   return diffs;
 }
 
-function saveProviderSample(providerId, entryType, stageFileName, sourceStagePath, updateGolden) {
+function loadCustomSample(providerId, entryType) {
+  const dir = path.join(CUSTOM_SAMPLE_ROOT, entryType, providerId);
+  const samplePath = path.join(dir, 'request.sample.json');
+  if (!fs.existsSync(samplePath)) return null;
+  let stageFile;
+  const metaPath = path.join(dir, 'meta.json');
+  if (fs.existsSync(metaPath)) {
+    try {
+      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+      stageFile = meta?.stageFile;
+    } catch (error) {
+      console.warn(`[capture] custom meta parse failed for ${providerId}/${entryType}: ${error.message}`);
+    }
+  }
+  return {
+    body: JSON.parse(fs.readFileSync(samplePath, 'utf-8')),
+    stageFile,
+    dir
+  };
+}
+
+function saveProviderSample(providerId, entryType, sourceStagePath, providedBody, updateGolden) {
   const targetDir = path.join(PROVIDER_GOLDEN_ROOT, providerId, entryType);
   ensureDir(targetDir);
-  const raw = JSON.parse(fs.readFileSync(sourceStagePath, 'utf-8'));
-  const body = raw?.body ?? raw;
+  let body = providedBody;
+  if (!body) {
+    if (!sourceStagePath || !fs.existsSync(sourceStagePath)) {
+      throw new Error(`missing stage payload for ${providerId} (${entryType})`);
+    }
+    const raw = JSON.parse(fs.readFileSync(sourceStagePath, 'utf-8'));
+    body = raw?.body ?? raw;
+  }
   const targetFile = path.join(targetDir, 'request.sample.json');
   if (fs.existsSync(targetFile)) {
     const previous = JSON.parse(fs.readFileSync(targetFile, 'utf-8'));
@@ -242,7 +332,7 @@ function saveProviderSample(providerId, entryType, stageFileName, sourceStagePat
     providerId,
     entryType,
     capturedAt: new Date().toISOString(),
-    stageFile: sourceStagePath
+    stageFile: sourceStagePath || null
   };
   fs.writeFileSync(path.join(targetDir, 'meta.json'), JSON.stringify(meta, null, 2));
 }
@@ -293,8 +383,8 @@ async function captureProvider(providerEntry, entryType, port, options) {
     .map((name) => ({ name, mtime: fs.statSync(path.join(stageDir, name)).mtimeMs }))
     .sort((a, b) => b.mtime - a.mtime)[0];
   const stagePath = path.join(stageDir, latest.name);
-  saveProviderSample(providerEntry.providerId, entryType, latest.name, stagePath, options.updateGolden);
-  return stagePath;
+  saveProviderSample(providerEntry.providerId, entryType, stagePath, null, options.updateGolden);
+  return { stagePath, mode: 'recorded' };
 }
 
 async function main() {
@@ -318,6 +408,21 @@ async function main() {
       results.push({ provider: entry.providerId, entryType, status: 'skipped', reason: 'sample missing' });
       continue;
     }
+    const custom = loadCustomSample(entry.providerId, entryType);
+    if (custom) {
+      console.log(`[capture] using custom sample for ${entry.providerId} (${entryType}) from ${custom.dir}`);
+      saveProviderSample(entry.providerId, entryType, custom.stageFile, custom.body, options.updateGolden);
+      captured.add(captureKey);
+      results.push({
+        provider: entry.providerId,
+        entryType,
+        status: 'ok',
+        stagePath: custom.stageFile || '<custom>',
+        mode: 'custom'
+      });
+      continue;
+    }
+
     const port = portBase++;
     const derived = buildDerivedConfig(entry.doc, entry.providerId, entry.providerConfig, port);
     const tmpConfig = path.join(
@@ -326,12 +431,12 @@ async function main() {
     );
     fs.writeFileSync(tmpConfig, JSON.stringify(derived, null, 2));
     const server = spawnServer(tmpConfig, port);
-    let stagePath;
+    let captureInfo;
     try {
       await waitForHealth(port);
-      stagePath = await captureProvider(entry, entryType, port, options);
+      captureInfo = await captureProvider(entry, entryType, port, options);
       captured.add(captureKey);
-      results.push({ provider: entry.providerId, entryType, status: 'ok', stagePath });
+      results.push({ provider: entry.providerId, entryType, status: 'ok', stagePath: captureInfo.stagePath, mode: captureInfo.mode });
     } catch (error) {
       results.push({ provider: entry.providerId, entryType, status: 'error', reason: error.message });
     } finally {
@@ -343,7 +448,8 @@ async function main() {
   console.log('\\n[capture] summary');
   for (const row of results) {
     if (row.status === 'ok') {
-      console.log(`  ✓ ${row.provider} (${row.entryType}) → ${row.stagePath}`);
+      const sourceLabel = row.mode === 'custom' ? 'custom' : 'capture';
+      console.log(`  ✓ ${row.provider} (${row.entryType}) [${sourceLabel}] → ${row.stagePath || '<body>'}`);
     } else {
       console.log(`  ✗ ${row.provider} (${row.entryType}) → ${row.reason}`);
     }

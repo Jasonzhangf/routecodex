@@ -1,0 +1,37 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-request",
+  "requestId": "req_req-v2-1764673768917-9xfi6avww",
+  "timestamp": 1764673768918,
+  "data": {
+    "meta": {
+      "stage": "provider-request",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T11:09:28.918Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "messages": [
+        {
+          "role": "system",
+          "content": "你是一个只需返回一句话的机器人。"
+        },
+        {
+          "role": "user",
+          "content": "请用中文告诉我你正在进行流式输出。"
+        }
+      ],
+      "model": "glm-4.6",
+      "stream": false,
+      "max_tokens": 8192
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T190928-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

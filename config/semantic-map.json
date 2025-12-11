@@ -1,0 +1,166 @@
+{
+  "version": "2024-12-02",
+  "fields": [
+    {
+      "id": "system_instruction",
+      "label": "System Instructions",
+      "summary": "systemInstructions",
+      "changeDescription": "systemInstructionDelta",
+      "normalize": "systemMessages",
+      "sources": [
+        {
+          "protocols": ["client-request"],
+          "path": "instructions",
+          "match": {
+            "entryEndpointIncludes": "/v1/responses"
+          }
+        },
+        {
+          "protocols": ["openai-chat", "hub", "client-request"],
+          "selector": "messages.system"
+        },
+        {
+          "protocols": ["anthropic-messages"],
+          "path": "system"
+        },
+        {
+          "protocols": ["provider-request"],
+          "selector": "provider.system"
+        }
+      ]
+    },
+    {
+      "id": "messages",
+      "label": "Chat Messages",
+      "summary": "messagesByRole",
+      "sources": [
+        {
+          "protocols": ["client-request", "openai-chat", "hub", "provider-request", "anthropic-messages"],
+          "path": "messages"
+        }
+      ]
+    },
+    {
+      "id": "tool_calls",
+      "label": "Tool Calls",
+      "summary": "toolCalls",
+      "changeDescription": "toolCallsDelta",
+      "sources": [
+        {
+          "protocols": ["openai-responses", "provider-response"],
+          "path": "required_action.submit_tool_outputs.tool_calls"
+        },
+        {
+          "protocols": ["hub", "openai-chat", "provider-request", "anthropic-messages", "client-request"],
+          "selector": "toolCalls.fromMessages"
+        }
+      ]
+    },
+    {
+      "id": "tool_definitions",
+      "label": "Tool Definitions",
+      "summary": "toolDefinitions",
+      "sources": [
+        {
+          "protocols": ["client-request", "openai-chat", "hub", "provider-request", "provider-response", "anthropic-messages", "client-response"],
+          "selector": "tools.list"
+        }
+      ]
+    },
+    {
+      "id": "required_action",
+      "label": "Required Action",
+      "summary": "requiredAction",
+      "sources": [
+        {
+          "protocols": ["openai-responses", "provider-response"],
+          "path": "required_action"
+        }
+      ]
+    },
+    {
+      "id": "response_content",
+      "label": "Response Content",
+      "summary": "contentPreview",
+      "changeDescription": "contentLengthDelta",
+      "sources": [
+        {
+          "protocols": ["openai-responses", "provider-response"],
+          "selector": "content.responses"
+        },
+        {
+          "protocols": ["openai-chat", "hub", "anthropic-messages", "client-response"],
+          "selector": "content.primary"
+        }
+      ]
+    },
+    {
+      "id": "finish_reason",
+      "label": "Finish Reason",
+      "summary": "finishReason",
+      "sources": [
+        {
+          "protocols": ["openai-chat", "hub", "provider-response", "client-response", "openai-responses"],
+          "path": "choices[0].finish_reason"
+        },
+        {
+          "protocols": ["anthropic-messages"],
+          "path": "stop_reason"
+        }
+      ]
+    },
+    {
+      "id": "route_target",
+      "label": "Route Target",
+      "summary": "routeTarget",
+      "optional": true,
+      "sources": [
+        {
+          "protocols": ["hub", "provider-request", "provider-response"],
+          "selector": "route.target"
+        }
+      ]
+    },
+    {
+      "id": "model_id",
+      "label": "Model",
+      "summary": "modelId",
+      "sources": [
+        {
+          "protocols": ["client-request", "client-response", "openai-chat", "openai-responses", "anthropic-messages", "provider-request", "provider-response"],
+          "path": "model"
+        },
+        {
+          "protocols": ["hub"],
+          "selector": "route.model"
+        }
+      ]
+    },
+    {
+      "id": "usage",
+      "label": "Usage",
+      "summary": "usageMetrics",
+      "optional": true,
+      "sources": [
+        {
+          "protocols": ["openai-chat", "openai-responses", "provider-response", "hub", "client-response", "anthropic-messages"],
+          "path": "usage"
+        }
+      ]
+    },
+    {
+      "id": "tool_results",
+      "label": "Tool Results",
+      "summary": "toolResults",
+      "optional": true,
+      "sources": [
+        {
+          "match": {
+            "stageIncludes": "context_capture"
+          },
+          "path": "tool_outputs"
+        }
+      ]
+    }
+  ]
+}

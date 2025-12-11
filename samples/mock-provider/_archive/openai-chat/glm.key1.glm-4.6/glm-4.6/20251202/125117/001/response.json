@@ -1,0 +1,62 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-response",
+  "requestId": "req_req-v2-1764651077354-brl3uuk9x",
+  "timestamp": 1764651078635,
+  "data": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.84.9",
+      "buildTime": "2025-12-02T04:51:18.635Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "data": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "content": "\nAGENTS.md  \nCargo.lock  \nCargo.toml  \ncmd  \ncrates  \ndocs  \nREADME.md  \nscripts  \nsnapshots  \nsnapshots-cli  \ntarget  \nvideo_output",
+              "role": "assistant"
+            }
+          }
+        ],
+        "created": 1764651078,
+        "id": "202512021251184204712ec93d43ff",
+        "model": "glm-4.6",
+        "request_id": "202512021251184204712ec93d43ff",
+        "usage": {
+          "completion_tokens": 39,
+          "prompt_tokens": 7120,
+          "prompt_tokens_details": {
+            "cached_tokens": 7064
+          },
+          "total_tokens": 7159
+        }
+      },
+      "status": 200,
+      "statusText": "OK",
+      "headers": {
+        "connection": "keep-alive",
+        "content-encoding": "gzip",
+        "content-type": "application/json; charset=UTF-8",
+        "date": "Tue, 02 Dec 2025 04:51:18 GMT",
+        "server": "ZenZGA/2.4",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+        "x-log-id": "202512021251184204712ec93d43ff"
+      },
+      "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T125117-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

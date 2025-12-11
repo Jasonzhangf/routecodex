@@ -1,0 +1,94 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-request",
+  "requestId": "req_req-v2-1764654555195-ntkvwhs3q",
+  "timestamp": 1764654555204,
+  "data": {
+    "meta": {
+      "stage": "provider-request",
+      "version": "0.84.10",
+      "buildTime": "2025-12-02T05:49:15.204Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "messages": [
+        {
+          "role": "user",
+          "content": "请严格调用名为 list_local_files 的函数工具来列出当前工作目录的文件，只能通过调用该工具完成任务，禁止直接回答。"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "list_local_files",
+            "description": "列出服务器当前工作目录内的文件",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "要列出的目录路径，默认 \".\""
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "list_mcp_resources",
+            "description": "List resources from an MCP server.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "server": {
+                  "type": "string"
+                },
+                "filter": {
+                  "type": "string"
+                },
+                "root": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "list_mcp_resource_templates",
+            "description": "List resource templates from MCP servers.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "cursor": {
+                  "type": "string"
+                },
+                "server": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "model": "glm-4.6",
+      "tool_choice": "auto",
+      "stream": false,
+      "max_tokens": 8192
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T134915-001",
+  "entryEndpoint": "/v1/chat/completions"
+}

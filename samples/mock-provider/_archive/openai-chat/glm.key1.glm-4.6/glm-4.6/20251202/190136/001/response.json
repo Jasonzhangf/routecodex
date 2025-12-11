@@ -1,0 +1,63 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "stage": "provider-response",
+  "requestId": "req_req-v2-1764673296095-4fi0en8xp",
+  "timestamp": 1764673304237,
+  "data": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.85.0",
+      "buildTime": "2025-12-02T11:01:44.237Z"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "Authorization": "Bearer****PvttZB",
+      "Accept": "application/json"
+    },
+    "body": {
+      "data": {
+        "choices": [
+          {
+            "finish_reason": "length",
+            "index": 0,
+            "message": {
+              "content": "",
+              "reasoning_content": "\n1.  **拆解用户请求：**\n    *   **核心任务1：**“你好，请用Responses协议格式回复我”。\n    *   **核心任务2：**“并介绍一下你的能力”。\n\n2.  **分析“Responses协议格式”：**\n    *   这是什么？我以前从未听说过。快速搜索“Responses protocol format”或“响应协议格式”并没有找到一个标准的、普遍接受的协议。这听起来像是一个用户可能见过或在特定上下文中（比如某个特定的API文档或内部系统）使用的术语。\n    *   **解读：**用户很可能想要一个结构化的、类似JSON的回复。他们想要一个看起来像计算机处理的数据结构，而不仅仅是散文。他们可能是一个开发者、数据科学家，或者只是对AI如何以更“机器化”的方式组织其输出感到好奇的人。\n    *   **我的策略：**由于没有单一的标准，我将创建一个*看起来合理*且*自解释*的结构化格式。JSON是显而易见的选择，因为它被广泛使用且易于人类阅读。我会把它设计得像一个API的响应负载。\n    *   **构建JSON结构：**\n        *   一个顶级对象。`{}`。\n        *   一个`status`字段是任何API响应的标准配置。`\"success\"`是合适的。\n        *   一个`message`字段用于提供人类可读的摘要。“请求已成功处理，以下是关于我的能力介绍。”是一个很好的开始。\n        *   一个`data`对象来承载实际内容。这是最佳实践。\n        *   在`data`内部，我需要表示“我的能力”。这应该是一个结构化的列表或对象。一个对象数组`[]`是完美的，因为每个能力都是一个独立的项。\n        *   对于`capabilities`数组中的每个能力对象，它应该有哪些属性？\n            *   `id`：一个唯一的标识符（例如，`core-01`，`nlp-01`）。\n            *   `category`：对能力进行分组（例如，“核心交互”，“自然语言处理”，“知识应用”）。\n            *   `name`：一个清晰、简洁的能力名称（例如，“多轮对话”，“文本理解与生成”）。\n            *   `description`：关于该能力包含什么的更详细解释。\n            *   `examples`（可选但非常有用）：一个具体示例的列表，使抽象的能力变得具体。这极大地增加了价值。\n\n3.  **分析“介绍一下你的能力”：**\n    *   这是一个标准的“关于你”的问题。我需要列出我的关键功能。\n    *   **头脑风暴能力列表：**\n        *   基础聊天/对话。\n        *   回答问题。\n        *   撰写文本（文章、邮件、代码、诗歌）。\n        *   总结文本。\n        *   翻译语言。\n        *   理解和生成代码。\n        *   进行头脑风暴和创意性任务。\n        *   分析数据（在基于文本的上下文中）。\n        *   角色扮演。\n        *   遵循复杂指令。\n    *   **为JSON结构进行分类和提炼：**现在，我将把这个头脑风暴出的列表映射到我设计的JSON结构中。\n        *   **类别：核心交互**\n            *   名称：多轮对话\n            *   描述：我可以记住对话上下文，进行连贯的多轮交流。\n            *   示例：`[\"用户：今天天气怎么样？\", \"我：请问您在哪个城市？\", \"用户：北京。\", \"我：北京今天晴朗，气温25℃...\"]`\n        *   **类别：自然语言处理**\n            *   名称：文本理解与生成\n            *   描述：我可以理解复杂的文本、提取关键信息，并根据要求生成各种格式的文本。\n            *   示例：`[\"撰写一封商务邮件\", \"总结一篇长篇文章\", \"写一首关于春天的诗\"]`\n            *   名称：语言翻译\n            *   描述：支持多种语言之间的互译。\n            *   示例：`[\"将'Hello, world!'翻译成中文\", \"将'你好，世界'翻译成法语\"]`\n        *   **类别：知识与应用**\n            *   名称：知识问答\n            *   描述：基于我庞大的知识库，回答涵盖历史、科学、文化等领域的问题。\n            *   示例：`[\"什么是黑洞？\", \"请介绍一下长城的历史。\"]`\n            *   名称：代码生成与解释\n            *   描述：我可以编写、调试和解释多种编程语言的代码。\n            *   示例：`[\"用Python写一个快速排序算法\", \"解释一下这段JavaScript代码的作用\"]`\n        *   **类别：创意",
+              "role": "assistant"
+            }
+          }
+        ],
+        "created": 1764673304,
+        "id": "202512021901368148d1734cde4498",
+        "model": "glm-4.6",
+        "request_id": "202512021901368148d1734cde4498",
+        "usage": {
+          "completion_tokens": 1000,
+          "prompt_tokens": 19,
+          "prompt_tokens_details": {
+            "cached_tokens": 4
+          },
+          "total_tokens": 1019
+        }
+      },
+      "status": 200,
+      "statusText": "OK",
+      "headers": {
+        "connection": "keep-alive",
+        "content-encoding": "gzip",
+        "content-type": "application/json; charset=UTF-8",
+        "date": "Tue, 02 Dec 2025 11:01:44 GMT",
+        "server": "ZenZGA/2.4",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+        "x-log-id": "202512021901368148d1734cde4498"
+      },
+      "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    }
+  },
+  "reqId": "openai-chat-glm.key1.glm-4.6-glm-4.6-20251202T190136-001",
+  "entryEndpoint": "/v1/chat/completions"
+}
