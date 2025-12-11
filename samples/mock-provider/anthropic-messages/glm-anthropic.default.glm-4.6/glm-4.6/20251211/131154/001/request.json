@@ -1,0 +1,90 @@
+{
+  "reqId": "anthropic-messages-glm-anthropic.default.glm-4.6-glm-4.6-20251211T131154-001",
+  "entry": "anthropic-messages",
+  "endpoint": "/v1/messages",
+  "providerId": "glm-anthropic.default.glm-4.6",
+  "model": "glm-4.6",
+  "timestamp": "2025-12-11T13:11:54.404Z",
+  "body": {
+    "model": "glm-4.6",
+    "system": [
+      {
+        "type": "text",
+        "text": "You are regression scout. Always keep tool ids."
+      }
+    ],
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "列出当前仓库根目录下的文件。"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "call_tool_1",
+            "name": "shell_command",
+            "input": {
+              "command": "ls -1",
+              "workdir": "/Users/fanzhang/Documents/github/routecodex",
+              "description": "列出仓库文件"
+            }
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "call_tool_1",
+            "content": "README.md\npackage.json",
+            "is_error": false
+          }
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "name": "shell_command",
+        "description": "Runs a shell command and returns stdout/stderr.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "workdir": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "workdir"
+          ]
+        }
+      },
+      {
+        "name": "list_mcp_resources",
+        "description": "List registered MCP resources",
+        "input_schema": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    ],
+    "metadata": {
+      "user_id": "legacy-regression"
+    },
+    "stream": false
+  }
+}

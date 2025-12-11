@@ -1,0 +1,20 @@
+{
+  "reqId": "openai-chat-gemini.default.gpt-5.1-codex-gpt-5.1-codex-20251211T130240-001",
+  "entry": "openai-chat",
+  "endpoint": "/v1/chat/completions",
+  "providerId": "gemini.default.gpt-5.1-codex",
+  "model": "gpt-5.1-codex",
+  "timestamp": "2025-12-11T13:02:40.587Z",
+  "status": 502,
+  "body": {
+    "error": {
+      "message": "[composite.request] ERR_PROTOCOL_MISMATCH: protocol=gemini-chat expected=openai-chat",
+      "code": "ERR_PROTOCOL_MISMATCH",
+      "request_id": "openai-chat-gemini.key1.modelsgemini-2.5-flash-lite-modelsgemini-2.5-flash-lite-20251211T210240574-001",
+      "provider_key": "gemini.key1.models/gemini-2.5-flash-lite",
+      "route_name": "default",
+      "provider_type": "openai",
+      "upstream_code": "ERR_PROTOCOL_MISMATCH"
+    }
+  }
+}

@@ -43,7 +43,7 @@ export interface IProviderV2 extends ProviderModule {
  *
  * 注意：品牌/家族（glm、qwen、iflow 等）通过 providerId/providerFamily 表达，禁止写入 providerType。
  */
-export type ProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini';
+export type ProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'mock';
 
 /**
  * 服务协议类型映射
@@ -52,7 +52,8 @@ export const PROVIDER_TYPE_MAP = {
   OPENAI: 'openai',
   RESPONSES: 'responses',
   ANTHROPIC: 'anthropic',
-  GEMINI: 'gemini'
+  GEMINI: 'gemini',
+  MOCK: 'mock'
 } as const;
 
 /**
@@ -114,6 +115,11 @@ export interface ProviderRuntimeProfile {
   providerType: ProviderType;
   providerFamily?: string;
   providerProtocol?: string;
+  /**
+   * Optional module implementation override (e.g. 'mock-provider').
+   * Allows host to keep logical providerType while instantiating a different module.
+   */
+  providerModule?: string;
   /**
    * Upstream endpoint/base URL emitted by virtual router runtime.
    * When only endpoint is provided, host/provider should treat it as baseUrl.

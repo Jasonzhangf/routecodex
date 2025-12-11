@@ -1,0 +1,30 @@
+{
+  "reqId": "openai-chat-kimi.default.gpt-5.1-codex-gpt-5.1-codex-20251211T130256-001",
+  "entry": "openai-chat",
+  "endpoint": "/v1/chat/completions",
+  "providerId": "kimi.default.gpt-5.1-codex",
+  "model": "gpt-5.1-codex",
+  "timestamp": "2025-12-11T13:02:56.207Z",
+  "status": 200,
+  "body": {
+    "id": "chatcmpl-dJnPA4j5okmrz1KrzJdOVSqE",
+    "object": "chat.completion",
+    "created": 1765458175,
+    "model": "gpt-5.1-codex",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "The metadata returned by `describe_current_request` is minimal: the single key `request` with the literal value `\"sample\"`.  \nThere’s no additional context, timestamps, or identifiers—just this placeholder string."
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 186,
+      "completion_tokens": 44,
+      "total_tokens": 230
+    }
+  }
+}

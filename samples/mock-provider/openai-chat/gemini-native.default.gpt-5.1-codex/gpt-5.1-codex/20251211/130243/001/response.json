@@ -1,0 +1,20 @@
+{
+  "reqId": "openai-chat-gemini-native.default.gpt-5.1-codex-gpt-5.1-codex-20251211T130243-001",
+  "entry": "openai-chat",
+  "endpoint": "/v1/chat/completions",
+  "providerId": "gemini-native.default.gpt-5.1-codex",
+  "model": "gpt-5.1-codex",
+  "timestamp": "2025-12-11T13:02:43.143Z",
+  "status": 404,
+  "body": {
+    "error": {
+      "message": "HTTP 404: ",
+      "code": "HTTP_404",
+      "request_id": "openai-chat-gemini-native.key1.modelsgemini-2.5-flash-lite-modelsgemini-2.5-flash-lite-20251211T210241604-001",
+      "provider_key": "gemini-native.key1.models/gemini-2.5-flash-lite",
+      "route_name": "default",
+      "provider_type": "gemini",
+      "upstream_code": "HTTP_404"
+    }
+  }
+}

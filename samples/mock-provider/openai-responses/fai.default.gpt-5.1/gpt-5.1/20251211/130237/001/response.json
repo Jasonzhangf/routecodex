@@ -1,0 +1,41 @@
+{
+  "reqId": "openai-responses-fai.default.gpt-5.1-gpt-5.1-20251211T130237-001",
+  "entry": "openai-responses",
+  "endpoint": "/v1/responses",
+  "providerId": "fai.default.gpt-5.1",
+  "model": "gpt-5.1",
+  "timestamp": "2025-12-11T13:02:37.939Z",
+  "status": 200,
+  "body": {
+    "id": "resp_0434f4766627c0b701693ac0ebf4848191843d31b57a97bf31",
+    "object": "response",
+    "created_at": 1765458155,
+    "model": "gpt-5.1",
+    "status": "requires_action",
+    "output": [
+      {
+        "id": "function_call_openai-chat-fai.key1.gpt-5.1-gpt-5.1-20251211T210232859-001_1",
+        "type": "function_call",
+        "status": "in_progress",
+        "name": "shell_command",
+        "call_id": "fc_eiQmBCATZp4i8kLpZSweQT5L",
+        "arguments": "{\"command\":\"ls\",\"justification\":\"User asked to list local directory contents\",\"login\":true,\"timeout_ms\":10000,\"with_escalated_permissions\":false,\"workdir\":\"/Users/fanzhang/Documents/github/webauto\"}"
+      }
+    ],
+    "required_action": {
+      "type": "submit_tool_outputs",
+      "submit_tool_outputs": {
+        "tool_calls": [
+          {
+            "id": "fc_eiQmBCATZp4i8kLpZSweQT5L",
+            "type": "function",
+            "function": {
+              "name": "shell_command",
+              "arguments": "{\"command\":\"ls\",\"justification\":\"User asked to list local directory contents\",\"login\":true,\"timeout_ms\":10000,\"with_escalated_permissions\":false,\"workdir\":\"/Users/fanzhang/Documents/github/webauto\"}"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

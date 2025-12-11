@@ -73,17 +73,19 @@ const AUX_STAGE_NAMES = [
 const TRACKED_STAGE_NAMES = Array.from(new Set([...Object.values(ENTRY_STAGE_MATRIX).flatMap((group) => [...group.request, ...group.response]), ...AUX_STAGE_NAMES]));
 
 function usage() {
-  console.log(`Usage: node scripts/tools/capture-provider-goldens.mjs [--update-golden]\n\n` +
-    '  --update-golden   Overwrite provider_golden_samples when diffs are detected\n');
+  console.log(`Usage: node scripts/tools/capture-provider-goldens.mjs [options]\n\n` +
+    '  --update-golden   Overwrite provider_golden_samples when diffs are detected\n' +
+    '  --custom-only     Only use ~/.routecodex/golden_samples/new samples (skip live capture)\n');
   process.exit(0);
 }
 
 function parseArgs() {
   const argv = process.argv.slice(2);
-  const opts = { updateGolden: false };
+  const opts = { updateGolden: false, customOnly: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--update-golden') opts.updateGolden = true;
+    else if (arg === '--custom-only') opts.customOnly = true;
     else if (arg === '--help' || arg === '-h') usage();
     else usage();
   }
@@ -178,15 +180,38 @@ function pickModel(providerConfig) {
   const models = providerConfig?.models;
   if (!models || typeof models !== 'object') return null;
   const keys = Object.keys(models);
-  return keys.length ? keys[0] : null;
+  if (!keys.length) return null;
+  const preferred = keys.find((key) => !/embedding|imagen|veo|live|lyria/i.test(key));
+  return preferred || keys[0];
 }
 
-function buildDerivedConfig(baseDoc, providerId, providerConfig, portOverride) {
+function sanitizeProviderId(providerId) {
+  if (typeof providerId !== 'string' || !providerId.trim()) {
+    return 'provider';
+  }
+  return providerId.replace(/[^a-z0-9_-]/gi, '_');
+}
+
+function normalizeProviderIdentifiers(body, providerId, sanitizedId) {
+  if (!body || typeof body !== 'object' || providerId === sanitizedId) {
+    return body;
+  }
+  const json = JSON.stringify(body);
+  if (!json.includes(sanitizedId)) {
+    return body;
+  }
+  return JSON.parse(json.split(sanitizedId).join(providerId));
+}
+
+function buildDerivedConfig(baseDoc, providerId, providerConfig, portOverride, overrideProviderId) {
   const clone = JSON.parse(JSON.stringify(baseDoc));
-  clone.virtualrouter.providers = { [providerId]: providerConfig };
+  const providerKey = overrideProviderId ?? providerId;
+  const providerClone = JSON.parse(JSON.stringify(providerConfig));
+  providerClone.id = providerKey;
+  clone.virtualrouter.providers = { [providerKey]: providerClone };
   const model = pickModel(providerConfig);
   if (!model) throw new Error(`Provider ${providerId} missing models list`);
-  clone.virtualrouter.routing = { default: [`${providerId}.${model}`] };
+  clone.virtualrouter.routing = { default: [`${providerKey}.${model}`] };
   clone.httpserver = clone.httpserver || {};
   clone.httpserver.host = '127.0.0.1';
   clone.httpserver.port = portOverride;
@@ -368,7 +393,7 @@ function spawnServer(configPath, port) {
   );
 }
 
-async function captureProvider(providerEntry, entryType, port, options) {
+async function captureProvider(providerEntry, entryType, port, options, sanitizedProviderId) {
   const stageDir = path.join(SNAPSHOT_ROOT, ENTRY_DEFS[entryType].stageDir);
   const suffix = '_req_outbound_stage2_format_build.json';
   const before = snapshotStageFiles(stageDir, suffix);
@@ -383,7 +408,19 @@ async function captureProvider(providerEntry, entryType, port, options) {
     .map((name) => ({ name, mtime: fs.statSync(path.join(stageDir, name)).mtimeMs }))
     .sort((a, b) => b.mtime - a.mtime)[0];
   const stagePath = path.join(stageDir, latest.name);
-  saveProviderSample(providerEntry.providerId, entryType, stagePath, null, options.updateGolden);
+  let processedBody;
+  try {
+    const stagePayload = JSON.parse(fs.readFileSync(stagePath, 'utf-8'));
+    const capturedBody = stagePayload?.body ?? stagePayload;
+    processedBody = normalizeProviderIdentifiers(
+      capturedBody,
+      providerEntry.providerId,
+      sanitizedProviderId
+    );
+  } catch {
+    processedBody = null;
+  }
+  saveProviderSample(providerEntry.providerId, entryType, stagePath, processedBody, options.updateGolden);
   return { stagePath, mode: 'recorded' };
 }
 
@@ -422,9 +459,25 @@ async function main() {
       });
       continue;
     }
+    if (options.customOnly) {
+      results.push({
+        provider: entry.providerId,
+        entryType,
+        status: 'skipped',
+        reason: 'custom sample missing'
+      });
+      continue;
+    }
 
     const port = portBase++;
-    const derived = buildDerivedConfig(entry.doc, entry.providerId, entry.providerConfig, port);
+    const sanitizedProviderId = sanitizeProviderId(entry.providerId);
+    const derived = buildDerivedConfig(
+      entry.doc,
+      entry.providerId,
+      entry.providerConfig,
+      port,
+      sanitizedProviderId
+    );
     const tmpConfig = path.join(
       TEMP_ROOT,
       `${entry.providerId}.${entryType.replace(/[^a-z0-9-]/gi, '_')}.${port}.json`
@@ -434,7 +487,7 @@ async function main() {
     let captureInfo;
     try {
       await waitForHealth(port);
-      captureInfo = await captureProvider(entry, entryType, port, options);
+      captureInfo = await captureProvider(entry, entryType, port, options, sanitizedProviderId);
       captured.add(captureKey);
       results.push({ provider: entry.providerId, entryType, status: 'ok', stagePath: captureInfo.stagePath, mode: captureInfo.mode });
     } catch (error) {

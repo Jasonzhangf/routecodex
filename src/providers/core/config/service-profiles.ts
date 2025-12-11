@@ -62,6 +62,18 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     timeout: 300000,
     maxRetries: 3
   },
+  gemini: {
+    defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    defaultEndpoint: '/models:generateContent',
+    defaultModel: 'models/gemini-2.0-flash',
+    requiredAuth: ['apikey'],
+    optionalAuth: [],
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    timeout: 300000,
+    maxRetries: 3
+  },
 
   glm: {
     // GLM coding 路径（已验证可用）

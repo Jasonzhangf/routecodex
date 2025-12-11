@@ -1,0 +1,105 @@
+{
+  "reqId": "openai-chat-gemini.default.gpt-5.1-codex-gpt-5.1-codex-20251211T130240-001",
+  "entry": "openai-chat",
+  "endpoint": "/v1/chat/completions",
+  "providerId": "gemini.default.gpt-5.1-codex",
+  "model": "gpt-5.1-codex",
+  "timestamp": "2025-12-11T13:02:40.587Z",
+  "body": {
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are RCC sentinel."
+      },
+      {
+        "role": "user",
+        "content": "Call describe_current_request and summarize the metadata."
+      },
+      {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_describe_request",
+            "type": "function",
+            "function": {
+              "name": "describe_current_request",
+              "arguments": "{\"query\":\"describe_current_request\"}"
+            },
+            "tool_call_id": "call_describe_request",
+            "call_id": "call_describe_request"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "{\"request\":\"sample\"}",
+        "tool_call_id": "call_describe_request",
+        "name": "tool",
+        "call_id": "call_describe_request",
+        "id": "call_describe_request"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "describe_current_request",
+          "description": "Echo context",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "list_mcp_resources",
+          "description": "Enumerate available MCP resources",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "server": {
+                "type": "string"
+              },
+              "filter": {
+                "type": "string"
+              },
+              "root": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "list_mcp_resource_templates",
+          "description": "List resource templates from MCP servers.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "cursor": {
+                "type": "string"
+              },
+              "server": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "model": "gpt-5.1-codex",
+    "stream": false,
+    "tool_choice": "auto"
+  }
+}

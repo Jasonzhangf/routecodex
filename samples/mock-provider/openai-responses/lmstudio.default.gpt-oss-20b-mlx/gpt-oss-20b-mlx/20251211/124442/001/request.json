@@ -1,0 +1,156 @@
+{
+  "reqId": "openai-responses-lmstudio.default.gpt-oss-20b-mlx-gpt-oss-20b-mlx-20251211T124442-001",
+  "entry": "openai-responses",
+  "endpoint": "/v1/responses",
+  "providerId": "lmstudio.default.gpt-oss-20b-mlx",
+  "model": "gpt-oss-20b-mlx",
+  "timestamp": "2025-12-11T12:44:42.700Z",
+  "body": {
+    "model": "gpt-oss-20b-mlx",
+    "tools": [
+      {
+        "type": "function",
+        "name": "describe_current_request",
+        "description": "Echoes metadata about the current request.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Literal command the user wants to run"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "function": {
+          "name": "describe_current_request",
+          "description": "Echoes metadata about the current request.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "Literal command the user wants to run"
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "name": "list_mcp_resources",
+        "description": "Enumerate registered MCP resources",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "server": {
+              "type": "string"
+            },
+            "filter": {
+              "type": "string"
+            },
+            "root": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "function": {
+          "name": "list_mcp_resources",
+          "description": "Enumerate registered MCP resources",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "server": {
+                "type": "string"
+              },
+              "filter": {
+                "type": "string"
+              },
+              "root": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "name": "list_mcp_resource_templates",
+        "description": "List resource templates from MCP servers.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "function": {
+          "name": "list_mcp_resource_templates",
+          "description": "List resource templates from MCP servers.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "cursor": {
+                "type": "string"
+              },
+              "server": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": "auto",
+    "parallel_tool_calls": false,
+    "instructions": "You are RCC responses sentinel. Use the registered tools exactly as specified and never invent new arguments.",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Call describe_current_request and report metadata."
+          }
+        ]
+      },
+      {
+        "type": "function_call",
+        "id": "fc_missing_output",
+        "name": "describe_current_request",
+        "arguments": "{\"query\":\"describe_current_request\"}",
+        "call_id": "fc_missing_output"
+      },
+      {
+        "type": "function_call_output",
+        "id": "fc_missing_output",
+        "call_id": "fc_missing_output",
+        "output": "{\"request\":\"sample\"}"
+      }
+    ],
+    "stream": false,
+    "include": [
+      "reasoning.encrypted_content"
+    ],
+    "store": false,
+    "metadata": {
+      "sample": "requires_tool_output"
+    },
+    "parameters": {
+      "stream": true
+    }
+  }
+}

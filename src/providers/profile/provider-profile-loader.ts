@@ -1,15 +1,22 @@
-import type { ProviderProfile, ProviderProfileCollection, ProviderTransportConfig, ProviderAuthConfig, ProviderProtocol } from './provider-profile.js';
+import type {
+  ProviderProfile,
+  ProviderProfileCollection,
+  ProviderTransportConfig,
+  ProviderAuthConfig,
+  ProviderProtocol
+} from './provider-profile.js';
 
 type UnknownRecord = Record<string, unknown>;
 
 export function buildProviderProfiles(config: UnknownRecord): ProviderProfileCollection {
-  const providersNode = isRecord(config.providers) ? config.providers : {};
+  const providersNode = collectProviderNodes(config);
   const profiles: ProviderProfile[] = [];
   for (const [id, raw] of Object.entries(providersNode)) {
     if (!isRecord(raw)) {
       continue;
     }
-    const protocol = resolveProtocol(id, raw);
+    const moduleType = pickString(raw.type) ?? pickString(raw.module);
+    const protocol = resolveProtocol(id, raw, moduleType);
     const transport = extractTransport(raw);
     const auth = extractAuth(raw);
     const compatibilityProfiles = extractCompatProfiles(raw);
@@ -17,6 +24,7 @@ export function buildProviderProfiles(config: UnknownRecord): ProviderProfileCol
     profiles.push({
       id,
       protocol,
+      moduleType: moduleType?.trim(),
       transport,
       auth,
       compatibilityProfiles,
@@ -32,16 +40,17 @@ export function buildProviderProfiles(config: UnknownRecord): ProviderProfileCol
   };
 }
 
-function resolveProtocol(id: string, raw: UnknownRecord): ProviderProtocol {
+function resolveProtocol(id: string, raw: UnknownRecord, moduleType?: string): ProviderProtocol {
+  const moduleHint = sanitizeType(moduleType);
   const rawType =
-    pickString(raw.type) ??
-    pickString(raw.providerType) ??
-    pickString(raw.protocol) ??
-    pickString(raw.module);
+    sanitizeType(pickString(raw.providerType)) ??
+    sanitizeType(pickString(raw.protocol)) ??
+    moduleHint ??
+    sanitizeType(pickString(raw.module));
   if (!rawType) {
     return 'openai';
   }
-  const normalized = rawType.trim().toLowerCase().replace(/-provider$/, '');
+  const normalized = rawType.trim();
   if (protocolAliases.openai.has(normalized)) {
     return 'openai';
   }
@@ -58,11 +67,18 @@ function resolveProtocol(id: string, raw: UnknownRecord): ProviderProtocol {
 }
 
 const protocolAliases = {
-  openai: new Set(['openai', 'glm', 'qwen', 'lmstudio', 'iflow', 'chat', 'openai-http', 'openai-standard']),
+  openai: new Set(['openai', 'glm', 'qwen', 'lmstudio', 'iflow', 'chat', 'openai-http', 'openai-standard', 'mock']),
   responses: new Set(['responses', 'openai-responses', 'responses-http']),
   anthropic: new Set(['anthropic', 'anthropic-http', 'claude']),
   gemini: new Set(['gemini', 'gemini2', 'gemini-chat', 'gemini-http'])
 };
+
+function sanitizeType(value?: string): string | undefined {
+  if (!value || !value.trim()) {
+    return undefined;
+  }
+  return value.trim().toLowerCase().replace(/-provider$/, '');
+}
 
 function extractTransport(raw: UnknownRecord): ProviderTransportConfig {
   const headers = extractHeaders(raw.headers) ?? extractHeaders(raw.defaultHeaders);
@@ -186,6 +202,30 @@ function extractMetadata(raw: UnknownRecord): ProviderProfile['metadata'] {
   };
 }
 
+function collectProviderNodes(config: UnknownRecord): Record<string, UnknownRecord> {
+  const entries: Record<string, UnknownRecord> = {};
+  const merge = (node?: UnknownRecord) => {
+    if (!node) {
+      return;
+    }
+    for (const [id, raw] of Object.entries(node)) {
+      if (isRecord(raw)) {
+        entries[id] = raw;
+      }
+    }
+  };
+  merge(isRecord(config.providers) ? (config.providers as UnknownRecord) : undefined);
+  const vr = isRecord(config.virtualrouter) ? (config.virtualrouter as UnknownRecord) : undefined;
+  if (vr && isRecord(vr.providers)) {
+    merge(vr.providers as UnknownRecord);
+  }
+  return entries;
+}
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 function pickString(value: unknown): string | undefined {
   if (typeof value === 'string') {
     const trimmed = value.trim();
@@ -222,8 +262,4 @@ function pickStringArray(value: unknown): string[] | undefined {
       .filter(Boolean);
   }
   return undefined;
-}
-
-function isRecord(value: unknown): value is UnknownRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -1,0 +1,277 @@
+{
+  "reqId": "openai-responses-lmstudio.default.gpt-oss-20b-mlx-gpt-oss-20b-mlx-20251211T124445-001",
+  "entry": "openai-responses",
+  "endpoint": "/v1/responses",
+  "providerId": "lmstudio.default.gpt-oss-20b-mlx",
+  "model": "gpt-oss-20b-mlx",
+  "timestamp": "2025-12-11T12:44:45.055Z",
+  "status": 200,
+  "body": {
+    "id": "resp_9d0bbb196619a14baaad4fef1dd05e199ff540390c5a022d",
+    "object": "response",
+    "created_at": 1765457083,
+    "model": "gpt-oss-20b-mlx",
+    "status": "completed",
+    "output": [
+      {
+        "id": "message_openai-chat-lmstudio.key1.gpt-oss-20b-mlx-gpt-oss-20b-mlx-20251211T204443715-001_1_reasoning",
+        "type": "reasoning",
+        "summary": [],
+        "content": [
+          {
+            "type": "reasoning_text",
+            "text": "We"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " need"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " to"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " reply"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " with"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " metadata"
+          },
+          {
+            "type": "reasoning_text",
+            "text": "."
+          },
+          {
+            "type": "reasoning_text",
+            "text": " The"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " function"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " returned"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " {\""
+          },
+          {
+            "type": "reasoning_text",
+            "text": "request"
+          },
+          {
+            "type": "reasoning_text",
+            "text": "\":\""
+          },
+          {
+            "type": "reasoning_text",
+            "text": "sample"
+          },
+          {
+            "type": "reasoning_text",
+            "text": "\""
+          },
+          {
+            "type": "reasoning_text",
+            "text": "}."
+          },
+          {
+            "type": "reasoning_text",
+            "text": " So"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " we"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " should"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " report"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " that"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " metadata"
+          },
+          {
+            "type": "reasoning_text",
+            "text": "."
+          },
+          {
+            "type": "reasoning_text",
+            "text": " Possibly"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " also"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " indicate"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " input"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " or"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " context"
+          },
+          {
+            "type": "reasoning_text",
+            "text": "?"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " The"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " user"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " asked"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " to"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " \""
+          },
+          {
+            "type": "reasoning_text",
+            "text": "Call"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " describe"
+          },
+          {
+            "type": "reasoning_text",
+            "text": "_current"
+          },
+          {
+            "type": "reasoning_text",
+            "text": "_request"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " and"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " report"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " metadata"
+          },
+          {
+            "type": "reasoning_text",
+            "text": ".\""
+          },
+          {
+            "type": "reasoning_text",
+            "text": " So"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " we"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " should"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " just"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " output"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " the"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " response"
+          },
+          {
+            "type": "reasoning_text",
+            "text": ".\n\n"
+          },
+          {
+            "type": "reasoning_text",
+            "text": "Thus"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " answer"
+          },
+          {
+            "type": "reasoning_text",
+            "text": ":"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " The"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " request"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " is"
+          },
+          {
+            "type": "reasoning_text",
+            "text": " \""
+          },
+          {
+            "type": "reasoning_text",
+            "text": "sample"
+          },
+          {
+            "type": "reasoning_text",
+            "text": "\"."
+          }
+        ]
+      },
+      {
+        "id": "message_openai-chat-lmstudio.key1.gpt-oss-20b-mlx-gpt-oss-20b-mlx-20251211T204443715-001_1",
+        "type": "message",
+        "status": "completed",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "**Request metadata**\n\n- **Query**: `describe_current_request`\n- **Response**: `{ \"request\": \"sample\" }`"
+          }
+        ]
+      }
+    ]
+  }
+}

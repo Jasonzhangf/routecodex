@@ -6,7 +6,8 @@ const TYPE_TO_PROTOCOL: Record<ProviderType, ProviderProtocol> = {
   openai: 'openai-chat',
   responses: 'openai-responses',
   anthropic: 'anthropic-messages',
-  gemini: 'gemini-chat'
+  gemini: 'gemini-chat',
+  mock: 'openai-chat'
 };
 
 const LEGACY_FAMILY_TO_TYPE: Record<string, ProviderType> = {
@@ -19,7 +20,7 @@ const LEGACY_FAMILY_TO_TYPE: Record<string, ProviderType> = {
 };
 
 export function isProviderType(value: string): value is ProviderType {
-  return value === 'openai' || value === 'responses' || value === 'anthropic' || value === 'gemini';
+  return value === 'openai' || value === 'responses' || value === 'anthropic' || value === 'gemini' || value === 'mock';
 }
 
 export function normalizeProviderType(value?: string): ProviderType {
@@ -50,4 +51,3 @@ export function normalizeProviderFamily(...sources: Array<string | undefined>): 
 }
 
 export const LEGACY_PROVIDER_FAMILY_MAP = Object.freeze({ ...LEGACY_FAMILY_TO_TYPE });
-

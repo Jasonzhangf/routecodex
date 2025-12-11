@@ -1,0 +1,33 @@
+{
+  "reqId": "openai-chat-glm.default.gpt-5.1-codex-gpt-5.1-codex-20251211T130247-001",
+  "entry": "openai-chat",
+  "endpoint": "/v1/chat/completions",
+  "providerId": "glm.default.gpt-5.1-codex",
+  "model": "gpt-5.1-codex",
+  "timestamp": "2025-12-11T13:02:47.850Z",
+  "status": 200,
+  "body": {
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "message": {
+          "content": "Based on the describe_current_request function call, here's a summary of the metadata:\n\n**Current Request Metadata:**\n- **Request Type**: \"sample\"\n\nThis appears to be a very minimal response indicating that the current request is identified as a \"sample\" request. The metadata is quite basic, suggesting this might be a test or example request context rather than a full-featured production request with additional parameters or detailed information.",
+          "role": "assistant"
+        }
+      }
+    ],
+    "created": 1765458167,
+    "id": "202512112102459bcb29fa0faf4126",
+    "model": "gpt-5.1-codex",
+    "request_id": "202512112102459bcb29fa0faf4126",
+    "usage": {
+      "completion_tokens": 122,
+      "prompt_tokens": 327,
+      "prompt_tokens_details": {},
+      "total_tokens": 449,
+      "output_tokens": 122
+    },
+    "created_at": 1765458167
+  }
+}

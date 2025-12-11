@@ -10,6 +10,7 @@ import { AnthropicHttpProvider } from './anthropic-http-provider.js';
 import { iFlowHttpProvider } from './iflow-http-provider.js';
 import { ChatHttpProvider } from './chat-http-provider.js';
 import { GeminiHttpProvider } from './gemini-http-provider.js';
+import { MockProvider } from '../../mock/index.js';
 import type { OpenAIStandardConfig, ApiKeyAuth, OAuthAuth, OAuthAuthType } from '../api/provider-config.js';
 import crypto from 'node:crypto';
 import type { IProviderV2, ProviderRuntimeProfile, ProviderRuntimeAuth, ProviderType } from '../api/provider-types.js';
@@ -187,8 +188,9 @@ export class ProviderFactory {
       extensions.oauthProviderId = runtime.auth.oauthProviderId;
     }
     extensions.providerProtocol = runtime.providerProtocol || providerTypeToProtocol(providerType);
+    const moduleOverride = this.resolveProviderModule(runtime.providerModule);
     return {
-      type: this.mapProviderModule(providerType),
+      type: moduleOverride ?? this.mapProviderModule(providerType),
       config: {
         providerType,
         providerId: providerFamily,
@@ -236,6 +238,24 @@ export class ProviderFactory {
     return oauthAuth;
   }
 
+  private static resolveProviderModule(value?: string): OpenAIStandardConfig['type'] | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    switch (trimmed) {
+      case 'openai-standard':
+      case 'openai-http-provider':
+      case 'responses-http-provider':
+      case 'anthropic-http-provider':
+      case 'gemini-http-provider':
+      case 'mock-provider':
+        return trimmed as OpenAIStandardConfig['type'];
+      default:
+        return undefined;
+    }
+  }
+
   private static mapProviderModule(
     providerType: ProviderType
   ): OpenAIStandardConfig['type'] {
@@ -248,6 +268,9 @@ export class ProviderFactory {
     if (providerType === 'gemini') {
       return 'gemini-http-provider';
     }
+    if (providerType === 'mock') {
+      return 'mock-provider';
+    }
     return 'openai-http-provider';
   }
 
@@ -257,6 +280,10 @@ export class ProviderFactory {
     config: OpenAIStandardConfig,
     dependencies: ModuleDependencies
   ): IProviderV2 {
+    if (moduleType === 'mock-provider') {
+      return new MockProvider(config, dependencies);
+    }
+
     switch (providerType) {
       case 'openai':
         return new ChatHttpProvider(config, dependencies);
@@ -282,7 +309,6 @@ export class ProviderFactory {
     if (moduleType === 'iflow-http-provider') {
       return new iFlowHttpProvider(config, dependencies);
     }
-
     const error = new Error(`[ProviderFactory] Unsupported providerType='${providerType}' and moduleType='${moduleType}'`);
     (error as Error & { code?: string }).code = 'ERR_UNSUPPORTED_PROVIDER_TYPE';
     throw error;

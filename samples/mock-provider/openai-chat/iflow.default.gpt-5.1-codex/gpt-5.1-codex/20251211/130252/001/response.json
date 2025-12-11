@@ -1,0 +1,20 @@
+{
+  "reqId": "openai-chat-iflow.default.gpt-5.1-codex-gpt-5.1-codex-20251211T130252-001",
+  "entry": "openai-chat",
+  "endpoint": "/v1/chat/completions",
+  "providerId": "iflow.default.gpt-5.1-codex",
+  "model": "gpt-5.1-codex",
+  "timestamp": "2025-12-11T13:02:52.029Z",
+  "status": 502,
+  "body": {
+    "error": {
+      "message": "[composite.response] ERR_COMPAT_PROTOCOL_DRIFT: openai-chat shape missing (messages/choices)",
+      "code": "ERR_COMPAT_PROTOCOL_DRIFT",
+      "request_id": "openai-chat-iflow.key1.deepseek-v3.2-deepseek-v3.2-20251211T210251588-001",
+      "provider_key": "iflow.key1.deepseek-v3.2",
+      "route_name": "default",
+      "provider_type": "openai",
+      "upstream_code": "ERR_COMPAT_PROTOCOL_DRIFT"
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "reqId": "openai-chat-qwen.default.gpt-5.1-codex-gpt-5.1-codex-20251211T130308-001",
+  "entry": "openai-chat",
+  "endpoint": "/v1/chat/completions",
+  "providerId": "qwen.default.gpt-5.1-codex",
+  "model": "gpt-5.1-codex",
+  "timestamp": "2025-12-11T13:03:08.836Z",
+  "status": 200,
+  "body": {
+    "id": "chatcmpl-d238af93-0546-4504-878d-52d18a7a3b02",
+    "object": "chat.completion",
+    "created": 1765458189,
+    "model": "gpt-5.1-codex",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "The current request contains a simple metadata structure with the key \"request\" having the value \"sample\". This indicates that the request is likely a placeholder or example, without specific operational data or parameters included.",
+          "tool_calls": []
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "completion_tokens": 40,
+      "prompt_tokens": 488,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "total_tokens": 528
+    },
+    "_transformed": true,
+    "_originalFormat": "qwen",
+    "_targetFormat": "openai"
+  }
+}

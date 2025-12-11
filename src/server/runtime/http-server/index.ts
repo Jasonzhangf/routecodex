@@ -256,6 +256,9 @@ export class RouteCodexHttpServer {
     const originalFamily = patched.providerFamily || patched.providerType;
     patched.providerFamily = originalFamily;
     patched.providerType = profile.protocol as ProviderRuntimeProfile['providerType'];
+    if (profile.moduleType && profile.moduleType.trim()) {
+      patched.providerModule = profile.moduleType.trim();
+    }
     if (!patched.baseUrl && profile.transport.baseUrl) {
       patched.baseUrl = profile.transport.baseUrl;
     }

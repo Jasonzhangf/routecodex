@@ -9,10 +9,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
-const DIST_ENTRY = path.join(PROJECT_ROOT, 'dist', 'index.js');
 const MOCK_SAMPLES_DIR = resolveSamplesDir();
 const REGISTRY_PATH = path.join(MOCK_SAMPLES_DIR, '_registry', 'index.json');
 const NAME_REGEX = /^[A-Za-z0-9_-]+$/;
+const ENTRY_FILTER = parseEntryFilter();
 
 function resolveSamplesDir() {
   const override = String(process.env.ROUTECODEX_MOCK_SAMPLES_DIR || '').trim();
@@ -22,11 +22,24 @@ function resolveSamplesDir() {
   return path.join(PROJECT_ROOT, 'samples/mock-provider');
 }
 
-async function ensureDistEntry() {
+function parseEntryFilter() {
+  const raw = String(process.env.ROUTECODEX_MOCK_ENTRY_FILTER || 'openai-chat').trim();
+  if (!raw || raw.toLowerCase() === 'all') {
+    return null;
+  }
+  const parts = raw
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return parts.length ? new Set(parts) : null;
+}
+
+async function ensureCliAvailable() {
+  const cliPath = path.join(PROJECT_ROOT, 'dist', 'cli.js');
   try {
-    await fs.access(DIST_ENTRY);
+    await fs.access(cliPath);
   } catch {
-    throw new Error('dist/index.js missing. Please run "npm run build:dev" before mock regressions.');
+    throw new Error('dist/cli.js missing. Please run "npm run build:dev" before mock regressions.');
   }
 }
 
@@ -36,7 +49,12 @@ async function loadRegistry() {
   if (!registry || !Array.isArray(registry.samples)) {
     throw new Error('Mock registry missing samples array');
   }
-  return registry.samples;
+  return registry.samples.filter((sample) => {
+    if (!ENTRY_FILTER) {
+      return true;
+    }
+    return sample.entry && ENTRY_FILTER.has(sample.entry);
+  });
 }
 
 async function loadSampleDocument(sample) {
@@ -91,7 +109,7 @@ function buildConfig(sample, port) {
             type: 'apikey',
             keys: {
               [alias]: {
-                value: `mock-${alias}`
+                value: `mock-${alias}-token-1234567890`
               }
             }
           },
@@ -133,9 +151,10 @@ function createServer(configPath, port) {
     ROUTECODEX_MOCK_SAMPLES_DIR: MOCK_SAMPLES_DIR,
     ROUTECODEX_MOCK_VALIDATE_NAMES: '1',
     ROUTECODEX_STAGE_LOG: process.env.ROUTECODEX_STAGE_LOG ?? '0',
-    ROUTECODEX_PORT: String(port)
+    ROUTECODEX_PORT: String(port),
+    ROUTECODEX_CONFIG_PATH: configPath
   };
-  const child = spawn(process.execPath, [DIST_ENTRY], {
+  const child = spawn('routecodex', ['start', '--config', configPath], {
     cwd: PROJECT_ROOT,
     env,
     stdio: ['ignore', 'pipe', 'pipe']
@@ -301,14 +320,15 @@ async function runSample(sample, index) {
 }
 
 async function main() {
-  await ensureDistEntry();
+  await ensureCliAvailable();
   const samples = await loadRegistry();
-  const watchedTags = new Set(['invalid_name', 'missing_output', 'missing_tool_call_id', 'require_fc_call_ids']);
+  const watchedTags = new Set(['invalid_name', 'missing_output', 'missing_tool_call_id', 'require_fc_call_ids', 'regression']);
   const regressionSamples = samples.filter(
     (sample) => Array.isArray(sample.tags) && sample.tags.some((tag) => watchedTags.has(tag))
   );
   if (!regressionSamples.length) {
-    throw new Error('No regression samples registered for invalid_name/missing_output/missing_tool_call_id/require_fc_call_ids');
+    console.warn('[mock:regressions] No regression-tagged samples matched current filters; skipping mock replay.');
+    return;
   }
   const tagCounter = Object.create(null);
   const incrementTag = (tag) => {

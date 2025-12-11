@@ -1,0 +1,39 @@
+{
+  "reqId": "openai-chat-modelscope.default.gpt-5.1-codex-gpt-5.1-codex-20251211T130305-001",
+  "entry": "openai-chat",
+  "endpoint": "/v1/chat/completions",
+  "providerId": "modelscope.default.gpt-5.1-codex",
+  "model": "gpt-5.1-codex",
+  "timestamp": "2025-12-11T13:03:05.802Z",
+  "status": 200,
+  "body": {
+    "id": "chatcmpl-ae35886b-1af6-4db9-9e33-d9b6ff757267",
+    "object": "chat.completion",
+    "created": 1765458185,
+    "model": "gpt-5.1-codex",
+    "system_fingerprint": "",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "role": null,
+          "content": "",
+          "tool_calls": null,
+          "function_calls": null
+        },
+        "finish_reason": "stop",
+        "message": {
+          "role": "assistant",
+          "content": "The metadata indicates that the current request is a sample request. There are no additional details or parameters provided in the metadata summary.",
+          "tool_calls": null,
+          "function_calls": null
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 488,
+      "completion_tokens": 25,
+      "total_tokens": 513
+    }
+  }
+}

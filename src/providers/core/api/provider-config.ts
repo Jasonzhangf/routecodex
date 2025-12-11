@@ -22,7 +22,7 @@ export interface OpenAIStandardConfig extends ModuleConfig {
    * 说明：为了保持 V1 兼容性，旧路径仍使用 'openai-standard'，新装配器会根据
    * providerType 选择具体的 *-http-provider 类型。
    */
-  type: 'openai-standard' | 'openai-http-provider' | 'responses-http-provider' | 'anthropic-http-provider' | 'gemini-http-provider' | 'iflow-http-provider';
+  type: 'openai-standard' | 'openai-http-provider' | 'responses-http-provider' | 'anthropic-http-provider' | 'gemini-http-provider' | 'iflow-http-provider' | 'mock-provider';
   config: {
     // 服务类型标识 (必需)
     providerType: ProviderType;
