@@ -15,7 +15,11 @@ const HOME = os.homedir();
 const PROVIDER_ROOT = path.join(HOME, '.routecodex', 'provider');
 const SNAPSHOT_ROOT = path.join(HOME, '.routecodex', 'golden_samples');
 const PROVIDER_GOLDEN_ROOT = path.join(SNAPSHOT_ROOT, 'provider_golden_samples');
-const CUSTOM_SAMPLE_ROOT = path.join(SNAPSHOT_ROOT, 'new');
+const CI_GOLDENS_ROOT = path.join(ROOT, 'samples', 'ci-goldens');
+const CUSTOM_SAMPLE_ROOTS = [
+  path.join(SNAPSHOT_ROOT, 'new'),
+  CI_GOLDENS_ROOT
+];
 const TEMP_ROOT = path.join(process.cwd(), 'tmp', 'provider-captures');
 const STAGE_DIRS = {
   'openai-chat': path.join(SNAPSHOT_ROOT, 'openai-chat'),
@@ -138,7 +142,7 @@ function ensureDir(p) {
 function listProviderConfigs() {
   const entries = [];
   if (!fs.existsSync(PROVIDER_ROOT)) {
-    throw new Error(`Provider directory missing: ${PROVIDER_ROOT}`);
+    return entries;
   }
   for (const dir of fs.readdirSync(PROVIDER_ROOT)) {
     const absDir = path.join(PROVIDER_ROOT, dir);
@@ -164,6 +168,39 @@ function listProviderConfigs() {
           doc
         });
       }
+    }
+  }
+  return entries;
+}
+
+function mapEntryTypeToProviderType(entryType) {
+  if (entryType === 'anthropic-messages') return 'anthropic-http-provider';
+  if (entryType === 'openai-responses') return 'responses-http-provider';
+  return 'openai-http-provider';
+}
+
+function listCiGoldenProviders() {
+  const entries = [];
+  if (!fs.existsSync(CI_GOLDENS_ROOT)) {
+    return entries;
+  }
+  for (const entryType of fs.readdirSync(CI_GOLDENS_ROOT)) {
+    const entryDir = path.join(CI_GOLDENS_ROOT, entryType);
+    if (!fs.statSync(entryDir).isDirectory()) continue;
+    for (const providerId of fs.readdirSync(entryDir)) {
+      const providerDir = path.join(entryDir, providerId);
+      if (!fs.statSync(providerDir).isDirectory()) continue;
+      entries.push({
+        dir: 'ci-goldens',
+        configFile: path.join(providerDir, 'request.sample.json'),
+        providerId,
+        providerConfig: {
+          id: providerId,
+          type: mapEntryTypeToProviderType(entryType)
+        },
+        doc: null,
+        entryTypeOverride: entryType
+      });
     }
   }
   return entries;
@@ -309,24 +346,30 @@ function diffJson(expected, actual, prefix = '<root>') {
 }
 
 function loadCustomSample(providerId, entryType) {
-  const dir = path.join(CUSTOM_SAMPLE_ROOT, entryType, providerId);
-  const samplePath = path.join(dir, 'request.sample.json');
-  if (!fs.existsSync(samplePath)) return null;
-  let stageFile;
-  const metaPath = path.join(dir, 'meta.json');
-  if (fs.existsSync(metaPath)) {
-    try {
-      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-      stageFile = meta?.stageFile;
-    } catch (error) {
-      console.warn(`[capture] custom meta parse failed for ${providerId}/${entryType}: ${error.message}`);
+  for (const root of CUSTOM_SAMPLE_ROOTS) {
+    if (!root) continue;
+    const dir = path.join(root, entryType, providerId);
+    const samplePath = path.join(dir, 'request.sample.json');
+    if (!fs.existsSync(samplePath)) {
+      continue;
     }
+    let stageFile;
+    const metaPath = path.join(dir, 'meta.json');
+    if (fs.existsSync(metaPath)) {
+      try {
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+        stageFile = meta?.stageFile || meta?.originStage || null;
+      } catch (error) {
+        console.warn(`[capture] custom meta parse failed for ${providerId}/${entryType}: ${error.message}`);
+      }
+    }
+    return {
+      body: JSON.parse(fs.readFileSync(samplePath, 'utf-8')),
+      stageFile,
+      dir
+    };
   }
-  return {
-    body: JSON.parse(fs.readFileSync(samplePath, 'utf-8')),
-    stageFile,
-    dir
-  };
+  return null;
 }
 
 function saveProviderSample(providerId, entryType, sourceStagePath, providedBody, updateGolden) {
@@ -427,22 +470,24 @@ async function captureProvider(providerEntry, entryType, port, options, sanitize
 async function main() {
   const options = parseArgs();
   ensureDir(TEMP_ROOT);
-  const providers = listProviderConfigs();
+  const providers = [
+    ...listProviderConfigs(),
+    ...listCiGoldenProviders()
+  ];
+  if (!providers.length) {
+    console.warn('[capture] no provider configs or ci goldens detected; exiting');
+    return;
+  }
   const captured = new Set();
   const results = [];
   let portBase = 5800;
 
   for (const entry of providers) {
-    const entryType = detectEntryType(entry.providerConfig);
+    const entryType = entry.entryTypeOverride || detectEntryType(entry.providerConfig);
     const entryDef = ENTRY_DEFS[entryType];
     if (!entryDef) continue;
     const captureKey = `${entry.providerId}:${entryType}`;
     if (captured.has(captureKey)) {
-      continue;
-    }
-    const sampleExists = fs.existsSync(entryDef.samplePath);
-    if (!sampleExists) {
-      results.push({ provider: entry.providerId, entryType, status: 'skipped', reason: 'sample missing' });
       continue;
     }
     const custom = loadCustomSample(entry.providerId, entryType);
@@ -457,6 +502,11 @@ async function main() {
         stagePath: custom.stageFile || '<custom>',
         mode: 'custom'
       });
+      continue;
+    }
+    const sampleExists = fs.existsSync(entryDef.samplePath);
+    if (!sampleExists) {
+      results.push({ provider: entry.providerId, entryType, status: 'skipped', reason: 'sample missing' });
       continue;
     }
     if (options.customOnly) {

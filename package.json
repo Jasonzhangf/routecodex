@@ -116,6 +116,7 @@
     "test:v2:protocol": "node tests/v2/dist/protocol-conversion-test.js",
     "test:comprehensive": "node scripts/v2-consistency/comprehensive-consistency-test.mjs",
     "test:golden": "node scripts/tests/golden-provider-cycle.mjs",
+    "sync:ci-goldens": "node scripts/tools/sync-ci-goldens.mjs",
     "mock:extract": "node scripts/mock-provider/extract.mjs",
     "mock:validate": "node scripts/mock-provider/validate.mjs",
     "mock:clean": "node scripts/mock-provider/clean.mjs"

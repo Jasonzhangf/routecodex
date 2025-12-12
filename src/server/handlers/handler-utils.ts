@@ -5,6 +5,7 @@ import type { IncomingHttpHeaders } from 'http';
 import type { HandlerContext, PipelineExecutionResult } from './types.js';
 import { mapErrorToHttp } from '../utils/http-error-mapper.js';
 import { logPipelineStage } from '../utils/stage-logger.js';
+import { buildInfo } from '../../build-info.js';
 import {
   generateRequestIdentifiers,
   resolveEffectiveRequestId
@@ -39,6 +40,9 @@ type FlushableResponse = Response & {
 function hasSsePayload(body: unknown): body is SsePayloadShape {
   return Boolean(body && typeof body === 'object' && '__sse_responses' in (body as Record<string, unknown>));
 }
+
+const SHOULD_LOG_HTTP_EVENTS = buildInfo.mode !== 'release'
+  || process.env.ROUTECODEX_HTTP_LOG_VERBOSE === '1';
 
 function formatRequestId(value?: string): string {
   return resolveEffectiveRequestId(value);
@@ -160,6 +164,9 @@ export function sendPipelineResponse(
 }
 
 export function logRequestStart(endpoint: string, requestId: string, meta?: RequestLogMeta): void {
+  if (!SHOULD_LOG_HTTP_EVENTS) {
+    return;
+  }
   const displayId = typeof meta?.clientRequestId === 'string' && meta.clientRequestId.trim()
     ? meta.clientRequestId.trim()
     : requestId;
@@ -168,10 +175,16 @@ export function logRequestStart(endpoint: string, requestId: string, meta?: Requ
 }
 
 export function logRequestComplete(endpoint: string, requestId: string, status: number): void {
+  if (!SHOULD_LOG_HTTP_EVENTS) {
+    return;
+  }
   console.log(`✅ [${endpoint}] request ${formatRequestId(requestId)} completed (status=${status})`);
 }
 
 export function logRequestError(endpoint: string, requestId: string, error: unknown): void {
+  if (!SHOULD_LOG_HTTP_EVENTS) {
+    return;
+  }
   const resolvedId = formatRequestId(requestId);
   const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
   console.error(`❌ [${endpoint}] request ${resolvedId} failed: ${message}`);

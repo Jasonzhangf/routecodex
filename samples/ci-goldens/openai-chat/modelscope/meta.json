@@ -1,0 +1,7 @@
+{
+  "providerId": "modelscope",
+  "entryType": "openai-chat",
+  "capturedAt": "2025-12-10T02:15:43.018Z",
+  "stageFile": "/Users/fanzhang/.routecodex/golden_samples/openai-chat/req_1765332932356_req_outbound_stage2_format_build.json",
+  "source": "ci-goldens"
+}

@@ -969,6 +969,12 @@ npm run test:coverage
 
 # 运行性能测试
 npm run test:performance
+
+# 黄金样本 + Mock 回归（覆盖 chat/responses/anthropic）
+npm run test:golden
+
+# 将 ~/.routecodex/golden_samples/new/** 同步到仓库内的 samples/ci-goldens/**
+npm run sync:ci-goldens
 ```
 
 #### Provider 专项测试
@@ -981,6 +987,22 @@ npm run test:performance
 | `tests/provider/provider-factory.test.ts` | 校验 ProviderFactory 的 Fail-Fast 行为，未知 `providerType/moduleType` 会直接抛错，防止静默回退。 |
 
 > 建议在跑专项测试前设置 `RCC_TEST_FAKE_OPENAI_COMPAT=1` 等 mock 环境变量，以避免真实兼容模块加载 import.meta。
+
+#### 黄金样本库与 Mock 测试
+
+`samples/ci-goldens/<entry>/<provider>/` 随仓库提供一套最小聊天请求，确保在完全离线的 CI
+环境也能复现工具字段、system 块与 streaming 行为。`npm run test:golden` 会：
+
+1. 执行 `scripts/tools/capture-provider-goldens.mjs --custom-only --update-golden`，把
+   `~/.routecodex/golden_samples/new/**` 或 `samples/ci-goldens/**` 中的最新请求复制到
+   `~/.routecodex/golden_samples/provider_golden_samples/`；
+2. 执行 `scripts/mock-provider/run-regressions.mjs`，通过 mock provider 跑完整的
+   chat/responses/anthropic 回归。
+
+若本地存在 `~/.routecodex/codex-samples`，脚本会提示额外运行
+`node scripts/mock-provider/capture-from-configs.mjs` 把真实 provider 录制转成 mock
+样本。若需要把最新的 `~/.routecodex/golden_samples/new/**` 同步进仓库，执行
+`npm run sync:ci-goldens`；更多细节参见 `docs/golden-ci-library.md`。
 
 ### 代码规范
 

@@ -1,0 +1,7 @@
+{
+  "providerId": "qwen",
+  "entryType": "openai-chat",
+  "capturedAt": "2025-12-10T02:15:49.773Z",
+  "stageFile": "/Users/fanzhang/.routecodex/golden_samples/openai-chat/req_1765332945039_req_outbound_stage2_format_build.json",
+  "source": "ci-goldens"
+}

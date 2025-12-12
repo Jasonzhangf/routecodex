@@ -1,0 +1,7 @@
+{
+  "providerId": "lmstudio.chat",
+  "entryType": "openai-chat",
+  "stageFile": "/Users/fanzhang/.routecodex/golden_samples/openai-chat/req_1765451080865_req_outbound_stage2_format_build.json",
+  "capturedAt": 1765451080874,
+  "source": "ci-goldens"
+}

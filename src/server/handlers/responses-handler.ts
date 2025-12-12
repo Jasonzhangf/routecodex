@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import type { HandlerContext } from './types.js';
 import {
-  nextRequestId,
+  nextRequestIdentifiers,
   respondWithPipelineError,
   sendPipelineResponse,
   logRequestStart,
@@ -32,7 +32,8 @@ export async function handleResponses(
   options: ResponsesHandlerOptions = {}
 ): Promise<void> {
   const entryEndpoint = options.entryEndpoint || '/v1/responses';
-  const requestId = nextRequestId(req.headers['x-request-id']);
+  const { clientRequestId, providerRequestId } = nextRequestIdentifiers(req.headers['x-request-id'], { entryEndpoint });
+  const requestId = providerRequestId;
   try {
     if (!ctx.executePipeline) {
       res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' } });
@@ -79,14 +80,7 @@ export async function handleResponses(
       applySystemPromptOverride(entryEndpoint, payload);
     }
 
-    logRequestStart(entryEndpoint, requestId, {
-      inboundStream: wantsStream,
-      outboundStream,
-      clientAcceptsSse: acceptsSse,
-      originalStream,
-      type: payload?.type
-    });
-    const result = await ctx.executePipeline({
+    const pipelineInput = {
       entryEndpoint,
       method: req.method,
       requestId,
@@ -103,9 +97,20 @@ export async function handleResponses(
         clientHeaders,
         responsesResume: resumeMeta
       }
+    };
+
+    logRequestStart(entryEndpoint, requestId, {
+      clientRequestId,
+      inboundStream: wantsStream,
+      outboundStream,
+      clientAcceptsSse: acceptsSse,
+      originalStream,
+      type: payload?.type
     });
-    logRequestComplete(entryEndpoint, requestId, result.status ?? 200);
-    sendPipelineResponse(res, result, requestId, { forceSSE: wantsStream });
+    const result = await ctx.executePipeline(pipelineInput);
+    const effectiveRequestId = pipelineInput.requestId;
+    logRequestComplete(entryEndpoint, effectiveRequestId, result.status ?? 200);
+    sendPipelineResponse(res, result, effectiveRequestId, { forceSSE: wantsStream });
   } catch (error: unknown) {
     logRequestError(entryEndpoint, requestId, error);
     if (res.headersSent) {

@@ -1,0 +1,8 @@
+{
+  "providerId": "gemini",
+  "entryType": "openai-chat",
+  "stageFile": "/Users/fanzhang/.routecodex/golden_samples/openai-responses/req_1765451484857_req_outbound_stage2_format_build.json",
+  "capturedAt": 1765451484865,
+  "notes": "model overridden to models/gemini-2.0-flash because preview endpoints return 404",
+  "source": "ci-goldens"
+}

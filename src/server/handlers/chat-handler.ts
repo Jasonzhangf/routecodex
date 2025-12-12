@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import type { HandlerContext } from './types.js';
 import {
-  nextRequestId,
+  nextRequestIdentifiers,
   respondWithPipelineError,
   sendPipelineResponse,
   logRequestStart,
@@ -19,7 +19,8 @@ type ChatCompletionPayload = {
 
 export async function handleChatCompletions(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
   const entryEndpoint = '/v1/chat/completions';
-  const requestId = nextRequestId(req.headers['x-request-id']);
+  const { clientRequestId, providerRequestId } = nextRequestIdentifiers(req.headers['x-request-id'], { entryEndpoint });
+  const requestId = providerRequestId;
   try {
     if (!ctx.executePipeline) {
       res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' } });
@@ -41,6 +42,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
     applySystemPromptOverride(entryEndpoint, payload);
 
     logRequestStart(entryEndpoint, requestId, {
+      clientRequestId,
       inboundStream: wantsSSE,
       outboundStream,
       clientAcceptsSse: acceptsSse,

@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { Readable } from 'node:stream';
 import type { HandlerContext } from './types.js';
 import {
-  nextRequestId,
+  nextRequestIdentifiers,
   respondWithPipelineError,
   sendPipelineResponse,
   logRequestStart,
@@ -27,7 +27,8 @@ const inboundRateLimiter = new SlidingWindowRateLimiter({
 
 export async function handleMessages(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
   const entryEndpoint = '/v1/messages';
-  const requestId = nextRequestId(req.headers['x-request-id']);
+  const { clientRequestId, providerRequestId } = nextRequestIdentifiers(req.headers['x-request-id'], { entryEndpoint });
+  const requestId = providerRequestId;
   try {
     if (!ctx.executePipeline) {
       res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' } });
@@ -98,6 +99,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     const outboundStream = clientRequestedStream;
 
     logRequestStart(entryEndpoint, requestId, {
+      clientRequestId,
       inboundStream,
       outboundStream,
       model: inferredModel ?? jsonPayload?.model

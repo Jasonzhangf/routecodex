@@ -1,0 +1,8 @@
+{
+  "providerId": "glm-anthropic",
+  "entryType": "anthropic-messages",
+  "stageFile": null,
+  "capturedAt": 1765458646567,
+  "notes": "Manual sample with matching tool_use/tool_result pairs",
+  "source": "ci-goldens"
+}
