@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>/v1/messages Streaming Flow</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>mermaid.initialize({ startOnLoad: true, theme: 'default' });</script>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 24px; }
+      pre { background: #f5f5f5; padding: 16px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>/v1/messages Streaming Pipeline</h1>
+    <pre class="mermaid">
+flowchart TD
+    A["Client Request\n(JSON or SSE body)\nfields: messages/tools/tool_choice/stream"] --> B
+    B["HTTP Handler\nsrc/server/handlers/messages-handler.ts\nstream := body.stream\nmetadata.stream/inbound/outbound := stream"] --> C
+    C["req_inbound_stage1/2\nChatEnvelope parameters.stream := stream\ncollect tools/tool_outputs/tool_choice"] --> D
+    D["req_process_stage1_tool_governance\nTool filters adjust tool list/tool_choice\nstream untouched"] --> E
+    E["req_outbound_stage1/2\nBuild provider payload\npayload.stream := override(supportsStreaming) or stream"] --> F
+    F["Provider Upstream\nSSE or JSON depending on payload.stream\nreturns SSE/JSON with tool_calls & finish_reason"] --> G
+    G["resp_inbound stages\nDecode SSE, map to Chat response\ncapture tool_calls/tool outputs"] --> H
+    H["resp_process stages\nTool governance validation\nBuild final Chat response"] --> I
+    I["resp_outbound_stage1\nMap Chat response to client protocol\n(Anthropic/OpenAI/Responses)"] --> J
+    J["resp_outbound_stage2\nif metadata.stream == true -> emit SSE\nelse -> JSON"] --> K
+    K["HTTP Response\nsendPipelineResponse\nforceSSE := metadata.stream"]
+    </pre>
+  </body>
+</html>

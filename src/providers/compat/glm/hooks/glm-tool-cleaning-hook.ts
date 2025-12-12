@@ -29,16 +29,6 @@ export class iFlowToolCleaningHook extends BaseHook {
   readonly stage = 'incoming_preprocessing';
   readonly priority = 100;
 
-  private readonly MAX_TOOL_CONTENT_LENGTH = 512;
-  private readonly NOISE_PATTERNS = [
-    'failed in sandbox',
-    'unsupported call',
-    '工具调用不可用',
-    'tool execution failed',
-    'function not available'
-  ];
-  private readonly TRUNCATION_MARKER = '...[truncated to 512B]';
-
   async execute(data: UnknownObject, context: CompatibilityContext): Promise<UnknownObject> {
     this.checkInitialized();
 
@@ -193,20 +183,7 @@ export class iFlowToolCleaningHook extends BaseHook {
   }
 
   private cleanToolContent(content: string): string {
-    let cleanedContent = content;
-
-    for (const noise of this.NOISE_PATTERNS) {
-      const regex = new RegExp(noise, 'gi');
-      cleanedContent = cleanedContent.replace(regex, '');
-    }
-
-    cleanedContent = cleanedContent.trim().replace(/\s+/g, ' ');
-
-    if (cleanedContent.length > this.MAX_TOOL_CONTENT_LENGTH) {
-      cleanedContent = cleanedContent.slice(0, this.MAX_TOOL_CONTENT_LENGTH) + this.TRUNCATION_MARKER;
-    }
-
-    return cleanedContent;
+    return content;
   }
 
   private cleanAssistantContent(content: unknown, messages: unknown[], currentIndex: number): string {

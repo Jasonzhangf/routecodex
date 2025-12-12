@@ -12,12 +12,18 @@ import {
 } from './handler-utils.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
 import { parseSseJsonRequest, createReadableFromSse } from '../utils/sse-request-parser.js';
+import { SlidingWindowRateLimiter } from '../utils/rate-limiter.js';
 
 type MessagesPayload = {
   stream?: boolean;
   model?: string;
   [key: string]: unknown;
 };
+
+const inboundRateLimiter = new SlidingWindowRateLimiter({
+  limit: Number(process.env.ROUTECODEX_MESSAGES_RPM_LIMIT || 10),
+  intervalMs: 60_000
+});
 
 export async function handleMessages(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
   const entryEndpoint = '/v1/messages';
@@ -36,6 +42,20 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     let originalPayload: MessagesPayload | undefined;
     let rawRequestMetadata: unknown;
     let inferredModel: string | undefined;
+
+    const throttleResult = inboundRateLimiter.tryAcquire();
+    if (!throttleResult.allowed) {
+      const retryAfterMs = throttleResult.retryAfterMs ?? inboundRateLimiter.intervalMs;
+      res.setHeader('Retry-After', Math.ceil(retryAfterMs / 1000).toString());
+      res.status(429).json({
+        error: {
+          message: 'Too many /v1/messages requests; limit 10 per minute. Please retry later.',
+          code: 'rate_limited',
+          type: 'capacity_error'
+        }
+      });
+      return;
+    }
 
     if (isSseRequest) {
       try {
@@ -69,21 +89,17 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     }
 
     const clientHeaders = captureClientHeaders(req.headers);
-    const acceptsSse = typeof req.headers['accept'] === 'string'
-      && (req.headers['accept'] as string).includes('text/event-stream');
-    const originalStream = isSseRequest || jsonPayload?.stream === true;
-    const inboundStream = acceptsSse || originalStream;
-    const outboundStream = originalStream;
-    if (acceptsSse && jsonPayload && !originalStream) {
-      jsonPayload.stream = true;
+    const clientRequestedStream = Boolean(isSseRequest || jsonPayload?.stream === true);
+    if (jsonPayload) {
+      jsonPayload.stream = clientRequestedStream;
     }
-    const wantsStream = inboundStream;
+    const inboundStream = clientRequestedStream;
+    const wantsStream = clientRequestedStream;
+    const outboundStream = clientRequestedStream;
 
     logRequestStart(entryEndpoint, requestId, {
-      inboundStream: wantsStream,
+      inboundStream,
       outboundStream,
-      clientAcceptsSse: acceptsSse,
-      originalStream,
       model: inferredModel ?? jsonPayload?.model
     });
     const result = await ctx.executePipeline({
@@ -95,8 +111,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       body: pipelineBody,
       metadata: {
         stream: wantsStream,
-        clientStream: acceptsSse || undefined,
-        inboundStream: wantsStream,
+        inboundStream,
         outboundStream,
         providerProtocol: 'anthropic-messages',
         __raw_request_body: rawRequestMetadata,

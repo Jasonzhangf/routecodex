@@ -10,6 +10,8 @@
 import { HttpTransportProvider } from './http-transport-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
+import type { ProviderContext } from '../api/provider-types.js';
+import type { UnknownObject } from '../../../types/common-types.js';
 import { AnthropicProtocolClient } from '../../../client/anthropic/anthropic-protocol-client.js';
 
 export class AnthropicHttpProvider extends HttpTransportProvider {
@@ -22,5 +24,35 @@ export class AnthropicHttpProvider extends HttpTransportProvider {
       }
     };
     super(cfg, dependencies, 'anthropic-http-provider', new AnthropicProtocolClient());
+  }
+
+  protected override wantsUpstreamSse(request: UnknownObject, context: ProviderContext): boolean {
+    const streamFromContext = this.extractStreamFlag(context.metadata);
+    if (typeof streamFromContext === 'boolean') {
+      return streamFromContext;
+    }
+    const streamFromRequest = this.extractStreamFlag(request);
+    return typeof streamFromRequest === 'boolean' ? streamFromRequest : false;
+  }
+
+  protected override prepareSseRequestBody(body: UnknownObject): void {
+    if (body && typeof body === 'object') {
+      (body as Record<string, unknown>).stream = true;
+    }
+  }
+
+  private extractStreamFlag(source: UnknownObject | ProviderContext['metadata']): boolean | undefined {
+    if (!source || typeof source !== 'object') {
+      return undefined;
+    }
+    const metadata =
+      'metadata' in source && typeof (source as { metadata?: unknown }).metadata === 'object'
+        ? (source as { metadata?: Record<string, unknown> }).metadata
+        : (source as Record<string, unknown>);
+    if (!metadata || typeof metadata !== 'object') {
+      return undefined;
+    }
+    const value = (metadata as Record<string, unknown>).stream;
+    return typeof value === 'boolean' ? value : undefined;
   }
 }

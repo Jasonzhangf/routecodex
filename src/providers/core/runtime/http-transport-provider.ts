@@ -703,16 +703,21 @@ export class HttpTransportProvider extends BaseProvider {
     );
 
     const processedRequest = httpRequestResult.data as UnknownObject;
+    const wantsSse = this.wantsUpstreamSse(processedRequest, context);
 
     // 仅传入 endpoint，让 HttpClient 按 baseUrl 进行拼接；避免 full URL 再次拼接导致 /https:/ 重复
     const defaultEndpoint = this.getEffectiveEndpoint();
     const endpoint = this.resolveRequestEndpoint(processedRequest, defaultEndpoint);
     const headers = await this.buildRequestHeaders();
-    const finalHeaders = await this.finalizeRequestHeaders(headers, processedRequest);
+    let finalHeaders = await this.finalizeRequestHeaders(headers, processedRequest);
+    finalHeaders = this.applyStreamModeHeaders(finalHeaders, wantsSse);
     const targetUrl = `${this.getEffectiveBaseUrl().replace(/\/$/, '')}/${endpoint.startsWith('/') ? endpoint.slice(1) : endpoint}`;
 
     // Flatten request body to standard OpenAI Chat JSON
     const finalBody = this.buildHttpRequestBody(processedRequest);
+    if (wantsSse) {
+      this.prepareSseRequestBody(finalBody, context);
+    }
 
     const entryEndpoint = this.getEntryEndpointFromPayload(processedRequest);
 
@@ -731,22 +736,37 @@ export class HttpTransportProvider extends BaseProvider {
       });
     } catch { /* non-blocking */ }
 
-    // 发送HTTP请求（统一非流式）
+    // 发送HTTP请求（根据是否需要 SSE 决定传输模式）
     let response: unknown;
     try {
-      response = await this.httpClient.post(endpoint, finalBody, finalHeaders);
-      // 快照：provider-response
-      try {
-        await writeProviderSnapshot({
-          phase: 'provider-response',
-          requestId: context.requestId,
-          data: response,
-          headers: finalHeaders,
-          url: targetUrl,
-          entryEndpoint,
-          clientRequestId
-        });
-      } catch { /* non-blocking */ }
+      if (wantsSse) {
+        const stream = await this.httpClient.postStream(endpoint, finalBody, finalHeaders);
+        response = await this.wrapUpstreamSseResponse(stream, context);
+        try {
+          await writeProviderSnapshot({
+            phase: 'provider-response',
+            requestId: context.requestId,
+            data: { mode: 'sse' },
+            headers: finalHeaders,
+            url: targetUrl,
+            entryEndpoint,
+            clientRequestId
+          });
+        } catch { /* non-blocking */ }
+      } else {
+        response = await this.httpClient.post(endpoint, finalBody, finalHeaders);
+        try {
+          await writeProviderSnapshot({
+            phase: 'provider-response',
+            requestId: context.requestId,
+            data: response,
+            headers: finalHeaders,
+            url: targetUrl,
+            entryEndpoint,
+            clientRequestId
+          });
+        } catch { /* non-blocking */ }
+      }
     } catch (error) {
       // OAuth token 失效：尝试刷新/重获并重试一次
       try {
@@ -759,7 +779,24 @@ export class HttpTransportProvider extends BaseProvider {
           );
           if (shouldRetry) {
             const retryHeaders = await this.buildRequestHeaders();
-            const finalRetryHeaders = await this.finalizeRequestHeaders(retryHeaders, processedRequest);
+            let finalRetryHeaders = await this.finalizeRequestHeaders(retryHeaders, processedRequest);
+            finalRetryHeaders = this.applyStreamModeHeaders(finalRetryHeaders, wantsSse);
+            if (wantsSse) {
+              const stream = await this.httpClient.postStream(endpoint, finalBody, finalRetryHeaders);
+              const wrapped = await this.wrapUpstreamSseResponse(stream, context);
+              try {
+                await writeProviderSnapshot({
+                  phase: 'provider-response',
+                  requestId: context.requestId,
+                  data: { mode: 'sse', retry: true },
+                  headers: finalRetryHeaders,
+                  url: targetUrl,
+                  entryEndpoint,
+                  clientRequestId
+                });
+              } catch { /* non-blocking */ }
+              return wrapped;
+            }
             response = await this.httpClient.post(endpoint, finalBody, finalRetryHeaders);
             try {
               await writeProviderSnapshot({
@@ -849,6 +886,34 @@ export class HttpTransportProvider extends BaseProvider {
     try { /* no-op */ } catch { /* ignore */ }
 
     return response;
+  }
+
+  protected wantsUpstreamSse(_request: UnknownObject, _context: ProviderContext): boolean {
+    return false;
+  }
+
+  protected applyStreamModeHeaders(headers: Record<string, string>, wantsSse: boolean): Record<string, string> {
+    const normalized = { ...headers };
+    const acceptKey = Object.keys(normalized).find((key) => key.toLowerCase() === 'accept');
+    if (wantsSse) {
+      if (acceptKey) {
+        delete normalized[acceptKey];
+      }
+      normalized['Accept'] = 'text/event-stream';
+      return normalized;
+    }
+    if (!acceptKey) {
+      normalized['Accept'] = 'application/json';
+    }
+    return normalized;
+  }
+
+  protected prepareSseRequestBody(_body: UnknownObject, _context: ProviderContext): void {
+    // default no-op
+  }
+
+  protected async wrapUpstreamSseResponse(stream: NodeJS.ReadableStream, _context: ProviderContext): Promise<UnknownObject> {
+    return { __sse_responses: stream } as UnknownObject;
   }
 
   protected async performHealthCheck(url: string): Promise<boolean> {
