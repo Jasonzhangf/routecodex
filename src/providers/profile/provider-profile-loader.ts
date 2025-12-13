@@ -173,6 +173,16 @@ function extractCompatProfiles(raw: UnknownRecord): string[] {
   if (direct) {
     return direct;
   }
+  const compatArrayAliases = [
+    pickStringArray(raw.compat),
+    pickStringArray(raw.compatibilityProfile),
+    pickStringArray(raw.compatibility_profile)
+  ];
+  for (const alias of compatArrayAliases) {
+    if (alias && alias.length) {
+      return alias;
+    }
+  }
   const compatNode = raw.compatibility;
   if (Array.isArray(compatNode)) {
     const arr = pickStringArray(compatNode);
@@ -180,10 +190,16 @@ function extractCompatProfiles(raw: UnknownRecord): string[] {
       return arr;
     }
   }
-  if (isRecord(compatNode) && Array.isArray(compatNode.profiles)) {
-    const arr = pickStringArray(compatNode.profiles);
-    if (arr) {
-      return arr;
+  if (isRecord(compatNode)) {
+    if (Array.isArray(compatNode.profiles)) {
+      const arr = pickStringArray(compatNode.profiles);
+      if (arr) {
+        return arr;
+      }
+    }
+    const single = pickString(compatNode.profile ?? compatNode.id);
+    if (single) {
+      return [single];
     }
   }
   return [];

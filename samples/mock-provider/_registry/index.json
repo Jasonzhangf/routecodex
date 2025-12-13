@@ -502,6 +502,28 @@
       "tags": [
         "regression"
       ]
+    },
+    {
+      "reqId": "openai-responses-mock.apply_patch.toolloop-20251212T234356590-002",
+      "entry": "openai-responses",
+      "providerId": "mock.apply_patch.toolloop",
+      "model": "toolloop",
+      "timestamp": "2025-12-12T23:43:56.590Z",
+      "path": "openai-responses/mock.apply_patch.toolloop/toolloop/20251212/234356/002",
+      "tags": [
+        "apply_patch_loop"
+      ]
+    },
+    {
+      "reqId": "openai-responses.submit_tool_outputs-mock.apply_patch.toolloop-20251212T234358000-002",
+      "entry": "openai-responses.submit_tool_outputs",
+      "providerId": "mock.apply_patch.toolloop",
+      "model": "toolloop",
+      "timestamp": "2025-12-12T23:43:58.000Z",
+      "path": "openai-responses.submit_tool_outputs/mock.apply_patch.toolloop/toolloop/20251212/234358/002",
+      "tags": [
+        "apply_patch_loop_submit"
+      ]
     }
   ]
 }

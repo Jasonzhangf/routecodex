@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { TextDecoder } from 'node:util';
 import { Readable } from 'node:stream';
@@ -14,6 +15,11 @@ const PROJECT_ROOT = path.resolve(__dirname, '../..');
 const MOCK_SAMPLES_DIR = path.join(PROJECT_ROOT, 'samples/mock-provider');
 const PORT = Number(process.env.RCC_TOOL_LOOP_PORT || 5555);
 const BASE_URL = `http://127.0.0.1:${PORT}`;
+const HOME = os.homedir();
+const STAGE_DIR = path.join(HOME, '.routecodex', 'golden_samples', 'openai-responses');
+const STAGE_SUFFIX = '_req_outbound_stage2_format_build.json';
+const STAGE1_SUFFIX = '_req_outbound_stage1_semantic_map.json';
+const MOCK_PROVIDER_ID = 'mock.apply_patch.toolloop';
 
 function listProcessesOnPort(port) {
   try {
@@ -57,6 +63,84 @@ async function ensurePortFree(port) {
     }
   }
   await delay(200);
+}
+
+async function snapshotStageFiles() {
+  try {
+    const entries = await fs.readdir(STAGE_DIR);
+    return new Set(entries.filter((name) => name.endsWith(STAGE_SUFFIX)));
+  } catch {
+    return new Set();
+  }
+}
+
+async function diffStageFiles(beforeSet) {
+  try {
+    const entries = await fs.readdir(STAGE_DIR);
+    return entries
+      .filter((name) => name.endsWith(STAGE_SUFFIX))
+      .filter((name) => !beforeSet.has(name));
+  } catch {
+    return [];
+  }
+}
+
+async function waitForMockStage(beforeSet, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const candidates = await diffStageFiles(beforeSet);
+    for (const name of candidates) {
+      const stage1Name = name.replace(STAGE_SUFFIX, STAGE1_SUFFIX);
+      const stage1Path = path.join(STAGE_DIR, stage1Name);
+      try {
+        await fs.access(stage1Path);
+      } catch {
+        continue;
+      }
+      let providerId = '';
+      try {
+        const stage1Doc = JSON.parse(await fs.readFile(stage1Path, 'utf-8'));
+        providerId = stage1Doc?.body?.meta?.context?.providerId ?? '';
+      } catch {
+        providerId = '';
+      }
+      if (typeof providerId === 'string' && providerId === MOCK_PROVIDER_ID) {
+        return path.join(STAGE_DIR, name);
+      }
+    }
+    await delay(250);
+  }
+  throw new Error('mock apply_patch stage snapshot not found (enable ROUTECODEX_STAGE_LOG)');
+}
+
+async function verifyApplyPatchTool(stagePath) {
+  const raw = await fs.readFile(stagePath, 'utf-8');
+  const doc = JSON.parse(raw);
+  const payload = doc?.body ?? doc;
+  const tools = Array.isArray(payload?.tools) ? payload.tools : [];
+  if (!tools.length) {
+    throw new Error('provider payload missing tools array');
+  }
+  const match = tools.find((tool) => {
+    const name = tool?.name || tool?.function?.name;
+    return typeof name === 'string' && name.trim() === 'apply_patch';
+  });
+  if (!match) {
+    throw new Error('apply_patch tool declaration missing in provider payload');
+  }
+  const params = match.parameters || match.function?.parameters;
+  const props = params?.properties;
+  const inputField = props?.input;
+  if (!inputField || typeof inputField !== 'object') {
+    throw new Error('apply_patch.parameters.input missing');
+  }
+  if (String(inputField.type).toLowerCase() !== 'string') {
+    throw new Error('apply_patch.parameters.input must be a string');
+  }
+  const required = Array.isArray(params?.required) ? params.required.map((v) => String(v)) : [];
+  if (!required.includes('input')) {
+    throw new Error('apply_patch.parameters.required must include \"input\"');
+  }
 }
 
 function buildMockConfig(port) {
@@ -210,11 +294,12 @@ async function requestApplyPatchLoop() {
       responseId = String(data?.response?.id || '');
       console.log(`[tool-loop] response.created id=${responseId}`);
     } else if (ev.event === 'response.required_action') {
-      toolCalls = Array.isArray(data?.required_action?.submit_tool_outputs?.tool_calls)
-        ? data.required_action.submit_tool_outputs.tool_calls
-        : [];
-      console.log(`[tool-loop] required_action tool_calls=${toolCalls.length}`);
-      break;
+      if (!toolCalls.length) {
+        toolCalls = Array.isArray(data?.required_action?.submit_tool_outputs?.tool_calls)
+          ? data.required_action.submit_tool_outputs.tool_calls
+          : [];
+        console.log(`[tool-loop] required_action tool_calls=${toolCalls.length}`);
+      }
     }
   }
 
@@ -231,7 +316,8 @@ async function requestApplyPatchLoop() {
   let patchText = '';
   try {
     const parsed = JSON.parse(firstCall.function.arguments || '{}');
-    patchText = String(parsed?.patch || '');
+    const diffText = parsed?.input ?? parsed?.patch;
+    patchText = typeof diffText === 'string' ? diffText : '';
   } catch {
     throw new Error('apply_patch.arguments JSON parse failed');
   }
@@ -264,12 +350,12 @@ function buildResponsesPayload() {
         parameters: {
           type: 'object',
           properties: {
-            patch: {
+            input: {
               type: 'string',
               description: 'Unified diff patch content (*** Begin Patch ... *** End Patch)'
             }
           },
-          required: ['patch'],
+          required: ['input'],
           additionalProperties: false
         },
         strict: true
@@ -336,13 +422,18 @@ async function main() {
       ROUTECODEX_MOCK_CONFIG_PATH: file,
       ROUTECODEX_MOCK_SAMPLES_DIR: MOCK_SAMPLES_DIR,
       ROUTECODEX_MOCK_VALIDATE_NAMES: '1',
+      ROUTECODEX_CONFIG_PATH: file,
       ROUTECODEX_PORT: String(PORT),
-      ROUTECODEX_STAGE_LOG: process.env.ROUTECODEX_STAGE_LOG ?? '0'
+      ROUTECODEX_STAGE_LOG: '1'
     }
   });
   try {
     await waitForHealth(server);
+    const stageBefore = await snapshotStageFiles();
     const { responseId, toolCalls, patchText } = await requestApplyPatchLoop();
+    const stagePath = await waitForMockStage(stageBefore);
+    await verifyApplyPatchTool(stagePath);
+    console.log(`[tool-loop] verified provider payload stage → ${stagePath}`);
     await submitToolOutputs(responseId, toolCalls, patchText);
     console.log('[tool-loop] apply_patch loop PASSED');
   } finally {

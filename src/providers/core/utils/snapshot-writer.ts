@@ -1,7 +1,9 @@
 import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { PassThrough } from 'node:stream';
 import { writeSnapshotViaHooks } from '../../../modules/llmswitch/bridge.js';
+import { buildInfo } from '../../../build-info.js';
 
 type Phase = 'provider-request' | 'provider-response' | 'provider-error';
 type ClientPhase = 'client-request';
@@ -123,6 +125,108 @@ export async function writeProviderSnapshot(options: {
       // non-blocking fallback failure
     }
   }
+}
+
+type StreamSnapshotOptions = {
+  requestId: string;
+  headers?: Record<string, unknown>;
+  url?: string;
+  entryEndpoint?: string;
+  clientRequestId?: string;
+  extra?: Record<string, unknown>;
+};
+
+function toBuffer(chunk: unknown): Buffer {
+  if (Buffer.isBuffer(chunk)) {
+    return chunk;
+  }
+  if (chunk instanceof Uint8Array) {
+    return Buffer.from(chunk);
+  }
+  if (typeof chunk === 'string') {
+    return Buffer.from(chunk, 'utf8');
+  }
+  if (chunk === undefined || chunk === null) {
+    return Buffer.alloc(0);
+  }
+  return Buffer.from(String(chunk), 'utf8');
+}
+
+export function shouldCaptureProviderStreamSnapshots(): boolean {
+  const flag = (process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS || '').trim().toLowerCase();
+  if (flag === '1' || flag === 'true') {
+    return true;
+  }
+  if (flag === '0' || flag === 'false') {
+    return false;
+  }
+  return buildInfo.mode !== 'release';
+}
+
+export function attachProviderSseSnapshotStream(
+  stream: NodeJS.ReadableStream,
+  options: StreamSnapshotOptions
+): NodeJS.ReadableStream {
+  const tee = new PassThrough();
+  const capture = new PassThrough();
+  stream.pipe(tee);
+  stream.pipe(capture);
+
+  const chunks: Buffer[] = [];
+  capture.on('data', (chunk) => {
+    const buf = toBuffer(chunk);
+    if (buf.length) {
+      chunks.push(buf);
+    }
+  });
+
+  let flushed = false;
+  const flushSnapshot = (error?: unknown) => {
+    if (flushed) {
+      return;
+    }
+    flushed = true;
+    try {
+      stream.unpipe(capture);
+    } catch {
+      /* ignore unpipe failures */
+    }
+    capture.removeAllListeners();
+    const raw = chunks.length ? Buffer.concat(chunks).toString('utf8') : '';
+    const payload: Record<string, unknown> = { mode: 'sse' };
+    if (raw) {
+      payload.raw = raw;
+    }
+    if (options.extra) {
+      Object.assign(payload, options.extra);
+    }
+    if (error) {
+      payload.error = error instanceof Error ? error.message : String(error);
+    }
+    void writeProviderSnapshot({
+      phase: 'provider-response',
+      requestId: options.requestId,
+      data: payload,
+      headers: options.headers,
+      url: options.url,
+      entryEndpoint: options.entryEndpoint,
+      clientRequestId: options.clientRequestId
+    }).catch(() => {
+      /* ignore snapshot errors */
+    });
+  };
+
+  const handleError = (error?: unknown) => {
+    flushSnapshot(error);
+  };
+
+  capture.on('end', () => flushSnapshot());
+  capture.on('close', () => flushSnapshot());
+  capture.on('error', handleError);
+  stream.on('error', handleError);
+  tee.on('error', handleError);
+
+  return tee;
 }
 
 export async function writeProviderRetrySnapshot(options: {

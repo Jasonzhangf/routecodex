@@ -82,7 +82,7 @@ build_project() {
     # 构建项目
     echo "🔨 编译TypeScript..."
     # dev 包：显式使用 BUILD_MODE=dev 以便在编译期区分 dev/release
-   BUILD_MODE=dev timeout 300 npm run build || {
+   BUILD_MODE=dev ROUTECODEX_SKIP_AUTO_BUMP=1 timeout 300 npm run build || {
        echo "❌ 构建超时或失败"
        echo "💡 尝试手动构建：npm run build"
        exit 1

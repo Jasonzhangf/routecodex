@@ -1,203 +1,211 @@
-# RouteCodex - 多提供商OpenAI代理服务器
+# RouteCodex – 多提供商 AI 代理
 
-[![npm version](https://badge.fury.io/js/routecodex.svg)](https://badge.fury.io/js/routecodex)
+[![npm version](https://badge.fury.io/js/%40jsonstudio%2Frcc.svg)](https://www.npmjs.com/package/@jsonstudio/rcc)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9+-blue.svg)](https://www.typescriptlang.org/)
 
-RouteCodex是一个功能强大的多提供商OpenAI代理服务器，基于配置驱动的V2架构，支持原生dry-run调试能力、动态路由分类、4层管道架构和实时监控。提供统一的API接口，无缝集成多个AI服务提供商。
+RouteCodex 是 JSON Studio 推出的多提供商 AI 代理，提供统一的 OpenAI / Anthropic / Responses / Gemini 入口，自动完成协议转换、工具治理、速率控制与快照审计。项目包含两个分发形态：
 
-当前开发版本：`0.87.1`
+- **Release CLI (`@jsonstudio/rcc`)**：给终端用户的 npm 包，自带 `rcc` 命令。
+- **Dev Worktree (`routecodex`)**：本仓库源码，开发者可修改、构建并贡献。
 
-## LLM Switch（前后半段）总览
+本文档面向 release 使用者与贡献者，覆盖架构、安装、配置与常见操作。
 
-- 前半段（Conversion）
-  - Chat：保持 OpenAI Chat 标准；删除 stream，统一非流
-  - Responses：instructions + input → Chat.messages（仅形状转换，不做工具治理/兜底）
-  - Anthropic：Claude → Chat（仅形状转换）
-  - SSE：默认不上游直通；需要时前半段合成为非流 JSON
+---
 
-- 后半段（Chat Pipeline，唯一治理点）
-  - 请求：canonicalize + arguments 修复 + MCP 两步暴露
-  - Provider：仅 HTTP 转发与快照
-  - 响应：统一 Chat 形状，工具结果与 tool_call_id 配对
-  - Responses：从 Chat 反向映射 required_action/items（仅映射，不治理）
+## 架构总览
 
-文档与代码参考：
-- 核心实现与详细说明：`sharedmodule/llmswitch-core/`
-- 源码文档：`sharedmodule/llmswitch-core/README.md`
+### 单一执行路径
 
-### Hub Pipeline 架构（唯一入口）
-
-- **唯一入口**：HTTP handler 直接调用 `sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/hub-pipeline`，本仓库不再维护自研 pipeline/blueprint。
-- **配置流**：`routecodex-config-loader` 读取用户配置，传给 `bootstrapVirtualRouterConfig`，由 llmswitch-core 输出 `VirtualRouterConfig + targetRuntime` 并注入 Hub Pipeline。
-- **节点链路（由 llmswitch-core 内部维护）**
-  - `SSE Input`：SSE ↔ JSON 转换、旁路透传。
-  - `Input Nodes`：解析 Chat / Responses / Messages 请求，生成 canonical `standardizedRequest`。
-  - `Chat Process`：唯一工具治理点，处理 tool_calls、MCP 规则、上下文压缩。
-  - `Virtual Router Process`：分类、熔断、挑选 provider，并覆写 `request.model`、写入 `target.runtimeKey`。
-  - `Output/SSE Nodes`：把 `processedRequest` 还原为目标协议，生成 usage、SSE 流和最终响应。
-- **Host 职责**：`RouteCodexHttpServer` 只负责 HTTP/SSE 封装与 Provider runtime 映射，工具治理与路由决策全部在 llmswitch-core 完成。
-
-### Reasoning / Tool 骨架
-
-- **入站统一拆分**：`sharedmodule/llmswitch-core/src/conversion/shared/reasoning-normalizer.ts` 会在 Chat/Responses/Anthropic/Gemini 入站阶段，把 `<think>/<reasoning>` 段落剥离到 `reasoning_content`，并同步处理 instructions/input/required_action。
-- **工具/理由写回**：`reasoning-tool-normalizer.ts` 与 `tool-call-utils.ts` 负责把 reasoning 文本中的工具片段转换为 `tool_calls`，处理 placeholder、capturedToolResults、metadata.extra-fields 等动作由 `bridge-actions.ts` 统一驱动。
-- **协议中性命名**：所有共享动作均使用 `messages.*`、`tools.*` 等协议无关名称（如 `messages.inject-system-instruction`、`tools.ensure-response-placeholders`）。兼容层不得新增带协议前缀的 helper。
-- **兼容层职责切换**：GLM/iFlow 等 compat hook 仅处理 usage、finish_reason、schema 轻量标准化，Reasoning 拆分/清理禁止下沉到 compat；若 Provider 需特殊字段，必须通过 JSON config 描述。
-
-## 快照排查指南（命令行）
-
-- 快速查看某个请求 RID 在各阶段的顶层键/消息概况/可疑字段：
-  - 运行：`npm run snapshot:inspect -- --rid <RID> [--endpoint openai-responses|openai-chat|anthropic-messages]`
-  - 输出：
-    - http-request / llmswitch.request.post / compatibility.request.post / provider.request.pre 的顶层键
-    - messages 统计（条数、角色覆盖、是否存在 user）
-    - 是否出现 data/metadata/stream 等可疑顶层键
-    - 简要差异（哪个阶段新增了可疑键）
-
-## 🔄 V2 架构特性
-
-本仓库已完成面向生产的 V2 重构并默认启用，基于9大核心架构原则：
-
-### 🏗️ V2 核心组件
-
-- **Compatibility V2（配置驱动）**
-  - 位置：`src/providers/compat/glm/*`（模块化 + Hook 系统）
-  - 职责：仅做 Provider 特定的最小字段标准化；reasoning/tool 清理统一由 conversion 骨架完成
-  - 特性：配置驱动字段映射、GLM 专用最小清理与 1210/1214 错误兼容
-  - 工具治理：统一在 llmswitch-core v2 处理；兼容层不进行工具语义修复/文本收割
-
-- **Provider V2（统一OpenAI标准）**
-  - 位置：`src/providers/*`
-  - 能力：统一 HTTP 发送、认证管理、请求/响应快照
-  - 支持服务：OpenAI、GLM、Qwen、iFlow、LM Studio
-  - 策略：Fail Fast 原则，无隐藏兜底机制
-
-- **LLM Switch Core（工具处理中心）**
-  - 位置：`sharedmodule/llmswitch-core/`
-  - 职责：工具调用统一处理（唯一入口）、文本意图收割、系统工具指引
-  - 特性：三端一致性（Chat/Responses/Messages）；arguments 三段式修复（JSON→JSON5→安全修复→"{}"）；必要时从文本块收割重建 tool_calls；（可选）SSE 参数聚合
-
-## 📐 模块职责边界（Do / Don't）
-
-### llmswitch-core（唯一工具入口）
-- Do
-  - 统一工具规范：`canonicalizeChatResponseTools()` 保证 `content=null`、`finish_reason='tool_calls'`
-  - arguments 统一修复：`jsonish.repairArgumentsToString()`（JSON/JSON5 容错 + 安全修复）
-  - 文本收割：在“可疑+存在文本工具块”时，用 `harvestTools()` 重建标准 `tool_calls`
-  - （可选）SSE 聚合：吞掉参数增量，在工具完成时一次性下发完整 arguments（默认关闭）
-- Don't
-  - 进行 Provider 特定修复/HTTP 通信/配置管理
-  - 将同样逻辑复制到兼容层或 Provider 层
-
-### Compatibility（最小兼容层）
-- Do
-  - Provider 字段标准化（usage/finish_reason 等）、配置驱动映射，遵守 shared 骨架输出
-  - 1210/1214 最小兼容（GLM）
-  - 请求侧最小黑名单（例如 GLM 删除 `tools[].function.strict`；无 tools 删除 `tool_choice`）
-  - 响应侧最小黑名单（仅非流式）：默认仅删 `usage.prompt_tokens_details.cached_tokens`
-    - 配置：`src/providers/compat/<provider>/config/response-blacklist.json`
-    - 关键字段保护：status/output/output_text/required_action/choices[].message.content/tool_calls/finish_reason
-- Don't
-  - 工具语义修复、reasoning 拆分或文本收割（统一由 llmswitch-core 骨架处理）
-
-### Provider V2（HTTP 通信）
-- Do
-  - 统一 HTTP 发送、认证管理、快照记录
-  - 配置驱动（baseUrl/timeout/retry/headers）
-- Don't
-  - 工具语义修复/参数归一（如改写 `shell.command`）
-  - 业务逻辑或格式转换
-  - 默认不上游真流式（Responses 直通）
-    - 开关（默认关闭）：`ROUTECODEX_RESPONSES_UPSTREAM_SSE=1` 或 `RCC_RESPONSES_UPSTREAM_SSE=1`
-
-### Server Endpoints（HTTP 协议层）
-- Do
-  - SSE 预心跳/错误帧、HTTP 协议处理、委托到管道
-- Don't
-  - 工具处理/格式转换/业务逻辑
-
-### 🎯 9大核心架构原则
-
-1. **统一工具处理** - 所有工具调用通过 llmswitch-core 统一入口
-2. **最小兼容层** - Compatibility层仅处理provider特定字段
-3. **统一工具引导** - 系统工具指引集中管理
-4. **快速死亡** - Fail Fast，无隐藏fallback
-5. **暴露问题** - 结构化日志，完整错误上下文
-6. **清晰解决** - 单一处理路径，确定性行为
-7. **功能分离** - 模块职责单一，边界清晰
-8. **配置驱动** - 无硬编码，外部化配置管理
-9. **模块化** - 文件大小控制，功能导向拆分
-
-### 🔧 构建与调试
-
-**构建顺序（重要）**：
-```bash
-# 1. 先编译共享模块
-npm --prefix sharedmodule/llmswitch-core run build
-
-# 2. 再编译根包
-npm run build
-
-# 3. 安装或发布
-npm pack && npm i -g ./routecodex-*.tgz
+```
+HTTP Server → llmswitch-core Hub Pipeline → Provider V2 Runtime → 上游 AI API
 ```
 
-**调试与快照**：
-- 环境变量：`ROUTECODEX_HOOKS_VERBOSITY=verbose`
-- 快照路径：`~/.routecodex/codex-samples/{openai-chat|openai-responses|anthropic-messages}`
-- 完整链路：raw-request → pre-llmswitch → post-llmswitch → compat-pre → provider-request → provider-response → compat-post
-- 回放样本：`npm run replay:codex-sample -- --sample <sample.json>`（详见 `docs/codex-samples-replay.md`）可将 codex-samples 请求重新送入本地 RouteCodex，并生成对应的 JSON/SSE 日志。
+- **Hub Pipeline（llmswitch-core）**：唯一的工具治理点，完成协议归一、tool call 修复、路由决策、SSE 处理。
+- **Provider V2**：纯运输层，只负责认证、重试和兼容性 hook；不解析或修改用户语义。
+- **Compatibility**：按 upstream 协议最小字段映射，确保 usage / finish_reason / required_action 一致。
+- **Host (RouteCodexHttpServer)**：只做 HTTP/SSE 封装、配置加载与 provider 生命周期管理。
 
-## 🔀 选择静态/动态流水线（V1/V2）
+### 模块职责矩阵
 
-- 开关：`ROUTECODEX_PIPELINE_MODE`
-- 取值：`dynamic`（动态流水线，V2，默认）或 `static`（静态流水线，V1）
-- 兼容：历史 `ROUTECODEX_USE_V2` 已弃用，请迁移至 `ROUTECODEX_PIPELINE_MODE`
+| 模块 | 代码位置 | 职责 | 禁止行为 |
+| --- | --- | --- | --- |
+| HTTP Server | `src/server/runtime/http-server` | Express 路由、SSE 包装、调用 Hub Pipeline | 工具决策、路由逻辑、配置拼装 |
+| Hub Pipeline | `sharedmodule/llmswitch-core` | 请求标准化、tool_calls 统一处理、虚拟路由 | 进行 HTTP 请求、处理认证 |
+| Provider V2 | `src/providers` | 请求签名、HTTP 发送、快照输出 | 解析/修复工具调用、修改配置 |
+| Compatibility | `src/providers/compat/*` | 上下游字段映射、最小清理 | 工具解码、兜底 try/catch |
 
-示例：
+更多细节请参考 `docs/ARCHITECTURE.md` 与 `docs/CONFIG_ARCHITECTURE.md`。
 
+---
+
+## 安装与升级
+
+### 环境要求
+- Node.js 20.x（20.11 及以上，<26）
+- npm 9.x 或 10.x
+- macOS / Linux：bash 或 zsh
+- Windows：PowerShell 5.1+ 或 Windows Terminal
+
+### Release CLI（推荐）
+
+> CLI 名称：`rcc`，包名：`@jsonstudio/rcc`
+
+**macOS / Linux**
 ```bash
-# 动态流水线（V2，默认）
-ROUTECODEX_PIPELINE_MODE=dynamic routecodex
-
-# 静态流水线（V1）
-ROUTECODEX_PIPELINE_MODE=static routecodex
+npm install -g @jsonstudio/rcc
+rcc --version
 ```
 
-## 🖥️ CLI：`rcc code` 参数透传到 Claude
+**Windows（PowerShell）**
+```powershell
+npm install -g @jsonstudio/rcc
+rcc --version
+```
 
-`rcc code` 会把紧跟在子命令 `code` 之后的参数默认传递给 Claude（Claude Code 可执行文件）。这使你可以无缝使用 Claude 自身的命令行参数，同时由 RouteCodex 代理请求到本地服务。
+安装成功后，`rcc --version` 会显示形如 `0.89.xxx (release)` 的版本信息；可通过 `npm update -g @jsonstudio/rcc` 升级，`npm uninstall -g @jsonstudio/rcc` 卸载。
 
-- 透传规则
-  - `rcc code` 自身会消费的选项（不会透传）：
-    - `-p/--port`、`-h/--host`、`-c/--config`、`--claude-path`、`--model`、`--profile`、`--ensure-server`
-  - 除上述选项外，`code` 后的其它参数会按原顺序透传给 Claude。
-  - 若使用分隔符 `--`，则 `--` 之后的所有参数将不做解析、原样透传。
+### Dev CLI（本仓库）
+开发者仍可直接在仓库根目录执行 `npm run install:global`，该脚本会构建源码并把 `routecodex` 命令安装到全局 `$PATH`，供本地调试使用。
 
-- 环境与代理
-  - `rcc code` 会为子进程设置：`ANTHROPIC_BASE_URL/ANTHROPIC_API_URL=http://<host>:<port>` 与 `ANTHROPIC_API_KEY=rcc-proxy-key`，并清理 `ANTHROPIC_AUTH_TOKEN/ANTHROPIC_TOKEN`，确保经由 RouteCodex 代理。
-  - 可用 `--ensure-server` 在启动 Claude 前探测并尝试启动本地 RouteCodex 服务。
+---
 
-- 使用示例
-  ```bash
-  # 直接传递 Claude 自身参数（无分隔符）
-  rcc code --model claude-3-5 -- --project ~/my/repo --editor vscode
+## 默认目录结构
 
-  # 显式使用分隔符 -- 强制原样传参（推荐在复杂参数场景）
-  rcc code -p 5506 -- --project ~/src/foo --some-claude-flag value
+| 系统 | 主配置 | Provider 配置 | 日志 / 快照 |
+| --- | --- | --- | --- |
+| macOS / Linux | `~/.routecodex/config.json`（或 `ROUTECODEX_CONFIG_PATH` 指定路径） | `~/.routecodex/provider/<name>/config.v1.json` | `~/.routecodex/logs`、`~/.routecodex/codex-samples/*` |
+| Windows | `%USERPROFILE%\.routecodex\config.json` | `%USERPROFILE%\.routecodex\provider\<name>\config.v1.json` | `%USERPROFILE%\.routecodex\logs` 等 |
 
-  # 指定 Claude 可执行文件路径
-  rcc code --claude-path /usr/local/bin/claude -- --project ~/repo
-  ```
+RouteCodex 会按以下优先级查找配置：
 
-> 提示：若透传参数与 `rcc code` 自身选项名冲突，建议使用 `--` 分隔，避免被 CLI 解析。
+1. CLI 参数 `--config <path>`
+2. 环境变量 `ROUTECODEX_CONFIG_PATH`
+3. 默认路径（见上表）
 
-## 🚀 核心特性
+---
 
-### 🏗️ 双向4层管道架构
-- **LLM Switch Workflow层**: 动态路由分类、协议转换、llmswitch-core工具处理统一入口
-- **Compatibility层**: Provider特定字段标准化、reasoning_content处理、双向修剪转换
+## 无密钥配置样本
+
+仓库附带了一份不含真实密钥的示例：`samples/configs/openai-chat-sample.json`。复制到本地后，只需提供环境变量即可启动。
+
+```json
+{
+  "httpserver": { "host": "127.0.0.1", "port": 5555 },
+  "virtualrouter": {
+    "providers": {
+      "demo.glm": {
+        "providerType": "openai",
+        "protocol": "openai-chat",
+        "baseUrl": "https://api.example.com/v1",
+        "auth": { "type": "apikey", "env": "GLM_API_KEY" },
+        "models": {
+          "glm-4.6": {
+            "supportsStreaming": true,
+            "profiles": ["glm-default"]
+          }
+        }
+      }
+    },
+    "routing": {
+      "default": ["demo.glm.glm-4.6"]
+    }
+  }
+}
+```
+
+使用步骤：
+
+1. **复制样本**
+   ```bash
+   mkdir -p ~/.routecodex
+   cp samples/configs/openai-chat-sample.json ~/.routecodex/config.json
+   ```
+2. **提供密钥（示例为环境变量）**
+   - macOS / Linux：`export GLM_API_KEY="sk-your-key"`
+   - Windows：`setx GLM_API_KEY "sk-your-key"`
+3. **启动**
+   ```bash
+   rcc start --config ~/.routecodex/config.json
+   ```
+4. **验证**
+   - 健康检查：`curl http://127.0.0.1:5555/health`
+   - Chat API：`curl http://127.0.0.1:5555/v1/chat/completions ...`
+
+> 样本仅用于演示。请把 `baseUrl` / `routing` 更新为真实 provider，再通过环境变量、`authfile-*` 或 Secret 管理工具提供密钥。
+
+---
+
+## 快速使用
+
+1. **准备配置**：如上所述放置 `config.json` 或使用 `--config` 指定文件。
+2. **启动 release server**
+   ```bash
+   rcc start --config ~/.routecodex/config.json
+   ```
+   CLI 会输出健康检查地址、配置文件路径和当前版本。
+3. **调用 API**
+   - OpenAI Chat：`POST /v1/chat/completions`
+   - OpenAI Responses：`POST /v1/responses`
+   - Anthropic：`POST /v1/messages`
+4. **开发者模式**
+   - `rcc code ...`：启动 Claude Code 并把所有请求代理到本地 RouteCodex。
+   - `rcc start --exclusive`：独占端口，自动终止旧实例。
+
+---
+
+## 配置与密钥管理
+
+- **AuthFile 引用**：在配置中使用 `authfile-<name>`，RouteCodex 会读取 `~/.routecodex/auth/<name>`。适用于多账号切换。
+- **环境变量**：将 `auth.type` 设为 `apikey` 且 `env` 字段指定变量名，server 会在启动时解析。
+- **provider profiles**：`src/providers/profile/` 定义了各 provider 允许的协议、Auth 方式及兼容 profile，可在配置中通过 `profiles` 字段引用。
+
+更多细节见 `docs/CONFIG_ARCHITECTURE.md`。
+
+---
+
+## 开发者工作流
+
+1. **克隆仓库并安装依赖**
+   ```bash
+   git clone https://github.com/jsonstudio/routecodex.git
+   cd routecodex
+   npm install
+   ```
+2. **构建 sharedmodule（必要）**
+   ```bash
+   npm --prefix sharedmodule/llmswitch-core run build
+   ```
+3. **编译与验证**
+   ```bash
+   npm run build:dev              # 生成 dist 并执行工具链验证
+   npm run install:global         # 安装本地版 routecodex CLI
+   ```
+4. **与 release 区分**
+   - Release：使用 npm 安装 `@jsonstudio/rcc`
+   - Dev：仓库内 `routecodex` CLI，支持 `npm run start:bg` 等脚本
+
+---
+
+## 故障排查
+
+| 症状 | 检查点 |
+| --- | --- |
+| `config:core:run` 提示缺失 | Release CLI 默认跳过动态 pipeline 生成；自定义流程可设置 `config:core:run` 脚本。 |
+| SSE 变为 JSON | 检查入口 `stream` 字段与客户端 `Accept` 头；RouteCodex 会根据 inbound 请求保持一致。 |
+| usage 始终 100% | 确保配置启用了对应 provider 的 `supportsStreaming`，并检查 `~/.routecodex/codex-samples/*` 快照确认 usage 字段已写入。 |
+| Release install 验证失败 | 查看 `/tmp/routecodex-release-verify-*.log`；脚本位于 `scripts/install-verify.mjs`，可单独执行 `node scripts/install-verify.mjs --launcher cli --cli-binary rcc ...`。 |
+
+---
+
+## 参考文档
+
+- `docs/ARCHITECTURE.md` – 全量架构细节与数据流
+- `docs/CONFIG_ARCHITECTURE.md` – 配置解析、authfile、虚拟路由
+- `docs/pipeline-routing-report.md` – Hub Pipeline 节点详解
+- `docs/codex-samples-replay.md` – 快照与回放说明
+
+如需提交问题或贡献代码，请查看 `CONTRIBUTING.md`（若不存在可参考 Issues 模板）并遵守 `AGENTS.md` 中的 V2 工作约定。
 - **Provider层**: 统一HTTP通信、认证管理、连接池优化、双向请求响应处理
 - **External AI Service层**: 多提供商AI模型支持、性能监控、双向数据流
 

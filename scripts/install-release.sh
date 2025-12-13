@@ -18,6 +18,13 @@ echo "🔨 构建源码..."
 # release 包：显式使用 BUILD_MODE=release 以便在编译期区分 dev/release
 BUILD_MODE=release npm run build
 
+# 构建过程可能自动 bump 版本号，因此需要重新读取
+NEW_VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "${VERSION}")
+if [ "${NEW_VERSION}" != "${VERSION}" ]; then
+  echo "ℹ️  构建后版本变更: ${VERSION} → ${NEW_VERSION}"
+  VERSION=${NEW_VERSION}
+fi
+
 TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/rcc-release.XXXXXX")
 TARBALL="routecodex-${VERSION}.tgz"
 

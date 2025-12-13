@@ -17,7 +17,11 @@ import { OAuthAuthProvider } from '../../auth/oauth-auth.js';
 import { TokenFileAuthProvider } from '../../auth/tokenfile-auth.js';
 import { ensureValidOAuthToken, handleUpstreamInvalidOAuthToken } from '../../auth/oauth-lifecycle.js';
 import { createHookSystemIntegration, HookSystemIntegration } from '../hooks/hooks-integration.js';
-import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
+import {
+  attachProviderSseSnapshotStream,
+  shouldCaptureProviderStreamSnapshots,
+  writeProviderSnapshot
+} from '../utils/snapshot-writer.js';
 import type { IAuthProvider } from '../../auth/auth-interface.js';
 import type { ApiKeyAuth, OAuthAuth, OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ProviderContext, ProviderError, ProviderRuntimeProfile, ServiceProfile, ProviderType } from '../api/provider-types.js';
@@ -738,21 +742,33 @@ export class HttpTransportProvider extends BaseProvider {
 
     // 发送HTTP请求（根据是否需要 SSE 决定传输模式）
     let response: unknown;
+    const captureSse = shouldCaptureProviderStreamSnapshots();
     try {
       if (wantsSse) {
-        const stream = await this.httpClient.postStream(endpoint, finalBody, finalHeaders);
-        response = await this.wrapUpstreamSseResponse(stream, context);
-        try {
-          await writeProviderSnapshot({
-            phase: 'provider-response',
+        const upstreamStream = await this.httpClient.postStream(endpoint, finalBody, finalHeaders);
+        const streamForHost = captureSse
+          ? attachProviderSseSnapshotStream(upstreamStream, {
             requestId: context.requestId,
-            data: { mode: 'sse' },
             headers: finalHeaders,
             url: targetUrl,
             entryEndpoint,
             clientRequestId
-          });
-        } catch { /* non-blocking */ }
+          })
+          : upstreamStream;
+        response = await this.wrapUpstreamSseResponse(streamForHost, context);
+        if (!captureSse) {
+          try {
+            await writeProviderSnapshot({
+              phase: 'provider-response',
+              requestId: context.requestId,
+              data: { mode: 'sse' },
+              headers: finalHeaders,
+              url: targetUrl,
+              entryEndpoint,
+              clientRequestId
+            });
+          } catch { /* non-blocking */ }
+        }
       } else {
         response = await this.httpClient.post(endpoint, finalBody, finalHeaders);
         try {
@@ -782,19 +798,31 @@ export class HttpTransportProvider extends BaseProvider {
             let finalRetryHeaders = await this.finalizeRequestHeaders(retryHeaders, processedRequest);
             finalRetryHeaders = this.applyStreamModeHeaders(finalRetryHeaders, wantsSse);
             if (wantsSse) {
-              const stream = await this.httpClient.postStream(endpoint, finalBody, finalRetryHeaders);
-              const wrapped = await this.wrapUpstreamSseResponse(stream, context);
-              try {
-                await writeProviderSnapshot({
-                  phase: 'provider-response',
+              const upstreamStream = await this.httpClient.postStream(endpoint, finalBody, finalRetryHeaders);
+              const streamForHost = captureSse
+                ? attachProviderSseSnapshotStream(upstreamStream, {
                   requestId: context.requestId,
-                  data: { mode: 'sse', retry: true },
                   headers: finalRetryHeaders,
                   url: targetUrl,
                   entryEndpoint,
-                  clientRequestId
-                });
-              } catch { /* non-blocking */ }
+                  clientRequestId,
+                  extra: { retry: true }
+                })
+                : upstreamStream;
+              const wrapped = await this.wrapUpstreamSseResponse(streamForHost, context);
+              if (!captureSse) {
+                try {
+                  await writeProviderSnapshot({
+                    phase: 'provider-response',
+                    requestId: context.requestId,
+                    data: { mode: 'sse', retry: true },
+                    headers: finalRetryHeaders,
+                    url: targetUrl,
+                    entryEndpoint,
+                    clientRequestId
+                  });
+                } catch { /* non-blocking */ }
+              }
               return wrapped;
             }
             response = await this.httpClient.post(endpoint, finalBody, finalRetryHeaders);

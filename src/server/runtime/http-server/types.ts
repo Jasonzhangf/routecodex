@@ -67,6 +67,7 @@ export interface VirtualRouterArtifacts {
 }
 
 export interface HubPipelineExecutionResult {
+  requestId?: string;
   providerPayload?: Record<string, unknown>;
   target?: {
     providerKey: string;

@@ -132,6 +132,7 @@ type ResponsesConversationModule = {
     submitPayload: AnyRecord,
     options?: { requestId?: string }
   ) => Promise<{ payload: AnyRecord; meta: AnyRecord }>;
+  rebindResponsesConversationRequestId?: (oldId: string, newId: string) => void;
 };
 
 export async function resumeResponsesConversation(
@@ -145,6 +146,17 @@ export async function resumeResponsesConversation(
     throw new Error('[llmswitch-bridge] resumeResponsesConversation not available');
   }
   return await fn(responseId, submitPayload, options);
+}
+
+export async function rebindResponsesConversationRequestId(oldId?: string, newId?: string): Promise<void> {
+  if (!oldId || !newId || oldId === newId) {
+    return;
+  }
+  const mod = await importCoreDist<ResponsesConversationModule>('conversion/shared/responses-conversation-store');
+  const fn = mod.rebindResponsesConversationRequestId;
+  if (typeof fn === 'function') {
+    fn(oldId, newId);
+  }
 }
 
 function resolveBaseDir(): string {

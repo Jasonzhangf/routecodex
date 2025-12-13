@@ -182,9 +182,6 @@ export function logRequestComplete(endpoint: string, requestId: string, status: 
 }
 
 export function logRequestError(endpoint: string, requestId: string, error: unknown): void {
-  if (!SHOULD_LOG_HTTP_EVENTS) {
-    return;
-  }
   const resolvedId = formatRequestId(requestId);
   const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
   console.error(`❌ [${endpoint}] request ${resolvedId} failed: ${message}`);

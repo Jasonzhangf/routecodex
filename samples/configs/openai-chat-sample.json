@@ -1,0 +1,34 @@
+{
+  "description": "RouteCodex demo config without embedded secrets",
+  "httpserver": {
+    "host": "127.0.0.1",
+    "port": 5555
+  },
+  "virtualrouter": {
+    "providers": {
+      "demo.glm": {
+        "providerType": "openai",
+        "providerFamily": "glm",
+        "protocol": "openai-chat",
+        "baseUrl": "https://api.example.com/v1",
+        "auth": {
+          "type": "apikey",
+          "env": "GLM_API_KEY"
+        },
+        "models": {
+          "glm-4.6": {
+            "supportsStreaming": true,
+            "maxTokens": 4096,
+            "profiles": ["glm-default"],
+            "metadata": {
+              "warmup": true
+            }
+          }
+        }
+      }
+    },
+    "routing": {
+      "default": ["demo.glm.glm-4.6"]
+    }
+  }
+}

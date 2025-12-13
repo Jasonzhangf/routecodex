@@ -13,7 +13,11 @@ import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { ServiceProfile, ProviderContext } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
-import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
+import {
+  attachProviderSseSnapshotStream,
+  shouldCaptureProviderStreamSnapshots,
+  writeProviderSnapshot
+} from '../utils/snapshot-writer.js';
 import { buildResponsesRequestFromChat } from '../../../modules/llmswitch/bridge.js';
 import { importCoreModule } from '../../../modules/llmswitch/core-loader.js';
 import type { HttpClient } from '../utils/http-client.js';
@@ -303,8 +307,22 @@ export class ResponsesProvider extends HttpTransportProvider {
       Accept: 'text/event-stream'
     });
 
+    const captureSse = clientRequestedStream && shouldCaptureProviderStreamSnapshots();
+    const streamForHost = captureSse
+      ? attachProviderSseSnapshotStream(stream, {
+        requestId: context.requestId,
+        headers,
+        url: targetUrl,
+        entryEndpoint,
+        clientRequestId: this.extractClientRequestId(context)
+      })
+      : stream;
+
     if (clientRequestedStream) {
-      return { __sse_stream: stream };
+      if (!captureSse) {
+        await this.snapshotPhase('provider-response', context, { mode: 'sse' }, headers, targetUrl, entryEndpoint);
+      }
+      return { __sse_stream: streamForHost };
     }
 
     const converter = await this.loadResponsesSseConverter();

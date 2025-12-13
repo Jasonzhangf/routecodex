@@ -35,6 +35,7 @@ import { mapProviderProtocol, normalizeProviderType, resolveProviderIdentity, as
 import { resolveRepoRoot, loadLlmswitchModule } from './llmswitch-loader.js';
 import { importCoreModule } from '../../../modules/llmswitch/core-loader.js';
 import { enhanceProviderRequestId } from '../../utils/request-id-manager.js';
+import { rebindResponsesConversationRequestId } from '../../../modules/llmswitch/bridge.js';
 import type {
   HubPipeline,
   HubPipelineCtor,
@@ -810,6 +811,13 @@ export class RouteCodexHttpServer {
       providerId: providerIdToken,
       model: rawModel
     });
+    if (providerProtocol === 'openai-responses') {
+      try {
+        await rebindResponsesConversationRequestId(pipelineResult.requestId, enhancedRequestId);
+      } catch {
+        /* ignore rebind failures */
+      }
+    }
     if (enhancedRequestId !== input.requestId) {
       input.requestId = enhancedRequestId;
     }
@@ -908,6 +916,7 @@ export class RouteCodexHttpServer {
     input: PipelineExecutionInput,
     metadata: Record<string, unknown>
   ): Promise<{
+    requestId: string;
     providerPayload: Record<string, unknown>;
     target: {
       providerKey: string;
@@ -937,7 +946,13 @@ export class RouteCodexHttpServer {
       });
     }
     const processMode = (result.metadata?.processMode as string | undefined) ?? 'chat';
+    const resultRecord = result as unknown as Record<string, unknown>;
+    const derivedRequestId =
+      typeof resultRecord.requestId === 'string'
+        ? (resultRecord.requestId as string)
+        : input.requestId;
     return {
+      requestId: derivedRequestId,
       providerPayload: result.providerPayload,
       target: result.target,
       routingDecision: result.routingDecision ?? undefined,
