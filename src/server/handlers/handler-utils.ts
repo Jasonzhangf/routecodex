@@ -6,6 +6,9 @@ import type { HandlerContext, PipelineExecutionResult } from './types.js';
 import { mapErrorToHttp } from '../utils/http-error-mapper.js';
 import { logPipelineStage } from '../utils/stage-logger.js';
 import { buildInfo } from '../../build-info.js';
+import type { RouteErrorPayload } from '../../error-handling/route-error-hub.js';
+import { reportRouteError } from '../../error-handling/route-error-hub.js';
+import { getProviderHealthManager } from '../../core/provider-health-manager.js';
 import {
   generateRequestIdentifiers,
   resolveEffectiveRequestId
@@ -196,26 +199,46 @@ export async function respondWithPipelineError(
 ): Promise<void> {
   const effectiveRequestId = formatRequestId(requestId);
   const normalizedError = normalizeError(error, effectiveRequestId, entryEndpoint);
-  const errorHandler = ctx.errorHandling?.handleError;
-  if (typeof errorHandler === 'function') {
-    try {
-      await (errorHandler as unknown as (payload: unknown) => Promise<void> | void)({
-        error: normalizedError,
-        source: 'http-handler',
-        severity: 'error',
-        moduleId: 'http-handler',
-        requestId: effectiveRequestId,
-        metadata: {
-          endpoint: entryEndpoint
-        }
-      });
-    } catch {
-      /* ignore error center failures */
+  const routePayload: RouteErrorPayload = {
+    code: typeof (normalizedError as Record<string, unknown>).code === 'string'
+      ? String((normalizedError as Record<string, unknown>).code)
+      : 'HTTP_HANDLER_ERROR',
+    message: normalizedError.message,
+    source: `http-handler.${entryEndpoint}`,
+    scope: 'http',
+    severity: 'medium',
+    requestId: effectiveRequestId,
+    endpoint: entryEndpoint,
+    providerKey: (normalizedError as Record<string, unknown>).providerKey as string | undefined,
+    providerType: (normalizedError as Record<string, unknown>).providerType as string | undefined,
+    routeName: (normalizedError as Record<string, unknown>).routeName as string | undefined,
+    details: {
+      ...(normalizedError as Record<string, unknown>),
+      endpoint: entryEndpoint
+    },
+    originalError: normalizedError
+  };
+  let mapped = mapErrorToHttp(normalizedError);
+  try {
+    const { http } = await reportRouteError(routePayload, { includeHttpResult: true });
+    if (http) {
+      mapped = http;
     }
+  } catch {
+    /* ignore hub failures */
   }
-  const mapped = mapErrorToHttp(normalizedError);
   if (effectiveRequestId && mapped.body?.error && !mapped.body.error.request_id) {
     mapped.body.error.request_id = effectiveRequestId;
+  }
+  if (routePayload.providerKey && mapped.status >= 500) {
+    try {
+      getProviderHealthManager().block(routePayload.providerKey, 'host_internal_error', {
+        endpoint: entryEndpoint,
+        status: mapped.status
+      });
+    } catch {
+      /* ignore block errors */
+    }
   }
   res.status(mapped.status).json(mapped.body);
 }

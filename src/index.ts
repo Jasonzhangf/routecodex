@@ -13,6 +13,7 @@ import { spawn } from 'child_process';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { buildInfo } from './build-info.js';
+import { reportRouteError } from './error-handling/route-error-hub.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 import { loadRouteCodexConfig } from './config/routecodex-config-loader.js';
 import type { RouteCodexHttpServer } from './server/runtime/http-server.js';
@@ -59,6 +60,28 @@ function readNumber(value: unknown): number | undefined {
     }
   }
   return undefined;
+}
+
+async function reportCliError(
+  code: string,
+  message: string,
+  error: unknown,
+  severity: 'low' | 'medium' | 'high' | 'critical' = 'medium',
+  details?: Record<string, unknown>
+): Promise<void> {
+  try {
+    await reportRouteError({
+      code,
+      message,
+      source: 'cli.routecodex',
+      scope: 'cli',
+      severity,
+      details,
+      originalError: error
+    });
+  } catch {
+    /* ignore hub failures */
+  }
 }
 
 function readString(value: unknown): string | undefined {
@@ -303,6 +326,7 @@ class RouteCodexApp {
       // samples dry-run removed
 
     } catch (error) {
+      await reportCliError('SERVER_START_FAILED', 'Failed to start RouteCodex server', error, 'critical');
       console.error('❌ Failed to start RouteCodex server:', error);
       process.exit(1);
     }
@@ -324,6 +348,7 @@ class RouteCodexApp {
         console.log('✅ RouteCodex server stopped successfully');
       }
     } catch (error) {
+      await reportCliError('SERVER_STOP_FAILED', 'Failed to stop RouteCodex server', error, 'high');
       console.error('❌ Failed to stop RouteCodex server:', error);
       process.exit(1);
     }
@@ -569,6 +594,7 @@ async function gracefulShutdown(app: RouteCodexApp): Promise<void> {
     await app.stop();
     process.exit(0);
   } catch (error) {
+    await reportCliError('GRACEFUL_SHUTDOWN_FAILED', 'Error during graceful shutdown', error, 'high');
     console.error('❌ Error during graceful shutdown:', error);
     process.exit(1);
   }
@@ -587,12 +613,16 @@ async function main(): Promise<void> {
 
   // Handle uncaught exceptions
   process.on('uncaughtException', (error) => {
+    void reportCliError('UNCAUGHT_EXCEPTION', 'Uncaught Exception', error, 'critical');
     console.error('❌ Uncaught Exception:', error);
     gracefulShutdown(app).catch(() => process.exit(1));
   });
 
   // Handle unhandled promise rejections (log only; do not shutdown)
   process.on('unhandledRejection', (reason, promise) => {
+    void reportCliError('UNHANDLED_REJECTION', 'Unhandled promise rejection', reason, 'high', {
+      promise: String(promise)
+    });
     console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
   });
 
@@ -602,7 +632,8 @@ async function main(): Promise<void> {
 
 // Start the application if this file is run directly
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((error) => {
+  main().catch(async (error) => {
+    await reportCliError('MAIN_START_FAILED', 'Failed to start RouteCodex', error, 'critical');
     console.error('❌ Failed to start RouteCodex:', error);
     process.exit(1);
   });

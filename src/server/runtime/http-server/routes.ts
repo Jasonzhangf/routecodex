@@ -4,6 +4,8 @@ import { handleMessages } from '../../handlers/messages-handler.js';
 import { handleResponses } from '../../handlers/responses-handler.js';
 import type { HandlerContext } from '../../handlers/types.js';
 import type { ServerConfigV2 } from './types.js';
+import { reportRouteError } from '../../../error-handling/route-error-hub.js';
+import { mapErrorToHttp } from '../../utils/http-error-mapper.js';
 
 interface RouteOptions {
   app: Application;
@@ -98,20 +100,36 @@ export function registerHttpRoutes(options: RouteOptions): void {
     });
   });
 
-  app.use((error: unknown, _req: Request, res: Response) => {
+  app.use(async (error: unknown, req: Request, res: Response) => {
     const normalizedError = error instanceof Error ? error : new Error(String(error));
-    handleError(normalizedError, 'request_handler').catch(() => undefined);
-    const status =
-      typeof (error as { status?: unknown })?.status === 'number'
-        ? Number((error as { status?: unknown }).status)
-        : 500;
-    res.status(status).json({
-      error: {
-        message: (error as { message?: string })?.message || 'Internal Server Error',
-        type: (error as { type?: string })?.type || 'internal_error',
-        code: (error as { code?: string })?.code || 'internal_error'
+    const errorRecord = normalizedError as unknown as Record<string, unknown>;
+    let mapped = mapErrorToHttp(normalizedError);
+    try {
+      const { http } = await reportRouteError({
+        code: typeof errorRecord.code === 'string'
+          ? String(errorRecord.code)
+          : 'HTTP_MIDDLEWARE_ERROR',
+        message: normalizedError.message,
+        source: 'http-middleware.global',
+        scope: 'http',
+        severity: 'high',
+        endpoint: req.path,
+        requestId: typeof req.headers['x-request-id'] === 'string'
+          ? req.headers['x-request-id']
+          : undefined,
+        details: {
+          method: req.method,
+          statusOverride: (error as { status?: number })?.status
+        },
+        originalError: normalizedError
+      }, { includeHttpResult: true });
+      if (http) {
+        mapped = http;
       }
-    });
+    } catch {
+      /* ignore hub failures */
+    }
+    res.status(mapped.status).json(mapped.body);
   });
 
   console.log('[RouteCodexHttpServer] Routes setup completed');

@@ -7,6 +7,8 @@ import type {
   ProviderErrorRuntimeMetadata
 } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { importCoreModule } from '../../../modules/llmswitch/core-loader.js';
+import { formatErrorForErrorCenter } from '../../../utils/error-center-payload.js';
+import { getRouteErrorHub, reportRouteError } from '../../../error-handling/route-error-hub.js';
 
 type ProviderErrorCenterExports = {
   providerErrorCenter?: {
@@ -90,25 +92,65 @@ export function emitProviderError(options: EmitOptions): void {
   }
 
   const center = options.dependencies.errorHandlingCenter;
-  if (center?.handleError) {
+  const hub = getRouteErrorHub();
+  if (hub) {
+    const targetModel =
+      options.runtime.target && typeof options.runtime.target === 'object'
+        ? (options.runtime.target as { clientModelId?: string }).clientModelId
+        : undefined;
+    void reportRouteError({
+      code,
+      message: err.message || code,
+      source: options.stage,
+      scope: 'provider',
+      severity: status && status >= 500 ? 'high' : 'medium',
+      requestId: options.runtime.requestId,
+      endpoint: options.runtime.routeName,
+      providerKey: options.runtime.providerKey,
+      providerType: options.runtime.providerType,
+      routeName: options.runtime.routeName,
+      model: targetModel,
+      details: {
+        status,
+        recoverable,
+        runtime: options.runtime,
+        details: options.details
+      },
+      originalError: err
+    }).catch(reportError => {
+      console.error('[provider-error-reporter] failed to route provider error via hub', reportError);
+    });
+  } else if (center?.handleError) {
     const severity: ErrorContext['severity'] = status && status >= 500 ? 'high' : 'medium';
+    const targetModel =
+      options.runtime.target && typeof options.runtime.target === 'object'
+        ? (options.runtime.target as { clientModelId?: string }).clientModelId
+        : undefined;
+    const extras = {
+      requestId: options.runtime.requestId,
+      providerKey: options.runtime.providerKey,
+      model: targetModel
+    };
+    const sanitizedContext = formatErrorForErrorCenter({
+      requestId: options.runtime.requestId,
+      providerKey: options.runtime.providerKey,
+      providerType: options.runtime.providerType,
+      providerFamily: options.runtime.providerFamily,
+      routeName: options.runtime.routeName,
+      status,
+      code,
+      runtime: options.runtime,
+      details: options.details
+    });
     const payload: ErrorContext = {
-      error: err,
+      error: err.message || code,
       source: options.stage,
       severity,
       timestamp: Date.now(),
       moduleId: options.runtime.providerId,
-      context: {
-        requestId: options.runtime.requestId,
-        providerKey: options.runtime.providerKey,
-        providerType: options.runtime.providerType,
-        providerFamily: options.runtime.providerFamily,
-        routeName: options.runtime.routeName,
-        status,
-        code,
-        runtime: options.runtime,
-        details: options.details
-      }
+      context: typeof sanitizedContext === 'object' && sanitizedContext
+        ? sanitizedContext as Record<string, unknown>
+        : { details: sanitizedContext }
     };
     void center.handleError(payload).catch((handlerError: unknown) => {
       console.error('[provider-error-reporter] error center handleError failed', handlerError);

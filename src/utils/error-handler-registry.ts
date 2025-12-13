@@ -7,6 +7,7 @@
 // 在 dev/worktree 场景下，直接使用本仓库提供的 shim 实现，
 // 避免对 rcc-debugcenter / rcc-errorhandling 的运行时依赖。
 import { ErrorHandlingCenter } from 'rcc-errorhandling';
+import { formatErrorForErrorCenter } from './error-center-payload.js';
 
 // Define ErrorContext interface locally
 interface ErrorContext {
@@ -154,6 +155,14 @@ export class ErrorHandlerRegistry {
   }
 
   /**
+   * Override the internal ErrorHandlingCenter instance.
+   * Allows host applications to inject a shared center so hooks and logging stay unified.
+   */
+  public attachErrorHandlingCenter(center: ErrorHandlingCenter): void {
+    this.errorHandlingCenter = center;
+  }
+
+  /**
    * Register error handler function
    */
   public registerErrorHandler(registration: ErrorHandlerRegistration): void {
@@ -205,21 +214,23 @@ export class ErrorHandlerRegistry {
       const template = this.getErrorMessageTemplate(error, context);
 
       // Create error context
+      const extras = this.extractErrorExtras(additionalContext);
+      const contextPayload: Record<string, unknown> = {
+        ...(additionalContext || {}),
+        stack: error.stack,
+        name: error.name,
+        errorCode: template.code,
+        errorCategory: template.category,
+        errorDescription: template.description,
+        recovery: template.recovery,
+      };
       const errorContext: ErrorContext = {
-        error: error,
+        error: formatErrorForErrorCenter(error, extras),
         source: `${moduleId}.${context}`,
         severity: template.severity,
         timestamp: Date.now(),
         module: moduleId,
-        context: {
-          ...additionalContext,
-          stack: error.stack,
-          name: error.name,
-          errorCode: template.code,
-          errorCategory: template.category,
-          errorDescription: template.description,
-          recovery: template.recovery,
-        },
+        context: formatErrorForErrorCenter(contextPayload, extras),
       };
 
       // Use ErrorHandlingCenter for base error handling
@@ -231,6 +242,32 @@ export class ErrorHandlerRegistry {
       console.error('Failed to handle error:', handlerError);
       console.error('Original error:', error);
     }
+  }
+
+  private extractErrorExtras(
+    additionalContext?: Record<string, unknown>
+  ): { requestId?: string; endpoint?: string; providerKey?: string; model?: string } | undefined {
+    if (!additionalContext) {
+      return undefined;
+    }
+    const extras: { requestId?: string; endpoint?: string; providerKey?: string; model?: string } = {};
+    const candidateRequestId = additionalContext['requestId'];
+    const candidateEndpoint = additionalContext['endpoint'];
+    const candidateProviderKey = additionalContext['providerKey'];
+    const candidateModel = additionalContext['model'];
+    if (typeof candidateRequestId === 'string') {
+      extras.requestId = candidateRequestId;
+    }
+    if (typeof candidateEndpoint === 'string') {
+      extras.endpoint = candidateEndpoint;
+    }
+    if (typeof candidateProviderKey === 'string') {
+      extras.providerKey = candidateProviderKey;
+    }
+    if (typeof candidateModel === 'string') {
+      extras.model = candidateModel;
+    }
+    return Object.keys(extras).length ? extras : undefined;
   }
 
   /**
