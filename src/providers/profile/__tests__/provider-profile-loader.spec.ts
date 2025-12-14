@@ -8,7 +8,7 @@ describe('provider-profile-loader', () => {
           type: 'glm',
           baseUrl: 'https://glm.example.com',
           apiKey: '${GLM_KEY}',
-          compatibilityProfiles: ['glm.tool-cleaning', 'glm.schema-remap'],
+          compatibilityProfile: 'glm.tool-cleaning',
           headers: {
             'X-Test': 'demo'
           },
@@ -27,7 +27,7 @@ describe('provider-profile-loader', () => {
     expect(result.byId.glm.protocol).toBe('openai');
     expect(result.byId.glm.transport.baseUrl).toBe('https://glm.example.com');
     expect(result.byId.glm.auth.kind).toBe('apikey');
-    expect(result.byId.glm.compatibilityProfiles).toEqual(['glm.tool-cleaning', 'glm.schema-remap']);
+    expect(result.byId.glm.compatibilityProfiles).toEqual(['glm.tool-cleaning']);
     expect(result.byId.glm.metadata?.supportedModels).toEqual(['glm-4', 'glm-4.5']);
   });
 
@@ -46,7 +46,7 @@ describe('provider-profile-loader', () => {
             scopes: ['responses.write']
           },
           compatibility: {
-            profiles: ['responses.passthrough']
+            profile: 'responses.passthrough'
           }
         }
       }

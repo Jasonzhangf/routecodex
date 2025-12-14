@@ -164,6 +164,26 @@ export class RouteCodexHttpServer {
     return userConfig;
   }
 
+  private applyCompatibilityShim(routerConfig: UnknownObject): void {
+    if (!routerConfig || typeof routerConfig !== 'object') {
+      return;
+    }
+    const providers = routerConfig.providers;
+    if (!providers || typeof providers !== 'object') {
+      return;
+    }
+    for (const provider of Object.values(providers as Record<string, unknown>)) {
+      if (!provider || typeof provider !== 'object') {
+        continue;
+      }
+      const record = provider as Record<string, unknown>;
+      const compatProfile = typeof record.compatibilityProfile === 'string' ? record.compatibilityProfile.trim() : '';
+      if (compatProfile) {
+        record.compat = compatProfile;
+      }
+    }
+  }
+
   private getModuleDependencies(): ModuleDependencies {
     if (!this.moduleDependencies) {
       this.moduleDependencies = {
@@ -549,6 +569,7 @@ export class RouteCodexHttpServer {
     this.userConfig = asRecord(userConfig);
     this.ensureProviderProfilesFromUserConfig();
     const routerInput = this.resolveVirtualRouterInput(this.userConfig);
+    this.applyCompatibilityShim(routerInput);
     const bootstrapArtifacts = await this.bootstrapVirtualRouter(routerInput);
     this.currentRouterArtifacts = bootstrapArtifacts;
     const hubCtor = await this.ensureHubPipelineCtor();

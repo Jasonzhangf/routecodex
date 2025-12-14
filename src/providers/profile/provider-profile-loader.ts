@@ -169,37 +169,15 @@ function normalizeAuthType(
 }
 
 function extractCompatProfiles(raw: UnknownRecord): string[] {
-  const direct = pickStringArray(raw.compatibilityProfiles);
-  if (direct) {
-    return direct;
+  const single = pickString(raw.compatibilityProfile ?? raw.compatibility_profile);
+  if (single) {
+    return [single];
   }
-  const compatArrayAliases = [
-    pickStringArray(raw.compat),
-    pickStringArray(raw.compatibilityProfile),
-    pickStringArray(raw.compatibility_profile)
-  ];
-  for (const alias of compatArrayAliases) {
-    if (alias && alias.length) {
-      return alias;
-    }
-  }
-  const compatNode = raw.compatibility;
-  if (Array.isArray(compatNode)) {
-    const arr = pickStringArray(compatNode);
-    if (arr) {
-      return arr;
-    }
-  }
-  if (isRecord(compatNode)) {
-    if (Array.isArray(compatNode.profiles)) {
-      const arr = pickStringArray(compatNode.profiles);
-      if (arr) {
-        return arr;
-      }
-    }
-    const single = pickString(compatNode.profile ?? compatNode.id);
-    if (single) {
-      return [single];
+  const compatNode = isRecord(raw.compatibility) ? raw.compatibility : undefined;
+  if (compatNode) {
+    const nested = pickString((compatNode as Record<string, unknown>).profile ?? (compatNode as Record<string, unknown>).id);
+    if (nested) {
+      return [nested];
     }
   }
   return [];

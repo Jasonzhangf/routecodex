@@ -25,10 +25,32 @@
             }
           }
         }
+      },
+      "demo.c4m": {
+        "providerType": "responses",
+        "protocol": "openai-responses",
+        "baseUrl": "https://api.codex-for.me/v1",
+        "auth": {
+          "type": "apikey",
+          "env": "C4M_API_KEY"
+        },
+        "models": {
+          "gpt-5.1": {
+            "supportsStreaming": true,
+            "maxTokens": 32768,
+            "profiles": ["responses-default"]
+          }
+        },
+        "responses": {
+          "process": "passthrough",
+          "streaming": "always"
+        },
+        "compatibilityProfile": "responses-c4m-compatibility"
       }
     },
     "routing": {
-      "default": ["demo.glm.glm-4.6"]
+      "default": ["demo.glm.glm-4.6"],
+      "responses": ["demo.c4m.gpt-5.1"]
     }
   }
 }
