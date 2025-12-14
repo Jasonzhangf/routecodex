@@ -32,7 +32,24 @@ export class ResponsesC4MCompatibility implements CompatibilityModule {
     return sanitized;
   }
 
-  async processOutgoing(response: UnknownObject, _context: CompatibilityContext): Promise<UnknownObject> {
+  async processOutgoing(response: UnknownObject, context: CompatibilityContext): Promise<UnknownObject> {
+    const rateLimitMessage = this.detectRateLimitNotice(response);
+    if (rateLimitMessage) {
+      const error = new Error(rateLimitMessage);
+      const enriched = error as Error & {
+        statusCode?: number;
+        code?: string;
+        details?: Record<string, unknown>;
+      };
+      enriched.statusCode = 429;
+      enriched.code = 'HTTP_429';
+      enriched.details = {
+        requestId: context.requestId,
+        profileId: context.profileId,
+        providerType: context.providerType
+      };
+      throw enriched;
+    }
     return response;
   }
 
@@ -78,6 +95,50 @@ export class ResponsesC4MCompatibility implements CompatibilityModule {
       removed.push(...inner.removed);
     }
     return { sanitized: clone, removed };
+  }
+
+  private detectRateLimitNotice(response: UnknownObject): string | null {
+    const candidates: string[] = [];
+    const pushText = (value: unknown) => {
+      if (typeof value === 'string' && value.trim()) {
+        candidates.push(value.trim());
+      }
+    };
+    pushText((response as Record<string, unknown>)?.message);
+    const errorNode = (response as Record<string, unknown>)?.error;
+    if (errorNode && typeof errorNode === 'object') {
+      pushText((errorNode as Record<string, unknown>).message);
+    }
+    const output = (response as Record<string, unknown>)?.output;
+    if (Array.isArray(output)) {
+      for (const item of output) {
+        if (!item || typeof item !== 'object') {
+          continue;
+        }
+        const content = (item as Record<string, unknown>).content;
+        if (typeof content === 'string') {
+          pushText(content);
+        } else if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block && typeof block === 'object') {
+              pushText((block as Record<string, unknown>).text);
+              pushText((block as Record<string, unknown>).message);
+            }
+          }
+        }
+      }
+    }
+    for (const value of candidates) {
+      if (this.isCodexRateLimitNotice(value)) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  private isCodexRateLimitNotice(value: string): boolean {
+    const normalized = value.toLowerCase();
+    return normalized.includes('codex-for.me') && normalized.includes('request limit');
   }
 
   private injectInstructionsIntoInput(container: Record<string, unknown>, instructions: string): boolean {
