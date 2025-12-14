@@ -1,6 +1,6 @@
 import { buildInfo } from '../build-info.js';
 
-type ErrorExtras = {
+export type ErrorExtras = {
   requestId?: string;
   endpoint?: string;
   providerKey?: string;

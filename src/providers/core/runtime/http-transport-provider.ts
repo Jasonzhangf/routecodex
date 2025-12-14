@@ -14,6 +14,7 @@ import { HttpClient } from '../utils/http-client.js';
 import { DynamicProfileLoader, ServiceProfileValidator } from '../config/service-profiles.js';
 import { ApiKeyAuthProvider } from '../../auth/apikey-auth.js';
 import { OAuthAuthProvider } from '../../auth/oauth-auth.js';
+import { logOAuthDebug } from '../../auth/oauth-logger.js';
 import { TokenFileAuthProvider } from '../../auth/tokenfile-auth.js';
 import { ensureValidOAuthToken, handleUpstreamInvalidOAuthToken } from '../../auth/oauth-lifecycle.js';
 import { createHookSystemIntegration, HookSystemIntegration } from '../hooks/hooks-integration.js';
@@ -132,7 +133,7 @@ export class HttpTransportProvider extends BaseProvider {
           const oauthProviderId = this.ensureOAuthProviderId(oauthAuth, extensions);
           const forceReauthorize = false;
           const tokenFileHint = oauthAuth.tokenFile ?? '(default)';
-          console.log(`[OAuth] [init] provider=${oauthProviderId} type=${auth.type} tokenFile=${tokenFileHint} forceReauth=${forceReauthorize}`);
+          logOAuthDebug(`[OAuth] [init] provider=${oauthProviderId} type=${auth.type} tokenFile=${tokenFileHint} forceReauth=${forceReauthorize}`);
           this.dependencies.logger?.logModule?.(this.id, 'oauth-init-start', {
             providerType: oauthProviderId,
             tokenFile: tokenFileHint,
@@ -144,7 +145,7 @@ export class HttpTransportProvider extends BaseProvider {
               openBrowser: true,
               forceReauthorize
             });
-            console.log('[OAuth] [init] ensureValid OK');
+            logOAuthDebug('[OAuth] [init] ensureValid OK');
             try {
               if (this.authProvider instanceof TokenFileAuthProvider) {
                 await this.authProvider.initialize();
@@ -1026,14 +1027,14 @@ export class HttpTransportProvider extends BaseProvider {
       if (this.normalizeAuthMode(auth.type) === 'oauth') {
         const oauthAuth = auth as OAuthAuthExtended;
         const oauthProviderId = this.ensureOAuthProviderId(oauthAuth);
-        console.log('[OAuth] [headers] ensureValid start (openBrowser=true, forceReauth=false)');
+        logOAuthDebug('[OAuth] [headers] ensureValid start (openBrowser=true, forceReauth=false)');
         try {
           await ensureValidOAuthToken(oauthProviderId, oauthAuth, {
             forceReacquireIfRefreshFails: true,
             openBrowser: true,
             forceReauthorize: false
           });
-          console.log('[OAuth] [headers] ensureValid OK');
+          logOAuthDebug('[OAuth] [headers] ensureValid OK');
         } catch (error) {
           const err = error as { message?: string };
           const msg = err?.message ? String(err.message) : String(error);

@@ -6,6 +6,7 @@ import path from 'path';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import { fetchIFlowUserInfo, mergeIFlowTokenData } from './iflow-userinfo-helper.js';
 import { fetchQwenUserInfo, mergeQwenTokenData, hasQwenApiKey } from './qwen-userinfo-helper.js';
+import { logOAuthDebug } from './oauth-logger.js';
 
 type EnsureOpts = {
   forceReacquireIfRefreshFails?: boolean;
@@ -172,9 +173,11 @@ function logTokenSnapshot(providerType: string, token: StoredOAuthToken | null, 
     const hasApiKey = hasApiKeyField(token);
     const hasAccess = hasAccessToken(token);
     const expRaw = token?.expires_at ?? token?.expired ?? token?.expiry_date ?? null;
-    console.log(`[OAuth] token.read: provider=${providerType} exists=${Boolean(token)} hasApiKey=${hasApiKey} hasAccess=${hasAccess} expRaw=${String(expRaw)}`);
+    logOAuthDebug(
+      `[OAuth] token.read: provider=${providerType} exists=${Boolean(token)} hasApiKey=${hasApiKey} hasAccess=${hasAccess} expRaw=${String(expRaw)}`
+    );
     if (providerType === 'iflow') {
-      console.log(`[OAuth] iflow endpoints: deviceCodeUrl=${String(endpoints.deviceCodeUrl)} tokenUrl=${String(endpoints.tokenUrl)}`);
+      logOAuthDebug(`[OAuth] iflow endpoints: deviceCodeUrl=${String(endpoints.deviceCodeUrl)} tokenUrl=${String(endpoints.tokenUrl)}`);
     }
   } catch {
     // ignore logging failures
@@ -285,19 +288,19 @@ async function finalizeTokenWrite(
   }
   const enriched = await maybeEnrichToken(providerType, tokenData);
   await strategy.saveToken(enriched);
-  console.log(`[OAuth] Token ${reason} saved: ${tokenFilePath}`);
+  logOAuthDebug(`[OAuth] Token ${reason} saved: ${tokenFilePath}`);
 }
 
 async function maybeEnrichToken(providerType: string, tokenData: UnknownObject): Promise<UnknownObject> {
   if (providerType === 'iflow') {
     const accessToken = extractAccessToken(sanitizeToken(tokenData) ?? null);
     if (!accessToken) {
-      console.warn('[OAuth] iFlow: no access_token found in auth result, skipping API Key fetch');
+      logOAuthDebug('[OAuth] iFlow: no access_token found in auth result, skipping API Key fetch');
       return tokenData;
     }
     try {
       const userInfo = await fetchIFlowUserInfo(accessToken);
-      console.log(`[OAuth] iFlow: successfully fetched API Key for ${userInfo.email}`);
+      logOAuthDebug(`[OAuth] iFlow: successfully fetched API Key for ${userInfo.email}`);
       return mergeIFlowTokenData(tokenData, userInfo) as unknown as UnknownObject;
     } catch (error) {
       console.error(`[OAuth] iFlow: failed to fetch API Key - ${error instanceof Error ? error.message : String(error)}`);
@@ -307,13 +310,13 @@ async function maybeEnrichToken(providerType: string, tokenData: UnknownObject):
   if (providerType === 'qwen' && !hasQwenApiKey(tokenData)) {
     const accessToken = extractAccessToken(sanitizeToken(tokenData) ?? null);
     if (!accessToken) {
-      console.warn('[OAuth] Qwen: no access_token found in auth result, skipping API Key fetch');
+      logOAuthDebug('[OAuth] Qwen: no access_token found in auth result, skipping API Key fetch');
       return tokenData;
     }
     try {
       const userInfo = await fetchQwenUserInfo(accessToken);
       if (userInfo.apiKey) {
-        console.log('[OAuth] Qwen: fetched API Key via user info');
+        logOAuthDebug('[OAuth] Qwen: fetched API Key via user info');
         return mergeQwenTokenData(tokenData, userInfo) as unknown as UnknownObject;
       }
     } catch (error) {
@@ -334,20 +337,20 @@ function logOAuthSetup(
   forceReauth: boolean
 ): void {
   try {
-    console.log(
+    logOAuthDebug(
       `[OAuth] ensureValid: provider=${providerType} flow=${String(defaults.flowType)} activation=${String(
         overrides.activationType
       )} tokenFile=${tokenFilePath} openBrowser=${openBrowser} forceReauth=${forceReauth}`
     );
     if (endpoints.deviceCodeUrl || endpoints.authorizationUrl) {
-      console.log(
+      logOAuthDebug(
         `[OAuth] endpoints: deviceCodeUrl=${String(endpoints.deviceCodeUrl || '')} tokenUrl=${String(
           endpoints.tokenUrl
         )} authUrl=${String(endpoints.authorizationUrl || '')} userInfoUrl=${String(endpoints.userInfoUrl || '')}`
       );
     }
     if (providerType === 'iflow') {
-      console.log(
+      logOAuthDebug(
         `[OAuth] iflow client: id=${String(client.clientId || '(missing)')} secret=${
           client.clientSecret ? '(present)' : '(missing)'
         } redirect=${String(client.redirectUri || '(default)')}`
@@ -391,7 +394,7 @@ async function runIflowAuthorizationSequence(
     await executeAuthFlow(providerType, authCodeOverrides, tokenFilePath);
     return;
   } catch (firstError) {
-    console.warn(
+    logOAuthDebug(
       `[OAuth] auth_code flow failed: ${firstError instanceof Error ? firstError.message : String(firstError || '')}`
     );
   }
@@ -454,7 +457,7 @@ export async function ensureValidOAuthToken(
     const tokenState = evaluateTokenState(token, providerType);
 
     if (!forceReauth && tokenState.validAccess) {
-      console.log(
+      logOAuthDebug(
         `[OAuth] Using existing token (${tokenState.hasApiKey ? 'apiKey' : 'access_token'} valid). No authorization required.`
       );
       updateThrottle(cacheKey);
@@ -468,7 +471,7 @@ export async function ensureValidOAuthToken(
       typeof strategy.refreshToken === 'function'
     ) {
       try {
-        console.log('[OAuth] refreshing token...');
+        logOAuthDebug('[OAuth] refreshing token...');
         const refreshed = await strategy.refreshToken(token.refresh_token);
         await finalizeTokenWrite(providerType, strategy, tokenFilePath, refreshed, 'refreshed and saved');
         updateThrottle(cacheKey);
@@ -477,7 +480,7 @@ export async function ensureValidOAuthToken(
         if (!opts.forceReacquireIfRefreshFails) {
           throw error;
         }
-        console.log('[OAuth] refresh failed, attempting interactive authorization...');
+        logOAuthDebug('[OAuth] refresh failed, attempting interactive authorization...');
       }
     }
 

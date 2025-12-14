@@ -9,6 +9,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import type { OAuthAuth } from '../core/api/provider-config.js';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
+import { logOAuthDebug } from './oauth-logger.js';
 
 type ExtendedOAuthAuth = OAuthAuth & {
   tokenFile?: string;
@@ -338,7 +339,7 @@ class BaseOAuthClient implements IOAuthClient {
         const dir = path.dirname(this.tokenFilePath);
         await fs.mkdir(dir, { recursive: true });
         await fs.writeFile(this.tokenFilePath, JSON.stringify(token, null, 2), 'utf-8');
-        console.log(`[OAuth] Token saved to: ${this.tokenFilePath}`);
+        logOAuthDebug(`[OAuth] Token saved to: ${this.tokenFilePath}`);
       }
     } catch { /* ignore persistence errors */ }
   }
@@ -354,7 +355,7 @@ class BaseOAuthClient implements IOAuthClient {
         const txt = await fs.readFile(this.tokenFilePath, 'utf-8');
         const j = JSON.parse(txt) as TokenStorage;
         this.currentToken = j;
-        console.log(`[OAuth] Token loaded from: ${this.tokenFilePath}`);
+        logOAuthDebug(`[OAuth] Token loaded from: ${this.tokenFilePath}`);
         return j;
       } catch {
         // fallthrough to memory

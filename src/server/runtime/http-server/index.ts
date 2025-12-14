@@ -36,6 +36,12 @@ import { resolveRepoRoot, loadLlmswitchModule } from './llmswitch-loader.js';
 import { importCoreModule } from '../../../modules/llmswitch/core-loader.js';
 import { enhanceProviderRequestId } from '../../utils/request-id-manager.js';
 import { rebindResponsesConversationRequestId } from '../../../modules/llmswitch/bridge.js';
+import {
+  initializeRouteErrorHub,
+  reportRouteError,
+  type RouteErrorHub,
+  type RouteErrorPayload
+} from '../../../error-handling/route-error-hub.js';
 import type {
   HubPipeline,
   HubPipelineCtor,
@@ -47,9 +53,6 @@ import type {
 } from './types.js';
 import type { ProviderErrorRuntimeMetadata } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { writeClientSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
-import { ProviderHealthManager, setProviderHealthManager } from '../../../core/provider-health-manager.js';
-import { initializeRouteErrorHub, reportRouteError, type RouteErrorHub } from '../../../error-handling/route-error-hub.js';
-import { formatErrorForErrorCenter } from '../../../utils/error-center-payload.js';
 
 type ConvertProviderResponseFn = (options: {
   providerProtocol: string;
@@ -138,15 +141,12 @@ export class RouteCodexHttpServer {
   private currentRouterArtifacts: VirtualRouterArtifacts | null = null;
   private providerProfileIndex: Map<string, ProviderProfile> = new Map();
   private errorHandlingShim: ModuleDependencies['errorHandlingCenter'] | null = null;
-  private providerHealth = new ProviderHealthManager();
-  private errorHub: RouteErrorHub;
+  private routeErrorHub: RouteErrorHub | null = null;
 
   constructor(config: ServerConfigV2) {
     this.config = config;
     this.app = express();
     this.errorHandling = new ErrorHandlingCenter();
-    this.errorHub = initializeRouteErrorHub({ errorHandlingCenter: this.errorHandling });
-    setProviderHealthManager(this.providerHealth);
     this.stageLoggingEnabled = isStageLoggingEnabled();
     this.repoRoot = resolveRepoRoot(import.meta.url);
     const envFlag = (process.env.ROUTECODEX_USE_HUB_PIPELINE || '').trim().toLowerCase();
@@ -404,7 +404,7 @@ export class RouteCodexHttpServer {
 
       // 初始化错误处理
       await this.errorHandling.initialize();
-      await this.errorHub.initialize();
+      await this.initializeRouteErrorHub();
 
       registerDefaultMiddleware(this.app);
       registerHttpRoutes({
@@ -507,22 +507,23 @@ export class RouteCodexHttpServer {
    * 处理错误
    */
   private async handleError(error: Error, context: string): Promise<void> {
+    const payload: RouteErrorPayload = {
+      code: `SERVER_${context.toUpperCase()}`,
+      message: error.message || 'RouteCodex server error',
+      source: `routecodex-server-v2.${context}`,
+      scope: 'server',
+      severity: 'medium',
+      details: {
+        name: error.name,
+        stack: error.stack,
+        version: 'v2'
+      },
+      originalError: error
+    };
     try {
-      await reportRouteError({
-        code: `SERVER_${context.toUpperCase()}`,
-        message: error.message,
-        source: `routecodex-server-v2.${context}`,
-        scope: 'server',
-        severity: 'high',
-        originalError: error,
-        details: {
-          stack: error.stack,
-          name: error.name,
-          version: 'v2'
-        }
-      });
+      await reportRouteError(payload);
     } catch (handlerError) {
-      console.error('[RouteCodexHttpServer] Failed to handle error:', handlerError);
+      console.error('[RouteCodexHttpServer] Failed to report error via RouteErrorHub:', handlerError);
       console.error('[RouteCodexHttpServer] Original error:', error);
     }
   }
@@ -836,14 +837,6 @@ export class RouteCodexHttpServer {
     const providerModel = rawModel;
     const providerLabel = this.buildProviderLabel(target.providerKey, providerModel);
 
-    if (this.providerHealth.isBlocked(target.providerKey)) {
-      throw Object.assign(new Error(`Provider ${target.providerKey} is blocked by host policy`), {
-        code: 'ERR_PROVIDER_BLOCKED',
-        statusCode: 503,
-        providerKey: target.providerKey
-      });
-    }
-
     this.logStage('provider.prepare', input.requestId, {
       providerKey: target.providerKey,
       runtimeKey,
@@ -890,7 +883,7 @@ export class RouteCodexHttpServer {
         providerLabel
       });
       const normalized = this.normalizeProviderResponse(providerResponse);
-      const converted = await this.convertProviderResponseIfNeeded({
+      return await this.convertProviderResponseIfNeeded({
         entryEndpoint: input.entryEndpoint,
         providerType: handle.providerType,
         requestId: input.requestId,
@@ -900,8 +893,6 @@ export class RouteCodexHttpServer {
         response: normalized,
         pipelineMetadata: mergedMetadata
       });
-      this.providerHealth.resetRateLimit(target.providerKey);
-      return converted;
     } catch (error) {
       this.logStage('provider.send.error', input.requestId, {
         providerKey: target.providerKey,
@@ -929,7 +920,6 @@ export class RouteCodexHttpServer {
         runtime: runtimeMetadata,
         dependencies: this.getModuleDependencies()
       });
-      this.applyProviderHealthPolicy(target.providerKey, this.determineErrorStatusCode(error));
       throw error;
     }
   }
@@ -1107,57 +1097,6 @@ export class RouteCodexHttpServer {
     }
   }
 
-  private determineErrorStatusCode(error: unknown): number | undefined {
-    if (!error || typeof error !== 'object') {
-      return undefined;
-    }
-    const record = error as Record<string, unknown>;
-    const direct = record['status'];
-    if (typeof direct === 'number') {
-      return direct;
-    }
-    const alt = record['statusCode'];
-    if (typeof alt === 'number') {
-      return alt;
-    }
-    const response = record['response'];
-    if (response && typeof response === 'object') {
-      const respStatus = (response as Record<string, unknown>).status;
-      if (typeof respStatus === 'number') {
-        return respStatus;
-      }
-    }
-    const details = record['details'];
-    if (details && typeof details === 'object') {
-      const detailStatus = (details as Record<string, unknown>).status;
-      if (typeof detailStatus === 'number') {
-        return detailStatus;
-      }
-    }
-    const message = typeof record['message'] === 'string' ? (record['message'] as string) : '';
-    const match = message.match(/HTTP\s+(\d{3})/i);
-    if (match) {
-      return Number(match[1]);
-    }
-    return undefined;
-  }
-
-  private applyProviderHealthPolicy(providerKey: string | undefined, status?: number): void {
-    if (!providerKey) {
-      return;
-    }
-    if (status === 429) {
-      const hits = this.providerHealth.recordRateLimitHit(providerKey);
-      if (hits >= 4) {
-        this.providerHealth.block(providerKey, 'rate_limit_exhausted', { attempts: hits });
-      }
-      return;
-    }
-    this.providerHealth.resetRateLimit(providerKey);
-    if (!status || status >= 500) {
-      this.providerHealth.block(providerKey, 'upstream_failure', status ? { status } : undefined);
-    }
-  }
   private extractClientModelId(
     metadata: Record<string, unknown>,
     originalRequest?: Record<string, unknown>
@@ -1189,6 +1128,15 @@ export class RouteCodexHttpServer {
       return JSON.parse(JSON.stringify(payload));
     } catch {
       return undefined;
+    }
+  }
+
+  private async initializeRouteErrorHub(): Promise<void> {
+    try {
+      this.routeErrorHub = initializeRouteErrorHub({ errorHandlingCenter: this.errorHandling });
+      await this.routeErrorHub.initialize();
+    } catch (error) {
+      console.error('[RouteCodexHttpServer] Failed to initialize RouteErrorHub', error);
     }
   }
 
@@ -1234,3 +1182,4 @@ function createNoopPipelineLogger(): PipelineDebugLogger {
     log: noop
   };
 }
+import { formatErrorForErrorCenter } from '../../../utils/error-center-payload.js';

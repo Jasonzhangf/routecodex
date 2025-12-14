@@ -1,6 +1,10 @@
 import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import { ErrorHandlerRegistry } from '../utils/error-handler-registry.js';
 import { mapErrorToHttp, type HttpErrorPayload } from '../server/utils/http-error-mapper.js';
+import {
+  formatErrorForErrorCenter,
+  type ErrorExtras
+} from '../utils/error-center-payload.js';
 
 export type RouteErrorScope = 'http' | 'provider' | 'server' | 'pipeline' | 'cli' | 'compat' | 'other';
 export type RouteErrorSeverity = 'low' | 'medium' | 'high' | 'critical';
@@ -19,8 +23,8 @@ export interface RouteErrorPayload {
   routeName?: string;
   model?: string;
   details?: Record<string, unknown>;
-  originalError?: unknown;
   metadata?: Record<string, unknown>;
+  originalError?: unknown;
 }
 
 export interface RouteErrorReportOptions {
@@ -37,7 +41,7 @@ export interface RouteErrorHubDeps {
 
 export class RouteErrorHub {
   private readonly registry = ErrorHandlerRegistry.getInstance();
-  private initialized: boolean = false;
+  private initialized = false;
 
   constructor(private readonly deps: RouteErrorHubDeps) {
     this.registry.attachErrorHandlingCenter(this.deps.errorHandlingCenter);
@@ -58,12 +62,14 @@ export class RouteErrorHub {
     await this.ensureInitialized();
     const normalized = this.normalizePayload(payload);
     const errorObject = this.buildErrorObject(normalized);
+    const sanitizedError = this.prepareErrorForCenter(errorObject, normalized);
+    const context = this.buildAdditionalContext(normalized);
     try {
       await this.registry.handleError(
-        errorObject,
+        sanitizedError as Error,
         normalized.source,
         normalized.scope,
-        this.buildAdditionalContext(normalized)
+        context
       );
     } catch (registryError) {
       console.error('[RouteErrorHub] Failed to dispatch error via registry:', registryError);
@@ -92,17 +98,29 @@ export class RouteErrorHub {
     };
   }
 
-  private buildErrorObject(payload: RouteErrorPayload): Error {
+  private buildErrorObject(payload: RouteErrorPayload): Error & Record<string, unknown> {
     if (payload.originalError instanceof Error) {
-      return payload.originalError;
+      return payload.originalError as Error & Record<string, unknown>;
     }
     const err = new Error(payload.message);
     (err as Error & { code?: string }).code = payload.code;
-    return err;
+    return err as Error & Record<string, unknown>;
+  }
+
+  private prepareErrorForCenter(
+    error: Error & Record<string, unknown>,
+    payload: RouteErrorPayload
+  ): Error & Record<string, unknown> {
+    const extras = this.buildErrorExtras(payload);
+    const formatted = formatErrorForErrorCenter(error, extras);
+    if (formatted && typeof formatted === 'object') {
+      return formatted as Error & Record<string, unknown>;
+    }
+    return error;
   }
 
   private buildAdditionalContext(payload: RouteErrorPayload): Record<string, unknown> {
-    const context: Record<string, unknown> = {
+    return {
       requestId: payload.requestId,
       endpoint: payload.endpoint,
       providerKey: payload.providerKey,
@@ -114,7 +132,15 @@ export class RouteErrorHub {
       metadata: payload.metadata,
       timestamp: payload.timestamp
     };
-    return context;
+  }
+
+  private buildErrorExtras(payload: RouteErrorPayload): ErrorExtras {
+    return {
+      requestId: payload.requestId,
+      endpoint: payload.endpoint,
+      providerKey: payload.providerKey,
+      model: payload.model
+    };
   }
 
   private buildHttpPayload(payload: RouteErrorPayload): Record<string, unknown> {

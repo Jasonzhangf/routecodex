@@ -9,6 +9,7 @@ import { BaseOAuthFlowStrategy, OAuthFlowType } from '../config/oauth-flows.js';
 import type { OAuthFlowConfig } from '../config/oauth-flows.js';
 import fs from 'fs/promises';
 import path from 'path';
+import { logOAuthDebug } from '../../auth/oauth-logger.js';
 
 /**
  * 设备码令牌响应
@@ -76,18 +77,18 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       // 1. 尝试加载现有令牌
       const existingToken = this.coerceStoredToken(await this.loadToken());
       if (existingToken && this.validateToken(existingToken)) {
-        console.log('Using existing valid token');
+        logOAuthDebug('[OAuth] Using existing valid token');
         return existingToken;
       }
 
       // 2. 如果令牌过期但可以刷新，则尝试刷新
       if (existingToken?.refresh_token) {
         try {
-          console.log('Token expired, attempting refresh...');
+          logOAuthDebug('[OAuth] Token expired, attempting refresh...');
           const refreshedRaw = await this.refreshToken(existingToken.refresh_token);
           const refreshedToken = this.ensureStoredToken(refreshedRaw);
           await this.saveToken(refreshedToken);
-          console.log('Token refreshed successfully');
+          logOAuthDebug('[OAuth] Token refreshed successfully');
           return refreshedToken;
         } catch (error) {
           console.warn('Token refresh failed, initiating new authentication:', error instanceof Error ? error.message : String(error));
@@ -95,7 +96,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       }
 
       // 3. 执行新的设备码认证流程
-      console.log('Starting OAuth device code flow...');
+      logOAuthDebug('[OAuth] Starting OAuth device code flow...');
 
       const deviceCodeData = await this.initiateDeviceCodeFlow();
       await this.activate(deviceCodeData, options);
@@ -107,7 +108,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       // 5. 保存令牌
       await this.saveToken(finalToken);
 
-      console.log('OAuth device code flow completed successfully!');
+      logOAuthDebug('[OAuth] OAuth device code flow completed successfully!');
       return finalToken;
 
     } catch (error) {
@@ -167,7 +168,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
 
     const dbgEnabled = String(process.env.ROUTECODEX_OAUTH_DEBUG || '1') === '1';
     if (dbgEnabled) {
-      try { console.log(`[OAuth] device-code raw: ${JSON.stringify(raw).slice(0, 512)}`); } catch { /* ignore */ }
+      try { logOAuthDebug(`[OAuth] device-code raw: ${JSON.stringify(raw).slice(0, 512)}`); } catch { /* ignore */ }
     }
 
     // 兼容多种形状（顶层/ data / result；蛇形/驼峰；uri/url）
@@ -289,7 +290,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
         // 如果是授权待处理错误，继续轮询
         const errorData = await response.json().catch(() => ({}));
         if (errorData.error === 'authorization_pending') {
-          console.log(`Authorization pending... (${attempt + 1}/${maxAttempts})`);
+          logOAuthDebug(`[OAuth] Authorization pending... (${attempt + 1}/${maxAttempts})`);
           continue;
         }
 
@@ -460,7 +461,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(this.tokenFile, JSON.stringify(stored, null, 2));
       this.tokenStorage = stored;
-      console.log(`[OAuth] [device_code] Token saved to: ${this.tokenFile}`);
+      logOAuthDebug(`[OAuth] [device_code] Token saved to: ${this.tokenFile}`);
     } catch (error) {
       console.error('Failed to save token:', error instanceof Error ? error.message : String(error));
       throw error;
@@ -476,7 +477,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       const raw = JSON.parse(content) as UnknownObject;
       const token = this.coerceStoredToken(raw);
       this.tokenStorage = token;
-      console.log(`[OAuth] [device_code] Token loaded from: ${this.tokenFile}`);
+      logOAuthDebug(`[OAuth] [device_code] Token loaded from: ${this.tokenFile}`);
       return token;
     } catch (error) {
       this.tokenStorage = null;

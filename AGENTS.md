@@ -30,8 +30,9 @@ This document replaces the old “architecture novel” with a concise set of ru
 
 ## 4. Error Reporting
 
-- Every provider failure must call `emitProviderError({ ..., dependencies })`. This pushes events into llmswitch-core for breaker logic and also invokes the local `ErrorHandlingCenter`.
-- When the HTTP server catches unexpected throws, wrap them via `errorHandling.handleError({ source: 'routecodex-server-v2.<stage>', ... })` so log streams stay structured.
+- 错误流统一交由 `RouteErrorHub → ErrorHandlerRegistry → providerErrorCenter` 处理，详见 `docs/error-handling-v2.md`。
+- Every provider failure must call `emitProviderError({ ..., dependencies })`，确保 Virtual Router 获取 `ProviderErrorEvent` 并更新健康状态。
+- HTTP server / CLI / pipeline 在捕获异常时调用 `reportRouteError({ scope: 'http' | 'server' | ... })`，由 RouteErrorHub 负责日志裁剪与 HTTP 映射。
 
 ## 5. Configuration Rules
 

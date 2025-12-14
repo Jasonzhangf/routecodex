@@ -480,7 +480,7 @@ export class ErrorHandlerRegistry {
           const schedule: number[] =
             Array.isArray(rateLimitContext.schedule) && rateLimitContext.schedule.length
               ? rateLimitContext.schedule
-              : [30000, 60000, 120000];
+              : [10000, 30000, 60000];
           const attempted: string[] = Array.isArray(rateLimitContext.attemptedPipelineIds)
             ? rateLimitContext.attemptedPipelineIds
             : [];

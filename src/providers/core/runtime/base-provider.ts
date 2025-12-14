@@ -70,6 +70,7 @@ export abstract class BaseProvider implements IProviderV2 {
   protected lastActivity: number = Date.now();
   private lastRuntimeMetadata?: ProviderRuntimeMetadata;
   private runtimeProfile?: ProviderRuntimeProfile;
+  private rateLimitFailures: Map<string, number> = new Map();
 
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     this.id = `provider-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -144,6 +145,7 @@ export abstract class BaseProvider implements IProviderV2 {
         requestId: context.requestId,
         responseTime: Date.now() - context.startTime
       });
+      this.resetRateLimitCounter(context.providerKey);
 
       return finalResponse;
 
@@ -180,6 +182,8 @@ export abstract class BaseProvider implements IProviderV2 {
 
       // 后处理响应
       const finalResponse = await this.postprocessResponse(response, context);
+
+      this.resetRateLimitCounter(context.providerKey);
 
       return finalResponse;
     } catch (error) {
@@ -335,7 +339,16 @@ export abstract class BaseProvider implements IProviderV2 {
 
     const runtimeProfile = this.getRuntimeProfile();
     const isClientError = typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500 && statusCode !== 429;
-    const affectsHealth = isClientError ? false : !isTransient;
+    const providerKey = context.providerKey || runtimeProfile?.providerKey;
+    let affectsHealth = isClientError ? false : !isTransient;
+    let forceFatalRateLimit = false;
+    if (isRateLimit) {
+      const escalated = this.registerRateLimitFailure(providerKey);
+      affectsHealth = escalated;
+      forceFatalRateLimit = escalated;
+    } else if (providerKey) {
+      this.resetRateLimitCounter(providerKey);
+    }
 
     // 统一错误日志
     this.dependencies.logger?.logModule(this.id, 'request-error', {
@@ -355,7 +368,7 @@ export abstract class BaseProvider implements IProviderV2 {
 
     const enrichedDetails = {
       providerId: this.id,
-      providerKey: context.providerKey || runtimeProfile?.providerKey,
+      providerKey,
       providerType: context.providerType,
       providerFamily: context.providerFamily,
       routeName: context.routeName,
@@ -391,7 +404,7 @@ export abstract class BaseProvider implements IProviderV2 {
       runtime: buildRuntimeFromProviderContext(context),
       dependencies: this.dependencies,
       statusCode,
-      recoverable: isTransient,
+      recoverable: forceFatalRateLimit ? false : isTransient,
       affectsHealth,
       details: enrichedDetails
     });
@@ -414,5 +427,26 @@ export abstract class BaseProvider implements IProviderV2 {
       return tools.length > 0;
     }
     return Boolean(tools);
+  }
+
+  private registerRateLimitFailure(providerKey?: string): boolean {
+    if (!providerKey) {
+      return false;
+    }
+    const current = this.rateLimitFailures.get(providerKey) ?? 0;
+    const next = current + 1;
+    this.rateLimitFailures.set(providerKey, next);
+    if (next >= 4) {
+      this.rateLimitFailures.set(providerKey, 0);
+      return true;
+    }
+    return false;
+  }
+
+  private resetRateLimitCounter(providerKey?: string): void {
+    if (!providerKey) {
+      return;
+    }
+    this.rateLimitFailures.delete(providerKey);
   }
 }

@@ -8,7 +8,6 @@ import { logPipelineStage } from '../utils/stage-logger.js';
 import { buildInfo } from '../../build-info.js';
 import type { RouteErrorPayload } from '../../error-handling/route-error-hub.js';
 import { reportRouteError } from '../../error-handling/route-error-hub.js';
-import { getProviderHealthManager } from '../../core/provider-health-manager.js';
 import {
   generateRequestIdentifiers,
   resolveEffectiveRequestId
@@ -107,7 +106,6 @@ export function sendPipelineResponse(
     logPipelineStage('response.sse.stream.start', requestLabel, { status });
 
     let eventCount = 0;
-    const previewLimit = 3;
 
     const cleanup = () => {
       try {
@@ -130,23 +128,8 @@ export function sendPipelineResponse(
         /* ignore end errors */
       }
     });
-    stream.on('data', (chunk: unknown) => {
+    stream.on('data', () => {
       eventCount++;
-      if (eventCount <= previewLimit) {
-        try {
-          const text = extractPreviewText(chunk);
-          if (!text) {
-            return;
-          }
-          const trimmed = text.length > 200 ? `${text.slice(0, 200)}…` : text;
-          logPipelineStage('response.sse.preview', requestLabel, {
-            event: eventCount,
-            preview: trimmed
-          });
-        } catch {
-          /* ignore preview errors */
-        }
-      }
     });
     res.on('close', cleanup);
     res.on('finish', cleanup);
@@ -192,7 +175,7 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
 
 export async function respondWithPipelineError(
   res: Response,
-  ctx: HandlerContext,
+  _ctx: HandlerContext,
   error: unknown,
   entryEndpoint: string,
   requestId: string
@@ -229,16 +212,6 @@ export async function respondWithPipelineError(
   }
   if (effectiveRequestId && mapped.body?.error && !mapped.body.error.request_id) {
     mapped.body.error.request_id = effectiveRequestId;
-  }
-  if (routePayload.providerKey && mapped.status >= 500) {
-    try {
-      getProviderHealthManager().block(routePayload.providerKey, 'host_internal_error', {
-        endpoint: entryEndpoint,
-        status: mapped.status
-      });
-    } catch {
-      /* ignore block errors */
-    }
   }
   res.status(mapped.status).json(mapped.body);
 }
@@ -336,20 +309,4 @@ function formatMeta(meta?: RequestLogMeta): string {
     .filter(([_, value]) => value !== undefined && value !== null && value !== '')
     .map(([key, value]) => `${key}=${typeof value === 'object' ? JSON.stringify(value) : value}`);
   return entries.length ? ` (${entries.join(', ')})` : '';
-}
-
-function extractPreviewText(chunk: unknown): string | null {
-  if (typeof chunk === 'string') {
-    return chunk;
-  }
-  if (typeof chunk === 'object' && chunk !== null) {
-    if (Buffer.isBuffer(chunk)) {
-      return chunk.toString('utf8');
-    }
-    const candidate = (chunk as { toString?: () => string }).toString?.();
-    if (typeof candidate === 'string') {
-      return candidate;
-    }
-  }
-  return null;
 }

@@ -1,66 +1,41 @@
-# RouteCodex V2 错误处理流程（2025）
+# RouteCodex 错误中心机制（V2）
 
-本页记录当前 V2 的错误中心、上报接口与 Provider 健康策略，方便各模块按照统一方式抛错/观测。
+本页记录当前 RouteCodex V2 的统一错误处理与熔断策略，覆盖 HTTP Server、Hub Pipeline、Provider 以及 Virtual Router 健康管理。所有细节以此为准，后续规则变动需同步更新此文档并在 `AGENTS.md` 追加引用。
 
-## 1. 核心组件
+## 1. 统一流程
 
-| 组件 | 作用 |
-| --- | --- |
-| `RouteErrorHub` (`src/error-handling/route-error-hub.ts`) | 唯一的错误上报入口。负责调用 `ErrorHandlerRegistry`、`ErrorHandlingCenter`、生成标准化 HTTP 响应，并在未初始化时回退到临时中心。 |
-| `reportRouteError(payload, options)` | 供所有模块调用的 helper，会自动引导到 Hub；`options.includeHttpResult=true` 时返回 `HttpErrorPayload`。 |
-| `ErrorHandlerRegistry` | 保持 hook 机制（429 回退、告警、统计等）；通过 `attachErrorHandlingCenter()` 复用 host 自己的 `ErrorHandlingCenter`。 |
-| `ProviderHealthManager` (`src/core/provider-health-manager.ts`) | Host 侧的 Provider 健康状态：429 连续次数、拉黑列表等，供 RequestExecutor/HTTP Handler 在本地拦截。 |
+1. **HTTP Server / CLI / Pipeline** 捕获异常后调用 `reportRouteError(payload)`，由 `RouteErrorHub` 统筹。
+2. `RouteErrorHub` 负责：
+   - 归一化错误元数据（requestId、endpoint、providerKey、model 等）。
+   - 根据构建模式自动裁剪堆栈：`release` 构建默认移除 stack（可通过 `ROUTECODEX_RELEASE_ERROR_VERBOSE=1` 恢复详细日志）。
+   - 将错误交给 `ErrorHandlerRegistry`，触发挂载的处理 Hook（含 429 回退调度、快照写入等）。
+   - 可选返回 HTTP 映射结果，确保客户端仅收到统一格式的错误体。
+3. Provider 侧在 `emitProviderError` 同时上报 `providerErrorCenter`（供 Virtual Router 熔断）与 `ErrorHandlingCenter`。
+4. `llmswitch-core` 的 Virtual Router 根据 `ProviderErrorEvent` 执行健康状态变更（回退、降级、拉黑）。
 
-> **注意**：任何模块都不应该直接 `errorHandling.handleError()`，统一使用 `reportRouteError()`。
+## 2. 错误策略矩阵
 
-## 2. Hub 报错流程
+| 错误来源 | 状态 / 错误码 | Error Center 处理 | Virtual Router / ProviderHealth 策略 | 说明 |
+| --- | --- | --- | --- | --- |
+| Provider 客户端错误 | 4xx（排除 429） | 记录并透传，`affectsHealth=false` | 不触发健康计数 | 用户参数错误，可重试但不熔断 |
+| Provider 429 限流 | HTTP 429 / `retryable=true` | `rate_limit_error` Hook 启动回退：10s → 30s → 60s 共三次 | BaseProvider 内置 RateLimitTracker：同一 provider 连续 4 次 429 会以 `affectsHealth=true` 向 Virtual Router 上报，触发熔断；任意一次成功即清零 | 回退期间可切换同模型 pipeline，必要时返回 429 给客户端 |
+| Provider 5xx / 不可恢复 | HTTP ≥ 500、`affectsHealth=true` | 立即触发 `emitProviderError`，带 `fatal=true` | `tripProvider`，按 `fatalCooldownMs` 冷却 | 兼容层错误（stage=compat）同样视为 fatal |
+| Host/Server 内部错误 | pipeline/router 抛出的 500 | `RouteErrorHub` 归档并映射 HTTP 500；原始错误号写入 `code` 字段 | 同步 `providerErrorCenter`（若具备 provider 上下文） | 保证 release 输出简单错误号，dev 模式保留堆栈 |
+| CLI/工具链错误 | CLI command / debug harness | `reportCliError`（同 `RouteErrorHub`） | 仅记录，不影响路由池 | CLI 运行期错误不触发 provider 熔断 |
 
-1. 构造 `RouteErrorPayload`，包含 `code`、`message`、`scope`、`requestId`、`endpoint`、`providerKey` 等上下文。
-2. 调用 `reportRouteError()`：
-   - Hub 自动确保 `ErrorHandlerRegistry.initialize()`，执行所有 hook（包括 429 handler）。
-   - 将 payload 交给 `ErrorHandlingCenter`。在 release 模式下，`formatErrorForErrorCenter()` 会剥离 stack 等敏感字段，只保留 message/code/requestId。
-   - 若 `includeHttpResult=true`，使用 `mapErrorToHttp()` 生成标准化响应（429/4xx/502 等）。
-3. Handler 根据返回值写入 HTTP 响应；release 日志只输出简要行，dev 可以看到堆栈。
+> ⚠️ RateLimitTracker 只针对相同 provider 的连续 429 生效，中间出现成功或其他错误即会自动清零；冷却结束后会再次尝试，具体 TTL 由 virtualrouter.health 配置决定。
 
-现有调用点：
-- `respondWithPipelineError()`（所有 /v1 接口）
-- Express 全局错误中间件
-- Provider runtime (`emitProviderError`)
-- CLI（`src/index.ts` 中的 `reportCliError`）
-- Server runtime (`RouteCodexHttpServer.handleError`)
+## 3. 日志与可观测性
 
-## 3. Provider 健康策略
+- **Release 输出最小化**：`error-center-payload` 会在 release 构建中移除 `stack`、`details.stack`，仅保留 message/code/requestId 等必要字段。若需排查，可在运行时设置 `ROUTECODEX_RELEASE_ERROR_VERBOSE=1`。
+- **OAuth 噪音削减**：所有 `[OAuth] ...` 信息级日志默认通过 `ROUTECODEX_OAUTH_DEBUG=1` 才会打印，错误（`console.error`) 仍保持输出。
+- **SSE 预览日志禁用**：Server 不再将 SSE chunk 内容写入 `stage-logger`，仅保留流开始/结束事件与统计，避免泄露响应片段。
 
-Host 引入 `ProviderHealthManager` 以便即刻拦截问题 Provider：
+## 4. 回调挂载点
 
-| 触发条件 | 动作 |
-| --- | --- |
-| 上游返回 400（包含 message/code） | 仅记录，不拉黑。 |
-| 上游返回 429：第一次退避 10s、再 30s、60s。若连续 4 次仍 429 | 通过 `block(providerKey, 'rate_limit_exhausted')` 拉黑，阻止继续派单。成功一次即 `resetRateLimit()`。 |
-| 上游返回 5xx / 未知错误 | 立即 `block(providerKey, 'upstream_failure')`。 |
-| Host 自己的流水线/HTTP handler 映射为 500，且能定位 `providerKey` | 标记为 `host_internal_error`，避免继续发送到可能有问题的 runtime。 |
+- `ErrorHandlerRegistry` 默认挂载以下 Hook，可按需扩展：
+  - `rate_limit_error`：提供回退调度（切换 pipeline 或延迟重放）。
+  - `provider_error`：可注入通知/报警逻辑。
+  - 自定义 Hook 通过 `ErrorHandlerRegistry.registerErrorHandler` 挂载，RouteErrorHub 会自动转发。
 
-被拉黑的 Provider 会在下一次 `provider.prepare` 前被检测到并抛出 `ERR_PROVIDER_BLOCKED`；解除的方法是手动调用 `ProviderHealthManager.clear()` 或重载 runtime（重启服务）。
-
-> 上游 breaker（`sharedmodule/llmswitch-core` 中的 `providerErrorCenter`）仍旧存在，此处策略是 Host 侧的第一道拦截，核心熔断逻辑仍由 sharedmodule 统一执行。
-
-## 4. 429 回退逻辑
-
-- 错误被归类为 `rate_limit_error` 时，`ErrorHandlerRegistry` 内建 handler 会：
-  1. 尝试切换 pipeline（依赖 llmswitch-core 提供的 hooks）。
-  2. 若无可用 pipeline，则按照 schedule `[30000, 60000, 120000]` 退避并重试。
-  3. Hub 在 release 模式下只记录一次性文案，dev 日志会输出详细 backoff 信息。
-- Provider 健康策略会在第 4 次 429 之后拉黑，避免无限退避。
-
-## 5. Release 与 Dev 日志
-
-- Release 默认打印精简错误（单行 message / code / requestId），stack 等信息被 `formatErrorForErrorCenter()` 去除。
-- Dev 模式（`NODE_ENV=development` 或 `ROUTECODEX_STAGE_LOG=1`）会看到 `logPipelineStage`、stack、metadata 等详细内容，便于调试。
-- `ProviderHealthManager.block()` 会 `console.warn` 一条 `[ProviderHealth] Blocked providerKey: reason`，如需更安静可在 release 判定下禁用。
-
-## 6. 新增/迁移指引
-
-1. **抛错**：调用 `reportRouteError({ code: 'MY_MODULE_FAIL', scope: 'cli', ... })`。禁止直接 `ErrorHandlingCenter.handleError()`。
-2. **HTTP 映射**：若需要具体 HTTP 响应，传 `includeHttpResult: true` 获取 `HttpErrorPayload`。
-3. **Provider/Compat**：捕获上游异常后统一调用 `emitProviderError()`，它会代你调用 Hub + `providerErrorCenter`。
-4. **文档/配置**：可在 `docs/error-handling-v2.md`（本文）基础上扩展错误矩阵，把 `code → HTTP/status/Severity` 形成 JSON/TS 配置，未来 Hub 可以直接按配置执行动作。
+如需新增策略（例如特定 provider 的 4xx 也触发冷却），建议在 `docs/error-handling-v2.md` 补充矩阵，并在 `virtualrouter.health` 配置中增加自定义参数。
