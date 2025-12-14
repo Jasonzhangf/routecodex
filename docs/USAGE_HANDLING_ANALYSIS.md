@@ -90,14 +90,15 @@ export const sessionUsageCache = new LRUCache<string, Usage>(100);
 **位置**: `src/utils/router.ts:87-103`
 
 ```typescript
-const longContextThreshold = config.Router.longContextThreshold || 60000;
+const longContextThreshold =
+  config.virtualrouter?.classifier?.longContextThresholdTokens ?? 180000;
 const lastUsageThreshold = 
   lastUsage && 
   lastUsage.input_tokens > longContextThreshold && 
   tokenCount > 20000;
 
 // 根据上一次使用情况决定是否使用长上下文模型
-if ((lastUsageThreshold || tokenCountThreshold) && config.Router.longContext) {
+if ((lastUsageThreshold || tokenCountThreshold) && config.Router?.longContext) {
   return config.Router.longContext;
 }
 ```

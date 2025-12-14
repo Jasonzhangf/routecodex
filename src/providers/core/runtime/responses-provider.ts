@@ -318,24 +318,31 @@ export class ResponsesProvider extends HttpTransportProvider {
       })
       : stream;
 
-    if (clientRequestedStream) {
-      if (!captureSse) {
-        await this.snapshotPhase('provider-response', context, { mode: 'sse' }, headers, targetUrl, entryEndpoint);
-      }
-      return { __sse_stream: streamForHost };
-    }
-
     const converter = await this.loadResponsesSseConverter();
-    const json = await converter.convertSseToJson(stream, {
+    const json = await converter.convertSseToJson(streamForHost, {
       requestId: context.requestId,
       model: typeof body.model === 'string' ? body.model : 'unknown'
     });
-    await this.snapshotPhase('provider-response', context, json ?? null, headers, targetUrl, entryEndpoint);
+    await this.snapshotPhase(
+      'provider-response',
+      context,
+      {
+        mode: 'sse',
+        clientStream: clientRequestedStream,
+        payload: json ?? null
+      },
+      headers,
+      targetUrl,
+      entryEndpoint
+    );
     return {
       data: json,
       status: 200,
       statusText: 'OK',
-      headers: { 'x-upstream-mode': 'sse' },
+      headers: {
+        'x-upstream-mode': 'sse',
+        'x-provider-stream-requested': clientRequestedStream ? '1' : '0'
+      },
       url: targetUrl
     };
   }

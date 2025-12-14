@@ -19,7 +19,7 @@
   - 位置：`../../claude-code-router/src/utils/router.ts`
   - 关键点：
     - 使用 `tiktoken` 计算 token（消息文本、tool_use/input、tool_result/content、system 文本、工具 schema 都计入）。
-    - 与配置阈值比较（`config.Router.longContextThreshold`，默认 60,000 tokens）。
+    - 与配置阈值比较（`virtualrouter.classifier.longContextThresholdTokens`，默认 180,000 tokens）。
     - 超阈值或结合上一轮 usage 过大则切换到 `config.Router.longContext` 模型。
 - CCR 并不把大段工具结果回灌到 assistant 文本；工作流结束时通过 ExitTool 返回最终文本，移除 `tool_calls`。
 
@@ -65,7 +65,7 @@
 ## 后续工作（对齐 CCR 的“预算来源”）
 - 预算来源与策略：
   - 总上下文预算：
-    - 从配置载入（建议：`config.Router.longContextThreshold`/`ROUTECODEX_CONTEXT_BUDGET_TOKENS`）。
+    - 从配置载入（建议：`virtualrouter.classifier.longContextThresholdTokens`，或在用户配置中覆盖）。
     - 用 `tiktoken` 计算请求 token 数，参照 CCR 的 `router.ts` 逻辑。
   - 分层预算落到工具结果：
     - 最近 N 条工具消息额度更大，其余更严格（HEAD/TAIL/摘要）。
@@ -77,4 +77,3 @@
 - 500 原因是“累积工具结果文本 + 超长 system 导致载荷过大”，而非“工具引导缺失”。
 - 处置方案定位在唯一入口（llmswitch-core），以“主动最小化 + 预算控制”预防问题发生。
 - 下一步将把“分层预算 + 类型化提要 + 全局上下文预算（CCR 同源）”落地为可配置策略，并继续用 curl 真样本回放验证。
-

@@ -10,6 +10,7 @@
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { DEFAULT_THINKING_KEYWORDS } from '@jsonstudio/llms';
 
 const HOME = os.homedir();
 const CHAT_DIR = path.join(HOME, '.routecodex', 'codex-samples', 'openai-chat');
@@ -85,8 +86,10 @@ function extractUserText(request, endpoint, protocolMapping) {
 
 async function main() {
   const classificationConfig = await loadClassificationConfigFromModules();
-  const thinkingKeywords = (classificationConfig.thinkingKeywords || []).map((s) =>
-    String(s || '').toLowerCase()
+  const thinkingKeywords = mergeKeywordLists(
+    DEFAULT_THINKING_KEYWORDS,
+    classificationConfig.thinkingKeywords,
+    classificationConfig.keywordInjections?.thinking
   );
   const protocolMapping = classificationConfig.protocolMapping || {};
 
@@ -167,3 +170,15 @@ main().catch((err) => {
   process.exit(1);
 });
 
+function mergeKeywordLists(...lists) {
+  const set = new Set();
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (!item) continue;
+      const lowered = String(item).toLowerCase();
+      if (lowered) set.add(lowered);
+    }
+  }
+  return Array.from(set);
+}

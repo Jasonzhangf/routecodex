@@ -35,20 +35,7 @@ export class ResponsesC4MCompatibility implements CompatibilityModule {
   async processOutgoing(response: UnknownObject, context: CompatibilityContext): Promise<UnknownObject> {
     const rateLimitMessage = this.detectRateLimitNotice(response);
     if (rateLimitMessage) {
-      const error = new Error(rateLimitMessage);
-      const enriched = error as Error & {
-        statusCode?: number;
-        code?: string;
-        details?: Record<string, unknown>;
-      };
-      enriched.statusCode = 429;
-      enriched.code = 'HTTP_429';
-      enriched.details = {
-        requestId: context.requestId,
-        profileId: context.profileId,
-        providerType: context.providerType
-      };
-      throw enriched;
+      throw this.buildRateLimitError(rateLimitMessage, context);
     }
     return response;
   }
@@ -98,35 +85,42 @@ export class ResponsesC4MCompatibility implements CompatibilityModule {
   }
 
   private detectRateLimitNotice(response: UnknownObject): string | null {
+    if (!response || typeof response !== 'object') {
+      return null;
+    }
     const candidates: string[] = [];
     const pushText = (value: unknown) => {
       if (typeof value === 'string' && value.trim()) {
         candidates.push(value.trim());
       }
     };
-    pushText((response as Record<string, unknown>)?.message);
-    const errorNode = (response as Record<string, unknown>)?.error;
+    const record = response as Record<string, unknown>;
+    pushText(record.message);
+    pushText(record.detail);
+    const errorNode = record.error;
     if (errorNode && typeof errorNode === 'object') {
       pushText((errorNode as Record<string, unknown>).message);
     }
-    const output = (response as Record<string, unknown>)?.output;
-    if (Array.isArray(output)) {
-      for (const item of output) {
-        if (!item || typeof item !== 'object') {
-          continue;
-        }
-        const content = (item as Record<string, unknown>).content;
-        if (typeof content === 'string') {
-          pushText(content);
-        } else if (Array.isArray(content)) {
-          for (const block of content) {
-            if (block && typeof block === 'object') {
-              pushText((block as Record<string, unknown>).text);
-              pushText((block as Record<string, unknown>).message);
-            }
-          }
-        }
+    const responseNode = record.response;
+    if (responseNode && typeof responseNode === 'object') {
+      const responseRecord = responseNode as Record<string, unknown>;
+      pushText(responseRecord.message);
+      const innerError = responseRecord.error;
+      if (innerError && typeof innerError === 'object') {
+        pushText((innerError as Record<string, unknown>).message);
       }
+      const innerOutput = responseRecord.output;
+      if (Array.isArray(innerOutput)) {
+        this.collectOutputText(innerOutput as Array<Record<string, unknown>>, pushText);
+      }
+    }
+    const output = record.output;
+    if (Array.isArray(output)) {
+      this.collectOutputText(output as Array<Record<string, unknown>>, pushText);
+    }
+    const content = record.content;
+    if (Array.isArray(content)) {
+      this.collectOutputText(content as Array<Record<string, unknown>>, pushText);
     }
     for (const value of candidates) {
       if (this.isCodexRateLimitNotice(value)) {
@@ -136,10 +130,46 @@ export class ResponsesC4MCompatibility implements CompatibilityModule {
     return null;
   }
 
+  private collectOutputText(items: Array<Record<string, unknown>>, push: (value: unknown) => void): void {
+    for (const item of items) {
+      const content = item?.content;
+      if (typeof content === 'string') {
+        push(content);
+        continue;
+      }
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block && typeof block === 'object') {
+            push((block as Record<string, unknown>).text);
+            push((block as Record<string, unknown>).message);
+          }
+        }
+      }
+    }
+  }
+
   private isCodexRateLimitNotice(value: string): boolean {
     const normalized = value.toLowerCase();
     return normalized.includes('codex-for.me') && normalized.includes('request limit');
   }
+
+  private buildRateLimitError(message: string, context: CompatibilityContext): Error {
+    const error = new Error(message);
+    const enriched = error as Error & {
+      statusCode?: number;
+      code?: string;
+      details?: Record<string, unknown>;
+    };
+    enriched.statusCode = 429;
+    enriched.code = 'HTTP_429';
+    enriched.details = {
+      requestId: context.requestId,
+      profileId: context.profileId,
+      providerType: context.providerType
+    };
+    return enriched;
+  }
+
 
   private injectInstructionsIntoInput(container: Record<string, unknown>, instructions: string): boolean {
     if (!instructions.trim()) {

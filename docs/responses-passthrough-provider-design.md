@@ -32,7 +32,7 @@
   - 请求端点：`POST <baseUrl>/responses`（与 OpenAI Responses 文档一致）。
   - 当请求 `metadata.entryEndpoint === '/v1/responses'` 且本 provider 生效：
     - 设置 Header：`Accept: text/event-stream`，发起真实 SSE；
-    - 将 WHATWG Readable 转成 Node Readable，返回 `{ __sse_stream, __sse_meta }` 给上层。
+    - Provider 消费上游 SSE，并转换成标准 Responses JSON（再标记 `x-upstream-mode: sse`）返回 Pipeline，不再暴露 `__sse_stream`。
   - 旁路快照：
     - `provider-request.json`：请求体；
     - `provider-response.json`：状态与 headers（SSE 情况记录 meta）；
@@ -68,7 +68,7 @@
     - `Cache-Control: no-cache, no-transform`
     - `Connection: keep-alive`
     - `X-Accel-Buffering: no`
-  - 若上游返回 `__sse_stream`：tee 到 `~/.routecodex/logs/sse/<requestId>_server.sse.log`，同时 pipe 至客户端。
+  - 若上游返回 SSE：Provider 负责先转换成 JSON，再由 llmswitch-core 决定是否重建 `__sse_responses` 给 HTTP Server。
   - 不做本地合成（直通模式）。
   - `/v1/responses/:id/submit_tool_outputs`：
   - 同上，透传上游返回的 SSE，tee+pipe。
@@ -99,7 +99,7 @@
 
 3) HTTP 层
    - `src/server/http-server.ts`：
-     - `/v1/responses` 收到 `__sse_stream` 时 tee+pipe（当前分支已具备 tee 基础，补 flushHeaders/X-Accel-Buffering）。
+  - `/v1/responses` 收到 `__sse_responses` 时 tee+pipe（当前分支已具备 tee 基础，补 flushHeaders/X-Accel-Buffering）。
      - `/v1/responses/:id/submit_tool_outputs` 直通处理（沿用现有结构，接 provider 方法）。
      - submit 路径新增对 `llmswitch-core` 的 `resumeResponsesConversation()` 调用，server 侧仅负责读取 `response_id` / `tool_outputs` 并交给核心缓存生成完整 payload，成功后再进 Hub Pipeline，失败返回 400（表示响应已过期或丢失）。
 

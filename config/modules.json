@@ -27,17 +27,7 @@
         "classificationConfig": {
           "confidenceThreshold": 60,
           "enableSmartRouting": true,
-          "longContextThresholdTokens": 100000,
-          "thinkingKeywords": [
-            "思考",
-            "深度思考",
-            "逐步思考",
-            "一步一步思考",
-            "先思考再回答",
-            "推理",
-            "逻辑推理",
-            "分析"
-          ],
+          "longContextThresholdTokens": 180000,
           "backgroundKeywords": [
             "background",
             "上下文"

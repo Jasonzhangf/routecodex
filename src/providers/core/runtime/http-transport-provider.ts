@@ -43,7 +43,6 @@ type ResponseRecord = Record<string, unknown> & {
   data?: ResponseRecord;
   headers?: Record<string, unknown>;
   status?: number;
-  __sse_stream?: unknown;
   model?: string;
   usage?: UnknownObject;
 };
@@ -603,18 +602,6 @@ export class HttpTransportProvider extends BaseProvider {
 
   protected async postprocessResponse(response: unknown, context: ProviderContext): Promise<UnknownObject> {
     const runtime = this.getRuntimeProfile();
-    // 流式短路：若上游仍返回 SSE，则统一包装为 __sse_responses，交由 HTTP 层原样透传
-    try {
-      const responseRecord = this.asResponseRecord(response);
-      if (responseRecord.__sse_stream) {
-        return { __sse_responses: responseRecord.__sse_stream };
-      }
-      if (responseRecord.data?.__sse_stream) {
-        return { __sse_responses: responseRecord.data.__sse_stream };
-      }
-    } catch {
-      // ignore
-    }
     const processingTime = Date.now() - context.startTime;
 
     let processedResponse = response;
@@ -671,8 +658,15 @@ export class HttpTransportProvider extends BaseProvider {
       throw e;
     }
 
-    const processedRecord = this.asResponseRecord(processedResponse);
     const originalRecord = this.asResponseRecord(response);
+    const processedRecord = this.asResponseRecord(processedResponse);
+
+    const sseStream =
+      processedRecord.__sse_responses ||
+      processedRecord.data?.__sse_responses;
+    if (sseStream) {
+      return { __sse_responses: sseStream } as UnknownObject;
+    }
 
     return {
       data: processedRecord.data || processedResponse,

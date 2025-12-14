@@ -535,7 +535,6 @@ export class ErrorHandlerRegistry {
               } catch {
                 // ignore telemetry failures
               }
-              await new Promise(resolve => setTimeout(resolve, delay));
               const resp = await (hooks.processWithPipeline
                 ? hooks.processWithPipeline(pipeline)
                 : Promise.reject(new Error('processWithPipeline not provided')));

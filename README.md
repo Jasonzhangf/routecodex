@@ -134,6 +134,28 @@ RouteCodex 会按以下优先级查找配置：
 
 > 样本仅用于演示。请把 `baseUrl` / `routing` 更新为真实 provider，再通过环境变量、`authfile-*` 或 Secret 管理工具提供密钥。
 
+### 自定义路由关键字
+
+虚拟路由器内置了一组默认关键字（如 `思考/think` → `thinking` 路由，`vision/image` → `vision` 路由）。若希望在不覆盖默认词表的前提下追加命中词，可以在用户配置中加入 `virtualrouter.classifier.keywordInjections`：
+
+```json
+{
+  "virtualrouter": {
+    "classifier": {
+      "keywordInjections": {
+        "thinking": ["慢慢分析", "stepwise"],
+        "vision": ["截图如下"],
+        "background": ["context dump please"]
+      }
+    }
+  }
+}
+```
+
+- 字段名对应路由类别（`thinking` / `background` / `vision` / `coding`），只需写新增词条即可，默认常量会自动保留。
+- 若同一词出现在多个路由，将沿用 `ROUTE_PRIORITY`（`longcontext → thinking → vision → ...`）顺序做匹配。
+- 更新配置文件后重启服务即可生效。
+
 ---
 
 ## 快速使用
@@ -212,12 +234,17 @@ RouteCodex 会按以下优先级查找配置：
 ### 🔧 智能路由系统
 支持7种动态路由类别，自动选择最优处理流水线：
 - `default`: 标准请求路由
-- `longcontext`: 长文本处理请求
+- `longcontext`: 长文本处理请求（tiktoken 统计超过 180k token 时切向 ≥256k provider，例如 fai/c4m）
 - `thinking`: 复杂推理请求
 - `background`: 后台处理请求
 - `websearch`: 网络搜索请求
 - `vision`: 图像处理请求
 - `coding`: 代码生成请求
+
+**强制路由/模型标签（请求文本内插入 `<**...**>`）**
+- `<**thinking|coding|tools|vision|websearch|longcontext|background**>`：强制命中对应路由，忽略其它关键词。
+- `<**provider.model**>`：强制命中某个 provider 模型（如 `<**c4m.gpt-5.1-codex**>`，当 provider 存在并健康时直接命中）。
+- 标签在路由阶段被剥离，真实请求不会把控制标签透传给上游。
 
 ### 🛠️ Provider V2架构
 完全重构的Provider系统，提供：
@@ -517,12 +544,16 @@ curl -X POST http://localhost:5506/v1/chat/completions \
       "longcontext": {
         "targets": [
           {
-            "providerId": "anthropic-provider",
-            "modelId": "claude-3-5-sonnet-20241022"
+            "providerId": "fai-provider",
+            "modelId": "gpt-5.1-codex"
+          },
+          {
+            "providerId": "c4m-provider",
+            "modelId": "gpt-5.1-codex"
           }
         ],
         "triggers": [
-          {"type": "token_count", "threshold": 100000},
+          {"type": "token_count", "threshold": 180000},
           {"type": "content_type", "value": "document"}
         ]
       },

@@ -65,7 +65,7 @@ function createRouterConfig() {
     routing,
     providers,
     classifier: {
-      longContextThresholdTokens: 60000,
+      longContextThresholdTokens: 180000,
       thinkingKeywords: ['think', '考', 'reason'],
       backgroundKeywords: []
     },
@@ -128,9 +128,9 @@ class VirtualRouterSimulator {
     return event;
   }
 
-  runRoute(label = 'default') {
+  runRoute(label = 'default', text) {
     const requestId = `req_${++this.sequence}`;
-    const request = cloneRequest(`scenario:${label}:${Date.now()}`);
+    const request = cloneRequest(text ?? `scenario:${label}:${Date.now()}`);
     const metadata = {
       requestId,
       entryEndpoint: '/v1/chat/completions',
@@ -227,6 +227,12 @@ async function scenarioScheduler(sim) {
   sim.runRoute('thinking');
 }
 
+async function scenarioRoutingDirectives(sim) {
+  sim.runRoute('baseline', '普通请求');
+  sim.runRoute('forced-thinking', '请仔细分析这个问题 <**thinking**>');
+  sim.runRoute('forced-provider', '请强制使用这个provider <**charlie.sim-model**> 来回答');
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
@@ -240,7 +246,8 @@ async function main() {
     ['client-error', scenarioClientError],
     ['upstream', scenarioUpstream],
     ['timeout', scenarioTimeout],
-    ['scheduler', scenarioScheduler]
+    ['scheduler', scenarioScheduler],
+    ['routing-directives', scenarioRoutingDirectives]
   ];
 
   const summary = [];

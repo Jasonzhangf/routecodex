@@ -154,7 +154,7 @@ function assertShape(payload: unknown, protocol: ProviderProtocol, where: string
         throw err;
       }
     } else if (protocol === 'openai-responses') {
-      // 最小检查：存在 input/instructions/response 之一
+      // 最小检查：存在 input/instructions/response 之一，或具备 SSE 遮罩
       const sseMask = Boolean(record.__sse_responses);
       const ok =
         sseMask ||
@@ -274,9 +274,23 @@ export class ProviderComposite {
     try {
       assertProtocol(ctx, 'composite.response');
       const compat = await loadCompat(ctx);
-      const std = await compat.response(response, ctx, opts.dependencies);
+      const hasEnvelope =
+        response !== null &&
+        typeof response === 'object' &&
+        'data' in (response as Record<string, unknown>);
+      const envelopeSource = hasEnvelope
+        ? (response as Record<string, unknown>).data
+        : response;
+      const compatInput = envelopeSource ?? response;
+      const compatResult = await compat.response(compatInput, ctx, opts.dependencies);
+      const std = hasEnvelope
+        ? {
+          ...(response as Record<string, unknown>),
+          data: compatResult
+        }
+        : compatResult;
       // 最小形状断言（对 std 侧，应该是“标准化后的上游 JSON”，允许是 data 外壳内部）；SSE 遮罩允许（responses 协议）
-      let root: unknown = std;
+      let root: unknown = hasEnvelope ? compatResult : std;
       if (root && typeof root === 'object' && 'data' in (root as Record<string, unknown>)) {
         const container = root as Record<string, unknown>;
         root = container.data ?? root;
