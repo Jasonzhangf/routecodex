@@ -74,6 +74,7 @@ type HubPipelineResult = {
     outboundProfile: string;
     runtimeKey?: string;
     processMode?: string;
+    compatibilityProfile?: string;
   };
   routingDecision?: { routeName?: string };
   processMode: string;
@@ -223,7 +224,8 @@ export class HubRequestExecutor implements RequestExecutor {
         routeName: pipelineResult.routingDecision?.routeName,
         runtimeKey,
         target,
-        metadata: mergedMetadata
+        metadata: mergedMetadata,
+        compatibilityProfile: target.compatibilityProfile
       });
 
       this.logStage('provider.send.start', input.requestId, {

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2025-12-11T13:11:54.445Z",
+  "updated": "2025-12-15T13:49:48.946Z",
   "samples": [
     {
       "reqId": "openai-chat-unknown-unknown-20251206T103315-001",
@@ -523,6 +523,28 @@
       "path": "openai-responses.submit_tool_outputs/mock.apply_patch.toolloop/toolloop/20251212/234358/002",
       "tags": [
         "apply_patch_loop_submit"
+      ]
+    },
+    {
+      "reqId": "openai-responses-iflow.key1.kimi-k2-kimi-k2-20251215T212851451-002",
+      "entry": "openai-chat",
+      "providerId": "iflow.key1.kimi-k2",
+      "model": "kimi-k2",
+      "timestamp": "2025-12-15T13:28:51.451Z",
+      "path": "openai-chat/iflow.key1.kimi-k2/kimi-k2/20251215/212851/002",
+      "tags": [
+        "regression"
+      ]
+    },
+    {
+      "reqId": "openai-responses-qwen.key1.qwen3-coder-plus-qwen3-coder-plus-20251215T214206485-001",
+      "entry": "openai-chat",
+      "providerId": "qwen.key1.qwen3-coder-plus",
+      "model": "qwen3-coder-plus",
+      "timestamp": "2025-12-15T21:42:06.485Z",
+      "path": "openai-chat/qwen.key1.qwen3-coder-plus/qwen3-coder-plus/20251215/214206/001",
+      "tags": [
+        "regression"
       ]
     }
   ]

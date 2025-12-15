@@ -13,6 +13,7 @@ export interface ProviderRuntimeMetadata {
   modelId?: string;
   metadata?: Record<string, unknown>;
   target?: TargetMetadata;
+  compatibilityProfile?: string;
 }
 
 const PROVIDER_RUNTIME_SYMBOL = Symbol.for('routecodex.providerRuntime');

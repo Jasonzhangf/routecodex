@@ -103,7 +103,7 @@ function buildConfig(sample, port) {
           type: 'mock-provider',
           providerType: 'responses',
           baseURL: `https://mock.local/${providerId}`,
-          compat: 'passthrough',
+          compatibilityProfile: 'compat:passthrough',
           providerId: sample.providerId,
           auth: {
             type: 'apikey',

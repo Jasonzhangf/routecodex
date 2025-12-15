@@ -1,0 +1,137 @@
+{
+  "reqId": "openai-responses-iflow.key1.kimi-k2-kimi-k2-20251215T212851451-002",
+  "entry": "openai-chat",
+  "endpoint": "/v1/chat/completions",
+  "providerId": "iflow.key1.kimi-k2",
+  "model": "kimi-k2",
+  "timestamp": 1765834141901,
+  "status": 200,
+  "statusText": "",
+  "responseInfo": {
+    "url": "https://apis.iflow.cn/v1/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer****b77f02",
+      "Accept": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "originator": "routecodex_host"
+    },
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.89.075",
+      "buildTime": "2025-12-15T13:29:01.901Z",
+      "clientRequestId": "openai-responses-unknown-unknown-20251215T212851451-002"
+    }
+  },
+  "body": {
+    "id": "chatcmpl-69400d18346c05998e629f31",
+    "object": "chat.completion",
+    "created": 1765805336,
+    "model": "kimi-k2",
+    "usage": {
+      "prompt_tokens": 77722,
+      "completion_tokens": 90,
+      "total_tokens": 77812
+    },
+    "extend_fields": {
+      "traceId": "2101ea3517658053322951857e1ac3",
+      "requestId": "ca426b21fc7287f8009e81b23d894b4d"
+    },
+    "choices": [
+      {
+        "index": 0,
+        "finish_reason": "tool_calls",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "index": 0,
+              "id": "shell_command:170",
+              "type": "function",
+              "function": {
+                "arguments": "{\"command\":\"curl -X POST http://127.0.0.1:7704/execute -H \\\"Content-Type: application/json\\\" -d '{\\\"action\\\": \\\"evaluate\\\", \\\"script\\\": \\\"return {title:document.title,url:window.location.href,headless:navigator.webdriver||false};\\\"}'\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\"}",
+                "name": "shell_command"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "raw": {
+    "meta": {
+      "stage": "provider-response",
+      "version": "0.89.075",
+      "buildTime": "2025-12-15T13:29:01.901Z",
+      "clientRequestId": "openai-responses-unknown-unknown-20251215T212851451-002"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer****b77f02",
+      "Accept": "application/json",
+      "User-Agent": "RouteCodex/2.0",
+      "originator": "routecodex_host"
+    },
+    "body": {
+      "data": {
+        "id": "chatcmpl-69400d18346c05998e629f31",
+        "object": "chat.completion",
+        "created": 1765805336,
+        "model": "kimi-k2",
+        "usage": {
+          "prompt_tokens": 77722,
+          "completion_tokens": 90,
+          "total_tokens": 77812
+        },
+        "extend_fields": {
+          "traceId": "2101ea3517658053322951857e1ac3",
+          "requestId": "ca426b21fc7287f8009e81b23d894b4d"
+        },
+        "choices": [
+          {
+            "index": 0,
+            "finish_reason": "tool_calls",
+            "message": {
+              "role": "assistant",
+              "content": "",
+              "tool_calls": [
+                {
+                  "index": 0,
+                  "id": "shell_command:170",
+                  "type": "function",
+                  "function": {
+                    "arguments": "{\"command\":\"curl -X POST http://127.0.0.1:7704/execute -H \\\"Content-Type: application/json\\\" -d '{\\\"action\\\": \\\"evaluate\\\", \\\"script\\\": \\\"return {title:document.title,url:window.location.href,headless:navigator.webdriver||false};\\\"}'\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\"}",
+                    "name": "shell_command"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "status": 200,
+      "statusText": "",
+      "headers": {
+        "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+        "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+        "access-control-allow-origin": "*",
+        "connection": "keep-alive",
+        "content-encoding": "gzip",
+        "content-type": "application/json;charset=UTF-8",
+        "date": "Mon, 15 Dec 2025 13:29:01 GMT",
+        "eagleeye-traceid": "2101ea3517658053322951857e1ac3",
+        "s-brt": "7707",
+        "s-rt": "9648",
+        "server": "Tengine",
+        "strict-transport-security": "max-age=0",
+        "transfer-encoding": "chunked",
+        "ups-target-key": "apis.iflow.cn.vipserver",
+        "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+        "x-protocol": "HTTP/1.1"
+      },
+      "url": "https://apis.iflow.cn/v1/chat/completions"
+    }
+  }
+}
