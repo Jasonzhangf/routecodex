@@ -1,0 +1,18 @@
+{
+  "reqId": "openai-responses.submit_tool_outputs-mock.apply_patch.toolloop-20251212T234358000-002",
+  "endpoint": "/v1/responses.submit_tool_outputs",
+  "providerId": "mock.apply_patch.toolloop",
+  "model": "toolloop",
+  "timestamp": "2025-12-12T23:43:59.000Z",
+  "status": 200,
+  "sseEvents": [
+    {
+      "event": "response.output_text.delta",
+      "data": "{\"response\":{\"id\":\"resp-apply-patch-loop\"},\"delta\":\"apply_patch 已执行，模拟修改完成。\"}"
+    },
+    {
+      "event": "response.completed",
+      "data": "{\"response\":{\"id\":\"resp-apply-patch-loop\",\"status\":\"completed\",\"output_text\":\"apply_patch 已执行，模拟修改完成。请继续下一步。\"}}"
+    }
+  ]
+}
