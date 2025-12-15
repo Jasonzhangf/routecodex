@@ -5,13 +5,13 @@ Provider V2 仅负责：
 - HTTP 通信（统一 baseUrl/headers/timeout/retry）。
 - 认证管理（API Key / OAuth / TokenFile）。
 - 请求/响应快照记录。
-- 最小兼容层（GLM/Qwen/iFlow/LM Studio）通过 `ProviderComposite` 注入。
+- 最小兼容层（GLM/Qwen/iFlow/LM Studio）统一由 Hub Pipeline 的 `compatibility` 模块注入。
 
 所有工具治理、路由决策、参数修复均由 `llmswitch-core` Hub Pipeline 完成；Host 不再自行修补 payload。
 
 ## 入口分层
 ```
-routecodex-server → Hub Pipeline → ProviderComposite
+routecodex-server → Hub Pipeline → Provider V2
                                   │
                                   ├─ compat/（最小字段修剪）
                                   └─ core/（HTTP 发送 + 快照）

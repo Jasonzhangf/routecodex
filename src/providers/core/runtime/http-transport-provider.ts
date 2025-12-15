@@ -28,7 +28,6 @@ import type { ApiKeyAuth, OAuthAuth, OpenAIStandardConfig } from '../api/provide
 import type { ProviderContext, ProviderError, ProviderRuntimeProfile, ServiceProfile, ProviderType } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
-import { ProviderComposite } from '../composite/provider-composite.js';
 import { attachProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import type { HttpProtocolClient, ProtocolRequestPayload } from '../../../client/http-protocol-client.js';
 import { OpenAIChatProtocolClient } from '../../../client/openai/chat-protocol-client.js';
@@ -62,7 +61,6 @@ type ProviderErrorAugmented = ProviderError & {
     };
   };
   details?: Record<string, unknown>;
-  providerFamily?: string;
   requestId?: string;
   providerKey?: string;
   providerId?: string;
@@ -576,26 +574,7 @@ export class HttpTransportProvider extends BaseProvider {
 
     // Provider 层不再修改工具 schema；统一入口在 llmswitch-core/兼容层
 
-    // 新增：ProviderComposite.compat.request（协议敏感；Fail Fast）
-    try {
-      const compatProfile = (runtime?.compatibilityProfile || '').toLowerCase();
-      const shouldRunCompat = compatProfile !== 'none';
-      if (shouldRunCompat) {
-        ensureRuntimeMetadata(processedRequest);
-        processedRequest = await ProviderComposite.applyRequest(processedRequest, {
-          providerType: runtime?.providerType || this.providerType,
-          providerFamily: runtime?.providerFamily || runtime?.providerId || runtime?.providerKey,
-          dependencies: this.dependencies
-        });
-        ensureRuntimeMetadata(processedRequest);
-      }
-    } catch (e) {
-      // 暴露问题，不兜底
-      this.dependencies.logger?.logModule?.(this.id, 'compat-request-error', {
-        error: e instanceof Error ? e.message : String(e)
-      });
-      throw e;
-    }
+    // Provider 层不做协议兼容改写：compatibility 由 llmswitch-core Hub Pipeline 统一处理。
 
     return processedRequest;
   }
@@ -639,24 +618,7 @@ export class HttpTransportProvider extends BaseProvider {
 
     processedResponse = postprocessResult.data;
 
-    // 新增：ProviderComposite.compat.response（在封装/模型名还原之前）
-    try {
-      const compatProfile = (runtime?.compatibilityProfile || '').toLowerCase();
-      const shouldRunCompat = compatProfile !== 'none';
-      if (shouldRunCompat) {
-        processedResponse = await ProviderComposite.applyResponse(processedResponse, undefined, {
-          providerType: runtime?.providerType || this.providerType,
-          providerFamily: runtime?.providerFamily || runtime?.providerId || runtime?.providerKey,
-          dependencies: this.dependencies,
-          runtime: context.runtimeMetadata
-        });
-      }
-    } catch (e) {
-      this.dependencies.logger?.logModule?.(this.id, 'compat-response-error', {
-        error: e instanceof Error ? e.message : String(e)
-      });
-      throw e;
-    }
+    // Provider 层不做协议兼容改写：compatibility 由 llmswitch-core Hub Pipeline 统一处理。
 
     const originalRecord = this.asResponseRecord(response);
     const processedRecord = this.asResponseRecord(processedResponse);
