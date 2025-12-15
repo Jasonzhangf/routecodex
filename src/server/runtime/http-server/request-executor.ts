@@ -108,6 +108,9 @@ export class HubRequestExecutor implements RequestExecutor {
         const headerUa =
           (typeof input.headers?.['user-agent'] === 'string' && input.headers['user-agent']) ||
           (typeof input.headers?.['User-Agent'] === 'string' && input.headers['User-Agent']);
+        const headerOriginator =
+          (typeof input.headers?.['originator'] === 'string' && input.headers['originator']) ||
+          (typeof input.headers?.['Originator'] === 'string' && input.headers['Originator']);
         await writeClientSnapshot({
           entryEndpoint: input.entryEndpoint,
           requestId: input.requestId,
@@ -115,7 +118,8 @@ export class HubRequestExecutor implements RequestExecutor {
           body: input.body,
           metadata: {
             ...metadata,
-            userAgent: headerUa
+            userAgent: headerUa,
+            clientOriginator: headerOriginator
           }
         });
       } catch {

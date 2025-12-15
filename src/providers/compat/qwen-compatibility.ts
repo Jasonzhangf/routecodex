@@ -34,12 +34,12 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 export class QwenCompatibility implements CompatibilityModule {
   readonly id: string;
-  readonly type = 'qwen-compatibility';
-  readonly providerType = 'qwen';
+  readonly type = 'chat:qwen';
+  readonly providerType = 'openai';
 
   private readonly dependencies: ModuleDependencies;
   private _config: ModuleConfig = {
-    type: 'qwen-compatibility',
+    type: 'chat:qwen',
     config: {}
   };
   private transformationEngine: TransformationEngine | null = null;
@@ -48,7 +48,7 @@ export class QwenCompatibility implements CompatibilityModule {
 
   constructor(dependencies: ModuleDependencies) {
     this.dependencies = dependencies;
-    this.id = `qwen-compatibility-${Date.now()}`;
+    this.id = `chat-qwen-${Date.now()}`;
   }
 
   get config(): ModuleConfig {

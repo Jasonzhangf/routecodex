@@ -17,19 +17,19 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 export class PassthroughCompatibility implements CompatibilityModule {
   readonly id: string;
-  readonly type = 'passthrough-compatibility';
+  readonly type = 'compat:passthrough';
   readonly providerType = 'passthrough';
 
   private readonly dependencies: ModuleDependencies;
   private _config: ModuleConfig = {
-    type: 'passthrough-compatibility',
+    type: 'compat:passthrough',
     config: {}
   };
   private isInitialized = false;
 
   constructor(dependencies: ModuleDependencies) {
     this.dependencies = dependencies;
-    this.id = `passthrough-compatibility-${Date.now()}`;
+    this.id = `compat-passthrough-${Date.now()}`;
   }
 
   get config(): ModuleConfig {

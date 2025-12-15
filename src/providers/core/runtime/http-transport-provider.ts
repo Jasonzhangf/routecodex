@@ -78,6 +78,9 @@ type ProviderConfigInternal = OpenAIStandardConfig['config'] & {
   };
 };
 
+const DEFAULT_USER_AGENT = 'RouteCodex/2.0';
+const DEFAULT_ORIGINATOR = 'routecodex_host';
+
 
 export class HttpTransportProvider extends BaseProvider {
   public readonly type: string;
@@ -970,6 +973,17 @@ export class HttpTransportProvider extends BaseProvider {
       'Content-Type': 'application/json'
     };
 
+    const runtimeMetadata = this.getCurrentRuntimeMetadata();
+    const inboundMetadata = runtimeMetadata?.metadata;
+    const inboundUserAgent =
+      typeof inboundMetadata?.userAgent === 'string' && inboundMetadata.userAgent.trim()
+        ? inboundMetadata.userAgent.trim()
+        : undefined;
+    const inboundOriginator =
+      typeof inboundMetadata?.clientOriginator === 'string' && inboundMetadata.clientOriginator.trim()
+        ? inboundMetadata.clientOriginator.trim()
+        : undefined;
+
     // 服务特定头部
     const serviceHeaders = this.serviceProfile.headers || {};
 
@@ -1029,6 +1043,25 @@ export class HttpTransportProvider extends BaseProvider {
     // 禁用上游SSE：设置 Accept 为 application/json（若未被显式覆盖）
     if (!('Accept' in finalHeaders) && !('accept' in finalHeaders)) {
       finalHeaders['Accept'] = 'application/json';
+    }
+
+    // 同步客户端 UA / originator（保持与 Codex CLI 完全一致），否则 fallback
+    const hasHeader = (headers: Record<string, string>, target: string): boolean =>
+      Object.keys(headers).some((key) => key.toLowerCase() === target.toLowerCase());
+
+    if (!hasHeader(finalHeaders, 'User-Agent')) {
+      if (inboundUserAgent) {
+        finalHeaders['User-Agent'] = inboundUserAgent;
+      } else {
+        finalHeaders['User-Agent'] = DEFAULT_USER_AGENT;
+      }
+    }
+    if (!hasHeader(finalHeaders, 'originator')) {
+      if (inboundOriginator) {
+        finalHeaders['originator'] = inboundOriginator;
+      } else {
+        finalHeaders['originator'] = DEFAULT_ORIGINATOR;
+      }
     }
 
     // 获取Hook管理器（新的统一系统）

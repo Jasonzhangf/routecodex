@@ -24,12 +24,12 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 export class LMStudioCompatibility implements CompatibilityModule {
   readonly id: string;
-  readonly type = 'lmstudio-compatibility';
-  readonly providerType = 'lmstudio';
+  readonly type = 'chat:lmstudio';
+  readonly providerType = 'openai';
 
   private readonly dependencies: ModuleDependencies;
   private _config: ModuleConfig = {
-    type: 'lmstudio-compatibility',
+    type: 'chat:lmstudio',
     config: {}
   };
   private transformationEngine: TransformationEngine | null = null;
@@ -38,7 +38,7 @@ export class LMStudioCompatibility implements CompatibilityModule {
 
   constructor(dependencies: ModuleDependencies) {
     this.dependencies = dependencies;
-    this.id = `lmstudio-compatibility-${Date.now()}`;
+    this.id = `chat-lmstudio-${Date.now()}`;
   }
 
   get config(): ModuleConfig {

@@ -10,7 +10,7 @@
         "type": "mock-provider",
         "providerType": "responses",
         "baseURL": "https://mock.local/mock",
-        "compatibilityProfile": "passthrough",
+        "compatibilityProfile": "compat:passthrough",
         "auth": {
           "type": "apikey",
           "keys": {

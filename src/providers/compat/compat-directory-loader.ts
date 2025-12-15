@@ -4,7 +4,7 @@ import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { CompatibilityModuleFactory } from './compatibility-factory.js';
 import type { ModuleDependencies } from '../../modules/pipeline/types/module.types.js';
-import type { CompatibilityModule } from './compatibility-interface.js';
+import { registerCompatibilityNamespace } from './register-compat-module.js';
 
 const SUPPORTED_EXTENSIONS = new Set(['.js', '.mjs', '.cjs']);
 
@@ -71,87 +71,13 @@ async function registerModulesInDir(dir: string, logger?: ModuleDependencies['lo
   }
 }
 
-type CompatibilityModuleCtor = new (dependencies: ModuleDependencies) => CompatibilityModule;
-
-interface CompatibilityModuleExportShape {
-  type?: string;
-  module?: CompatibilityModuleCtor;
-}
-
-interface CompatibilityModuleNamespace {
-  register?: (factory: typeof CompatibilityModuleFactory) => void;
-  registerCompatibility?: (factory: typeof CompatibilityModuleFactory) => void;
-  default?: CompatibilityModuleExportShape;
-  compatibilities?: CompatibilityModuleExportShape[];
-  type?: string;
-  module?: CompatibilityModuleCtor;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function isCompatibilityModuleNamespace(value: unknown): value is CompatibilityModuleNamespace {
-  return isRecord(value);
-}
-
-function isExportShape(shape: unknown): shape is CompatibilityModuleExportShape {
-  if (!isRecord(shape)) {
-    return false;
-  }
-  const type = typeof shape.type === 'string' ? shape.type.trim() : '';
-  return Boolean(type && typeof shape.module === 'function');
-}
-
-function collectExportShapes(namespace: CompatibilityModuleNamespace): CompatibilityModuleExportShape[] {
-  const shapes: CompatibilityModuleExportShape[] = [];
-  if (Array.isArray(namespace.compatibilities)) {
-    for (const compat of namespace.compatibilities) {
-      if (isExportShape(compat)) {
-        shapes.push(compat);
-      }
-    }
-  }
-  if (isExportShape(namespace.default)) {
-    shapes.push(namespace.default);
-  }
-  if (isExportShape(namespace)) {
-    shapes.push({ type: namespace.type, module: namespace.module });
-  }
-  return shapes;
-}
-
 async function registerModuleExport(
   mod: unknown,
   logger: ModuleDependencies['logger'] | undefined,
   source: string
 ): Promise<void> {
-  if (!isCompatibilityModuleNamespace(mod)) {
-    return;
-  }
-  const factory = CompatibilityModuleFactory;
   try {
-    if (typeof mod.registerCompatibility === 'function') {
-      mod.registerCompatibility(factory);
-      return;
-    }
-    if (typeof mod.register === 'function') {
-      mod.register(factory);
-      return;
-    }
-    const exportShapes = collectExportShapes(mod);
-    for (const entry of exportShapes) {
-      const type = typeof entry.type === 'string' ? entry.type.trim() : '';
-      const moduleCtor = entry.module;
-      if (!type || typeof moduleCtor !== 'function') {
-        logger?.logError?.(new Error('Invalid compatibility module export'), {
-          component: 'compat-module-register',
-          source
-        });
-        continue;
-      }
-      factory.registerModuleType(type, moduleCtor);
-    }
+    registerCompatibilityNamespace(CompatibilityModuleFactory, mod, source, logger);
   } catch (error) {
     logger?.logError?.(error as Error, { component: 'compat-module-register', source });
   }

@@ -28,8 +28,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
  */
 export class GLMCompatibility implements CompatibilityModule {
   readonly id: string;
-  readonly type = 'glm';
-  readonly providerType = 'glm';
+  readonly type = 'chat:glm';
+  readonly providerType = 'openai';
 
   private readonly fieldMappingProcessor: GLMFieldMappingProcessor;
   private readonly dependencies: ModuleDependencies;
@@ -42,7 +42,7 @@ export class GLMCompatibility implements CompatibilityModule {
   }
 
   constructor(dependencies: ModuleDependencies) {
-    this.id = `glm-compatibility-${Date.now()}`;
+    this.id = `chat-glm-${Date.now()}`;
     this.dependencies = dependencies;
 
     // 初始化组件（仅字段映射；hooks 留空）
@@ -55,7 +55,7 @@ export class GLMCompatibility implements CompatibilityModule {
   }
 
   async initialize(): Promise<void> {
-    this.dependencies.logger?.logModule('glm-compatibility', 'initializing', {
+    this.dependencies.logger?.logModule(this.type, 'initializing', {
       compatibilityId: this.id,
       providerType: this.providerType
     });
@@ -97,7 +97,7 @@ export class GLMCompatibility implements CompatibilityModule {
       this.id
     );
 
-    this.dependencies.logger?.logModule('glm-compatibility', 'initialized', {
+    this.dependencies.logger?.logModule(this.type, 'initialized', {
       compatibilityId: this.id,
       providerType: this.providerType
     });
@@ -122,7 +122,7 @@ export class GLMCompatibility implements CompatibilityModule {
   }
 
   async cleanup(): Promise<void> {
-    this.dependencies.logger?.logModule('glm-compatibility', 'cleanup-start', {
+    this.dependencies.logger?.logModule(this.type, 'cleanup-start', {
       compatibilityId: this.id
     });
 
@@ -132,7 +132,7 @@ export class GLMCompatibility implements CompatibilityModule {
     // 清理函数化配置
     this.processConfig = null;
 
-    this.dependencies.logger?.logModule('glm-compatibility', 'cleanup-complete', {
+    this.dependencies.logger?.logModule(this.type, 'cleanup-complete', {
       compatibilityId: this.id
     });
   }

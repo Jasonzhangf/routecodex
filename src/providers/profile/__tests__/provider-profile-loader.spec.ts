@@ -8,7 +8,7 @@ describe('provider-profile-loader', () => {
           type: 'glm',
           baseUrl: 'https://glm.example.com',
           apiKey: '${GLM_KEY}',
-          compatibilityProfile: 'glm.tool-cleaning',
+          compatibilityProfile: 'chat:glm',
           headers: {
             'X-Test': 'demo'
           },
@@ -27,7 +27,7 @@ describe('provider-profile-loader', () => {
     expect(result.byId.glm.protocol).toBe('openai');
     expect(result.byId.glm.transport.baseUrl).toBe('https://glm.example.com');
     expect(result.byId.glm.auth.kind).toBe('apikey');
-    expect(result.byId.glm.compatibilityProfiles).toEqual(['glm.tool-cleaning']);
+    expect(result.byId.glm.compatibilityProfile).toEqual('chat:glm');
     expect(result.byId.glm.metadata?.supportedModels).toEqual(['glm-4', 'glm-4.5']);
   });
 
@@ -45,9 +45,7 @@ describe('provider-profile-loader', () => {
             authorizationUrl: 'https://proxy.example.com/oauth/authorize',
             scopes: ['responses.write']
           },
-          compatibility: {
-            profile: 'responses.passthrough'
-          }
+          compatibilityProfile: 'responses:c4m'
         }
       }
     };
@@ -60,7 +58,19 @@ describe('provider-profile-loader', () => {
       expect(profile.auth.clientId).toBe('abc');
       expect(profile.auth.scopes).toEqual(['responses.write']);
     }
-    expect(profile.compatibilityProfiles).toEqual(['responses.passthrough']);
+    expect(profile.compatibilityProfile).toEqual('responses:c4m');
+  });
+
+  it('throws when legacy compatibility fields are used', () => {
+    const config: Record<string, unknown> = {
+      providers: {
+        legacy: {
+          type: 'glm',
+          compat: 'old.compat'
+        }
+      }
+    };
+    expect(() => buildProviderProfiles(config)).toThrow(/legacy compatibility field/);
   });
 
   it('returns empty collection when providers are absent', () => {

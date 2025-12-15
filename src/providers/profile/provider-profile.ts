@@ -61,7 +61,7 @@ export interface ProviderProfile {
   moduleType?: string;
   transport: ProviderTransportConfig;
   auth: ProviderAuthConfig;
-  compatibilityProfiles: string[];
+  compatibilityProfile?: string;
   metadata?: {
     defaultModel?: string;
     supportedModels?: string[];

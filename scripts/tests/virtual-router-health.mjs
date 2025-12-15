@@ -45,7 +45,7 @@ function buildProviderProfile(providerKey, endpoint) {
     endpoint,
     auth: { type: 'apiKey', secretRef: providerKey },
     outboundProfile: 'openai-chat',
-    compatibilityProfile: 'default',
+    compatibilityProfile: 'compat:passthrough',
     defaultModel: 'sim-model'
   };
 }

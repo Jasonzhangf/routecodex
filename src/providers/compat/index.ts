@@ -14,14 +14,6 @@ import type { CompatibilityContext as CompatCtx } from './compatibility-interfac
 import type { CompatibilityModuleConfig as CompatConfig } from './compatibility-factory.js';
 import { CompatibilityManager } from './compatibility-manager.js';
 
-// 导入GLM模块以触发注册
-import './glm/index.js';
-import './lmstudio/index.js';
-import './passthrough/index.js';
-import './iflow/index.js';
-import './qwen/index.js';
-import './responses/index.js';
-
 /**
  * 兼容性模块API
  * 提供标准的创建和管理接口

@@ -19,7 +19,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  */
 export class iFlowCompatibility implements CompatibilityModule {
   readonly id: string;
-  readonly type = 'iflow';
+  readonly type = 'chat:iflow';
   readonly providerType = 'iflow';
 
   private fieldMappingProcessor: iFlowFieldMappingProcessor;
@@ -29,7 +29,7 @@ export class iFlowCompatibility implements CompatibilityModule {
   private injectedConfig: UnknownObject | null = null;
 
   constructor(dependencies: ModuleDependencies) {
-    this.id = `iflow-compatibility-${Date.now()}`;
+    this.id = `chat-iflow-${Date.now()}`;
     this.dependencies = dependencies;
 
     // 初始化组件（仅字段映射；hooks 留空）
@@ -46,7 +46,7 @@ export class iFlowCompatibility implements CompatibilityModule {
   }
 
   async initialize(): Promise<void> {
-    this.dependencies.logger?.logModule('iflow-compatibility', 'initializing', {
+    this.dependencies.logger?.logModule(this.type, 'initializing', {
       compatibilityId: this.id,
       providerType: this.providerType
     });
@@ -86,7 +86,7 @@ export class iFlowCompatibility implements CompatibilityModule {
       this.id
     );
 
-    this.dependencies.logger?.logModule('iflow-compatibility', 'initialized', {
+    this.dependencies.logger?.logModule(this.type, 'initialized', {
       compatibilityId: this.id,
       providerType: this.providerType
     });
@@ -111,7 +111,7 @@ export class iFlowCompatibility implements CompatibilityModule {
   }
 
   async cleanup(): Promise<void> {
-    this.dependencies.logger?.logModule('iflow-compatibility', 'cleanup-start', {
+    this.dependencies.logger?.logModule(this.type, 'cleanup-start', {
       compatibilityId: this.id
     });
 
@@ -121,7 +121,7 @@ export class iFlowCompatibility implements CompatibilityModule {
     // 清理函数化配置
     this.processConfig = null;
 
-    this.dependencies.logger?.logModule('iflow-compatibility', 'cleanup-complete', {
+    this.dependencies.logger?.logModule(this.type, 'cleanup-complete', {
       compatibilityId: this.id
     });
   }

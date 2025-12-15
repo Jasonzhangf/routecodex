@@ -32,6 +32,20 @@ if (!providerDef) usage(`Provider "${providerId}" not found in config`);
 const auth = providerDef.auth || {};
 const apiKey = auth.apiKey || auth.value || process.env.DRY_RUN_API_KEY || 'dry-run-key';
 
+const legacyCompatFields = [];
+if (typeof providerDef.compatibility_profile === 'string') legacyCompatFields.push('compatibility_profile');
+if (typeof providerDef.compat === 'string') legacyCompatFields.push('compat');
+if (providerDef.compatibility && typeof providerDef.compatibility === 'object') {
+  if (typeof providerDef.compatibility.profile === 'string') legacyCompatFields.push('compatibility.profile');
+  if (typeof providerDef.compatibility.id === 'string') legacyCompatFields.push('compatibility.id');
+}
+if (legacyCompatFields.length > 0) {
+  usage(`Provider "${providerId}" uses legacy compatibility field(s): ${legacyCompatFields.join(', ')}. Rename to "compatibilityProfile".`);
+}
+const compatProfile =
+  (typeof providerDef.compatibilityProfile === 'string' && providerDef.compatibilityProfile.trim()) ||
+  undefined;
+
 const runtime = {
   runtimeKey: `${providerId}.dry`,
   providerId,
@@ -42,7 +56,7 @@ const runtime = {
     type: 'apikey',
     value: apiKey
   },
-  compatibilityProfile: providerDef.compat || 'default',
+  compatibilityProfile: compatProfile,
   outboundProfile: providerDef.type === 'responses' ? 'openai-responses' : 'openai-chat',
   defaultModel: modelId
 };

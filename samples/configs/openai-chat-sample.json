@@ -45,7 +45,7 @@
           "process": "passthrough",
           "streaming": "always"
         },
-        "compatibilityProfile": "responses-c4m-compatibility"
+        "compatibilityProfile": "responses:c4m"
       }
     },
     "routing": {

@@ -9,11 +9,11 @@ import type { UnknownObject } from '../../../modules/pipeline/types/common-types
  */
 export class ResponsesC4MCompatibility implements CompatibilityModule {
   readonly id: string;
-  readonly type = 'responses-c4m-compatibility';
+  readonly type = 'responses:c4m';
   readonly providerType = 'responses';
 
   constructor(private readonly dependencies: ModuleDependencies) {
-    this.id = `responses-c4m-compatibility-${Date.now()}`;
+    this.id = `responses-c4m-${Date.now()}`;
   }
 
   async initialize(): Promise<void> {

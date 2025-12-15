@@ -19,7 +19,7 @@ export function buildProviderProfiles(config: UnknownRecord): ProviderProfileCol
     const protocol = resolveProtocol(id, raw, moduleType);
     const transport = extractTransport(raw);
     const auth = extractAuth(raw);
-    const compatibilityProfiles = extractCompatProfiles(raw);
+    const compatibilityProfile = extractCompatProfile(id, raw);
     const metadata = extractMetadata(raw);
     profiles.push({
       id,
@@ -27,7 +27,7 @@ export function buildProviderProfiles(config: UnknownRecord): ProviderProfileCol
       moduleType: moduleType?.trim(),
       transport,
       auth,
-      compatibilityProfiles,
+      compatibilityProfile,
       metadata
     });
   }
@@ -168,19 +168,32 @@ function normalizeAuthType(
   return normalized ? 'apikey' : 'none';
 }
 
-function extractCompatProfiles(raw: UnknownRecord): string[] {
-  const single = pickString(raw.compatibilityProfile ?? raw.compatibility_profile);
-  if (single) {
-    return [single];
+function extractCompatProfile(providerId: string, raw: UnknownRecord): string | undefined {
+  const declared = pickString(raw.compatibilityProfile);
+  const legacyFields: string[] = [];
+  if (typeof raw.compatibility_profile === 'string') {
+    legacyFields.push('compatibility_profile');
   }
-  const compatNode = isRecord(raw.compatibility) ? raw.compatibility : undefined;
-  if (compatNode) {
-    const nested = pickString((compatNode as Record<string, unknown>).profile ?? (compatNode as Record<string, unknown>).id);
-    if (nested) {
-      return [nested];
+  if (typeof raw.compat === 'string') {
+    legacyFields.push('compat');
+  }
+  if (isRecord(raw.compatibility)) {
+    const compatNode = raw.compatibility as Record<string, unknown>;
+    if (typeof compatNode.profile === 'string') {
+      legacyFields.push('compatibility.profile');
+    }
+    if (typeof compatNode.id === 'string') {
+      legacyFields.push('compatibility.id');
     }
   }
-  return [];
+  if (legacyFields.length > 0) {
+    throw new Error(
+      `[provider-profiles] Provider "${providerId}" uses legacy compatibility field(s): ${legacyFields.join(
+        ', '
+      )}. Rename to "compatibilityProfile".`
+    );
+  }
+  return declared;
 }
 
 function extractMetadata(raw: UnknownRecord): ProviderProfile['metadata'] {

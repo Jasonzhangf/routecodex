@@ -209,6 +209,22 @@ function resolveProviderRuntime(configPath, target) {
   const auth = providerDef.auth || {};
   const apiKey = auth.apiKey || auth.value || process.env.C4M_API_KEY;
   if (!apiKey) throw new Error(`Missing API key for ${providerId}. set in config or C4M_API_KEY env`);
+  const legacyCompatFields = [];
+  if (typeof providerDef.compatibility_profile === 'string') legacyCompatFields.push('compatibility_profile');
+  if (typeof providerDef.compat === 'string') legacyCompatFields.push('compat');
+  if (providerDef.compatibility && typeof providerDef.compatibility === 'object') {
+    if (typeof providerDef.compatibility.profile === 'string') legacyCompatFields.push('compatibility.profile');
+    if (typeof providerDef.compatibility.id === 'string') legacyCompatFields.push('compatibility.id');
+  }
+  if (legacyCompatFields.length > 0) {
+    throw new Error(
+      `Provider ${providerId} uses legacy compatibility field(s): ${legacyCompatFields.join(
+        ', '
+      )}. Rename to "compatibilityProfile".`
+    );
+  }
+  const compatProfile =
+    (typeof providerDef.compatibilityProfile === 'string' && providerDef.compatibilityProfile.trim()) || undefined;
   return {
     runtime: {
       runtimeKey: `${providerId}.replay.${Date.now()}`,
@@ -218,7 +234,7 @@ function resolveProviderRuntime(configPath, target) {
       providerType: (providerDef.type || 'responses').toLowerCase(),
     endpoint: providerDef.baseURL || providerDef.baseUrl || providerDef.endpoint || 'https://api.example.net/v1',
     auth: { type: 'apikey', value: apiKey },
-    compatibilityProfile: providerDef.compat || 'default',
+    compatibilityProfile: compatProfile,
       outboundProfile: 'openai-responses',
       defaultModel: modelId
     },

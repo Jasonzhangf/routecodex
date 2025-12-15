@@ -164,26 +164,6 @@ export class RouteCodexHttpServer {
     return userConfig;
   }
 
-  private applyCompatibilityShim(routerConfig: UnknownObject): void {
-    if (!routerConfig || typeof routerConfig !== 'object') {
-      return;
-    }
-    const providers = routerConfig.providers;
-    if (!providers || typeof providers !== 'object') {
-      return;
-    }
-    for (const provider of Object.values(providers as Record<string, unknown>)) {
-      if (!provider || typeof provider !== 'object') {
-        continue;
-      }
-      const record = provider as Record<string, unknown>;
-      const compatProfile = typeof record.compatibilityProfile === 'string' ? record.compatibilityProfile.trim() : '';
-      if (compatProfile) {
-        record.compat = compatProfile;
-      }
-    }
-  }
-
   private getModuleDependencies(): ModuleDependencies {
     if (!this.moduleDependencies) {
       this.moduleDependencies = {
@@ -298,8 +278,8 @@ export class RouteCodexHttpServer {
     if (!patched.headers && profile.transport.headers) {
       patched.headers = profile.transport.headers;
     }
-    if (!patched.compatibilityProfile && profile.compatibilityProfiles.length > 0) {
-      patched.compatibilityProfile = profile.compatibilityProfiles[0];
+    if (!patched.compatibilityProfile && profile.compatibilityProfile) {
+      patched.compatibilityProfile = profile.compatibilityProfile;
     }
     if (!patched.defaultModel && profile.metadata?.defaultModel) {
       patched.defaultModel = profile.metadata.defaultModel;
@@ -569,7 +549,6 @@ export class RouteCodexHttpServer {
     this.userConfig = asRecord(userConfig);
     this.ensureProviderProfilesFromUserConfig();
     const routerInput = this.resolveVirtualRouterInput(this.userConfig);
-    this.applyCompatibilityShim(routerInput);
     const bootstrapArtifacts = await this.bootstrapVirtualRouter(routerInput);
     this.currentRouterArtifacts = bootstrapArtifacts;
     const hubCtor = await this.ensureHubPipelineCtor();
@@ -769,6 +748,9 @@ export class RouteCodexHttpServer {
       const headerUa =
         (typeof input.headers?.['user-agent'] === 'string' && input.headers['user-agent']) ||
         (typeof input.headers?.['User-Agent'] === 'string' && input.headers['User-Agent']);
+      const headerOriginator =
+        (typeof input.headers?.['originator'] === 'string' && input.headers['originator']) ||
+        (typeof input.headers?.['Originator'] === 'string' && input.headers['Originator']);
       await writeClientSnapshot({
         entryEndpoint: input.entryEndpoint,
         requestId: input.requestId,
@@ -776,7 +758,8 @@ export class RouteCodexHttpServer {
         body: input.body,
         metadata: {
           ...metadata,
-          userAgent: headerUa
+          userAgent: headerUa,
+          clientOriginator: headerOriginator
         }
       });
     } catch {
@@ -1086,6 +1069,17 @@ export class RouteCodexHttpServer {
         providerProtocol,
         originalModelId
       };
+      const compatProfile =
+        metadataBag &&
+        typeof metadataBag === 'object' &&
+        metadataBag.target &&
+        typeof metadataBag.target === 'object' &&
+        typeof (metadataBag.target as Record<string, unknown>).compatibilityProfile === 'string'
+          ? ((metadataBag.target as Record<string, unknown>).compatibilityProfile as string)
+          : undefined;
+      if (compatProfile && compatProfile.trim()) {
+        (adapterContext as Record<string, unknown>).compatibilityProfile = compatProfile.trim();
+      }
       if (aliasMap) {
         (adapterContext as Record<string, unknown>).anthropicToolNameMap = aliasMap;
       }
