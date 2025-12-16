@@ -10,6 +10,7 @@ import { AnthropicHttpProvider } from './anthropic-http-provider.js';
 import { iFlowHttpProvider } from './iflow-http-provider.js';
 import { ChatHttpProvider } from './chat-http-provider.js';
 import { GeminiHttpProvider } from './gemini-http-provider.js';
+import { GeminiCLIHttpProvider } from './gemini-cli-http-provider.js';
 import { MockProvider } from '../../mock/index.js';
 import type { OpenAIStandardConfig, ApiKeyAuth, OAuthAuth, OAuthAuthType } from '../api/provider-config.js';
 import crypto from 'node:crypto';
@@ -293,6 +294,8 @@ export class ProviderFactory {
         return new AnthropicHttpProvider(config, dependencies);
       case 'gemini':
         return new GeminiHttpProvider(config, dependencies);
+      case 'gemini-cli':
+        return new GeminiCLIHttpProvider(config, dependencies);
       default:
         break;
     }
@@ -308,6 +311,9 @@ export class ProviderFactory {
     }
     if (moduleType === 'iflow-http-provider') {
       return new iFlowHttpProvider(config, dependencies);
+    }
+    if (moduleType === 'gemini-cli-http-provider') {
+      return new GeminiCLIHttpProvider(config, dependencies);
     }
     const error = new Error(`[ProviderFactory] Unsupported providerType='${providerType}' and moduleType='${moduleType}'`);
     (error as Error & { code?: string }).code = 'ERR_UNSUPPORTED_PROVIDER_TYPE';

@@ -30,6 +30,11 @@ type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'>;
 type ResponsesSseConverter = {
   convertSseToJson(stream: unknown, options: { requestId: string; model: string }): Promise<unknown>;
 };
+
+type SubmitToolOutputsPayload = {
+  responseId: string;
+  body: Record<string, unknown>;
+};
 async function loadEnsureResponsesInstructions(): Promise<EnsureResponsesInstructionsFn> {
   if (ensureResponsesInstructionsFn) {
     return ensureResponsesInstructionsFn;
@@ -78,20 +83,39 @@ export class ResponsesProvider extends HttpTransportProvider {
     const headers = await this.finalizeRequestHeaders(baseHeaders, request);
 
     const context = this.createProviderContext();
-    const targetUrl = this.buildTargetUrl(this.getEffectiveBaseUrl(), endpoint);
-
     const settings = this.getResponsesSettings();
     const inboundClientStream = this.normalizeStreamFlag(this.extractStreamFlag(context));
-    const finalBody = this.responsesClient.buildRequestBody(request);
     const entryEndpoint = this.extractEntryEndpoint(request) ?? this.extractEntryEndpoint(context);
+    const clientRequestedStream = this.resolveClientStreamPreference(settings.streaming, inboundClientStream);
+
+    const submitPayload = this.extractSubmitToolOutputsPayload(context);
+    if (submitPayload) {
+      const submitEndpoint = this.buildSubmitToolOutputsEndpoint(endpoint, submitPayload.responseId);
+      const submitTargetUrl = this.buildTargetUrl(this.getEffectiveBaseUrl(), submitEndpoint);
+      return await this.sendSubmitToolOutputsRequest({
+        endpoint: submitEndpoint,
+        body: submitPayload.body,
+        headers,
+        context,
+        targetUrl: submitTargetUrl,
+        entryEndpoint,
+        clientRequestedStream,
+        httpClient: this.httpClient
+      });
+    }
+
+    const targetUrl = this.buildTargetUrl(this.getEffectiveBaseUrl(), endpoint);
+    const finalBody = this.responsesClient.buildRequestBody(request);
 
     await this.ensureResponsesInstructions(finalBody);
     this.applyInstructionsMode(finalBody, settings.instructionsMode);
 
-    const useSse = settings.streaming !== 'never';
+    const useSse = settings.streaming === 'never'
+      ? false
+      : settings.streaming === 'always'
+        ? true
+        : clientRequestedStream === true;
     this.responsesClient.ensureStreamFlag(finalBody, useSse);
-    const clientRequestedStream = this.resolveClientStreamPreference(settings.streaming, inboundClientStream);
-
     this.dependencies.logger?.logModule?.(this.id, 'responses-provider-stream-flag', {
       requestId: context.requestId,
       inboundClientStream,
@@ -218,10 +242,50 @@ export class ResponsesProvider extends HttpTransportProvider {
     return inbound === true;
   }
 
+  private extractSubmitToolOutputsPayload(context: ProviderContext): SubmitToolOutputsPayload | null {
+    const metadata = context.metadata && typeof context.metadata === 'object'
+      ? (context.metadata as Record<string, unknown>)
+      : null;
+    if (!metadata) {
+      return null;
+    }
+    const raw = metadata.__raw_request_body && typeof metadata.__raw_request_body === 'object'
+      ? (metadata.__raw_request_body as Record<string, unknown>)
+      : null;
+    if (!raw) {
+      return null;
+    }
+    const responseId = typeof raw.response_id === 'string' && raw.response_id.trim()
+      ? raw.response_id.trim()
+      : undefined;
+    const toolOutputs = Array.isArray(raw.tool_outputs) ? raw.tool_outputs : null;
+    if (!responseId || !toolOutputs || toolOutputs.length === 0) {
+      return null;
+    }
+    const submitBody = JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
+    delete submitBody.response_id;
+    if (!Array.isArray(submitBody.tool_outputs)) {
+      submitBody.tool_outputs = toolOutputs;
+    }
+    return {
+      responseId,
+      body: submitBody
+    };
+  }
+
+  private buildSubmitToolOutputsEndpoint(baseEndpoint: string, responseId: string): string {
+    const normalizedBase = baseEndpoint.replace(/\/+$/, '');
+    const encodedId = encodeURIComponent(responseId);
+    return `${normalizedBase}/${encodedId}/submit_tool_outputs`;
+  }
+
   private async maybeConvertChatPayload(body: Record<string, unknown>): Promise<void> {
     const looksResponses = Array.isArray(body.input as unknown[]) || typeof body.instructions === 'string';
     const looksChat = Array.isArray(body.messages as unknown[]);
-    if (looksResponses || !looksChat) {
+    if (looksResponses) {
+      return;
+    }
+    if (!looksChat) {
       return;
     }
 
@@ -345,6 +409,78 @@ export class ResponsesProvider extends HttpTransportProvider {
       },
       url: targetUrl
     };
+  }
+
+  private async sendSubmitToolOutputsRequest(options: {
+    endpoint: string;
+    body: Record<string, unknown>;
+    headers: Record<string, string>;
+    context: ProviderContext;
+    targetUrl: string;
+    entryEndpoint?: string;
+    clientRequestedStream: boolean;
+    httpClient: ResponsesHttpClient;
+  }): Promise<unknown> {
+    const { endpoint, body, headers, context, targetUrl, entryEndpoint, clientRequestedStream, httpClient } = options;
+    await this.snapshotPhase('provider-request', context, body, headers, targetUrl, entryEndpoint);
+    try {
+      const stream = await httpClient.postStream(endpoint, body, {
+        ...headers,
+        Accept: 'text/event-stream'
+      });
+      const captureSse = clientRequestedStream && shouldCaptureProviderStreamSnapshots();
+      const streamForHost = captureSse
+        ? attachProviderSseSnapshotStream(stream, {
+          requestId: context.requestId,
+          headers,
+          url: targetUrl,
+          entryEndpoint,
+          clientRequestId: this.extractClientRequestId(context)
+        })
+        : stream;
+      const converter = await this.loadResponsesSseConverter();
+      const json = await converter.convertSseToJson(streamForHost, {
+        requestId: context.requestId,
+        model: typeof context.model === 'string' ? context.model : 'unknown'
+      });
+      await this.snapshotPhase(
+        'provider-response',
+        context,
+        {
+          mode: 'sse',
+          clientStream: clientRequestedStream,
+          payload: json ?? null
+        },
+        headers,
+        targetUrl,
+        entryEndpoint
+      );
+      return {
+        data: json,
+        status: 200,
+        statusText: 'OK',
+        headers: {
+          'x-upstream-mode': 'sse',
+          'x-provider-stream-requested': clientRequestedStream ? '1' : '0'
+        },
+        url: targetUrl
+      };
+    } catch (error) {
+      const normalizedError = this.normalizeUpstreamError(error);
+      await this.snapshotPhase(
+        'provider-error',
+        context,
+        {
+          status: normalizedError.statusCode ?? normalizedError.status ?? null,
+          code: normalizedError.code ?? null,
+          error: normalizedError.message
+        },
+        headers,
+        targetUrl,
+        entryEndpoint
+      );
+      throw normalizedError;
+    }
   }
 
   private async sendJsonRequest(options: {

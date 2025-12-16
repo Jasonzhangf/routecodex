@@ -1,7 +1,9 @@
 import type { ProviderProtocol } from './types.js';
 
-const CANONICAL_PROVIDER_TYPES = new Set(['openai', 'responses', 'anthropic', 'gemini']);
-const FAMILY_TO_CANONICAL: Record<string, 'openai' | 'responses' | 'anthropic' | 'gemini'> = {
+type CanonicalProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'gemini-cli';
+
+const CANONICAL_PROVIDER_TYPES = new Set<CanonicalProviderType>(['openai', 'responses', 'anthropic', 'gemini', 'gemini-cli']);
+const FAMILY_TO_CANONICAL: Record<string, CanonicalProviderType> = {
   openai: 'openai',
   glm: 'openai',
   qwen: 'openai',
@@ -12,7 +14,8 @@ const FAMILY_TO_CANONICAL: Record<string, 'openai' | 'responses' | 'anthropic' |
   'openai-responses': 'responses',
   anthropic: 'anthropic',
   claude: 'anthropic',
-  gemini: 'gemini'
+  gemini: 'gemini',
+  'gemini-cli': 'gemini-cli'
 };
 
 export function normalizeProviderType(input?: string): string {
@@ -26,13 +29,13 @@ export function normalizeProviderType(input?: string): string {
   return value;
 }
 
-function canonicalizeProviderType(input?: string): 'openai' | 'responses' | 'anthropic' | 'gemini' {
+function canonicalizeProviderType(input?: string): CanonicalProviderType {
   if (!input || !input.trim()) {
     return 'openai';
   }
   const normalized = input.trim().toLowerCase();
-  if (CANONICAL_PROVIDER_TYPES.has(normalized)) {
-    return normalized as 'openai' | 'responses' | 'anthropic' | 'gemini';
+  if (CANONICAL_PROVIDER_TYPES.has(normalized as CanonicalProviderType)) {
+    return normalized as CanonicalProviderType;
   }
   return FAMILY_TO_CANONICAL[normalized] || 'openai';
 }
@@ -40,7 +43,7 @@ function canonicalizeProviderType(input?: string): 'openai' | 'responses' | 'ant
 export function resolveProviderIdentity(
   rawType?: string,
   existingFamily?: string
-): { providerType: 'openai' | 'responses' | 'anthropic' | 'gemini'; providerFamily: string } {
+): { providerType: CanonicalProviderType; providerFamily: string } {
   const familyCandidate = typeof existingFamily === 'string' && existingFamily.trim()
     ? existingFamily.trim().toLowerCase()
     : undefined;
@@ -64,6 +67,9 @@ export function mapProviderModule(providerType: string): string {
   if (normalized === 'gemini') {
     return 'gemini-http-provider';
   }
+  if (normalized === 'gemini-cli') {
+    return 'gemini-cli-http-provider';
+  }
   if (normalized === 'iflow') {
     return 'iflow-http-provider';
   }
@@ -84,6 +90,9 @@ export function mapProviderProtocol(providerType?: string): ProviderProtocol {
   if (normalized === 'gemini') {
     return 'gemini-chat';
   }
+  if (normalized === 'gemini-cli') {
+    return 'gemini-cli-chat';
+  }
   if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'iflow' || normalized === 'lmstudio') {
     return 'openai-chat';
   }
@@ -100,6 +109,9 @@ export function defaultEndpointForProvider(providerType?: string): string {
   }
   if (normalized === 'gemini') {
     return '/v1beta/models';
+  }
+  if (normalized === 'gemini-cli') {
+    return '/v1internal:generateContent';
   }
   if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'iflow' || normalized === 'lmstudio') {
     return '/v1/chat/completions';

@@ -23,7 +23,7 @@ function resolveSamplesDir() {
 }
 
 function parseEntryFilter() {
-  const raw = String(process.env.ROUTECODEX_MOCK_ENTRY_FILTER || 'openai-chat').trim();
+  const raw = String(process.env.ROUTECODEX_MOCK_ENTRY_FILTER || 'openai-chat,openai-responses').trim();
   if (!raw || raw.toLowerCase() === 'all') {
     return null;
   }
@@ -57,15 +57,23 @@ async function loadRegistry() {
   });
 }
 
-async function loadSampleDocument(sample) {
+async function loadSampleDocument(sample, options = {}) {
+  const fileName = options.fileName || 'request.json';
   const sampleDir = path.join(MOCK_SAMPLES_DIR, sample.path);
-  const requestPath = path.join(sampleDir, 'request.json');
-  const raw = await fs.readFile(requestPath, 'utf-8');
-  const doc = JSON.parse(raw);
-  if (!doc || typeof doc !== 'object' || !doc.body) {
-    throw new Error(`Sample ${sample.reqId} missing request body`);
+  const requestPath = path.join(sampleDir, fileName);
+  try {
+    const raw = await fs.readFile(requestPath, 'utf-8');
+    const doc = JSON.parse(raw);
+    if (!doc || typeof doc !== 'object' || !doc.body) {
+      throw new Error(`Sample ${sample.reqId} missing request body (${fileName})`);
+    }
+    return doc;
+  } catch (error) {
+    if (options.optional) {
+      return null;
+    }
+    throw error;
   }
-  return doc;
 }
 
 function parseProviderKey(providerKey) {
@@ -154,7 +162,8 @@ function createServer(configPath, port) {
     ROUTECODEX_PORT: String(port),
     ROUTECODEX_CONFIG_PATH: configPath
   };
-  const child = spawn('routecodex', ['start', '--config', configPath], {
+  const entry = path.join(PROJECT_ROOT, 'dist', 'index.js');
+  const child = spawn(process.execPath, [entry], {
     cwd: PROJECT_ROOT,
     env,
     stdio: ['ignore', 'pipe', 'pipe']
@@ -255,10 +264,46 @@ function collectInvalidNames(payload) {
   return failures;
 }
 
+function extractRequestBody(doc) {
+  const body = doc && typeof doc === 'object' ? doc.body : undefined;
+  if (!body || typeof body !== 'object') {
+    return {};
+  }
+  if (body.body && typeof body.body === 'object') {
+    return body.body;
+  }
+  if (body.payload && typeof body.payload === 'object') {
+    return body.payload;
+  }
+  return body;
+}
+
+function resolveRequestUrl(sample, requestDoc, port) {
+  const rawCandidate =
+    requestDoc.endpoint ||
+    (requestDoc.meta && typeof requestDoc.meta.entryEndpoint === 'string' ? requestDoc.meta.entryEndpoint : undefined) ||
+    requestDoc.url ||
+    sample.entry ||
+    '/v1/responses';
+  if (typeof rawCandidate === 'string' && /^https?:\/\//i.test(rawCandidate.trim())) {
+    return rawCandidate.trim();
+  }
+  const normalizedPath = typeof rawCandidate === 'string' && rawCandidate.trim().length
+    ? rawCandidate.trim()
+    : '/v1/responses';
+  const pathWithSlash = normalizedPath.startsWith('/') ? normalizedPath : `/${normalizedPath}`;
+  return `http://127.0.0.1:${port}${pathWithSlash}`;
+}
+
 async function sendRequest(sample, requestDoc, port) {
-  const url = `http://127.0.0.1:${port}${requestDoc.endpoint || sample.entry}`;
+  const url = resolveRequestUrl(sample, requestDoc, port);
+  const payload = extractRequestBody(requestDoc);
   const headers = { 'content-type': 'application/json' };
-  if (requestDoc.body?.stream === true) {
+  const wantsStream =
+    payload?.stream === true ||
+    (requestDoc.body && typeof requestDoc.body === 'object' && requestDoc.body.stream === true) ||
+    (requestDoc.meta && requestDoc.meta.stream === true);
+  if (wantsStream) {
     headers.accept = 'text/event-stream';
   }
   const controller = new AbortController();
@@ -267,7 +312,7 @@ async function sendRequest(sample, requestDoc, port) {
     const res = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify(requestDoc.body),
+      body: JSON.stringify(payload),
       signal: controller.signal
     });
     const text = await res.text();
@@ -283,7 +328,8 @@ async function sendRequest(sample, requestDoc, port) {
 }
 
 async function runSample(sample, index) {
-  const requestDoc = await loadSampleDocument(sample);
+  const clientDoc = await loadSampleDocument(sample, { fileName: 'client-request.json', optional: true });
+  const requestDoc = clientDoc || (await loadSampleDocument(sample));
   const port = 5800 + index;
   const { dir, file } = await writeTempConfig(sample, port);
   const server = createServer(file, port);

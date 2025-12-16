@@ -546,6 +546,30 @@
       "tags": [
         "regression"
       ]
+    },
+    {
+      "reqId": "openai-responses-crs.key1.gpt-5.1-gpt-5.1-20251215T224322727-004",
+      "entry": "openai-responses",
+      "providerId": "crs.key1.gpt-5.1",
+      "model": "gpt-5.1",
+      "timestamp": "2025-12-15T22:43:22.727Z",
+      "path": "openai-responses/crs.key1.gpt-5.1/gpt-5.1/20251215/224322/004",
+      "tags": [
+        "regression",
+        "apply_patch_input"
+      ]
+    },
+    {
+      "reqId": "openai-responses-tab.key1.gpt-5.1-gpt-5.1-20251216T115200-001",
+      "entry": "openai-responses",
+      "providerId": "tab.key1.gpt-5.1",
+      "model": "gpt-5.1",
+      "timestamp": "2025-12-16T03:52:00.886Z",
+      "path": "openai-responses/tab.key1.gpt-5.1/gpt-5.1/20251216/115200/001",
+      "tags": [
+        "regression",
+        "apply_patch_schema"
+      ]
     }
   ]
 }

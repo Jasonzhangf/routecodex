@@ -5,7 +5,7 @@
  * 该层仅关注用户配置的声明式信息，与 runtime profile 解密后的密钥/令牌相区分。
  */
 
-export type ProviderProtocol = 'openai' | 'responses' | 'anthropic' | 'gemini';
+export type ProviderProtocol = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'gemini-cli';
 
 export interface ProviderTransportConfig {
   baseUrl?: string;

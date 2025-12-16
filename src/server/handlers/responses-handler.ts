@@ -116,7 +116,11 @@ export async function handleResponses(
     if (res.headersSent) {
       return;
     }
-    await respondWithPipelineError(res, ctx, error, entryEndpoint, requestId);
+    const acceptsSse = typeof req.headers['accept'] === 'string'
+      && (req.headers['accept'] as string).includes('text/event-stream');
+    const originalStream = Boolean(req.body && typeof req.body === 'object' && (req.body as ResponsesPayload).stream === true);
+    const wantsStream = acceptsSse || originalStream || options.forceStream === true;
+    await respondWithPipelineError(res, ctx, error, entryEndpoint, requestId, { forceSse: wantsStream });
   }
 }
 

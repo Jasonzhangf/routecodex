@@ -6,6 +6,11 @@ import path from 'path';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import { fetchIFlowUserInfo, mergeIFlowTokenData } from './iflow-userinfo-helper.js';
 import { fetchQwenUserInfo, mergeQwenTokenData, hasQwenApiKey } from './qwen-userinfo-helper.js';
+import {
+  fetchGeminiCLIUserInfo,
+  fetchGeminiCLIProjects,
+  mergeGeminiCLITokenData
+} from './gemini-cli-userinfo-helper.js';
 import { logOAuthDebug } from './oauth-logger.js';
 
 type EnsureOpts = {
@@ -321,6 +326,21 @@ async function maybeEnrichToken(providerType: string, tokenData: UnknownObject):
       }
     } catch (error) {
       console.error(`[OAuth] Qwen: failed to fetch API Key - ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (providerType === 'gemini-cli') {
+    const accessToken = extractAccessToken(sanitizeToken(tokenData) ?? null);
+    if (!accessToken) {
+      logOAuthDebug('[OAuth] Gemini CLI: no access_token found in auth result, skipping UserInfo fetch');
+      return tokenData;
+    }
+    try {
+      const userInfo = await fetchGeminiCLIUserInfo(accessToken);
+      const projects = await fetchGeminiCLIProjects(accessToken);
+      logOAuthDebug(`[OAuth] Gemini CLI: fetched UserInfo for ${userInfo.email} and ${projects.length} projects`);
+      return mergeGeminiCLITokenData(tokenData, userInfo, projects) as unknown as UnknownObject;
+    } catch (error) {
+      console.error(`[OAuth] Gemini CLI: failed to fetch UserInfo - ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   return tokenData;

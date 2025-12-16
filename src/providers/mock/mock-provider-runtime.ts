@@ -179,6 +179,51 @@ function validateCallIdExpectations(sample: MockSample, body: Record<string, unk
   }
 }
 
+function validateApplyPatchToolSchema(sample: MockSample, body: Record<string, unknown> | undefined): void {
+  if (!body || typeof body !== 'object') {
+    return;
+  }
+  const tools = Array.isArray((body as any).tools) ? ((body as any).tools as any[]) : [];
+  const applyPatch = tools.find((t) => {
+    if (!t || typeof t !== 'object') return false;
+    const fnName =
+      (t.function && typeof t.function === 'object' && typeof t.function.name === 'string' ? t.function.name : undefined) ??
+      (typeof t.name === 'string' ? t.name : undefined);
+    return typeof fnName === 'string' && fnName.trim() === 'apply_patch';
+  });
+  if (!applyPatch) {
+    return;
+  }
+  const params = applyPatch && typeof applyPatch === 'object'
+    ? ((applyPatch as any).function && typeof (applyPatch as any).function === 'object'
+      ? (applyPatch as any).function.parameters
+      : (applyPatch as any).parameters)
+    : undefined;
+  const props = params && typeof params === 'object' ? (params as any).properties : undefined;
+  const required = params && typeof params === 'object' ? (params as any).required : undefined;
+  const hasRequiredInput = Array.isArray(required) && required.includes('input');
+  const hasInputProp = props && typeof props === 'object' && props.input && typeof props.input === 'object' && props.input.type === 'string';
+  if (!applyPatch || !hasRequiredInput || !hasInputProp) {
+    const summary = (() => {
+      try {
+        const name = applyPatch
+          ? ((applyPatch as any).function?.name ?? (applyPatch as any).name ?? 'apply_patch')
+          : 'missing';
+        const p = params && typeof params === 'object' ? params : null;
+        return JSON.stringify({ name, parameters: p }, null, 2);
+      } catch {
+        return '<unserializable>';
+      }
+    })();
+    const error = new Error(
+      `apply_patch schema 校验失败：必须提供 JSON schema 且 required 包含 input（sample=${sample.reqId}，当前：${summary}）`
+    ) as MockRuntimeError & { status?: number };
+    error.code = 'HTTP_400';
+    (error as any).status = 400;
+    throw error;
+  }
+}
+
 function detectEntryHint(
   payload: { entryEndpoint?: string; endpoint?: string } | undefined,
   body: Record<string, unknown> | undefined
@@ -294,6 +339,7 @@ export class MockProviderRuntime {
     if (isValidationEnabled()) {
       validateCallIdExpectations(sample, body, resp.mockExpectations?.callIds);
     }
+    validateApplyPatchToolSchema(sample, body);
     if (resp.mockExpectations) {
       delete (resp as any).mockExpectations;
     }

@@ -40,10 +40,11 @@ export interface IProviderV2 extends ProviderModule {
  * - 'responses'  : OpenAI Responses wire（/v1/responses）
  * - 'anthropic'  : Anthropic Messages wire（/v1/messages）
  * - 'gemini'     : Gemini Chat wire
+ * - 'gemini-cli' : Gemini CLI wire (Cloud Code Assist)
  *
  * 注意：品牌/家族（glm、qwen、iflow 等）通过 providerId/providerFamily 表达，禁止写入 providerType。
  */
-export type ProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'mock';
+export type ProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'gemini-cli' | 'mock';
 
 /**
  * 服务协议类型映射
@@ -53,6 +54,7 @@ export const PROVIDER_TYPE_MAP = {
   RESPONSES: 'responses',
   ANTHROPIC: 'anthropic',
   GEMINI: 'gemini',
+  GEMINI_CLI: 'gemini-cli',
   MOCK: 'mock'
 } as const;
 

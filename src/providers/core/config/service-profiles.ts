@@ -74,6 +74,21 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     timeout: 300000,
     maxRetries: 3
   },
+  'gemini-cli': {
+    defaultBaseUrl: 'https://cloudcode-pa.googleapis.com',
+    defaultEndpoint: '/v1internal:generateContent',
+    defaultModel: 'gemini-2.5-pro',
+    requiredAuth: ['oauth'],
+    optionalAuth: [],
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': 'google-api-nodejs-client/9.15.1',
+      'X-Goog-Api-Client': 'gl-node/22.17.0',
+      'Client-Metadata': 'ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI'
+    },
+    timeout: 300000,
+    maxRetries: 2
+  },
 
   glm: {
     // GLM coding 路径（已验证可用）

@@ -45,7 +45,7 @@ export interface RequestContextV2 {
   endpoint: string;
 }
 
-export type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
+export type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat' | 'gemini-cli-chat';
 
 export interface ProviderHandle {
   runtimeKey: string;

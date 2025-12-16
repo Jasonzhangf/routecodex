@@ -79,7 +79,6 @@ type ProviderConfigInternal = OpenAIStandardConfig['config'] & {
 };
 
 const DEFAULT_USER_AGENT = 'RouteCodex/2.0';
-const DEFAULT_ORIGINATOR = 'routecodex_host';
 
 
 export class HttpTransportProvider extends BaseProvider {
@@ -1045,23 +1044,42 @@ export class HttpTransportProvider extends BaseProvider {
       finalHeaders['Accept'] = 'application/json';
     }
 
-    // 同步客户端 UA / originator（保持与 Codex CLI 完全一致），否则 fallback
-    const hasHeader = (headers: Record<string, string>, target: string): boolean =>
-      Object.keys(headers).some((key) => key.toLowerCase() === target.toLowerCase());
+    const getHeader = (headers: Record<string, string>, target: string): string | undefined => {
+      const lowered = target.toLowerCase();
+      for (const [key, value] of Object.entries(headers)) {
+        if (key.toLowerCase() === lowered && typeof value === 'string' && value.trim()) {
+          return value.trim();
+        }
+      }
+      return undefined;
+    };
+    const setHeader = (headers: Record<string, string>, target: string, value: string): void => {
+      if (!value || !value.trim()) return;
+      const lowered = target.toLowerCase();
+      for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() === lowered) {
+          headers[key] = value;
+          return;
+        }
+      }
+      headers[target] = value;
+    };
 
-    if (!hasHeader(finalHeaders, 'User-Agent')) {
-      if (inboundUserAgent) {
-        finalHeaders['User-Agent'] = inboundUserAgent;
-      } else {
-        finalHeaders['User-Agent'] = DEFAULT_USER_AGENT;
-      }
-    }
-    if (!hasHeader(finalHeaders, 'originator')) {
-      if (inboundOriginator) {
-        finalHeaders['originator'] = inboundOriginator;
-      } else {
-        finalHeaders['originator'] = DEFAULT_ORIGINATOR;
-      }
+    // Header priority:
+    // - user/provider config (overrides/runtime) wins
+    // - otherwise inherit from inbound client headers
+    // - otherwise fall back to defaults
+    const uaFromConfig = getHeader({ ...overrideHeaders, ...runtimeHeaders }, 'User-Agent');
+    const uaFromService = getHeader(serviceHeaders, 'User-Agent');
+    const resolvedUa = uaFromConfig ?? inboundUserAgent ?? uaFromService ?? DEFAULT_USER_AGENT;
+    setHeader(finalHeaders, 'User-Agent', resolvedUa);
+
+    // originator: do not invent one; only forward from config or inbound client
+    const originatorFromConfig = getHeader({ ...overrideHeaders, ...runtimeHeaders }, 'originator');
+    const originatorFromService = getHeader(serviceHeaders, 'originator');
+    const resolvedOriginator = originatorFromConfig ?? inboundOriginator ?? originatorFromService;
+    if (resolvedOriginator) {
+      setHeader(finalHeaders, 'originator', resolvedOriginator);
     }
 
     // 获取Hook管理器（新的统一系统）

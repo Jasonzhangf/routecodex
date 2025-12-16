@@ -5,6 +5,8 @@ import path from 'node:path';
 
 const root = process.cwd();
 const skip = String(process.env.ROUTECODEX_SKIP_CORE_BUILD || process.env.SKIP_CORE_BUILD || '').trim().toLowerCase();
+const buildModeRaw = String(process.env.BUILD_MODE || process.env.RCC_BUILD_MODE || 'release').toLowerCase();
+const buildMode = buildModeRaw === 'dev' ? 'dev' : 'release';
 const tsc = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
 const proj = path.join(root, 'sharedmodule', 'llmswitch-core', 'tsconfig.json');
 const coreRoot = path.join(root, 'sharedmodule', 'llmswitch-core');
@@ -74,6 +76,12 @@ function shouldSkipBuild() {
 if (!fs.existsSync(tsc)) fail('TypeScript not installed in root node_modules. Run npm i.');
 if (!fs.existsSync(proj)) {
   console.log('[build-core] llmswitch-core source not found under sharedmodule; skip local core build (依赖包将用于运行/打包)');
+  process.exit(0);
+}
+
+// 标准流程：release 构建必须依赖 npm 包（@jsonstudio/llms），禁止编译本地 sharedmodule。
+if (buildMode !== 'dev') {
+  console.log('[build-core] BUILD_MODE=release: skip local llmswitch-core build (use npm @jsonstudio/llms)');
   process.exit(0);
 }
 

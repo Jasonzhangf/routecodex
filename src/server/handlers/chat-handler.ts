@@ -73,7 +73,11 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
     if (res.headersSent) {
       return;
     }
-    await respondWithPipelineError(res, ctx, error, entryEndpoint, requestId);
+    const acceptsSse = typeof req.headers['accept'] === 'string'
+      && (req.headers['accept'] as string).includes('text/event-stream');
+    const originalStream = Boolean(req.body && typeof req.body === 'object' && (req.body as ChatCompletionPayload).stream === true);
+    const wantsSSE = acceptsSse || originalStream;
+    await respondWithPipelineError(res, ctx, error, entryEndpoint, requestId, { forceSse: wantsSSE });
   }
 }
 

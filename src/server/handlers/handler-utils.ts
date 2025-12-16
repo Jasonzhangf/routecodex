@@ -178,7 +178,8 @@ export async function respondWithPipelineError(
   _ctx: HandlerContext,
   error: unknown,
   entryEndpoint: string,
-  requestId: string
+  requestId: string,
+  options?: { forceSse?: boolean }
 ): Promise<void> {
   const effectiveRequestId = formatRequestId(requestId);
   const normalizedError = normalizeError(error, effectiveRequestId, entryEndpoint);
@@ -212,6 +213,28 @@ export async function respondWithPipelineError(
   }
   if (effectiveRequestId && mapped.body?.error && !mapped.body.error.request_id) {
     mapped.body.error.request_id = effectiveRequestId;
+  }
+  if (options?.forceSse) {
+    // For streaming clients, return an SSE error event so the client can surface the failure.
+    // Use 200 to keep SSE parsers happy; embed the actual status in the event payload.
+    const payload = mapped.body?.error
+      ? { type: 'error', status: mapped.status, error: mapped.body.error }
+      : { type: 'error', status: mapped.status, error: mapped.body };
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    try {
+      res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
+    } catch {
+      // ignore stream write errors
+    }
+    try {
+      res.end();
+    } catch {
+      // ignore end errors
+    }
+    return;
   }
   res.status(mapped.status).json(mapped.body);
 }

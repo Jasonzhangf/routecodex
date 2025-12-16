@@ -1,12 +1,13 @@
 import type { ProviderType } from '../api/provider-types.js';
 
-export type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
+export type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat' | 'gemini-cli-chat';
 
 const TYPE_TO_PROTOCOL: Record<ProviderType, ProviderProtocol> = {
   openai: 'openai-chat',
   responses: 'openai-responses',
   anthropic: 'anthropic-messages',
   gemini: 'gemini-chat',
+  'gemini-cli': 'gemini-cli-chat',
   mock: 'openai-chat'
 };
 
@@ -20,7 +21,7 @@ const LEGACY_FAMILY_TO_TYPE: Record<string, ProviderType> = {
 };
 
 export function isProviderType(value: string): value is ProviderType {
-  return value === 'openai' || value === 'responses' || value === 'anthropic' || value === 'gemini' || value === 'mock';
+  return value === 'openai' || value === 'responses' || value === 'anthropic' || value === 'gemini' || value === 'gemini-cli' || value === 'mock';
 }
 
 export function normalizeProviderType(value?: string): ProviderType {

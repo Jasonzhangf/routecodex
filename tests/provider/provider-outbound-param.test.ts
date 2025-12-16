@@ -13,7 +13,8 @@ jest.mock('../../src/modules/llmswitch/bridge.ts', () => ({
       ? body.messages.map((m: any) => ({ role: m.role || 'user', content: [{ type: 'input_text', text: (m.content || '') + '' }] }))
       : [];
     return { request: { model: body?.model || 'gpt-4o-mini', input } };
-  }
+  },
+  ensureResponsesApplyPatchArguments: () => {}
 }), { virtual: true });
 
 import { ChatHttpProvider } from '../../src/providers/core/runtime/chat-http-provider.ts';

@@ -80,6 +80,7 @@ export async function bridgeProcessOutboundResponse(response: AnyRecord, opts: B
 
 type ResponsesBridgeModule = {
   buildResponsesRequestFromChat?: (request: AnyRecord) => Promise<AnyRecord>;
+  ensureResponsesApplyPatchArguments?: (input?: unknown[]) => void;
 };
 
 export async function buildResponsesRequestFromChat(chatRequest: AnyRecord): Promise<AnyRecord> {
@@ -89,6 +90,14 @@ export async function buildResponsesRequestFromChat(chatRequest: AnyRecord): Pro
     throw new Error('[llmswitch-bridge] buildResponsesRequestFromChat not available');
   }
   return builder(chatRequest);
+}
+
+export async function ensureResponsesApplyPatchArguments(input?: unknown[]): Promise<void> {
+  const mod = await importCoreDist<ResponsesBridgeModule>('conversion/responses/responses-openai-bridge');
+  const fn = mod.ensureResponsesApplyPatchArguments;
+  if (typeof fn === 'function') {
+    fn(input as unknown[]);
+  }
 }
 
 type SnapshotHooksModule = {
