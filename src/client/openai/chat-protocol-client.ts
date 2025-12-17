@@ -80,4 +80,5 @@ export class OpenAIChatProtocolClient implements HttpProtocolClient<ProtocolRequ
     }
     return this.defaultMaxTokens;
   }
+
 }

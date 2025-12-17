@@ -70,7 +70,8 @@ export abstract class BaseProvider implements IProviderV2 {
   protected lastActivity: number = Date.now();
   private lastRuntimeMetadata?: ProviderRuntimeMetadata;
   private runtimeProfile?: ProviderRuntimeProfile;
-  private rateLimitFailures: Map<string, number> = new Map();
+  private static rateLimitFailures: Map<string, number> = new Map();
+  private static readonly RATE_LIMIT_THRESHOLD = 4;
 
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     this.id = `provider-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -336,6 +337,7 @@ export abstract class BaseProvider implements IProviderV2 {
     const upstream = augmentedError.response?.data;
     const upstreamCode = augmentedError.code || upstream?.error?.code;
     const upstreamMessage = upstream?.error?.message;
+    const upstreamMessageLower = typeof upstreamMessage === 'string' ? upstreamMessage.toLowerCase() : '';
 
     const statusText = String(statusCode ?? '');
     const msgLower = msg.toLowerCase();
@@ -343,6 +345,7 @@ export abstract class BaseProvider implements IProviderV2 {
 
     // 2) 429 限流：可恢复 + 连续 4 次熔断
     const isRateLimit = statusText.includes('429') || msgLower.includes('429');
+    const isDailyLimit429 = isRateLimit && this.isDailyLimitRateLimit(msgLower, upstreamMessageLower);
 
     // 3) 可恢复池：目前仅 400、429
     const isClient400 = statusText.includes('400') || msgLower.includes('400');
@@ -372,6 +375,9 @@ export abstract class BaseProvider implements IProviderV2 {
     }
     let forceFatalRateLimit = false;
     if (isRateLimit) {
+      if (isDailyLimit429) {
+        this.forceRateLimitFailure(providerKey);
+      }
       const escalated = this.registerRateLimitFailure(providerKey);
       affectsHealth = escalated;
       forceFatalRateLimit = escalated;
@@ -379,6 +385,11 @@ export abstract class BaseProvider implements IProviderV2 {
         recoverable = false;
       } else {
         recoverable = true;
+      }
+      if (isDailyLimit429) {
+        affectsHealth = true;
+        recoverable = false;
+        forceFatalRateLimit = true;
       }
     } else if (providerKey) {
       this.resetRateLimitCounter(providerKey);
@@ -467,9 +478,9 @@ export abstract class BaseProvider implements IProviderV2 {
     if (!providerKey) {
       return false;
     }
-    const current = this.rateLimitFailures.get(providerKey) ?? 0;
+    const current = BaseProvider.rateLimitFailures.get(providerKey) ?? 0;
     const next = current + 1;
-    this.rateLimitFailures.set(providerKey, next);
+    BaseProvider.rateLimitFailures.set(providerKey, next);
     // 调试：记录当前 key 的第几次 429 命中，方便观察是否触发熔断
     if (this.dependencies.logger) {
       this.dependencies.logger.logModule(this.id, 'rate-limit-429', {
@@ -477,8 +488,8 @@ export abstract class BaseProvider implements IProviderV2 {
         hitCount: next
       });
     }
-    if (next >= 4) {
-      this.rateLimitFailures.set(providerKey, 0);
+    if (next >= BaseProvider.RATE_LIMIT_THRESHOLD) {
+      BaseProvider.rateLimitFailures.set(providerKey, 0);
       return true;
     }
     return false;
@@ -488,7 +499,26 @@ export abstract class BaseProvider implements IProviderV2 {
     if (!providerKey) {
       return;
     }
-    this.rateLimitFailures.delete(providerKey);
+    BaseProvider.rateLimitFailures.delete(providerKey);
+  }
+
+  private forceRateLimitFailure(providerKey?: string): void {
+    if (!providerKey) {
+      return;
+    }
+    BaseProvider.rateLimitFailures.set(providerKey, BaseProvider.RATE_LIMIT_THRESHOLD);
+  }
+
+  private isDailyLimitRateLimit(messageLower: string, upstreamLower?: string): boolean {
+    const haystack = `${messageLower} ${upstreamLower ?? ''}`;
+    return (
+      haystack.includes('daily cost limit') ||
+      haystack.includes('daily quota') ||
+      haystack.includes('quota has been exhausted') ||
+      haystack.includes('quota exceeded') ||
+      haystack.includes('费用限制') ||
+      haystack.includes('每日费用限制')
+    );
   }
 }
 

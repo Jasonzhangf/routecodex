@@ -252,13 +252,18 @@ export class HttpTransportProvider extends BaseProvider {
   private initializeHookSystem(): HookSystemIntegration {
     // 暂时完全禁用 Hook 系统集成，避免在未提供 hooks 模块时产生日志噪音。
     // 提供一个空实现，保持调用方不崩溃。
-    return {
-      getBidirectionalHookManager: () => ({
-        registerHook: () => {},
-        unregisterHook: () => {},
-        executeHookChain: async () => ({ data: {}, metrics: {} }),
-        setDebugConfig: () => {}
+    const passthroughHookManager = {
+      registerHook: () => {},
+      unregisterHook: () => {},
+      executeHookChain: async (_stage: string, _direction: string, payload: unknown) => ({
+        data: payload,
+        metrics: {}
       }),
+      setDebugConfig: () => {}
+    };
+
+    return {
+      getBidirectionalHookManager: () => passthroughHookManager,
       setDebugConfig: () => {},
       initialize: async () => {},
       getStats: () => ({ enabled: false }),
@@ -703,37 +708,39 @@ export class HttpTransportProvider extends BaseProvider {
       });
     } catch { /* non-blocking */ }
 
-    // 发送HTTP请求（根据是否需要 SSE 决定传输模式）
-    let response: unknown;
+    // 发送HTTP请求（根据是否需要 SSE 决定传输模式），支持有限重试
     const captureSse = shouldCaptureProviderStreamSnapshots();
-    try {
-      if (wantsSse) {
-        const upstreamStream = await this.httpClient.postStream(endpoint, finalBody, finalHeaders);
-        const streamForHost = captureSse
-          ? attachProviderSseSnapshotStream(upstreamStream, {
-            requestId: context.requestId,
-            headers: finalHeaders,
-            url: targetUrl,
-            entryEndpoint,
-            clientRequestId
-          })
-          : upstreamStream;
-        response = await this.wrapUpstreamSseResponse(streamForHost, context);
-        if (!captureSse) {
-          try {
-            await writeProviderSnapshot({
-              phase: 'provider-response',
+    const maxAttempts = this.getHttpRetryLimit();
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        if (wantsSse) {
+          const upstreamStream = await this.httpClient.postStream(endpoint, finalBody, finalHeaders);
+          const streamForHost = captureSse
+            ? attachProviderSseSnapshotStream(upstreamStream, {
               requestId: context.requestId,
-              data: { mode: 'sse' },
               headers: finalHeaders,
               url: targetUrl,
               entryEndpoint,
               clientRequestId
-            });
-          } catch { /* non-blocking */ }
+            })
+            : upstreamStream;
+          const wrapped = await this.wrapUpstreamSseResponse(streamForHost, context);
+          if (!captureSse) {
+            try {
+              await writeProviderSnapshot({
+                phase: 'provider-response',
+                requestId: context.requestId,
+                data: { mode: 'sse' },
+                headers: finalHeaders,
+                url: targetUrl,
+                entryEndpoint,
+                clientRequestId
+              });
+            } catch { /* non-blocking */ }
+          }
+          return wrapped;
         }
-      } else {
-        response = await this.httpClient.post(endpoint, finalBody, finalHeaders);
+        const response = await this.httpClient.post(endpoint, finalBody, finalHeaders);
         try {
           await writeProviderSnapshot({
             phase: 'provider-response',
@@ -745,140 +752,42 @@ export class HttpTransportProvider extends BaseProvider {
             clientRequestId
           });
         } catch { /* non-blocking */ }
-      }
-    } catch (error) {
-      // OAuth token 失效：尝试刷新/重获并重试一次
-      try {
-        const providerAuth = this.config.config.auth;
-        if (this.normalizeAuthMode(providerAuth.type) === 'oauth') {
-          const shouldRetry = await handleUpstreamInvalidOAuthToken(
-            this.providerType,
-            providerAuth as OAuthAuthExtended,
-            error
-          );
-          if (shouldRetry) {
-            const retryHeaders = await this.buildRequestHeaders();
-            let finalRetryHeaders = await this.finalizeRequestHeaders(retryHeaders, processedRequest);
-            finalRetryHeaders = this.applyStreamModeHeaders(finalRetryHeaders, wantsSse);
-            if (wantsSse) {
-              const upstreamStream = await this.httpClient.postStream(endpoint, finalBody, finalRetryHeaders);
-              const streamForHost = captureSse
-                ? attachProviderSseSnapshotStream(upstreamStream, {
-                  requestId: context.requestId,
-                  headers: finalRetryHeaders,
-                  url: targetUrl,
-                  entryEndpoint,
-                  clientRequestId,
-                  extra: { retry: true }
-                })
-                : upstreamStream;
-              const wrapped = await this.wrapUpstreamSseResponse(streamForHost, context);
-              if (!captureSse) {
-                try {
-                  await writeProviderSnapshot({
-                    phase: 'provider-response',
-                    requestId: context.requestId,
-                    data: { mode: 'sse', retry: true },
-                    headers: finalRetryHeaders,
-                    url: targetUrl,
-                    entryEndpoint,
-                    clientRequestId
-                  });
-                } catch { /* non-blocking */ }
-              }
-              return wrapped;
-            }
-            response = await this.httpClient.post(endpoint, finalBody, finalRetryHeaders);
-            try {
-              await writeProviderSnapshot({
-                phase: 'provider-response',
-                requestId: context.requestId,
-                data: response,
-                headers: finalRetryHeaders,
-                url: targetUrl,
-                entryEndpoint,
-                clientRequestId
-              });
-            } catch { /* non-blocking */ }
-            return response;
-          }
-        }
-      } catch { /* ignore and fallthrough */ }
-      // 🔍 Hook 9: 错误处理阶段
-      const errorResult = await hookManager.executeHookChain(
-        'error_handling',
-        'error',
-        { error, request: processedRequest, url: targetUrl, headers: finalHeaders },
-        context
-      );
-
-      // 如果Hook处理了错误，使用Hook的返回结果
-      const hookErrorData = errorResult.data as { error?: boolean } | undefined;
-      if (hookErrorData && hookErrorData.error === false) {
-        return hookErrorData;
-      }
-
-      // 规范化错误：补充结构化字段，移除仅文本填充的旧做法
-      const normalized: ProviderErrorAugmented = error as ProviderErrorAugmented;
-      try {
-        const msg = typeof normalized.message === 'string' ? normalized.message : String(normalized || '');
-        const m = msg.match(/HTTP\s+(\d{3})/i);
-        const parsedStatus = m ? parseInt(m[1], 10) : undefined;
-        const responseStatus = readStatusCodeFromResponse(normalized);
-        const statusCode = Number.isFinite(normalized.statusCode)
-          ? Number(normalized.statusCode)
-          : Number.isFinite(normalized.status)
-            ? Number(normalized.status)
-            : responseStatus ?? parsedStatus ?? undefined;
-        if (statusCode && !Number.isNaN(statusCode)) {
-          normalized.statusCode = statusCode;
-          if (!normalized.status) {
-            normalized.status = statusCode;
-          }
-          if (!normalized.code) {
-            normalized.code = `HTTP_${statusCode}`;
-          }
-        }
-        // 兼容 Manager 的 code 路径（response.data.error.code）
-        if (!normalized.response) {
-          normalized.response = {};
-        }
-        if (!normalized.response.data) {
-          normalized.response.data = {};
-        }
-        if (!normalized.response.data.error) {
-          normalized.response.data.error = {};
-        }
-        if (normalized.code && !normalized.response.data.error.code) {
-          normalized.response.data.error.code = normalized.code;
-        }
-      } catch { /* keep original */ }
-
-      // 快照：provider-error（结构化写入）
-      try {
-        await writeProviderSnapshot({
-          phase: 'provider-error',
-          requestId: context.requestId,
-          data: {
-            status: normalized?.statusCode ?? normalized?.status ?? null,
-            code: normalized?.code ?? null,
-            error: typeof normalized?.message === 'string' ? normalized.message : String(normalized || '')
-          },
-          headers: finalHeaders,
-          url: targetUrl,
+        return response;
+      } catch (error) {
+        const oauthReplay = await this.tryRecoverOAuthAndReplay(
+          error,
+          wantsSse,
+          endpoint,
+          finalBody,
+          processedRequest,
+          targetUrl,
           entryEndpoint,
-          clientRequestId
-        });
-      } catch { /* non-blocking */ }
-
-      throw normalized;
+          clientRequestId,
+          captureSse,
+          context
+        );
+        if (oauthReplay !== undefined) {
+          return oauthReplay;
+        }
+        if (this.shouldRetryHttpError(error, attempt, maxAttempts)) {
+          await this.delayBeforeHttpRetry(attempt);
+          continue;
+        }
+        const hookOutcome = await this.handleHttpErrorViaHooks(
+          error,
+          processedRequest,
+          targetUrl,
+          finalHeaders,
+          hookManager,
+          context
+        );
+        if (hookOutcome.handled) {
+          return hookOutcome.payload;
+        }
+        throw hookOutcome.error;
+      }
     }
 
-    // Provider 不处理工具修复/注入逻辑：统一收敛到 llmswitch-core 与兼容层
-    // 此处不做任何自动修复/重试，保持单次请求的幂等与可观测性
-    try { /* no-op */ } catch { /* ignore */ }
-
-    return response;
   }
 
   protected wantsUpstreamSse(_request: UnknownObject, _context: ProviderContext): boolean {
@@ -917,6 +826,200 @@ export class HttpTransportProvider extends BaseProvider {
     } catch {
       return false;
     }
+  }
+
+  private getHttpRetryLimit(): number {
+    return 3;
+  }
+
+  private async delayBeforeHttpRetry(attempt: number): Promise<void> {
+    const delay = Math.min(500 * attempt, 2000);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+
+  private extractStatusCodeFromError(error: ProviderErrorAugmented): number | undefined {
+    if (typeof error.statusCode === 'number') {
+      return error.statusCode;
+    }
+    if (typeof error.status === 'number') {
+      return error.status;
+    }
+    const responseStatus = readStatusCodeFromResponse(error);
+    if (responseStatus) {
+      return responseStatus;
+    }
+    if (typeof error.message === 'string') {
+      const match = error.message.match(/HTTP\s+(\d{3})/i);
+      if (match) {
+        return parseInt(match[1], 10);
+      }
+    }
+    return undefined;
+  }
+
+  private shouldRetryHttpError(error: unknown, attempt: number, maxAttempts: number): boolean {
+    if (attempt >= maxAttempts) {
+      return false;
+    }
+    const normalized = error as ProviderErrorAugmented;
+    const statusCode = this.extractStatusCodeFromError(normalized);
+    if (statusCode && statusCode >= 500) {
+      return true;
+    }
+    return false;
+  }
+
+  private async tryRecoverOAuthAndReplay(
+    error: unknown,
+    wantsSse: boolean,
+    endpoint: string,
+    finalBody: UnknownObject,
+    processedRequest: UnknownObject,
+    targetUrl: string,
+    entryEndpoint: string | undefined,
+    clientRequestId: string | undefined,
+    captureSse: boolean,
+    context: ProviderContext
+  ): Promise<unknown | undefined> {
+    try {
+      const providerAuth = this.config.config.auth;
+      if (this.normalizeAuthMode(providerAuth.type) !== 'oauth') {
+        return undefined;
+      }
+      const shouldRetry = await handleUpstreamInvalidOAuthToken(
+        this.providerType,
+        providerAuth as OAuthAuthExtended,
+        error
+      );
+      if (!shouldRetry) {
+        return undefined;
+      }
+      const retryHeaders = await this.buildRequestHeaders();
+      let finalRetryHeaders = await this.finalizeRequestHeaders(retryHeaders, processedRequest);
+      finalRetryHeaders = this.applyStreamModeHeaders(finalRetryHeaders, wantsSse);
+      if (wantsSse) {
+        const upstreamStream = await this.httpClient.postStream(endpoint, finalBody, finalRetryHeaders);
+        const streamForHost = captureSse
+          ? attachProviderSseSnapshotStream(upstreamStream, {
+            requestId: context.requestId,
+            headers: finalRetryHeaders,
+            url: targetUrl,
+            entryEndpoint,
+            clientRequestId,
+            extra: { retry: true }
+          })
+          : upstreamStream;
+        const wrapped = await this.wrapUpstreamSseResponse(streamForHost, context);
+        if (!captureSse) {
+          try {
+            await writeProviderSnapshot({
+              phase: 'provider-response',
+              requestId: context.requestId,
+              data: { mode: 'sse', retry: true },
+              headers: finalRetryHeaders,
+              url: targetUrl,
+              entryEndpoint,
+              clientRequestId
+            });
+          } catch { /* non-blocking */ }
+        }
+        return wrapped;
+      }
+      const response = await this.httpClient.post(endpoint, finalBody, finalRetryHeaders);
+      try {
+        await writeProviderSnapshot({
+          phase: 'provider-response',
+          requestId: context.requestId,
+          data: response,
+          headers: finalRetryHeaders,
+          url: targetUrl,
+          entryEndpoint,
+          clientRequestId
+        });
+      } catch { /* non-blocking */ }
+      return response;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async handleHttpErrorViaHooks(
+    error: unknown,
+    processedRequest: UnknownObject,
+    targetUrl: string,
+    finalHeaders: Record<string, string>,
+    hookManager: ReturnType<HttpTransportProvider['getHookManager']>,
+    context: ProviderContext
+  ): Promise<{ handled: true; payload: unknown } | { handled: false; error: ProviderErrorAugmented }> {
+    const errorResult = await hookManager.executeHookChain(
+      'error_handling',
+      'error',
+      { error, request: processedRequest, url: targetUrl, headers: finalHeaders },
+      context
+    );
+
+    const hookErrorData = errorResult.data as { error?: boolean } | undefined;
+    if (hookErrorData && hookErrorData.error === false) {
+      return { handled: true, payload: hookErrorData };
+    }
+    const normalized: ProviderErrorAugmented = error as ProviderErrorAugmented;
+    try {
+      const msg = typeof normalized.message === 'string' ? normalized.message : String(normalized || '');
+      const m = msg.match(/HTTP\s+(\d{3})/i);
+      const parsedStatus = m ? parseInt(m[1], 10) : undefined;
+      const responseStatus = readStatusCodeFromResponse(normalized);
+      const statusCode = Number.isFinite(normalized.statusCode)
+        ? Number(normalized.statusCode)
+        : Number.isFinite(normalized.status)
+          ? Number(normalized.status)
+          : responseStatus ?? parsedStatus ?? undefined;
+      if (statusCode && !Number.isNaN(statusCode)) {
+        normalized.statusCode = statusCode;
+        if (!normalized.status) {
+          normalized.status = statusCode;
+        }
+        if (!normalized.code) {
+          normalized.code = `HTTP_${statusCode}`;
+        }
+      }
+      if (!normalized.response) {
+        normalized.response = {};
+      }
+      if (!normalized.response.data) {
+        normalized.response.data = {};
+      }
+      if (!normalized.response.data.error) {
+        normalized.response.data.error = {};
+      }
+      if (normalized.code && !normalized.response.data.error.code) {
+        normalized.response.data.error.code = normalized.code;
+      }
+      if (normalized.message && !normalized.response.data.error.message) {
+        normalized.response.data.error.message = normalized.message;
+      }
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      await writeProviderSnapshot({
+        phase: 'provider-error',
+        requestId: context.requestId,
+        data: {
+          status: (error as ProviderErrorAugmented)?.statusCode ?? (error as ProviderErrorAugmented)?.status ?? null,
+          code: (error as ProviderErrorAugmented)?.code ?? null,
+          error: typeof (error as ProviderErrorAugmented)?.message === 'string'
+            ? (error as ProviderErrorAugmented).message
+            : String(error || '')
+        },
+        headers: finalHeaders,
+        url: targetUrl,
+        entryEndpoint: this.getEntryEndpointFromPayload(processedRequest),
+        clientRequestId: this.getClientRequestIdFromContext(context)
+      });
+    } catch { /* non-blocking */ }
+
+    return { handled: false, error: normalized };
   }
 
   /**
