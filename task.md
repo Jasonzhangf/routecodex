@@ -45,3 +45,41 @@ Unify `gemini-cli` with the standard `gemini` protocol family: both use provider
 ## Execution Log
 
 - 2025-12-16: Created task.md and documented plan for Gemini CLI provider refactor.
+
+---
+
+# Task: HTTP Provider Refactor & Error Handling Cleanup
+
+## Goal
+
+Simplify `HttpTransportProvider` by splitting HTTP request phases into focused helpers, remove the unused Hook system stub, and push provider error classification into the global Error Handling Center / Virtual Router health manager. Providers should only perform transport duties (auth + HTTP + minimal shaping) and emit structured errors upstream.
+
+## Constraints
+
+- Obey AGENTS.md: provider layer = transport; no routing/tool logic.
+- SSE handling must continue to rely on `@jsonstudio/llms` modules.
+- Changes must be incremental; after each major step, run `npm run build` (release) followed by `npm run llmswitch:link`.
+
+## Plan
+
+1. **Document current provider responsibilities**
+   - [ ] Capture the existing call graph inside `HttpTransportProvider.sendRequestInternal` (hooks, OAuth retry, SSE branch, error handling).
+   - [ ] Identify which pieces map cleanly to helper methods (e.g., request snapshotting, OAuth replay, SSE wrapping, error normalization).
+
+2. **Split HTTP execution pipeline**
+   - [ ] Introduce helpers for request preparation (`buildFinalHeaders`, `buildFinalBody`), HTTP execution (`executeHttpRequest`), SSE wrapping, and snapshotting.
+   - [ ] Ensure the core `sendRequestInternal` becomes a thin orchestrator that calls helpers in order.
+   - [ ] Consolidate retry/backoff logic (3 attempts for 5xx) into a dedicated helper shared by SSE/JSON paths.
+
+3. **Remove legacy Hook integration**
+   - [ ] Delete `getHookManager` usage and the noop stub; replace with explicit helper invocations so the flow is deterministic.
+   - [ ] If a future Hook system is needed, re‑introduce via a feature flag (`ROUTECODEX_ENABLE_PROVIDER_HOOKS`); default build must not mutate payloads.
+
+4. **Centralize error reporting**
+   - [ ] Move the recoverable/fatal classification out of `BaseProvider.handleRequestError` into a shared error handler (near `provider-error-reporter` / Virtual Router).
+   - [ ] BaseProvider should capture context (status, code, stage) and emit it; Virtual Router decides health penalties/cooldowns.
+   - [ ] Update Virtual Router error mapper to honor the new error payload (status, retryable, reason).
+
+5. **Tests & Verification**
+   - [ ] After each refactor milestone, run `npm run build` (release) and re-link `@jsonstudio/llms`.
+   - [ ] Run targeted smoke tests (`npm run verify:e2e-toolcall`, sample `/v1/responses` requests) to ensure models propagate correctly and retries happen.
