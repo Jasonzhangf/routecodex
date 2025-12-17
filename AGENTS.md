@@ -22,7 +22,7 @@ This document replaces the old “architecture novel” with a concise set of ru
 ## 3. Build & Release Workflow
 
 1. **Update shared modules first** – Modify `sharedmodule/llmswitch-core` (or other sharedmodule repos) in their source worktrees, run their `npm run build`, and ensure dist artifacts exist.
-2. **Host build** – Run `npm run build:dev` (use `ROUTECODEX_VERIFY_SKIP=1` only if the verification provider config is known broken). This regenerates `dist/` and `src/build-info.ts`.
+2. **Host build** – Run `npm run build:dev` 并确保验证通过；禁止在常规流程中使用 `ROUTECODEX_VERIFY_SKIP=1` 跳过验证。这会重新生成 `dist/` 和 `src/build-info.ts`。
 3. **Global install/test** – `npm run install:global` to validate the CLI, followed by any targeted smoke tests (providers, responses SSE, etc.).
 4. **Never commit build artifacts** – `dist/` is emitted during CI, sharedmodule dist files track the upstream repo, and tarballs stay out of git.
 5. **Release vs. Dev 依赖** – Release 构建一律依赖 npm 上的 `@jsonstudio/llms`（通过 `npm install` 获取）；开发流程使用 `npm run llmswitch:link` 将 `sharedmodule/llmswitch-core` 符号链接到 `node_modules/@jsonstudio/llms`，两种路径互不覆盖。
@@ -43,7 +43,7 @@ This document replaces the old “architecture novel” with a concise set of ru
 ## 6. Testing Checklist (per change)
 
 - `sharedmodule/llmswitch-core`: `npm run build` (matrix) whenever shared code changes.
-- Host repo: `ROUTECODEX_VERIFY_SKIP=1 npm run build:dev`, `npm run install:global`.
+- Host repo: `npm run build:dev`, `npm run install:global`。
 - Provider-specific tweaks: run the relevant script in `scripts/provider-*` or `scripts/responses-*` to ensure upstream compatibility.
 
 Keep this file short. If a rule needs more nuance, add a doc in `docs/` and link it here instead of expanding this page.

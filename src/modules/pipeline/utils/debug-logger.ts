@@ -1,4 +1,5 @@
 import type { LogData } from '../../../types/common-types.js';
+import { ColoredLogger, type ColoredLoggerOptions } from './colored-logger.js';
 
 export type DebugLogEntry = {
   timestamp: number;
@@ -36,8 +37,11 @@ export class PipelineDebugLogger {
   private readonly transformations: TransformationLogEntry[] = [];
   private readonly providerLogs: ProviderRequestLogEntry[] = [];
   private readonly recentLogs: DebugLogEntry[] = [];
+  private colored?: ColoredLogger;
 
   constructor(_config?: unknown, options?: LoggerOptions) {
+    const isDev = String(process.env.BUILD_MODE || process.env.RCC_BUILD_MODE || 'release').toLowerCase() === 'dev';
+    this.colored = new ColoredLogger({ isDev });
     this.options = {
       maxEntries: options?.maxEntries ?? DEFAULT_OPTIONS.maxEntries,
       enableConsoleLogging: options?.enableConsoleLogging ?? DEFAULT_OPTIONS.enableConsoleLogging
@@ -45,6 +49,7 @@ export class PipelineDebugLogger {
   }
 
   logModule(module: string, action: string, data?: LogData): void {
+    if (this.colored) { this.colored.logModule(module, action, data); return; }
     this.record({
       timestamp: Date.now(),
       level: 'info',
@@ -55,6 +60,7 @@ export class PipelineDebugLogger {
   }
 
   logError(error: unknown, context?: LogData): void {
+    if (this.colored) { this.colored.logProviderRequest('', 'request-error', { error, context }); return; }
     this.record({
       timestamp: Date.now(),
       level: 'error',
@@ -68,6 +74,7 @@ export class PipelineDebugLogger {
   }
 
   logPipeline(pipelineId: string, action: string, data?: LogData): void {
+    if (this.colored) { this.colored.logModule(pipelineId, action, data); return; }
     this.appendScoped(this.pipelineLogs, pipelineId, {
       timestamp: Date.now(),
       level: 'info',
@@ -78,12 +85,26 @@ export class PipelineDebugLogger {
   }
 
   logRequest(requestId: string, action: string, data?: LogData): void {
+    if (this.colored) { this.colored.logProviderRequest(requestId, action as any, data); return; }
     this.appendScoped(this.requestLogs, requestId, {
       timestamp: Date.now(),
       level: 'info',
       pipelineId: requestId,
       category: action,
       data
+    });
+  }
+
+  logVirtualRouterHit(routeName: string, providerKey: string, model?: string): void {
+    if (this.colored) {
+      this.colored.logVirtualRouterHit(routeName, providerKey, model);
+      return;
+    }
+    this.record({
+      timestamp: Date.now(),
+      level: 'info',
+      category: 'virtual-router-hit',
+      message: `${routeName} -> ${providerKey}${model ? '.' + model : ''}`
     });
   }
 
@@ -103,6 +124,7 @@ export class PipelineDebugLogger {
   }
 
   logProviderRequest(requestId: string, action: string, request?: LogData, response?: LogData): void {
+    if (this.colored) { this.colored.logProviderRequest(requestId, action as any, { request, response }); return; }
     this.providerLogs.push({
       timestamp: Date.now(),
       level: 'info',

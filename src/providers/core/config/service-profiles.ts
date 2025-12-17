@@ -66,29 +66,17 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
     defaultEndpoint: '/models:generateContent',
     defaultModel: 'models/gemini-2.0-flash',
-    requiredAuth: ['apikey'],
-    optionalAuth: [],
+    // gemini / gemini-cli 共享同一 providerType=gemini，只在 auth 模式上做变体
+    // 允许 apikey 与 oauth，两者都视为合法
+    requiredAuth: [],
+    optionalAuth: ['apikey', 'oauth'],
     headers: {
       'Content-Type': 'application/json'
     },
     timeout: 300000,
     maxRetries: 3
   },
-  'gemini-cli': {
-    defaultBaseUrl: 'https://cloudcode-pa.googleapis.com',
-    defaultEndpoint: '/v1internal:generateContent',
-    defaultModel: 'gemini-2.5-pro',
-    requiredAuth: ['oauth'],
-    optionalAuth: [],
-    headers: {
-      'Content-Type': 'application/json',
-      'User-Agent': 'google-api-nodejs-client/9.15.1',
-      'X-Goog-Api-Client': 'gl-node/22.17.0',
-      'Client-Metadata': 'ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI'
-    },
-    timeout: 300000,
-    maxRetries: 2
-  },
+  // gemini-cli 不再单独作为 providerType，行为由 GeminiCLIHttpProvider + 动态配置控制
 
   glm: {
     // GLM coding 路径（已验证可用）

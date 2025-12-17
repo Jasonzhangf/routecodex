@@ -321,6 +321,8 @@ export abstract class BaseProvider implements IProviderV2 {
     const now = Date.now();
     const err: ProviderError = (error instanceof Error ? error : new Error(String(error))) as ProviderError;
     const msg = typeof err.message === 'string' ? err.message : String(error ?? 'unknown error');
+
+    // 1) 提取状态码：优先 err.statusCode；否则从 message 中提取第一个 "HTTP <3xx>" 数字
     let statusCode: number | undefined = err.statusCode;
     if (!statusCode) {
       try {
@@ -334,18 +336,50 @@ export abstract class BaseProvider implements IProviderV2 {
     const upstream = augmentedError.response?.data;
     const upstreamCode = augmentedError.code || upstream?.error?.code;
     const upstreamMessage = upstream?.error?.message;
-    const isRateLimit = statusCode === 429;
-    const isTransient = isRateLimit || augmentedError.retryable === true;
 
+    const statusText = String(statusCode ?? '');
+    const msgLower = msg.toLowerCase();
+    const isNetworkError = !statusCode && looksLikeNetworkTransportError(augmentedError, msgLower);
+
+    // 2) 429 限流：可恢复 + 连续 4 次熔断
+    const isRateLimit = statusText.includes('429') || msgLower.includes('429');
+
+    // 3) 可恢复池：目前仅 400、429
+    const isClient400 = statusText.includes('400') || msgLower.includes('400');
+    const isExplicitRecoverable = isRateLimit || isClient400;
+
+    // 4) 不可恢复：401 / 402 / 500 / 524 以及所有不在可恢复池里的
+    const is401 = statusText.includes('401') || msgLower.includes('401');
+    const is402 = statusText.includes('402') || msgLower.includes('402');
+    const is500 = statusText.includes('500') || msgLower.includes('500');
+    const is524 = statusText.includes('524') || msgLower.includes('524');
+
+    let recoverable = isExplicitRecoverable;
+    if (isNetworkError) {
+      recoverable = true;
+    }
+    if (is401 || is402 || is500 || is524) {
+      recoverable = false;
+    }
     const runtimeProfile = this.getRuntimeProfile();
-    const isClientError = typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500 && statusCode !== 429;
     const providerKey = context.providerKey || runtimeProfile?.providerKey;
-    let affectsHealth = isClientError ? false : !isTransient;
+
+    // 5) 是否影响健康：除非可恢复，一律影响健康
+    let affectsHealth = !recoverable;
+    if (isRateLimit && recoverable) {
+      // rate-limit 由熔断计数器决定是否升级为健康问题
+      affectsHealth = false;
+    }
     let forceFatalRateLimit = false;
     if (isRateLimit) {
       const escalated = this.registerRateLimitFailure(providerKey);
       affectsHealth = escalated;
       forceFatalRateLimit = escalated;
+      if (escalated) {
+        recoverable = false;
+      } else {
+        recoverable = true;
+      }
     } else if (providerKey) {
       this.resetRateLimitCounter(providerKey);
     }
@@ -404,7 +438,7 @@ export abstract class BaseProvider implements IProviderV2 {
       runtime: buildRuntimeFromProviderContext(context),
       dependencies: this.dependencies,
       statusCode,
-      recoverable: forceFatalRateLimit ? false : isTransient,
+      recoverable: forceFatalRateLimit ? false : recoverable,
       affectsHealth,
       details: enrichedDetails
     });
@@ -436,6 +470,13 @@ export abstract class BaseProvider implements IProviderV2 {
     const current = this.rateLimitFailures.get(providerKey) ?? 0;
     const next = current + 1;
     this.rateLimitFailures.set(providerKey, next);
+    // 调试：记录当前 key 的第几次 429 命中，方便观察是否触发熔断
+    if (this.dependencies.logger) {
+      this.dependencies.logger.logModule(this.id, 'rate-limit-429', {
+        providerKey,
+        hitCount: next
+      });
+    }
     if (next >= 4) {
       this.rateLimitFailures.set(providerKey, 0);
       return true;
@@ -449,4 +490,33 @@ export abstract class BaseProvider implements IProviderV2 {
     }
     this.rateLimitFailures.delete(providerKey);
   }
+}
+
+const NETWORK_ERROR_CODE_SET = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'EHOSTUNREACH',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EPIPE',
+  'ETIMEDOUT',
+  'ECONNABORTED'
+]);
+
+function looksLikeNetworkTransportError(error: ProviderErrorAugmented, msgLower: string): boolean {
+  const code = typeof error.code === 'string' ? error.code : undefined;
+  if (code && NETWORK_ERROR_CODE_SET.has(code)) {
+    return true;
+  }
+  const hints = [
+    'fetch failed',
+    'network timeout',
+    'socket hang up',
+    'client network socket disconnected',
+    'tls handshake timeout',
+    'unable to verify the first certificate',
+    'network error',
+    'temporarily unreachable'
+  ];
+  return hints.some((hint) => msgLower.includes(hint));
 }

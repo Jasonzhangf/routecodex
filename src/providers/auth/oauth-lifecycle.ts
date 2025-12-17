@@ -312,22 +312,6 @@ async function maybeEnrichToken(providerType: string, tokenData: UnknownObject):
       return tokenData;
     }
   }
-  if (providerType === 'qwen' && !hasQwenApiKey(tokenData)) {
-    const accessToken = extractAccessToken(sanitizeToken(tokenData) ?? null);
-    if (!accessToken) {
-      logOAuthDebug('[OAuth] Qwen: no access_token found in auth result, skipping API Key fetch');
-      return tokenData;
-    }
-    try {
-      const userInfo = await fetchQwenUserInfo(accessToken);
-      if (userInfo.apiKey) {
-        logOAuthDebug('[OAuth] Qwen: fetched API Key via user info');
-        return mergeQwenTokenData(tokenData, userInfo) as unknown as UnknownObject;
-      }
-    } catch (error) {
-      console.error(`[OAuth] Qwen: failed to fetch API Key - ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
   if (providerType === 'gemini-cli') {
     const accessToken = extractAccessToken(sanitizeToken(tokenData) ?? null);
     if (!accessToken) {

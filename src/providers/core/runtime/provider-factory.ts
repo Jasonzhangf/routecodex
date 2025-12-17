@@ -10,13 +10,13 @@ import { AnthropicHttpProvider } from './anthropic-http-provider.js';
 import { iFlowHttpProvider } from './iflow-http-provider.js';
 import { ChatHttpProvider } from './chat-http-provider.js';
 import { GeminiHttpProvider } from './gemini-http-provider.js';
-import { GeminiCLIHttpProvider } from './gemini-cli-http-provider.js';
 import { MockProvider } from '../../mock/index.js';
-import type { OpenAIStandardConfig, ApiKeyAuth, OAuthAuth, OAuthAuthType } from '../api/provider-config.js';
+import { GeminiCLIHttpProvider } from './gemini-cli-http-provider.js';
+
 import crypto from 'node:crypto';
-import type { IProviderV2, ProviderRuntimeProfile, ProviderRuntimeAuth, ProviderType } from '../api/provider-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
-import {
+import type { OpenAIStandardConfig, ApiKeyAuth, OAuthAuth, OAuthAuthType } from '../api/provider-config.js';
+import type { IProviderV2, ProviderRuntimeProfile, ProviderRuntimeAuth, ProviderType } from '../api/provider-types.js';import {
   normalizeProviderFamily,
   normalizeProviderType,
   providerTypeToProtocol
@@ -250,6 +250,7 @@ export class ProviderFactory {
       case 'responses-http-provider':
       case 'anthropic-http-provider':
       case 'gemini-http-provider':
+      case 'gemini-cli-http-provider':
       case 'mock-provider':
         return trimmed as OpenAIStandardConfig['type'];
       default:
@@ -267,6 +268,7 @@ export class ProviderFactory {
       return 'anthropic-http-provider';
     }
     if (providerType === 'gemini') {
+      // 默认返回标准 gemini-http-provider，但允许 config 显式指定 gemini-cli-http-provider
       return 'gemini-http-provider';
     }
     if (providerType === 'mock') {
@@ -293,9 +295,12 @@ export class ProviderFactory {
       case 'anthropic':
         return new AnthropicHttpProvider(config, dependencies);
       case 'gemini':
+        // Check if OAuth type is gemini-cli-oauth to decide between providers
+        const oauthType = config?.config?.auth?.type;
+        if (oauthType === 'gemini-cli-oauth') {
+          return new GeminiCLIHttpProvider(config, dependencies);
+        }
         return new GeminiHttpProvider(config, dependencies);
-      case 'gemini-cli':
-        return new GeminiCLIHttpProvider(config, dependencies);
       default:
         break;
     }
@@ -311,9 +316,6 @@ export class ProviderFactory {
     }
     if (moduleType === 'iflow-http-provider') {
       return new iFlowHttpProvider(config, dependencies);
-    }
-    if (moduleType === 'gemini-cli-http-provider') {
-      return new GeminiCLIHttpProvider(config, dependencies);
     }
     const error = new Error(`[ProviderFactory] Unsupported providerType='${providerType}' and moduleType='${moduleType}'`);
     (error as Error & { code?: string }).code = 'ERR_UNSUPPORTED_PROVIDER_TYPE';

@@ -22,6 +22,7 @@ import { buildResponsesRequestFromChat } from '../../../modules/llmswitch/bridge
 import { importCoreModule } from '../../../modules/llmswitch/core-loader.js';
 import type { HttpClient } from '../utils/http-client.js';
 import { ResponsesProtocolClient } from '../../../client/responses/responses-protocol-client.js';
+import { emitProviderError, buildRuntimeFromProviderContext } from '../utils/provider-error-reporter.js';
 
 type EnsureResponsesInstructionsFn = typeof import('@jsonstudio/llms/dist/conversion/shared/responses-instructions.js')['ensureResponsesInstructions'];
 let ensureResponsesInstructionsFn: EnsureResponsesInstructionsFn | null = null;
@@ -399,6 +400,7 @@ export class ResponsesProvider extends HttpTransportProvider {
       targetUrl,
       entryEndpoint
     );
+    this.reportResponsesFailureIfNeeded(json, context);
     return {
       data: json,
       status: 200,
@@ -455,6 +457,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         targetUrl,
         entryEndpoint
       );
+      this.reportResponsesFailureIfNeeded(json, context);
       return {
         data: json,
         status: 200,
@@ -498,6 +501,7 @@ export class ResponsesProvider extends HttpTransportProvider {
       Accept: 'application/json'
     });
     await this.snapshotPhase('provider-response', context, response, headers, targetUrl, entryEndpoint);
+    this.reportResponsesFailureIfNeeded(response, context);
     return response;
   }
 
@@ -561,6 +565,102 @@ export class ResponsesProvider extends HttpTransportProvider {
     const moduleUrl = pathToFileURL(modPath).href;
     const { ResponsesSseToJsonConverter } = await import(moduleUrl);
     return new ResponsesSseToJsonConverter();
+  }
+
+  private reportResponsesFailureIfNeeded(payload: unknown, context: ProviderContext): void {
+    const failure = this.detectResponsesFailure(payload);
+    if (!failure) {
+      return;
+    }
+    const err = new Error(failure.message) as Error & { code?: string };
+    err.code = failure.code ?? 'RESPONSES_FAILED';
+    emitProviderError({
+      error: err,
+      stage: 'provider.responses',
+      runtime: buildRuntimeFromProviderContext(context),
+      dependencies: this.dependencies,
+      statusCode: failure.statusCode,
+      recoverable: failure.recoverable,
+      details: {
+        status: failure.status,
+        code: failure.code,
+        error: failure.rawError
+      }
+    });
+  }
+
+  private detectResponsesFailure(payload: unknown): ResponsesFailure | null {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return null;
+    }
+    const record = payload as Record<string, unknown>;
+    const status = typeof record.status === 'string' ? record.status : undefined;
+    const errorCandidate = record.error;
+    const errorRecord = errorCandidate && typeof errorCandidate === 'object' && !Array.isArray(errorCandidate)
+      ? (errorCandidate as Record<string, unknown>)
+      : undefined;
+    if (status !== 'failed' && !errorRecord) {
+      return null;
+    }
+    const message = typeof errorRecord?.message === 'string'
+      ? errorRecord.message
+      : `Responses request failed${status ? ` (${status})` : ''}`;
+    const code = typeof errorRecord?.code === 'string'
+      ? errorRecord.code
+      : status === 'failed'
+        ? 'RESPONSES_FAILED'
+        : undefined;
+    const httpStatus = typeof errorRecord?.['http_status'] === 'number'
+      ? (errorRecord['http_status'] as number)
+      : undefined;
+    const embeddedStatus = typeof errorRecord?.status === 'number'
+      ? (errorRecord.status as number)
+      : undefined;
+    const statusCode = httpStatus ?? embeddedStatus ?? this.extractStatusFromErrorCode(code);
+    const recoverable = this.isRecoverableStatus(statusCode, code);
+    return {
+      message,
+      statusCode,
+      code,
+      recoverable,
+      status,
+      rawError: errorRecord
+    };
+  }
+
+  private extractStatusFromErrorCode(code?: string): number | undefined {
+    if (typeof code !== 'string') {
+      return undefined;
+    }
+    const numericMatch = code.match(/(\d{3})/);
+    if (numericMatch) {
+      const candidate = Number(numericMatch[1] ?? numericMatch[0]);
+      if (!Number.isNaN(candidate)) {
+        return candidate;
+      }
+    }
+    const lowered = code.toLowerCase();
+    if (lowered.includes('quota') || lowered.includes('billing')) {
+      return 402;
+    }
+    if (lowered.includes('unauthorized') || lowered.includes('auth')) {
+      return 401;
+    }
+    if (lowered.includes('rate') || lowered.includes('limit')) {
+      return 429;
+    }
+    return undefined;
+  }
+
+  private isRecoverableStatus(statusCode?: number, code?: string): boolean {
+    if (statusCode === 429 || statusCode === 408) {
+      return true;
+    }
+    if (!code) {
+      return false;
+    }
+    const lowered = code.toLowerCase();
+    return lowered.includes('rate') || lowered.includes('timeout') || lowered.includes('retry');
   }
 }
 
@@ -659,3 +759,12 @@ const PACKAGE_ROOT = resolveModuleRoot(import.meta.url);
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
+
+type ResponsesFailure = {
+  message: string;
+  status?: string;
+  statusCode?: number;
+  code?: string;
+  recoverable: boolean;
+  rawError?: Record<string, unknown>;
+};

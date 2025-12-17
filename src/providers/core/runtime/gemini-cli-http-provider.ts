@@ -32,8 +32,8 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       ...config,
       config: {
         ...config.config,
-        // 保持 providerType 为 gemini，表示协议族与标准 Gemini 一致
-        // 仅在 ServiceProfile / auth 上体现 gemini-cli 的差异
+        // 使用统一的 providerType=gemini，表示协议族与标准 Gemini 一致
+        // gemini-cli 仅作为 Cloud Code Assist 变体，通过模块类型 + auth 配置区分
         providerType: 'gemini' as ProviderType
       }
     };

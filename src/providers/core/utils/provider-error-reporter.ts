@@ -73,7 +73,7 @@ export function emitProviderError(options: EmitOptions): void {
   const err = normalizeError(options.error);
   const code = normalizeCode(err.code, options.stage);
   const status = determineStatusCode(err, options.statusCode);
-  const recoverable = options.recoverable ?? (err.retryable === true);
+  let recoverable = options.recoverable ?? (err.retryable === true);
   const event: ProviderErrorEventExtended = {
     code,
     message: err.message || code,
@@ -84,7 +84,13 @@ export function emitProviderError(options: EmitOptions): void {
     timestamp: Date.now(),
     details: options.details ?? extractRecord(err.details)
   };
-  event.affectsHealth = options.affectsHealth !== false;
+  // Default health impact: all errors affect health unless explicitly disabled.
+  // For non-recoverable errors (including 402) we always want health impact.
+  if (!recoverable) {
+    event.affectsHealth = true;
+  } else {
+    event.affectsHealth = options.affectsHealth !== false;
+  }
   try {
     providerErrorCenter.emit(event);
   } catch (emitError) {

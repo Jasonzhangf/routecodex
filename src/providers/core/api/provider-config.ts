@@ -58,7 +58,7 @@ export interface ApiKeyAuth {
 /**
  * OAuth认证类型
  */
-export type OAuthAuthType = 'oauth' | `${string}-oauth`;
+export type OAuthAuthType = 'oauth' | 'gemini-cli-oauth' | `${string}-oauth`;
 
 /**
  * OAuth认证配置

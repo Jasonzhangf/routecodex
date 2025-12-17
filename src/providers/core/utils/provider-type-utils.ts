@@ -29,11 +29,15 @@ export function normalizeProviderType(value?: string): ProviderType {
     return 'openai';
   }
   const normalized = value.trim().toLowerCase();
-  if (isProviderType(normalized)) {
-    return normalized as ProviderType;
-  }
-  if (normalized in LEGACY_FAMILY_TO_TYPE) {
-    return LEGACY_FAMILY_TO_TYPE[normalized as keyof typeof LEGACY_FAMILY_TO_TYPE];
+ if (isProviderType(normalized)) {
+   return normalized as ProviderType;
+ }
+ if (normalized in LEGACY_FAMILY_TO_TYPE) {
+   return LEGACY_FAMILY_TO_TYPE[normalized as keyof typeof LEGACY_FAMILY_TO_TYPE];
+ }
+  // gemini-cli 归入 gemini 协议族，仅保留 provider 模块差异
+  if (normalized === 'gemini-cli') {
+    return 'gemini';
   }
   return 'openai';
 }

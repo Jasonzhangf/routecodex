@@ -48,6 +48,29 @@ type ResponseRecord = Record<string, unknown> & {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
+
+const readStatusCodeFromResponse = (error: ProviderErrorAugmented): number | undefined => {
+  const response = error?.response as Record<string, unknown> | undefined;
+  const directStatus = typeof response?.status === 'number' ? response.status : undefined;
+  const directStatusCode = typeof (response as { statusCode?: number })?.statusCode === 'number'
+    ? (response as { statusCode?: number }).statusCode
+    : undefined;
+  const nestedStatus =
+    response &&
+    typeof response === 'object' &&
+    typeof (response as { data?: Record<string, unknown> })?.data?.status === 'number'
+      ? ((response as { data?: Record<string, unknown> }).data!.status as number)
+      : undefined;
+  const nestedErrorStatus =
+    response &&
+    typeof response === 'object' &&
+    typeof (response as { data?: { error?: { status?: number } } })?.data?.error?.status === 'number'
+      ? ((response as { data?: { error?: { status?: number } } }).data!.error!.status as number)
+      : undefined;
+  return [directStatus, directStatusCode, nestedStatus, nestedErrorStatus].find(
+    (candidate): candidate is number => typeof candidate === 'number' && Number.isFinite(candidate)
+  );
+};
 type ProviderErrorAugmented = ProviderError & {
   code?: string;
   retryable?: boolean;
@@ -227,45 +250,23 @@ export class HttpTransportProvider extends BaseProvider {
    * 初始化Hook系统集成
    */
   private initializeHookSystem(): HookSystemIntegration {
-    try {
-      const integration = createHookSystemIntegration(
-        this.dependencies,
-        this.id,
-        {
-          enabled: true,
-          debugMode: true, // Provider v2默认启用调试模式
-          snapshotEnabled: true,
-          migrationMode: true // 迁移现有Hooks
-        }
-      );
-
-      this.dependencies.logger?.logModule(this.id, 'hook-system-integration-created', {
-        providerId: this.id
-      });
-
-      return integration;
-    } catch (error) {
-      this.dependencies.logger?.logModule(this.id, 'hook-system-integration-failed', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-
-      // 创建兼容的空实现，避免系统崩溃
-      return {
-        getBidirectionalHookManager: () => ({
-          registerHook: () => {},
-          unregisterHook: () => {},
-          executeHookChain: async () => ({ data: {}, metrics: {} }),
-          setDebugConfig: () => {}
-        }),
-        setDebugConfig: () => {},
-        initialize: async () => {},
-        getStats: () => ({ enabled: false }),
-        healthCheck: async () => ({ healthy: true }),
-        start: async () => {},
-        stop: async () => {},
-        shutdown: async () => {}
-      } as unknown as HookSystemIntegration;
-    }
+    // 暂时完全禁用 Hook 系统集成，避免在未提供 hooks 模块时产生日志噪音。
+    // 提供一个空实现，保持调用方不崩溃。
+    return {
+      getBidirectionalHookManager: () => ({
+        registerHook: () => {},
+        unregisterHook: () => {},
+        executeHookChain: async () => ({ data: {}, metrics: {} }),
+        setDebugConfig: () => {}
+      }),
+      setDebugConfig: () => {},
+      initialize: async () => {},
+      getStats: () => ({ enabled: false }),
+      healthCheck: async () => ({ healthy: true }),
+      start: async () => {},
+      stop: async () => {},
+      shutdown: async () => {}
+    } as unknown as HookSystemIntegration;
   }
 
   /**
@@ -441,8 +442,11 @@ export class HttpTransportProvider extends BaseProvider {
       : this.providerType;
 
     // 验证认证配置（按 providerIdForAuth 选择服务档案）
+    // 对于 gemini-cli 这类变体，provider 行为归入 gemini 协议族
+    const profileKeyForValidation = providerIdForAuth === 'gemini-cli' ? 'gemini' : providerIdForAuth;
+
     const validation = ServiceProfileValidator.validateServiceProfile(
-      providerIdForAuth,
+      profileKeyForValidation,
       authMode
     );
 
@@ -457,10 +461,10 @@ export class HttpTransportProvider extends BaseProvider {
       return new ApiKeyAuthProvider(auth as ApiKeyAuth);
     } else if (authMode === 'oauth') {
       const oauthAuth = auth as OAuthAuthExtended;
-      // For providers like Qwen where public OAuth client may not be available,
-      // allow reading tokens produced by external login tools (CLIProxyAPI)
+      // For providers like Qwen/iflow/Gemini CLI where public OAuth client may not be available,
+      // allow reading tokens produced by external login tools (CLIProxyAPI) via token file.
       const useTokenFile =
-        (providerIdForAuth === 'qwen' || providerIdForAuth === 'iflow') &&
+        (providerIdForAuth === 'qwen' || providerIdForAuth === 'iflow' || providerIdForAuth === 'gemini-cli') &&
         !oauthAuth.clientId &&
         !oauthAuth.tokenUrl &&
         !oauthAuth.deviceCodeUrl;
@@ -817,13 +821,15 @@ export class HttpTransportProvider extends BaseProvider {
       // 规范化错误：补充结构化字段，移除仅文本填充的旧做法
       const normalized: ProviderErrorAugmented = error as ProviderErrorAugmented;
       try {
-        // 提取状态码
         const msg = typeof normalized.message === 'string' ? normalized.message : String(normalized || '');
         const m = msg.match(/HTTP\s+(\d{3})/i);
         const parsedStatus = m ? parseInt(m[1], 10) : undefined;
+        const responseStatus = readStatusCodeFromResponse(normalized);
         const statusCode = Number.isFinite(normalized.statusCode)
           ? Number(normalized.statusCode)
-          : (Number.isFinite(normalized.status) ? Number(normalized.status) : (parsedStatus || undefined));
+          : Number.isFinite(normalized.status)
+            ? Number(normalized.status)
+            : responseStatus ?? parsedStatus ?? undefined;
         if (statusCode && !Number.isNaN(statusCode)) {
           normalized.statusCode = statusCode;
           if (!normalized.status) {

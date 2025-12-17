@@ -30,7 +30,7 @@ interface DispatchOptions {
 
 type RequestLogMeta = Record<string, unknown> | undefined;
 
-interface SsePayloadShape {
+export interface SsePayloadShape {
   __sse_responses?: unknown;
 }
 
@@ -39,7 +39,7 @@ type FlushableResponse = Response & {
   flush?: () => void;
 };
 
-function hasSsePayload(body: unknown): body is SsePayloadShape {
+export function hasSsePayload(body: unknown): body is SsePayloadShape {
   return Boolean(body && typeof body === 'object' && '__sse_responses' in (body as Record<string, unknown>));
 }
 

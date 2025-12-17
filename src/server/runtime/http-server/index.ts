@@ -15,6 +15,7 @@ import type { UnknownObject } from '../../../types/common-types.js';
 import type { HandlerContext, PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
 import { ProviderFactory } from '../../../providers/core/runtime/provider-factory.js';
 import type { ModuleDependencies, PipelineDebugLogger } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
+import { PipelineDebugLogger as PipelineDebugLoggerImpl } from '../../../modules/pipeline/utils/debug-logger.js';
 import type { DebugCenter } from '../../../modules/pipeline/types/external-types.js';
 import type {
   DebugLogEntry,
@@ -53,6 +54,7 @@ import type {
 } from './types.js';
 import type { ProviderErrorRuntimeMetadata } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { writeClientSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
+import { createServerColoredLogger } from './colored-logger.js';
 
 type ConvertProviderResponseFn = (options: {
   providerProtocol: string;
@@ -142,6 +144,7 @@ export class RouteCodexHttpServer {
   private providerProfileIndex: Map<string, ProviderProfile> = new Map();
   private errorHandlingShim: ModuleDependencies['errorHandlingCenter'] | null = null;
   private routeErrorHub: RouteErrorHub | null = null;
+  private readonly coloredLogger = createServerColoredLogger();
 
   constructor(config: ServerConfigV2) {
     this.config = config;
@@ -152,6 +155,13 @@ export class RouteCodexHttpServer {
     const envFlag = (process.env.ROUTECODEX_USE_HUB_PIPELINE || '').trim().toLowerCase();
     if (config.pipeline?.useHubPipeline === false || envFlag === '0' || envFlag === 'false') {
       console.warn('[RouteCodexHttpServer] Super pipeline has been removed; falling back to Hub pipeline.');
+    }
+
+    try {
+      this.pipelineLogger = new PipelineDebugLoggerImpl({ colored: this.coloredLogger }, { enableConsoleLogging: true });
+    } catch (error) {
+      console.warn('[RouteCodexHttpServer] Failed to initialize PipelineDebugLogger; falling back to noop logger.', error);
+      this.pipelineLogger = createNoopPipelineLogger();
     }
 
     console.log('[RouteCodexHttpServer] Initialized (pipeline=hub)');
@@ -951,7 +961,10 @@ export class RouteCodexHttpServer {
     const payload = asRecord(input.body);
     const pipelineInput: PipelineExecutionInput & { payload: Record<string, unknown> } = {
       ...input,
-      metadata,
+      metadata: {
+        ...metadata,
+        logger: this.coloredLogger
+      },
       payload
     };
     const result = await this.hubPipeline.execute(pipelineInput);

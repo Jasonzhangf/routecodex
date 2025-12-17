@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.89.099",
+  "version": "0.89.150",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -33,7 +33,7 @@
   "scripts": {
     "build": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs",
     "build:dev": "BUILD_MODE=dev npm run build && npm run verify:e2e-toolcall && npm run install:global",
-    "build:min": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-configs.mjs",
+    "build:min": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs",
     "prepack": "echo skip-prepack",
     "postbuild": "chmod +x dist/cli.js || true",
     "build:watch": "tsc --watch",
@@ -124,7 +124,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
-    "@jsonstudio/llms": "^0.6.54",
+    "@jsonstudio/llms": "^0.6.97",
     "@lmstudio/sdk": "^1.5.0",
     "@radix-ui/react-switch": "^1.2.6",
     "@types/socket.io": "^3.0.1",
