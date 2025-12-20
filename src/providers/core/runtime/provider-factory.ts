@@ -286,6 +286,12 @@ export class ProviderFactory {
     if (moduleType === 'mock-provider') {
       return new MockProvider(config, dependencies);
     }
+    if (moduleType === 'gemini-cli-http-provider') {
+      return new GeminiCLIHttpProvider(config, dependencies);
+    }
+    if (moduleType === 'gemini-http-provider') {
+      return new GeminiHttpProvider(config, dependencies);
+    }
 
     switch (providerType) {
       case 'openai':

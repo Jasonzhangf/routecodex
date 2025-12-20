@@ -7,6 +7,7 @@ const baseConfig: OpenAIStandardConfig = {
   config: {
     providerType: 'gemini-cli',
     baseUrl: 'https://cloudcode-pa.googleapis.com',
+    endpoint: '/v1internal:generateContent',
     auth: {
       type: 'gemini-cli-oauth',
       apiKey: ''
@@ -27,7 +28,7 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
     const profile = (provider as any).serviceProfile;
     expect(profile).toBeTruthy();
     expect(profile.defaultBaseUrl).toContain('cloudcode-pa.googleapis.com');
-    expect(profile.defaultEndpoint).toContain('v1internal');
+    expect(profile.defaultEndpoint).toContain('v1internal:generateContent');
+    expect(profile.requiredAuth).toContain('oauth');
   });
 });
-

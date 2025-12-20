@@ -7,7 +7,6 @@
 import type {
   IProviderV2,
   ProviderContext,
-  ProviderError,
   ServiceProfile,
   ProviderRuntimeProfile
 } from '../api/provider-types.js';
@@ -29,28 +28,10 @@ import {
   normalizeProviderType,
   providerTypeToProtocol
 } from '../utils/provider-type-utils.js';
+import { classifyProviderError } from './provider-error-classifier.js';
+import type { ProviderErrorAugmented } from './provider-error-types.js';
 
 type RequestEnvelope = UnknownObject & { data?: UnknownObject };
-
-type ProviderErrorAugmented = ProviderError & {
-  code?: string;
-  retryable?: boolean;
-  response?: {
-    data?: {
-      error?: {
-        code?: string;
-        message?: string;
-      };
-    };
-  };
-  details?: Record<string, unknown>;
-  providerFamily?: string;
-  requestId?: string;
-  providerKey?: string;
-  providerId?: string;
-  providerType?: string;
-  routeName?: string;
-};
 
 /**
  * 基础Provider抽象类
@@ -68,10 +49,14 @@ export abstract class BaseProvider implements IProviderV2 {
   protected requestCount = 0;
   protected errorCount = 0;
   protected lastActivity: number = Date.now();
+  protected authMode: 'apikey' | 'oauth' = 'apikey';
+  protected oauthProviderId?: string;
   private lastRuntimeMetadata?: ProviderRuntimeMetadata;
   private runtimeProfile?: ProviderRuntimeProfile;
   private static rateLimitFailures: Map<string, number> = new Map();
   private static readonly RATE_LIMIT_THRESHOLD = 4;
+  private static clientErrorCounters: Map<string, number> = new Map();
+  private static readonly CLIENT_ERROR_THRESHOLD = 4;
 
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     this.id = `provider-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -147,6 +132,8 @@ export abstract class BaseProvider implements IProviderV2 {
         responseTime: Date.now() - context.startTime
       });
       this.resetRateLimitCounter(context.providerKey);
+      this.resetClientErrorCounter(context.providerKey);
+      this.resetClientErrorCounter(context.providerKey);
 
       return finalResponse;
 
@@ -320,82 +307,38 @@ export abstract class BaseProvider implements IProviderV2 {
 
   private handleRequestError(error: unknown, context: ProviderContext): void {
     const now = Date.now();
-    const err: ProviderError = (error instanceof Error ? error : new Error(String(error))) as ProviderError;
-    const msg = typeof err.message === 'string' ? err.message : String(error ?? 'unknown error');
-
-    // 1) 提取状态码：优先 err.statusCode；否则从 message 中提取第一个 "HTTP <3xx>" 数字
-    let statusCode: number | undefined = err.statusCode;
-    if (!statusCode) {
-      try {
-        const m = msg.match(/HTTP\s+(\d{3})/i);
-        if (m) {
-          statusCode = parseInt(m[1], 10);
-        }
-      } catch { /* ignore */ }
-    }
-    const augmentedError = err as ProviderErrorAugmented;
-    const upstream = augmentedError.response?.data;
-    const upstreamCode = augmentedError.code || upstream?.error?.code;
-    const upstreamMessage = upstream?.error?.message;
-    const upstreamMessageLower = typeof upstreamMessage === 'string' ? upstreamMessage.toLowerCase() : '';
-
-    const statusText = String(statusCode ?? '');
-    const msgLower = msg.toLowerCase();
-    const isNetworkError = !statusCode && looksLikeNetworkTransportError(augmentedError, msgLower);
-
-    // 2) 429 限流：可恢复 + 连续 4 次熔断
-    const isRateLimit = statusText.includes('429') || msgLower.includes('429');
-    const isDailyLimit429 = isRateLimit && this.isDailyLimitRateLimit(msgLower, upstreamMessageLower);
-
-    // 3) 可恢复池：目前仅 400、429
-    const isClient400 = statusText.includes('400') || msgLower.includes('400');
-    const isExplicitRecoverable = isRateLimit || isClient400;
-
-    // 4) 不可恢复：401 / 402 / 500 / 524 以及所有不在可恢复池里的
-    const is401 = statusText.includes('401') || msgLower.includes('401');
-    const is402 = statusText.includes('402') || msgLower.includes('402');
-    const is500 = statusText.includes('500') || msgLower.includes('500');
-    const is524 = statusText.includes('524') || msgLower.includes('524');
-
-    let recoverable = isExplicitRecoverable;
-    if (isNetworkError) {
-      recoverable = true;
-    }
-    if (is401 || is402 || is500 || is524) {
-      recoverable = false;
-    }
     const runtimeProfile = this.getRuntimeProfile();
+    const classification = classifyProviderError({
+      error,
+      context,
+      detectDailyLimit: (messageLower, upstreamLower) => this.isDailyLimitRateLimit(messageLower, upstreamLower),
+      registerRateLimitFailure: this.registerRateLimitFailure.bind(this),
+      forceRateLimitFailure: this.forceRateLimitFailure.bind(this),
+      authMode: this.authMode
+    });
+    const augmentedError = classification.error;
+    const msg = classification.message;
+    const statusCode = classification.statusCode;
+    const upstreamCode = classification.upstreamCode;
+    const upstreamMessage = classification.upstreamMessage;
     const providerKey = context.providerKey || runtimeProfile?.providerKey;
 
-    // 5) 是否影响健康：除非可恢复，一律影响健康
-    let affectsHealth = !recoverable;
-    if (isRateLimit && recoverable) {
-      // rate-limit 由熔断计数器决定是否升级为健康问题
-      affectsHealth = false;
-    }
-    let forceFatalRateLimit = false;
-    if (isRateLimit) {
-      if (isDailyLimit429) {
-        this.forceRateLimitFailure(providerKey);
-      }
-      const escalated = this.registerRateLimitFailure(providerKey);
-      affectsHealth = escalated;
-      forceFatalRateLimit = escalated;
-      if (escalated) {
-        recoverable = false;
-      } else {
-        recoverable = true;
-      }
-      if (isDailyLimit429) {
-        affectsHealth = true;
-        recoverable = false;
-        forceFatalRateLimit = true;
-      }
-    } else if (providerKey) {
+    if (!classification.isRateLimit && providerKey) {
       this.resetRateLimitCounter(providerKey);
     }
 
-    // 统一错误日志
+    let affectsHealth = classification.affectsHealth;
+    let recoverable = classification.forceFatalRateLimit ? false : classification.recoverable;
+    if (!classification.affectsHealth && statusCode === 400) {
+      const escalated = this.registerClientError(providerKey, statusCode);
+      if (escalated) {
+        affectsHealth = true;
+        recoverable = false;
+      }
+    } else if (providerKey && statusCode && statusCode !== 400) {
+      this.resetClientErrorCounter(providerKey);
+    }
+
     this.dependencies.logger?.logModule(this.id, 'request-error', {
       requestId: context.requestId,
       error: msg,
@@ -406,7 +349,7 @@ export abstract class BaseProvider implements IProviderV2 {
       providerFamily: context.providerFamily,
       providerId: context.providerId,
       providerProtocol: context.providerProtocol,
-      providerKey: context.providerKey || runtimeProfile?.providerKey,
+      providerKey: providerKey,
       runtimeKey: runtimeProfile?.runtimeKey,
       processingTime: now - context.startTime
     });
@@ -423,17 +366,16 @@ export abstract class BaseProvider implements IProviderV2 {
       requestContext: context.runtimeMetadata,
       meta: augmentedError.details
     };
-    const enrichedError = augmentedError;
-    if (!enrichedError.requestId) {
-      enrichedError.requestId = context.requestId;
+    if (!augmentedError.requestId) {
+      augmentedError.requestId = context.requestId;
     }
-    enrichedError.providerKey = context.providerKey;
-    enrichedError.providerId = context.providerId;
-    enrichedError.providerType = context.providerType;
-    enrichedError.providerFamily = context.providerFamily;
-    enrichedError.routeName = context.routeName;
-    enrichedError.details = {
-      ...(enrichedError.details || {}),
+    augmentedError.providerKey = context.providerKey;
+    augmentedError.providerId = context.providerId;
+    augmentedError.providerType = context.providerType;
+    augmentedError.providerFamily = context.providerFamily;
+    augmentedError.routeName = context.routeName;
+    augmentedError.details = {
+      ...(augmentedError.details || {}),
       ...enrichedDetails,
       providerKey: enrichedDetails.providerKey,
       providerType: context.providerType,
@@ -444,12 +386,12 @@ export abstract class BaseProvider implements IProviderV2 {
     };
 
     emitProviderError({
-      error: err,
+      error: augmentedError,
       stage: 'provider.http',
       runtime: buildRuntimeFromProviderContext(context),
       dependencies: this.dependencies,
       statusCode,
-      recoverable: forceFatalRateLimit ? false : recoverable,
+      recoverable,
       affectsHealth,
       details: enrichedDetails
     });
@@ -502,6 +444,32 @@ export abstract class BaseProvider implements IProviderV2 {
     BaseProvider.rateLimitFailures.delete(providerKey);
   }
 
+  private registerClientError(providerKey?: string, statusCode?: number): boolean {
+    if (!providerKey || statusCode !== 400) {
+      return false;
+    }
+    const current = BaseProvider.clientErrorCounters.get(providerKey) ?? 0;
+    const next = current + 1;
+    BaseProvider.clientErrorCounters.set(providerKey, next);
+    if (this.dependencies.logger) {
+      this.dependencies.logger.logModule(this.id, 'client-error-400', {
+        providerKey,
+        hitCount: next
+      });
+    }
+    if (next >= BaseProvider.CLIENT_ERROR_THRESHOLD) {
+      return true;
+    }
+    return false;
+  }
+
+  private resetClientErrorCounter(providerKey?: string): void {
+    if (!providerKey) {
+      return;
+    }
+    BaseProvider.clientErrorCounters.delete(providerKey);
+  }
+
   private forceRateLimitFailure(providerKey?: string): void {
     if (!providerKey) {
       return;
@@ -520,33 +488,4 @@ export abstract class BaseProvider implements IProviderV2 {
       haystack.includes('每日费用限制')
     );
   }
-}
-
-const NETWORK_ERROR_CODE_SET = new Set([
-  'ECONNRESET',
-  'ECONNREFUSED',
-  'EHOSTUNREACH',
-  'ENOTFOUND',
-  'EAI_AGAIN',
-  'EPIPE',
-  'ETIMEDOUT',
-  'ECONNABORTED'
-]);
-
-function looksLikeNetworkTransportError(error: ProviderErrorAugmented, msgLower: string): boolean {
-  const code = typeof error.code === 'string' ? error.code : undefined;
-  if (code && NETWORK_ERROR_CODE_SET.has(code)) {
-    return true;
-  }
-  const hints = [
-    'fetch failed',
-    'network timeout',
-    'socket hang up',
-    'client network socket disconnected',
-    'tls handshake timeout',
-    'unable to verify the first certificate',
-    'network error',
-    'temporarily unreachable'
-  ];
-  return hints.some((hint) => msgLower.includes(hint));
 }

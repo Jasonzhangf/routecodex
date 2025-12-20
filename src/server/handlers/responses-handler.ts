@@ -66,8 +66,29 @@ export async function handleResponses(
         payload = (resumeResult.payload ?? {}) as ResponsesPayload;
         resumeMeta = resumeResult.meta;
       } catch (error: unknown) {
+        const structured = error as { status?: number; code?: string; origin?: string };
+        const origin = typeof structured?.origin === 'string' ? structured.origin : undefined;
+        const status = typeof structured?.status === 'number'
+          ? structured.status
+          : origin === 'client'
+            ? 422
+            : 500;
+        const code = typeof structured?.code === 'string' ? structured.code : 'responses_resume_failed';
         const message = error instanceof Error ? error.message : 'Unable to resume Responses conversation';
-        res.status(400).json({ error: { message, type: 'invalid_request_error', code: 'responses_resume_failed' } });
+        logRequestError(entryEndpoint, requestId, error);
+        if (origin === 'client') {
+          res.status(status).json({
+            error: {
+              message,
+              type: 'invalid_request_error',
+              code,
+              origin
+            }
+          });
+          return;
+        }
+        const wantsStreamForError = typeof options.forceStream === 'boolean' ? options.forceStream : inboundStream;
+        await respondWithPipelineError(res, ctx, error, entryEndpoint, requestId, { forceSse: wantsStreamForError });
         return;
       }
     }

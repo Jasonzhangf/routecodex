@@ -14,14 +14,36 @@ function parseArgs(argv) {
   return out;
 }
 
+const projectRoot = process.cwd();
 const args = parseArgs(process.argv);
 if (!args.name || !args.bin) {
   console.error('Usage: node scripts/pack-mode.mjs --name <packageName> --bin <binName>');
   process.exit(1);
 }
 
-const pkgPath = path.join(process.cwd(), 'package.json');
+const pkgPath = path.join(projectRoot, 'package.json');
 const backupPath = pkgPath + '.bak.pack';
+const ensureScriptPath = path.join(projectRoot, 'scripts', 'ensure-llmswitch-mode.mjs');
+const llmsPath = path.join(projectRoot, 'node_modules', '@jsonstudio', 'llms');
+
+function runEnsureMode(mode) {
+  const env = { ...process.env, BUILD_MODE: mode };
+  const res = spawnSync(process.execPath, [ensureScriptPath], { stdio: 'inherit', env });
+  if ((res.status ?? 0) !== 0) {
+    throw new Error(`ensure-llmswitch-mode failed for ${mode}`);
+  }
+}
+
+function isSymlink(p) {
+  try {
+    return fs.lstatSync(p).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+const hadDevLink = isSymlink(llmsPath);
+runEnsureMode('release');
 
 const original = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
 fs.writeFileSync(backupPath, JSON.stringify(original, null, 2));
@@ -55,4 +77,11 @@ try {
   // restore
   fs.writeFileSync(pkgPath, fs.readFileSync(backupPath, 'utf-8'));
   fs.unlinkSync(backupPath);
+  if (hadDevLink) {
+    try {
+      runEnsureMode('dev');
+    } catch (err) {
+      console.warn('[pack-mode] failed to restore dev llms link:', err);
+    }
+  }
 }

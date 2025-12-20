@@ -992,6 +992,17 @@ export class RouteCodexHttpServer {
 
   private buildRequestMetadata(input: PipelineExecutionInput): Record<string, unknown> {
     const userMeta = asRecord(input.metadata);
+    const headers = asRecord(input.headers);
+    const inboundUserAgent = this.extractHeaderValue(headers, 'user-agent');
+    const inboundOriginator = this.extractHeaderValue(headers, 'originator');
+    const resolvedUserAgent =
+      typeof userMeta.userAgent === 'string' && userMeta.userAgent.trim()
+        ? userMeta.userAgent.trim()
+        : inboundUserAgent;
+    const resolvedOriginator =
+      typeof userMeta.clientOriginator === 'string' && userMeta.clientOriginator.trim()
+        ? userMeta.clientOriginator.trim()
+        : inboundOriginator;
     const routeHint = this.extractRouteHint(input) ?? userMeta.routeHint;
     const processMode = (userMeta.processMode as string) || 'chat';
     return {
@@ -1001,8 +1012,33 @@ export class RouteCodexHttpServer {
       direction: 'request',
       stage: 'inbound',
       routeHint,
-      stream: userMeta.stream === true
+      stream: userMeta.stream === true,
+      ...(resolvedUserAgent ? { userAgent: resolvedUserAgent } : {}),
+      ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {})
     };
+  }
+
+  private extractHeaderValue(
+    headers: Record<string, unknown> | undefined,
+    name: string
+  ): string | undefined {
+    if (!headers) {
+      return undefined;
+    }
+    const target = name.toLowerCase();
+    for (const [key, value] of Object.entries(headers)) {
+      if (key.toLowerCase() !== target) {
+        continue;
+      }
+      if (typeof value === 'string') {
+        return value.trim() || undefined;
+      }
+      if (Array.isArray(value) && value.length) {
+        return String(value[0]).trim() || undefined;
+      }
+      return undefined;
+    }
+    return undefined;
   }
 
   private extractRouteHint(input: PipelineExecutionInput): string | undefined {

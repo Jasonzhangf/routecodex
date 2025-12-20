@@ -1027,6 +1027,7 @@ async function main() {
       messages: [...chatMessages, assistantMsg, toolMsg],
       tools: chatTools,
       stream: false,
+      tool_choice: 'auto'
     };
 
     console.log('📨 提交工具输出...');

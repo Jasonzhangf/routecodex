@@ -10,7 +10,7 @@
 
 import { HttpTransportProvider } from './http-transport-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
-import type { ProviderContext, ServiceProfile, ProviderType } from '../api/provider-types.js';
+import type { ProviderContext, ProviderType } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import { GeminiProtocolClient } from '../../../client/gemini/gemini-protocol-client.js';
@@ -39,19 +39,6 @@ export class GeminiHttpProvider extends HttpTransportProvider {
       }
     };
     super(cfg, dependencies, 'gemini-http-provider', new GeminiProtocolClient());
-  }
-
-  protected getServiceProfile(): ServiceProfile {
-    return {
-      defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-      defaultEndpoint: '/models:generateContent', // 实际发送时注入 /{model}:generateContent
-      defaultModel: '',
-      requiredAuth: ['apikey'],
-      optionalAuth: [],
-      headers: { 'Content-Type': 'application/json' },
-      timeout: 300000,
-      maxRetries: 2
-    };
   }
 
   protected override async preprocessRequest(request: UnknownObject): Promise<UnknownObject> {

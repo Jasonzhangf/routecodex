@@ -10,7 +10,7 @@
 
 import { HttpTransportProvider } from './http-transport-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
-import type { ProviderContext, ServiceProfile, ProviderType } from '../api/provider-types.js';
+import type { ProviderContext, ProviderType } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import { GeminiCLIProtocolClient } from '../../../client/gemini-cli/gemini-cli-protocol-client.js';
@@ -28,21 +28,25 @@ type MutablePayload = Record<string, unknown> & {
 
 export class GeminiCLIHttpProvider extends HttpTransportProvider {
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
+    const providerId =
+      typeof config.config?.providerId === 'string' && config.config.providerId.trim().length
+        ? config.config.providerId.trim()
+        : 'gemini-cli';
     const cfg: OpenAIStandardConfig = {
       ...config,
       config: {
         ...config.config,
         // 使用统一的 providerType=gemini，表示协议族与标准 Gemini 一致
         // gemini-cli 仅作为 Cloud Code Assist 变体，通过模块类型 + auth 配置区分
-        providerType: 'gemini' as ProviderType
+        providerType: 'gemini' as ProviderType,
+        providerId,
+        extensions: {
+          ...(config.config?.extensions || {}),
+          oauthProviderId: (config.config?.extensions as Record<string, unknown> | undefined)?.oauthProviderId ?? providerId
+        }
       }
     };
     super(cfg, dependencies, 'gemini-cli-http-provider', new GeminiCLIProtocolClient());
-  }
-
-  protected getServiceProfile(): ServiceProfile {
-    // 完全依赖 service-profiles / config-core 提供的行为配置，避免在 Provider 内重复硬编码
-    return super.getServiceProfile();
   }
 
   protected override async preprocessRequest(request: UnknownObject): Promise<UnknownObject> {

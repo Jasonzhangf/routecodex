@@ -17,10 +17,8 @@ import { OAuthAuthProvider } from '../../auth/oauth-auth.js';
 import { logOAuthDebug } from '../../auth/oauth-logger.js';
 import { TokenFileAuthProvider } from '../../auth/tokenfile-auth.js';
 import { ensureValidOAuthToken, handleUpstreamInvalidOAuthToken } from '../../auth/oauth-lifecycle.js';
-import { createHookSystemIntegration, HookSystemIntegration } from '../hooks/hooks-integration.js';
 import {
   attachProviderSseSnapshotStream,
-  shouldCaptureProviderStreamSnapshots,
   writeProviderSnapshot
 } from '../utils/snapshot-writer.js';
 import type { IAuthProvider } from '../../auth/auth-interface.js';
@@ -29,8 +27,12 @@ import type { ProviderContext, ProviderError, ProviderRuntimeProfile, ServicePro
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import { attachProviderRuntimeMetadata } from './provider-runtime-metadata.js';
+import type { ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import type { HttpProtocolClient, ProtocolRequestPayload } from '../../../client/http-protocol-client.js';
 import { OpenAIChatProtocolClient } from '../../../client/openai/chat-protocol-client.js';
+import { HttpRequestExecutor, type HttpRequestExecutorDeps, type PreparedHttpRequest } from './http-request-executor.js';
+import type { ProviderErrorAugmented } from './provider-error-types.js';
+import { extractStatusCodeFromError } from './provider-error-classifier.js';
 
 type ProtocolClient = HttpProtocolClient<ProtocolRequestPayload>;
 type OAuthAuthExtended = OAuthAuth & { rawType?: string; oauthProviderId?: string; tokenFile?: string };
@@ -49,48 +51,6 @@ type ResponseRecord = Record<string, unknown> & {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
-const readStatusCodeFromResponse = (error: ProviderErrorAugmented): number | undefined => {
-  const response = error?.response as Record<string, unknown> | undefined;
-  const directStatus = typeof response?.status === 'number' ? response.status : undefined;
-  const directStatusCode = typeof (response as { statusCode?: number })?.statusCode === 'number'
-    ? (response as { statusCode?: number }).statusCode
-    : undefined;
-  const nestedStatus =
-    response &&
-    typeof response === 'object' &&
-    typeof (response as { data?: Record<string, unknown> })?.data?.status === 'number'
-      ? ((response as { data?: Record<string, unknown> }).data!.status as number)
-      : undefined;
-  const nestedErrorStatus =
-    response &&
-    typeof response === 'object' &&
-    typeof (response as { data?: { error?: { status?: number } } })?.data?.error?.status === 'number'
-      ? ((response as { data?: { error?: { status?: number } } }).data!.error!.status as number)
-      : undefined;
-  return [directStatus, directStatusCode, nestedStatus, nestedErrorStatus].find(
-    (candidate): candidate is number => typeof candidate === 'number' && Number.isFinite(candidate)
-  );
-};
-type ProviderErrorAugmented = ProviderError & {
-  code?: string;
-  retryable?: boolean;
-  status?: number;
-  response?: {
-    data?: {
-      error?: {
-        code?: string;
-        message?: string;
-      };
-    };
-  };
-  details?: Record<string, unknown>;
-  requestId?: string;
-  providerKey?: string;
-  providerId?: string;
-  providerType?: string;
-  routeName?: string;
-};
-
 type ProviderConfigInternal = OpenAIStandardConfig['config'] & {
   endpoint?: string;
   defaultModel?: string;
@@ -101,7 +61,7 @@ type ProviderConfigInternal = OpenAIStandardConfig['config'] & {
   };
 };
 
-const DEFAULT_USER_AGENT = 'RouteCodex/2.0';
+const DEFAULT_USER_AGENT = 'codex_cli_rs/0.73.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5';
 
 
 export class HttpTransportProvider extends BaseProvider {
@@ -110,8 +70,8 @@ export class HttpTransportProvider extends BaseProvider {
   protected authProvider: IAuthProvider | null = null;
   protected httpClient!: HttpClient;
   protected serviceProfile: ServiceProfile;
-  protected hookSystemIntegration: HookSystemIntegration;
   protected protocolClient: ProtocolClient;
+  private requestExecutor!: HttpRequestExecutor;
   private injectedConfig: UnknownObject | null = null;
 
   constructor(
@@ -132,12 +92,10 @@ export class HttpTransportProvider extends BaseProvider {
 
     // 创建HTTP客户端
     this.createHttpClient();
+    this.requestExecutor = new HttpRequestExecutor(this.httpClient, this.createRequestExecutorDeps());
 
     // 创建认证提供者
     this.authProvider = this.createAuthProvider();
-
-    // 初始化Hook系统集成
-    this.hookSystemIntegration = this.initializeHookSystem();
   }
 
   /**
@@ -150,7 +108,8 @@ export class HttpTransportProvider extends BaseProvider {
         const providerConfig = this.config.config;
         const extensions = this.getConfigExtensions();
         const auth = providerConfig.auth;
-        if (this.normalizeAuthMode(auth.type) === 'oauth') {
+        const usesTokenFile = this.authProvider instanceof TokenFileAuthProvider;
+        if (this.normalizeAuthMode(auth.type) === 'oauth' && !usesTokenFile) {
           const oauthAuth = auth as OAuthAuthExtended;
           const oauthProviderId = this.ensureOAuthProviderId(oauthAuth, extensions);
           const forceReauthorize = false;
@@ -204,16 +163,6 @@ export class HttpTransportProvider extends BaseProvider {
         }
       }
 
-      // 初始化新的Hook系统集成
-      await this.hookSystemIntegration.initialize();
-
-      // 设置调试配置（向后兼容）
-      this.configureHookDebugging();
-
-      this.dependencies.logger?.logModule(this.id, 'provider-hook-system-initialized', {
-        providerType: this.providerType,
-        integrationEnabled: true
-      });
     } catch (error) {
       // 暴露问题，快速失败，便于定位凭证问题
       this.dependencies.logger?.logModule(this.id, 'provider-initialization-error', {
@@ -244,75 +193,6 @@ export class HttpTransportProvider extends BaseProvider {
 
   public getConfig(): unknown {
     return this.injectedConfig ?? this.config.config ?? null;
-  }
-
-  /**
-   * 初始化Hook系统集成
-   */
-  private initializeHookSystem(): HookSystemIntegration {
-    // 暂时完全禁用 Hook 系统集成，避免在未提供 hooks 模块时产生日志噪音。
-    // 提供一个空实现，保持调用方不崩溃。
-    const passthroughHookManager = {
-      registerHook: () => {},
-      unregisterHook: () => {},
-      executeHookChain: async (_stage: string, _direction: string, payload: unknown) => ({
-        data: payload,
-        metrics: {}
-      }),
-      setDebugConfig: () => {}
-    };
-
-    return {
-      getBidirectionalHookManager: () => passthroughHookManager,
-      setDebugConfig: () => {},
-      initialize: async () => {},
-      getStats: () => ({ enabled: false }),
-      healthCheck: async () => ({ healthy: true }),
-      start: async () => {},
-      stop: async () => {},
-      shutdown: async () => {}
-    } as unknown as HookSystemIntegration;
-  }
-
-  /**
-   * 配置Hook调试（保持向后兼容）
-   */
-  private configureHookDebugging(): void {
-    try {
-      // 设置调试配置（使用统一Hook系统的阶段字符串）
-      const debugConfig = {
-        enabled: true,
-        level: 'verbose',
-        maxDataSize: 1024 * 64, // 64KB 单次输出上限，避免过大控制台噪声
-        stages: [
-          'request_preprocessing',
-          'request_validation',
-          'authentication',
-          'http_request',
-          'http_response',
-          'response_validation',
-          'response_postprocessing',
-          'error_handling'
-        ],
-        outputFormat: 'structured',
-        outputTargets: ['console'],
-        performanceThresholds: {
-          maxHookExecutionTime: 500,    // 单个Hook 500ms告警
-          maxTotalExecutionTime: 5000,  // 阶段总时长 5s 告警
-          maxDataSize: 1024 * 256       // 256KB 数据告警
-        }
-      };
-
-      this.hookSystemIntegration.setDebugConfig(debugConfig);
-
-      this.dependencies.logger?.logModule(this.id, 'provider-debug-hooks-configured', {
-        providerType: this.providerType
-      });
-    } catch (error) {
-      this.dependencies.logger?.logModule(this.id, 'provider-debug-hooks-error', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-    }
   }
 
   protected getServiceProfile(): ServiceProfile {
@@ -442,16 +322,19 @@ export class HttpTransportProvider extends BaseProvider {
     const auth = this.config.config.auth;
     const extensions = this.getConfigExtensions();
     const authMode = this.normalizeAuthMode(auth.type);
-    const providerIdForAuth = authMode === 'oauth'
+    this.authMode = authMode;
+    let providerIdForAuth = authMode === 'oauth'
       ? this.ensureOAuthProviderId(auth as OAuthAuthExtended, extensions)
       : this.providerType;
-
-    // 验证认证配置（按 providerIdForAuth 选择服务档案）
-    // 对于 gemini-cli 这类变体，provider 行为归入 gemini 协议族
-    const profileKeyForValidation = providerIdForAuth === 'gemini-cli' ? 'gemini' : providerIdForAuth;
+    if (this.type === 'gemini-cli-http-provider') {
+      providerIdForAuth = 'gemini-cli';
+    }
+    if (authMode === 'oauth') {
+      this.oauthProviderId = providerIdForAuth;
+    }
 
     const validation = ServiceProfileValidator.validateServiceProfile(
-      profileKeyForValidation,
+      providerIdForAuth,
       authMode
     );
 
@@ -510,9 +393,46 @@ export class HttpTransportProvider extends BaseProvider {
     });
   }
 
+  private createRequestExecutorDeps(): HttpRequestExecutorDeps {
+    return {
+      wantsUpstreamSse: this.wantsUpstreamSse.bind(this),
+      getEffectiveEndpoint: () => this.getEffectiveEndpoint(),
+      resolveRequestEndpoint: this.resolveRequestEndpoint.bind(this),
+      buildRequestHeaders: this.buildRequestHeaders.bind(this),
+      finalizeRequestHeaders: this.finalizeRequestHeaders.bind(this),
+      applyStreamModeHeaders: this.applyStreamModeHeaders.bind(this),
+      getEffectiveBaseUrl: () => this.getEffectiveBaseUrl(),
+      buildHttpRequestBody: this.buildHttpRequestBody.bind(this),
+      prepareSseRequestBody: this.prepareSseRequestBody.bind(this),
+      getEntryEndpointFromPayload: this.getEntryEndpointFromPayload.bind(this),
+      getClientRequestIdFromContext: this.getClientRequestIdFromContext.bind(this),
+      wrapUpstreamSseResponse: this.wrapUpstreamSseResponse.bind(this),
+      getHttpRetryLimit: () => this.getHttpRetryLimit(),
+      shouldRetryHttpError: this.shouldRetryHttpError.bind(this),
+      delayBeforeHttpRetry: this.delayBeforeHttpRetry.bind(this),
+      tryRecoverOAuthAndReplay: this.tryRecoverOAuthAndReplay.bind(this),
+      normalizeHttpError: this.normalizeHttpError.bind(this)
+    };
+  }
+
   protected async preprocessRequest(request: UnknownObject): Promise<UnknownObject> {
     const context = this.createProviderContext();
     const runtimeMetadata = context.runtimeMetadata;
+    const headersFromRequest = this.normalizeClientHeaders((request as MetadataContainer)?.metadata?.clientHeaders);
+    const headersFromRuntime = this.normalizeClientHeaders(
+      runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object'
+        ? (runtimeMetadata.metadata as Record<string, unknown>).clientHeaders
+        : undefined
+    );
+    const effectiveClientHeaders = headersFromRequest ?? headersFromRuntime;
+    if (effectiveClientHeaders) {
+      if (runtimeMetadata) {
+        if (!runtimeMetadata.metadata || typeof runtimeMetadata.metadata !== 'object') {
+          runtimeMetadata.metadata = {};
+        }
+        (runtimeMetadata.metadata as Record<string, unknown>).clientHeaders = effectiveClientHeaders;
+      }
+    }
 
     const ensureRuntimeMetadata = (payload: UnknownObject): void => {
       if (!runtimeMetadata || !payload || typeof payload !== 'object') {
@@ -540,13 +460,14 @@ export class HttpTransportProvider extends BaseProvider {
       const streamFlag = typeof requestCarrier?.metadata?.stream === 'boolean'
         ? requestCarrier.metadata.stream
         : requestCarrier?.stream;
-      const processedMetadata = (processedRequest as MetadataContainer).metadata ?? {};
-      (processedRequest as MetadataContainer).metadata = {
-        ...processedMetadata,
-        ...(entryEndpoint ? { entryEndpoint } : {}),
-        ...(typeof streamFlag === 'boolean' ? { stream: !!streamFlag } : {}),
-        __origModel: inboundModel
-      };
+    const processedMetadata = (processedRequest as MetadataContainer).metadata ?? {};
+    (processedRequest as MetadataContainer).metadata = {
+      ...processedMetadata,
+      ...(entryEndpoint ? { entryEndpoint } : {}),
+      ...(typeof streamFlag === 'boolean' ? { stream: !!streamFlag } : {}),
+      ...(effectiveClientHeaders ? { clientHeaders: effectiveClientHeaders } : {}),
+      __origModel: inboundModel
+    };
     } catch { /* ignore */ }
     // 流式开关：基础 Provider 统一移除入口层的 stream 标记，
     // 具体协议（如 Responses/Anthropic）的真实流控由各自独立 Provider 处理
@@ -558,35 +479,6 @@ export class HttpTransportProvider extends BaseProvider {
       }
     } catch { /* ignore */ }
 
-    // 获取Hook管理器（新的统一系统）
-    const hookManager = this.getHookManager();
-
-    // 🔍 Hook 1: 请求预处理阶段
-    const preprocessResult = await hookManager.executeHookChain(
-      'request_preprocessing',
-      'request',
-      processedRequest,
-      context
-    );
-
-    processedRequest = preprocessResult.data as UnknownObject;
-    ensureRuntimeMetadata(processedRequest);
-
-    // 🔍 Hook 2: 请求验证阶段
-    const validationResult = await hookManager.executeHookChain(
-      'request_validation',
-      'request',
-      processedRequest,
-      context
-    );
-
-    processedRequest = validationResult.data as UnknownObject;
-    ensureRuntimeMetadata(processedRequest);
-
-    // Provider 层不再修改工具 schema；统一入口在 llmswitch-core/兼容层
-
-    // Provider 层不做协议兼容改写：compatibility 由 llmswitch-core Hub Pipeline 统一处理。
-
     return processedRequest;
   }
 
@@ -595,42 +487,6 @@ export class HttpTransportProvider extends BaseProvider {
     const processingTime = Date.now() - context.startTime;
 
     let processedResponse = response;
-
-    // 获取Hook管理器（新的统一系统）
-    const hookManager = this.getHookManager();
-
-    // 🔍 Hook 3: HTTP响应阶段
-    const httpResponseResult = await hookManager.executeHookChain(
-      'http_response',
-      'response',
-      processedResponse,
-      context
-    );
-
-    processedResponse = httpResponseResult.data;
-
-    // 🔍 Hook 4: 响应验证阶段
-    const validationResult = await hookManager.executeHookChain(
-      'response_validation',
-      'response',
-      processedResponse,
-      context
-    );
-
-    processedResponse = validationResult.data;
-
-    // 🔍 Hook 5: 响应后处理阶段
-    const postprocessResult = await hookManager.executeHookChain(
-      'response_postprocessing',
-      'response',
-      processedResponse,
-      context
-    );
-
-    processedResponse = postprocessResult.data;
-
-    // Provider 层不做协议兼容改写：compatibility 由 llmswitch-core Hub Pipeline 统一处理。
-
     const originalRecord = this.asResponseRecord(response);
     const processedRecord = this.asResponseRecord(processedResponse);
 
@@ -651,143 +507,14 @@ export class HttpTransportProvider extends BaseProvider {
         providerType: this.providerType,
         // 对外暴露的 model 统一为入站模型
         model: context.model ?? this.extractModel(processedRecord) ?? this.extractModel(originalRecord),
-        usage: this.extractUsage(processedRecord) ?? this.extractUsage(originalRecord),
-        hookMetrics: {
-          httpResponse: httpResponseResult.metrics,
-          validation: validationResult.metrics,
-          postprocess: postprocessResult.metrics
-        }
+        usage: this.extractUsage(processedRecord) ?? this.extractUsage(originalRecord)
       }
     } as UnknownObject;
   }
 
   protected async sendRequestInternal(request: UnknownObject): Promise<unknown> {
     const context = this.createProviderContext();
-    // 获取Hook管理器（新的统一系统）
-    const hookManager = this.getHookManager();
-
-    // 🔍 Hook 8: HTTP请求阶段
-    const httpRequestResult = await hookManager.executeHookChain(
-      'http_request',
-      'request',
-      request,
-      context
-    );
-
-    const processedRequest = httpRequestResult.data as UnknownObject;
-    const wantsSse = this.wantsUpstreamSse(processedRequest, context);
-
-    // 仅传入 endpoint，让 HttpClient 按 baseUrl 进行拼接；避免 full URL 再次拼接导致 /https:/ 重复
-    const defaultEndpoint = this.getEffectiveEndpoint();
-    const endpoint = this.resolveRequestEndpoint(processedRequest, defaultEndpoint);
-    const headers = await this.buildRequestHeaders();
-    let finalHeaders = await this.finalizeRequestHeaders(headers, processedRequest);
-    finalHeaders = this.applyStreamModeHeaders(finalHeaders, wantsSse);
-    const targetUrl = `${this.getEffectiveBaseUrl().replace(/\/$/, '')}/${endpoint.startsWith('/') ? endpoint.slice(1) : endpoint}`;
-
-    // Flatten request body to standard OpenAI Chat JSON
-    const finalBody = this.buildHttpRequestBody(processedRequest);
-    if (wantsSse) {
-      this.prepareSseRequestBody(finalBody, context);
-    }
-
-    const entryEndpoint = this.getEntryEndpointFromPayload(processedRequest);
-
-    const clientRequestId = this.getClientRequestIdFromContext(context);
-
-    // 快照：provider-request（默认开启，脱敏headers）
-    try {
-      await writeProviderSnapshot({
-        phase: 'provider-request',
-        requestId: context.requestId,
-        data: finalBody,
-        headers: finalHeaders,
-        url: targetUrl,
-        entryEndpoint,
-        clientRequestId
-      });
-    } catch { /* non-blocking */ }
-
-    // 发送HTTP请求（根据是否需要 SSE 决定传输模式），支持有限重试
-    const captureSse = shouldCaptureProviderStreamSnapshots();
-    const maxAttempts = this.getHttpRetryLimit();
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        if (wantsSse) {
-          const upstreamStream = await this.httpClient.postStream(endpoint, finalBody, finalHeaders);
-          const streamForHost = captureSse
-            ? attachProviderSseSnapshotStream(upstreamStream, {
-              requestId: context.requestId,
-              headers: finalHeaders,
-              url: targetUrl,
-              entryEndpoint,
-              clientRequestId
-            })
-            : upstreamStream;
-          const wrapped = await this.wrapUpstreamSseResponse(streamForHost, context);
-          if (!captureSse) {
-            try {
-              await writeProviderSnapshot({
-                phase: 'provider-response',
-                requestId: context.requestId,
-                data: { mode: 'sse' },
-                headers: finalHeaders,
-                url: targetUrl,
-                entryEndpoint,
-                clientRequestId
-              });
-            } catch { /* non-blocking */ }
-          }
-          return wrapped;
-        }
-        const response = await this.httpClient.post(endpoint, finalBody, finalHeaders);
-        try {
-          await writeProviderSnapshot({
-            phase: 'provider-response',
-            requestId: context.requestId,
-            data: response,
-            headers: finalHeaders,
-            url: targetUrl,
-            entryEndpoint,
-            clientRequestId
-          });
-        } catch { /* non-blocking */ }
-        return response;
-      } catch (error) {
-        const oauthReplay = await this.tryRecoverOAuthAndReplay(
-          error,
-          wantsSse,
-          endpoint,
-          finalBody,
-          processedRequest,
-          targetUrl,
-          entryEndpoint,
-          clientRequestId,
-          captureSse,
-          context
-        );
-        if (oauthReplay !== undefined) {
-          return oauthReplay;
-        }
-        if (this.shouldRetryHttpError(error, attempt, maxAttempts)) {
-          await this.delayBeforeHttpRetry(attempt);
-          continue;
-        }
-        const hookOutcome = await this.handleHttpErrorViaHooks(
-          error,
-          processedRequest,
-          targetUrl,
-          finalHeaders,
-          hookManager,
-          context
-        );
-        if (hookOutcome.handled) {
-          return hookOutcome.payload;
-        }
-        throw hookOutcome.error;
-      }
-    }
-
+    return this.requestExecutor.execute(request, context);
   }
 
   protected wantsUpstreamSse(_request: UnknownObject, _context: ProviderContext): boolean {
@@ -837,32 +564,12 @@ export class HttpTransportProvider extends BaseProvider {
     await new Promise((resolve) => setTimeout(resolve, delay));
   }
 
-  private extractStatusCodeFromError(error: ProviderErrorAugmented): number | undefined {
-    if (typeof error.statusCode === 'number') {
-      return error.statusCode;
-    }
-    if (typeof error.status === 'number') {
-      return error.status;
-    }
-    const responseStatus = readStatusCodeFromResponse(error);
-    if (responseStatus) {
-      return responseStatus;
-    }
-    if (typeof error.message === 'string') {
-      const match = error.message.match(/HTTP\s+(\d{3})/i);
-      if (match) {
-        return parseInt(match[1], 10);
-      }
-    }
-    return undefined;
-  }
-
   private shouldRetryHttpError(error: unknown, attempt: number, maxAttempts: number): boolean {
     if (attempt >= maxAttempts) {
       return false;
     }
     const normalized = error as ProviderErrorAugmented;
-    const statusCode = this.extractStatusCodeFromError(normalized);
+    const statusCode = extractStatusCodeFromError(normalized);
     if (statusCode && statusCode >= 500) {
       return true;
     }
@@ -871,13 +578,8 @@ export class HttpTransportProvider extends BaseProvider {
 
   private async tryRecoverOAuthAndReplay(
     error: unknown,
-    wantsSse: boolean,
-    endpoint: string,
-    finalBody: UnknownObject,
+    requestInfo: PreparedHttpRequest,
     processedRequest: UnknownObject,
-    targetUrl: string,
-    entryEndpoint: string | undefined,
-    clientRequestId: string | undefined,
     captureSse: boolean,
     context: ProviderContext
   ): Promise<unknown | undefined> {
@@ -887,7 +589,7 @@ export class HttpTransportProvider extends BaseProvider {
         return undefined;
       }
       const shouldRetry = await handleUpstreamInvalidOAuthToken(
-        this.providerType,
+        this.oauthProviderId || this.providerType,
         providerAuth as OAuthAuthExtended,
         error
       );
@@ -896,16 +598,16 @@ export class HttpTransportProvider extends BaseProvider {
       }
       const retryHeaders = await this.buildRequestHeaders();
       let finalRetryHeaders = await this.finalizeRequestHeaders(retryHeaders, processedRequest);
-      finalRetryHeaders = this.applyStreamModeHeaders(finalRetryHeaders, wantsSse);
-      if (wantsSse) {
-        const upstreamStream = await this.httpClient.postStream(endpoint, finalBody, finalRetryHeaders);
+      finalRetryHeaders = this.applyStreamModeHeaders(finalRetryHeaders, requestInfo.wantsSse);
+      if (requestInfo.wantsSse) {
+        const upstreamStream = await this.httpClient.postStream(requestInfo.endpoint, requestInfo.body, finalRetryHeaders);
         const streamForHost = captureSse
           ? attachProviderSseSnapshotStream(upstreamStream, {
             requestId: context.requestId,
             headers: finalRetryHeaders,
-            url: targetUrl,
-            entryEndpoint,
-            clientRequestId,
+            url: requestInfo.targetUrl,
+            entryEndpoint: requestInfo.entryEndpoint,
+            clientRequestId: requestInfo.clientRequestId,
             extra: { retry: true }
           })
           : upstreamStream;
@@ -917,24 +619,24 @@ export class HttpTransportProvider extends BaseProvider {
               requestId: context.requestId,
               data: { mode: 'sse', retry: true },
               headers: finalRetryHeaders,
-              url: targetUrl,
-              entryEndpoint,
-              clientRequestId
+              url: requestInfo.targetUrl,
+              entryEndpoint: requestInfo.entryEndpoint,
+              clientRequestId: requestInfo.clientRequestId
             });
           } catch { /* non-blocking */ }
         }
         return wrapped;
       }
-      const response = await this.httpClient.post(endpoint, finalBody, finalRetryHeaders);
+      const response = await this.httpClient.post(requestInfo.endpoint, requestInfo.body, finalRetryHeaders);
       try {
         await writeProviderSnapshot({
           phase: 'provider-response',
           requestId: context.requestId,
           data: response,
           headers: finalRetryHeaders,
-          url: targetUrl,
-          entryEndpoint,
-          clientRequestId
+          url: requestInfo.targetUrl,
+          entryEndpoint: requestInfo.entryEndpoint,
+          clientRequestId: requestInfo.clientRequestId
         });
       } catch { /* non-blocking */ }
       return response;
@@ -943,36 +645,15 @@ export class HttpTransportProvider extends BaseProvider {
     }
   }
 
-  private async handleHttpErrorViaHooks(
+  private async normalizeHttpError(
     error: unknown,
     processedRequest: UnknownObject,
-    targetUrl: string,
-    finalHeaders: Record<string, string>,
-    hookManager: ReturnType<HttpTransportProvider['getHookManager']>,
+    requestInfo: PreparedHttpRequest,
     context: ProviderContext
-  ): Promise<{ handled: true; payload: unknown } | { handled: false; error: ProviderErrorAugmented }> {
-    const errorResult = await hookManager.executeHookChain(
-      'error_handling',
-      'error',
-      { error, request: processedRequest, url: targetUrl, headers: finalHeaders },
-      context
-    );
-
-    const hookErrorData = errorResult.data as { error?: boolean } | undefined;
-    if (hookErrorData && hookErrorData.error === false) {
-      return { handled: true, payload: hookErrorData };
-    }
+  ): Promise<ProviderErrorAugmented> {
     const normalized: ProviderErrorAugmented = error as ProviderErrorAugmented;
     try {
-      const msg = typeof normalized.message === 'string' ? normalized.message : String(normalized || '');
-      const m = msg.match(/HTTP\s+(\d{3})/i);
-      const parsedStatus = m ? parseInt(m[1], 10) : undefined;
-      const responseStatus = readStatusCodeFromResponse(normalized);
-      const statusCode = Number.isFinite(normalized.statusCode)
-        ? Number(normalized.statusCode)
-        : Number.isFinite(normalized.status)
-          ? Number(normalized.status)
-          : responseStatus ?? parsedStatus ?? undefined;
+      const statusCode = extractStatusCodeFromError(normalized);
       if (statusCode && !Number.isNaN(statusCode)) {
         normalized.statusCode = statusCode;
         if (!normalized.status) {
@@ -1006,20 +687,18 @@ export class HttpTransportProvider extends BaseProvider {
         phase: 'provider-error',
         requestId: context.requestId,
         data: {
-          status: (error as ProviderErrorAugmented)?.statusCode ?? (error as ProviderErrorAugmented)?.status ?? null,
-          code: (error as ProviderErrorAugmented)?.code ?? null,
-          error: typeof (error as ProviderErrorAugmented)?.message === 'string'
-            ? (error as ProviderErrorAugmented).message
-            : String(error || '')
+          status: normalized?.statusCode ?? normalized?.status ?? null,
+          code: normalized?.code ?? null,
+          error: typeof normalized?.message === 'string' ? normalized.message : String(error || '')
         },
-        headers: finalHeaders,
-        url: targetUrl,
-        entryEndpoint: this.getEntryEndpointFromPayload(processedRequest),
-        clientRequestId: this.getClientRequestIdFromContext(context)
+        headers: requestInfo.headers,
+        url: requestInfo.targetUrl,
+        entryEndpoint: requestInfo.entryEndpoint ?? this.getEntryEndpointFromPayload(processedRequest),
+        clientRequestId: requestInfo.clientRequestId ?? this.getClientRequestIdFromContext(context)
       });
     } catch { /* non-blocking */ }
 
-    return { handled: false, error: normalized };
+    return normalized;
   }
 
   /**
@@ -1091,6 +770,7 @@ export class HttpTransportProvider extends BaseProvider {
       typeof inboundMetadata?.clientOriginator === 'string' && inboundMetadata.clientOriginator.trim()
         ? inboundMetadata.clientOriginator.trim()
         : undefined;
+    const inboundClientHeaders = this.extractClientHeaders(runtimeMetadata);
 
     // 服务特定头部
     const serviceHeaders = this.serviceProfile.headers || {};
@@ -1148,11 +828,6 @@ export class HttpTransportProvider extends BaseProvider {
       ...authHeaders
     };
 
-    // 禁用上游SSE：设置 Accept 为 application/json（若未被显式覆盖）
-    if (!('Accept' in finalHeaders) && !('accept' in finalHeaders)) {
-      finalHeaders['Accept'] = 'application/json';
-    }
-
     const getHeader = (headers: Record<string, string>, target: string): string | undefined => {
       const lowered = target.toLowerCase();
       for (const [key, value] of Object.entries(headers)) {
@@ -1174,6 +849,14 @@ export class HttpTransportProvider extends BaseProvider {
       headers[target] = value;
     };
 
+    // 保留客户端 Accept；无则默认为 application/json
+    const clientAccept = inboundClientHeaders ? getHeader(inboundClientHeaders, 'Accept') : undefined;
+    if (clientAccept) {
+      setHeader(finalHeaders, 'Accept', clientAccept);
+    } else if (!getHeader(finalHeaders, 'Accept')) {
+      setHeader(finalHeaders, 'Accept', 'application/json');
+    }
+
     // Header priority:
     // - user/provider config (overrides/runtime) wins
     // - otherwise inherit from inbound client headers
@@ -1191,26 +874,16 @@ export class HttpTransportProvider extends BaseProvider {
       setHeader(finalHeaders, 'originator', resolvedOriginator);
     }
 
-    // 获取Hook管理器（新的统一系统）
-    const hookManager = this.getHookManager();
-
-    // 🔍 Hook 6: 认证阶段
-    await hookManager.executeHookChain(
-      'authentication',
-      'auth',
-      authHeaders,
-      this.createProviderContext()
-    );
-
-    // 🔍 Hook 7: Headers处理阶段
-    const headersResult = await hookManager.executeHookChain(
-      'request_preprocessing',
-      'headers',
-      finalHeaders,
-      this.createProviderContext()
-    );
-
-    finalHeaders = headersResult.data as Record<string, string>;
+    if (inboundClientHeaders) {
+      const conversationId = getHeader(inboundClientHeaders, 'conversation_id');
+      if (conversationId) {
+        setHeader(finalHeaders, 'conversation_id', conversationId);
+      }
+      const sessionId = getHeader(inboundClientHeaders, 'session_id');
+      if (sessionId) {
+        setHeader(finalHeaders, 'session_id', sessionId);
+      }
+    }
 
     return finalHeaders;
   }
@@ -1259,10 +932,6 @@ export class HttpTransportProvider extends BaseProvider {
     }
     const trimmed = value.trim();
     return /^https?:\/\//i.test(trimmed) || trimmed.startsWith('//');
-  }
-
-  private getHookManager() {
-    return this.hookSystemIntegration.getBidirectionalHookManager();
   }
 
   // （工具自动修复辅助函数已删除）
@@ -1401,5 +1070,46 @@ export class HttpTransportProvider extends BaseProvider {
       );
     }
     return providerId;
+  }
+
+  private extractClientHeaders(source?: Record<string, unknown> | ProviderRuntimeMetadata): Record<string, string> | undefined {
+    const normalize = (value: unknown): Record<string, string> | undefined => {
+      return this.normalizeClientHeaders(value);
+    };
+    if (!source || typeof source !== 'object') {
+      return undefined;
+    }
+    const candidates: unknown[] = [];
+    const metadataNode = (source as { metadata?: unknown }).metadata;
+    if (metadataNode && typeof metadataNode === 'object') {
+      const headersNode = (metadataNode as Record<string, unknown>).clientHeaders;
+      if (headersNode) {
+        candidates.push(headersNode);
+      }
+    }
+    const directNode = (source as { clientHeaders?: unknown }).clientHeaders;
+    if (directNode) {
+      candidates.push(directNode);
+    }
+    for (const candidate of candidates) {
+      const normalized = normalize(candidate);
+      if (normalized) {
+        return normalized;
+      }
+    }
+    return undefined;
+  }
+
+  private normalizeClientHeaders(value: unknown): Record<string, string> | undefined {
+    if (!value || typeof value !== 'object') {
+      return undefined;
+    }
+    const normalized: Record<string, string> = {};
+    for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof raw === 'string' && raw.trim()) {
+        normalized[key] = raw;
+      }
+    }
+    return Object.keys(normalized).length ? normalized : undefined;
   }
 }

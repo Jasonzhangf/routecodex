@@ -62,13 +62,17 @@ export class TokenFileAuthProvider implements IAuthProvider {
   }
 
   buildHeaders(): Record<string, string> {
-    // Lazy reload if token not available yet
-    if (!this.token) {
-      const file = this.resolveTokenFile();
-      if (file) {
-        this.token = this.readJson(file);
+    // Always attempt to reload token from disk to pick up refreshed credentials
+    const file = this.resolveTokenFile();
+    if (file) {
+      const latest = this.readJson(file);
+      if (latest) {
+        this.token = latest;
       }
+    } else if (!this.token) {
+      this.token = null;
     }
+
     if (!this.isInitialized || !this.token) {
       throw new Error('TokenFileAuthProvider not initialized');
     }

@@ -8,12 +8,7 @@ const config = {
       'ts-jest',
       {
         useESM: true,
-        isolatedModules: true,
-        tsconfig: {
-          esModuleInterop: true,
-          allowSyntheticDefaultImports: true,
-          verbatimModuleSyntax: false,
-        },
+        tsconfig: '<rootDir>/tsconfig.json',
       },
     ],
   },
@@ -47,6 +42,7 @@ const config = {
     '^rcc-debugcenter$': '<rootDir>/tests/mocks/rcc-debugcenter.ts',
     '^rcc-basemodule$': '<rootDir>/tests/mocks/rcc-basemodule.ts',
     '^rcc-errorhandling$': '<rootDir>/tests/mocks/rcc-errorhandling.ts',
+    '.*modules/llmswitch/core-loader\\.js$': '<rootDir>/tests/mocks/core-loader.ts',
     '^yaml$': '<rootDir>/tests/mocks/yaml.js',
   },
 };

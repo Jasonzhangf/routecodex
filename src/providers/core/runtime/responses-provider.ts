@@ -6,9 +6,6 @@
  */
 
 import { HttpTransportProvider } from './http-transport-provider.js';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { ServiceProfile, ProviderContext } from '../api/provider-types.js';
@@ -31,6 +28,7 @@ type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'>;
 type ResponsesSseConverter = {
   convertSseToJson(stream: unknown, options: { requestId: string; model: string }): Promise<unknown>;
 };
+type ResponsesSseConverterCtor = new () => ResponsesSseConverter;
 
 type SubmitToolOutputsPayload = {
   responseId: string;
@@ -553,18 +551,14 @@ export class ResponsesProvider extends HttpTransportProvider {
   }
 
   private async loadResponsesSseConverter(): Promise<ResponsesSseConverter> {
-    const modPath = path.join(
-      PACKAGE_ROOT,
-      'sharedmodule',
-      'llmswitch-core',
-      'dist',
-      'sse',
-      'sse-to-json',
-      'index.js'
+    const mod = await importCoreModule<{ ResponsesSseToJsonConverter?: ResponsesSseConverterCtor }>(
+      'sse/sse-to-json/index'
     );
-    const moduleUrl = pathToFileURL(modPath).href;
-    const { ResponsesSseToJsonConverter } = await import(moduleUrl);
-    return new ResponsesSseToJsonConverter();
+    const Converter = mod?.ResponsesSseToJsonConverter;
+    if (!Converter) {
+      throw new Error('[responses-provider] 无法加载 llmswitch-core ResponsesSseToJsonConverter');
+    }
+    return new Converter();
   }
 
   private reportResponsesFailureIfNeeded(payload: unknown, context: ProviderContext): void {
@@ -724,38 +718,6 @@ function extractResponsesConfig(config: UnknownObject): Partial<ResponsesSetting
     instructionsMode: parseInstructionsMode(responsesCfg.instructionsMode)
   };
 }
-function hasSharedmodule(dir: string): boolean {
-  try {
-    return fs.existsSync(path.join(dir, 'sharedmodule', 'llmswitch-core'));
-  } catch {
-    return false;
-  }
-}
-
-function findPackageRoot(startDir: string): string {
-  let dir = startDir;
-  const root = path.parse(dir).root;
-  while (true) {
-    const hasPackageJson = fs.existsSync(path.join(dir, 'package.json'));
-    if (hasPackageJson || hasSharedmodule(dir)) {
-      return dir;
-    }
-    if (dir === root) {
-      break;
-    }
-    dir = path.resolve(dir, '..');
-  }
-  return startDir;
-}
-
-function resolveModuleRoot(currentModuleUrl: string): string {
-  const current = fileURLToPath(currentModuleUrl || import.meta.url);
-  const dirname = path.dirname(current);
-  return findPackageRoot(dirname);
-}
-
-const PACKAGE_ROOT = resolveModuleRoot(import.meta.url);
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }

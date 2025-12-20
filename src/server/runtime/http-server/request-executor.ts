@@ -86,6 +86,7 @@ export class HubRequestExecutor implements RequestExecutor {
 
   async execute(input: PipelineExecutionInput): Promise<PipelineExecutionResult> {
     this.deps.stats.recordRequestStart(input.requestId);
+    const requestStartedAt = Date.now();
     let statsRecorded = false;
     const finalizeStats = (options?: { usage?: UsageMetrics; error?: boolean }) => {
       if (statsRecorded) {
@@ -97,6 +98,7 @@ export class HubRequestExecutor implements RequestExecutor {
     try {
       const hubPipeline = this.ensureHubPipeline();
       const metadata = this.buildRequestMetadata(input);
+      const inboundClientHeaders = this.cloneClientHeaders(metadata?.clientHeaders);
       const providerRequestId = input.requestId;
       const clientRequestId = this.resolveClientRequestId(metadata, providerRequestId);
 
@@ -136,6 +138,10 @@ export class HubRequestExecutor implements RequestExecutor {
       const pipelineResult = await this.runHubPipeline(hubPipeline, input, metadata);
       const pipelineMetadata = pipelineResult.metadata ?? {};
       const mergedMetadata = { ...metadata, ...pipelineMetadata };
+      const mergedClientHeaders = this.cloneClientHeaders(mergedMetadata?.clientHeaders) || inboundClientHeaders;
+      if (mergedClientHeaders) {
+        mergedMetadata.clientHeaders = mergedClientHeaders;
+      }
       this.logStage(`${pipelineLabel}.completed`, providerRequestId, {
         route: pipelineResult.routingDecision?.routeName,
         target: pipelineResult.target?.providerKey
@@ -197,6 +203,9 @@ export class HubRequestExecutor implements RequestExecutor {
       mergedMetadata.clientRequestId = clientRequestId;
       const providerModel = rawModel;
       const providerLabel = this.buildProviderLabel(target.providerKey, providerModel);
+      if (inboundClientHeaders) {
+        this.ensureClientHeadersOnPayload(providerPayload, inboundClientHeaders);
+      }
       this.deps.stats.bindProvider(input.requestId, {
         providerKey: target.providerKey,
         providerType: handle.providerType,
@@ -262,6 +271,12 @@ export class HubRequestExecutor implements RequestExecutor {
         });
         const usage = this.extractUsageFromResult(converted, mergedMetadata);
         finalizeStats({ usage, error: false });
+        this.logUsageSummary(input.requestId, {
+          providerKey: target.providerKey,
+          model: providerModel,
+          usage,
+          latencyMs: Date.now() - requestStartedAt
+        });
         return converted;
       } catch (error) {
         this.logStage('provider.send.error', input.requestId, {
@@ -341,6 +356,33 @@ export class HubRequestExecutor implements RequestExecutor {
     };
   }
 
+  private cloneClientHeaders(source: unknown): Record<string, string> | undefined {
+    if (!source || typeof source !== 'object') {
+      return undefined;
+    }
+    const normalized: Record<string, string> = {};
+    for (const [key, value] of Object.entries(source as Record<string, unknown>)) {
+      if (typeof value === 'string' && value.trim()) {
+        normalized[key] = value;
+      }
+    }
+    return Object.keys(normalized).length ? normalized : undefined;
+  }
+
+  private ensureClientHeadersOnPayload(payload: unknown, headers: Record<string, string>): void {
+    if (!payload || typeof payload !== 'object') {
+      return;
+    }
+    const carrier = payload as { metadata?: Record<string, unknown> };
+    const existing = carrier.metadata && typeof carrier.metadata === 'object'
+      ? carrier.metadata
+      : {};
+    carrier.metadata = {
+      ...existing,
+      clientHeaders: existing.clientHeaders ?? headers
+    };
+  }
+
   private resolveClientRequestId(metadata: Record<string, unknown>, fallback: string): string {
     const clientRequestId = typeof metadata.clientRequestId === 'string' && metadata.clientRequestId.trim()
       ? metadata.clientRequestId.trim()
@@ -350,6 +392,17 @@ export class HubRequestExecutor implements RequestExecutor {
 
   private buildRequestMetadata(input: PipelineExecutionInput): Record<string, unknown> {
     const userMeta = asRecord(input.metadata);
+    const headers = asRecord(input.headers);
+    const inboundUserAgent = this.extractHeaderValue(headers, 'user-agent');
+    const inboundOriginator = this.extractHeaderValue(headers, 'originator');
+    const resolvedUserAgent =
+      typeof userMeta.userAgent === 'string' && userMeta.userAgent.trim()
+        ? userMeta.userAgent.trim()
+        : inboundUserAgent;
+    const resolvedOriginator =
+      typeof userMeta.clientOriginator === 'string' && userMeta.clientOriginator.trim()
+        ? userMeta.clientOriginator.trim()
+        : inboundOriginator;
     const routeHint = this.extractRouteHint(input) ?? userMeta.routeHint;
     const processMode = (userMeta.processMode as string) || 'chat';
     return {
@@ -359,8 +412,33 @@ export class HubRequestExecutor implements RequestExecutor {
       direction: 'request',
       stage: 'inbound',
       routeHint,
-      stream: userMeta.stream === true
+      stream: userMeta.stream === true,
+      ...(resolvedUserAgent ? { userAgent: resolvedUserAgent } : {}),
+      ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {})
     };
+  }
+
+  private extractHeaderValue(
+    headers: Record<string, unknown> | undefined,
+    name: string
+  ): string | undefined {
+    if (!headers) {
+      return undefined;
+    }
+    const target = name.toLowerCase();
+    for (const [key, value] of Object.entries(headers)) {
+      if (key.toLowerCase() !== target) {
+        continue;
+      }
+      if (typeof value === 'string') {
+        return value.trim() || undefined;
+      }
+      if (Array.isArray(value) && value.length) {
+        return String(value[0]).trim() || undefined;
+      }
+      return undefined;
+    }
+    return undefined;
   }
 
   private extractRouteHint(input: PipelineExecutionInput): string | undefined {
@@ -537,6 +615,22 @@ export class HubRequestExecutor implements RequestExecutor {
     this.deps.logStage(stage, requestId, details);
   }
 
+  private logUsageSummary(
+    requestId: string,
+    info: { providerKey?: string; model?: string; usage?: UsageMetrics; latencyMs: number }
+  ): void {
+    if (process.env.ROUTECODEX_USAGE_LOG === '0') {
+      return;
+    }
+    const providerLabel = this.buildProviderLabel(info.providerKey, info.model) ?? '-';
+    const prompt = info.usage?.prompt_tokens;
+    const completion = info.usage?.completion_tokens;
+    const total = info.usage?.total_tokens ?? (prompt !== undefined && completion !== undefined ? prompt + completion : undefined);
+    const usageText = `prompt=${prompt ?? 'n/a'} completion=${completion ?? 'n/a'} total=${total ?? 'n/a'}`;
+    const latency = info.latencyMs.toFixed(1);
+    console.log(`[usage] request ${requestId} provider=${providerLabel} latency=${latency}ms (${usageText})`);
+  }
+
   private extractUsageFromResult(
     result: PipelineExecutionResult,
     metadata?: Record<string, unknown>
@@ -574,9 +668,25 @@ export class HubRequestExecutor implements RequestExecutor {
       return undefined;
     }
     const record = value as Record<string, unknown>;
-    const prompt = typeof record.prompt_tokens === 'number' ? record.prompt_tokens : undefined;
-    const completion = typeof record.completion_tokens === 'number' ? record.completion_tokens : undefined;
-    const total = typeof record.total_tokens === 'number' ? record.total_tokens : undefined;
+    const prompt =
+      typeof record.prompt_tokens === 'number'
+        ? record.prompt_tokens
+        : typeof record.input_tokens === 'number'
+          ? record.input_tokens
+          : undefined;
+    const completion =
+      typeof record.completion_tokens === 'number'
+        ? record.completion_tokens
+        : typeof record.output_tokens === 'number'
+          ? record.output_tokens
+          : undefined;
+    let total =
+      typeof record.total_tokens === 'number'
+        ? record.total_tokens
+        : undefined;
+    if (total === undefined && prompt !== undefined && completion !== undefined) {
+      total = prompt + completion;
+    }
     if (prompt === undefined && completion === undefined && total === undefined) {
       return undefined;
     }
