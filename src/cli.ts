@@ -547,6 +547,7 @@ program
   .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
   .option('--codex', 'Use Codex system prompt (tools unchanged)')
   .option('--claude', 'Use Claude system prompt (tools unchanged)')
+  .option('--ua <mode>', 'Upstream User-Agent override mode (e.g., codex)')
   .option('--restart', 'Restart if an instance is already running')
   .option('--exclusive', 'Always take over the port (kill existing listeners)')
   .action(async (options) => {
@@ -563,6 +564,9 @@ program
         if (promptFlag) {
           process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = promptFlag;
           process.env.ROUTECODEX_SYSTEM_PROMPT_ENABLE = '1';
+        }
+        if (typeof options.ua === 'string' && options.ua.trim()) {
+          process.env.ROUTECODEX_UA_MODE = options.ua.trim();
         }
       } catch { /* ignore */ }
 

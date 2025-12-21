@@ -164,6 +164,58 @@ async function main() {
   }
 
   console.log('[verify-client-headers] ✅ inbound conversation/session headers forwarded');
+
+  const originalUaMode = process.env.ROUTECODEX_UA_MODE;
+  process.env.ROUTECODEX_UA_MODE = 'codex';
+  const codexRequest = {
+    metadata: {
+      clientHeaders: {},
+      stream: true
+    },
+    data: {
+      model: 'gpt-5.1-codex',
+      input: []
+    }
+  };
+
+  attachProviderRuntimeMetadata(codexRequest, {
+    requestId: 'verify-codex',
+    providerId: 'crs.key1',
+    providerKey: 'crs.key1.gpt-5.1-codex',
+    providerType: 'responses',
+    providerProtocol: 'openai-responses',
+    routeName: 'verify',
+    metadata: {
+      entryEndpoint: '/v1/responses',
+      clientHeaders: {}
+    },
+    target: {
+      providerKey: 'crs.key1.gpt-5.1-codex',
+      providerType: 'responses',
+      compatibilityProfile: undefined,
+      runtimeKey: 'crs.key1',
+      modelId: 'gpt-5.1-codex'
+    }
+  });
+
+  await provider.processIncoming(codexRequest);
+  const codexHeaders = provider.client.lastHeaders || {};
+  const codexSession = codexHeaders['session_id'];
+  const codexConv = codexHeaders['conversation_id'];
+  if (!codexSession?.startsWith('codex_cli_session_') || !codexConv?.startsWith('codex_cli_conversation_')) {
+    throw new Error(
+      `codex headers not injected. observed=${JSON.stringify(
+        { session_id: codexSession, conversation_id: codexConv }
+      )}`
+    );
+  }
+
+  console.log('[verify-client-headers] ✅ codex session/conversation headers generated');
+  if (originalUaMode === undefined) {
+    delete process.env.ROUTECODEX_UA_MODE;
+  } else {
+    process.env.ROUTECODEX_UA_MODE = originalUaMode;
+  }
 }
 
 main().catch((error) => {

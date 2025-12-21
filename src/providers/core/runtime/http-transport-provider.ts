@@ -772,6 +772,7 @@ export class HttpTransportProvider extends BaseProvider {
         ? inboundMetadata.clientOriginator.trim()
         : undefined;
     const inboundClientHeaders = this.extractClientHeaders(runtimeMetadata);
+    const normalizedClientHeaders = this.normalizeCodexClientHeaders(inboundClientHeaders);
 
     // 服务特定头部
     const serviceHeaders = this.serviceProfile.headers || {};
@@ -829,64 +830,151 @@ export class HttpTransportProvider extends BaseProvider {
       ...authHeaders
     };
 
-    const getHeader = (headers: Record<string, string>, target: string): string | undefined => {
-      const lowered = target.toLowerCase();
-      for (const [key, value] of Object.entries(headers)) {
-        if (key.toLowerCase() === lowered && typeof value === 'string' && value.trim()) {
-          return value.trim();
-        }
-      }
-      return undefined;
-    };
-    const setHeader = (headers: Record<string, string>, target: string, value: string): void => {
-      if (!value || !value.trim()) return;
-      const lowered = target.toLowerCase();
-      for (const key of Object.keys(headers)) {
-        if (key.toLowerCase() === lowered) {
-          headers[key] = value;
-          return;
-        }
-      }
-      headers[target] = value;
-    };
-
     // 保留客户端 Accept；无则默认为 application/json
-    const clientAccept = inboundClientHeaders ? getHeader(inboundClientHeaders, 'Accept') : undefined;
+    const clientAccept = normalizedClientHeaders ? this.findHeaderValue(normalizedClientHeaders, 'Accept') : undefined;
     if (clientAccept) {
-      setHeader(finalHeaders, 'Accept', clientAccept);
-    } else if (!getHeader(finalHeaders, 'Accept')) {
-      setHeader(finalHeaders, 'Accept', 'application/json');
+      this.assignHeader(finalHeaders, 'Accept', clientAccept);
+    } else if (!this.findHeaderValue(finalHeaders, 'Accept')) {
+      this.assignHeader(finalHeaders, 'Accept', 'application/json');
     }
 
     // Header priority:
     // - user/provider config (overrides/runtime) wins
     // - otherwise inherit from inbound client headers
     // - otherwise fall back to defaults
-    const uaFromConfig = getHeader({ ...overrideHeaders, ...runtimeHeaders }, 'User-Agent');
-    const uaFromService = getHeader(serviceHeaders, 'User-Agent');
+    const uaFromConfig = this.findHeaderValue({ ...overrideHeaders, ...runtimeHeaders }, 'User-Agent');
+    const uaFromService = this.findHeaderValue(serviceHeaders, 'User-Agent');
     const resolvedUa = uaFromConfig ?? inboundUserAgent ?? uaFromService ?? DEFAULT_USER_AGENT;
-    setHeader(finalHeaders, 'User-Agent', resolvedUa);
+    this.assignHeader(finalHeaders, 'User-Agent', resolvedUa);
 
     // originator: do not invent one; only forward from config or inbound client
-    const originatorFromConfig = getHeader({ ...overrideHeaders, ...runtimeHeaders }, 'originator');
-    const originatorFromService = getHeader(serviceHeaders, 'originator');
+    const originatorFromConfig = this.findHeaderValue({ ...overrideHeaders, ...runtimeHeaders }, 'originator');
+    const originatorFromService = this.findHeaderValue(serviceHeaders, 'originator');
     const resolvedOriginator = originatorFromConfig ?? inboundOriginator ?? originatorFromService;
     if (resolvedOriginator) {
-      setHeader(finalHeaders, 'originator', resolvedOriginator);
+      this.assignHeader(finalHeaders, 'originator', resolvedOriginator);
     }
 
-    if (inboundClientHeaders) {
-      const conversationId = getHeader(inboundClientHeaders, 'conversation_id');
+    if (normalizedClientHeaders) {
+      const conversationId = this.findHeaderValue(normalizedClientHeaders, 'conversation_id');
       if (conversationId) {
-        setHeader(finalHeaders, 'conversation_id', conversationId);
+        this.assignHeader(finalHeaders, 'conversation_id', conversationId);
       }
-      const sessionId = getHeader(inboundClientHeaders, 'session_id');
+      const sessionId = this.findHeaderValue(normalizedClientHeaders, 'session_id');
       if (sessionId) {
-        setHeader(finalHeaders, 'session_id', sessionId);
+        this.assignHeader(finalHeaders, 'session_id', sessionId);
       }
+    }
+
+    if (this.isCodexUaMode()) {
+      this.ensureCodexSessionHeaders(finalHeaders, runtimeMetadata);
     }
 
     return finalHeaders;
+  }
+
+  protected isCodexUaMode(): boolean {
+    const raw =
+      process.env.ROUTECODEX_UA_MODE ??
+      process.env.RCC_UA_MODE ??
+      '';
+    return typeof raw === 'string' && raw.trim().toLowerCase() === 'codex';
+  }
+
+  private normalizeCodexClientHeaders(headers?: Record<string, string>): Record<string, string> | undefined {
+    if (!headers) {
+      return undefined;
+    }
+    if (!this.isCodexUaMode()) {
+      return headers;
+    }
+    const normalizedHeaders = { ...headers };
+    this.copyHeaderValue(normalizedHeaders, headers, 'anthropic-session-id', 'session_id');
+    this.copyHeaderValue(normalizedHeaders, headers, 'anthropic-conversation-id', 'conversation_id');
+    this.copyHeaderValue(normalizedHeaders, headers, 'anthropic-user-agent', 'User-Agent');
+    this.copyHeaderValue(normalizedHeaders, headers, 'anthropic-originator', 'originator');
+    return normalizedHeaders;
+  }
+
+  private copyHeaderValue(
+    target: Record<string, string>,
+    source: Record<string, string>,
+    from: string,
+    to: string
+  ): void {
+    if (this.findHeaderValue(target, to)) {
+      return;
+    }
+    const value = this.findHeaderValue(source, from);
+    if (value) {
+      target[to] = value;
+    }
+  }
+
+  private findHeaderValue(headers: Record<string, string>, target: string): string | undefined {
+    const lowered = target.toLowerCase();
+    for (const [key, value] of Object.entries(headers)) {
+      if (key.toLowerCase() === lowered && typeof value === 'string' && value.trim()) {
+        return value.trim();
+      }
+    }
+    return undefined;
+  }
+
+  private assignHeader(headers: Record<string, string>, target: string, value: string): void {
+    if (!value || !value.trim()) {
+      return;
+    }
+    const lowered = target.toLowerCase();
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() === lowered) {
+        headers[key] = value;
+        return;
+      }
+    }
+    headers[target] = value;
+  }
+
+  private ensureCodexSessionHeaders(
+    headers: Record<string, string>,
+    runtimeMetadata?: ProviderRuntimeMetadata
+  ): void {
+    this.setHeaderIfMissing(headers, 'session_id', this.buildCodexIdentifier('session', runtimeMetadata));
+    this.setHeaderIfMissing(
+      headers,
+      'conversation_id',
+      this.buildCodexIdentifier('conversation', runtimeMetadata)
+    );
+  }
+
+  private setHeaderIfMissing(
+    headers: Record<string, string>,
+    target: string,
+    value: string
+  ): void {
+    if (this.findHeaderValue(headers, target)) {
+      return;
+    }
+    this.assignHeader(headers, target, value);
+  }
+
+  private buildCodexIdentifier(
+    kind: 'session' | 'conversation',
+    runtimeMetadata?: ProviderRuntimeMetadata
+  ): string {
+    const fallbackId = runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object'
+      ? (runtimeMetadata.metadata as Record<string, unknown>).clientRequestId
+      : undefined;
+    const requestId = runtimeMetadata?.requestId ?? fallbackId;
+    const routeName = runtimeMetadata?.routeName;
+    const suffix = (requestId ?? `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+      .toString()
+      .replace(/[^A-Za-z0-9_-]/g, '_');
+    const parts = ['codex_cli', kind, suffix];
+    if (routeName) {
+      parts.push(routeName.replace(/[^A-Za-z0-9_-]/g, '_'));
+    }
+    return parts.join('_');
   }
 
   protected getEffectiveBaseUrl(): string {

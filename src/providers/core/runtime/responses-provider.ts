@@ -71,6 +71,15 @@ export class ResponsesProvider extends HttpTransportProvider {
     } as ServiceProfile;
   }
 
+  protected override async buildRequestHeaders(): Promise<Record<string, string>> {
+    const headers = await super.buildRequestHeaders();
+    if (this.shouldOverrideCodexUa()) {
+      headers['User-Agent'] = 'codex_cli_rs/0.73.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5';
+      headers['originator'] = 'codex_cli_rs';
+    }
+    return headers;
+  }
+
   /**
    * 覆写内部发送：/v1/responses 入口时按配置选择上游 SSE 或 JSON。
    * 根据架构约束：Responses 上游不支持 JSON，统一使用 SSE 与上游通信，
@@ -168,6 +177,10 @@ export class ResponsesProvider extends HttpTransportProvider {
       streaming: cfg.streaming ?? 'auto',
       instructionsMode: cfg.instructionsMode ?? 'default'
     };
+  }
+
+  private shouldOverrideCodexUa(): boolean {
+    return this.isCodexUaMode();
   }
 
   private normalizeStreamFlag(value: unknown): boolean | undefined {
