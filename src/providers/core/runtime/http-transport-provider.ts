@@ -51,10 +51,11 @@ type ResponseRecord = Record<string, unknown> & {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
-type ProviderConfigInternal = OpenAIStandardConfig['config'] & {
+export type ProviderConfigInternal = OpenAIStandardConfig['config'] & {
   endpoint?: string;
   defaultModel?: string;
   headers?: Record<string, string>;
+  responses?: Record<string, unknown>;
   authCapabilities?: {
     required?: string[];
     optional?: string[];

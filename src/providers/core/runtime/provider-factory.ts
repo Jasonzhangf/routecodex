@@ -12,6 +12,7 @@ import { ChatHttpProvider } from './chat-http-provider.js';
 import { GeminiHttpProvider } from './gemini-http-provider.js';
 import { MockProvider } from '../../mock/index.js';
 import { GeminiCLIHttpProvider } from './gemini-cli-http-provider.js';
+import type { ProviderConfigInternal } from './http-transport-provider.js';
 
 import crypto from 'node:crypto';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
@@ -190,17 +191,45 @@ export class ProviderFactory {
     }
     extensions.providerProtocol = runtime.providerProtocol || providerTypeToProtocol(providerType);
     const moduleOverride = this.resolveProviderModule(runtime.providerModule);
+    const configNode: ProviderConfigInternal = {
+      providerType,
+      providerId: providerFamily,
+      baseUrl,
+      auth: authConfig,
+      overrides,
+      ...(Object.keys(extensions).length ? { extensions } : {})
+    };
+    const responsesConfig = this.mapRuntimeResponsesConfig(runtime.responsesConfig);
+    if (responsesConfig) {
+      configNode.responses = responsesConfig;
+    }
     return {
       type: moduleOverride ?? this.mapProviderModule(providerType),
-      config: {
-        providerType,
-        providerId: providerFamily,
-        baseUrl,
-        auth: authConfig,
-        overrides,
-        ...(Object.keys(extensions).length ? { extensions } : {})
-      }
+      config: configNode
     };
+  }
+
+  private static mapRuntimeResponsesConfig(source: unknown): Record<string, unknown> | undefined {
+    if (!source || typeof source !== 'object') {
+      return undefined;
+    }
+    const node = source as Record<string, unknown>;
+    const responses: Record<string, unknown> = {};
+    if (typeof node.toolCallIdStyle === 'string') {
+      responses.toolCallIdStyle = node.toolCallIdStyle;
+    }
+    if (typeof node.streaming === 'string') {
+      responses.streaming = node.streaming;
+    }
+    if (node.streaming === true) {
+      responses.streaming = 'always';
+    } else if (node.streaming === false) {
+      responses.streaming = 'never';
+    }
+    if (typeof node.instructionsMode === 'string') {
+      responses.instructionsMode = node.instructionsMode;
+    }
+    return Object.keys(responses).length ? responses : undefined;
   }
 
   private static mapRuntimeAuthToConfig(auth: ProviderRuntimeAuth, runtimeKey: string) {

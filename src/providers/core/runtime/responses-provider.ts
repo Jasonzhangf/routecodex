@@ -109,11 +109,7 @@ export class ResponsesProvider extends HttpTransportProvider {
     await this.ensureResponsesInstructions(finalBody);
     this.applyInstructionsMode(finalBody, settings.instructionsMode);
 
-    const useSse = settings.streaming === 'never'
-      ? false
-      : settings.streaming === 'always'
-        ? true
-        : clientRequestedStream === true;
+    const useSse = clientRequestedStream === true;
     this.responsesClient.ensureStreamFlag(finalBody, useSse);
     this.dependencies.logger?.logModule?.(this.id, 'responses-provider-stream-flag', {
       requestId: context.requestId,
@@ -704,12 +700,15 @@ function parseInstructionsMode(value: unknown): InstructionsMode {
 }
 
 function extractResponsesConfig(config: UnknownObject): Partial<ResponsesSettings> {
-  const providerConfig = isRecord((config as Record<string, unknown>).config)
-    ? ((config as Record<string, unknown>).config as Record<string, unknown>)
+  const container = isRecord(config) ? (config as Record<string, unknown>) : {};
+  const providerConfig = isRecord(container.config)
+    ? (container.config as Record<string, unknown>)
     : undefined;
   const responsesCfg = providerConfig && isRecord(providerConfig.responses)
     ? (providerConfig.responses as Record<string, unknown>)
-    : undefined;
+    : isRecord(container.responses)
+      ? (container.responses as Record<string, unknown>)
+      : undefined;
   if (!responsesCfg) {
     return {};
   }

@@ -133,6 +133,11 @@ export interface ProviderRuntimeProfile {
   compatibilityProfile?: string;
   outboundProfile?: string;
   defaultModel?: string;
+  responsesConfig?: {
+    toolCallIdStyle?: string;
+    streaming?: 'auto' | 'always' | 'never';
+    instructionsMode?: 'default' | 'inline';
+  };
 }
 
 /**
