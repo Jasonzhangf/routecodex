@@ -470,16 +470,6 @@ export class HttpTransportProvider extends BaseProvider {
       __origModel: inboundModel
     };
     } catch { /* ignore */ }
-    // 流式开关：基础 Provider 统一移除入口层的 stream 标记，
-    // 具体协议（如 Responses/Anthropic）的真实流控由各自独立 Provider 处理
-    try {
-      // 统一：所有入口均移除 stream=true（Provider 始终走非流式），SSE 由上层合成
-      const requestBody = processedRequest as { stream?: boolean };
-      if (requestBody.stream === true) {
-        delete requestBody.stream;
-      }
-    } catch { /* ignore */ }
-
     return processedRequest;
   }
 

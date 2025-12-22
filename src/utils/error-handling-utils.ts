@@ -6,6 +6,7 @@
 import { ErrorHandlerRegistry } from './error-handler-registry.js';
 import type { ErrorHandlerFunction as RegistryErrorHandlerFunction } from './error-handler-registry.js';
 import { /* ErrorHandlingCenter, */ type ErrorContext } from 'rcc-errorhandling';
+import { formatValueForConsole } from './logger.js';
 // import { DebugEventBus } from 'rcc-debugcenter';
 
 export function getErrorMessage(error: unknown): string {
@@ -139,8 +140,8 @@ export class ErrorHandlingUtils {
         this.logError(contextualError, context, moduleId, options);
       }
     } catch (handlerError) {
-      console.error('Failed to handle error:', handlerError);
-      console.error('Original error:', error);
+      console.error('Failed to handle error:', formatValueForConsole(handlerError));
+      console.error('Original error:', formatValueForConsole(error));
     }
   }
 
@@ -195,7 +196,7 @@ export class ErrorHandlingUtils {
         moduleId,
         options
       ).catch(handlerError => {
-        console.error('Failed to handle error:', handlerError);
+        console.error('Failed to handle error:', formatValueForConsole(handlerError));
       });
       throw error; // Re-throw to allow caller to handle
     }

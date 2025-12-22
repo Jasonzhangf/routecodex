@@ -91,9 +91,6 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
 
     const clientHeaders = captureClientHeaders(req.headers);
     const clientRequestedStream = Boolean(isSseRequest || jsonPayload?.stream === true);
-    if (jsonPayload) {
-      jsonPayload.stream = clientRequestedStream;
-    }
     const inboundStream = clientRequestedStream;
     const wantsStream = clientRequestedStream;
     const outboundStream = clientRequestedStream;

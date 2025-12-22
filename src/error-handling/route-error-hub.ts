@@ -5,6 +5,7 @@ import {
   formatErrorForErrorCenter,
   type ErrorExtras
 } from '../utils/error-center-payload.js';
+import { formatValueForConsole } from '../utils/logger.js';
 
 export type RouteErrorScope = 'http' | 'provider' | 'server' | 'pipeline' | 'cli' | 'compat' | 'other';
 export type RouteErrorSeverity = 'low' | 'medium' | 'high' | 'critical';
@@ -72,8 +73,14 @@ export class RouteErrorHub {
         context
       );
     } catch (registryError) {
-      console.error('[RouteErrorHub] Failed to dispatch error via registry:', registryError);
-      console.error('[RouteErrorHub] Original payload:', normalized);
+      console.error(
+        '[RouteErrorHub] Failed to dispatch error via registry:',
+        formatValueForConsole(registryError)
+      );
+      console.error(
+        '[RouteErrorHub] Original payload:',
+        formatValueForConsole(normalized)
+      );
     }
 
     let http: HttpErrorPayload | undefined;

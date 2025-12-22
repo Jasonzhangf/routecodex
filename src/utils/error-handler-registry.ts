@@ -8,6 +8,7 @@
 // 避免对 rcc-debugcenter / rcc-errorhandling 的运行时依赖。
 import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import { formatErrorForErrorCenter } from './error-center-payload.js';
+import { formatValueForConsole } from './logger.js';
 
 // Define ErrorContext interface locally
 interface ErrorContext {
@@ -128,7 +129,7 @@ export class ErrorHandlerRegistry {
         handlerCount: this.errorHandlers.size,
       });
     } catch (error) {
-      console.error('Failed to initialize Error Handler Registry:', error);
+      console.error('Failed to initialize Error Handler Registry:', formatValueForConsole(error));
       throw error;
     }
   }
@@ -239,8 +240,8 @@ export class ErrorHandlerRegistry {
       // Execute registered error handlers
       await this.executeErrorHandlers(template.code, errorContext);
     } catch (handlerError) {
-      console.error('Failed to handle error:', handlerError);
-      console.error('Original error:', error);
+      console.error('Failed to handle error:', formatValueForConsole(handlerError));
+      console.error('Original error:', formatValueForConsole(error));
     }
   }
 
@@ -326,7 +327,10 @@ export class ErrorHandlerRegistry {
       try {
         await handler(errorContext);
       } catch (handlerError) {
-        console.error(`Error handler failed for error code ${errorCode}:`, handlerError);
+        console.error(
+          `Error handler failed for error code ${errorCode}:`,
+          formatValueForConsole(handlerError)
+        );
       }
     }
   }
@@ -614,7 +618,7 @@ export class ErrorHandlerRegistry {
 
       this.logDebugEvent('error_handler_registry_destroyed', {});
     } catch (error) {
-      console.error('Failed to destroy Error Handler Registry:', error);
+      console.error('Failed to destroy Error Handler Registry:', formatValueForConsole(error));
     }
   }
 }

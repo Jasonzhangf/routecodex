@@ -55,6 +55,7 @@ import type {
 import type { ProviderErrorRuntimeMetadata } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { writeClientSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
 import { createServerColoredLogger } from './colored-logger.js';
+import { formatValueForConsole } from '../../../utils/logger.js';
 
 type ConvertProviderResponseFn = (options: {
   providerProtocol: string;
@@ -533,8 +534,11 @@ export class RouteCodexHttpServer {
     try {
       await reportRouteError(payload);
     } catch (handlerError) {
-      console.error('[RouteCodexHttpServer] Failed to report error via RouteErrorHub:', handlerError);
-      console.error('[RouteCodexHttpServer] Original error:', error);
+      console.error(
+        '[RouteCodexHttpServer] Failed to report error via RouteErrorHub:',
+        formatValueForConsole(handlerError)
+      );
+      console.error('[RouteCodexHttpServer] Original error:', formatValueForConsole(error));
     }
   }
 

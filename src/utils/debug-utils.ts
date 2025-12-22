@@ -191,6 +191,14 @@ export class DebugUtilsImpl implements DebugUtils {
 
     // Handle primitives
     if (typeof data !== 'object') {
+      if (typeof data === 'string' && (options.maxStringLength || options.maxStringLength === 0)) {
+        const limit = options.maxStringLength ?? data.length;
+        if (data.length > limit) {
+          const truncated = data.slice(0, limit);
+          const omitted = data.length - truncated.length;
+          return `${truncated}...[truncated ${omitted} chars]`;
+        }
+      }
       return data;
     }
 
