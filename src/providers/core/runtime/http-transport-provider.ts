@@ -9,6 +9,7 @@
  * 各协议具体行为（OpenAI Chat、Responses、Anthropic、Gemini 等）通过子类覆写钩子实现。
  */
 
+import { createHash } from 'node:crypto';
 import { BaseProvider } from './base-provider.js';
 import { HttpClient } from '../utils/http-client.js';
 import { DynamicProfileLoader, ServiceProfileValidator } from '../config/service-profiles.js';
@@ -964,7 +965,16 @@ export class HttpTransportProvider extends BaseProvider {
     if (routeName) {
       parts.push(routeName.replace(/[^A-Za-z0-9_-]/g, '_'));
     }
-    return parts.join('_');
+    return this.enforceCodexIdentifierLength(parts.join('_'));
+  }
+
+  private enforceCodexIdentifierLength(value: string): string {
+    if (value.length <= CODEX_IDENTIFIER_MAX_LENGTH) {
+      return value;
+    }
+    const hash = createHash('sha256').update(value).digest('hex').slice(0, 10);
+    const keep = Math.max(1, CODEX_IDENTIFIER_MAX_LENGTH - hash.length - 1);
+    return `${value.slice(0, keep)}_${hash}`;
   }
 
   protected getEffectiveBaseUrl(): string {
@@ -1195,3 +1205,4 @@ export class HttpTransportProvider extends BaseProvider {
     return Object.keys(normalized).length ? normalized : undefined;
   }
 }
+const CODEX_IDENTIFIER_MAX_LENGTH = 64;
