@@ -250,6 +250,13 @@ export class DebugUtilsImpl implements DebugUtils {
         break;
       }
 
+      // 专门处理名为 raw 的字段，避免在日志中输出完整原始内容（例如上游 HTML / 大 JSON 字符串）。
+      if (key === 'raw' && typeof value === 'string') {
+        sanitized[key] = '[RAW_OMITTED]';
+        entriesProcessed++;
+        continue;
+      }
+
       // Check for sensitive fields
       if (this.isSensitiveField(key, options.redactFields || [])) {
         sanitized[key] = '[REDACTED]';

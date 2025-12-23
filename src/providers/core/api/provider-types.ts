@@ -133,6 +133,8 @@ export interface ProviderRuntimeProfile {
   compatibilityProfile?: string;
   outboundProfile?: string;
   defaultModel?: string;
+  streaming?: 'auto' | 'always' | 'never';
+  modelStreaming?: Record<string, 'auto' | 'always' | 'never'>;
   responsesConfig?: {
     toolCallIdStyle?: string;
     streaming?: 'auto' | 'always' | 'never';

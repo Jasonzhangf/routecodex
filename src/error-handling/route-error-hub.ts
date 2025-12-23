@@ -6,6 +6,7 @@ import {
   type ErrorExtras
 } from '../utils/error-center-payload.js';
 import { formatValueForConsole } from '../utils/logger.js';
+import { buildInfo } from '../build-info.js';
 
 export type RouteErrorScope = 'http' | 'provider' | 'server' | 'pipeline' | 'cli' | 'compat' | 'other';
 export type RouteErrorSeverity = 'low' | 'medium' | 'high' | 'critical';
@@ -73,14 +74,18 @@ export class RouteErrorHub {
         context
       );
     } catch (registryError) {
-      console.error(
-        '[RouteErrorHub] Failed to dispatch error via registry:',
-        formatValueForConsole(registryError)
-      );
-      console.error(
-        '[RouteErrorHub] Original payload:',
-        formatValueForConsole(normalized)
-      );
+      // 在 release 模式下静默处理错误中心自身的异常，避免在控制台刷屏。
+      if (buildInfo.mode !== 'release') {
+        console.error(
+          '[RouteErrorHub] Failed to dispatch error via registry:',
+          registryError instanceof Error ? registryError.message : String(registryError ?? 'Unknown error')
+        );
+        // 为了避免在控制台中再次输出大体量 raw 内容，这里仅输出经过格式化的精简 payload。
+        console.error(
+          '[RouteErrorHub] Original payload:',
+          formatValueForConsole(normalized)
+        );
+      }
     }
 
     let http: HttpErrorPayload | undefined;

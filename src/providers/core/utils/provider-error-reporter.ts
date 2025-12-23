@@ -9,6 +9,7 @@ import type {
 import { importCoreModule } from '../../../modules/llmswitch/core-loader.js';
 import { formatErrorForErrorCenter } from '../../../utils/error-center-payload.js';
 import { getRouteErrorHub, reportRouteError } from '../../../error-handling/route-error-hub.js';
+import { buildInfo } from '../../../build-info.js';
 
 type ProviderErrorCenterExports = {
   providerErrorCenter?: {
@@ -124,7 +125,13 @@ export function emitProviderError(options: EmitOptions): void {
       },
       originalError: err
     }).catch(reportError => {
-      console.error('[provider-error-reporter] failed to route provider error via hub', reportError);
+      // release 模式下避免在控制台输出完整错误对象，防止 raw 等大字段刷屏。
+      if (buildInfo.mode !== 'release') {
+        console.error(
+          '[provider-error-reporter] failed to route provider error via hub',
+          reportError instanceof Error ? reportError.message : String(reportError ?? 'Unknown error')
+        );
+      }
     });
   } else if (center?.handleError) {
     const severity: ErrorContext['severity'] = status && status >= 500 ? 'high' : 'medium';
@@ -159,7 +166,12 @@ export function emitProviderError(options: EmitOptions): void {
         : { details: sanitizedContext }
     };
     void center.handleError(payload).catch((handlerError: unknown) => {
-      console.error('[provider-error-reporter] error center handleError failed', handlerError);
+      if (buildInfo.mode !== 'release') {
+        console.error(
+          '[provider-error-reporter] error center handleError failed',
+          handlerError instanceof Error ? handlerError.message : String(handlerError ?? 'Unknown error')
+        );
+      }
     });
   }
 }

@@ -55,8 +55,6 @@ export abstract class BaseProvider implements IProviderV2 {
   private runtimeProfile?: ProviderRuntimeProfile;
   private static rateLimitFailures: Map<string, number> = new Map();
   private static readonly RATE_LIMIT_THRESHOLD = 4;
-  private static clientErrorCounters: Map<string, number> = new Map();
-  private static readonly CLIENT_ERROR_THRESHOLD = 4;
 
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     this.id = `provider-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -132,8 +130,6 @@ export abstract class BaseProvider implements IProviderV2 {
         responseTime: Date.now() - context.startTime
       });
       this.resetRateLimitCounter(context.providerKey);
-      this.resetClientErrorCounter(context.providerKey);
-      this.resetClientErrorCounter(context.providerKey);
 
       return finalResponse;
 
@@ -327,17 +323,8 @@ export abstract class BaseProvider implements IProviderV2 {
       this.resetRateLimitCounter(providerKey);
     }
 
-    let affectsHealth = classification.affectsHealth;
-    let recoverable = classification.forceFatalRateLimit ? false : classification.recoverable;
-    if (!classification.affectsHealth && statusCode === 400) {
-      const escalated = this.registerClientError(providerKey, statusCode);
-      if (escalated) {
-        affectsHealth = true;
-        recoverable = false;
-      }
-    } else if (providerKey && statusCode && statusCode !== 400) {
-      this.resetClientErrorCounter(providerKey);
-    }
+    const affectsHealth = classification.affectsHealth;
+    const recoverable = classification.forceFatalRateLimit ? false : classification.recoverable;
 
     this.dependencies.logger?.logModule(this.id, 'request-error', {
       requestId: context.requestId,
@@ -442,32 +429,6 @@ export abstract class BaseProvider implements IProviderV2 {
       return;
     }
     BaseProvider.rateLimitFailures.delete(providerKey);
-  }
-
-  private registerClientError(providerKey?: string, statusCode?: number): boolean {
-    if (!providerKey || statusCode !== 400) {
-      return false;
-    }
-    const current = BaseProvider.clientErrorCounters.get(providerKey) ?? 0;
-    const next = current + 1;
-    BaseProvider.clientErrorCounters.set(providerKey, next);
-    if (this.dependencies.logger) {
-      this.dependencies.logger.logModule(this.id, 'client-error-400', {
-        providerKey,
-        hitCount: next
-      });
-    }
-    if (next >= BaseProvider.CLIENT_ERROR_THRESHOLD) {
-      return true;
-    }
-    return false;
-  }
-
-  private resetClientErrorCounter(providerKey?: string): void {
-    if (!providerKey) {
-      return;
-    }
-    BaseProvider.clientErrorCounters.delete(providerKey);
   }
 
   private forceRateLimitFailure(providerKey?: string): void {

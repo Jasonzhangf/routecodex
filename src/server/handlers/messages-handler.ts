@@ -20,10 +20,42 @@ type MessagesPayload = {
   [key: string]: unknown;
 };
 
-const inboundRateLimiter = new SlidingWindowRateLimiter({
-  limit: Number(process.env.ROUTECODEX_MESSAGES_RPM_LIMIT || 10),
+const warmupRateLimiter = new SlidingWindowRateLimiter({
+  // 已不再用于实际下游请求节流，仅用于为上游提供 Retry-After 提示，避免持续风暴。
+  limit: Number(process.env.ROUTECODEX_MESSAGES_WARMUP_RPM_LIMIT || process.env.ROUTECODEX_MESSAGES_RPM_LIMIT || 1),
   intervalMs: 60_000
 });
+
+function isWarmupMessagesPayload(payload: MessagesPayload | undefined): boolean {
+  if (!payload || typeof payload !== 'object') {
+    return false;
+  }
+  const messages = Array.isArray((payload as MessagesPayload).messages)
+    ? ((payload as MessagesPayload).messages as Array<Record<string, unknown>>)
+    : undefined;
+  if (!messages || messages.length === 0) {
+    return false;
+  }
+  const first = messages[0];
+  const content = Array.isArray(first.content)
+    ? (first.content as Array<Record<string, unknown>>)
+    : undefined;
+  if (!content || content.length === 0) {
+    return false;
+  }
+  const last = content[content.length - 1] ?? {};
+  const text = typeof last.text === 'string' ? last.text.trim() : '';
+  const cacheControl = last.cache_control as { type?: unknown } | undefined;
+  const cacheType =
+    cacheControl && typeof cacheControl.type === 'string'
+      ? cacheControl.type
+      : undefined;
+  if (text !== 'Warmup') {
+    return false;
+  }
+  // 严格要求 cache_control.type === 'ephemeral'，避免误伤用户正常请求。
+  return cacheType === 'ephemeral';
+}
 
 export async function handleMessages(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
   const entryEndpoint = '/v1/messages';
@@ -39,24 +71,11 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       : '';
     const isSseRequest = contentType.includes('text/event-stream');
     let jsonPayload: MessagesPayload | undefined;
+    let warmupPayload: MessagesPayload | undefined;
     let pipelineBody: Record<string, unknown> | { readable?: Readable } | Readable;
     let originalPayload: MessagesPayload | undefined;
     let rawRequestMetadata: unknown;
     let inferredModel: string | undefined;
-
-    const throttleResult = inboundRateLimiter.tryAcquire();
-    if (!throttleResult.allowed) {
-      const retryAfterMs = throttleResult.retryAfterMs ?? inboundRateLimiter.intervalMs;
-      res.setHeader('Retry-After', Math.ceil(retryAfterMs / 1000).toString());
-      res.status(429).json({
-        error: {
-          message: 'Too many /v1/messages requests; limit 10 per minute. Please retry later.',
-          code: 'rate_limited',
-          type: 'capacity_error'
-        }
-      });
-      return;
-    }
 
     if (isSseRequest) {
       try {
@@ -68,10 +87,16 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
           events: parsed.events
         };
         if (parsed.firstPayload && typeof parsed.firstPayload === 'object') {
+          jsonPayload = parsed.firstPayload as MessagesPayload;
           inferredModel =
-            typeof (parsed.firstPayload as Record<string, unknown>).model === 'string'
-              ? String((parsed.firstPayload as Record<string, unknown>).model)
+            typeof jsonPayload.model === 'string'
+              ? String(jsonPayload.model)
               : undefined;
+        }
+        if (parsed.lastPayload && typeof parsed.lastPayload === 'object') {
+          warmupPayload = parsed.lastPayload as MessagesPayload;
+        } else if (jsonPayload && typeof jsonPayload === 'object') {
+          warmupPayload = jsonPayload;
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Invalid SSE request payload';
@@ -87,6 +112,27 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       applySystemPromptOverride(entryEndpoint, jsonPayload);
       pipelineBody = jsonPayload;
       inferredModel = typeof jsonPayload?.model === 'string' ? jsonPayload.model : undefined;
+      warmupPayload = jsonPayload;
+    }
+
+    // Warmup 请求从第一条起直接在入口挡掉：
+    // 1) 不再进入 HubPipeline / 虚拟路由器；
+    // 2) 不再打到下游 provider，避免浪费 token；
+    // 3) 通过 429 + Retry-After 明确告诉上游不要继续 warmup 风暴。
+    if (isWarmupMessagesPayload(warmupPayload)) {
+      const throttleResult = warmupRateLimiter.tryAcquire();
+      const retryAfterMs = throttleResult.retryAfterMs ?? warmupRateLimiter.intervalMs;
+      if (retryAfterMs > 0) {
+        res.setHeader('Retry-After', Math.ceil(retryAfterMs / 1000).toString());
+      }
+      res.status(429).json({
+        error: {
+          message: 'Warmup /v1/messages is not supported; please stop sending warmup requests.',
+          code: 'warmup_not_allowed',
+          type: 'warmup'
+        }
+      });
+      return;
     }
 
     const clientHeaders = captureClientHeaders(req.headers);

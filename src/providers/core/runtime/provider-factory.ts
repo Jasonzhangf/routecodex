@@ -199,7 +199,7 @@ export class ProviderFactory {
       overrides,
       ...(Object.keys(extensions).length ? { extensions } : {})
     };
-    const responsesConfig = this.mapRuntimeResponsesConfig(runtime.responsesConfig);
+    const responsesConfig = this.mapRuntimeResponsesConfig(runtime.responsesConfig, runtime.streaming);
     if (responsesConfig) {
       configNode.responses = responsesConfig;
     }
@@ -209,21 +209,28 @@ export class ProviderFactory {
     };
   }
 
-  private static mapRuntimeResponsesConfig(source: unknown): Record<string, unknown> | undefined {
-    if (!source || typeof source !== 'object') {
+  private static mapRuntimeResponsesConfig(
+    source: unknown,
+    streamingPref?: 'auto' | 'always' | 'never'
+  ): Record<string, unknown> | undefined {
+    if (!source && !streamingPref) {
       return undefined;
     }
-    const node = source as Record<string, unknown>;
+    const node = (source && typeof source === 'object' ? (source as Record<string, unknown>) : {}) as Record<
+      string,
+      unknown
+    >;
     const responses: Record<string, unknown> = {};
     if (typeof node.toolCallIdStyle === 'string') {
       responses.toolCallIdStyle = node.toolCallIdStyle;
     }
-    if (typeof node.streaming === 'string') {
-      responses.streaming = node.streaming;
-    }
-    if (node.streaming === true) {
+    const streamingValue =
+      node.streaming !== undefined && node.streaming !== null ? node.streaming : streamingPref;
+    if (typeof streamingValue === 'string') {
+      responses.streaming = streamingValue;
+    } else if (streamingValue === true) {
       responses.streaming = 'always';
-    } else if (node.streaming === false) {
+    } else if (streamingValue === false) {
       responses.streaming = 'never';
     }
     if (typeof node.instructionsMode === 'string') {

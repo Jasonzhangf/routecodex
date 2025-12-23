@@ -295,6 +295,24 @@ export class RouteCodexHttpServer {
     if (!patched.defaultModel && profile.metadata?.defaultModel) {
       patched.defaultModel = profile.metadata.defaultModel;
     }
+
+    // Propagate streaming preferences from user config into runtime profile.
+    // Virtual Router remains the authority for routing; this only influences
+    // how V2 providers (especially ResponsesProvider) shape outbound requests.
+    const meta = profile.metadata;
+    const streamingPref = meta?.responsesStreaming ?? meta?.streaming;
+    if (streamingPref && patched.providerType === 'responses') {
+      // Attach to runtime so ProviderFactory can map it into provider config.
+      if (!patched.responsesConfig) {
+        patched.responsesConfig = {};
+      }
+      if (patched.responsesConfig.streaming === undefined) {
+        patched.responsesConfig.streaming = streamingPref;
+      }
+      if (patched.streaming === undefined) {
+        patched.streaming = streamingPref;
+      }
+    }
     return this.canonicalizeRuntimeProvider(patched);
   }
 

@@ -5,6 +5,7 @@ export interface ParsedSseJsonRequest {
   rawText: string;
   events: ParsedSseEvent[];
   firstPayload?: Record<string, unknown>;
+  lastPayload?: Record<string, unknown>;
 }
 
 interface ParsedSseEvent {
@@ -79,20 +80,23 @@ export async function parseSseJsonRequest(req: IncomingMessage): Promise<ParsedS
   }
 
   let firstPayload: Record<string, unknown> | undefined;
+  let lastPayload: Record<string, unknown> | undefined;
   for (const event of events) {
     const data = event.data?.trim();
     if (!data) continue;
     try {
       const payload = JSON.parse(data);
       if (payload && typeof payload === 'object') {
-        firstPayload = payload as Record<string, unknown>;
-        break;
+        if (!firstPayload) {
+          firstPayload = payload as Record<string, unknown>;
+        }
+        lastPayload = payload as Record<string, unknown>;
       }
     } catch {
       continue;
     }
   }
-  return { rawText, events, firstPayload };
+  return { rawText, events, firstPayload, lastPayload };
 }
 
 export function createReadableFromSse(rawText: string): Readable {

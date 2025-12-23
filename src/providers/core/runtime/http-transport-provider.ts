@@ -26,7 +26,7 @@ import type { ApiKeyAuth, OAuthAuth, OpenAIStandardConfig } from '../api/provide
 import type { ProviderContext, ProviderError, ProviderRuntimeProfile, ServiceProfile, ProviderType } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
-import { attachProviderRuntimeMetadata } from './provider-runtime-metadata.js';
+import { attachProviderRuntimeMetadata, extractProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import type { ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import type { HttpProtocolClient, ProtocolRequestPayload } from '../../../client/http-protocol-client.js';
 import { OpenAIChatProtocolClient } from '../../../client/openai/chat-protocol-client.js';
@@ -1022,8 +1022,11 @@ export class HttpTransportProvider extends BaseProvider {
   }
 
   private getEntryEndpointFromPayload(payload: UnknownObject): string | undefined {
-    const metadata = (payload as MetadataContainer).metadata;
-    if (metadata && typeof metadata.entryEndpoint === 'string') {
+    const runtimeMeta = extractProviderRuntimeMetadata(payload as Record<string, unknown>);
+    const metadata = (runtimeMeta && typeof runtimeMeta.metadata === 'object')
+      ? (runtimeMeta.metadata as Record<string, unknown>)
+      : (payload as MetadataContainer).metadata;
+    if (metadata && typeof metadata.entryEndpoint === 'string' && metadata.entryEndpoint.trim()) {
       return metadata.entryEndpoint;
     }
     return undefined;

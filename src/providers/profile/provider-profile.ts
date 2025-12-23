@@ -65,6 +65,18 @@ export interface ProviderProfile {
   metadata?: {
     defaultModel?: string;
     supportedModels?: string[];
+    /**
+     * High-level streaming preference derived from user config.
+     * When set, host/runtime can use this to influence outbound
+     * provider streaming behavior (e.g. forcing SSE upstream).
+     */
+    streaming?: 'auto' | 'always' | 'never';
+    /**
+     * Streaming preference specifically for OpenAI Responses-style
+     * providers (virtualrouter.providers[*].responses.streaming or
+     * .config.responses.streaming).
+     */
+    responsesStreaming?: 'auto' | 'always' | 'never';
   };
 }
 

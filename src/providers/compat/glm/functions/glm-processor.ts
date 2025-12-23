@@ -124,6 +124,25 @@ export const processGLMIncoming = async (
     let processedPayload = await config.baseCompat.processIncoming(payload, context);
     processedPayload = sanitizeToolsSchema(processedPayload);
 
+    // 自动开启 GLM 思考模式（thinking），仅针对支持思考能力的模型。
+    try {
+      const modelIdRaw = (processedPayload.model ?? payload.model) as unknown;
+      const modelId = typeof modelIdRaw === 'string' ? modelIdRaw.toLowerCase().trim() : '';
+      const hasThinkingField = typeof (processedPayload as { thinking?: unknown }).thinking === 'object';
+      if (modelId && !hasThinkingField) {
+        const supportsThinkingModel =
+          modelId.startsWith('glm-4.7') ||
+          modelId.startsWith('glm-4.6') && !modelId.startsWith('glm-4.6v') ||
+          modelId.startsWith('glm-4.5') ||
+          modelId.startsWith('glm-z1');
+        if (supportsThinkingModel) {
+          (processedPayload as { thinking?: UnknownObject }).thinking = { type: 'enabled' } as UnknownObject;
+        }
+      }
+    } catch {
+      // best-effort; 不阻塞主流程
+    }
+
     if (config.preflightEnabled) {
       processedPayload = await performGLMValidation(processedPayload, config.dependencies, requestId, config.compatibilityId);
     }

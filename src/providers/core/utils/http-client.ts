@@ -152,9 +152,18 @@ export class HttpClient {
 
       const response = await fetch(fullUrl, fetchOptions);
       if (!response.ok) {
-        // 与非流式 request 保持一致：在错误中包含上游返回体，便于快照/日志分析
+        // 与非流式 request 保持一致：在错误中包含上游返回体，但对 message 进行截断，避免控制台刷屏。
         const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
+        const message = this.buildHttpErrorMessage(response.status, errorText);
+        const err: UpstreamError = new Error(message) as UpstreamError;
+        err.status = response.status;
+        err.statusCode = response.status;
+        err.response = {
+          data: undefined,
+          raw: errorText
+        };
+        err.retryable = false;
+        throw err;
       }
 
       // Convert WHATWG ReadableStream to Node.js Readable for pipeline streaming
@@ -273,7 +282,8 @@ export class HttpClient {
         } catch {
           parsed = undefined;
         }
-        const err: UpstreamError = new Error(`HTTP ${response.status}: ${errorText}`) as UpstreamError;
+        const message = this.buildHttpErrorMessage(response.status, errorText);
+        const err: UpstreamError = new Error(message) as UpstreamError;
         err.status = response.status;
         err.statusCode = response.status;
         if (parsed && typeof parsed === 'object' && 'error' in parsed) {
@@ -346,6 +356,23 @@ export class HttpClient {
       clearTimeout(timeoutId);
       throw error;
     }
+  }
+
+  /**
+   * 为 HTTP 错误构造截断后的错误消息，避免在控制台打印过长的上游返回体。
+   * 完整 body 仍通过 err.response.raw 保留在错误详情中。
+   */
+  private buildHttpErrorMessage(status: number, body: string): string {
+    if (!body) {
+      return `HTTP ${status}`;
+    }
+    const maxLength = 500;
+    if (body.length <= maxLength) {
+      return `HTTP ${status}: ${body}`;
+    }
+    const truncated = body.slice(0, maxLength);
+    const omitted = body.length - truncated.length;
+    return `HTTP ${status}: ${truncated}...[truncated ${omitted} chars]`;
   }
 
   /**
