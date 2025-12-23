@@ -548,6 +548,10 @@ program
   .option('--codex', 'Use Codex system prompt (tools unchanged)')
   .option('--claude', 'Use Claude system prompt (tools unchanged)')
   .option('--ua <mode>', 'Upstream User-Agent override mode (e.g., codex)')
+  .option('--snap', 'Force-enable snapshot capture')
+  .option('--snap-off', 'Disable snapshot capture')
+  .option('--verbose-errors', 'Print verbose error stacks in console output')
+  .option('--quiet-errors', 'Silence detailed error stacks')
   .option('--restart', 'Restart if an instance is already running')
   .option('--exclusive', 'Always take over the port (kill existing listeners)')
   .action(async (options) => {
@@ -567,6 +571,24 @@ program
         }
         if (typeof options.ua === 'string' && options.ua.trim()) {
           process.env.ROUTECODEX_UA_MODE = options.ua.trim();
+        }
+        if (options.snap && options.snapOff) {
+          spinner.fail('Flags --snap and --snap-off are mutually exclusive');
+          process.exit(1);
+        }
+        if (options.snap) {
+          process.env.ROUTECODEX_SNAPSHOT = '1';
+        } else if (options.snapOff) {
+          process.env.ROUTECODEX_SNAPSHOT = '0';
+        }
+        if (options.verboseErrors && options.quietErrors) {
+          spinner.fail('Flags --verbose-errors and --quiet-errors are mutually exclusive');
+          process.exit(1);
+        }
+        if (options.verboseErrors) {
+          process.env.ROUTECODEX_VERBOSE_ERRORS = '1';
+        } else if (options.quietErrors) {
+          process.env.ROUTECODEX_VERBOSE_ERRORS = '0';
         }
       } catch { /* ignore */ }
 

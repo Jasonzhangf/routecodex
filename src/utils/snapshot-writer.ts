@@ -2,6 +2,7 @@ import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { writeSnapshotViaHooks } from '../modules/llmswitch/bridge.js';
+import { runtimeFlags } from '../runtime/runtime-flags.js';
 
 export type ServerSnapshotPhase =
   | 'http-request'
@@ -29,12 +30,7 @@ export function isSnapshotsEnabled(): boolean {
   } catch {
     /* ignore */
   }
-  // 环境变量显式关闭：0/false/no → 禁用；否则默认开启（便于调试与回归）
-  const envRaw = String(process.env.ROUTECODEX_SNAPSHOTS || process.env.RCC_SNAPSHOTS || '').trim().toLowerCase();
-  if (envRaw === '0' || envRaw === 'false' || envRaw === 'no') {
-    return false;
-  }
-  return true;
+  return runtimeFlags.snapshotsEnabled;
 }
 
 function mapEndpointToFolder(entryEndpoint?: string): string {

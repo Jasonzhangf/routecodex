@@ -53,7 +53,6 @@ export class ResponsesProvider extends HttpTransportProvider {
 
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     const responsesClient = new ResponsesProtocolClient({
-      streaming: extractResponsesConfig(config as unknown as UnknownObject).streaming ?? 'auto',
       betaVersion: 'responses-2024-12-17'
     });
     super(config, dependencies, 'responses-http-provider', responsesClient);
@@ -92,9 +91,7 @@ export class ResponsesProvider extends HttpTransportProvider {
 
     const context = this.createProviderContext();
     const settings = this.getResponsesSettings();
-    const inboundClientStream = this.normalizeStreamFlag(this.extractStreamFlag(context));
     const entryEndpoint = this.extractEntryEndpoint(request) ?? this.extractEntryEndpoint(context);
-    const clientRequestedStream = this.resolveClientStreamPreference(settings.streaming, inboundClientStream);
 
     const submitPayload = this.extractSubmitToolOutputsPayload(context);
     if (submitPayload) {
@@ -107,7 +104,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         context,
         targetUrl: submitTargetUrl,
         entryEndpoint,
-        clientRequestedStream,
+        providerStream: this.extractStreamFlagFromBody(submitPayload.body),
         httpClient: this.httpClient
       });
     }
@@ -118,11 +115,11 @@ export class ResponsesProvider extends HttpTransportProvider {
     await this.ensureResponsesInstructions(finalBody);
     this.applyInstructionsMode(finalBody, settings.instructionsMode);
 
-    const useSse = clientRequestedStream === true;
+    const providerStream = this.extractStreamFlagFromBody(finalBody);
+    const useSse = providerStream === true;
     this.responsesClient.ensureStreamFlag(finalBody, useSse);
     this.dependencies.logger?.logModule?.(this.id, 'responses-provider-stream-flag', {
       requestId: context.requestId,
-      inboundClientStream,
       outboundStream: useSse
     });
 
@@ -139,7 +136,7 @@ export class ResponsesProvider extends HttpTransportProvider {
           context,
           targetUrl,
           entryEndpoint,
-          clientRequestedStream,
+          providerStream,
           httpClient: this.httpClient
         });
       }
@@ -174,7 +171,6 @@ export class ResponsesProvider extends HttpTransportProvider {
   private getResponsesSettings(): ResponsesSettings {
     const cfg = extractResponsesConfig(this.config as unknown as UnknownObject);
     return {
-      streaming: cfg.streaming ?? 'auto',
       instructionsMode: cfg.instructionsMode ?? 'default'
     };
   }
@@ -183,32 +179,26 @@ export class ResponsesProvider extends HttpTransportProvider {
     return this.isCodexUaMode();
   }
 
-  private normalizeStreamFlag(value: unknown): boolean | undefined {
-    if (value === true || value === false) {
-      return value;
-    }
-    if (typeof value === 'string') {
-      const lowered = value.trim().toLowerCase();
-      if (['true', '1', 'yes'].includes(lowered)) {
-        return true;
-      }
-      if (['false', '0', 'no'].includes(lowered)) {
-        return false;
-      }
-    }
-    return undefined;
-  }
-
   private buildTargetUrl(baseUrl: string, endpoint: string): string {
     const normalizedBase = baseUrl.replace(/\/$/, '');
     const normalizedEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
     return `${normalizedBase}/${normalizedEndpoint}`;
   }
 
-  private extractStreamFlag(context: ProviderContext): unknown {
-    const metadata = context.metadata;
-    if (metadata && typeof metadata === 'object' && 'stream' in metadata) {
-      return (metadata as Record<string, unknown>).stream;
+  private extractStreamFlagFromBody(body: Record<string, unknown>): boolean | undefined {
+    if (!body || typeof body !== 'object') {
+      return undefined;
+    }
+    const direct = (body as Record<string, unknown>).stream;
+    if (typeof direct === 'boolean') {
+      return direct;
+    }
+    const parameters = (body as Record<string, unknown>).parameters;
+    if (parameters && typeof parameters === 'object') {
+      const nested = (parameters as Record<string, unknown>).stream;
+      if (typeof nested === 'boolean') {
+        return nested;
+      }
     }
     return undefined;
   }
@@ -238,16 +228,6 @@ export class ResponsesProvider extends HttpTransportProvider {
     if (mode === 'inline') {
       (body as Record<string, unknown>).__rcc_inline_system_instructions = true;
     }
-  }
-
-  private resolveClientStreamPreference(pref: StreamPref, inbound: boolean | undefined): boolean {
-    if (pref === 'always') {
-      return true;
-    }
-    if (pref === 'never') {
-      return false;
-    }
-    return inbound === true;
   }
 
   private extractSubmitToolOutputsPayload(context: ProviderContext): SubmitToolOutputsPayload | null {
@@ -370,16 +350,16 @@ export class ResponsesProvider extends HttpTransportProvider {
     context: ProviderContext;
     targetUrl: string;
     entryEndpoint?: string;
-    clientRequestedStream: boolean;
+    providerStream: boolean | undefined;
     httpClient: ResponsesHttpClient;
   }): Promise<unknown> {
-    const { endpoint, body, headers, context, targetUrl, entryEndpoint, clientRequestedStream, httpClient } = options;
+    const { endpoint, body, headers, context, targetUrl, entryEndpoint, providerStream, httpClient } = options;
     const stream = await httpClient.postStream(endpoint, body, {
       ...headers,
       Accept: 'text/event-stream'
     });
 
-    const captureSse = clientRequestedStream && shouldCaptureProviderStreamSnapshots();
+    const captureSse = providerStream === true && shouldCaptureProviderStreamSnapshots();
     const streamForHost = captureSse
       ? attachProviderSseSnapshotStream(stream, {
         requestId: context.requestId,
@@ -400,7 +380,7 @@ export class ResponsesProvider extends HttpTransportProvider {
       context,
       {
         mode: 'sse',
-        clientStream: clientRequestedStream,
+        clientStream: providerStream === true,
         payload: json ?? null
       },
       headers,
@@ -414,7 +394,7 @@ export class ResponsesProvider extends HttpTransportProvider {
       statusText: 'OK',
       headers: {
         'x-upstream-mode': 'sse',
-        'x-provider-stream-requested': clientRequestedStream ? '1' : '0'
+        'x-provider-stream-requested': providerStream === true ? '1' : '0'
       },
       url: targetUrl
     };
@@ -427,17 +407,17 @@ export class ResponsesProvider extends HttpTransportProvider {
     context: ProviderContext;
     targetUrl: string;
     entryEndpoint?: string;
-    clientRequestedStream: boolean;
+    providerStream: boolean | undefined;
     httpClient: ResponsesHttpClient;
   }): Promise<unknown> {
-    const { endpoint, body, headers, context, targetUrl, entryEndpoint, clientRequestedStream, httpClient } = options;
+    const { endpoint, body, headers, context, targetUrl, entryEndpoint, providerStream, httpClient } = options;
     await this.snapshotPhase('provider-request', context, body, headers, targetUrl, entryEndpoint);
     try {
       const stream = await httpClient.postStream(endpoint, body, {
         ...headers,
         Accept: 'text/event-stream'
       });
-      const captureSse = clientRequestedStream && shouldCaptureProviderStreamSnapshots();
+      const captureSse = providerStream === true && shouldCaptureProviderStreamSnapshots();
       const streamForHost = captureSse
         ? attachProviderSseSnapshotStream(stream, {
           requestId: context.requestId,
@@ -457,7 +437,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         context,
         {
           mode: 'sse',
-          clientStream: clientRequestedStream,
+          clientStream: providerStream === true,
           payload: json ?? null
         },
         headers,
@@ -471,7 +451,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         statusText: 'OK',
         headers: {
           'x-upstream-mode': 'sse',
-          'x-provider-stream-requested': clientRequestedStream ? '1' : '0'
+          'x-provider-stream-requested': providerStream === true ? '1' : '0'
         },
         url: targetUrl
       };
@@ -669,40 +649,10 @@ export class ResponsesProvider extends HttpTransportProvider {
 
 export default ResponsesProvider;
 
-type StreamPref = 'auto' | 'always' | 'never';
 type InstructionsMode = 'default' | 'inline';
 
 interface ResponsesSettings {
-  streaming: StreamPref;
   instructionsMode: InstructionsMode;
-}
-
-function parseStreamPref(value: unknown): StreamPref {
-  if (value === true) {
-    return 'always';
-  }
-  if (value === false) {
-    return 'never';
-  }
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === 'always') {
-      return 'always';
-    }
-    if (normalized === 'never') {
-      return 'never';
-    }
-    if (['true', '1', 'yes'].includes(normalized)) {
-      return 'always';
-    }
-    if (['false', '0', 'no'].includes(normalized)) {
-      return 'never';
-    }
-  }
-  if (value === 'always' || value === 'never') {
-    return value;
-  }
-  return 'auto';
 }
 
 function parseInstructionsMode(value: unknown): InstructionsMode {
@@ -726,7 +676,6 @@ function extractResponsesConfig(config: UnknownObject): Partial<ResponsesSetting
     return {};
   }
   return {
-    streaming: parseStreamPref(responsesCfg.streaming),
     instructionsMode: parseInstructionsMode(responsesCfg.instructionsMode)
   };
 }

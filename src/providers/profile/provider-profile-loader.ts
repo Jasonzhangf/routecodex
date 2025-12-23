@@ -205,17 +205,7 @@ function extractMetadata(raw: UnknownRecord): ProviderProfile['metadata'] {
   const modelsNode = isRecord(raw.models) ? raw.models : undefined;
   const supportedModels = modelsNode ? Object.keys(modelsNode) : undefined;
 
-  // Streaming preferences (host-level hint; virtual router remains source of truth)
-  const responsesNode = isRecord(raw.responses) ? (raw.responses as UnknownRecord) : undefined;
-  const configNode = isRecord(raw.config) ? (raw.config as UnknownRecord) : undefined;
-  const configResponses = configNode && isRecord(configNode.responses)
-    ? (configNode.responses as UnknownRecord)
-    : undefined;
-  const streamingPref =
-    normalizeStreamingPreference(responsesNode?.streaming ?? responsesNode?.stream) ??
-    normalizeStreamingPreference(configResponses?.streaming ?? configResponses?.stream);
-
-  if (!defaultModel && (!supportedModels || supportedModels.length === 0) && !streamingPref) {
+  if (!defaultModel && (!supportedModels || supportedModels.length === 0)) {
     return undefined;
   }
 
@@ -226,45 +216,7 @@ function extractMetadata(raw: UnknownRecord): ProviderProfile['metadata'] {
   if (supportedModels && supportedModels.length > 0) {
     metadata.supportedModels = supportedModels;
   }
-  if (streamingPref) {
-    // For now we only surface responses-specific streaming; callers may also
-    // treat this as generic streaming preference when appropriate.
-    metadata.streaming = streamingPref;
-    metadata.responsesStreaming = streamingPref;
-  }
   return Object.keys(metadata).length ? metadata : undefined;
-}
-
-function normalizeStreamingPreference(value: unknown): 'auto' | 'always' | 'never' | undefined {
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === 'always' || normalized === 'auto' || normalized === 'never') {
-      return normalized;
-    }
-    if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
-      return 'always';
-    }
-    if (normalized === 'false' || normalized === '0' || normalized === 'no') {
-      return 'never';
-    }
-  }
-  if (typeof value === 'boolean') {
-    return value ? 'always' : 'never';
-  }
-  if (!value || typeof value !== 'object') {
-    return undefined;
-  }
-  const node = value as UnknownRecord;
-  if (node.mode !== undefined) {
-    return normalizeStreamingPreference(node.mode);
-  }
-  if (node.value !== undefined) {
-    return normalizeStreamingPreference(node.value);
-  }
-  if (node.enabled !== undefined) {
-    return normalizeStreamingPreference(node.enabled);
-  }
-  return undefined;
 }
 
 function collectProviderNodes(config: UnknownRecord): Record<string, UnknownRecord> {

@@ -1,5 +1,6 @@
 import type { IncomingMessage } from 'http';
 import { Readable } from 'node:stream';
+import { attachRawPayload } from '../../utils/log-helpers.js';
 
 export interface ParsedSseJsonRequest {
   rawText: string;
@@ -72,11 +73,15 @@ function collectRawBody(req: IncomingMessage): Promise<string> {
 export async function parseSseJsonRequest(req: IncomingMessage): Promise<ParsedSseJsonRequest> {
   const rawText = await collectRawBody(req);
   if (!rawText.trim()) {
-    throw new Error('SSE request body is empty');
+    const error = new Error('SSE request body is empty');
+    attachRawPayload(error, rawText);
+    throw error;
   }
   const events = parseSseEvents(rawText);
   if (!events.length) {
-    throw new Error('SSE request body is malformed');
+    const error = new Error('SSE request body is malformed');
+    attachRawPayload(error, rawText);
+    throw error;
   }
 
   let firstPayload: Record<string, unknown> | undefined;
@@ -92,7 +97,10 @@ export async function parseSseJsonRequest(req: IncomingMessage): Promise<ParsedS
         }
         lastPayload = payload as Record<string, unknown>;
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error) {
+        attachRawPayload(error, data ?? rawText);
+      }
       continue;
     }
   }

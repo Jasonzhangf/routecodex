@@ -1,5 +1,4 @@
 import type { Request, Response } from 'express';
-import { Readable } from 'node:stream';
 import type { HandlerContext } from './types.js';
 import {
   nextRequestIdentifiers,
@@ -11,51 +10,15 @@ import {
   captureClientHeaders
 } from './handler-utils.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
-import { parseSseJsonRequest, createReadableFromSse } from '../utils/sse-request-parser.js';
-import { SlidingWindowRateLimiter } from '../utils/rate-limiter.js';
+import { parseSseJsonRequest } from '../utils/sse-request-parser.js';
+import { detectWarmupRequest } from '../utils/warmup-detector.js';
+import { recordWarmupSkipEvent } from '../utils/warmup-storm-tracker.js';
 
 type MessagesPayload = {
   stream?: boolean;
   model?: string;
   [key: string]: unknown;
 };
-
-const warmupRateLimiter = new SlidingWindowRateLimiter({
-  // 已不再用于实际下游请求节流，仅用于为上游提供 Retry-After 提示，避免持续风暴。
-  limit: Number(process.env.ROUTECODEX_MESSAGES_WARMUP_RPM_LIMIT || process.env.ROUTECODEX_MESSAGES_RPM_LIMIT || 1),
-  intervalMs: 60_000
-});
-
-function isWarmupMessagesPayload(payload: MessagesPayload | undefined): boolean {
-  if (!payload || typeof payload !== 'object') {
-    return false;
-  }
-  const messages = Array.isArray((payload as MessagesPayload).messages)
-    ? ((payload as MessagesPayload).messages as Array<Record<string, unknown>>)
-    : undefined;
-  if (!messages || messages.length === 0) {
-    return false;
-  }
-  const first = messages[0];
-  const content = Array.isArray(first.content)
-    ? (first.content as Array<Record<string, unknown>>)
-    : undefined;
-  if (!content || content.length === 0) {
-    return false;
-  }
-  const last = content[content.length - 1] ?? {};
-  const text = typeof last.text === 'string' ? last.text.trim() : '';
-  const cacheControl = last.cache_control as { type?: unknown } | undefined;
-  const cacheType =
-    cacheControl && typeof cacheControl.type === 'string'
-      ? cacheControl.type
-      : undefined;
-  if (text !== 'Warmup') {
-    return false;
-  }
-  // 严格要求 cache_control.type === 'ephemeral'，避免误伤用户正常请求。
-  return cacheType === 'ephemeral';
-}
 
 export async function handleMessages(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
   const entryEndpoint = '/v1/messages';
@@ -72,7 +35,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     const isSseRequest = contentType.includes('text/event-stream');
     let jsonPayload: MessagesPayload | undefined;
     let warmupPayload: MessagesPayload | undefined;
-    let pipelineBody: Record<string, unknown> | { readable?: Readable } | Readable;
+    let pipelineBody: Record<string, unknown>;
     let originalPayload: MessagesPayload | undefined;
     let rawRequestMetadata: unknown;
     let inferredModel: string | undefined;
@@ -80,7 +43,6 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     if (isSseRequest) {
       try {
         const parsed = await parseSseJsonRequest(req);
-        pipelineBody = createReadableFromSse(parsed.rawText);
         rawRequestMetadata = {
           format: 'sse',
           rawText: parsed.rawText,
@@ -93,11 +55,14 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
               ? String(jsonPayload.model)
               : undefined;
         }
-        if (parsed.lastPayload && typeof parsed.lastPayload === 'object') {
-          warmupPayload = parsed.lastPayload as MessagesPayload;
-        } else if (jsonPayload && typeof jsonPayload === 'object') {
-          warmupPayload = jsonPayload;
+        const aggregatedPayload = parsed.lastPayload ?? parsed.firstPayload;
+        if (!aggregatedPayload || typeof aggregatedPayload !== 'object') {
+          throw new Error('SSE request did not contain a valid JSON payload');
         }
+        jsonPayload = aggregatedPayload as MessagesPayload;
+        warmupPayload = aggregatedPayload as MessagesPayload;
+        applySystemPromptOverride(entryEndpoint, jsonPayload);
+        pipelineBody = jsonPayload;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Invalid SSE request payload';
         res.status(400).json({ error: { message, code: 'invalid_sse_request' } });
@@ -115,23 +80,15 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       warmupPayload = jsonPayload;
     }
 
-    // Warmup 请求从第一条起直接在入口挡掉：
-    // 1) 不再进入 HubPipeline / 虚拟路由器；
-    // 2) 不再打到下游 provider，避免浪费 token；
-    // 3) 通过 429 + Retry-After 明确告诉上游不要继续 warmup 风暴。
-    if (isWarmupMessagesPayload(warmupPayload)) {
-      const throttleResult = warmupRateLimiter.tryAcquire();
-      const retryAfterMs = throttleResult.retryAfterMs ?? warmupRateLimiter.intervalMs;
-      if (retryAfterMs > 0) {
-        res.setHeader('Retry-After', Math.ceil(retryAfterMs / 1000).toString());
-      }
-      res.status(429).json({
-        error: {
-          message: 'Warmup /v1/messages is not supported; please stop sending warmup requests.',
-          code: 'warmup_not_allowed',
-          type: 'warmup'
-        }
+    const warmupCheck = detectWarmupRequest(req.headers, warmupPayload as Record<string, unknown>);
+    if (warmupCheck.isWarmup) {
+      recordWarmupSkipEvent({
+        endpoint: entryEndpoint,
+        requestId,
+        userAgent: warmupCheck.userAgent,
+        reason: warmupCheck.reason
       });
+      res.status(200).json({ status: 'ready' });
       return;
     }
 

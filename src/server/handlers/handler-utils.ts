@@ -8,6 +8,8 @@ import { logPipelineStage } from '../utils/stage-logger.js';
 import { buildInfo } from '../../build-info.js';
 import type { RouteErrorPayload } from '../../error-handling/route-error-hub.js';
 import { reportRouteError } from '../../error-handling/route-error-hub.js';
+import { runtimeFlags } from '../../runtime/runtime-flags.js';
+import { formatErrorForConsole } from '../../utils/log-helpers.js';
 import {
   generateRequestIdentifiers,
   resolveEffectiveRequestId
@@ -169,8 +171,11 @@ export function logRequestComplete(endpoint: string, requestId: string, status: 
 
 export function logRequestError(endpoint: string, requestId: string, error: unknown): void {
   const resolvedId = formatRequestId(requestId);
-  const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
-  console.error(`❌ [${endpoint}] request ${resolvedId} failed: ${message}`);
+  const formatted = formatErrorForConsole(error);
+  console.error(`❌ [${endpoint}] request ${resolvedId} failed: ${formatted.text}`);
+  if (runtimeFlags.verboseErrors && error instanceof Error && typeof error.stack === 'string') {
+    console.debug(error.stack);
+  }
 }
 
 export async function respondWithPipelineError(

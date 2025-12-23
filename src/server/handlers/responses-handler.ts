@@ -11,6 +11,8 @@ import {
 } from './handler-utils.js';
 import { resumeResponsesConversation } from '../../modules/llmswitch/bridge.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
+import { detectWarmupRequest } from '../utils/warmup-detector.js';
+import { recordWarmupSkipEvent } from '../utils/warmup-storm-tracker.js';
 
 interface ResponsesHandlerOptions {
   entryEndpoint?: string;
@@ -99,6 +101,17 @@ export async function handleResponses(
 
     if (entryEndpoint === '/v1/responses') {
       applySystemPromptOverride(entryEndpoint, payload);
+    }
+    const warmupCheck = detectWarmupRequest(req.headers, payload as Record<string, unknown>);
+    if (warmupCheck.isWarmup) {
+      recordWarmupSkipEvent({
+        endpoint: entryEndpoint,
+        requestId,
+        userAgent: warmupCheck.userAgent,
+        reason: warmupCheck.reason
+      });
+      res.status(200).json({ status: 'ready' });
+      return;
     }
 
     const pipelineInput = {

@@ -4,6 +4,7 @@ import path from 'path';
 import { PassThrough } from 'node:stream';
 import { writeSnapshotViaHooks } from '../../../modules/llmswitch/bridge.js';
 import { buildInfo } from '../../../build-info.js';
+import { runtimeFlags } from '../../../runtime/runtime-flags.js';
 
 type Phase = 'provider-request' | 'provider-response' | 'provider-error';
 type ClientPhase = 'client-request';
@@ -94,6 +95,9 @@ export async function writeProviderSnapshot(options: {
   entryEndpoint?: string;
   clientRequestId?: string;
 }): Promise<void> {
+  if (!runtimeFlags.snapshotsEnabled) {
+    return;
+  }
   const { endpoint, folder } = resolveEndpoint(options.entryEndpoint || options.url);
   const stage = options.phase;
   const requestId = normalizeRequestId(options.requestId);
@@ -160,7 +164,7 @@ export function shouldCaptureProviderStreamSnapshots(): boolean {
   if (flag === '0' || flag === 'false') {
     return false;
   }
-  return buildInfo.mode !== 'release';
+  return runtimeFlags.snapshotsEnabled && buildInfo.mode !== 'release';
 }
 
 export function attachProviderSseSnapshotStream(
