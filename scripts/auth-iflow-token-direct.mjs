@@ -6,13 +6,40 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
 
-const tokenFile = process.env.IFLOW_TOKEN_FILE || path.join(os.homedir(), '.routecodex', 'auth', 'iflow-oauth-1-primary.json');
+async function resolveIflowTokenPath() {
+  const envFile = process.env.IFLOW_TOKEN_FILE;
+  if (envFile && envFile.trim()) {
+    const normalized = envFile.startsWith('~') ? envFile.replace(/^~\//, `${os.homedir()}/`) : envFile;
+    return { tokenPath: normalized, duplicates: [] };
+  }
+
+  const authDir = path.join(os.homedir(), '.routecodex', 'auth');
+  const seq = 1;
+  const prefix = `iflow-oauth-${seq}`;
+  let entries = [];
+  try {
+    entries = await fs.readdir(authDir);
+  } catch {
+    // directory may not exist yet
+  }
+  const matches = entries
+    .filter((entry) => entry.endsWith('.json'))
+    .filter((entry) => entry === `${prefix}.json` || entry.startsWith(`${prefix}-`));
+  matches.sort();
+  if (matches.length > 0) {
+    const canonical = path.join(authDir, matches[0]);
+    const duplicates = matches.slice(1).map((name) => path.join(authDir, name));
+    return { tokenPath: canonical, duplicates };
+  }
+  const canonical = path.join(authDir, `${prefix}-primary.json`);
+  return { tokenPath: canonical, duplicates: [] };
+}
 
 async function run() {
-  console.log(`[iflow-auth-direct] Starting device flow for: ${tokenFile}`);
+  const { tokenPath, duplicates } = await resolveIflowTokenPath();
+  console.log(`[iflow-auth-direct] Starting device flow for: ${tokenPath}`);
   
   // ensure token file exists so re-auth can recreate after delete
-  const tokenPath = tokenFile.startsWith('~') ? tokenFile.replace(/^~\//, `${os.homedir()}/`) : tokenFile;
   await fs.mkdir(path.dirname(tokenPath), { recursive: true });
   try {
     await fs.access(tokenPath);
@@ -39,6 +66,17 @@ async function run() {
   console.log('[iflow-auth-direct] Opening browser for device code flow...');
   const token = await strategy.authenticate({ openBrowser: true });
   await strategy.saveToken(token);
+
+  // clean up duplicate token files for the same sequence
+  for (const dup of duplicates) {
+    if (dup === tokenPath) continue;
+    try {
+      await fs.unlink(dup);
+      console.log(`[iflow-auth-direct] Removed duplicate token file: ${dup}`);
+    } catch {
+      // ignore
+    }
+  }
   
   console.log(`[iflow-auth-direct] Token saved to: ${tokenPath}`);
 }
