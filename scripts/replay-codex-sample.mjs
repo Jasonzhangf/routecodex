@@ -39,21 +39,26 @@ function readJson(file) {
 }
 
 function extractEndpoint(doc) {
-  return doc?.data?.url || doc?.endpoint || '/v1/responses';
+  return doc?.data?.url || doc?.url || doc?.endpoint || '/v1/responses';
 }
 
 function extractBody(doc) {
-  const body = doc?.data?.body;
-  if (!body) return undefined;
-  if (typeof body.body === 'object') return body.body;
-  if (typeof body === 'object') return body;
-  if (typeof doc.data.data === 'object') return doc.data.data;
+  const bodyNode = doc?.data?.body || doc?.body;
+  if (!bodyNode) {
+    if (typeof doc?.data?.data === 'object') return doc.data.data;
+    if (typeof doc?.body?.data === 'object') return doc.body.data;
+    return undefined;
+  }
+  if (typeof bodyNode.body === 'object') return bodyNode.body;
+  if (typeof bodyNode === 'object') return bodyNode;
+  if (typeof doc?.data?.data === 'object') return doc.data.data;
+  if (typeof doc?.body?.data === 'object') return doc.body.data;
   return undefined;
 }
 
 function detectStream(doc, requestBody) {
-  if (doc?.data?.meta?.stream === true) return true;
-  if (doc?.data?.body?.metadata?.stream === true) return true;
+  if (doc?.data?.meta?.stream === true || doc?.meta?.stream === true) return true;
+  if (doc?.data?.body?.metadata?.stream === true || doc?.body?.metadata?.stream === true) return true;
   if (requestBody?.stream === true) return true;
   return false;
 }

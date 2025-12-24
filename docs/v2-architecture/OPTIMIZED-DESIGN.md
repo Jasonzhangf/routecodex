@@ -306,7 +306,7 @@ export class V2ConfigLibrary {
       }
     },
     'qwen-compatibility-config': {
-      type: 'qwen-compatibility',
+      type: 'qwen-compatibility', // ⚠️ legacy；v2 以后由 sharedmodule/llmswitch-core 的 chat:qwen profile 负责
       config: {
         providerType: 'qwen',
         // 字段映射配置 - 将Qwen特定字段映射到OpenAI标准格式

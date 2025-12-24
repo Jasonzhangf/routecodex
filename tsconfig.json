@@ -60,7 +60,6 @@
     "src/server-v2/**/*",
     "src/server-v2/**",
     "src/modules/pipeline/v2/**/*",
-    "src/providers/compat/glm/glm-compatibility.ts",
     "src/server-factory.ts",
     "src/migration/version-selector.ts"
   ]

@@ -405,7 +405,7 @@ cp config/examples/basic-config.json ~/.routecodex/config.json
       "models": ["glm-4"],
       "modules": {
         "llmSwitch": { "type": "llmswitch-v2" },
-        "compatibility": { "type": "glm-compatibility" },
+        "compatibility": { "type": "compat:passthrough" },
         "provider": { "type": "chat-http-provider" }
       }
     }
@@ -891,18 +891,13 @@ RouteCodex V2架构已完成兼容层的函数化重构，实现了两层架构�
 #### 核心文件结构
 
 ```
-src/providers/compat/
-├── compatibility-interface.ts           # 兼容层接口定义
-├── compatibility-adapter.ts             # PipelineModule适配器
-├── base-compatibility.ts                # 基础兼容抽象类
-├── glm/                                 # GLM兼容模块
-│   ├── glm-compatibility.ts            # GLM兼容模块主类
-│   ├── functions/glm-processor.ts      # GLM函数化实现
-│   └── field-mapping/                  # 字段映射处理
-└── iflow/                               # iFlow兼容模块
-    ├── iflow-compatibility.ts          # iFlow兼容模块主类
-    ├── functions/iflow-processor.ts    # iFlow函数化实现
-    └── field-mapping/                  # 字段映射处理
+sharedmodule/llmswitch-core/src/conversion/compat/
+├── compat/profile-store                 # built-in profile registry
+├── profiles/chat-*.json                 # chat models（glm / qwen / iflow / lmstudio ...）
+├── profiles/responses-*.json            # responses family（c4m、fai……）
+└── compat-engine.ts                     # request/response 映射引擎
+
+⚠️ 0.89.258 起，兼容逻辑 **全部** 驻留在 llmswitch-core，由 virtual router 在命中 provider 后将 `compatibilityProfile` 注入 Hub Pipeline。Host 仓库已删除 `src/providers/compat/*`，仅保留 provider/runtime/handler；新增的兼容需求请直接在 sharedmodule 中新增 profile 并引用。
 ```
 
 #### 函数化实现模式

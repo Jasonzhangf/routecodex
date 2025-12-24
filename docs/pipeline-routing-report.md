@@ -60,6 +60,7 @@
 - Compatibility（格式转换）
   - 已有：LM Studio 兼容模块与 JSON 规则驱动的变换引擎。
     - `src/providers/compat/lmstudio-compatibility.ts:16`
+> ⚠️ 2025-12 更新：`src/providers/compat/*` 已下线；兼容行为现由 `sharedmodule/llmswitch-core/src/conversion/compat/` 提供，旧行号仅供历史排查参考。
     - `src/modules/pipeline/utils/transformation-engine.ts`
   - 现状：HTTP 服务未调用。
 
