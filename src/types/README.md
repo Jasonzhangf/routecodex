@@ -1,18 +1,22 @@
-# 类型定义模块 (Types Module)
+# Types Module
 
-## 概述
-类型定义模块提供 RouteCodex Host 与共享模块的 TypeScript 类型系统，重点包括：
-- 与 `@jsonstudio/llms` 共享的 DTO/接口
-- 配置加载相关类型
-- 调试与会话类型
+## Overview
+Type definitions for RouteCodex Host and shared module alignment. Focus on DTOs, config types, and debug/session types.
 
-## 核心文件
-- `common-types.ts`：基础 JSON/日志类型。
-- `shared-dtos.ts`：请求/响应/错误等共享数据结构。
-- `external-types.ts`：第三方模块的类型声明。
-- `base-types.ts`：Host 与 `llmswitch-core` 的桥接类型。
+## Core Files
+- `common-types.ts`: Base JSON/logging types
+- `shared-dtos.ts`: Request/response/error data structures shared with `@jsonstudio/llms`
+- `external-types.ts`: Third-party library type declarations
+- `base-types.ts`: Bridge types between Host and `llmswitch-core`
 
-## 维护原则
-- 与 `sharedmodule/llmswitch-core/dist/types` 保持一致，避免重复定义。
-- 新增 DTO 或接口应同步更新到共享模块，并重新构建。
-- 调试相关类型应与 `src/debug/types.ts` 对齐。
+## Alignment Rule
+Stay in sync with `sharedmodule/llmswitch-core/dist/types`. New DTOs/interfaces should be added to shared module and rebuilt first.
+
+## Do / Don't
+**Do**
+- Mirror shared module types to ensure type safety
+- Keep debug types aligned with `src/debug/types.ts`
+
+**Don't**
+- Duplicate definitions that exist in shared module
+- Add business logic or runtime code in type files

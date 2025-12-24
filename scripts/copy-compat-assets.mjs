@@ -15,32 +15,11 @@ async function ensureDir(p) {
 }
 
 async function main() {
-  const SRC = path.resolve(process.cwd(), 'src/providers/compat');
-  const DIST = path.resolve(process.cwd(), 'dist/providers/compat');
   const PROMPT_SRC = path.resolve(process.cwd(), 'src/config/system-prompts');
   const PROMPT_DIST = path.resolve(process.cwd(), 'dist/config/system-prompts');
-  const copied = [];
   const promptCopied = [];
   try {
-    const compatExists = await fs
-      .stat(SRC)
-      .then((stats) => stats.isDirectory())
-      .catch((err) => {
-        if (err && err.code === 'ENOENT') return false;
-        throw err;
-      });
-    if (compatExists) {
-      for await (const file of walk(SRC)) {
-        if (file.endsWith('.json') && file.includes(`${path.sep}config${path.sep}`)) {
-          const rel = path.relative(SRC, file);
-          const dest = path.join(DIST, rel);
-          await ensureDir(path.dirname(dest));
-          await fs.copyFile(file, dest);
-          copied.push(rel);
-        }
-      }
-    }
-    // copy system prompt artifacts
+    // copy system prompt artifacts only; provider compat assets are owned by llmswitch-core
     try {
       for await (const file of walk(PROMPT_SRC)) {
         const stats = await fs.stat(file);
@@ -55,8 +34,8 @@ async function main() {
     } catch (promptErr) {
       if (promptErr && promptErr.code !== 'ENOENT') throw promptErr;
     }
-    // 不再复制 pipeline-config.generated.json 到 dist；统一从 ~/.routecodex/config/generated 读取
-    console.log(`[copy-compat-assets] copied ${copied.length} JSON assets; prompts: ${promptCopied.length}`);
+    // 不再复制 provider compat 资产；兼容层由 sharedmodule/llmswitch-core 提供
+    console.log(`[copy-compat-assets] prompts copied: ${promptCopied.length}`);
   } catch (err) {
     console.error('[copy-compat-assets] failed:', err?.message || String(err));
     process.exit(1);

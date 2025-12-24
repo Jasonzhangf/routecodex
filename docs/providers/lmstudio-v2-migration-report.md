@@ -21,7 +21,7 @@
 
 **Compatibility Responsibilities**
 - Keep compatibility minimal, provider‑agnostic, and confined to the Compatibility layer:
-  - Normalize `tool_choice` to LM Studio’s expected strings when an OpenAI object is provided, forcing `'required'` in that case (src/providers/compat/lmstudio-compatibility.ts:76-85).
+  - Normalize `tool_choice` to LM Studio’s expected strings when an OpenAI object is provided, forcing `'required'` in that case（逻辑现由 `sharedmodule/llmswitch-core` 中的 compat profile 提供）。
   - Preserve OpenAI tool shape (direct mapping of `tools` and `choices[].message.tool_calls`).
   - Maintain `object` values like `chat.completion` and `chat.completion.chunk` in responses.
 - Do not duplicate llmswitch-core tool governance (canonicalization/harvest/repair) in Compatibility per AGENTS.md.
@@ -71,7 +71,7 @@
   - Reuse `openai-standard` end‑to‑end; select `ServiceProfile('lmstudio')` for defaults. No tool logic here.
   - For Responses passthrough, use the dedicated `responses` profile if routing `/v1/responses` to LM Studio’s OpenAI‑compatible Responses endpoint.
 - Compatibility
-  - Ensure LM Studio module is available and registered (type: `lmstudio-compatibility`). It performs only light normalization/mapping; notably `tool_choice` normalization (src/providers/compat/lmstudio-compatibility.ts:76-85) and direct mapping rules for tools/tool_calls.
+  - Ensure LM Studio compat profile is available and registered（type 由 `compatibilityProfile` 指定）。It performs only light normalization/mapping; notably `tool_choice` normalization and direct mapping rules for tools/tool_calls（均驻留在 llmswitch-core compat 中）。
   - Keep response `object` and tool call shapes intact (see same file, response rules section around id `tool-calls-response`).
 - llmswitch-core
   - Tool canonicalization, harvesting from text, and argument repair remain centralized per AGENTS.md; do not reimplement in Compatibility/Provider.
@@ -93,11 +93,10 @@
 **References**
 - `src/providers/core/api/provider-config.ts:103` — maps `lmstudio-provider-simple` to `openai-standard`.
 - `src/providers/core/config/service-profiles.ts:92` — LM Studio service profile defaults.
-- `src/providers/compat/lmstudio-compatibility.ts:76` — `tool_choice` normalization logic.
+- 历史实现：`src/providers/compat/lmstudio-compatibility.ts:76` — `tool_choice` normalization logic（已迁移至 sharedmodule/llmswitch-core compat profiles）。
 - `docs/lmstudio-tool-calling.md:1` — LM Studio tool calling shape and examples.
 - `docs/transformation-tables/claude-code-router-openai-to-lmstudio.json:1` — direct mappings for OpenAI↔LM Studio.
 - `docs/responses-passthrough-provider-design.md:3` — Responses SSE passthrough design.
 
 **Conclusion**
 - Answer to Q1: Yes — reuse `openai-standard` with `lmstudio-compatibility`. This yields minimal, standards‑aligned integration under Provider V2, keeps tool governance centralized in llmswitch‑core, and supports both Chat Completions and Responses with straightforward configuration.
-

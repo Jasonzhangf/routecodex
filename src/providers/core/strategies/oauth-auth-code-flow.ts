@@ -257,7 +257,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
           const okPath = reqPath === pathName || /oauth.*callback/i.test(reqPath);
           if (!req.url || !okPath) {
             res.statusCode = 302;
-            res.setHeader('Location', 'https://example.com');
+            res.setHeader('Content-Type', 'text/html'); res.end('<html><body><h1>OAuth Success</h1><p>You can close this window.</p></body></html>');
             res.end();
             reject(new Error(`Unexpected request: ${req.url}`));
             return;
@@ -269,7 +269,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
           const error = params.get('error');
           if (error) {
             res.statusCode = 302;
-            res.setHeader('Location', 'https://example.com');
+            res.setHeader('Content-Type', 'text/html'); res.end('<html><body><h1>OAuth Success</h1><p>You can close this window.</p></body></html>');
             res.end();
             reject(new Error(`Authorization error: ${error}`));
             return;
@@ -295,7 +295,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
 
           // 成功响应
           res.statusCode = 302;
-          res.setHeader('Location', 'https://example.com');
+          res.setHeader('Content-Type', 'text/html'); res.end('<html><body><h1>OAuth Success</h1><p>You can close this window.</p></body></html>');
           res.end();
 
           logOAuthDebug('[OAuth] Received authorization code via local callback');

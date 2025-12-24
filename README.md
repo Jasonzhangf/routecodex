@@ -33,7 +33,7 @@ HTTP Server → llmswitch-core Hub Pipeline → Provider V2 Runtime → 上游 A
 | HTTP Server | `src/server/runtime/http-server` | Express 路由、SSE 包装、调用 Hub Pipeline | 工具决策、路由逻辑、配置拼装 |
 | Hub Pipeline | `sharedmodule/llmswitch-core` | 请求标准化、tool_calls 统一处理、虚拟路由 | 进行 HTTP 请求、处理认证 |
 | Provider V2 | `src/providers` | 请求签名、HTTP 发送、快照输出 | 解析/修复工具调用、修改配置 |
-| Compatibility | `src/providers/compat/*` | 上下游字段映射、最小清理 | 工具解码、兜底 try/catch |
+| Compatibility | `sharedmodule/llmswitch-core/src/conversion/compat/*` | 上下游字段映射、最小清理 | 工具解码、兜底 try/catch |
 
 更多细节请参考 `docs/ARCHITECTURE.md` 与 `docs/CONFIG_ARCHITECTURE.md`。
 
@@ -66,7 +66,15 @@ rcc --version
 安装成功后，`rcc --version` 会显示形如 `0.89.xxx (release)` 的版本信息；可通过 `npm update -g @jsonstudio/rcc` 升级，`npm uninstall -g @jsonstudio/rcc` 卸载。
 
 ### Dev CLI（本仓库）
-开发者仍可直接在仓库根目录执行 `npm run install:global`，该脚本会构建源码并把 `routecodex` 命令安装到全局 `$PATH`，供本地调试使用。
+开发者使用以下命令安装 dev CLI（必须先构建 sharedmodule）：
+
+```bash
+npm --prefix sharedmodule/llmswitch-core run build
+npm run build:dev
+npm run install:global
+```
+
+> ⚠️ 禁止：`routecodex` 只用于本地调试，严禁发布到 npm。发布 `@jsonstudio/rcc` 必须使用 `npm run install:release`。
 
 ---
 

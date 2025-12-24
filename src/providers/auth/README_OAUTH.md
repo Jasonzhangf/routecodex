@@ -150,3 +150,4 @@ iFlow OAuth 实现完全对齐 CLIProxyAPI 的设计：
 - ✅ **配置驱动**：所有参数外部化，无硬编码
 - ✅ **CLIProxyAPI 兼容**：字段名、端点、错误处理完全一致
 - ✅ **生产就绪**：经过完整测试验证，支持自动刷新和错误恢复
+- ✅ **错误上报一致**：所有 OAuth 错误必须调用 `emitProviderError({ ..., dependencies })`，确保 RouteErrorHub/Virtual Router 可以更新 provider 健康状态。

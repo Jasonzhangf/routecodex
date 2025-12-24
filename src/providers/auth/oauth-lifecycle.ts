@@ -11,6 +11,7 @@ import {
   fetchGeminiCLIProjects,
   mergeGeminiCLITokenData
 } from './gemini-cli-userinfo-helper.js';
+import { parseTokenSequenceFromPath } from "./token-scanner/index.js";
 import { logOAuthDebug } from './oauth-logger.js';
 
 type EnsureOpts = {

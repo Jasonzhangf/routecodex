@@ -380,8 +380,7 @@ data: [DONE]
 
 ## 相关文档
 
-- [RouteCodex GLM兼容性文档（历史）](../src/providers/compat/glm-api.md)
-- [GLM兼容性实现（已迁移至 sharedmodule/llmswitch-core/src/conversion/compat/）](../src/providers/compat/glm-compatibility.ts)
+- GLM 兼容性实现现位于 `sharedmodule/llmswitch-core/src/conversion/compat/`（以 `chat:glm` profile 形式提供）
 - [智谱AI官方文档](https://docs.bigmodel.cn/)
 
 ---

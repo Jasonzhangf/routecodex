@@ -1,5 +1,7 @@
 # V2 Pipeline Architecture Design
 
+> **Status**: This blueprint is frozen. Current implementation follows AGENTS.md principles (single execution path, no bypasses). This doc is retained for historical reference only; do not use as current architecture guidance.
+
 ## 🎯 Design Objectives
 
 This document outlines the V2 pipeline architecture design for RouteCodex, focusing on:

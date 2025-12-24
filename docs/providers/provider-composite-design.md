@@ -34,7 +34,7 @@ output/* → Provider.preprocessRequest(compat.request) → HTTP Provider → Pr
   - `src/providers/core/composite/compat/{responses,anthropic,gemin i}.ts`
 
 - 复用（保持原路径）：
-  - 现有 `src/providers/compat/*` 模块作为旧实现，按需由 openai-compat-aggregator 适配调用（GLM/LM Studio/iFlow）。
+- 历史上曾存在 `src/providers/compat/*` 模块作为旧实现，现已下线；兼容行为统一迁移至 `sharedmodule/llmswitch-core/src/conversion/compat/*`（通过 `compatibilityProfile` 驱动 GLM / LM Studio / iFlow 等）。
 
 ## 协议守卫与自动加载
 

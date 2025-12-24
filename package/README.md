@@ -1,42 +1,36 @@
-# Qoder CLI
+# RouteCodex CLI Packaging
 
-[![npm package](https://img.shields.io/npm/v/@qoder-ai/qodercli.svg?style=flat-square)](https://www.npmjs.com/package/@qoder-ai/qodercli)
+This directory is used for CLI packaging and release artifacts only.
 
-Qoder CLI is a powerful terminal-based AI assistant that understands your codebase and helps you code faster by executing routine tasks, explaining complex code, and handling development workflows -- all through natural language commands.
+## Release CLI (@jsonstudio/rcc)
 
-## Get started
+Release builds must use the npm-published `@jsonstudio/llms` dependency and the `rcc` binary.
 
-Install Qoder CLI using your preferred method:
+Build and pack:
 
-### Curl + Bash
-```sh
-curl -fsSL https://qoder.com/install | bash
+```bash
+node scripts/pack-mode.mjs --name @jsonstudio/rcc --bin rcc
 ```
 
-### Homebrew (macOS & Linux)
-```sh
-brew install --cask QoderAI/qoder/qodercli
+Publish the generated tarball:
+
+```bash
+npm publish jsonstudio-rcc-*.tgz
 ```
 
-### NPM
-```sh
-npm install -g @qoder-ai/qodercli
+## Dev CLI (routecodex)
+
+The `routecodex` CLI is dev-only and must never be published to npm.
+
+For dev work:
+
+```bash
+npm run build:dev
+npm run install:global
 ```
 
-## Usage
+## Rules
 
-1. Navigate to your project directory
-2. Run `qodercli` to start the interactive mode
-3. Or run single commands: `qodercli -p "your prompt here"`
-
-## Reporting Bugs
-
-We welcome feedback. Use the `/feedback` command to report issues directly within Qoder CLI.
-
-## Data collection, usage, and retention
-
-please review our Commercial Terms of Service at https://qoder.com/product-service.
-
-## Support
-
-For support and documentation, visit [https://qoder.com](https://qoder.com)
+- Do not publish `routecodex` to npm.
+- Do not mix release builds with the dev CLI.
+- Do not commit build artifacts; `dist/` is emitted in CI.

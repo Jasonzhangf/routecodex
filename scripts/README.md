@@ -1,20 +1,34 @@
-# RouteCodex 构建和安装脚本
+# Build & Install Scripts
 
-本目录包含用于自动构建和安装 RouteCodex 的脚本。
+> **AGENTS.md rules apply** – always build shared modules first, never skip verification, never mix dev/release modes.
 
-## 唯一安装脚本
-
-### install-user-global.sh（推荐）
+## Dev CLI (routecodex)
 
 ```bash
-# 一键构建并全局安装（使用 npm 默认全局路径，不修改前缀）
+# 1. build sharedmodule first
+npm --prefix sharedmodule/llmswitch-core run build
+
+# 2. build host
+cd - && npm run build:dev
+
+# 3. install globally
 npm run install:global
 ```
 
-脚本流程：
-- 构建 sharedmodule/llmswitch-core 与根包
-- npm pack 生成 tgz
-- 卸载全局旧版 routecodex
-- npm install -g 安装新版本
+## Release CLI (rcc)
 
-> 说明：其余安装脚本已移除，请统一使用上述命令。
+```bash
+# 1. build sharedmodule first
+npm --prefix sharedmodule/llmswitch-core run build
+
+# 2. build release variant
+npm run build:release
+
+# 3. install globally
+npm run install:release
+```
+
+## Verification
+
+- Never use `ROUTECODEX_VERIFY_SKIP=1`; golden samples are up-to-date.
+- CI runs `npm run build:dev && npm run build:release` with full verification.

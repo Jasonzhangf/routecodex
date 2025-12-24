@@ -58,10 +58,9 @@
   - 现状：HTTP 服务未调用。
 
 - Compatibility（格式转换）
-  - 已有：LM Studio 兼容模块与 JSON 规则驱动的变换引擎。
-    - `src/providers/compat/lmstudio-compatibility.ts:16`
+  - 已有：LM Studio 等兼容模块与 JSON 规则驱动的变换引擎（现全部驻留在 llmswitch-core compat profiles 中）。
 > ⚠️ 2025-12 更新：`src/providers/compat/*` 已下线；兼容行为现由 `sharedmodule/llmswitch-core/src/conversion/compat/` 提供，旧行号仅供历史排查参考。
-    - `src/modules/pipeline/utils/transformation-engine.ts`
+  - 历史辅助引擎：`src/modules/pipeline/utils/transformation-engine.ts`
   - 现状：HTTP 服务未调用。
 
 - Provider（标准 HTTP 通信、无格式转换）
@@ -157,7 +156,7 @@
 - 流水线（已实现但未接入 HTTP 路径）
   - BasePipeline 主链路：`src/modules/pipeline/core/base-pipeline.ts:119`
   - LLM Switch（OpenAI 直通）：`src/modules/pipeline/modules/llmswitch/openai-passthrough.ts:15`
-  - 兼容层（LM Studio）：`src/providers/compat/lmstudio-compatibility.ts:16`
+- 历史兼容层（LM Studio）：`src/providers/compat/lmstudio-compatibility.ts:16`
   - Provider（Chat/Responses）：`src/providers/core/runtime/chat-http-provider.ts:15`
 - 智能选择（格式识别/选择）：`src/server/http-server.ts` 提供的 `ConfigRequestClassifier` + RR 组合逻辑
 

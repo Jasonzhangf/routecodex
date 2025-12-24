@@ -2,6 +2,7 @@ import { Readable } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { Response } from 'express';
 import type { IncomingHttpHeaders } from 'http';
+import chalk from 'chalk';
 import type { HandlerContext, PipelineExecutionResult } from './types.js';
 import { mapErrorToHttp } from '../utils/http-error-mapper.js';
 import { logPipelineStage } from '../utils/stage-logger.js';
@@ -174,7 +175,8 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
   const formatted = formatErrorForConsole(error);
   const rawMeta = extractRawErrorMeta(error);
   const summary = rawMeta?.rawErrorSnippet ?? formatted.text;
-  console.error(`❌ [${endpoint}] request ${resolvedId} failed: ${summary}`);
+  const chalkError = typeof chalk?.redBright === 'function' ? chalk.redBright : (value: string) => value;
+  console.error(chalkError(`❌ [${endpoint}] request ${resolvedId} failed: ${summary}`));
   if (rawMeta) {
     const payload = {
       requestId: resolvedId,
@@ -182,7 +184,7 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
       rawError: rawMeta.rawError,
       rawErrorSnippet: rawMeta.rawErrorSnippet ?? summary
     };
-    console.error(`[http.error.meta] ${JSON.stringify(payload)}`);
+    console.error(chalkError(`[http.error.meta] ${JSON.stringify(payload)}`));
   }
 }
 

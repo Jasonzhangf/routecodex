@@ -7,7 +7,7 @@
 - 目标：将现有位于主包 `src/modules/pipeline/modules/llmswitch/*` 的逻辑，全面迁移/收敛到 `sharedmodule/llmswitch-core`，确保：
   - OpenAI Chat 与 Responses 输入/输出路径复用相同的转换与工具封装逻辑；
   - 工具引导、参数解析、结果封装在 sharedmodule 内统一实现；
-  - 与 GLM 的兼容处理限于 provider 兼容层（glm-compatibility），SSE 实现保持标准协议，不混入 provider 逻辑；
+  - 与 GLM 的兼容处理限于 sharedmodule 兼容层（`sharedmodule/llmswitch-core/src/conversion/compat` 中的 `chat:glm` profile），SSE 实现保持标准协议，不混入 provider 逻辑；
   - 删除主包内冗余/过时的 llmswitch 层，主包仅做协议对接与调用；
 - 边界：
   - 不改变既有业务语义与行为，严格遵循改造前逻辑，仅调整实现位置与依赖路径；
@@ -49,7 +49,7 @@
 - 统一实现位置：
   - Chat 出口构建在 sharedmodule，Responses 入/出同样复用 sharedmodule 的打包器；
 
-4) GLM 兼容层（仅在 provider 兼容中处理）
+4) GLM 兼容层（仅在 sharedmodule 兼容中处理）
 - Chat/Responses → GLM 请求映射：
   - 输出遵循 GLM 官方 schema（`message.content|null`、`message.tool_calls[].function.{name,arguments}`），`arguments` 仍为 JSON 字符串；
   - 去除强校验与字段裁剪；
@@ -57,7 +57,7 @@
 - GLM 响应 → OpenAI 映射：
   - 统一返回工具调用与文本，避免 “nrr/no response requested”；
   - SSE 维持标准事件序列；
-- 实现位置：`src/providers/compat/glm-compatibility.ts`
+- 实现位置（当前）：`sharedmodule/llmswitch-core/src/conversion/compat/profiles/chat-glm.json`
 
 5) 主包内引用与注册清理
 - 清除/替换主包对本地 llmswitch 的引入与注册：
@@ -103,4 +103,3 @@
 
 - 按阶段 A/B/C/D 逐步实施；
 - 每阶段结束 push，并提供样本/日志链接与变更说明，供下一步审批。
-

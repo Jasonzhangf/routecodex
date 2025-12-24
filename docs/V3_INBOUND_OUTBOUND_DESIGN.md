@@ -7,7 +7,7 @@
 | Stage | 说明 | 典型节点 |
 | --- | --- | --- |
 | **Inbound Conversion** | 解析入口协议（SSE→JSON、input codec），输出 canonical `StandardizedRequest` 与 `metadata`；不做治理。 | `sse-input`, `chat-input`, `responses-input`, `anthropic-input` |
-| **Process Stage (host)** | RouteCodex workflow 对 canonical JSON 做路由、兼容 patch；写入 `providerId/providerProtocol/processMode/stream`。| 现有虚拟路由器 + `src/providers/compat/*` |
+| **Process Stage (host)** | RouteCodex workflow 对 canonical JSON 做路由、兼容 patch；写入 `providerId/providerProtocol/processMode/stream`。| 现有虚拟路由器 + `sharedmodule/llmswitch-core/src/conversion/compat/*` |
 | **Outbound Conversion** | 在 host 兼容层之后、Provider HTTP 之前，根据 metadata 中的 provider 信息运行 `chat-process`/`response-process`，输出 provider payload/SSE。| `chat-process-node`, `response-process-node`, `openai-output`, `responses-output`, `sse-output` |
 
 ### 2. Pipeline 配置
