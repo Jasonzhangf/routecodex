@@ -1,0 +1,55 @@
+{
+  "version": "1.0.0",
+  "httpserver": {
+    "port": 5520,
+    "host": "127.0.0.1"
+  },
+  "virtualrouter": {
+    "providers": {
+      "iflow": {
+        "id": "iflow",
+        "enabled": true,
+        "type": "openai",
+        "providerType": "openai",
+        "baseURL": "https://apis.iflow.cn/v1",
+        "auth": {
+          "type": "iflow-oauth",
+          "tokenFile": "~/.routecodex/auth/iflow-oauth.json"
+        },
+        "models": {
+          "tstars2.0": {},
+          "qwen3-coder-plus": {},
+          "qwen3-coder": {},
+          "qwen3-max": {},
+          "qwen3-vl-plus": {},
+          "qwen3-max-preview": {},
+          "kimi-k2-0905": {},
+          "glm-4.6": {},
+          "glm-4.7": {},
+          "kimi-k2": {},
+          "deepseek-v3.2": {},
+          "deepseek-v3.1": {},
+          "deepseek-r1": {},
+          "deepseek-v3": {},
+          "qwen3-32b": {},
+          "qwen3-235b-a22b-thinking-2507": {},
+          "qwen3-235b-a22b-instruct": {},
+          "qwen3-235b": {},
+          "minimax-m2": {},
+          "minimax-m2.1": {}
+        },
+        "compatibilityProfile": "chat:iflow"
+      }
+    },
+    "routing": {
+      "default": [
+        "iflow.kimi-k2"
+      ],
+      "vision": [
+        "iflow.qwen3-vl-plus"
+      ],
+      "websearch": [],
+      "background": []
+    }
+  }
+}

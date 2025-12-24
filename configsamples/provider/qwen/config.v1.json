@@ -1,0 +1,34 @@
+{
+  "version": "1.0.0",
+  "httpserver": {
+    "port": 5521,
+    "host": "127.0.0.1"
+  },
+  "virtualrouter": {
+    "providers": {
+      "qwen": {
+        "id": "qwen",
+        "enabled": true,
+        "type": "openai",
+        "baseURL": "https://portal.qwen.ai/v1",
+        "compatibilityProfile": "chat:qwen",
+        "auth": {
+          "type": "qwen-oauth",
+          "tokenFile": "~/.routecodex/auth/qwen-oauth.json"
+        },
+        "models": {
+          "qwen3-coder-plus": {
+            "maxTokens": 64000,
+            "maxContext": 256000,
+            "supportsStreaming": true
+          }
+        }
+      }
+    },
+    "routing": {
+      "default": [
+        "qwen.qwen3-coder-plus"
+      ]
+    }
+  }
+}

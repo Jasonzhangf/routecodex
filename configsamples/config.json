@@ -1,0 +1,534 @@
+{
+  "version": "1.0.0",
+  "httpserver": {
+    "port": 5520,
+    "host": "0.0.0.0"
+  },
+  "virtualrouter": {
+    "providers": {
+      "glm": {
+        "id": "glm",
+        "enabled": true,
+        "type": "openai-standard",
+        "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
+        "compatibilityProfile": "chat:glm",
+        "models": {
+          "glm-4.7": {
+            "maxTokens": 128000,
+            "maxContext": 200000,
+            "supportsThinking": true,
+            "supportsStreaming": true
+          },
+          "glm-4.6v": {
+            "maxTokens": 128000,
+            "maxContext": 200000,
+            "supportsThinking": false,
+            "supportsStreaming": true
+          },
+          "glm-4.5-air": {
+            "supportsStreaming": true
+          }
+        },
+        "auth": {
+          "type": "apikey",
+          "apiKey": "YOUR_API_KEY_HERE"
+        }
+      },
+      "qwen": {
+        "id": "qwen",
+        "enabled": true,
+        "type": "openai",
+        "baseURL": "https://portal.qwen.ai/v1",
+        "compatibilityProfile": "chat:qwen",
+        "auth": {
+          "type": "qwen-oauth",
+          "tokenFile": "~/.routecodex/auth/qwen-oauth.json"
+        },
+        "models": {
+          "qwen3-coder-plus": {
+            "maxTokens": 64000,
+            "maxContext": 256000,
+            "supportsStreaming": true
+          }
+        }
+      },
+      "c4m": {
+        "id": "c4m",
+        "enabled": true,
+        "type": "responses",
+        "baseURL": "https://api-vip.codex-for.me/v1",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "YOUR_API_KEY_HERE"
+        },
+        "models": {
+          "gpt-5.1": {},
+          "gpt-5.1-codex": {},
+          "gpt-5.2-codex": {},
+          "gpt-5.2": {}
+        },
+        "responses": {
+          "process": "chat",
+          "streaming": "always"
+        },
+        "config": {
+          "responses": {
+            "process": "chat",
+            "streaming": "always"
+          }
+        },
+        "compatibilityProfile": "responses:c4m"
+      },
+      "kimi": {
+        "id": "kimi",
+        "enabled": true,
+        "type": "openai",
+        "baseURL": "https://api.kimi.com/coding/v1",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "YOUR_API_KEY_HERE"
+        },
+        "models": {
+          "kimi-for-coding": {
+            "supportsStreaming": true,
+            "maxTokens": 64000,
+            "maxContext": 256000
+          }
+        },
+        "headers": {
+          "User-Agent": "KimiCLI/1.0"
+        }
+      },
+      "iflow": {
+        "id": "iflow",
+        "enabled": true,
+        "type": "iflow",
+        "baseURL": "https://apis.iflow.cn/v1",
+        "compatibilityProfile": "chat:iflow",
+        "auth": {
+          "type": "iflow-oauth",
+          "tokenFile": "~/.routecodex/auth/iflow-oauth.json"
+        },
+        "models": {
+          "tstars2.0": {},
+          "qwen3-coder-plus": {},
+          "qwen3-coder": {},
+          "qwen3-max": {},
+          "qwen3-vl-plus": {},
+          "qwen3-max-preview": {},
+          "kimi-k2-0905": {},
+          "glm-4.6": {},
+          "glm-4.7": {},
+          "kimi-k2": {},
+          "kimi-k2-thinking": {},
+          "deepseek-v3.2": {},
+          "deepseek-v3.1": {},
+          "deepseek-r1": {},
+          "deepseek-v3": {},
+          "qwen3-32b": {},
+          "qwen3-235b-a22b-thinking-2507": {},
+          "qwen3-235b-a22b-instruct": {},
+          "qwen3-235b": {},
+          "minimax-m2": {},
+          "minimax-m2.1": {}
+        }
+      },
+      "tab": {
+        "id": "tab",
+        "enabled": true,
+        "type": "responses",
+        "baseURL": "https://api.tabcode.cc/openai",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "YOUR_API_KEY_HERE"
+        },
+        "models": {
+          "gpt-5.1": {},
+          "gpt-5.1-codex": {},
+          "gpt-5.2-codex": {},
+          "gpt-5.2": {}
+        },
+        "responses": {
+          "process": "chat",
+          "streaming": "always"
+        },
+        "config": {
+          "responses": {
+            "process": "chat",
+            "streaming": "always"
+          }
+        }
+      },
+      "crs": {
+        "id": "crs",
+        "enabled": true,
+        "type": "responses",
+        "baseURL": "https://dapi.micosoft.icu/openai",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "YOUR_API_KEY_HERE"
+        },
+        "models": {
+          "gpt-5.1": {},
+          "gpt-5.1-codex": {},
+          "gpt-5.2-codex": {},
+          "gpt-5.2": {}
+        },
+        "responses": {
+          "process": "chat",
+          "streaming": "always"
+        },
+        "config": {
+          "responses": {
+            "process": "chat",
+            "streaming": "always"
+          }
+        }
+      },
+      "gemini": {
+        "id": "gemini",
+        "enabled": true,
+        "type": "openai-standard",
+        "baseURL": "https://generativelanguage.googleapis.com",
+        "process": "chat",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "YOUR_API_KEY_HERE",
+          "headerName": "x-goog-api-key",
+          "prefix": ""
+        },
+        "models": {
+          "models/embedding-gecko-001": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.5-pro-preview-03-25": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.5-flash-preview-05-20": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.5-flash": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.5-flash-lite-preview-06-17": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.5-pro-preview-05-06": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.5-pro-preview-06-05": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.5-pro": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.0-flash-exp": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.0-flash": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.0-flash-001": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.0-flash-exp-image-generation": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.0-flash-lite-001": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.0-flash-lite": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.0-flash-lite-preview-02-05": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.0-flash-lite-preview": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.0-pro-exp": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.0-pro-exp-02-05": {
+            "supportsStreaming": true
+          },
+          "models/gemini-exp-1206": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.0-flash-thinking-exp-01-21": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.0-flash-thinking-exp": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.0-flash-thinking-exp-1219": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.5-flash-preview-tts": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.5-pro-preview-tts": {
+            "supportsStreaming": true
+          },
+          "models/learnlm-2.0-flash-experimental": {
+            "supportsStreaming": true
+          },
+          "models/gemma-3-1b-it": {
+            "supportsStreaming": true
+          },
+          "models/gemma-3-4b-it": {
+            "supportsStreaming": true
+          },
+          "models/gemma-3-12b-it": {
+            "supportsStreaming": true
+          },
+          "models/gemma-3-27b-it": {
+            "supportsStreaming": true
+          },
+          "models/gemma-3n-e4b-it": {
+            "supportsStreaming": true
+          },
+          "models/gemma-3n-e2b-it": {
+            "supportsStreaming": true
+          },
+          "models/gemini-flash-latest": {
+            "supportsStreaming": true
+          },
+          "models/gemini-flash-lite-latest": {
+            "supportsStreaming": true
+          },
+          "models/gemini-pro-latest": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.5-flash-lite": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.5-flash-image-preview": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.5-flash-image": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.5-flash-preview-09-2025": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.5-flash-lite-preview-09-2025": {
+            "supportsStreaming": true
+          },
+          "models/gemini-robotics-er-1.5-preview": {
+            "supportsStreaming": true
+          },
+          "models/gemini-2.5-computer-use-preview-10-2025": {
+            "supportsStreaming": true
+          }
+        }
+      },
+      "modelscope": {
+        "id": "modelscope",
+        "enabled": true,
+        "type": "openai",
+        "baseURL": "https://api-inference.modelscope.cn/v1",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "YOUR_API_KEY_HERE"
+        },
+        "models": {
+          "deepseek-ai/DeepSeek-R1-0528": {
+            "supportsStreaming": true,
+            "maxTokens": 32000,
+            "maxContext": 128000
+          },
+          "deepseek-ai/DeepSeek-V3.2-Exp": {
+            "supportsStreaming": true,
+            "maxTokens": 64000,
+            "maxContext": 128000
+          },
+          "MiniMax/MiniMax-M2": {
+            "supportsStreaming": true
+          },
+          "PaddlePaddle/ERNIE-4.5-300B-A47B-PT": {
+            "supportsStreaming": true
+          },
+          "PaddlePaddle/ERNIE-4.5-VL-28B-A3B-PT": {
+            "supportsStreaming": true
+          },
+          "Qwen/QVQ-72B-Preview": {
+            "supportsStreaming": true
+          },
+          "Qwen/Qwen-Image-Edit": {
+            "supportsStreaming": true
+          },
+          "Qwen/Qwen3-235B-A22B": {
+            "supportsStreaming": true
+          },
+          "Qwen/Qwen3-235B-A22B-Instruct-2507": {
+            "supportsStreaming": true,
+            "maxTokens": 64000,
+            "maxContext": 256000
+          },
+          "Qwen/Qwen3-235B-A22B-Thinking-2507": {
+            "supportsStreaming": true,
+            "maxTokens": 64000,
+            "maxContext": 256000
+          },
+          "Qwen/Qwen3-Coder-480B-A35B-Instruct": {
+            "supportsStreaming": true,
+            "maxTokens": 64000,
+            "maxContext": 256000
+          },
+          "Qwen/Qwen3-Next-80B-A3B-Instruct": {
+            "supportsStreaming": true
+          },
+          "Qwen/Qwen3-Next-80B-A3B-Thinking": {
+            "supportsStreaming": true
+          },
+          "Qwen/Qwen3-VL-235B-A22B-Instruct": {
+            "supportsStreaming": true
+          },
+          "Qwen/QwQ-32B": {
+            "supportsStreaming": true
+          },
+          "ZhipuAI/GLM-4.5": {
+            "supportsStreaming": true
+          },
+          "ZhipuAI/GLM-4.6": {
+            "supportsStreaming": true,
+            "maxTokens": 128000,
+            "maxContext": 200000,
+            "supportsThinking": true
+          }
+        }
+      },
+      "lmstudio": {
+        "id": "lmstudio",
+        "enabled": true,
+        "type": "responses",
+        "baseURL": "http://127.0.0.1:1234/v1",
+        "compatibilityProfile": "chat:lmstudio",
+        "models": {
+          "minimax-m2-mlx@4bit": {
+            "supportsStreaming": true
+          },
+          "minimax-m2-mlx@8bit": {
+            "supportsStreaming": true
+          },
+          "mradermacher/vibethinker-1.5b-gguf/._vibethinker-1.5b.q8_0.gguf": {
+            "supportsStreaming": true
+          },
+          "mradermacher/vibethinker-1.5b-gguf/vibethinker-1.5b.q8_0.gguf": {
+            "supportsStreaming": true
+          },
+          "aigotahole/sensenova-si-internvl3-8b-q5_k_m-gguf/._sensenova-si-internvl3-8b-q5_k_m.gguf": {
+            "supportsStreaming": true
+          },
+          "aigotahole/sensenova-si-internvl3-8b-q5_k_m-gguf/sensenova-si-internvl3-8b-q5_k_m.gguf": {
+            "supportsStreaming": true
+          },
+          "text-embedding-nomic-embed-text-v1.5": {
+            "supportsStreaming": true
+          },
+          "mradermacher/ui-ins-32b-gguf/._ui-ins-32b.q4_k_s.gguf": {
+            "supportsStreaming": true
+          },
+          "mradermacher/ui-ins-32b-gguf/ui-ins-32b.q4_k_s.gguf": {
+            "supportsStreaming": true
+          },
+          "mradermacher/ui-ins-7b-gguf/._ui-ins-7b.q4_k_s.gguf": {
+            "supportsStreaming": true
+          },
+          "mradermacher/ui-ins-7b-gguf/ui-ins-7b.q4_k_s.gguf": {
+            "supportsStreaming": true
+          },
+          "kimi-linear-48b-a3b-instruct": {
+            "supportsStreaming": true
+          },
+          "glm-4.6": {
+            "maxTokens": 128000,
+            "maxContext": 200000,
+            "supportsThinking": true,
+            "supportsStreaming": true
+          },
+          "quantstack/internvl3_5-gpt-oss-20b-a4b-preview-gguf/._internvl3_5-gpt-oss-20b-a4b-preview-q4_0.gguf": {
+            "supportsStreaming": true
+          },
+          "quantstack/internvl3_5-gpt-oss-20b-a4b-preview-gguf/internvl3_5-gpt-oss-20b-a4b-preview-q4_0.gguf": {
+            "supportsStreaming": true
+          },
+          "qwen3-next-80b-a3b-thinking": {
+            "supportsStreaming": true
+          },
+          "gpt-oss-20b-mlx": {
+            "supportsStreaming": true
+          },
+          "bge-small-en-v1.5": {
+            "supportsStreaming": true
+          }
+        },
+        "responses": {
+          "process": "chat",
+          "streaming": "always"
+        },
+        "auth": {
+          "type": "apikey",
+          "apiKey": "YOUR_API_KEY_HERE"
+        },
+        "config": {
+          "responses": {
+            "streaming": "always"
+          }
+        }
+      },
+      "mimo": {
+        "id": "mimo",
+        "enabled": true,
+        "type": "openai-standard",
+        "baseURL": "https://api.xiaomimimo.com/v1",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "YOUR_API_KEY_HERE"
+        },
+        "models": {
+          "mimo-v2-flash": {
+            "supportsStreaming": true
+          }
+        }
+      }
+    },
+    "routing": {
+      "default": [
+        "glm.glm-4.7",
+        "tab.gpt-5.2-codex",
+        "iflow.kimi-k2"
+      ],
+      "coding": [
+        "glm.glm-4.7",
+        "iflow.kimi-k2"
+      ],
+      "longcontext": [
+        "tab.gpt-5.1-codex",
+        "crs.gpt-5.1"
+      ],
+      "thinking": [
+        "crs.gpt-5.1-codex",
+        "tab.gpt-5.2-codex"
+      ],
+      "vision": [
+        "iflow.qwen3-vl-plus",
+        "glm.glm-4.7"
+      ],
+      "websearch": [
+        "iflow.kimi-k2",
+        "qwen.qwen3-coder-plus"
+      ],
+      "background": [
+        "glm.glm-4.7",
+        "qwen.qwen3-coder-plus"
+      ],
+      "tools": [
+        "glm.glm-4.7",
+        "qwen.qwen3-coder-plus",
+        "iflow.kimi-k2"
+      ]
+    }
+  }
+}

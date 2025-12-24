@@ -1,0 +1,107 @@
+{
+  "version": "1.0.0",
+  "httpserver": {
+    "port": 5555,
+    "host": "0.0.0.0"
+  },
+  "virtualrouter": {
+    "providers": {
+      "lmstudio": {
+        "id": "lmstudio",
+        "enabled": true,
+        "type": "responses",
+        "baseURL": "http://127.0.0.1:9550/v1",
+        "compatibilityProfile": "chat:lmstudio",
+        "models": {
+          "minimax-m2-mlx@4bit": {
+            "supportsStreaming": true
+          },
+          "minimax-m2-mlx@8bit": {
+            "supportsStreaming": true
+          },
+          "mradermacher/vibethinker-1.5b-gguf/._vibethinker-1.5b.q8_0.gguf": {
+            "supportsStreaming": true
+          },
+          "mradermacher/vibethinker-1.5b-gguf/vibethinker-1.5b.q8_0.gguf": {
+            "supportsStreaming": true
+          },
+          "aigotahole/sensenova-si-internvl3-8b-q5_k_m-gguf/._sensenova-si-internvl3-8b-q5_k_m.gguf": {
+            "supportsStreaming": true
+          },
+          "aigotahole/sensenova-si-internvl3-8b-q5_k_m-gguf/sensenova-si-internvl3-8b-q5_k_m.gguf": {
+            "supportsStreaming": true
+          },
+          "text-embedding-nomic-embed-text-v1.5": {
+            "supportsStreaming": true
+          },
+          "mradermacher/ui-ins-32b-gguf/._ui-ins-32b.q4_k_s.gguf": {
+            "supportsStreaming": true
+          },
+          "mradermacher/ui-ins-32b-gguf/ui-ins-32b.q4_k_s.gguf": {
+            "supportsStreaming": true
+          },
+          "mradermacher/ui-ins-7b-gguf/._ui-ins-7b.q4_k_s.gguf": {
+            "supportsStreaming": true
+          },
+          "mradermacher/ui-ins-7b-gguf/ui-ins-7b.q4_k_s.gguf": {
+            "supportsStreaming": true
+          },
+          "kimi-linear-48b-a3b-instruct": {
+            "supportsStreaming": true
+          },
+          "glm-4.6": {
+            "maxTokens": 128000,
+            "maxContext": 200000,
+            "supportsThinking": true,
+            "supportsStreaming": true
+          },
+          "quantstack/internvl3_5-gpt-oss-20b-a4b-preview-gguf/._internvl3_5-gpt-oss-20b-a4b-preview-q4_0.gguf": {
+            "supportsStreaming": true
+          },
+          "quantstack/internvl3_5-gpt-oss-20b-a4b-preview-gguf/internvl3_5-gpt-oss-20b-a4b-preview-q4_0.gguf": {
+            "supportsStreaming": true
+          },
+          "qwen3-next-80b-a3b-thinking": {
+            "supportsStreaming": true
+          },
+          "gpt-oss-20b-mlx": {
+            "supportsStreaming": true
+          },
+          "bge-small-en-v1.5": {
+            "supportsStreaming": true
+          }
+        },
+        "auth": {
+          "type": "apikey",
+          "apiKey": "YOUR_API_KEY_HERE"
+        },
+        "responses": {
+          "process": "chat",
+          "streaming": "auto"
+        }
+      }
+    },
+    "routing": {
+      "default": [
+        "lmstudio.gpt-oss-20b-mlx"
+      ],
+      "coding": [
+        "lmstudio.gpt-oss-20b-mlx"
+      ],
+      "longcontext": [
+        "lmstudio.gpt-oss-20b-mlx"
+      ],
+      "thinking": [
+        "lmstudio.gpt-oss-20b-mlx"
+      ],
+      "tools": [
+        "lmstudio.gpt-oss-20b-mlx"
+      ],
+      "vision": [
+        "lmstudio.gpt-oss-20b-mlx"
+      ],
+      "websearch": [],
+      "background": []
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "version": "1.0.0",
+  "virtualrouter": {
+    "providers": {
+      "glm": {
+        "id": "glm",
+        "enabled": true,
+        "type": "openai-standard",
+        "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "YOUR_API_KEY_HERE"
+        },
+        "models": {
+          "glm-4.5": {
+            "supportsStreaming": true
+          },
+          "glm-4.5-air": {
+            "supportsStreaming": true
+          },
+          "glm-4.6": {
+            "maxTokens": 128000,
+            "maxContext": 200000,
+            "supportsThinking": true,
+            "supportsStreaming": true
+          },
+          "glm-4.7": {
+            "maxTokens": 128000,
+            "maxContext": 200000,
+            "supportsThinking": true,
+            "supportsStreaming": true
+          },
+          "glm-4.6v": {
+            "maxTokens": 128000,
+            "maxContext": 200000,
+            "supportsStreaming": true
+          }
+        },
+        "compatibilityProfile": "chat:glm"
+      }
+    },
+    "routing": {
+      "default": [
+        "glm.glm-4.7"
+      ],
+      "vision": [
+        "glm.glm-4.6v"
+      ]
+    }
+  },
+  "httpserver": {
+    "host": "127.0.0.1",
+    "port": 5520
+  }
+}

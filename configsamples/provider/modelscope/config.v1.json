@@ -1,0 +1,92 @@
+{
+  "version": "1.0.0",
+  "virtualrouter": {
+    "providers": {
+      "modelscope": {
+        "id": "modelscope",
+        "enabled": true,
+        "type": "openai",
+        "baseURL": "https://api-inference.modelscope.cn/v1",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "YOUR_API_KEY_HERE"
+        },
+        "models": {
+          "deepseek-ai/DeepSeek-R1-0528": {
+            "supportsStreaming": true,
+            "maxTokens": 32000,
+            "maxContext": 128000
+          },
+          "deepseek-ai/DeepSeek-V3.2-Exp": {
+            "supportsStreaming": true,
+            "maxTokens": 64000,
+            "maxContext": 128000
+          },
+          "MiniMax/MiniMax-M2": {
+            "supportsStreaming": true
+          },
+          "PaddlePaddle/ERNIE-4.5-300B-A47B-PT": {
+            "supportsStreaming": true
+          },
+          "PaddlePaddle/ERNIE-4.5-VL-28B-A3B-PT": {
+            "supportsStreaming": true
+          },
+          "Qwen/QVQ-72B-Preview": {
+            "supportsStreaming": true
+          },
+          "Qwen/Qwen-Image-Edit": {
+            "supportsStreaming": true
+          },
+          "Qwen/Qwen3-235B-A22B": {
+            "supportsStreaming": true
+          },
+          "Qwen/Qwen3-235B-A22B-Instruct-2507": {
+            "supportsStreaming": true,
+            "maxTokens": 64000,
+            "maxContext": 256000
+          },
+          "Qwen/Qwen3-235B-A22B-Thinking-2507": {
+            "supportsStreaming": true,
+            "maxTokens": 64000,
+            "maxContext": 256000
+          },
+          "Qwen/Qwen3-Coder-480B-A35B-Instruct": {
+            "supportsStreaming": true,
+            "maxTokens": 64000,
+            "maxContext": 256000
+          },
+          "Qwen/Qwen3-Next-80B-A3B-Instruct": {
+            "supportsStreaming": true
+          },
+          "Qwen/Qwen3-Next-80B-A3B-Thinking": {
+            "supportsStreaming": true
+          },
+          "Qwen/Qwen3-VL-235B-A22B-Instruct": {
+            "supportsStreaming": true
+          },
+          "Qwen/QwQ-32B": {
+            "supportsStreaming": true
+          },
+          "ZhipuAI/GLM-4.5": {
+            "supportsStreaming": true
+          },
+          "ZhipuAI/GLM-4.6": {
+            "supportsStreaming": true,
+            "maxTokens": 128000,
+            "maxContext": 200000,
+            "supportsThinking": true
+          }
+        }
+      }
+    },
+    "routing": {
+      "default": [
+        "modelscope.Qwen/Qwen3-Coder-480B-A35B-Instruct"
+      ]
+    }
+  },
+  "httpserver": {
+    "port": 5520,
+    "host": "127.0.0.1"
+  }
+}

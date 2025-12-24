@@ -1,0 +1,42 @@
+{
+  "version": "1.0.0",
+  "httpserver": {
+    "port": 5520,
+    "host": "127.0.0.1"
+  },
+  "virtualrouter": {
+    "providers": {
+      "crs": {
+        "id": "crs",
+        "enabled": true,
+        "type": "responses",
+        "baseURL": "https://dapi.micosoft.icu/openai",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "YOUR_API_KEY_HERE"
+        },
+        "models": {
+          "gpt-5.1": {},
+          "gpt-5.1-codex": {},
+          "gpt-5.2-codex": {},
+          "gpt-5.2": {}
+        },
+        "responses": {
+          "process": "chat",
+          "streaming": "always"
+        },
+        "config": {
+          "responses": {
+            "process": "chat",
+            "streaming": "always"
+          }
+        }
+      }
+    },
+    "routing": {
+      "default": [
+        "crs.gpt-5.1"
+      ]
+    }
+  }
+}

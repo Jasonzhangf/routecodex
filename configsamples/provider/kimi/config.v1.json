@@ -1,0 +1,37 @@
+{
+  "version": "1.0.0",
+  "virtualrouter": {
+    "providers": {
+      "kimi": {
+        "id": "kimi",
+        "enabled": true,
+        "type": "openai",
+        "baseURL": "https://api.kimi.com/coding/v1",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "YOUR_API_KEY_HERE"
+        },
+        "models": {
+          "kimi-for-coding": {
+            "supportsStreaming": true,
+            "maxTokens": 64000,
+            "maxContext": 256000
+          }
+        },
+        "headers": {
+          "User-Agent": "KimiCLI/1.0"
+        },
+        "process": "chat"
+      }
+    },
+    "routing": {
+      "default": [
+        "kimi.kimi-for-coding"
+      ]
+    }
+  },
+  "httpserver": {
+    "port": 5522,
+    "host": "127.0.0.1"
+  }
+}

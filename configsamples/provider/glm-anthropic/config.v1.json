@@ -1,0 +1,41 @@
+{
+  "version": "1.0.0",
+  "httpserver": {
+    "port": 5524,
+    "host": "127.0.0.1"
+  },
+  "virtualrouter": {
+    "providers": {
+      "glm-anthropic": {
+        "id": "glm",
+        "enabled": true,
+        "type": "anthropic",
+        "baseURL": "https://open.bigmodel.cn/api/anthropic",
+        "process": "chat",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "YOUR_API_KEY_HERE"
+        },
+        "models": {
+          "glm-4.5": {
+            "supportsStreaming": true
+          },
+          "glm-4.5-air": {
+            "supportsStreaming": true
+          },
+          "glm-4.6": {
+            "maxTokens": 128000,
+            "maxContext": 200000,
+            "supportsThinking": true,
+            "supportsStreaming": true
+          }
+        }
+      }
+    },
+    "routing": {
+      "default": [
+        "glm-anthropic.glm-4.6"
+      ]
+    }
+  }
+}

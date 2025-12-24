@@ -1,0 +1,31 @@
+{
+  "version": "1.0.0",
+  "httpserver": {
+    "host": "127.0.0.1",
+    "port": 5545
+  },
+  "virtualrouter": {
+    "providers": {
+      "mimo": {
+        "id": "mimo",
+        "enabled": true,
+        "type": "openai-standard",
+        "baseURL": "https://api.xiaomimimo.com/v1",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "YOUR_API_KEY_HERE"
+        },
+        "models": {
+          "mimo-v2-flash": {
+            "supportsStreaming": true
+          }
+        }
+      }
+    },
+    "routing": {
+      "default": [
+        "mimo.mimo-v2-flash"
+      ]
+    }
+  }
+}
