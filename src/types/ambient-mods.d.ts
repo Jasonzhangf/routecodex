@@ -27,16 +27,29 @@ declare module 'rcc-debugcenter' {
 
 declare module 'rcc-errorhandling' {
   export type ErrorContext = {
-    error: string | Error;
+    error: string | Error | Record<string, unknown>;
     source: string;
     severity: 'low' | 'medium' | 'high' | 'critical' | string;
     timestamp: number;
     moduleId?: string;
     context?: Record<string, unknown>;
   };
+  export type ErrorResponse = {
+    success: boolean;
+    message: string;
+    actionTaken?: string;
+    timestamp: number;
+    errorId?: string;
+  };
   export class ErrorHandlingCenter {
+    constructor(info?: Record<string, unknown>);
     initialize(): Promise<void>;
-    handleError(_context: UnknownObject): Promise<void>;
+    handleError(context: ErrorContext): Promise<ErrorResponse>;
+    handleErrorAsync(context: ErrorContext): void;
+    handleBatchErrors(contexts: ErrorContext[]): Promise<ErrorResponse[]>;
     destroy(): Promise<void>;
+    getHealth(): Record<string, unknown>;
+    getStats(): Record<string, unknown>;
+    resetErrorCount(): void;
   }
 }

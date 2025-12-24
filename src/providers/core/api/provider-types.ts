@@ -135,6 +135,9 @@ export interface ProviderRuntimeProfile {
   defaultModel?: string;
   streaming?: 'auto' | 'always' | 'never';
   modelStreaming?: Record<string, 'auto' | 'always' | 'never'>;
+  modelContextTokens?: Record<string, number>;
+  defaultContextTokens?: number;
+  maxContextTokens?: number;
   responsesConfig?: {
     toolCallIdStyle?: string;
     streaming?: 'auto' | 'always' | 'never';

@@ -56,6 +56,7 @@ import type { ProviderErrorRuntimeMetadata } from '@jsonstudio/llms/dist/router/
 import { writeClientSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
 import { createServerColoredLogger } from './colored-logger.js';
 import { formatValueForConsole } from '../../../utils/logger.js';
+import { QuietErrorHandlingCenter } from '../../../error-handling/quiet-error-handling-center.js';
 
 type ConvertProviderResponseFn = (options: {
   providerProtocol: string;
@@ -150,7 +151,7 @@ export class RouteCodexHttpServer {
   constructor(config: ServerConfigV2) {
     this.config = config;
     this.app = express();
-    this.errorHandling = new ErrorHandlingCenter();
+    this.errorHandling = new QuietErrorHandlingCenter();
     this.stageLoggingEnabled = isStageLoggingEnabled();
     this.repoRoot = resolveRepoRoot(import.meta.url);
     const envFlag = (process.env.ROUTECODEX_USE_HUB_PIPELINE || '').trim().toLowerCase();
@@ -190,10 +191,13 @@ export class RouteCodexHttpServer {
     if (!this.errorHandlingShim) {
       this.errorHandlingShim = {
         handleError: async (errorPayload, contextPayload) => {
-          const sanitizedError = formatErrorForErrorCenter(errorPayload);
-          const sanitizedContext = formatErrorForErrorCenter(contextPayload);
+          const sanitizedError = formatErrorForErrorCenter(errorPayload) as string | Error | Record<string, unknown>;
+          const sanitizedContext = formatErrorForErrorCenter(contextPayload) as Record<string, unknown> | undefined;
           await this.errorHandling.handleError({
             error: sanitizedError,
+            source: 'pipeline',
+            severity: 'medium',
+            timestamp: Date.now(),
             context: sanitizedContext
           });
         },

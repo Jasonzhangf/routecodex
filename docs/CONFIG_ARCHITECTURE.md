@@ -52,8 +52,8 @@ VirtualRouterArtifacts (virtualRouter + targetRuntime)
         ],
         "models": {
           "gpt-4": {
-            "maxContext": 128000,  // 可选，不配置使用默认值
-            "maxTokens": 32000     // 可选，不配置使用默认值
+            "maxContextTokens": 128000,  // 可选（tokens），不配置使用默认 200000
+            "maxTokens": 32000           // 可选，不配置使用默认值
           }
         }
       }
@@ -83,6 +83,18 @@ VirtualRouterArtifacts (virtualRouter + targetRuntime)
 - 取值 `passthrough`：RouteCodex 仅负责路由/鉴权/日志，**请求与响应会原样透传**。为了避免协议错配，要求入口协议必须与 provider 类型一致（例如 providerType=`responses` 只能在 `/v1/responses` 入口透传），否则启动时直接抛错。
 - Passthrough 模式仍然会写入 `client-request` / `provider-request` / `provider-response` 快照，便于审计，但不会再注入模型、stream、instruction 等治理字段。
 
+#### 2.1.2 `contextRouting` 运行策略
+
+`virtualrouter.contextRouting` 用于告诉引擎如何在“上下文接近耗尽”时调整路由。字段如下：
+
+| 字段 | 含义 | 默认值 |
+|------|------|--------|
+| `warnRatio` | 当 `estimatedTokens / maxContextTokens` 高于该阈值时，默认池被视为“紧张”；路由会优先尝试 `fallbackRoute`| `0.9` |
+| `fallbackRoute` | 尝试升级上下文模型时要命中的路由（如 `longcontext`）。若配置为空或该路由无 provider，则保持原路由 | `longcontext`（若存在） |
+| `hardLimit` | 为 `true` 时禁止使用 `maxContextTokens` 以内无法满足的 provider（即拒绝 overflow 候选）| `false` |
+
+> `maxContextTokens` 由 provider 模型配置决定，未显式配置时默认为 **200000 tokens**（tiktoken 估算值）。旧字段 `maxContext` 仍支持，但建议迁移到 `maxContextTokens`。
+
 ### 2.2 系统模块默认 (./config/modules.json)
 
 ```json
@@ -96,7 +108,7 @@ VirtualRouterArtifacts (virtualRouter + targetRuntime)
         "inputProtocol": "openai",
         "outputProtocol": "openai",
         "userConfigDefaults": {
-          "maxContext": 128000,
+          "maxContextTokens": 128000,
           "maxTokens": 32000
         }
       }
@@ -166,7 +178,7 @@ interface AuthFileResolver {
 ```typescript
 // 用户配置 + 系统默认值 = 完整配置
 interface ModelConfig {
-  maxContext: number;  // 用户配置或系统默认(128000)
+  maxContextTokens: number;  // 用户配置或系统默认 (200000 tokens)
   maxTokens: number;   // 用户配置或系统默认(32000)
 }
 ```
@@ -225,7 +237,7 @@ interface PipelineConfigs {
       "baseURL": "https://api.openai.com/v1"
     },
     "model": {
-      "maxContext": 128000,
+      "maxContextTokens": 128000,
       "maxTokens": 32000
     },
     "keyConfig": {

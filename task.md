@@ -83,3 +83,44 @@ Simplify `HttpTransportProvider` by splitting HTTP request phases into focused h
 5. **Tests & Verification**
    - [ ] After each refactor milestone, run `npm run build` (release) and re-link `@jsonstudio/llms`.
    - [ ] Run targeted smoke tests (`npm run verify:e2e-toolcall`, sample `/v1/responses` requests) to ensure models propagate correctly and retries happen.
+
+---
+
+# Task: Virtual Router Context Capacity Management
+
+## Goal
+
+Ensure virtual router respects each provider/model's real context limit. When a request approaches/exceeds that limit, routing automatically prefers larger-context providers or fallback routes, preventing overflow errors while honoring the “config is the single source of truth” rule.
+
+## Constraints
+
+- Streaming flags remain config-driven; virtual router is the sole component allowed to mutate request `stream`.
+- Provider layer must stay transport-only; context capacity logic lives entirely inside llmswitch-core virtual router.
+- Default context limit is 200 000 tokens (tiktoken-based). Models with different limits must declare `maxContextTokens` in config.
+
+## Plan
+
+1. Capture requirements & defaults
+   - [ ] Document the default 200k-token behavior and how modules/config overrides apply.
+   - [ ] Define new configuration surface (`virtualrouter.providers.*.models.*.maxContextTokens`, `virtualrouter.contextRouting.*`).
+
+2. Bootstrap/runtime wiring
+   - [ ] Extend `bootstrapVirtualRouterConfig` to read `maxContextTokens` (fallback to 200k) and inject into `ProviderProfile`/`ProviderRuntimeProfile`.
+   - [ ] Propagate `maxContextTokens` through `ProviderRegistry` and `TargetMetadata`.
+
+3. ContextAdvisor implementation
+   - [ ] Add a reusable advisor that classifies providers into safe/risky/overflow groups based on `estimatedTokens` ratio vs. `maxContextTokens`.
+   - [ ] Make thresholds configurable (`warnRatio`, optional `hardLimit`, `fallbackRoute`).
+
+4. Integrate into `VirtualRouterEngine.selectProvider`
+   - [ ] Filter each route's pool via ContextAdvisor before invoking load balancer.
+   - [ ] When a pool exhausts safe options, fall back to risky providers; if still empty, switch to fallback route (e.g., `longcontext`) if available.
+   - [ ] Enrich diagnostics/logging with usage ratio context.
+
+5. Tests & docs
+   - [ ] Add unit tests covering safe/risky/fallback scenarios and ensuring backwards compatibility when configs omit `maxContextTokens`.
+   - [ ] Update relevant docs (virtual router config guide, release notes) to describe the new knobs and defaults.
+
+## Execution Log
+
+- 2025-12-24: Drafted plan and constraints for virtual router context management.

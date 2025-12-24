@@ -172,10 +172,31 @@ export function logRequestComplete(endpoint: string, requestId: string, status: 
 export function logRequestError(endpoint: string, requestId: string, error: unknown): void {
   const resolvedId = formatRequestId(requestId);
   const formatted = formatErrorForConsole(error);
-  console.error(`❌ [${endpoint}] request ${resolvedId} failed: ${formatted.text}`);
-  if (runtimeFlags.verboseErrors && error instanceof Error && typeof error.stack === 'string') {
-    console.debug(error.stack);
+  const rawMeta = extractRawErrorMeta(error);
+  const summary = rawMeta?.rawErrorSnippet ?? formatted.text;
+  console.error(`❌ [${endpoint}] request ${resolvedId} failed: ${summary}`);
+  if (rawMeta) {
+    const payload = {
+      requestId: resolvedId,
+      endpoint,
+      rawError: rawMeta.rawError,
+      rawErrorSnippet: rawMeta.rawErrorSnippet ?? summary
+    };
+    console.error(`[http.error.meta] ${JSON.stringify(payload)}`);
   }
+}
+
+function extractRawErrorMeta(error: unknown): { rawError?: string; rawErrorSnippet?: string } | null {
+  if (!error || typeof error !== 'object') {
+    return null;
+  }
+  const bag = error as Record<string, unknown>;
+  const rawError = typeof bag.rawError === 'string' ? bag.rawError : undefined;
+  const rawErrorSnippet = typeof bag.rawErrorSnippet === 'string' ? bag.rawErrorSnippet : undefined;
+  if (!rawError && !rawErrorSnippet) {
+    return null;
+  }
+  return { rawError, rawErrorSnippet };
 }
 
 export async function respondWithPipelineError(

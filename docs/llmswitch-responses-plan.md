@@ -11,6 +11,9 @@
 - Refine `llmswitch-response-chat.ts` to handle request normalization, tool mapping, and SSE events.
 - Implement streaming parser for Responses events (output_text/tool calls) and map to chat deltas.
 - Ensure round-trip conversion retains instructions, include/store flags, metadata.
+- Host 维护 `store/include` 字段但根据 target protocol 决定是否透传：若 client → provider 仍是官方 `/v1/responses`，所有状态托管字段原样转发并依赖 upstream 存档；若 target 为其它协议（OpenAI Chat、Anthropic、Gemini 等），payload 中清理这些字段，由 host 的 `responsesConversationStore` 负责恢复上下文/工具结果。
+- `submit_tool_outputs` 有两套路径：官方 Responses 端直接透传，不做本地拼装；非 Responses 端从 `responsesConversationStore.resumeConversation()` 取回 base payload + tool outputs，重新构造下一轮请求后发送。
+- 为确保官方 Responses 的两段请求命中同一 provider，resume 流程需向 Virtual Router 传递 sticky key（如 `responsesResume.previousRequestId`）以便 RouteLoadBalancer 使用 sticky 机制锁定初次 provider。
 - Capture request context per `requestId` for mapping responses.
 - Add metadata annotations (`entryProtocol`, `targetProtocol`).
 
