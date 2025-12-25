@@ -1,0 +1,67 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.274",
+    "buildTime": "2025-12-24T08:01:14.177Z",
+    "entryEndpoint": "/v1/messages",
+    "clientRequestId": "anthropic-messages-unknown-unknown-20251224T160111468-047"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "application/json",
+    "User-Agent": "claude-cli/2.0.76 (external, cli)",
+    "session_id": "codex_cli_session_anthropic-messages-iflow_key1_kimi-_0a3af4f9e1",
+    "conversation_id": "codex_cli_conversation_anthropic-messages-iflow_key1__01c5de986e"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694b9dc86d1b90a78befa975",
+      "object": "chat.completion",
+      "created": 1766563272,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 29536,
+        "completion_tokens": 25,
+        "total_tokens": 29561
+      },
+      "extend_fields": {
+        "traceId": "212c393517665632717402481e0ffd",
+        "requestId": "c8de4db1750d2f9f1aee5fa6f9d5f251"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "stop",
+          "message": {
+            "role": "assistant",
+            "content": "当前目录中只有 `focus_watcher.py` 文件，系统会自动重置到项目根目录，这是系统设置。"
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:01:14 GMT",
+      "eagleeye-traceid": "212c393517665632717402481e0ffd",
+      "s-brt": "2314",
+      "s-rt": "2422",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "anthropic-messages-unknown-unknown-20251225T092023-006"
+}

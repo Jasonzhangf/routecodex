@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T11:03:11.474Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T190310374-046"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "用户说必须全部是 ESM，但这里看到有 `bootstrap.cjs`。让我查看一下。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cat apps/floating-panel/bootstrap.cjs\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042383915219011951",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766487791,
+      "id": "20251223190310b58d25b49ad14428",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223190310b58d25b49ad14428",
+      "usage": {
+        "completion_tokens": 41,
+        "prompt_tokens": 26444,
+        "prompt_tokens_details": {
+          "cached_tokens": 26001
+        },
+        "total_tokens": 26485
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 11:03:11 GMT",
+      "set-cookie": "acw_tc=ac11000117664877904796006ee21fd01449090b20e307f7a663f2ff1ba446;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223190310b58d25b49ad14428"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-019"
+}

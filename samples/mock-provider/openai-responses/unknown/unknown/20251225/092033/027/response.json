@@ -1,0 +1,60 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:38:38.818Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T203825375-038"
+  },
+  "url": "https://api.tabcode.cc/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****d731a8",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_06e6648805e0576401694a8d486b08819a9468ec2223de4d3a",
+      "object": "response",
+      "created_at": 1766493512,
+      "status": "completed",
+      "model": "gpt-5.2-codex",
+      "temperature": 1,
+      "top_p": 0.98,
+      "metadata": {},
+      "output": [
+        {
+          "id": "msg_06e6648805e0576401694a8d4a5984819aac545918e86db3d4",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "窗口“狂闪”是因为之前前端拖拽逻辑对 `window` 调用了 `getBoundingClientRect`/`style`，在 Electron 中这些 API 不存在，导致异常不断冒泡；同时主进程 `moved` 里高频 log 也会放大抖动。我已经做了两点修复：  \n1) 去掉渲染层的拖拽逻辑（用系统窗口拖拽/缩放即可）。  \n2) 降低移动时日志噪音。\n\n你现在可以直接用 headful 启动命令（不要传 `--headless false`，这是布尔开关）：\n```bash\nnode scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com\n```\n\n如果还在“狂闪”，请确认你拖拽的是窗口标题栏（系统拖拽），不是自定义拖拽区域。需要我再加 `-webkit-app-region: drag` 的无闪烁方案吗？"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 34897,
+        "input_tokens_details": {
+          "cached_tokens": 33664
+        },
+        "output_tokens": 226,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 35123
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092033-027"
+}

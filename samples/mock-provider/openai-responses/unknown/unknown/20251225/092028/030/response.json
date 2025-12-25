@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.278",
+    "buildTime": "2025-12-24T11:18:58.395Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T191844878-170"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "根据你的要求，我已制定以下实施计划：\n\n## 多Token支持实施计划\n\n### 1. 确认auth目录扫描与命名规范实现位置\n- 在现有的OAuth认证流程中新增iFlow token扫描器\n- 支持命名模式：`iflow-oauth-<序号>-alias`，使用时忽略alias部分\n- 扫描`~/.routecodex/auth/`目录下所有匹配该模式的文件\n\n### 2. VirtualRouter bootstrap阶段展开多个auth entry\n- 按序号对扫描到的token文件进行排序\n- 将每个token文件映射为独立的auth entry，keyAlias为序号（如`1`、`2`）\n- 自动为每个auth entry生成对应的provider runtime profile\n- routing默认会展开为多个provider实例，参与轮询\n\n### 3. OAuth生命周期失效处理\n- 任一token文件失效时，在console明确提示：`iflow token <序号> 无效，需重新认证`\n- 触发该token文件的OAuth认证流程\n- 认证完成后写回原文件（`~/.routecodex/auth/iflow-oauth-<序号>-alias.json`）\n- 支持release和dev模式均正常提示与重新认证\n\n### 4. 更新配置与文档\n- 移除`secondaryTokenFile`字段（不再需要手动指定）\n- 更新配置示例说明自动扫描机制\n- 在文档中说明命名规范`iflow-oauth-<序号>-alias`及其使用方式\n- alias仅用于用户识别，系统使用序号进行排序和keyAlias映射\n\n**关键改动点：**\n- 不需要在配置文件中手动列出多个tokenFile，系统自动发现\n- 每个token文件对应一个auth entry，自动扩展为多个provider\n- 失效时精确点名需要重新认证的token序号\n- 认证成功后写回对应序号的原文件\n\n请确认此计划是否可行，我将在你的批准后开始实施。",
+            "reasoning_content": "我已完成第一个步骤：确认了当前的token文件加载逻辑和命名规范。现在等待用户批准计划后再开始实施。",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766575138,
+      "id": "202512241918457987aded7ec9487b",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512241918457987aded7ec9487b",
+      "usage": {
+        "completion_tokens": 460,
+        "prompt_tokens": 39846,
+        "prompt_tokens_details": {
+          "cached_tokens": 16425
+        },
+        "total_tokens": 40306
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:18:58 GMT",
+      "set-cookie": "acw_tc=ac11000117665751250937206e36f186e789a2e8870711580ba2dfd13861b0;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512241918457987aded7ec9487b"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-030"
+}

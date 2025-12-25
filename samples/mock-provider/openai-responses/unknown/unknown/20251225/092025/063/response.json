@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T11:08:11.507Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T190803544-090"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "esbuild 仍然报错 \"Unexpected end of file\" 在第 229 行。文件确实只有 228 行。这可能意味着文件末尾缺少某些内容，或者有语法错误。\n\n让我检查文件的完整内容，看看是否有未闭合的括号或语法问题。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd apps/floating-panel && npx tsc --noEmit src/renderer/index.mts 2>&1 | head -50\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042284512494718233",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766488091,
+      "id": "20251223190803bab361555fb44261",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223190803bab361555fb44261",
+      "usage": {
+        "completion_tokens": 95,
+        "prompt_tokens": 48543,
+        "prompt_tokens_details": {
+          "cached_tokens": 48387
+        },
+        "total_tokens": 48638
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 11:08:11 GMT",
+      "set-cookie": "acw_tc=ac11000117664880836512680e6f408bc34f18cf6762c551f18e0cc839837d;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223190803bab361555fb44261"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-063"
+}

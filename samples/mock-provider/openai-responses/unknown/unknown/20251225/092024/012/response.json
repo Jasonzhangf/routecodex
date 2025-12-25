@@ -1,0 +1,56 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:24:09.202Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T202404253-018"
+  },
+  "url": "https://dapi.micosoft.icu/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****3a6257",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_03445b9ce93b394d01694a89e781e08191b83d5bfe8f661dc5",
+      "object": "response",
+      "created_at": 1766492647,
+      "status": "completed",
+      "model": "gpt-5.1-codex",
+      "temperature": 1,
+      "top_p": 1,
+      "metadata": {},
+      "output": [
+        {
+          "id": "fc_03445b9ce93b394d01694a89e851408191b516206766b18afd",
+          "type": "function_call",
+          "status": "completed",
+          "call_id": "call_o29cXEHCrLAes5cJWuyLOMiI",
+          "name": "exec_command",
+          "arguments": "{\"cmd\":\"node scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com --headless false\",\"justification\":\"启动 headful 模式\",\"login\":false,\"max_output_tokens\":6000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":1000}"
+        }
+      ],
+      "usage": {
+        "input_tokens": 22081,
+        "input_tokens_details": {
+          "cached_tokens": 20352
+        },
+        "output_tokens": 94,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 22175
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092024-012"
+}

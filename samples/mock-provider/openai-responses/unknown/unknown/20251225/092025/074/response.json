@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T11:09:10.752Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T190908415-101"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Let me try just sed to fix this file directly.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd apps/floating-panel/src/renderer && sed -i '.bak2' '97,102d' index.mts && echo \\\"删除完成\\\"\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042216411492165261",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766488150,
+      "id": "20251223190908db351c0423ba43bc",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223190908db351c0423ba43bc",
+      "usage": {
+        "completion_tokens": 52,
+        "prompt_tokens": 51044,
+        "prompt_tokens_details": {
+          "cached_tokens": 50684
+        },
+        "total_tokens": 51096
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 11:09:10 GMT",
+      "set-cookie": "acw_tc=ac11000117664881485344637e6f40e12ef87c84f485897e788e478724b5df;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223190908db351c0423ba43bc"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-074"
+}

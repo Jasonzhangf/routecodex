@@ -108,6 +108,25 @@ export class TokenFileAuthProvider implements IAuthProvider {
 
   getStatus(): AuthStatus { return { ...this.status }; }
 
+  /**
+   * 返回当前缓存的 token 内容快照。
+   * 会尝试与磁盘上的最新内容同步一次，但不会抛出异常。
+   * 主要用于需要从 token 中读取附加字段（如 project_id）的 Provider。
+   */
+  public getTokenPayload(): TokenPayload | null {
+    const file = this.resolveTokenFile();
+    if (file) {
+      const latest = this.readJson(file);
+      if (latest) {
+        this.token = latest;
+      }
+    }
+    if (!this.isInitialized && !this.token) {
+      return null;
+    }
+    return this.token ? { ...this.token } : null;
+  }
+
   // ---- helpers ----
   private resolveTokenFile(): string | null {
     // Prefer explicit tokenFile from config

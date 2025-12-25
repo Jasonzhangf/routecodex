@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.267",
+    "buildTime": "2025-12-24T06:46:15.289Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T144606606-004"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****kpzZOA",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766558775,
+      "usage": {
+        "completion_tokens": 418,
+        "prompt_tokens": 11411,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 11829
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-622ca1b1-a250-49ab-8227-3f12c55bcf23",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "apply_patch",
+                  "arguments": "{\"input\": \"*** Begin Patch\\n--- a/scripts/start-headful.mjs\\n+++ b/scripts/start-headful.mjs\\n@@ -15,9 +15,9 @@\\n function parseArgs() {\\n   const args = process.argv.slice(2);\\n   const result = {\\n-    profile: null as string | null,\\n-    url: null as string | null\\n+    profile: null,\\n+    url: null\\n   };\\n   \\n   for (let i = 0; i < args.length; i++) {\\n@@ -29,6 +29,7 @@\\n     }\\n   }\\n   \\n+  result.headless = args.includes('--headless') || args.includes('-h');\\n   return result;\\n }\\n \\n@@ -31,12 +32,12 @@\\n   }\\n   \\n   return result;\\n-}\\n-\\n-function main() {\\n-  const { profile, url, headless } = parseArgs();\\n+}\\n \\n+function main() {\\n+  const { profile, url, headless } = parseArgs();\\n   const defaultProfile = 'weibo_fresh';\\n   const defaultUrl = 'https://weibo.com';\\n   \\n@@ -40,7 +41,7 @@\\n   \\n   // 将所有剩余参数传递给 launcher（包括 --headless）\\n   const extraArgs = process.argv.slice(2).filter(arg => arg !== '--profile' && arg !== '-p' && arg !== '--url' && arg !== '-u' && arg !== '-h');\\n   \\n-  const args = [launcherPath, '--profile', profileName, '--url', targetUrl, ...extraArgs];\\n+  const args = [launcherPath, '--profile', profileName, '--url', targetUrl, ...(headless ? ['--headless'] : []), ...extraArgs];\\n   \\n   console.log('🚀 WebAuto 一键启动');\\n   console.log(`  Profile: ${profileName}`);\\n*** End Patch\"}"
+                },
+                "index": 0,
+                "id": "call_32694cba7b0f424093ba125b",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "1961",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 06:46:15 GMT",
+      "req-arrive-time": "1766558766984",
+      "req-cost-time": "8043",
+      "resp-start-time": "1766558775027",
+      "x-envoy-upstream-service-time": "8042"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092031-007"
+}

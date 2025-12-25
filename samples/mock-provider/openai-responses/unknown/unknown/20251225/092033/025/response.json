@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:29:55.514Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T202940241-032"
+  },
+  "url": "https://api.tabcode.cc/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****d731a8",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_042b41d134249a5f01694a8b3a29548199978d39b070e5d5c7",
+      "object": "response",
+      "created_at": 1766492986,
+      "status": "completed",
+      "model": "gpt-5.2-codex",
+      "temperature": 1,
+      "top_p": 0.98,
+      "metadata": {},
+      "output": [
+        {
+          "id": "rs_042b41d134249a5f01694a8b3c09f881999e775b61c0be1a94",
+          "type": "reasoning",
+          "summary": [],
+          "content": []
+        },
+        {
+          "id": "msg_042b41d134249a5f01694a8b3dc6208199b0957389b59b96f9",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "移动窗口狂闪是因为 `drag.mjs` 把浏览器 `window` 当成 DOM 元素来用（`getBoundingClientRect`/`style`），触发异常后拖拽状态不一致，导致反复重绘和“闪”。我已改成只在 `#drag-area` 上处理拖拽，避免用错对象；同时启用了可调整大小并持久化窗口尺寸。\n\n已修复的文件：\n- `apps/floating-panel/src/renderer/drag.mjs:1`\n- `apps/floating-panel/src/renderer/index.mts:54`\n- `apps/floating-panel/src/main/index.mts:1`\n- `apps/floating-panel/scripts/build.mjs:16`\n\n启动命令（有头 + 导航到 weibo.com）：\n```\nnode scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com\n```\n说明：`--headless` 是布尔开关，带上就是 `true`，不要写 `false`。\n\n请先退出旧进程（Ctrl+C），然后重新启动。窗口拖拽应不再闪烁、可调整大小且会记住尺寸。\n\n如果还出现 `EIO` 日志问题，主进程会把日志写到临时文件：`/var/folders/.../webauto-floating-panel.log`。需要我再加一个 UI 上的“重置窗口大小”按钮吗？"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 33304,
+        "input_tokens_details": {
+          "cached_tokens": 31616
+        },
+        "output_tokens": 380,
+        "output_tokens_details": {
+          "reasoning_tokens": 64
+        },
+        "total_tokens": 33684
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092033-025"
+}

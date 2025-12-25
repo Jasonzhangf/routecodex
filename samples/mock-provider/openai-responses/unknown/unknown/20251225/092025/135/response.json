@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:11:19.188Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T201113203-007"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "已修复两个问题：\n\n**问题1：EIO报错（console.log 写入失败）**\n- 原因：终端或控制台环境异常导致 `console.log` 写入失败\n- 修复：`src/main/index.mts:23-42` 中添加容错逻辑，首次捕获 `EIO` 错误后自动切换到日志文件\n- 回退：日志文件写入失败时不抛异常，避免崩溃循环\n\n**问题2：浮窗不能调整大小且不记住**\n- 原因：`resizable: false` 禁止调整；没有持久化窗口状态\n- 修复：\n  - `src/main/index.mts:6` 引入 `electron-window-state` 库（依赖已安装）\n  - `src/main/index.mts:64-81` 使用 `windowStateKeeper` 自动持久化位置和尺寸\n  - `src/main/index.mts:87` 设置 `resizable: true`\n  - `src/main/index.mts:88-89` 设置最小尺寸 `280x200`，防止过小\n  - `src/main/index.mts:101` 调用 `manage(win)` 启用持久化\n\n需要重启浮窗才能生效：\n```bash\n# 如果启动进程还在运行，先按 Ctrl+C 退出，然后重新运行\nnode scripts/start-headful.mjs\n```\n\n重启后窗口可拖拽边缘调整大小，下次启动会自动恢复上次的尺寸和位置。日志文件保存在 `/tmp/webauto-floating-panel.log`。",
+            "reasoning_content": "计划已完成，现在总结修复内容。",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766491879,
+      "id": "20251223201113c6e3558cc3524522",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223201113c6e3558cc3524522",
+      "usage": {
+        "completion_tokens": 337,
+        "prompt_tokens": 19827,
+        "prompt_tokens_details": {
+          "cached_tokens": 19265
+        },
+        "total_tokens": 20164
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 12:11:19 GMT",
+      "set-cookie": "acw_tc=0ae5a87017664918734002212e4d8f2d5d362ce1eb01ca8c5c4df61d832218;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223201113c6e3558cc3524522"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-135"
+}

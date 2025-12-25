@@ -1,0 +1,56 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:44:46.799Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T204442741-053"
+  },
+  "url": "https://dapi.micosoft.icu/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****3a6257",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_08c734a7a0b2539e01694a8ebc01a08191a405bb0ecc6698fe",
+      "object": "response",
+      "created_at": 1766493884,
+      "status": "completed",
+      "model": "gpt-5.1-codex",
+      "temperature": 1,
+      "top_p": 1,
+      "metadata": {},
+      "output": [
+        {
+          "id": "fc_08c734a7a0b2539e01694a8ebdaabc8191baefe2f577f4066d",
+          "type": "function_call",
+          "status": "completed",
+          "call_id": "call_QwvVGesdriDhCF894MqizXS6",
+          "name": "exec_command",
+          "arguments": "{\"cmd\":\"pgrep -lf electron | head\",\"justification\":\"Check for electron processes\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":1000}"
+        }
+      ],
+      "usage": {
+        "input_tokens": 40591,
+        "input_tokens_details": {
+          "cached_tokens": 32768
+        },
+        "output_tokens": 76,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 40667
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092024-027"
+}

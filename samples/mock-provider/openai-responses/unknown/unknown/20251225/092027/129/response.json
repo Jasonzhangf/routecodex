@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.261",
+    "buildTime": "2025-12-24T05:09:45.903Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T130927518-122"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "我看到日志显示程序已经启动了。但是没有看到关键的 drawAllConnections 日志输出，这说明 renderGraph 可能没有被调用或者在调用前就出错了。\n\n让我检查一下是否有 drawAllConnections 的日志，或者是否根本没有被调用。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cat /tmp/webauto-test.log | grep -E \\\"drawAllConnections|Container.*Highlighting|DOM.*Highlighting\\\" | head -10\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042406283409152015",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766552985,
+      "id": "20251224130928816b248ffdf04765",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224130928816b248ffdf04765",
+      "usage": {
+        "completion_tokens": 89,
+        "prompt_tokens": 142236,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 142325
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 05:09:45 GMT",
+      "set-cookie": "acw_tc=ac11000117665529679872205e753e572f48374885986e7b6378382af19667;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224130928816b248ffdf04765"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-129"
+}

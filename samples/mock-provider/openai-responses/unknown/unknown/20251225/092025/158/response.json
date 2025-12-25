@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.246",
+    "buildTime": "2025-12-23T13:01:39.597Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T210132048-013"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "Changes committed and pushed. Summary of what was done:\n\nFixed floating panel issues:\n\n- Window resizing now works and remembers size/position using `electron-window-state` (persisted in OS config)\n- Native drag region implemented with `-webkit-app-region: drag` CSS property (no JS drag logic, eliminates flicker)\n- Window enabled as resizable with min 280×200 constraints\n- EIO console logging crash fixed with fallback to file logging\n- `electron-window-state` externalized in build to avoid bundling errors\n- Reduced excessive logging on window move and message flush\n\nOther fixes:\n\n- `node scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com` now launches headful (with browser) correctly (headless is optional boolean flag, defaults to false)\n- Console health check logging consolidated to reduce noise\n\nTemporary files excluded from commit:\n\n- `.bak`, `.bak2`, build artifacts (`*.js`, `*.mjs`), and diag.ts remain untracked and not pushed\n\nTo test: `node scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com`\n\n窗口现在支持拖动无闪烁，调整大小后位置/大小会被记住。",
+            "reasoning_content": "Looks like push succeeded. The working tree is clean except for untracked files which are temporary and should not be committed.\n\nNow let me summarize what was done:\n\n1. Fixed the window resize persistence by adding electron-window-state\n2. Enabled window resizing with min constraints\n3. Fixed the EIO logging error by adding fallback to file logging\n4. Implemented native Electron drag region to eliminate flicker\n5. Externalized electron-window-state to avoid bundling errors\n6. Reduced logging on window move and message flushing\n7. Fixed headless argument parsing\n8. Restructured unified-api entry point\n\nLet me now provide the summary to the user.",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766494899,
+      "id": "2025122321013284bc3b2810164ffe",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122321013284bc3b2810164ffe",
+      "usage": {
+        "completion_tokens": 387,
+        "prompt_tokens": 56010,
+        "prompt_tokens_details": {
+          "cached_tokens": 55650
+        },
+        "total_tokens": 56397
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:01:39 GMT",
+      "set-cookie": "acw_tc=ac11000117664948922353615e5486af5299e5f43404f36ccea0bafd132f1e;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122321013284bc3b2810164ffe"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-158"
+}

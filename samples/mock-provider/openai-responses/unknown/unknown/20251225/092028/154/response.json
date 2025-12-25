@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.286",
+    "buildTime": "2025-12-25T00:58:34.313Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251225T085830926-067"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "构建已完成。现在检查一下 dist/main/preload.mjs 是否存在且是最新的。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"ls -lh apps/floating-panel/dist/main/preload.mjs\",\"justification\":\"\",\"login\":true,\"max_output_tokens\":6000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042350964230218468",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766624314,
+      "id": "202512250858313a4b85e045d04c66",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512250858313a4b85e045d04c66",
+      "usage": {
+        "completion_tokens": 102,
+        "prompt_tokens": 19186,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 19288
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Thu, 25 Dec 2025 00:58:34 GMT",
+      "set-cookie": "acw_tc=ac11000117666243110804691ef7ba11cfdea6cf7edb2d57ce6106f00b9ff5;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512250858313a4b85e045d04c66"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-154"
+}

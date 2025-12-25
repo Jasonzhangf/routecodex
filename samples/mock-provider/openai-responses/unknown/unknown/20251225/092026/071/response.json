@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.252",
+    "buildTime": "2025-12-23T14:55:52.649Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T225532880-023"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "The user is asking me to commit and push all the changes I've made. I've already added the files to git. Now I need to commit and push.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto && git commit -m \\\"$(cat <<'EOF'\\nfeat(floating-panel): add window controls, fix connections and full expansion\\n\\n- Add minimize (−) and close (×) buttons to title bar\\n- Add window:minimize and window:close IPC handlers\\n- Add window control styles with hover effects\\n- Add highlightElement method to preload API for browser highlighting\\n- Recursively expand all DOM and container nodes on initial render\\n- Track both container and DOM node positions for connections\\n- Draw connections from all containers (including children) to matched DOM elements\\n- Fix connection rendering with proper Y position tracking\\n- Fix highlightElement calls with proper type checking\\n- Add debug logging to drawAllConnections for troubleshooting\\n- Maintain Windows Registry style with Consolas font\\nEOF\\n)\\\" && git push origin main\",\"justification\":\"提交所有修复并推送到GitHub\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":5000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042379070496036268",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766501752,
+      "id": "202512232255330a5d0fbafa7c49b0",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512232255330a5d0fbafa7c49b0",
+      "usage": {
+        "completion_tokens": 284,
+        "prompt_tokens": 157500,
+        "prompt_tokens_details": {
+          "cached_tokens": 157163
+        },
+        "total_tokens": 157784
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 14:55:52 GMT",
+      "set-cookie": "acw_tc=ac11000117665017331856030ebb563e78455062dd37a3951214c35597590a;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512232255330a5d0fbafa7c49b0"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-071"
+}

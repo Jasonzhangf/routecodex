@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T12:06:16.659Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T200604384-173"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "现在我需要总结完成的工作：\n\n1. 创建了token扫描器 `/Users/fanzhang/Documents/github/routecodex/src/providers/auth/token-scanner/index.ts`\n2. 修改了sharedmodule的bootstrap函数以支持扫描和展开多token\n3. 重命名了现有的token文件以符合新的命名规范\n4. 创建了多个认证脚本用于手动认证token\n5. 修复了OAuth回调中的example.com重定向问题\n6. 更新了配置文件移除secondaryTokenFile字段\n7. 创建了多token认证指南文档\n\n让我给用户一个总结。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"explanation\":\"多token支持开发完成：命名规范、自动扫描、认证工具、文档齐全\",\"plan\":[{\"status\": \"completed\", \"step\": \"确认当前iFlow OAuth token文件命名与加载逻辑：目前只支持单一tokenFile，无自动扫描/扩展机制，需新增扫描逻辑。\"}, {\"status\": \"completed\", \"step\": \"在`~/.routecodex/auth/`下按“`iflow-oauth-<序号>-alias`”模式自动扫描所有token文件，忽略alias部分，提取序号并排序生成有序token列表。\"}, {\"status\": \"completed\", \"step\": \"在bootstrap阶段把扫描出的每个token文件映射为独立auth entry（keyAlias=序号），从而生成多个provider runtime profile。\"}, {\"status\": \"completed\", \"step\": \"在OAuth生命周期里按token文件路径定位：失效时控制台提示“iflow token <序号> 需重新认证”，并触发该文件的认证写回。\"}, {\"status\": \"completed\", \"step\": \"修复OAuth认证流程中example.com重定向问题，改为显示成功页面。\"}, {\"status\": \"completed\", \"step\": \"创建认证文档说明多token命名规范与使用方法。\"}]}",
+                  "name": "update_plan"
+                },
+                "id": "call_-8042221187496351859",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766577976,
+      "id": "20251224200604269148d8ba7448c4",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224200604269148d8ba7448c4",
+      "usage": {
+        "completion_tokens": 397,
+        "prompt_tokens": 77730,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 78127
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 12:06:16 GMT",
+      "set-cookie": "acw_tc=ac11000117665779646763605e8d208c796143b57470a07441cb531828683e;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224200604269148d8ba7448c4"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-073"
+}

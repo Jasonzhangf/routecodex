@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.260",
+    "buildTime": "2025-12-24T03:05:39.725Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T110538019-046"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Now let's rebuild to see if this fixes the issue.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd apps/floating-panel && npm run build\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042266748509933033",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766545539,
+      "id": "202512241105385d635e2132ee407c",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512241105385d635e2132ee407c",
+      "usage": {
+        "completion_tokens": 32,
+        "prompt_tokens": 41651,
+        "prompt_tokens_details": {
+          "cached_tokens": 40407
+        },
+        "total_tokens": 41683
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 03:05:39 GMT",
+      "set-cookie": "acw_tc=ac11000117665455381455218e0904bd749e9851302ab45c0808e6c5fc10f1;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512241105385d635e2132ee407c"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-166"
+}

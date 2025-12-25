@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.278",
+    "buildTime": "2025-12-24T11:20:52.031Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T192028142-181"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Now I'll create the token scanner. It should:\n1. Scan the auth directory for files matching the pattern `iflow-oauth-<序号>-alias.json`\n2. Extract the sequence number from each filename\n3. Sort by sequence number and return ordered list of token files\n4. Ignore the alias part (just use the number for ordering)",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cat > /Users/fanzhang/Documents/github/routecodex/src/providers/auth/token-scanner/index.ts << 'EOF'\\n/**\\n * OAuth Token Scanner\\n * 自动扫描auth目录下符合命名规范的token文件\\n * 命名规范: <provider>-oauth-<序号>-<alias>.json\\n * 例如: iflow-oauth-1-work.json, iflow-oauth-2-personal.json\\n */\\n\\nimport fs from 'fs/promises';\\nimport path from 'path';\\nimport { homedir } from 'os';\\n\\nexport interface TokenFileMatch {\\n  filePath: string;\\n  providerPrefix: string;\\n  sequence: number;\\n  alias: string;\\n}\\n\\nconst AUTH_DIR = path.join(homedir(), '.routecodex', 'auth');\\n\\n/**\\n * 匹配token文件名的正则\\n * 格式: <provider>-oauth-<序号>-<alias>.json\\n * 例如: iflow-oauth-1-work.json -> provider=iflow, sequence=1, alias=work\\n */\\nconst TOKEN_FILE_PATTERN = /^(.+)-oauth-(\\\\d+)-(.+)\\\\.json$/;\\n\\n/**\\n * 扫描auth目录下指定provider的所有token文件\\n */\\nexport async function scanProviderTokenFiles(provider: string): Promise<TokenFileMatch[]> {\\n  try {\\n    const entries = await fs.readdir(AUTH_DIR);\\n    const matches: TokenFileMatch[] = [];\\n\\n    for (const entry of entries) {\\n      if (!entry.endsWith('.json')) {\\n        continue;\\n      }\\n\\n      const match = entry.match(TOKEN_FILE_PATTERN);\\n      if (!match) {\\n        continue;\\n      }\\n\\n      const [, providerPrefix, sequenceStr, alias] = match;\\n      if (providerPrefix.toLowerCase() !== provider.toLowerCase()) {\\n        continue;\\n      }\\n\\n      const sequence = parseInt(sequenceStr, 10);\\n      if (isNaN(sequence) || sequence <= 0) {\\n        continue;\\n      }\\n\\n      matches.push({\\n        filePath: path.join(AUTH_DIR, entry),\\n        providerPrefix,\\n        sequence,\\n        alias\\n      });\\n    }\\n\\n    // 按序号排序\\n    matches.sort((a, b) => a.sequence - b.sequence);\\n\\n    return matches;\\n  } catch (error) {\\n    // 目录不存在或读取失败，返回空列表\\n    return [];\\n  }\\n}\\n\\n/**\\n * 获取指定provider的所有token文件路径（有序）\\n */\\nexport async function getProviderTokenFilePaths(provider: string): Promise<string[]> {\\n  const matches = await scanProviderTokenFiles(provider);\\n  return matches.map((m) => m.filePath);\\n}\\n\\n/**\\n * 获取指定provider的token文件信息（用于调试）\\n */\\nexport async function getProviderTokenFileInfo(provider: string): Promise<TokenFileMatch[]> {\\n  return scanProviderTokenFiles(provider);\\n}\\n\\n/**\\n * 从文件路径提取序号\\n * 返回: { sequence: number, alias: string } 或 null\\n */\\nexport function parseTokenSequenceFromPath(filePath: string): { sequence: number; alias: string } | null {\\n  const basename = path.basename(filePath);\\n  const match = basename.match(TOKEN_FILE_PATTERN);\\n  if (!match) {\\n    return null;\\n  }\\n\\n  const [, , sequenceStr, alias] = match;\\n  const sequence = parseInt(sequenceStr, 10);\\n  if (isNaN(sequence) || sequence <= 0) {\\n    return null;\\n  }\\n\\n  return { sequence, alias };\\n}\\nEOF\\n\",\"justification\":\"\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042195280253161976",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766575252,
+      "id": "20251224192028389b09bbb7764d11",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224192028389b09bbb7764d11",
+      "usage": {
+        "completion_tokens": 851,
+        "prompt_tokens": 40654,
+        "prompt_tokens_details": {
+          "cached_tokens": 16425
+        },
+        "total_tokens": 41505
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:20:52 GMT",
+      "set-cookie": "acw_tc=ac11000117665752283496577e86d184c7e15f4ad2237ad7f7c5553c1cbe6e;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224192028389b09bbb7764d11"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-033"
+}

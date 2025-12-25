@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T11:04:15.806Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T190402484-065"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "UI 代码在最后部分初始化，当 `window.api` 可用时会调用 `window.api.onBusStatus` 和 `window.api.onBusEvent`。\n\n问题可能在于：\n1. `window.api` 不可用\n2. preload 脚本没有正确加载\n3. IPC 通道没有正确建立\n\n让我检查 main 进程是否正确设置 IPC 处理：",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"grep -n \\\"ipcMain\\\\|ui:action\\\\|health\\\" apps/floating-panel/dist/main/index.mjs | head -30\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042384568054238444",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766487855,
+      "id": "20251223190402014a2f4cdc144779",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223190402014a2f4cdc144779",
+      "usage": {
+        "completion_tokens": 120,
+        "prompt_tokens": 38981,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 39101
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 11:04:15 GMT",
+      "set-cookie": "acw_tc=ac11000117664878425848008ee21fd6e782a22d85f2d7a0b8014d61789fcf;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223190402014a2f4cdc144779"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-038"
+}

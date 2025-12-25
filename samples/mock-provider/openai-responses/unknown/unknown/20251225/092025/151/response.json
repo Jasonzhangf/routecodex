@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.246",
+    "buildTime": "2025-12-23T13:00:34.620Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T210029965-006"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Changes include modifications to several files. Some significant changes include unified-api index.ts being deleted. I need to make sure we're not adding any sensitive data like cookies or profile data. The .gitignore already excludes cookies, sessions, and dist directories, which is good.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto && git add apps/floating-panel/package.json apps/floating-panel/scripts/build.mjs apps/floating-panel/src/main/index.mts apps/floating-panel/src/main/preload.cjs apps/floating-panel/src/renderer/drag.mjs apps/floating-panel/src/renderer/index.html apps/floating-panel/src/renderer/index.mts apps/floating-panel/tsconfig.json\",\"justification\":\"Stage floating-panel changes\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042240222791344070",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766494834,
+      "id": "20251223210030b463d06c0fab4a1c",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223210030b463d06c0fab4a1c",
+      "usage": {
+        "completion_tokens": 209,
+        "prompt_tokens": 54258,
+        "prompt_tokens_details": {
+          "cached_tokens": 53716
+        },
+        "total_tokens": 54467
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:00:34 GMT",
+      "set-cookie": "acw_tc=ac11000117664948301501602e5486c434a6cfea82acffcd47b51d7703f394;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223210030b463d06c0fab4a1c"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-151"
+}

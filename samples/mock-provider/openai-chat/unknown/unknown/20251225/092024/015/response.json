@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.275",
+    "buildTime": "2025-12-24T08:36:55.871Z",
+    "entryEndpoint": "/v1/chat/completions",
+    "clientRequestId": "openai-chat-unknown-unknown-20251224T163631548-038"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4f75-4969-72a2-bad1-d8add9d76504",
+    "session_id": "019b4f75-4969-72a2-bad1-d8add9d76504"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "Updated the following READMEs to align with AGENTS.md and functional module organization:\n\n- **root README** – added dev CLI build order warning (sharedmodule first) and no-publish prohibition for `routecodex`.\n- **scripts/README.md** – emphasized build-first order and clarified never to skip verification (golden samples are up-to-date).\n- **package/README.md** – replaced unrelated Qoder CLI text with RouteCodex CLI packaging rules (rcc release vs routecodex dev-only).\n- **docs/v2-architecture/README.md** – added status banner noting the blueprint is frozen and AGENTS.md is the current reference.\n- **src/commands/README.md** – rewrote to highlight CLI → Config → Hub Pipeline delegation and single execution path.\n- **src/config/README.md** – clarified config-driven design, authfile handling, and no manual patching.\n- **src/types/README.md** – stressed alignment with sharedmodule types and no duplicate definitions.\n- **src/utils/README.md** – listed error handling, load balancing, failover, snapshot tools; no tool governance.\n- **src/debug/README.md** – emphasized read-only toolkit use, no production path changes.\n- **src/providers/README.md** – reaffirmed transport-only rule, error emission via `emitProviderError`, no bypass.\n- **src/providers/auth/README_OAUTH.md** – added note that all OAuth errors must call `emitProviderError` with dependencies.\n\nAll other module READMEs (`src/`, `src/server/handlers/`, `src/modules/**`, `src/providers/core/hooks/`, `src/utils/`, `src/debug/`) already align with AGENTS.md.",
+            "reasoning_content": "I should provide a concise summary of the changes made to the README files.",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766565415,
+      "id": "20251224163631912a10009cc444bb",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224163631912a10009cc444bb",
+      "usage": {
+        "completion_tokens": 366,
+        "prompt_tokens": 58145,
+        "prompt_tokens_details": {
+          "cached_tokens": 55780
+        },
+        "total_tokens": 58511
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:36:55 GMT",
+      "set-cookie": "acw_tc=ac11000117665653916964412e3f4c2637af525949c3150627bf5febaf4185;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224163631912a10009cc444bb"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-chat-unknown-unknown-20251225T092024-015"
+}

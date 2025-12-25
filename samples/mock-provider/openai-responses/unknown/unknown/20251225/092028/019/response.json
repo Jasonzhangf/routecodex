@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.278",
+    "buildTime": "2025-12-24T11:07:11.782Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T190708180-074"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "我需要使用正确的patch格式。让我重新编写。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"input\":\"*** Begin Patch\\n--- a/Users/fanzhang/.routecodex/provider/iflow/config.v1.json\\n+++ b/Users/fanzhang/.routecodex/provider/iflow/config.v1.json\\n@@ -14,7 +14,8 @@\\n         \\\"baseURL\\\": \\\"https://apis.iflow.cn/v1\\\",\\n         \\\"auth\\\": {\\n           \\\"type\\\": \\\"iflow-oauth\\\",\\n-          \\\"tokenFile\\\": \\\"~/.routecodex/auth/iflow-oauth.json\\\"\\n+          \\\"tokenFile\\\": \\\"~/.routecodex/auth/iflow-oauth.json\\\",\\n+          \\\"secondaryTokenFile\\\": \\\"~/.routecodex/auth/iflow-oauth-secondary.json\\\"\\n         },\\n         \\\"models\\\": {\\n           \\\"tstars2.0\\\": {},\\n*** End Patch\"}",
+                  "name": "apply_patch"
+                },
+                "id": "call_-8042195555131071094",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766574431,
+      "id": "20251224190708ba1bb817250449a3",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224190708ba1bb817250449a3",
+      "usage": {
+        "completion_tokens": 187,
+        "prompt_tokens": 17587,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 17774
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:07:11 GMT",
+      "set-cookie": "acw_tc=ac11000117665744283224297e6f3883230b43092e34da47abc4b50c0e73c3;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224190708ba1bb817250449a3"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-019"
+}

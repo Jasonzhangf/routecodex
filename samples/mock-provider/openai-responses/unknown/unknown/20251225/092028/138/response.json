@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.284",
+    "buildTime": "2025-12-24T16:13:54.025Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251225T001351606-158"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "我需要查看 controller 中所有的 action 注册情况，看看为什么 \"containers:match\" 无法识别。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"rg \\\"case '\\\" services/controller/src/controller.ts | head -30\",\"justification\":\"列出 controller 的所有 action case\",\"login\":true,\"max_output_tokens\":4000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/bash\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042257299581979741",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766592833,
+      "id": "20251225001351f35e146d5b864e04",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251225001351f35e146d5b864e04",
+      "usage": {
+        "completion_tokens": 109,
+        "prompt_tokens": 98266,
+        "prompt_tokens_details": {
+          "cached_tokens": 97891
+        },
+        "total_tokens": 98375
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 16:13:53 GMT",
+      "set-cookie": "acw_tc=0ae5a7e117665928317558418e2314603b83d37342e6073a93b61c3539bf38;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251225001351f35e146d5b864e04"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-138"
+}

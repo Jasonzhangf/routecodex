@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.275",
+    "buildTime": "2025-12-24T08:42:53.137Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T164157450-026"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694ba756966f039a14e24485",
+      "object": "chat.completion",
+      "created": 1766565720,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 150300,
+        "completion_tokens": 917,
+        "total_tokens": 151217
+      },
+      "extend_fields": {
+        "traceId": "2141676817665657179227423e1024",
+        "requestId": "b79c09adeb9dd9950d1e25022e3eaffc"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:198",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"cat > /tmp/add-browser-control-cli-fix.mjs << 'EOF'\\nimport { readFileSync, writeFileSync } from 'fs';\\n\\nconst cliPath = 'dist/modules/browser-control/src/cli.js';\\nlet content = readFileSync(cliPath, 'utf-8');\\n\\n// 1. 在 run() 函数里新增两个 if 分支\\ncontent = content.replace(\\n  /if \\\\(command === 'status'\\\\) \\\\{\\\\s*return handleStatus\\\\(flags\\\\);\\\\s*\\\\}/,\\n  `if (command === 'status') {\\n        return handleStatus(flags);\\n    }\\n    if (command === 'highlight') {\\n        return handleHighlight(flags);\\n    }\\n    if (command === 'highlight-dom-path') {\\n        return handleHighlightDomPath(flags);\\n    }`\\n);\\n\\n// 2. 新增两个 handler 函数（插在文件末尾）\\nconst handlers = `\\nasync function handleHighlight(flags) {\\n    const session = await openSession(flags);\\n    const style = \\\\`4px solid \\\\${flags.color || 'green'}\\\\`;\\n    const duration = Number(flags.duration || 1500);\\n    const result = await session.page.evaluate((data) => {\\n        const nodes = Array.from(document.querySelectorAll(data.selector));\\n        if (!nodes.length) return { success: false, error: 'element not found', count: 0 };\\n        const cleanups = nodes.map(el => {\\n            const orig = el.style.outline;\\n            el.style.outline = data.style;\\n            return () => { el.style.outline = orig; };\\n        });\\n        const cleanup = () => cleanups.forEach(fn => { try { fn(); } catch {} });\\n        if (data.duration > 0) setTimeout(cleanup, data.duration);\\n        return { success: true, count: nodes.length };\\n    }, { selector: flags.selector, style, duration });\\n    await session.close();\\n    return { success: true, data: result };\\n}\\n\\nasync function handleHighlightDomPath(flags) {\\n    const session = await openSession(flags);\\n    const path = flags['dom-path'];\\n    const style = \\\\`4px solid \\\\${flags.color || 'green'}\\\\`;\\n    const duration = Number(flags.duration || 1500);\\n    const result = await session.page.evaluate((data) => {\\n        const parts = data.path.split('/').filter(t => t.length);\\n        if (parts[0] !== 'root') parts.unshift('root');\\n        let node = document.body || document.documentElement;\\n        for (let i = 1; i < parts.length; i++) {\\n            const idx = Number(parts[i]);\\n            const children = node.children ? Array.from(node.children) : [];\\n            if (!Number.isFinite(idx) || idx < 0 || idx >= children.length) {\\n                return { success: false, error: 'dom path not found', count: 0 };\\n            }\\n            node = children[idx];\\n            if (!node) return { success: false, error: 'dom path not found', count: 0 };\\n        }\\n        const orig = node.style.outline;\\n        node.style.outline = data.style;\\n        if (data.duration > 0) setTimeout(() => { node.style.outline = orig; }, data.duration);\\n        return { success: true, count: 1 };\\n    }, { path, style, duration });\\n    await session.close();\\n    return { success: true, data: result };\\n}\\n`;\\ncontent += handlers;\\n\\nwriteFileSync(cliPath, content, 'utf-8');\\nconsole.log('已给 browser-control CLI 新增 highlight / highlight-dom-path 命令');\\nEOF\\nnode /tmp/add-browser-control-cli-fix.mjs\",\"justification\":\"给 browser-control CLI 增加两个子命令，使其能执行高亮\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"\",\"workdir\":\"\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:42:53 GMT",
+      "eagleeye-traceid": "2141676817665657179227423e1024",
+      "s-brt": "54990",
+      "s-rt": "55188",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-007"
+}

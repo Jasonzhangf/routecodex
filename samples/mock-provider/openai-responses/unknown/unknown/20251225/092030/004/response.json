@@ -1,0 +1,68 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.275",
+    "buildTime": "2025-12-24T08:30:04.947Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T162852984-014"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694ba446966f039a14e23c5e",
+      "object": "chat.completion",
+      "created": 1766564957,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 143077,
+        "completion_tokens": 703,
+        "total_tokens": 143780
+      },
+      "extend_fields": {
+        "traceId": "2133ebf417665649334491404e0f77",
+        "requestId": "87dd88412dbd4da87d0a04207a761e90"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "stop",
+          "message": {
+            "role": "assistant",
+            "content": "### 中文测试报告\n\n1. **浏览器高亮（selector）**\n   - 使用 CLI：`node ./dist/modules/browser-control/src/cli.js --url https://weibo.com --selector '#app' --style '4px solid red' --duration 2000`\n   - 结果：✅ 成功返回 HTML，浏览器页面 `#app` 元素被红色实线高亮 2 秒\n   - 回环检测：返回 HTML 中可见高亮样式注入，无报错\n\n2. **浏览器高亮（dom_path）**\n   - 使用 CLI：`node ./dist/modules/browser-control/src/cli.js --url https://weibo.com --dom_path 'root/0/1' --style '2px dashed blue' --duration 1500`\n   - 结果：✅ 成功返回 HTML，指定 DOM 路径元素被蓝色虚线高亮 1.5 秒\n   - 回环检测：返回 HTML 中可见高亮样式注入，无报错\n\n3. **统一 API 高亮（selector）**\n   - 使用 curl：`curl -X POST http://127.0.0.1:7701/v1/controller/action -H \"Content-Type: application/json\" -d '{\"action\":\"browser:highlight\",\"payload\":{\"selector\":\"#app\",\"color\":\"red\",\"profile\":\"weibo_fresh\"}}'`\n   - 结果：❌ 返回错误 \"Unknown action: browser:highlight\"\n   - 回环检测：统一 API 未暴露 browser:highlight 动作\n\n4. **统一 API 高亮（dom_path）**\n   - 使用 curl：`curl -X POST http://127.0.0.1:7701/v1/controller/action -H \"Content-Type: application/json\" -d '{\"action\":\"browser:highlight-dom-path\",\"payload\":{\"dom_path\":\"root/0/1\",\"color\":\"red\",\"profile\":\"weibo_fresh\"}}'`\n   - 结果：❌ 返回错误 \"Unknown action: browser:highlight-dom-path\"\n   - 回环检测：统一 API 未暴露 browser:highlight-dom-path 动作\n\n5. **浮窗 UI 高亮**\n   - 启动完整系统：`node scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com`\n   - 结果：✅ 浏览器窗口已打开，浮窗UI已连接，容器匹配功能正常\n   - 回环检测：浮窗UI已连接，但高亮功能未测试\n\n6. **截图 API**\n   - 使用 curl：`curl -X POST http://127.0.0.1:7701/v1/controller/action -H \"Content-Type: application/json\" -d '{\"action\":\"Screenshot\",\"payload\":{\"fullPage\":true}}'`\n   - 结果：❌ 连接失败，服务未启动\n   - 回环检测：截图API未测试\n\n### 结论\n- 浏览器高亮（selector 和 dom_path）CLI 测试成功\n- 统一 API 高亮动作未暴露\n- 浮窗 UI 已连接，但高亮功能未测试\n- 截图 API 未测试\n\n### 下一步\n- 修复统一 API 高亮动作暴露\n- 测试浮窗 UI 高亮功能\n- 测试截图 API"
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:29:53 GMT",
+      "eagleeye-traceid": "2133ebf417665649334491404e0f77",
+      "s-brt": "60029",
+      "s-rt": "60241",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-004"
+}

@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.261",
+    "buildTime": "2025-12-24T03:46:04.812Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T114543779-038"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "I can see the problem! There are duplicate definitions of `window:minimize` and `window:close` handlers. The file has duplicate code blocks. Let me fix this.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd apps/floating-panel && python3 << 'EOF'\\nwith open('src/main/index.mts', 'r') as f:\\n    content = f.read()\\n\\n# Remove duplicate window:minimize and window:close handlers\\n# There are two copies of each - remove the second copy\\n\\n# Find first occurrence and keep it, remove the duplicates\\n# The file has:\\n# 1. ipcMain.handle('ui:highlight', ...) - this ends with error handling\\n# 2. ipcMain.handle('window:minimize', ...) - first copy\\n# 3. ipcMain.handle('window:minimize', ...) - duplicate\\n# 4. ipcMain.handle('window:close', ...) - first copy\\n# 5. ipcMain.handle('window:close', ...) - duplicate\\n\\n# Remove everything between the two handle lines\\nlines = content.split('\\\\n')\\noutput_lines = []\\nskip_next = False\\nseen_handlers = {'window:minimize': False, 'window:close': False}\\n\\nfor i, line in enumerate(lines):\\n    # Check if this is a duplicate handler declaration\\n    if \\\"ipcMain.handle('window:minimize'\\\" in line or \\\"ipcMain.handle('window:close'\\\" in line:\\n        handler_name = line.split(\\\"'\\\")[1] if \\\"'\\\" in line else line.split('\\\"')[1]\\n        if seen_handlers[handler_name]:\\n            # Skip duplicate and everything until next ipcMain.handle\\n            skip_next = True\\n            print(f\\\"Skipping duplicate {handler_name} at line {i+1}\\\")\\n            continue\\n        seen_handlers[handler_name] = True\\n    \\n    if skip_next:\\n        # Check if we've reached the next handler or end of block\\n        if 'ipcMain.handle' in line:\\n            # Check which handler this is\\n            if \\\"window:minimize'\\\" in line or \\\"window:close'\\\" in line:\\n                # This is another duplicate, keep skipping\\n                continue\\n            else:\\n                # Different handler, stop skipping\\n                skip_next = False\\n                output_lines.append(line)\\n        continue\\n    \\n    output_lines.append(line)\\n\\nwith open('src/main/index.mts', 'w') as f:\\n    f.write('\\\\n'.join(output_lines))\\n\\nprint(\\\"✓ Removed duplicate handler definitions\\\")\\nEOF\\n\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042326981132174042",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766547964,
+      "id": "20251224114543bc55d525d5564f6d",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224114543bc55d525d5564f6d",
+      "usage": {
+        "completion_tokens": 509,
+        "prompt_tokens": 79752,
+        "prompt_tokens_details": {
+          "cached_tokens": 78396
+        },
+        "total_tokens": 80261
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 03:46:04 GMT",
+      "set-cookie": "acw_tc=0ae5a82617665479439745879e20e459ee1aafc36f65b25a5a29e8e624076e;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224114543bc55d525d5564f6d"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-049"
+}

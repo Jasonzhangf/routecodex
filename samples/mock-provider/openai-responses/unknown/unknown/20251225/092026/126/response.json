@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.260",
+    "buildTime": "2025-12-24T02:59:17.266Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T105915517-006"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "现在我需要检查这些函数在哪里被调用，以及数据是如何传递过来的。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd apps/floating-panel && rg \\\"updateDomTree|updateContainerTree|import.*graph\\\" src/renderer/ --type js -B 2 -A 2\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042372026749672301",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766545157,
+      "id": "20251224105915c91c3bb49aab4983",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224105915c91c3bb49aab4983",
+      "usage": {
+        "completion_tokens": 60,
+        "prompt_tokens": 12729,
+        "prompt_tokens_details": {
+          "cached_tokens": 8256
+        },
+        "total_tokens": 12789
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 02:59:17 GMT",
+      "set-cookie": "acw_tc=ac11000117665451555974275e090489e90612c84112eb9ceacaa331c92a4f;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224105915c91c3bb49aab4983"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-126"
+}

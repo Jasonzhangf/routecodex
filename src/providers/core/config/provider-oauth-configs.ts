@@ -139,6 +139,93 @@ function registerProviderOAuthConfigs(): void {
       customState: false
     }
   });
+
+  // Gemini CLI OAuth 配置 - 对齐 CLIProxyAPI / Gemini CLI 登录行为
+  // 使用标准 Google OAuth 2.0 授权码流程，后续通过 gemini-cli-userinfo-helper 获取项目列表。
+  OAuthFlowConfigManager.registerDefaultConfig('gemini-cli', {
+    flowType: OAuthFlowType.AUTHORIZATION_CODE,
+    activationType: OAuthActivationType.AUTO_BROWSER,
+    endpoints: {
+      authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+      tokenUrl: 'https://oauth2.googleapis.com/token',
+      userInfoUrl: 'https://www.googleapis.com/oauth2/v2/userinfo',
+      // 使用标准设备码端点以满足配置校验要求，实际流程仍以授权码为主
+      deviceCodeUrl: 'https://oauth2.googleapis.com/device/code'
+    },
+    client: {
+      // 复用 CLIProxyAPI 中的公开客户端配置
+      clientId: '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com',
+      clientSecret: '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',
+      scopes: [
+        'https://www.googleapis.com/auth/cloud-platform',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/userinfo.profile'
+      ],
+      redirectUri: `${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.LOCALHOST}:${DEFAULT_CONFIG.OAUTH_CALLBACK_PORT}${API_PATHS.OAUTH_CALLBACK}`
+    },
+    headers: {
+      'Accept': 'application/json'
+    },
+    polling: {
+      interval: 5000,
+      maxAttempts: 60,
+      timeout: 300000
+    },
+    retry: {
+      maxAttempts: 3,
+      backoffMs: 1000
+    },
+    features: {
+      supportsPKCE: true,
+      supportsApiKeyExchange: false,
+      requireHttpsCallback: true,
+      customState: true
+    }
+  });
+
+  // Antigravity OAuth 配置 - 复用 gcli2api 中的 Antigravity 客户端配置
+  // 仅用于本地开发 / 调试场景，通过独立 providerId 实现与 gemini-cli 的 OAuth 隔离。
+  OAuthFlowConfigManager.registerDefaultConfig('antigravity', {
+    flowType: OAuthFlowType.AUTHORIZATION_CODE,
+    activationType: OAuthActivationType.AUTO_BROWSER,
+    endpoints: {
+      authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+      tokenUrl: 'https://oauth2.googleapis.com/token',
+      userInfoUrl: 'https://www.googleapis.com/oauth2/v2/userinfo',
+      deviceCodeUrl: 'https://oauth2.googleapis.com/device/code'
+    },
+    client: {
+      clientId: '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com',
+      clientSecret: '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',
+      scopes: [
+        'https://www.googleapis.com/auth/cloud-platform',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/userinfo.profile',
+        'https://www.googleapis.com/auth/cclog',
+        'https://www.googleapis.com/auth/experimentsandconfigs'
+      ],
+      redirectUri: `${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.LOCALHOST}:${DEFAULT_CONFIG.OAUTH_CALLBACK_PORT}${API_PATHS.OAUTH_CALLBACK}`
+    },
+    headers: {
+      'Accept': 'application/json'
+    },
+    polling: {
+      interval: 5000,
+      maxAttempts: 60,
+      timeout: 300000
+    },
+    retry: {
+      maxAttempts: 3,
+      backoffMs: 1000
+    },
+    features: {
+      supportsPKCE: true,
+      supportsApiKeyExchange: false,
+      requireHttpsCallback: true,
+      customState: true,
+      requestOfflineAccess: true
+    }
+  });
 }
 
 /**

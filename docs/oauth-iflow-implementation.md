@@ -127,7 +127,8 @@ const response = await provider.processIncoming({
 
 - `IFLOW_CLIENT_ID`：覆盖默认 clientId（高级用法）
 - `IFLOW_CLIENT_SECRET`：覆盖默认 clientSecret（高级用法）
-- `ROUTECODEX_OAUTH_AUTO_OPEN=0`：禁用自动打开浏览器（手动授权）
+
+> 所有 OAuth 流程现在都会在可用时自动拉起浏览器进行授权，不再支持通过环境变量关闭自动打开行为。
 
 ## 📊 测试验证
 

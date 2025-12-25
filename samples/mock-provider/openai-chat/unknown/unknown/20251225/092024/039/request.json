@@ -1,0 +1,82 @@
+{
+  "meta": {
+    "stage": "provider-request",
+    "version": "0.89.261",
+    "buildTime": "2025-12-24T03:24:39.949Z",
+    "entryEndpoint": "/v1/chat/completions",
+    "clientRequestId": "openai-chat-unknown-unknown-20251224T112439598-001"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "*/*",
+    "User-Agent": "curl/8.7.1",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****kpzZOA"
+  },
+  "body": {
+    "model": "qwen3-coder-plus",
+    "messages": [
+      {
+        "role": "user",
+        "content": "请用一句话介绍RouteCodex"
+      }
+    ],
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "text": "请用一句话介绍RouteCodex"
+          }
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "list_mcp_resources",
+          "description": "List resources from a given MCP server (arguments.server = server label).",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "server": {
+                "type": "string"
+              },
+              "filter": {
+                "type": "string"
+              },
+              "root": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "list_mcp_resource_templates",
+          "description": "List resource templates from MCP servers.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "cursor": {
+                "type": "string"
+              },
+              "server": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "max_tokens": 8192
+  },
+  "reqId": "openai-chat-unknown-unknown-20251225T092024-039"
+}

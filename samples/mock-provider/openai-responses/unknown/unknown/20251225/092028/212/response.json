@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.286",
+    "buildTime": "2025-12-25T00:38:00.132Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251225T083748092-010"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694c875d966f039a14e4edd9",
+      "object": "chat.completion",
+      "created": 1766623070,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 151213,
+        "completion_tokens": 165,
+        "total_tokens": 151378
+      },
+      "extend_fields": {
+        "traceId": "212aa73e17666230685642892e1021",
+        "requestId": "c726ed17ecb1bf21c209c13514cd42d9"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "update_plan:245",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"plan\":[{\"step\":\"验证 weibo_fresh profile + cookie 恢复：运行 scripts/test-weibo-profile.mjs 并确认输出\",\"status\":\"completed\"},{\"step\":\"启动统一服务并执行容器匹配：复现 containers:match 成功结果\",\"status\":\"completed\"},{\"step\":\"完善容器匹配结果路径判断：launcher 读取 result?.data?.snapshot?.container_tree\",\"status\":\"completed\"},{\"step\":\"用容器匹配到的 selector 调用 /v1/browser/highlight 回环验证并截图\",\"status\":\"in_progress\"}],\"explanation\":\"一键脚本已能正常拉起所有服务并完成容器匹配验证。下一步：用匹配返回的 selector（div[class*='LoginCard_']）调用高亮接口并截图，作为最终回环证据。\"}",
+                  "name": "update_plan"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Thu, 25 Dec 2025 00:38:00 GMT",
+      "eagleeye-traceid": "212aa73e17666230685642892e1021",
+      "s-brt": "11350",
+      "s-rt": "11547",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-212"
+}

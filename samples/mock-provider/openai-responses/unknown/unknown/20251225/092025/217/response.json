@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.246",
+    "buildTime": "2025-12-23T13:32:50.115Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T213245600-069"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "The patch command failed. Let me use apply_patch instead, or directly edit the file.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/main && head -n 252 index.mts > /tmp/index_new.mts && cat >> /tmp/index_new.mts << 'EOF'\\n\\nipcMain.handle('ui:highlight', async (_evt, { selector, color }) => {\\n  try {\\n    log(`Highlight element: ${selector}, color: ${color}`);\\n    const res = await fetch('http://127.0.0.1:7701/v1/browser/highlight', {\\n      method: 'POST',\\n      headers: { 'Content-Type': 'application/json' },\\n      body: JSON.stringify({ selector, color })\\n    });\\n    return await res.json();\\n  } catch (e) {\\n    log(`Highlight error: ${e}`);\\n    return { success: false, error: String(e) };\\n  }\\n});\\n\\nEOF\\ntail -n +253 index.mts >> /tmp/index_new.mts && mv /tmp/index_new.mts index.mts\",\"justification\":\"Insert highlight handler by splitting file\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/main\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042381887994682800",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766496770,
+      "id": "2025122321324586ef42967f574096",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122321324586ef42967f574096",
+      "usage": {
+        "completion_tokens": 299,
+        "prompt_tokens": 87430,
+        "prompt_tokens_details": {
+          "cached_tokens": 87299
+        },
+        "total_tokens": 87729
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:32:50 GMT",
+      "set-cookie": "acw_tc=0ae5a7dc17664967657821778e7e6b4ced6f643a507761c59641b2c8097201;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122321324586ef42967f574096"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-217"
+}

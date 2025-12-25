@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.278",
+    "buildTime": "2025-12-24T11:17:04.796Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T191656346-152"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "现在我对OAuth生命周期有了更多了解。我需要查看provider是如何被注册和使用的，以及routing如何处理多个provider实例。让我看看virtual-router和bootstrap相关代码，看是否已经有provider扩展的逻辑。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"rg -n \\\"expand.*provider|provider.*multi|multiple.*provider\\\" -S /Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src\",\"justification\":\"\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042222733684602430",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766575024,
+      "id": "20251224191656f13b4b0e48454592",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224191656f13b4b0e48454592",
+      "usage": {
+        "completion_tokens": 154,
+        "prompt_tokens": 30884,
+        "prompt_tokens_details": {
+          "cached_tokens": 23647
+        },
+        "total_tokens": 31038
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:17:04 GMT",
+      "set-cookie": "acw_tc=0ae5a7de17665750165241597ed4bd148fc78bb85d683340b14965ee66a2a7;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224191656f13b4b0e48454592"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-026"
+}

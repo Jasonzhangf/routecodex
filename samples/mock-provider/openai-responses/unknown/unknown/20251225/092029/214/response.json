@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.274",
+    "buildTime": "2025-12-24T08:03:56.908Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T160346688-029"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694b9e636d1b90a78befaada",
+      "object": "chat.completion",
+      "created": 1766563430,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 110928,
+        "completion_tokens": 95,
+        "total_tokens": 111023
+      },
+      "extend_fields": {
+        "traceId": "212c397817665634270868905e175f",
+        "requestId": "5e7c7040e8b9a96968d00bc48d7492d7"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:151",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\": \"node ./dist/modules/browser-control/src/cli.js --url https://weibo.com --selector '#app' --color 'red'\", \"justification\": \"用 browser-control CLI 高亮已知 selector\", \"login\": false, \"max_output_tokens\": 6000, \"sandbox_permissions\": \"use_default\", \"shell\": \"\", \"workdir\": \"\", \"yield_time_ms\": 10000}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:03:56 GMT",
+      "eagleeye-traceid": "212c397817665634270868905e175f",
+      "s-brt": "9651",
+      "s-rt": "9807",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092029-214"
+}

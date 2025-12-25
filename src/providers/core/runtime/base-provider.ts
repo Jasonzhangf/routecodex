@@ -30,8 +30,34 @@ import {
 } from '../utils/provider-type-utils.js';
 import { classifyProviderError } from './provider-error-classifier.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
+import type { ProviderUsageEvent } from '@jsonstudio/llms';
+import * as LlmsCore from '@jsonstudio/llms';
 
 type RequestEnvelope = UnknownObject & { data?: UnknownObject };
+type StatsCenterLike = {
+  recordProviderUsage(ev: ProviderUsageEvent): void;
+};
+
+function getStatsCenterSafe(): StatsCenterLike {
+  const anyLlms = LlmsCore as unknown as {
+    getStatsCenter?: () => StatsCenterLike | unknown;
+  };
+  try {
+    if (anyLlms && typeof anyLlms.getStatsCenter === 'function') {
+      const center = anyLlms.getStatsCenter();
+      if (center && typeof (center as StatsCenterLike).recordProviderUsage === 'function') {
+        return center as StatsCenterLike;
+      }
+    }
+  } catch {
+    // fall through to no-op
+  }
+  return {
+    recordProviderUsage: () => {
+      // stats center not available in this @jsonstudio/llms build
+    }
+  };
+}
 
 /**
  * 基础Provider抽象类
@@ -125,9 +151,10 @@ export abstract class BaseProvider implements IProviderV2 {
       // 后处理响应
       const finalResponse = await this.postprocessResponse(response, context);
 
+      const endTime = Date.now();
       this.dependencies.logger?.logProviderRequest(this.id, 'request-success', {
         requestId: context.requestId,
-        responseTime: Date.now() - context.startTime
+        responseTime: endTime - context.startTime
       });
       this.resetRateLimitCounter(context.providerKey);
 
@@ -152,6 +179,7 @@ export abstract class BaseProvider implements IProviderV2 {
 
     const context = this.createContext(request as UnknownObject);
     const runtimeMetadata = context.runtimeMetadata;
+    const stats = getStatsCenterSafe();
 
     try {
       this.requestCount++;
@@ -167,11 +195,51 @@ export abstract class BaseProvider implements IProviderV2 {
       // 后处理响应
       const finalResponse = await this.postprocessResponse(response, context);
 
+      const endTime = Date.now();
       this.resetRateLimitCounter(context.providerKey);
+      try {
+        const usage = this.extractUsageTokensFromResponse(finalResponse);
+        const event: ProviderUsageEvent = {
+          requestId: context.requestId,
+          timestamp: endTime,
+          providerKey: context.providerKey || runtimeMetadata?.providerKey || this.getRuntimeProfile()?.providerKey || this.providerType,
+          runtimeKey: this.getRuntimeProfile()?.runtimeKey,
+          providerType: context.providerType,
+          modelId: context.model,
+          routeName: context.routeName,
+          entryEndpoint: typeof context.metadata?.entryEndpoint === 'string' ? context.metadata.entryEndpoint : undefined,
+          success: true,
+          latencyMs: endTime - context.startTime,
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          totalTokens: usage.totalTokens
+        };
+        stats.recordProviderUsage(event);
+      } catch {
+        // ignore stats errors
+      }
 
       return finalResponse;
     } catch (error) {
       this.errorCount++;
+      const endTime = Date.now();
+      try {
+        const event: ProviderUsageEvent = {
+          requestId: context.requestId,
+          timestamp: endTime,
+          providerKey: context.providerKey || runtimeMetadata?.providerKey || this.getRuntimeProfile()?.providerKey || this.providerType,
+          runtimeKey: this.getRuntimeProfile()?.runtimeKey,
+          providerType: context.providerType,
+          modelId: context.model,
+          routeName: context.routeName,
+          entryEndpoint: typeof context.metadata?.entryEndpoint === 'string' ? context.metadata.entryEndpoint : undefined,
+          success: false,
+          latencyMs: endTime - context.startTime
+        };
+        stats.recordProviderUsage(event);
+      } catch {
+        // ignore stats errors
+      }
       this.handleRequestError(error, context);
       throw error;
     }
@@ -244,6 +312,61 @@ export abstract class BaseProvider implements IProviderV2 {
   // 私有辅助方法
   protected getCurrentRuntimeMetadata(): ProviderRuntimeMetadata | undefined {
     return this.lastRuntimeMetadata;
+  }
+
+  private extractUsageTokensFromResponse(finalResponse: UnknownObject): {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  } {
+    if (!finalResponse || typeof finalResponse !== 'object') {
+      return {};
+    }
+    const container = finalResponse as { metadata?: unknown; usage?: unknown };
+    const meta = (container.metadata && typeof container.metadata === 'object')
+      ? (container.metadata as { usage?: unknown })
+      : undefined;
+    const usageNode = meta && meta.usage && typeof meta.usage === 'object'
+      ? meta.usage as Record<string, unknown>
+      : (container.usage && typeof container.usage === 'object'
+        ? container.usage as Record<string, unknown>
+        : undefined);
+
+    if (!usageNode) {
+      return {};
+    }
+
+    const readNumber = (value: unknown): number | undefined => {
+      if (typeof value !== 'number') {
+        return undefined;
+      }
+      if (!Number.isFinite(value)) {
+        return undefined;
+      }
+      return value;
+    };
+
+    const promptTokens =
+      readNumber(usageNode.prompt_tokens) ??
+      readNumber(usageNode.promptTokens) ??
+      readNumber(usageNode.input_tokens) ??
+      readNumber(usageNode.inputTokens);
+
+    const completionTokens =
+      readNumber(usageNode.completion_tokens) ??
+      readNumber(usageNode.completionTokens) ??
+      readNumber(usageNode.output_tokens) ??
+      readNumber(usageNode.outputTokens);
+
+    let totalTokens =
+      readNumber(usageNode.total_tokens) ??
+      readNumber(usageNode.totalTokens);
+
+    if (totalTokens === undefined && (promptTokens !== undefined || completionTokens !== undefined)) {
+      totalTokens = (promptTokens ?? 0) + (completionTokens ?? 0);
+    }
+
+    return { promptTokens, completionTokens, totalTokens };
   }
 
   private createContext(request: UnknownObject): ProviderContext {

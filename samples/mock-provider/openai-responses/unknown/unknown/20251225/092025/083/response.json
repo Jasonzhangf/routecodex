@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T11:10:04.545Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T191001415-110"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "现在看到了：\n1. 容器匹配成功 (root_container_id=weibo_login, success=true)\n2. Bus 客户端断开连接\n\n问题是 Bus 连接断开了。我需要检查是否有重连机制。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"curl -s http://127.0.0.1:7701/health && echo \\\"\\\" && curl -s http://127.0.0.1:7704/health\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042202942474574283",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766488204,
+      "id": "202512231910010b04a154b6e2476b",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512231910010b04a154b6e2476b",
+      "usage": {
+        "completion_tokens": 99,
+        "prompt_tokens": 54780,
+        "prompt_tokens_details": {
+          "cached_tokens": 54311
+        },
+        "total_tokens": 54879
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 11:10:04 GMT",
+      "set-cookie": "acw_tc=ac11000117664882016136914ed8a0efb3dab94f301df3fb86c527b16f7ac6;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512231910010b04a154b6e2476b"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-083"
+}

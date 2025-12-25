@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.246",
+    "buildTime": "2025-12-23T13:21:34.472Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T212128641-029"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Good, build completed. Now the graph visualization should have proper DOM rendering, better styling with proper colors, fonts, borders, expand/collapse indicators (+/-), and connection lines.\n\nLet me also address the health logging issue mentioned earlier - the excessive logging from repeated health checks. I should update the renderer code to reduce the noise.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"input\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/renderer/index.mts\\n@@\\nfunction setStatus(text: string, ok: boolean) {\\n-  log('setStatus', text, ok);\\n   if (statusEl) {\\n     statusEl.textContent = text;\\n     statusEl.className = ok ? 'ok' : 'bad';\\n   }\\n }\\n*** End Patch\",\"patch\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/renderer/index.mts\\n@@\\nfunction setStatus(text: string, ok: boolean) {\\n-  log('setStatus', text, ok);\\n   if (statusEl) {\\n     statusEl.textContent = text;\\n     statusEl.className = ok ? 'ok' : 'bad';\\n   }\\n }\\n*** End Patch\"}",
+                  "name": "apply_patch"
+                },
+                "id": "call_-8042299596420247498",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766496094,
+      "id": "2025122321212877de5299483d4ac1",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122321212877de5299483d4ac1",
+      "usage": {
+        "completion_tokens": 250,
+        "prompt_tokens": 73089,
+        "prompt_tokens_details": {
+          "cached_tokens": 72726
+        },
+        "total_tokens": 73339
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:21:34 GMT",
+      "set-cookie": "acw_tc=0ae5a87017664960888027133e4d8172101662afcd61cfd89edc187924cf1c;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122321212877de5299483d4ac1"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-177"
+}

@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.275",
+    "buildTime": "2025-12-24T08:20:39.092Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T162012621-002"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "现在我找到了 highlight CLI 的实现。它需要 `--selector` 参数，而不是 `--op highlight --selector`。让我重新测试正确的语法。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"node ./dist/modules/browser-control/src/cli.js --url https://weibo.com --selector '#app' --style '4px solid red' --duration 2000\",\"justification\":\"用 browser-control CLI 正确语法高亮一个已知 selector\",\"login\":false,\"max_output_tokens\":6000,\"sandbox_permissions\":\"use_default\",\"shell\":\"\",\"workdir\":\"\",\"yield_time_ms\":15000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042363368095558608",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766564439,
+      "id": "20251224162013fbbc8961be8742bb",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224162013fbbc8961be8742bb",
+      "usage": {
+        "completion_tokens": 136,
+        "prompt_tokens": 125182,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 125318
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:20:39 GMT",
+      "set-cookie": "acw_tc=0ae5a7de17665644129811076ed4c2638b2c6d47694288659de4364f2e8f66;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224162013fbbc8961be8742bb"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-210"
+}

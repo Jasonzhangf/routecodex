@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.261",
+    "buildTime": "2025-12-24T04:34:36.035Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T123431970-025"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****kpzZOA",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766550876,
+      "usage": {
+        "completion_tokens": 46,
+        "prompt_tokens": 111977,
+        "prompt_tokens_details": {
+          "cached_tokens": 107008
+        },
+        "total_tokens": 112023
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-1df234b3-e316-4ea2-804f-ead150e7fb51",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "exec_command",
+                  "arguments": "{\"cmd\": \"grep -A 5 -B 5 \\\"maxDepth.*maxChildren\\\" apps/floating-panel/src/renderer/index.mts\"}"
+                },
+                "index": 0,
+                "id": "call_e1df3576ba0c4d71884d6a0e",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "629",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 04:34:36 GMT",
+      "req-arrive-time": "1766550872537",
+      "req-cost-time": "3509",
+      "resp-start-time": "1766550876046",
+      "x-envoy-upstream-service-time": "3437"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-159"
+}

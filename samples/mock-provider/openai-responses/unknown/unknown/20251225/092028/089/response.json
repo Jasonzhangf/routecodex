@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T12:18:37.585Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T201828478-225"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "看来没有返回内容，可能是需要创建会话。让我看看 launcher 中是怎么创建会话的。\n\n从之前的日志看：\n- [创建浏览器会话]\n- [刷新页面应用 Cookie]\n- [检查登录状态]\n- [launcher] 登录状态: 已登录\n\n这说明确实创建了会话。让我检查 browser service 的会话相关 API。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"rg -n \\\"create.*session\\\" libs/browser/remote-service.js | head -10\",\"justification\":\"查找会话创建命令\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":100}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042214521706995972",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766578717,
+      "id": "2025122420182867301b1e117d4803",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122420182867301b1e117d4803",
+      "usage": {
+        "completion_tokens": 167,
+        "prompt_tokens": 100591,
+        "prompt_tokens_details": {
+          "cached_tokens": 99373
+        },
+        "total_tokens": 100758
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 12:18:37 GMT",
+      "set-cookie": "acw_tc=0ae5a82517665787088432965e5566f1fde022bfde67113cb64ecefb142c94;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122420182867301b1e117d4803"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-089"
+}

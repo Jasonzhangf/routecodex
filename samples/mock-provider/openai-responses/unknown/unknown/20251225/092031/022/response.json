@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.267",
+    "buildTime": "2025-12-24T06:54:37.941Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T145419225-055"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****kpzZOA",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766559278,
+      "usage": {
+        "completion_tokens": 715,
+        "prompt_tokens": 49730,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 50445
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-e4cdb69f-3a36-4eb0-83e2-3cbda9b4318d",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "exec_command",
+                  "arguments": "{\"cmd\": \"cat > /tmp/fix-main-complete.mjs << 'EOFPATCH'\\n#!/usr/bin/env node\\nimport { readFileSync, writeFileSync } from 'node:fs';\\n\\nconst filePath = '/Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/main/index.mts';\\nlet content = readFileSync(filePath, 'utf-8');\\n\\n// Replace the entire content after the bus connection section with proper structure\\nconst startPart = content.substring(0, content.indexOf('ipcMain.handle(\\\\'health\\\\', async () => {'));\\nconst endPart = `ipcMain.handle('health', async () => {\\n  try {\\n    log('Health check requested');\\n    const res = await fetch('http://127.0.0.1:7701/health');\\n    log(\\\\`Health check result: \\\\${res.ok}\\\\`);\\n    return { ok: res.ok };\\n  } catch (e) {\\n    log(\\\\`Health check error: \\\\${e}\\\\`);\\n    return { ok: false };\\n  }\\n});\\n\\nipcMain.handle('ui:highlight', async (_evt, { selector, color }) => {\\n  try {\\n    log(\\\\`Highlight element: \\\\${selector}, color: \\\\${color}\\\\`);\\n    const res = await fetch('http://127.0.0.1:7701/v1/browser/highlight', {\\n      method: 'POST',\\n      headers: { 'Content-Type': 'application/json' },\\n      body: JSON.stringify({ selector, color })\\n    });\\n    return await res.json();\\n  } catch (e) {\\n    log(\\\\`Highlight error: \\\\${e}\\\\`);\\n    return { success: false, error: String(e) };\\n  }\\n});\\n\\nipcMain.handle('window:minimize', async (_evt) => {\\n  if (win) {\\n    log('Minimizing window');\\n    win.minimize();\\n  }\\n});\\n\\nipcMain.handle('window:close', async (_evt) => {\\n  if (win) {\\n    log('Closing window');\\n    win.close();\\n  }\\n});\\n\\nipcMain.handle('ui:action', async (_evt, { action, payload }) => {\\n  try {\\n    log(\\\\`UI action: \\\\${action}\\\\`);\\n    const res = await fetch(\\\\`http://127.0.0.1:7701/v1/controller/action\\\\`, {\\n      method: 'POST',\\n      headers: { 'Content-Type': 'application/json' },\\n      body: JSON.stringify({ action, payload })\\n    });\\n    return await res.json();\\n  } catch (e) {\\n    log(\\\\`UI action error: \\\\${e}\\\\`);\\n    return { success: false, error: String(e) };\\n  }\\n});\\n\\nlog('Main process started');\\n`;\\n\\ncontent = startPart + endPart;\\n\\nwriteFileSync(filePath, content, 'utf-8');\\nconsole.log('Completely fixed main.mts structure');\\nEOFPATCH\\nnode /tmp/fix-main-complete.mjs\", \"justification\": \"Completely fix main.mts structure\", \"login\": false, \"max_output_tokens\": 6000, \"sandbox_permissions\": \"use_default\", \"shell\": \"\", \"workdir\": \"\", \"yield_time_ms\": 1000}"
+                },
+                "index": 0,
+                "id": "call_9b12208079174f148a0aebc0",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "3132",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 06:54:37 GMT",
+      "req-arrive-time": "1766559259567",
+      "req-cost-time": "18382",
+      "resp-start-time": "1766559277950",
+      "x-envoy-upstream-service-time": "18315"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092031-022"
+}

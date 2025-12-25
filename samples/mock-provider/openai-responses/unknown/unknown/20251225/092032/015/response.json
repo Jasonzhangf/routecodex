@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.286",
+    "buildTime": "2025-12-25T00:43:07.732Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251225T084200140-028"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****ygYHzg",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766623388,
+      "usage": {
+        "completion_tokens": 175,
+        "prompt_tokens": 187099,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 187274
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-169c7e9e-7c03-47c5-9844-08c71ad1285a",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "exec_command",
+                  "arguments": "{\"cmd\": \"writeStdout() { echo \\\"$1\\\"; } && writeStdout \\\"当前状态：基础功能验证完成，容器匹配和高亮接口正常，但浮窗UI preload API缺失。\\\" && writeStdout \\\"下一步计划：修复 preload API 暴露问题，确保 contextBridge 正常工作。\\\"\", \"justification\": \"\", \"login\": true, \"max_output_tokens\": 4000, \"sandbox_permissions\": \"use_default\", \"shell\": \"/bin/bash\", \"workdir\": \"/Users/fanzhang/Documents/github/webauto\", \"yield_time_ms\": 1000}"
+                },
+                "index": 0,
+                "id": "call_22cdbcd3b17d46b08366df52",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "1041",
+      "content-type": "application/json",
+      "date": "Thu, 25 Dec 2025 00:43:07 GMT",
+      "req-arrive-time": "1766623320650",
+      "req-cost-time": "67044",
+      "resp-start-time": "1766623387694",
+      "x-envoy-upstream-service-time": "66932"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092032-015"
+}

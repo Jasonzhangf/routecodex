@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.260",
+    "buildTime": "2025-12-24T02:59:56.287Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T105954310-016"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "继续查看 `dist/renderer/index.js` 的其余部分，看看 `graph` 模块的导出部分是如何处理的。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd apps/floating-panel && cat dist/renderer/index.js | tail -n +200 | head -200\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042371408274528962",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766545196,
+      "id": "2025122410595447fda5d120e24b7f",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122410595447fda5d120e24b7f",
+      "usage": {
+        "completion_tokens": 57,
+        "prompt_tokens": 18405,
+        "prompt_tokens_details": {
+          "cached_tokens": 16572
+        },
+        "total_tokens": 18462
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 02:59:56 GMT",
+      "set-cookie": "acw_tc=ac11000117665451943965508e09042df2622db709ae266703b483ceba45b5;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122410595447fda5d120e24b7f"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-136"
+}

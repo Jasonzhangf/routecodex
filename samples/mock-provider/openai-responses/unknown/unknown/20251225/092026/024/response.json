@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.250",
+    "buildTime": "2025-12-23T14:19:39.583Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T221931989-020"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "已提交所有修复：highlightElement方法、DOM全展开、所有容器连线、修复highlight调用。等待用户确认后再推送。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"explanation\":\"已完成所有修复：DOM全展开、所有容器连线和highlightElement修复。等待用户确认后再推送。\",\"plan\":[{\"status\": \"completed\", \"step\": \"Expand all container nodes recursively, not just root\"}, {\"status\": \"completed\", \"step\": \"Fix connection line rendering with proper DOM Y positions\"}, {\"status\": \"completed\", \"step\": \"Fix highlight to show browser element outline\"}, {\"status\": \"completed\", \"step\": \"Commit changes and await user confirmation before pushing\"}]}",
+                  "name": "update_plan"
+                },
+                "id": "call_-8042239707395277025",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766499579,
+      "id": "202512232219329a65bb764c4d450b",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512232219329a65bb764c4d450b",
+      "usage": {
+        "completion_tokens": 145,
+        "prompt_tokens": 133565,
+        "prompt_tokens_details": {
+          "cached_tokens": 133312
+        },
+        "total_tokens": 133710
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 14:19:39 GMT",
+      "set-cookie": "acw_tc=ac11000117664995722445010e122d275e631057d46790adcfde8d9b072692;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512232219329a65bb764c4d450b"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-024"
+}

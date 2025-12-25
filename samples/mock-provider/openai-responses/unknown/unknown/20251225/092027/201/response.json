@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.274",
+    "buildTime": "2025-12-24T08:03:08.295Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T160248860-023"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "输出还是 \"highlight operation requires selector\"，但是我已经提供了 --selector \"#app\"。让我检查一下 CLI 的实现。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cat ./dist/modules/operations/src/cli.js | rg -n \\\"highlight|selector\\\" | head -20\",\"justification\":\"查看 CLI 实现\",\"login\":false,\"max_output_tokens\":6000,\"sandbox_permissions\":\"use_default\",\"shell\":\"\",\"workdir\":\"\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042233007246446275",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766563388,
+      "id": "202512241602496aa6e93d09de4668",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512241602496aa6e93d09de4668",
+      "usage": {
+        "completion_tokens": 108,
+        "prompt_tokens": 97141,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 97249
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:03:08 GMT",
+      "set-cookie": "acw_tc=0ae5a7e117665633691265934e22ce3de6a01580e1784e2fa8de12f132b041;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512241602496aa6e93d09de4668"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-201"
+}

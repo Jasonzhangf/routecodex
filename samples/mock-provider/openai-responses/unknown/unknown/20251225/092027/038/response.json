@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.261",
+    "buildTime": "2025-12-24T03:44:28.015Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T114425472-027"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Let me try the correct format.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd apps/floating-panel && sed -i '' 's/maxDepth: 2,/maxDepth: 6,/g' src/renderer/index.mts && sed -i '' 's/maxChildren: 5,/maxChildren: 20,/g' src/renderer/index.mts\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042253829248109703",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766547868,
+      "id": "20251224114425a1e09fb861844275",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224114425a1e09fb861844275",
+      "usage": {
+        "completion_tokens": 75,
+        "prompt_tokens": 77926,
+        "prompt_tokens_details": {
+          "cached_tokens": 76172
+        },
+        "total_tokens": 78001
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 03:44:28 GMT",
+      "set-cookie": "acw_tc=0ae5a82617665478656654024e20e4a4fb7f37f040a464257cc3accf32aad6;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224114425a1e09fb861844275"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-038"
+}

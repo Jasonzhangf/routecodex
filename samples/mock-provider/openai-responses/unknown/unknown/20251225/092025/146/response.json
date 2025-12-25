@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.246",
+    "buildTime": "2025-12-23T12:59:53.871Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T205948991-001"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "用户要求：\n1. 提交所有代码到 github 并推送\n2. 不要临时文件\n3. 不要构建物\n4. 不要提交敏感数据，比如 profile 等 cookie\n\n首先我需要查看当前的 git 状态，然后：\n1. 清理临时文件和构建物\n2. 查看是否有敏感数据在暂存区\n3. 创建提交\n4. 推送到 github\n\n让我先看看当前的状态。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto && git status\",\"justification\":\"查看当前git状态\",\"login\":false,\"max_output_tokens\":4000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time\":\"1000\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042239501236820983",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766494793,
+      "id": "20251223205949e0ec2e28c1304af1",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223205949e0ec2e28c1304af1",
+      "usage": {
+        "completion_tokens": 178,
+        "prompt_tokens": 52303,
+        "prompt_tokens_details": {
+          "cached_tokens": 51297
+        },
+        "total_tokens": 52481
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 12:59:53 GMT",
+      "set-cookie": "acw_tc=ac11000117664947893288354e5486c62deb917b671209486d16c86f6ba055;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223205949e0ec2e28c1304af1"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-146"
+}

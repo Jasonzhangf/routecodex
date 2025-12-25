@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:24:28.581Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T202421509-020"
+  },
+  "url": "https://dapi.micosoft.icu/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****3a6257",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_0cafd280ec71d00e01694a89f8cda48191ac6fb0779c9846f8",
+      "object": "response",
+      "created_at": 1766492664,
+      "status": "completed",
+      "model": "gpt-5.1-codex",
+      "temperature": 1,
+      "top_p": 1,
+      "metadata": {},
+      "output": [
+        {
+          "id": "rs_0cafd280ec71d00e01694a89fa3d208191adaa3be326ad605c",
+          "type": "reasoning",
+          "summary": [],
+          "content": []
+        },
+        {
+          "id": "msg_0cafd280ec71d00e01694a89fa9b708191a843f528a82562e2",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "**Changes Applied**\n- `apps/floating-panel/src/main/index.mts`: Added resilient logging (falls back to `/tmp/webauto-floating-panel.log` on `EIO`), enabled resizing with `electron-window-state` so the window remembers its bounds, and made the window resizable with sensible minimums and state management.\n- `apps/floating-panel/scripts/build.mjs`: Marked `electron-window-state` as external so esbuild doesn’t bundle it, avoiding dynamic `require` errors.\n\n**Usage**\n- Launch headful Weibo run via:\n  - default headful: `node scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com`\n  - explicitly headless: add `--headless` (flag only, no “false”).\n\n**Status**\n- Floating panel now tolerates `console.log` failures, logs to `/tmp/webauto-floating-panel.log` if needed, and the window can be resized with persisted geometry. rebuilding succeeded. Consider restarting the launcher to pick up the new floating panel build."
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 24913,
+        "input_tokens_details": {
+          "cached_tokens": 14336
+        },
+        "output_tokens": 221,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 25134
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092024-013"
+}

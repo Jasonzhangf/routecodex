@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.275",
+    "buildTime": "2025-12-24T08:33:20.690Z",
+    "entryEndpoint": "/v1/chat/completions",
+    "clientRequestId": "openai-chat-unknown-unknown-20251224T163313713-025"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4f75-4969-72a2-bad1-d8add9d76504",
+    "session_id": "019b4f75-4969-72a2-bad1-d8add9d76504"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "It seems the sed command partially succeeded earlier, it replaced the line with \"开发者使用以下命令安装 dev CLI（必须先构建 sharedmodule）：\". Let's view that section more precisely and then add the warning below.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"sed -n '/### Dev CLI/,/^## /p' README.md | head -20\",\"justification\":\"View current dev CLI section to see what we have now.\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":100}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042294442459700276",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766565200,
+      "id": "20251224163314d076a2ad24e9484d",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224163314d076a2ad24e9484d",
+      "usage": {
+        "completion_tokens": 147,
+        "prompt_tokens": 52812,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 52959
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:33:20 GMT",
+      "set-cookie": "acw_tc=0ae5a7de17665651938917714ed4ce362b71f26220322b03b917bfcf7dc76a;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224163314d076a2ad24e9484d"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-chat-unknown-unknown-20251225T092024-010"
+}

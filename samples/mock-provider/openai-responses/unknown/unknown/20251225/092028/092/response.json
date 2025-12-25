@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T12:22:08.357Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T202204147-243"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Browser Service 可能还没启动好，等待3秒后重试创建会话。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"sleep 3 && curl -s http://127.0.0.1:7704/command -H \\\"Content-Type: application/json\\\" -d '{\\\"action\\\":\\\"start\\\",\\\"args\\\":{\\\"profileId\\\":\\\"weibo_fresh\\\",\\\"url\\\":\\\"https://weibo.com\\\",\\\"headless\\\":false}}'\",\"justification\":\"重试创建会话\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":100}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042282176033058232",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766578928,
+      "id": "20251224202204f2a232e8c57b491b",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224202204f2a232e8c57b491b",
+      "usage": {
+        "completion_tokens": 153,
+        "prompt_tokens": 106123,
+        "prompt_tokens_details": {
+          "cached_tokens": 102833
+        },
+        "total_tokens": 106276
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 12:22:08 GMT",
+      "set-cookie": "acw_tc=ac11000117665789245446841edd9213898923aeb3a020a51a5e79193d9bdf;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224202204f2a232e8c57b491b"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-092"
+}

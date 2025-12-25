@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T11:23:26.716Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T192312536-009"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "我需要在extractProviderAuthEntries函数中添加对自动扫描token文件的支持。让我找到合适的位置插入这个逻辑。\n\n看起来在函数开始处，在收集defaults之后，我可以添加一个逻辑来扫描token文件。如果检测到oauth类型，就扫描对应的token文件，然后为每个扫描到的文件创建auth entry。\n\n让我修改这个函数。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cat > /tmp/extract_provider_auth_patch.txt << 'EOF'\\n  const pushEntry = (candidateAlias: string | undefined, authConfig: Record<string, unknown>) => {\\n    const alias = normalizeAlias(candidateAlias, aliasSet);\\n    const typeSource =\\n      (authConfig as any)?.rawType ??\\n      (authConfig as any)?.type ??\\n      baseTypeSource ??\\n      baseType;\\n    const typeInfo = interpretAuthType(typeSource);\\n    const entryType = typeInfo.type;\\n    const oauthProviderId =\\n      (authConfig as any)?.oauthProviderId ??\\n      typeInfo.oauthProviderId ??\\n      baseTypeInfo.oauthProviderId;\\n\\n    if (entryType === 'oauth' && !oauthProviderId) {\\n      throw new VirtualRouterError(\\n        `Provider ${providerId} OAuth auth entries must declare provider-specific type (e.g. \\\"qwen-oauth\\\")`,\\n        VirtualRouterErrorCode.CONFIG_ERROR\\n      );\\n    }\\n\\n    const normalized: ProviderAuthConfig = {\\n      type: entryType,\\n      rawType: typeof typeSource === 'string' ? typeSource : undefined,\\n      oauthProviderId,\\n      value: readOptionalString((authConfig as any)?.value ?? (authConfig as any)?.apiKey),\\n      secretRef: readOptionalString((authConfig as any)?.secretRef)\\n    };\\n    normalized.tokenFile = readOptionalString((authConfig as any)?.tokenFile);\\n    normalized.tokenUrl = readOptionalString((authConfig as any)?.tokenUrl ?? (authConfig as any)?.token_url);\\n    normalized.deviceCodeUrl = readOptionalString(\\n      (authConfig as any)?.deviceCodeUrl ?? (authConfig as any)?.device_code_url\\n    );\\n    normalized.clientId = readOptionalString((authConfig as any)?.clientId ?? (authConfig as any)?.client_id);\\n    normalized.clientSecret = readOptionalString(\\n      (authConfig as any)?.clientSecret ?? (authConfig as any)?.client_secret\\n    );\\n    normalized.authorizationUrl = readOptionalString(\\n      (authConfig as any)?.authorizationUrl ??\\n        (authConfig as any)?.authorization_url ??\\n        (authConfig as any)?.authUrl\\n    );\\n    normalized.userInfoUrl = readOptionalString((authConfig as any)?.userInfoUrl ?? (authConfig as any)?.user_info_url);\\n    normalized.refreshUrl = readOptionalString((authConfig as any)?.refreshUrl ?? (authConfig as any)?.refresh_url);\\n    normalized.scopes = normalizeScopeList((authConfig as any)?.scopes ?? (authConfig as any)?.scope);\\n\\n    normalized.secretRef ??= defaults.secretRef;\\n    normalized.tokenFile ??= defaults.tokenFile;\\n    normalized.tokenUrl ??= defaults.tokenUrl;\\n    normalized.deviceCodeUrl ??= defaults.deviceCodeUrl;\\n    normalized.clientId ??= defaults.clientId;\\n    normalized.clientSecret ??= defaults.clientSecret;\\n    normalized.authorizationUrl ??= defaults.authorizationUrl;\\n    normalized.userInfoUrl ??= defaults.userInfoUrl;\\n    normalized.refreshUrl ??= defaults.refreshUrl;\\n    normalized.scopes = mergeScopes(normalized.scopes, defaults.scopes);\\n\\n    if (entryType === 'apiKey') {\\n      if (!normalized.secretRef && normalized.value) {\\n        normalized.secretRef = `${providerId}.${alias}`;\\n      } else if (!normalized.secretRef) {\\n        normalized.secretRef = `${providerId}.${alias}`;\\n      }\\n    }\\n\\n    entries.push({ keyAlias: alias, auth: normalized });\\n    aliasSet.add(alias);\\n  };\\nEOF\\ncat /tmp/extract_provider_auth_patch.txt\",\"justification\":\"准备修改extractProviderAuthEntries函数\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042314061870557424",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766575406,
+      "id": "2025122419231300e134ec1fa44c58",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122419231300e134ec1fa44c58",
+      "usage": {
+        "completion_tokens": 876,
+        "prompt_tokens": 45046,
+        "prompt_tokens_details": {
+          "cached_tokens": 43437
+        },
+        "total_tokens": 45922
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:23:26 GMT",
+      "set-cookie": "acw_tc=0ae5a86d17665753927592846ea1a282d9e9655db1589af2507d42256d4f37;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122419231300e134ec1fa44c58"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-036"
+}

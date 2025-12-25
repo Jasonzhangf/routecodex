@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.283",
+    "buildTime": "2025-12-24T14:02:40.805Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T220134606-071"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****BNZi-Q",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766584961,
+      "usage": {
+        "completion_tokens": 128,
+        "prompt_tokens": 182172,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 182300
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-86cb7255-403b-4ef3-8690-5fad9ba36968",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "update_plan",
+                  "arguments": "{\"plan\": [{\"step\": \"基础健康检查单元测试已通过\", \"status\": \"completed\"}, {\"step\": \"验证容器匹配与DOM连线功能\", \"status\": \"pending\"}, {\"step\": \"测试长按连线修改连接关系\", \"status\": \"pending\"}, {\"step\": \"确认最小化/关闭按钮功能\", \"status\": \"completed\"}], \"explanation\": \"基础健康检查单元测试已修复并成功通过，返回 true。现在可以继续验证容器匹配与DOM连线功能。\"}"
+                },
+                "index": 0,
+                "id": "call_306a154ad68345c4b33e187f",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "1006",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 14:02:40 GMT",
+      "req-arrive-time": "1766584895545",
+      "req-cost-time": "65048",
+      "resp-start-time": "1766584960594",
+      "x-envoy-upstream-service-time": "64825"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092031-148"
+}

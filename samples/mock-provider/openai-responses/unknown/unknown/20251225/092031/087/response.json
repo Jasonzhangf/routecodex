@@ -1,0 +1,63 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.278",
+    "buildTime": "2025-12-24T11:11:04.185Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T191054482-114"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****BNZi-Q",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "created": 1766574664,
+      "usage": {
+        "completion_tokens": 560,
+        "prompt_tokens": 27397,
+        "prompt_tokens_details": {
+          "cached_tokens": 25856
+        },
+        "total_tokens": 27957
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-925cb971-1377-4497-ba32-40731bcc921f",
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "根据我的检查，当前系统中没有实现 `secondaryTokenFile` 这样的配置选项。RouteCodex 的 iFlow provider 目前只支持单一的 OAuth token 文件。让我为您解释当前情况和解决方案：\n\n## 当前状态\n\n1. 我已经将您的两个 token 文件重命名并更新了配置：\n   - `/Users/fanzhang/.routecodex/auth/iflow-oauth.json` - 主 token\n   - `/Users/fanzhang/.routecodex/auth/iflow-oauth-secondary.json` - 第二个 token（已重命名）\n\n2. 配置文件已更新添加了 `secondaryTokenFile` 字段，但**当前系统不支持此字段**。\n\n## 关于多 token 支持\n\nRouteCodex 当前的架构并不支持单个 provider 使用多个 OAuth token 进行轮询。系统设计是：\n\n- 每个 provider 配置对应一个认证源\n- OAuth 认证通过单一 token 文件管理\n- 路由层不处理同一 provider 的多 token 轮询\n\n## 解决方案\n\n如果您希望使用两个 iFlow token 进行负载均衡或轮询，需要创建两个独立的 provider 配置：\n\n1. **创建第二个 iFlow provider 配置**：\n   ```json\n   {\n     \"id\": \"iflow-secondary\",\n     \"enabled\": true,\n     \"type\": \"openai\",\n     \"providerType\": \"openai\",\n     \"baseURL\": \"https://apis.iflow.cn/v1\",\n     \"auth\": {\n       \"type\": \"iflow-oauth\",\n       \"tokenFile\": \"~/.routecodex/auth/iflow-oauth-secondary.json\"\n     },\n     \"models\": {\n       // 相同的模型列表\n     },\n     \"compatibilityProfile\": \"chat:iflow\"\n   }\n   ```\n\n2. **更新路由配置**以包含两个 provider：\n   ```json\n   \"routing\": {\n     \"default\": [\n       \"iflow.kimi-k2\",\n       \"iflow-secondary.kimi-k2\"\n     ],\n     // ...\n   }\n   ```\n\n## 实施建议\n\n由于当前系统不支持 `secondaryTokenFile` 配置，您需要：\n\n1. 修改 `/Users/fanzhang/.routecodex/config.json` 和 `/Users/fanzhang/.routecodex/provider/iflow/config.v1.json` \n2. 添加一个名为 `iflow-secondary` 的新 provider，使用第二个 token 文件\n3. 更新路由规则以包含两个 iFlow provider\n\n您希望我帮您更新配置以创建第二个独立的 iFlow provider 吗？"
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "2561",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 11:11:04 GMT",
+      "req-arrive-time": "1766574654840",
+      "req-cost-time": "9339",
+      "resp-start-time": "1766574664179",
+      "x-envoy-upstream-service-time": "9302"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092031-087"
+}

@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.260",
+    "buildTime": "2025-12-24T03:05:55.075Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T110551332-049"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "The build output still doesn't include the buildSelectorMap function. This is very strange. Let me check if the source file was actually modified correctly, and if there's some caching or tree-shaking issue.\n\nLet me check the actual source file content around the drawAllConnections function to see if the buildSelectorMap function was inserted properly.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"grep -n \\\"drawAllConnections\\\" apps/floating-panel/src/renderer/graph.mjs | head -5\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042232354411269033",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766545555,
+      "id": "2025122411055173f1be1db7a14f0c",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122411055173f1be1db7a14f0c",
+      "usage": {
+        "completion_tokens": 100,
+        "prompt_tokens": 42183,
+        "prompt_tokens_details": {
+          "cached_tokens": 42088
+        },
+        "total_tokens": 42283
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 03:05:55 GMT",
+      "set-cookie": "acw_tc=ac11000117665455514615506e090488884c9379206887b4063f54606f38fe;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122411055173f1be1db7a14f0c"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-169"
+}

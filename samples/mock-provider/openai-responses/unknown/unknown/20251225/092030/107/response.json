@@ -1,0 +1,68 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T11:55:56.269Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T195532833-132"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****45931c",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694bd4b66d1b90a78bf02d25",
+      "object": "chat.completion",
+      "created": 1766577335,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 78445,
+        "completion_tokens": 297,
+        "total_tokens": 78742
+      },
+      "extend_fields": {
+        "traceId": "212b9fc917665773332793152e0f55",
+        "requestId": "dd4976b7a5215bcc6bab34598fc0c5c6"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "stop",
+          "message": {
+            "role": "assistant",
+            "content": "## 总结\n\n✅ **ESM-only 架构已达成**\n\n1. **硬性规则更新**  \n   已将 `AGENTS.md` 中的模块系统规则改为 **无例外 ESM-only**：  \n   - 禁止 `.cjs`  \n   - Electron preload 强制使用 `.mjs`  \n   - 构建脚本、CLI 全部 ESM 化  \n\n2. **浮窗（floating-panel）**  \n   - `preload.cjs` → `preload.mjs` 并改为 `import` 语法  \n   - `bootstrap.cjs` → `bootstrap.mjs` 并改为 `import` 语法  \n   - 构建脚本 `build.mjs` 同步更新拷贝路径  \n   - 主进程 `index.mts` 中 `preload` 字段指向 `.mjs`  \n   - 新增 `scripts/start-headful.mjs` 供 launcher 调用  \n\n3. **遗留 CJS 清理**  \n   已移除两组目录：  \n   - `runtime/infra/utils/scripts/{production,platform-specific,utils,tests}/**/*.cjs`  \n   - `src/modules/executable-container/node/*.cjs`  \n\n4. **Git 状态**  \n   变更已提交并推送至 GitHub，commit `1575cd4`。\n\n仓库现已 **100% ESM**，无 `.cjs` 源码残留（node_modules 除外）。"
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:55:56 GMT",
+      "eagleeye-traceid": "212b9fc917665773332793152e0f55",
+      "s-brt": "22845",
+      "s-rt": "23043",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-107"
+}

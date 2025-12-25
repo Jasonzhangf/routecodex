@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.261",
+    "buildTime": "2025-12-24T04:44:22.973Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T124403083-064"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****kpzZOA",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766551463,
+      "usage": {
+        "completion_tokens": 497,
+        "prompt_tokens": 124520,
+        "prompt_tokens_details": {
+          "cached_tokens": 122752
+        },
+        "total_tokens": 125017
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-5fab9eaf-3d8e-46bf-a7c6-664123a27347",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "exec_command",
+                  "arguments": "{\"cmd\": \"cd apps/floating-panel && python3 << 'EOF'\\nwith open('src/renderer/graph.mjs', 'r') as f:\\n    content = f.read()\\n\\n# 检查 renderGraph 函数中是否有重复的 selectorMap 构建逻辑\\n# 在源代码中，我添加了 selectorMap 构建逻辑，但可能与 drawAllConnections 中的重复\\n\\n# 首先，移除 renderGraph 中的 selectorMap 构建逻辑，因为 drawAllConnections 中已经包含了\\n# 只保留 drawAllConnections 中的构建逻辑\\n\\n# 从 renderGraph 中移除 selectorMap 构建\\nlines = content.split('\\\\n')\\nnew_lines = []\\nin_render_graph = False\\nskip_selector_build = False\\n\\nfor line in lines:\\n    if 'function renderGraph()' in line:\\n        in_render_graph = True\\n        new_lines.append(line)\\n    elif in_render_graph:\\n        # 检查是否是 selectorMap 构建相关行\\n        if 'function buildSelectorMap(domNode)' in line:\\n            print(\\\"Found buildSelectorMap in renderGraph, skipping...\\\")\\n            skip_selector_build = True\\n            continue\\n        elif skip_selector_build and line.strip().startswith('}'):\\n            # 找到函数结尾，停止跳过\\n            skip_selector_build = False\\n            continue\\n        elif skip_selector_build:\\n            continue\\n        elif 'selectorMap.clear()' in line and 'buildSelectorMap' in ''.join(lines[lines.index(line):lines.index(line)+5]):\\n            print(\\\"Found selectorMap building in renderGraph, skipping...\\\")\\n            # Skip the selectorMap building lines\\n            continue\\n        elif 'buildSelectorMap(domData)' in line:\\n            print(\\\"Found buildSelectorMap call in renderGraph, skipping...\\\")\\n            continue\\n        elif 'Built selector map' in line:\\n            print(\\\"Found selector map log in renderGraph, skipping...\\\")\\n            continue\\n        else:\\n            new_lines.append(line)\\n        \\n        if 'canvas.appendChild(mainGroup);' in line:\\n            in_render_graph = False\\n    else:\\n        new_lines.append(line)\\n\\nwith open('src/renderer/graph.mjs', 'w') as f:\\n    f.write('\\\\n'.join(new_lines))\\n\\nprint(\\\"✓ 移除了 renderGraph 中的 selectorMap 构建逻辑\\\")\\nEOF\\n\"}"
+                },
+                "index": 0,
+                "id": "call_8432b37491dc43e499c56521",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "2805",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 04:44:23 GMT",
+      "req-arrive-time": "1766551443611",
+      "req-cost-time": "19407",
+      "resp-start-time": "1766551463019",
+      "x-envoy-upstream-service-time": "19298"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-171"
+}

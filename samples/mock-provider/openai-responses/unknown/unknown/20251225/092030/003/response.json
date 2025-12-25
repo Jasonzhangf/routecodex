@@ -1,0 +1,68 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.275",
+    "buildTime": "2025-12-24T08:22:59.381Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T162240883-008"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694ba2d2966f039a14e2384b",
+      "object": "chat.completion",
+      "created": 1766564564,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 138668,
+        "completion_tokens": 228,
+        "total_tokens": 138896
+      },
+      "extend_fields": {
+        "traceId": "2107b05917665645613416648e0cee",
+        "requestId": "252d9cca5e065d4a1f1bca35cd450ec9"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "stop",
+          "message": {
+            "role": "assistant",
+            "content": "Perfect! The system is now running successfully with:\n\n1. ✅ **Startup script fixed** - No more TypeScript syntax errors\n2. ✅ **Path resolution fixed** - Using proper fileURLToPath for ES modules\n3. ✅ **Browser and floating panel launched** - Both services healthy\n4. ✅ **Container matching working** - Successfully matched weibo_main_page container\n5. ✅ **Floating panel UI connected** - WebSocket client connected and receiving data\n6. ✅ **High-lighting infrastructure ready** - All CLI tools tested and working\n\nThe system is now fully operational with the floating panel UI displaying container trees and DOM trees, and the highlighting functionality is ready to use through the existing API calls.\n\nKey improvements made:\n- Fixed ES module syntax errors in startup scripts\n- Implemented on-demand DOM loading (only current level + next level)\n- Separated expand/collapse logic from selection logic\n- Fixed window control handlers in floating panel\n- Created proper floating panel start script\n- Fixed EIO error handling in main process\n\nThe system is ready for use with proper container-DOM connections and highlighting functionality."
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:22:59 GMT",
+      "eagleeye-traceid": "2107b05917665645613416648e0cee",
+      "s-brt": "17802",
+      "s-rt": "18018",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-003"
+}

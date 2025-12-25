@@ -1,0 +1,56 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:24:00.726Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T202345446-016"
+  },
+  "url": "https://api.tabcode.cc/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****d731a8",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_0ea2087e2080051301694a89d73bc8819bbc9f4b4a44b0d477",
+      "object": "response",
+      "created_at": 1766492631,
+      "status": "completed",
+      "model": "gpt-5.2-codex",
+      "temperature": 1,
+      "top_p": 0.98,
+      "metadata": {},
+      "output": [
+        {
+          "id": "fc_0ea2087e2080051301694a89d92724819baf9b2ab721b661cc",
+          "type": "function_call",
+          "status": "completed",
+          "call_id": "call_xpoSVz1jLfkznknuo1SJ5zhE",
+          "name": "apply_patch",
+          "arguments": "{\"input\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/scripts/build.mjs\\n@@\\n-// 1. 构建 main 进程 (ESM)\\n+// 1. 构建 main 进程 (ESM)\\n console.log('[floating-panel] building main process (ESM)...');\\n-execSync('npx esbuild src/main/index.mts --bundle --platform=node --format=esm --outfile=dist/main/index.mjs --sourcemap --external:electron --external:ws', { stdio: 'inherit' });\\n+execSync('npx esbuild src/main/index.mts --bundle --platform=node --format=esm --outfile=dist/main/index.mjs --sourcemap --external:electron --external:ws --external:electron-window-state', { stdio: 'inherit' });\\n*** End Patch\",\"patch\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/scripts/build.mjs\\n@@\\n-// 1. 构建 main 进程 (ESM)\\n+// 1. 构建 main 进程 (ESM)\\n console.log('[floating-panel] building main process (ESM)...');\\n-execSync('npx esbuild src/main/index.mts --bundle --platform=node --format=esm --outfile=dist/main/index.mjs --sourcemap --external:electron --external:ws', { stdio: 'inherit' });\\n+execSync('npx esbuild src/main/index.mts --bundle --platform=node --format=esm --outfile=dist/main/index.mjs --sourcemap --external:electron --external:ws --external:electron-window-state', { stdio: 'inherit' });\\n*** End Patch\"}"
+        }
+      ],
+      "usage": {
+        "input_tokens": 21278,
+        "input_tokens_details": {
+          "cached_tokens": 20352
+        },
+        "output_tokens": 408,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 21686
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092033-019"
+}

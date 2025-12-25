@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.286",
+    "buildTime": "2025-12-25T01:03:39.394Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251225T090324547-093"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "现在我们有以下测试文件：\n\n1. scripts/test-weibo-profile.mjs - 测试 weibo profile 恢复\n2. apps/floating-panel/scripts/test-preload.mjs - preload 回环测试\n3. modules/browser/tests/ - 大量浏览器服务测试\n\n我需要检查每个主要模块是否有对应的测试：\n\n1. services/browser-service/ - 应该有测试\n2. services/controller/ - 需要 check\n3. services/unified-api/ - 需要 check\n4. apps/floating-panel/ - 我们刚刚加了 preload 测试，但 main process 的启动/IPC也需要测试\n\n让我列出所有主要模块目录，然后为每个模块制定测试计划。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"ls -d services/* apps/* modules/*\",\"justification\":\"\",\"login\":true,\"max_output_tokens\":6000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042185247209508858",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766624619,
+      "id": "20251225090324154b21a753b24282",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251225090324154b21a753b24282",
+      "usage": {
+        "completion_tokens": 219,
+        "prompt_tokens": 25957,
+        "prompt_tokens_details": {
+          "cached_tokens": 23936
+        },
+        "total_tokens": 26176
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Thu, 25 Dec 2025 01:03:39 GMT",
+      "set-cookie": "acw_tc=ac11000117666246046865491eeba3e1055fa260d9695ef7a3db4273c1c94d;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251225090324154b21a753b24282"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-157"
+}

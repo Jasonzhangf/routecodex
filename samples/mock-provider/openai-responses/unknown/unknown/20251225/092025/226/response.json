@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.246",
+    "buildTime": "2025-12-23T13:35:15.063Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T213505202-078"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "已完成并提交以下功能：\n\n## 完成的改进\n\n### 浮窗面板修复\n- **窗口闪烁修复**：改用原生 Electron `-webkit-app-region: drag` 实现拖拽，消除移动时的闪烁\n- **窗口大小记忆**：集成 `electron-window-state` 保存窗口位置和尺寸\n- **EIO 日志错误修复**：添加回退机制，日志输出失败时写入文件\n- **参数解析修复**：纠正 `start-headful.mjs` 的布尔标志处理\n\n### 控制台日志优化\n- 注释掉健康检查成功时的重复日志\n- 减少 `setStatus` 调用时的日志输出\n\n### 图形可视化增强\n- **完整树渲染**：所有容器和 DOM 节点递归渲染，不再只显示第一个\n- **连线功能**：容器到匹配的 DOM 元素之间绘制连接线\n- **Canvas 可拖动**：支持鼠标拖拽移动整个图形画布\n- **展开/折叠**：添加 `+/-` 指示器，支持点击展开/收起子节点\n- **配色优化**：采用 VS Code 深色主题配色方案，提升可读性\n- **交互高亮**：\n  - 点击容器节点：绿色高亮选中项，同时发送高亮请求到浏览器\n  - 点击 DOM 元素：蓝色高亮选中项，同时发送高亮请求到浏览器\n\n### IPC 通信扩展\n- 在 preload 中添加 `highlightElement(selector, color)` API\n- 在主进程中添加 `ui:highlight` IPC 处理器\n\n### 代码提交\n- 3 个提交已推送到 `origin/main`\n- 不包含临时文件、构建产物或敏感数据",
+            "reasoning_content": "Good, no staged changes, and the untracked files are just backup files and build artifacts which are not being committed (per gitignore).\n\nLet me summarize what I've accomplished:\n\n1. Fixed EIO logging error by adding fallback logging\n2. Fixed window resize flicker by using native Electron drag region\n3. Added window resize persistence with electron-window-state\n4. Fixed headless argument parsing in start-headful.mjs\n5. Reduced excessive console logging\n6. Improved tree visualization with VS Code-style colors\n7. Added expand/collapse indicators (+/-)\n8. Added canvas drag functionality\n9. Rendered full tree nodes (not just first one)\n10. Added connection lines between containers and DOM\n11. Added click-to-highlight functionality\n12. Added selected state tracking with visual highlighting\n\nAll code has been committed and pushed to GitHub.",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766496915,
+      "id": "20251223213505d69de21769c24fb9",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223213505d69de21769c24fb9",
+      "usage": {
+        "completion_tokens": 544,
+        "prompt_tokens": 92568,
+        "prompt_tokens_details": {
+          "cached_tokens": 92269
+        },
+        "total_tokens": 93112
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:35:15 GMT",
+      "set-cookie": "acw_tc=0ae5a7dc17664969053886157e7e6b6d98b973af533ec0b5263ddf0bfeffe6;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223213505d69de21769c24fb9"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-226"
+}

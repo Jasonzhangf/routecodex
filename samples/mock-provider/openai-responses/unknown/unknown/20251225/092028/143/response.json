@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.286",
+    "buildTime": "2025-12-24T16:33:19.285Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251225T003233010-002"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "好的，我需要继续执行补齐action。从刚才的输出看，controller.js 文件中有这些方法，但是我们需要检查容器匹配相关的action是否全部在controller.js中实现了。\n\n从TS文件中看到的action列表包括：\n- containers:inspect\n- containers:inspect-container\n- containers:inspect-branch\n- containers:remap\n- containers:create-child\n- containers:update-alias\n- containers:update-operations\n- containers:match\n- browser:highlight\n- browser:clear-highlight\n- browser:highlight-dom-path\n- browser:cancel-pick\n- browser:pick-dom\n- dom:branch:2\n- dom:pick:2\n\n我需要检查这些是否都已经在controller.js中实现了。让我继续查看controller.js的内容。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"rg \\\"async handleContainer\\\" services/controller/src/controller.js\",\"justification\":\"检查 controller.js 中的 handleContainer 方法\",\"login\":true,\"max_output_tokens\":4000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/bash\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042232526210272513",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766593999,
+      "id": "202512250032335797066a3ea34a65",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512250032335797066a3ea34a65",
+      "usage": {
+        "completion_tokens": 247,
+        "prompt_tokens": 102677,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 102924
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 16:33:19 GMT",
+      "set-cookie": "acw_tc=ac11000117665939534324332ef14177df6e971d840e84324f7d85010c6787;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512250032335797066a3ea34a65"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-143"
+}

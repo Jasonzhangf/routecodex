@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.284",
+    "buildTime": "2025-12-24T16:11:02.571Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251225T001044153-143"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "看来 unified-api 的 WS 还是被指向 8765 了，但那个端口现在被 test-weibo-profile.mjs 的 Browser Service 占用了。问题是：两个进程都需要同一个 Browser Service（port 7704 + ws 8765）。\n\n现在 test-weibo-profile.mjs 已经在后台运行，Browser Service 已经在运行（port 7704 + ws 8765）。我应该直接在这个基础上运行容器匹配。\n\n但是 unified-api 没有启动，需要启动它。并且需要设置 WEBAUTO_WS_URL=ws://127.0.0.1:8765。\n\n让我杀掉之前的 unified-api 进程，然后重新启动它。\n\n不过，我意识到 test-weibo-profile.mjs 会在执行完成后退出吗？从代码看它只是启动 Browser Service，创建会话，获取状态和 cookies，然后退出。Browser Service 会继续运行吗？从日志看没有显示退出，所以应该还在运行。\n\n现在的问题是需要启动 unified-api 并设置 WEBAUTO_WS_URL。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"lsof -ti:7704; lsof -ti:8765\",\"justification\":\"\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/bash\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042354915600139799",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766592662,
+      "id": "20251225001044810cd375b84e4520",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251225001044810cd375b84e4520",
+      "usage": {
+        "completion_tokens": 301,
+        "prompt_tokens": 92083,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 92384
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 16:11:02 GMT",
+      "set-cookie": "acw_tc=0ae5a7de17665926443837722ed49b2f676460738a72c8cce116d5c498b2f1;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251225001044810cd375b84e4520"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-136"
+}

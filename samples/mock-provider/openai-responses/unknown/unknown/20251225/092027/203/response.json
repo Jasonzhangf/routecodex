@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.274",
+    "buildTime": "2025-12-24T08:04:22.498Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T160405773-030"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "好的，browser-control CLI 的 --selector 参数似乎没有直接触发高亮，而是获取 HTML。让我找更多关于高亮的 CLI。\n\n从之前的日志看，有 `controller` 的 `handleBrowserHighlight` 函数。让我检查是否有直接的 CLI 来高亮元素。\n\n让我检查 browser-control CLI 的参数，看看是否有其他高亮相关的命令。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"rg \\\"dom_path|highlight.*dom\\\" /Users/fanzhang/Documents/github/webauto/services/controller/src/controller.ts -n\",\"justification\":\"查找 dom_path 相关的高亮功能\",\"login\":false,\"max_output_tokens\":6000,\"sandbox_permissions\":\"use_default\",\"shell\":\"\",\"workdir\":\"\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042267882381393536",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766563462,
+      "id": "202512241604069c2460855e9b437d",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512241604069c2460855e9b437d",
+      "usage": {
+        "completion_tokens": 164,
+        "prompt_tokens": 117336,
+        "prompt_tokens_details": {
+          "cached_tokens": 44
+        },
+        "total_tokens": 117500
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:04:22 GMT",
+      "set-cookie": "acw_tc=ac11000117665634460771941ee1f02e609af99dae2c9e52f9f1fd79b67a0a;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512241604069c2460855e9b437d"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-203"
+}

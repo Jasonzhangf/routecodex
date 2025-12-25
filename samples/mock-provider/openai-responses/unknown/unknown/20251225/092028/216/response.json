@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.286",
+    "buildTime": "2025-12-25T00:58:25.465Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251225T085748143-065"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694c8c0c6d1b90a78bf20e25",
+      "object": "chat.completion",
+      "created": 1766624269,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 17310,
+        "completion_tokens": 675,
+        "total_tokens": 17985
+      },
+      "extend_fields": {
+        "traceId": "21044adc17666242684094510e0eb5",
+        "requestId": "ebc64350f469187258592918b36d151d"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:14",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"cat > apps/floating-panel/scripts/test-preload.mjs << 'EOF'\\nimport { app, BrowserWindow } from 'electron';\\nimport path from 'node:path';\\nimport { fileURLToPath, pathToFileURL } from 'node:url';\\n\\nconst __filename = fileURLToPath(import.meta.url);\\nconst __dirname = path.dirname(__filename);\\n\\nconst preloadPath = path.resolve(__dirname, '../dist/main/preload.mjs');\\nconst preloadUrl = pathToFileURL(preloadPath).toString();\\n\\nconst html = `<!doctype html>\\n<html>\\n  <head>\\n    <meta charset=\\\"utf-8\\\" />\\n    <title>Preload Test</title>\\n  </head>\\n  <body>\\n    <div id=\\\"root\\\">preload test</div>\\n  </body>\\n</html>`;\\n\\nlet sawPreloadError = null;\\n\\nconst logResult = (ok, detail = '') => {\\n  if (ok) {\\n    console.log('[preload-test] window.api OK');\\n  } else {\\n    const suffix = detail ? `: ${detail}` : '';\\n    console.log(`[preload-test] FAILED${suffix}`);\\n  }\\n};\\n\\nconst runTest = async () => {\\n  const win = new BrowserWindow({\\n    width: 300,\\n    height: 200,\\n    show: true,\\n    webPreferences: {\\n      contextIsolation: true,\\n      nodeIntegration: false,\\n      preload: preloadUrl\\n    }\\n  });\\n\\n  win.webContents.on('preload-error', (_event, preloadErr) => {\\n    sawPreloadError = preloadErr;\\n  });\\n\\n  win.webContents.on('console-message', (_event, _level, message) => {\\n    if (message.startsWith('[preload]')) {\\n      console.log(message);\\n    }\\n  });\\n\\n  const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;\\n  await win.loadURL(dataUrl);\\n\\n  const hasApi = await win.webContents.executeJavaScript(\\n    'Boolean(window.api)',\\n    true\\n  );\\n\\n  if (hasApi && !sawPreloadError) {\\n    logResult(true);\\n  } else if (sawPreloadError) {\\n    logResult(false, sawPreloadError.message || String(sawPreloadError));\\n  } else {\\n    logResult(false, 'window.api missing');\\n  }\\n\\n  win.close();\\n  app.quit();\\n};\\n\\napp.whenReady().then(runTest).catch((err) => {\\n  logResult(false, err?.message || String(err));\\n  app.quit();\\n});\\nEOF\",\"justification\":\"\",\"login\":true,\"max_output_tokens\":6000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Thu, 25 Dec 2025 00:58:25 GMT",
+      "eagleeye-traceid": "21044adc17666242684094510e0eb5",
+      "s-brt": "36985",
+      "s-rt": "37035",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-216"
+}

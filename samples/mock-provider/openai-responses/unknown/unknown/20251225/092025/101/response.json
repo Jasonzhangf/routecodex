@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T11:13:48.349Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T191343302-128"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "从日志中可以看到一个关键问题：\n\n1. UI 通过 Bus 连接成功，收到 `health.status` 和 `browser.mode` 事件\n2. UI 请求 `containers:match`，Unified API 成功执行并返回了完整的容器匹配结果\n3. 但是日志中**没有**看到 `Broadcasting event: containers.matched` 的日志\n\nUnified API 应该在容器匹配成功后广播 `containers.matched` 事件到 Bus，但是它没有这样做。让我检查 Unified API 的代码，看看是否有事件广播的逻辑。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"grep -n \\\"containers.matched\\\\|Broadcasting event.*container\\\\|broadcastEvent\\\" services/unified-api/index.js | head -20\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042384052658120999",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766488428,
+      "id": "202512231913436722c6f6c5114943",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512231913436722c6f6c5114943",
+      "usage": {
+        "completion_tokens": 153,
+        "prompt_tokens": 63224,
+        "prompt_tokens_details": {
+          "cached_tokens": 57700
+        },
+        "total_tokens": 63377
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 11:13:48 GMT",
+      "set-cookie": "acw_tc=ac11000117664884234513300edd7f8e3e4f00c94c2401f97c28bb61814a3e;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512231913436722c6f6c5114943"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-101"
+}

@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T13:56:52.207Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T215640126-012"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "已修复并提交以下改进：\n\n1. **修复 highlight IPC handler** - 删除重复的闭合括号，解决\"No handler registered\"错误\n\n2. **Windows 注册表风格设计** - 容器和 DOM 树改用经典风格\n   - 使用 Consolas 等宽字体\n   - 矩形方框展开指示器（+/-）\n   - 扁平化边框和小圆角\n\n3. **容器-DOM 连线** - 绿色虚线从容器节点连接到匹配的 DOM 元素\n\n4. **DOM 点击获取子容器** - 点击 DOM 元素后，调用 `containers:match` 获取该元素的子容器列表\n\n5. **移除右侧滚动** - Canvas 设置 `overflow: hidden`，通过拖拽画布导航\n\n已提交但未推送。请确认测试效果后告诉我是否可以推送到 GitHub。",
+            "reasoning_content": "已完成代码提交，等待用户确认后再推送。",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766498212,
+      "id": "20251223215640a7d5a25ae6bc44dc",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223215640a7d5a25ae6bc44dc",
+      "usage": {
+        "completion_tokens": 199,
+        "prompt_tokens": 110736,
+        "prompt_tokens_details": {
+          "cached_tokens": 110600
+        },
+        "total_tokens": 110935
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:56:52 GMT",
+      "set-cookie": "acw_tc=ac11000117664982003524817ebb148bc1fcd9e3f0d69ce66df40470d978a8;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223215640a7d5a25ae6bc44dc"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-260"
+}

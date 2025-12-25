@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.269",
+    "buildTime": "2025-12-24T07:23:09.542Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T152250279-027"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Good, let's see the inspectTree implementation.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"sed -n '71,250p' /Users/fanzhang/Documents/github/webauto/modules/container-matcher/src/index.ts\",\"justification\":\"View inspectTree implementation\",\"login\":false,\"max_output_tokens\":6000,\"sandbox_permissions\":\"use_default\",\"shell\":\"\",\"workdir\":\"\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042283344264002432",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766560989,
+      "id": "20251224152250e121116f7a7843cb",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224152250e121116f7a7843cb",
+      "usage": {
+        "completion_tokens": 99,
+        "prompt_tokens": 60445,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 60544
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 07:23:09 GMT",
+      "set-cookie": "acw_tc=ac11000117665609705047297e425a91f1d330a240ce1b3a96cc4698d78bc8;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224152250e121116f7a7843cb"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-175"
+}

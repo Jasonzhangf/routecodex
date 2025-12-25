@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.275",
+    "buildTime": "2025-12-24T08:29:48.567Z",
+    "entryEndpoint": "/v1/chat/completions",
+    "clientRequestId": "openai-chat-unknown-unknown-20251224T162935536-015"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4f75-4969-72a2-bad1-d8add9d76504",
+    "session_id": "019b4f75-4969-72a2-bad1-d8add9d76504"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Let me first capture context from the key files to ensure edits are precise and consistent. I'll load each targeted README that needs changes and note exact sections to update.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cat README.md | head -500\",\"justification\":\"Capture root README first 500 lines to identify exact sections to edit for build/CLI usage alignment.\",\"login\":true,\"max_output_tokens\":6000,\"sandbox_permissions\":\"use_default\",\"shell\":\"zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":100}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042245033155026347",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766564988,
+      "id": "20251224162935849458a3fc4c4ab2",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224162935849458a3fc4c4ab2",
+      "usage": {
+        "completion_tokens": 132,
+        "prompt_tokens": 40953,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 41085
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:29:48 GMT",
+      "set-cookie": "acw_tc=0ae5a82317665649756917754e15f566db5c4f50fe06cf6468177f0c41b5da;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224162935849458a3fc4c4ab2"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-chat-unknown-unknown-20251225T092024-006"
+}

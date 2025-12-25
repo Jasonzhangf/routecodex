@@ -208,6 +208,11 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       authUrl.searchParams.set('state', state);
       authUrl.searchParams.set('code_challenge', codeChallenge);
       authUrl.searchParams.set('code_challenge_method', 'S256');
+      if (this.config.features?.requestOfflineAccess) {
+        authUrl.searchParams.set('access_type', 'offline');
+        authUrl.searchParams.set('prompt', 'consent');
+        authUrl.searchParams.set('include_granted_scopes', 'true');
+      }
     }
 
     // 记录样式供后续交换 token 逻辑使用

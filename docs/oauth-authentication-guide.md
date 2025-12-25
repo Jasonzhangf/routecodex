@@ -143,7 +143,8 @@ const response = await provider.processIncoming({
 
 - `IFLOW_CLIENT_ID`：覆盖默认 clientId（高级用法）
 - `IFLOW_CLIENT_SECRET`：覆盖默认 clientSecret（高级用法）
-- `ROUTECODEX_OAUTH_AUTO_OPEN=0`：禁用自动打开浏览器（手动授权）
+
+> OAuth 认证流程现已强制在可用时自动打开浏览器完成授权，不再提供环境变量开关。
 
 # Unified OAuth Authentication System Guide
 

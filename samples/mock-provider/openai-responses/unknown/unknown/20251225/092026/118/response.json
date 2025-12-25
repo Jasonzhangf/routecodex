@@ -1,0 +1,82 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.260",
+    "buildTime": "2025-12-24T02:32:27.578Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T103218579-007"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "我来帮你检查容器树和 DOM 展开时连线不显示的问题。先看看项目结构和相关代码。",
+            "reasoning_content": "用户反映 WebAuto 启动后可以展开容器树和 DOM，但是没有连线。这是一个可视化问题，可能是：\n1. SVG 连线没有正确渲染\n2. 连线的路径计算有问题\n3. 数据结构问题导致连线数据缺失\n4. CSS 样式问题导致连线不可见\n\n我需要先了解项目结构，找到相关的代码。让我先看看项目结构和相关文件。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"find /Users/fanzhang/Documents/github/webauto -type f -name \\\"*.tsx\\\" -o -name \\\"*.ts\\\" | grep -E \\\"(container|tree|dom|graph)\\\" | head -20\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042328218082770205",
+                "index": 0,
+                "type": "function"
+              },
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"ls -la /Users/fanzhang/Documents/github/webauto/apps/\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042328218082770204",
+                "index": 1,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766543547,
+      "id": "20251224103218fbe6035e692147bb",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224103218fbe6035e692147bb",
+      "usage": {
+        "completion_tokens": 182,
+        "prompt_tokens": 7896,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 8078
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 02:32:27 GMT",
+      "set-cookie": "acw_tc=ac11000117665435386024509e4275bd66dee64c2fac1b096fbc7676da97ba;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224103218fbe6035e692147bb"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-118"
+}

@@ -1,0 +1,56 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:45:59.997Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T204551323-063"
+  },
+  "url": "https://dapi.micosoft.icu/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****3a6257",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_02b0b599124bae5601694a8f00bddc8191b79704f580d63de2",
+      "object": "response",
+      "created_at": 1766493952,
+      "status": "completed",
+      "model": "gpt-5.1-codex",
+      "temperature": 1,
+      "top_p": 1,
+      "metadata": {},
+      "output": [
+        {
+          "id": "fc_02b0b599124bae5601694a8f027c588191af1864b0cd5bb4b5",
+          "type": "function_call",
+          "status": "completed",
+          "call_id": "call_oB3okQLeJ9QDSy4Y2A2jgH8s",
+          "name": "apply_patch",
+          "arguments": "{\"input\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/renderer/drag.mjs\\n@@\\n-let dragArea = null;\\n-\\n-export function initDrag(element) {\\n-  dragArea = element;\\n-  if (!dragArea) return;\\n-\\n-  dragArea.addEventListener('mousedown', startDrag);\\n-  window.addEventListener('mousemove', drag);\\n-  window.addEventListener('mouseup', stopDrag);\\n-\\n-  // Prevent text selection during drag\\n-  dragArea.addEventListener('selectstart', (e) => {\\n-    if (isDragging) e.preventDefault();\\n-  });\\n-}\\n+let dragArea = null;\\n+\\n+export function initDrag(element) {\\n+  dragArea = element;\\n+  if (!dragArea) return;\\n+\\n+  dragArea.addEventListener('mousedown', startDrag);\\n+  window.addEventListener('mousemove', drag);\\n+  window.addEventListener('mouseup', stopDrag);\\n+\\n+  // Prevent text selection during drag\\n+  dragArea.addEventListener('selectstart', (e) => {\\n+    if (isDragging) e.preventDefault();\\n+  });\\n+}\\n@@\\n-  const x = e.clientX - dragOffset.x;\\n-  const y = e.clientY - dragOffset.y;\\n-  \\n-  // Constrain to screen bounds\\n-  const screenWidth = window.screen.availWidth;\\n-  const screenHeight = window.screen.availHeight;\\n-  const windowWidth = window.outerWidth;\\n-  const windowHeight = window.outerHeight;\\n-  \\n-  const constrainedX = Math.max(0, Math.min(x, screenWidth - windowWidth));\\n-  const constrainedY = Math.max(0, Math.min(y, screenHeight - windowHeight));\\n-  \\n-  window.moveTo(constrainedX, constrainedY);\\n+  const x = e.clientX - dragOffset.x;\\n+  const y = e.clientY - dragOffset.y;\\n+  window.moveTo(x, y);\\n*** End Patch\",\"patch\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/renderer/drag.mjs\\n@@\\n-let dragArea = null;\\n-\\n-export function initDrag(element) {\\n-  dragArea = element;\\n-  if (!dragArea) return;\\n-\\n-  dragArea.addEventListener('mousedown', startDrag);\\n-  window.addEventListener('mousemove', drag);\\n-  window.addEventListener('mouseup', stopDrag);\\n-\\n-  // Prevent text selection during drag\\n-  dragArea.addEventListener('selectstart', (e) => {\\n-    if (isDragging) e.preventDefault();\\n-  });\\n-}\\n+let dragArea = null;\\n+\\n+export function initDrag(element) {\\n+  dragArea = element;\\n+  if (!dragArea) return;\\n+\\n+  dragArea.addEventListener('mousedown', startDrag);\\n+  window.addEventListener('mousemove', drag);\\n+  window.addEventListener('mouseup', stopDrag);\\n+\\n+  // Prevent text selection during drag\\n+  dragArea.addEventListener('selectstart', (e) => {\\n+    if (isDragging) e.preventDefault();\\n+  });\\n+}\\n@@\\n-  const x = e.clientX - dragOffset.x;\\n-  const y = e.clientY - dragOffset.y;\\n-  \\n-  // Constrain to screen bounds\\n-  const screenWidth = window.screen.availWidth;\\n-  const screenHeight = window.screen.availHeight;\\n-  const windowWidth = window.outerWidth;\\n-  const windowHeight = window.outerHeight;\\n-  \\n-  const constrainedX = Math.max(0, Math.min(x, screenWidth - windowWidth));\\n-  const constrainedY = Math.max(0, Math.min(y, screenHeight - windowHeight));\\n-  \\n-  window.moveTo(constrainedX, constrainedY);\\n+  const x = e.clientX - dragOffset.x;\\n+  const y = e.clientY - dragOffset.y;\\n+  window.moveTo(x, y);\\n*** End Patch\"}"
+        }
+      ],
+      "usage": {
+        "input_tokens": 47492,
+        "input_tokens_details": {
+          "cached_tokens": 45696
+        },
+        "output_tokens": 988,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 48480
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092024-035"
+}

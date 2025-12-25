@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T12:11:27.764Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T201105544-202"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "test-script 无法解析 ws 模块，因为不在 node_modules 内。改用项目内 ws 或将 test script 放到项目中运行。改用项目内 ws。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cat <<'EOF' > /tmp/test-container-match.js\\nconst WebSocket = require('ws');\\n\\nconst WS_URL = 'ws://127.0.0.1:7701/ws';\\n\\nasync function testContainerMatch() {\\n  console.log('[TEST] 连接 WS', WS_URL);\\n  const ws = new WebSocket(WS_URL);\\n\\n  await new Promise((resolve, reject) => {\\n    ws.on('open', resolve);\\n    ws.on('error', reject);\\n    setTimeout(() => reject(new Error('WS open timeout')), 5000);\\n  });\\n  console.log('[TEST] WS 已连接');\\n\\n  return new Promise((resolve, reject) => {\\n    const timer = setTimeout(() => reject(new Error('containers:match 超时')), 15000);\\n\\n    ws.on('message', (data) => {\\n      try {\\n        const msg = JSON.parse(data.toString());\\n        console.log('[TEST] 收到消息 type='+msg.type+' action='+(msg.action||'none'));\\n        if (msg.type === 'response' && msg.action === 'containers:match') {\\n          clearTimeout(timer);\\n          resolve(msg);\\n        }\\n        if (msg.type === 'error') {\\n          clearTimeout(timer);\\n          reject(new Error(msg.error || 'WS error'));\\n        }\\n      } catch (e) {\\n        clearTimeout(timer);\\n        reject(e);\\n      }\\n    });\\n\\n    const payload = {\\n      type: 'action',\\n      action: 'containers:match',\\n      payload: { profile: 'weibo_fresh', url: 'https://weibo.com', maxDepth: 6, maxChildren: 20 }\\n    };\\n    console.log('[TEST] 发送 payload');\\n    ws.send(JSON.stringify(payload));\\n  });\\n}\\n\\ntestContainerMatch()\\n  .then((res) => {\\n    console.log('[TEST] ✅ 容器匹配结果 success='+(res?.success)+' data_keys='+(res?.data?Object.keys(res.data):'none'));\\n    process.exit(0);\\n  })\\n  .catch((err) => {\\n    console.error('[TEST] ❌ 失败:', err.message);\\n    process.exit(1);\\n  });\\nEOF\",\"justification\":\"改用 CJS 版本的容器匹配测试脚本（避免 ws 模块解析错误）\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":100}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042399445821275953",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766578287,
+      "id": "202512242011066c3de57bdd344c1a",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512242011066c3de57bdd344c1a",
+      "usage": {
+        "completion_tokens": 567,
+        "prompt_tokens": 92019,
+        "prompt_tokens_details": {
+          "cached_tokens": 90270
+        },
+        "total_tokens": 92586
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 12:11:27 GMT",
+      "set-cookie": "acw_tc=ac11000117665782658792235e8d56a6bdc7e98a70dd0d27689f9b62f13116;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512242011066c3de57bdd344c1a"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-082"
+}

@@ -1,0 +1,50 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.282",
+    "buildTime": "2025-12-24T13:24:53.527Z",
+    "entryEndpoint": "/v1/messages",
+    "clientRequestId": "anthropic-messages-unknown-unknown-20251224T212453521-001"
+  },
+  "url": "http://127.0.0.1:58993/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****fy-key",
+    "Accept": "text/event-stream",
+    "User-Agent": "node"
+  },
+  "body": {
+    "data": {
+      "id": "mock-1766582693",
+      "object": "chat.completion",
+      "created": 1766582693,
+      "model": "verify-mock",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "stop",
+          "message": {
+            "role": "assistant",
+            "content": "Mock response: Test streaming response."
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 5,
+        "completion_tokens": 5,
+        "total_tokens": 10
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 13:24:53 GMT",
+      "keep-alive": "timeout=5",
+      "transfer-encoding": "chunked"
+    },
+    "url": "http://127.0.0.1:58993/v1/chat/completions"
+  },
+  "reqId": "anthropic-messages-unknown-unknown-20251225T092023-041"
+}

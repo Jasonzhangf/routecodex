@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:46:15.568Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T204608328-065"
+  },
+  "url": "https://dapi.micosoft.icu/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****3a6257",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_0310f139cf322b9d01694a8f12bf0c819190c9866daa7cf137",
+      "object": "response",
+      "created_at": 1766493970,
+      "status": "completed",
+      "model": "gpt-5.1-codex",
+      "temperature": 1,
+      "top_p": 1,
+      "metadata": {},
+      "output": [
+        {
+          "id": "rs_0310f139cf322b9d01694a8f154b34819195791b9711042414",
+          "type": "reasoning",
+          "summary": [],
+          "content": []
+        },
+        {
+          "id": "msg_0310f139cf322b9d01694a8f15895c8191b63e36bcfc8fa4c5",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "**Headful Launch**\n\n- Use `node scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com` (leave off the `--headless false`; flag presence toggles headless mode off by default).\n- Floating panel now persists size/position via `electron-window-state`, allows user resizing, and logs fall back to `/tmp/webauto-floating-panel.log` on EIO to prevent crashes (`apps/floating-panel/src/main/index.mts` lines 8‑74, 83‑135, 167).\n- Dragging now hooks the title bar element and relies on Electron’s native window movement, avoiding DOM flicker (`apps/floating-panel/src/renderer/index.mts:14-36, 44-56` and `drag.mjs:1-50`).\n- For flicker-free updates we removed verbose log spam inside `flushPendingMessages` and runtime polling (`src/main/index.mts:50-80`)."
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 48887,
+        "input_tokens_details": {
+          "cached_tokens": 42368
+        },
+        "output_tokens": 203,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 49090
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092024-036"
+}

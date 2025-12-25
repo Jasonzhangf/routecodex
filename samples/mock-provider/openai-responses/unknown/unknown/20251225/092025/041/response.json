@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T11:04:41.217Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T190426915-068"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "现在我来启动完整的测试脚本，看看WebSocket的连通性：",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto && node -e \\\"\\nconst WebSocket = require('ws');\\nconst http = require('http');\\n\\nconsole.log('=== 1. 启动健康检查服务 ===');\\nconst healthServer = http.createServer((req, res) => {\\n  if (req.url === '/health') {\\n    res.writeHead(200, { 'Content-Type': 'application/json' });\\n    res.end(JSON.stringify({ ok: true, timestamp: Date.now() }));\\n  }\\n});\\nhealthServer.listen(7701, () => {\\n  console.log('健康检查服务启动在 7701');\\n  \\n  console.log('\\\\\\\\n=== 2. 启动 WebSocket 服务 (/ws 和 /bus) ===');\\n  const { WebSocketServer } = require('ws');\\n  \\n  const httpServer = http.createServer();\\n  \\n  const wss = new WebSocketServer({ noServer: true });\\n  const busWss = new WebSocketServer({ noServer: true });\\n  \\n  httpServer.on('upgrade', (request, socket, head) => {\\n    const { pathname } = new URL(request.url, 'http://localhost');\\n    \\n    if (pathname === '/ws') {\\n      wss.handleUpgrade(request, socket, head, (ws) => {\\n        console.log('[/ws] 客户端已连接');\\n        ws.send(JSON.stringify({ type: 'welcome', message: 'Connected to /ws' }));\\n        \\n        ws.on('message', (data) => {\\n          console.log('[/ws] 收到消息:', data.toString());\\n          ws.send(JSON.stringify({ type: 'echo', data: data.toString() }));\\n        });\\n        \\n        ws.on('close', () => console.log('[/ws] 客户端断开'));\\n      });\\n    } else if (pathname === '/bus') {\\n      busWss.handleUpgrade(request, socket, head, (ws) => {\\n        console.log('[/bus] 客户端已连接');\\n        \\n        // 发送初始状态\\n        ws.send(JSON.stringify({\\n          type: 'event',\\n          topic: 'health.status',\\n          payload: {\\n            unified_api: { healthy: true, port: 7701 },\\n            browser_service: { healthy: true, port: 7704 },\\n            websocket: { connected: true },\\n            bus: { connected: true },\\n            containers: { matched: false }\\n          }\\n        }));\\n        \\n        ws.on('message', (data) => {\\n          console.log('[/bus] 收到消息:', data.toString());\\n        });\\n        \\n        ws.on('close', () => console.log('[/bus] 客户端断开'));\\n      });\\n    }\\n  });\\n  \\n  httpServer.listen(7701, () => {\\n    console.log('HTTP+WebSocket 服务启动在 7701');\\n    console.log('  - ws://127.0.0.1:7701/ws');\\n    console.log('  - ws://127.0.0.1:7701/bus');\\n    \\n    console.log('\\\\\\\\n=== 3. 测试客户端连接 ===');\\n    \\n    // 测试 /ws 连接\\n    setTimeout(() => {\\n      console.log('\\\\\\\\n[测试] 连接到 /ws...');\\n      const ws1 = new WebSocket('ws://127.0.0.1:7701/ws');\\n      ws1.on('open', () => {\\n        console.log('[测试] ✅ /ws 连接成功');\\n        ws1.send(JSON.stringify({ type: 'test', action: 'ping' }));\\n      });\\n      ws1.on('message', (data) => {\\n        console.log('[测试] /ws 响应:', data.toString());\\n        ws1.close();\\n      });\\n      ws1.on('error', (err) => {\\n        console.log('[测试] ❌ /ws 错误:', err.message);\\n      });\\n    }, 500);\\n    \\n    // 测试 /bus 连接\\n    setTimeout(() => {\\n      console.log('\\\\\\\\n[测试] 连接到 /bus...');\\n      const ws2 = new WebSocket('ws://127.0.0.1:7701/bus');\\n      ws2.on('open', () => {\\n        console.log('[测试] ✅ /bus 连接成功');\\n      });\\n      ws2.on('message', (data) => {\\n        console.log('[测试] /bus 响应:', data.toString());\\n        setTimeout(() => ws2.close(), 1000);\\n      });\\n      ws2.on('error', (err) => {\\n        console.log('[测试] ❌ /bus 错误:', err.message);\\n      });\\n    }, 1500);\\n  });\\n});\\n\\\"\",\"max_output_tokens\":5000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042309388945813113",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766487881,
+      "id": "202512231904277fe642f61dfb4852",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512231904277fe642f61dfb4852",
+      "usage": {
+        "completion_tokens": 994,
+        "prompt_tokens": 39580,
+        "prompt_tokens_details": {
+          "cached_tokens": 39133
+        },
+        "total_tokens": 40574
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 11:04:41 GMT",
+      "set-cookie": "acw_tc=ac11000117664878670338778ee21f94b9840641324d488e37371ae24c90fe;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512231904277fe642f61dfb4852"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-041"
+}

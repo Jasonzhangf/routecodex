@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.260",
+    "buildTime": "2025-12-24T03:07:23.549Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T110717241-060"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Good. The build output includes the selectorMap.clear() line. Let me verify the full function structure is correct by checking for the renderContainerNode update as well.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"grep -B 5 \\\"drawConnectionToDom(parent\\\" apps/floating-panel/dist/renderer/index.js | head -20\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042272417866810800",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766545643,
+      "id": "20251224110717b481339e5a5a4f14",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224110717b481339e5a5a4f14",
+      "usage": {
+        "completion_tokens": 68,
+        "prompt_tokens": 45355,
+        "prompt_tokens_details": {
+          "cached_tokens": 44535
+        },
+        "total_tokens": 45423
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 03:07:23 GMT",
+      "set-cookie": "acw_tc=ac11000117665456373787263e0904e4373b944127a57178b35fc4c2234806;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224110717b481339e5a5a4f14"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-180"
+}

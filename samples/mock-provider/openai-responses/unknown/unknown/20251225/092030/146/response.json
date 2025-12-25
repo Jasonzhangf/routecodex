@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T12:26:27.459Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T202615269-255"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****45931c",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694bdbe864f8633edd331ce3",
+      "object": "chat.completion",
+      "created": 1766579177,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 110384,
+        "completion_tokens": 160,
+        "total_tokens": 110544
+      },
+      "extend_fields": {
+        "traceId": "2167786d17665791758008077e0cdc",
+        "requestId": "8b7fe6f727df5b92a21cdf6348ca6551"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "update_plan:263",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"plan\":[{\"step\":\"UI 连线与交互：在浮窗中实现点击容器/DOM 节点后高亮浏览器对应元素，并绘制连线。\",\"status\":\"in_progress\"},{\"step\":\"按需加载 DOM：初次只加载当前匹配层级+下一层，点击+号再获取该节点下一层。\",\"status\":\"pending\"},{\"step\":\"长按连线修改连接：支持断开并重新连接容器与 DOM 元素。\",\"status\":\"pending\"},{\"step\":\"最小化/关闭按钮：确保浮窗最小化与关闭按钮功能正常。\",\"status\":\"completed\"}],\"explanation\":\"基础能力已验证，现在进入 UI 连线与交互阶段。最小化/关闭按钮已在 ESM-only 修复中完成。\"}",
+                  "name": "update_plan"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 12:26:27 GMT",
+      "eagleeye-traceid": "2167786d17665791758008077e0cdc",
+      "s-brt": "11528",
+      "s-rt": "11730",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-146"
+}

@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.278",
+    "buildTime": "2025-12-24T11:17:52.880Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T191558446-147"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694bcb6fb83af1906f9e0d2b",
+      "object": "chat.completion",
+      "created": 1766574960,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 49735,
+        "completion_tokens": 1928,
+        "total_tokens": 51663
+      },
+      "extend_fields": {
+        "traceId": "214178b117665749588092787e0fcd",
+        "requestId": "0720a18ad0e0a94747480c4ada859479"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:108",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"cat <<'EOF' > services/unified-api/server.mjs\\n#!/usr/bin/env node\\nimport { UiController } from '../../services/controller/src/controller.js';\\nimport { WebSocketServer, WebSocket } from 'ws';\\nimport path from 'node:path';\\nimport os from 'node:os';\\nimport { fileURLToPath } from 'node:url';\\n\\nconst __dirname = path.dirname(fileURLToPath(import.meta.url));\\n\\nconst DEFAULT_PORT = Number(process.env.WEBAUTO_UNIFIED_PORT || 7701);\\nconst DEFAULT_HOST = process.env.WEBAUTO_UNIFIED_HOST || '127.0.0.1';\\n\\nconst repoRoot = path.resolve(__dirname, '../..');\\nconst userContainerRoot = process.env.WEBAUTO_USER_CONTAINER_ROOT || path.join(os.homedir(), '.webauto', 'container-lib');\\nconst containerIndexPath = process.env.WEBAUTO_CONTAINER_INDEX || path.join(repoRoot, 'container-library.index.json');\\nconst defaultWsHost = process.env.WEBAUTO_WS_HOST || '127.0.0.1';\\nconst defaultWsPort = Number(process.env.WEBAUTO_WS_PORT || 8765);\\nconst defaultHttpHost = process.env.WEBAUTO_BROWSER_HTTP_HOST || '127.0.0.1';\\nconst defaultHttpPort = Number(process.env.WEBAUTO_BROWSER_HTTP_PORT || 7704);\\nconst defaultHttpProtocol = process.env.WEBAUTO_BROWSER_HTTP_PROTO || 'http';\\nconst cliTargets = {\\n  'browser-control': path.join(repoRoot, 'modules/browser-control/src/cli.ts'),\\n  'session-manager': path.join(repoRoot, 'modules/session-manager/src/cli.ts'),\\n  logging: path.join(repoRoot, 'modules/logging/src/cli.ts'),\\n  operations: path.join(repoRoot, 'modules/operations/src/cli.ts'),\\n  'container-matcher': path.join(repoRoot, 'modules/container-matcher/src/cli.ts'),\\n};\\n\\nclass UnifiedApiServer {\\n  constructor() {\\n    this.controller = new UiController({\\n      repoRoot,\\n      userContainerRoot,\\n      containerIndexPath,\\n      cliTargets,\\n      defaultWsHost,\\n      defaultWsPort,\\n      defaultHttpHost,\\n      defaultHttpPort,\\n      defaultHttpProtocol,\\n      messageBus: {\\n        publish: (topic, payload) => {\\n          this.broadcastBusEvent(topic, payload);\\n        },\\n      },\\n    });\\n\\n    this.clients = new Set();\\n  }\\n\\n  async start() {\\n    const { createServer } = await import('node:http');\\n    const server = createServer();\\n    const wss = new WebSocketServer({ server });\\n\\n    // HTTP 路由\\n    server.on('request', (req, res) => {\\n      const url = new URL(req.url, `http://${req.headers.host}`);\\n      \\n      // 健康检查\\n      if (url.pathname === '/health') {\\n        res.writeHead(200, { 'Content-Type': 'application/json' });\\n        res.end(JSON.stringify({ ok: true, service: 'unified-api', timestamp: new Date().toISOString() }));\\n        return;\\n      }\\n\\n      // WebSocket 端点\\n      if (url.pathname === '/ws' || url.pathname === '/bus') {\\n        res.writeHead(426, { 'Content-Type': 'text/plain' });\\n        res.end('Upgrade Required');\\n        return;\\n      }\\n\\n      // 未找到\\n      res.writeHead(404, { 'Content-Type': 'text/plain' });\\n      res.end('Not Found');\\n    });\\n\\n    // WebSocket 事件处理\\n    wss.on('connection', (socket, request) => {\\n      const url = new URL(request.url, `http://${request.headers.host}`);\\n      \\n      if (url.pathname === '/ws') {\\n        this.clients.add(socket);\\n        socket.on('message', (raw) => this.handleMessage(socket, raw));\\n        socket.on('close', () => this.clients.delete(socket));\\n        socket.on('error', () => this.clients.delete(socket));\\n        this.safeSend(socket, { type: 'ready' });\\n      } else if (url.pathname === '/bus') {\\n        this.clients.add(socket);\\n        socket.on('message', (raw) => this.handleBusMessage(socket, raw));\\n        socket.on('close', () => this.clients.delete(socket));\\n        socket.on('error', () => this.clients.delete(socket));\\n        this.safeSend(socket, { type: 'ready' });\\n      }\\n    });\\n\\n    // 启动服务器\\n    const host = DEFAULT_HOST;\\n    const port = DEFAULT_PORT;\\n    server.listen(port, host, () => {\\n      console.log(`[unified-api] Server running at http://${host}:${port}`);\\n      console.log(`[unified-api] WebSocket endpoint: ws://${host}:${port}/ws`);\\n      console.log(`[unified-api] Bus endpoint: ws://${host}:${port}/bus`);\\n    });\\n  }\\n\\n  async handleMessage(socket, raw) {\\n    let envelope;\\n    try {\\n      envelope = JSON.parse(raw.toString());\\n    } catch (err) {\\n      this.safeSend(socket, { type: 'error', error: 'Invalid JSON payload' });\\n      return;\\n    }\\n\\n    if (!envelope) return;\\n    console.log('[unified-api] recv', envelope.type || 'unknown', envelope.action || envelope.topic || '');\\n\\n    if (envelope.type === 'ping') {\\n      this.safeSend(socket, { type: 'pong', requestId: envelope.requestId });\\n      return;\\n    }\\n\\n    if (envelope.type === 'action' || envelope.action) {\\n      const action = envelope.action;\\n      const payload = envelope.payload || {};\\n      const requestId = envelope.requestId || envelope.id;\\n      \\n      if (!action) {\\n        this.safeSend(socket, { type: 'response', requestId, success: false, error: 'Missing action' });\\n        return;\\n      }\\n\\n      try {\\n        const result = await this.controller.handleAction(action, payload);\\n        console.log('[unified-api] action result', action, !!result && typeof result);\\n        this.safeSend(socket, { type: 'response', action, requestId, ...this.normalizeResult(result) });\\n      } catch (err) {\\n        console.warn('[unified-api] action failed', action, err?.message || err);\\n        this.safeSend(socket, { type: 'response', action, requestId, success: false, error: err?.message || String(err) });\\n      }\\n      return;\\n    }\\n\\n    this.safeSend(socket, { type: 'error', requestId: envelope.requestId, error: 'Unsupported message type' });\\n  }\\n\\n  async handleBusMessage(socket, raw) {\\n    // Bus 消息直接转发到所有客户端\\n    this.broadcastBusEvent('bus.message', { data: raw.toString(), timestamp: new Date().toISOString() });\\n  }\\n\\n  broadcastBusEvent(topic, payload) {\\n    const message = JSON.stringify({ type: 'event', topic, payload });\\n    this.clients.forEach((socket) => {\\n      if (socket.readyState === WebSocket.OPEN) {\\n        this.safeSend(socket, { type: 'event', topic, payload });\\n      }\\n    });\\n  }\\n\\n  safeSend(socket, payload) {\\n    if (!socket || socket.readyState !== WebSocket.OPEN) return;\\n    try {\\n      socket.send(JSON.stringify(payload));\\n    } catch (err) {\\n      console.warn('[unified-api] send failed', err?.message || err);\\n    }\\n  }\\n\\n  normalizeResult(result) {\\n    if (!result || typeof result !== 'object') return { success: true, data: result };\\n    if (typeof result.success === 'boolean') return result;\\n    return { success: true, data: result };\\n  }\\n}\\n\\n// 启动服务器\\nconst server = new UnifiedApiServer();\\nserver.start().catch(err => {\\n  console.error('[unified-api] Server failed to start:', err);\\n  process.exit(1);\\n});\\nEOF\",\"justification\":\"根据launcher需求创建unified-api/server.mjs，确保能正常启动\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":100}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:16:58 GMT",
+      "eagleeye-traceid": "214178b117665749588092787e0fcd",
+      "s-brt": "60019",
+      "s-rt": "60174",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-055"
+}

@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.250",
+    "buildTime": "2025-12-23T14:13:58.517Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T221353472-013"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "已完成所有修复：\n\n- ✅ 全部展开容器节点（递归展开所有子节点）\n- ✅ 修复连线：使用 `domNodePositions` Map 正确计算 DOM 节点的 Y 坐标，确保连线从容器到匹配的 DOM 元素\n- ✅ 子容器连线：所有容器节点（包括子节点）都会连接到其匹配的 DOM 元素\n- ✅ 浏览器元素高亮：点击容器或 DOM 节点时调用 `highlightElement` API，高亮浏览器中对应元素的外框（绿色/蓝色）\n\n所有更改已提交到本地 git，等待您确认后再推送到 GitHub。",
+            "reasoning_content": "已提交所有修复，现在等待用户确认后再推送到GitHub。",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766499238,
+      "id": "20251223221353bbb8b1a04aeb4df5",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223221353bbb8b1a04aeb4df5",
+      "usage": {
+        "completion_tokens": 156,
+        "prompt_tokens": 128065,
+        "prompt_tokens_details": {
+          "cached_tokens": 127808
+        },
+        "total_tokens": 128221
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 14:13:58 GMT",
+      "set-cookie": "acw_tc=ac11000117664992337277356ef7b6a4a1326e6746e0afbe2a657b830c28a8;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223221353bbb8b1a04aeb4df5"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-016"
+}

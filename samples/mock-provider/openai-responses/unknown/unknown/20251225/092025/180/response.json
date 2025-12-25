@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.246",
+    "buildTime": "2025-12-23T13:22:11.100Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T212207412-032"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "The patch format seems to be sensitive. Let me try with proper spacing.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto/apps/floating-panel && sed -i '' \\\"s/^  log('setStatus', text, ok);$/  \\\\/\\\\/ log('setStatus', text, ok);  \\\\/* Don't log status updates to reduce noise *\\\\//\\\" src/renderer/index.mts\",\"justification\":\"Comment out setStatus log to reduce noise\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto/apps/floating-panel\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042297809713807663",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766496131,
+      "id": "20251223212207ad1ee5ebfc6d444b",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223212207ad1ee5ebfc6d444b",
+      "usage": {
+        "completion_tokens": 149,
+        "prompt_tokens": 73775,
+        "prompt_tokens_details": {
+          "cached_tokens": 73330
+        },
+        "total_tokens": 73924
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:22:11 GMT",
+      "set-cookie": "acw_tc=0ae5a87017664961275788360e4d8113880d00ba388572f6605e35a7bf5036;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223212207ad1ee5ebfc6d444b"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-180"
+}

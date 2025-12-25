@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.262",
+    "buildTime": "2025-12-24T05:31:40.396Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T133115379-014"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "好的，我发现了问题：命令行参数 `--profile weibo_fresh` 被错误解析了，导致导航到错误的 URL。\n\n让我修复参数解析逻辑：",
+            "reasoning_content": "看到日志中出现了导航错误：\"navigating to weibo_fresh, waiting until domcontentloaded\"。这说明命令行参数被错误地解析了。用户传入的是 `--profile weibo_fresh`，但脚本可能把它当成了 URL 来解析。\n\n我需要修改脚本，确保参数正确解析：\n1. `--profile weibo_fresh` 应该被正确识别为 profile 参数\n2. `--url https://weibo.com` 应该被识别为 url 参数\n\n问题可能出在参数解析逻辑中。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cat > scripts/start-headful.mjs << 'ENDOFJS'\\n#!/usr/bin/env node\\n/**\\n * 启动脚本 - 支持命令行参数\\n * 用法：node scripts/start-headful.mjs [--profile <name>] [--url <url>]\\n *       node scripts/start-headful.mjs                  # 使用默认配置\\n *       node scripts/start-headful.mjs --profile weibo_fresh https://weibo.com\\n */\\n\\nimport { spawn } from 'node:child_process';\\nimport path from 'node:path';\\n\\nconst __filename = import.meta.url;\\nconst __dirname = path.dirname(fileURLToPath(__filename));\\nconst launcherPath = path.resolve(__dirname, 'launcher/core/launcher.mjs');\\n\\n/**\\n * 解析命令行参数\\n * @returns { profile, url } 提取的参数\\n */\\nfunction parseArgs() {\\n  const args = process.argv.slice(2);\\n  const result = {\\n    profile: null as string | null,\\n    url: null as string | null,\\n    headless: false\\n  };\\n  \\n  for (let i = 0; i < args.length; i++) {\\n    const arg = args[i];\\n    \\n    if (arg === '--profile' || arg === '-p') {\\n      if (i + 1 < args.length) {\\n        result.profile = args[i + 1];\\n        i++; // 跳过下一个参数值\\n      }\\n    } else if (arg === '--url' || arg === '-u') {\\n      if (i + 1 < args.length) {\\n        result.url = args[i + 1];\\n        i++; // 跳过下一个参数值\\n      }\\n    } else if (arg === '--headless' || arg === '-h') {\\n      result.headless = true;\\n    } else if (arg === '--headful' || arg === '--gui') {\\n      result.headless = false;\\n    }\\n  }\\n  \\n  return result;\\n}\\n\\nfunction main() {\\n  const { profile, url, headless } = parseArgs();\\n  \\n  // 默认配置\\n  const DEFAULT_PROFILE = 'weibo_fresh';\\n  const DEFAULT_URL = 'https://weibo.com';\\n  \\n  const profileName = profile || DEFAULT_PROFILE;\\n  const targetUrl = url || DEFAULT_URL;\\n  const headlessMode = headless ? '1' : '0';\\n  \\n  console.log('🚀 WebAuto 一键启动');\\n  console.log(`  Profile: ${profileName}`);\\n  console.log(`  URL: ${targetUrl}`);\\n  console.log(`  Headless: ${headlessMode === '1' ? 'yes' : 'no'}`);\\n  console.log();\\n  \\n  const args = [launcherPath, '--profile', profileName, '--url', targetUrl];\\n  if (headlessMode) {\\n    args.push('--headless');\\n  }\\n  \\n  console.log('启动 launcher...');\\n  const child = spawn('node', args, {\\n    stdio: 'inherit',\\n    env: {\\n      ...process.env,\\n      WEBAUTO_HEADLESS: headlessMode\\n    }\\n  });\\n\\n  // 转发 launcher 输出\\n  child.stdout.on('data', (data) => {\\n    process.stdout.write(data);\\n  });\\n  \\n  child.stderr.on('data', (data) => {\\n    process.stderr.write(data);\\n  });\\n  \\n  child.on('exit', (code) => {\\n    process.exit(code);\\n  });\\n}\\n\\nmain();\\nENDOFJS\\nchmod +x scripts/start-headful.mjs\\n\",\"justification\":\"重写启动脚本，修复参数解析问题，防止错误的 URL 解析\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042370789799328456",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766554300,
+      "id": "20251224133115b8b215e1be9940c9",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224133115b8b215e1be9940c9",
+      "usage": {
+        "completion_tokens": 913,
+        "prompt_tokens": 150022,
+        "prompt_tokens_details": {
+          "cached_tokens": 146601
+        },
+        "total_tokens": 150935
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 05:31:40 GMT",
+      "set-cookie": "acw_tc=ac11000117665542757834972e2a8b6304541a6b2d6ab4f4af515d9f2f2c0f;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224133115b8b215e1be9940c9"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-138"
+}

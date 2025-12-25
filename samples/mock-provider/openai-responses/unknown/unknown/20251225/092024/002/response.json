@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:06:54.443Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T200644186-003"
+  },
+  "url": "https://dapi.micosoft.icu/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****3a6257",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_0490c638afb2f21801694a85dcd52881918f5b841ad7331339",
+      "object": "response",
+      "created_at": 1766491612,
+      "status": "completed",
+      "model": "gpt-5.1-codex",
+      "temperature": 1,
+      "top_p": 1,
+      "metadata": {},
+      "output": [
+        {
+          "id": "rs_0490c638afb2f21801694a85dd82b08191842ad2629e29a9e2",
+          "type": "reasoning",
+          "summary": [],
+          "content": []
+        },
+        {
+          "id": "fc_0490c638afb2f21801694a85ddad34819189d1ab646ee40b50",
+          "type": "function_call",
+          "status": "completed",
+          "call_id": "call_znofGDiGRYtilXS0E7tvfWsJ",
+          "name": "write_stdin",
+          "arguments": "{\"chars\":\"\",\"max_output_tokens\":6000,\"session_id\":10122,\"yield_time_ms\":1000}"
+        },
+        {
+          "id": "message_placeholder_3",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": ""
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 6890,
+        "input_tokens_details": {
+          "cached_tokens": 0
+        },
+        "output_tokens": 39,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 6929
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092024-002"
+}

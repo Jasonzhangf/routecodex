@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.246",
+    "buildTime": "2025-12-23T13:00:16.649Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T210007112-003"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Good, .gitignore covers the important things: dist/, build/, *.log, temp/, tmp/, cookies.json, .env*, etc.\n\nNow let me add the files that should be committed:\n\nFor the floating panel:\n- apps/floating-panel/package.json (version bump)\n- apps/floating-panel/scripts/build.mjs (added external for electron-window-state)\n- apps/floating-panel/src/main/index.mts (EIO fix, state persistence, logging)\n- apps/floating-panel/src/main/preload.cjs (changes made earlier)\n- apps/floating-panel/src/renderer/drag.mjs (simplified for native drag)\n- apps/floating-panel/src/renderer/index.html (webkit-app-region)\n- apps/floating-panel/src/renderer/index.mts (removed drag import)\n- apps/floating-panel/tsconfig.json (changes)\n- apps/floating-panel/src/renderer/diag.ts (new diag module - should we commit? Let's check if it's used)\n\nThe untracked files I should NOT add:\n- .bak files (backups)\n- services/unified-api/index.js, index.mjs, server.mjs, index.ts.bak (generated/deleted/backup)\n\nLet me check if diag.ts is actually being used before deciding to add it.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto/apps/floating-panel && rg -n \\\"diag\\\" src/renderer/index.html\",\"justification\":\"Check if diag is used in HTML\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto/apps/floating-panel\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042291109564674131",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766494816,
+      "id": "202512232100073a530be0e55c4096",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512232100073a530be0e55c4096",
+      "usage": {
+        "completion_tokens": 362,
+        "prompt_tokens": 53558,
+        "prompt_tokens_details": {
+          "cached_tokens": 52834
+        },
+        "total_tokens": 53920
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:00:16 GMT",
+      "set-cookie": "acw_tc=ac11000117664948072958949e54860ba9840ba91a1f8b38f656aa965956f3;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512232100073a530be0e55c4096"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-148"
+}

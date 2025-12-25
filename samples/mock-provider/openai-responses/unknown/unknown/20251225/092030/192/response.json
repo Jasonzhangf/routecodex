@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.262",
+    "buildTime": "2025-12-24T05:28:21.029Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T132700612-005"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****kpzZOA",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766554100,
+      "usage": {
+        "completion_tokens": 532,
+        "prompt_tokens": 160716,
+        "prompt_tokens_details": {
+          "cached_tokens": 38400
+        },
+        "total_tokens": 161248
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-bb9918a9-166b-4233-803b-99fe498805cc",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "exec_command",
+                  "arguments": "{\"cmd\": \"cat > scripts/start-headful.mjs << 'EOF'\\n#!/usr/bin/env node\\n/**\\n * 启动脚本外壳 - 仅负责 CLI 解析并调用 launcher\\n * 业务逻辑全部在 launcher/core/launcher.mjs 中\\n */\\n\\nimport { fileURLToPath } from 'node:url';\\nimport { spawn } from 'node:child_process';\\nimport path from 'node:path';\\nimport { parseArgs } from 'node:util';\\n\\nconst __filename = fileURLToPath(import.meta.url);\\nconst __dirname = path.dirname(__filename);\\nconst launcherPath = path.resolve(__dirname, '../launcher/core/launcher.mjs');\\n\\nfunction main() {\\n  const { values, positionals } = parseArgs({\\n    options: {\\n      profile: { type: 'string', short: 'p', default: 'weibo_fresh' },\\n      url:     { type: 'string', short: 'u', default: 'https://weibo.com' },\\n      headless:{ type: 'boolean', short: 'h', default: false }\\n    },\\n    allowPositionals: true\\n  });\\n\\n  const profile = values.profile;\\n  const url     = values.url;\\n  const headless = values.headless;\\n\\n  // 显示启动信息\\n  console.log('🚀 一键启动模式');\\n  console.log('  Profile:', profile);\\n  console.log('  URL:', url);\\n  console.log('  Headless:', headless);\\n\\n  const args = [launcherPath, '--profile', profile, '--url', url];\\n  if (headless) {\\n    args.push('--headless');\\n  }\\n\\n  const child = spawn('node', args, {\\n    stdio: 'inherit',\\n    env: {\\n      ...process.env,\\n      WEBAUTO_HEADLESS: headless ? '1' : '0'\\n    }\\n  });\\n\\n  child.on('exit', (code) => {\\n    process.exit(code);\\n  });\\n}\\n\\nmain();\\nEOF\", \"login\": true, \"max_output_tokens\": 600, \"sandbox_permissions\": \"use_default\", \"shell\": \"/bin/zsh\", \"workdir\": \"/Users/fanzhang/Documents/github/webauto\", \"yield_time_ms\": 3000, \"justification\": \"重写启动脚本，支持 --profile 和 --url 命令行参数\"}"
+                },
+                "index": 0,
+                "id": "call_2f67926e7cbb437db657e6a5",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "2416",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 05:28:20 GMT",
+      "req-arrive-time": "1766554021250",
+      "req-cost-time": "78898",
+      "resp-start-time": "1766554100148",
+      "x-envoy-upstream-service-time": "78772"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-192"
+}

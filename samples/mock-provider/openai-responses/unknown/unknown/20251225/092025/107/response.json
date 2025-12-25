@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T11:14:06.382Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T191403028-134"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "I see! The `case 'containers:match':` in the HTTP action handler (line 96) returns `matchResult` directly (line 141). This is for HTTP requests. But this doesn't trigger the `broadcastEvent` for Bus clients.\n\nLet me look at the WebSocket action handler to see if it broadcasts events.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"grep -n -B 5 -A 10 \\\"ws.on('message'\\\" services/unified-api/index.js\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042286814597235395",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766488446,
+      "id": "20251223191403d79c03ce9c9f4544",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223191403d79c03ce9c9f4544",
+      "usage": {
+        "completion_tokens": 102,
+        "prompt_tokens": 65460,
+        "prompt_tokens_details": {
+          "cached_tokens": 64005
+        },
+        "total_tokens": 65562
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 11:14:06 GMT",
+      "set-cookie": "acw_tc=ac11000117664884431733808edd7f67d3e9bc6a1944cd9fddc7fe3126c179;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223191403d79c03ce9c9f4544"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-107"
+}

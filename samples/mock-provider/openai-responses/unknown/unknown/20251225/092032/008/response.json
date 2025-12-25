@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.286",
+    "buildTime": "2025-12-24T16:36:32.713Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251225T003502085-009"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****BNZi-Q",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766594193,
+      "usage": {
+        "completion_tokens": 647,
+        "prompt_tokens": 124357,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 125004
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-f8526a86-73df-474e-8675-5a222f5620cc",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "apply_patch",
+                  "arguments": "{\"input\": \"*** Begin Patch\\n*** Update File: services/unified-api/server.mjs\\n@@\\n       if (req.method === 'POST' && url.pathname === '/v1/browser/highlight-dom-path') {\\n         try {\\n           const payload = await this.readJsonBody(req);\\n           const result = await this.controller.handleAction('browser:highlight-dom-path', payload);\\n           res.writeHead(200, { 'Content-Type': 'application/json' });\\n           res.end(JSON.stringify(this.normalizeResult(result)));\\n         } catch (err) {\\n           res.writeHead(400, { 'Content-Type': 'application/json' });\\n           res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));\\n         }\\n         return;\\n       }\\n+\\n+      if (req.method === 'POST' && url.pathname === '/v1/container/match') {\\n+        try {\\n+          const payload = await this.readJsonBody(req);\\n+          const result = await this.controller.handleAction('containers:match', payload);\\n+          res.writeHead(200, { 'Content-Type': 'application/json' });\\n+          res.end(JSON.stringify(this.normalizeResult(result)));\\n+        } catch (err) {\\n+          res.writeHead(400, { 'Content-Type': 'application/json' });\\n+          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));\\n+        }\\n+        return;\\n+      }\\n \\n       // WebSocket 端点\\n*** End Patch\", \"patch\": \"*** Begin Patch\\n*** Update File: services/unified-api/server.mjs\\n@@\\n       if (req.method === 'POST' && url.pathname === '/v1/browser/highlight-dom-path') {\\n         try {\\n           const payload = await this.readJsonBody(req);\\n           const result = await this.controller.handleAction('browser:highlight-dom-path', payload);\\n           res.writeHead(200, { 'Content-Type': 'application/json' });\\n           res.end(JSON.stringify(this.normalizeResult(result)));\\n         } catch (err) {\\n           res.writeHead(400, { 'Content-Type': 'application/json' });\\n           res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));\\n         }\\n         return;\\n       }\\n+\\n+      if (req.method === 'POST' && url.pathname === '/v1/container/match') {\\n+        try {\\n+          const payload = await this.readJsonBody(req);\\n+          const result = await this.controller.handleAction('containers:match', payload);\\n+          res.writeHead(200, { 'Content-Type': 'application/json' });\\n+          res.end(JSON.stringify(this.normalizeResult(result)));\\n+        } catch (err) {\\n+          res.writeHead(400, { 'Content-Type': 'application/json' });\\n+          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));\\n+        }\\n+        return;\\n+      }\\n \\n       // WebSocket 端点\\n*** End Patch\"}"
+                },
+                "index": 0,
+                "id": "call_d0265cb7874d42c1bc647669",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "3354",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 16:36:32 GMT",
+      "req-arrive-time": "1766594103631",
+      "req-cost-time": "88961",
+      "resp-start-time": "1766594192592",
+      "x-envoy-upstream-service-time": "87193"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092032-008"
+}

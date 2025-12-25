@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.274",
+    "buildTime": "2025-12-24T07:54:15.684Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T155408467-010"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "**完成所有修复和改进**\n\n**启动脚本修复**\n- `scripts/start-headful.mjs`：移除 TypeScript 语法，修复路径解析\n- 支持 `--profile`、`--url`、`--headless` 参数\n\n**浮窗UI修复**\n- `apps/floating-panel/scripts/start-headful.mjs`：创建启动脚本\n\n**图形渲染改进**\n- `apps/floating-panel/src/renderer/graph.mjs`：\n  - 仅展开根节点，实现按需加载 DOM\n  - 点击节点主体：选择并高亮\n  - 点击 +/- 指示器：展开/折叠\n  - 改进连线逻辑，支持子容器连接\n\n**窗口控制修复**\n- `apps/floating-panel/src/main/index.mts`：修复重复和损坏的窗口控制处理器\n\n**错误处理**\n- `apps/floating-panel/src/main/index.mts`：移除 `console.log` 调用，避免 EIO 错误\n\n**使用方法**\n```bash\n# 默认启动\nnode scripts/start-headful.mjs\n\n# 指定 profile 和 URL\nnode scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com\n\n# Headless 模式\nnode scripts/start-headful.mjs --headless\n```\n\n所有修改已完成并重新编译。现在可以正常启动并使用浮窗UI。",
+            "reasoning_content": "Let me provide a summary of all the changes made.",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766562855,
+      "id": "2025122415540889b2667999804423",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122415540889b2667999804423",
+      "usage": {
+        "completion_tokens": 306,
+        "prompt_tokens": 95332,
+        "prompt_tokens_details": {
+          "cached_tokens": 95021
+        },
+        "total_tokens": 95638
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 07:54:15 GMT",
+      "set-cookie": "acw_tc=0ae5a7e117665628486626848e230f475a778f892b2fa2edbd2fc7968cf4b3;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122415540889b2667999804423"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-199"
+}

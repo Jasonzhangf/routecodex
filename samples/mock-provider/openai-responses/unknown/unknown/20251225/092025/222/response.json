@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.246",
+    "buildTime": "2025-12-23T13:34:55.989Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T213450425-074"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Git commit message:\nfeat(floating-panel): add interactive graph with container-DOM connections\n\n- Add highlight IPC handler for browser element highlighting\n- Render full container tree with all child nodes recursively\n- Draw connection lines from containers to matched DOM elements\n- Implement click-to-highlight: green for containers, blue for DOM\n- Add selected state tracking with visual highlighting\n- Maintain canvas drag functionality for navigation",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto && git commit -m \\\"$(cat <<'EOF'\\nfeat(floating-panel): add interactive graph with container-DOM connections\\n\\n- Add highlight IPC handler for browser element highlighting\\n- Render full container tree with all child nodes recursively\\n- Draw connection lines from containers to matched DOM elements\\n- Implement click-to-highlight: green for containers, blue for DOM\\n- Add selected state tracking with visual highlighting\\n- Maintain canvas drag functionality for navigation\\nEOF\\n)\\\"\",\"justification\":\"提交交互式图形增强\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042324610310173864",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766496895,
+      "id": "202512232134509ce3c8e526814e53",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512232134509ce3c8e526814e53",
+      "usage": {
+        "completion_tokens": 248,
+        "prompt_tokens": 90928,
+        "prompt_tokens_details": {
+          "cached_tokens": 90413
+        },
+        "total_tokens": 91176
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:34:55 GMT",
+      "set-cookie": "acw_tc=0ae5a7dc17664968906155612e7e6beeda3ceb690d70fa9e8e35475e01f831;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512232134509ce3c8e526814e53"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-222"
+}

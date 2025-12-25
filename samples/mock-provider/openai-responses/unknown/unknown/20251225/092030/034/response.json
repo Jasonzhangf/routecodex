@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.278",
+    "buildTime": "2025-12-24T11:07:08.164Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T190654670-073"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694bc94f966f039a14e2a59e",
+      "object": "chat.completion",
+      "created": 1766574415,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 15738,
+        "completion_tokens": 187,
+        "total_tokens": 15925
+      },
+      "extend_fields": {
+        "traceId": "2150211917665744149532310e0cad",
+        "requestId": "8615dd0139e1fd2d5d70cc40de94493a"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "apply_patch:8",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"input\": \"--- a/Users/fanzhang/.routecodex/provider/iflow/config.v1.json\\n+++ b/Users/fanzhang/.routecodex/provider/iflow/config.v1.json\\n@@ -14,7 +14,8 @@\\n         \\\"baseURL\\\": \\\"https://apis.iflow.cn/v1\\\",\\n         \\\"auth\\\": {\\n           \\\"type\\\": \\\"iflow-oauth\\\",\\n-          \\\"tokenFile\\\": \\\"~/.routecodex/auth/iflow-oauth.json\\\"\\n+          \\\"tokenFile\\\": \\\"~/.routecodex/auth/iflow-oauth.json\\\",\\n+          \\\"secondaryTokenFile\\\": \\\"~/.routecodex/auth/iflow-oauth-secondary.json\\\"\\n         },\\n         \\\"models\\\": {\\n           \\\"tstars2.0\\\": {},\"}",
+                  "name": "apply_patch"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:07:08 GMT",
+      "eagleeye-traceid": "2150211917665744149532310e0cad",
+      "s-brt": "13180",
+      "s-rt": "13233",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-034"
+}

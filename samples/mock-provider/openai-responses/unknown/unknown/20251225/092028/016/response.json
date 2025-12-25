@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.278",
+    "buildTime": "2025-12-24T11:04:50.552Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T190445575-050"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "浮窗应该已经启动了。让我让它继续运行一下,然后我再测试最小化和关闭按钮。\n\n实际上我应该先验证浮窗是否正常显示,然后测试最小化和关闭按钮。\n\n但是由于我没有图形界面,我无法看到浮窗。不过我可以通过检查日志来判断窗口是否正常创建。\n\n让我查看日志文件。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"tail -50 /tmp/webauto-floating-panel.log\",\"justification\":\"\",\"login\":true,\"max_output_tokens\":4000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":100}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042182945106918324",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766574290,
+      "id": "2025122419044550e437c8ee124ff5",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122419044550e437c8ee124ff5",
+      "usage": {
+        "completion_tokens": 145,
+        "prompt_tokens": 27403,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 27548
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:04:50 GMT",
+      "set-cookie": "acw_tc=0ae5a7dd17665742857483174ee48156827c90ad5c3dbb19ad3861b0958116;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122419044550e437c8ee124ff5"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-016"
+}

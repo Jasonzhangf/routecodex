@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.286",
+    "buildTime": "2025-12-25T01:01:48.274Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251225T090139625-089"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****ygYHzg",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766624508,
+      "usage": {
+        "completion_tokens": 165,
+        "prompt_tokens": 27753,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 27918
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-7d36c206-0081-48b0-ba0c-8d8ea260d88b",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "update_plan",
+                  "arguments": "{\"explanation\": \"preload 回环测试已通过，现在可以验证高亮功能的基线测试。\", \"plan\": [{\"status\": \"completed\", \"step\": \"检查当前浮窗 preload 代码与缺失的回环测试脚本\"}, {\"status\": \"completed\", \"step\": \"实现并运行 preload 回环测试脚本，确保 window.api 暴露正常\"}, {\"status\": \"in_progress\", \"step\": \"整理测试结果并规划下一步（高亮基线验证）\"}, {\"status\": \"pending\", \"step\": \"验证 health 和高亮端点是否正常\"}]}"
+                },
+                "index": 0,
+                "id": "call_ec2ff13ba8b64369ade9fe83",
+                "type": "function"
+              }
+            ],
+            "content": "现在 preload 测试通过了！让我更新计划并继续下一步。\n\n"
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "1130",
+      "content-type": "application/json",
+      "date": "Thu, 25 Dec 2025 01:01:48 GMT",
+      "req-arrive-time": "1766624499947",
+      "req-cost-time": "8304",
+      "resp-start-time": "1766624508252",
+      "x-envoy-upstream-service-time": "8278"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092032-019"
+}

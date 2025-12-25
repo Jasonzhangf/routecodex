@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:09:39.551Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T200919610-001"
+  },
+  "url": "https://dapi.micosoft.icu/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****3a6257",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_0044030376757b2901694a86727e94819195362bee02fe5174",
+      "object": "response",
+      "created_at": 1766491762,
+      "status": "completed",
+      "model": "gpt-5.1-codex",
+      "temperature": 1,
+      "top_p": 1,
+      "metadata": {},
+      "output": [
+        {
+          "id": "rs_0044030376757b2901694a8673a08481918fe6f7f670388642",
+          "type": "reasoning",
+          "summary": [],
+          "content": []
+        },
+        {
+          "id": "fc_0044030376757b2901694a86827ca08191a3f37a14722e132c",
+          "type": "function_call",
+          "status": "completed",
+          "call_id": "call_JU3GKFxtCFegctj9YTF1S7pZ",
+          "name": "exec_command",
+          "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto/apps/floating-panel && rg -n \\\"\\\\.mts\\\" -g\\\"*.mts\\\"\",\"justification\":\"Find import patterns with TS extension\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto/apps/floating-panel\",\"yield_time_ms\":1000}"
+        },
+        {
+          "id": "message_placeholder_3",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": ""
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 15114,
+        "input_tokens_details": {
+          "cached_tokens": 11392
+        },
+        "output_tokens": 2153,
+        "output_tokens_details": {
+          "reasoning_tokens": 2048
+        },
+        "total_tokens": 17267
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092024-007"
+}

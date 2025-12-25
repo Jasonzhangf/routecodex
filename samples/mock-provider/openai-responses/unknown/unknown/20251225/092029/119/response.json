@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.261",
+    "buildTime": "2025-12-24T04:35:29.921Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T123517264-029"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694b6d866d1b90a78bef2771",
+      "object": "chat.completion",
+      "created": 1766550919,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 107386,
+        "completion_tokens": 152,
+        "total_tokens": 107538
+      },
+      "extend_fields": {
+        "traceId": "21044e8b17665509177338377e0ee9",
+        "requestId": "a2fb8c36ed8c011a29c201828becc5a0"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "update_plan:203",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"plan\":[{\"step\":\"修复问题1: 分离点击逻辑，只有点击 +/- 才展开/折叠\",\"status\":\"completed\"},{\"step\":\"修复问题2: 使用正确的 match.nodes 选择器高亮\",\"status\":\"completed\"},{\"step\":\"修复问题3: 增加调试日志到 drawConnectionsForNode\",\"status\":\"in_progress\"},{\"step\":\"修复问题4: 增加 maxDepth 和 maxChildren\",\"status\":\"completed\"},{\"step\":\"测试所有修复\",\"status\":\"pending\"}],\"explanation\":\"已修复了点击逻辑和高亮逻辑问题，现在需要增加调试日志来诊断连线问题。当前 drawAllConnections 没有日志输出，说明函数可能没有被调用或者条件检查失败。\"}",
+                  "name": "update_plan"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 04:35:29 GMT",
+      "eagleeye-traceid": "21044e8b17665509177338377e0ee9",
+      "s-brt": "12040",
+      "s-rt": "12235",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092029-119"
+}

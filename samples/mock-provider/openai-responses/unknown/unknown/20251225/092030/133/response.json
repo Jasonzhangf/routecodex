@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T12:14:05.006Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T201336340-210"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****45931c",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694bd8f1966f039a14e2d3a2",
+      "object": "chat.completion",
+      "created": 1766578418,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 94741,
+        "completion_tokens": 424,
+        "total_tokens": 95165
+      },
+      "extend_fields": {
+        "traceId": "2150211917665784168242220e0d51",
+        "requestId": "b8446f5f1a9e2052505192fb407268a8"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:222",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"cat <<'EOF' > services/controller/src/containers-match.mjs\\n/**\\n * containers:match action handler\\n * 支持 profile/url 匹配并返回 container_tree + dom_tree\\n */\\nimport { UiController } from './controller.js';\\n\\nexport async function handleContainersMatch(controller, payload) {\\n  const { profile, url, maxDepth, maxChildren } = payload;\\n  \\n  if (!profile) {\\n    return { success: false, error: '缺少 profile' };\\n  }\\n  \\n  try {\\n    // 调用已有的 inspect_tree 逻辑\\n    const result = await controller.handleContainerInspect({\\n      profile,\\n      url,\\n      maxDepth,\\n      maxChildren\\n    });\\n    \\n    if (!result.success) {\\n      return { success: false, error: result.error || 'container inspect 失败' };\\n    }\\n    \\n    const snapshot = result.data?.snapshot;\\n    if (!snapshot) {\\n      return { success: false, error: '缺少 snapshot' };\\n    }\\n    \\n    // 构造 containers:match 期望的返回格式\\n    return {\\n      success: true,\\n      data: {\\n        container_tree: snapshot.container_tree || null,\\n        dom_tree: snapshot.dom_tree || null,\\n        metadata: {\\n          root_container_id: snapshot.metadata?.root_container_id || snapshot.container_tree?.id\\n        }\\n      }\\n    };\\n  } catch (err) {\\n    return { success: false, error: err.message };\\n  }\\n}\\nEOF\",\"justification\":\"创建 containers:match 处理函数，复用已有 inspect_tree 逻辑\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":100}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 12:14:05 GMT",
+      "eagleeye-traceid": "2150211917665784168242220e0d51",
+      "s-brt": "28065",
+      "s-rt": "28203",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-133"
+}

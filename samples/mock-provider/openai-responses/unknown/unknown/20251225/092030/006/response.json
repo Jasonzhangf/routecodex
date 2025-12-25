@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.275",
+    "buildTime": "2025-12-24T08:39:29.275Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T163802146-022"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694ba66b64f8633edd32c2e7",
+      "object": "chat.completion",
+      "created": 1766565484,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 147645,
+        "completion_tokens": 1264,
+        "total_tokens": 148909
+      },
+      "extend_fields": {
+        "traceId": "0b52134d17665654824497447e0e6e",
+        "requestId": "ac817617db20c814a1356870d0e3c558"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:194",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"cat > /tmp/add-browser-control-cli.mjs << 'EOF'\\nimport { readFileSync, writeFileSync } from 'fs';\\n\\nconst cliPath = 'dist/modules/browser-control/src/cli.js';\\nlet content = readFileSync(cliPath, 'utf-8');\\n\\n// 在 yargs command 区段插入两个新子命令\\nconst highlightCmd = `\\n  .command('highlight', '高亮指定 selector', (yargs) => {\\n    return yargs\\n      .option('url', { describe: '目标页面 URL', type: 'string', demandOption: true })\\n      .option('selector', { describe: 'CSS 选择器', type: 'string', demandOption: true })\\n      .option('color', { describe: '高亮颜色', type: 'string', default: 'green' })\\n      .option('duration', { describe: '持续时间(ms)', type: 'number', default: 1500 })\\n      .option('profile', { describe: 'profile 名', type: 'string', default: 'weibo_fresh' });\\n  }, async (argv) => {\\n    const result = await runHighlight(argv);\\n    console.log(JSON.stringify(result));\\n  })\\n  .command('highlight-dom-path', '高亮指定 dom_path', (yargs) => {\\n    return yargs\\n      .option('url', { describe: '目标页面 URL', type: 'string', demandOption: true })\\n      .option('dom-path', { describe: 'DOM 路径，如 root/0/1', type: 'string', demandOption: true })\\n      .option('color', { describe: '高亮颜色', type: 'string', default: 'green' })\\n      .option('duration', { describe: '持续时间(ms)', type: 'number', default: 1500 })\\n      .option('profile', { describe: 'profile 名', type: 'string', default: 'weibo_fresh' });\\n  }, async (argv) => {\\n    const result = await runHighlightDomPath(argv);\\n    console.log(JSON.stringify(result));\\n  })\\n`;\\n\\n// 插入位置：在 .command('dom-dump', ...) 后面\\ncontent = content.replace(\\n  /(\\\\s+\\\\.command\\\\('dom-dump'[\\\\s\\\\S]+?\\\\}))/,\\n  `$1${highlightCmd}`\\n);\\n\\n// 新增两个运行函数\\nconst runHighlight = `\\nasync function runHighlight(argv) {\\n  const session = await openSession(argv);\\n  const style = \\\\`4px solid \\\\${argv.color}\\\\`;\\n  const duration = argv.duration;\\n  const result = await session.page.evaluate((data) => {\\n    const nodes = Array.from(document.querySelectorAll(data.selector));\\n    if (!nodes.length) return { success: false, error: 'element not found', count: 0 };\\n    const cleanups = nodes.map(el => {\\n      const orig = el.style.outline;\\n      el.style.outline = data.style;\\n      return () => { el.style.outline = orig; };\\n    });\\n    const cleanup = () => cleanups.forEach(fn => { try { fn(); } catch {} });\\n    if (data.duration > 0) setTimeout(cleanup, data.duration);\\n    return { success: true, count: nodes.length };\\n  }, { selector: argv.selector, style, duration });\\n  await session.close();\\n  return result;\\n}\\n`;\\n\\nconst runHighlightDomPath = `\\nasync function runHighlightDomPath(argv) {\\n  const session = await openSession(argv);\\n  const path = argv['dom-path'];\\n  const style = \\\\`4px solid \\\\${argv.color}\\\\`;\\n  const duration = argv.duration;\\n  const result = await session.page.evaluate((data) => {\\n    const parts = data.path.split('/').filter(t => t.length);\\n    if (parts[0] !== 'root') parts.unshift('root');\\n    let node = document.body || document.documentElement;\\n    for (let i = 1; i < parts.length; i++) {\\n      const idx = Number(parts[i]);\\n      const children = node.children ? Array.from(node.children) : [];\\n      if (!Number.isFinite(idx) || idx < 0 || idx >= children.length) {\\n        return { success: false, error: 'dom path not found', count: 0 };\\n      }\\n      node = children[idx];\\n      if (!node) return { success: false, error: 'dom path not found', count: 0 };\\n    }\\n    const orig = node.style.outline;\\n    node.style.outline = data.style;\\n    if (data.duration > 0) setTimeout(() => { node.style.outline = orig; }, data.duration);\\n    return { success: true, count: 1 };\\n  }, { path, style, duration });\\n  await session.close();\\n  return result;\\n}\\n`;\\n\\n// 在文件尾部追加函数定义\\ncontent += '\\\\n' + runHighlight + '\\\\n' + runHighlightDomPath;\\n\\nwriteFileSync(cliPath, content, 'utf-8');\\nconsole.log('已给 browser-control CLI 新增 highlight / highlight-dom-path 命令');\\nEOF\\nnode /tmp/add-browser-control-cli.mjs\",\"justification\":\"给 browser-control CLI 增加两个子命令，使其能执行高亮\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"\",\"workdir\":\"\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:39:02 GMT",
+      "eagleeye-traceid": "0b52134d17665654824497447e0e6e",
+      "s-brt": "60037",
+      "s-rt": "60090",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-006"
+}

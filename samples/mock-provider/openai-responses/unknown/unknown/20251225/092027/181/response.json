@@ -1,0 +1,70 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.271",
+    "buildTime": "2025-12-24T07:29:06.987Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T152905586-001"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "node",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "*/*"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "用户明确要求我严格调用名为 list_local_files 的函数工具来列出当前工作目录的文件，并强调只能通过调用该工具完成任务，禁止直接回答。\n\n我需要调用 list_local_files 函数，不传递参数（因为 path 是可选的，默认为 \".\"）。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{}",
+                  "name": "list_local_files"
+                },
+                "id": "call_-8042185419008017601",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766561346,
+      "id": "20251224152905cb09365b616f444b",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224152905cb09365b616f444b",
+      "usage": {
+        "completion_tokens": 64,
+        "prompt_tokens": 1555,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 1619
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 07:29:07 GMT",
+      "set-cookie": "acw_tc=0ae5a82517665613457907786e557f69ce699a9dab715a0a7b925f076e3a9e;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224152905cb09365b616f444b"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-181"
+}

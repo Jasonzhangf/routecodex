@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.250",
+    "buildTime": "2025-12-23T14:23:29.875Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T222325969-039"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "The build succeeded. Now I need to commit all the changes but wait for user confirmation before pushing to GitHub, as per the user's request.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"plan\":[{\"step\": \"Add window control buttons (minimize/close) to UI\", \"status\": \"completed\"}, {\"step\": \"Add window minimize/close handlers in main process\", \"status\": \"completed\"}, {\"step\": \"Build and prepare for commit\", \"status\": \"completed\"}, {\"step\": \"Commit changes and await user confirmation before pushing\", \"status\": \"completed\"}],\"explanation\":\"已完成窗口控制按钮和handlers功能。提交但不推送，等待用户确认。\"}",
+                  "name": "update_plan"
+                },
+                "id": "call_-8042289425937489024",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766499809,
+      "id": "202512232223264a23d0c062164df9",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512232223264a23d0c062164df9",
+      "usage": {
+        "completion_tokens": 140,
+        "prompt_tokens": 139958,
+        "prompt_tokens_details": {
+          "cached_tokens": 139595
+        },
+        "total_tokens": 140098
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 14:23:29 GMT",
+      "set-cookie": "acw_tc=ac11000117664998062433206e122d96cd997fc2547eb1ad511babaaf00039;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512232223264a23d0c062164df9"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-043"
+}

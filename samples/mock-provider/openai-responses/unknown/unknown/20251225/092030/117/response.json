@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T12:06:04.269Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T200517022-169"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****45931c",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694bd6fed75fc1f61ac6ef8e",
+      "object": "chat.completion",
+      "created": 1766577918,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 76942,
+        "completion_tokens": 679,
+        "total_tokens": 77621
+      },
+      "extend_fields": {
+        "traceId": "216663f017665779174508513e0e48",
+        "requestId": "9de081fb5b23d765d817f4575fda000f"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:117",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"cat > /Users/fanzhang/Documents/github/routecodex/docs/multi-token-auth-guide.md << 'EOF'\\n# Multi-Token Authentication Guide\\n\\nRouteCodex now supports multiple OAuth tokens per provider using a standardized naming convention.\\n\\n## Token File Naming Convention\\n\\nToken files must follow the pattern: `<provider>-oauth-<sequence>[-<alias>].json`\\n\\nExamples:\\n- `iflow-oauth-1-primary.json` (sequence 1, alias \\\"primary\\\")\\n- `iflow-oauth-2-backup.json` (sequence 2, alias \\\"backup\\\")\\n- `qwen-oauth-1-work.json` (sequence 1, alias \\\"work\\\")\\n\\nThe `sequence` number determines the order in which tokens are used (1, 2, 3...).\\nThe `alias` part is optional and ignored by the system - it's just for your reference.\\n\\n## Automatic Discovery\\n\\nThe system automatically scans `~/.routecodex/auth/` for token files matching the pattern and creates multiple provider instances. No manual configuration needed.\\n\\n## Authentication Commands\\n\\n### Authenticate specific token:\\n```bash\\n# Token 1\\nIFLOW_TOKEN_FILE=\\\"$HOME/.routecodex/auth/iflow-oauth-1-primary.json\\\" node scripts/auth-iflow-token-direct.mjs\\n\\n# Token 2\\nIFLOW_TOKEN_FILE=\\\"$HOME/.routecodex/auth/iflow-oauth-2-backup.json\\\" node scripts/auth-iflow-token-direct.mjs\\n```\\n\\n### Manual authentication (if device flow fails):\\n```bash\\nIFLOW_TOKEN_FILE=\\\"$HOME/.routecodex/auth/iflow-oauth-1-primary.json\\\" node scripts/auth-iflow-manual.mjs\\n```\\n\\n### Delete and re-authenticate:\\n```bash\\nrm ~/.routecodex/auth/iflow-oauth-1-primary.json\\nIFLOW_TOKEN_FILE=\\\"$HOME/.routecodex/auth/iflow-oauth-1-primary.json\\\" node scripts/auth-iflow-token-direct.mjs\\n```\\n\\n## How It Works\\n\\n1. On startup, RouteCodex scans for all token files matching the pattern\\n2. Each token becomes a separate provider instance with keyAlias = sequence number\\n3. Routing automatically includes all available tokens in round-robin order\\n4. If a token fails, the system tries the next one\\n5. Console logs show which token sequence is being used\\n\\n## Troubleshooting\\n\\n- **Token fails**: The system will automatically try the next token in sequence\\n- **Need to re-auth**: Delete the token file and run the auth command again\\n- **Wrong redirect**: The OAuth callback now shows a success page instead of redirecting to example.com\\n\\n## Provider Support\\n\\nCurrently only iFlow supports multi-token authentication. Other providers will be added as needed.\\nEOF\",\"justification\":\"创建多token认证使用指南文档\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 12:06:04 GMT",
+      "eagleeye-traceid": "216663f017665779174508513e0e48",
+      "s-brt": "46701",
+      "s-rt": "46853",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-117"
+}

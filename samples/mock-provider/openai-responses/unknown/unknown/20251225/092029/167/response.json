@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.267",
+    "buildTime": "2025-12-24T06:48:08.124Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T144754180-018"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694b8c9a60f18590a269adf9",
+      "object": "chat.completion",
+      "created": 1766558874,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 15872,
+        "completion_tokens": 193,
+        "total_tokens": 16065
+      },
+      "extend_fields": {
+        "traceId": "212c2b4317665588743036098e0c6c",
+        "requestId": "17c8aa78036e47ffd0e80ab3f070ec25"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "update_plan:17",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"plan\":[{\"step\":\"Fix startup script syntax errors (TypeScript syntax in JS file)\",\"status\":\"completed\"},{\"step\":\"Fix path resolution in startup script\",\"status\":\"completed\"},{\"step\":\"Test startup script with --headless flag\",\"status\":\"completed\"},{\"step\":\"Analyze current DOM loading logic and connection implementation\",\"status\":\"in_progress\"},{\"step\":\"Separate expand/collapse logic from selection logic\",\"status\":\"pending\"},{\"step\":\"Implement on-demand DOM loading (only current level + next level)\",\"status\":\"pending\"},{\"step\":\"Fix container-DOM connection mapping for all child containers\",\"status\":\"pending\"},{\"step\":\"Add debug logging for connection verification\",\"status\":\"pending\"},{\"step\":\"Test minimize/close button functionality\",\"status\":\"pending\"}],\"explanation\":\"Startup script is now working. Need to analyze the current DOM loading and connection implementation to understand why only root container has connections and child containers are not properly connected to DOM elements.\"}",
+                  "name": "update_plan"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 06:48:08 GMT",
+      "eagleeye-traceid": "212c2b4317665588743036098e0c6c",
+      "s-brt": "13795",
+      "s-rt": "13844",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092029-167"
+}

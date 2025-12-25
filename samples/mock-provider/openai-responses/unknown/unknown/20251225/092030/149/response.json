@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.250",
+    "buildTime": "2025-12-23T14:03:23.421Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T220243889-002"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****ciS-4w",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "created": 1766498603,
+      "usage": {
+        "completion_tokens": 205,
+        "prompt_tokens": 133546,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 133751
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-68686dca-25b5-4fb7-a335-6958ac16b3a6",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "exec_command",
+                  "arguments": "{\"cmd\": \"cd /Users/fanzhang/Documents/github/webauto && git add apps/floating-panel/src/renderer/graph.mjs apps/floating-panel/package.json && git commit -m \\\"$(cat <<'EOF'\\nfix(floating-panel): fix connections and expand root container\\n\\n- Add domNodePositions map to track DOM node coordinates\\n- Calculate proper DOM Y positions for connections\\n- Default expand root container node on initial render\\n- Fix connection lines to connect containers to matched DOM elements\\n- Maintain Windows Registry style rendering\\nEOF\\n)\\\"\", \"justification\": \"提交连线和展开修复\", \"login\": false, \"max_output_tokens\": 2000, \"sandbox_permissions\": \"use_default\", \"shell\": \"/bin/zsh\", \"workdir\": \"/Users/fanzhang/Documents/github/webauto\"}"
+                },
+                "index": 0,
+                "id": "call_07bf5007e1854ff197c6b358",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "1296",
+      "content-type": "application/json",
+      "date": "Tue, 23 Dec 2025 14:03:23 GMT",
+      "req-arrive-time": "1766498564405",
+      "req-cost-time": "38898",
+      "resp-start-time": "1766498603303",
+      "x-envoy-upstream-service-time": "38815"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-149"
+}

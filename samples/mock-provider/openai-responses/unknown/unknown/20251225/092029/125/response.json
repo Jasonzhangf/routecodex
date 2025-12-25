@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.261",
+    "buildTime": "2025-12-24T04:39:12.868Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T123844865-047"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694b6e56966f039a14e1a279",
+      "object": "chat.completion",
+      "created": 1766551126,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 114393,
+        "completion_tokens": 389,
+        "total_tokens": 114782
+      },
+      "extend_fields": {
+        "traceId": "2150137017665511253669000e0ca9",
+        "requestId": "e63d94e170be2cf324ef5aa6e59ddb7b"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:221",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"cd apps/floating-panel && python3 << 'EOF'\\nwith open('src/renderer/graph.mjs', 'r') as f:\\n    content = f.read()\\n\\n# 给 renderGraph 添加 try-catch 和更多调试日志\\nold_render_graph = '''function renderGraph() {\\n  if (!canvas) return;\\n  while (canvas.firstChild) {\\n    canvas.removeChild(canvas.firstChild);\\n  }'''\\n\\nnew_render_graph = '''function renderGraph() {\\n  console.log('[renderGraph] Starting renderGraph');\\n  \\n  try {\\n    if (!canvas) {\\n      console.log('[renderGraph] No canvas, returning');\\n      return;\\n    }\\n    \\n    console.log('[renderGraph] Clearing canvas children');\\n    while (canvas.firstChild) {\\n      canvas.removeChild(canvas.firstChild);\\n    }'''\\n\\ncontent = content.replace(old_render_graph, new_render_graph)\\n\\n# 在 renderGraph 结束前添加 catch 和 finally\\nold_end = '''  canvas.appendChild(mainGroup);\\n}'''\\n\\nnew_end = '''    console.log('[renderGraph] Adding mainGroup to canvas');\\n    canvas.appendChild(mainGroup);\\n    console.log('[renderGraph] Completed successfully');\\n  } catch (error) {\\n    console.error('[renderGraph] ERROR in renderGraph:', error);\\n    console.error('[renderGraph] Stack:', error.stack);\\n  }\\n}'''\\n\\ncontent = content.replace(old_end, new_end)\\n\\nwith open('src/renderer/graph.mjs', 'w') as f:\\n    f.write(content)\\n\\nprint(\\\"✓ 给 renderGraph 添加了错误处理和调试日志\\\")\\nEOF\\n\"}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 04:39:12 GMT",
+      "eagleeye-traceid": "2150137017665511253669000e0ca9",
+      "s-brt": "27396",
+      "s-rt": "27551",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092029-125"
+}

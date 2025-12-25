@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.275",
+    "buildTime": "2025-12-24T08:25:01.409Z",
+    "entryEndpoint": "/v1/chat/completions",
+    "clientRequestId": "openai-chat-unknown-unknown-20251224T162437187-004"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4f75-4969-72a2-bad1-d8add9d76504",
+    "session_id": "019b4f75-4969-72a2-bad1-d8add9d76504"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694ba34664f8633edd32beab",
+      "object": "chat.completion",
+      "created": 1766564679,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 7454,
+        "completion_tokens": 219,
+        "total_tokens": 7673
+      },
+      "extend_fields": {
+        "traceId": "2133ef1617665646774015837e0d7f",
+        "requestId": "50b1839cdf9b431c7fbf0e306f657887"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "update_plan:1",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"plan\":[{\"step\":\"Overview README (root) – verify it reflects current build & CLI usage\",\"status\":\"pending\"},{\"step\":\"src/README.md – confirm it aligns with AGENTS.md execution flow\",\"status\":\"pending\"},{\"step\":\"src/server/handlers/README.md – check for Hub Pipeline delegation notes\",\"status\":\"pending\"},{\"step\":\"src/providers/README.md – ensure Provider V2 transport-only rule is stated\",\"status\":\"pending\"},{\"step\":\"src/modules/pipeline/** – spot-check for stale architecture refs\",\"status\":\"pending\"},{\"step\":\"docs/v2-architecture/README.md – cross-check against AGENTS.md\",\"status\":\"pending\"},{\"step\":\"scripts/README.md – validate dev & release workflow bullets\",\"status\":\"pending\"},{\"step\":\"package/README.md – confirm CLI pack/publish rules\",\"status\":\"pending\"},{\"step\":\"sharedmodule.backup*/** – ignore (archived)\",\"status\":\"pending\"}],\"explanation\":\"Quick scan of every README to see if any still describe the old architecture or outdated build steps that conflict with the concise AGENTS.md rules.\"}",
+                  "name": "update_plan"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:25:01 GMT",
+      "eagleeye-traceid": "2133ef1617665646774015837e0d7f",
+      "s-brt": "23987",
+      "s-rt": "23987",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-chat-unknown-unknown-20251225T092024-019"
+}

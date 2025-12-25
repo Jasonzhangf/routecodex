@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:28:29.534Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T202715820-025"
+  },
+  "url": "https://api.tabcode.cc/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****d731a8",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_0df0679908b2111401694a8aaa370c8198b91381cac8709519",
+      "object": "response",
+      "created_at": 1766492842,
+      "status": "completed",
+      "model": "gpt-5.2-codex",
+      "temperature": 1,
+      "top_p": 0.98,
+      "metadata": {},
+      "output": [
+        {
+          "id": "rs_0df0679908b2111401694a8aac3238819899eb19d492a268a1",
+          "type": "reasoning",
+          "summary": [],
+          "content": []
+        },
+        {
+          "id": "fc_0df0679908b2111401694a8adaa45c81989b6d8a8291626ae2",
+          "type": "function_call",
+          "status": "completed",
+          "call_id": "call_LfYjNodDaVW12duppLwPkg5y",
+          "name": "apply_patch",
+          "arguments": "{\"input\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/renderer/drag.mjs\\n@@\\n-let isDragging = false;\\n-let dragOffset = { x: 0, y: 0 };\\n-\\n-export function initDrag(window) {\\n-  window.addEventListener('mousedown', startDrag);\\n-  window.addEventListener('mousemove', drag);\\n-  window.addEventListener('mouseup', stopDrag);\\n-  \\n-  // Prevent text selection during drag\\n-  window.addEventListener('selectstart', (e) => {\\n-    if (isDragging) e.preventDefault();\\n-  });\\n-}\\n+let isDragging = false;\\n+let dragOffset = { x: 0, y: 0 };\\n+let dragArea = null;\\n+\\n+export function initDrag(element) {\\n+  dragArea = element;\\n+  if (!dragArea) return;\\n+\\n+  dragArea.addEventListener('mousedown', startDrag);\\n+  window.addEventListener('mousemove', drag);\\n+  window.addEventListener('mouseup', stopDrag);\\n+\\n+  // Prevent text selection during drag\\n+  dragArea.addEventListener('selectstart', (e) => {\\n+    if (isDragging) e.preventDefault();\\n+  });\\n+}\\n@@\\n-  isDragging = true;\\n-  const rect = window.getBoundingClientRect();\\n-  dragOffset.x = e.clientX - rect.left;\\n-  dragOffset.y = e.clientY - rect.top;\\n-  \\n-  window.style.cursor = 'grabbing';\\n+  if (!dragArea) return;\\n+\\n+  isDragging = true;\\n+  const rect = dragArea.getBoundingClientRect();\\n+  dragOffset.x = e.clientX - rect.left;\\n+  dragOffset.y = e.clientY - rect.top;\\n+  \\n+  dragArea.style.cursor = 'grabbing';\\n@@\\n-  window.style.zIndex = '9999';\\n+  dragArea.style.zIndex = '9999';\\n }\\n@@\\n-  window.style.cursor = 'default';\\n+  if (!dragArea) return;\\n+\\n+  dragArea.style.cursor = 'default';\\n@@\\n-    window.style.zIndex = '1000';\\n+    dragArea.style.zIndex = '1000';\\n   }, 100);\\n }\\n*** End Patch\",\"patch\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/renderer/drag.mjs\\n@@\\n-let isDragging = false;\\n-let dragOffset = { x: 0, y: 0 };\\n-\\n-export function initDrag(window) {\\n-  window.addEventListener('mousedown', startDrag);\\n-  window.addEventListener('mousemove', drag);\\n-  window.addEventListener('mouseup', stopDrag);\\n-  \\n-  // Prevent text selection during drag\\n-  window.addEventListener('selectstart', (e) => {\\n-    if (isDragging) e.preventDefault();\\n-  });\\n-}\\n+let isDragging = false;\\n+let dragOffset = { x: 0, y: 0 };\\n+let dragArea = null;\\n+\\n+export function initDrag(element) {\\n+  dragArea = element;\\n+  if (!dragArea) return;\\n+\\n+  dragArea.addEventListener('mousedown', startDrag);\\n+  window.addEventListener('mousemove', drag);\\n+  window.addEventListener('mouseup', stopDrag);\\n+\\n+  // Prevent text selection during drag\\n+  dragArea.addEventListener('selectstart', (e) => {\\n+    if (isDragging) e.preventDefault();\\n+  });\\n+}\\n@@\\n-  isDragging = true;\\n-  const rect = window.getBoundingClientRect();\\n-  dragOffset.x = e.clientX - rect.left;\\n-  dragOffset.y = e.clientY - rect.top;\\n-  \\n-  window.style.cursor = 'grabbing';\\n+  if (!dragArea) return;\\n+\\n+  isDragging = true;\\n+  const rect = dragArea.getBoundingClientRect();\\n+  dragOffset.x = e.clientX - rect.left;\\n+  dragOffset.y = e.clientY - rect.top;\\n+  \\n+  dragArea.style.cursor = 'grabbing';\\n@@\\n-  window.style.zIndex = '9999';\\n+  dragArea.style.zIndex = '9999';\\n }\\n@@\\n-  window.style.cursor = 'default';\\n+  if (!dragArea) return;\\n+\\n+  dragArea.style.cursor = 'default';\\n@@\\n-    window.style.zIndex = '1000';\\n+    dragArea.style.zIndex = '1000';\\n   }, 100);\\n }\\n*** End Patch\"}"
+        },
+        {
+          "id": "message_placeholder_3",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": ""
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 29944,
+        "input_tokens_details": {
+          "cached_tokens": 25472
+        },
+        "output_tokens": 3584,
+        "output_tokens_details": {
+          "reasoning_tokens": 2432
+        },
+        "total_tokens": 33528
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092033-023"
+}

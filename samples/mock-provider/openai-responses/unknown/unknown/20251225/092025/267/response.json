@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.250",
+    "buildTime": "2025-12-23T14:00:23.073Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T220017825-005"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "构建成功了。现在需要修复连线问题。目前的drawConnectionToDom函数中，domY = 0，这会导致所有连线都从同一个点开始。需要计算每个DOM节点的实际Y位置。\n\n同时需要确保默认容器是展开的。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto && git add apps/floating-panel/src/renderer/graph.mjs apps/floating-panel/package.json && git commit -m \\\"$(cat <<'EOF'\\nfix(floating-panel): fix connections and ensure container expansion\\n\\n- Fix connection line rendering with proper DOM node Y positions\\n- Ensure root container is expanded by default\\n- Maintain Windows Registry style with Consolas font\\n- Fix expand/collapse indicator display (+/-/•)\\nEOF\\n)\\\"\",\"justification\":\"提交连线修复，等待用户确认\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042249912237713754",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766498422,
+      "id": "202512232200188713efac308646e5",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512232200188713efac308646e5",
+      "usage": {
+        "completion_tokens": 218,
+        "prompt_tokens": 115447,
+        "prompt_tokens_details": {
+          "cached_tokens": 115086
+        },
+        "total_tokens": 115665
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 14:00:22 GMT",
+      "set-cookie": "acw_tc=ac11000117664984180423623e36e77bab7b39fecbeed72a5eee90de5f3498;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512232200188713efac308646e5"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-267"
+}

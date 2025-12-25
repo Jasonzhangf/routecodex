@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.267",
+    "buildTime": "2025-12-24T06:46:57.945Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T144651219-007"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Let me try a different approach - I'll use exec_command with sed to fix the file directly.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cat > /tmp/fix-start.mjs << 'EOFPATCH'\\n#!/usr/bin/env node\\nimport { readFileSync, writeFileSync } from 'node:fs';\\nimport path from 'node:path';\\n\\nconst filePath = '/Users/fanzhang/Documents/github/webauto/scripts/start-headful.mjs';\\nlet content = readFileSync(filePath, 'utf-8');\\n\\n// Fix 1: Remove TypeScript syntax\\ncontent = content.replace('profile: null as string | null', 'profile: null');\\ncontent = content.replace('url: null as string | null', 'url: null');\\n\\n// Fix 2: Add headless detection in parseArgs\\ncontent = content.replace(\\n  \\\"  return result;\\\\n}\\\",\\n  \\\"  result.headless = args.includes('--headless') || args.includes('-h');\\\\n  return result;\\\\n}\\\"\\n);\\n\\n// Fix 3: Add --headless to args when present\\ncontent = content.replace(\\n  \\\"const args = [launcherPath, '--profile', profileName, '--url', targetUrl, ...extraArgs];\\\",\\n  \\\"const args = [launcherPath, '--profile', profileName, '--url', targetUrl, ...(headless ? ['--headless'] : []), ...extraArgs];\\\"\\n);\\n\\nwriteFileSync(filePath, content, 'utf-8');\\nconsole.log('Fixed scripts/start-headful.mjs');\\nEOFPATCH\\nnode /tmp/fix-start.mjs\",\"justification\":\"Fix TypeScript syntax errors in start-headful.mjs\",\"login\":false,\"max_output_tokens\":6000,\"sandbox_permissions\":\"use_default\",\"shell\":\"\",\"workdir\":\"\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042256921624640409",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766558817,
+      "id": "20251224144651b8cded78996a47fd",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224144651b8cded78996a47fd",
+      "usage": {
+        "completion_tokens": 380,
+        "prompt_tokens": 12933,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 13313
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 06:46:57 GMT",
+      "set-cookie": "acw_tc=0ae5a86f17665588113878128e98a5718a5c6ce1d9718f550e2e2816d3ce61;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224144651b8cded78996a47fd"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-147"
+}

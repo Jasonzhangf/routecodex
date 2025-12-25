@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.260",
+    "buildTime": "2025-12-24T03:15:05.183Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T111439075-079"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "OK, the Electron window should be closed. Now let me create a simple test page to verify the selector mapping logic works correctly.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cat > /tmp/test-connections.html << 'EOF'\\n<!DOCTYPE html>\\n<html>\\n<head>\\n    <title>Test Container Connections</title>\\n    <script src=\\\"https://cdn.jsdelivr.net/npm/ace-builds@1.4.12/src-min-noconflict/ace.min.js\\\"></script>\\n    <style>\\n        body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #ccc; }\\n        #editor { width: 100%; height: 400px; border: 1px solid #555; }\\n        .result { margin-top: 20px; padding: 10px; border: 1px solid #555; background: #2d2d30; }\\n        .success { color: #4CAF50; }\\n        .error { color: #f44336; }\\n        .info { color: #2196F3; }\\n        button { padding: 8px 16px; margin: 5px; background: #007acc; color: white; border: none; cursor: pointer; }\\n        button:hover { background: #005a9e; }\\n    </style>\\n</head>\\n<body>\\n    <h2>Test Container-DOM Connection Logic</h2>\\n    \\n    <div>\\n        <button onclick=\\\"testBasic()\\\">Test Basic Connection</button>\\n        <button onclick=\\\"testClassSelector()\\\">Test Class Selector</button>\\n        <button onclick=\\\"testIdSelector()\\\">Test ID Selector</button>\\n        <button onclick=\\\"runAllTests()\\\">Run All Tests</button>\\n    </div>\\n    \\n    <div id=\\\"results\\\"></div>\\n    \\n    <script>\\n        // Simplified version of the selector mapping logic\\n        function buildSelectorMap(domNode) {\\n            const selectorMap = new Map();\\n            \\n            function walk(node) {\\n                if (!node) return;\\n                \\n                if (node.id) {\\n                    const idSelector = '#' + node.id;\\n                    if (!selectorMap.has(idSelector)) {\\n                        selectorMap.set(idSelector, node.path);\\n                    }\\n                }\\n                \\n                if (node.classes && node.classes.length > 0) {\\n                    for (const cls of node.classes) {\\n                        const classSelector = '.' + cls;\\n                        if (!selectorMap.has(classSelector)) {\\n                            selectorMap.set(classSelector, node.path);\\n                        }\\n                    }\\n                }\\n                \\n                if (node.children) {\\n                    for (const child of node.children) {\\n                        walk(child);\\n                    }\\n                }\\n            }\\n            \\n            walk(domNode);\\n            return selectorMap;\\n        }\\n        \\n        // Sample DOM tree\\n        const sampleDomTree = {\\n            path: 'root',\\n            tag: 'DIV',\\n            id: null,\\n            classes: ['app-container'],\\n            children: [\\n                {\\n                    path: 'root/0',\\n                    tag: 'DIV',\\n                    id: 'header',\\n                    classes: ['nav-bar', 'top'],\\n                    children: []\\n                },\\n                {\\n                    path: 'root/1',\\n                    tag: 'DIV',\\n                    id: 'main',\\n                    classes: ['content'],\\n                    children: [\\n                        {\\n                            path: 'root/1/0',\\n                            tag: 'DIV',\\n                            id: null,\\n                            classes: ['feed-list'],\\n                            children: []\\n                        },\\n                        {\\n                            path: 'root/1/1',\\n                            tag: 'DIV',\\n                            id: 'post-1',\\n                            classes: ['post-item'],\\n                            children: []\\n                        }\\n                    ]\\n                }\\n            ]\\n        };\\n        \\n        // Sample container tree\\n        const sampleContainerTree = {\\n            id: 'root',\\n            name: 'Page Root',\\n            match: {\\n                selectors: ['.app-container']\\n            },\\n            children: [\\n                {\\n                    id: 'header',\\n                    name: 'Header',\\n                    match: {\\n                        selectors: ['#header', '.nav-bar']\\n                    }\\n                },\\n                {\\n                    id: 'main',\\n                    name: 'Main Content',\\n                    match: {\\n                        selectors: ['#main', '.content']\\n                    },\\n                    children: [\\n                        {\\n                            id: 'feed',\\n                            name: 'Feed List',\\n                            match: {\\n                                selectors: ['.feed-list']\\n                            }\\n                        },\\n                        {\\n                            id: 'post',\\n                            name: 'Post Item',\\n                            match: {\\n                                selectors: ['#post-1', '.post-item']\\n                            }\\n                        }\\n                    ]\\n                }\\n            ]\\n        };\\n        \\n        function addResult(type, message) {\\n            const results = document.getElementById('results');\\n            const div = document.createElement('div');\\n            div.className = type;\\n            div.textContent = message;\\n            results.appendChild(div);\\n        }\\n        \\n        function testBasic() {\\n            const selectorMap = buildSelectorMap(sampleDomTree);\\n            addResult('info', `Selector map has ${selectorMap.size} entries`);\\n            \\n            const selector = '.app-container';\\n            const path = selectorMap.get(selector);\\n            if (path === 'root') {\\n                addResult('success', `✓ Basic test passed: ${selector} → ${path}`);\\n            } else {\\n                addResult('error', `✗ Basic test failed: ${selector} → ${path || 'not found'}`);\\n            }\\n        }\\n        \\n        function testClassSelector() {\\n            const selectorMap = buildSelectorMap(sampleDomTree);\\n            \\n            const tests = [\\n                ['.app-container', 'root'],\\n                ['.nav-bar', 'root/0'],\\n                ['.content', 'root/1'],\\n                ['.feed-list', 'root/1/0'],\\n                ['.post-item', 'root/1/1']\\n            ];\\n            \\n            let passed = 0;\\n            for (const [selector, expected] of tests) {\\n                const path = selectorMap.get(selector);\\n                if (path === expected) {\\n                    addResult('success', `✓ ${selector} → ${path}`);\\n                    passed++;\\n                } else {\\n                    addResult('error', `✗ ${selector} → ${path || 'not found'} (expected: ${expected})`);\\n                }\\n            }\\n            addResult('info', `Passed ${passed}/${tests.length} class selector tests`);\\n        }\\n        \\n        function testIdSelector() {\\n            const selectorMap = buildSelectorMap(sampleDomTree);\\n            \\n            const tests = [\\n                ['#header', 'root/0'],\\n                ['#main', 'root/1'],\\n                ['#post-1', 'root/1/1']\\n            ];\\n            \\n            let passed = 0;\\n            for (const [selector, expected] of tests) {\\n                const path = selectorMap.get(selector);\\n                if (path === expected) {\\n                    addResult('success', `✓ ${selector} → ${path}`);\\n                    passed++;\\n                } else {\\n                    addResult('error', `✗ ${selector} → ${path || 'not found'} (expected: ${expected})`);\\n                }\\n            }\\n            addResult('info', `Passed ${passed}/${tests.length} ID selector tests`);\\n        }\\n        \\n        function runAllTests() {\\n            document.getElementById('results').innerHTML = '';\\n            addResult('info', '=== Running all tests ===');\\n            testBasic();\\n            testClassSelector();\\n            testIdSelector();\\n            addResult('info', '=== All tests completed ===');\\n        }\\n    </script>\\n</body>\\n</html>\\nEOF\\necho \\\"Test page created at /tmp/test-connections.html\\\"\\n\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042244655197783781",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766546105,
+      "id": "20251224111439eab7eb43899a48be",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224111439eab7eb43899a48be",
+      "usage": {
+        "completion_tokens": 1567,
+        "prompt_tokens": 52856,
+        "prompt_tokens_details": {
+          "cached_tokens": 52790
+        },
+        "total_tokens": 54423
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 03:15:05 GMT",
+      "set-cookie": "acw_tc=0ae5a7de17665460792227598ed4a75bb4d1f9c37fe8f2063377fb05d930e6;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224111439eab7eb43899a48be"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-200"
+}

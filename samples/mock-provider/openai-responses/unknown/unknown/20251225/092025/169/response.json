@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.246",
+    "buildTime": "2025-12-23T13:13:07.198Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T211258540-022"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "已完成以下改进：\n\n**浮窗UI改进**\n- 使用 VS Code 深色主题配色（#2d2d30, #252526 等）\n- 容器树：左侧显示，带有类型徽章（蓝色）\n- DOM 树：右侧显示，完整递归渲染\n- 所有节点支持展开/折叠（绿色 +/- 指示器）\n- 父子节点之间有灰色连线\n- 改进字体：系统字体 + 单色字体混用\n- 悬停效果：蓝色高亮边框\n- 点击节点可切换展开状态\n\n**之前已修复的问题**\n- EIO 报错：日志写入失败时自动降级\n- 窗口调整大小：可调整，尺寸持久化\n- 拖动无闪烁：使用 `-webkit-app-region: drag` 原生实现\n- 健康检查日志：只记录错误，不重复打印成功状态\n\n运行 `node scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com` 查看效果。",
+            "reasoning_content": "Now let me create a concise summary for the user about what has been completed.\n\nChanges made:\n1. Fixed graph.mjs - completely rewrote with improved styling:\n   - Better color scheme using VS Code-like dark theme colors\n   - Added expand/collapse functionality with +/- indicators\n   - Added connection lines between parent and child nodes\n   - Improved fonts using system fonts for better readability\n   - Added type badges for container nodes\n   - Container tree on left, DOM tree on right\n   - DOM nodes show tag, id/class with improved coloring\n   - Hover effects and click interactions\n\n2. Fixed the previous issues:\n   - EIO logging errors fixed with fallback\n   - Window resizing and persistence added\n   - Native Electron drag region implemented\n   - Reduced flickering on window move\n   - Reduced excessive logging\n\nThe user can now run the app to see the improved visualization.",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766495587,
+      "id": "20251223211258f271c92bedfa4549",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223211258f271c92bedfa4549",
+      "usage": {
+        "completion_tokens": 414,
+        "prompt_tokens": 68849,
+        "prompt_tokens_details": {
+          "cached_tokens": 68484
+        },
+        "total_tokens": 69263
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:13:07 GMT",
+      "set-cookie": "acw_tc=0ae5a7e217664955787346738e3c1188953beedb98f97b1a297817561e6f73;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223211258f271c92bedfa4549"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-169"
+}

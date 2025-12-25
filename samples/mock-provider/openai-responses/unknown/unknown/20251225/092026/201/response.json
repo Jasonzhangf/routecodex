@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.260",
+    "buildTime": "2025-12-24T03:15:08.585Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T111505301-080"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "让我检查一下实际的 selector 映射逻辑是否正确。我需要看看 container 的 selectors 和 DOM 树中的数据结构是否匹配。\n\n让我看看后端返回的实际数据格式中，selector 是什么格式。从日志中看：\n\n```json\nselectors: [Array],\nmatch: [Object],\n```\n\n让我检查 match 对象的结构。我需要看看 match 对象中是 selectors 还是 selector。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"curl -s 'http://127.0.0.1:7701/v1/container/match?url=https://weibo.com&max-depth=2&max-children=5' | python3 -m json.tool 2>&1 | head -200\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042372576505648729",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766546108,
+      "id": "20251224111505569d13da5e7e4b11",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224111505569d13da5e7e4b11",
+      "usage": {
+        "completion_tokens": 148,
+        "prompt_tokens": 54445,
+        "prompt_tokens_details": {
+          "cached_tokens": 52854
+        },
+        "total_tokens": 54593
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 03:15:08 GMT",
+      "set-cookie": "acw_tc=0ae5a7de17665461054588271ed4a761e01e07e2bb923df714e07929e31271;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224111505569d13da5e7e4b11"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-201"
+}

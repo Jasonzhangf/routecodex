@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.271",
+    "buildTime": "2025-12-24T07:37:09.468Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T153653540-014"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****kpzZOA",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766561829,
+      "usage": {
+        "completion_tokens": 314,
+        "prompt_tokens": 88522,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 88836
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-732dfa86-f20f-45b8-9087-82421101db1b",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "exec_command",
+                  "arguments": "{\"cmd\": \"cat > /tmp/fix-launcher-args2.mjs << 'EOFPATCH'\\n#!/usr/bin/env node\\nimport { readFileSync, writeFileSync } from 'node:fs';\\nimport path from 'node:path';\\n\\nconst filePath = '/Users/fanzhang/Documents/github/webauto/scripts/start-headful.mjs';\\nlet content = readFileSync(filePath, 'utf-8');\\n\\n// Fix the launcher argument parsing to properly extract profile and URL\\ncontent = content.replace(\\n  /const args = \\\\[launcherPath, '--profile', profileName, '--url', targetUrl, \\\\.\\\\.\\\\.\\\\(headless \\\\? \\\\['--headless'\\\\] : \\\\[\\\\]\\\\), \\\\.\\\\.\\\\.extraArgs\\\\];/,\\n  `const args = [launcherPath, profileName, targetUrl, ...(headless ? ['--headless'] : [])];`\\n);\\n\\nwriteFileSync(filePath, content, 'utf-8');\\nconsole.log('Fixed launcher argument passing');\\nEOFPATCH\\nnode /tmp/fix-launcher-args2.mjs\", \"justification\": \"Fix launcher argument parsing\", \"login\": false, \"max_output_tokens\": 6000, \"sandbox_permissions\": \"use_default\", \"shell\": \"\", \"workdir\": \"\", \"yield_time_ms\": 1000}"
+                },
+                "index": 0,
+                "id": "call_f4869880a0f44821a6c787e7",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "1584",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 07:37:09 GMT",
+      "req-arrive-time": "1766561814574",
+      "req-cost-time": "14878",
+      "resp-start-time": "1766561829452",
+      "x-envoy-upstream-service-time": "14123"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092031-036"
+}

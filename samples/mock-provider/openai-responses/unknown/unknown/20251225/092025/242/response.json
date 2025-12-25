@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.247",
+    "buildTime": "2025-12-23T13:45:11.807Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T214436464-004"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "编译成功。现在我需要提交更改。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto && git add apps/floating-panel/src/renderer/graph.mjs apps/floating-panel/package.json && git commit -m \\\"$(cat <<'EOF'\\nfix(floating-panel): fix container/DOM rendering and disable canvas scroll\\n\\n- Fix container tree rendering to show all child nodes recursively\\n- Fix DOM tree rendering with proper node expansion logic\\n- Disable canvas overflow to prevent unwanted scrolling\\n- Set container panel width to 180px for better layout\\n- Set DOM panel start at x=400 for proper separation\\n- Improve node positioning and spacing for better readability\\n- Maintain drag functionality for canvas navigation\\nEOF\\n)\\\" && git push origin main\",\"justification\":\"提交修复并推送\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time\":\"2000\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042267848021400678",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766497511,
+      "id": "20251223214436bcf287ba8e764920",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223214436bcf287ba8e764920",
+      "usage": {
+        "completion_tokens": 220,
+        "prompt_tokens": 103003,
+        "prompt_tokens_details": {
+          "cached_tokens": 96073
+        },
+        "total_tokens": 103223
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:45:11 GMT",
+      "set-cookie": "acw_tc=0ae5a82717664974766673594efa4f29bdd9d7b17a177cb45a16eb4a285758;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223214436bcf287ba8e764920"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-242"
+}

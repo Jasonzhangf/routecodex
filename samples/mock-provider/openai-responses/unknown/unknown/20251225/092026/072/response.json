@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.252",
+    "buildTime": "2025-12-23T14:56:21.384Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T225556792-024"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "<tool_call>update_plan<arg_key>explanation</arg_key><arg_value>成功推送到GitHub。已完成：窗口控制（最小化/关闭）、修复highlight handler、所有容器和DOM全展开、连接线渲染、Windows注册表风格。</arg_value><arg_key>plan</arg_key><arg_value>[{\"step\": \"Fix highlight handler registration in preload and main process\", \"status\": \"completed\"}, {\"step\": \"Debug connection rendering by adding logging to drawConnectionsForNode\", \"status\": \"completed\"}, {\"step\": \"Fix container match.selector to ensure connections can be drawn\", \"status\": \"completed\"}, {\"step\": \"Add window control buttons (minimize/close) to UI\", \"status\": \"completed\"}, {\"step\": \"Build and test fixes\", \"status\": \"completed\"}, {\"step\": \"Commit and push to GitHub\", \"status\": \"completed\"}]</arg_value></tool_call>",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766501781,
+      "id": "20251223225557f84f0e5f48cf485d",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223225557f84f0e5f48cf485d",
+      "usage": {
+        "completion_tokens": 169,
+        "prompt_tokens": 161139,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 161308
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 14:56:21 GMT",
+      "set-cookie": "acw_tc=0ae5a87217665017571817856eea446180013d8aa3af216c15242cb53343f9;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223225557f84f0e5f48cf485d"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-072"
+}

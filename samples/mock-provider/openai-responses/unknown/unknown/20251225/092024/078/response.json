@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T10:29:35.697Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T182907441-002"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "<tool_call>write_stdin<arg_key>session_id</arg_key><arg_value>61558</arg_value><arg_key>chars</arg_key><arg_value></arg_value><arg_key>yield_time_ms</arg_key><arg_value>0</arg_value></tool_call>",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766485775,
+      "id": "202512231829075abe7d028de84f05",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512231829075abe7d028de84f05",
+      "usage": {
+        "completion_tokens": 28,
+        "prompt_tokens": 194311,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 194339
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 10:29:35 GMT",
+      "set-cookie": "acw_tc=ac11000117664857479255611e87135568611b22addd1477819641360d98c5;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512231829075abe7d028de84f05"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092024-078"
+}

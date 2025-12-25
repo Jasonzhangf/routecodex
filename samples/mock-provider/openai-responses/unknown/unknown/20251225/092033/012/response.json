@@ -1,0 +1,56 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:08:47.366Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T200838074-010"
+  },
+  "url": "https://api.tabcode.cc/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****d731a8",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_02b7d596af8dbb4d01694a864b1068819abdd67781520cad87",
+      "object": "response",
+      "created_at": 1766491723,
+      "status": "completed",
+      "model": "gpt-5.2-codex",
+      "temperature": 1,
+      "top_p": 0.98,
+      "metadata": {},
+      "output": [
+        {
+          "id": "fc_02b7d596af8dbb4d01694a864cd1e0819a8d93e3c1e958e29d",
+          "type": "function_call",
+          "status": "completed",
+          "call_id": "call_QDKqOZBz5U0vqEyH2YokBhZv",
+          "name": "exec_command",
+          "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto/apps/floating-panel && rg -n \\\"BrowserWindow|window\\\" src -g\\\"*.cjs\\\" -g\\\"*.js\\\" -g\\\"*.ts\\\" -g\\\"*.mjs\\\"\",\"justification\":\"查找窗口创建和配置代码\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto/apps/floating-panel\",\"yield_time_ms\":1000}"
+        }
+      ],
+      "usage": {
+        "input_tokens": 12048,
+        "input_tokens_details": {
+          "cached_tokens": 11264
+        },
+        "output_tokens": 127,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 12175
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092033-012"
+}

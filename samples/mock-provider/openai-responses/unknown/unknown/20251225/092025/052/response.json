@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T11:07:03.004Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T190655711-079"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "好，现在清理完成了。让我创建一个测试脚本来启动测试服务并验证UI连接。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto && WEBAUTO_FLOATING_WS_URL=ws://127.0.0.1:7702/ws WEBAUTO_FLOATING_BUS_URL=ws://127.0.0.1:7702/bus WEBAUTO_FLOATING_BUS_PORT=7702 WEBAUTO_FLOATING_DEVTOOLS=1 timeout 15 node /tmp/test-ws-server.mjs &\\nTEST_PID=$!\\necho \\\"测试服务 PID: $TEST_PID\\\"\\n\\nsleep 3\\n\\necho \\\"\\\"\\necho \\\"=== 启动 UI 进行连接测试 ===\\\"\\ncd apps/floating-panel && timeout 10 npm run start 2>&1 | head -50 || true\\n\\nkill $TEST_PID 2>/dev/null\\necho \\\"\\\"\\necho \\\"测试完成\\\"\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042242593613285483",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766488022,
+      "id": "20251223190655efba92cc10af424a",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223190655efba92cc10af424a",
+      "usage": {
+        "completion_tokens": 191,
+        "prompt_tokens": 44949,
+        "prompt_tokens_details": {
+          "cached_tokens": 44793
+        },
+        "total_tokens": 45140
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 11:07:03 GMT",
+      "set-cookie": "acw_tc=ac11000117664880158188852e6f40c92a5861fe4f9b49026652848672e8ef;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223190655efba92cc10af424a"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-052"
+}

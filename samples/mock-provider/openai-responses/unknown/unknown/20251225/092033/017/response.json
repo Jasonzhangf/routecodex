@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:15:05.400Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T201454235-012"
+  },
+  "url": "https://api.tabcode.cc/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****d731a8",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_065b97202fcdfae501694a87c3db188198a07c296c7d6fc0ac",
+      "object": "response",
+      "created_at": 1766492099,
+      "status": "completed",
+      "model": "gpt-5.2-codex",
+      "temperature": 1,
+      "top_p": 0.98,
+      "metadata": {},
+      "output": [
+        {
+          "id": "rs_065b97202fcdfae501694a87c59d088198834cac3bed1ea39d",
+          "type": "reasoning",
+          "summary": [],
+          "content": []
+        },
+        {
+          "id": "msg_065b97202fcdfae501694a87c784a48198bf13ecb726ff72dc",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "你这里的 `--headless` 是一个布尔开关，带上就是 `true`，不支持 `--headless false` 这种形式，所以报了 positional error。  \n要有头模式，直接不要传 `--headless`：\n\n```bash\nnode scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com\n```\n\n需要我帮你停掉现在这个 headless 进程再重启吗？"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 19429,
+        "input_tokens_details": {
+          "cached_tokens": 18304
+        },
+        "output_tokens": 168,
+        "output_tokens_details": {
+          "reasoning_tokens": 64
+        },
+        "total_tokens": 19597
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092033-017"
+}

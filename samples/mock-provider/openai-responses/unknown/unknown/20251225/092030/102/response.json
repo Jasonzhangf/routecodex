@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T11:51:02.421Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T195047589-118"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****45931c",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694bd39860f18590a26a6ec2",
+      "object": "chat.completion",
+      "created": 1766577049,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 65912,
+        "completion_tokens": 215,
+        "total_tokens": 66127
+      },
+      "extend_fields": {
+        "traceId": "212b740217665770479841806e0ce9",
+        "requestId": "b987712de8b99bdd1a4bb627d18f829b"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:96",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"python3 << 'EOF'\\n# Quick test: hit device-code endpoint with curl to see what's returned\\nimport subprocess\\nimport json\\n\\nresult = subprocess.run([\\n    'curl', '-s', '-X', 'POST',\\n    'https://iflow.cn/oauth/device/code',\\n    '-H', 'Content-Type: application/x-www-form-urlencoded',\\n    '-d', 'client_id=10009311001&scope=openid profile email api'\\n], capture_output=True, text=True)\\n\\nprint('Device code endpoint response:')\\nprint(result.stdout)\\nprint('Error (if any):', result.stderr)\\nprint('HTTP status:', result.returncode)\\nEOF\\n\",\"justification\":\"测试设备码端点返回内容\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:51:02 GMT",
+      "eagleeye-traceid": "212b740217665770479841806e0ce9",
+      "s-brt": "14347",
+      "s-rt": "14492",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-102"
+}

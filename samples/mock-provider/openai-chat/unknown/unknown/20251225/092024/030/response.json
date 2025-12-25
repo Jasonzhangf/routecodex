@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.275",
+    "buildTime": "2025-12-24T08:36:31.507Z",
+    "entryEndpoint": "/v1/chat/completions",
+    "clientRequestId": "openai-chat-unknown-unknown-20251224T163620408-037"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4f75-4969-72a2-bad1-d8add9d76504",
+    "session_id": "019b4f75-4969-72a2-bad1-d8add9d76504"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694ba60564f8633edd32c24f",
+      "object": "chat.completion",
+      "created": 1766565382,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 55419,
+        "completion_tokens": 135,
+        "total_tokens": 55554
+      },
+      "extend_fields": {
+        "traceId": "2133ef1617665653806882842e0e03",
+        "requestId": "89cc0e38dfc9bbbdfe8f4754e939a1db"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "update_plan:33",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"plan\":[{\"step\":\"Confirm targeted README list and capture current context snippets\",\"status\":\"completed\"},{\"step\":\"Edit root README + scripts README to emphasize build flow and no ROUTECODEX_VERIFY_SKIP\",\"status\":\"completed\"},{\"step\":\"Replace package/README contents with CLI pack info\",\"status\":\"completed\"},{\"step\":\"Update docs/v2-architecture README with status disclaimer\",\"status\":\"completed\"},{\"step\":\"Refresh module READMEs under src/ per functional grouping (commands, config, providers/auth, etc.)\",\"status\":\"completed\"}],\"explanation\":\"Updated READMEs across modules to align with AGENTS.md principles and functional module descriptions.\"}",
+                  "name": "update_plan"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:36:31 GMT",
+      "eagleeye-traceid": "2133ef1617665653806882842e0e03",
+      "s-brt": "10595",
+      "s-rt": "10796",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-chat-unknown-unknown-20251225T092024-030"
+}

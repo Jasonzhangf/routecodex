@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T11:24:53.997Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T192448203-018"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "好的，规则已经修改为 ESM only。现在需要将 Electron preload 脚本从 .cjs 改为 .mjs，并修改主进程加载方式和构建脚本。\n\n首先，我需要将 preload.cjs 重命名为 preload.mjs，并将其从 CommonJS 转换为 ESM。然后修改主进程加载预加载脚本的路径和配置。最后修改构建脚本以适应新的 ESM 架构。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"mv apps/floating-panel/src/main/preload.cjs apps/floating-panel/src/main/preload.mjs\",\"justification\":\"将preload脚本从CJS重命名为ESM\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":100}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042302207760766939",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766575494,
+      "id": "20251224192448d5e20217e6034d99",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224192448d5e20217e6034d99",
+      "usage": {
+        "completion_tokens": 192,
+        "prompt_tokens": 58537,
+        "prompt_tokens_details": {
+          "cached_tokens": 53313
+        },
+        "total_tokens": 58729
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:24:54 GMT",
+      "set-cookie": "acw_tc=ac11000117665754883814194ebb3ab18103ae158ff578b96712f373dba31c;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224192448d5e20217e6034d99"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-039"
+}

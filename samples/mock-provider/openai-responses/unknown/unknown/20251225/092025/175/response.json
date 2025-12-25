@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.246",
+    "buildTime": "2025-12-23T13:21:25.490Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T212108338-027"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Good, but renderDomNodeRecursive has a similar problem.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"input\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/renderer/graph.mjs\\n@@\\n  g.appendChild(indicatorBg);\\n  g.appendChild(indicatorText);\\n  parent.appendChild(g);\\n\\n  // Draw children if expanded\\n  if (hasChildren && isExpanded) {\\n    let currentY = y + 30;\\n    node.children.forEach((child) => {\\n      // Connection line\\n      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');\\n      line.setAttribute('x1', '10');\\n      line.setAttribute('y1', String(y + 24));\\n      line.setAttribute('x2', '15');\\n      line.setAttribute('y2', String(currentY + 12));\\n      line.setAttribute('stroke', '#555');\\n      line.setAttribute('stroke-width', '1');\\n      parent.appendChild(line);\\n\\n      renderDomNodeRecursive(parent, child, x + 15, currentY);\\n      currentY += 30;\\n    });\\n-  }\\n\\n-  return currentY - y;\\n+  } else {\\n+    return 24;\\n+  }\\n+\\n+  return currentY - (y + 30);\\n }\\n*** End Patch\",\"patch\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/renderer/graph.mjs\\n@@\\n  g.appendChild(indicatorBg);\\n  g.appendChild(indicatorText);\\n  parent.appendChild(g);\\n\\n  // Draw children if expanded\\n  if (hasChildren && isExpanded) {\\n    let currentY = y + 30;\\n    node.children.forEach((child) => {\\n      // Connection line\\n      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');\\n      line.setAttribute('x1', '10');\\n      line.setAttribute('y1', String(y + 24));\\n      line.setAttribute('x2', '15');\\n      line.setAttribute('y2', String(currentY + 12));\\n      line.setAttribute('stroke', '#555');\\n      line.setAttribute('stroke-width', '1');\\n      parent.appendChild(line);\\n\\n      renderDomNodeRecursive(parent, child, x + 15, currentY);\\n      currentY += 30;\\n    });\\n-  }\\n\\n-  return currentY - y;\\n+  } else {\\n+    return 24;\\n+  }\\n+\\n+  return currentY - (y + 30);\\n }\\n*** End Patch\"}",
+                  "name": "apply_patch"
+                },
+                "id": "call_-8042216239693550584",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766496085,
+      "id": "20251223212108fc1e89c1b7664c5c",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223212108fc1e89c1b7664c5c",
+      "usage": {
+        "completion_tokens": 530,
+        "prompt_tokens": 72166,
+        "prompt_tokens_details": {
+          "cached_tokens": 71502
+        },
+        "total_tokens": 72696
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:21:25 GMT",
+      "set-cookie": "acw_tc=0ae5a87017664960684936371e4d8166526f5c5de24ee5519af82176f70023;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223212108fc1e89c1b7664c5c"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-175"
+}

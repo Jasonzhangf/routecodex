@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.282",
+    "buildTime": "2025-12-24T13:30:42.670Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T212942372-009"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****BNZi-Q",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766583042,
+      "usage": {
+        "completion_tokens": 1155,
+        "prompt_tokens": 142244,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 143399
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-ae40be91-0a57-44af-ba7d-f64ebece295a",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "apply_patch",
+                  "arguments": "{\"input\": \"*** Begin Patch\\n*** Update File: apps/floating-panel/src/renderer/graph.mjs\\n@@\\n  const infoText = document.createElementNS('http://www.w3.org/2000/svg', 'text');\\n   const label = node.id ? `#${node.id}` : (node.classes?.[0] ? `.${node.classes[0]}` : '');\\n   infoText.setAttribute('x', '70');\\n   infoText.setAttribute('y', '16');\\n   infoText.setAttribute('fill', '#9cdcfe');\\n   infoText.setAttribute('font-size', '10');\\n   infoText.setAttribute('font-family', 'Consolas, monospace');\\n   infoText.setAttribute('pointer-events', 'none');\\n   infoText.textContent = label.substring(0, 30);\\n\\n   const indicatorBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');\\n   indicatorBg.setAttribute('x', '4');\\n   indicatorBg.setAttribute('y', '6');\\n   indicatorBg.setAttribute('width', '12');\\n   indicatorBg.setAttribute('height', '12');\\n   indicatorBg.setAttribute('fill', '#3e3e42');\\n   indicatorBg.setAttribute('stroke', '#888');\\n   indicatorBg.setAttribute('stroke-width', '1');\\n   indicatorBg.setAttribute('rx', '1');\\n+  indicatorBg.style.cursor = 'pointer';\\n+  indicatorBg.style.pointerEvents = 'auto';\\n\\n   const indicatorText = document.createElementNS('http://www.w3.org/2000/svg', 'text');\\n   indicatorText.setAttribute('x', '10');\\n   indicatorText.setAttribute('y', '16');\\n   indicatorText.setAttribute('text-anchor', 'middle');\\n   indicatorText.setAttribute('fill', '#fff');\\n   indicatorText.setAttribute('font-size', '10');\\n   indicatorText.setAttribute('font-weight', 'bold');\\n   indicatorText.setAttribute('pointer-events', 'none');\\n   indicatorText.textContent = hasChildren ? (isExpanded ? '-' : '+') : '';\\n\\n+  // 点击+/-号：切换展开状态\\n+  indicatorBg.addEventListener('click', (e) => {\\n+    e.stopPropagation();\\n+    if (hasChildren) {\\n+      if (isExpanded) {\\n+        expandedNodes.delete(nodeId);\\n+      } else {\\n+        expandedNodes.add(nodeId);\\n+      }\\n+      console.log('[DOM Node] Toggle expand:', nodeId, isExpanded ? 'collapsed' : 'expanded');\\n+      renderGraph();\\n+    }\\n+  });\\n\\n   g.appendChild(rect);\\n   g.appendChild(indicatorBg);\\n   g.appendChild(indicatorText);\\n   g.appendChild(tagText);\\n   g.appendChild(infoText);\\n   parent.appendChild(g);\\n*** End Patch\\n\", \"patch\": \"*** Begin Patch\\n*** Update File: apps/floating-panel/src/renderer/graph.mjs\\n@@\\n  const infoText = document.createElementNS('http://www.w3.org/2000/svg', 'text');\\n   const label = node.id ? `#${node.id}` : (node.classes?.[0] ? `.${node.classes[0]}` : '');\\n   infoText.setAttribute('x', '70');\\n   infoText.setAttribute('y', '16');\\n   infoText.setAttribute('fill', '#9cdcfe');\\n   infoText.setAttribute('font-size', '10');\\n   infoText.setAttribute('font-family', 'Consolas, monospace');\\n   infoText.setAttribute('pointer-events', 'none');\\n   infoText.textContent = label.substring(0, 30);\\n\\n   const indicatorBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');\\n   indicatorBg.setAttribute('x', '4');\\n   indicatorBg.setAttribute('y', '6');\\n   indicatorBg.setAttribute('width', '12');\\n   indicatorBg.setAttribute('height', '12');\\n   indicatorBg.setAttribute('fill', '#3e3e42');\\n   indicatorBg.setAttribute('stroke', '#888');\\n   indicatorBg.setAttribute('stroke-width', '1');\\n   indicatorBg.setAttribute('rx', '1');\\n+  indicatorBg.style.cursor = 'pointer';\\n+  indicatorBg.style.pointerEvents = 'auto';\\n\\n   const indicatorText = document.createElementNS('http://www.w3.org/2000/svg', 'text');\\n   indicatorText.setAttribute('x', '10');\\n   indicatorText.setAttribute('y', '16');\\n   indicatorText.setAttribute('text-anchor', 'middle');\\n   indicatorText.setAttribute('fill', '#fff');\\n   indicatorText.setAttribute('font-size', '10');\\n   indicatorText.setAttribute('font-weight', 'bold');\\n   indicatorText.setAttribute('pointer-events', 'none');\\n   indicatorText.textContent = hasChildren ? (isExpanded ? '-' : '+') : '';\\n\\n+  // 点击+/-号：切换展开状态\\n+  indicatorBg.addEventListener('click', (e) => {\\n+    e.stopPropagation();\\n+    if (hasChildren) {\\n+      if (isExpanded) {\\n+        expandedNodes.delete(nodeId);\\n+      } else {\\n+        expandedNodes.add(nodeId);\\n+      }\\n+      console.log('[DOM Node] Toggle expand:', nodeId, isExpanded ? 'collapsed' : 'expanded');\\n+      renderGraph();\\n+    }\\n+  });\\n\\n   g.appendChild(rect);\\n   g.appendChild(indicatorBg);\\n   g.appendChild(indicatorText);\\n   g.appendChild(tagText);\\n   g.appendChild(infoText);\\n   parent.appendChild(g);\\n*** End Patch\\n\"}"
+                },
+                "index": 0,
+                "id": "call_c844e9a05d06489780b8d747",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "5195",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 13:30:42 GMT",
+      "req-arrive-time": "1766582982985",
+      "req-cost-time": "59453",
+      "resp-start-time": "1766583042439",
+      "x-envoy-upstream-service-time": "59332"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092031-142"
+}

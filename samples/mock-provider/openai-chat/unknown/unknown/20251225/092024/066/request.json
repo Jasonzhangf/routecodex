@@ -1,0 +1,75 @@
+{
+  "meta": {
+    "stage": "provider-request",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T15:02:31.070Z",
+    "entryEndpoint": "/v1/chat/completions",
+    "clientRequestId": "openai-chat-unknown-unknown-20251223T230231005-001"
+  },
+  "url": "http://127.0.0.1:64511/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****fy-key",
+    "Accept": "*/*",
+    "User-Agent": "node"
+  },
+  "body": {
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a test assistant."
+      },
+      {
+        "role": "user",
+        "content": "Say hello in one short sentence."
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "list_mcp_resources",
+          "description": "List resources from a given MCP server (arguments.server = server label).",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "server": {
+                "type": "string"
+              },
+              "filter": {
+                "type": "string"
+              },
+              "root": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "list_mcp_resource_templates",
+          "description": "List resource templates from MCP servers.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "cursor": {
+                "type": "string"
+              },
+              "server": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "model": "verify-mock",
+    "tool_choice": "auto",
+    "max_tokens": 8192
+  },
+  "reqId": "openai-chat-unknown-unknown-20251225T092024-066"
+}

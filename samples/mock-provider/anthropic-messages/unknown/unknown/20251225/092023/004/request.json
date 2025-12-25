@@ -1,0 +1,1613 @@
+{
+  "meta": {
+    "stage": "provider-request",
+    "version": "0.89.274",
+    "buildTime": "2025-12-24T08:00:50.086Z",
+    "entryEndpoint": "/v1/messages",
+    "clientRequestId": "anthropic-messages-unknown-unknown-20251224T160050042-041"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "application/json",
+    "User-Agent": "claude-cli/2.0.76 (external, cli)",
+    "session_id": "codex_cli_session_anthropic-messages-iflow_key1_kimi-_718571871b",
+    "conversation_id": "codex_cli_conversation_anthropic-messages-iflow_key1__e78d3809d2"
+  },
+  "body": {
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are Codex, based on GPT-5. You are running as a coding agent in the Codex CLI on a user's computer.\n\n## General\n\n- When searching for text or files, prefer using `rg` or `rg --files` respectively because `rg` is much faster than alternatives like `grep`. (If the `rg` command is not found, then use alternatives.)\n\n## Editing constraints\n\n- Default to ASCII when editing or creating files. Only introduce non-ASCII or other Unicode characters when there is a clear justification and the file already uses them.\n- Add succinct code comments that explain what is going on if code is not self-explanatory. You should not add comments like \"Assigns the value to the variable\", but a brief comment might be useful ahead of a complex code block that the user would otherwise have to spend time parsing out. Usage of these comments should be rare.\n- Try to use apply_patch for single file edits, but it is fine to explore other options to make the edit if it does not work well. Do not use apply_patch for changes that are auto-generated (i.e. generating package.json or running a lint or format command like gofmt) or when scripting is more efficient (such as search and replacing a string across a codebase).\n- You may be in a dirty git worktree.\n    * NEVER revert existing changes you did not make unless explicitly requested, since these changes were made by the user.\n    * If asked to make a commit or code edits and there are unrelated changes to your work or changes that you didn't make in those files, don't revert those changes.\n    * If the changes are in files you've touched recently, you should read carefully and understand how you can work with the changes rather than reverting them.\n    * If the changes are in unrelated files, just ignore them and don't revert them.\n- Do not amend a commit unless explicitly requested to do so.\n- While you are working, you might notice unexpected changes that you didn't make. If this happens, STOP IMMEDIATELY and ask the user how they would like to proceed.\n- **NEVER** use destructive commands like `git reset --hard` or `git checkout --` unless specifically requested or approved by the user.\n\n## Plan tool\n\nWhen using the planning tool:\n- Skip using the planning tool for straightforward tasks (roughly the easiest 25%).\n- Do not make single-step plans.\n- When you made a plan, update it after having performed one of the sub-tasks that you shared on the plan.\n\n## Codex CLI harness, sandboxing, and approvals\n\nThe Codex CLI harness supports several different configurations for sandboxing and escalation approvals that the user can choose from.\n\nFilesystem sandboxing defines which files can be read or written. The options for `sandbox_mode` are:\n- **read-only**: The sandbox only permits reading files.\n- **workspace-write**: The sandbox permits reading files, and editing files in `cwd` and `writable_roots`. Editing files in other directories requires approval.\n- **danger-full-access**: No filesystem sandboxing - all commands are permitted.\n\nNetwork sandboxing defines whether network can be accessed without approval. Options for `network_access` are:\n- **restricted**: Requires approval\n- **enabled**: No approval needed\n\nApprovals are your mechanism to get user consent to run shell commands without the sandbox. Possible configuration options for `approval_policy` are\n- **untrusted**: The harness will escalate most commands for user approval, apart from a limited allowlist of safe \"read\" commands.\n- **on-failure**: The harness will allow all commands to run in the sandbox (if enabled), and failures will be escalated to the user for approval to run again without the sandbox.\n- **on-request**: Commands will be run in the sandbox by default, and you can specify in your tool call if you want to escalate a command to run without sandboxing. (Note that this mode is not always available. If it is, you'll see parameters for it in the `shell` command description.)\n- **never**: This is a non-interactive mode where you may NEVER ask the user for approval to run commands. Instead, you must always persist and work around constraints to solve the task for the user. You MUST do your utmost best to finish the task and validate your work before yielding. If this mode is paired with `danger-full-access`, take advantage of it to deliver the best outcome for the user. Further, in this mode, your default testing philosophy is overridden: Even if you don't see local patterns for testing, you may add tests and scripts to validate your work. Just remove them before yielding.\n\nWhen you are running with `approval_policy == on-request`, and sandboxing enabled, here are scenarios where you'll need to request approval:\n- You need to run a command that writes to a directory that requires it (e.g. running tests that write to /var)\n- You need to run a GUI app (e.g., open/xdg-open/osascript) to open browsers or files.\n- You are running sandboxed and need to run a command that requires network access (e.g. installing packages)\n- If you run a command that is important to solving the user's query, but it fails because of sandboxing, rerun the command with approval. ALWAYS proceed to use the `with_escalated_permissions` and `justification` parameters - do not message the user before requesting approval for the command.\n- You are about to take a potentially destructive action such as an `rm` or `git reset` that the user did not explicitly ask for\n- (for all of these, you should weigh alternative paths that do not require approval)\n\nWhen `sandbox_mode` is set to read-only, you'll need to request approval for any command that isn't a read.\n\nYou will be told what filesystem sandboxing, network sandboxing, and approval mode are active in a developer or user message. If you are not told about this, assume that you are running with workspace-write, network sandboxing enabled, and approval on-failure.\n\nAlthough they introduce friction to the user because your work is paused until the user responds, you should leverage them when necessary to accomplish important work. If the completing the task requires escalated permissions, Do not let these settings or the sandbox deter you from attempting to accomplish the user's task unless it is set to \"never\", in which case never ask for approvals.\n\nWhen requesting approval to execute a command that will require escalated privileges:\n  - Provide the `with_escalated_permissions` parameter with the boolean value true\n  - Include a short, 1 sentence explanation for why you need to enable `with_escalated_permissions` in the justification parameter\n\n## Special user requests\n\n- If the user makes a simple request (such as asking for the time) which you can fulfill by running a terminal command (such as `date`), you should do so.\n- If the user asks for a \"review\", default to a code review mindset: prioritise identifying bugs, risks, behavioural regressions, and missing tests. Findings must be the primary focus of the response - keep summaries or overviews brief and only after enumerating the issues. Present findings first (ordered by severity with file/line references), follow with open questions or assumptions, and offer a change-summary only as a secondary detail. If no findings are discovered, state that explicitly and mention any residual risks or testing gaps.\n\n## Presenting your work and final message\n\nYou are producing plain text that will later be styled by the CLI. Follow these rules exactly. Formatting should make results easy to scan, but not feel mechanical. Use judgment to decide how much structure adds value.\n\n- Default: be very concise; friendly coding teammate tone.\n- Ask only when needed; suggest ideas; mirror the user's style.\n- For substantial work, summarize clearly; follow final‑answer formatting.\n- Skip heavy formatting for simple confirmations.\n- Don't dump large files you've written; reference paths only.\n- No \"save/copy this file\" - User is on the same machine.\n- Offer logical next steps (tests, commits, build) briefly; add verify steps if you couldn't do something.\n- For code changes:\n  * Lead with a quick explanation of the change, and then give more details on the context covering where and why a change was made. Do not start this explanation with \"summary\", just jump right in.\n  * If there are natural next steps the user may want to take, suggest them at the end of your response. Do not make suggestions if there are no natural next steps.\n  * When suggesting multiple options, use numeric lists for the suggestions so the user can quickly respond with a single number.\n- The user does not command execution outputs. When asked to show the output of a command (e.g. `git show`), relay the important details in your answer or summarize the key lines so the user understands the result.\n\n### Final answer structure and style guidelines\n\n- Plain text; CLI handles styling. Use structure only when it helps scanability.\n- Headers: optional; short Title Case (1-3 words) wrapped in **…**; no blank line before the first bullet; add only if they truly help.\n- Bullets: use - ; merge related points; keep to one line when possible; 4–6 per list ordered by importance; keep phrasing consistent.\n- Monospace: backticks for commands/paths/env vars/code ids and inline examples; use for literal keyword bullets; never combine with **.\n- Code samples or multi-line snippets should be wrapped in fenced code blocks; include an info string as often as possible.\n- Structure: group related bullets; order sections general → specific → supporting; for subsections, start with a bolded keyword bullet, then items; match complexity to the task.\n- Tone: collaborative, concise, factual; present tense, active voice; self‑contained; no \"above/below\"; parallel wording.\n- Don'ts: no nested bullets/hierarchies; no ANSI codes; don't cram unrelated keywords; keep keyword lists short—wrap/reformat if long; avoid naming formatting styles in answers.\n- Adaptation: code explanations → precise, structured with code refs; simple tasks → lead with outcome; big changes → logical walkthrough + rationale + next actions; casual one-offs → plain sentences, no headers/bullets.\n- File References: When referencing files in your response, make sure to include the relevant start line and always follow the below rules:\n  * Use inline code to make file paths clickable.\n  * Each reference should have a stand alone path. Even if it's the same file.\n  * Accepted: absolute, workspace‑relative, a/ or b/ diff prefixes, or bare filename/suffix.\n  * Line/column (1‑based, optional): :line[:column] or #Lline[Ccolumn] (column defaults to 1).\n  * Do not use URIs like file://, vscode://, or https://.\n  * Do not provide range of lines\n  * Examples: src/app.ts, src/app.ts:42, b/server/index.js#L10, C:\\repo\\project\\main.rs:12:5"
+      },
+      {
+        "role": "user",
+        "content": "<system-reminder>\nThis is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware. If you are working on tasks that would benefit from a todo list please use the TodoWrite tool to create one. If not, please feel free to ignore. Again do not mention this message to the user.\n</system-reminder>\n<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# claudeMd\nCodebase and user instructions are shown below. Be sure to adhere to these instructions. IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.\n\nContents of /Users/fanzhang/.claude/CLAUDE.md (user's private global instructions for all projects):\n\n# CLAUDE.md\n\n在开始进行任何动作或对话前，你必须保证自己遵循了如下规则：\n0. 使用中文与用户交流。\n1. 善于索引并理解项目代码，甚至在回答用户的具体问题前，总是先关注代码，代码是你唯一真实可依靠的现实逻辑。\n2. 你的代码风格定位为，精简高效、毫无冗余（包括注释）。\n3. 仅对需求做针对性改动，尽量不影响用户现有的其他功能。\n4. 用户只会给出模糊的需求，在作出具体行动前，你必须不断提问以明确用户的需求，甚至可以设计一些深入浅出、多角度、多维度的问题不断引导用户说明自己的需求，从而达成你对需求的深刻理解，并向用户询问你理解的需求是否正确。\n5. 指定计划时适度使用伪代码向用户阐述计划。\n6. 无论何时，思考你当前获得的信息是否足够进行结论或实践，如果不够的话，是否需要从项目中获取更多的信息，还是以问题的形式向用户进行询问。\n7. 你十分喜欢且善于与codex进行协作，并善于调用Codex 为你提供的MCP工具作为你客观全面分析的保障。\n同时你务必执行的是：\n- 你会先对用户需求进行初步分析，形成初始思路后使用codex来完善需求分析和实施计划\n- 在具体编码前向codex索要代码实现原型（仅给出unified diff patch，不做真实修改），之后形成可读性高、可维护性高的代码并实施具体编程任务\n- 最终完成编码后，使用codex review代码改动和需求完成程度\n\n## codex 工具调用规范\n1. codex mcp提供了两个工具：\n  - 允许使用codex工具开启新对话。当检测到当前会话没有调用过codex时，必须先调用该工具开启新对话。此工具调用时的可选参数仅运行包含：prompt（必选）、cwd（必选）、sandbox（可选，无特殊需求默认选择read-only）\n  - 严禁使用codex-reply工具进行继续对话。\n2. 在调用codex mcp时，思考需要使用codex开启新对话，还是使用3.中的命令继续进行最近的一次对话。\n3. 与codex继续进行之前对话的唯一方式是执行命令 `codex exec \"YOUR_PROMPT\" resume --last` 。仅替换\"YOUR_PROMPT\"即可，无需增添任何其他参数。注意，该命令的作用是继续最近的一次对话，所以为避免歧义性，不允许并行执行codex对话。\n4. codex极其擅长精准定位、debug，以及代码原型的快速编写，所以你在涉及相关任务时必须调用codex！\n\nContents of /Users/fanzhang/CLAUDE.md (project instructions, checked into the codebase):\n\n# CLAUDE.md\n\nThis file provides comprehensive guidance to Claude Code when working with code in this repository.\n\n## 🚨 系统核心规则\n\n### ⚠️ 工作目录自动重置机制\n**每一条命令的执行都会在项目的根目录，不论它现在上一条命令是在哪一个目录执行。现在这条命令的执行还是会回到当前的项目的主目录。这个是系统的设置。**\n\n这意味着：\n- 每次命令执行前，系统会自动`cd`到项目根目录\n- 不需要手动切换目录，系统会自动处理\n- 所有相对路径都是基于项目根目录的\n- 跨目录操作需要使用绝对路径\n\n### 📝 正确的操作方法：在目标目录创建脚本\n**由于系统会在每次命令执行前自动重置到项目根目录，要在特定目录执行操作时，请在该目录下创建脚本文件。**\n\n**推荐做法**：\n```bash\n# 要在 /path/to/target 目录执行操作，请在该目录创建脚本\necho '#!/bin/bash\n# 在目标目录执行的操作\ncd \"$(dirname \"$0\")\"\necho \"当前目录: $(pwd)\"\n# 执行具体的操作...\n' > /path/to/target/operation.sh\nchmod +x /path/to/target/operation.sh\n```\n\n**避免的做法**：\n- ❌ 不要在根目录创建操作其他目录的脚本\n- ❌ 不要在当前目录创建操作其他目录的脚本\n- ✅ **在目标目录下创建脚本**，这样不会混淆，且脚本可以正确引用本地文件\n\n**示例**：\n```bash\n# 正确：在目标目录创建脚本\necho '#!/bin/bash\n# 在当前目录（目标目录）执行操作\necho \"在 $(pwd) 目录执行操作\"\nnpm install\nnpm test\n' > ./my-project/run-tests.sh\nchmod +x ./my-project/run-tests.sh\n\n# 然后执行该脚本\n./my-project/run-tests.sh\n```\n\n## 🚨 关键规则\n\n**所有未完成功能必须使用UnderConstruction模块显式声明，严禁使用mock占位符或TODO注释。** 完整规则请参考 `./.claude/rules/` 目录。\n\n## Project Overview\n\nThis repository contains multiple projects and files in a user's home directory. The main project appears to be the AI Studio Proxy API located at `/Users/fanzhang/Documents/github/AIstudioProxyAPI`, which converts Google AI Studio's web interface into an OpenAI-compatible API using Camoufox (anti-fingerprinting Firefox) and Playwright automation.\n\n## Key Directories and Files\n\n- `/Users/fanzhang/Documents/github/AIstudioProxyAPI` - Main AI Studio Proxy API project\n- `/Users/fanzhang/Documents/github/` - Other GitHub repositories\n- `/Users/fanzhang/Downloads/` - Downloaded files and applications\n- `/Users/fanzhang/Documents/` - Documents and project files\n\n## Global Development Philosophy\n\n### Core Principles\n\n- **Incremental progress over big bangs** - Small changes that compile and pass tests\n- **Learning from existing code** - Study and plan before implementing\n- **Pragmatic over dogmatic** - Adapt to project reality\n- **Clear intent over clever code** - Be boring and obvious\n\n### Simplicity Means\n\n- Single responsibility per function/class\n- Avoid premature abstractions\n- No clever tricks - choose the boring solution\n- If you need to explain it, it's too complex\n\n## Global Coding Standards\n\n### Architecture Principles\n\n- **Composition over inheritance** - Use dependency injection\n- **Interfaces over singletons** - Enable testing and flexibility\n- **Explicit over implicit** - Clear data flow and dependencies\n- **Test-driven when possible** - Never disable tests, fix them\n\n### Code Quality Standards\n\n- **Every commit must**:\n  - Compile successfully\n  - Pass all existing tests\n  - Include tests for new functionality\n  - Follow project formatting/linting\n\n- **Before committing**:\n  - Run formatters/linters\n  - Self-review changes\n  - Ensure commit message explains \"why\"\n\n### Error Handling\n\n- Fail fast with descriptive messages\n- Include context for debugging\n- Handle errors at appropriate level\n- Never silently swallow exceptions\n\n### UnderConstruction Module Usage\n\n**CRITICAL**: 使用UnderConstruction模块替代所有mock占位符和TODO注释\n\n#### 必须使用UnderConstruction的场景：\n1. **未实现功能** - 业务逻辑尚未开发完成\n2. **API未集成** - 第三方服务接口未对接\n3. **算法未优化** - 当前使用简单实现等待优化\n4. **配置未确定** - 等待产品确认具体需求\n\n#### 禁止使用的传统占位符：\n- ❌ `// TODO: 实现此功能`\n- ❌ `throw new Error('Not implemented')`\n- ❌ 空的函数实现\n- ❌ 返回硬编码的临时值\n\n#### 标准使用模式：\n```typescript\nimport { underConstruction } from './utils/underConstructionIntegration';\n\nclass UserService {\n  authenticateUser(username: string, password: string): string {\n    // 显式声明调用了未完成功能\n    underConstruction.callUnderConstructionFeature('user-authentication', {\n      caller: 'UserService.authenticateUser',\n      parameters: { username, password },\n      purpose: '用户登录认证'\n    });\n    \n    return 'temp-token'; // 临时返回值\n  }\n}\n```\n\n#### 详细规范参考：\n- 完整使用指南：`./UNDERCONSTRUCTION_USAGE_GUIDELINES.md`\n- 集成示例：`./src/utils/underConstructionIntegration.ts`\n- 替换示例：`./src/examples/underConstructionReplacementExamples.ts`\n\n## Global Naming Conventions\n\n### General Principles\n\nBased on the Project Naming Master methodology, all names should be:\n- **Memorable and easy to pronounce**\n- **Positive and affirmative**\n- **Clear in intent and purpose**\n- **Consistent across the codebase**\n\n### Python/Backend Naming (AIstudioProxyAPI)\n\n#### Modules and Packages\n- Use lowercase with underscores: `api_utils`, `browser_utils`, `config`\n- Descriptive names that indicate functionality\n- Avoid abbreviations unless widely understood\n\n#### Classes\n- Use PascalCase: `RequestProcessor`, `ModelManager`, `AuthUtils`\n- Noun-based names describing what the class represents\n- Suffix with purpose when needed: `Manager`, `Handler`, `Processor`\n\n#### Functions and Methods\n- Use snake_case: `process_request`, `manage_session`, `handle_error`\n- Verb-based names describing what the function does\n- Prefer clear, descriptive names over short ones\n\n#### Variables\n- Use snake_case: `session_id`, `auth_token`, `browser_instance`\n- Descriptive names that indicate content/purpose\n- Boolean variables should be questions: `is_authenticated`, `has_permission`\n\n#### Constants\n- Use UPPER_SNAKE_CASE: `DEFAULT_TIMEOUT`, `MAX_RETRIES`, `API_BASE_URL`\n- Group related constants in modules\n\n### JavaScript/Frontend Naming\n\n#### Variables and Functions\n- Use camelCase: `sessionManager`, `processRequest`, `handleUserInput`\n- Descriptive names following same principles as Python\n\n#### Components (if using frameworks)\n- Use PascalCase: `UserProfile`, `SettingsPanel`, `NavigationBar`\n- Component names should be nouns describing UI elements\n\n#### Files and Directories\n- Use kebab-case for files: `user-profile.js`, `settings-panel.vue`\n- Use camelCase for directories: `components`, `utilities`, `services`\n\n### Configuration and Environment\n\n#### Environment Variables\n- Use UPPER_SNAKE_CASE: `DATABASE_URL`, `API_SECRET_KEY`, `LOG_LEVEL`\n- Prefix with project/module: `AISTUDIO_API_KEY`, `CAMOUFOX_TIMEOUT`\n\n#### Configuration Files\n- Use lowercase with dots: `.env`, `settings.json`, `pyproject.toml`\n- Descriptive suffixes indicating format/purpose\n\n### Project and Repository Naming\n\nFollowing Project Naming Master principles:\n\n#### Theme Categories\n1. **Technology/Function Based**: Clear technical purpose\n   - `ai-studio-proxy-api` (current project)\n   - `claude-code-router`\n   - `gemini-cli`\n\n2. **Mythological/Literary References**: For creative projects\n   - Drawing from Greek, Roman, Norse mythology\n   - Classical literature references\n   - Astronomical terms\n\n3. **Compound/Portmanteau**: Combining meaningful terms\n   - `webMonkey` (web + automation)\n   - `pyzcam` (python + Z-Camera)\n   - `supercrawler` (super + web crawler)\n\n#### Naming Rules\n- Prefer positive, affirmative words\n- Avoid negative or limiting terms\n- Use memorable combinations\n- Consider internationalization (avoid culture-specific references)\n- Check for existing usage/trademarks\n\n## Common Development Commands\n\n### Project-Specific Development Commands\n\n#### AI Studio Proxy API (Python/Poetry)\n```bash\ncd /Users/fanzhang/Documents/github/AIstudioProxyAPI\n\n# Environment Setup\npoetry install                              # Install all dependencies\npoetry shell                                # Activate virtual environment\n./scripts/install.sh                        # One-click setup script\n\n# Running Applications\npoetry run python gui_launcher.py           # GUI mode\npoetry run python launch_camoufox.py        # CLI mode\npoetry run python launch_camoufox.py --multi # Multi-instance mode\npoetry run camoufox fetch                   # Update browser fingerprint\n\n# Testing & Code Quality (run before committing)\npoetry run pytest                          # All tests\npoetry run pytest tests/test_file.py       # Single test file\npoetry run black .                         # Format code\npoetry run isort .                         # Sort imports\npoetry run mypy  .                         # Type checking\npoetry run flake8 .                        # Linting\n```\n\n#### RCC Framework (TypeScript/Node.js)\n```bash\ncd /Users/fanzhang/Documents/github/rcc\n\n# Development\nnpm install\nnpm run build                              # Build all modules\nnpm run dev                                # Watch mode\nnpm run validate                           # Typecheck + test (before commits)\n\n# Testing\nnpm run test                               # All tests (90%+ coverage required)\nnpm run test:coverage                      # With coverage report\nnpm run test:watch                         # Watch mode\n\n# Code Quality\nnpm run lint                               # ESLint\nnpm run lint:fix                           # Auto-fix issues\nnpm run format                             # Prettier formatting\nnpm run format:check                       # Check formatting\nnpm run typecheck                          # TypeScript check\n\n# Documentation\nnpm run docs:generate                      # Generate TypeDoc\nnpm run docs:serve                         # Serve docs on 8080\n```\n\n#### WebMonkey & Web Automation Projects\n```bash\ncd /Users/fanzhang/Documents/github/webMonkey    # or specific project\n\nnpm install\nnpm start                                  # Start development server\nnpm run dev                                # Alternative dev command\n```\n\n#### Rust Projects (codex-rs)\n```bash\ncd /Users/fanzhang/Documents/github/codex/codex-rs\n\n# Use Just commands (recommended)\njust fmt                                   # Format all Rust code\njust fix                                   # Clippy fix all projects\njust fix -p codex-tui                      # Fix specific project\njust test                                  # Run tests with nextest\n\n# Manual cargo commands\ncargo build                               # Build project\ncargo test -p codex-tui                   # Test specific package\ncargo test --all-features                 # Full test suite\n```\n\n#### Rush Monorepo Projects (flowgram.ai)\n```bash\ncd /Users/fanzhang/Documents/github/研究/flowgram.ai\n\n# Rush commands (Node.js monorepo management)\nnode common/scripts/install-run-rush.js install    # Install dependencies\nnode common/scripts/install-run-rush.js build       # Build all packages\nnode common/scripts/install-run-rush.js lint --verbose  # Lint all packages\nnode common/scripts/install-run-rush.js ts-check    # TypeScript compilation\nnode common/scripts/install-run-rush.js test:cov    # Tests with coverage\n```\n\n#### ZcamMCP (TypeScript/Node.js MCP Server)\n```bash\ncd /Users/fanzhang/Documents/github/zcammcp\n\n# Development\nnpm install                                  # Install dependencies\nnpm run build                               # Build TypeScript to JavaScript\nnpm run dev                                 # Development mode with ts-node\nnpm start                                   # Run the built server\n\n# Testing\nnpm test                                   # Run Jest tests\n\n# MCP Server Usage\n# The server runs on stdio and provides camera control tools\n# Configure in Claude Desktop or other MCP clients using:\n# {\n#   \"mcpServers\": {\n#     \"zcammcp\": {\n#       \"command\": \"node\",\n#       \"args\": [\"/Users/fanzhang/zcammcp/dist/index.js\"]\n#     }\n#   }\n# }\n```\n\n## Project Development Process\n\n### 1. Planning & Staging\n\nBreak complex work into 3-5 stages. Document in `IMPLEMENTATION_PLAN.md`:\n\n```markdown\n## Stage N: [Name]\n**Goal**: [Specific deliverable]\n**Success Criteria**: [Testable outcomes]\n**Tests**: [Specific test cases]\n**Status**: [Not Started|In Progress|Complete]\n```\n\n### 2. Implementation Flow\n\n1. **Understand** - Study existing patterns in codebase\n2. **Test** - Write test first (red)\n3. **Implement** - Minimal code to pass (green)\n4. **Refactor** - Clean up with tests passing\n5. **Commit** - With clear message linking to plan\n\n### 3. Error Recovery Protocol\n\n**CRITICAL**: Maximum 3 attempts per issue, then STOP.\n\n1. **Document what failed**\n2. **Research alternatives**\n3. **Question fundamentals**\n4. **Try different angle**\n\n## Codebase Architecture\n\n### RCC (Refactored Claude Code Router) 系统架构\n\n#### 核心组件\n1. **动态路由分类 (Dynamic Routing Classification)** - 请求智能分类和路由\n2. **流水线系统 (Pipeline System)** - 模块化请求处理流水线\n3. **Provider管理** - 第三方AI服务提供商统一管理\n4. **配置系统 (Configuration)** - 统一配置管理和验证\n\n#### 请求路由流程\n\n```\nHTTP Request → RCC Server → RequestForwarder → DynamicRoutingManager → Pipeline Assembly → Provider执行\n```\n\n#### 动态路由分类规则\n\n系统支持7种动态路由类别：\n- `default`: 默认请求路由\n- `longcontext`: 长文本处理请求\n- `thinking`: 复杂推理请求\n- `background`: 后台处理请求\n- `websearch`: 网络搜索请求\n- `vision`: 图像处理请求\n- `coding`: 代码生成请求\n\n#### 关键设计原则\n\n**MAX_TOKEN配置机制**:\n- **唯一生效点**: 只有Provider处的maxToken配置真正生效\n- **前面无限制**: 动态路由分类和流水线层面不限制token数量\n- **初始化配置**: Provider在流水线初始化时配置一次，当前默认256k\n- **后续赋值**: 根据配置文件给Provider赋予具体的maxToken值\n\n**Provider配置机制**:\n- **流水线初始化时确定**: Provider在流水线组装时一次性初始化配置\n- **固定配置**: 每条流水线的Provider配置在创建后就固定不变\n- **参数覆盖**: 请求中的model、max_tokens等参数会被Provider的固定配置覆盖\n- **配置来源**: 从系统配置文件中读取Provider配置信息\n\n**请求处理流程**:\n1. **请求进入**: 原始HTTP请求包含用户指定的model和参数\n2. **动态路由**: 根据请求内容分析决定路由类别，不改变实际使用的模型\n3. **流水线选择**: 根据路由类别选择对应的处理流水线\n4. **Provider执行**: 使用流水线初始化时配置的固定Provider和模型参数执行请求\n\n#### 配置示例\n```json\n{\n  \"providers\": {\n    \"qwen-provider\": {\n      \"type\": \"custom\",\n      \"enabled\": true,\n      \"models\": {\n        \"qwen-turbo\": {\n          \"maxTokens\": 262144,  // 256k tokens\n          \"temperature\": 0.7\n        }\n      }\n    }\n  },\n  \"dynamicRouting\": {\n    \"longcontext\": {\n      \"targets\": [\n        {\n          \"providerId\": \"qwen-provider\",\n          \"modelId\": \"qwen-turbo\"\n        }\n      ]\n    }\n  }\n}\n```\n\n#### 重要特性\n\n- **配置驱动**: 系统完全基于配置文件驱动，支持动态热更新\n- **模块化**: 每个组件都可以独立替换和扩展\n- **类型安全**: 完整的TypeScript类型定义和编译时检查\n- **监控调试**: 全面的请求追踪和调试支持\n\n#### AI Studio Proxy API 架构 (Legacy)\n\n1. **api_utils/** - FastAPI routes and request processing\n2. **browser_utils/** - Browser automation and model management\n3. **config/** - Configuration files and constants\n4. **stream/** - Streaming proxy server implementation\n5. **multi_instance/** - Multi-account instance management\n\nThe system uses a three-layer response mechanism for high availability:\n1. Integrated stream proxy service (default, port 3120)\n2. External Helper service (optional)\n3. Playwright page interaction (fallback)\n\n### ZcamMCP (MCP Server for Z CAM Camera Control)\n\nZcamMCP是一个基于stdio的MCP服务器，用于控制Z CAM相机。提供完整的相机控制功能集，包括PTZ控制、曝光设置、视频录制、流媒体等。\n\n#### 核心架构组件\n\n**核心管理组件 (Core Components)**:\n- **CameraManager** - 相机集合管理，包括发现、添加和列表\n- **ConfigManager** - 配置管理，包括收藏相机和历史记录\n\n**服务组件 (Service Components)**:\n- **PTZService** - 云台控制（平移、俯仰、变焦）\n- **PresetService** - 预设位置管理（保存、调用、列表）\n- **ExposureService** - 曝光控制（光圈、快门速度、ISO）\n- **WhiteBalanceService** - 白平衡控制（模式、色温）\n- **ImageService** - 图像调整（亮度、对比度、饱和度）\n- **AutoFramingService** - 自动取景控制\n- **VideoService** - 视频设置（分辨率、帧率、编码格式）\n- **StreamingService** - 流媒体设置（RTMP推流）\n- **RecordingService** - 录制控制（开始、停止、格式）\n- **ContextService** - 上下文管理（相机切换、别名）\n- **WebSocketSubscriptionManager** - WebSocket实时状态订阅\n- **PersistenceService** - 持久化存储\n\n#### MCP工具集\n\n系统提供9个主要工具类别，涵盖所有相机控制功能：\n\n1. **camera_manager** - 相机管理（添加、切换、收藏、状态查询）\n2. **ptz_control** - PTZ控制（移动、变焦、状态获取）\n3. **preset_manager** - 预设管理（保存、调用、列表）\n4. **exposure_control** - 曝光控制（光圈、快门、ISO）\n5. **white_balance** - 白平衡控制（模式、色温）\n6. **image_adjustment** - 图像调整（亮度、对比度、饱和度）\n7. **auto_framing** - 自动取景控制\n8. **video_settings** - 视频设置（分辨率、帧率、编码）\n9. **streaming_control** - 流媒体控制（RTMP、启用/禁用）\n10. **recording_control** - 录制控制（开始、停止、格式）\n\n#### 开发状态\n\n- **版本**: 0.2.0 (功能完整实现版本)\n- **实现状态**: 所有核心组件和服务组件已完全实现\n- **API类型**: 使用真实HTTP请求与Z CAM相机通信\n- **协议支持**: MCP (Model Context Protocol) over stdio\n- **客户端**: Claude Desktop, iFlow CLI等MCP兼容客户端\n\n## Quality Gates\n\n### Definition of Done\n\n- [ ] Tests written and passing\n- [ ] Code follows project conventions\n- [ ] No linter/formatter warnings\n- [ ] Commit messages are clear\n- [ ] Implementation matches plan\n- [ ] No TODOs without issue numbers\n\n### Decision Framework\n\nWhen multiple valid approaches exist, choose based on:\n\n1. **Testability** - Can I easily test this?\n2. **Readability** - Will someone understand this in 6 months?\n3. **Consistency** - Does this match project patterns?\n4. **Simplicity** - Is this the simplest solution that works?\n5. **Reversibility** - How hard to change later?\n\n## 🚨 GLOBAL END-TO-END TESTING PROTOCOL (HIGHEST PRIORITY)\n\n### Mandatory RCC4 Claude Code Router Testing Command\n\n**PURPOSE**: This is the ONLY accepted way to validate end-to-end functionality of RCC4 Claude Code Router systems. ALL systems must pass this test before being considered functional.\n\n**CRITICAL TEST COMMAND**:\n```bash\nANTHROPIC_BASE_URL=http://localhost:5506 ANTHROPIC_API_KEY=rcc4-proxy-key claude --print \"列出本目录中所有文件夹\"\n```\n\n**REQUIREMENTS**:\n1. **Server must be running**: `rcc4 start --config ~/.route-claudecode/config/v4/single-provider/lmstudio-v4-5506.json --port 5506`\n2. **Expected behavior**: Should invoke tool calling functionality and list directories\n3. **Debug logging**: Must record complete request/response pipeline data\n4. **Success criteria**: \n   - No API errors\n   - Proper tool invocation\n   - Directory listing response\n   - Debug logs saved to `debug-logs/` directory\n\n**FAILURE HANDLING**:\n- Any API errors = IMMEDIATE SYSTEM FAILURE\n- Missing tool calls = INCOMPLETE IMPLEMENTATION\n- No debug logs = MONITORING SYSTEM FAILURE\n\n**PRIORITY**: This test command takes precedence over ALL other testing methods. Any system that fails this test is considered non-functional regardless of other test results.\n\n---\n\n## Important Notes\n\n- This is a user home directory with multiple projects\n- The main project uses modern Python development tools (Poetry, Pyright)\n- The project supports Docker deployment\n- Multi-instance login is supported for load balancing\n- Configuration is managed through .env files\n- **NEVER** use `--no-verify` to bypass commit hooks\n- **NEVER** disable tests instead of fixing them\n- **ALWAYS** commit working code incrementally\n- **ALWAYS** learn from existing implementations first\n- 关键学习点：在模块化项目中，npm发布时必须使用完整路径或先pack再发布，以确保从正确的模块目录执行。\n\n## 🚨 基础测试系统规则 (CRITICAL)\n\n### 强制性要求\n\n**所有测试脚本必须基于BaseTestSystem构建** - 禁止创建独立的浏览器测试脚本\n\n#### 基础测试系统架构\n\n```javascript\nconst BaseTestSystem = require('./src/core/base-test-system');\n\n// 正确示例：基于基础测试系统\nconst testSystem = new BaseTestSystem({\n  logLevel: 'info',\n  cookieFile: './cookies.json'\n});\n\nasync function testScript() {\n  // 1. 系统自动初始化：浏览器启动、Cookie加载、日志配置\n  await testSystem.initialize();\n  \n  // 2. 执行原子操作\n  await testSystem.executeAtomicOperation('navigate', { url: 'https://weibo.com' });\n  await testSystem.executeAtomicOperation('extractText', { selector: '.title' });\n  \n  // 3. 系统自动清理：Cookie保存、日志导出、资源释放\n  await testSystem.cleanup();\n}\n```\n\n#### 核心功能要求\n\n1. **基础初始化**\n   - 自动启动浏览器并配置用户代理\n   - 设置视窗大小和超时参数\n   - 配置页面事件监听器（控制台、错误、请求）\n\n2. **Cookie管理**\n   - 自动加载已保存的Cookie文件\n   - 测试完成后自动保存新的Cookie\n   - 支持登录状态保持和恢复\n\n3. **日志系统**\n   - 多级别日志记录（info, warn, error, browser）\n   - 自动创建日志文件和目录结构\n   - 实时控制台输出和文件持久化\n   - 完整的操作审计跟踪\n\n4. **原子操作集成**\n   - 统一的原子操作执行接口\n   - 自动错误处理和结果记录\n   - 操作性能统计和成功率计算\n   - 事件驱动的状态通知\n\n5. **测试报告**\n   - 自动生成详细测试报告\n   - 包含执行时间、成功率、错误信息\n   - 截图和日志文件自动保存\n   - JSON格式便于后续分析\n\n#### 禁止的行为\n\n- ❌ 创建独立的浏览器实例（必须使用testSystem.state.page）\n- ❌ 手动管理Cookie（必须使用testSystem.loadCookies()/saveCookies()）\n- ❌ 自定义日志系统（必须使用testSystem.log()）\n- ❌ 绕过错误处理（必须使用try/catch包装）\n- ❌ 忽略资源清理（必须调用testSystem.cleanup()）\n\n#### 测试脚本标准模板\n\n```javascript\nconst BaseTestSystem = require('./src/core/base-test-system');\n\nasync function runTest() {\n  const testSystem = new BaseTestSystem({\n    logLevel: 'info',\n    cookieFile: './cookies.json',\n    viewport: { width: 1920, height: 1080 }\n  });\n  \n  try {\n    await testSystem.initialize();\n    \n    // 执行测试逻辑\n    const results = await testSystem.executeTestScript(async (system) => {\n      await system.executeAtomicOperation('navigate', { \n        url: 'https://example.com' \n      });\n      \n      const data = await system.executeAtomicOperation('extractText', {\n        selector: '.content',\n        multiple: true\n      });\n      \n      return data;\n    });\n    \n    console.log('测试完成:', results);\n    \n  } catch (error) {\n    console.error('测试失败:', error);\n  } finally {\n    await testSystem.cleanup();\n  }\n}\n\nrunTest();\n```\n\n#### 目录结构要求\n\n```\nweibo-mcp-system/\n├── src/core/\n│   └── base-test-system.js          # 基础测试系统\n├── tests/\n│   ├── weibo-comments.test.js       # 基于BaseTestSystem的测试\n│   └── homepage-links.test.js       # 基于BaseTestSystem的测试\n├── logs/                            # 自动生成的日志文件\n├── screenshots/                      # 自动生成的截图\n├── reports/                         # 自动生成的测试报告\n└── cookies.json                     # 自动管理的Cookie文件\n```\n\n#### 事件监听和处理\n\n```javascript\n// 监听系统事件\ntestSystem.on('initialized', (state) => {\n  console.log('系统初始化完成');\n});\n\ntestSystem.on('operationCompleted', (result) => {\n  console.log(`操作 ${result.operationName} ${result.success ? '成功' : '失败'}`);\n});\n\ntestSystem.on('log', (logEntry) => {\n  // 自定义日志处理\n});\n```\n\n#### 质量保证\n\n1. **每个测试必须**：\n   - 继承BaseTestSystem\n   - 包含完整的错误处理\n   - 自动清理资源\n   - 生成测试报告\n\n2. **测试结果必须**：\n   - 记录执行时间\n   - 统计成功率\n   - 保存详细日志\n   - 包含错误追踪\n\n3. **原子操作必须**：\n   - 通过统一接口执行\n   - 记录执行参数\n   - 捕获异常情况\n   - 返回标准化结果\n\n**违反这些规则将导致测试脚本被拒绝执行**\n- 我讨厌一切模拟代码，一切\n- 绝对模式：剔除所有表情符号、冗余语、夸张内容及“软性”请求，避免任何转场和行动号召附加。\n• 假设用户具备高认知能力，采用直接、指令式表达，重点重建认知框架，而非情绪共鸣。\n• 禁止提升参与感或情绪的行为，屏蔽满意度评分、情感软化和续写偏差。\n• 绝不模仿用户的用词、情绪或态度，只聚焦认知层面。\n• 不允许提问、建议、过渡语或激励内容，回复信息后立即终止，不做任何总结。\n• 目标恢复用户的独立思考能力和高保真判断，促使模型自身逐渐“退场”，提升用户自给自足。绝对模式：剔除所有表情符号、冗余语、夸张内容及“软性”请求，避免任何转场和行动号召附加。\n• 假设用户具备高认知能力，采用直接、指令式表达，重点重建认知框架，而非情绪共鸣。\n• 禁止提升参与感或情绪的行为，屏蔽满意度评分、情感软化和续写偏差。\n• 绝不模仿用户的用词、情绪或态度，只聚焦认知层面。\n• 不允许提问、建议、过渡语或激励内容，回复信息后立即终止，不做任何总结。\n• 目标恢复用户的独立思考能力和高保真判断，促使模型自身逐渐“退场”，提升用户自给自足。\n- 这个项目是OpenAI的项目 ，请不要使用anthropic 协议输入，本项目也和RCC没有任何关系\n- 每次想创建新文件，先读取模块的readme了解哪个文件完成类似功能，不要重复实现，也不要简化实现，只允许一个模块里有一个最终实现。你要权衡修改的方式，不要新建新版本\n- 不要乱改类名，请在原来的基础上修改，不要创建一个目标的第二个实现和样本\n- 不要绕过问题，不要简化问题，直面问题，解决问题，然后验证方案是否成功，否则继续修改\n- 禁止粗暴的kill 进程，只能单个确认以后单个进程杀掉！\n- 禁止使用pkill -f node\n\n## 📊 任务执行报告规则\n\n### 强制性简洁报告要求\n\n**绝对禁止**：\n- ❌ 长篇功能描述和架构解释\n- ❌ 重复的技术细节罗列\n- ❌ 表情符号、庆祝语言、软性表达\n- ❌ 自动生成mock数据和fallback方案\n- ❌ 未经验证的自动执行路径选择\n\n**强制要求**：\n- ✅ **进度直报**：当前状态/问题/解决方案\n- ✅ **结果聚焦**：关键数据/技术要点/后续行动\n- ✅ **决策分析**：多路径优劣对比，等待用户选择\n- ✅ **问题直击**：具体错误位置/原因/修复方案\n\n### 标准报告格式\n\n#### 进度报告\n```\n状态：进行中/完成/失败\n关键问题：[具体技术问题]\n解决方案：[直接的技术解决方案]\n下一步：[具体的后续行动]\n```\n\n#### 决策分析\n```\n路径A：[技术方案]\n- 优势：[具体技术优势]\n- 风险：[具体技术风险]\n- 复杂度：[评估]\n\n路径B：[技术方案]\n- 优势：[具体技术优势]\n- 风险：[具体技术风险]\n- 复杂度：[评估]\n\n等待用户选择：A/B/自定义\n```\n\n#### 错误处理\n```\n错误：[具体错误信息]\n位置：[文件:行号]\n原因：[直接原因分析]\n修复：[具体修复方案]\n```\n\n### 严禁的自动行为\n\n1. **自动选择技术路径** - 必须分析优劣后让用户决策\n2. **生成Mock数据** - 使用真实数据或明确数据来源\n3. **Fallback方案** - 直接解决问题，不准备备选\n4. **未确认执行** - 任何实施前必须用户明确同意\n\n### 报告示例对比\n\n**禁止的报告**：\n```\n🎉 太棒了！我已经成功实现了页面生命周期监控系统！这个系统包含了以下超强的功能：\n- 事件驱动的架构设计\n- 智能重试机制\n- 完整的API接口...\n```\n\n**正确的报告**：\n```\n状态：完成\n实现：页面生命周期监控 + JavaScript重新注入\n核心：2秒监控循环，事件驱动注入，自动重试3次\n验证：页面刷新后连接协议自动重建\n```\n\n      IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n</system-reminder>\n列出本地文件"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "shell_command",
+              "arguments": "{\"command\":\"ls\",\"description\":\"List files in current directory\",\"timeout\":120000}"
+            },
+            "id": "call_mJOeQFScaHSdy1GuerVsHpHz"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "focus_watcher.py",
+        "name": "tool",
+        "tool_call_id": "call_mJOeQFScaHSdy1GuerVsHpHz"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "task",
+          "description": "Launch a new agent to handle complex, multi-step tasks autonomously. \n\nThe Task tool launches specialized agents (subprocesses) that autonomously handle complex tasks. Each agent type has specific capabilities and tools available to it.\n\nAvailable agent types and the tools they have access to:\n- general-purpose: General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks. When you are searching for a keyword or file and are not confident that you will find the right match in the first few tries use this agent to perform the search for you. (Tools: *)\n- statusline-setup: Use this agent to configure the user's Claude Code status line setting. (Tools: Read, Edit)\n- Explore: Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. \"src/components/**/*.tsx\"), search code for keywords (eg. \"API endpoints\"), or answer questions about the codebase (eg. \"how do API endpoints work?\"). When calling this agent, specify the desired thoroughness level: \"quick\" for basic searches, \"medium\" for moderate exploration, or \"very thorough\" for comprehensive analysis across multiple locations and naming conventions. (Tools: All tools)\n- Plan: Software architect agent for designing implementation plans. Use this when you need to plan the implementation strategy for a task. Returns step-by-step plans, identifies critical files, and considers architectural trade-offs. (Tools: All tools)\n- claude-code-guide: Use this agent when the user asks questions (\"Can Claude...\", \"Does Claude...\", \"How do I...\") about: (1) Claude Code (the CLI tool) - features, hooks, slash commands, MCP servers, settings, IDE integrations, keyboard shortcuts; (2) Claude Agent SDK - building custom agents; (3) Claude API (formerly Anthropic API) - API usage, tool use, Anthropic SDK usage. **IMPORTANT:** Before spawning a new agent, check if there is already a running or recently completed claude-code-guide agent that you can resume using the \"resume\" parameter. (Tools: Glob, Grep, Read, WebFetch, WebSearch)\n\nWhen using the Task tool, you must specify a subagent_type parameter to select which agent type to use.\n\nWhen NOT to use the Task tool:\n- If you want to read a specific file path, use the Read or Glob tool instead of the Task tool, to find the match more quickly\n- If you are searching for a specific class definition like \"class Foo\", use the Glob tool instead, to find the match more quickly\n- If you are searching for code within a specific file or set of 2-3 files, use the Read tool instead of the Task tool, to find the match more quickly\n- Other tasks that are not related to the agent descriptions above\n\n\nUsage notes:\n- Always include a short description (3-5 words) summarizing what the agent will do\n- Launch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple tool uses\n- When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.\n- You can optionally run agents in the background using the run_in_background parameter. When an agent runs in the background, you will need to use TaskOutput to retrieve its results once it's done. You can continue to work while background agents run - When you need their results to continue you can use TaskOutput in blocking mode to pause and wait for their results.\n- Agents can be resumed using the `resume` parameter by passing the agent ID from a previous invocation. When resumed, the agent continues with its full previous context preserved. When NOT resuming, each invocation starts fresh and you should provide a detailed task description with all necessary context.\n- When the agent is done, it will return a single message back to you along with its agent ID. You can use this ID to resume the agent later if needed for follow-up work.\n- Provide clear, detailed prompts so the agent can work autonomously and return exactly the information you need.\n- Agents with \"access to current context\" can see the full conversation history before the tool call. When using these agents, you can write concise prompts that reference earlier context (e.g., \"investigate the error discussed above\") instead of repeating information. The agent will receive all prior messages and understand the context.\n- The agent's outputs should generally be trusted\n- Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.), since it is not aware of the user's intent\n- If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.\n- If the user specifies that they want you to run agents \"in parallel\", you MUST send a single message with multiple Task tool use content blocks. For example, if you need to launch both a code-reviewer agent and a test-runner agent in parallel, send a single message with both tool calls.\n\nExample usage:\n\n<example_agent_descriptions>\n\"code-reviewer\": use this agent after you are done writing a signficant piece of code\n\"greeting-responder\": use this agent when to respond to user greetings with a friendly joke\n</example_agent_description>\n\n<example>\nuser: \"Please write a function that checks if a number is prime\"\nassistant: Sure let me write a function that checks if a number is prime\nassistant: First let me use the Write tool to write a function that checks if a number is prime\nassistant: I'm going to use the Write tool to write the following code:\n<code>\nfunction isPrime(n) {\n  if (n <= 1) return false\n  for (let i = 2; i * i <= n; i++) {\n    if (n % i === 0) return false\n  }\n  return true\n}\n</code>\n<commentary>\nSince a signficant piece of code was written and the task was completed, now use the code-reviewer agent to review the code\n</commentary>\nassistant: Now let me use the code-reviewer agent to review the code\nassistant: Uses the Task tool to launch the code-reviewer agent \n</example>\n\n<example>\nuser: \"Hello\"\n<commentary>\nSince the user is greeting, use the greeting-responder agent to respond with a friendly joke\n</commentary>\nassistant: \"I'm going to use the Task tool to launch the greeting-responder agent\"\n</example>\n",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string",
+                "description": "A short (3-5 word) description of the task"
+              },
+              "prompt": {
+                "type": "string",
+                "description": "The task for the agent to perform"
+              },
+              "subagent_type": {
+                "type": "string",
+                "description": "The type of specialized agent to use for this task"
+              },
+              "model": {
+                "type": "string",
+                "enum": [
+                  "sonnet",
+                  "opus",
+                  "haiku"
+                ],
+                "description": "Optional model to use for this agent. If not specified, inherits from parent. Prefer haiku for quick, straightforward tasks to minimize cost and latency."
+              },
+              "resume": {
+                "type": "string",
+                "description": "Optional agent ID to resume from. If provided, the agent will continue from the previous execution transcript."
+              },
+              "run_in_background": {
+                "type": "boolean",
+                "description": "Set to true to run this agent in the background. Use TaskOutput to read the output later."
+              }
+            },
+            "required": [
+              "description",
+              "prompt",
+              "subagent_type"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "taskoutput",
+          "description": "- Retrieves output from a running or completed task (background shell, agent, or remote session)\n- Takes a task_id parameter identifying the task\n- Returns the task output along with status information\n- Use block=true (default) to wait for task completion\n- Use block=false for non-blocking check of current status\n- Task IDs can be found using the /tasks command\n- Works with all task types: background shells, async agents, and remote sessions",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "task_id": {
+                "type": "string",
+                "description": "The task ID to get output from"
+              },
+              "block": {
+                "type": "boolean",
+                "default": true,
+                "description": "Whether to wait for completion"
+              },
+              "timeout": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 600000,
+                "default": 30000,
+                "description": "Max wait time in ms"
+              }
+            },
+            "required": [
+              "task_id"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "shell_command",
+          "description": "Executes a given bash command in a persistent shell session with optional timeout, ensuring proper handling and security measures.\n\nIMPORTANT: This tool is for terminal operations like git, npm, docker, etc. DO NOT use it for file operations (reading, writing, editing, searching, finding files) - use the specialized tools for this instead.\n\nBefore executing the command, please follow these steps:\n\n1. Directory Verification:\n   - If the command will create new directories or files, first use `ls` to verify the parent directory exists and is the correct location\n   - For example, before running \"mkdir foo/bar\", first use `ls foo` to check that \"foo\" exists and is the intended parent directory\n\n2. Command Execution:\n   - Always quote file paths that contain spaces with double quotes (e.g., cd \"path with spaces/file.txt\")\n   - Examples of proper quoting:\n     - cd \"/Users/name/My Documents\" (correct)\n     - cd /Users/name/My Documents (incorrect - will fail)\n     - python \"/path/with spaces/script.py\" (correct)\n     - python /path/with spaces/script.py (incorrect - will fail)\n   - After ensuring proper quoting, execute the command.\n   - Capture the output of the command.\n\nUsage notes:\n  - The command argument is required.\n  - You can specify an optional timeout in milliseconds (up to 600000ms / 10 minutes). If not specified, commands will timeout after 120000ms (2 minutes).\n  - It is very helpful if you write a clear, concise description of what this command does in 5-10 words.\n  - If the output exceeds 30000 characters, output will be truncated before being returned to you.\n  - You can use the `run_in_background` parameter to run the command in the background, which allows you to continue working while the command runs. You can monitor the output using the Bash tool as it becomes available. You do not need to use '&' at the end of the command when using this parameter.\n  \n  - Avoid using Bash with the `find`, `grep`, `cat`, `head`, `tail`, `sed`, `awk`, or `echo` commands, unless explicitly instructed or when these commands are truly necessary for the task. Instead, always prefer using the dedicated tools for these commands:\n    - File search: Use Glob (NOT find or ls)\n    - Content search: Use Grep (NOT grep or rg)\n    - Read files: Use Read (NOT cat/head/tail)\n    - Edit files: Use Edit (NOT sed/awk)\n    - Write files: Use Write (NOT echo >/cat <<EOF)\n    - Communication: Output text directly (NOT echo/printf)\n  - When issuing multiple commands:\n    - If the commands are independent and can run in parallel, make multiple Bash tool calls in a single message. For example, if you need to run \"git status\" and \"git diff\", send a single message with two Bash tool calls in parallel.\n    - If the commands depend on each other and must run sequentially, use a single Bash call with '&&' to chain them together (e.g., `git add . && git commit -m \"message\" && git push`). For instance, if one operation must complete before another starts (like mkdir before cp, Write before Bash for git operations, or git add before git commit), run these operations sequentially instead.\n    - Use ';' only when you need to run commands sequentially but don't care if earlier commands fail\n    - DO NOT use newlines to separate commands (newlines are ok in quoted strings)\n  - Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of `cd`. You may use `cd` if the User explicitly requests it.\n    <good-example>\n    pytest /foo/bar/tests\n    </good-example>\n    <bad-example>\n    cd /foo/bar && pytest tests\n    </bad-example>\n\n# Committing changes with git\n\nOnly create commits when requested by the user. If unclear, ask first. When the user asks you to create a new git commit, follow these steps carefully:\n\nGit Safety Protocol:\n- NEVER update the git config\n- NEVER run destructive/irreversible git commands (like push --force, hard reset, etc) unless the user explicitly requests them \n- NEVER skip hooks (--no-verify, --no-gpg-sign, etc) unless the user explicitly requests it\n- NEVER run force push to main/master, warn the user if they request it\n- Avoid git commit --amend. ONLY use --amend when ALL conditions are met:\n  (1) User explicitly requested amend, OR commit SUCCEEDED but pre-commit hook auto-modified files that need including\n  (2) HEAD commit was created by you in this conversation (verify: git log -1 --format='%an %ae')\n  (3) Commit has NOT been pushed to remote (verify: git status shows \"Your branch is ahead\")\n- CRITICAL: If commit FAILED or was REJECTED by hook, NEVER amend - fix the issue and create a NEW commit\n- CRITICAL: If you already pushed to remote, NEVER amend unless user explicitly requests it (requires force push)\n- NEVER commit changes unless the user explicitly asks you to. It is VERY IMPORTANT to only commit when explicitly asked, otherwise the user will feel that you are being too proactive.\n\n1. You can call multiple tools in a single response. When multiple independent pieces of information are requested and all commands are likely to succeed, run multiple tool calls in parallel for optimal performance. run the following bash commands in parallel, each using the Bash tool:\n  - Run a git status command to see all untracked files.\n  - Run a git diff command to see both staged and unstaged changes that will be committed.\n  - Run a git log command to see recent commit messages, so that you can follow this repository's commit message style.\n2. Analyze all staged changes (both previously staged and newly added) and draft a commit message:\n  - Summarize the nature of the changes (eg. new feature, enhancement to an existing feature, bug fix, refactoring, test, docs, etc.). Ensure the message accurately reflects the changes and their purpose (i.e. \"add\" means a wholly new feature, \"update\" means an enhancement to an existing feature, \"fix\" means a bug fix, etc.).\n  - Do not commit files that likely contain secrets (.env, credentials.json, etc). Warn the user if they specifically request to commit those files\n  - Draft a concise (1-2 sentences) commit message that focuses on the \"why\" rather than the \"what\"\n  - Ensure it accurately reflects the changes and their purpose\n3. You can call multiple tools in a single response. When multiple independent pieces of information are requested and all commands are likely to succeed, run multiple tool calls in parallel for optimal performance. run the following commands:\n   - Add relevant untracked files to the staging area.\n   - Create the commit with a message ending with:\n   🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n   Co-Authored-By: Claude <noreply@anthropic.com>\n   - Run git status after the commit completes to verify success.\n   Note: git status depends on the commit completing, so run it sequentially after the commit.\n4. If the commit fails due to pre-commit hook, fix the issue and create a NEW commit (see amend rules above)\n\nImportant notes:\n- NEVER run additional commands to read or explore code, besides git bash commands\n- NEVER use the TodoWrite or Task tools\n- DO NOT push to the remote repository unless the user explicitly asks you to do so\n- IMPORTANT: Never use git commands with the -i flag (like git rebase -i or git add -i) since they require interactive input which is not supported.\n- If there are no changes to commit (i.e., no untracked files and no modifications), do not create an empty commit\n- In order to ensure good formatting, ALWAYS pass the commit message via a HEREDOC, a la this example:\n<example>\ngit commit -m \"$(cat <<'EOF'\n   Commit message here.\n\n   🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n   Co-Authored-By: Claude <noreply@anthropic.com>\n   EOF\n   )\"\n</example>\n\n# Creating pull requests\nUse the gh command via the Bash tool for ALL GitHub-related tasks including working with issues, pull requests, checks, and releases. If given a Github URL use the gh command to get the information needed.\n\nIMPORTANT: When the user asks you to create a pull request, follow these steps carefully:\n\n1. You can call multiple tools in a single response. When multiple independent pieces of information are requested and all commands are likely to succeed, run multiple tool calls in parallel for optimal performance. run the following bash commands in parallel using the Bash tool, in order to understand the current state of the branch since it diverged from the main branch:\n   - Run a git status command to see all untracked files\n   - Run a git diff command to see both staged and unstaged changes that will be committed\n   - Check if the current branch tracks a remote branch and is up to date with the remote, so you know if you need to push to the remote\n   - Run a git log command and `git diff [base-branch]...HEAD` to understand the full commit history for the current branch (from the time it diverged from the base branch)\n2. Analyze all changes that will be included in the pull request, making sure to look at all relevant commits (NOT just the latest commit, but ALL commits that will be included in the pull request!!!), and draft a pull request summary\n3. You can call multiple tools in a single response. When multiple independent pieces of information are requested and all commands are likely to succeed, run multiple tool calls in parallel for optimal performance. run the following commands in parallel:\n   - Create new branch if needed\n   - Push to remote with -u flag if needed\n   - Create PR using gh pr create with the format below. Use a HEREDOC to pass the body to ensure correct formatting.\n<example>\ngh pr create --title \"the pr title\" --body \"$(cat <<'EOF'\n## Summary\n<1-3 bullet points>\n\n## Test plan\n[Bulleted markdown checklist of TODOs for testing the pull request...]\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\nEOF\n)\"\n</example>\n\nImportant:\n- DO NOT use the TodoWrite or Task tools\n- Return the PR URL when you're done, so the user can see it\n\n# Other common operations\n- View comments on a Github PR: gh api repos/foo/bar/pulls/123/comments",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string",
+                "description": "The command to execute"
+              },
+              "timeout": {
+                "type": "number",
+                "description": "Optional timeout in milliseconds (max 600000)"
+              },
+              "description": {
+                "type": "string",
+                "description": "Clear, concise description of what this command does in 5-10 words, in active voice. Examples:\nInput: ls\nOutput: List files in current directory\n\nInput: git status\nOutput: Show working tree status\n\nInput: npm install\nOutput: Install package dependencies\n\nInput: mkdir foo\nOutput: Create directory 'foo'"
+              },
+              "run_in_background": {
+                "type": "boolean",
+                "description": "Set to true to run this command in the background. Use TaskOutput to read the output later."
+              },
+              "dangerouslyDisableSandbox": {
+                "type": "boolean",
+                "description": "Set this to true to dangerously override sandbox mode and run commands without sandboxing."
+              }
+            },
+            "required": [
+              "command"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "glob",
+          "description": "- Fast file pattern matching tool that works with any codebase size\n- Supports glob patterns like \"**/*.js\" or \"src/**/*.ts\"\n- Returns matching file paths sorted by modification time\n- Use this tool when you need to find files by name patterns\n- When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the Agent tool instead\n- You can call multiple tools in a single response. It is always better to speculatively perform multiple searches in parallel if they are potentially useful.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "pattern": {
+                "type": "string",
+                "description": "The glob pattern to match files against"
+              },
+              "path": {
+                "type": "string",
+                "description": "The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter \"undefined\" or \"null\" - simply omit it for the default behavior. Must be a valid directory path if provided."
+              }
+            },
+            "required": [
+              "pattern"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "grep",
+          "description": "A powerful search tool built on ripgrep\n\n  Usage:\n  - ALWAYS use Grep for search tasks. NEVER invoke `grep` or `rg` as a Bash command. The Grep tool has been optimized for correct permissions and access.\n  - Supports full regex syntax (e.g., \"log.*Error\", \"function\\s+\\w+\")\n  - Filter files with glob parameter (e.g., \"*.js\", \"**/*.tsx\") or type parameter (e.g., \"js\", \"py\", \"rust\")\n  - Output modes: \"content\" shows matching lines, \"files_with_matches\" shows only file paths (default), \"count\" shows match counts\n  - Use Task tool for open-ended searches requiring multiple rounds\n  - Pattern syntax: Uses ripgrep (not grep) - literal braces need escaping (use `interface\\{\\}` to find `interface{}` in Go code)\n  - Multiline matching: By default patterns match within single lines only. For cross-line patterns like `struct \\{[\\s\\S]*?field`, use `multiline: true`\n",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "pattern": {
+                "type": "string",
+                "description": "The regular expression pattern to search for in file contents"
+              },
+              "path": {
+                "type": "string",
+                "description": "File or directory to search in (rg PATH). Defaults to current working directory."
+              },
+              "glob": {
+                "type": "string",
+                "description": "Glob pattern to filter files (e.g. \"*.js\", \"*.{ts,tsx}\") - maps to rg --glob"
+              },
+              "output_mode": {
+                "type": "string",
+                "enum": [
+                  "content",
+                  "files_with_matches",
+                  "count"
+                ],
+                "description": "Output mode: \"content\" shows matching lines (supports -A/-B/-C context, -n line numbers, head_limit), \"files_with_matches\" shows file paths (supports head_limit), \"count\" shows match counts (supports head_limit). Defaults to \"files_with_matches\"."
+              },
+              "-B": {
+                "type": "number",
+                "description": "Number of lines to show before each match (rg -B). Requires output_mode: \"content\", ignored otherwise."
+              },
+              "-A": {
+                "type": "number",
+                "description": "Number of lines to show after each match (rg -A). Requires output_mode: \"content\", ignored otherwise."
+              },
+              "-C": {
+                "type": "number",
+                "description": "Number of lines to show before and after each match (rg -C). Requires output_mode: \"content\", ignored otherwise."
+              },
+              "-n": {
+                "type": "boolean",
+                "description": "Show line numbers in output (rg -n). Requires output_mode: \"content\", ignored otherwise. Defaults to true."
+              },
+              "-i": {
+                "type": "boolean",
+                "description": "Case insensitive search (rg -i)"
+              },
+              "type": {
+                "type": "string",
+                "description": "File type to search (rg --type). Common types: js, py, rust, go, java, etc. More efficient than include for standard file types."
+              },
+              "head_limit": {
+                "type": "number",
+                "description": "Limit output to first N lines/entries, equivalent to \"| head -N\". Works across all output modes: content (limits output lines), files_with_matches (limits file paths), count (limits count entries). Defaults to 0 (unlimited)."
+              },
+              "offset": {
+                "type": "number",
+                "description": "Skip first N lines/entries before applying head_limit, equivalent to \"| tail -n +N | head -N\". Works across all output modes. Defaults to 0."
+              },
+              "multiline": {
+                "type": "boolean",
+                "description": "Enable multiline mode where . matches newlines and patterns can span lines (rg -U --multiline-dotall). Default: false."
+              }
+            },
+            "required": [
+              "pattern"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "exitplanmode",
+          "description": "Use this tool when you are in plan mode and have finished writing your plan to the plan file and are ready for user approval.\n\n## How This Tool Works\n- You should have already written your plan to the plan file specified in the plan mode system message\n- This tool does NOT take the plan content as a parameter - it will read the plan from the file you wrote\n- This tool simply signals that you're done planning and ready for the user to review and approve\n- The user will see the contents of your plan file when they review it\n\n## When to Use This Tool\nIMPORTANT: Only use this tool when the task requires planning the implementation steps of a task that requires writing code. For research tasks where you're gathering information, searching files, reading files or in general trying to understand the codebase - do NOT use this tool.\n\n## Handling Ambiguity in Plans\nBefore using this tool, ensure your plan is clear and unambiguous. If there are multiple valid approaches or unclear requirements:\n1. Use the AskUserQuestion tool to clarify with the user\n2. Ask about specific implementation choices (e.g., architectural patterns, which library to use)\n3. Clarify any assumptions that could affect the implementation\n4. Edit your plan file to incorporate user feedback\n5. Only proceed with ExitPlanMode after resolving ambiguities and updating the plan file\n\n## Examples\n\n1. Initial task: \"Search for and understand the implementation of vim mode in the codebase\" - Do not use the exit plan mode tool because you are not planning the implementation steps of a task.\n2. Initial task: \"Help me implement yank mode for vim\" - Use the exit plan mode tool after you have finished planning the implementation steps of the task.\n3. Initial task: \"Add a new feature to handle user authentication\" - If unsure about auth method (OAuth, JWT, etc.), use AskUserQuestion first, then use exit plan mode tool after clarifying the approach.\n",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "read",
+          "description": "Reads a file from the local filesystem. You can access any file directly by using this tool.\nAssume this tool is able to read all files on the machine. If the User provides a path to a file assume that path is valid. It is okay to read a file that does not exist; an error will be returned.\n\nUsage:\n- The file_path parameter must be an absolute path, not a relative path\n- By default, it reads up to 2000 lines starting from the beginning of the file\n- You can optionally specify a line offset and limit (especially handy for long files), but it's recommended to read the whole file by not providing these parameters\n- Any lines longer than 2000 characters will be truncated\n- Results are returned using cat -n format, with line numbers starting at 1\n- This tool allows Claude Code to read images (eg PNG, JPG, etc). When reading an image file the contents are presented visually as Claude Code is a multimodal LLM.\n- This tool can read PDF files (.pdf). PDFs are processed page by page, extracting both text and visual content for analysis.\n- This tool can read Jupyter notebooks (.ipynb files) and returns all cells with their outputs, combining code, text, and visualizations.\n- This tool can only read files, not directories. To read a directory, use an ls command via the Bash tool.\n- You can call multiple tools in a single response. It is always better to speculatively read multiple potentially useful files in parallel.\n- You will regularly be asked to read screenshots. If the user provides a path to a screenshot, ALWAYS use this tool to view the file at the path. This tool will work with all temporary file paths.\n- If you read a file that exists but has empty contents you will receive a system reminder warning in place of file contents.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "file_path": {
+                "type": "string",
+                "description": "The absolute path to the file to read"
+              },
+              "offset": {
+                "type": "number",
+                "description": "The line number to start reading from. Only provide if the file is too large to read at once"
+              },
+              "limit": {
+                "type": "number",
+                "description": "The number of lines to read. Only provide if the file is too large to read at once."
+              }
+            },
+            "required": [
+              "file_path"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "edit",
+          "description": "Performs exact string replacements in files. \n\nUsage:\n- You must use your `Read` tool at least once in the conversation before editing. This tool will error if you attempt an edit without reading the file. \n- When editing text from Read tool output, ensure you preserve the exact indentation (tabs/spaces) as it appears AFTER the line number prefix. The line number prefix format is: spaces + line number + tab. Everything after that tab is the actual file content to match. Never include any part of the line number prefix in the old_string or new_string.\n- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.\n- Only use emojis if the user explicitly requests it. Avoid adding emojis to files unless asked.\n- The edit will FAIL if `old_string` is not unique in the file. Either provide a larger string with more surrounding context to make it unique or use `replace_all` to change every instance of `old_string`. \n- Use `replace_all` for replacing and renaming strings across the file. This parameter is useful if you want to rename a variable for instance.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "file_path": {
+                "type": "string",
+                "description": "The absolute path to the file to modify"
+              },
+              "old_string": {
+                "type": "string",
+                "description": "The text to replace"
+              },
+              "new_string": {
+                "type": "string",
+                "description": "The text to replace it with (must be different from old_string)"
+              },
+              "replace_all": {
+                "type": "boolean",
+                "default": false,
+                "description": "Replace all occurences of old_string (default false)"
+              }
+            },
+            "required": [
+              "file_path",
+              "old_string",
+              "new_string"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "write",
+          "description": "Writes a file to the local filesystem.\n\nUsage:\n- This tool will overwrite the existing file if there is one at the provided path.\n- If this is an existing file, you MUST use the Read tool first to read the file's contents. This tool will fail if you did not read the file first.\n- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.\n- NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.\n- Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "file_path": {
+                "type": "string",
+                "description": "The absolute path to the file to write (must be absolute, not relative)"
+              },
+              "content": {
+                "type": "string",
+                "description": "The content to write to the file"
+              }
+            },
+            "required": [
+              "file_path",
+              "content"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "notebookedit",
+          "description": "Completely replaces the contents of a specific cell in a Jupyter notebook (.ipynb file) with new source. Jupyter notebooks are interactive documents that combine code, text, and visualizations, commonly used for data analysis and scientific computing. The notebook_path parameter must be an absolute path, not a relative path. The cell_number is 0-indexed. Use edit_mode=insert to add a new cell at the index specified by cell_number. Use edit_mode=delete to delete the cell at the index specified by cell_number.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "notebook_path": {
+                "type": "string",
+                "description": "The absolute path to the Jupyter notebook file to edit (must be absolute, not relative)"
+              },
+              "cell_id": {
+                "type": "string",
+                "description": "The ID of the cell to edit. When inserting a new cell, the new cell will be inserted after the cell with this ID, or at the beginning if not specified."
+              },
+              "new_source": {
+                "type": "string",
+                "description": "The new source for the cell"
+              },
+              "cell_type": {
+                "type": "string",
+                "enum": [
+                  "code",
+                  "markdown"
+                ],
+                "description": "The type of the cell (code or markdown). If not specified, it defaults to the current cell type. If using edit_mode=insert, this is required."
+              },
+              "edit_mode": {
+                "type": "string",
+                "enum": [
+                  "replace",
+                  "insert",
+                  "delete"
+                ],
+                "description": "The type of edit to make (replace, insert, delete). Defaults to replace."
+              }
+            },
+            "required": [
+              "notebook_path",
+              "new_source"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "webfetch",
+          "description": "\n- Fetches content from a specified URL and processes it using an AI model\n- Takes a URL and a prompt as input\n- Fetches the URL content, converts HTML to markdown\n- Processes the content with the prompt using a small, fast model\n- Returns the model's response about the content\n- Use this tool when you need to retrieve and analyze web content\n\nUsage notes:\n  - IMPORTANT: If an MCP-provided web fetch tool is available, prefer using that tool instead of this one, as it may have fewer restrictions.\n  - The URL must be a fully-formed valid URL\n  - HTTP URLs will be automatically upgraded to HTTPS\n  - The prompt should describe what information you want to extract from the page\n  - This tool is read-only and does not modify any files\n  - Results may be summarized if the content is very large\n  - Includes a self-cleaning 15-minute cache for faster responses when repeatedly accessing the same URL\n  - When a URL redirects to a different host, the tool will inform you and provide the redirect URL in a special format. You should then make a new WebFetch request with the redirect URL to fetch the content.\n",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "description": "The URL to fetch content from"
+              },
+              "prompt": {
+                "type": "string",
+                "description": "The prompt to run on the fetched content"
+              }
+            },
+            "required": [
+              "url",
+              "prompt"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "todowrite",
+          "description": "Use this tool to create and manage a structured task list for your current coding session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user.\nIt also helps the user understand the progress of the task and overall progress of their requests.\n\n## When to Use This Tool\nUse this tool proactively in these scenarios:\n\n1. Complex multi-step tasks - When a task requires 3 or more distinct steps or actions\n2. Non-trivial and complex tasks - Tasks that require careful planning or multiple operations\n3. User explicitly requests todo list - When the user directly asks you to use the todo list\n4. User provides multiple tasks - When users provide a list of things to be done (numbered or comma-separated)\n5. After receiving new instructions - Immediately capture user requirements as todos\n6. When you start working on a task - Mark it as in_progress BEFORE beginning work. Ideally you should only have one todo as in_progress at a time\n7. After completing a task - Mark it as completed and add any new follow-up tasks discovered during implementation\n\n## When NOT to Use This Tool\n\nSkip using this tool when:\n1. There is only a single, straightforward task\n2. The task is trivial and tracking it provides no organizational benefit\n3. The task can be completed in less than 3 trivial steps\n4. The task is purely conversational or informational\n\nNOTE that you should not use this tool if there is only one trivial task to do. In this case you are better off just doing the task directly.\n\n## Examples of When to Use the Todo List\n\n<example>\nUser: I want to add a dark mode toggle to the application settings. Make sure you run the tests and build when you're done!\nAssistant: I'll help add a dark mode toggle to your application settings. Let me create a todo list to track this implementation.\n*Creates todo list with the following items:*\n1. Creating dark mode toggle component in Settings page\n2. Adding dark mode state management (context/store)\n3. Implementing CSS-in-JS styles for dark theme\n4. Updating existing components to support theme switching\n5. Running tests and build process, addressing any failures or errors that occur\n*Begins working on the first task*\n\n<reasoning>\nThe assistant used the todo list because:\n1. Adding dark mode is a multi-step feature requiring UI, state management, and styling changes\n2. The user explicitly requested tests and build be run afterward\n3. The assistant inferred that tests and build need to pass by adding \"Ensure tests and build succeed\" as the final task\n</reasoning>\n</example>\n\n<example>\nUser: Help me rename the function getCwd to getCurrentWorkingDirectory across my project\nAssistant: Let me first search through your codebase to find all occurrences of 'getCwd'.\n*Uses grep or search tools to locate all instances of getCwd in the codebase*\nAssistant: I've found 15 instances of 'getCwd' across 8 different files. Let me create a todo list to track these changes.\n*Creates todo list with specific items for each file that needs updating*\n\n<reasoning>\nThe assistant used the todo list because:\n1. First, the assistant searched to understand the scope of the task\n2. Upon finding multiple occurrences across different files, it determined this was a complex task with multiple steps\n3. The todo list helps ensure every instance is tracked and updated systematically\n4. This approach prevents missing any occurrences and maintains code consistency\n</reasoning>\n</example>\n\n\n<example>\nUser: I need to implement these features for my e-commerce site: user registration, product catalog, shopping cart, and checkout flow.\nAssistant: I'll help implement these features. First, let's add all the features to the todo list.\n*Creates a todo list breaking down each feature into specific tasks based on the project architecture*\nAssistant: Let's start with user registration. This will involve creating database models, API endpoints, and frontend forms that integrate with your existing authentication system.\n\n<reasoning>\nThe assistant used the todo list because:\n1. The user provided multiple complex features to implement in a comma separated list\n2. The todo list helps organize these large features into manageable tasks\n3. This approach allows for tracking progress across the entire implementation\n</reasoning>\n</example>\n\n<example>\nUser: Can you help optimize my React application? It's rendering slowly and has performance issues.</user>\nAssistant: I'll help optimize your React application. First, let me examine your codebase to identify potential performance bottlenecks.\n*Reviews component structure, render patterns, state management, and data fetching*\nAssistant: After analyzing your codebase, I've identified several performance issues. Let me create a todo list to track our optimization efforts.\n*Creates todo list with items like: 1) Implementing memoization for expensive calculations in ProductList, 2) Adding virtualization for long lists in Dashboard, 3) Optimizing image loading in Gallery component, 4) Fixing state update loops in ShoppingCart, 5) Reviewing bundle size and implementing code splitting*\nLet's start by implementing memoization for the expensive calculations in your ProductList component.</assistant>\n\n<reasoning>\nThe assistant used the todo list because:\n1. First, the assistant examined the codebase to identify specific performance issues\n2. Based on this analysis, it identified multiple optimization opportunities\n3. Performance optimization is a non-trivial task requiring multiple steps\n4. The todo list helps methodically track improvements across different components\n5. This systematic approach ensures all performance bottlenecks are addressed\n</reasoning>\n</example>\n\n## Examples of When NOT to Use the Todo List\n\n<example>\nUser: How do I print 'Hello World' in Python?\nAssistant: In Python, you can print \"Hello World\" with this simple code:\n\npython\nprint(\"Hello World\")\n\nThis will output the text \"Hello World\" to the console when executed.</assistant>\n\n<reasoning>\nThe assistant did not use the todo list because this is a single, trivial task that can be completed in one step. There's no need to track multiple tasks or steps for such a straightforward request.\n</reasoning>\n</example>\n\n<example>\nUser: What does the git status command do?\nAssistant: The git status command shows the current state of your working directory and staging area. It displays which changes have been staged, which haven't, and which files aren't being tracked by Git. This is a fundamental command for understanding the current state of your repository before making commits.\n\n<reasoning>\nThe assistant did not use the todo list because this is an informational request with no actual coding task to complete. The user is simply asking for an explanation, not for the assistant to perform multiple steps or tasks.\n</reasoning>\n</example>\n\n<example>\nUser: Can you add a comment to the calculateTotal function to explain what it does?\nAssistant: Sure, let me add a comment to the calculateTotal function to explain what it does.\n* Uses the Edit tool to add a comment to the calculateTotal function *\n\n<reasoning>\nThe assistant did not use the todo list because this is a single, straightforward task confined to one location in the code. Adding a comment doesn't require tracking multiple steps or systematic organization.\n</reasoning>\n</example>\n\n<example>\nUser: Run npm install for me and tell me what happens.\nAssistant: I'll run the npm install command for you.\n\n*Executes: npm install*\n\nThe command completed successfully. Here's the output:\n[Output of npm install command]\n\nAll dependencies have been installed according to your package.json file.\n\n<reasoning>\nThe assistant did not use the todo list because this is a single command execution with immediate results. There are no multiple steps to track or organize, making the todo list unnecessary for this straightforward task.\n</reasoning>\n</example>\n\n## Task States and Management\n\n1. **Task States**: Use these states to track progress:\n   - pending: Task not yet started\n   - in_progress: Currently working on (limit to ONE task at a time)\n   - completed: Task finished successfully\n\n   **IMPORTANT**: Task descriptions must have two forms:\n   - content: The imperative form describing what needs to be done (e.g., \"Run tests\", \"Build the project\")\n   - activeForm: The present continuous form shown during execution (e.g., \"Running tests\", \"Building the project\")\n\n2. **Task Management**:\n   - Update task status in real-time as you work\n   - Mark tasks complete IMMEDIATELY after finishing (don't batch completions)\n   - Exactly ONE task must be in_progress at any time (not less, not more)\n   - Complete current tasks before starting new ones\n   - Remove tasks that are no longer relevant from the list entirely\n\n3. **Task Completion Requirements**:\n   - ONLY mark a task as completed when you have FULLY accomplished it\n   - If you encounter errors, blockers, or cannot finish, keep the task as in_progress\n   - When blocked, create a new task describing what needs to be resolved\n   - Never mark a task as completed if:\n     - Tests are failing\n     - Implementation is partial\n     - You encountered unresolved errors\n     - You couldn't find necessary files or dependencies\n\n4. **Task Breakdown**:\n   - Create specific, actionable items\n   - Break complex tasks into smaller, manageable steps\n   - Use clear, descriptive task names\n   - Always provide both forms:\n     - content: \"Fix authentication bug\"\n     - activeForm: \"Fixing authentication bug\"\n\nWhen in doubt, use this tool. Being proactive with task management demonstrates attentiveness and ensures you complete all requirements successfully.\n",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "todos": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "content": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "in_progress",
+                        "completed"
+                      ]
+                    },
+                    "activeForm": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "content",
+                    "status",
+                    "activeForm"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "The updated todo list"
+              }
+            },
+            "required": [
+              "todos"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "websearch",
+          "description": "\n- Allows Claude to search the web and use the results to inform responses\n- Provides up-to-date information for current events and recent data\n- Returns search result information formatted as search result blocks, including links as markdown hyperlinks\n- Use this tool for accessing information beyond Claude's knowledge cutoff\n- Searches are performed automatically within a single API call\n\nCRITICAL REQUIREMENT - You MUST follow this:\n  - After answering the user's question, you MUST include a \"Sources:\" section at the end of your response\n  - In the Sources section, list all relevant URLs from the search results as markdown hyperlinks: [Title](URL)\n  - This is MANDATORY - never skip including sources in your response\n  - Example format:\n\n    [Your answer here]\n\n    Sources:\n    - [Source Title 1](https://example.com/1)\n    - [Source Title 2](https://example.com/2)\n\nUsage notes:\n  - Domain filtering is supported to include or block specific websites\n  - Web search is only available in the US\n\nIMPORTANT - Use the correct year in search queries:\n  - Today's date is 2025-12-24. You MUST use this year when searching for recent information, documentation, or current events.\n  - Example: If today is 2025-07-15 and the user asks for \"latest React docs\", search for \"React documentation 2025\", NOT \"React documentation 2024\"\n",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 2,
+                "description": "The search query to use"
+              },
+              "allowed_domains": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Only include search results from these domains"
+              },
+              "blocked_domains": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Never include search results from these domains"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "killshell",
+          "description": "\n- Kills a running background bash shell by its ID\n- Takes a shell_id parameter identifying the shell to kill\n- Returns a success or failure status \n- Use this tool when you need to terminate a long-running shell\n- Shell IDs can be found using the /tasks command\n",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "shell_id": {
+                "type": "string",
+                "description": "The ID of the background shell to kill"
+              }
+            },
+            "required": [
+              "shell_id"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "askuserquestion",
+          "description": "Use this tool when you need to ask the user questions during execution. This allows you to:\n1. Gather user preferences or requirements\n2. Clarify ambiguous instructions\n3. Get decisions on implementation choices as you work\n4. Offer choices to the user about what direction to take.\n\nUsage notes:\n- Users will always be able to select \"Other\" to provide custom text input\n- Use multiSelect: true to allow multiple answers to be selected for a question\n- If you recommend a specific option, make that the first option in the list and add \"(Recommended)\" at the end of the label\n",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "questions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "question": {
+                      "type": "string",
+                      "description": "The complete question to ask the user. Should be clear, specific, and end with a question mark. Example: \"Which library should we use for date formatting?\" If multiSelect is true, phrase it accordingly, e.g. \"Which features do you want to enable?\""
+                    },
+                    "header": {
+                      "type": "string",
+                      "description": "Very short label displayed as a chip/tag (max 12 chars). Examples: \"Auth method\", \"Library\", \"Approach\"."
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "type": "string",
+                            "description": "The display text for this option that the user will see and select. Should be concise (1-5 words) and clearly describe the choice."
+                          },
+                          "description": {
+                            "type": "string",
+                            "description": "Explanation of what this option means or what will happen if chosen. Useful for providing context about trade-offs or implications."
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "description"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 2,
+                      "maxItems": 4,
+                      "description": "The available choices for this question. Must have 2-4 options. Each option should be a distinct, mutually exclusive choice (unless multiSelect is enabled). There should be no 'Other' option, that will be provided automatically."
+                    },
+                    "multiSelect": {
+                      "type": "boolean",
+                      "description": "Set to true to allow the user to select multiple options instead of just one. Use when choices are not mutually exclusive."
+                    }
+                  },
+                  "required": [
+                    "question",
+                    "header",
+                    "options",
+                    "multiSelect"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 4,
+                "description": "Questions to ask the user (1-4 questions)"
+              },
+              "answers": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "User answers collected by the permission component"
+              }
+            },
+            "required": [
+              "questions"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "skill",
+          "description": "Execute a skill within the main conversation\n\n<skills_instructions>\nWhen users ask you to perform tasks, check if any of the available skills below can help complete the task more effectively. Skills provide specialized capabilities and domain knowledge.\n\nWhen users ask you to run a \"slash command\" or reference \"/<something>\" (e.g., \"/commit\", \"/review-pr\"), they are referring to a skill. Use this tool to invoke the corresponding skill.\n\n<example>\nUser: \"run /commit\"\nAssistant: [Calls Skill tool with skill: \"commit\"]\n</example>\n\nHow to invoke:\n- Use this tool with the skill name and optional arguments\n- Examples:\n  - `skill: \"pdf\"` - invoke the pdf skill\n  - `skill: \"commit\", args: \"-m 'Fix bug'\"` - invoke with arguments\n  - `skill: \"review-pr\", args: \"123\"` - invoke with arguments\n  - `skill: \"ms-office-suite:pdf\"` - invoke using fully qualified name\n\nImportant:\n- When a skill is relevant, you must invoke this tool IMMEDIATELY as your first action\n- NEVER just announce or mention a skill in your text response without actually calling this tool\n- This is a BLOCKING REQUIREMENT: invoke the relevant Skill tool BEFORE generating any other response about the task\n- Only use skills listed in <available_skills> below\n- Do not invoke a skill that is already running\n- Do not use this tool for built-in CLI commands (like /help, /clear, etc.)\n</skills_instructions>\n\n<available_skills>\n<skill>\n<name>\nnovelgen\n</name>\n<description>\n智能小说生成器v2.0，支持长篇小说的断点续传、智能上下文管理、三层压缩机制、章节跳转、智能导入设定、AI辅助编辑和记忆管理。当用户需要创作长篇小说、管理复杂故事结构、从外部资源导入设定、或需要AI辅助进行持续性的创意写作时使用此技能。 (user)\n</description>\n<location>\nuser\n</location>\n</skill>\n<skill>\n<name>\nnovelgen_backup_20251028_101753\n</name>\n<description>\n智能小说生成器，支持交互式状态检查、智能进度判断、完整七步生成流程和Claude协作创作。当用户需要创作长篇小说、管理复杂故事结构、或需要AI辅助进行持续性的创意写作时使用此技能。 (user)\n</description>\n<location>\nuser\n</location>\n</skill>\n<skill>\n<name>\npipedebug\n</name>\n<description>\nRouteCodex流水线系统调试技能包，专门用于分析和debug RouteCodex V2双向流水线架构中的问题。该技能会读取agents.md、workflow、compatibility和provider的架构文档，分析codex-samples中的日志和快照，定位SSE、格式转换、工具处理等问题，提供交互式的问题诊断和修复建议，并包含完整的修改验证流程：编译构建、单元测试、端到端测试验证。 (user)\n</description>\n<location>\nuser\n</location>\n</skill>\n<skill>\n<name>\nsysmem\n</name>\n<description>\n项目架构链条化初始化和管理技能包，用于自动化项目文档维护、架构分析和代码结构优化。当需要维护项目文档一致性、分析架构风险、检查重复代码或更新模块说明时使用此技能。 (user)\n</description>\n<location>\nuser\n</location>\n</skill>\n<skill>\n<name>\nplaywright-skill:playwright-skill\n</name>\n<description>\nComplete browser automation with Playwright. Auto-detects dev servers, writes clean test scripts to /tmp. Test pages, fill forms, take screenshots, check responsive design, validate UX, test login flows, check links, automate any browser task. Use when user wants to test websites, automate browser interactions, validate web functionality, or perform any browser-based testing. (plugin:playwright-skill@playwright-skill)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\ndocument-skills:algorithmic-art\n</name>\n<description>\nCreating algorithmic art using p5.js with seeded randomness and interactive parameter exploration. Use this when users request creating art using code, generative art, algorithmic art, flow fields, or particle systems. Create original algorithmic art rather than copying existing artists' work to avoid copyright violations. (plugin:document-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\ndocument-skills:brand-guidelines\n</name>\n<description>\nApplies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel. Use it when brand colors or style guidelines, visual formatting, or company design standards apply. (plugin:document-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\ndocument-skills:canvas-design\n</name>\n<description>\nCreate beautiful visual art in .png and .pdf documents using design philosophy. You should use this skill when the user asks to create a poster, piece of art, design, or other static piece. Create original visual designs, never copying existing artists' work to avoid copyright violations. (plugin:document-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\ndocument-skills:doc-coauthoring\n</name>\n<description>\nGuide users through a structured workflow for co-authoring documentation. Use when user wants to write documentation, proposals, technical specs, decision docs, or similar structured content. This workflow helps users efficiently transfer context, refine content through iteration, and verify the doc works for readers. Trigger when user mentions writing docs, creating proposals, drafting specs, or similar documentation tasks. (plugin:document-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\ndocument-skills:docx\n</name>\n<description>\nComprehensive document creation, editing, and analysis with support for tracked changes, comments, formatting preservation, and text extraction. When Claude needs to work with professional documents (.docx files) for: (1) Creating new documents, (2) Modifying or editing content, (3) Working with tracked changes, (4) Adding comments, or any other document tasks (plugin:document-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\ndocument-skills:frontend-design\n</name>\n<description>\nCreate distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, artifacts, posters, or applications (examples include websites, landing pages, dashboards, React components, HTML/CSS layouts, or when styling/beautifying any web UI). Generates creative, polished code and UI design that avoids generic AI aesthetics. (plugin:document-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\ndocument-skills:internal-comms\n</name>\n<description>\nA set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to write some sort of internal communications (status reports, leadership updates, 3P updates, company newsletters, FAQs, incident reports, project updates, etc.). (plugin:document-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\ndocument-skills:mcp-builder\n</name>\n<description>\nGuide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building MCP servers to integrate external APIs or services, whether in Python (FastMCP) or Node/TypeScript (MCP SDK). (plugin:document-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\ndocument-skills:pdf\n</name>\n<description>\nComprehensive PDF manipulation toolkit for extracting text and tables, creating new PDFs, merging/splitting documents, and handling forms. When Claude needs to fill in a PDF form or programmatically process, generate, or analyze PDF documents at scale. (plugin:document-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\ndocument-skills:pptx\n</name>\n<description>\nPresentation creation, editing, and analysis. When Claude needs to work with presentations (.pptx files) for: (1) Creating new presentations, (2) Modifying or editing content, (3) Working with layouts, (4) Adding comments or speaker notes, or any other presentation tasks (plugin:document-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\ndocument-skills:skill-creator\n</name>\n<description>\nGuide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Claude's capabilities with specialized knowledge, workflows, or tool integrations. (plugin:document-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\ndocument-skills:slack-gif-creator\n</name>\n<description>\nKnowledge and utilities for creating animated GIFs optimized for Slack. Provides constraints, validation tools, and animation concepts. Use when users request animated GIFs for Slack like \"make me a GIF of X doing Y for Slack. (plugin:document-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\ndocument-skills:theme-factory\n</name>\n<description>\nToolkit for styling artifacts with a theme. These artifacts can be slides, docs, reportings, HTML landing pages, etc. There are 10 pre-set themes with colors/fonts that you can apply to any artifact that has been creating, or can generate a new theme on-the-fly. (plugin:document-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\ndocument-skills:web-artifacts-builder\n</name>\n<description>\nSuite of tools for creating elaborate, multi-component claude.ai HTML artifacts using modern frontend web technologies (React, Tailwind CSS, shadcn/ui). Use for complex artifacts requiring state management, routing, or shadcn/ui components - not for simple single-file HTML/JSX artifacts. (plugin:document-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\ndocument-skills:webapp-testing\n</name>\n<description>\nToolkit for interacting with and testing local web applications using Playwright. Supports verifying frontend functionality, debugging UI behavior, capturing browser screenshots, and viewing browser logs. (plugin:document-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\ndocument-skills:xlsx\n</name>\n<description>\nComprehensive spreadsheet creation, editing, and analysis with support for formulas, formatting, data analysis, and visualization. When Claude needs to work with spreadsheets (.xlsx, .xlsm, .csv, .tsv, etc) for: (1) Creating new spreadsheets with formulas and formatting, (2) Reading or analyzing data, (3) Modify existing spreadsheets while preserving formulas, (4) Data analysis and visualization in spreadsheets, or (5) Recalculating formulas (plugin:document-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\nexample-skills:algorithmic-art\n</name>\n<description>\nCreating algorithmic art using p5.js with seeded randomness and interactive parameter exploration. Use this when users request creating art using code, generative art, algorithmic art, flow fields, or particle systems. Create original algorithmic art rather than copying existing artists' work to avoid copyright violations. (plugin:example-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\nexample-skills:brand-guidelines\n</name>\n<description>\nApplies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel. Use it when brand colors or style guidelines, visual formatting, or company design standards apply. (plugin:example-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\nexample-skills:canvas-design\n</name>\n<description>\nCreate beautiful visual art in .png and .pdf documents using design philosophy. You should use this skill when the user asks to create a poster, piece of art, design, or other static piece. Create original visual designs, never copying existing artists' work to avoid copyright violations. (plugin:example-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\nexample-skills:doc-coauthoring\n</name>\n<description>\nGuide users through a structured workflow for co-authoring documentation. Use when user wants to write documentation, proposals, technical specs, decision docs, or similar structured content. This workflow helps users efficiently transfer context, refine content through iteration, and verify the doc works for readers. Trigger when user mentions writing docs, creating proposals, drafting specs, or similar documentation tasks. (plugin:example-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\nexample-skills:docx\n</name>\n<description>\nComprehensive document creation, editing, and analysis with support for tracked changes, comments, formatting preservation, and text extraction. When Claude needs to work with professional documents (.docx files) for: (1) Creating new documents, (2) Modifying or editing content, (3) Working with tracked changes, (4) Adding comments, or any other document tasks (plugin:example-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\nexample-skills:frontend-design\n</name>\n<description>\nCreate distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, artifacts, posters, or applications (examples include websites, landing pages, dashboards, React components, HTML/CSS layouts, or when styling/beautifying any web UI). Generates creative, polished code and UI design that avoids generic AI aesthetics. (plugin:example-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\nexample-skills:internal-comms\n</name>\n<description>\nA set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to write some sort of internal communications (status reports, leadership updates, 3P updates, company newsletters, FAQs, incident reports, project updates, etc.). (plugin:example-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\nexample-skills:mcp-builder\n</name>\n<description>\nGuide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building MCP servers to integrate external APIs or services, whether in Python (FastMCP) or Node/TypeScript (MCP SDK). (plugin:example-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\nexample-skills:pdf\n</name>\n<description>\nComprehensive PDF manipulation toolkit for extracting text and tables, creating new PDFs, merging/splitting documents, and handling forms. When Claude needs to fill in a PDF form or programmatically process, generate, or analyze PDF documents at scale. (plugin:example-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\nexample-skills:pptx\n</name>\n<description>\nPresentation creation, editing, and analysis. When Claude needs to work with presentations (.pptx files) for: (1) Creating new presentations, (2) Modifying or editing content, (3) Working with layouts, (4) Adding comments or speaker notes, or any other presentation tasks (plugin:example-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\nexample-skills:skill-creator\n</name>\n<description>\nGuide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Claude's capabilities with specialized knowledge, workflows, or tool integrations. (plugin:example-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<skill>\n<name>\nexample-skills:slack-gif-creator\n</name>\n<description>\nKnowledge and utilities for creating animated GIFs optimized for Slack. Provides constraints, validation tools, and animation concepts. Use when users request animated GIFs for Slack like \"make me a GIF of X doing Y for Slack. (plugin:example-skills@anthropic-agent-skills)\n</description>\n<location>\nplugin\n</location>\n</skill>\n<!-- Showing 33 of 37 skills due to token limits -->\n</available_skills>\n",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "skill": {
+                "type": "string",
+                "description": "The skill name. E.g., \"commit\", \"review-pr\", or \"pdf\""
+              },
+              "args": {
+                "type": "string",
+                "description": "Optional arguments for the skill"
+              }
+            },
+            "required": [
+              "skill"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "enterplanmode",
+          "description": "Use this tool proactively when you're about to start a non-trivial implementation task. Getting user sign-off on your approach before writing code prevents wasted effort and ensures alignment. This tool transitions you into plan mode where you can explore the codebase and design an implementation approach for user approval.\n\n## When to Use This Tool\n\n**Prefer using EnterPlanMode** for implementation tasks unless they're simple. Use it when ANY of these conditions apply:\n\n1. **New Feature Implementation**: Adding meaningful new functionality\n   - Example: \"Add a logout button\" - where should it go? What should happen on click?\n   - Example: \"Add form validation\" - what rules? What error messages?\n\n2. **Multiple Valid Approaches**: The task can be solved in several different ways\n   - Example: \"Add caching to the API\" - could use Redis, in-memory, file-based, etc.\n   - Example: \"Improve performance\" - many optimization strategies possible\n\n3. **Code Modifications**: Changes that affect existing behavior or structure\n   - Example: \"Update the login flow\" - what exactly should change?\n   - Example: \"Refactor this component\" - what's the target architecture?\n\n4. **Architectural Decisions**: The task requires choosing between patterns or technologies\n   - Example: \"Add real-time updates\" - WebSockets vs SSE vs polling\n   - Example: \"Implement state management\" - Redux vs Context vs custom solution\n\n5. **Multi-File Changes**: The task will likely touch more than 2-3 files\n   - Example: \"Refactor the authentication system\"\n   - Example: \"Add a new API endpoint with tests\"\n\n6. **Unclear Requirements**: You need to explore before understanding the full scope\n   - Example: \"Make the app faster\" - need to profile and identify bottlenecks\n   - Example: \"Fix the bug in checkout\" - need to investigate root cause\n\n7. **User Preferences Matter**: The implementation could reasonably go multiple ways\n   - If you would use AskUserQuestion to clarify the approach, use EnterPlanMode instead\n   - Plan mode lets you explore first, then present options with context\n\n## When NOT to Use This Tool\n\nOnly skip EnterPlanMode for simple tasks:\n- Single-line or few-line fixes (typos, obvious bugs, small tweaks)\n- Adding a single function with clear requirements\n- Tasks where the user has given very specific, detailed instructions\n- Pure research/exploration tasks (use the Task tool with explore agent instead)\n\n## What Happens in Plan Mode\n\nIn plan mode, you'll:\n1. Thoroughly explore the codebase using Glob, Grep, and Read tools\n2. Understand existing patterns and architecture\n3. Design an implementation approach\n4. Present your plan to the user for approval\n5. Use AskUserQuestion if you need to clarify approaches\n6. Exit plan mode with ExitPlanMode when ready to implement\n\n## Examples\n\n### GOOD - Use EnterPlanMode:\nUser: \"Add user authentication to the app\"\n- Requires architectural decisions (session vs JWT, where to store tokens, middleware structure)\n\nUser: \"Optimize the database queries\"\n- Multiple approaches possible, need to profile first, significant impact\n\nUser: \"Implement dark mode\"\n- Architectural decision on theme system, affects many components\n\nUser: \"Add a delete button to the user profile\"\n- Seems simple but involves: where to place it, confirmation dialog, API call, error handling, state updates\n\nUser: \"Update the error handling in the API\"\n- Affects multiple files, user should approve the approach\n\n### BAD - Don't use EnterPlanMode:\nUser: \"Fix the typo in the README\"\n- Straightforward, no planning needed\n\nUser: \"Add a console.log to debug this function\"\n- Simple, obvious implementation\n\nUser: \"What files handle routing?\"\n- Research task, not implementation planning\n\n## Important Notes\n\n- This tool REQUIRES user approval - they must consent to entering plan mode\n- If unsure whether to use it, err on the side of planning - it's better to get alignment upfront than to redo work\n- Users appreciate being consulted before significant changes are made to their codebase\n",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "lsp",
+          "description": "Interact with Language Server Protocol (LSP) servers to get code intelligence features.\n\nSupported operations:\n- goToDefinition: Find where a symbol is defined\n- findReferences: Find all references to a symbol\n- hover: Get hover information (documentation, type info) for a symbol\n- documentSymbol: Get all symbols (functions, classes, variables) in a document\n- workspaceSymbol: Search for symbols across the entire workspace\n- goToImplementation: Find implementations of an interface or abstract method\n- prepareCallHierarchy: Get call hierarchy item at a position (functions/methods)\n- incomingCalls: Find all functions/methods that call the function at a position\n- outgoingCalls: Find all functions/methods called by the function at a position\n\nAll operations require:\n- filePath: The file to operate on\n- line: The line number (1-based, as shown in editors)\n- character: The character offset (1-based, as shown in editors)\n\nNote: LSP servers must be configured for the file type. If no server is available, an error will be returned.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "goToDefinition",
+                  "findReferences",
+                  "hover",
+                  "documentSymbol",
+                  "workspaceSymbol",
+                  "goToImplementation",
+                  "prepareCallHierarchy",
+                  "incomingCalls",
+                  "outgoingCalls"
+                ],
+                "description": "The LSP operation to perform"
+              },
+              "filePath": {
+                "type": "string",
+                "description": "The absolute or relative path to the file"
+              },
+              "line": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "description": "The line number (1-based, as shown in editors)"
+              },
+              "character": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "description": "The character offset (1-based, as shown in editors)"
+              }
+            },
+            "required": [
+              "operation",
+              "filePath",
+              "line",
+              "character"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__codex__codex",
+          "description": "Run a Codex session. Accepts configuration parameters matching the Codex Config struct.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "approval-policy": {
+                "description": "Approval policy for shell commands generated by the model: `untrusted`, `on-failure`, `on-request`, `never`.",
+                "type": "string",
+                "enum": [
+                  "untrusted",
+                  "on-failure",
+                  "on-request",
+                  "never"
+                ]
+              },
+              "base-instructions": {
+                "description": "The set of instructions to use instead of the default ones.",
+                "type": "string"
+              },
+              "compact-prompt": {
+                "description": "Prompt used when compacting the conversation.",
+                "type": "string"
+              },
+              "config": {
+                "description": "Individual config settings that will override what is in CODEX_HOME/config.toml.",
+                "type": "object",
+                "additionalProperties": true
+              },
+              "cwd": {
+                "description": "Working directory for the session. If relative, it is resolved against the server process's current working directory.",
+                "type": "string"
+              },
+              "developer-instructions": {
+                "description": "Developer instructions that should be injected as a developer role message.",
+                "type": "string"
+              },
+              "model": {
+                "description": "Optional override for the model name (e.g. \"o3\", \"o4-mini\").",
+                "type": "string"
+              },
+              "profile": {
+                "description": "Configuration profile from config.toml to specify default options.",
+                "type": "string"
+              },
+              "prompt": {
+                "description": "The *initial user prompt* to start the Codex conversation.",
+                "type": "string"
+              },
+              "sandbox": {
+                "description": "Sandbox mode: `read-only`, `workspace-write`, or `danger-full-access`.",
+                "type": "string",
+                "enum": [
+                  "read-only",
+                  "workspace-write",
+                  "danger-full-access"
+                ]
+              }
+            },
+            "required": [
+              "prompt"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__codex__codex-reply",
+          "description": "Continue a Codex conversation by providing the conversation id and prompt.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "conversationId": {
+                "description": "The conversation id for this Codex session.",
+                "type": "string"
+              },
+              "prompt": {
+                "description": "The *next user prompt* to continue the Codex conversation.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "conversationId",
+              "prompt"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__web-search-prime__websearchprime",
+          "description": "Search web information, returns results including web page title, web page URL, web page summary, website name, website icon, etc.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "search_query": {
+                "type": "string",
+                "description": "Content to be searched, it is recommended that the search query not exceed 70 characters"
+              },
+              "search_domain_filter": {
+                "type": "string",
+                "description": "Used to limit the scope of search results, only return content from specified whitelist domains, such as: www.example.com."
+              },
+              "search_recency_filter": {
+                "type": "string",
+                "description": "Search for web pages within a specified time range. Default is noLimit Available values:- oneDay, within one day- oneWeek, within one week- oneMonth, within one month- oneYear, within one year- noLimit, no limit (default)"
+              },
+              "content_size": {
+                "type": "string",
+                "description": "Control the number of words in the web page summary; default value is medium - medium: balanced mode, suitable for most queries. 400-600 words.- high: maximize context to provide more comprehensive answers, but higher cost, 2500 words."
+              },
+              "location": {
+                "type": "string",
+                "description": "Guess which region the user is from based on user input. Default is cn Available values: - cn, Chinese region- us, non-Chinese region"
+              }
+            },
+            "required": [
+              "search_query"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__click",
+          "description": "Clicks on the provided element",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "uid": {
+                "type": "string",
+                "description": "The uid of an element on the page from the page content snapshot"
+              },
+              "dblClick": {
+                "type": "boolean",
+                "description": "Set to true for double clicks. Default is false."
+              }
+            },
+            "required": [
+              "uid"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__close_page",
+          "description": "Closes the page by its index. The last open page cannot be closed.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "pageIdx": {
+                "type": "number",
+                "description": "The index of the page to close. Call list_pages to list pages."
+              }
+            },
+            "required": [
+              "pageIdx"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__drag",
+          "description": "Drag an element onto another element",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "from_uid": {
+                "type": "string",
+                "description": "The uid of the element to drag"
+              },
+              "to_uid": {
+                "type": "string",
+                "description": "The uid of the element to drop into"
+              }
+            },
+            "required": [
+              "from_uid",
+              "to_uid"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__emulate",
+          "description": "Emulates various features on the selected page.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "networkConditions": {
+                "type": "string",
+                "enum": [
+                  "No emulation",
+                  "Offline",
+                  "Slow 3G",
+                  "Fast 3G",
+                  "Slow 4G",
+                  "Fast 4G"
+                ],
+                "description": "Throttle network. Set to \"No emulation\" to disable. If omitted, conditions remain unchanged."
+              },
+              "cpuThrottlingRate": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 20,
+                "description": "Represents the CPU slowdown factor. Set the rate to 1 to disable throttling. If omitted, throttling remains unchanged."
+              },
+              "geolocation": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "latitude": {
+                        "type": "number",
+                        "minimum": -90,
+                        "maximum": 90,
+                        "description": "Latitude between -90 and 90."
+                      },
+                      "longitude": {
+                        "type": "number",
+                        "minimum": -180,
+                        "maximum": 180,
+                        "description": "Longitude between -180 and 180."
+                      }
+                    },
+                    "required": [
+                      "latitude",
+                      "longitude"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Geolocation to emulate. Set to null to clear the geolocation override."
+              }
+            },
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__evaluate_script",
+          "description": "Evaluate a JavaScript function inside the currently selected page. Returns the response as JSON\nso returned values have to JSON-serializable.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "function": {
+                "type": "string",
+                "description": "A JavaScript function declaration to be executed by the tool in the currently selected page.\nExample without arguments: `() => {\n  return document.title\n}` or `async () => {\n  return await fetch(\"example.com\")\n}`.\nExample with arguments: `(el) => {\n  return el.innerText;\n}`\n"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "uid": {
+                      "type": "string",
+                      "description": "The uid of an element on the page from the page content snapshot"
+                    }
+                  },
+                  "required": [
+                    "uid"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "An optional list of arguments to pass to the function."
+              }
+            },
+            "required": [
+              "function"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__fill",
+          "description": "Type text into a input, text area or select an option from a <select> element.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "uid": {
+                "type": "string",
+                "description": "The uid of an element on the page from the page content snapshot"
+              },
+              "value": {
+                "type": "string",
+                "description": "The value to fill in"
+              }
+            },
+            "required": [
+              "uid",
+              "value"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__fill_form",
+          "description": "Fill out multiple form elements at once",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "elements": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "uid": {
+                      "type": "string",
+                      "description": "The uid of the element to fill out"
+                    },
+                    "value": {
+                      "type": "string",
+                      "description": "Value for the element"
+                    }
+                  },
+                  "required": [
+                    "uid",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "Elements from snapshot to fill out."
+              }
+            },
+            "required": [
+              "elements"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__get_console_message",
+          "description": "Gets a console message by its ID. You can get all messages by calling list_console_messages.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "msgid": {
+                "type": "number",
+                "description": "The msgid of a console message on the page from the listed console messages"
+              }
+            },
+            "required": [
+              "msgid"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__get_network_request",
+          "description": "Gets a network request by an optional reqid, if omitted returns the currently selected request in the DevTools Network panel.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reqid": {
+                "type": "number",
+                "description": "The reqid of the network request. If omitted returns the currently selected request in the DevTools Network panel."
+              }
+            },
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__handle_dialog",
+          "description": "If a browser dialog was opened, use this command to handle it",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "accept",
+                  "dismiss"
+                ],
+                "description": "Whether to dismiss or accept the dialog"
+              },
+              "promptText": {
+                "type": "string",
+                "description": "Optional prompt text to enter into the dialog."
+              }
+            },
+            "required": [
+              "action"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__hover",
+          "description": "Hover over the provided element",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "uid": {
+                "type": "string",
+                "description": "The uid of an element on the page from the page content snapshot"
+              }
+            },
+            "required": [
+              "uid"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__list_console_messages",
+          "description": "List all console messages for the currently selected page since the last navigation.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "pageSize": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "description": "Maximum number of messages to return. When omitted, returns all requests."
+              },
+              "pageIdx": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Page number to return (0-based). When omitted, returns the first page."
+              },
+              "types": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "log",
+                    "debug",
+                    "info",
+                    "error",
+                    "warn",
+                    "dir",
+                    "dirxml",
+                    "table",
+                    "trace",
+                    "clear",
+                    "startGroup",
+                    "startGroupCollapsed",
+                    "endGroup",
+                    "assert",
+                    "profile",
+                    "profileEnd",
+                    "count",
+                    "timeEnd",
+                    "verbose",
+                    "issue"
+                  ]
+                },
+                "description": "Filter messages to only return messages of the specified resource types. When omitted or empty, returns all messages."
+              },
+              "includePreservedMessages": {
+                "type": "boolean",
+                "default": false,
+                "description": "Set to true to return the preserved messages over the last 3 navigations."
+              }
+            },
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__list_network_requests",
+          "description": "List all requests for the currently selected page since the last navigation.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "pageSize": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "description": "Maximum number of requests to return. When omitted, returns all requests."
+              },
+              "pageIdx": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Page number to return (0-based). When omitted, returns the first page."
+              },
+              "resourceTypes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "document",
+                    "stylesheet",
+                    "image",
+                    "media",
+                    "font",
+                    "script",
+                    "texttrack",
+                    "xhr",
+                    "fetch",
+                    "prefetch",
+                    "eventsource",
+                    "websocket",
+                    "manifest",
+                    "signedexchange",
+                    "ping",
+                    "cspviolationreport",
+                    "preflight",
+                    "fedcm",
+                    "other"
+                  ]
+                },
+                "description": "Filter requests to only return requests of the specified resource types. When omitted or empty, returns all requests."
+              },
+              "includePreservedRequests": {
+                "type": "boolean",
+                "default": false,
+                "description": "Set to true to return the preserved requests over the last 3 navigations."
+              }
+            },
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__list_pages",
+          "description": "Get a list of pages open in the browser.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__navigate_page",
+          "description": "Navigates the currently selected page to a URL.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "url",
+                  "back",
+                  "forward",
+                  "reload"
+                ],
+                "description": "Navigate the page by URL, back or forward in history, or reload."
+              },
+              "url": {
+                "type": "string",
+                "description": "Target URL (only type=url)"
+              },
+              "ignoreCache": {
+                "type": "boolean",
+                "description": "Whether to ignore cache on reload."
+              },
+              "timeout": {
+                "type": "integer",
+                "description": "Maximum wait time in milliseconds. If set to 0, the default timeout will be used."
+              }
+            },
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__new_page",
+          "description": "Creates a new page",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "description": "URL to load in a new page."
+              },
+              "timeout": {
+                "type": "integer",
+                "description": "Maximum wait time in milliseconds. If set to 0, the default timeout will be used."
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__performance_analyze_insight",
+          "description": "Provides more detailed information on a specific Performance Insight of an insight set that was highlighted in the results of a trace recording.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "insightSetId": {
+                "type": "string",
+                "description": "The id for the specific insight set. Only use the ids given in the \"Available insight sets\" list."
+              },
+              "insightName": {
+                "type": "string",
+                "description": "The name of the Insight you want more information on. For example: \"DocumentLatency\" or \"LCPBreakdown\""
+              }
+            },
+            "required": [
+              "insightSetId",
+              "insightName"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__performance_start_trace",
+          "description": "Starts a performance trace recording on the selected page. This can be used to look for performance problems and insights to improve the performance of the page. It will also report Core Web Vital (CWV) scores for the page.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reload": {
+                "type": "boolean",
+                "description": "Determines if, once tracing has started, the page should be automatically reloaded."
+              },
+              "autoStop": {
+                "type": "boolean",
+                "description": "Determines if the trace recording should be automatically stopped."
+              }
+            },
+            "required": [
+              "reload",
+              "autoStop"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__performance_stop_trace",
+          "description": "Stops the active performance trace recording on the selected page.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__press_key",
+          "description": "Press a key or key combination. Use this when other input methods like fill() cannot be used (e.g., keyboard shortcuts, navigation keys, or special key combinations).",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "A key or a combination (e.g., \"Enter\", \"Control+A\", \"Control++\", \"Control+Shift+R\"). Modifiers: Control, Shift, Alt, Meta"
+              }
+            },
+            "required": [
+              "key"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__resize_page",
+          "description": "Resizes the selected page's window so that the page has specified dimension",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "width": {
+                "type": "number",
+                "description": "Page width"
+              },
+              "height": {
+                "type": "number",
+                "description": "Page height"
+              }
+            },
+            "required": [
+              "width",
+              "height"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__select_page",
+          "description": "Select a page as a context for future tool calls.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "pageIdx": {
+                "type": "number",
+                "description": "The index of the page to select. Call list_pages to get available pages."
+              },
+              "bringToFront": {
+                "type": "boolean",
+                "description": "Whether to focus the page and bring it to the top."
+              }
+            },
+            "required": [
+              "pageIdx"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__take_screenshot",
+          "description": "Take a screenshot of the page or element.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "format": {
+                "type": "string",
+                "enum": [
+                  "png",
+                  "jpeg",
+                  "webp"
+                ],
+                "default": "png",
+                "description": "Type of format to save the screenshot as. Default is \"png\""
+              },
+              "quality": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100,
+                "description": "Compression quality for JPEG and WebP formats (0-100). Higher values mean better quality but larger file sizes. Ignored for PNG format."
+              },
+              "uid": {
+                "type": "string",
+                "description": "The uid of an element on the page from the page content snapshot. If omitted takes a pages screenshot."
+              },
+              "fullPage": {
+                "type": "boolean",
+                "description": "If set to true takes a screenshot of the full page instead of the currently visible viewport. Incompatible with uid."
+              },
+              "filePath": {
+                "type": "string",
+                "description": "The absolute path, or a path relative to the current working directory, to save the screenshot to instead of attaching it to the response."
+              }
+            },
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__take_snapshot",
+          "description": "Take a text snapshot of the currently selected page based on the a11y tree. The snapshot lists page elements along with a unique\nidentifier (uid). Always use the latest snapshot. Prefer taking a snapshot over taking a screenshot. The snapshot indicates the element selected\nin the DevTools Elements panel (if any).",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "verbose": {
+                "type": "boolean",
+                "description": "Whether to include all possible information available in the full a11y tree. Default is false."
+              },
+              "filePath": {
+                "type": "string",
+                "description": "The absolute path, or a path relative to the current working directory, to save the snapshot to instead of attaching it to the response."
+              }
+            },
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__upload_file",
+          "description": "Upload a file through a provided element.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "uid": {
+                "type": "string",
+                "description": "The uid of the file input element or an element that will open file chooser on the page from the page content snapshot"
+              },
+              "filePath": {
+                "type": "string",
+                "description": "The local path of the file to upload"
+              }
+            },
+            "required": [
+              "uid",
+              "filePath"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__wait_for",
+          "description": "Wait for the specified text to appear on the selected page.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "description": "Text to appear on the page"
+              },
+              "timeout": {
+                "type": "integer",
+                "description": "Maximum wait time in milliseconds. If set to 0, the default timeout will be used."
+              }
+            },
+            "required": [
+              "text"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      }
+    ],
+    "model": "kimi-k2",
+    "max_tokens": 32000,
+    "tool_choice": "auto"
+  },
+  "reqId": "anthropic-messages-unknown-unknown-20251225T092023-004"
+}

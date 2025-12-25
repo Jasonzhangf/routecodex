@@ -1,0 +1,82 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.260",
+    "buildTime": "2025-12-24T02:31:18.968Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T103112907-001"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "我来帮你检查连线渲染的问题。先看一下浮窗面板的相关代码结构。",
+            "reasoning_content": "用户反馈启动后可以展开容器树和DOM，但是没有连线。这是一个UI相关的问题，需要检查浮窗面板的连线渲染逻辑。\n\n让我先了解一下项目结构，特别是浮窗面板相关的代码。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"find /Users/fanzhang/Documents/github/webauto/apps/floating-panel -type f -name \\\"*.ts\\\" -o -name \\\"*.tsx\\\" -o -name \\\"*.js\\\" -o -name \\\"*.jsx\\\" | head -20\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042267710582604485",
+                "index": 0,
+                "type": "function"
+              },
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"ls -la /Users/fanzhang/Documents/github/webauto/apps/floating-panel/\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042267710582604484",
+                "index": 1,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766543478,
+      "id": "202512241031133d0f97ca03494615",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512241031133d0f97ca03494615",
+      "usage": {
+        "completion_tokens": 143,
+        "prompt_tokens": 7896,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 8039
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 02:31:18 GMT",
+      "set-cookie": "acw_tc=ac11000117665434730753366e4275bfd1128009d6c923a6bfc14455e4986f;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512241031133d0f97ca03494615"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-112"
+}

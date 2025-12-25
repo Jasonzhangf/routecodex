@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.250",
+    "buildTime": "2025-12-23T14:19:31.787Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T221927404-019"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "现在我需要提交这些修改，但不要推送到GitHub，等待用户确认。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto && git commit -m \\\"$(cat <<'EOF'\\nfix(floating-panel): add highlightElement and ensure full expansion\\n\\n- Add highlightElement method to preload API for browser highlighting\\n- Recursively expand all DOM nodes on initial render\\n- Track both container and DOM node positions for connections\\n- Draw connections from all containers to their matched DOM elements\\n- Fix highlightElement calls with proper type checking\\n- Maintain Windows Registry style with Consolas font\\nEOF\\n)\\\"\",\"justification\":\"提交修复但不推送，等待用户确认\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042282347831255715",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766499571,
+      "id": "202512232219271e6f470f360346ba",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512232219271e6f470f360346ba",
+      "usage": {
+        "completion_tokens": 189,
+        "prompt_tokens": 133314,
+        "prompt_tokens_details": {
+          "cached_tokens": 132807
+        },
+        "total_tokens": 133503
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 14:19:31 GMT",
+      "set-cookie": "acw_tc=ac11000117664995676534892e122d21c859b4e4bf314c730b3782b5c4c5cf;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512232219271e6f470f360346ba"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-023"
+}

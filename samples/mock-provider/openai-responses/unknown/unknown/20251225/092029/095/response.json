@@ -1,0 +1,68 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:13:10.354Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T201255297-008"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694a874860f18590a266bfc8",
+      "object": "chat.completion",
+      "created": 1766491976,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 18652,
+        "completion_tokens": 93,
+        "total_tokens": 18745
+      },
+      "extend_fields": {
+        "traceId": "212aa73e17664919756075453e1021",
+        "requestId": "2dfefaedb8ec228375d97535e34cf2aa"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "stop",
+          "message": {
+            "role": "assistant",
+            "content": "```bash\nnode scripts/start-headful.mjs\n```\n\n运行后需要重启一次 Electron 浮窗进程（Ctrl+C 退出后再次执行即可），改动生效：\n\n- 浮窗现在可拖动边框自由缩放，最小 280×200 px；\n- 大小和位置自动保存，下次启动恢复；\n- 若控制台再次 `EIO` 报错，日志会静默写入 `/tmp/webauto-floating-panel.log`，不再崩溃。"
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 12:13:10 GMT",
+      "eagleeye-traceid": "212aa73e17664919756075453e1021",
+      "s-brt": "14726",
+      "s-rt": "14781",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092029-095"
+}

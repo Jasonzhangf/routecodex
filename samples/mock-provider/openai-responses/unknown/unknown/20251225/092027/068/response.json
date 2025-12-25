@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.261",
+    "buildTime": "2025-12-24T03:48:28.254Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T114815204-057"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "The problem is clear now. The original file had a duplicate block. When I removed the second occurrence, the file ended without a closing brace. The correct way to fix this is:\n\n1. Go back to the original file\n2. Use a proper approach to delete the duplicate lines (269-306 or similar)\n3. Make sure the file is syntactically correct\n\nLet me just reset and use a more careful sed command that deletes specific line ranges.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd apps/floating-panel && git checkout src/main/index.mts && sed -i '' '269,306d' src/main/index.mts && npm run build\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042271696312318710",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766548108,
+      "id": "20251224114815ab350b9e5b584668",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224114815ab350b9e5b584668",
+      "usage": {
+        "completion_tokens": 139,
+        "prompt_tokens": 86324,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 86463
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 03:48:28 GMT",
+      "set-cookie": "acw_tc=0ae5a82617665480954251682e20e41909c83586738da7f7428dd0457879c6;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224114815ab350b9e5b584668"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-068"
+}

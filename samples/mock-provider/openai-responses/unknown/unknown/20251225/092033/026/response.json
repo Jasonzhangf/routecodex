@@ -1,0 +1,56 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:38:07.695Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T203756739-035"
+  },
+  "url": "https://api.tabcode.cc/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****d731a8",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_07491099a81069da01694a8d2a8b80819980ed04052195151d",
+      "object": "response",
+      "created_at": 1766493482,
+      "status": "completed",
+      "model": "gpt-5.2-codex",
+      "temperature": 1,
+      "top_p": 0.98,
+      "metadata": {},
+      "output": [
+        {
+          "id": "fc_07491099a81069da01694a8d2b7b9c81999f4d1140bd33133f",
+          "type": "function_call",
+          "status": "completed",
+          "call_id": "call_IwNP8px9dOH0uQci4D2Zjmze",
+          "name": "apply_patch",
+          "arguments": "{\"input\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/main/index.mts\\n@@\\n-  win.on('moved', () => {\\n-    log('Window moved event');\\n-    log(`Window bounds: ${JSON.stringify(win.getBounds())}`);\\n-  });\\n+  win.on('moved', () => {\\n+    log('Window moved event');\\n+  });\\n*** End Patch\",\"patch\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/main/index.mts\\n@@\\n-  win.on('moved', () => {\\n-    log('Window moved event');\\n-    log(`Window bounds: ${JSON.stringify(win.getBounds())}`);\\n-  });\\n+  win.on('moved', () => {\\n+    log('Window moved event');\\n+  });\\n*** End Patch\"}"
+        }
+      ],
+      "usage": {
+        "input_tokens": 34025,
+        "input_tokens_details": {
+          "cached_tokens": 32640
+        },
+        "output_tokens": 228,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 34253
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092033-026"
+}

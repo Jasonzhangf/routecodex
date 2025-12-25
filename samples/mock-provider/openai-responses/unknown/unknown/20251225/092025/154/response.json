@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.246",
+    "buildTime": "2025-12-23T13:01:07.987Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T210039945-009"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Good. Now let me commit.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto && git commit -m \\\"$(cat <<'EOF'\\nfeat(floating-panel): add window resize persistence and native drag region\\n\\n- Add electron-window-state to remember window size and position\\n- Enable resizable window with min width/height constraints\\n- Fix EIO logging error with fallback to file logging\\n- Implement native Electron drag region with -webkit-app-region CSS\\n- Remove custom JS drag logic to eliminate flicker\\n- Externalize electron-window-state in build to avoid bundling errors\\n- Reduce logging on window move and message flushing\\n\\nfeat(startup): fix argument parsing for headless mode\\n\\n- Correct boolean flag handling in start-headful.mjs CLI parser\\n- Ensure headless false (headful) mode works correctly with --headless flag\\n\\nfix(logging): avoid excessive log output on successful health checks\\n\\n- Consolidate status update logging to reduce console noise\\n- Only log errors, not repeated successful health checks\\n\\nrefactor(unified-api): reorganize server entry point\\n\\n- Move unified-api main logic to server.mjs\\n- Remove redundant index.ts to simplify module structure\\nEOF\\n)\\\"\",\"justification\":\"Commit changes with detailed message\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042381063360789454",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766494868,
+      "id": "20251223210040432b3c37420c4f6f",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223210040432b3c37420c4f6f",
+      "usage": {
+        "completion_tokens": 316,
+        "prompt_tokens": 55119,
+        "prompt_tokens_details": {
+          "cached_tokens": 53868
+        },
+        "total_tokens": 55435
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:01:08 GMT",
+      "set-cookie": "acw_tc=ac11000117664948401181940e54862f75afdebe3fc1d668666f8a5fed9b50;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223210040432b3c37420c4f6f"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-154"
+}

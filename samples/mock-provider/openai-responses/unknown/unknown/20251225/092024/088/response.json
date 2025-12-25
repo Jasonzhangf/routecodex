@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T11:01:00.387Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T190030982-011"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "<tool_call>update_plan<arg_key>plan</arg_key><arg_value>[{\"step\": \"定位 Browser Service 启动失败的根本原因\", \"status\": \"completed\"}, {\"step\": \"修复 Browser Service 的导入路径\", \"status\": \"in_progress\"}, {\"step\": \"验证修复后的启动流程\", \"status\": \"pending\"}]</arg_value></tool_call>",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766487660,
+      "id": "202512231900315cb0a2d14b7c40f9",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512231900315cb0a2d14b7c40f9",
+      "usage": {
+        "completion_tokens": 66,
+        "prompt_tokens": 193179,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 193245
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 11:01:00 GMT",
+      "set-cookie": "acw_tc=ac11000117664876314846391e428d69e3aaa57be5f2a6d0d219dc6a2eec53;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512231900315cb0a2d14b7c40f9"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092024-088"
+}

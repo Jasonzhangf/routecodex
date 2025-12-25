@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T12:24:23.451Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T202340859-250"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****45931c",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694bdb4e6d1b90a78bf040d9",
+      "object": "chat.completion",
+      "created": 1766579023,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 107847,
+        "completion_tokens": 585,
+        "total_tokens": 108432
+      },
+      "extend_fields": {
+        "traceId": "213fecfc17665790213673267e0e45",
+        "requestId": "d4175bc332dff30bc7aa143859d92af7"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:259",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"cat <<'EOF' > /tmp/baseline-report.md\\n# WebAuto 基础能力基线评估报告\\n\\n## 1. 服务启动与健康检查\\n- ✅ **Unified API (7701)**\\n  - 启动命令：`node services/unified-api/server.mjs`\\n  - /health 返回：`{\\\"ok\\\":true,\\\"service\\\":\\\"unified-api\\\",\\\"timestamp\\\":\\\"...\\\"}`\\n  - 日志：Server running at http://127.0.0.1:7701\\n- ✅ **Browser Service (7704)**\\n  - 启动命令：`node libs/browser/remote-service.js --host 127.0.0.1 --port 7704 --ws-host 127.0.0.1 --ws-port 8765`\\n  - /health 返回：`{\\\"ok\\\":true}`\\n  - 日志：BrowserService listening on http://127.0.0.1:7704\\n\\n## 2. 容器匹配闭环\\n- ✅ **containers:match** 调用成功\\n  - 输入：profile=weibo_fresh, url=https://weibo.com, maxDepth=6, maxChildren=20\\n  - 输出：success=true, root_container_id=weibo_login\\n  - 结构：container_tree + dom_tree 完整，包含子容器（用户名输入框、密码输入框、登录按钮）\\n\\n## 3. 高亮能力闭环\\n- ✅ **browser:highlight (selector)**\\n  - 输入：selector=div[class*=\\\"LoginCard_\\\"], color=#ff0000, style=2px solid\\n  - 输出：success=true, 无错误\\n- ✅ **browser:highlight-dom-path**\\n  - 输入：dom_path=root/0/0, root_selector=div[class*=\\\"LoginCard_\\\"], color=#00ff00, style=3px dashed\\n  - 输出：success=true, 无错误\\n\\n## 4. 修复记录\\n- 新增 `containers:match` 路由，复用 `handleContainerInspect` 逻辑\\n- 修正高亮测试脚本，添加 profile 参数\\n- Browser Service 启用 WS 端口 8765\\n- 会话创建：`create_session` 成功，sessionId=weibo_fresh\\n\\n## 5. 基线结论\\n当前基础能力已打通，可进入 UI 连线与交互阶段。\\nEOF\",\"justification\":\"生成基础能力评估报告\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":100}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 12:24:23 GMT",
+      "eagleeye-traceid": "213fecfc17665790213673267e0e45",
+      "s-brt": "42006",
+      "s-rt": "42153",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-144"
+}

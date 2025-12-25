@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.275",
+    "buildTime": "2025-12-24T08:34:21.634Z",
+    "entryEndpoint": "/v1/chat/completions",
+    "clientRequestId": "openai-chat-unknown-unknown-20251224T163358414-030"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4f75-4969-72a2-bad1-d8add9d76504",
+    "session_id": "019b4f75-4969-72a2-bad1-d8add9d76504"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694ba577966f039a14e23f55",
+      "object": "chat.completion",
+      "created": 1766565239,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 51442,
+        "completion_tokens": 352,
+        "total_tokens": 51794
+      },
+      "extend_fields": {
+        "traceId": "2150b49e17665652386727944e0ddb",
+        "requestId": "06c3d2bc932f7f01e809aa1aa67cdddf"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:26",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"cat <<'EOF' > src/config/README.md\\n# Config Module\\n\\n## Purpose\\nCentralized config loading and path resolution for RouteCodex. Configs live in `~/.routecodex/`; this module only handles loading and validation.\\n\\n## Key Files\\n- `routecodex-config-loader.ts`: Load user config, apply legacy defaults, generate provider profiles\\n- `auth-file-resolver.ts`: Resolve `authfile-*` references and cache key files\\n- `config-paths.ts` + `unified-config-paths.ts`: Parse `ROUTECODEX_CONFIG*` env vars and default paths\\n\\n## Flow\\n```\\nUser Config → Config Paths → routecodex-config-loader → bootstrapVirtualRouterConfig → Hub Pipeline\\n```\\n\\n## Do / Don't\\n**Do**\\n- Use `routecodex-config-loader` for all config loading\\n- Pass raw config to `bootstrapVirtualRouterConfig` without manual patching\\n- Support env vars and `authfile-*` references\\n\\n**Don't**\\n- Store decrypted secrets back into config\\n- Manually merge runtime data or patch configs on the fly\\n- Implement provider-specific logic here\\n\\n## CLI Usage\\n```bash\\nroutecodex validate --config ~/.routecodex/config.json\\n```\\nEOF\",\"justification\":\"Update config README to emphasize config-driven design and no manual patching.\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":100}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:34:21 GMT",
+      "eagleeye-traceid": "2150b49e17665652386727944e0ddb",
+      "s-brt": "22806",
+      "s-rt": "22941",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-chat-unknown-unknown-20251225T092024-027"
+}

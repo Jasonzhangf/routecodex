@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.273",
+    "buildTime": "2025-12-24T07:48:00.967Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T154742527-004"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****kpzZOA",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766562481,
+      "usage": {
+        "completion_tokens": 463,
+        "prompt_tokens": 95391,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 95854
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-507ddd9e-21c6-4fee-b03e-4fe51ce4d9f1",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "exec_command",
+                  "arguments": "{\"cmd\": \"cat > /tmp/create-floating-start.mjs << 'EOFPATCH'\\n#!/usr/bin/env node\\n/**\\n * 浮窗启动脚本\\n */\\nimport { spawn } from 'node:child_process';\\nimport path from 'node:path';\\nimport { fileURLToPath } from 'node:url';\\n\\nconst __filename = fileURLToPath(import.meta.url);\\nconst __dirname = path.dirname(__filename);\\nconst electronPath = path.resolve(__dirname, '../../node_modules/.bin/electron');\\nconst mainPath = path.resolve(__dirname, '../dist/main/index.mjs');\\n\\nconsole.log('🚀 启动 WebAuto 浮窗 UI');\\nconsole.log('Electron path:', electronPath);\\nconsole.log('Main path:', mainPath);\\n\\nconst child = spawn(electronPath, [mainPath], {\\n  stdio: 'inherit',\\n  env: process.env\\n});\\n\\nchild.on('exit', (code) => {\\n  process.exit(code);\\n});\\n\\nchild.on('error', (err) => {\\n  console.error('启动失败:', err);\\n  // Try fallback using npm start\\n  console.log('尝试使用 npm start 启动...');\\n  const fallback = spawn('npm', ['start'], {\\n    cwd: path.resolve(__dirname, '..'),\\n    stdio: 'inherit',\\n    env: process.env\\n  });\\n  \\n  fallback.on('exit', (code) => {\\n    process.exit(code);\\n  });\\n});\\n`;\\n\\nconst scriptPath = '/Users/fanzhang/Documents/github/webauto/apps/floating-panel/scripts/start-headful.mjs';\\nimport { writeFileSync } from 'node:fs';\\nwriteFileSync(scriptPath, startScript, 'utf-8');\\nconsole.log('Created floating panel start script');\\nEOFPATCH\\nnode /tmp/create-floating-start.mjs\", \"justification\": \"Create floating panel start script with fallback\", \"login\": false, \"max_output_tokens\": 6000, \"sandbox_permissions\": \"use_default\", \"shell\": \"\", \"workdir\": \"\", \"yield_time_ms\": 1000}"
+                },
+                "index": 0,
+                "id": "call_f8ac2c6711074c49bc40ee23",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "2261",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 07:48:00 GMT",
+      "req-arrive-time": "1766562462965",
+      "req-cost-time": "18010",
+      "resp-start-time": "1766562480976",
+      "x-envoy-upstream-service-time": "17949"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092031-040"
+}

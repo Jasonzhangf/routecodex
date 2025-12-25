@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.260",
+    "buildTime": "2025-12-24T02:31:57.775Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T103150040-004"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "我来帮你检查容器树和 DOM 的连线问题。先看看项目结构和相关代码。",
+            "reasoning_content": "用户提到启动后可以展开容器树和 DOM，但是没有连线。这看起来是一个 WebAuto 项目中的问题，涉及到 UI 展示问题。我需要：\n\n1. 首先了解项目结构，找到相关的容器树和 DOM 展示的代码\n2. 检查连线的实现逻辑\n3. 查看是否有配置问题或者 bug\n\n让我先探索一下项目结构，找到相关的 UI 代码。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"find /Users/fanzhang/Documents/github/webauto -type f -name \\\"*.ts\\\" -o -name \\\"*.tsx\\\" -o -name \\\"*.js\\\" -o -name \\\"*.jsx\\\" | grep -E \\\"(tree|dom|container|connection|line)\\\" | head -20\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042260598116619282",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766543517,
+      "id": "2025122410315000059e51ce294cbb",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122410315000059e51ce294cbb",
+      "usage": {
+        "completion_tokens": 178,
+        "prompt_tokens": 7896,
+        "prompt_tokens_details": {
+          "cached_tokens": 999
+        },
+        "total_tokens": 8074
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 02:31:57 GMT",
+      "set-cookie": "acw_tc=ac11000117665435100693979e42753cf4be798d9a80c2734c83c16820eb4d;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122410315000059e51ce294cbb"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-115"
+}

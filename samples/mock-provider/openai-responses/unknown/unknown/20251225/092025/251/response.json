@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T13:54:06.852Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T215401545-003"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "现在我将创建一个更详细的计划，包括剩余要实现的功能。用户的需求包括：\n1. 连线需要支持断开重连\n2. DOM 元素点击后需要获取子容器列表并展开\n3. Windows 注册表风格\n\n我已经实现了基础功能，但还需要：\n- 实现断开重连的连线\n- 完善DOM点击后的子容器获取\n\n让我先提交当前的更改，然后再逐步添加剩余功能。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"explanation\":\"已实现Windows注册表风格和基础连接；剩余添加断开重连连线功能\",\"plan\":[{\"status\": \"completed\", \"step\": \"Fix missing container-DOM connections and explain expand indicator\"}, {\"status\": \"completed\", \"step\": \"Redesign to Windows Registry style tree layout\"}, {\"status\": \"completed\", \"step\": \"Add DOM click handler to fetch sub-containers\"}, {\"status\": \"pending\", \"step\": \"Implement reconnectable connection lines with draggable endpoints\"}]}",
+                  "name": "update_plan"
+                },
+                "id": "call_-8042319662507773987",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766498046,
+      "id": "20251223215401718d74fed6bc42e8",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223215401718d74fed6bc42e8",
+      "usage": {
+        "completion_tokens": 209,
+        "prompt_tokens": 108688,
+        "prompt_tokens_details": {
+          "cached_tokens": 108545
+        },
+        "total_tokens": 108897
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:54:06 GMT",
+      "set-cookie": "acw_tc=ac11000117664980417622060ef788302eb4f17f43856d1dc28975defc00bc;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223215401718d74fed6bc42e8"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-251"
+}

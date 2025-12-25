@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T12:03:54.919Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T200328684-160"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****BNZi-Q",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "created": 1766577835,
+      "usage": {
+        "completion_tokens": 488,
+        "prompt_tokens": 84204,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 84692
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-2d4b2558-7806-41e8-9860-4ee47b0d82b3",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "exec_command",
+                  "arguments": "{\"cmd\": \"python3 << 'EOF'\\n# Update the token scanner to handle the correct naming pattern\\nimport re\\n\\nfile_path = '/Users/fanzhang/Documents/github/routecodex/src/providers/auth/token-scanner/index.ts'\\n\\nwith open(file_path, 'r') as f:\\n    content = f.read()\\n\\n# Update the token file pattern to match the correct naming convention\\n# The current pattern is: /^(.+)-oauth-(\\\\d+)-(.+)\\\\.json$/\\n# But we need to support: iflow-oauth-1-primary.json\\npattern = r'const TOKEN_FILE_PATTERN = /\\\\^(.+)-oauth-(\\\\d+)-(.+)\\\\.json\\\\$/;'\\nreplacement = r\\\"const TOKEN_FILE_PATTERN = /^(.+)-oauth-(\\\\d+)(?:-(.+))?\\\\.(json)$/;\\\"\\n\\nif re.search(pattern.replace('^', r'\\\\^').replace('$', r'\\\\$'), content):\\n    new_content = re.sub(pattern.replace('^', r'\\\\^').replace('$', r'\\\\$'), replacement, content)\\n    with open(file_path, 'w') as f:\\n        f.write(new_content)\\n    print(\\\"Updated token file pattern to support optional alias\\\")\\nelse:\\n    print(\\\"Pattern not found, trying alternative approach\\\")\\n    # Try to find the pattern with raw characters\\n    raw_pattern = r'/^(.+)-oauth-(\\\\d+)-(.+)\\\\.json$/'\\n    if raw_pattern in content:\\n        new_content = content.replace(raw_pattern, r'^(.+)-oauth-(\\\\d+)(?:-(.+))?\\\\.json$')\\n        with open(file_path, 'w') as f:\\n            f.write(new_content)\\n        print(\\\"Updated token file pattern (alternative)\\\")\\n    else:\\n        print(\\\"Could not find token pattern\\\")\\nEOF\\n\", \"justification\": \"更新token扫描器以支持可选的alias部分\", \"login\": true, \"max_output_tokens\": 2000, \"sandbox_permissions\": \"use_default\", \"shell\": \"/bin/zsh\", \"workdir\": \"/Users/fanzhang/Documents/github/routecodex\", \"yield_time_ms\": 1000}"
+                },
+                "index": 0,
+                "id": "call_6e3ececaee40417e9dbd2d7f",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "2323",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 12:03:54 GMT",
+      "req-arrive-time": "1766577809458",
+      "req-cost-time": "25448",
+      "resp-start-time": "1766577834907",
+      "x-envoy-upstream-service-time": "25333"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092031-126"
+}

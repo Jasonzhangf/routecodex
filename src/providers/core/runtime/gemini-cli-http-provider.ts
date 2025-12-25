@@ -9,6 +9,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { Transform } from 'node:stream';
+import type { TransformCallback } from 'node:stream';
 import { HttpTransportProvider } from './http-transport-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ProviderContext, ProviderType } from '../api/provider-types.js';
@@ -23,6 +25,7 @@ type DataEnvelope = UnknownObject & { data?: UnknownObject };
 type MutablePayload = Record<string, unknown> & {
   model?: unknown;
   project?: unknown;
+  action?: unknown;
   // 以下字段按“已经是 Gemini 协议”对待，由 llmswitch-core 负责从 OpenAI/Responses 映射过来
   // contents?: unknown;
   // systemInstruction?: unknown;
@@ -53,7 +56,8 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
   }
 
   protected override async preprocessRequest(request: UnknownObject): Promise<UnknownObject> {
-    const adapter = this.resolvePayload(request);
+    const processedRequest = await super.preprocessRequest(request);
+    const adapter = this.resolvePayload(processedRequest);
     const payload = adapter.payload as MutablePayload;
 
     // 从 auth provider 获取 project_id（仅做最小的 OAuth token 解析，不介入登录流程）
@@ -89,18 +93,28 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       throw new Error('Gemini CLI: model is required');
     }
 
-    const rebuilt: MutablePayload = {
-      ...(payload as Record<string, unknown>),
-      model,
-      project: projectId
-    };
-    this.ensureRequestMetadata(rebuilt);
+    payload.model = model;
+    payload.project = projectId;
+    this.ensureRequestMetadata(payload);
 
     // 删除与 Gemini 协议无关的字段，避免影响 Cloud Code Assist schema 校验
-    delete (rebuilt as any).messages;
-    delete (rebuilt as any).stream;
+    delete (payload as Record<string, unknown>).messages;
+    delete (payload as Record<string, unknown>).stream;
 
-    return adapter.assign(rebuilt);
+    return processedRequest;
+  }
+
+  protected override wantsUpstreamSse(request: UnknownObject, context: ProviderContext): boolean {
+    const fromRequest = this.extractStreamFlag(request);
+    const fromContext = this.extractStreamFlag(context.metadata as UnknownObject);
+    const wantsStream =
+      typeof fromRequest === 'boolean'
+        ? fromRequest
+        : typeof fromContext === 'boolean'
+          ? fromContext
+          : false;
+    this.applyStreamAction(request, wantsStream);
+    return wantsStream;
   }
 
   protected override async finalizeRequestHeaders(
@@ -189,6 +203,15 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     } as UnknownObject;
   }
 
+  protected override async wrapUpstreamSseResponse(
+    stream: NodeJS.ReadableStream,
+    context: ProviderContext
+  ): Promise<UnknownObject> {
+    const normalizer = new GeminiSseNormalizer();
+    stream.pipe(normalizer);
+    return super.wrapUpstreamSseResponse(normalizer, context);
+  }
+
   private isAntigravityRuntime(): boolean {
     return (this.oauthProviderId || '').toLowerCase() === 'antigravity';
   }
@@ -236,6 +259,18 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     return fallbackMap[model] || [];
   }
 
+  private applyStreamAction(target: UnknownObject, wantsStream: boolean): void {
+    const adapter = this.resolvePayload(target);
+    const payload = adapter.payload as MutablePayload;
+    if (wantsStream) {
+      payload.action = 'streamGenerateContent';
+      return;
+    }
+    if (!this.hasNonEmptyString(payload.action)) {
+      payload.action = 'generateContent';
+    }
+  }
+
   private ensureRequestMetadata(payload: MutablePayload): void {
     if (!this.hasNonEmptyString(payload.requestId)) {
       payload.requestId = `req-${randomUUID()}`;
@@ -251,6 +286,150 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
   private hasNonEmptyString(value: unknown): value is string {
     return typeof value === 'string' && value.trim().length > 0;
   }
+
+  private extractStreamFlag(source: UnknownObject | undefined): boolean | undefined {
+    if (!source || typeof source !== 'object') {
+      return undefined;
+    }
+    const direct = (source as Record<string, unknown>).stream;
+    if (typeof direct === 'boolean') {
+      return direct;
+    }
+    const metadataContainer = (source as { metadata?: unknown }).metadata;
+    if (metadataContainer && typeof metadataContainer === 'object') {
+      const metaStream = (metadataContainer as Record<string, unknown>).stream;
+      if (typeof metaStream === 'boolean') {
+        return metaStream;
+      }
+    }
+    const dataContainer = (source as { data?: unknown }).data;
+    if (dataContainer && typeof dataContainer === 'object') {
+      const nested = this.extractStreamFlag(dataContainer as UnknownObject);
+      if (typeof nested === 'boolean') {
+        return nested;
+      }
+    }
+    return undefined;
+  }
 }
 
 export default GeminiCLIHttpProvider;
+
+class GeminiSseNormalizer extends Transform {
+  private buffer = '';
+  private lastDonePayload: Record<string, unknown> | null = null;
+
+  constructor() {
+    super();
+  }
+
+  override _transform(chunk: unknown, _encoding: BufferEncoding, callback: TransformCallback): void {
+    if (chunk) {
+      const text = chunk instanceof Buffer ? chunk.toString('utf8') : String(chunk);
+      this.buffer += text.replace(/\r\n/g, '\n');
+      this.processBuffered();
+    }
+    callback();
+  }
+
+  override _flush(callback: TransformCallback): void {
+    this.processBuffered(true);
+    if (this.lastDonePayload) {
+      this.pushEvent('gemini.done', this.lastDonePayload);
+      this.lastDonePayload = null;
+    }
+    callback();
+  }
+
+  private processBuffered(flush = false): void {
+    while (true) {
+      const separatorIndex = this.buffer.indexOf('\n\n');
+      if (separatorIndex === -1) {
+        break;
+      }
+      const rawEvent = this.buffer.slice(0, separatorIndex);
+      this.buffer = this.buffer.slice(separatorIndex + 2);
+      this.processEvent(rawEvent);
+    }
+    if (flush && this.buffer.trim().length) {
+      this.processEvent(this.buffer);
+      this.buffer = '';
+    }
+  }
+
+  private processEvent(rawEvent: string): void {
+    const trimmed = rawEvent.trim();
+    if (!trimmed.length) {
+      return;
+    }
+    const dataLines = trimmed
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trimStart());
+    if (!dataLines.length) {
+      return;
+    }
+    const payloadText = dataLines.join('\n').trim();
+    if (!payloadText || payloadText === '[DONE]') {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(payloadText) as { response?: Record<string, unknown> };
+      const response = parsed?.response;
+      if (!response || typeof response !== 'object') {
+        return;
+      }
+      this.emitCandidateParts(response as Record<string, unknown>);
+    } catch {
+      // ignore malformed chunks
+    }
+  }
+
+  private emitCandidateParts(response: Record<string, unknown>): void {
+    const candidatesRaw = (response as { candidates?: unknown }).candidates;
+    const candidates = Array.isArray(candidatesRaw) ? (candidatesRaw as Record<string, unknown>[]) : [];
+    candidates.forEach((candidate, index) => {
+      const content =
+        candidate && typeof candidate.content === 'object' && candidate.content !== null
+          ? (candidate.content as Record<string, unknown>)
+          : undefined;
+      const role = typeof content?.role === 'string' ? (content.role as string) : 'model';
+      const partsRaw = content?.parts;
+      const parts = Array.isArray(partsRaw) ? (partsRaw as unknown[]) : [];
+      for (const part of parts) {
+        this.pushEvent('gemini.data', {
+          candidateIndex: index,
+          role,
+          part
+        });
+      }
+    });
+
+    this.lastDonePayload = {
+      candidates: candidates.map((candidate, index) => ({
+        index,
+        finishReason:
+          candidate && typeof candidate === 'object'
+            ? ((candidate as Record<string, unknown>).finishReason as unknown)
+            : undefined,
+        safetyRatings:
+          candidate && typeof candidate === 'object'
+            ? ((candidate as Record<string, unknown>).safetyRatings as unknown)
+            : undefined
+      })),
+      usageMetadata: (response as { usageMetadata?: unknown }).usageMetadata,
+      promptFeedback: (response as { promptFeedback?: unknown }).promptFeedback,
+      modelVersion: (response as { modelVersion?: unknown }).modelVersion
+    };
+  }
+
+  private pushEvent(eventName: string, payload: Record<string, unknown>): void {
+    try {
+      const data = JSON.stringify(payload);
+      this.push(`event: ${eventName}\ndata: ${data}\n\n`);
+    } catch {
+      // ignore serialization errors
+    }
+  }
+}

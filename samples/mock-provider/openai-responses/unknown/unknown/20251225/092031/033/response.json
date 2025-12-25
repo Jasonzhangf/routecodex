@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.270",
+    "buildTime": "2025-12-24T07:28:15.874Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T152750540-010"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****kpzZOA",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766561296,
+      "usage": {
+        "completion_tokens": 1551,
+        "prompt_tokens": 74760,
+        "prompt_tokens_details": {
+          "cached_tokens": 73088
+        },
+        "total_tokens": 76311
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-d1c47148-cc4a-42a8-bb21-fb1cfb213be8",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "exec_command",
+                  "arguments": "{\"cmd\": \"cat > /tmp/fix-render-dom-node.mjs << 'EOFPATCH'\\n#!/usr/bin/env node\\nimport { readFileSync, writeFileSync } from 'node:fs';\\n\\nconst filePath = '/Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/renderer/graph.mjs';\\nlet content = readFileSync(filePath, 'utf-8');\\n\\n// Modify renderDomNodeRecursive to handle on-demand loading\\ncontent = content.replace(\\n  /function renderDomNodeRecursive\\\\(parent, node, x, y\\\\) \\\\{[\\\\s\\\\S]*?let totalHeight = 24;[\\\\s\\\\S]*?return totalHeight;\\\\n\\\\}/,\\n  `function renderDomNodeRecursive(parent, node, x, y) {\\n  if (!node || typeof node !== 'object') return 0;\\n\\n  const nodeId = node.path || node.id || \\\\`dom-\\\\${x}-\\\\${y}\\\\`;\\n  const isExpanded = expandedNodes.has(nodeId);\\n  const hasChildren = node.children && node.children.length > 0;\\n  const isSelected = selectedDom === nodeId;\\n\\n  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');\\n  g.setAttribute('transform', \\\\`translate(\\\\${x}, \\\\${y})\\\\`);\\n\\n  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');\\n  rect.setAttribute('x', '0');\\n  rect.setAttribute('y', '0');\\n  rect.setAttribute('width', '220');\\n  rect.setAttribute('height', '24');\\n  rect.setAttribute('fill', isSelected ? '#264f36' : '#252526');\\n  rect.setAttribute('stroke', isSelected ? '#007acc' : '#3e3e42');\\n  rect.setAttribute('stroke-width', isSelected ? '2' : '1');\\n  rect.setAttribute('rx', '2');\\n  rect.style.cursor = 'pointer';\\n\\n  rect.addEventListener('mouseenter', () => {\\n    if (selectedDom !== nodeId) {\\n      rect.setAttribute('fill', '#2d2d30');\\n      rect.setAttribute('stroke', '#007acc');\\n    }\\n  });\\n  rect.addEventListener('mouseleave', () => {\\n    if (selectedDom !== nodeId) {\\n      rect.setAttribute('fill', '#252526');\\n      rect.setAttribute('stroke', '#3e3e42');\\n    }\\n  });\\n\\n  // 点击 DOM 节点主体：选择和高亮，不展开/折叠\\n  rect.addEventListener('click', (e) => {\\n    e.stopPropagation();\\n    selectedDom = nodeId;\\n    selectedContainer = null;\\n    \\n    const selector = node.id ? \\\\`#\\\\${node.id}\\\\` : (node.path || '');\\n    if (selector && typeof window.api?.highlightElement === 'function') {\\n      console.log('[DOM Node] Highlighting:', selector);\\n      window.api.highlightElement(selector, 'blue').catch(err => {\\n        console.error('Failed to highlight:', err);\\n      });\\n    }\\n    \\n    renderGraph();\\n  });\\n\\n  const tagText = document.createElementNS('http://www.w3.org/2000/svg', 'text');\\n  tagText.setAttribute('x', '24');\\n  tagText.setAttribute('y', '16');\\n  tagText.setAttribute('fill', '#4ec9b0');\\n  tagText.setAttribute('font-size', '11');\\n  tagText.setAttribute('font-family', 'Consolas, monospace');\\n  tagText.setAttribute('font-weight', 'bold');\\n  tagText.setAttribute('pointer-events', 'none');\\n  tagText.textContent = node.tag || 'DIV';\\n\\n  const infoText = document.createElementNS('http://www.w3.org/2000/svg', 'text');\\n  const label = node.id ? \\\\`#\\\\${node.id}\\\\` : (node.classes?.[0] ? \\\\`.\\\\${node.classes[0]}\\\\` : '');\\n  infoText.setAttribute('x', '70');\\n  infoText.setAttribute('y', '16');\\n  infoText.setAttribute('fill', '#9cdcfe');\\n  infoText.setAttribute('font-size', '10');\\n  infoText.setAttribute('font-family', 'Consolas, monospace');\\n  infoText.setAttribute('pointer-events', 'none');\\n  infoText.textContent = label.substring(0, 30);\\n\\n  const indicatorBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');\\n  indicatorBg.setAttribute('x', '4');\\n  indicatorBg.setAttribute('y', '6');\\n  indicatorBg.setAttribute('width', '12');\\n  indicatorBg.setAttribute('height', '12');\\n  indicatorBg.setAttribute('fill', '#3e3e42');\\n  indicatorBg.setAttribute('stroke', '#888');\\n  indicatorBg.setAttribute('stroke-width', '1');\\n  indicatorBg.setAttribute('rx', '1');\\n\\n  const indicatorText = document.createElementNS('http://www.w3.org/2000/svg', 'text');\\n  indicatorText.setAttribute('x', '10');\\n  indicatorText.setAttribute('y', '16');\\n  indicatorText.setAttribute('text-anchor', 'middle');\\n  indicatorText.setAttribute('fill', '#fff');\\n  indicatorText.setAttribute('font-size', '10');\\n  indicatorText.setAttribute('font-weight', 'bold');\\n  indicatorText.setAttribute('pointer-events', 'none');\\n  indicatorText.textContent = hasChildren ? (isExpanded ? '-' : '+') : '';\\n\\n  g.appendChild(rect);\\n  g.appendChild(indicatorBg);\\n  g.appendChild(indicatorText);\\n  g.appendChild(tagText);\\n  g.appendChild(infoText);\\n  parent.appendChild(g);\\n\\n  let totalHeight = 24;\\n\\n  if (hasChildren && isExpanded) {\\n    let currentY = y + 28;\\n    node.children.forEach((child) => {\\n      const vertLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');\\n      vertLine.setAttribute('x1', '10');\\n      vertLine.setAttribute('y1', String(y + 24));\\n      vertLine.setAttribute('x2', '10');\\n      vertLine.setAttribute('y2', String(currentY + 12));\\n      vertLine.setAttribute('stroke', '#555');\\n      vertLine.setAttribute('stroke-width', '1');\\n      parent.appendChild(vertLine);\\n\\n      const childHeight = renderDomNodeRecursive(parent, child, x + 15, currentY);\\n      currentY += childHeight + 4;\\n      totalHeight = currentY - y;\\n    });\\n  } else {\\n    // If not expanded but has children, still return a height to show the + indicator\\n    return 24;\\n  }\\n\\n  return totalHeight;\\n}`\\n);\\n\\nwriteFileSync(filePath, content, 'utf-8');\\nconsole.log('Updated renderDomNodeRecursive for on-demand loading');\\nEOFPATCH\\nnode /tmp/fix-render-dom-node.mjs\", \"justification\": \"Update renderDomNodeRecursive to handle on-demand loading\", \"login\": false, \"max_output_tokens\": 6000, \"sandbox_permissions\": \"use_default\", \"shell\": \"\", \"workdir\": \"\", \"yield_time_ms\": 1000}"
+                },
+                "index": 0,
+                "id": "call_1182206401424272ac5415d1",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "6524",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 07:28:15 GMT",
+      "req-arrive-time": "1766561270966",
+      "req-cost-time": "24879",
+      "resp-start-time": "1766561295845",
+      "x-envoy-upstream-service-time": "24505"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092031-033"
+}

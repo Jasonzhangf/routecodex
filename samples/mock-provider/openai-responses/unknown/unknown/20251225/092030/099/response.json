@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T11:49:17.582Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T194834286-109"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****45931c",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694bd313b83af1906f9e1ee8",
+      "object": "chat.completion",
+      "created": 1766576915,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 62922,
+        "completion_tokens": 660,
+        "total_tokens": 63582
+      },
+      "extend_fields": {
+        "traceId": "2141676817665769146867912e0d98",
+        "requestId": "8c2ba7a9571ea839c73a37749bad5caa"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:89",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"cat > /Users/fanzhang/Documents/github/routecodex/scripts/auth-iflow-token-direct.mjs << 'EOF'\\n#!/usr/bin/env node\\n// iFlow token auth using direct device flow - no browser redirect\\n// Usage: ILOW_TOKEN_FILE=\\\"~/.routecodex/auth/iflow-oauth-1-xxx.json\\\" node scripts/auth-iflow-token-direct.mjs\\n\\nimport os from 'os';\\nimport path from 'path';\\nimport fs from 'fs/promises';\\n\\nconst tokenFile = process.env.IFLOW_TOKEN_FILE || path.join(os.homedir(), '.routecodex', 'auth', 'iflow-oauth-1-primary.json');\\n\\nasync function run() {\\n  console.log(`[iflow-auth-direct] Starting device flow for: ${tokenFile}`);\\n  \\n  // ensure token file exists so re-auth can recreate after delete\\n  const tokenPath = tokenFile.startsWith('~') ? tokenFile.replace(/^~\\\\//, `${os.homedir()}/`) : tokenFile;\\n  await fs.mkdir(path.dirname(tokenPath), { recursive: true });\\n  try {\\n    await fs.access(tokenPath);\\n  } catch {\\n    await fs.writeFile(tokenPath, '{}', 'utf-8');\\n  }\\n  \\n  const { createProviderOAuthStrategy } = await import('../dist/providers/core/config/provider-oauth-configs.js');\\n  \\n  // Use device code flow instead of auth code flow\\n  const strategy = createProviderOAuthStrategy('iflow', {\\n    flowType: 'device_code',\\n    endpoints: {\\n      deviceCodeUrl: 'https://iflow.cn/oauth/device/code',\\n      tokenUrl: 'https://iflow.cn/oauth/token',\\n      userInfoUrl: 'https://iflow.cn/api/oauth/getUserInfo'\\n    },\\n    client: {\\n      clientId: process.env.IFLOW_CLIENT_ID || 'iflow-desktop-client',\\n      scopes: ['openid','profile','email','api']\\n    }\\n  }, tokenPath);\\n  \\n  console.log('[iflow-auth-direct] Opening browser for device code flow...');\\n  const token = await strategy.authenticate({ openBrowser: true });\\n  await strategy.saveToken(token);\\n  \\n  console.log(`[iflow-auth-direct] Token saved to: ${tokenPath}`);\\n}\\n\\nrun().catch(err => {\\n  console.error('[iflow-auth-direct] Error:', err);\\n  process.exit(1);\\n});\\nEOF\\nchmod +x /Users/fanzhang/Documents/github/routecodex/scripts/auth-iflow-token-direct.mjs\\n\",\"justification\":\"创建使用设备码流程的认证脚本，避免浏览器重定向到example.com\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:49:17 GMT",
+      "eagleeye-traceid": "2141676817665769146867912e0d98",
+      "s-brt": "42797",
+      "s-rt": "42947",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-099"
+}

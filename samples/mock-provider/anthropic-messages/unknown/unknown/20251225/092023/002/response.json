@@ -1,0 +1,61 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.274",
+    "buildTime": "2025-12-24T08:02:16.314Z",
+    "entryEndpoint": "/v1/messages",
+    "clientRequestId": "anthropic-messages-unknown-unknown-20251224T160210761-050"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "claude-cli/2.0.76 (external, cli)",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "application/json",
+    "session_id": "codex_cli_session_anthropic-messages-glm_key1_glm-4_7_b7f6866952",
+    "conversation_id": "codex_cli_conversation_anthropic-messages-glm_key1_gl_c88253f390"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "I can see there's a `focus_watcher.py` file in the current directory. How can I help you with it?",
+            "reasoning_content": "The user ran `ls` and the output shows a single file `focus_watcher.py`. They haven't asked me to do anything yet, so I should wait for their request. However, given the context, they might want me to look at this file or help them with something related to it.\n\nLet me just acknowledge what I see and wait for their instruction.",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766563336,
+      "id": "20251224160210afd6433c061a4d81",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224160210afd6433c061a4d81",
+      "usage": {
+        "completion_tokens": 102,
+        "prompt_tokens": 2319,
+        "prompt_tokens_details": {
+          "cached_tokens": 2
+        },
+        "total_tokens": 2421
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:02:16 GMT",
+      "set-cookie": "acw_tc=ac11000117665633308367296eeb885a665e5b5a08eda232f3b49033ce81f0;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224160210afd6433c061a4d81"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "anthropic-messages-unknown-unknown-20251225T092023-002"
+}

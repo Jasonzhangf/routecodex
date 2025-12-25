@@ -1,0 +1,59 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.257",
+    "buildTime": "2025-12-23T16:17:06.572Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T001642930-001"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "node",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "update_plan<arg_key>explanation</arg_key><arg_value>需要继续实现容器与DOM的连线和交互功能。当前问题：1)连线未显示，2)点击高亮报错。解决方案：修复连线绘制逻辑，确保highlight handler正确注册。</arg_value><arg_key>plan</arg_key><arg_value>[{\"step\": \"检查连线绘制逻辑，确认containerData和domData的数据结构\", \"status\": \"in_progress\"}, {\"step\": \"修复highlight handler注册错误，确保preload正确暴露API\", \"status\": \"pending\"}, {\"step\": \"测试窗口拖动和容器展开功能\", \"status\": \"pending\"}, {\"step\": \"提交修改并推送到GitHub\", \"status\": \"pending\"}]</arg_value></tool_call>",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766506626,
+      "id": "20251224001643dc34629817924f63",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224001643dc34629817924f63",
+      "usage": {
+        "completion_tokens": 142,
+        "prompt_tokens": 157884,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 158026
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 16:17:06 GMT",
+      "set-cookie": "acw_tc=0ae5a86f17665066034024563e988983dc9e57a6fbd2481b5d3aba99ef4d6a;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224001643dc34629817924f63"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-081"
+}

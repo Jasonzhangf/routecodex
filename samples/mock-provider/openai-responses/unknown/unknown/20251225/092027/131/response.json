@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.262",
+    "buildTime": "2025-12-24T05:21:19.221Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T132025959-004"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "我看到当前启动脚本已经支持 `--url` 和 `--profile` 参数，但默认值还是 `weibo_fresh` 和需要指定 `--headless`。我来修改为支持一键启动：",
+            "reasoning_content": "用户需要查看当前启动脚本是否支持参数，并修改成一键启动到 weibo.com，要求：\n1. 不能网页变成硬编码\n2. 用 -- 参数设置，不要用环境变量\n3. 浏览器和浮窗都有头显示\n\n从刚才的输出可以看到：\n- 脚本确实使用了 parseArgs 来解析参数\n- 目前 profile 默认是 'weibo_fresh'\n- url 默认是 'https://weibo.com'\n- 有 headless 参数\n\n我需要：\n1. 修改默认的 url 为 'https://weibo.com'\n2. 修改默认的 profile 为 'weibo_fresh'\n3. 确保 headless 参数默认为 false（有头显示）\n4. 查看是否需要添加 \"一键启动\" 参数\n\n让我先检查当前的代码，然后修改。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"input\":\"*** Begin Patch ***\\n--- a/scripts/start-headful.mjs\\n+++ b/scripts/start-headful.mjs\\n@@ -3,13 +3,13 @@\\n import { fileURLToPath } from 'node:url';\\n import { spawn } from 'node:child_process';\\n-import { parseArgs } from 'node:util';\\n import path from 'node:path';\\n+import { parseArgs } from 'node:util';\\n+import fs from 'node:fs';\\n \\n const __filename = fileURLToPath(import.meta.url);\\n const __dirname = path.dirname(__filename);\\n@@ -25,7 +25,10 @@\\n function main() {\\n-  const { values } = parseArgs({\\n-    options: {\\n-      profile: { type: 'string', short: 'p' },\\n-      url:     { type: 'string', short: 'u' },\\n-      headless:{ type: 'boolean', short: 'h' }\\n-    }\\n-  });\\n+  const { values, positionals } = parseArgs({\\n+    options: {\\n+      profile: { type: 'string', short: 'p', default: 'weibo_fresh' },\\n+      url:     { type: 'string', short: 'u', default: 'https://weibo.com' },\\n+      headless:{ type: 'boolean', short: 'h', default: false }\\n+    },\\n+    allowUnknown: true\\n+  });\\n \\n-  const profile = values.profile || 'weibo_fresh';\\n-  const url     = values.url     || 'https://weibo.com';\\n-  const headless= !!values.headless;\\n+  const profile = values.profile || 'weibo_fresh';\\n+  const url     = values.url     || 'https://weibo.com';\\n+  const headless = !!values.headless;\\n+  \\n+  // 一键启动模式：当没有参数时使用默认配置\\n+  const quickStart = !values.profile && !values.url && positionals.length === 0;\\n+  if (quickStart) {\\n+    console.log('🚀 一键启动模式: 默认配置');\\n+  }\\n \\n   const child = spawn('node', [launcherPath, '--profile', profile, '--url', url], {\\n     stdio: 'inherit',\\n     env: {\\n@@ -37,7 +38,7 @@\\n   child.on('exit', (code) => {\\n     process.exit(code);\\n   });\\n }\\n \\n-main();\\n\\\\ No newline at end of file\\n+main();\\n\\\\ No newline at end of file\\n*** End Patch ***\\n\",\"patch\":\"*** Begin Patch ***\\n--- a/scripts/start-headful.mjs\\n+++ b/scripts/start-headful.mjs\\n@@ -3,13 +3,13 @@\\n import { fileURLToPath } from 'node:url';\\n import { spawn } from 'node:child_process';\\n-import { parseArgs } from 'node:util';\\n import path from 'node:path';\\n+import { parseArgs } from 'node:util';\\n+import fs from 'node:fs';\\n \\n const __filename = fileURLToPath(import.meta.url);\\n const __dirname = path.dirname(__filename);\\n@@ -25,7 +25,10 @@\\n function main() {\\n-  const { values } = parseArgs({\\n-    options: {\\n-      profile: { type: 'string', short: 'p' },\\n-      url:     { type: 'string', short: 'u' },\\n-      headless:{ type: 'boolean', short: 'h' }\\n-    }\\n-  });\\n+  const { values, positionals } = parseArgs({\\n+    options: {\\n+      profile: { type: 'string', short: 'p', default: 'weibo_fresh' },\\n+      url:     { type: 'string', short: 'u', default: 'https://weibo.com' },\\n+      headless:{ type: 'boolean', short: 'h', default: false }\\n+    },\\n+    allowUnknown: true\\n+  });\\n \\n-  const profile = values.profile || 'weibo_fresh';\\n-  const url     = values.url     || 'https://weibo.com';\\n-  const headless= !!values.headless;\\n+  const profile = values.profile || 'weibo_fresh';\\n+  const url     = values.url     || 'https://weibo.com';\\n+  const headless = !!values.headless;\\n+  \\n+  // 一键启动模式：当没有参数时使用默认配置\\n+  const quickStart = !values.profile && !values.url && positionals.length === 0;\\n+  if (quickStart) {\\n+    console.log('🚀 一键启动模式: 默认配置');\\n+  }\\n \\n   const child = spawn('node', [launcherPath, '--profile', profile, '--url', url], {\\n     stdio: 'inherit',\\n     env: {\\n@@ -37,7 +38,7 @@\\n   child.on('exit', (code) => {\\n     process.exit(code);\\n   });\\n }\\n \\n-main();\\n\\\\ No newline at end of file\\n+main();\\n\\\\ No newline at end of file\\n*** End Patch ***\\n\"}",
+                  "name": "apply_patch"
+                },
+                "id": "call_-8042369896445880823",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766553679,
+      "id": "2025122413202658d7439abafc420c",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122413202658d7439abafc420c",
+      "usage": {
+        "completion_tokens": 1315,
+        "prompt_tokens": 142793,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 144108
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 05:21:19 GMT",
+      "set-cookie": "acw_tc=0ae5a86f17665536264213419e986817ac34da0ad2dea964a7f9f6bc561359;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122413202658d7439abafc420c"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-131"
+}

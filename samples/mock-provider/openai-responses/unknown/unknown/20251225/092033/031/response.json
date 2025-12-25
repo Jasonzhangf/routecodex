@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:54:54.794Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T205441837-074"
+  },
+  "url": "https://api.tabcode.cc/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****d731a8",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_0c110b93ff2803da01694a91187ba0819ba5eb73780967c78c",
+      "object": "response",
+      "created_at": 1766494488,
+      "status": "completed",
+      "model": "gpt-5.2-codex",
+      "temperature": 1,
+      "top_p": 0.98,
+      "metadata": {},
+      "output": [
+        {
+          "id": "rs_0c110b93ff2803da01694a911a7da0819b9781ad5c453bf588",
+          "type": "reasoning",
+          "summary": [],
+          "content": []
+        },
+        {
+          "id": "msg_0c110b93ff2803da01694a911b79b4819b8acbbaf0a03e406d",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "I’m seeing a lot of unrelated modified/untracked files (e.g. `launcher/core/launcher.mjs`, `services/*`, `modules/*`, plus several `.bak` and `services/unified-api/*` files) that I didn’t touch in this session. Per your rules I have to stop and ask: do you want me to continue only with the floating-panel changes, or should I also clean up/ignore those other changes?"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 52054,
+        "input_tokens_details": {
+          "cached_tokens": 50048
+        },
+        "output_tokens": 96,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 52150
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092033-031"
+}

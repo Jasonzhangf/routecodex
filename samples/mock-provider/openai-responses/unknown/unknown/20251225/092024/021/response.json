@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:42:13.462Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T204204770-041"
+  },
+  "url": "https://dapi.micosoft.icu/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****3a6257",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_063a9954b29e6a5801694a8e1fbb7081918f5b7af25b7896d7",
+      "object": "response",
+      "created_at": 1766493727,
+      "status": "completed",
+      "model": "gpt-5.1-codex",
+      "temperature": 1,
+      "top_p": 1,
+      "metadata": {},
+      "output": [
+        {
+          "id": "rs_063a9954b29e6a5801694a8e22064881918eae40b5ac556083",
+          "type": "reasoning",
+          "summary": [],
+          "content": []
+        },
+        {
+          "id": "fc_063a9954b29e6a5801694a8e24484c8191b60aea601fe4a59a",
+          "type": "function_call",
+          "status": "completed",
+          "call_id": "call_36f1sUQceTaS4DTGV4Y72NWt",
+          "name": "exec_command",
+          "arguments": "{\"cmd\":\"tail -n 200 /private/var/tmp/webauto-floating-panel.log\",\"justification\":\"Check fallback logging for floating panel issues\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":1000}"
+        },
+        {
+          "id": "message_placeholder_3",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": ""
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 35262,
+        "input_tokens_details": {
+          "cached_tokens": 34816
+        },
+        "output_tokens": 281,
+        "output_tokens_details": {
+          "reasoning_tokens": 192
+        },
+        "total_tokens": 35543
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092024-021"
+}

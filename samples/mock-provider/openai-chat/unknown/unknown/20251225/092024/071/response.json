@@ -1,0 +1,50 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.258",
+    "buildTime": "2025-12-23T16:22:19.464Z",
+    "entryEndpoint": "/v1/chat/completions",
+    "clientRequestId": "openai-chat-unknown-unknown-20251224T002219375-001"
+  },
+  "url": "http://127.0.0.1:54259/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****fy-key",
+    "Accept": "*/*",
+    "User-Agent": "node"
+  },
+  "body": {
+    "data": {
+      "id": "mock-1766506939",
+      "object": "chat.completion",
+      "created": 1766506939,
+      "model": "verify-mock",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "stop",
+          "message": {
+            "role": "assistant",
+            "content": "Mock response: Say hello in one short sentence."
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 5,
+        "completion_tokens": 5,
+        "total_tokens": 10
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-type": "application/json",
+      "date": "Tue, 23 Dec 2025 16:22:19 GMT",
+      "keep-alive": "timeout=5",
+      "transfer-encoding": "chunked"
+    },
+    "url": "http://127.0.0.1:54259/v1/chat/completions"
+  },
+  "reqId": "openai-chat-unknown-unknown-20251225T092024-071"
+}

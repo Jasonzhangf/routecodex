@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.262",
+    "buildTime": "2025-12-24T05:23:53.413Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T132204708-006"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****kpzZOA",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766553833,
+      "usage": {
+        "completion_tokens": 550,
+        "prompt_tokens": 157832,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 158382
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-56b0cca3-95b6-4b81-812c-4abcfbda2821",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "exec_command",
+                  "arguments": "{\"cmd\": \"cat > /tmp/fix-start.js << 'ENDOFJS'\\nconst fs = require('fs');\\nconst path = require('path');\\n\\n// 读取当前文件\\nconst filePath = path.resolve(__dirname, 'scripts/start-headful.mjs');\\nlet content = fs.readFileSync(filePath, 'utf8');\\n\\n// 替换参数解析部分\\nconst oldParseArgs = `const { values } = parseArgs({\\n    options: {\\n      profile: { type: 'string', short: 'p' },\\n      url:     { type: 'string', short: 'u' },\\n      headless:{ type: 'boolean', short: 'h' }\\n    }\\n  });\\n\\n  const profile = values.profile || 'weibo_fresh';\\n  const url     = values.url     || 'https://weibo.com';\\n  const headless= !!values.headless;`;\\n\\nconst newParseArgs = `const { values, positionals } = parseArgs({\\n    options: {\\n      profile: { type: 'string', short: 'p', default: 'weibo_fresh' },\\n      url:     { type: 'string', short: 'u', default: 'https://weibo.com' },\\n      headless:{ type: 'boolean', short: 'h', default: false }\\n    },\\n    allowUnknown: true\\n  });\\n\\n  const profile = values.profile || 'weibo_fresh';\\n  const url = values.url || 'https://weibo.com';\\n  const headless = !!values.headless;\\n\\n  // 显示启动信息\\n  console.log('🚀 一键启动模式');\\n  console.log('  Profile:', profile);\\n  console.log('  URL:', url);\\n  console.log('  Headless:', headless);`;\\n\\n// 替换参数使用\\ncontent = content.replace(oldParseArgs, newParseArgs);\\n\\n// 写回文件\\nfs.writeFileSync(filePath, content, 'utf8');\\nconsole.log('✓ 已更新启动脚本，支持 --profile 和 --url 参数');\\nENDOFJS\\nnode /tmp/fix-start.js\\n\", \"login\": true, \"max_output_tokens\": 600, \"sandbox_permissions\": \"use_default\", \"shell\": \"/bin/zsh\", \"workdir\": \"/Users/fanzhang/Documents/github/webauto\", \"yield_time_ms\": 3000, \"justification\": \"使用 Node.js 脚本修改启动脚本支持命令行参数\"}"
+                },
+                "index": 0,
+                "id": "call_afdb516eff144553b66e61f2",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "2451",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 05:23:53 GMT",
+      "req-arrive-time": "1766553725598",
+      "req-cost-time": "107873",
+      "resp-start-time": "1766553833472",
+      "x-envoy-upstream-service-time": "107754"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-190"
+}

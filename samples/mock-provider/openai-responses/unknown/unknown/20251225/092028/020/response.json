@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.278",
+    "buildTime": "2025-12-24T11:07:24.318Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T190719286-076"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Actually, let me try to use python to make the JSON edit properly.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"python3 << 'EOF'\\nimport json\\n\\nconfig_path = '/Users/fanzhang/.routecodex/provider/iflow/config.v1.json'\\nwith open(config_path, 'r') as f:\\n    config = json.load(f)\\n\\n# Add secondary token file\\nconfig['virtualrouter']['providers']['iflow']['auth']['secondaryTokenFile'] = '~/.routecodex/auth/iflow-oauth-secondary.json'\\n\\nwith open(config_path, 'w') as f:\\n    json.dump(config, f, indent=2)\\n\\nprint(\\\"Updated iflow provider config\\\")\\nEOF\\n\",\"justification\":\"使用python安全地编辑JSON配置文件\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042264343328367736",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766574444,
+      "id": "2025122419071930669bcab29448b5",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122419071930669bcab29448b5",
+      "usage": {
+        "completion_tokens": 216,
+        "prompt_tokens": 18157,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 18373
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:07:24 GMT",
+      "set-cookie": "acw_tc=0ae5a7e317665744394633903effea24ae7c6a775e527d0ff74cd9adc53745;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122419071930669bcab29448b5"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-020"
+}

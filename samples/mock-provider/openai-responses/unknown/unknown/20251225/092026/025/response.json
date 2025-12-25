@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.250",
+    "buildTime": "2025-12-23T14:20:03.091Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T221939607-021"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "已完成以下修复：\n\n1. **DOM全展开** - `expandAllDomNodes()` 函数递归展开所有DOM节点\n2. **所有容器连线** - `drawAllConnections()` 函数遍历所有容器并连接到匹配的DOM元素\n3. **highlightElement修复** - 添加到preload API，并在调用时检查类型避免错误\n4. **Windows注册表风格** - Consolas等宽字体、方框展开/收起指示器\n5. **位置跟踪** - 使用Map记录容器和DOM节点坐标，确保连线正确\n\n已提交到本地git，等待您确认后再推送到GitHub。\n\n如果需要推送，请告诉我。",
+            "reasoning_content": "已完成了所有修改：\n1. 在preload.cjs中添加了highlightElement方法\n2. 在graph.mjs中实现了DOM全展开（expandAllDomNodes）\n3. 添加了containerNodePositions和domNodePositions来跟踪节点位置\n4. 实现了drawAllConnections函数，遍历所有容器并连接到匹配的DOM元素\n5. 修复了highlightElement的调用，添加了typeof检查防止错误\n6. 使用Windows注册表风格（Consolas字体、方框指示器）\n\n现在等待用户确认后再推送。",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766499603,
+      "id": "202512232219395e2423063f7e448d",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512232219395e2423063f7e448d",
+      "usage": {
+        "completion_tokens": 259,
+        "prompt_tokens": 133688,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 133947
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 14:20:03 GMT",
+      "set-cookie": "acw_tc=ac11000117664995798775197e122d99f2355b5d56c4a1324f433c2e372aa7;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512232219395e2423063f7e448d"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-025"
+}

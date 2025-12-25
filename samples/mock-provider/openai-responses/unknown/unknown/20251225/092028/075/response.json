@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T12:07:05.707Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T200645727-178"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "好，unified-api健康了。现在测试高亮能力。我需要调用/v1/browser/highlight端点。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cat <<'EOF' > test-highlight.js\\nimport WebSocket from 'ws';\\n\\nasync function testHighlight() {\\n  console.log('1. 测试 unified-api /health');\\n  const healthRes = await fetch('http://127.0.0.1:7701/health');\\n  console.log('   健康检查:', await healthRes.json());\\n\\n  console.log('\\\\n2. 测试浏览器服务健康');\\n  const browserHealthRes = await fetch('http://127.0.0.1:7704/health');\\n  console.log('   浏览器健康:', await browserHealthRes.json());\\n\\n  console.log('\\\\n3. 测试 containers:match 动作');\\n  const ws = new WebSocket('ws://127.0.0.1:7701/ws');\\n  await new Promise((resolve) => ws.on('open', resolve));\\n  \\n  const matchResult = await new Promise((resolve) => {\\n    ws.on('message', (data) => {\\n      const payload = JSON.parse(data.toString());\\n      if (payload.type === 'response') {\\n        resolve(payload);\\n      } else if (payload.type === 'error') {\\n        resolve(payload);\\n      }\\n    });\\n    ws.send(JSON.stringify({\\n      type: 'action',\\n      action: 'containers:match',\\n      payload: { profile: 'weibo_fresh', url: 'https://weibo.com', maxDepth: 6, maxChildren: 20 }\\n    }));\\n  });\\n  ws.close();\\n  console.log('   容器匹配结果:', matchResult);\\n\\n  console.log('\\\\n4. 测试 browser:highlight 动作（高亮 weibo 头部）');\\n  const ws2 = new WebSocket('ws://127.0.0.1:7701/ws');\\n  await new Promise((resolve) => ws2.on('open', resolve));\\n  \\n  const highlightResult = await new Promise((resolve) => {\\n    ws2.on('message', (data) => {\\n      const payload = JSON.parse(data.toString());\\n      if (payload.type === 'response') {\\n        resolve(payload);\\n      } else if (payload.type === 'error') {\\n        resolve(payload);\\n      }\\n    });\\n    ws2.send(JSON.stringify({\\n      type: 'action',\\n      action: 'browser:highlight',\\n      payload: { selector: '.WB_global_nav.WB_global_nav_v2', color: 'red' }\\n    }));\\n  });\\n  ws2.close();\\n  console.log('   高亮结果:', highlightResult);\\n  \\n  console.log('\\\\n✅ 基础能力测试完成');\\n}\\n\\ntestHighlight().catch(err => {\\n  console.error('❌ 测试失败:', err);\\n  process.exit(1);\\n});\\nEOF\",\"justification\":\"创建高亮基础能力测试脚本\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":100}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042244071082558935",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766578025,
+      "id": "2025122420064666a873927a4c4e4f",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122420064666a873927a4c4e4f",
+      "usage": {
+        "completion_tokens": 671,
+        "prompt_tokens": 87882,
+        "prompt_tokens_details": {
+          "cached_tokens": 77100
+        },
+        "total_tokens": 88553
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 12:07:05 GMT",
+      "set-cookie": "acw_tc=0ae5a7df17665780059911240edfe05536fba44e74ac93c5f9a399215f7537;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122420064666a873927a4c4e4f"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-075"
+}

@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T11:40:27.469Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T194016391-090"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "看起来iflow需要使用auth-code-flow而不是device-code-flow。让我创建一个新的认证脚本使用正确的flow。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cat > /Users/fanzhang/Documents/github/routecodex/scripts/auth-iflow-token.mjs << 'EOF'\\n#!/usr/bin/env node\\n// iFlow token authentication script for specific token file\\n// Usage: ILOW_TOKEN_FILE=\\\"~/.routecodex/auth/iflow-oauth-1-xxx.json\\\" node scripts/auth-iflow-token.mjs\\n\\nimport os from 'os';\\nimport path from 'path';\\nimport fs from 'fs/promises';\\n\\nconst tokenFile = process.env.IFLOW_TOKEN_FILE || path.join(os.homedir(), '.routecodex', 'auth', 'iflow-oauth-1-primary.json');\\n\\nasync function run() {\\n  console.log(`[iflow-auth] Authenticating token: ${tokenFile}`);\\n  \\n  const { ensureValidOAuthToken } = await import('../dist/providers/auth/oauth-lifecycle.js');\\n  \\n  await ensureValidOAuthToken('iflow', {\\n    type: 'iflow-oauth',\\n    tokenFile\\n  }, {\\n    forceReauthorize: true,\\n    openBrowser: true\\n  });\\n  \\n  console.log(`[iflow-auth] Token saved to: ${tokenFile}`);\\n}\\n\\nrun().catch(err => {\\n  console.error('[iflow-auth] Error:', err);\\n  process.exit(1);\\n});\\nEOF\\nchmod +x /Users/fanzhang/Documents/github/routecodex/scripts/auth-iflow-token.mjs\\n\",\"justification\":\"创建独立的iFlow token认证脚本\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042206722046134776",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766576427,
+      "id": "202512241940166600718cfe5c4d12",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512241940166600718cfe5c4d12",
+      "usage": {
+        "completion_tokens": 393,
+        "prompt_tokens": 59603,
+        "prompt_tokens_details": {
+          "cached_tokens": 54073
+        },
+        "total_tokens": 59996
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:40:27 GMT",
+      "set-cookie": "acw_tc=0ae5a7e117665764166568672e23098f398e9739993f73326362b325dd70ba;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512241940166600718cfe5c4d12"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-056"
+}

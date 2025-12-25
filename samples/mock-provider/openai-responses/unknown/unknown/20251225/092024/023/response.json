@@ -1,0 +1,56 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:42:34.539Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T204228318-044"
+  },
+  "url": "https://dapi.micosoft.icu/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****3a6257",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_0e5b2c4afafff67c01694a8e36c84081919e2d4e00f73529a8",
+      "object": "response",
+      "created_at": 1766493750,
+      "status": "completed",
+      "model": "gpt-5.1-codex",
+      "temperature": 1,
+      "top_p": 1,
+      "metadata": {},
+      "output": [
+        {
+          "id": "fc_0e5b2c4afafff67c01694a8e390b348191b4b19a7bbec840bf",
+          "type": "function_call",
+          "status": "completed",
+          "call_id": "call_tpmRx9AVtErGhHNTAw0iRjRG",
+          "name": "exec_command",
+          "arguments": "{\"cmd\":\"node scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com\",\"justification\":\"start headful and check logs\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":1000}"
+        }
+      ],
+      "usage": {
+        "input_tokens": 35786,
+        "input_tokens_details": {
+          "cached_tokens": 35328
+        },
+        "output_tokens": 91,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 35877
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092024-023"
+}

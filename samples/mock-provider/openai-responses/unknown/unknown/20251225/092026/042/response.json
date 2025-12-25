@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.250",
+    "buildTime": "2025-12-23T14:23:25.274Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T222319488-038"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Good, now I need to also add the window minimize and close methods to the preload API.\n\nWait, actually looking at the invokeAction call in the renderer, it's already calling window.api.invokeAction('window:minimize', {}) and window.api.invokeAction('window:close', {}). These will go through the existing ui:action handler which forwards to the controller.\n\nBut that won't work because the controller doesn't handle window:minimize and window:close. I need to add specific handlers.\n\nActually, let me just add the window handlers I already added and it should work.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto/apps/floating-panel && npm run build\",\"justification\":\"重新构建浮窗面板\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto/apps/floating-panel\",\"yield_time_ms\":3000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042302791875999930",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766499805,
+      "id": "2025122322231977bc975be2584151",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122322231977bc975be2584151",
+      "usage": {
+        "completion_tokens": 214,
+        "prompt_tokens": 139597,
+        "prompt_tokens_details": {
+          "cached_tokens": 139337
+        },
+        "total_tokens": 139811
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 14:23:25 GMT",
+      "set-cookie": "acw_tc=ac11000117664997997513077e122d9c686501fcd3c94c71f055fb9e86b833;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122322231977bc975be2584151"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-042"
+}

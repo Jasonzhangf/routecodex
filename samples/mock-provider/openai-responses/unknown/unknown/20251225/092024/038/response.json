@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:50:01.507Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T204952210-069"
+  },
+  "url": "https://dapi.micosoft.icu/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****3a6257",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_08b4bd72d1511cad01694a8ff3790c8191b527c1c1c8a35edb",
+      "object": "response",
+      "created_at": 1766494195,
+      "status": "completed",
+      "model": "gpt-5.1-codex",
+      "temperature": 1,
+      "top_p": 1,
+      "metadata": {},
+      "output": [
+        {
+          "id": "rs_08b4bd72d1511cad01694a8ff5f44c81919beacb6a64005146",
+          "type": "reasoning",
+          "summary": [],
+          "content": []
+        },
+        {
+          "id": "msg_08b4bd72d1511cad01694a8ff62ac48191baa00e6e90e65e91",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "未看到浮窗是因为之前的崩溃。已修复并确认启动命令 `node scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com`；`--headless` 无参数即可切换。（原 `--headless false` 触发 parseArgs 异常，现无需传 false。）\n\n修改点：\n- `apps/floating-panel/src/main/index.mts:1-210` 引入 electron-window-state 与 fs/os 日志；碰撞 console EIO 时写入 `/tmp/webauto-floating-panel.log`，避免进程崩溃；窗口改为可调尺寸且持久化位置；减少移动时日志刷屏。\n- `apps/floating-panel/scripts/build.mjs:28-44` 在 esbuild 中声明 `electron-window-state` external，保持 CJS 模块动态 require。\n- `apps/floating-panel/src/renderer/drag.mjs:1-80` 改为只监听顶部 `#drag-area`，修复 `window.getBoundingClientRect` 报错；拖动逻辑直接调用 BrowserWindow moveTo；简化状态。\n- `apps/floating-panel/src/renderer/index.mts:1-220` 注入 drag 初始化并确保元素存在；其它渲染逻辑保持。\n- 多次 rebuild，浮窗版本已至 0.1.189。\n\n建议：\n1. `node scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com`（默认 headful）再试；浮窗可自由缩放和拖动并记忆大小。\n2. 若仍有闪烁，可检查 `/tmp/webauto-floating-panel.log` 是否出现大量 WARN；必要时继续优化拖动节流。"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 50127,
+        "input_tokens_details": {
+          "cached_tokens": 48000
+        },
+        "output_tokens": 380,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 50507
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092024-038"
+}

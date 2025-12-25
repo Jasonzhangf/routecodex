@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T11:06:37.782Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T190603990-076"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "很好，Unified API 启动成功。现在让我使用测试客户端连接，并让用户手动启动 UI 来测试 WebSocket 连接。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"node -e \\\"\\nconst WebSocket = require('ws');\\nconst http = require('http');\\n\\nconsole.log('=== 完整的 WebSocket 测试服务 ===');\\nconsole.log('这个服务模拟 Unified API 的 WebSocket 行为');\\nconsole.log('请保持运行，然后启动 UI 测试');\\nconsole.log('');\\n\\nconst httpServer = http.createServer((req, res) => {\\n  if (req.url === '/health') {\\n    const healthData = {\\n      status: 'ok',\\n      timestamp: Date.now(),\\n      services: {\\n        unified_api: { healthy: true, port: 7701 },\\n        browser_service: { healthy: true, port: 7704 },\\n        controller: { healthy: true, port: 8970 }\\n      }\\n    };\\n    res.writeHead(200, { 'Content-Type': 'application/json' });\\n    res.end(JSON.stringify(healthData));\\n    console.log('[HTTP] /health 请求');\\n  }\\n});\\n\\nconst wss = new WebSocket.Server({ noServer: true });\\nconst busWss = new WebSocket.Server({ noServer: true });\\n\\nhttpServer.on('upgrade', (request, socket, head) => {\\n  const { pathname } = new URL(request.url, 'http://localhost');\\n  \\n  if (pathname === '/ws') {\\n    wss.handleUpgrade(request, socket, head, (ws) => {\\n      const clientId = Math.random().toString(36).substr(2, 8);\\n      console.log('[/ws] ✅ 客户端已连接 ID:', clientId);\\n      \\n      ws.send(JSON.stringify({ type: 'welcome', clientId }));\\n      \\n      ws.on('message', (data) => {\\n        try {\\n          const msg = JSON.parse(data.toString());\\n          console.log('[/ws] 收到消息:', msg);\\n          \\n          // 响应 action 类型消息\\n          if (msg.type === 'action') {\\n            ws.send(JSON.stringify({\\n              type: 'response',\\n              action: msg.action,\\n              success: true,\\n              data: { acknowledged: true }\\n            }));\\n          }\\n        } catch (e) {\\n          console.log('[/ws] 非JSON消息:', data.toString());\\n        }\\n      });\\n      \\n      ws.on('close', (code, reason) => {\\n        console.log('[/ws] 客户端断开 ID:', clientId, 'code:', code);\\n      });\\n      \\n      ws.on('error', (err) => {\\n        console.log('[/ws] 错误:', err.message);\\n      });\\n    });\\n  } else if (pathname === '/bus') {\\n    busWss.handleUpgrade(request, socket, head, (ws) => {\\n      const clientId = Math.random().toString(36).substr(2, 8);\\n      console.log('[/bus] ✅ 客户端已连接 ID:', clientId);\\n      \\n      // 发送初始状态 - 这是 UI 期望的\\n      const initialStatus = {\\n        type: 'event',\\n        topic: 'health.status',\\n        payload: {\\n          unified_api: { healthy: true, port: 7701 },\\n          controller: { healthy: true, port: 8970 },\\n          browser_service: { healthy: true, port: 7704 },\\n          websocket: { connected: true },\\n          bus: { connected: true },\\n          containers: { matched: false },\\n          browser: { mode: 'unknown' }\\n        }\\n      };\\n      \\n      console.log('[/bus] 发送初始状态');\\n      ws.send(JSON.stringify(initialStatus));\\n      \\n      ws.on('message', (data) => {\\n        try {\\n          const msg = JSON.parse(data.toString());\\n          console.log('[/bus] 收到消息:', msg);\\n          \\n          // 模拟响应各种 action\\n          if (msg.type === 'action') {\\n            if (msg.action === 'containers:match') {\\n              // 模拟容器匹配\\n              ws.send(JSON.stringify({\\n                type: 'event',\\n                topic: 'containers.matched',\\n                payload: {\\n                  success: true,\\n                  matched: true,\\n                  snapshot: {\\n                    container_tree: {\\n                      id: 'weibo_root',\\n                      name: '微博首页',\\n                      role: 'root',\\n                      children: []\\n                    },\\n                    dom_tree: [\\n                      { tag: 'DIV', classes: ['WB_frame'], id: 'plc_frame' },\\n                      { tag: 'DIV', classes: ['WB_cardwrap'], id: 'plc_cardwrap' }\\n                    ],\\n                    metadata: {\\n                      root_container_id: 'weibo_root',\\n                      matched_at: Date.now()\\n                    }\\n                  }\\n                }\\n              }));\\n            }\\n          }\\n        } catch (e) {\\n          console.log('[/bus] 非JSON消息:', data.toString());\\n        }\\n      });\\n      \\n      ws.on('close', (code, reason) => {\\n        console.log('[/bus] 客户端断开 ID:', clientId, 'code:', code);\\n      });\\n      \\n      ws.on('error', (err) => {\\n        console.log('[/bus] 错误:', err.message);\\n      });\\n    });\\n  }\\n});\\n\\nhttpServer.listen(7702, () => {\\n  console.log('✅ 测试服务启动在 7702');\\n  console.log('');\\n  console.log('服务端点:');\\n  console.log('  - http://127.0.0.1:7702/health');\\n  console.log('  - ws://127.0.0.1:7702/ws');\\n  console.log('  - ws://127.0.0.1:7702/bus');\\n  console.log('');\\n  console.log('要测试 UI 连接，请运行:');\\n  console.log('  WEBAUTO_FLOATING_BUS_URL=ws://127.0.0.1:7702/bus npm run start');\\n  console.log('');\\n  console.log('按 Ctrl+C 停止服务');\\n});\\n\\nprocess.on('SIGINT', () => {\\n  console.log('\\\\\\\\n正在关闭服务...');\\n  httpServer.close();\\n  process.exit(0);\\n});\\n\\\" > /tmp/test-ws-server.mjs\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042203664029094146",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766487997,
+      "id": "202512231906043ce0929606b347f0",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512231906043ce0929606b347f0",
+      "usage": {
+        "completion_tokens": 1303,
+        "prompt_tokens": 43479,
+        "prompt_tokens_details": {
+          "cached_tokens": 43312
+        },
+        "total_tokens": 44782
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 11:06:37 GMT",
+      "set-cookie": "acw_tc=ac11000117664879641084041ee21f0ec0d6c150b81a68d8310ff64cbb97ac;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512231906043ce0929606b347f0"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-049"
+}

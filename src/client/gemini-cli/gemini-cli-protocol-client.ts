@@ -45,9 +45,6 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
     if (typeof project === 'string' && project.length > 0) {
       body.project = project;
     }
-    if (typeof action === 'string' && action.length > 0) {
-      body.action = action;
-    }
     if (typeof requestId === 'string' && requestId.length > 0) {
       body.requestId = requestId;
     }
@@ -71,10 +68,14 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
   resolveEndpoint(request: ProtocolRequestPayload, defaultEndpoint: string): string {
     const payload = this.extractPayload(request);
     const action = (payload.action as string) || 'generateContent';
+    const endpoint = `/v1internal:${action}`;
 
     // 根据 action 返回对应的 endpoint
     // generateContent, streamGenerateContent, countTokens
-    return `/v1internal:${action}`;
+    if (action === 'streamGenerateContent') {
+      return `${endpoint}?alt=sse`;
+    }
+    return endpoint;
   }
 
   finalizeHeaders(

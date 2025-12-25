@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T12:17:17.495Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T201657515-220"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "容器匹配成功！返回了 container_tree 和 dom_tree，且 root_container_id 为 \"weibo_login\"。现在可以进入步骤3：高亮能力闭环。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"explanation\":\"步骤2完成：containers:match 返回 success=true、container_tree/dom_tree 结构完整、root_container_id=weibo_login。进入步骤3：高亮能力闭环。\",\"plan\":[{\"status\": \"completed\", \"step\": \"启动与健康检查：验证 Unified API(7701) 与 Browser Service(7704) 启动、/health 返回 200，记录启动日志与PID。\"}, {\"status\": \"completed\", \"step\": \"容器匹配闭环：通过 WS 调用 containers:match，确认返回 success 与 container_tree/dom_tree 结构完整，并记录关键字段（root_container_id）。\"}, {\"status\": \"in_progress\", \"step\": \"高亮能力闭环：分别测试 selector 高亮与 dom_path 高亮，调用接口后用截图 API 验证高亮存在。\"}, {\"status\": \"pending\", \"step\": \"回环报告：整理以上测试输入/输出、截图路径、异常与修复建议，作为基线评估结果。\"}]}",
+                  "name": "update_plan"
+                },
+                "id": "call_-8042358489012851855",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766578637,
+      "id": "2025122420165885bcbbafef8c43c7",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122420165885bcbbafef8c43c7",
+      "usage": {
+        "completion_tokens": 258,
+        "prompt_tokens": 99145,
+        "prompt_tokens_details": {
+          "cached_tokens": 95778
+        },
+        "total_tokens": 99403
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 12:17:17 GMT",
+      "set-cookie": "acw_tc=0ae5a7dc17665786178862110e7e6d56cd06de7640c9626701fbf863859382;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122420165885bcbbafef8c43c7"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-087"
+}

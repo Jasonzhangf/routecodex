@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.278",
+    "buildTime": "2025-12-24T11:06:54.571Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T190647260-072"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****BNZi-Q",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "created": 1766574414,
+      "usage": {
+        "completion_tokens": 298,
+        "prompt_tokens": 18634,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 18932
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-e5aeda47-ad61-4e93-9ecc-8cbe5ebf703d",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "exec_command",
+                  "arguments": "{\"cmd\": \"mv /Users/fanzhang/.routecodex/auth/iflow-oauth-2.json /Users/fanzhang/.routecodex/auth/iflow-oauth-secondary.json\", \"justification\": \"重命名iFlow的第二个OAuth token文件以符合系统命名规范\", \"login\": true, \"max_output_tokens\": 2000, \"sandbox_permissions\": \"use_default\", \"shell\": \"/bin/zsh\", \"workdir\": \"/Users/fanzhang/Documents/github/routecodex\", \"yield_time_ms\": 1000}"
+                },
+                "index": 0,
+                "id": "call_4b6578c13c6a4334b9a984ff",
+                "type": "function"
+              }
+            ],
+            "content": "根据我检查的结果，我需要帮你更新iFlow的多token命名方式。从当前的文件来看，系统中存在两个iFlow token文件：\n\n1. `/Users/fanzhang/.routecodex/auth/iflow-oauth.json` - 第一个token\n2. `/Users/fanzhang/.routecodex/auth/iflow-oauth-2.json` - 第二个token\n\n按照系统的命名模式（参考qwen的命名方式），我将帮你重命名并更新相关配置文件，使iFlow能同时使用两个token。\n\n首先，让我重命名第二个token文件以符合系统的命名规范：\n\n"
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "1480",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 11:06:54 GMT",
+      "req-arrive-time": "1766574407442",
+      "req-cost-time": "6852",
+      "resp-start-time": "1766574414295",
+      "x-envoy-upstream-service-time": "6850"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092031-079"
+}

@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.252",
+    "buildTime": "2025-12-23T14:50:05.390Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T225000508-010"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Now I need to insert the handlers before the ui:action handler. Looking at the structure, I need to insert before line 268. Let me insert the handlers.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/main && head -n 267 index.mts > /tmp/index_with_handlers.mts && cat /tmp/handlers_part.mts >> /tmp/index_with_handlers.mts && tail -n +268 index.mts >> /tmp/index_with_handlers.mts && mv /tmp/index_with_handlers.mts index.mts\",\"justification\":\"Insert handlers before ui:action handler\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/main\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042313615193759413",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766501405,
+      "id": "20251223225000bad566c2b7b84373",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223225000bad566c2b7b84373",
+      "usage": {
+        "completion_tokens": 192,
+        "prompt_tokens": 145051,
+        "prompt_tokens_details": {
+          "cached_tokens": 144859
+        },
+        "total_tokens": 145243
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 14:50:05 GMT",
+      "set-cookie": "acw_tc=ac11000117665014007837128ebb560bf6e53408509a65ef0b2804b58a1910;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223225000bad566c2b7b84373"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-058"
+}

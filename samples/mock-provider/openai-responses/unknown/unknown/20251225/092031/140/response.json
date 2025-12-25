@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T12:23:40.821Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T202258188-249"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****BNZi-Q",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766579020,
+      "usage": {
+        "completion_tokens": 237,
+        "prompt_tokens": 124555,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 124792
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-15ac8070-99e8-4711-94b1-fa7ba7f66ad3",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "update_plan",
+                  "arguments": "{\"explanation\": \"步骤3完成：selector 和 dom_path 高亮测试均返回 success=true。进入步骤4：生成回环报告。\", \"plan\": [{\"status\": \"completed\", \"step\": \"启动与健康检查：验证 Unified API(7701) 与 Browser Service(7704) 启动、/health 返回 200，记录启动日志与PID。\"}, {\"status\": \"completed\", \"step\": \"容器匹配闭环：通过 WS 调用 containers:match，确认返回 success 与 container_tree/dom_tree 结构完整，并记录关键字段（root_container_id）。\"}, {\"status\": \"completed\", \"step\": \"高亮能力闭环：分别测试 selector 高亮与 dom_path 高亮，调用接口后用截图 API 验证高亮存在。\"}, {\"status\": \"in_progress\", \"step\": \"回环报告：整理以上测试输入/输出、截图路径、异常与修复建议，作为基线评估结果。\"}]}"
+                },
+                "index": 0,
+                "id": "call_953d56389a3542bcae14f51b",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "1387",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 12:23:40 GMT",
+      "req-arrive-time": "1766578979130",
+      "req-cost-time": "41267",
+      "resp-start-time": "1766579020397",
+      "x-envoy-upstream-service-time": "40104"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092031-140"
+}

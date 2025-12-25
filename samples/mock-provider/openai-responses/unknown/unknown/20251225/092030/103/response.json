@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T11:52:11.227Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T195116603-120"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****45931c",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694bd3b560f18590a26a6f1f",
+      "object": "chat.completion",
+      "created": 1766577086,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 68803,
+        "completion_tokens": 703,
+        "total_tokens": 69506
+      },
+      "extend_fields": {
+        "traceId": "213d17c517665770770051304e0ecb",
+        "requestId": "67e83aa66634fcd837b8843097e69107"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:98",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"python3 << 'EOF'\\n# Create a simple manual auth script that opens the correct URL and waits for user input\\nimport os\\nimport subprocess\\n\\nscript = \\\"\\\"\\\"#!/usr/bin/env node\\nimport os from 'os';\\nimport path from 'path';\\nimport fs from 'fs/promises';\\nimport { createProviderOAuthStrategy } from '../dist/providers/core/config/provider-oauth-configs.js';\\n\\nconst tokenFile = process.env.IFLOW_TOKEN_FILE || path.join(os.homedir(), '.routecodex', 'auth', 'iflow-oauth-1-primary.json');\\n\\nasync function run() {\\n  console.log(`[iflow-manual] Manual auth for: ${tokenFile}`);\\n  \\n  // ensure token file exists\\n  const tokenPath = tokenFile.startsWith('~') ? tokenFile.replace(/^~\\\\\\\\//, `${os.homedir()}/`) : tokenFile;\\n  await fs.mkdir(path.dirname(tokenPath), { recursive: true });\\n  try { await fs.access(tokenPath); } catch { await fs.writeFile(tokenPath, '{}', 'utf-8'); }\\n  \\n  // Use device code flow but let user open the URL manually\\n  const strategy = createProviderOAuthStrategy('iflow', {\\n    flowType: 'device_code',\\n    endpoints: {\\n      deviceCodeUrl: 'https://iflow.cn/oauth/device/code',\\n      tokenUrl: 'https://iflow.cn/oauth/token',\\n      userInfoUrl: 'https://iflow.cn/api/oauth/getUserInfo'\\n    },\\n    client: { clientId: '10009311001', scopes: ['openid','profile','email','api'] }\\n  }, tokenPath);\\n  \\n  // Manually trigger device code flow\\n  const deviceCodeData = await strategy.initiateDeviceCodeFlow();\\n  console.log('Please open this URL in your browser:');\\n  console.log(deviceCodeData.verification_uri);\\n  console.log('User code:', deviceCodeData.user_code);\\n  console.log('Press Enter when you have authorized...');\\n  \\n  await new Promise(resolve => process.stdin.once('data', resolve));\\n  \\n  const token = await strategy.pollForToken(deviceCodeData);\\n  await strategy.saveToken(token);\\n  console.log(`[iflow-manual] Token saved to: ${tokenPath}`);\\n}\\n\\nrun().catch(err => { console.error('[iflow-manual] Error:', err); process.exit(1); });\\n\\\"\\\"\\\"\\n\\nwith open('/Users/fanzhang/Documents/github/routecodex/scripts/auth-iflow-manual.mjs', 'w') as f:\\n    f.write(script)\\nos.chmod('/Users/fanzhang/Documents/github/routecodex/scripts/auth-iflow-manual.mjs', 0o755)\\nprint('Created manual auth script')\\nEOF\\n\",\"justification\":\"创建手动认证脚本，让用户手动打开URL和输入验证码\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:52:11 GMT",
+      "eagleeye-traceid": "213d17c517665770770051304e0ecb",
+      "s-brt": "54132",
+      "s-rt": "54277",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-103"
+}

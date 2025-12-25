@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.250",
+    "buildTime": "2025-12-23T14:24:36.487Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T222413555-043"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "<tool_call>exec_command<arg_key>cmd</arg_key><arg_value>cd /Users/fanzhang/Documents/github/webauto/apps/floating-panel && sed -n '200,240p' src/main/index.mts</arg_value><arg_key>justification</arg_key><arg_value>检查ui:highlight handler注册代码</arg_value><arg_key>login</arg_key><arg_value>false</arg_value><arg_key>max_output_tokens</arg_key><arg_value>2000</arg_value><arg_key>sandbox_permissions</arg_key><arg_value>use_default</arg_value><arg_key>shell</arg_key><arg_value>/bin/zsh</arg_value><arg_key>workdir</arg_key><arg_value>/Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/main</arg_value></tool_call>",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766499876,
+      "id": "202512232224139c439f112bda491c",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512232224139c439f112bda491c",
+      "usage": {
+        "completion_tokens": 103,
+        "prompt_tokens": 140564,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 140667
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 14:24:36 GMT",
+      "set-cookie": "acw_tc=ac11000117664998538304337e122d0c8a45e56067633c026ef269b0605188;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512232224139c439f112bda491c"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-047"
+}

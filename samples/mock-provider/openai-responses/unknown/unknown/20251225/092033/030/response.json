@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:53:59.648Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T205334856-070"
+  },
+  "url": "https://api.tabcode.cc/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****d731a8",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_0bf45dd529ed200501694a90d49bfc81999981159566f4b78a",
+      "object": "response",
+      "created_at": 1766494420,
+      "status": "completed",
+      "model": "gpt-5.2-codex",
+      "temperature": 1,
+      "top_p": 0.98,
+      "metadata": {},
+      "output": [
+        {
+          "id": "rs_0bf45dd529ed200501694a90d6a70881999711e0b15501789d",
+          "type": "reasoning",
+          "summary": [],
+          "content": []
+        },
+        {
+          "id": "fc_0bf45dd529ed200501694a90dbbd3481999ba46f11173afbfb",
+          "type": "function_call",
+          "status": "completed",
+          "call_id": "call_IESv3MO1XwXT9PXG3edUmvoy",
+          "name": "apply_patch",
+          "arguments": "{\"input\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/renderer/index.html\\n@@\\n-    #drag-area { height: 24px; background: #2d2d2d; border-bottom: 1px solid #3e3e3e; cursor: grab; display: flex; align-items: center; padding: 0 8px; user-select: none; }\\n-    #drag-area:active { cursor: grabbing; }\\n+    #drag-area { height: 24px; background: #2d2d2d; border-bottom: 1px solid #3e3e3e; cursor: grab; display: flex; align-items: center; padding: 0 8px; user-select: none; -webkit-app-region: drag; }\\n+    #drag-area:active { cursor: grabbing; }\\n@@\\n-    button { padding: 3px 8px; font-size: 11px; background: #3c3c3c; border: 1px solid #555; color: #ccc; border-radius: 2px; cursor: pointer; }\\n+    button { padding: 3px 8px; font-size: 11px; background: #3c3c3c; border: 1px solid #555; color: #ccc; border-radius: 2px; cursor: pointer; -webkit-app-region: no-drag; }\\n*** End Patch\",\"patch\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/renderer/index.html\\n@@\\n-    #drag-area { height: 24px; background: #2d2d2d; border-bottom: 1px solid #3e3e3e; cursor: grab; display: flex; align-items: center; padding: 0 8px; user-select: none; }\\n-    #drag-area:active { cursor: grabbing; }\\n+    #drag-area { height: 24px; background: #2d2d2d; border-bottom: 1px solid #3e3e3e; cursor: grab; display: flex; align-items: center; padding: 0 8px; user-select: none; -webkit-app-region: drag; }\\n+    #drag-area:active { cursor: grabbing; }\\n@@\\n-    button { padding: 3px 8px; font-size: 11px; background: #3c3c3c; border: 1px solid #555; color: #ccc; border-radius: 2px; cursor: pointer; }\\n+    button { padding: 3px 8px; font-size: 11px; background: #3c3c3c; border: 1px solid #555; color: #ccc; border-radius: 2px; cursor: pointer; -webkit-app-region: no-drag; }\\n*** End Patch\"}"
+        },
+        {
+          "id": "message_placeholder_3",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": ""
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 50153,
+        "input_tokens_details": {
+          "cached_tokens": 49024
+        },
+        "output_tokens": 862,
+        "output_tokens_details": {
+          "reasoning_tokens": 192
+        },
+        "total_tokens": 51015
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092033-030"
+}

@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.286",
+    "buildTime": "2025-12-24T16:39:07.812Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251225T003826361-020"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****BNZi-Q",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766594348,
+      "usage": {
+        "completion_tokens": 257,
+        "prompt_tokens": 130910,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 131167
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-9313859a-e521-4d36-ba27-122de5331032",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "exec_command",
+                  "arguments": "{\"cmd\": \"node -e \\\"import WebSocket from 'ws'; const ws=new WebSocket('ws://127.0.0.1:7701/ws'); ws.on('open',()=>{ws.send(JSON.stringify({type:'action',action:'containers:match',payload:{profile:'weibo_fresh',url:'https://weibo.com',maxDepth:6,maxChildren:20}}));}); ws.on('message',(data)=>{console.log('msg', data.toString());}); ws.on('error',(err)=>{console.error('ws error', err.message); process.exit(1);}); setTimeout(()=>process.exit(0), 3000);\\\"\", \"justification\": \"测试 WebSocket 调用 containers:match\", \"login\": true, \"max_output_tokens\": 4000, \"sandbox_permissions\": \"use_default\", \"shell\": \"/bin/bash\", \"workdir\": \"/Users/fanzhang/Documents/github/webauto\", \"yield_time_ms\": 3000}"
+                },
+                "index": 0,
+                "id": "call_77692411e2f5457ab89b46bd",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "1251",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 16:39:07 GMT",
+      "req-arrive-time": "1766594308122",
+      "req-cost-time": "39638",
+      "resp-start-time": "1766594347760",
+      "x-envoy-upstream-service-time": "37869"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092032-009"
+}

@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.278",
+    "buildTime": "2025-12-24T11:19:39.240Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T191936527-176"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "还需要移除验证列表中的 unified-api/index.js 检查。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"input\":\"*** Begin Patch\\n*** Update File: scripts/build/run-services-build.mjs\\n@@\\n  // 6. 验证构建产物存在\\n   const verify = [\\n     'dist/sharedmodule/engines/api-gateway/server.js',\\n-    'dist/services/unified-api/index.js',\\n     'dist/services/browser-service/index.js',\\n   ];\\n*** End Patch\\n\",\"patch\":\"*** Begin Patch\\n*** Update File: scripts/build/run-services-build.mjs\\n@@\\n  // 6. 验证构建产物存在\\n   const verify = [\\n     'dist/sharedmodule/engines/api-gateway/server.js',\\n-    'dist/services/unified-api/index.js',\\n     'dist/services/browser-service/index.js',\\n   ];\\n*** End Patch\\n\"}",
+                  "name": "apply_patch"
+                },
+                "id": "call_-8042238058128078162",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766575179,
+      "id": "2025122419193644ab03d8bb064012",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122419193644ab03d8bb064012",
+      "usage": {
+        "completion_tokens": 181,
+        "prompt_tokens": 56083,
+        "prompt_tokens_details": {
+          "cached_tokens": 54473
+        },
+        "total_tokens": 56264
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:19:39 GMT",
+      "set-cookie": "acw_tc=ac11000117665751767554379e370f24ef00852ad85b0a80f66460b5938c13;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122419193644ab03d8bb064012"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-032"
+}

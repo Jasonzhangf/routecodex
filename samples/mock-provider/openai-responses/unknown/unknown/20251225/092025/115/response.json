@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T11:15:01.249Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T191455682-142"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "找到问题了！\n\nUI 使用 `http://127.0.0.1:7701/v1/controller/action` 端点发送 actions，但是：\n1. `/v1/controller/action` 端点只返回结果，不会广播事件\n2. `/v1/containers/match` 端点会广播 `containers.matched` 事件\n\n所以问题是：UI 调用了错误的端点！应该使用 `/v1/containers/match` 而不是 `/v1/controller/action`。\n\n让我检查 `containers:match` action 应该走哪个端点。实际上，`/v1/controller/action` 只是通用的 action 处理器，不会触发事件广播。而 `/v1/containers/match` 是专门的端点，会广播事件。\n\n解决方案：\n1. 修改 `/v1/controller/action` 让它也能广播 `containers.matched` 事件\n2. 或者修改 UI，让它直接调用 `/v1/containers/match`\n\n方案 1 更好，因为保持了通用性。\n\n让我检查 `handleAction` 的实现，看看是否可以在那里添加广播逻辑。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"grep -n -B 5 -A 30 \\\"async handleAction\\\" services/unified-api/index.js\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042304200625225700",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766488501,
+      "id": "20251223191455ca6be96a0dd34c11",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223191455ca6be96a0dd34c11",
+      "usage": {
+        "completion_tokens": 268,
+        "prompt_tokens": 67044,
+        "prompt_tokens_details": {
+          "cached_tokens": 66824
+        },
+        "total_tokens": 67312
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 11:15:01 GMT",
+      "set-cookie": "acw_tc=ac11000117664884958335549edd7f747d09a467416d0d17c28801f5172c5c;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223191455ca6be96a0dd34c11"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-115"
+}

@@ -1,0 +1,61 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.274",
+    "buildTime": "2025-12-24T08:00:23.273Z",
+    "entryEndpoint": "/v1/messages",
+    "clientRequestId": "anthropic-messages-unknown-unknown-20251224T160021190-036"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "claude-cli/2.0.76 (external, cli)",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "application/json",
+    "session_id": "codex_cli_session_anthropic-messages-glm_key1_glm-4_7_e5057049ac",
+    "conversation_id": "codex_cli_conversation_anthropic-messages-glm_key1_gl_6ce8540253"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "我正在列出当前目录的文件。</think>```shell\nls -la\n```",
+            "reasoning_content": "用户用中文问\"列出本地文件\"，意思是\"list local files\"。我需要使用shell命令来列出当前目录的文件。\n\n用户要求简洁回复，我应该直接执行命令并给出简洁的答案。",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766563223,
+      "id": "202512241600210274a3343c584698",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512241600210274a3343c584698",
+      "usage": {
+        "completion_tokens": 61,
+        "prompt_tokens": 2315,
+        "prompt_tokens_details": {
+          "cached_tokens": 4
+        },
+        "total_tokens": 2376
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:00:23 GMT",
+      "set-cookie": "acw_tc=ac11000117665632213116700e67d75e154bab5d511bbb54f388686c910b97;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512241600210274a3343c584698"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "anthropic-messages-unknown-unknown-20251225T092023-001"
+}

@@ -1,0 +1,1173 @@
+{
+  "meta": {
+    "stage": "provider-request",
+    "version": "0.89.260",
+    "buildTime": "2025-12-24T02:59:56.436Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T105956395-017"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are Codex, based on GPT-5. You are running as a coding agent in the Codex CLI on a user's computer.\n\n## General\n\n- When searching for text or files, prefer using `rg` or `rg --files` respectively because `rg` is much faster than alternatives like `grep`. (If the `rg` command is not found, then use alternatives.)\n\n## Editing constraints\n\n- Default to ASCII when editing or creating files. Only introduce non-ASCII or other Unicode characters when there is a clear justification and the file already uses them.\n- Add succinct code comments that explain what is going on if code is not self-explanatory. You should not add comments like \"Assigns the value to the variable\", but a brief comment might be useful ahead of a complex code block that the user would otherwise have to spend time parsing out. Usage of these comments should be rare.\n- Try to use apply_patch for single file edits, but it is fine to explore other options to make the edit if it does not work well. Do not use apply_patch for changes that are auto-generated (i.e. generating package.json or running a lint or format command like gofmt) or when scripting is more efficient (such as search and replacing a string across a codebase).\n- You may be in a dirty git worktree.\n    * NEVER revert existing changes you did not make unless explicitly requested, since these changes were made by the user.\n    * If asked to make a commit or code edits and there are unrelated changes to your work or changes that you didn't make in those files, don't revert those changes.\n    * If the changes are in files you've touched recently, you should read carefully and understand how you can work with the changes rather than reverting them.\n    * If the changes are in unrelated files, just ignore them and don't revert them.\n- Do not amend a commit unless explicitly requested to do so.\n- While you are working, you might notice unexpected changes that you didn't make. If this happens, STOP IMMEDIATELY and ask the user how they would like to proceed.\n- **NEVER** use destructive commands like `git reset --hard` or `git checkout --` unless specifically requested or approved by the user.\n\n## Plan tool\n\nWhen using the planning tool:\n- Skip using the planning tool for straightforward tasks (roughly the easiest 25%).\n- Do not make single-step plans.\n- When you made a plan, update it after having performed one of the sub-tasks that you shared on the plan.\n\n## Codex CLI harness, sandboxing, and approvals\n\nThe Codex CLI harness supports several different configurations for sandboxing and escalation approvals that the user can choose from.\n\nFilesystem sandboxing defines which files can be read or written. The options for `sandbox_mode` are:\n- **read-only**: The sandbox only permits reading files.\n- **workspace-write**: The sandbox permits reading files, and editing files in `cwd` and `writable_roots`. Editing files in other directories requires approval.\n- **danger-full-access**: No filesystem sandboxing - all commands are permitted.\n\nNetwork sandboxing defines whether network can be accessed without approval. Options for `network_access` are:\n- **restricted**: Requires approval\n- **enabled**: No approval needed\n\nApprovals are your mechanism to get user consent to run shell commands without the sandbox. Possible configuration options for `approval_policy` are\n- **untrusted**: The harness will escalate most commands for user approval, apart from a limited allowlist of safe \"read\" commands.\n- **on-failure**: The harness will allow all commands to run in the sandbox (if enabled), and failures will be escalated to the user for approval to run again without the sandbox.\n- **on-request**: Commands will be run in the sandbox by default, and you can specify in your tool call if you want to escalate a command to run without sandboxing. (Note that this mode is not always available. If it is, you'll see parameters for it in the `shell` command description.)\n- **never**: This is a non-interactive mode where you may NEVER ask the user for approval to run commands. Instead, you must always persist and work around constraints to solve the task for the user. You MUST do your utmost best to finish the task and validate your work before yielding. If this mode is paired with `danger-full-access`, take advantage of it to deliver the best outcome for the user. Further, in this mode, your default testing philosophy is overridden: Even if you don't see local patterns for testing, you may add tests and scripts to validate your work. Just remove them before yielding.\n\nWhen you are running with `approval_policy == on-request`, and sandboxing enabled, here are scenarios where you'll need to request approval:\n- You need to run a command that writes to a directory that requires it (e.g. running tests that write to /var)\n- You need to run a GUI app (e.g., open/xdg-open/osascript) to open browsers or files.\n- You are running sandboxed and need to run a command that requires network access (e.g. installing packages)\n- If you run a command that is important to solving the user's query, but it fails because of sandboxing, rerun the command with approval. ALWAYS proceed to use the `with_escalated_permissions` and `justification` parameters - do not message the user before requesting approval for the command.\n- You are about to take a potentially destructive action such as an `rm` or `git reset` that the user did not explicitly ask for\n- (for all of these, you should weigh alternative paths that do not require approval)\n\nWhen `sandbox_mode` is set to read-only, you'll need to request approval for any command that isn't a read.\n\nYou will be told what filesystem sandboxing, network sandboxing, and approval mode are active in a developer or user message. If you are not told about this, assume that you are running with workspace-write, network sandboxing enabled, and approval on-failure.\n\nAlthough they introduce friction to the user because your work is paused until the user responds, you should leverage them when necessary to accomplish important work. If the completing the task requires escalated permissions, Do not let these settings or the sandbox deter you from attempting to accomplish the user's task unless it is set to \"never\", in which case never ask for approvals.\n\nWhen requesting approval to execute a command that will require escalated privileges:\n  - Provide the `with_escalated_permissions` parameter with the boolean value true\n  - Include a short, 1 sentence explanation for why you need to enable `with_escalated_permissions` in the justification parameter\n\n## Special user requests\n\n- If the user makes a simple request (such as asking for the time) which you can fulfill by running a terminal command (such as `date`), you should do so.\n- If the user asks for a \"review\", default to a code review mindset: prioritise identifying bugs, risks, behavioural regressions, and missing tests. Findings must be the primary focus of the response - keep summaries or overviews brief and only after enumerating the issues. Present findings first (ordered by severity with file/line references), follow with open questions or assumptions, and offer a change-summary only as a secondary detail. If no findings are discovered, state that explicitly and mention any residual risks or testing gaps.\n\n## Presenting your work and final message\n\nYou are producing plain text that will later be styled by the CLI. Follow these rules exactly. Formatting should make results easy to scan, but not feel mechanical. Use judgment to decide how much structure adds value.\n\n- Default: be very concise; friendly coding teammate tone.\n- Ask only when needed; suggest ideas; mirror the user's style.\n- For substantial work, summarize clearly; follow final‑answer formatting.\n- Skip heavy formatting for simple confirmations.\n- Don't dump large files you've written; reference paths only.\n- No \"save/copy this file\" - User is on the same machine.\n- Offer logical next steps (tests, commits, build) briefly; add verify steps if you couldn't do something.\n- For code changes:\n  * Lead with a quick explanation of the change, and then give more details on the context covering where and why a change was made. Do not start this explanation with \"summary\", just jump right in.\n  * If there are natural next steps the user may want to take, suggest them at the end of your response. Do not make suggestions if there are no natural next steps.\n  * When suggesting multiple options, use numeric lists for the suggestions so the user can quickly respond with a single number.\n- The user does not command execution outputs. When asked to show the output of a command (e.g. `git show`), relay the important details in your answer or summarize the key lines so the user understands the result.\n\n### Final answer structure and style guidelines\n\n- Plain text; CLI handles styling. Use structure only when it helps scanability.\n- Headers: optional; short Title Case (1-3 words) wrapped in **…**; no blank line before the first bullet; add only if they truly help.\n- Bullets: use - ; merge related points; keep to one line when possible; 4–6 per list ordered by importance; keep phrasing consistent.\n- Monospace: backticks for commands/paths/env vars/code ids and inline examples; use for literal keyword bullets; never combine with **.\n- Code samples or multi-line snippets should be wrapped in fenced code blocks; include an info string as often as possible.\n- Structure: group related bullets; order sections general → specific → supporting; for subsections, start with a bolded keyword bullet, then items; match complexity to the task.\n- Tone: collaborative, concise, factual; present tense, active voice; self‑contained; no \"above/below\"; parallel wording.\n- Don'ts: no nested bullets/hierarchies; no ANSI codes; don't cram unrelated keywords; keep keyword lists short—wrap/reformat if long; avoid naming formatting styles in answers.\n- Adaptation: code explanations → precise, structured with code refs; simple tasks → lead with outcome; big changes → logical walkthrough + rationale + next actions; casual one-offs → plain sentences, no headers/bullets.\n- File References: When referencing files in your response, make sure to include the relevant start line and always follow the below rules:\n  * Use inline code to make file paths clickable.\n  * Each reference should have a stand alone path. Even if it's the same file.\n  * Accepted: absolute, workspace‑relative, a/ or b/ diff prefixes, or bare filename/suffix.\n  * Line/column (1‑based, optional): :line[:column] or #Lline[Ccolumn] (column defaults to 1).\n  * Do not use URIs like file://, vscode://, or https://.\n  * Do not provide range of lines\n  * Examples: src/app.ts, src/app.ts:42, b/server/index.js#L10, C:\\repo\\project\\main.rs:12:5"
+      },
+      {
+        "role": "user",
+        "content": "# AGENTS.md instructions for /Users/fanzhang/Documents/github/webauto\n\n<INSTRUCTIONS>\n# WebAuto 架构设计原则与模块职责\n\n## 统一端口\n\n- 7701：Unified API（HTTP + WebSocket + Bus）\n- 7704：Browser Service（会话管理）\n\n## 启动方式\n\n- 唯一脚本：node scripts/start-headful.mjs\n- 业务逻辑：launcher/headful-launcher.mjs\n\n## 模块职责\n\n- 脚本：CLI 参数解析，不含业务 logic\n- 模块：独立 CLI，通过 HTTP/WebSocket 通信\n- 服务：无业务 logic，纯技术实现\n- UI：状态展示，无业务 logic\n\n## 详细文档\n\n- docs/arch/PORTS.md：端口与环境变量\n- docs/arch/LAUNCHER.md：启动器架构\n- docs/arch/AGENTS.md：完整设计原则\n\n## 快速验证\n\n```bash\n# 统一健康检查\ncurl http://127.0.0.1:7701/health\n\n# 浏览器服务健康\ncurl http://127.0.0.1:7704/health\n```\n## 硬性规则：模块系统\n1. 全仓库统一使用 ES Module（`\"type\": \"module\"`），禁止混用 CommonJS。\n2. 所有源码文件扩展名：`.ts`、`.mts`、`.js`、`.mjs` 均为 ES 模块；`.cjs` 仅用于必须 CommonJS 的遗留依赖。\n3. 禁止在 ES 模块中使用 `require`、`module.exports`、`__dirname`、`__filename`；统一改用 `import`、 `export`、 `import.meta.url`、`fileURLToPath`。\n4. Electron preload 脚本必须使用 `.cjs`，主进程显式加载 `.cjs`；禁止出现 `.mjs` 路径以避免模块冲突。\n5. 构建脚本、CLI 统一使用 CommonJS，Node ≥ 14 原生支持。\n6. 违反上述规则即视为阻塞性 Bug，立即回滚或修复。\n7. 浮窗UI（apps/floating-panel）必须使用纯CJS架构，禁止混用ESM以避免Electron加载错误。\n\n## Skills\nThese skills are discovered at startup from multiple local sources. Each entry includes a name, description, and file path so you can open the source for full instructions.\n- skill-creator: Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Codex's capabilities with specialized knowledge, workflows, or tool integrations. (file: /Users/fanzhang/.codex/skills/.system/skill-creator/SKILL.md)\n- skill-installer: Install Codex skills into $CODEX_HOME/skills from a curated list or a GitHub repo path. Use when a user asks to list installable skills, install a curated skill, or install a skill from another repo (including private repos). (file: /Users/fanzhang/.codex/skills/.system/skill-installer/SKILL.md)\n- Discovery: Available skills are listed in project docs and may also appear in a runtime \"## Skills\" section (name + description + file path). These are the sources of truth; skill bodies live on disk at the listed paths.\n- Trigger rules: If the user names a skill (with `$SkillName` or plain text) OR the task clearly matches a skill's description, you must use that skill for that turn. Multiple mentions mean use them all. Do not carry skills across turns unless re-mentioned.\n- Missing/blocked: If a named skill isn't in the list or the path can't be read, say so briefly and continue with the best fallback.\n- How to use a skill (progressive disclosure):\n  1) After deciding to use a skill, open its `SKILL.md`. Read only enough to follow the workflow.\n  2) If `SKILL.md` points to extra folders such as `references/`, load only the specific files needed for the request; don't bulk-load everything.\n  3) If `scripts/` exist, prefer running or patching them instead of retyping large code blocks.\n  4) If `assets/` or templates exist, reuse them instead of recreating from scratch.\n- Description as trigger: The YAML `description` in `SKILL.md` is the primary trigger signal; rely on it to decide applicability. If unsure, ask a brief clarification before proceeding.\n- Coordination and sequencing:\n  - If multiple skills apply, choose the minimal set that covers the request and state the order you'll use them.\n  - Announce which skill(s) you're using and why (one short line). If you skip an obvious skill, say why.\n- Context hygiene:\n  - Keep context small: summarize long sections instead of pasting them; only load extra files when needed.\n  - Avoid deeply nested references; prefer one-hop files explicitly linked from `SKILL.md`.\n  - When variants exist (frameworks, providers, domains), pick only the relevant reference file(s) and note that choice.\n- Safety and fallback: If a skill can't be applied cleanly (missing files, unclear instructions), state the issue, pick the next-best approach, and continue.\n</INSTRUCTIONS>"
+      },
+      {
+        "role": "user",
+        "content": "<environment_context>\n  <cwd>/Users/fanzhang/Documents/github/webauto</cwd>\n  <approval_policy>never</approval_policy>\n  <sandbox_mode>danger-full-access</sandbox_mode>\n  <network_access>enabled</network_access>\n  <shell>zsh</shell>\n</environment_context>"
+      },
+      {
+        "role": "user",
+        "content": "重新检查为何启动后可以展开容器树和 DOM，但是没有连线？"
+      },
+      {
+        "role": "user",
+        "content": "重新检查为何启动后可以展开容器树和 DOM，但是没有连线？"
+      },
+      {
+        "role": "user",
+        "content": "重新检查为何启动后可以展开容器树和 DOM，但是没有连线？"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"find . -type f -name \\\"*.ts\\\" -o -name \\\"*.js\\\" -o -name \\\"*.tsx\\\" -o -name \\\"*.jsx\\\" | xargs grep -l \\\"连线\\\\|connection\\\\|edge\\\\|link\\\" | grep -v node_modules | head -20\"}"
+            },
+            "id": "fc_-8042263346895745548"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "Chunk ID: b74d51\nWall time: 3.6938 seconds\nProcess exited with code 0\nOriginal token count: 271\nOutput:\ngrep: ./node_modules/sql.js: Is a directory\r\ngrep: ./node_modules/ipaddr.js: Is a directory\r\n./dist/inpage/container-tree.js\r\n./dist/sharedmodule/engines/api-gateway/controllers/workflowSequenceController.js\r\n./dist/sharedmodule/engines/api-gateway/controllers/extractController.js\r\n./dist/libs/browser/cookie-manager.ts\r\n./dist/libs/browser/dist/browser-config.js\r\n./dist/libs/browser/browser-config.js\r\n./dist/libs/browser/browser/dist/browser-config.js\r\n./dist/libs/browser/browser/browser-config.js\r\n./dist/libs/browser/browser/cookie-manager.js\r\n./dist/libs/browser/browser-config.ts\r\n./dist/libs/browser/cookie-manager.js\r\n./dist/libs/containers/src/engine/ExecutionPlanner.js\r\n./dist/libs/containers/src/engine/RelationshipRegistry.js\r\n./dist/libs/containers/src/engine/TreeDiscoveryEngine.js\r\n./dist/modules/container-matcher/src/fixtureSession.js\r\n./dist/modules/graph-engine/tests/graphStore.test.js\r\n./dist/modules/graph-engine/src/graphStore.js\r\n./dist/modules/browser-control/src/domTree.js\r\n./dist/modules/browser-control/src/launcher.js\r\n./dist/electron/src/main.js",
+        "name": "exec_command",
+        "tool_call_id": "fc_-8042263346895745548"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"rg -l \\\"连线|svg.*line|BezierCurve|path.*edge\\\" --type ts --type js | grep -v node_modules | head -10\"}"
+            },
+            "id": "fc_-8042371751871692111"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "Chunk ID: 351b16\nWall time: 0.0522 seconds\nProcess exited with code 0\nOriginal token count: 11\nOutput:\napps/floating-panel/src/renderer/graph.mjs",
+        "name": "exec_command",
+        "tool_call_id": "fc_-8042371751871692111"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"cat apps/floating-panel/src/renderer/graph.mjs\"}"
+            },
+            "id": "fc_-8042299630780161659"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "Chunk ID: a77145\nWall time: 0.0515 seconds\nProcess exited with code 0\nOriginal token count: 4101\nOutput:\nlet canvas = null;\r\nlet containerData = null;\r\nlet domData = null;\r\nconst expandedNodes = new Set();\r\nlet isDraggingGraph = false;\r\nlet dragStart = { x: 0, y: 0 };\r\nlet graphOffset = { x: 0, y: 0 };\r\nlet selectedContainer = null;\r\nlet selectedDom = null;\r\nconst domNodePositions = new Map();\r\nconst containerNodePositions = new Map();\r\n\r\nexport function initGraph(canvasEl) {\r\n  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');\r\n  svg.setAttribute('width', '100%');\r\n  svg.setAttribute('height', '100%');\r\n  svg.style.overflow = 'hidden';\r\n  svg.style.backgroundColor = '#1e1e1e';\r\n  svg.style.cursor = 'grab';\r\n  canvasEl.style.overflow = 'hidden';\r\n  canvasEl.appendChild(svg);\r\n  canvas = svg;\r\n  \r\n  svg.addEventListener('mousedown', (e) => {\r\n    if (e.target.tagName === 'svg') {\r\n      isDraggingGraph = true;\r\n      dragStart.x = e.clientX - graphOffset.x;\r\n      dragStart.y = e.clientY - graphOffset.y;\r\n      svg.style.cursor = 'grabbing';\r\n      e.preventDefault();\r\n    }\r\n  });\r\n  \r\n  window.addEventListener('mousemove', (e) => {\r\n    if (isDraggingGraph) {\r\n      graphOffset.x = e.clientX - dragStart.x;\r\n      graphOffset.y = e.clientY - dragStart.y;\r\n      renderGraph();\r\n    }\r\n  });\r\n  \r\n  window.addEventListener('mouseup', () => {\r\n    if (isDraggingGraph) {\r\n      isDraggingGraph = false;\r\n      svg.style.cursor = 'grab';\r\n    }\r\n  });\r\n}\r\n\r\nexport function updateContainerTree(data) {\r\n  if (!canvas) return;\r\n  containerData = data;\r\n  if (data && (data.id || data.name)) {\r\n    const rootId = data.id || data.name || 'root';\r\n    expandedNodes.add(rootId);\r\n    expandAllContainers(data);\r\n  }\r\n  renderGraph();\r\n}\r\n\r\nexport function updateDomTree(data) {\r\n  if (!canvas) return;\r\n  domData = data;\r\n  expandAllDomNodes(data);\r\n  renderGraph();\r\n}\r\n\r\nfunction expandAllContainers(node) {\r\n  if (!node || typeof node !== 'object') return;\r\n  const nodeId = node.id || node.name;\r\n  if (nodeId) {\r\n    expandedNodes.add(nodeId);\r\n  }\r\n  if (node.children && Array.isArray(node.children)) {\r\n    node.children.forEach(child => expandAllContainers(child));\r\n  }\r\n}\r\n\r\nfunction expandAllDomNodes(node) {\r\n  if (!node || typeof node !== 'object') return;\r\n  const nodeId = node.path || node.id || `dom-${Math.random()}`;\r\n  expandedNodes.add(nodeId);\r\n  if (node.children && Array.isArray(node.children)) {\r\n    node.children.forEach(child => expandAllDomNodes(child));\r\n  }\r\n}\r\n\r\nfunction renderGraph() {\r\n  if (!canvas) return;\r\n  while (canvas.firstChild) {\r\n    canvas.removeChild(canvas.firstChild);\r\n  }\r\n\r\n  const mainGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');\r\n  mainGroup.setAttribute('transform', `translate(${graphOffset.x + 10}, ${graphOffset.y + 10})`);\r\n\r\n  const domNodesMap = new Map();\r\n  domNodePositions.clear();\r\n  containerNodePositions.clear();\r\n  \r\n  if (domData) {\r\n    collectDomNodes(domData, domNodesMap, 0);\r\n  }\r\n\r\n  if (containerData) {\r\n    const containerGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');\r\n    containerGroup.setAttribute('transform', 'translate(0, 0)');\r\n    renderContainerNode(containerGroup, containerData, 0, 0, 0, domNodesMap);\r\n    mainGroup.appendChild(containerGroup);\r\n  }\r\n\r\n  if (domData) {\r\n    const domGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');\r\n    domGroup.setAttribute('transform', 'translate(400, 0)');\r\n    renderDomNodeRecursive(domGroup, domData, 0, 0);\r\n    mainGroup.appendChild(domGroup);\r\n    \r\n    drawAllConnections(mainGroup);\r\n  }\r\n\r\n  canvas.appendChild(mainGroup);\r\n}\r\n\r\nfunction collectDomNodes(node, map, currentY) {\r\n  if (!node || typeof node !== 'object') return;\r\n  const path = node.path || node.id || node.selectors?.[0] || `node-${Math.random()}`;\r\n  map.set(path, node);\r\n  domNodePositions.set(path, currentY);\r\n  if (node.children && Array.isArray(node.children)) {\r\n    let y = currentY + 28;\r\n    node.children.forEach(child => {\r\n      collectDomNodes(child, map, y);\r\n      y += 32;\r\n    });\r\n  }\r\n}\r\n\r\nfunction renderContainerNode(parent, node, x, y, depth, domNodesMap) {\r\n  const nodeId = node.id || node.name || 'root';\r\n  const isExpanded = expandedNodes.has(nodeId);\r\n  const hasChildren = node.children && node.children.length > 0;\r\n  const isSelected = selectedContainer === nodeId;\r\n\r\n  containerNodePositions.set(nodeId, { x: x + depth * 20 + 180, y: y + 14 });\r\n\r\n  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');\r\n  g.setAttribute('transform', `translate(${x + depth * 20}, ${y})`);\r\n\r\n  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');\r\n  rect.setAttribute('x', '0');\r\n  rect.setAttribute('y', '0');\r\n  rect.setAttribute('width', '180');\r\n  rect.setAttribute('height', '28');\r\n  rect.setAttribute('fill', isSelected ? '#264f36' : '#2d2d30');\r\n  rect.setAttribute('stroke', isSelected ? '#4CAF50' : '#555');\r\n  rect.setAttribute('stroke-width', isSelected ? '2' : '1');\r\n  rect.setAttribute('rx', '2');\r\n  rect.style.cursor = 'pointer';\r\n\r\n  rect.addEventListener('mouseenter', () => {\r\n    if (selectedContainer !== nodeId) {\r\n      rect.setAttribute('fill', '#3e3e42');\r\n      rect.setAttribute('stroke', '#007acc');\r\n    }\r\n  });\r\n  rect.addEventListener('mouseleave', () => {\r\n    if (selectedContainer !== nodeId) {\r\n      rect.setAttribute('fill', '#2d2d30');\r\n      rect.setAttribute('stroke', '#555');\r\n    }\r\n  });\r\n  \r\n  rect.addEventListener('click', (e) => {\r\n    e.stopPropagation();\r\n    selectedContainer = nodeId;\r\n    selectedDom = null;\r\n    if (hasChildren) {\r\n      if (isExpanded) {\r\n        expandedNodes.delete(nodeId);\r\n      } else {\r\n        expandedNodes.add(nodeId);\r\n      }\r\n    }\r\n    \r\n    if (node.selectors && node.selectors.length > 0 && typeof window.api?.highlightElement === 'function') {\r\n      window.api.highlightElement(node.selectors[0], 'green').catch(err => {\r\n        console.error('Failed to highlight:', err);\r\n      });\r\n    }\r\n    \r\n    renderGraph();\r\n  });\r\n\r\n  const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');\r\n  text.setAttribute('x', '24');\r\n  text.setAttribute('y', '18');\r\n  text.setAttribute('fill', '#cccccc');\r\n  text.setAttribute('font-size', '12');\r\n  text.setAttribute('font-family', 'Consolas, monospace');\r\n  text.setAttribute('pointer-events', 'none');\r\n  text.textContent = node.name || node.id || 'Unknown';\r\n\r\n  const indicatorBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');\r\n  indicatorBg.setAttribute('x', '4');\r\n  indicatorBg.setAttribute('y', '8');\r\n  indicatorBg.setAttribute('width', '12');\r\n  indicatorBg.setAttribute('height', '12');\r\n  indicatorBg.setAttribute('fill', '#3e3e42');\r\n  indicatorBg.setAttribute('stroke', '#888');\r\n  indicatorBg.setAttribute('stroke-width', '1');\r\n  indicatorBg.setAttribute('rx', '1');\r\n\r\n  const indicatorText = document.createElementNS('http://www.w3.org/2000/svg', 'text');\r\n  indicatorText.setAttribute('x', '10');\r\n  indicatorText.setAttribute('y', '18');\r\n  indicatorText.setAttribute('text-anchor', 'middle');\r\n  indicatorText.setAttribute('fill', '#fff');\r\n  indicatorText.setAttribute('font-size', '10');\r\n  indicatorText.setAttribute('font-weight', 'bold');\r\n  indicatorText.setAttribute('pointer-events', 'none');\r\n  indicatorText.textContent = hasChildren ? (isExpanded ? '-' : '+') : '';\r\n\r\n  g.appendChild(rect);\r\n  g.appendChild(indicatorBg);\r\n  g.appendChild(indicatorText);\r\n  g.appendChild(text);\r\n  parent.appendChild(g);\r\n\r\n  if (node.match && node.match.selector) {\r\n    const domNodeY = domNodePositions.get(node.match.selector) || 0;\r\n    drawConnectionToDom(parent, x + depth * 20 + 180, y + 14, 410, domNodeY + 12);\r\n  }\r\n\r\n  let totalHeight = 28;\r\n\r\n  if (hasChildren && isExpanded) {\r\n    let currentY = y + 32;\r\n    node.children.forEach((child, index) => {\r\n      const vertLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');\r\n      vertLine.setAttribute('x1', '10');\r\n      vertLine.setAttribute('y1', String(y + 28));\r\n      vertLine.setAttribute('x2', '10');\r\n      vertLine.setAttribute('y2', String(currentY + 14));\r\n      vertLine.setAttribute('stroke', '#666');\r\n      vertLine.setAttribute('stroke-width', '1');\r\n      parent.appendChild(vertLine);\r\n      \r\n      const horizLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');\r\n      horizLine.setAttribute('x1', '10');\r\n      horizLine.setAttribute('y1', String(currentY + 14));\r\n      horizLine.setAttribute('x2', String((depth + 1) * 20 + 10));\r\n      horizLine.setAttribute('y2', String(currentY + 14));\r\n      horizLine.setAttribute('stroke', '#666');\r\n      horizLine.setAttribute('stroke-width', '1');\r\n      parent.appendChild(horizLine);\r\n      \r\n      const childHeight = renderContainerNode(parent, child, x, currentY, depth + 1, domNodesMap);\r\n      currentY += childHeight + 4;\r\n      totalHeight = currentY - y;\r\n    });\r\n  }\r\n\r\n  return totalHeight;\r\n}\r\n\r\nfunction renderDomNodeRecursive(parent, node, x, y) {\r\n  if (!node || typeof node !== 'object') return 0;\r\n\r\n  const nodeId = node.path || node.id || `dom-${x}-${y}`;\r\n  const isExpanded = expandedNodes.has(nodeId);\r\n  const hasChildren = node.children && node.children.length > 0;\r\n  const isSelected = selectedDom === nodeId;\r\n\r\n  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');\r\n  g.setAttribute('transform', `translate(${x}, ${y})`);\r\n\r\n  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');\r\n  rect.setAttribute('x', '0');\r\n  rect.setAttribute('y', '0');\r\n  rect.setAttribute('width', '220');\r\n  rect.setAttribute('height', '24');\r\n  rect.setAttribute('fill', isSelected ? '#264f36' : '#252526');\r\n  rect.setAttribute('stroke', isSelected ? '#007acc' : '#3e3e42');\r\n  rect.setAttribute('stroke-width', isSelected ? '2' : '1');\r\n  rect.setAttribute('rx', '2');\r\n  rect.style.cursor = 'pointer';\r\n\r\n  rect.addEventListener('mouseenter', () => {\r\n    if (selectedDom !== nodeId) {\r\n      rect.setAttribute('fill', '#2d2d30');\r\n      rect.setAttribute('stroke', '#007acc');\r\n    }\r\n  });\r\n  rect.addEventListener('mouseleave', () => {\r\n    if (selectedDom !== nodeId) {\r\n      rect.setAttribute('fill', '#252526');\r\n      rect.setAttribute('stroke', '#3e3e42');\r\n    }\r\n  });\r\n\r\n  rect.addEventListener('click', (e) => {\r\n    e.stopPropagation();\r\n    selectedDom = nodeId;\r\n    selectedContainer = null;\r\n    if (hasChildren) {\r\n      if (isExpanded) {\r\n        expandedNodes.delete(nodeId);\r\n      } else {\r\n        expandedNodes.add(nodeId);\r\n      }\r\n    }\r\n    \r\n    const selector = node.id ? `#${node.id}` : (node.path || '');\r\n    if (selector && typeof window.api?.highlightElement === 'function') {\r\n      window.api.highlightElement(selector, 'blue').catch(err => {\r\n        console.error('Failed to highlight:', err);\r\n      });\r\n    }\r\n    \r\n    renderGraph();\r\n  });\r\n\r\n  const tagText = document.createElementNS('http://www.w3.org/2000/svg', 'text');\r\n  tagText.setAttribute('x', '24');\r\n  tagText.setAttribute('y', '16');\r\n  tagText.setAttribute('fill', '#4ec9b0');\r\n  tagText.setAttribute('font-size', '11');\r\n  tagText.setAttribute('font-family', 'Consolas, monospace');\r\n  tagText.setAttribute('font-weight', 'bold');\r\n  tagText.setAttribute('pointer-events', 'none');\r\n  tagText.textContent = node.tag || 'DIV';\r\n\r\n  const infoText = document.createElementNS('http://www.w3.org/2000/svg', 'text');\r\n  const label = node.id ? `#${node.id}` : (node.classes?.[0] ? `.${node.classes[0]}` : '');\r\n  infoText.setAttribute('x', '70');\r\n  infoText.setAttribute('y', '16');\r\n  infoText.setAttribute('fill', '#9cdcfe');\r\n  infoText.setAttribute('font-size', '10');\r\n  infoText.setAttribute('font-family', 'Consolas, monospace');\r\n  infoText.setAttribute('pointer-events', 'none');\r\n  infoText.textContent = label.substring(0, 30);\r\n\r\n  const indicatorBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');\r\n  indicatorBg.setAttribute('x', '4');\r\n  indicatorBg.setAttribute('y', '6');\r\n  indicatorBg.setAttribute('width', '12');\r\n  indicatorBg.setAttribute('height', '12');\r\n  indicatorBg.setAttribute('fill', '#3e3e42');\r\n  indicatorBg.setAttribute('stroke', '#888');\r\n  indicatorBg.setAttribute('stroke-width', '1');\r\n  indicatorBg.setAttribute('rx', '1');\r\n\r\n  const indicatorText = document.createElementNS('http://www.w3.org/2000/svg', 'text');\r\n  indicatorText.setAttribute('x', '10');\r\n  indicatorText.setAttribute('y', '16');\r\n  indicatorText.setAttribute('text-anchor', 'middle');\r\n  indicatorText.setAttribute('fill', '#fff');\r\n  indicatorText.setAttribute('font-size', '10');\r\n  indicatorText.setAttribute('font-weight', 'bold');\r\n  indicatorText.setAttribute('pointer-events', 'none');\r\n  indicatorText.textContent = hasChildren ? (isExpanded ? '-' : '+') : '';\r\n\r\n  g.appendChild(rect);\r\n  g.appendChild(indicatorBg);\r\n  g.appendChild(indicatorText);\r\n  g.appendChild(tagText);\r\n  g.appendChild(infoText);\r\n  parent.appendChild(g);\r\n\r\n  let totalHeight = 24;\r\n\r\n  if (hasChildren && isExpanded) {\r\n    let currentY = y + 28;\r\n    node.children.forEach((child) => {\r\n      const vertLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');\r\n      vertLine.setAttribute('x1', '10');\r\n      vertLine.setAttribute('y1', String(y + 24));\r\n      vertLine.setAttribute('x2', '10');\r\n      vertLine.setAttribute('y2', String(currentY + 12));\r\n      vertLine.setAttribute('stroke', '#555');\r\n      vertLine.setAttribute('stroke-width', '1');\r\n      parent.appendChild(vertLine);\r\n\r\n      const childHeight = renderDomNodeRecursive(parent, child, x + 15, currentY);\r\n      currentY += childHeight + 4;\r\n      totalHeight = currentY - y;\r\n    });\r\n  } else {\r\n    return 24;\r\n  }\r\n\r\n  return totalHeight;\r\n}\r\n\r\nfunction drawAllConnections(parent) {\r\n  if (!containerData || !domData) {\r\n    console.log('[drawAllConnections] Missing data');\r\n    return;\r\n  }\r\n\r\n  console.log('[drawAllConnections] Starting connection drawing');\r\n\r\n  function drawConnectionsForNode(node) {\r\n    if (!node || typeof node !== 'object') return;\r\n    \r\n    console.log('[drawConnectionsForNode] Checking node:', node.id || node.name, 'has match:', !!node.match, 'match selector:', node.match?.selector);\r\n    \r\n    if (node.match && node.match.selector) {\r\n      const domNodeY = domNodePositions.get(node.match.selector);\r\n      const containerPos = containerNodePositions.get(node.id || node.name);\r\n      \r\n      console.log('[drawConnectionsForNode] Connection data:', {\r\n        containerId: node.id || node.name,\r\n        containerPos,\r\n        domNodeSelector: node.match.selector,\r\n        domNodeY\r\n      });\r\n      \r\n      if (containerPos && domNodeY !== undefined && domNodeY >= 0) {\r\n        const startX = containerPos.x;\r\n        const startY = containerPos.y;\r\n        const endX = 410;\r\n        const endY = domNodeY + 12;\r\n        \r\n        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');\r\n        const midX = (startX + endX) / 2;\r\n        path.setAttribute('d', `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`);\r\n        path.setAttribute('stroke', '#4CAF50');\r\n        path.setAttribute('stroke-width', '2');\r\n        path.setAttribute('fill', 'none');\r\n        path.setAttribute('stroke-dasharray', '4,2');\r\n        path.setAttribute('opacity', '0.7');\r\n        parent.appendChild(path);\r\n        console.log('[drawConnectionsForNode] Drew connection from', node.id, 'to', node.match.selector);\r\n      } else {\r\n        console.log('[drawConnectionsForNode] Cannot draw: missing positions or invalid Y');\r\n      }\r\n    }\r\n    \r\n    if (node.children && Array.isArray(node.children)) {\r\n      node.children.forEach(child => drawConnectionsForNode(child));\r\n    }\r\n  }\r\n\r\n  drawConnectionsForNode(containerData);\r\n  console.log('[drawAllConnections] Complete, connections drawn');\r\n}\r\n\r\nfunction drawConnectionToDom(parent, startX, startY, endX, endY) {\r\n  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');\r\n  const midX = (startX + endX) / 2;\r\n  path.setAttribute('d', `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`);\r\n  path.setAttribute('stroke', '#4CAF50');\r\n  path.setAttribute('stroke-width', '2');\r\n  path.setAttribute('fill', 'none');\r\n  path.setAttribute('stroke-dasharray', '4,2');\r\n  path.setAttribute('opacity', '0.7');\r\n  parent.appendChild(path);\r\n}",
+        "name": "exec_command",
+        "tool_call_id": "fc_-8042299630780161659"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"cd apps/floating-panel && rg -l \\\"console|log\\\" --type js --type mjs | head -5\"}"
+            },
+            "id": "fc_-8042223798836233018"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "Chunk ID: 6d8988\nWall time: 0.0509 seconds\nProcess exited with code 0\nOriginal token count: 9\nOutput:\nrg: unrecognized file type: mjs",
+        "name": "exec_command",
+        "tool_call_id": "fc_-8042223798836233018"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"cd apps/floating-panel && rg \\\"updateDomTree|updateContainerTree\\\" --type js -A 3 -B 3\"}"
+            },
+            "id": "fc_-8042286848957231946"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "Chunk ID: 94bba9\nWall time: 0.0522 seconds\nProcess exited with code 0\nOriginal token count: 88\nOutput:\nsrc/renderer/graph.mjs\r\n47-  });\r\n48-}\r\n49-\r\n50:export function updateContainerTree(data) {\r\n51-  if (!canvas) return;\r\n52-  containerData = data;\r\n53-  if (data && (data.id || data.name)) {\r\n--\r\n58-  renderGraph();\r\n59-}\r\n60-\r\n61:export function updateDomTree(data) {\r\n62-  if (!canvas) return;\r\n63-  domData = data;\r\n64-  expandAllDomNodes(data);",
+        "name": "exec_command",
+        "tool_call_id": "fc_-8042286848957231946"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"cd apps/floating-panel && rg \\\"updateDomTree|updateContainerTree|import.*graph\\\" src/renderer/ --type js -B 2 -A 2\"}"
+            },
+            "id": "fc_-8042372026749672301"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "Chunk ID: b3e3f9\nWall time: 0.0517 seconds\nProcess exited with code 0\nOriginal token count: 61\nOutput:\nsrc/renderer/graph.mjs\r\n48-}\r\n49-\r\n50:export function updateContainerTree(data) {\r\n51-  if (!canvas) return;\r\n52-  containerData = data;\r\n--\r\n59-}\r\n60-\r\n61:export function updateDomTree(data) {\r\n62-  if (!canvas) return;\r\n63-  domData = data;",
+        "name": "exec_command",
+        "tool_call_id": "fc_-8042372026749672301"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"cd apps/floating-panel && rg \\\"\\\\{.*updateDomTree.*\\\\}|\\\\{.*updateContainerTree.*\\\\}\\\" --type js src/ -A 2 -B 2\"}"
+            },
+            "id": "fc_-8042227406608790083"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "Chunk ID: a78ae3\nWall time: 0.0513 seconds\nProcess exited with code 1\nOriginal token count: 0\nOutput:",
+        "name": "exec_command",
+        "tool_call_id": "fc_-8042227406608790083"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"cd apps/floating-panel && find src -name \\\"*.js\\\" -o -name \\\"*.mjs\\\" | xargs grep -l \\\"updateDomTree\\\\|updateContainerTree\\\"\"}"
+            },
+            "id": "fc_-8042232560569700319"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "Chunk ID: f9eb63\nWall time: 0.0508 seconds\nProcess exited with code 0\nOriginal token count: 6\nOutput:\nsrc/renderer/graph.mjs",
+        "name": "exec_command",
+        "tool_call_id": "fc_-8042232560569700319"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"cd apps/floating-panel && find . -name \\\"*.cjs\\\" -o -name \\\"*.js\\\" | grep -v node_modules | grep -v dist | head -20\"}"
+            },
+            "id": "fc_-8042263003298404767"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "Chunk ID: 0f3d56\nWall time: 0.0518 seconds\nProcess exited with code 0\nOriginal token count: 22\nOutput:\n./scripts/build.cjs\r\n./build/main/index.js\r\n./bootstrap.cjs\r\n./src/main/preload.cjs",
+        "name": "exec_command",
+        "tool_call_id": "fc_-8042263003298404767"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"cd apps/floating-panel && cat src/main/preload.cjs\"}"
+            },
+            "id": "fc_-8042293446027129148"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "Chunk ID: bdd5a2\nWall time: 0.0512 seconds\nProcess exited with code 0\nOriginal token count: 362\nOutput:\n// Preload 脚本 - 在 Node.js 上下文中运行\r\n// 需要加载 electron 模块\r\n\r\nconsole.log('[preload] Starting preload script');\r\n\r\nconst { contextBridge, ipcRenderer } = require('electron');\r\n\r\nconsole.log('[preload] Electron modules loaded:', {\r\n  contextBridge: !!contextBridge,\r\n  ipcRenderer: !!ipcRenderer\r\n});\r\n\r\nconst api = {\r\n  health: () => {\r\n    console.log('[preload] health() called');\r\n    return ipcRenderer.invoke('health');\r\n  },\r\n  invokeAction: (action, payload) => {\r\n    console.log('[preload] invokeAction called:', action);\r\n    return ipcRenderer.invoke('ui:action', { action, payload });\r\n  },\r\n  highlightElement: (selector, color = 'green') => {\r\n    console.log('[preload] highlightElement called:', selector, color);\r\n    return ipcRenderer.invoke('ui:highlight', { selector, color });\r\n  },\r\n  onBusEvent: (cb) => {\r\n    console.log('[preload] onBusEvent registered');\r\n    return ipcRenderer.on('bus:event', (_, msg) => {\r\n      console.log('[preload] Bus event received:', msg?.topic);\r\n      cb(msg);\r\n    });\r\n  },\r\n  onBusStatus: (cb) => {\r\n    console.log('[preload] onBusStatus registered');\r\n    return ipcRenderer.on('bus:status', (_, status) => {\r\n      console.log('[preload] Bus status received:', status);\r\n      cb(status);\r\n    });\r\n  }\r\n};\r\n\r\nconsole.log('[preload] Exposing api to renderer');\r\ncontextBridge.exposeInMainWorld('api', api);\r\nconsole.log('[preload] Preload script completed');",
+        "name": "exec_command",
+        "tool_call_id": "fc_-8042293446027129148"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"cd apps/floating-panel && find src/main -name \\\"*.cjs\\\" -o -name \\\"*.js\\\" | head -20\"}"
+            },
+            "id": "fc_-8042217270485773378"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "Chunk ID: 198f41\nWall time: 0.0519 seconds\nProcess exited with code 0\nOriginal token count: 6\nOutput:\nsrc/main/preload.cjs",
+        "name": "exec_command",
+        "tool_call_id": "fc_-8042217270485773378"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"cd apps/floating-panel && ls -la src/main/\"}"
+            },
+            "id": "fc_-8042191294523262951"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "Chunk ID: ada2bb\nWall time: 0.0515 seconds\nProcess exited with code 0\nOriginal token count: 110\nOutput:\ntotal 56\r\ndrwxr-xr-x@ 7 fanzhang  staff   224 Dec 23 22:50 .\r\ndrwxr-xr-x@ 4 fanzhang  staff   128 Dec 21 08:31 ..\r\n-rw-r--r--@ 1 fanzhang  wheel  8514 Dec 23 22:50 index.mts\r\n-rw-r--r--@ 1 fanzhang  staff  1404 Dec 23 22:17 preload.cjs\r\n-rw-r--r--@ 1 fanzhang  staff  1206 Dec 23 21:31 preload.cjs.bak4\r\n-rw-r--r--@ 1 fanzhang  staff  1404 Dec 23 22:49 preload.cjs.bak5\r\n-rw-r--r--@ 1 fanzhang  staff   246 Dec 22 08:22 tsconfig.cjs.json",
+        "name": "exec_command",
+        "tool_call_id": "fc_-8042191294523262951"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"cd apps/floating-panel && cat src/main/index.mts\"}"
+            },
+            "id": "fc_-8042219091551941438"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "Chunk ID: 37a92d\nWall time: 0.0522 seconds\nProcess exited with code 0\nOriginal token count: 2212\nOutput:\nimport { app, BrowserWindow, ipcMain, screen } from 'electron';\r\nimport fs from 'node:fs';\r\nimport os from 'node:os';\r\nimport path from 'node:path';\r\nimport WebSocket from 'ws';\r\nimport windowStateKeeper from 'electron-window-state';\r\n\r\n// 使用 process.cwd() 获取项目根目录\r\nconst PROJECT_ROOT = process.cwd();\r\nconst DIST_DIR = path.join(PROJECT_ROOT, 'dist');\r\nconst MAIN_DIR = path.join(DIST_DIR, 'main');\r\nconst LOG_FILE_PATH = path.join(os.tmpdir(), 'webauto-floating-panel.log');\r\n\r\nlet win: BrowserWindow | null = null;\r\nlet ws: WebSocket | null = null;\r\nlet busConnected = false;\r\nlet pendingStatus: any = null;\r\nlet pendingEvents: any[] = [];\r\nlet consoleLoggingBroken = false;\r\n\r\nconst WS_URL = process.env.WEBAUTO_FLOATING_WS_URL || 'ws://127.0.0.1:7701/ws';\r\nconst BUS_URL = process.env.WEBAUTO_FLOATING_BUS_URL || 'ws://127.0.0.1:7701/bus';\r\nconst HEADLESS = process.env.WEBAUTO_FLOATING_HEADLESS === '1';\r\nconst DEVTOOLS = process.env.WEBAUTO_FLOATING_DEVTOOLS === '1';\r\n\r\nfunction log(msg: string) {\r\r\n  const timestamp = new Date().toISOString().split('T')[1].slice(0, 12);\r\n  const line = `[${timestamp}] [floating-main] ${msg}`;\r\n\r\n  if (!consoleLoggingBroken) {\r\n    try {\r\n      console.log(line);\r\n      return;\r\n    } catch (error) {\r\n      const err = error as NodeJS.ErrnoException;\r\n      if (err?.code !== 'EIO') {\r\n        throw error;\r\n      }\r\n      consoleLoggingBroken = true;\r\n    }\r\n  }\r\n\r\n  try {\r\n    fs.appendFileSync(LOG_FILE_PATH, `${line}\\n`, 'utf8');\r\n  } catch {\r\n    // Swallow errors when writing logs to prevent crash loops\r\n  }\r\n}\r\n\r\nfunction flushPendingMessages() {\r\n  if (!win || !win.isVisible()) {\r\n    return;\r\n  }\r\n  \r\n  for (const event of pendingEvents) {\r\n    try {\r\n      win.webContents.send('bus:event', event);\r\n    } catch (err) {\r\n      log(`ERROR sending event: ${err}`);\r\n    }\r\n  }\r\n  pendingEvents = [];\r\n  \r\n  if (pendingStatus) {\r\n    try {\r\n      win.webContents.send('bus:status', pendingStatus);\r\n    } catch (err) {\r\n      log(`ERROR sending status: ${err}`);\r\n    }\r\n    pendingStatus = null;\r\n  }\r\n}\r\n\r\nfunction createWindow() {\r\n  log(`Creating window (HEADLESS=${HEADLESS}, DEVTOOLS=${DEVTOOLS})`);\r\n  log(`PROJECT_ROOT: ${PROJECT_ROOT}`);\r\n  log(`DIST_DIR: ${DIST_DIR}`);\r\n  \r\n  const { width, height } = screen.getPrimaryDisplay().workAreaSize;\r\n  const defaultWidth = 320;\r\n  const defaultHeight = 480;\r\n  const fallbackX = Math.max(0, width - defaultWidth - 20);\r\n  const fallbackY = 60;\r\n\r\n  const mainWindowState = windowStateKeeper({\r\n    defaultWidth,\r\n    defaultHeight\r\n  });\r\n\r\n  const windowBounds = {\r\n    width: mainWindowState.width,\r\n    height: mainWindowState.height,\r\n    x: typeof mainWindowState.x === 'number' ? mainWindowState.x : fallbackX,\r\n    y: typeof mainWindowState.y === 'number' ? mainWindowState.y : fallbackY\r\n  };\r\n\r\n  log(`Window geometry: ${windowBounds.width}x${windowBounds.height} at (${windowBounds.x}, ${windowBounds.y})`);\r\n  \r\n  win = new BrowserWindow({\r\n    width: windowBounds.width,\r\n    height: windowBounds.height,\r\n    x: windowBounds.x,\r\n    y: windowBounds.y,\r\n    frame: false,\r\n    alwaysOnTop: true,\r\n    skipTaskbar: true,\r\n    resizable: true,\r\n    minWidth: 280,\r\n    minHeight: 200,\r\n    show: true,\r\n    webPreferences: {\r\n      preload: path.join(MAIN_DIR, 'preload.cjs'),\r\n      contextIsolation: true,\r\n      nodeIntegration: false,\r\n      webSecurity: false\r\n    }\r\n  });\r\n\r\n  mainWindowState.manage(win);\r\n  \r\n  const htmlPath = path.join(DIST_DIR, 'renderer', 'index.html');\r\n  log(`Loading HTML from: ${htmlPath}`);\r\n  \r\n  win.loadFile(htmlPath).then(() => {\r\n    log('HTML loaded successfully');\r\n    \r\n    // 延迟显示窗口并刷新消息队列\r\n    setTimeout(() => {\r\n      if (win && win.isVisible()) {\r\n        win.show();\r\n        log('Window shown');\r\n        setTimeout(() => {\r\n          flushPendingMessages();\r\n        }, 200);\r\n      }\r\n    }, 500);\r\n  }).catch((err) => {\r\n    log(`Failed to load HTML: ${err}`);\r\n  });\r\n  \r\n  if (DEVTOOLS) {\r\n    win.webContents.openDevTools({ mode: 'detach' });\r\n    log('DevTools opened');\r\n  }\r\n  \r\n  win.on('ready-to-show', () => {\r\n    log('Window ready-to-show event');\r\n  });\r\n  \r\n  win.on('moved', () => {\r\n    log('Window moved event');\r\n  });\r\n  \r\n  win.on('closed', () => { \r\n    log('Window closed');\r\n    win = null; \r\n  });\r\n}\r\n\r\nfunction connectBus() {\r\n  log(`Connecting to bus: ${BUS_URL}`);\r\n  ws = new WebSocket(BUS_URL);\r\n  \r\n  ws.on('open', () => {\r\n    log('Bus WebSocket OPEN event');\r\n    busConnected = true;\r\n    pendingStatus = { connected: true };\r\n    \r\n    // 立即发送总线状态\r\n    if (win && win.isVisible()) {\r\n      log('Window visible, flushing immediately');\r\n      flushPendingMessages();\r\n    } else {\r\n      log('Window not visible yet, status will be sent later');\r\n    }\r\n  });\r\n  \r\n  ws.on('message', (data) => {\r\n    log('Bus message received');\r\n    try {\r\n      const msg = JSON.parse(data.toString());\r\n      log(`Bus message: topic=${msg.topic || 'unknown'}, payload exists=${!!msg.payload}`);\r\n      \r\n      pendingEvents.push(msg);\r\n      \r\n      if (win && win.isVisible()) {\r\n        log('Window visible, flushing events immediately');\r\n        flushPendingMessages();\r\n      } else {\r\n        log(`Window not visible yet, event queued (${pendingEvents.length} pending)`);\r\n      }\r\n    } catch (e) {\r\n      log(`Failed to parse bus message: ${e}`);\r\n    }\r\n  });\r\n  \r\n  ws.on('close', () => {\r\n    log('Bus WebSocket CLOSED');\r\n    busConnected = false;\r\n    pendingStatus = { connected: false };\r\n    \r\n    if (win && win.isVisible()) {\r\n      win.webContents.send('bus:status', { connected: false });\r\n    }\r\n    \r\n    log('Reconnecting in 3s...');\r\n    setTimeout(connectBus, 3000);\r\n  });\r\n  \r\n  ws.on('error', (err) => {\r\n    log(`Bus WebSocket ERROR: ${err}`);\r\n    busConnected = false;\r\n    pendingStatus = { connected: false };\r\n    \r\n    if (win && win.isVisible()) {\r\n      win.webContents.send('bus:status', { connected: false });\r\n    }\r\n  });\r\n}\r\n\r\napp.whenReady().then(() => {\r\n  log('App ready');\r\n  \r\n  // 确保只有一个主窗口\r\n  const existingWindows = BrowserWindow.getAllWindows();\r\n  if (existingWindows.length > 0) {\r\n    log(`Closing ${existingWindows.length} existing windows`);\r\n    existingWindows.forEach(w => w.close());\r\n  }\r\n  \r\n  createWindow();\r\n  connectBus();\r\n});\r\n\r\napp.on('window-all-closed', () => {\r\n  log('All windows closed');\r\n  ws?.close();\r\n  if (process.platform !== 'darwin') {\r\n    app.quit();\r\n  }\r\n});\r\n\r\nipcMain.handle('health', async () => {\r\n  try {\r\n    log('Health check requested');\r\n    const res = await fetch('http://127.0.0.1:7701/health');\r\n    log(`Health check result: ${res.ok}`);\r\n    return { ok: res.ok };\r\n  } catch (e) {\r\n    log(`Health check error: ${e}`);\r\n    return { ok: false };\r\n  }\r\n\r\nipcMain.handle('ui:highlight', async (_evt, { selector, color }) => {\r\n  try {\r\n    log(`Highlight element: ${selector}, color: ${color}`);\r\n    const res = await fetch('http://127.0.0.1:7701/v1/browser/highlight', {\r\n      method: 'POST',\r\n      headers: { 'Content-Type': 'application/json' },\r\n      body: JSON.stringify({ selector, color })\r\n    });\r\n    return await res.json();\r\n  } catch (e) {\r\n    log(`Highlight error: ${e}`);\r\n\r\nipcMain.handle('window:minimize', async (_evt) => {\r\n  if (win) {\r\n\r\nipcMain.handle('ui:highlight', async (_evt, { selector, color }) => {\r\n  try {\r\n    log(`Highlight element: ${selector}, color: ${color}`);\r\n    const res = await fetch('http://127.0.0.1:7701/v1/browser/highlight', {\r\n      method: 'POST',\r\n      headers: { 'Content-Type': 'application/json' },\r\n      body: JSON.stringify({ selector, color })\r\n    });\r\n    return await res.json();\r\n  } catch (e) {\r\n    log(`Highlight error: ${e}`);\r\n    return { success: false, error: String(e) };\r\n  }\r\n});\r\n\r\nipcMain.handle('window:minimize', async (_evt) => {\r\n  if (win) {\r\n    log('Minimizing window');\r\n    win.minimize();\r\n  }\r\n});\r\n\r\nipcMain.handle('window:close', async (_evt) => {\r\n  if (win) {\r\n    log('Closing window');\r\n    win.close();\r\n  }\r\n});\r\n    log('Minimizing window');\r\n    win.minimize();\r\n  }\r\n});\r\n\r\nipcMain.handle('window:close', async (_evt) => {\r\n  if (win) {\r\n    log('Closing window');\r\n    win.close();\r\n  }\r\n});\r\n\r\n    return { success: false, error: String(e) };\r\n  }\r\n});\r\n\r\n});\r\n\r\nipcMain.handle('ui:action', async (_evt, { action, payload }) => {\r\n  try {\r\n    log(`UI action: ${action}`);\r\n    const res = await fetch(`http://127.0.0.1:7701/v1/controller/action`, {\r\n      method: 'POST',\r\n      headers: { 'Content-Type': 'application/json' },\r\n      body: JSON.stringify({ action, payload })\r\n    });\r\n    return await res.json();\r\n  } catch (e) {\r\n    log(`UI action error: ${e}`);\r\n    return { success: false, error: String(e) };\r\n  }\r\n});\r\n\r\nlog('Main process started');",
+        "name": "exec_command",
+        "tool_call_id": "fc_-8042219091551941438"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"cd apps/floating-panel && ls -la dist/renderer/\"}"
+            },
+            "id": "fc_-8042222836763487219"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "Chunk ID: 928c9a\nWall time: 0.0512 seconds\nProcess exited with code 0\nOriginal token count: 137\nOutput:\ntotal 256\r\ndrwxr-xr-x@ 9 fanzhang  staff    288 Dec 24 08:20 .\r\ndrwxr-xr-x@ 4 fanzhang  staff    128 Dec 24 08:20 ..\r\n-rw-r--r--@ 1 fanzhang  staff  12219 Dec 24 08:20 diag.js\r\n-rw-r--r--@ 1 fanzhang  staff  20871 Dec 24 08:20 diag.js.map\r\n-rw-r--r--@ 1 fanzhang  staff   1295 Dec 24 08:20 drag.mjs\r\n-rw-r--r--@ 1 fanzhang  staff  15945 Dec 24 08:20 graph.mjs\r\n-rw-r--r--@ 1 fanzhang  staff   7362 Dec 24 08:20 index.html\r\n-rw-r--r--@ 1 fanzhang  staff  22992 Dec 24 08:20 index.js\r\n-rw-r--r--@ 1 fanzhang  staff  40340 Dec 24 08:20 index.js.map",
+        "name": "exec_command",
+        "tool_call_id": "fc_-8042222836763487219"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"cd apps/floating-panel && cat dist/renderer/index.js | head -200\"}"
+            },
+            "id": "fc_-8042214452987203572"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "Chunk ID: 6d2d35\nWall time: 0.0512 seconds\nProcess exited with code 0\nOriginal token count: 1721\nOutput:\nvar __defProp = Object.defineProperty;\r\nvar __getOwnPropNames = Object.getOwnPropertyNames;\r\nvar __esm = (fn, res) => function __init() {\r\n  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;\r\n};\r\nvar __export = (target, all) => {\r\n  for (var name in all)\r\n    __defProp(target, name, { get: all[name], enumerable: true });\r\n};\r\n\r\n// src/renderer/drag.mjs\r\nvar drag_exports = {};\r\n__export(drag_exports, {\r\n  initDrag: () => initDrag\r\n});\r\nfunction initDrag(element) {\r\n  dragArea = element;\r\n  if (!dragArea) return;\r\n}\r\nvar dragArea;\r\nvar init_drag = __esm({\r\n  \"src/renderer/drag.mjs\"() {\r\n    \"use strict\";\r\n    dragArea = null;\r\n  }\r\n});\r\n\r\n// src/renderer/graph.mjs\r\nvar canvas = null;\r\nvar containerData = null;\r\nvar domData = null;\r\nvar expandedNodes = /* @__PURE__ */ new Set();\r\nvar isDraggingGraph = false;\r\nvar dragStart = { x: 0, y: 0 };\r\nvar graphOffset = { x: 0, y: 0 };\r\nvar selectedContainer = null;\r\nvar selectedDom = null;\r\nvar domNodePositions = /* @__PURE__ */ new Map();\r\nvar containerNodePositions = /* @__PURE__ */ new Map();\r\nfunction initGraph(canvasEl) {\r\n  const svg = document.createElementNS(\"http://www.w3.org/2000/svg\", \"svg\");\r\n  svg.setAttribute(\"width\", \"100%\");\r\n  svg.setAttribute(\"height\", \"100%\");\r\n  svg.style.overflow = \"hidden\";\r\n  svg.style.backgroundColor = \"#1e1e1e\";\r\n  svg.style.cursor = \"grab\";\r\n  canvasEl.style.overflow = \"hidden\";\r\n  canvasEl.appendChild(svg);\r\n  canvas = svg;\r\n  svg.addEventListener(\"mousedown\", (e) => {\r\n    if (e.target.tagName === \"svg\") {\r\n      isDraggingGraph = true;\r\n      dragStart.x = e.clientX - graphOffset.x;\r\n      dragStart.y = e.clientY - graphOffset.y;\r\n      svg.style.cursor = \"grabbing\";\r\n      e.preventDefault();\r\n    }\r\n  });\r\n  window.addEventListener(\"mousemove\", (e) => {\r\n    if (isDraggingGraph) {\r\n      graphOffset.x = e.clientX - dragStart.x;\r\n      graphOffset.y = e.clientY - dragStart.y;\r\n      renderGraph();\r\n    }\r\n  });\r\n  window.addEventListener(\"mouseup\", () => {\r\n    if (isDraggingGraph) {\r\n      isDraggingGraph = false;\r\n      svg.style.cursor = \"grab\";\r\n    }\r\n  });\r\n}\r\nfunction updateContainerTree(data) {\r\n  if (!canvas) return;\r\n  containerData = data;\r\n  if (data && (data.id || data.name)) {\r\n    const rootId = data.id || data.name || \"root\";\r\n    expandedNodes.add(rootId);\r\n    expandAllContainers(data);\r\n  }\r\n  renderGraph();\r\n}\r\nfunction updateDomTree(data) {\r\n  if (!canvas) return;\r\n  domData = data;\r\n  expandAllDomNodes(data);\r\n  renderGraph();\r\n}\r\nfunction expandAllContainers(node) {\r\n  if (!node || typeof node !== \"object\") return;\r\n  const nodeId = node.id || node.name;\r\n  if (nodeId) {\r\n    expandedNodes.add(nodeId);\r\n  }\r\n  if (node.children && Array.isArray(node.children)) {\r\n    node.children.forEach((child) => expandAllContainers(child));\r\n  }\r\n}\r\nfunction expandAllDomNodes(node) {\r\n  if (!node || typeof node !== \"object\") return;\r\n  const nodeId = node.path || node.id || `dom-${Math.random()}`;\r\n  expandedNodes.add(nodeId);\r\n  if (node.children && Array.isArray(node.children)) {\r\n    node.children.forEach((child) => expandAllDomNodes(child));\r\n  }\r\n}\r\nfunction renderGraph() {\r\n  if (!canvas) return;\r\n  while (canvas.firstChild) {\r\n    canvas.removeChild(canvas.firstChild);\r\n  }\r\n  const mainGroup = document.createElementNS(\"http://www.w3.org/2000/svg\", \"g\");\r\n  mainGroup.setAttribute(\"transform\", `translate(${graphOffset.x + 10}, ${graphOffset.y + 10})`);\r\n  const domNodesMap = /* @__PURE__ */ new Map();\r\n  domNodePositions.clear();\r\n  containerNodePositions.clear();\r\n  if (domData) {\r\n    collectDomNodes(domData, domNodesMap, 0);\r\n  }\r\n  if (containerData) {\r\n    const containerGroup = document.createElementNS(\"http://www.w3.org/2000/svg\", \"g\");\r\n    containerGroup.setAttribute(\"transform\", \"translate(0, 0)\");\r\n    renderContainerNode(containerGroup, containerData, 0, 0, 0, domNodesMap);\r\n    mainGroup.appendChild(containerGroup);\r\n  }\r\n  if (domData) {\r\n    const domGroup = document.createElementNS(\"http://www.w3.org/2000/svg\", \"g\");\r\n    domGroup.setAttribute(\"transform\", \"translate(400, 0)\");\r\n    renderDomNodeRecursive(domGroup, domData, 0, 0);\r\n    mainGroup.appendChild(domGroup);\r\n    drawAllConnections(mainGroup);\r\n  }\r\n  canvas.appendChild(mainGroup);\r\n}\r\nfunction collectDomNodes(node, map, currentY) {\r\n  if (!node || typeof node !== \"object\") return;\r\n  const path = node.path || node.id || node.selectors?.[0] || `node-${Math.random()}`;\r\n  map.set(path, node);\r\n  domNodePositions.set(path, currentY);\r\n  if (node.children && Array.isArray(node.children)) {\r\n    let y = currentY + 28;\r\n    node.children.forEach((child) => {\r\n      collectDomNodes(child, map, y);\r\n      y += 32;\r\n    });\r\n  }\r\n}\r\nfunction renderContainerNode(parent, node, x, y, depth, domNodesMap) {\r\n  const nodeId = node.id || node.name || \"root\";\r\n  const isExpanded = expandedNodes.has(nodeId);\r\n  const hasChildren = node.children && node.children.length > 0;\r\n  const isSelected = selectedContainer === nodeId;\r\n  containerNodePositions.set(nodeId, { x: x + depth * 20 + 180, y: y + 14 });\r\n  const g = document.createElementNS(\"http://www.w3.org/2000/svg\", \"g\");\r\n  g.setAttribute(\"transform\", `translate(${x + depth * 20}, ${y})`);\r\n  const rect = document.createElementNS(\"http://www.w3.org/2000/svg\", \"rect\");\r\n  rect.setAttribute(\"x\", \"0\");\r\n  rect.setAttribute(\"y\", \"0\");\r\n  rect.setAttribute(\"width\", \"180\");\r\n  rect.setAttribute(\"height\", \"28\");\r\n  rect.setAttribute(\"fill\", isSelected ? \"#264f36\" : \"#2d2d30\");\r\n  rect.setAttribute(\"stroke\", isSelected ? \"#4CAF50\" : \"#555\");\r\n  rect.setAttribute(\"stroke-width\", isSelected ? \"2\" : \"1\");\r\n  rect.setAttribute(\"rx\", \"2\");\r\n  rect.style.cursor = \"pointer\";\r\n  rect.addEventListener(\"mouseenter\", () => {\r\n    if (selectedContainer !== nodeId) {\r\n      rect.setAttribute(\"fill\", \"#3e3e42\");\r\n      rect.setAttribute(\"stroke\", \"#007acc\");\r\n    }\r\n  });\r\n  rect.addEventListener(\"mouseleave\", () => {\r\n    if (selectedContainer !== nodeId) {\r\n      rect.setAttribute(\"fill\", \"#2d2d30\");\r\n      rect.setAttribute(\"stroke\", \"#555\");\r\n    }\r\n  });\r\n  rect.addEventListener(\"click\", (e) => {\r\n    e.stopPropagation();\r\n    selectedContainer = nodeId;\r\n    selectedDom = null;\r\n    if (hasChildren) {\r\n      if (isExpanded) {\r\n        expandedNodes.delete(nodeId);\r\n      } else {\r\n        expandedNodes.add(nodeId);\r\n      }\r\n    }\r\n    if (node.selectors && node.selectors.length > 0 && typeof window.api?.highlightElement === \"function\") {\r\n      window.api.highlightElement(node.selectors[0], \"green\").catch((err) => {\r\n        console.error(\"Failed to highlight:\", err);\r\n      });\r\n    }\r\n    renderGraph();\r\n  });\r\n  const text = document.createElementNS(\"http://www.w3.org/2000/svg\", \"text\");\r\n  text.setAttribute(\"x\", \"24\");\r\n  text.setAttribute(\"y\", \"18\");\r\n  text.setAttribute(\"fill\", \"#cccccc\");\r\n  text.setAttribute(\"font-size\", \"12\");",
+        "name": "exec_command",
+        "tool_call_id": "fc_-8042214452987203572"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"cd apps/floating-panel && cat dist/renderer/index.js | tail -n +200 | head -200\"}"
+            },
+            "id": "fc_-8042371408274528962"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "Chunk ID: 0f79d9\nWall time: 0.0520 seconds\nProcess exited with code 0\nOriginal token count: 2247\nOutput:\n  text.setAttribute(\"font-size\", \"12\");\r\n  text.setAttribute(\"font-family\", \"Consolas, monospace\");\r\n  text.setAttribute(\"pointer-events\", \"none\");\r\n  text.textContent = node.name || node.id || \"Unknown\";\r\n  const indicatorBg = document.createElementNS(\"http://www.w3.org/2000/svg\", \"rect\");\r\n  indicatorBg.setAttribute(\"x\", \"4\");\r\n  indicatorBg.setAttribute(\"y\", \"8\");\r\n  indicatorBg.setAttribute(\"width\", \"12\");\r\n  indicatorBg.setAttribute(\"height\", \"12\");\r\n  indicatorBg.setAttribute(\"fill\", \"#3e3e42\");\r\n  indicatorBg.setAttribute(\"stroke\", \"#888\");\r\n  indicatorBg.setAttribute(\"stroke-width\", \"1\");\r\n  indicatorBg.setAttribute(\"rx\", \"1\");\r\n  const indicatorText = document.createElementNS(\"http://www.w3.org/2000/svg\", \"text\");\r\n  indicatorText.setAttribute(\"x\", \"10\");\r\n  indicatorText.setAttribute(\"y\", \"18\");\r\n  indicatorText.setAttribute(\"text-anchor\", \"middle\");\r\n  indicatorText.setAttribute(\"fill\", \"#fff\");\r\n  indicatorText.setAttribute(\"font-size\", \"10\");\r\n  indicatorText.setAttribute(\"font-weight\", \"bold\");\r\n  indicatorText.setAttribute(\"pointer-events\", \"none\");\r\n  indicatorText.textContent = hasChildren ? isExpanded ? \"-\" : \"+\" : \"\";\r\n  g.appendChild(rect);\r\n  g.appendChild(indicatorBg);\r\n  g.appendChild(indicatorText);\r\n  g.appendChild(text);\r\n  parent.appendChild(g);\r\n  if (node.match && node.match.selector) {\r\n    const domNodeY = domNodePositions.get(node.match.selector) || 0;\r\n    drawConnectionToDom(parent, x + depth * 20 + 180, y + 14, 410, domNodeY + 12);\r\n  }\r\n  let totalHeight = 28;\r\n  if (hasChildren && isExpanded) {\r\n    let currentY = y + 32;\r\n    node.children.forEach((child, index) => {\r\n      const vertLine = document.createElementNS(\"http://www.w3.org/2000/svg\", \"line\");\r\n      vertLine.setAttribute(\"x1\", \"10\");\r\n      vertLine.setAttribute(\"y1\", String(y + 28));\r\n      vertLine.setAttribute(\"x2\", \"10\");\r\n      vertLine.setAttribute(\"y2\", String(currentY + 14));\r\n      vertLine.setAttribute(\"stroke\", \"#666\");\r\n      vertLine.setAttribute(\"stroke-width\", \"1\");\r\n      parent.appendChild(vertLine);\r\n      const horizLine = document.createElementNS(\"http://www.w3.org/2000/svg\", \"line\");\r\n      horizLine.setAttribute(\"x1\", \"10\");\r\n      horizLine.setAttribute(\"y1\", String(currentY + 14));\r\n      horizLine.setAttribute(\"x2\", String((depth + 1) * 20 + 10));\r\n      horizLine.setAttribute(\"y2\", String(currentY + 14));\r\n      horizLine.setAttribute(\"stroke\", \"#666\");\r\n      horizLine.setAttribute(\"stroke-width\", \"1\");\r\n      parent.appendChild(horizLine);\r\n      const childHeight = renderContainerNode(parent, child, x, currentY, depth + 1, domNodesMap);\r\n      currentY += childHeight + 4;\r\n      totalHeight = currentY - y;\r\n    });\r\n  }\r\n  return totalHeight;\r\n}\r\nfunction renderDomNodeRecursive(parent, node, x, y) {\r\n  if (!node || typeof node !== \"object\") return 0;\r\n  const nodeId = node.path || node.id || `dom-${x}-${y}`;\r\n  const isExpanded = expandedNodes.has(nodeId);\r\n  const hasChildren = node.children && node.children.length > 0;\r\n  const isSelected = selectedDom === nodeId;\r\n  const g = document.createElementNS(\"http://www.w3.org/2000/svg\", \"g\");\r\n  g.setAttribute(\"transform\", `translate(${x}, ${y})`);\r\n  const rect = document.createElementNS(\"http://www.w3.org/2000/svg\", \"rect\");\r\n  rect.setAttribute(\"x\", \"0\");\r\n  rect.setAttribute(\"y\", \"0\");\r\n  rect.setAttribute(\"width\", \"220\");\r\n  rect.setAttribute(\"height\", \"24\");\r\n  rect.setAttribute(\"fill\", isSelected ? \"#264f36\" : \"#252526\");\r\n  rect.setAttribute(\"stroke\", isSelected ? \"#007acc\" : \"#3e3e42\");\r\n  rect.setAttribute(\"stroke-width\", isSelected ? \"2\" : \"1\");\r\n  rect.setAttribute(\"rx\", \"2\");\r\n  rect.style.cursor = \"pointer\";\r\n  rect.addEventListener(\"mouseenter\", () => {\r\n    if (selectedDom !== nodeId) {\r\n      rect.setAttribute(\"fill\", \"#2d2d30\");\r\n      rect.setAttribute(\"stroke\", \"#007acc\");\r\n    }\r\n  });\r\n  rect.addEventListener(\"mouseleave\", () => {\r\n    if (selectedDom !== nodeId) {\r\n      rect.setAttribute(\"fill\", \"#252526\");\r\n      rect.setAttribute(\"stroke\", \"#3e3e42\");\r\n    }\r\n  });\r\n  rect.addEventListener(\"click\", (e) => {\r\n    e.stopPropagation();\r\n    selectedDom = nodeId;\r\n    selectedContainer = null;\r\n    if (hasChildren) {\r\n      if (isExpanded) {\r\n        expandedNodes.delete(nodeId);\r\n      } else {\r\n        expandedNodes.add(nodeId);\r\n      }\r\n    }\r\n    const selector = node.id ? `#${node.id}` : node.path || \"\";\r\n    if (selector && typeof window.api?.highlightElement === \"function\") {\r\n      window.api.highlightElement(selector, \"blue\").catch((err) => {\r\n        console.error(\"Failed to highlight:\", err);\r\n      });\r\n    }\r\n    renderGraph();\r\n  });\r\n  const tagText = document.createElementNS(\"http://www.w3.org/2000/svg\", \"text\");\r\n  tagText.setAttribute(\"x\", \"24\");\r\n  tagText.setAttribute(\"y\", \"16\");\r\n  tagText.setAttribute(\"fill\", \"#4ec9b0\");\r\n  tagText.setAttribute(\"font-size\", \"11\");\r\n  tagText.setAttribute(\"font-family\", \"Consolas, monospace\");\r\n  tagText.setAttribute(\"font-weight\", \"bold\");\r\n  tagText.setAttribute(\"pointer-events\", \"none\");\r\n  tagText.textContent = node.tag || \"DIV\";\r\n  const infoText = document.createElementNS(\"http://www.w3.org/2000/svg\", \"text\");\r\n  const label = node.id ? `#${node.id}` : node.classes?.[0] ? `.${node.classes[0]}` : \"\";\r\n  infoText.setAttribute(\"x\", \"70\");\r\n  infoText.setAttribute(\"y\", \"16\");\r\n  infoText.setAttribute(\"fill\", \"#9cdcfe\");\r\n  infoText.setAttribute(\"font-size\", \"10\");\r\n  infoText.setAttribute(\"font-family\", \"Consolas, monospace\");\r\n  infoText.setAttribute(\"pointer-events\", \"none\");\r\n  infoText.textContent = label.substring(0, 30);\r\n  const indicatorBg = document.createElementNS(\"http://www.w3.org/2000/svg\", \"rect\");\r\n  indicatorBg.setAttribute(\"x\", \"4\");\r\n  indicatorBg.setAttribute(\"y\", \"6\");\r\n  indicatorBg.setAttribute(\"width\", \"12\");\r\n  indicatorBg.setAttribute(\"height\", \"12\");\r\n  indicatorBg.setAttribute(\"fill\", \"#3e3e42\");\r\n  indicatorBg.setAttribute(\"stroke\", \"#888\");\r\n  indicatorBg.setAttribute(\"stroke-width\", \"1\");\r\n  indicatorBg.setAttribute(\"rx\", \"1\");\r\n  const indicatorText = document.createElementNS(\"http://www.w3.org/2000/svg\", \"text\");\r\n  indicatorText.setAttribute(\"x\", \"10\");\r\n  indicatorText.setAttribute(\"y\", \"16\");\r\n  indicatorText.setAttribute(\"text-anchor\", \"middle\");\r\n  indicatorText.setAttribute(\"fill\", \"#fff\");\r\n  indicatorText.setAttribute(\"font-size\", \"10\");\r\n  indicatorText.setAttribute(\"font-weight\", \"bold\");\r\n  indicatorText.setAttribute(\"pointer-events\", \"none\");\r\n  indicatorText.textContent = hasChildren ? isExpanded ? \"-\" : \"+\" : \"\";\r\n  g.appendChild(rect);\r\n  g.appendChild(indicatorBg);\r\n  g.appendChild(indicatorText);\r\n  g.appendChild(tagText);\r\n  g.appendChild(infoText);\r\n  parent.appendChild(g);\r\n  let totalHeight = 24;\r\n  if (hasChildren && isExpanded) {\r\n    let currentY = y + 28;\r\n    node.children.forEach((child) => {\r\n      const vertLine = document.createElementNS(\"http://www.w3.org/2000/svg\", \"line\");\r\n      vertLine.setAttribute(\"x1\", \"10\");\r\n      vertLine.setAttribute(\"y1\", String(y + 24));\r\n      vertLine.setAttribute(\"x2\", \"10\");\r\n      vertLine.setAttribute(\"y2\", String(currentY + 12));\r\n      vertLine.setAttribute(\"stroke\", \"#555\");\r\n      vertLine.setAttribute(\"stroke-width\", \"1\");\r\n      parent.appendChild(vertLine);\r\n      const childHeight = renderDomNodeRecursive(parent, child, x + 15, currentY);\r\n      currentY += childHeight + 4;\r\n      totalHeight = currentY - y;\r\n    });\r\n  } else {\r\n    return 24;\r\n  }\r\n  return totalHeight;\r\n}\r\nfunction drawAllConnections(parent) {\r\n  if (!containerData || !domData) {\r\n    console.log(\"[drawAllConnections] Missing data\");\r\n    return;\r\n  }\r\n  console.log(\"[drawAllConnections] Starting connection drawing\");\r\n  function drawConnectionsForNode(node) {\r\n    if (!node || typeof node !== \"object\") return;\r\n    console.log(\"[drawConnectionsForNode] Checking node:\", node.id || node.name, \"has match:\", !!node.match, \"match selector:\", node.match?.selector);\r\n    if (node.match && node.match.selector) {\r\n      const domNodeY = domNodePositions.get(node.match.selector);\r\n      const containerPos = containerNodePositions.get(node.id || node.name);\r\n      console.log(\"[drawConnectionsForNode] Connection data:\", {\r\n        containerId: node.id || node.name,\r\n        containerPos,\r\n        domNodeSelector: node.match.selector,\r\n        domNodeY\r\n      });\r\n      if (containerPos && domNodeY !== void 0 && domNodeY >= 0) {\r\n        const startX = containerPos.x;\r\n        const startY = containerPos.y;\r\n        const endX = 410;\r\n        const endY = domNodeY + 12;\r\n        const path = document.createElementNS(\"http://www.w3.org/2000/svg\", \"path\");\r\n        const midX = (startX + endX) / 2;\r\n        path.setAttribute(\"d\", `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`);\r\n        path.setAttribute(\"stroke\", \"#4CAF50\");\r\n        path.setAttribute(\"stroke-width\", \"2\");\r\n        path.setAttribute(\"fill\", \"none\");\r\n        path.setAttribute(\"stroke-dasharray\", \"4,2\");",
+        "name": "exec_command",
+        "tool_call_id": "fc_-8042371408274528962"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "exec_command",
+          "description": "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "cmd": {
+                "type": "string",
+                "description": "Shell command to execute."
+              },
+              "justification": {
+                "type": "string",
+                "description": "Only set if sandbox_permissions is \"require_escalated\". 1-sentence explanation of why we want to run this command."
+              },
+              "login": {
+                "type": "boolean",
+                "description": "Whether to run the shell with -l/-i semantics. Defaults to true."
+              },
+              "max_output_tokens": {
+                "type": "number",
+                "description": "Maximum number of tokens to return. Excess output will be truncated."
+              },
+              "sandbox_permissions": {
+                "type": "string",
+                "description": "Sandbox permissions for the command. Set to \"require_escalated\" to request running without sandbox restrictions; defaults to \"use_default\"."
+              },
+              "shell": {
+                "type": "string",
+                "description": "Shell binary to launch. Defaults to /bin/bash."
+              },
+              "workdir": {
+                "type": "string",
+                "description": "Optional working directory to run the command in; defaults to the turn cwd."
+              },
+              "yield_time_ms": {
+                "type": "number",
+                "description": "How long to wait (in milliseconds) for output before yielding."
+              }
+            },
+            "required": [
+              "cmd"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "write_stdin",
+          "description": "Writes characters to an existing unified exec session and returns recent output.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "chars": {
+                "type": "string",
+                "description": "Bytes to write to stdin (may be empty to poll)."
+              },
+              "max_output_tokens": {
+                "type": "number",
+                "description": "Maximum number of tokens to return. Excess output will be truncated."
+              },
+              "session_id": {
+                "type": "number",
+                "description": "Identifier of the running unified exec session."
+              },
+              "yield_time_ms": {
+                "type": "number",
+                "description": "How long to wait (in milliseconds) for output before yielding."
+              }
+            },
+            "required": [
+              "session_id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "list_mcp_resources",
+          "description": "Lists resources provided by MCP servers. Resources allow servers to share data that provides context to language models, such as files, database schemas, or application-specific information. Prefer resources over web search when possible.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "server": {
+                "type": "string"
+              },
+              "filter": {
+                "type": "string"
+              },
+              "root": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "list_mcp_resource_templates",
+          "description": "Lists resource templates provided by MCP servers. Parameterized resource templates allow servers to share data that takes parameters and provides context to language models, such as files, database schemas, or application-specific information. Prefer resource templates over web search when possible.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "cursor": {
+                "type": "string"
+              },
+              "server": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "update_plan",
+          "description": "Updates the task plan.\nProvide an optional explanation and a list of plan items, each with a step and status.\nAt most one step can be in_progress at a time.\n",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "explanation": {
+                "type": "string"
+              },
+              "plan": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "description": "One of: pending, in_progress, completed"
+                    },
+                    "step": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "The list of steps"
+              }
+            },
+            "required": [
+              "plan"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "apply_patch",
+          "description": "Use apply_patch to edit files. Provide the diff via the input field (*** Begin Patch ... *** End Patch).",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "string",
+                "description": "Unified diff patch body between *** Begin Patch/*** End Patch."
+              },
+              "patch": {
+                "type": "string",
+                "description": "Alias of input for backwards compatibility."
+              }
+            },
+            "required": [
+              "input"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__click",
+          "description": "Clicks on the provided element",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "dblClick": {
+                "type": "boolean",
+                "description": "Set to true for double clicks. Default is false."
+              },
+              "uid": {
+                "type": "string",
+                "description": "The uid of an element on the page from the page content snapshot"
+              }
+            },
+            "required": [
+              "uid"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__close_page",
+          "description": "Closes the page by its index. The last open page cannot be closed.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "pageIdx": {
+                "type": "number",
+                "description": "The index of the page to close. Call list_pages to list pages."
+              }
+            },
+            "required": [
+              "pageIdx"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__drag",
+          "description": "Drag an element onto another element",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "from_uid": {
+                "type": "string",
+                "description": "The uid of the element to drag"
+              },
+              "to_uid": {
+                "type": "string",
+                "description": "The uid of the element to drop into"
+              }
+            },
+            "required": [
+              "from_uid",
+              "to_uid"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__emulate",
+          "description": "Emulates various features on the selected page.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "cpuThrottlingRate": {
+                "type": "number",
+                "description": "Represents the CPU slowdown factor. Set the rate to 1 to disable throttling. If omitted, throttling remains unchanged."
+              },
+              "geolocation": {
+                "type": "string",
+                "description": "Geolocation to emulate. Set to null to clear the geolocation override."
+              },
+              "networkConditions": {
+                "type": "string",
+                "description": "Throttle network. Set to \"No emulation\" to disable. If omitted, conditions remain unchanged."
+              }
+            }
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__evaluate_script",
+          "description": "Evaluate a JavaScript function inside the currently selected page. Returns the response as JSON\nso returned values have to JSON-serializable.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "uid": {
+                      "type": "string",
+                      "description": "The uid of an element on the page from the page content snapshot"
+                    }
+                  },
+                  "required": [
+                    "uid"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "An optional list of arguments to pass to the function."
+              },
+              "function": {
+                "type": "string",
+                "description": "A JavaScript function declaration to be executed by the tool in the currently selected page.\nExample without arguments: `() => {\n  return document.title\n}` or `async () => {\n  return await fetch(\"example.com\")\n}`.\nExample with arguments: `(el) => {\n  return el.innerText;\n}`\n"
+              }
+            },
+            "required": [
+              "function"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__fill",
+          "description": "Type text into a input, text area or select an option from a <select> element.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "uid": {
+                "type": "string",
+                "description": "The uid of an element on the page from the page content snapshot"
+              },
+              "value": {
+                "type": "string",
+                "description": "The value to fill in"
+              }
+            },
+            "required": [
+              "uid",
+              "value"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__fill_form",
+          "description": "Fill out multiple form elements at once",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "elements": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "uid": {
+                      "type": "string",
+                      "description": "The uid of the element to fill out"
+                    },
+                    "value": {
+                      "type": "string",
+                      "description": "Value for the element"
+                    }
+                  },
+                  "required": [
+                    "uid",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "Elements from snapshot to fill out."
+              }
+            },
+            "required": [
+              "elements"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__get_console_message",
+          "description": "Gets a console message by its ID. You can get all messages by calling list_console_messages.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "msgid": {
+                "type": "number",
+                "description": "The msgid of a console message on the page from the listed console messages"
+              }
+            },
+            "required": [
+              "msgid"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__get_network_request",
+          "description": "Gets a network request by an optional reqid, if omitted returns the currently selected request in the DevTools Network panel.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reqid": {
+                "type": "number",
+                "description": "The reqid of the network request. If omitted returns the currently selected request in the DevTools Network panel."
+              }
+            }
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__handle_dialog",
+          "description": "If a browser dialog was opened, use this command to handle it",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "description": "Whether to dismiss or accept the dialog"
+              },
+              "promptText": {
+                "type": "string",
+                "description": "Optional prompt text to enter into the dialog."
+              }
+            },
+            "required": [
+              "action"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__hover",
+          "description": "Hover over the provided element",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "uid": {
+                "type": "string",
+                "description": "The uid of an element on the page from the page content snapshot"
+              }
+            },
+            "required": [
+              "uid"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__list_console_messages",
+          "description": "List all console messages for the currently selected page since the last navigation.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "includePreservedMessages": {
+                "type": "boolean",
+                "description": "Set to true to return the preserved messages over the last 3 navigations."
+              },
+              "pageIdx": {
+                "type": "number",
+                "description": "Page number to return (0-based). When omitted, returns the first page."
+              },
+              "pageSize": {
+                "type": "number",
+                "description": "Maximum number of messages to return. When omitted, returns all requests."
+              },
+              "types": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Filter messages to only return messages of the specified resource types. When omitted or empty, returns all messages."
+              }
+            }
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__list_network_requests",
+          "description": "List all requests for the currently selected page since the last navigation.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "includePreservedRequests": {
+                "type": "boolean",
+                "description": "Set to true to return the preserved requests over the last 3 navigations."
+              },
+              "pageIdx": {
+                "type": "number",
+                "description": "Page number to return (0-based). When omitted, returns the first page."
+              },
+              "pageSize": {
+                "type": "number",
+                "description": "Maximum number of requests to return. When omitted, returns all requests."
+              },
+              "resourceTypes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Filter requests to only return requests of the specified resource types. When omitted or empty, returns all requests."
+              }
+            }
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__list_pages",
+          "description": "Get a list of pages open in the browser.",
+          "parameters": {
+            "type": "object",
+            "properties": {}
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__navigate_page",
+          "description": "Navigates the currently selected page to a URL.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "ignoreCache": {
+                "type": "boolean",
+                "description": "Whether to ignore cache on reload."
+              },
+              "timeout": {
+                "type": "number",
+                "description": "Maximum wait time in milliseconds. If set to 0, the default timeout will be used."
+              },
+              "type": {
+                "type": "string",
+                "description": "Navigate the page by URL, back or forward in history, or reload."
+              },
+              "url": {
+                "type": "string",
+                "description": "Target URL (only type=url)"
+              }
+            }
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__new_page",
+          "description": "Creates a new page",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "timeout": {
+                "type": "number",
+                "description": "Maximum wait time in milliseconds. If set to 0, the default timeout will be used."
+              },
+              "url": {
+                "type": "string",
+                "description": "URL to load in a new page."
+              }
+            },
+            "required": [
+              "url"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__performance_analyze_insight",
+          "description": "Provides more detailed information on a specific Performance Insight of an insight set that was highlighted in the results of a trace recording.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "insightName": {
+                "type": "string",
+                "description": "The name of the Insight you want more information on. For example: \"DocumentLatency\" or \"LCPBreakdown\""
+              },
+              "insightSetId": {
+                "type": "string",
+                "description": "The id for the specific insight set. Only use the ids given in the \"Available insight sets\" list."
+              }
+            },
+            "required": [
+              "insightSetId",
+              "insightName"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__performance_start_trace",
+          "description": "Starts a performance trace recording on the selected page. This can be used to look for performance problems and insights to improve the performance of the page. It will also report Core Web Vital (CWV) scores for the page.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "autoStop": {
+                "type": "boolean",
+                "description": "Determines if the trace recording should be automatically stopped."
+              },
+              "reload": {
+                "type": "boolean",
+                "description": "Determines if, once tracing has started, the page should be automatically reloaded."
+              }
+            },
+            "required": [
+              "reload",
+              "autoStop"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__performance_stop_trace",
+          "description": "Stops the active performance trace recording on the selected page.",
+          "parameters": {
+            "type": "object",
+            "properties": {}
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__press_key",
+          "description": "Press a key or key combination. Use this when other input methods like fill() cannot be used (e.g., keyboard shortcuts, navigation keys, or special key combinations).",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "A key or a combination (e.g., \"Enter\", \"Control+A\", \"Control++\", \"Control+Shift+R\"). Modifiers: Control, Shift, Alt, Meta"
+              }
+            },
+            "required": [
+              "key"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__resize_page",
+          "description": "Resizes the selected page's window so that the page has specified dimension",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "height": {
+                "type": "number",
+                "description": "Page height"
+              },
+              "width": {
+                "type": "number",
+                "description": "Page width"
+              }
+            },
+            "required": [
+              "width",
+              "height"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__select_page",
+          "description": "Select a page as a context for future tool calls.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "bringToFront": {
+                "type": "boolean",
+                "description": "Whether to focus the page and bring it to the top."
+              },
+              "pageIdx": {
+                "type": "number",
+                "description": "The index of the page to select. Call list_pages to get available pages."
+              }
+            },
+            "required": [
+              "pageIdx"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__take_screenshot",
+          "description": "Take a screenshot of the page or element.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "filePath": {
+                "type": "string",
+                "description": "The absolute path, or a path relative to the current working directory, to save the screenshot to instead of attaching it to the response."
+              },
+              "format": {
+                "type": "string",
+                "description": "Type of format to save the screenshot as. Default is \"png\""
+              },
+              "fullPage": {
+                "type": "boolean",
+                "description": "If set to true takes a screenshot of the full page instead of the currently visible viewport. Incompatible with uid."
+              },
+              "quality": {
+                "type": "number",
+                "description": "Compression quality for JPEG and WebP formats (0-100). Higher values mean better quality but larger file sizes. Ignored for PNG format."
+              },
+              "uid": {
+                "type": "string",
+                "description": "The uid of an element on the page from the page content snapshot. If omitted takes a pages screenshot."
+              }
+            }
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__take_snapshot",
+          "description": "Take a text snapshot of the currently selected page based on the a11y tree. The snapshot lists page elements along with a unique\nidentifier (uid). Always use the latest snapshot. Prefer taking a snapshot over taking a screenshot. The snapshot indicates the element selected\nin the DevTools Elements panel (if any).",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "filePath": {
+                "type": "string",
+                "description": "The absolute path, or a path relative to the current working directory, to save the snapshot to instead of attaching it to the response."
+              },
+              "verbose": {
+                "type": "boolean",
+                "description": "Whether to include all possible information available in the full a11y tree. Default is false."
+              }
+            }
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__upload_file",
+          "description": "Upload a file through a provided element.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "filePath": {
+                "type": "string",
+                "description": "The local path of the file to upload"
+              },
+              "uid": {
+                "type": "string",
+                "description": "The uid of the file input element or an element that will open file chooser on the page from the page content snapshot"
+              }
+            },
+            "required": [
+              "uid",
+              "filePath"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mcp__chrome-devtools__wait_for",
+          "description": "Wait for the specified text to appear on the selected page.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "description": "Text to appear on the page"
+              },
+              "timeout": {
+                "type": "number",
+                "description": "Maximum wait time in milliseconds. If set to 0, the default timeout will be used."
+              }
+            },
+            "required": [
+              "text"
+            ]
+          }
+        }
+      }
+    ],
+    "model": "glm-4.7",
+    "tool_choice": "auto",
+    "thinking": {
+      "type": "enabled"
+    },
+    "max_tokens": 8192
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-137"
+}

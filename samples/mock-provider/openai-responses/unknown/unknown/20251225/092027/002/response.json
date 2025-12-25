@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.260",
+    "buildTime": "2025-12-24T03:20:16.160Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T111925704-093"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Now let me create a Python script that will read the file, find the drawAllConnections function starting at line 503, and replace it with the new implementation.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd apps/floating-panel && python3 << 'EOF'\\nwith open('src/renderer/graph.mjs', 'r') as f:\\n    lines = f.readlines()\\n\\n# Find the function definition and replace everything from there to the closing brace of drawAllConnections\\n# The function starts around line 503: \\\"function drawAllConnections(parent) {\\\"\\n# We need to find where it ends (before \\\"function drawConnectionToDom\\\")\\n\\n# Find start and end of drawAllConnections function\\nstart_idx = None\\nend_idx = None\\nbrace_count = 0\\nin_function = False\\n\\nfor i, line in enumerate(lines):\\n    if 'function drawAllConnections(parent)' in line:\\n        start_idx = i\\n        in_function = True\\n        brace_count = 0  # Will count from opening brace on next line\\n    elif in_function:\\n        if '{' in line:\\n            brace_count += line.count('{')\\n        if '}' in line:\\n            brace_count -= line.count('}')\\n            if brace_count == 0:\\n                end_idx = i + 1  # Include the closing brace\\n                break\\n\\nif start_idx is None or end_idx is None:\\n    print(f\\\"✗ Could not find drawAllConnections function bounds: start={start_idx}, end={end_idx}\\\")\\n    exit(1)\\n\\nprint(f\\\"Found function at lines {start_idx+1}-{end_idx}\\\")\\n\\n# Read new function from file\\nwith open('/tmp/new-draw-connections.js', 'r') as f:\\n    new_func = f.read()\\n\\n# Replace the function\\nnew_lines = lines[:start_idx] + [new_func + '\\\\n'] + lines[end_idx:]\\n\\nwith open('src/renderer/graph.mjs', 'w') as f:\\n    f.writelines(new_lines)\\n\\nprint(f\\\"✓ Replaced function (lines {start_idx+1}-{end_idx}) with new implementation\\\")\\nEOF\\n\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042286848957244421",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766546416,
+      "id": "20251224111925b68f009a0ee34472",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224111925b68f009a0ee34472",
+      "usage": {
+        "completion_tokens": 436,
+        "prompt_tokens": 62018,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 62454
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 03:20:16 GMT",
+      "set-cookie": "acw_tc=0ae5a7de17665463658776092ed4a7870fe7c1e76c775d2d177f0b3533667d;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224111925b68f009a0ee34472"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-002"
+}

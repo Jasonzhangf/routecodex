@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.284",
+    "buildTime": "2025-12-24T15:20:14.901Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T232008053-084"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "浏览器服务的 /command 接口并不支持 inspect_tree 操作，它只支持 start/goto/getCookies/saveCookies/loadCookies/getStatus/stop/screenshot/evaluate/autoCookies 等基础操作，而不支持容器匹配相关的 inspect_tree 或 inspect_dom_branch 操作。这些容器匹配操作是由 WebSocket 服务（ws-server.js）提供的。\n\n这意味着我们之前的尝试是错误的，我们应该通过 WebSocket 来调用 inspect_tree，而不是通过 HTTP /command 接口。\n\n让我先验证 controller 的 getBrowserWsUrl 是否正确配置，它应该连接到 ws://127.0.0.1:8765。\n\n让我检查一下 controller 的 getBrowserWsUrl 实现。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"rg \\\"getBrowserWsUrl\\\" services/controller/src/controller.ts -A 5\",\"justification\":\"\",\"login\":true,\"max_output_tokens\":4000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/bash\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042211154452561401",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766589614,
+      "id": "202512242320084d05ce5eeb5247a0",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512242320084d05ce5eeb5247a0",
+      "usage": {
+        "completion_tokens": 219,
+        "prompt_tokens": 67828,
+        "prompt_tokens_details": {
+          "cached_tokens": 59424
+        },
+        "total_tokens": 68047
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 15:20:14 GMT",
+      "set-cookie": "acw_tc=0ae5a7dc17665896082744867e7e5dafd712795bfca2750c4e9e416ccf1579;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512242320084d05ce5eeb5247a0"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-128"
+}

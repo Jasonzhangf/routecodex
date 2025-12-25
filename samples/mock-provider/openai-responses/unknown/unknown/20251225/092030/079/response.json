@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T11:27:27.548Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T192711956-039"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694bce10d75fc1f61ac6d7fc",
+      "object": "chat.completion",
+      "created": 1766575633,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 51583,
+        "completion_tokens": 235,
+        "total_tokens": 51818
+      },
+      "extend_fields": {
+        "traceId": "212c397817665756321495903e154e",
+        "requestId": "1038e92216b7e4f433d9544114b086c7"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:62",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"python3 << 'EOF'\\nimport re\\n\\nfile_path = '/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts'\\n\\nwith open(file_path, 'r') as f:\\n    content = f.read()\\n\\n# Change bootstrapVirtualRouterConfig function to async\\npattern = r'export function bootstrapVirtualRouterConfig\\\\('\\nreplacement = 'export async function bootstrapVirtualRouterConfig('\\n\\nif re.search(pattern, content):\\n    new_content = re.sub(pattern, replacement, content)\\n    with open(file_path, 'w') as f:\\n        f.write(new_content)\\n    print(\\\"Changed bootstrapVirtualRouterConfig to async\\\")\\nelse:\\n    print(\\\"Pattern not found\\\")\\nEOF\\n\",\"justification\":\"将bootstrapVirtualRouterConfig函数改为async\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:27:27 GMT",
+      "eagleeye-traceid": "212c397817665756321495903e154e",
+      "s-brt": "15389",
+      "s-rt": "15427",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-079"
+}

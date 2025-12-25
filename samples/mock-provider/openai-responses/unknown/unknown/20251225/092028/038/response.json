@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T11:24:45.856Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T192434882-016"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "The patch format is incorrect. Let me use a simpler approach - just use python to edit the file directly.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"python3 << 'EOF'\\nimport re\\n\\nfile_path = '/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts'\\n\\nwith open(file_path, 'r') as f:\\n    content = f.read()\\n\\n# Find the location after the aliasSet.add(alias); line inside pushEntry function\\n# and before the fromRecord definition\\npattern = r'(entries\\\\.push\\\\(\\\\{ keyAlias: alias, auth: normalized \\\\}\\\\);\\\\s+aliasSet\\\\.add\\\\(alias\\\\);\\\\s+\\\\});\\\\s*(const fromRecord)'\\n\\nreplacement = r'''\\\\1;\\n  \\n  // Handle OAuth providers with multiple token files\\n  if (baseType === 'oauth' && providerId === 'iflow') {\\n    // Scan for multiple token files for iflow provider\\n    const tokenMatches = await scanProviderTokenFiles(providerId);\\n    for (const match of tokenMatches) {\\n      const sequenceAlias = match.sequence.toString();\\n      if (!aliasSet.has(sequenceAlias)) {\\n        const authConfig = {\\n          ...defaults,\\n          type: baseTypeSource,\\n          tokenFile: match.filePath\\n        };\\n        pushEntry(sequenceAlias, authConfig);\\n      }\\n    }\\n  }\\n  \\n  \\\\2'''\\n\\nif re.search(pattern, content):\\n    new_content = re.sub(pattern, replacement, content)\\n    with open(file_path, 'w') as f:\\n        f.write(new_content)\\n    print(\\\"Successfully added token scanning logic to extractProviderAuthEntries\\\")\\nelse:\\n    print(\\\"Pattern not found, trying alternative approach...\\\")\\n    # Alternative: search for a unique line before fromRecord\\n    alt_pattern = r'(aliasSet\\\\.add\\\\(alias\\\\);\\\\s+\\\\});\\\\s*(const fromRecord)'\\n    if re.search(alt_pattern, content):\\n        new_content = re.sub(alt_pattern, replacement, content)\\n        with open(file_path, 'w') as f:\\n            f.write(new_content)\\n        print(\\\"Successfully added token scanning logic (alternative)\\\")\\n    else:\\n        print(\\\"Could not find target location\\\")\\nEOF\\n\",\"justification\":\"使用python直接编辑文件添加扫描逻辑\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042359897762158593",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766575485,
+      "id": "20251224192435c4c33400030d4a2e",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224192435c4c33400030d4a2e",
+      "usage": {
+        "completion_tokens": 531,
+        "prompt_tokens": 49594,
+        "prompt_tokens_details": {
+          "cached_tokens": 39843
+        },
+        "total_tokens": 50125
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:24:45 GMT",
+      "set-cookie": "acw_tc=ac11000117665754750803830ebb3abbfebd1dfa3ce49068588196e8293b24;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224192435c4c33400030d4a2e"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-038"
+}

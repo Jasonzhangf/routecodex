@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:49:22.881Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T204904427-067"
+  },
+  "url": "https://api.tabcode.cc/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****d731a8",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_06056b1888f3477401694a8fc68430819aa3a272fe7279adf9",
+      "object": "response",
+      "created_at": 1766494150,
+      "status": "completed",
+      "model": "gpt-5.2-codex",
+      "temperature": 1,
+      "top_p": 0.98,
+      "metadata": {},
+      "output": [
+        {
+          "id": "rs_06056b1888f3477401694a8fc8bd28819a9930a5bb929fe8ea",
+          "type": "reasoning",
+          "summary": [],
+          "content": []
+        },
+        {
+          "id": "fc_06056b1888f3477401694a8fce35f8819ab9128572b52a5a1b",
+          "type": "function_call",
+          "status": "completed",
+          "call_id": "call_7ygPEykN6nTaolkbuXyG0oCq",
+          "name": "apply_patch",
+          "arguments": "{\"input\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/renderer/index.mts\\n@@\\n-// Enable drag for the Electron window\\n-initDrag();\\n+// Enable drag for the Electron window\\n+const dragArea = document.getElementById('drag-area') as HTMLElement | null;\\n+if (dragArea) {\\n+  initDrag(dragArea);\\n+} else {\\n+  console.warn('[ui-renderer] drag-area not found, drag disabled');\\n+}\\n*** End Patch\",\"patch\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/renderer/index.mts\\n@@\\n-// Enable drag for the Electron window\\n-initDrag();\\n+// Enable drag for the Electron window\\n+const dragArea = document.getElementById('drag-area') as HTMLElement | null;\\n+if (dragArea) {\\n+  initDrag(dragArea);\\n+} else {\\n+  console.warn('[ui-renderer] drag-area not found, drag disabled');\\n+}\\n*** End Patch\"}"
+        },
+        {
+          "id": "message_placeholder_3",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": ""
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 49475,
+        "input_tokens_details": {
+          "cached_tokens": 35328
+        },
+        "output_tokens": 520,
+        "output_tokens_details": {
+          "reasoning_tokens": 256
+        },
+        "total_tokens": 49995
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092033-029"
+}

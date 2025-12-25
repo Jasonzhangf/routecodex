@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.262",
+    "buildTime": "2025-12-24T05:53:13.679Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T134956485-029"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694b7f06966f039a14e1d821",
+      "object": "chat.completion",
+      "created": 1766555399,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 165038,
+        "completion_tokens": 3332,
+        "total_tokens": 168370
+      },
+      "extend_fields": {
+        "traceId": "2150137017665553970154907e0c66",
+        "requestId": "4189d1be465a5723c5694dffcfbf9a5e"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:327",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"cat > launcher/core/launcher.mjs << 'ENDOFJS'\\nimport { spawn, execSync } from 'node:child_process';\\nimport { fileURLToPath } from 'node:url';\\nimport path from 'node:path';\\nimport fs from 'node:fs';\\nimport os from 'node:os';\\nimport WebSocket from 'ws';\\n\\nconst __dirname = path.dirname(fileURLToPath(import.meta.url));\\nconst CONFIG = {\\n  ports: {\\n    unified: 7701,\\n    browser: 7704\\n  },\\n  timeout: 10_000\\n};\\n\\nconst APP_PIDS = new Set();\\n\\nasync function sleep(ms) {\\n  return new Promise(r => setTimeout(r, ms));\\n}\\n\\nfunction log(msg) {\\n  console.log(`[launcher] ${msg}`);\\n}\\n\\nfunction registerPid(pid) {\\n  APP_PIDS.add(pid);\\n}\\n\\nfunction cleanupPids() {\\n  for (const pid of APP_PIDS) {\\n    try {\\n      process.kill(pid, 'SIGTERM');\\n    } catch {}\\n  }\\n  APP_PIDS.clear();\\n}\\n\\nasync function startProcess(cmd, args = [], opts = {}) {\\n  const startAt = Date.now();\\n  log(`启动子进程: ${cmd} ${args.join(' ')}`);\\n  const p = spawn(cmd, args, { stdio: opts.stdio || 'inherit', env: opts.env || process.env });\\n  registerPid(p.pid);\\n  log(`子进程已启动: pid=${p.pid}`);\\n  return new Promise((resolve, reject) => {\\n    const timer = setTimeout(() => {\\n      reject(new Error(`子进程启动超时: ${cmd} ${args.join(' ')}`));\\n    }, CONFIG.timeout);\\n\\n    p.on('error', (err) => {\\n      clearTimeout(timer);\\n      reject(err);\\n    });\\n\\n    p.on('exit', (code, signal) => {\\n      clearTimeout(timer);\\n      const cost = Date.now() - startAt;\\n      reject(new Error(`子进程异常退出: ${cmd} ${args.join(' ')} code=${code} signal=${signal} cost=${cost}ms`));\\n    });\\n\\n    // 子进程启动后，1s 内无异常即视为成功\\n    setTimeout(() => {\\n      resolve(p);\\n    }, 1000);\\n  });\\n}\\n\\nasync function ensurePortFree(port, name) {\\n  // 1. 先尝试 0.5s 内正常关闭可能残留的进程\\n  try {\\n    const list = execSync(`lsof -ti :${port}`, { encoding: 'utf8' }).trim().split('\\\\n').filter(Boolean);\\n    if (list.length) {\\n      log(`${name} 端口 ${port} 被占用，准备清理以下进程:`);\\n      for (const pid of list) {\\n        try {\\n          execSync(`kill -TERM ${pid}`);\\n          log(`已发送 SIGTERM 给 PID ${pid}`);\\n        } catch {}\\n      }\\n      await sleep(500);\\n      const remain = execSync(`lsof -ti :${port}`, { encoding: 'utf8' }).trim().split('\\\\n').filter(Boolean);\\n      for (const pid of remain) {\\n        try {\\n          execSync(`kill -KILL ${pid}`);\\n          log(`已强制杀掉 PID ${pid}`);\\n        } catch {}\\n      }\\n      await sleep(1000);\\n    }\\n  } catch {}\\n  // 2. 如仍被占用，仅杀掉该端口的进程（精确匹配）\\n  try {\\n    const list = execSync(`lsof -ti :${port}`, { encoding: 'utf8' }).trim().split('\\\\n').filter(Boolean);\\n    if (list.length) {\\n      log(`${name} 端口 ${port} 被占用，准备清理以下进程:`);\\n      for (const pid of list) {\\n        try {\\n          execSync(`kill -TERM ${pid}`);\\n          log(`已发送 SIGTERM 给 PID ${pid}`);\\n        } catch {}\\n      }\\n      await sleep(1500);\\n      const remain = execSync(`lsof -ti :${port}`, { encoding: 'utf8' }).trim().split('\\\\n').filter(Boolean);\\n      for (const pid of remain) {\\n        try {\\n          execSync(`kill -KILL ${pid}`);\\n          log(`已强制杀掉 PID ${pid}`);\\n        } catch {}\\n      }\\n      await sleep(500);\\n    }\\n  } catch {}\\n  try {\\n    execSync(`lsof -ti :${port}`, { encoding: 'utf8' });\\n    throw new Error(`${name} 端口 ${port} 仍被占用，且未识别为本仓库进程。`);\\n  } catch {}\\n}\\n\\nasync function waitForHealth(port, name) {\\n  log(`等待健康检查: ${name} 端口 ${port}`);\\n  const t0 = Date.now();\\n  while (Date.now() - t0 < CONFIG.timeout) {\\n    try {\\n      const res = await fetch(`http://127.0.0.1:${port}/health`);\\n      log(`[${name}] fetch /health: ${res.status} (${res.statusText})`);\\n      if (res.ok) {\\n        const body = await res.text();\\n        log(`✅ ${name} 健康检查通过 (${Date.now() - t0}ms) body=\\\"${body}\\\"`);\\n        return;\\n      }\\n    } catch (err) {\\n      log(`[${name}] /health 请求失败: ${err.message}`);\\n    }\\n    await sleep(500);\\n  }\\n  throw new Error(`${name} 健康检查超时 (${CONFIG.timeout}ms)`);\\n}\\n\\nasync function sendBrowserCommand(payload) {\\n  const res = await fetch(`http://127.0.0.1:${CONFIG.ports.browser}/command`, {\\n    method: 'POST',\\n    headers: { 'Content-Type': 'application/json' },\\n    body: JSON.stringify(payload)\\n  });\\n  return await res.json();\\n}\\n\\nasync function isLoggedIn(profile) {\\n  const script = \\\"(() => { const loginAnchor = document.querySelector('.woo-badge-box'); return !!loginAnchor; })()\\\";\\n  const res = await sendBrowserCommand({\\n    action: 'evaluate',\\n    args: { profileId: profile, script }\\n  });\\n  const result = res?.result ?? res?.body?.result ?? res?.data?.result;\\n  return result === true;\\n}\\n\\nasync function verifyContainerMatch(profile, url) {\\n  log('\\\\n[容器匹配验证]');\\n  const ws = new WebSocket(`ws://127.0.0.1:${CONFIG.ports.unified}/ws`);\\n  await new Promise((r, j) => {\\n    ws.on('open', r);\\n    ws.on('error', j);\\n    setTimeout(() => j(new Error('WebSocket 连接超时')), 5000);\\n  });\\n  const result = await new Promise((resolve, reject) => {\\n    const t = setTimeout(() => reject(new Error('容器匹配超时')), 15000);\\n    const onMessage = (data) => {\\n      let payload;\\n      try {\\n        payload = JSON.parse(data.toString());\\n      } catch (err) {\\n        clearTimeout(t);\\n        ws.off('message', onMessage);\\n        reject(new Error('容器匹配返回非 JSON'));\\n        return;\\n      }\\n      if (payload?.type === 'response') {\\n        clearTimeout(t);\\n        ws.off('message', onMessage);\\n        resolve(payload.data);\\n      } else if (payload?.type === 'error') {\\n        clearTimeout(t);\\n        ws.off('message', onMessage);\\n        reject(new Error(payload.error || '容器匹配返回错误'));\\n      }\\n    };\\n    ws.on('message', onMessage);\\n    ws.send(JSON.stringify({\\n      type: 'action',\\n      action: 'containers:match',\\n      payload: { profile, url, maxDepth: 6, maxChildren: 20 }\\n    }));\\n  });\\n  ws.close();\\n  if (!result?.success) {\\n    throw new Error(`容器匹配失败: ${result?.error || 'unknown error'}`);\\n  }\\n  if (!result?.data?.container_tree || !result?.data?.dom_tree) {\\n    throw new Error('容器匹配失败: 缺少 container_tree 或 dom_tree');\\n  }\\n  const rootId = result?.data?.metadata?.root_container_id;\\n  if (!rootId || !String(rootId).startsWith('weibo_')) {\\n    throw new Error(`容器匹配失败: root_container_id=${rootId || 'unknown'}`);\\n  }\\n  log('✅ 容器匹配成功');\\n}\\n\\nexport async function startAll({ profile, url, headless }) {\\n  console.log('╔══════════════════════════════════════╗');\\n  console.log('║ Core Launcher - 统一启动编排器       ║');\\n  console.log('║ 架构：Unified API + Browser Service ║');\\n  console.log('╚══════════════════════════════════════╝');\\n  console.log(`参数: profile=${profile} url=${url} headless=${headless}`);\\n\\n  // 在真正启动前，先清理可能残留的“本仓库”子进程\\n  cleanupPids();\\n\\n  await ensurePortFree(CONFIG.ports.unified, 'Unified API');\\n  await ensurePortFree(CONFIG.ports.browser, 'Browser Service');\\n\\n  log('=== 启动 Unified API ===');\\n  const unified = await startProcess('node', ['services/unified-api/server.mjs']);\\n  log('=== Unified API 进程启动，等待健康检查 ===');\\n  await waitForHealth(CONFIG.ports.unified, 'Unified API');\\n  try {\\n    await fetch(`http://127.0.0.1:${CONFIG.ports.unified}/v1/internal/events/browser-mode`, {\\n      method: 'POST',\\n      headers: { 'Content-Type': 'application/json' },\\n      body: JSON.stringify({ headless })\\n    }).catch(() => {});\\n  } catch {}\\n\\n  log('=== 启动 Browser Service ===');\\n  const browser = await startProcess('node', ['libs/browser/remote-service.js',\\n    '--host', '127.0.0.1', '--port', CONFIG.ports.browser,\\n    '--no-ws'\\n  ], {\\n    env: { ...process.env, WEBAUTO_SKIP_HEALTH_CHECK: '1' }\\n  });\\n  log('=== Browser Service 进程启动，等待健康检查 ===');\\n  await waitForHealth(CONFIG.ports.browser, 'Browser Service');\\n\\n  console.log('\\\\n[创建浏览器会话]');\\n  const startResult = await sendBrowserCommand({\\n    action: 'start',\\n    args: { profileId: profile, url, headless }\\n  });\\n  if (!startResult?.ok) {\\n    throw new Error(`创建会话失败: ${startResult?.error || 'unknown error'}`);\\n  }\\n\\n  console.log('\\\\n[刷新页面应用 Cookie]');\\n  await sendBrowserCommand({ action: 'goto', args: { url, waitUntil: 'networkidle', profileId: profile } });\\n\\n  console.log('\\\\n[检查登录状态]');\\n  let loggedIn = await isLoggedIn(profile);\\n  console.log(`[launcher] 登录状态: ${loggedIn ? '已登录' : '未登录'}`);\\n\\n  if (!loggedIn) {\\n    console.log('\\\\n[等待用户登录...]');\\n    console.log('请在浏览器中完成登录，每15秒检查一次登录状态');\\n    while (!loggedIn) {\\n      await sleep(15000);\\n      loggedIn = await isLoggedIn(profile);\\n      console.log(`[launcher] 登录状态: ${loggedIn ? '已登录' : '未登录'}`);\\n    }\\n  }\\n\\n  console.log('\\\\n[启动浮窗 UI]');\\n  const floating = await startProcess('node', [\\n    'apps/floating-panel/scripts/start-headful.mjs'\\n  ], {\\n    cwd: __dirname,\\n    env: {\\n      ...process.env,\\n      WEBAUTO_FLOATING_WS_URL: `ws://127.0.0.1:${CONFIG.ports.unified}/ws`,\\n      WEBAUTO_FLOATING_BUS_URL: `ws://127.0.0.1:${CONFIG.ports.unified}/bus`,\\n      WEBAUTO_FLOATING_BUS_PORT: `${CONFIG.ports.unified}`,\\n      WEBAUTO_CONTROLLER_WS_URL: `ws://127.0.0.1:${CONFIG.ports.unified}/ws`,\\n      WEBAUTO_FLOATING_HEADLESS: headless ? '1' : '0',\\n      WEBAUTO_FLOATING_DEVTOOLS: '1'\\n    }\\n  });\\n  registerPid(floating.pid);\\n\\n  // 等待浮窗启动后，立即发起匹配\\n  await sleep(1500);\\n\\n  try {\\n    await fetch(`http://127.0.0.1:${CONFIG.ports.unified}/v1/internal/events/browser-mode`, {\\n      method: 'POST',\\n      headers: { 'Content-Type': 'application/json' },\\n      body: JSON.stringify({ headless })\\n    }).catch(() => {});\\n  } catch {}\\n\\n  await verifyContainerMatch(profile, url);\\n\\n  console.log('\\\\n🎉 启动完成！');\\n  console.log('💡 浏览器窗口已打开');\\n  console.log('💡 浮窗UI已连接');\\n  console.log('💡 容器匹配功能正常');\\n  console.log('💡 按 Ctrl+C 退出');\\n\\n  // 优雅退出\\n  const cleanup = () => {\\n    console.log('\\\\n[launcher] 收到退出信号，正在清理...');\\n    cleanupPids();\\n    process.exit(0);\\n  };\\n  process.on('SIGINT', cleanup);\\n  process.on('SIGTERM', cleanup);\\n}\\n\\nconst [,, profile = 'weibo_fresh', url = 'https://weibo.com'] = process.argv;\\nconst headless = process.env.WEBAUTO_HEADLESS === '1';\\n\\nstartAll({ profile, url, headless }).catch(err => {\\n  console.error(`启动失败: ${err.message}`);\\n  cleanupPids();\\n  process.exit(1);\\n});\\nENDOFJS\\nchmod +x launcher/core/launcher.mjs\"}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 05:50:57 GMT",
+      "eagleeye-traceid": "2150137017665553970154907e0c66",
+      "s-brt": "60040",
+      "s-rt": "60239",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092029-161"
+}

@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.260",
+    "buildTime": "2025-12-24T02:31:49.224Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T103129174-003"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "我来帮你检查连线功能的问题。先了解一下项目结构和相关代码。",
+            "reasoning_content": "用户遇到的问题是：启动后可以展开容器树和 DOM，但是没有连线。\n\n我需要先了解一下这个项目的结构，看看是什么类型的\"容器树和 DOM\"，以及\"连线\"是什么意思。根据项目名称 webauto，这很可能是一个浏览器自动化项目。\n\n让我先查看项目结构，了解当前的实现情况。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"find /Users/fanzhang/Documents/github/webauto -type f -name \\\"*.ts\\\" -o -name \\\"*.js\\\" -o -name \\\"*.mjs\\\" | head -30\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042193149949149731",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766543509,
+      "id": "20251224103129692fd045347d4e2d",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224103129692fd045347d4e2d",
+      "usage": {
+        "completion_tokens": 127,
+        "prompt_tokens": 7896,
+        "prompt_tokens_details": {
+          "cached_tokens": 7894
+        },
+        "total_tokens": 8023
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 02:31:49 GMT",
+      "set-cookie": "acw_tc=ac11000117665434891943660e42750f30fcd84722e6a7a4e4f70b7ca75bb5;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224103129692fd045347d4e2d"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-114"
+}

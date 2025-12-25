@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.274",
+    "buildTime": "2025-12-24T08:01:36.523Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T160118881-016"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "好的，找到一些包含高亮逻辑的文件。让我先找到CLI相关的命令来执行高亮操作。\n\n我需要：\n1. 找到可以通过selector高亮元素的CLI\n2. 找到可以通过dom_path高亮元素的CLI\n3. 找到连接容器和DOM的CLI（如果存在）\n\n先看看browser-control和container-matcher的CLI有哪些命令。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"find . -path \\\"*/node_modules\\\" -prune -o -type f -name \\\"cli.ts\\\" -o -name \\\"cli.mjs\\\" -o -name \\\"cli.js\\\" | head -10\",\"justification\":\"找到所有CLI入口文件\",\"login\":false,\"max_output_tokens\":6000,\"sandbox_permissions\":\"use_default\",\"shell\":\"\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042257505740274996",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766563296,
+      "id": "20251224160119638726c156ff4f70",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224160119638726c156ff4f70",
+      "usage": {
+        "completion_tokens": 187,
+        "prompt_tokens": 95893,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 96080
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:01:36 GMT",
+      "set-cookie": "acw_tc=0ae5a86d17665632791393420ea1b545768fbdb703241ee6fa48bbf6c0b4fc;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224160119638726c156ff4f70"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-200"
+}

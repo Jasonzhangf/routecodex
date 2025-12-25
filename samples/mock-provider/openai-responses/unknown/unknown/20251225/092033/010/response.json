@@ -1,0 +1,60 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:07:09.537Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T200700068-005"
+  },
+  "url": "https://api.tabcode.cc/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****d731a8",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_0feba7e3281f14d501694a85e9e7a8819abed5d829980c7475",
+      "object": "response",
+      "created_at": 1766491625,
+      "status": "completed",
+      "model": "gpt-5.2-codex",
+      "temperature": 1,
+      "top_p": 0.98,
+      "metadata": {},
+      "output": [
+        {
+          "id": "msg_0feba7e3281f14d501694a85ebb020819a8caa809e815e3ecb",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "启动已完成并且服务健康。\n- Unified API `http://127.0.0.1:7701/health` 返回 `{\"status\":\"ok\",...}`\n- Browser Service `http://127.0.0.1:7704/health` 返回 `{\"ok\":true}`\n\n如果要继续下一步（比如查看日志/停止进程/执行特定操作），告诉我。"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 11245,
+        "input_tokens_details": {
+          "cached_tokens": 0
+        },
+        "output_tokens": 89,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 11334
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092033-010"
+}

@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.260",
+    "buildTime": "2025-12-24T03:02:19.300Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T110206598-034"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Wait, I used the wrong sed syntax. Let me fix this properly with a Python script.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd apps/floating-panel && python3 << 'EOF'\\nimport re\\n\\nwith open('src/renderer/graph.mjs', 'r') as f:\\n    content = f.read()\\n\\n# Fix the selector references in console.log\\ncontent = content.replace(\\n    \\\"node.match?.selector\\\",\\n    \\\"node.match?.selectors?.[0]\\\"\\n)\\n\\nwith open('src/renderer/graph.mjs', 'w') as f:\\n    f.write(content)\\n\\nprint(\\\"Fixed selector references\\\")\\nEOF\\n\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042413979990600027",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766545339,
+      "id": "2025122411020635f973233449436e",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122411020635f973233449436e",
+      "usage": {
+        "completion_tokens": 126,
+        "prompt_tokens": 37788,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 37914
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 03:02:19 GMT",
+      "set-cookie": "acw_tc=ac11000117665453267201052e090469c02dc99f3d4553c9cb0feca6c49e16;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122411020635f973233449436e"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-154"
+}

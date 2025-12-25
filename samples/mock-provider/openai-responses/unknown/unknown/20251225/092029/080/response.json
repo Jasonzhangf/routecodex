@@ -1,0 +1,68 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.286",
+    "buildTime": "2025-12-25T00:54:35.800Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251225T085422350-062"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****45931c",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694c8b3f966f039a14e4f521",
+      "object": "chat.completion",
+      "created": 1766624063,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 14319,
+        "completion_tokens": 219,
+        "total_tokens": 14538
+      },
+      "extend_fields": {
+        "traceId": "21044e8b17666240626027372e0f0a",
+        "requestId": "b6c719b10c11e9e3a118f2f5884529ec"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "stop",
+          "message": {
+            "role": "assistant",
+            "content": "先确认 preload 现状：  \n- 源码为 apps/floating-panel/src/main/preload.mjs（ESM 合规）  \n- 已编译到 apps/floating-panel/dist/main/preload.mjs  \n- 暴露 window.api（含 health / minimize / close / highlightElement 等 7 个接口）  \n\n下一步：立即补齐“最小回环”测试脚本，确保 preload 在独立 Electron 主进程里能被加载且 renderer 端能拿到 window.api。  \n我会新建 apps/floating-panel/scripts/test-preload.mjs，流程如下：  \n1. 启动极简 Electron（300×200 窗口），preload 指向 dist/main/preload.mjs  \n2. renderer 里通过 ipcRenderer.invoke('preload-test:check') 把 !!window.api 回传主进程  \n3. 主进程打印 [preload-test] OK / FAILED 后退出  \n4. 你随时可运行 `cd apps/floating-panel && npx electron scripts/test-preload.mjs` 验证基线  \n\n现在开始写脚本。"
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Thu, 25 Dec 2025 00:54:35 GMT",
+      "eagleeye-traceid": "21044e8b17666240626027372e0f0a",
+      "s-brt": "13125",
+      "s-rt": "13178",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092029-080"
+}

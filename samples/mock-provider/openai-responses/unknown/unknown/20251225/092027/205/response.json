@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.274",
+    "buildTime": "2025-12-24T08:07:20.685Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T160709450-041"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Unified API 是在 unified-api 目录下，但 controller 已经在前面找到了。现在的问题是：\n\n1. 我找到了 controller.ts 中有 `browser:highlight-dom-path` 这个 action，它会调用 `handleBrowserHighlightDomPath`\n2. `handleBrowserHighlightDomPath` 发送 WS 命令给 browser service\n3. 但是当从 UI 调用时，需要通过一个统一的 API 来中转\n\n让我看看 services/unified-api 目录下有什么文件。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"ls -la /Users/fanzhang/Documents/github/webauto/services/unified-api/\",\"justification\":\"查看unified-api目录结构\",\"login\":false,\"max_output_tokens\":6000,\"sandbox_permissions\":\"use_default\",\"shell\":\"\",\"workdir\":\"\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042279942649876361",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766563640,
+      "id": "20251224160709e91ef4fec9c44998",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224160709e91ef4fec9c44998",
+      "usage": {
+        "completion_tokens": 180,
+        "prompt_tokens": 120163,
+        "prompt_tokens_details": {
+          "cached_tokens": 97139
+        },
+        "total_tokens": 120343
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:07:20 GMT",
+      "set-cookie": "acw_tc=ac11000117665636297486018ed6dc0a385b88319801f5e1159347af863b7a;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224160709e91ef4fec9c44998"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-205"
+}

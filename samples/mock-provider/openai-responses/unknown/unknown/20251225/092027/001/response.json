@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.260",
+    "buildTime": "2025-12-24T03:19:25.588Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T111831295-092"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "The current implementation still uses the selector map approach which doesn't work for complex CSS selectors. I need to update it to use the pre-built `node.match.nodes` array that already contains the DOM path mapping.\n\nLet me write a Python script to replace the drawAllConnections function.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd apps/floating-panel && cat > /tmp/new-draw-connections.js << 'JSEOF'\\nfunction drawAllConnections(parent) {\\n  if (!containerData || !domData) {\\n    console.log('[drawAllConnections] Missing data');\\n    return;\\n  }\\n\\n  console.log('[drawAllConnections] Starting connection drawing');\\n\\n  function drawConnectionsForNode(node) {\\n    if (!node || typeof node !== 'object') return;\\n    \\n    console.log('[drawConnectionsForNode] Checking node:', node.id || node.name, 'has match:', !!node.match);\\n    \\n    // Use pre-built node mappings from container.match.nodes\\n    if (node.match && node.match.nodes && node.match.nodes.length > 0) {\\n      const containerPos = containerNodePositions.get(node.id || node.name);\\n      \\n      console.log('[drawConnectionsForNode] Match nodes:', node.match.nodes.length);\\n      \\n      for (const matchNode of node.match.nodes) {\\n        const domPath = matchNode.dom_path;\\n        const domNodeY = domNodePositions.get(domPath);\\n        const selector = matchNode.selector;\\n        \\n        console.log('[drawConnectionsForNode] Connection data:', {\\n          containerId: node.id || node.name,\\n          containerPos,\\n          domPath,\\n          selector,\\n          domNodeY\\n        });\\n        \\n        if (containerPos && domNodeY !== undefined && domNodeY >= 0) {\\n          const startX = containerPos.x;\\n          const startY = containerPos.y;\\n          const endX = 410;\\n          const endY = domNodeY + 12;\\n          \\n          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');\\n          const midX = (startX + endX) / 2;\\n          path.setAttribute('d', `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`);\\n          path.setAttribute('stroke', '#4CAF50');\\n          path.setAttribute('stroke-width', '2');\\n          path.setAttribute('fill', 'none');\\n          path.setAttribute('stroke-dasharray', '4,2');\\n          path.setAttribute('opacity', '0.7');\\n          parent.appendChild(path);\\n          console.log('[drawConnectionsForNode] Drew connection from', node.id, 'to', domPath, 'via', selector);\\n        } else {\\n          console.log('[drawConnectionsForNode] Cannot draw to', domPath, ': missing positions or invalid Y');\\n        }\\n      }\\n    }\\n    \\n    if (node.children && Array.isArray(node.children)) {\\n      node.children.forEach(child => drawConnectionsForNode(child));\\n    }\\n  }\\n\\n  drawConnectionsForNode(containerData);\\n  console.log('[drawAllConnections] Complete, connections drawn');\\n}\\nJSEOF\\necho \\\"New function created\\\"\\n\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042315333180784840",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766546365,
+      "id": "20251224111831869ac36cc67c4675",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224111831869ac36cc67c4675",
+      "usage": {
+        "completion_tokens": 654,
+        "prompt_tokens": 61377,
+        "prompt_tokens_details": {
+          "cached_tokens": 44
+        },
+        "total_tokens": 62031
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 03:19:25 GMT",
+      "set-cookie": "acw_tc=0ae5a7de17665463114694786ed4a7cbdc87df4c3d1d0cad1ee6ac8ccf1530;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224111831869ac36cc67c4675"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-001"
+}

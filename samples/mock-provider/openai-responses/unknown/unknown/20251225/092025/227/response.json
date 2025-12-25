@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.246",
+    "buildTime": "2025-12-23T13:37:02.448Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T213657811-079"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "用户抱怨健康检查日志一直打印刷屏很烦。这是因为健康检查是每5秒执行一次(setInterval(checkHealth, 5000))，每次都会打印日志。\n\n需要修改健康检查逻辑，使其在启动后健康成功后就停止定期检查，或者只在需要时才检查。\n\n可以改为：\n1. 只在初始化时检查一次\n2. 在健康成功后停止定时器\n3. 完全注释掉定期检查\n\n让我检查并修改index.mts中的健康检查逻辑。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto/apps/floating-panel && rg -n \\\"setInterval\\\" src/renderer/index.mts\",\"justification\":\"查找定时器位置\",\"login\":false,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/renderer\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042238642243361879",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766497022,
+      "id": "20251223213658092e795bdbdf4e24",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223213658092e795bdbdf4e24",
+      "usage": {
+        "completion_tokens": 204,
+        "prompt_tokens": 93509,
+        "prompt_tokens_details": {
+          "cached_tokens": 92565
+        },
+        "total_tokens": 93713
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:37:02 GMT",
+      "set-cookie": "acw_tc=ac11000117664970181031073ee1d4a576977b6b79047670170e6bff665535;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223213658092e795bdbdf4e24"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-227"
+}

@@ -1,0 +1,91 @@
+{
+  "meta": {
+    "stage": "provider-request",
+    "version": "0.89.252",
+    "buildTime": "2025-12-23T14:47:08.646Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T224708575-001"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "node",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "*/*"
+  },
+  "body": {
+    "messages": [
+      {
+        "role": "system",
+        "content": "# RouteCodex V2 – Working Agreement\n\nThis document replaces the old “architecture novel” with a concise set of rules that reflect how the system actually works today. Everything else lives in source.\n\n## 1. Core Principles\n\n1. **Single execution path** – All traffic flows `HTTP server → llmswitch-core Hub Pipeline → Provider V2 → upstream AI`. No side channels, no bypasses.\n2. **llmswitch-core owns tools & routing** – Host/server/provider code must never repair tool calls, rewrite arguments, or decide routes. Use the Hub Pipeline APIs only.\n3. **Provider layer = transport** – V2 providers handle auth, HTTP, retries, and compatibility hooks. They do not inspect user payload semantics.\n4. **Fail fast** – Any upstream error (HTTP, auth, compat) is bubbled via `providerErrorCenter` + `errorHandlingCenter`. No silent fallbacks.\n5. **Config-driven** – Host consumes `bootstrapVirtualRouterConfig` output only. Do not reassemble “merged configs” or patch runtime data on the fly.\n\n## 2. Module Responsibilities\n\n| Layer | Source | What it does | What it must **not** do |\n|-------|--------|--------------|--------------------------|\n| HTTP server | `src/server/runtime/http-server/` | Express wiring, middleware, route handlers, delegating to Hub Pipeline, managing provider runtimes | Tool/route logic, manual SSE bridging, configuration munging |\n| Hub Pipeline (llmswitch-core) | `sharedmodule/llmswitch-core/dist/...` | Tool canonicalization, routing, compatibility orchestration, SSE conversion | Direct HTTP calls, auth, provider-specific behavior |\n| Provider V2 | `src/providers/` | Auth resolution, request shaping, error reporting, compatibility adapters | Tool extraction, routing, configuration merges |\n| Compatibility (if needed) | `src/providers/compat/` | Minimal field remap/cleanup per upstream contract | Tool decoding, fallback routing, catch-all try/catch |\n\n## 3. Build & Release Workflow\n\n1. **Update shared modules first** – Modify `sharedmodule/llmswitch-core` (or other sharedmodule repos) in their source worktrees, run their `npm run build`, and ensure dist artifacts exist.\n2. **Host build** – Run `npm run build:dev` 并确保验证通过；禁止在常规流程中使用 `ROUTECODEX_VERIFY_SKIP=1` 跳过验证。这会重新生成 `dist/` 和 `src/build-info.ts`。\n3. **Global install/test** – `npm run install:global` to validate the CLI, followed by any targeted smoke tests (providers, responses SSE, etc.).\n4. **Never commit build artifacts** – `dist/` is emitted during CI, sharedmodule dist files track the upstream repo, and tarballs stay out of git.\n5. **Release vs. Dev 依赖** – Release 构建一律依赖 npm 上的 `@jsonstudio/llms`（通过 `npm install` 获取）；开发流程使用 `npm run llmswitch:link` 将 `sharedmodule/llmswitch-core` 符号链接到 `node_modules/@jsonstudio/llms`，两种路径互不覆盖。\n6. **CLI 包隔离** – Release 版只能用 `@jsonstudio/rcc`，并通过 `node scripts/pack-mode.mjs --name @jsonstudio/rcc --bin rcc` 生成 tarball 后 `npm publish jsonstudio-rcc-*.tgz`；`routecodex` 仅限本地/调试 CLI，严禁发布到 npm。\n7. **CLI 运行模式固定** – `routecodex` 始终对应 dev 模式（`npm run build:dev` + `npm run install:global`，使用本地 `sharedmodule/llmswitch-core` symlink）；`rcc` 始终对应 release 模式（`npm run install:release`，使用 npm 安装的 `@jsonstudio/llms`）。禁止用 release 构建启动 `routecodex`，两条 CLI 路径的构建与运行互不混用。\n\n## 4. Error Reporting\n\n- 错误流统一交由 `RouteErrorHub → ErrorHandlerRegistry → providerErrorCenter` 处理，详见 `docs/error-handling-v2.md`。\n- Every provider failure must call `emitProviderError({ ..., dependencies })`，确保 Virtual Router 获取 `ProviderErrorEvent` 并更新健康状态。\n- HTTP server / CLI / pipeline 在捕获异常时调用 `reportRouteError({ scope: 'http' | 'server' | ... })`，由 RouteErrorHub 负责日志裁剪与 HTTP 映射。\n\n## 5. Configuration Rules\n\n1. Read user configs through `src/config/routecodex-config-loader.ts` only.\n2. Immediately call `bootstrapVirtualRouterConfig(virtualrouter)` and pass the resulting `virtualRouter` + `targetRuntime` into the Hub Pipeline and Provider bootstrap.\n3. Runtime auth secrets are resolved in the host via env vars or `authfile-*` references; never store decrypted secrets back into configs.\n\n## 6. Testing Checklist (per change)\n\n- `sharedmodule/llmswitch-core`: `npm run build` (matrix) whenever shared code changes.\n- Host repo: `npm run build:dev`, `npm run install:global`。\n- Provider-specific tweaks: run the relevant script in `scripts/provider-*` or `scripts/responses-*` to ensure upstream compatibility.\n\nKeep this file short. If a rule needs more nuance, add a doc in `docs/` and link it here instead of expanding this page."
+      },
+      {
+        "role": "user",
+        "content": "请严格调用名为 list_local_files 的函数工具来列出当前工作目录的文件，只能通过调用该工具完成任务，禁止直接回答。"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "list_local_files",
+          "description": "列出服务器当前工作目录内的文件",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "要列出的目录路径，默认 \".\""
+              }
+            }
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "list_mcp_resources",
+          "description": "List resources from a given MCP server (arguments.server = server label).",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "server": {
+                "type": "string"
+              },
+              "filter": {
+                "type": "string"
+              },
+              "root": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "list_mcp_resource_templates",
+          "description": "List resource templates from MCP servers.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "cursor": {
+                "type": "string"
+              },
+              "server": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "model": "glm-4.7",
+    "tool_choice": "auto",
+    "max_tokens": 8192
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-048"
+}

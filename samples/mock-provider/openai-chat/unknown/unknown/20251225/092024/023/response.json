@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.275",
+    "buildTime": "2025-12-24T08:32:25.997Z",
+    "entryEndpoint": "/v1/chat/completions",
+    "clientRequestId": "openai-chat-unknown-unknown-20251224T163212317-019"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4f75-4969-72a2-bad1-d8add9d76504",
+    "session_id": "019b4f75-4969-72a2-bad1-d8add9d76504"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694ba50d60f18590a269edd6",
+      "object": "chat.completion",
+      "created": 1766565134,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 48379,
+        "completion_tokens": 175,
+        "total_tokens": 48554
+      },
+      "extend_fields": {
+        "traceId": "212c2b4317665651325798397e0e5b",
+        "requestId": "61206b8afc612b3e88d9e89d39514d5f"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:15",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"sed -i '' 's/开发者仍可直接在仓库根目录执行 `npm run install:global`，该脚本会构建源码并把 `routecodex` 命令安装到全局 `$PATH`，供本地调试使用。/开发者使用以下命令安装 dev CLI（必须先构建 sharedmodule）：\\\\n\\\\n```bash\\\\nnpm --prefix sharedmodule\\\\/llmswitch-core run build\\\\nnpm run build:dev\\\\nnpm run install:global\\\\n```/g' README.md\",\"justification\":\"Update dev CLI install section to enforce correct build order.\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":100}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:32:25 GMT",
+      "eagleeye-traceid": "212c2b4317665651325798397e0e5b",
+      "s-brt": "13262",
+      "s-rt": "13398",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-chat-unknown-unknown-20251225T092024-023"
+}

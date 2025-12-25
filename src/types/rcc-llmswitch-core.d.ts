@@ -1,4 +1,23 @@
-declare module '@jsonstudio/llms' { const anyModule: any; export = anyModule; }
+declare module '@jsonstudio/llms' {
+  export interface ProviderUsageEvent {
+    requestId: string;
+    timestamp: number;
+    providerKey: string;
+    runtimeKey?: string;
+    providerType: string;
+    modelId?: string;
+    routeName?: string;
+    entryEndpoint?: string;
+    success: boolean;
+    latencyMs: number;
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  }
+  export function getStatsCenter(): {
+    recordProviderUsage(ev: ProviderUsageEvent): void;
+  };
+}
 // V1 conversion exports removed
 declare module '@jsonstudio/llms/guidance' { const anyModule: any; export = anyModule; }
 declare module '@jsonstudio/llms/conversion/shared/snapshot-hooks' {

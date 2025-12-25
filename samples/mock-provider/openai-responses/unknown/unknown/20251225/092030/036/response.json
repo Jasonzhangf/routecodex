@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.278",
+    "buildTime": "2025-12-24T11:07:38.336Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T190724458-077"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694bc96d966f039a14e2a5ed",
+      "object": "chat.completion",
+      "created": 1766574445,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 17013,
+        "completion_tokens": 197,
+        "total_tokens": 17210
+      },
+      "extend_fields": {
+        "traceId": "212ba22917665744447243623e1046",
+        "requestId": "79f53026ac56f4124887c291f436b8d1"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:12",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"python3 << 'EOF'\\nimport json\\n\\nconfig_path = '/Users/fanzhang/.routecodex/config.json'\\nwith open(config_path, 'r') as f:\\n    config = json.load(f)\\n\\n# Add secondary token file to main config\\nconfig['virtualrouter']['providers']['iflow']['auth']['secondaryTokenFile'] = '~/.routecodex/auth/iflow-oauth-secondary.json'\\n\\nwith open(config_path, 'w') as f:\\n    json.dump(config, f, indent=2)\\n\\nprint(\\\"Updated main config\\\")\\nEOF\\n\",\"justification\":\"更新主配置文件添加secondary token文件\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:07:38 GMT",
+      "eagleeye-traceid": "212ba22917665744447243623e1046",
+      "s-brt": "13594",
+      "s-rt": "13640",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-036"
+}

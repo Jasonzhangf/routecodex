@@ -1,0 +1,82 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T11:01:13.802Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T190108348-012"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "我来继续检查和修复。让我先看看当前的服务运行状态和代码配置。",
+            "reasoning_content": "用户要求我继续工作。从之前的对话摘要来看，有几个关键问题：\n\n1. UI无法连接到WebSocket服务（ws://127.0.0.1:7701/bus）\n2. 浏览器服务启动失败\n3. 用户要求所有代码必须是ESM，不能使用CJS\n4. UI需要有诊断功能并能自我报告状态\n5. 浮窗的DevTools无法打开\n\n从诊断报告看：\n- API健康检查正常（health()返回true）\n- 但是总线（Bus）连接失败\n- 总线状态未收到\n- 快照未收到\n- 容器树和DOM树数据为空\n\n我需要：\n1. 检查浏览器服务是否正常启动\n2. 检查WebSocket连接配置\n3. 确保所有代码都是ESM格式\n4. 添加UI诊断报告的自我探测能力\n\n让我先检查当前的运行状态。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"lsof -i :7701 -i :7704 | head -20\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042226788133282873",
+                "index": 0,
+                "type": "function"
+              },
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"ps aux | grep -E \\\"(node|electron)\\\" | grep -v grep\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042226788133282872",
+                "index": 1,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766487673,
+      "id": "202512231901082ca7c18582804c80",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512231901082ca7c18582804c80",
+      "usage": {
+        "completion_tokens": 265,
+        "prompt_tokens": 9120,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 9385
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 11:01:13 GMT",
+      "set-cookie": "acw_tc=0ae5a7e117664876684762323e231f51f84342a7a89a9dd3927742eb97b082;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512231901082ca7c18582804c80"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092024-089"
+}

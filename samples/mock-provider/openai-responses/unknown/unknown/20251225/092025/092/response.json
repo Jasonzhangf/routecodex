@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T11:11:11.562Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T191108465-119"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Browser Service 只启动了日志文件，但实际进程可能已经退出了。让我直接运行：\n\n```bash\nnode libs/browser/remote-service.js --host 127.0.0.1 --port 7704 --no-ws\n```\n\n不重定向输出，看看会发生什么。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto && timeout 5 node libs/browser/remote-service.js --host 127.0.0.1 --port 7704 --no-ws 2>&1 || echo \\\"退出或超时\\\"\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042313855711873728",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766488271,
+      "id": "20251223191108d305b49a024349ff",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223191108d305b49a024349ff",
+      "usage": {
+        "completion_tokens": 126,
+        "prompt_tokens": 56649,
+        "prompt_tokens_details": {
+          "cached_tokens": 56160
+        },
+        "total_tokens": 56775
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 11:11:11 GMT",
+      "set-cookie": "acw_tc=ac11000117664882685961029ed8a0137cf41332d72803b80b6fc810359a3f;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223191108d305b49a024349ff"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-092"
+}

@@ -64,3 +64,25 @@ declare module '@jsonstudio/llms/dist/conversion/hub/response/provider-response.
 declare module '@jsonstudio/llms/dist/conversion/shared/responses-instructions.js' {
   export function ensureResponsesInstructions(payload: Record<string, unknown>): void;
 }
+
+declare module '@jsonstudio/llms/dist/telemetry/stats-center.js' {
+  export interface ProviderUsageEvent {
+    requestId: string;
+    timestamp: number;
+    providerKey: string;
+    runtimeKey?: string;
+    providerType: string;
+    modelId?: string;
+    routeName?: string;
+    entryEndpoint?: string;
+    success: boolean;
+    latencyMs: number;
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  }
+  export interface StatsCenter {
+    recordProviderUsage(ev: ProviderUsageEvent): void;
+  }
+  export function getStatsCenter(): StatsCenter;
+}

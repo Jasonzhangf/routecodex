@@ -9,10 +9,12 @@ import { fetchQwenUserInfo, mergeQwenTokenData, hasQwenApiKey } from './qwen-use
 import {
   fetchGeminiCLIUserInfo,
   fetchGeminiCLIProjects,
-  mergeGeminiCLITokenData
+  mergeGeminiCLITokenData,
+  getDefaultProjectId
 } from './gemini-cli-userinfo-helper.js';
 import { parseTokenSequenceFromPath } from "./token-scanner/index.js";
 import { logOAuthDebug } from './oauth-logger.js';
+import { fetchAntigravityProjectId } from './antigravity-userinfo-helper.js';
 
 type EnsureOpts = {
   forceReacquireIfRefreshFails?: boolean;
@@ -48,6 +50,11 @@ const TOKEN_REFRESH_SKEW_MS = 60_000;
 
 const inFlight: Map<string, Promise<void>> = new Map();
 const lastRunAt: Map<string, number> = new Map();
+const GEMINI_CLI_PROVIDER_IDS = new Set(['gemini-cli', 'antigravity']);
+
+function isGeminiCliFamily(providerType: string): boolean {
+  return GEMINI_CLI_PROVIDER_IDS.has(providerType.toLowerCase());
+}
 
 function keyFor(providerType: string, tokenFile?: string): string {
   return `${providerType}::${tokenFile || ''}`;
@@ -64,6 +71,12 @@ function defaultTokenFile(providerType: string): string {
   }
   if (providerType === 'qwen') {
     return path.join(home, '.routecodex', 'auth', 'qwen-oauth.json');
+  }
+  if (isGeminiCliFamily(providerType)) {
+    const file = providerType.toLowerCase() === 'antigravity'
+      ? 'antigravity-oauth.json'
+      : 'gemini-oauth.json';
+    return path.join(home, '.routecodex', 'auth', file);
   }
   return path.join(home, '.routecodex', 'tokens', `${providerType}-default.json`);
 }
@@ -247,6 +260,92 @@ async function buildClientOverrides(defaults: OAuthFlowConfig, auth: ExtendedOAu
   return base;
 }
 
+async function ensureGeminiCLIServicesEnabled(accessToken: string, projectId: string): Promise<void> {
+  if (!hasNonEmptyString(accessToken) || !hasNonEmptyString(projectId)) {
+    return;
+  }
+
+  const baseUrl = 'https://serviceusage.googleapis.com';
+  const requiredServices = ['cloudaicompanion.googleapis.com'];
+
+  for (const service of requiredServices) {
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`
+    };
+
+    // 1) 检查当前启用状态
+    try {
+      const checkUrl = `${baseUrl}/v1/projects/${projectId}/services/${service}`;
+      const checkResp = await fetch(checkUrl, { method: 'GET', headers });
+      if (checkResp.ok) {
+        const text = await checkResp.text();
+        try {
+          const data = JSON.parse(text) as { state?: string };
+          if (data.state === 'ENABLED') {
+            continue;
+          }
+        } catch {
+          // ignore parse errors; fall through to enable
+        }
+      } else {
+        // drain body
+        await checkResp.text().catch(() => {});
+      }
+    } catch (error) {
+      logOAuthDebug(
+        `[OAuth] Gemini CLI: failed to check service ${service} for project ${projectId} - ${error instanceof Error ? error.message : String(error)}`
+      );
+      // best-effort; continue to try enable
+    }
+
+    // 2) 尝试启用服务
+    const enableUrl = `${baseUrl}/v1/projects/${projectId}/services/${service}:enable`;
+    let enableResp: Response | null = null;
+    let bodyText = '';
+    try {
+      enableResp = await fetch(enableUrl, {
+        method: 'POST',
+        headers,
+        body: '{}'
+      });
+      bodyText = await enableResp.text().catch(() => '');
+    } catch (error) {
+      throw new Error(
+        `Gemini CLI: failed to enable ${service} for project ${projectId} - ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+
+    let errMessage = bodyText;
+    try {
+      const parsed = JSON.parse(bodyText) as { error?: { message?: string } };
+      if (parsed?.error?.message) {
+        errMessage = parsed.error.message;
+      }
+    } catch {
+      // ignore parse errors
+    }
+
+    if (enableResp && (enableResp.ok || enableResp.status === 201)) {
+      logOAuthDebug(
+        `[OAuth] Gemini CLI: service ${service} enabled for project ${projectId} (status=${enableResp.status})`
+      );
+      continue;
+    }
+
+    if (enableResp && enableResp.status === 400 && errMessage.toLowerCase().includes('already enabled')) {
+      logOAuthDebug(
+        `[OAuth] Gemini CLI: service ${service} already enabled for project ${projectId}`
+      );
+      continue;
+    }
+
+    throw new Error(
+      `Gemini CLI: project activation required for ${service} on ${projectId}: ${errMessage || 'unknown error'}`
+    );
+  }
+}
+
 function buildHeaderOverrides(defaults: OAuthFlowConfig, providerType: string): Record<string, string> {
   const baseHeaders = { ...(defaults.headers || {}) };
   if (providerType === 'iflow') {
@@ -313,19 +412,49 @@ async function maybeEnrichToken(providerType: string, tokenData: UnknownObject):
       return tokenData;
     }
   }
-  if (providerType === 'gemini-cli') {
+  if (providerType === 'antigravity') {
     const accessToken = extractAccessToken(sanitizeToken(tokenData) ?? null);
     if (!accessToken) {
-      logOAuthDebug('[OAuth] Gemini CLI: no access_token found in auth result, skipping UserInfo fetch');
+      logOAuthDebug('[OAuth] Antigravity: no access_token found in auth result, skipping metadata fetch');
+      return tokenData;
+    }
+    try {
+      const userInfo = await fetchGeminiCLIUserInfo(accessToken);
+      const projectId = await fetchAntigravityProjectId(accessToken);
+      const projects = projectId ? [{ projectId }] : [];
+      const merged = mergeGeminiCLITokenData(tokenData, userInfo, projects) as unknown as UnknownObject;
+      if (projectId) {
+        merged.project_id = projectId;
+      }
+      return merged;
+    } catch (error) {
+      console.error(`[OAuth] Antigravity: failed to fetch metadata - ${error instanceof Error ? error.message : String(error)}`);
+    }
+  } else if (isGeminiCliFamily(providerType)) {
+    const label = 'Gemini CLI';
+    const accessToken = extractAccessToken(sanitizeToken(tokenData) ?? null);
+    if (!accessToken) {
+      logOAuthDebug(`[OAuth] ${label}: no access_token found in auth result, skipping UserInfo fetch`);
       return tokenData;
     }
     try {
       const userInfo = await fetchGeminiCLIUserInfo(accessToken);
       const projects = await fetchGeminiCLIProjects(accessToken);
-      logOAuthDebug(`[OAuth] Gemini CLI: fetched UserInfo for ${userInfo.email} and ${projects.length} projects`);
-      return mergeGeminiCLITokenData(tokenData, userInfo, projects) as unknown as UnknownObject;
+      logOAuthDebug(`[OAuth] ${label}: fetched UserInfo for ${userInfo.email} and ${projects.length} projects`);
+      const merged = mergeGeminiCLITokenData(tokenData, userInfo, projects) as unknown as UnknownObject;
+      const projectId = getDefaultProjectId(merged);
+      if (projectId) {
+        try {
+          await ensureGeminiCLIServicesEnabled(accessToken, projectId);
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          logOAuthDebug(`[OAuth] ${label}: service enablement failed for project ${projectId} - ${msg}`);
+          throw error;
+        }
+      }
+      return merged;
     } catch (error) {
-      console.error(`[OAuth] Gemini CLI: failed to fetch UserInfo - ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`[OAuth] ${label}: failed to fetch UserInfo - ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   return tokenData;
@@ -442,7 +571,7 @@ export async function ensureValidOAuthToken(
     return;
   }
 
-  const openBrowser = opts.openBrowser ?? String(process.env.ROUTECODEX_OAUTH_AUTO_OPEN || '1') === '1';
+  const openBrowser = opts.openBrowser ?? true;
   const forceReauth =
     opts.forceReauthorize === true || String(process.env.ROUTECODEX_OAUTH_FORCE_REAUTH || '0') === '1';
 
@@ -508,7 +637,30 @@ export async function handleUpstreamInvalidOAuthToken(
 ): Promise<boolean> {
   try {
     const msg = upstreamError instanceof Error ? upstreamError.message : String(upstreamError || '');
-    const looksInvalid = /401|403|invalid[_-]?token|expired|40308/i.test(msg);
+    const lower = msg.toLowerCase();
+
+    // 基本令牌失效判定：只看典型 OAuth 文案
+    let looksInvalid =
+      /invalid[_-]?token|invalid[_-]?grant|unauthenticated|unauthorized|token has expired|access token expired/.test(
+        lower
+      );
+
+    const pt = providerType.toLowerCase();
+
+    // 对于 iflow / qwen，保留基于 401/403 的宽松判定，避免破坏既有行为
+    if (!looksInvalid && (pt === 'iflow' || pt === 'qwen')) {
+      if (/\b401\b|\b403\b|40308/.test(msg)) {
+        looksInvalid = true;
+      }
+    }
+
+    // 对于 gemini / gemini-cli，显式排除 service disabled 等项目级错误
+    if (pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity') {
+      if (/service_disabled/.test(lower) || lower.includes('has not been used in project')) {
+        looksInvalid = false;
+      }
+    }
+
     if (!looksInvalid) {
       return false;
     }

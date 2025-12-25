@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T11:09:37.895Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T190927280-107"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "很好！现在 Unified API 已经成功启动。接下来我需要启动 UI 来测试 WebSocket 连接。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto/apps/floating-panel && WEBAUTO_FLOATING_WS_URL=ws://127.0.0.1:7701/ws WEBAUTO_FLOATING_BUS_URL=ws://127.0.0.1:7701/bus WEBAUTO_FLOATING_BUS_PORT=7701 WEBAUTO_FLOATING_DEVTOOLS=1 timeout 15 npm run start 2>&1 &\\nUI_PID=$!\\necho \\\"UI PID: $UI_PID\\\"\\nsleep 8\\necho \\\"\\\"\\necho \\\"=== Unified API 日志 ===\\\"\\ncat /tmp/unified-api.log\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042275682041848499",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766488177,
+      "id": "2025122319092739eeef09712d4fbc",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122319092739eeef09712d4fbc",
+      "usage": {
+        "completion_tokens": 156,
+        "prompt_tokens": 52223,
+        "prompt_tokens_details": {
+          "cached_tokens": 52043
+        },
+        "total_tokens": 52379
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 11:09:37 GMT",
+      "set-cookie": "acw_tc=ac11000117664881674135229e6f401bfbc30cc79c1e049ec4d04c57f20555;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122319092739eeef09712d4fbc"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-080"
+}

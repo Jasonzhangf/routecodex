@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T11:16:27.739Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T191614226-152"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "现在启动系统，只运行 15 秒来测试 UI 数据流。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto && timeout 20 node scripts/start-headful.mjs 2>&1 | tee /tmp/startup-fixed.log &\\nSTARTER_PID=$!\\necho \\\"启动脚本 PID: $STARTER_PID\\\"\\n\\n# 等待一段时间让所有服务启动\\nsleep 18\\n\\necho \\\"\\\"\\necho \\\"=== 18秒后检查进程状态 ===\\\"\\nps aux | grep -E \\\"unified-api|remote-service|electron|start-headful\\\" | grep -v grep | head -5\\n\\necho \\\"\\\"\\necho \\\"=== 检查端口 ===\\\"\\nlsof -i :7701 -i :7704 | grep LISTEN\\n\\necho \\\"\\\"\\necho \\\"=== 关键日志摘要 ===\\\"\\ntail -100 /tmp/startup-fixed.log | grep -E \\\"Bus message|containers.matched|Broadcasting|Sending|已识别|匹配成功|ERROR|error\\\" | tail -30 || echo \\\"无关键日志\\\"\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042384430615351955",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766488587,
+      "id": "2025122319161451074708ed734fca",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122319161451074708ed734fca",
+      "usage": {
+        "completion_tokens": 226,
+        "prompt_tokens": 70613,
+        "prompt_tokens_details": {
+          "cached_tokens": 70509
+        },
+        "total_tokens": 70839
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 11:16:27 GMT",
+      "set-cookie": "acw_tc=ac11000117664885743948448edd7f33bf5fa8eb069243e72416ac4a684449;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122319161451074708ed734fca"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-125"
+}

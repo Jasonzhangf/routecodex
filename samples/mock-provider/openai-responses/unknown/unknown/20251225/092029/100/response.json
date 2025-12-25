@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:44:05.850Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T204256416-047"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694a8e51cb82642cca550dbe",
+      "object": "chat.completion",
+      "created": 1766493777,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 36360,
+        "completion_tokens": 979,
+        "total_tokens": 37339
+      },
+      "extend_fields": {
+        "traceId": "2133ef1617664937767452194e0c75",
+        "requestId": "33146e2e25c23f302ad97240ec4adc64"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "apply_patch:50",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"input\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/main/index.mts\\n@@\\nfunction flushPendingMessages() {\\n-  log(`flushPendingMessages called: win=${!!win}, visible=${win?.isVisible()}, pendingEvents=${pendingEvents.length}, pendingStatus=${!!pendingStatus}`);\\n-  \\n  if (!win || !win.isVisible()) {\\n    log('ERROR: No window to send messages to');\\n    return;\\n  }\\n  \\n  for (const event of pendingEvents) {\\n    log(`Sending pending event: ${event.topic || 'unknown'}`);\\n    try {\\n      win.webContents.send('bus:event', event);\\n    } catch (err) {\\n      log(`ERROR sending event: ${err}`);\\n    }\\n  }\\n  pendingEvents = [];\\n  \\n  if (pendingStatus) {\\n    log(`Sending pending status: ${JSON.stringify(pendingStatus)}`);\\n    try {\\n      win.webContents.send('bus:status', pendingStatus);\\n      log(`Successfully sent status: ${JSON.stringify(pendingStatus)}`);\\n    } catch (err) {\\n      log(`ERROR sending status: ${err}`);\\n    }\\n    pendingStatus = null;\\n  }\\n  \\n  log('All pending messages flushed');\\n}\\n+function flushPendingMessages() {\\n+  if (!win || !win.isVisible()) {\\n+    return;\\n+  }\\n+  \\n+  for (const event of pendingEvents) {\\n+    try {\\n+      win.webContents.send('bus:event', event);\\n+    } catch (err) {\\n+      log(`ERROR sending event: ${err}`);\\n+    }\\n+  }\\n+  pendingEvents = [];\\n+  \\n+  if (pendingStatus) {\\n+    try {\\n+      win.webContents.send('bus:status', pendingStatus);\\n+    } catch (err) {\\n+      log(`ERROR sending status: ${err}`);\\n+    }\\n+    pendingStatus = null;\\n+  }\\n+}\\n*** End Patch\",\"patch\":\"*** Begin Patch\\n*** Update File: /Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/main/index.mts\\n@@\\nfunction flushPendingMessages() {\\n-  log(`flushPendingMessages called: win=${!!win}, visible=${win?.isVisible()}, pendingEvents=${pendingEvents.length}, pendingStatus=${!!pendingStatus}`);\\n-  \\n  if (!win || !win.isVisible()) {\\n    log('ERROR: No window to send messages to');\\n    return;\\n  }\\n  \\n  for (const event of pendingEvents) {\\n    log(`Sending pending event: ${event.topic || 'unknown'}`);\\n    try {\\n      win.webContents.send('bus:event', event);\\n    } catch (err) {\\n      log(`ERROR sending event: ${err}`);\\n    }\\n  }\\n  pendingEvents = [];\\n  \\n  if (pendingStatus) {\\n    log(`Sending pending status: ${JSON.stringify(pendingStatus)}`);\\n    try {\\n      win.webContents.send('bus:status', pendingStatus);\\n      log(`Successfully sent status: ${JSON.stringify(pendingStatus)}`);\\n    } catch (err) {\\n      log(`ERROR sending status: ${err}`);\\n    }\\n    pendingStatus = null;\\n  }\\n  \\n  log('All pending messages flushed');\\n}\\n+function flushPendingMessages() {\\n+  if (!win || !win.isVisible()) {\\n+    return;\\n+  }\\n+  \\n+  for (const event of pendingEvents) {\\n+    try {\\n+      win.webContents.send('bus:event', event);\\n+    } catch (err) {\\n+      log(`ERROR sending event: ${err}`);\\n+    }\\n+  }\\n+  pendingEvents = [];\\n+  \\n+  if (pendingStatus) {\\n+    try {\\n+      win.webContents.send('bus:status', pendingStatus);\\n+    } catch (err) {\\n+      log(`ERROR sending status: ${err}`);\\n+    }\\n+    pendingStatus = null;\\n+  }\\n+}\\n*** End Patch\"}",
+                  "name": "apply_patch"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 12:43:56 GMT",
+      "eagleeye-traceid": "2133ef1617664937767452194e0c75",
+      "s-brt": "60025",
+      "s-rt": "60124",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092029-100"
+}

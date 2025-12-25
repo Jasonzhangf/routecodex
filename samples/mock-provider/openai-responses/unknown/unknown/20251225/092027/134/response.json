@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.262",
+    "buildTime": "2025-12-24T05:27:00.503Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T132620122-004"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "The user wants to:\n1. One-click startup to go to weibo.com\n2. Browser and floating panel both have header display\n3. Don't hardcode the URL in the script, use command line arguments\n4. Use `--profile` and `--url` parameters, not environment variables\n\nI need to modify the start-headful.mjs script to support command line arguments. The user also mentioned they don't want to use environment variables because it's too hard to type.\n\nLet me check the current script structure and then create a proper patch.\n\nThe script should:\n- Accept `--profile <name>` parameter\n- Accept `--url <url>` parameter  \n- Default to weibo_fresh and https://weibo.com if no arguments provided\n- Pass these as `--profile` and `--url` flags to the launcher\n\nLet me create a clean, working solution.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cat > scripts/start-headful.mjs << 'EOF'\\n#!/usr/bin/env node\\n/**\\n * 启动脚本 - 支持命令行参数\\n * \\n * 用法：\\n *   node scripts/start-headful.mjs [--profile <name>] [--url <url>]\\n *   node scripts/start-headful.mjs                  # 使用默认配置（weibo_fresh, weibo.com）\\n *   node scripts/start-headful.mjs --profile weibo_fresh https://weibo.com\\n *   node scripts/start-headful.mjs --url https://weibo.com   # 使用默认 profile\\n */\\n\\nimport { spawn } from 'node:child_process';\\nimport path from 'node:path';\\n\\nconst __filename = import.meta.url;\\nconst __dirname = path.dirname(fileURLToPath(__filename));\\nconst launcherPath = path.resolve(__dirname, 'launcher/core/launcher.mjs');\\n\\n// 默认配置\\nconst DEFAULT_PROFILE = 'weibo_fresh';\\nconst DEFAULT_URL = 'https://weibo.com';\\n\\n/**\\n * 解析命令行参数\\n */\\nfunction parseArgs() {\\n  const args = process.argv.slice(2);\\n  const profile = args.find(arg => arg === '--profile' || arg === '-p') ? args[args.indexOf(arg) + 1] : null;\\n  const url = args.find(arg => arg === '--url' || arg === '-u') ? args[args.indexOf(arg) + 1] : null;\\n  \\n  return { profile, url };\\n}\\n\\nfunction main() {\\n  const { profile, url } = parseArgs();\\n  \\n  // 使用默认值或命令行参数\\n  const profileName = profile || DEFAULT_PROFILE;\\n  const targetUrl = url || DEFAULT_URL;\\n  \\n  const headless = false; // 始终使用有头模式\\n  \\n  console.log('🚀 WebAuto 一键启动');\\n  console.log(`  Profile: ${profileName}`);\\n  console.log(`  URL: ${targetUrl}`);\\n  console.log(`  Mode: ${headless ? 'headless' : 'headful'}`);\\n  console.log();\\n  \\n  const args = [launcherPath, '--profile', profileName, '--url', targetUrl];\\n  \\n  console.log('启动 launcher...');\\n  const child = spawn('node', args, {\\n    stdio: 'inherit',\\n    env: process.env,\\n    SHELL: process.env.SHELL\\n  });\\n  \\n  child.stdout.on('data', (data) => {\\n    process.stdout.write(data);\\n  });\\n  \\n  child.stderr.on('data', (data) => {\\n    process.stderr.write(data);\\n  });\\n  \\n  child.on('exit', (code) => {\\n    process.exit(code);\\n  });\\n}\\n\\nmain();\\nEOF\\nchmod +x scripts/start-headful.mjs\\n\",\"login\":true,\"max_output_tokens\":600,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":3000,\"justification\":\"重写启动脚本，支持 --profile 和 --url 命令行参数\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042369449769324915",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766554020,
+      "id": "20251224132620c6b57f8906ca42c6",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224132620c6b57f8906ca42c6",
+      "usage": {
+        "completion_tokens": 839,
+        "prompt_tokens": 146603,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 147442
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 05:27:00 GMT",
+      "set-cookie": "acw_tc=0ae5a7dc17665539805097618e7e38198b1744220bde60c7b42d524aa00df4;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224132620c6b57f8906ca42c6"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-134"
+}

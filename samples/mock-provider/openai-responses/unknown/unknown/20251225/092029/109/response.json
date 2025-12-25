@@ -1,0 +1,65 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.261",
+    "buildTime": "2025-12-24T03:26:52.288Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T112628362-001"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "*/*",
+    "User-Agent": "curl/8.7.1"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694b5d6460f18590a269287f",
+      "object": "chat.completion",
+      "created": 1766546788,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 123,
+        "completion_tokens": 254,
+        "total_tokens": 377
+      },
+      "extend_fields": {
+        "traceId": "2150211917665467885458712e0fe7",
+        "requestId": "6d8c1e14042aadbdc2e33d91b9269873"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "stop",
+          "message": {
+            "role": "assistant",
+            "content": "目前我无法直接访问 RouteCodex 的 MCP 资源列表，因此无法给出官方、完整的功能清单。不过，根据 RouteCodex 这一名称（通常与“路由”“代码/索引”相关）以及常见同类产品的主流设计，可以推测它大概率具备以下三条典型功能，供你参考：\n\n1. 路由规则可视化  \n   把分散在代码或配置文件里的路由规则自动抓取出来，生成一张可交互的“路由地图”，让开发者一眼看清整个项目有多少条路由、各自对应哪个控制器或页面。\n\n2. 冲突与重复检测  \n   在新增或调整路由时，实时扫描已有规则，自动提示路径冲突（例如两条 `/user/:id` 写法不同却可能匹配同一请求）、重复定义或潜在 404 风险，避免上线后才发现路由打架。\n\n3. 快速定位与跳转  \n   支持“一键跳转”：在可视化界面里点击某条路由，即可直接打开对应的源码文件、控制器方法或视图模板，省去全局搜索时间；同时能给出版本差异，方便 Code Review。\n\n如果你想拿到官方权威的功能列表，可以让我尝试调用 RouteCodex 的 MCP 资源接口，只要告诉我它的 server 标签即可。"
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 03:26:52 GMT",
+      "eagleeye-traceid": "2150211917665467885458712e0fe7",
+      "s-brt": "23751",
+      "s-rt": "23751",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092029-109"
+}

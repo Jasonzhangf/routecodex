@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.275",
+    "buildTime": "2025-12-24T08:34:28.667Z",
+    "entryEndpoint": "/v1/chat/completions",
+    "clientRequestId": "openai-chat-unknown-unknown-20251224T163421747-031"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4f75-4969-72a2-bad1-d8add9d76504",
+    "session_id": "019b4f75-4969-72a2-bad1-d8add9d76504"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Good. Now let's update src/types/README.md to align with shared module and DTO responsibilities.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cat <<'EOF' > src/types/README.md\\n# Types Module\\n\\n## Overview\\nType definitions for RouteCodex Host and shared module alignment. Focus on DTOs, config types, and debug/session types.\\n\\n## Core Files\\n- `common-types.ts`: Base JSON/logging types\\n- `shared-dtos.ts`: Request/response/error data structures shared with `@jsonstudio/llms`\\n- `external-types.ts`: Third-party library type declarations\\n- `base-types.ts`: Bridge types between Host and `llmswitch-core`\\n\\n## Alignment Rule\\nStay in sync with `sharedmodule/llmswitch-core/dist/types`. New DTOs/interfaces should be added to shared module and rebuilt first.\\n\\n## Do / Don't\\n**Do**\\n- Mirror shared module types to ensure type safety\\n- Keep debug types aligned with `src/debug/types.ts`\\n\\n**Don't**\\n- Duplicate definitions that exist in shared module\\n- Add business logic or runtime code in type files\\nEOF\",\"justification\":\"Update types README to emphasize shared module sync and no duplicate definitions.\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"zsh\",\"yield_time_ms\":100}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042317841441755118",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766565268,
+      "id": "202512241634222b54fb8f10f94f1a",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512241634222b54fb8f10f94f1a",
+      "usage": {
+        "completion_tokens": 300,
+        "prompt_tokens": 54355,
+        "prompt_tokens_details": {
+          "cached_tokens": 52810
+        },
+        "total_tokens": 54655
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:34:28 GMT",
+      "set-cookie": "acw_tc=0ae5a7dc17665652619267610e7e8a32d9575e1ab06383148e22e5ca8f995f;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512241634222b54fb8f10f94f1a"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-chat-unknown-unknown-20251225T092024-012"
+}

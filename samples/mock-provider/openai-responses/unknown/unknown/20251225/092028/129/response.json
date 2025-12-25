@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.284",
+    "buildTime": "2025-12-24T15:21:28.773Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T232119160-090"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Unified API 即使设置了 WEBAUTO_WS_URL 也无法连接到 ws://127.0.0.1:8765。这说明浏览器服务的 WebSocket 服务器没有正确启动。之前使用 --no-ws 时肯定不会有 WebSocket 服务器，后来去掉 --no-ws 后，应该需要重新启动服务才能启用 WebSocket。\n\n但现在的问题是：即使浏览器服务已经启动并监听 HTTP 端口 7704，WebSocket 服务器似乎没有启动。\n\n回顾之前的测试：当我们运行 node libs/browser/remote-service.js --host 127.0.0.1 --port 7704 --no-ws 时，输出中没有 \"[browser-ws] listening on ws://127.0.0.1:8765\"。当我们运行 node scripts/test-weibo-profile.mjs 时，输出中有 \"[browser-ws] listening on ws://127.0.0.1:8765\"，这说明只有当使用默认参数（即 --no-ws 不存在时）才会启动 WebSocket 服务器。\n\n但是，test-weibo-profile.mjs 脚本结束后，浏览器服务也会停止，所以我们现在需要手动启动浏览器服务。\n\n问题是：我们之前启动的服务是带 --no-ws 的，所以没有启动 WebSocket 服务器。\n\nI'll investigate further to understand what's happening with the browser service connection.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"ps aux | grep -E 'node.*browser-service|node.*remote-service|node.*unified-api' | grep -v grep\",\"justification\":\"\",\"login\":true,\"max_output_tokens\":4000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/bash\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042278980577343306",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766589688,
+      "id": "20251224232119b76576447ec04da2",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224232119b76576447ec04da2",
+      "usage": {
+        "completion_tokens": 371,
+        "prompt_tokens": 70435,
+        "prompt_tokens_details": {
+          "cached_tokens": 54020
+        },
+        "total_tokens": 70806
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 15:21:28 GMT",
+      "set-cookie": "acw_tc=0ae5a82617665896793765738e20e62771001fdb3ec11064f9b82f55f3e0b8;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224232119b76576447ec04da2"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-129"
+}

@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.282",
+    "buildTime": "2025-12-24T13:35:46.797Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T213449933-015"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****45931c",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694bebfb966f039a14e30f16",
+      "object": "chat.completion",
+      "created": 1766583292,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 131043,
+        "completion_tokens": 859,
+        "total_tokens": 131902
+      },
+      "extend_fields": {
+        "traceId": "213c539017665832905454594e101e",
+        "requestId": "c904f011d8fb872b10175119765509d0"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "apply_patch:281",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"input\":\"*** Begin Patch\\n*** Update File: apps/floating-panel/src/renderer/graph.mjs\\n@@\\n  indicatorBg.setAttribute('fill', '#3e3e42');\\n   indicatorBg.setAttribute('stroke', '#888');\\n   indicatorBg.setAttribute('stroke-width', '1');\\n   indicatorBg.setAttribute('rx', '1');\\n+  indicatorBg.style.cursor = 'pointer';\\n+  indicatorBg.style.pointerEvents = 'auto';\\n\\n   const indicatorText = document.createElementNS('http://www.w3.org/2000/svg', 'text');\\n   indicatorText.setAttribute('x', '10');\\n   indicatorText.setAttribute('y', '16');\\n   indicatorText.setAttribute('text-anchor', 'middle');\\n   indicatorText.setAttribute('fill', '#fff');\\n   indicatorText.setAttribute('font-size', '10');\\n   indicatorText.setAttribute('font-weight', 'bold');\\n   indicatorText.style.pointerEvents = 'none';\\n   indicatorText.textContent = hasChildren ? (isExpanded ? '-' : '+') : '';\\n\\n+  // 点击+/-号：切换展开状态\\n+  indicatorBg.addEventListener('click', (e) => {\\n+    e.stopPropagation();\\n+    if (hasChildren) {\\n+      if (isExpanded) {\\n+        expandedNodes.delete(nodeId);\\n+      } else {\\n+        expandedNodes.add(nodeId);\\n+      }\\n+      console.log('[DOM Node] Toggle expand:', nodeId, isExpanded ? 'collapsed' : 'expanded');\\n+      renderGraph();\\n+    }\\n+  });\\n\\n   g.appendChild(rect);\\n   g.appendChild(indicatorBg);\\n   g.appendChild(indicatorText);\\n   g.appendChild(tagText);\\n   g.appendChild(infoText);\\n   parent.appendChild(g);\\n*** End Patch\\n\",\"patch\":\"*** Begin Patch\\n*** Update File: apps/floating-panel/src/renderer/graph.mjs\\n@@\\n  indicatorBg.setAttribute('fill', '#3e3e42');\\n   indicatorBg.setAttribute('stroke', '#888');\\n   indicatorBg.setAttribute('stroke-width', '1');\\n   indicatorBg.setAttribute('rx', '1');\\n+  indicatorBg.style.cursor = 'pointer';\\n+  indicatorBg.style.pointerEvents = 'auto';\\n\\n   const indicatorText = document.createElementNS('http://www.w3.org/2000/svg', 'text');\\n   indicatorText.setAttribute('x', '10');\\n   indicatorText.setAttribute('y', '16');\\n   indicatorText.setAttribute('text-anchor', 'middle');\\n   indicatorText.setAttribute('fill', '#fff');\\n   indicatorText.setAttribute('font-size', '10');\\n   indicatorText.setAttribute('font-weight', 'bold');\\n   indicatorText.style.pointerEvents = 'none';\\n   indicatorText.textContent = hasChildren ? (isExpanded ? '-' : '+') : '';\\n\\n+  // 点击+/-号：切换展开状态\\n+  indicatorBg.addEventListener('click', (e) => {\\n+    e.stopPropagation();\\n+    if (hasChildren) {\\n+      if (isExpanded) {\\n+        expandedNodes.delete(nodeId);\\n+      } else {\\n+        expandedNodes.add(nodeId);\\n+      }\\n+      console.log('[DOM Node] Toggle expand:', nodeId, isExpanded ? 'collapsed' : 'expanded');\\n+      renderGraph();\\n+    }\\n+  });\\n\\n   g.appendChild(rect);\\n   g.appendChild(indicatorBg);\\n   g.appendChild(indicatorText);\\n   g.appendChild(tagText);\\n   g.appendChild(infoText);\\n   parent.appendChild(g);\\n*** End Patch\\n\"}",
+                  "name": "apply_patch"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 13:35:46 GMT",
+      "eagleeye-traceid": "213c539017665832905454594e101e",
+      "s-brt": "56155",
+      "s-rt": "56352",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092029-091"
+}

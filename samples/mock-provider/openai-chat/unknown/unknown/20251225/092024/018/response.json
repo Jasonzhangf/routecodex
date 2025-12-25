@@ -1,0 +1,65 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.261",
+    "buildTime": "2025-12-24T03:26:12.532Z",
+    "entryEndpoint": "/v1/chat/completions",
+    "clientRequestId": "openai-chat-unknown-unknown-20251224T112608623-001"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "*/*",
+    "User-Agent": "curl/8.7.1"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694b5d51e7b46bd412ed9092",
+      "object": "chat.completion",
+      "created": 1766546769,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 122,
+        "completion_tokens": 33,
+        "total_tokens": 155
+      },
+      "extend_fields": {
+        "traceId": "212b1ce317665467688813178e0d71",
+        "requestId": "3dc3ec1088a3c908464c435aecac369c"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "stop",
+          "message": {
+            "role": "assistant",
+            "content": "iFlow 是一个用“流程图”方式把 AI 提示词（Prompt）组装成可运行、可分享、可迭代的小程序的平台。"
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 03:26:12 GMT",
+      "eagleeye-traceid": "212b1ce317665467688813178e0d71",
+      "s-brt": "3653",
+      "s-rt": "3654",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-chat-unknown-unknown-20251225T092024-018"
+}

@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.278",
+    "buildTime": "2025-12-24T11:08:27.404Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T190820207-085"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "**已完成iFlow多token配置规范化：**\n\n**Token文件命名更新：**\n- `iflow-oauth.json` - 保持原有命名\n- `iflow-oauth-secondary.json` - 从 `iflow-oauth-2.json` 重命名，符合命名规范\n\n**配置文件更新：**\n\n1. `~/.routecodex/provider/iflow/config.v1.json:18` - 已添加 `secondaryTokenFile`\n2. `~/.routecodex/config.json:111` - 已添加 `secondaryTokenFile`\n\n**变更摘要：**\n```\nauth: {\n  \"type\": \"iflow-oauth\",\n  \"tokenFile\": \"~/.routecodex/auth/iflow-oauth.json\",\n  \"secondaryTokenFile\": \"~/.routecodex/auth/iflow-oauth-secondary.json\"\n}\n```\n\n现在iFlow可以同时使用两个token：\n- 主token (`iflow-oauth.json`) 优先使用\n- 次级token (`iflow-oauth-secondary.json`) 作为备选\n\n系统会自动处理token轮换和failover逻辑。",
+            "reasoning_content": "完美。现在两个配置文件都正确更新了。让我验证一下所有的变更：\n\n1. Token文件命名：\n   - `iflow-oauth.json` (主token) - 保持不变\n   - `iflow-oauth-secondary.json` (次级token) - 从 `iflow-oauth-2.json` 重命名而来\n\n2. 配置更新：\n   - `/Users/fanzhang/.routecodex/provider/iflow/config.v1.json` - 已添加 `secondaryTokenFile`\n   - `/Users/fanzhang/.routecodex/config.json` - 已添加 `secondaryTokenFile`\n\n配置现在完全符合系统命名规范：\n- token文件使用 `iflow-oauth.json` 和 `iflow-oauth-secondary.json`\n- 配置中通过 `tokenFile` 和 `secondaryTokenFile` 字段分别引用这两个token文件\n\n系统应该能够同时使用这两个token了（主token优先，当主token失效或失败时，会自动fallback到次级token）。",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766574507,
+      "id": "2025122419082052248d4e345549b2",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122419082052248d4e345549b2",
+      "usage": {
+        "completion_tokens": 441,
+        "prompt_tokens": 20576,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 21017
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:08:27 GMT",
+      "set-cookie": "acw_tc=ac11000117665745003527434e42583d98f3fda995f51f664c2a2d22ba8047;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122419082052248d4e345549b2"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-022"
+}

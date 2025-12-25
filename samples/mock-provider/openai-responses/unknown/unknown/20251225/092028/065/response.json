@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T11:55:28.556Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T195516443-130"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "现在已经提交了CJS清理的变更。用户要求：\n1. 验证了吗？ - 我验证了，没有cjs残留\n2. 还有哪些cjs残留？ - 已经清理完了\n\n现在需要总结一下修改的内容，告诉用户当前状态。\n\n修改总结：\n1. 修复了AGENTS.md中的ESM-only规则，移除了所有CJS例外\n2. 将apps/floating-panel的preload.cjs重命名为preload.mjs并转换为ESM语法\n3. 修复了apps/floating-panel/src/main/index.mts中的preload字段重复\n4. 修复了apps/floating-panel/scripts/build.mjs中的preload.cjs引用\n5. 删除了apps/floating-panel/scripts/build.cjs（旧的CJS构建脚本）\n6. 将apps/floating-panel/bootstrap.cjs重命名为bootstrap.mjs并转换为ESM语法\n7. 创建了apps/floating-panel/scripts/start-headful.mjs（ESM启动脚本）\n8. 创建了services/unified-api/server.mjs（统一API服务器）\n9. 修改了scripts/build/run-services-build.mjs，跳过unified-api的CJS构建步骤\n10. 移除了所有不需要的CJS脚本和测试文件\n11. 移除了src/modules/executable-container/node/目录\n\n现在整个项目是纯ESM架构，没有CJS残留（除了node_modules中的第三方依赖）。\n\n\n我将通过git push将所有本地修改同步到远程仓库，确保团队成员能够获取最新的代码更新。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"git push\",\"justification\":\"推送CJS清理变更到GitHub\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"/bin/zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/webauto\",\"yield_time_ms\":100}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042269978325619380",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766577328,
+      "id": "2025122419551695168f4827ff4d95",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122419551695168f4827ff4d95",
+      "usage": {
+        "completion_tokens": 390,
+        "prompt_tokens": 76979,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 77369
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:55:28 GMT",
+      "set-cookie": "acw_tc=ac11000117665773167745929e755ee9b5d05de9475f25a14d23e6bac01987;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122419551695168f4827ff4d95"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-065"
+}

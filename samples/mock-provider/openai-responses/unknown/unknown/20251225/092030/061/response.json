@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.278",
+    "buildTime": "2025-12-24T11:18:25.346Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T191808859-162"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694bcbf164f8633edd32fcbc",
+      "object": "chat.completion",
+      "created": 1766575089,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 36133,
+        "completion_tokens": 235,
+        "total_tokens": 36368
+      },
+      "extend_fields": {
+        "traceId": "214178b117665750890105746e0fcd",
+        "requestId": "1b18daa4eabb90818dc3bd5312d58ec4"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "update_plan:39",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"plan\":[{\"step\":\"确认当前iFlow OAuth token文件命名与加载逻辑：目前只支持单一tokenFile，无自动扫描/扩展机制，需新增扫描逻辑。\",\"status\":\"in_progress\"},{\"step\":\"在`~/.routecodex/auth/`下按“`iflow-oauth-<序号>-alias`”模式自动扫描所有token文件，忽略alias部分，提取序号并排序生成有序token列表。\",\"status\":\"pending\"},{\"step\":\"在bootstrap阶段把扫描出的每个token文件映射为独立auth entry（keyAlias=序号），从而生成多个provider runtime profile。\",\"status\":\"pending\"},{\"step\":\"任一token失效时，在console明确提示“token <序号> 无效，需重新认证”，并触发该token文件的OAuth流程，完成后写回原文件。\",\"status\":\"pending\"},{\"step\":\"更新config示例与文档，移除手动secondaryTokenFile字段，改为自动扫描说明。\",\"status\":\"pending\"}],\"explanation\":\"先确认现有tokenFile加载逻辑，再实现自动扫描与多entry展开，最后处理失效提示与重认证交互。\"}",
+                  "name": "update_plan"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:18:25 GMT",
+      "eagleeye-traceid": "214178b117665750890105746e0fcd",
+      "s-brt": "16361",
+      "s-rt": "16362",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092030-061"
+}

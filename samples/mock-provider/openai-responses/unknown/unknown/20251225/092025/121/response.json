@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.249",
+    "buildTime": "2025-12-23T11:15:54.444Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T191543119-148"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc",
+    "session_id": "019b48ff-ff73-7ab1-a466-34e653bf65cc"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "补丁格式有问题。我需要直接修改文件。让我使用 sed 或直接重新生成文件。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/webauto && cat services/unified-api/index.js | sed '/this.app.post.*controller.action/,/res.json(result);/{\\n/res.json(result);/i\\\\\\n\\\\\\n        // Broadcast events for specific actions (same as /v1/containers/match)\\\\\\n        if (action === '\\\\''containers:match'\\\\'') {\\\\\\n          if (result?.success && result?.data) {\\\\\\n            this.broadcastEvent('\\\\''containers.matched'\\\\'', {\\\\\\n              success: true,\\\\\\n              matched: true,\\\\\\n              snapshot: result.data\\\\\\n            });\\\\\\n            if (result.data?.dom_tree) {\\\\\\n              this.broadcastEvent('\\\\''dom.tree'\\\\'', {\\\\\\n                tree: result.data.dom_tree,\\\\\\n                url: result.data?.url || payload?.url,\\\\\\n                timestamp: Date.now()\\\\\\n              });\\\\\\n            }\\\\\\n          } else {\\\\\\n            this.broadcastEvent('\\\\''containers.matched'\\\\'', {\\\\\\n              success: false,\\\\\\n              matched: false,\\\\\\n              error: result?.error || '\\\\''Unknown error'\\\\''\\\\\\n            });\\\\\\n          }\\\\\\n        }\\n}' > services/unified-api/index.js.tmp && mv services/unified-api/index.js.tmp services/unified-api/index.js && echo \\\"修改完成\\\"\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042314405467697226",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766488554,
+      "id": "202512231915431384d9d78ee740c8",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512231915431384d9d78ee740c8",
+      "usage": {
+        "completion_tokens": 282,
+        "prompt_tokens": 69765,
+        "prompt_tokens_details": {
+          "cached_tokens": 68701
+        },
+        "total_tokens": 70047
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 11:15:54 GMT",
+      "set-cookie": "acw_tc=ac11000117664885432797177edd7fde3bac05cd5f9af50b288f0a2d58c2e1;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512231915431384d9d78ee740c8"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-121"
+}

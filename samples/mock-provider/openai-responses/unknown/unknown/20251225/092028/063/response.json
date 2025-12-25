@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T11:52:54.446Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T195211377-121"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680",
+    "session_id": "019b5007-eaea-7ea3-8f8e-baf47c7e9680"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "设备码端点返回HTML而不是JSON，说明iFlow不提供标准的设备码OAuth流程。我已经修复了example.com重定向问题（改为显示成功页面）。\n\n删除手动脚本并使用修正后的认证码流程：\n\n```bash\n# 删除不可用的设备码/手动脚本\nrm /Users/fanzhang/Documents/github/routecodex/scripts/auth-iflow-token-direct.mjs\nrm /Users/fanzhang/Documents/github/routecodex/scripts/auth-iflow-manual.mjs\n\n# 第一个token认证\nIFLOW_TOKEN_FILE=\"$HOME/.routecodex/auth/iflow-oauth-1-primary.json\" node scripts/auth-iflow-token.mjs\n\n# 第二个token认证（先创建文件）\ntouch ~/.routecodex/auth/iflow-oauth-2-secondary.json\nIFLOW_TOKEN_FILE=\"$HOME/.routecodex/auth/iflow-oauth-2-secondary.json\" node scripts/auth-iflow-token.mjs\n```",
+            "reasoning_content": "设备码端点返回HTML而不是JSON，说明iFlow不提供标准的设备码OAuth流程。我们需要使用认证码流程(Authorization Code Flow)，但是需要修复example.com重定向问题。\n\n我已经修改了oauth-auth-code-flow.ts中的example.com重定向，改为显示成功页面。现在用户需要使用原来的auth-iflow-token.mjs脚本（使用认证码流程），而不是设备码流程。\n\n让我告诉用户如何使用：\n1. 使用原来的auth-iflow-token.mjs脚本（现在已经修复了example.com问题）\n2. 第一个token: IFLOW_TOKEN_FILE=\"$HOME/.routecodex/auth/iflow-oauth-1-xxx.json\" node scripts/auth-iflow-token.mjs\n3. 第二个token: IFLOW_TOKEN_FILE=\"$HOME/.routecodex/auth/iflow-oauth-2-yyy.json\" node scripts/auth-iflow-token.mjs\n\n由于设备码流程不可用，我需要告诉用户删除manual脚本并使用修正后的认证码流程脚本。",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766577174,
+      "id": "20251224195211acf3769e69c94889",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224195211acf3769e69c94889",
+      "usage": {
+        "completion_tokens": 408,
+        "prompt_tokens": 69878,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 70286
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:52:54 GMT",
+      "set-cookie": "acw_tc=0ae5a86f17665771316775475e98aab8cf7de65e35f5547741da6ae39294cf;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224195211acf3769e69c94889"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-063"
+}

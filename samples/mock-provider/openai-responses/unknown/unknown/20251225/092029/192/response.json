@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.271",
+    "buildTime": "2025-12-24T07:34:27.098Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T153227562-002"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694b970c64f8633edd32afdb",
+      "object": "chat.completion",
+      "created": 1766561549,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 72466,
+        "completion_tokens": 1881,
+        "total_tokens": 74347
+      },
+      "extend_fields": {
+        "traceId": "2107403417665615479591053e1014",
+        "requestId": "5ed5dbbc50ca310e4abafd54e21cbb0c"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:95",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"cat > /tmp/fix-connection-logic.mjs << 'EOFPATCH'\\n#!/usr/bin/env node\\nimport { readFileSync, writeFileSync } from 'node:fs';\\n\\nconst filePath = '/Users/fanzhang/Documents/github/webauto/apps/floating-panel/src/renderer/graph.mjs';\\nlet content = readFileSync(filePath, 'utf-8');\\n\\n// Add function to populate selectorMap from container data\\nconst selectorMapFunction = `\\nfunction populateSelectorMap(containerData) {\\n  selectorMap.clear();\\n  if (!containerData) return;\\n  \\n  function traverse(node) {\\n    if (!node || typeof node !== 'object') return;\\n    \\n    // Map selectors to DOM paths\\n    if (node.selectors && Array.isArray(node.selectors)) {\\n      node.selectors.forEach(selector => {\\n        if (selector.css) {\\n          // Find matching DOM nodes\\n          const domNodes = Array.from(domNodePositions.keys());\\n          const matchedNode = domNodes.find(path => {\\n            // Simple heuristic: if the DOM path contains the selector class/id\\n            return selector.css.includes('#') ? false : true;\\n          });\\n          if (matchedNode) {\\n            selectorMap.set(selector.css, matchedNode);\\n          }\\n        }\\n      });\\n    }\\n    \\n    // Process children recursively\\n    if (node.children && Array.isArray(node.children)) {\\n      node.children.forEach(child => traverse(child));\\n    }\\n  }\\n  \\n  traverse(containerData);\\n}\\n`;\\n\\n// Add the function after the existing variable declarations\\ncontent = content.replace(\\n  /const domNodePositions = new Map\\\\(\\\\);\\\\s*const containerNodePositions = new Map\\\\(\\\\);\\\\s*const selectorMap = new Map\\\\(\\\\);/,\\n  `const domNodePositions = new Map();\\nconst containerNodePositions = new Map();\\nconst selectorMap = new Map();\\\\n\\\\n${selectorMapFunction}`\\n);\\n\\n// Update drawAllConnections to populate selectorMap and handle child connections better\\ncontent = content.replace(\\n  /function drawAllConnections\\\\(parent\\\\) \\\\{[\\\\s\\\\S]*?\\\\n}/,\\n  `function drawAllConnections(parent) {\\n  console.log('[drawAllConnections] Called');\\n  console.log('[drawAllConnections] containerData:', !!containerData, 'domData:', !!domData);\\n  \\n  if (!containerData || !domData) {\\n    console.log('[drawAllConnections] Missing data - containerData:', containerData, 'domData:', domData);\\n    return;\\n  }\\n\\n  console.log('[drawAllConnections] Starting connection drawing');\\n  console.log('[drawAllConnections] containerData.keys:', containerData ? Object.keys(containerData) : 'N/A');\\n  console.log('[drawAllConnections] domData has children:', domData ? (domData.children?.length || 0) : 'N/A');\\n\\n  // Populate selector map from container data\\n  populateSelectorMap(containerData);\\n  console.log('[drawAllConnections] selectorMap populated with', selectorMap.size, 'entries');\\n\\n  function drawConnectionsForNode(node) {\\n    if (!node || typeof node !== 'object') {\\n      console.log('[drawConnectionsForNode] Invalid node or not object');\\n      return;\\n    }\\n    \\n    console.log('[drawConnectionsForNode] Checking node:', node.id || node.name, 'has match:', !!node.match, 'match exists:', !!node.match?.nodes, 'nodes length:', node.match?.nodes?.length || 0);\\n    \\n    // Use pre-built node mappings from container.match.nodes first\\n    if (node.match && node.match.nodes && node.match.nodes.length > 0) {\\n      console.log('[drawConnectionsForNode] Using match nodes for:', node.id || node.name);\\n      const containerPos = containerNodePositions.get(node.id || node.name);\\n      \\n      for (const matchNode of node.match.nodes) {\\n        const domPath = matchNode.dom_path;\\n        const domNodeY = domNodePositions.get(domPath);\\n        const selector = matchNode.selector;\\n        \\n        console.log('[drawConnectionsForNode] Drawing connection:', {\\n          containerId: node.id || node.name,\\n          domPath,\\n          selector,\\n          domNodeY\\n        });\\n        \\n        if (containerPos && domNodeY !== undefined && domNodeY >= 0) {\\n          const startX = containerPos.x;\\n          const startY = containerPos.y;\\n          const endX = 410;\\n          const endY = domNodeY + 12;\\n          \\n          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');\\n          const midX = (startX + endX) / 2;\\n          path.setAttribute('d', \\\\`M \\\\${startX} \\\\${startY} C \\\\${midX} \\\\${startY}, \\\\${midX} \\\\${endY}, \\\\${endX} \\\\${endY}\\\\`);\\n          path.setAttribute('stroke', '#4CAF50');\\n          path.setAttribute('stroke-width', '2');\\n          path.setAttribute('fill', 'none');\\n          path.setAttribute('stroke-dasharray', '4,2');\\n          path.setAttribute('opacity', '0.7');\\n          parent.appendChild(path);\\n          console.log('[drawConnectionsForNode] Drew connection from', node.id || node.name, 'to', domPath);\\n        } else {\\n          console.log('[drawConnectionsForNode] Cannot draw to', domPath, ': missing positions or invalid Y');\\n        }\\n      }\\n    } else if (node.match && node.match.selectors && node.match.selectors.length > 0) {\\n      console.log('[drawConnectionsForNode] Using selectors for:', node.id || node.name);\\n      const containerPos = containerNodePositions.get(node.id || node.name);\\n      \\n      for (const selector of node.match.selectors) {\\n        const domPath = selectorMap.get(selector);\\n        const domNodeY = domNodePositions.get(domPath);\\n        \\n        if (containerPos && domNodeY !== undefined && domNodeY >= 0) {\\n          const startX = containerPos.x;\\n          const startY = containerPos.y;\\n          const endX = 410;\\n          const endY = domNodeY + 12;\\n          \\n          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');\\n          const midX = (startX + endX) / 2;\\n          path.setAttribute('d', \\\\`M \\\\${startX} \\\\${startY} C \\\\${midX} \\\\${startY}, \\\\${midX} \\\\${endY}, \\\\${endX} \\\\${endY}\\\\`);\\n          path.setAttribute('stroke', '#4CAF50');\\n          path.setAttribute('stroke-width', '2');\\n          path.setAttribute('fill', 'none');\\n          path.setAttribute('stroke-dasharray', '4,2');\\n          path.setAttribute('opacity', '0.7');\\n          parent.appendChild(path);\\n        }\\n      }\\n    } else {\\n      console.log('[drawConnectionsForNode] No match data for:', node.id || node.name);\\n    }\\n    \\n    console.log('[drawConnectionsForNode] Checking children for:', node.id || node.name, 'children count:', node.children?.length || 0);\\n    if (node.children && Array.isArray(node.children)) {\\n      node.children.forEach((child, index) => {\\n        console.log('[drawConnectionsForNode] Processing child', index, 'of', node.id || node.name);\\n        drawConnectionsForNode(child);\\n      });\\n    }\\n  }\\n\\n  drawConnectionsForNode(containerData);\\n  console.log('[drawAllConnections] Complete, connections drawn');\\n}`\\n);\\n\\nwriteFileSync(filePath, content, 'utf-8');\\nconsole.log('Updated connection logic to handle child containers better');\\nEOFPATCH\\nnode /tmp/fix-connection-logic.mjs\",\"justification\":\"Improve connection logic for child containers\",\"login\":false,\"max_output_tokens\":6000,\"sandbox_permissions\":\"use_default\",\"shell\":\"\",\"workdir\":\"\",\"yield_time_ms\":1000}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 07:33:28 GMT",
+      "eagleeye-traceid": "2107403417665615479591053e1014",
+      "s-brt": "60023",
+      "s-rt": "60183",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092029-192"
+}

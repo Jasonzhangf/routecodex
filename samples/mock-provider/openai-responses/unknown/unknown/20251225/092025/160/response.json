@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.246",
+    "buildTime": "2025-12-23T13:03:12.918Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T210306873-014"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "是的，已经提交并推送到 GitHub 了。\n\n根据刚才的 `git status` 显示：\n- `Your branch is up to date with 'origin/main'` - 推送成功\n- 所有临时文件（`.bak`、构建产物等）都未提交\n- 没有敏感数据（profile、cookie 等）被提交\n\n**已提交的内容包括：**\n- apps/floating-panel/ 窗口大小持久化、原生拖拽区域、EIO 错误修复\n- start-headful.mjs 参数解析修复\n- 减少日志输出\n- unified-api 重构\n\n未提交的文件保持为 untracked 状态：\n- `*.bak` 备份文件\n- `services/unified-api/index.js`、`index.mjs`、`server.mjs` 构建产物\n- `diag.ts` 等临时文件",
+            "reasoning_content": "用户问我是否提交了\"我准备的提交\"。让我回顾一下：\n\n1. 用户要求提交所有代码到github并推送\n2. 我确实执行了 git add 和 git commit，然后执行了 git push\n3. 提交成功了（看到 \"[main 0239b7c]\" 的提交信息）\n4. 然后 git push 命令还在运行中（session 4636）\n\n让我检查一下推送是否完成。我刚刚的 git status 显示：\n- On branch main\n- Your branch is up to date with 'origin/main'.\n\n这说明推送已经成功了！分支已经和 origin/main 同步了。\n\n所以是的，我已经提交并推送了用户要求的更改。临时文件和构建物都没有被提交（它们在 untracked files 中，没有被 git add）。",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766494992,
+      "id": "2025122321030747d47cf8164a4931",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122321030747d47cf8164a4931",
+      "usage": {
+        "completion_tokens": 349,
+        "prompt_tokens": 56020,
+        "prompt_tokens_details": {
+          "cached_tokens": 55730
+        },
+        "total_tokens": 56369
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:03:12 GMT",
+      "set-cookie": "acw_tc=ac11000117664949871305172ef11e578336bbf7455880f9fe4db22c587eb2;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122321030747d47cf8164a4931"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-160"
+}

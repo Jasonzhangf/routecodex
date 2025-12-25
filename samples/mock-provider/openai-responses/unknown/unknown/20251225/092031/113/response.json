@@ -1,0 +1,63 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.279",
+    "buildTime": "2025-12-24T11:40:38.959Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T194016804-091"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****BNZi-Q",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766576438,
+      "usage": {
+        "completion_tokens": 218,
+        "prompt_tokens": 83990,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 84208
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-9d6aa67b-42e5-4a5a-af59-01785a7360fd",
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "现在我们已经完成了以下主要改进：\n\n1. **修正了AGENTS.md规则**：将模块系统规则更新为严格的ESM-only架构，禁止使用.cjs文件\n2. **转换了浮窗UI的preload脚本**：从CJS转换为ESM（.cjs → .mjs），并更新了所有相关引用\n3. **修复了构建脚本**：更新build.mjs以复制正确的preload.mjs文件\n4. **更新了启动脚本**：创建了正确的apps/floating-panel/scripts/start-headful.mjs\n5. **清理了构建配置**：移除了对不存在的CJS构建脚本的引用\n\n当前项目现在遵循ESM-only架构原则，不再使用CJS文件作为源码，符合项目刚性要求。Electron的preload脚本现在使用ESM格式，与项目整体的模块系统保持一致。\n\n浮窗的最小化和关闭功能现在通过正确的ESM接口实现，整个系统架构更加一致。\n\n接下来可以继续处理其他功能需求。"
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "1290",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 11:40:38 GMT",
+      "req-arrive-time": "1766576417079",
+      "req-cost-time": "21352",
+      "resp-start-time": "1766576438431",
+      "x-envoy-upstream-service-time": "21306"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092031-113"
+}

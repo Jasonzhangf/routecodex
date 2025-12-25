@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.260",
+    "buildTime": "2025-12-24T03:08:41.056Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T110754637-065"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "There's still a reference to `node.match.selector` in the logging code. This should also be `node.match.selectors[0]` for consistency. Let me fix this to avoid confusion, and then we can test.",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"cd apps/floating-panel && python3 << 'EOF'\\nwith open('src/renderer/graph.mjs', 'r') as f:\\n    content = f.read()\\n\\n# Fix the console.log to use selectors[0] instead of selector\\ncontent = content.replace(\\n    'domNodeSelector: node.match.selector,',\\n    'domNodeSelector: node.match.selectors[0],'\\n)\\ncontent = content.replace(\\n    \\\"console.log('[drawConnectionsForNode] Drew connection from', node.id, 'to', node.match.selector);\\\",\\n    \\\"console.log('[drawConnectionsForNode] Drew connection from', node.id, 'to', node.match.selectors[0]);\\\"\\n)\\n\\nwith open('src/renderer/graph.mjs', 'w') as f:\\n    f.write(content)\\n\\nprint(\\\"Fixed console.log references\\\")\\nEOF\\n\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042286745877981928",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766545721,
+      "id": "2025122411075466e5a0c5f42a414e",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122411075466e5a0c5f42a414e",
+      "usage": {
+        "completion_tokens": 224,
+        "prompt_tokens": 46634,
+        "prompt_tokens_details": {
+          "cached_tokens": 46437
+        },
+        "total_tokens": 46858
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 03:08:41 GMT",
+      "set-cookie": "acw_tc=ac11000117665456747818068e0904a5ccdd650a3a7fcc53d1c2a5c69fc312;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122411075466e5a0c5f42a414e"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-185"
+}

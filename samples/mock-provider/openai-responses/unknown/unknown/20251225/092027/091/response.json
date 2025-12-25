@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.261",
+    "buildTime": "2025-12-24T04:31:18.196Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T123114877-012"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "我现在看到了：\n1. indicatorText 包含 +/- 符号，在第 307 行\n2. 这在第 290-320 行之间，是在 renderContainerNode 函数中\n\n让我查看点击事件在哪里添加的。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"sed -n '230,290p' apps/floating-panel/src/renderer/graph.mjs\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042221393654534640",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766550678,
+      "id": "2025122412311535e976d2a2f94785",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122412311535e976d2a2f94785",
+      "usage": {
+        "completion_tokens": 76,
+        "prompt_tokens": 95449,
+        "prompt_tokens_details": {
+          "cached_tokens": 92799
+        },
+        "total_tokens": 95525
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 04:31:18 GMT",
+      "set-cookie": "acw_tc=0ae5a7dd17665506751873416ee499716872d95a2cd15bba73c669cfe7a477;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122412311535e976d2a2f94785"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-091"
+}

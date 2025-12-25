@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:13:48.873Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T201343557-009"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "**启动命令**\n\n```bash\nnode scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com --headless false\n```\n\n这个命令会：\n- 启动 Unified API（端口 7701）\n- 启动 Browser Service（端口 7704）\n- 打开浏览器窗口（有头模式）\n- 导航到 weibo.com\n- 启动浮窗 UI（支持调整大小，会记住位置和尺寸）\n\n浮窗现在支持：\n- ✅ 拖拽边缘调整窗口大小（最小 280x200）\n- ✅ 自动记住窗口位置和尺寸，下次启动恢复",
+            "reasoning_content": "用户需要启动命令，并且要导航到 weibo.com，使用有头模式（headless=false）。\n\n根据之前的启动日志，启动命令是：\n```\nnode scripts/start-headful.mjs\n```\n\n从启动日志可以看到参数是：\n```\n参数: profile=weibo_fresh url=https://weibo.com headless=false\n```\n\n所以完整的启动命令应该是：\n```\nnode scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com --headless false\n```\n\n或者根据启动器的实现，可能支持不同的参数格式。让我查看一下启动脚本的参数格式。\n\n但是从之前的日志来看，启动器已经处理了这些参数，所以命令应该是这样的。",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766492028,
+      "id": "2025122320134390a59a0dfe354012",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "2025122320134390a59a0dfe354012",
+      "usage": {
+        "completion_tokens": 286,
+        "prompt_tokens": 19842,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 20128
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 12:13:48 GMT",
+      "set-cookie": "acw_tc=ac11000117664920237665909e757eca1db2fe7094889f5fa9e25ab8ca2af9;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "2025122320134390a59a0dfe354012"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-136"
+}

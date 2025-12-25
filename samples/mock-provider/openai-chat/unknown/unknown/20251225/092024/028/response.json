@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.275",
+    "buildTime": "2025-12-24T08:34:46.688Z",
+    "entryEndpoint": "/v1/chat/completions",
+    "clientRequestId": "openai-chat-unknown-unknown-20251224T163428818-032"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4f75-4969-72a2-bad1-d8add9d76504",
+    "session_id": "019b4f75-4969-72a2-bad1-d8add9d76504"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694ba595966f039a14e23fb9",
+      "object": "chat.completion",
+      "created": 1766565270,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 52166,
+        "completion_tokens": 270,
+        "total_tokens": 52436
+      },
+      "extend_fields": {
+        "traceId": "212c397817665652690947118e18a8",
+        "requestId": "4f307daf60a4e581df8916bf19923d43"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "exec_command:28",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"cmd\":\"cat <<'EOF' > src/utils/README.md\\n# Utils Module\\n\\n## Overview\\nUtility functions for Host layer: error handling, load balancing, failover, key tracking, and snapshot writing. No tool governance or protocol conversion.\\n\\n## Core Tools\\n- `error-handler-registry.ts`: Error registration via `ErrorHandlingCenter`\\n- `load-balancer.ts`: Provider multi-key round-robin load balancing\\n- `failover.ts`: Provider failover and health checks\\n- `key-429-tracker.ts`: API key rate-limit status tracking\\n- `snapshot-writer.ts`: Snapshot writing (shared with `src/debug`)\\n\\n## Do / Don't\\n**Do**\\n- Use `ErrorHandlingCenter` for all error reporting\\n- Keep utilities Host-layer only (auth, load, failover, snapshots)\\n\\n**Don't**\\n- Implement provider-specific logic here\\n- Patch tool calls or routing decisions\\n- Store runtime config merges\\nEOF\",\"justification\":\"Update utils README to emphasize error center usage and no tool governance.\",\"login\":true,\"max_output_tokens\":2000,\"sandbox_permissions\":\"use_default\",\"shell\":\"zsh\",\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":100}",
+                  "name": "exec_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:34:46 GMT",
+      "eagleeye-traceid": "212c397817665652690947118e18a8",
+      "s-brt": "17420",
+      "s-rt": "17570",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "openai-chat-unknown-unknown-20251225T092024-028"
+}

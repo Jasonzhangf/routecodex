@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.246",
+    "buildTime": "2025-12-23T13:28:33.408Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T212826613-056"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "已提交并推送到 GitHub。本次更新修复了以下问题：\n\n**已修复的问题**\n\n1. 点击展开/折叠后内容消失\n   - 修复事件冒泡导致意外清空的问题\n   - 添加 `e.stopPropagation()` 阻止事件传播\n\n2. 只绘制第一个元素\n   - 修复高度计算逻辑，现在会递归渲染所有子节点\n   - 使用返回值正确计算每个节点的总高度\n\n3. 没有连线\n   - 添加父子节点间的垂直和水平连接线\n   - 添加容器树和 DOM 树之间的虚线连接\n\n4. Canvas 不可移动\n   - 实现画布拖拽功能\n   - 支持 `mousedown`、`mousemove`、`mouseup` 事件处理\n   - 鼠标拖动背景可平移整个视图\n\n**启动命令（无头模式 false 即有头）**\n\n```bash\nnode scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com\n```\n\n**注意：不使用 `--headless false` 参数形式，直接不指定该参数即为有头模式。**",
+            "reasoning_content": "Successfully pushed the fix. Let me summarize what was done.",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766496513,
+      "id": "20251223212826161c8acbc9084a53",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251223212826161c8acbc9084a53",
+      "usage": {
+        "completion_tokens": 259,
+        "prompt_tokens": 83534,
+        "prompt_tokens_details": {
+          "cached_tokens": 82769
+        },
+        "total_tokens": 83793
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:28:33 GMT",
+      "set-cookie": "acw_tc=0ae5a7dc17664965067968147e7e31332df70c412fd66af971507ce4ba3615;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251223212826161c8acbc9084a53"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-204"
+}

@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.284",
+    "buildTime": "2025-12-24T15:17:13.417Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T231706116-067"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "问题是 unified-api 尝试连接到 8765 的 WebSocket（Browser Service 的 wsPort），但当前我们用 `--no-ws` 启动了 Browser Service，所以 8765 未监听。controller 默认使用 getBrowserWsUrl() 连接 8765。我需要：\n\n1. 重启 Browser Service 时启用 WS（去掉 --no-ws）以便 controller 能通过 WebSocket 通讯\n2. 或者统一改配置让 controller 使用 HTTP 而不是 WS\n\n根据架构，controller 已有 sendCommand（HTTP）和 sendWsCommand（WS）。highlight 相关用的是 sendWsCommand。所以我需要启动 Browser Service 时启用 WS。\n\n但 launcher 使用了 --no-ws，这是为了只保留 HTTP（为了健康检查）。但 highlight 需要 WS。所以正确的做法是：Browser Service 需要 WS 启用。launcher 那边应该是误解了需求。我先手动启动带 WS 的 Browser Service，并保留 unified-api。\n\n当前已有：unified-api 在 48279，browser-service 需要重启带 WS。\n\n我手动启动一个带 WS 的 browser-service，但端口 8765 要和配置一致。默认 wsPort=8765。\n\n我杀掉当前的（如果有），然后启动带 WS 的：\n\nnode libs/browser/remote-service.js --host 127.0.0.1 --port 7704 --ws-port 8765 --ws-host 127.0.0.1\n\n先手动启动：\n\n",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"chars\":\"^C\",\"max_output_tokens\":2000,\"session_id\":48279,\"yield_time_ms\":1000}",
+                  "name": "write_stdin"
+                },
+                "id": "call_-8042254482083388440",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766589433,
+      "id": "202512242317067b8e3721de9b4554",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512242317067b8e3721de9b4554",
+      "usage": {
+        "completion_tokens": 351,
+        "prompt_tokens": 59426,
+        "prompt_tokens_details": {
+          "cached_tokens": 56668
+        },
+        "total_tokens": 59777
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 15:17:13 GMT",
+      "set-cookie": "acw_tc=0ae5a7e217665894263052847e3bdebcf426ac24c26b518b02213c53be5faf;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512242317067b8e3721de9b4554"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-126"
+}

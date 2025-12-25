@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.253",
+    "buildTime": "2025-12-23T12:45:14.573Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T204506465-057"
+  },
+  "url": "https://dapi.micosoft.icu/openai/responses",
+  "headers": {
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "responses-2024-12-17",
+    "Authorization": "Bearer****3a6257",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "mode": "sse",
+    "clientStream": true,
+    "payload": {
+      "id": "resp_087eb50435a64b3d01694a8ed3b1e08191a6386fde67a5dee5",
+      "object": "response",
+      "created_at": 1766493908,
+      "status": "completed",
+      "model": "gpt-5.1-codex",
+      "temperature": 1,
+      "top_p": 1,
+      "metadata": {},
+      "output": [
+        {
+          "id": "rs_087eb50435a64b3d01694a8ed6031c8191853d56d7ac10a5ac",
+          "type": "reasoning",
+          "summary": [],
+          "content": []
+        },
+        {
+          "id": "fc_087eb50435a64b3d01694a8ed8c78881918b1355a3cf7d58a3",
+          "type": "function_call",
+          "status": "completed",
+          "call_id": "call_WxPUZ2bmlSMhkPi1LtZ0fYaq",
+          "name": "apply_patch",
+          "arguments": "{\"input\":\"*** Begin Patch\\n*** Update File: apps/floating-panel/src/renderer/index.mts\\n@@\\n-import { initGraph, updateContainerTree, updateDomTree } from './graph.mjs';\\n-import { initDrag } from './drag.mjs';\\n+import { initGraph, updateContainerTree, updateDomTree } from './graph.mjs';\\n@@\\n-// Initialize drag for Electron window\\n-if (typeof window.require === 'undefined') {\\n-  initDrag(window);\\n-}\\n-\\n if (!window.api) {\\n*** End Patch\\n\",\"patch\":\"*** Begin Patch\\n*** Update File: apps/floating-panel/src/renderer/index.mts\\n@@\\n-import { initGraph, updateContainerTree, updateDomTree } from './graph.mjs';\\n-import { initDrag } from './drag.mjs';\\n+import { initGraph, updateContainerTree, updateDomTree } from './graph.mjs';\\n@@\\n-// Initialize drag for Electron window\\n-if (typeof window.require === 'undefined') {\\n-  initDrag(window);\\n-}\\n-\\n if (!window.api) {\\n*** End Patch\"}"
+        },
+        {
+          "id": "message_placeholder_3",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": ""
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 44091,
+        "input_tokens_details": {
+          "cached_tokens": 39936
+        },
+        "output_tokens": 587,
+        "output_tokens_details": {
+          "reasoning_tokens": 320
+        },
+        "total_tokens": 44678
+      }
+    }
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092024-031"
+}

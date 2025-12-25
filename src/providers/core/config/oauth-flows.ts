@@ -102,6 +102,8 @@ export interface OAuthFlowConfig {
     requireHttpsCallback?: boolean;
     /** 自定义状态参数 */
     customState?: boolean;
+    /** 需要请求离线访问令牌（access_type=offline/prompt=consent） */
+    requestOfflineAccess?: boolean;
   };
 }
 

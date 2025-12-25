@@ -1,0 +1,82 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.260",
+    "buildTime": "2025-12-24T02:31:28.798Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T103119161-002"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "我来帮你检查为什么可以展开容器树和DOM，但没有连线的问题。这可能是WebSocket连接、绘图逻辑或数据传递的问题。",
+            "reasoning_content": "用户报告说启动后可以展开容器树和DOM，但是没有连线。这听起来像是WebSocket连接的问题，或者是Canvas绘图的问题。\n\n根据项目架构：\n- 7701：Unified API（HTTP + WebSocket + Bus）\n- 7704：Browser Service（会话管理）\n\n可能的问题：\n1. WebSocket连接没有建立\n2. 连线逻辑没有执行\n3. Canvas绘图有问题\n4. 数据没有正确传递\n\n让我先检查一下当前运行的服务状态，然后查看相关的代码。\n\n首先查看健康检查：\n```bash\ncurl http://127.0.0.1:7701/health\ncurl http://127.0.0.1:7704/health\n```\n\n然后查看浏览器页面状态和控制台消息。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"curl -s http://127.0.0.1:7701/health && echo \\\"\\\" && curl -s http://127.0.0.1:7704/health\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042294201941396191",
+                "index": 0,
+                "type": "function"
+              },
+              {
+                "function": {
+                  "arguments": "{}",
+                  "name": "mcp__chrome-devtools__list_pages"
+                },
+                "id": "call_-8042294201941396190",
+                "index": 1,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766543488,
+      "id": "20251224103119ce8c97782d6f4d28",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224103119ce8c97782d6f4d28",
+      "usage": {
+        "completion_tokens": 247,
+        "prompt_tokens": 7896,
+        "prompt_tokens_details": {
+          "cached_tokens": 7894
+        },
+        "total_tokens": 8143
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 02:31:28 GMT",
+      "set-cookie": "acw_tc=ac11000117665434791883470e42757c55072e213da120579c13f9cdef2a5f;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224103119ce8c97782d6f4d28"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092026-113"
+}

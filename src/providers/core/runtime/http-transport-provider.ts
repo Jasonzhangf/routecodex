@@ -10,6 +10,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import fs from 'node:fs/promises';
 import { BaseProvider } from './base-provider.js';
 import { HttpClient } from '../utils/http-client.js';
 import { DynamicProfileLoader, ServiceProfileValidator } from '../config/service-profiles.js';
@@ -18,6 +19,7 @@ import { OAuthAuthProvider } from '../../auth/oauth-auth.js';
 import { logOAuthDebug } from '../../auth/oauth-logger.js';
 import { TokenFileAuthProvider } from '../../auth/tokenfile-auth.js';
 import { ensureValidOAuthToken, handleUpstreamInvalidOAuthToken } from '../../auth/oauth-lifecycle.js';
+import { fetchAntigravityProjectId } from '../../auth/antigravity-userinfo-helper.js';
 import {
   attachProviderSseSnapshotStream,
   writeProviderSnapshot
@@ -111,12 +113,14 @@ export class HttpTransportProvider extends BaseProvider {
         const extensions = this.getConfigExtensions();
         const auth = providerConfig.auth;
         const usesTokenFile = this.authProvider instanceof TokenFileAuthProvider;
-        if (this.normalizeAuthMode(auth.type) === 'oauth' && !usesTokenFile) {
+        if (this.normalizeAuthMode(auth.type) === 'oauth') {
           const oauthAuth = auth as OAuthAuthExtended;
-          const oauthProviderId = this.ensureOAuthProviderId(oauthAuth, extensions);
+          const oauthProviderId = this.oauthProviderId || this.ensureOAuthProviderId(oauthAuth, extensions);
           const forceReauthorize = false;
           const tokenFileHint = oauthAuth.tokenFile ?? '(default)';
-          logOAuthDebug(`[OAuth] [init] provider=${oauthProviderId} type=${auth.type} tokenFile=${tokenFileHint} forceReauth=${forceReauthorize}`);
+          logOAuthDebug(
+            `[OAuth] [init] provider=${oauthProviderId} type=${auth.type} tokenFile=${tokenFileHint} forceReauth=${forceReauthorize}`
+          );
           this.dependencies.logger?.logModule?.(this.id, 'oauth-init-start', {
             providerType: oauthProviderId,
             tokenFile: tokenFileHint,
@@ -128,9 +132,13 @@ export class HttpTransportProvider extends BaseProvider {
               openBrowser: true,
               forceReauthorize
             });
+            if (this.oauthProviderId === 'antigravity') {
+              await this.ensureAntigravityProjectMetadata(oauthAuth);
+            }
             logOAuthDebug('[OAuth] [init] ensureValid OK');
             try {
               if (this.authProvider instanceof TokenFileAuthProvider) {
+                // 令牌文件可能在 ensureValidOAuthToken 中被创建/更新，重新加载一次
                 await this.authProvider.initialize();
               } else {
                 (this.authProvider as OAuthAwareAuthProvider).getOAuthClient?.()?.loadToken?.();
@@ -146,15 +154,10 @@ export class HttpTransportProvider extends BaseProvider {
             const msg = err?.message ? String(err.message) : String(error);
             console.error(`[OAuth] [init] ensureValid ERROR: ${msg}`);
             this.dependencies.logger?.logModule?.(this.id, 'oauth-init-error', {
-              providerType: this.providerType,
+              providerType: oauthProviderId,
               error: msg
             });
             throw error;
-          }
-          try {
-            (this.authProvider as OAuthAwareAuthProvider).getOAuthClient?.()?.loadToken?.();
-          } catch {
-            // ignore
           }
         } else {
           try {
@@ -325,24 +328,24 @@ export class HttpTransportProvider extends BaseProvider {
     const extensions = this.getConfigExtensions();
     const authMode = this.normalizeAuthMode(auth.type);
     this.authMode = authMode;
-    let providerIdForAuth = authMode === 'oauth'
-      ? this.ensureOAuthProviderId(auth as OAuthAuthExtended, extensions)
-      : this.providerType;
-    if (this.type === 'gemini-cli-http-provider') {
-      providerIdForAuth = 'gemini-cli';
-    }
-    if (authMode === 'oauth') {
-      this.oauthProviderId = providerIdForAuth;
-    }
+    const resolvedOAuthProviderId =
+      authMode === 'oauth'
+        ? this.ensureOAuthProviderId(auth as OAuthAuthExtended, extensions)
+        : undefined;
+
+    const serviceProfileKey =
+      this.type === 'gemini-cli-http-provider'
+        ? 'gemini-cli'
+        : (resolvedOAuthProviderId ?? this.providerType);
 
     const validation = ServiceProfileValidator.validateServiceProfile(
-      providerIdForAuth,
+      serviceProfileKey,
       authMode
     );
 
     if (!validation.isValid) {
       throw new Error(
-        `Invalid auth configuration for ${providerIdForAuth}: ${validation.errors.join(', ')}`
+        `Invalid auth configuration for ${serviceProfileKey}: ${validation.errors.join(', ')}`
       );
     }
 
@@ -351,17 +354,23 @@ export class HttpTransportProvider extends BaseProvider {
       return new ApiKeyAuthProvider(auth as ApiKeyAuth);
     } else if (authMode === 'oauth') {
       const oauthAuth = auth as OAuthAuthExtended;
+      const oauthProviderId = resolvedOAuthProviderId ?? serviceProfileKey;
+      this.oauthProviderId = oauthProviderId;
       // For providers like Qwen/iflow/Gemini CLI where public OAuth client may not be available,
       // allow reading tokens produced by external login tools (CLIProxyAPI) via token file.
       const useTokenFile =
-        (providerIdForAuth === 'qwen' || providerIdForAuth === 'iflow' || providerIdForAuth === 'gemini-cli') &&
+        (
+          oauthProviderId === 'qwen' ||
+          oauthProviderId === 'iflow' ||
+          this.type === 'gemini-cli-http-provider'
+        ) &&
         !oauthAuth.clientId &&
         !oauthAuth.tokenUrl &&
         !oauthAuth.deviceCodeUrl;
       if (useTokenFile) {
         return new TokenFileAuthProvider(oauthAuth);
       }
-      return new OAuthAuthProvider(oauthAuth, providerIdForAuth);
+      return new OAuthAuthProvider(oauthAuth, oauthProviderId);
     } else {
       throw new Error(`Unsupported auth type: ${auth.type}`);
     }
@@ -777,7 +786,7 @@ export class HttpTransportProvider extends BaseProvider {
       const auth = this.config.config.auth;
       if (this.normalizeAuthMode(auth.type) === 'oauth') {
         const oauthAuth = auth as OAuthAuthExtended;
-        const oauthProviderId = this.ensureOAuthProviderId(oauthAuth);
+        const oauthProviderId = this.oauthProviderId || this.ensureOAuthProviderId(oauthAuth);
         logOAuthDebug('[OAuth] [headers] ensureValid start (openBrowser=true, forceReauth=false)');
         try {
           await ensureValidOAuthToken(oauthProviderId, oauthAuth, {
@@ -1235,6 +1244,89 @@ export class HttpTransportProvider extends BaseProvider {
       }
     }
     return Object.keys(normalized).length ? normalized : undefined;
+  }
+
+  private async ensureAntigravityProjectMetadata(oauthAuth: OAuthAuthExtended): Promise<void> {
+    const tokenFile = typeof oauthAuth?.tokenFile === 'string' ? oauthAuth.tokenFile.trim() : '';
+    if (!tokenFile) {
+      return;
+    }
+    const tokenPath = tokenFile.startsWith('~/')
+      ? tokenFile.replace(/^~\//, `${process.env.HOME || ''}/`)
+      : tokenFile;
+    let raw: string;
+    try {
+      raw = await fs.readFile(tokenPath, 'utf-8');
+    } catch {
+      return;
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    if (this.extractProjectIdFromTokenSnapshot(parsed)) {
+      return;
+    }
+    const accessToken = this.extractAccessTokenFromSnapshot(parsed);
+    if (!accessToken) {
+      return;
+    }
+    const baseOverride = (oauthAuth as { antigravityApiBase?: string }).antigravityApiBase;
+    const apiBaseHint = baseOverride || this.getEffectiveBaseUrl();
+    const projectId = await fetchAntigravityProjectId(accessToken, apiBaseHint);
+    if (!projectId) {
+      logOAuthDebug('[OAuth] Antigravity: unable to resolve project_id for token file');
+      return;
+    }
+    parsed.project_id = projectId;
+    parsed.projectId = projectId;
+    const projectsNode = (parsed as { projects?: { projectId: string }[] }).projects;
+    if (!Array.isArray(projectsNode) || !projectsNode.length) {
+      (parsed as { projects?: { projectId: string }[] }).projects = [{ projectId }];
+    }
+    await fs.writeFile(tokenPath, JSON.stringify(parsed, null, 2));
+    logOAuthDebug(`[OAuth] Antigravity: persisted project_id=${projectId} for ${tokenPath}`);
+  }
+
+  private extractAccessTokenFromSnapshot(snapshot: Record<string, unknown>): string | undefined {
+    const lower = (snapshot as { access_token?: unknown }).access_token;
+    const upper = (snapshot as { AccessToken?: unknown }).AccessToken;
+    const value =
+      typeof lower === 'string'
+        ? lower
+        : typeof upper === 'string'
+          ? upper
+          : undefined;
+    if (value && value.trim()) {
+      return value.trim();
+    }
+    return undefined;
+  }
+
+  private extractProjectIdFromTokenSnapshot(snapshot: Record<string, unknown>): string | undefined {
+    const directNode = (snapshot as { project_id?: unknown }).project_id;
+    const direct = typeof directNode === 'string' ? directNode : undefined;
+    if (direct && direct.trim()) {
+      return direct.trim();
+    }
+    const camelNode = (snapshot as { projectId?: unknown }).projectId;
+    const camel = typeof camelNode === 'string' ? camelNode : undefined;
+    if (camel && camel.trim()) {
+      return camel.trim();
+    }
+    if (Array.isArray((snapshot as { projects?: UnknownObject[] }).projects)) {
+      for (const entry of (snapshot as { projects?: UnknownObject[] }).projects ?? []) {
+        if (entry && typeof entry === 'object' && typeof (entry as { projectId?: unknown }).projectId === 'string') {
+          const candidate = String((entry as { projectId?: unknown }).projectId);
+          if (candidate.trim()) {
+            return candidate.trim();
+          }
+        }
+      }
+    }
+    return undefined;
   }
 }
 const CODEX_IDENTIFIER_MAX_LENGTH = 64;

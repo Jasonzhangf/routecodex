@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.247",
+    "buildTime": "2025-12-23T13:46:44.647Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251223T214638503-006"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165",
+    "session_id": "019b4b1a-4a77-7be2-aa70-af43a98b8165"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "抱歉，我会修改流程。现在只做代码修改和本地验证，不再自动执行 git add/commit/push。\n\n你可以手动决定何时提交和推送。我已完成的修改：\n\n- 禁用了 canvas 的 overflow（改为 hidden），防止右侧滚动\n- 修复了容器树和 DOM 树的递归渲染逻辑\n- 修复了节点展开/折叠的逻辑\n- 保持了 canvas 拖动功能\n- 实现了点击容器高亮（绿色）和点击 DOM 高亮（蓝色）\n\n你可以先测试一下，确认没问题后再告诉我提交和推送。",
+            "reasoning_content": "用户抱怨我推送得太激进，需要用户确认后再提交推送。这是一个很好的反馈。我之前每次修复一个小问题就立即提交并推送，这确实不够谨慎。\n\n从现在开始，我应该：\n1. 只做代码修改和本地构建验证\n2. 不再自动执行 git add/commit/push\n3. 让用户手动决定何时提交和推送\n4. 可以告诉用户我已经完成了哪些修改，等待用户确认\n\n我应该简短地道歉并说明以后的流程。",
+            "role": "assistant"
+          }
+        }
+      ],
+      "created": 1766497604,
+      "id": "202512232146391de2ae83a81a4727",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512232146391de2ae83a81a4727",
+      "usage": {
+        "completion_tokens": 224,
+        "prompt_tokens": 103995,
+        "prompt_tokens_details": {
+          "cached_tokens": 103001
+        },
+        "total_tokens": 104219
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Tue, 23 Dec 2025 13:46:44 GMT",
+      "set-cookie": "acw_tc=0ae5a7e317664975988186269effd520e9b43ebec0ee33332cb5647f85bafb;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512232146391de2ae83a81a4727"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092025-244"
+}

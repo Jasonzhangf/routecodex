@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.278",
+    "buildTime": "2025-12-24T11:00:12.713Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T190002438-016"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "Now let's update the button click handlers to use the direct API methods instead of invokeAction:",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"input\":\"*** Begin Patch\\n*** Update File: apps/floating-panel/src/renderer/index.mts\\n@@\\nif (btnMinimize && window.api) {\\n   btnMinimize.addEventListener('click', () => {\\n-    window.api.invokeAction('window:minimize', {}).catch(err => {\\n+    window.api.minimize().catch(err => {\\n       console.error('Failed to minimize:', err);\\n     });\\n   });\\n }\\n \\n if (btnClose && window.api) {\\n   btnClose.addEventListener('click', () => {\\n-    window.api.invokeAction('window:close', {}).catch(err => {\\n+    window.api.close().catch(err => {\\n       console.error('Failed to close:', err);\\n     });\\n   });\\n }\\n*** End Patch\\n\",\"patch\":\"*** Begin Patch\\n*** Update File: apps/floating-panel/src/renderer/index.mts\\n@@\\nif (btnMinimize && window.api) {\\n   btnMinimize.addEventListener('click', () => {\\n-    window.api.invokeAction('window:minimize', {}).catch(err => {\\n+    window.api.minimize().catch(err => {\\n       console.error('Failed to minimize:', err);\\n     });\\n   });\\n }\\n \\n if (btnClose && window.api) {\\n   btnClose.addEventListener('click', () => {\\n-    window.api.invokeAction('window:close', {}).catch(err => {\\n+    window.api.close().catch(err => {\\n       console.error('Failed to close:', err);\\n     });\\n   });\\n }\\n*** End Patch\\n\"}",
+                  "name": "apply_patch"
+                },
+                "id": "call_-8042253107693771710",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766574012,
+      "id": "202512241900020f2ba28d63254d69",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "202512241900020f2ba28d63254d69",
+      "usage": {
+        "completion_tokens": 331,
+        "prompt_tokens": 18373,
+        "prompt_tokens_details": {
+          "cached_tokens": 42
+        },
+        "total_tokens": 18704
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 11:00:12 GMT",
+      "set-cookie": "acw_tc=0ae5a82617665740025885248e20dec5edb7a612c181f4b5b9ef10fa3576b9;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "202512241900020f2ba28d63254d69"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092028-008"
+}

@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.278",
+    "buildTime": "2025-12-24T11:19:36.457Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T191917887-175"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****BNZi-Q",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "created": 1766575176,
+      "usage": {
+        "completion_tokens": 441,
+        "prompt_tokens": 64092,
+        "prompt_tokens_details": {
+          "cached_tokens": 2944
+        },
+        "total_tokens": 64533
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-0c0d3e3a-56e2-4a16-bbfb-82238b714f06",
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "apply_patch",
+                  "arguments": "{\"input\": \"*** Begin Patch\\n*** Update File: scripts/build/run-services-build.mjs\\n@@\\n  // 4. 构建 unified-api（输出到 dist/services/unified-api），使用CJS格式保持兼容性\\n  try { fs.mkdirSync(path.resolve(repoRoot, 'dist/services/unified-api'), { recursive: true }); } catch {}\\n-  await run('npx esbuild services/unified-api/index.js --bundle --platform=node --format=cjs --outfile=dist/services/unified-api/index.js', 'inherit');\\n+  // unified-api 使用 server.mjs 直接启动，无需构建\\n+  // await run('npx esbuild services/unified-api/index.js --bundle --platform=node --format=cjs --outfile=dist/services/unified-api/index.js', 'inherit');\\n \\n   // 5. 确认 workflow api (sharedmodule) 已存在\\n   const workflowPath = 'dist/sharedmodule/engines/api-gateway/server.js';\\n*** End Patch\\n\", \"patch\": \"*** Begin Patch\\n*** Update File: scripts/build/run-services-build.mjs\\n@@\\n  // 4. 构建 unified-api（输出到 dist/services/unified-api），使用CJS格式保持兼容性\\n  try { fs.mkdirSync(path.resolve(repoRoot, 'dist/services/unified-api'), { recursive: true }); } catch {}\\n-  await run('npx esbuild services/unified-api/index.js --bundle --platform=node --format=cjs --outfile=dist/services/unified-api/index.js', 'inherit');\\n+  // unified-api 使用 server.mjs 直接启动，无需构建\\n+  // await run('npx esbuild services/unified-api/index.js --bundle --platform=node --format=cjs --outfile=dist/services/unified-api/index.js', 'inherit');\\n \\n   // 5. 确认 workflow api (sharedmodule) 已存在\\n   const workflowPath = 'dist/sharedmodule/engines/api-gateway/server.js';\\n*** End Patch\\n\"}"
+                },
+                "index": 0,
+                "id": "call_ef514f844dc74cb3baec28b2",
+                "type": "function"
+              }
+            ],
+            "content": ""
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "2203",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 11:19:36 GMT",
+      "req-arrive-time": "1766575158315",
+      "req-cost-time": "17984",
+      "resp-start-time": "1766575176300",
+      "x-envoy-upstream-service-time": "17888"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092031-100"
+}

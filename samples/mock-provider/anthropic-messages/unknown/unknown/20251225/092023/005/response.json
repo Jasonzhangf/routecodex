@@ -1,0 +1,78 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.274",
+    "buildTime": "2025-12-24T08:01:03.459Z",
+    "entryEndpoint": "/v1/messages",
+    "clientRequestId": "anthropic-messages-unknown-unknown-20251224T160100471-043"
+  },
+  "url": "https://apis.iflow.cn/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****b77f02",
+    "Accept": "application/json",
+    "User-Agent": "claude-cli/2.0.76 (external, cli)",
+    "session_id": "codex_cli_session_anthropic-messages-iflow_key1_kimi-_99e16e33e6",
+    "conversation_id": "codex_cli_conversation_anthropic-messages-iflow_key1__3b8a2cb949"
+  },
+  "body": {
+    "data": {
+      "id": "chatcmpl-694b9dbc60f18590a269d915",
+      "object": "chat.completion",
+      "created": 1766563261,
+      "model": "kimi-k2",
+      "usage": {
+        "prompt_tokens": 29405,
+        "completion_tokens": 31,
+        "total_tokens": 29436
+      },
+      "extend_fields": {
+        "traceId": "213fe9de17665632605685414e0d9b",
+        "requestId": "163fb18a2f893b163c81bd1ed9efe540"
+      },
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "shell_command:1",
+                "type": "function",
+                "function": {
+                  "arguments": "{\"command\":\"ls -la\",\"description\":\"List all files including hidden ones\",\"timeout\":120000}",
+                  "name": "shell_command"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-headers": "Authorization, Content-Type, x-biz-info, EagleEye-UserData, _csrf, priority",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-origin": "*",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 08:01:03 GMT",
+      "eagleeye-traceid": "213fe9de17665632605685414e0d9b",
+      "s-brt": "2829",
+      "s-rt": "2879",
+      "server": "Tengine",
+      "strict-transport-security": "max-age=0",
+      "transfer-encoding": "chunked",
+      "ups-target-key": "apis.iflow.cn.vipserver",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-protocol": "HTTP/1.1"
+    },
+    "url": "https://apis.iflow.cn/v1/chat/completions"
+  },
+  "reqId": "anthropic-messages-unknown-unknown-20251225T092023-005"
+}

@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.261",
+    "buildTime": "2025-12-24T04:41:03.689Z",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-unknown-unknown-20251224T124044425-053"
+  },
+  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "codex_cli_rs/0.77.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5",
+    "Authorization": "Bearer****PvttZB",
+    "Accept": "text/event-stream",
+    "originator": "codex_cli_rs",
+    "conversation_id": "019b4e2d-216f-7443-aa72-71dffce21f66",
+    "session_id": "019b4e2d-216f-7443-aa72-71dffce21f66"
+  },
+  "body": {
+    "data": {
+      "choices": [
+        {
+          "finish_reason": "tool_calls",
+          "index": 0,
+          "message": {
+            "content": "",
+            "reasoning_content": "日志中没有 renderGraph 的输出，这很奇怪。让我检查一下编译后的 JavaScript 文件，看看代码是否正确。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"cmd\":\"grep -A 10 \\\"function renderGraph\\\" apps/floating-panel/dist/renderer/index.js | head -20\"}",
+                  "name": "exec_command"
+                },
+                "id": "call_-8042370205683592406",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1766551263,
+      "id": "20251224124045b1b1438c59a84bf4",
+      "model": "glm-4.7",
+      "object": "chat.completion",
+      "request_id": "20251224124045b1b1438c59a84bf4",
+      "usage": {
+        "completion_tokens": 58,
+        "prompt_tokens": 111617,
+        "prompt_tokens_details": {
+          "cached_tokens": 111381
+        },
+        "total_tokens": 111675
+      }
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Wed, 24 Dec 2025 04:41:03 GMT",
+      "set-cookie": "acw_tc=0ae5a7dc17665512448034020e7e4822cf435970d23e124a1f08ce786c8dc0;path=/;HttpOnly;Max-Age=1800",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-log-id": "20251224124045b1b1438c59a84bf4"
+    },
+    "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  },
+  "reqId": "openai-responses-unknown-unknown-20251225T092027-105"
+}

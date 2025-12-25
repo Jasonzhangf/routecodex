@@ -1,0 +1,32 @@
+{
+  "meta": {
+    "stage": "provider-request",
+    "version": "0.89.284",
+    "buildTime": "2025-12-24T14:07:48.110Z",
+    "entryEndpoint": "/v1/messages",
+    "clientRequestId": "anthropic-messages-unknown-unknown-20251224T220748105-001"
+  },
+  "url": "http://127.0.0.1:49728/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer****fy-key",
+    "Accept": "text/event-stream",
+    "User-Agent": "node"
+  },
+  "body": {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Test streaming response."
+      }
+    ],
+    "model": "verify-mock",
+    "anthropicMirror": {
+      "messageContentShape": [
+        "string"
+      ]
+    },
+    "max_tokens": 8192
+  },
+  "reqId": "anthropic-messages-unknown-unknown-20251225T092023-043"
+}

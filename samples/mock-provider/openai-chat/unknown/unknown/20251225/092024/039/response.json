@@ -1,0 +1,60 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "version": "0.89.261",
+    "buildTime": "2025-12-24T03:24:45.025Z",
+    "entryEndpoint": "/v1/chat/completions",
+    "clientRequestId": "openai-chat-unknown-unknown-20251224T112439598-001"
+  },
+  "url": "https://portal.qwen.ai/v1/chat/completions",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "*/*",
+    "User-Agent": "curl/8.7.1",
+    "X-Goog-Api-Client": "gl-node/22.17.0",
+    "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+    "Authorization": "Bearer****kpzZOA"
+  },
+  "body": {
+    "data": {
+      "created": 1766546685,
+      "usage": {
+        "completion_tokens": 33,
+        "prompt_tokens": 415,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 448
+      },
+      "model": "qwen3-coder-plus",
+      "id": "chatcmpl-5773ed35-f91b-4350-8c40-0748c6018a9d",
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "RouteCodex 是一个用于管理和配置 MCP（Management Control Plane）服务器资源的工具，支持资源的过滤、根路径指定以及分页查询等功能。"
+          },
+          "logprobs": null
+        }
+      ],
+      "system_fingerprint": null,
+      "object": "chat.completion"
+    },
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "549",
+      "content-type": "application/json",
+      "date": "Wed, 24 Dec 2025 03:24:45 GMT",
+      "req-arrive-time": "1766546680178",
+      "req-cost-time": "4845",
+      "resp-start-time": "1766546685023",
+      "x-envoy-upstream-service-time": "4844"
+    },
+    "url": "https://portal.qwen.ai/v1/chat/completions"
+  },
+  "reqId": "openai-chat-unknown-unknown-20251225T092024-039"
+}
