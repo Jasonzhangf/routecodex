@@ -186,7 +186,7 @@ async function main() {
     providerProtocol: 'openai-responses',
     routeName: 'verify',
     metadata: {
-      entryEndpoint: '/v1/responses',
+      entryEndpoint: '/v1/chat/completions',
       clientHeaders: {}
     },
     target: {

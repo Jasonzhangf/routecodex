@@ -569,8 +569,13 @@ program
           process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = promptFlag;
           process.env.ROUTECODEX_SYSTEM_PROMPT_ENABLE = '1';
         }
-        if (typeof options.ua === 'string' && options.ua.trim()) {
-          process.env.ROUTECODEX_UA_MODE = options.ua.trim();
+        const uaFromFlag =
+          typeof options.ua === 'string' && options.ua.trim()
+            ? options.ua.trim()
+            : null;
+        const uaMode = uaFromFlag || (options.codex ? 'codex' : null);
+        if (uaMode) {
+          process.env.ROUTECODEX_UA_MODE = uaMode;
         }
         if (options.snap && options.snapOff) {
           spinner.fail('Flags --snap and --snap-off are mutually exclusive');

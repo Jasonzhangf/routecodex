@@ -869,7 +869,31 @@ export class HttpTransportProvider extends BaseProvider {
       process.env.ROUTECODEX_UA_MODE ??
       process.env.RCC_UA_MODE ??
       '';
-    return typeof raw === 'string' && raw.trim().toLowerCase() === 'codex';
+    const enabled = typeof raw === 'string' && raw.trim().toLowerCase() === 'codex';
+    if (!enabled) {
+      return false;
+    }
+
+    const runtime = this.getCurrentRuntimeMetadata();
+    if (!runtime) {
+      return false;
+    }
+
+    const providerType = (runtime.providerType as ProviderType) || this.providerType;
+    if (providerType !== 'responses') {
+      return false;
+    }
+
+    const entryEndpoint = this.getEntryEndpointFromRuntime(runtime);
+    if (!entryEndpoint) {
+      return false;
+    }
+    const lowered = entryEndpoint.trim().toLowerCase();
+    if (lowered.includes('/responses')) {
+      return false;
+    }
+
+    return true;
   }
 
   private normalizeCodexClientHeaders(headers?: Record<string, string>): Record<string, string> | undefined {
@@ -1040,6 +1064,15 @@ export class HttpTransportProvider extends BaseProvider {
       return metadata.entryEndpoint;
     }
     return undefined;
+  }
+
+  private getEntryEndpointFromRuntime(runtime?: ProviderRuntimeMetadata): string | undefined {
+    if (!runtime || !runtime.metadata || typeof runtime.metadata !== 'object') {
+      return undefined;
+    }
+    const meta = runtime.metadata as Record<string, unknown>;
+    const value = meta.entryEndpoint;
+    return typeof value === 'string' && value.trim().length ? value : undefined;
   }
 
   private asResponseRecord(value: unknown): ResponseRecord {
