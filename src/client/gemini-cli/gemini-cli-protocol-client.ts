@@ -20,7 +20,11 @@ interface GeminiCLIPayload extends UnknownObject {
   contents?: unknown;
   systemInstruction?: unknown;
   generationConfig?: Record<string, unknown>;
+  metadata?: unknown;
   action?: string;
+  requestId?: string;
+  userAgent?: string;
+  session_id?: string;
 }
 
 function hasDataEnvelope(payload: ProtocolRequestPayload): payload is ProtocolRequestPayload & DataEnvelope {
@@ -31,11 +35,35 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
   buildRequestBody(request: ProtocolRequestPayload): Record<string, unknown> {
     const payload = this.extractPayload(request);
 
-    // 保持原生 Gemini CLI 格式
-    const body: GeminiCLIPayload = { ...payload };
+    // 顶层字段：model / project / action / request metadata
+    const { model, project, action, requestId, userAgent, metadata: _metadata, ...rest } = payload;
 
-    // 移除不必要的字段
-    delete (body as any).stream;
+    const body: Record<string, unknown> = {};
+    if (typeof model === 'string' && model.length > 0) {
+      body.model = model;
+    }
+    if (typeof project === 'string' && project.length > 0) {
+      body.project = project;
+    }
+    if (typeof action === 'string' && action.length > 0) {
+      body.action = action;
+    }
+    if (typeof requestId === 'string' && requestId.length > 0) {
+      body.requestId = requestId;
+    }
+    if (typeof userAgent === 'string' && userAgent.length > 0) {
+      body.userAgent = userAgent;
+    }
+
+    // 其余 Gemini Chat 兼容字段（contents/systemInstruction/generationConfig/tools/metadata 等）
+    // 统一放到 request 下，对齐 Cloud Code Assist v1internal:generateContent 的预期形状
+    const requestPayload: Record<string, unknown> = { ...rest };
+    // 显式移除 OpenAI 兼容字段
+    delete (requestPayload as any).stream;
+
+    if (Object.keys(requestPayload).length > 0) {
+      body.request = requestPayload;
+    }
 
     return body;
   }

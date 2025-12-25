@@ -8,6 +8,7 @@
  * - 特性：多 project 支持、token 共享、模型回退
  */
 
+import { randomUUID } from 'node:crypto';
 import { HttpTransportProvider } from './http-transport-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ProviderContext, ProviderType } from '../api/provider-types.js';
@@ -15,15 +16,17 @@ import type { UnknownObject } from '../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import { GeminiCLIProtocolClient } from '../../../client/gemini-cli/gemini-cli-protocol-client.js';
 import { getDefaultProjectId } from '../../auth/gemini-cli-userinfo-helper.js';
+import { ANTIGRAVITY_HELPER_DEFAULTS } from '../../auth/antigravity-userinfo-helper.js';
 
 type DataEnvelope = UnknownObject & { data?: UnknownObject };
 
 type MutablePayload = Record<string, unknown> & {
   model?: unknown;
   project?: unknown;
-  contents?: unknown;
-  systemInstruction?: unknown;
-  generationConfig?: Record<string, unknown>;
+  // 以下字段按“已经是 Gemini 协议”对待，由 llmswitch-core 负责从 OpenAI/Responses 映射过来
+  // contents?: unknown;
+  // systemInstruction?: unknown;
+  // generationConfig?: Record<string, unknown>;
 };
 
 export class GeminiCLIHttpProvider extends HttpTransportProvider {
@@ -58,8 +61,17 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       throw new Error('Gemini CLI: auth provider not found');
     }
 
-    const oauthClient = (this.authProvider as any).getOAuthClient?.();
-    const tokenData = oauthClient?.getToken?.();
+    const anyAuth = this.authProvider as any;
+    let tokenData: UnknownObject | null | undefined;
+
+    const oauthClient = anyAuth.getOAuthClient?.();
+    if (oauthClient && typeof oauthClient.getToken === 'function') {
+      tokenData = oauthClient.getToken() as UnknownObject;
+    } else if (typeof anyAuth.getTokenPayload === 'function') {
+      // 兼容 TokenFileAuthProvider：直接从本地 token JSON 解析 project_id
+      tokenData = anyAuth.getTokenPayload() as UnknownObject | null;
+    }
+
     const projectId = getDefaultProjectId(tokenData || {});
 
     if (!projectId) {
@@ -68,46 +80,117 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       );
     }
 
-    // 构建 Gemini CLI 格式的请求
-    const model = typeof payload.model === 'string' ? payload.model : '';
+    // 构建 Gemini CLI 格式的请求（仅做传输层整理，不做 OpenAI→Gemini 语义转换）
+    const model =
+      typeof payload.model === 'string' && payload.model.trim().length > 0
+        ? (payload.model as string)
+        : '';
     if (!model) {
       throw new Error('Gemini CLI: model is required');
     }
 
-    // 转换 messages 到 contents (如果存在)
-    let contents = payload.contents;
-    if (!contents && Array.isArray((payload as any).messages)) {
-      contents = this.convertMessagesToContents((payload as any).messages);
-    }
-
-    // 构建 generationConfig
-    const generationConfig = this.buildGenerationConfig(payload);
-
     const rebuilt: MutablePayload = {
-      ...payload,
+      ...(payload as Record<string, unknown>),
       model,
       project: projectId
     };
+    this.ensureRequestMetadata(rebuilt);
 
-    if (contents) {
-      rebuilt.contents = contents;
-    }
-    if (Object.keys(generationConfig).length > 0) {
-      rebuilt.generationConfig = generationConfig;
-    }
-
-    // 删除不必要的字段
-    delete rebuilt.messages;
-    delete rebuilt.stream;
+    // 删除与 Gemini 协议无关的字段，避免影响 Cloud Code Assist schema 校验
+    delete (rebuilt as any).messages;
+    delete (rebuilt as any).stream;
 
     return adapter.assign(rebuilt);
   }
 
-  protected override async postprocessResponse(response: unknown, context: ProviderContext): Promise<UnknownObject> {
-    if (response && typeof response === 'object') {
-      return response as UnknownObject;
+  protected override async finalizeRequestHeaders(
+    headers: Record<string, string>,
+    request: UnknownObject
+  ): Promise<Record<string, string>> {
+    const finalized = await super.finalizeRequestHeaders(headers, request);
+    if (this.isAntigravityRuntime()) {
+      finalized['User-Agent'] = ANTIGRAVITY_HELPER_DEFAULTS.userAgent;
+      if (!this.hasNonEmptyString(finalized['Accept-Encoding'])) {
+        finalized['Accept-Encoding'] = 'gzip, deflate, br';
+      }
     }
-    return { data: response } as UnknownObject;
+    return finalized;
+  }
+
+  protected override async postprocessResponse(response: unknown, context: ProviderContext): Promise<UnknownObject> {
+    const processingTime = Date.now() - context.startTime;
+
+    if (response && typeof response === 'object') {
+      const record = response as {
+        data?: unknown;
+        status?: number;
+        headers?: Record<string, string>;
+        __sse_responses?: unknown;
+      };
+
+      // 保持与基类一致：优先透传上游 SSE 流
+      const sseStream =
+        record.__sse_responses ||
+        (record.data && typeof record.data === 'object'
+          ? (record.data as { __sse_responses?: unknown }).__sse_responses
+          : undefined);
+      if (sseStream) {
+        return { __sse_responses: sseStream } as UnknownObject;
+      }
+
+      // 非流式响应：HttpClient.post 返回的 data 是 Cloud Code Assist 的 envelope：{ response: <GeminiResponse>, ... }
+      const rawData = record.data ?? response;
+      let normalizedPayload = rawData as unknown;
+      if (rawData && typeof rawData === 'object' && 'response' in (rawData as Record<string, unknown>)) {
+        const inner = (rawData as Record<string, unknown>).response;
+        if (inner && typeof inner === 'object') {
+          normalizedPayload = inner as Record<string, unknown>;
+        }
+      }
+
+      const payloadObject =
+        normalizedPayload && typeof normalizedPayload === 'object'
+          ? (normalizedPayload as Record<string, unknown>)
+          : undefined;
+
+      const modelFromPayload =
+        payloadObject && typeof payloadObject.model === 'string' && payloadObject.model.trim().length
+          ? payloadObject.model
+          : undefined;
+
+      const usageFromPayload =
+        payloadObject && typeof (payloadObject as { usageMetadata?: unknown }).usageMetadata === 'object'
+          ? ((payloadObject as { usageMetadata?: UnknownObject }).usageMetadata as UnknownObject)
+          : undefined;
+
+      return {
+        data: normalizedPayload,
+        status: typeof record.status === 'number' ? record.status : undefined,
+        headers: record.headers,
+        metadata: {
+          requestId: context.requestId,
+          processingTime,
+          providerType: this.providerType,
+          model: context.model ?? modelFromPayload,
+          usage: usageFromPayload
+        }
+      } as UnknownObject;
+    }
+
+    // 基本兜底：保留处理时间和 requestId，数据直接透传
+    return {
+      data: response,
+      metadata: {
+        requestId: context.requestId,
+        processingTime,
+        providerType: this.providerType,
+        model: context.model
+      }
+    } as UnknownObject;
+  }
+
+  private isAntigravityRuntime(): boolean {
+    return (this.oauthProviderId || '').toLowerCase() === 'antigravity';
   }
 
   private resolvePayload(source: UnknownObject): {
@@ -140,48 +223,6 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     return typeof payload === 'object' && payload !== null && 'data' in payload;
   }
 
-  private convertMessagesToContents(messages: unknown[]): unknown[] {
-    return messages
-      .filter((msg): msg is UnknownObject => typeof msg === 'object' && msg !== null)
-      .map((message) => {
-        const role = (message.role === 'assistant' ? 'model' : 'user') as string;
-        const content = this.normalizeMessageContent(message.content);
-        return { role, parts: [{ text: content }] };
-      });
-  }
-
-  private normalizeMessageContent(content: unknown): string {
-    if (typeof content === 'string') {
-      return content;
-    }
-    if (Array.isArray(content)) {
-      return content.map((c) => (typeof c === 'string' ? c : JSON.stringify(c))).join('\n');
-    }
-    return JSON.stringify(content ?? '');
-  }
-
-  private buildGenerationConfig(payload: MutablePayload): Record<string, unknown> {
-    const generationConfig =
-      typeof payload.generationConfig === 'object' && payload.generationConfig !== null
-        ? { ...(payload.generationConfig as Record<string, unknown>) }
-        : {};
-
-    if (typeof payload.max_tokens === 'number') {
-      generationConfig.maxOutputTokens = payload.max_tokens;
-    }
-    if (typeof payload.temperature === 'number') {
-      generationConfig.temperature = payload.temperature;
-    }
-    if (typeof payload.top_p === 'number') {
-      generationConfig.topP = payload.top_p;
-    }
-    if (typeof payload.top_k === 'number') {
-      generationConfig.topK = payload.top_k;
-    }
-
-    return generationConfig;
-  }
-
   /**
    * 获取模型回退列表（用于处理 429 限流）
    * 参考 CLIProxyAPI 的 cliPreviewFallbackOrder
@@ -193,6 +234,22 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       'gemini-2.5-flash-lite': []
     };
     return fallbackMap[model] || [];
+  }
+
+  private ensureRequestMetadata(payload: MutablePayload): void {
+    if (!this.hasNonEmptyString(payload.requestId)) {
+      payload.requestId = `req-${randomUUID()}`;
+    }
+    if (!this.hasNonEmptyString(payload.session_id)) {
+      payload.session_id = `session-${randomUUID()}`;
+    }
+    if (!this.hasNonEmptyString(payload.userAgent)) {
+      payload.userAgent = this.oauthProviderId === 'antigravity' ? 'antigravity' : 'routecodex';
+    }
+  }
+
+  private hasNonEmptyString(value: unknown): value is string {
+    return typeof value === 'string' && value.trim().length > 0;
   }
 }
 
