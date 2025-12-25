@@ -443,7 +443,7 @@ export abstract class BaseProvider implements IProviderV2 {
     const providerKey = context.providerKey || runtimeProfile?.providerKey;
 
     if (!classification.isRateLimit && providerKey) {
-      this.resetRateLimitCounter(providerKey);
+      this.resetRateLimitCounter(providerKey, context.model);
     }
 
     const affectsHealth = classification.affectsHealth;
@@ -526,39 +526,54 @@ export abstract class BaseProvider implements IProviderV2 {
     return Boolean(tools);
   }
 
-  private registerRateLimitFailure(providerKey?: string): boolean {
+  private getRateLimitBucketKey(providerKey?: string, model?: string): string | undefined {
     if (!providerKey) {
+      return undefined;
+    }
+    const runtimeProfile = this.getRuntimeProfile();
+    const providerId = runtimeProfile?.providerId || this.config.config.providerId;
+    if (providerId === 'antigravity' && model) {
+      return `${providerKey}::${model}`;
+    }
+    return providerKey;
+  }
+
+  private registerRateLimitFailure(providerKey?: string, model?: string): boolean {
+    const bucketKey = this.getRateLimitBucketKey(providerKey, model);
+    if (!bucketKey) {
       return false;
     }
-    const current = BaseProvider.rateLimitFailures.get(providerKey) ?? 0;
+    const current = BaseProvider.rateLimitFailures.get(bucketKey) ?? 0;
     const next = current + 1;
-    BaseProvider.rateLimitFailures.set(providerKey, next);
+    BaseProvider.rateLimitFailures.set(bucketKey, next);
     // 调试：记录当前 key 的第几次 429 命中，方便观察是否触发熔断
     if (this.dependencies.logger) {
       this.dependencies.logger.logModule(this.id, 'rate-limit-429', {
-        providerKey,
+        providerKey: bucketKey,
         hitCount: next
       });
     }
     if (next >= BaseProvider.RATE_LIMIT_THRESHOLD) {
-      BaseProvider.rateLimitFailures.set(providerKey, 0);
+      BaseProvider.rateLimitFailures.set(bucketKey, 0);
       return true;
     }
     return false;
   }
 
-  private resetRateLimitCounter(providerKey?: string): void {
-    if (!providerKey) {
+  private resetRateLimitCounter(providerKey?: string, model?: string): void {
+    const bucketKey = this.getRateLimitBucketKey(providerKey, model);
+    if (!bucketKey) {
       return;
     }
-    BaseProvider.rateLimitFailures.delete(providerKey);
+    BaseProvider.rateLimitFailures.delete(bucketKey);
   }
 
-  private forceRateLimitFailure(providerKey?: string): void {
-    if (!providerKey) {
+  private forceRateLimitFailure(providerKey?: string, model?: string): void {
+    const bucketKey = this.getRateLimitBucketKey(providerKey, model);
+    if (!bucketKey) {
       return;
     }
-    BaseProvider.rateLimitFailures.set(providerKey, BaseProvider.RATE_LIMIT_THRESHOLD);
+    BaseProvider.rateLimitFailures.set(bucketKey, BaseProvider.RATE_LIMIT_THRESHOLD);
   }
 
   private isDailyLimitRateLimit(messageLower: string, upstreamLower?: string): boolean {

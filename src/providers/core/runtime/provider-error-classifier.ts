@@ -18,8 +18,8 @@ export type ProviderErrorClassifierOptions = {
   error: unknown;
   context: ProviderContext;
   detectDailyLimit(messageLower: string, upstreamLower?: string): boolean;
-  registerRateLimitFailure(providerKey?: string): boolean;
-  forceRateLimitFailure(providerKey?: string): void;
+  registerRateLimitFailure(providerKey?: string, model?: string): boolean;
+  forceRateLimitFailure(providerKey?: string, model?: string): void;
   authMode?: 'apikey' | 'oauth';
 };
 
@@ -88,9 +88,9 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
 
   if (isRateLimit) {
     if (isDailyLimit429) {
-      options.forceRateLimitFailure(options.context.providerKey);
+      options.forceRateLimitFailure(options.context.providerKey, options.context.model);
     }
-    const escalated = options.registerRateLimitFailure(options.context.providerKey);
+    const escalated = options.registerRateLimitFailure(options.context.providerKey, options.context.model);
     affectsHealth = escalated;
     if (escalated) {
       recoverable = false;
