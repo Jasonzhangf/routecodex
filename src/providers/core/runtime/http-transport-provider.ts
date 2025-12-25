@@ -869,10 +869,7 @@ export class HttpTransportProvider extends BaseProvider {
       process.env.ROUTECODEX_UA_MODE ??
       process.env.RCC_UA_MODE ??
       '';
-    const enabled = typeof raw === 'string' && raw.trim().toLowerCase() === 'codex';
-    if (!enabled) {
-      return false;
-    }
+    const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
 
     const runtime = this.getCurrentRuntimeMetadata();
     if (!runtime) {
@@ -880,20 +877,22 @@ export class HttpTransportProvider extends BaseProvider {
     }
 
     const providerType = (runtime.providerType as ProviderType) || this.providerType;
-    if (providerType !== 'responses') {
-      return false;
-    }
-
     const entryEndpoint = this.getEntryEndpointFromRuntime(runtime);
-    if (!entryEndpoint) {
-      return false;
-    }
-    const lowered = entryEndpoint.trim().toLowerCase();
-    if (lowered.includes('/responses')) {
-      return false;
+
+    // 显式 UA 模式（--codex / --ua codex）：对所有 provider 激活
+    if (normalized === 'codex') {
+      return true;
     }
 
-    return true;
+    // 隐式模式：未显式设置 UA 时，仅在 responses provider 且入口不是 /v1/responses 时激活
+    if (providerType === 'responses' && entryEndpoint) {
+      const lowered = entryEndpoint.trim().toLowerCase();
+      if (!lowered.includes('/responses')) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private normalizeCodexClientHeaders(headers?: Record<string, string>): Record<string, string> | undefined {
