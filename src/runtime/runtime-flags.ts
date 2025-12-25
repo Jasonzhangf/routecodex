@@ -29,6 +29,13 @@ const verboseErrors = resolveBoolFromEnv(
   defaultVerbose
 );
 
+if (!snapshotsEnabled) {
+  const hubFlag = process.env.ROUTECODEX_HUB_SNAPSHOTS;
+  if (!hubFlag || !hubFlag.trim().length) {
+    process.env.ROUTECODEX_HUB_SNAPSHOTS = '0';
+  }
+}
+
 export const runtimeFlags: Record<FlagName, boolean> = {
   snapshotsEnabled,
   verboseErrors

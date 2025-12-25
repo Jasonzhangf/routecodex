@@ -38,7 +38,7 @@ curl -s http://127.0.0.1:5555/v1/messages \
 
 #### 验证快照
 
-- 设置 `ROUTECODEX_HUB_SNAPSHOTS=1` 后回放，`~/.routecodex/golden_samples/anthropic-messages/` 将刷新对应的
+- 设置 `ROUTECODEX_HUB_SNAPSHOTS=1` 后回放，`~/.routecodex/codex-samples/anthropic-messages/` 将刷新对应的
   `req_*` 与 `resp_*` 阶段文件，可直接 diff。
 - `anthropic/glm46-toolcall-…` 目录内已有响应黄金样本，可与请求目录交叉比对，确认入站/出站一致性。
 

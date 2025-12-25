@@ -191,7 +191,7 @@ function resolveGoldenExpectations(sample) {
   if (sample.meta?.endpoint && sample.meta?.requestId) {
     const reqId = sample.meta.requestId;
     const endpoint = sample.meta.endpoint;
-    const baseDir = path.join(os.homedir(), '.routecodex', 'golden_samples');
+    const baseDir = path.join(os.homedir(), '.routecodex', 'codex-samples');
     const folder = endpoint.includes('/messages')
       ? 'anthropic-messages'
       : endpoint.includes('/responses')

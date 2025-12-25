@@ -13,18 +13,19 @@ const ROOT = path.resolve(__dirname, '../..');
 
 const HOME = os.homedir();
 const PROVIDER_ROOT = path.join(HOME, '.routecodex', 'provider');
-const SNAPSHOT_ROOT = path.join(HOME, '.routecodex', 'golden_samples');
-const PROVIDER_GOLDEN_ROOT = path.join(SNAPSHOT_ROOT, 'provider_golden_samples');
+const RUNTIME_SNAPSHOT_ROOT = path.join(HOME, '.routecodex', 'codex-samples');
+const GOLDEN_ROOT = path.join(HOME, '.routecodex', 'golden_samples');
+const PROVIDER_GOLDEN_ROOT = path.join(GOLDEN_ROOT, 'provider_golden_samples');
 const CI_GOLDENS_ROOT = path.join(ROOT, 'samples', 'ci-goldens');
 const CUSTOM_SAMPLE_ROOTS = [
-  path.join(SNAPSHOT_ROOT, 'new'),
+  path.join(GOLDEN_ROOT, 'new'),
   CI_GOLDENS_ROOT
 ];
 const TEMP_ROOT = path.join(process.cwd(), 'tmp', 'provider-captures');
 const STAGE_DIRS = {
-  'openai-chat': path.join(SNAPSHOT_ROOT, 'openai-chat'),
-  'openai-responses': path.join(SNAPSHOT_ROOT, 'openai-responses'),
-  'anthropic-messages': path.join(SNAPSHOT_ROOT, 'anthropic-messages')
+  'openai-chat': path.join(RUNTIME_SNAPSHOT_ROOT, 'openai-chat'),
+  'openai-responses': path.join(RUNTIME_SNAPSHOT_ROOT, 'openai-responses'),
+  'anthropic-messages': path.join(RUNTIME_SNAPSHOT_ROOT, 'anthropic-messages')
 };
 const ENTRY_STAGE_MATRIX = {
   'openai-chat': {
@@ -437,7 +438,7 @@ function spawnServer(configPath, port) {
 }
 
 async function captureProvider(providerEntry, entryType, port, options, sanitizedProviderId) {
-  const stageDir = path.join(SNAPSHOT_ROOT, ENTRY_DEFS[entryType].stageDir);
+  const stageDir = path.join(RUNTIME_SNAPSHOT_ROOT, ENTRY_DEFS[entryType].stageDir);
   const suffix = '_req_outbound_stage2_format_build.json';
   const before = snapshotStageFiles(stageDir, suffix);
   const baseUrl = `http://127.0.0.1:${port}`;
