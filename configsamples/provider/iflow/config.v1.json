@@ -48,7 +48,7 @@
       "vision": [
         "iflow.qwen3-vl-plus"
       ],
-      "websearch": [],
+      "search": [],
       "background": []
     }
   }

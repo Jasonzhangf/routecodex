@@ -171,7 +171,9 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     const { codeVerifier, codeChallenge } = this.generatePKCEPair();
     const state = this.generateState();
     const authUrl = new URL(this.config.endpoints.authorizationUrl);
-    const isIflowHost = /(?:^|\.)iflow\.cn$/.test(authUrl.hostname);
+    const hostname = authUrl.hostname;
+    const isIflowHost = /(?:^|\.)iflow\.cn$/.test(hostname);
+    const isGoogleOAuthHost = /(?:^|\.)accounts\.google\.com$/i.test(hostname);
     const styleEnv = (process.env.IFLOW_AUTH_STYLE || '').toLowerCase();
     const style: FlowStyle = isIflowHost
       ? normalizeFlowStyle(styleEnv, 'web')
@@ -208,7 +210,9 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       authUrl.searchParams.set('state', state);
       authUrl.searchParams.set('code_challenge', codeChallenge);
       authUrl.searchParams.set('code_challenge_method', 'S256');
-      if (this.config.features?.requestOfflineAccess) {
+      const wantsOfflineAccess =
+        this.config.features?.requestOfflineAccess === true || isGoogleOAuthHost;
+      if (wantsOfflineAccess) {
         authUrl.searchParams.set('access_type', 'offline');
         authUrl.searchParams.set('prompt', 'consent');
         authUrl.searchParams.set('include_granted_scopes', 'true');

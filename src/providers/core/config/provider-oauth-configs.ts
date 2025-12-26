@@ -179,7 +179,9 @@ function registerProviderOAuthConfigs(): void {
       supportsPKCE: true,
       supportsApiKeyExchange: false,
       requireHttpsCallback: true,
-      customState: true
+      customState: true,
+      // 对齐 gcli2api：始终请求 offline refresh_token
+      requestOfflineAccess: true
     }
   });
 
