@@ -25,12 +25,12 @@ interface DeferredHandler {
   reject: (reason?: unknown) => void;
 }
 
-interface RateLimitPipelineDescriptor {
+export interface RateLimitPipelineDescriptor {
   pipelineId: string;
   [key: string]: unknown;
 }
 
-interface RateLimitHookTelemetryEvent {
+export interface RateLimitHookTelemetryEvent {
   type: '429-backoff' | '429-final-fail';
   timestamp: number;
   pipelineId?: string;
@@ -39,7 +39,7 @@ interface RateLimitHookTelemetryEvent {
   message?: string;
 }
 
-interface RateLimitHandlerHooks {
+export interface RateLimitHandlerHooks {
   getAvailablePipelines?(exclude: Set<string>): RateLimitPipelineDescriptor[];
   selectNextRoundRobin?(candidates: RateLimitPipelineDescriptor[]): RateLimitPipelineDescriptor;
   processWithPipeline?(pipeline: RateLimitPipelineDescriptor): Promise<unknown>;
@@ -49,7 +49,7 @@ interface RateLimitHandlerHooks {
   };
 }
 
-interface RateLimitHandlerContext {
+export interface RateLimitHandlerContext {
   hooks?: RateLimitHandlerHooks;
   schedule?: number[];
   attemptedPipelineIds?: string[];
@@ -142,7 +142,7 @@ export class ErrorHandlerRegistry {
     if (this.messageTemplates.has(template.code)) {
       return;
     }
-    
+
     this.messageTemplates.set(template.code, template);
 
     // Only publish debug events during normal operation (not during initialization)
@@ -172,13 +172,13 @@ export class ErrorHandlerRegistry {
     }
 
     const handlers = this.errorHandlers.get(registration.errorCode)!;
-    
+
     // Check if this handler is already registered to avoid duplicates
     const existingHandlerIndex = handlers.findIndex(h => h === registration.handler);
     if (existingHandlerIndex !== -1) {
       return;
     }
-    
+
     handlers.push(registration.handler);
 
     // Sort by priority (lower number = higher priority)
@@ -275,31 +275,66 @@ export class ErrorHandlerRegistry {
    * Get error message template for error
    */
   private getErrorMessageTemplate(error: Error, context: string): ErrorMessageTemplate {
-    // Try to find specific error template based on error type or message
     const errorType = error.constructor.name;
+    const contextLower = context.toLowerCase();
     const errorCode = this.generateErrorCode(errorType, context);
 
+    // 1) Provider-specific mapping (used by HTTP server failover)
+    if (contextLower === 'provider') {
+      const errObj = error as unknown as {
+        statusCode?: unknown;
+        status?: unknown;
+        code?: unknown;
+      };
+      const statusCode =
+        typeof errObj.statusCode === 'number'
+          ? errObj.statusCode
+          : typeof errObj.status === 'number'
+            ? errObj.status
+            : undefined;
+      const codeRaw =
+        typeof errObj.code === 'string' && errObj.code.trim().length
+          ? errObj.code.trim().toUpperCase()
+          : undefined;
+
+      // 429 / HTTP_429 → rate_limit_error，其他 provider 错误 → provider_error
+      const preferredKey =
+        statusCode === 429 || codeRaw === 'HTTP_429' || codeRaw === 'RATE_LIMIT'
+          ? 'rate_limit_error'
+          : 'provider_error';
+      const preferredTemplate = this.messageTemplates.get(preferredKey);
+      if (preferredTemplate) {
+        return preferredTemplate;
+      }
+    }
+
+    // 2) Direct match on generated code
     let template = this.messageTemplates.get(errorCode);
 
+    // 3) Fallback: try to match by context or error type in a more conservative way
     if (!template) {
-      // Try to find template by error type
+      const errorTypeLower = errorType.toLowerCase();
       for (const [code, tmpl] of this.messageTemplates.entries()) {
-        if (code.includes(errorType.toLowerCase()) || code.includes(context.toLowerCase())) {
+        if (code === contextLower || code.startsWith(`${contextLower}_`)) {
+          template = tmpl;
+          break;
+        }
+        if (code.includes(errorTypeLower)) {
           template = tmpl;
           break;
         }
       }
     }
 
-    // Default template if no specific template found
+    // 4) Default template if no specific template found
     if (!template) {
       template = {
         code: errorCode,
         message: error.message,
-        severity: 'medium' as const,
+        severity: 'medium',
         category: 'general',
         description: 'General error occurred',
-        recovery: 'Retry the operation or contact support',
+        recovery: 'Retry the operation or contact support'
       };
     }
 
@@ -456,8 +491,71 @@ export class ErrorHandlerRegistry {
     this.registerErrorHandler({
       errorCode: 'provider_error',
       handler: async (context: ErrorContext) => {
-        console.error(`Provider Error in ${context.source}: ${context.error}`);
-        // Could implement provider failover logic here
+        try {
+          const handlerContext = (context.context as RateLimitHandlerContext | undefined) ?? {};
+          const hooks = handlerContext.hooks ?? {};
+          const deferred: DeferredHandler = handlerContext.deferred ?? {
+            resolve: () => { },
+            reject: () => { }
+          };
+
+          // Basic logging
+          console.error(`Provider Error in ${context.source}: ${context.error}`);
+
+          // Try pipeline switch/failover if hooks provided
+          const attempted: string[] = Array.isArray(handlerContext.attemptedPipelineIds)
+            ? handlerContext.attemptedPipelineIds
+            : [];
+          const exclude = new Set<string>(attempted);
+
+          let candidates: RateLimitPipelineDescriptor[] = [];
+          try {
+            // Ask for candidates excluding the ones we already tried
+            candidates = hooks.getAvailablePipelines ? hooks.getAvailablePipelines(exclude) : [];
+          } catch {
+            candidates = [];
+          }
+
+          if (Array.isArray(candidates) && candidates.length > 0) {
+            try {
+              // Select next candidate (default to first available if no selector)
+              const next = hooks.selectNextRoundRobin ? hooks.selectNextRoundRobin(candidates) : candidates[0];
+
+              // Notify error center about the switch (optional telemetry)
+              try {
+                await hooks.errorCenter?.handleError?.({
+                  type: '429-backoff', // Reuse existing event type or add 'provider-failover'
+                  timestamp: Date.now(),
+                  pipelineId: next.pipelineId,
+                  requestId: handlerContext.request?.route?.requestId,
+                  message: `Failover triggered by ${context.error}`
+                } as any);
+              } catch {
+                /* ignore */
+              }
+
+              // Execute retry
+              const resp = await (hooks.processWithPipeline
+                ? hooks.processWithPipeline(next)
+                : Promise.reject(new Error('processWithPipeline not provided')));
+
+              deferred.resolve(resp);
+              return;
+            } catch (e) {
+              // If retry fails, reject (or recursively handle? For now reject context to bubble up)
+              deferred.reject(e);
+              return;
+            }
+          }
+
+          // No candidates or hooks -> reject with original error to bubble up
+          deferred.reject(context.error);
+        } catch (e) {
+          // Fallback if handler logic fails
+          try {
+            (context.context as RateLimitHandlerContext | undefined)?.deferred?.reject?.(context.error);
+          } catch { /* ignore */ }
+        }
       },
       priority: 2,
       description: 'Handle AI provider errors',
@@ -490,8 +588,8 @@ export class ErrorHandlerRegistry {
             : [];
           const deferred: DeferredHandler =
             rateLimitContext.deferred ?? {
-              resolve: () => {},
-              reject: () => {}
+              resolve: () => { },
+              reject: () => { }
             };
 
           // Try pipeline switch first if available

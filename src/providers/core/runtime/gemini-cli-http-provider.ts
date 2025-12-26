@@ -11,7 +11,9 @@
 import { randomUUID } from 'node:crypto';
 import { Transform } from 'node:stream';
 import type { TransformCallback } from 'node:stream';
+import { StringDecoder } from 'node:string_decoder';
 import { HttpTransportProvider } from './http-transport-provider.js';
+// ...
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ProviderContext, ProviderType } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
@@ -316,16 +318,25 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
 export default GeminiCLIHttpProvider;
 
 class GeminiSseNormalizer extends Transform {
+  private decoder: StringDecoder;
   private buffer = '';
   private lastDonePayload: Record<string, unknown> | null = null;
 
   constructor() {
     super();
+    this.decoder = new StringDecoder('utf8');
   }
 
   override _transform(chunk: unknown, _encoding: BufferEncoding, callback: TransformCallback): void {
     if (chunk) {
-      const text = chunk instanceof Buffer ? chunk.toString('utf8') : String(chunk);
+      let text = '';
+      if (Buffer.isBuffer(chunk)) {
+        text = this.decoder.write(chunk);
+      } else {
+        // If we receive strings, convert to buffer to maintain decoder state safety
+        // or assume separate handling. Safe approach: treat as bytes.
+        text = this.decoder.write(Buffer.from(String(chunk), 'utf8'));
+      }
       this.buffer += text.replace(/\r\n/g, '\n');
       this.processBuffered();
     }
@@ -333,6 +344,10 @@ class GeminiSseNormalizer extends Transform {
   }
 
   override _flush(callback: TransformCallback): void {
+    const remaining = this.decoder.end();
+    if (remaining) {
+      this.buffer += remaining.replace(/\r\n/g, '\n');
+    }
     this.processBuffered(true);
     if (this.lastDonePayload) {
       this.pushEvent('gemini.done', this.lastDonePayload);

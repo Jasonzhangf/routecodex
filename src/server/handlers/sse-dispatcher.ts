@@ -1,8 +1,9 @@
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { Response } from 'express';
 import { logPipelineStage } from '../utils/stage-logger.js';
 import { applyResponseHeaders } from './response-headers.js';
+import { Utf8ChunkBuffer } from '../utils/utf8-chunk-buffer.js';
 
 const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on']);
 const FALSY_VALUES = new Set(['0', 'false', 'no', 'off']);
@@ -56,6 +57,10 @@ export function dispatchSseStream(options: DispatchSseOptions): boolean {
   logPipelineStage('response.sse.stream.start', requestLabel, { status });
 
   let eventCount = 0;
+
+  // Create UTF-8 aware chunk buffer to prevent splitting multibyte characters
+  const utf8Buffer = new Utf8ChunkBuffer(128); // Use larger chunks for better performance
+
   const cleanup = () => {
     try {
       stream.destroy?.();
@@ -64,6 +69,7 @@ export function dispatchSseStream(options: DispatchSseOptions): boolean {
     }
     logPipelineStage('response.sse.stream.end', requestLabel, { events: eventCount, status });
   };
+
   stream.on('error', (error: Error) => {
     logPipelineStage('response.sse.stream.error', requestLabel, { message: error.message });
     try {
@@ -77,6 +83,7 @@ export function dispatchSseStream(options: DispatchSseOptions): boolean {
       /* ignore end errors */
     }
   });
+
   stream.on('data', (chunk: unknown) => {
     eventCount++;
     if (eventCount <= 3 && SSE_STAGE_LOG_ENABLED) {
@@ -94,10 +101,41 @@ export function dispatchSseStream(options: DispatchSseOptions): boolean {
         /* ignore preview errors */
       }
     }
+
+    // Process chunk through UTF-8 buffer to prevent splitting multibyte characters
+    try {
+      const safeChunks = utf8Buffer.push(chunk instanceof Buffer || typeof chunk === 'string' ? chunk : String(chunk));
+      for (const safeChunk of safeChunks) {
+        res.write(safeChunk);
+      }
+    } catch (error) {
+      // Fallback: write directly if buffering fails
+      res.write(chunk);
+    }
   });
+
+  stream.on('end', () => {
+    // Flush any remaining buffered data, then end the response
+    try {
+      const remaining = utf8Buffer.flush();
+      if (remaining) {
+        res.write(remaining);
+      }
+    } catch {
+      /* ignore flush errors */
+    }
+    try {
+      res.end();
+    } catch {
+      /* ignore end errors */
+    }
+  });
+
   res.on('close', cleanup);
   res.on('finish', cleanup);
-  stream.pipe(res);
+
+  // Note: We handle writing manually via the data event listener above,
+  // so we don't use stream.pipe(res) anymore
   return true;
 }
 
