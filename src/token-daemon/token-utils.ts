@@ -88,6 +88,8 @@ export function evaluateTokenState(token: RawTokenPayload | null, now: number): 
   const refresh = hasRefreshToken(token);
   const expiresAt = getExpiresAtMillis(token);
   const msUntilExpiry = expiresAt !== null ? expiresAt - now : null;
+  const noRefresh =
+    token != null && (token.norefresh === true || (typeof (token as any).noRefresh === 'boolean' && (token as any).noRefresh));
 
   let status: TokenState['status'] = 'invalid';
   if (!access && !apiKey) {
@@ -108,7 +110,8 @@ export function evaluateTokenState(token: RawTokenPayload | null, now: number): 
     hasApiKey: apiKey,
     expiresAt,
     msUntilExpiry,
-    status
+    status,
+    noRefresh
   };
 }
 
@@ -174,4 +177,3 @@ export async function collectTokenSnapshot(): Promise<TokenDaemonSnapshot> {
 
   return { timestamp: now, providers };
 }
-

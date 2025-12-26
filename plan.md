@@ -19,11 +19,11 @@
    - 输入：`estimatedTokens`、候选 provider 列表、配置阈值（默认 warnRatio=0.9）。
    - 输出：`safeProviders`、`riskyProviders`、`overflowProviders`，并返回 flag（如 `poolExhausted`）。
    - 逻辑：`usage = estimatedTokens / maxContextTokens`，>=1 判定 overflow，>=warnRatio 记为 risky，否则 safe。
-   - WarnRatio、fallbackRoute、hardLimit 通过 `virtualrouter.contextRouting` 配置（可写入 plan 后在实现阶段补充 schema）。
+   - WarnRatio、hardLimit 通过 `virtualrouter.contextRouting` 配置（可写入 plan 后在实现阶段补充 schema）。
 
 4. **整合到 VirtualRouterEngine.selectProvider**
    - 在 load balancer 挑选前调用 ContextAdvisor。
-   - 先尝试 safe，若为空尝试 risky，最后才接受 overflow（若配置允许）；全部拒绝时触发 fallback 路由（默认 `longcontext`）。
+   - 先尝试 safe，若为空尝试 risky，最后才接受 overflow（若配置允许）；全部拒绝时才降级到下一个优先级池或路由候选。
    - hit log 增加上下文使用率诊断（如 `context:0.87/200k`）。
 
 5. **配置 & 文档更新**
@@ -39,4 +39,3 @@
 - **缺失模型配置**：默认统一 200k tokens，并允许 CLI/env 覆盖 warnRatio，防止误杀。
 - **性能影响**：ContextAdvisor 只做常数次遍历，缓存 `maxContextTokens`，对路由耗时影响可忽略。
 - **配置兼容性**：保持向后兼容；老配置不写 `maxContextTokens` 也可运行，只是全部视为 200k。
-

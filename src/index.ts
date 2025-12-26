@@ -218,7 +218,6 @@ class RouteCodexApp {
 
       console.log(`ℹ RouteCodex version: ${buildInfo.version} (${buildInfo.mode} build)`);
 
-      // 3. 初始化服务器（V1/V2可切换，默认动态V2）
       // 3. 初始化服务器（仅使用 V2 动态流水线架构）
       // Resolve host/port from merged config for V2 constructor
       let bindHost = readRecordString(getNestedRecord(userConfigRecord, ['httpserver']), 'host')
@@ -256,7 +255,6 @@ class RouteCodexApp {
         providers: {},
         v2Config: { enableHooks: hooksOn }
       });
-      await this.httpServer.initializeWithUserConfig(userConfig, { providerProfiles });
 
       // 4.1 校验 virtualrouter 配置
       const virtualRouter = getNestedRecord(userConfigRecord, ['virtualrouter']);
@@ -275,7 +273,8 @@ class RouteCodexApp {
       console.log(`🧱 Virtual router routes: ${routeEntries.length}`);
       console.log(`🔑 Provider targets: ${targetCount}`);
 
-      // 6. 启动服务器（若端口被占用，先尝试优雅释放；确保在合并配置已生成之后）
+      // 5. 启动 HTTP Server 监听端口（若端口被占用，先尝试优雅释放）
+      //    必须在 provider OAuth 初始化之前完成监听，否则本地 token portal 无法访问。
       // Ensure the port is available before continuing. Attempt graceful shutdown first.
       await ensurePortAvailable(port, { attemptGraceful: true });
       try {
@@ -296,6 +295,10 @@ class RouteCodexApp {
           throw err;
         }
       }
+
+      // 6. 在服务已监听的前提下初始化运行时（包括 Hub Pipeline 和 Provider OAuth）
+      await this.httpServer.initializeWithUserConfig(userConfig, { providerProfiles });
+
       this._isRunning = true;
 
       // 7. 记录当前运行模式（仅 V2）

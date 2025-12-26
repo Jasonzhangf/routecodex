@@ -254,18 +254,23 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       }
     } catch { /* ignore parsing errors */ }
 
+    let serverInstance: ReturnType<typeof http.createServer> | null = null;
+    let timeoutHandle: NodeJS.Timeout | null = null;
+
     const callbackPromise = new Promise<{ code: string; verifier: string }>((resolve, reject) => {
       const server = http.createServer(async (req, res) => {
         try {
+          logOAuthDebug(`[OAuth] Callback server received request: ${req.url}`);
           const full = new url.URL(req.url || '/', `http://${host}:${port}`);
           const reqPath = full.pathname || '';
           const okPath = reqPath === pathName || /oauth.*callback/i.test(reqPath);
+
           if (!req.url || !okPath) {
-            res.statusCode = 302;
-            res.setHeader('Content-Type', 'text/html'); res.end('<html><body><h1>OAuth Success</h1><p>You can close this window.</p></body></html>');
-            res.end();
-            reject(new Error(`Unexpected request: ${req.url}`));
-            return;
+            logOAuthDebug(`[OAuth] Ignoring non-callback request: ${req.url}`);
+            res.statusCode = 404;
+            res.setHeader('Content-Type', 'text/html');
+            res.end('<html><body><h1>Not Found</h1><p>This is the OAuth callback server. Please use the correct callback path.</p></body></html>');
+            return; // 不要拒绝 Promise，继续等待正确的 callback
           }
 
           const params = full.searchParams;
@@ -273,9 +278,13 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
           // 检查错误
           const error = params.get('error');
           if (error) {
-            res.statusCode = 302;
-            res.setHeader('Content-Type', 'text/html'); res.end('<html><body><h1>OAuth Success</h1><p>You can close this window.</p></body></html>');
-            res.end();
+            logOAuthDebug(`[OAuth] Authorization error: ${error}`);
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'text/html');
+            res.end('<html><body><h1>OAuth Error</h1><p>Authorization failed. You can close this window.</p></body></html>');
+
+            if (timeoutHandle) clearTimeout(timeoutHandle);
+            server.close();
             reject(new Error(`Authorization error: ${error}`));
             return;
           }
@@ -283,8 +292,13 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
           // 验证状态参数
           const receivedState = params.get('state');
           if (receivedState !== state) {
+            logOAuthDebug(`[OAuth] State mismatch: expected ${state}, got ${receivedState}`);
             res.statusCode = 400;
-            res.end('State mismatch. Possible CSRF attack');
+            res.setHeader('Content-Type', 'text/html');
+            res.end('<html><body><h1>OAuth Error</h1><p>State mismatch. Possible CSRF attack. You can close this window.</p></body></html>');
+
+            if (timeoutHandle) clearTimeout(timeoutHandle);
+            server.close();
             reject(new Error('State mismatch. Possible CSRF attack'));
             return;
           }
@@ -292,39 +306,71 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
           // 获取授权码
           const code = params.get('code');
           if (!code) {
+            logOAuthDebug('[OAuth] No authorization code found in callback');
             res.statusCode = 400;
-            res.end('No authorization code found');
+            res.setHeader('Content-Type', 'text/html');
+            res.end('<html><body><h1>OAuth Error</h1><p>No authorization code found. You can close this window.</p></body></html>');
+
+            if (timeoutHandle) clearTimeout(timeoutHandle);
+            server.close();
             reject(new Error('No authorization code found'));
             return;
           }
 
           // 成功响应
-          res.statusCode = 302;
-          res.setHeader('Content-Type', 'text/html'); res.end('<html><body><h1>OAuth Success</h1><p>You can close this window.</p></body></html>');
-          res.end();
+          logOAuthDebug('[OAuth] Successfully received authorization code via callback');
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'text/html');
+          res.end('<html><body><h1>OAuth Success!</h1><p>Authentication successful. You can close this window now.</p><script>setTimeout(function(){window.close()},3000);</script></body></html>');
 
-          logOAuthDebug('[OAuth] Received authorization code via local callback');
+          if (timeoutHandle) clearTimeout(timeoutHandle);
+          server.close();
           resolve({ code, verifier: codeVerifier });
 
         } catch (error) {
+          logOAuthDebug(`[OAuth] Callback handler error: ${error instanceof Error ? error.message : String(error)}`);
           try {
             res.statusCode = 500;
-            res.end('Authentication failed');
+            res.setHeader('Content-Type', 'text/html');
+            res.end('<html><body><h1>OAuth Error</h1><p>Internal server error. You can close this window.</p></body></html>');
           } catch {
             // Response might already be closed
           }
-          reject(error instanceof Error ? error : new Error(String(error)));
-        } finally {
+
+          if (timeoutHandle) clearTimeout(timeoutHandle);
           server.close();
+          reject(error instanceof Error ? error : new Error(String(error)));
         }
       });
 
-      server.listen(port, host);
+      serverInstance = server;
+
+      // 添加服务器错误处理
+      server.on('error', (error: Error) => {
+        logOAuthDebug(`[OAuth] Callback server error: ${error.message}`);
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        reject(new Error(`Failed to start callback server: ${error.message}`));
+      });
+
+      // 等待服务器完全启动
+      server.listen(port, host, () => {
+        logOAuthDebug(`[OAuth] Callback server listening on ${host}:${port}${pathName}`);
+        console.log(`[OAuth] Waiting for OAuth callback at http://${host}:${port}${pathName}`);
+        console.log(`[OAuth] You have 10 minutes to complete the authentication in your browser`);
+
+        // 设置 10 分钟超时
+        timeoutHandle = setTimeout(() => {
+          logOAuthDebug('[OAuth] Callback server timeout (10 minutes)');
+          console.warn('[OAuth] OAuth callback timeout after 10 minutes. Please try again.');
+          server.close();
+          reject(new Error('OAuth callback timeout after 10 minutes'));
+        }, 10 * 60 * 1000);
+      });
     });
 
     // 更新重定向URI（使用配置中的路径或默认）
     const redirectUri = `http://${host}:${port}${pathName}`;
-    logOAuthDebug(`[OAuth] Starting local callback server at ${redirectUri}`);
+    logOAuthDebug(`[OAuth] Callback redirect URI: ${redirectUri}`);
 
     return { callbackPromise, redirectUri };
   }
@@ -379,7 +425,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     }
 
     // iflow web 登录样式常用 Basic(client_id:client_secret)
-    const tokenHeaders: Record<string,string> = { 'Content-Type': 'application/x-www-form-urlencoded' };
+    const tokenHeaders: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded' };
     if (this.config.client.clientSecret) {
       const basic = Buffer.from(`${this.config.client.clientId}:${this.config.client.clientSecret}`).toString('base64');
       tokenHeaders['Authorization'] = `Basic ${basic}`;

@@ -77,6 +77,30 @@ VirtualRouterArtifacts (virtualRouter + targetRuntime)
 }
 ```
 
+##### 2.1.x 路由池（主/备）配置
+
+`virtualrouter.routing` 现在支持“池子”对象，用于声明优先级与备份策略。旧写法（字符串数组）仍被视为单一主池，无须改动。要显式声明主/备池，可使用下列结构：
+
+```jsonc
+"routing": {
+  "default": [
+    { "id": "primary", "priority": 200, "targets": ["glm.glm-4.7", "tab.gpt-5.2-codex"] },
+    { "id": "backup", "backup": true, "targets": ["iflow.kimi-k2"] }
+  ],
+  "thinking": [
+    { "id": "thinking-main", "priority": 300, "targets": ["iflow.kimi-k2-thinking"] },
+    { "id": "thinking-secondary", "priority": 100, "targets": ["tab.gpt-5.2-codex"] },
+    { "id": "thinking-backup", "backup": true, "targets": ["glm.glm-4.7"] }
+  ]
+}
+```
+
+- `priority`：数字越大优先级越高，未显式配置时按声明顺序自动递减。
+- `backup: true`：标记备用池，仅在所有主池耗尽后才会命中（即便 priority 较高，也会自动排在主池之后）。
+- `targets`：与旧写法一致，为 `providerId.modelId`（可选 `providerId.alias.modelId`）列表。
+
+Virtual Router 会在一次请求中依次尝试高优先级池；当前池所有 provider 临时不可用（如 429、健康熔断）时才会降级到下一池，并在下一次请求重新从最高优先级开始检查。
+
 #### 2.1.1 Provider `process` 模式
 - `process` 是 provider 节点的顶层字段，控制 RouteCodex 是否需要介入编解码。
 - 取值 `chat`（默认）：进入 Chat → Virtual Router → Provider 的标准链路，允许跨协议转换（如 `/v1/messages` → Responses）。
@@ -89,8 +113,7 @@ VirtualRouterArtifacts (virtualRouter + targetRuntime)
 
 | 字段 | 含义 | 默认值 |
 |------|------|--------|
-| `warnRatio` | 当 `estimatedTokens / maxContextTokens` 高于该阈值时，默认池被视为“紧张”；路由会优先尝试 `fallbackRoute`| `0.9` |
-| `fallbackRoute` | 尝试升级上下文模型时要命中的路由（如 `longcontext`）。若配置为空或该路由无 provider，则保持原路由 | `longcontext`（若存在） |
+| `warnRatio` | 当 `estimatedTokens / maxContextTokens` 高于该阈值时，会把 provider 归入 `risky`/`overflow` 候选，只有当前优先级池全部落入这些档位后才会尝试下一优先级池 | `0.9` |
 | `hardLimit` | 为 `true` 时禁止使用 `maxContextTokens` 以内无法满足的 provider（即拒绝 overflow 候选）| `false` |
 
 > `maxContextTokens` 由 provider 模型配置决定，未显式配置时默认为 **200000 tokens**（tiktoken 估算值）。旧字段 `maxContext` 仍支持，但建议迁移到 `maxContextTokens`。
@@ -132,7 +155,7 @@ VirtualRouterArtifacts (virtualRouter + targetRuntime)
 ```ts
 type VirtualRouterArtifacts = {
   config: {
-    routing: Record<string, Array<{ providerKey: string; weight?: number }>>;
+    routing: Record<string, Array<{ id: string; targets: string[]; priority: number; backup?: boolean }>>;
     providers: Record<string, any>;
     classifiers?: Record<string, any>;
   };

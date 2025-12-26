@@ -13,7 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../..');
-const CORE_DIST = path.join(ROOT, 'sharedmodule', 'llmswitch-core', 'dist', 'v2', 'router', 'virtual-router');
+const CORE_DIST = path.join(ROOT, 'sharedmodule', 'llmswitch-core', 'dist', 'router', 'virtual-router');
 
 async function loadCoreModule(rel) {
   const file = path.join(CORE_DIST, rel);
@@ -21,16 +21,19 @@ async function loadCoreModule(rel) {
 }
 
 const { VirtualRouterEngine } = await loadCoreModule('engine.js');
+const { bootstrapVirtualRouterConfig } = await loadCoreModule('bootstrap.js');
 const { providerErrorCenter } = await loadCoreModule('error-center.js');
 const { VirtualRouterError } = await loadCoreModule('types.js');
 
 function parseArgs(argv) {
-  const args = { out: null };
+  const args = { out: null, config: null };
   const list = [...argv];
   while (list.length) {
     const cur = list.shift();
     if (cur === '--out' || cur === '--output') {
       args.out = list.shift() || null;
+    } else if (cur === '--config') {
+      args.config = list.shift() || null;
     } else if (cur === '--help' || cur === '-h') {
       args.help = true;
     }
@@ -57,9 +60,18 @@ function createRouterConfig() {
     'charlie.sim-model': buildProviderProfile('charlie.sim-model', 'https://charlie.local/v1')
   };
   const routing = {
-    default: Object.keys(providers),
-    coding: ['bravo.sim-model', 'charlie.sim-model'],
-    thinking: ['charlie.sim-model', 'alpha.sim-model']
+    default: [
+      { id: 'default-primary', priority: 200, targets: ['alpha.sim-model', 'bravo.sim-model'] },
+      { id: 'default-backup', backup: true, priority: 100, targets: ['charlie.sim-model'] }
+    ],
+    coding: [
+      { id: 'coding-primary', priority: 200, targets: ['bravo.sim-model', 'charlie.sim-model'] },
+      { id: 'coding-backup', backup: true, priority: 100, targets: ['alpha.sim-model'] }
+    ],
+    thinking: [
+      { id: 'thinking-primary', priority: 200, targets: ['charlie.sim-model'] },
+      { id: 'thinking-backup', backup: true, priority: 100, targets: ['bravo.sim-model'] }
+    ]
   };
   return {
     routing,
@@ -227,16 +239,128 @@ async function scenarioScheduler(sim) {
   sim.runRoute('thinking');
 }
 
+async function scenarioPriorityPools(sim) {
+  const first = sim.runRoute('thinking');
+  if (first !== 'charlie.sim-model') {
+    throw new Error(`expected primary thinking pool hit charlie.sim-model, got ${first}`);
+  }
+  sim.engine.handleProviderFailure({
+    providerKey: 'charlie.sim-model',
+    reason: 'priority-test',
+    fatal: true,
+    affectsHealth: true,
+    cooldownOverrideMs: 60_000
+  });
+  const second = sim.runRoute('thinking');
+  if (second !== 'bravo.sim-model') {
+    throw new Error(`expected thinking backup pool hit bravo.sim-model, got ${second}`);
+  }
+}
+
 async function scenarioRoutingDirectives(sim) {
   sim.runRoute('baseline', '普通请求');
   sim.runRoute('forced-thinking', '请仔细分析这个问题 <**thinking**>');
   sim.runRoute('forced-provider', '请强制使用这个provider <**charlie.sim-model**> 来回答');
 }
 
+async function scenarioRealConfig(configPath) {
+  const resolvedPath = path.resolve(configPath);
+  console.log(`\n=== Scenario: real-config (${resolvedPath}) ===`);
+  const source = JSON.parse(await fs.readFile(resolvedPath, 'utf-8'));
+  const section = source.virtualrouter && typeof source.virtualrouter === 'object' ? source.virtualrouter : source;
+  const { config } = bootstrapVirtualRouterConfig(section);
+  const engine = new VirtualRouterEngine();
+  engine.initialize(config);
+  const thinkingPools = config.routing.thinking ?? [];
+  const primaryPools = thinkingPools.filter((tier) => !tier.backup);
+  const backupPools = thinkingPools.filter((tier) => tier.backup);
+
+  const runThinking = (label) => {
+    const reqId = `real-config-${label}-${Date.now()}`;
+    const request = {
+      model: 'gpt-5.2-codex',
+      messages: [
+        { role: 'system', content: 'diagnostic' },
+        { role: 'user', content: `深入思考：${label}` }
+      ]
+    };
+    const metadata = {
+      requestId: reqId,
+      entryEndpoint: '/v1/responses',
+      processMode: 'chat',
+      stream: false,
+      direction: 'request',
+      providerProtocol: 'openai-responses'
+    };
+    const result = engine.route(request, metadata);
+    console.log(
+      JSON.stringify(
+        {
+          stage: 'real-config-route',
+          label,
+          providerKey: result.decision.providerKey,
+          route: result.decision.routeName,
+          poolId: result.decision.poolId
+        },
+        null,
+        2
+      )
+    );
+    return result.decision.providerKey;
+  };
+
+  const markUnavailable = (targets, reason) => {
+    for (const key of targets || []) {
+      engine.handleProviderFailure({
+        providerKey: key,
+        fatal: true,
+        affectsHealth: true,
+        reason,
+        cooldownOverrideMs: 60_000
+      });
+    }
+  };
+
+  // Primary hit
+  const firstProvider = runThinking('primary-hit');
+  const primaryTargets = primaryPools.flatMap((pool) => pool.targets ?? []);
+  const backupTargets = backupPools.flatMap((pool) => pool.targets ?? []);
+  if (primaryTargets.length === 0) {
+    console.warn('[real-config] No explicit primary thinking pool configured.');
+  } else if (!primaryTargets.includes(firstProvider)) {
+    console.warn('[real-config] First provider is not part of primary tier:', firstProvider);
+  }
+
+  // Drain primary
+  markUnavailable(primaryTargets, 'primary-exhausted');
+  const secondProvider = runThinking('backup-hit');
+  if (backupTargets.length && !backupTargets.includes(secondProvider)) {
+    throw new Error(
+      `[real-config] Expected backup pool provider after draining primary, got ${secondProvider}`
+    );
+  }
+
+  // Drain backup -> should fall to default
+  markUnavailable(backupTargets, 'backup-exhausted');
+  const thirdProvider = runThinking('default-fallback');
+  const usedRoute = engine.getStatus().routes;
+  console.log(
+    JSON.stringify(
+      {
+        stage: 'real-config-summary',
+        thirdProvider,
+        routes: usedRoute
+      },
+      null,
+      2
+    )
+  );
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
-    console.log('Usage: node scripts/tests/virtual-router-health.mjs [--out summary.json]');
+    console.log('Usage: node scripts/tests/virtual-router-health.mjs [--out summary.json] [--config ~/.routecodex/config.json]');
     return;
   }
 
@@ -247,6 +371,7 @@ async function main() {
     ['upstream', scenarioUpstream],
     ['timeout', scenarioTimeout],
     ['scheduler', scenarioScheduler],
+    ['priority-pools', scenarioPriorityPools],
     ['routing-directives', scenarioRoutingDirectives]
   ];
 
@@ -258,6 +383,16 @@ async function main() {
       status: result.status,
       lastHealth: result.history.filter((entry) => entry.stage === 'snapshot').slice(-1)[0]?.health ?? null
     });
+  }
+
+  if (args.config) {
+    try {
+      await scenarioRealConfig(args.config);
+      summary.push({ name: 'real-config', status: 'ok', lastHealth: null });
+    } catch (error) {
+      console.error('[real-config] failed:', error);
+      summary.push({ name: 'real-config', status: 'failed', error: error?.message || String(error), lastHealth: null });
+    }
   }
 
   if (args.out) {

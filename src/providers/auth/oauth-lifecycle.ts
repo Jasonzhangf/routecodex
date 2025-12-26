@@ -2,7 +2,9 @@ import type { OAuthAuth } from '../core/api/provider-config.js';
 import { createProviderOAuthStrategy, getProviderOAuthConfig } from '../core/config/provider-oauth-configs.js';
 import { OAuthFlowType, type OAuthFlowConfig, type OAuthClientConfig, type OAuthEndpoints } from '../core/config/oauth-flows.js';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
+import os from 'os';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import { fetchIFlowUserInfo, mergeIFlowTokenData } from './iflow-userinfo-helper.js';
 import { fetchQwenUserInfo, mergeQwenTokenData, hasQwenApiKey } from './qwen-userinfo-helper.js';
@@ -12,9 +14,10 @@ import {
   mergeGeminiCLITokenData,
   getDefaultProjectId
 } from './gemini-cli-userinfo-helper.js';
-import { parseTokenSequenceFromPath } from "./token-scanner/index.js";
+import { parseTokenSequenceFromPath } from './token-scanner/index.js';
 import { logOAuthDebug } from './oauth-logger.js';
 import { fetchAntigravityProjectId } from './antigravity-userinfo-helper.js';
+import { HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 
 type EnsureOpts = {
   forceReacquireIfRefreshFails?: boolean;
@@ -44,6 +47,8 @@ type StoredOAuthToken = UnknownObject & {
   expires_at?: number | string;
   expired?: number | string;
   expiry_date?: number | string;
+  // 可选：标记该 token 仅供读取，不做自动刷新或重新授权
+  norefresh?: boolean;
 };
 
 const TOKEN_REFRESH_SKEW_MS = 60_000;
@@ -82,12 +87,63 @@ function defaultTokenFile(providerType: string): string {
 }
 
 function resolveTokenFilePath(auth: ExtendedOAuthAuth, providerType: string): string {
-  const tf = typeof auth.tokenFile === 'string' ? auth.tokenFile.trim() : '';
-  const resolved = tf ? expandHome(tf) : defaultTokenFile(providerType);
-  if (!tf) {
-    auth.tokenFile = resolved;
+  const raw = typeof auth.tokenFile === 'string' ? auth.tokenFile.trim() : '';
+
+  // 没有任何配置：使用 provider 默认 token 文件（兼容单 token 场景）
+  if (!raw) {
+    const fallback = defaultTokenFile(providerType);
+    auth.tokenFile = fallback;
+    return fallback;
   }
-  return resolved;
+
+  // 显式路径（包含路径分隔符或 .json），直接扩展 ~ 并返回
+  if (raw.includes('/') || raw.includes('\\') || raw.endsWith('.json')) {
+    const resolved = expandHome(raw);
+    auth.tokenFile = resolved;
+    return resolved;
+  }
+
+  // 纯 alias：在 ~/.routecodex/auth 下按 <provider>-oauth-*-<alias>.json 规则匹配（同步版本）
+  const alias = raw;
+  const homeDir = process.env.HOME || os.homedir();
+  const authDir = path.join(homeDir, '.routecodex', 'auth');
+  const pattern = new RegExp(`^${providerType}-oauth-(\\d+)(?:-(.+))?\\.json$`, 'i');
+
+  let existingPath: string | null = null;
+  let maxSeq = 0;
+  try {
+    const entries = fsSync.readdirSync(authDir);
+    for (const entry of entries) {
+      const match = entry.match(pattern);
+      if (!match) {
+        continue;
+      }
+      const seq = parseInt(match[1], 10);
+      if (!Number.isFinite(seq) || seq <= 0) {
+        continue;
+      }
+      const entryAlias = (match[2] || 'default');
+      if (entryAlias === alias && !existingPath) {
+        existingPath = path.join(authDir, entry);
+      }
+      if (seq > maxSeq) {
+        maxSeq = seq;
+      }
+    }
+  } catch {
+    // ignore directory errors; treat as no existing tokens
+  }
+
+  if (existingPath) {
+    auth.tokenFile = existingPath;
+    return existingPath;
+  }
+
+  const nextSeq = maxSeq + 1;
+  const fileName = `${providerType}-oauth-${nextSeq}-${alias}.json`;
+  const fullPath = path.join(authDir, fileName);
+  auth.tokenFile = fullPath;
+  return fullPath;
 }
 
 function shouldThrottle(k: string, ms = 60_000): boolean {
@@ -169,6 +225,21 @@ function getExpiresAt(token: StoredOAuthToken | null): number | null {
     return Number.isFinite(ts) ? ts : null;
   }
   return null;
+}
+
+function hasNoRefreshFlag(token: StoredOAuthToken | null): boolean {
+  if (!token) {
+    return false;
+  }
+  const direct = (token as any).norefresh ?? (token as any).noRefresh;
+  if (typeof direct === 'boolean') {
+    return direct;
+  }
+  if (typeof direct === 'string') {
+    const normalized = direct.trim().toLowerCase();
+    return normalized === '1' || normalized === 'true' || normalized === 'yes';
+  }
+  return false;
 }
 
 function evaluateTokenState(token: StoredOAuthToken | null, providerType: string) {
@@ -361,6 +432,43 @@ function buildHeaderOverrides(defaults: OAuthFlowConfig, providerType: string): 
   return baseHeaders;
 }
 
+function resolveTokenAliasFromPath(tokenFilePath: string): string | undefined {
+  const parsed = parseTokenSequenceFromPath(tokenFilePath);
+  return parsed?.alias;
+}
+
+function resolveTokenPortalBaseUrl(): string | null {
+  const configured = String(process.env.ROUTECODEX_TOKEN_PORTAL_BASE || '').trim();
+  if (configured) {
+    return configured;
+  }
+
+  const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
+  if (!Number.isFinite(envPort) || envPort <= 0) {
+    // No reliable server port detected; disable portal and fall back to direct OAuth URL
+    return null;
+  }
+  const host = LOCAL_HOSTS.IPV4;
+  return `${HTTP_PROTOCOLS.HTTP}${host}:${envPort}/token-auth/demo`;
+}
+
+function buildTokenPortalConfig(
+  providerType: string,
+  tokenFilePath: string
+): OAuthFlowConfig['tokenPortal'] | undefined {
+  const baseUrl = resolveTokenPortalBaseUrl();
+  if (!baseUrl) {
+    return undefined;
+  }
+  const alias = resolveTokenAliasFromPath(tokenFilePath) ?? 'default';
+  return {
+    baseUrl,
+    provider: providerType,
+    alias,
+    tokenFile: tokenFilePath
+  };
+}
+
 async function buildOverrides(
   providerType: string,
   defaults: OAuthFlowConfig,
@@ -371,6 +479,7 @@ async function buildOverrides(
   const endpoints = buildEndpointOverrides(defaults, auth);
   const client = await buildClientOverrides(defaults, auth, providerType);
   const headers = buildHeaderOverrides(defaults, providerType);
+  const tokenPortal = openBrowser ? buildTokenPortalConfig(providerType, tokenFilePath) : undefined;
   const overrides: Record<string, unknown> = {
     activationType: openBrowser ? 'auto_browser' : 'manual',
     endpoints,
@@ -378,6 +487,9 @@ async function buildOverrides(
     tokenFile: tokenFilePath,
     headers
   };
+  if (tokenPortal) {
+    (overrides as any).tokenPortal = tokenPortal;
+  }
   return { overrides, endpoints, client };
 }
 
@@ -571,6 +683,16 @@ export async function ensureValidOAuthToken(
     return;
   }
 
+  const aliasInfo = parseTokenSequenceFromPath(tokenFilePath);
+  const isStaticAlias = aliasInfo?.alias === 'static';
+  if (isStaticAlias) {
+    logOAuthDebug(
+      `[OAuth] static alias token detected, skipping refresh/reauth (provider=${providerType} tokenFile=${tokenFilePath})`
+    );
+    updateThrottle(cacheKey);
+    return;
+  }
+
   const openBrowser = opts.openBrowser ?? true;
   const forceReauth =
     opts.forceReauthorize === true || String(process.env.ROUTECODEX_OAUTH_FORCE_REAUTH || '0') === '1';
@@ -589,6 +711,15 @@ export async function ensureValidOAuthToken(
     const token = await readTokenFromFile(tokenFilePath);
     logTokenSnapshot(providerType, token, endpoints);
     const tokenState = evaluateTokenState(token, providerType);
+    const noRefresh = hasNoRefreshFlag(token);
+
+    if (noRefresh) {
+      logOAuthDebug(
+        `[OAuth] norefresh flag set for provider=${providerType} tokenFile=${tokenFilePath} - skip auto-refresh and re-authorization.`
+      );
+      updateThrottle(cacheKey);
+      return;
+    }
 
     if (!forceReauth && tokenState.validAccess) {
       logOAuthDebug(

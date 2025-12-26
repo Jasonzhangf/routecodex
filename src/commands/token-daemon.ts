@@ -2,6 +2,8 @@ import { Command } from 'commander';
 import fs from 'fs/promises';
 import path from 'path';
 import { homedir } from 'os';
+import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
 import { TokenDaemon } from '../token-daemon/index.js';
 import {
   printStatus,
@@ -11,12 +13,27 @@ import {
   interactiveRefresh
 } from '../token-daemon/index.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const TOKEN_DAEMON_PID_FILE = path.join(homedir(), '.routecodex', 'token-daemon.pid');
+const CLI_ENTRY = path.resolve(__dirname, '../cli.js');
 
 export function createTokenDaemonCommand(): Command {
   const cmd = new Command('token-daemon');
   cmd
-    .description('Background daemon for monitoring and refreshing OAuth tokens');
+    .description('Background daemon for monitoring and refreshing OAuth tokens')
+    .argument(
+      '[selector]',
+      'Token selector: file basename, full path, or provider id (e.g. "iflow-oauth-1-work.json")'
+    )
+    .action(async (selector?: string) => {
+      if (!selector) {
+        cmd.outputHelp();
+        return;
+      }
+      await interactiveRefresh(selector);
+    });
 
   cmd
     .command('start')
@@ -28,41 +45,28 @@ export function createTokenDaemonCommand(): Command {
       '30'
     )
     .action(async (options: { interval?: string; refreshAheadMinutes?: string }) => {
-      const intervalMs = Number(options.interval || '60') * 1000;
-      const refreshAheadMinutes = Number(options.refreshAheadMinutes || '30');
-      const daemon = new TokenDaemon({
-        intervalMs: Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : undefined,
-        refreshAheadMinutes: Number.isFinite(refreshAheadMinutes) && refreshAheadMinutes > 0
-          ? refreshAheadMinutes
-          : undefined
-      });
+      await startDaemonForeground(options);
+    });
 
-      // write PID file for auto-start / detection
-      try {
-        const dir = path.dirname(TOKEN_DAEMON_PID_FILE);
-        await fs.mkdir(dir, { recursive: true });
-        await fs.writeFile(TOKEN_DAEMON_PID_FILE, String(process.pid), 'utf8');
-      } catch {
-        // non-fatal
+  cmd
+    .command('restart')
+    .description('Stop existing daemon if running, then start a new one in background')
+    .option('--interval <seconds>', 'Polling interval in seconds', '60')
+    .option(
+      '--refresh-ahead-minutes <minutes>',
+      'Minutes before expiry to attempt silent refresh',
+      '30'
+    )
+    .action(async (options: { interval?: string; refreshAheadMinutes?: string }) => {
+      const stopped = await stopExistingDaemon();
+      if (stopped) {
+        console.log('Stopped existing token daemon');
+        await delay(300);
+      } else {
+        console.log('No existing token daemon detected');
       }
-
-      await daemon.start();
-
-      const cleanupAndExit = async () => {
-        daemon.stop();
-        try {
-          await fs.unlink(TOKEN_DAEMON_PID_FILE);
-        } catch {
-          // ignore
-        }
-        process.exit(0);
-      };
-
-      const handleStop = () => {
-        void cleanupAndExit();
-      };
-      process.on('SIGINT', handleStop);
-      process.on('SIGTERM', handleStop);
+      await startDaemonBackground(options);
+      console.log('Token daemon restarted in background');
     });
 
   cmd
@@ -109,4 +113,103 @@ export function createTokenDaemonCommand(): Command {
     });
 
   return cmd;
+}
+
+async function startDaemonForeground(options: { interval?: string; refreshAheadMinutes?: string }): Promise<void> {
+  const intervalMs = Number(options.interval || '60') * 1000;
+  const refreshAheadMinutes = Number(options.refreshAheadMinutes || '30');
+  const daemon = new TokenDaemon({
+    intervalMs: Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : undefined,
+    refreshAheadMinutes: Number.isFinite(refreshAheadMinutes) && refreshAheadMinutes > 0
+      ? refreshAheadMinutes
+      : undefined
+  });
+
+  await writePidFile(String(process.pid));
+  await daemon.start();
+
+  const cleanupAndExit = async () => {
+    daemon.stop();
+    try {
+      await fs.unlink(TOKEN_DAEMON_PID_FILE);
+    } catch {
+      // ignore
+    }
+    process.exit(0);
+  };
+
+  const handleStop = () => {
+    void cleanupAndExit();
+  };
+  process.on('SIGINT', handleStop);
+  process.on('SIGTERM', handleStop);
+}
+
+async function startDaemonBackground(options: { interval?: string; refreshAheadMinutes?: string }): Promise<void> {
+  const args = buildStartArgs(options);
+  const child = spawn(process.execPath, args, {
+    stdio: 'ignore',
+    detached: true,
+    env: { ...process.env }
+  });
+  try {
+    child.unref();
+  } catch {
+    // ignore
+  }
+}
+
+async function stopExistingDaemon(): Promise<boolean> {
+  let pidFile: string | null = null;
+  try {
+    pidFile = await fs.readFile(TOKEN_DAEMON_PID_FILE, 'utf8');
+  } catch {
+    return false;
+  }
+  if (!pidFile) {
+    return false;
+  }
+  const pid = Number(pidFile.trim());
+  if (!Number.isFinite(pid)) {
+    return false;
+  }
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code !== 'ESRCH') {
+      console.warn(`Failed to stop token daemon (pid=${pid}): ${err.message}`);
+    }
+  }
+  try {
+    await fs.unlink(TOKEN_DAEMON_PID_FILE);
+  } catch {
+    // ignore
+  }
+  return true;
+}
+
+function buildStartArgs(options: { interval?: string; refreshAheadMinutes?: string }): string[] {
+  const args = [CLI_ENTRY, 'token-daemon', 'start'];
+  if (options.interval) {
+    args.push('--interval', options.interval);
+  }
+  if (options.refreshAheadMinutes) {
+    args.push('--refresh-ahead-minutes', options.refreshAheadMinutes);
+  }
+  return args;
+}
+
+async function writePidFile(pid: string): Promise<void> {
+  try {
+    const dir = path.dirname(TOKEN_DAEMON_PID_FILE);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(TOKEN_DAEMON_PID_FILE, pid, 'utf8');
+  } catch {
+    // ignore pid file failures
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

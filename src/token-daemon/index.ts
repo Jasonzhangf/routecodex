@@ -249,6 +249,13 @@ export async function interactiveRefresh(selector: string): Promise<void> {
     console.error(chalk.red('✗'), `No token found for selector: ${selector}`);
     return;
   }
+  if (token.alias === 'static') {
+    console.error(
+      chalk.red('✗'),
+      'Token with alias "static" is read-only. Please create a new token with a different alias to re-authenticate.'
+    );
+    return;
+  }
 
   const label = formatTokenLabel(token);
   console.log('');

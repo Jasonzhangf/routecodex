@@ -15,6 +15,79 @@ interface RouteOptions {
   handleError: (error: Error, context: string) => Promise<void>;
 }
 
+/**
+ * Register OAuth Portal route early to support token authentication flow
+ * This route must be available before provider initialization
+ */
+export function registerOAuthPortalRoute(app: Application): void {
+  app.get('/token-auth/demo', (req: Request, res: Response) => {
+    const provider = typeof req.query.provider === 'string' ? req.query.provider : 'unknown-provider';
+    const alias = typeof req.query.alias === 'string' ? req.query.alias : 'default';
+    const tokenFile =
+      typeof req.query.tokenFile === 'string' ? req.query.tokenFile : '~/.routecodex/auth/unknown-token.json';
+    const oauthUrl =
+      typeof req.query.oauthUrl === 'string'
+        ? req.query.oauthUrl
+        : 'https://accounts.google.com/o/oauth2/v2/auth';
+    const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : 'demo-session';
+
+    const escapeHtml = (value: string) =>
+      value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>RouteCodex Token Auth Demo</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 40px; color: #1f2933; background:#f8fafc; }
+      .card { border: 1px solid #e2e8f0; border-radius: 16px; padding: 28px; max-width: 640px; background:#fff; box-shadow: 0 25px 50px -12px rgba(15,23,42,0.25); }
+      .title { font-size: 26px; margin-bottom: 16px; font-weight: 600; color:#0f172a; }
+      .meta { margin-bottom: 18px; line-height: 1.7; }
+      .meta div { margin-bottom:4px; }
+      .meta span { font-weight: 600; color:#475569; margin-right:6px; }
+      button { background: linear-gradient(135deg,#2563eb,#4f46e5); color: white; border: none; border-radius: 10px; padding: 14px 26px; font-size: 16px; font-weight:600; cursor: pointer; transition: transform .1s ease; }
+      button:hover { transform: translateY(-1px); }
+      button:disabled { opacity: 0.6; cursor: not-allowed; }
+      .hint { color: #475569; margin-top: 18px; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="title">Authorize Token</div>
+      <div class="meta">
+        <div><span>Provider:</span> ${escapeHtml(provider)}</div>
+        <div><span>Alias:</span> ${escapeHtml(alias)}</div>
+        <div><span>Token file:</span> ${escapeHtml(tokenFile)}</div>
+        <div><span>Session ID:</span> ${escapeHtml(sessionId)}</div>
+      </div>
+      <button id="continue-btn">Continue to OAuth</button>
+      <div class="hint">
+        This demo shows what users will see before visiting Google OAuth. The daemon will point the browser
+        to this page with the exact token details so there is no ambiguity about which alias is being refreshed.
+      </div>
+    </div>
+    <script>
+      const btn = document.getElementById('continue-btn');
+      const oauthUrl = ${JSON.stringify(oauthUrl)};
+      btn.addEventListener('click', () => {
+        btn.disabled = true;
+        btn.innerText = 'Opening OAuth…';
+        window.location.href = oauthUrl;
+      });
+    </script>
+  </body>
+</html>`;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  });
+}
+
 export function registerHttpRoutes(options: RouteOptions): void {
   const { app, config, buildHandlerContext, getPipelineReady, handleError } = options;
 
@@ -31,6 +104,9 @@ export function registerHttpRoutes(options: RouteOptions): void {
   app.get('/config', (_req: Request, res: Response) => {
     res.status(200).json({ httpserver: { host: config.server.host, port: config.server.port }, merged: false });
   });
+
+  // OAuth Portal route is registered early in constructor, so we skip it here
+  // to avoid duplicate route registration
 
   app.post('/shutdown', (req: Request, res: Response) => {
     try {

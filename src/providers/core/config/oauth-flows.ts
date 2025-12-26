@@ -70,6 +70,19 @@ export interface OAuthClientConfig {
 /**
  * OAuth流程配置
  */
+export interface TokenPortalMetadata {
+  /** Landing page URL that shows token alias before redirecting to upstream OAuth */
+  baseUrl: string;
+  /** Provider identifier (display only) */
+  provider?: string;
+  /** Friendly alias derived from token file name */
+  alias?: string;
+  /** Absolute token file path (display only) */
+  tokenFile?: string;
+  /** Optional name/email to display */
+  displayName?: string;
+}
+
 export interface OAuthFlowConfig {
   /** 流程类型 */
   flowType: OAuthFlowType;
@@ -105,6 +118,8 @@ export interface OAuthFlowConfig {
     /** 需要请求离线访问令牌（access_type=offline/prompt=consent） */
     requestOfflineAccess?: boolean;
   };
+  /** RouteCodex token portal metadata (optional) */
+  tokenPortal?: TokenPortalMetadata;
 }
 
 /**
@@ -180,13 +195,26 @@ export abstract class BaseOAuthFlowStrategy {
       throw new Error('No activation URL provided');
     }
 
+    const portalUrl = this.buildTokenPortalUrl(targetUrl);
+    const resolvedUrl = portalUrl || targetUrl;
+
     console.log('Opening browser for authentication...');
-    console.log(`URL: ${targetUrl}`);
+    if (portalUrl) {
+      console.log(`Portal URL: ${resolvedUrl}`);
+      console.log(`OAuth URL: ${targetUrl}`);
+    } else {
+      console.log(`URL: ${targetUrl}`);
+    }
     if (userCode) {
       console.log(`User Code: ${userCode}`);
     }
 
     if (options.openBrowser !== false) {
+      // If using Portal URL, ensure server is ready before opening browser
+      if (portalUrl) {
+        await this.waitForPortalReady(portalUrl);
+      }
+
       // Prefer npm 'open' for cross-platform behavior; fallback to OS-specific commands
       let opened = false;
       try {
@@ -199,7 +227,7 @@ export abstract class BaseOAuthFlowStrategy {
           opener = moduleRef.default ?? moduleRef.open;
         }
         if (typeof opener === 'function') {
-          await opener(targetUrl);
+          await opener(resolvedUrl);
           opened = true;
         }
       } catch {
@@ -211,12 +239,12 @@ export abstract class BaseOAuthFlowStrategy {
           const { promisify } = await import('node:util');
           const execAsync = promisify(exec) as ExecAsyncFn;
           // macOS
-          await execAsync(`open "${targetUrl}"`).catch(async () => {
+          await execAsync(`open "${resolvedUrl}"`).catch(async () => {
             // Linux
-            await execAsync(`xdg-open "${targetUrl}"`).catch(async () => {
+            await execAsync(`xdg-open "${resolvedUrl}"`).catch(async () => {
               // Windows
               const shellOptions: ShellExecOptions = { shell: true };
-              await execAsync(`start "" "${targetUrl}"`, shellOptions);
+              await execAsync(`start "" "${resolvedUrl}"`, shellOptions);
             });
           });
           opened = true;
@@ -229,6 +257,53 @@ export abstract class BaseOAuthFlowStrategy {
       }
     }
   }
+
+  /**
+   * 等待 Portal 服务器就绪
+   * 在打开浏览器前确保路由已注册，避免 404
+   */
+  protected async waitForPortalReady(portalUrl: string): Promise<void> {
+    try {
+      const url = new URL(portalUrl);
+      const baseUrl = `${url.protocol}//${url.host}`;
+      const healthUrl = `${baseUrl}/health`;
+
+      const maxAttempts = 15; // 最多尝试 15 次
+      const delayMs = 200;    // 每次等待 200ms，总计最多 3 秒
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 500);
+
+          const response = await fetch(healthUrl, {
+            method: 'GET',
+            signal: controller.signal
+          });
+
+          clearTimeout(timeoutId);
+
+          if (response.ok) {
+            console.log('[OAuth] Portal server is ready');
+            return;
+          }
+        } catch (error) {
+          // Server not ready yet, continue waiting
+          if (attempt < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+          }
+        }
+      }
+
+      // Server didn't respond in time, but continue anyway
+      // The route might still work, just log a warning
+      console.warn('[OAuth] Portal server health check timed out, continuing anyway...');
+    } catch (error) {
+      // Invalid URL or other error, just continue
+      console.warn(`[OAuth] Failed to check portal readiness: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
 
   /**
    * 手动激活
@@ -261,6 +336,44 @@ export abstract class BaseOAuthFlowStrategy {
   protected async activateSilently(activationData: UnknownObject, _options: { openBrowser?: boolean } = {}): Promise<void> {
     // 默认实现：静默激活实际上不做任何事，依赖后台流程
     console.log('Silent activation initiated...');
+  }
+
+  /**
+   * 构造 RouteCodex token portal URL（如果配置可用）
+   */
+  protected buildTokenPortalUrl(targetUrl: string): string | null {
+    const portal = (this.config as OAuthFlowConfig)?.tokenPortal;
+    if (!portal?.baseUrl) {
+      return null;
+    }
+    try {
+      const sessionId =
+        typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : crypto.randomBytes(12).toString('hex');
+      const landing = new URL(portal.baseUrl);
+      landing.searchParams.set('oauthUrl', targetUrl);
+      landing.searchParams.set('sessionId', sessionId);
+      if (portal.provider) {
+        landing.searchParams.set('provider', portal.provider);
+      }
+      if (portal.alias) {
+        landing.searchParams.set('alias', portal.alias);
+      }
+      if (portal.tokenFile) {
+        landing.searchParams.set('tokenFile', portal.tokenFile);
+      }
+      if (portal.displayName) {
+        landing.searchParams.set('displayName', portal.displayName);
+      }
+      return landing.toString();
+    } catch (error) {
+      console.warn(
+        `[OAuth] Failed to build token auth portal URL (${portal.baseUrl}): ${error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return null;
+    }
   }
 
   /**

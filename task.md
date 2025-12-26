@@ -90,7 +90,7 @@ Simplify `HttpTransportProvider` by splitting HTTP request phases into focused h
 
 ## Goal
 
-Ensure virtual router respects each provider/model's real context limit. When a request approaches/exceeds that limit, routing automatically prefers larger-context providers or fallback routes, preventing overflow errors while honoring the “config is the single source of truth” rule.
+Ensure virtual router respects each provider/model's real context limit. When a request approaches/exceeds that limit, routing automatically prefers larger-context providers and downgrades across tiered pools before giving up, all while honoring the “config is the single source of truth” rule.
 
 ## Constraints
 
@@ -110,11 +110,11 @@ Ensure virtual router respects each provider/model's real context limit. When a 
 
 3. ContextAdvisor implementation
    - [ ] Add a reusable advisor that classifies providers into safe/risky/overflow groups based on `estimatedTokens` ratio vs. `maxContextTokens`.
-   - [ ] Make thresholds configurable (`warnRatio`, optional `hardLimit`, `fallbackRoute`).
+   - [ ] Make thresholds configurable (`warnRatio`, optional `hardLimit`).
 
 4. Integrate into `VirtualRouterEngine.selectProvider`
    - [ ] Filter each route's pool via ContextAdvisor before invoking load balancer.
-   - [ ] When a pool exhausts safe options, fall back to risky providers; if still empty, switch to fallback route (e.g., `longcontext`) if available.
+   - [ ] When a pool exhausts safe options, fall back to risky/overflow providers (if allowed), then continue degrading to the next route pool before finally failing.
    - [ ] Enrich diagnostics/logging with usage ratio context.
 
 5. Tests & docs

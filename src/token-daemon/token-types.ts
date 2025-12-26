@@ -21,6 +21,8 @@ export interface RawTokenPayload {
   email?: string;
   account?: string;
   name?: string;
+  // 可选：标记该 token 仅供读取，不做自动刷新或重新授权
+  norefresh?: boolean;
   [key: string]: unknown;
 }
 
@@ -33,6 +35,8 @@ export interface TokenState {
   expiresAt: number | null;
   msUntilExpiry: number | null;
   status: TokenStatus;
+  // 为 true 时，token-daemon 不会尝试自动刷新该 token
+  noRefresh: boolean;
 }
 
 export interface TokenIdentity {

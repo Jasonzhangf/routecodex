@@ -158,6 +158,27 @@
       border-color: rgba(148, 163, 184, 0.5);
       color: #e5e7eb;
     }
+    .scope-switch {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+      font-size: 11px;
+    }
+    .scope-pill {
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid #1f2937;
+      background-color: #020617;
+      color: #9ca3af;
+      cursor: default;
+    }
+    .scope-pill.active {
+      border-color: rgba(59, 130, 246, 0.7);
+      background: radial-gradient(circle at top left, rgba(59, 130, 246, 0.35), #020617 60%);
+      color: #e5e7eb;
+    }
     .tag {
       padding: 0 4px;
       border-radius: 4px;
@@ -176,7 +197,8 @@
     <h1>RouteCodex Token Daemon 预览</h1>
     <div class="subtitle">树状结构：服务器 → Providers → Tokens / Tokens → Used By</div>
     <div class="meta">
-      所有数据为静态示例，结构对齐 CLI 输出：<span class="mono">token-daemon servers/providers/tokens --json</span>
+      所有数据为静态示例，结构对齐 CLI 输出：<span class="mono">token-daemon servers/providers/tokens --json</span>；
+      系统统计对应 <span class="mono">StatsSnapshot</span>（<span class="mono">router.global</span> / <span class="mono">providers.global</span>）
     </div>
   </header>
 
@@ -184,26 +206,46 @@
     <!-- 顶部统计区 -->
     <section style="margin-bottom: 12px; display:flex; gap:12px; flex-wrap:wrap;">
       <div style="flex:1; min-width:180px; background:#020617; border:1px solid #111827; border-radius:10px; padding:8px 10px;">
-        <div style="font-size:11px; color:#9ca3af; margin-bottom:4px;">系统统计</div>
-        <div style="display:flex; gap:12px; font-size:12px;">
+        <div style="font-size:11px; color:#9ca3af; margin-bottom:4px;">系统统计（Virtual Router）</div>
+        <div class="scope-switch">
+          <span class="dim">范围：</span>
+          <span class="scope-pill active">当前 Server（local-5555）</span>
+          <span class="scope-pill">当前 Config（~/.routecodex/config.json）</span>
+          <span class="scope-pill">所有 Server</span>
+          <span class="scope-pill">所有 Config</span>
+        </div>
+        <div class="dim" style="font-size:11px; margin-bottom:4px;">
+          示例：当前 Server 视角，对应该进程的 <span class="mono">StatsSnapshot.router.global</span> /
+          <span class="mono">StatsSnapshot.providers.global</span>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:12px; font-size:12px;">
           <div>
-            <div class="dim" style="font-size:11px;">Servers</div>
-            <div class="mono">2 <span class="dim">(1 online)</span></div>
+            <div class="dim" style="font-size:11px;">Requests</div>
+            <div class="mono">
+              12,345
+              <span class="dim">(router.global.requestCount)</span>
+            </div>
           </div>
           <div>
-            <div class="dim" style="font-size:11px;">Providers</div>
-            <div class="mono">10 <span class="dim">(6 apikey / 4 oauth)</span></div>
+            <div class="dim" style="font-size:11px;">Success / Error</div>
+            <div class="mono">
+              12,000 / 345
+              <span class="dim">(providers.global.successCount / errorCount)</span>
+            </div>
+          </div>
+          <div>
+            <div class="dim" style="font-size:11px;">Avg Latency</div>
+            <div class="mono">
+              210 ms
+              <span class="dim">(providers.global.latencySumMs / requestCount)</span>
+            </div>
           </div>
           <div>
             <div class="dim" style="font-size:11px;">Tokens</div>
             <div class="mono">
-              5
-              <span class="dim">(valid=2 / expiring=1 / expired=1 / invalid=1)</span>
+              prompt=23k / completion=18k / total=41k
+              <span class="dim">(providers.global.usage)</span>
             </div>
-          </div>
-          <div>
-            <div class="dim" style="font-size:11px;">Last Refresh</div>
-            <div class="mono">2025-12-26T08:54:00Z</div>
           </div>
         </div>
       </div>

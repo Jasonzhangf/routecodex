@@ -31,7 +31,7 @@ import { buildProviderProfiles } from '../../../providers/profile/provider-profi
 import { emitProviderError } from '../../../providers/core/utils/provider-error-reporter.js';
 import { isStageLoggingEnabled, logPipelineStage } from '../../utils/stage-logger.js';
 import { registerDefaultMiddleware } from './middleware.js';
-import { registerHttpRoutes } from './routes.js';
+import { registerHttpRoutes, registerOAuthPortalRoute } from './routes.js';
 import { mapProviderProtocol, normalizeProviderType, resolveProviderIdentity, asRecord } from './provider-utils.js';
 import { resolveRepoRoot, loadLlmswitchModule } from './llmswitch-loader.js';
 import { importCoreModule } from '../../../modules/llmswitch/core-loader.js';
@@ -166,6 +166,12 @@ export class RouteCodexHttpServer {
       this.pipelineLogger = createNoopPipelineLogger();
     }
 
+    // Register critical routes early (before provider initialization)
+    // This ensures OAuth Portal is available when providers check token validity
+    registerDefaultMiddleware(this.app);
+    registerOAuthPortalRoute(this.app);
+    console.log('[RouteCodexHttpServer] OAuth Portal route registered (early initialization)');
+
     console.log('[RouteCodexHttpServer] Initialized (pipeline=hub)');
   }
 
@@ -210,10 +216,10 @@ export class RouteCodexHttpServer {
 
   private createDebugCenterShim(): DebugCenter {
     return {
-      logDebug: () => {},
-      logError: () => {},
-      logModule: () => {},
-      processDebugEvent: () => {},
+      logDebug: () => { },
+      logError: () => { },
+      logModule: () => { },
+      processDebugEvent: () => { },
       getLogs: () => []
     };
   }
@@ -221,7 +227,7 @@ export class RouteCodexHttpServer {
   private updateProviderProfiles(collection?: ProviderProfileCollection, rawConfig?: UnknownObject): void {
     this.providerProfileIndex.clear();
     const source = collection ?? this.tryBuildProfiles(rawConfig);
-    if (!source) {return;}
+    if (!source) { return; }
     for (const profile of source.profiles) {
       if (profile && typeof profile.id === 'string' && profile.id.trim()) {
         this.providerProfileIndex.set(profile.id.trim(), profile);
@@ -234,7 +240,7 @@ export class RouteCodexHttpServer {
       return;
     }
     const fallback = this.tryBuildProfiles(this.userConfig);
-    if (!fallback) {return;}
+    if (!fallback) { return; }
     for (const profile of fallback.profiles) {
       if (profile && typeof profile.id === 'string' && profile.id.trim()) {
         this.providerProfileIndex.set(profile.id.trim(), profile);
@@ -243,7 +249,7 @@ export class RouteCodexHttpServer {
   }
 
   private tryBuildProfiles(config: UnknownObject | undefined): ProviderProfileCollection | null {
-    if (!config) {return null;}
+    if (!config) { return null; }
     try {
       return buildProviderProfiles(config);
     } catch {
@@ -267,7 +273,7 @@ export class RouteCodexHttpServer {
     }
     for (const candidate of candidates) {
       const profile = this.providerProfileIndex.get(candidate);
-      if (profile) {return profile;}
+      if (profile) { return profile; }
     }
     return undefined;
   }
@@ -422,7 +428,8 @@ export class RouteCodexHttpServer {
       await this.errorHandling.initialize();
       await this.initializeRouteErrorHub();
 
-      registerDefaultMiddleware(this.app);
+      // registerDefaultMiddleware and registerOAuthPortalRoute already called in constructor
+      // Register remaining HTTP routes
       registerHttpRoutes({
         app: this.app,
         config: this.config,
@@ -595,7 +602,7 @@ export class RouteCodexHttpServer {
     this.providerKeyToRuntimeKey.clear();
 
     for (const [providerKey, runtime] of Object.entries(runtimeMap)) {
-      if (!runtime) {continue;}
+      if (!runtime) { continue; }
       const runtimeKey = runtime.runtimeKey || providerKey;
       if (!this.providerHandles.has(runtimeKey)) {
         const resolvedRuntime = await this.materializeRuntimeProfile(runtime);
@@ -670,7 +677,7 @@ export class RouteCodexHttpServer {
       return undefined;
     };
     const pickStringArray = (value: unknown): string[] | undefined => {
-      if (!value) {return undefined;}
+      if (!value) { return undefined; }
       if (Array.isArray(value)) {
         const normalized = value
           .map((item) => pickString(item))
@@ -1082,7 +1089,7 @@ export class RouteCodexHttpServer {
   }
 
   private normalizeProviderResponseHeaders(headers: unknown): Record<string, string> | undefined {
-    if (!headers || typeof headers !== 'object') {return undefined;}
+    if (!headers || typeof headers !== 'object') { return undefined; }
     const normalized: Record<string, string> = {};
     for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
       if (typeof value === 'string') {
@@ -1129,10 +1136,10 @@ export class RouteCodexHttpServer {
       };
       const compatProfile =
         metadataBag &&
-        typeof metadataBag === 'object' &&
-        metadataBag.target &&
-        typeof metadataBag.target === 'object' &&
-        typeof (metadataBag.target as Record<string, unknown>).compatibilityProfile === 'string'
+          typeof metadataBag === 'object' &&
+          metadataBag.target &&
+          typeof metadataBag.target === 'object' &&
+          typeof (metadataBag.target as Record<string, unknown>).compatibilityProfile === 'string'
           ? ((metadataBag.target as Record<string, unknown>).compatibilityProfile as string)
           : undefined;
       if (compatProfile && compatProfile.trim()) {
@@ -1196,7 +1203,7 @@ export class RouteCodexHttpServer {
   }
 
   private cloneRequestPayload(payload: unknown): Record<string, unknown> | undefined {
-    if (!payload || typeof payload !== 'object') {return undefined;}
+    if (!payload || typeof payload !== 'object') { return undefined; }
     try {
       return JSON.parse(JSON.stringify(payload));
     } catch {
@@ -1216,7 +1223,7 @@ export class RouteCodexHttpServer {
 }
 
 function createNoopPipelineLogger(): PipelineDebugLogger {
-  const noop = () => {};
+  const noop = () => { };
   const emptyLogs = (): {
     general: DebugLogEntry[];
     transformations: TransformationLogEntry[];

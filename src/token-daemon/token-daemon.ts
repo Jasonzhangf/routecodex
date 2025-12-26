@@ -16,6 +16,9 @@ export interface TokenDaemonOptions {
   refreshAheadMinutes: number;
 }
 
+const DEBUG_FLAG = String(process.env.ROUTECODEX_TOKEN_DAEMON_DEBUG || '').trim().toLowerCase();
+const DEBUG_ENABLED = DEBUG_FLAG === '1' || DEBUG_FLAG === 'true';
+
 const DEFAULT_INTERVAL_MS = 60_000;
 const DEFAULT_REFRESH_AHEAD_MINUTES = 30;
 const MIN_REFRESH_INTERVAL_MS = 5 * 60_000;
@@ -67,22 +70,42 @@ export class TokenDaemon {
 
     for (const providerSnapshot of snapshot.providers) {
       for (const token of providerSnapshot.tokens) {
+        this.logDebug(
+          `[daemon] evaluate token provider=${token.provider} alias=${token.alias} expires=${token.state.expiresAt ?? 'unknown'} remainingMs=${token.state.msUntilExpiry ?? 'unknown'} refreshToken=${token.state.hasRefreshToken}`
+        );
         const key = buildTokenKey(token);
         const { state } = token;
         const expires = state.expiresAt;
         const msLeft = state.msUntilExpiry;
+        if (token.alias === 'static') {
+          this.logDebug(`[daemon] skip token with static alias provider=${token.provider} file=${token.filePath}`);
+          continue;
+        }
+
+        // respect per-token norefresh 标记：仅做状态展示，不做自动刷新
+        if (state.noRefresh) {
+          this.logDebug(`[daemon] skip token (noRefresh=true) alias=${token.alias}`);
+          continue;
+        }
 
         if (!state.hasRefreshToken || !expires || msLeft === null) {
+          this.logDebug(`[daemon] skip token missing refresh info alias=${token.alias} hasRefresh=${state.hasRefreshToken} expires=${expires}`);
           continue;
         }
 
         // Only attempt auto-refresh when token is valid/expiring and within refresh window
         if (msLeft <= 0 || msLeft > refreshAheadMs) {
+          this.logDebug(
+            `[daemon] skip token outside refresh window alias=${token.alias} remainingMs=${msLeft} window=${refreshAheadMs}`
+          );
           continue;
         }
 
         const last = this.lastRefreshAttempt.get(key) || 0;
         if (now - last < MIN_REFRESH_INTERVAL_MS) {
+          this.logDebug(
+            `[daemon] skip token throttle alias=${token.alias} sinceLast=${now - last}ms minInterval=${MIN_REFRESH_INTERVAL_MS}`
+          );
           continue;
         }
 
@@ -106,6 +129,9 @@ export class TokenDaemon {
       chalk.gray('◉'),
       `Auto-refresh token for ${providerType} (${token.displayName}), file=${token.filePath}`
     );
+    this.logDebug(
+      `[daemon] trigger refresh provider=${providerType} alias=${token.alias} file=${token.filePath}`
+    );
 
     await ensureValidOAuthToken(
       providerType,
@@ -123,6 +149,7 @@ export class TokenDaemon {
       chalk.green('✓'),
       `Token refreshed for ${providerType} (${token.displayName})`
     );
+    this.logDebug(`[daemon] refresh success provider=${providerType} alias=${token.alias}`);
   }
 
   static async getSnapshot(): Promise<TokenDaemonSnapshot> {
@@ -173,5 +200,11 @@ export class TokenDaemon {
 
     return null;
   }
-}
 
+  private logDebug(message: string): void {
+    if (!DEBUG_ENABLED) {
+      return;
+    }
+    console.log(chalk.gray('[token-daemon-debug]'), message);
+  }
+}
