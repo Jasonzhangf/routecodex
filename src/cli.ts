@@ -187,15 +187,79 @@ const pkgName: string = (() => {
 // - rcc（release 包）：严格按配置文件端口启动（httpserver.port/server.port/port）
 const IS_DEV_PACKAGE = pkgName === 'routecodex';
 const DEFAULT_DEV_PORT = 5555;
+const TOKEN_DAEMON_PID_FILE = path.join(homedir(), '.routecodex', 'token-daemon.pid');
 program
   .name(pkgName === 'rcc' ? 'rcc' : 'routecodex')
   .description('RouteCodex CLI - Multi-provider OpenAI proxy server and Claude Code interface')
   .version(cliVersion);
 
+async function ensureTokenDaemonAutoStart(): Promise<void> {
+  try {
+    const disabledEnv = String(
+      process.env.ROUTECODEX_TOKEN_DAEMON_DISABLED || process.env.RCC_TOKEN_DAEMON_DISABLED || ''
+    )
+      .trim()
+      .toLowerCase();
+    if (disabledEnv === '1' || disabledEnv === 'true' || disabledEnv === 'yes') {
+      logger.info('Token daemon auto-start disabled via env (ROUTECODEX_TOKEN_DAEMON_DISABLED/RCC_TOKEN_DAEMON_DISABLED)');
+      return;
+    }
+
+    let existingPid: number | null = null;
+    try {
+      if (fs.existsSync(TOKEN_DAEMON_PID_FILE)) {
+        const txt = fs.readFileSync(TOKEN_DAEMON_PID_FILE, 'utf8');
+        const parsed = Number(String(txt || '').trim());
+        if (Number.isFinite(parsed) && parsed > 0) {
+          existingPid = parsed;
+        }
+      }
+    } catch {
+      existingPid = null;
+    }
+
+    if (existingPid) {
+      try {
+        process.kill(existingPid, 0);
+        logger.debug(`Token daemon appears to be running (pid=${existingPid})`);
+        return;
+      } catch {
+        // stale pid, fall through to spawn
+      }
+    }
+
+    const nodeBin = process.execPath;
+    const cliEntry = path.resolve(__dirname, 'cli.js');
+    const args = [cliEntry, 'token-daemon', 'start'];
+    const { spawn } = await import('child_process');
+    const child = spawn(nodeBin, args, {
+      stdio: 'ignore',
+      detached: true,
+      env: { ...process.env }
+    });
+    try {
+      child.unref();
+    } catch {
+      // ignore
+    }
+    logger.info('Token daemon auto-started in background');
+  } catch (error) {
+    logger.debug(
+      `Failed to auto-start token daemon: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
 // Provider command group - update models and generate minimal provider config
 try {
   const { createProviderUpdateCommand } = await import('./commands/provider-update.js');
   program.addCommand(createProviderUpdateCommand());
+} catch { /* optional: command not available in some builds */ }
+
+// Token daemon command group - manage OAuth tokens
+try {
+  const { createTokenDaemonCommand } = await import('./commands/token-daemon.js');
+  program.addCommand(createTokenDaemonCommand());
 } catch { /* optional: command not available in some builds */ }
 
 // Validate command - auto start server then run E2E checks
@@ -558,6 +622,9 @@ program
     const spinner = await createSpinner('Starting RouteCodex server...');
 
     try {
+      // Best-effort auto-start of token daemon (can be disabled via env)
+      await ensureTokenDaemonAutoStart();
+
       // Validate system prompt replacement flags
       try {
         if (options.codex && options.claude) {

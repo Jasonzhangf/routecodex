@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>RouteCodex Token Daemon 预览（树状视图）</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #020617;
+      color: #e5e7eb;
+    }
+    header {
+      padding: 14px 20px;
+      border-bottom: 1px solid #111827;
+      background: radial-gradient(circle at top left, #1d4ed8 0, #020617 50%);
+    }
+    header h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    header .subtitle {
+      font-size: 12px;
+      color: #cbd5f5;
+      margin-top: 4px;
+    }
+    header .meta {
+      margin-top: 4px;
+      font-size: 11px;
+      color: #9ca3af;
+    }
+    main {
+      padding: 12px 20px 24px;
+    }
+    .layout {
+      display: flex;
+      gap: 16px;
+    }
+    .panel {
+      flex: 1;
+      min-width: 0;
+      background-color: #020617;
+      border-radius: 10px;
+      border: 1px solid #111827;
+      padding: 10px 12px 12px;
+    }
+    .panel h2 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .panel .hint {
+      font-size: 11px;
+      color: #6b7280;
+      margin-bottom: 6px;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px;
+    }
+
+    /* Tree */
+    .tree {
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .tree ul {
+      list-style: none;
+      margin: 0;
+      padding-left: 16px;
+      border-left: 1px solid #1f2937;
+    }
+    .tree-root {
+      font-size: 12px;
+      font-weight: 500;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .tree-node {
+      position: relative;
+      padding: 3px 0 3px 12px;
+    }
+    .tree-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .tree-node::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 10px;
+      width: 10px;
+      height: 1px;
+      background-color: #1f2937;
+    }
+    .icon {
+      font-size: 11px;
+      opacity: 0.8;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0 6px;
+      border-radius: 999px;
+      font-size: 10px;
+      border: 1px solid transparent;
+    }
+    .badge.online {
+      background-color: rgba(34, 197, 94, 0.15);
+      border-color: rgba(34, 197, 94, 0.5);
+      color: #bbf7d0;
+    }
+    .badge.offline {
+      background-color: rgba(148, 163, 184, 0.15);
+      border-color: rgba(148, 163, 184, 0.5);
+      color: #e5e7eb;
+    }
+    .badge.apikey {
+      background-color: rgba(59, 130, 246, 0.1);
+      border-color: rgba(59, 130, 246, 0.6);
+      color: #bfdbfe;
+    }
+    .badge.oauth {
+      background-color: rgba(52, 211, 153, 0.1);
+      border-color: rgba(52, 211, 153, 0.6);
+      color: #a7f3d0;
+    }
+    .badge.none {
+      background-color: rgba(156, 163, 175, 0.1);
+      border-color: rgba(156, 163, 175, 0.6);
+      color: #e5e7eb;
+    }
+    .badge.status-valid {
+      background-color: rgba(34, 197, 94, 0.15);
+      border-color: rgba(34, 197, 94, 0.5);
+      color: #bbf7d0;
+    }
+    .badge.status-expiring {
+      background-color: rgba(234, 179, 8, 0.15);
+      border-color: rgba(234, 179, 8, 0.5);
+      color: #facc15;
+    }
+    .badge.status-expired {
+      background-color: rgba(239, 68, 68, 0.15);
+      border-color: rgba(239, 68, 68, 0.5);
+      color: #fecaca;
+    }
+    .badge.status-invalid {
+      background-color: rgba(148, 163, 184, 0.15);
+      border-color: rgba(148, 163, 184, 0.5);
+      color: #e5e7eb;
+    }
+    .tag {
+      padding: 0 4px;
+      border-radius: 4px;
+      border: 1px solid #1f2937;
+      font-size: 10px;
+      color: #9ca3af;
+      background-color: #020617;
+    }
+    .dim {
+      color: #6b7280;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>RouteCodex Token Daemon 预览</h1>
+    <div class="subtitle">树状结构：服务器 → Providers → Tokens / Tokens → Used By</div>
+    <div class="meta">
+      所有数据为静态示例，结构对齐 CLI 输出：<span class="mono">token-daemon servers/providers/tokens --json</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- 顶部统计区 -->
+    <section style="margin-bottom: 12px; display:flex; gap:12px; flex-wrap:wrap;">
+      <div style="flex:1; min-width:180px; background:#020617; border:1px solid #111827; border-radius:10px; padding:8px 10px;">
+        <div style="font-size:11px; color:#9ca3af; margin-bottom:4px;">系统统计</div>
+        <div style="display:flex; gap:12px; font-size:12px;">
+          <div>
+            <div class="dim" style="font-size:11px;">Servers</div>
+            <div class="mono">2 <span class="dim">(1 online)</span></div>
+          </div>
+          <div>
+            <div class="dim" style="font-size:11px;">Providers</div>
+            <div class="mono">10 <span class="dim">(6 apikey / 4 oauth)</span></div>
+          </div>
+          <div>
+            <div class="dim" style="font-size:11px;">Tokens</div>
+            <div class="mono">
+              5
+              <span class="dim">(valid=2 / expiring=1 / expired=1 / invalid=1)</span>
+            </div>
+          </div>
+          <div>
+            <div class="dim" style="font-size:11px;">Last Refresh</div>
+            <div class="mono">2025-12-26T08:54:00Z</div>
+          </div>
+        </div>
+      </div>
+      <div style="flex:0 0 220px; min-width:200px; background:#020617; border:1px solid #111827; border-radius:10px; padding:8px 10px;">
+        <div style="font-size:11px; color:#9ca3af; margin-bottom:4px;">操作</div>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <button style="font-size:12px; padding:4px 8px; border-radius:6px; border:none; cursor:default; background:linear-gradient(90deg,#4f46e5,#06b6d4); color:#f9fafb;">
+            ⟳ 重启所有受影响的 Providers
+          </button>
+          <div class="dim" style="font-size:11px;">
+            实际实现中，这里可以调用后端 API，例如：
+            <span class="mono">routecodex restart</span> 或 针对单个 server 的重启命令。
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="layout">
+      <!-- 左侧：Server → Providers → Tokens 视角 -->
+      <section class="panel">
+        <h2>Server 视角（自上而下）</h2>
+        <div class="hint">
+          入口：<span class="mono">servers + providers</span>，按「服务器 → Provider → TokenFile」组织。
+        </div>
+
+        <div class="tree">
+          <div class="tree-root">
+            <span class="icon">🖥</span>
+            <span class="mono">Servers</span>
+          </div>
+          <ul>
+            <li class="tree-node">
+              <div class="tree-label">
+                <span class="icon">📦</span>
+                <span class="mono">local-5520</span>
+                <span class="badge offline">offline</span>
+                <span class="dim mono">(~/.routecodex/config.json)</span>
+              </div>
+              <ul>
+                <li class="tree-node">
+                  <div class="tree-label">
+                    <span class="icon">🤖</span>
+                    <span class="mono">glm</span>
+                    <span class="tag">protocol=openai</span>
+                    <span class="badge apikey">apikey</span>
+                    <span class="dim mono">source=inline value=6484…ttZB</span>
+                  </div>
+                </li>
+                <li class="tree-node">
+                  <div class="tree-label">
+                    <span class="icon">🤖</span>
+                    <span class="mono">qwen</span>
+                    <span class="tag">protocol=openai</span>
+                    <span class="badge oauth">oauth</span>
+                    <span class="dim mono">tokenFile=~/.routecodex/auth/qwen-oauth.json</span>
+                  </div>
+                  <ul>
+                    <li class="tree-node">
+                      <div class="tree-label">
+                        <span class="icon">🔑</span>
+                        <span class="mono">token: work (qwen-oauth-1-work.json)</span>
+                        <span class="badge status-expired">expired</span>
+                        <span class="dim mono">expiresAt=2025-12-25T23:10Z</span>
+                      </div>
+                    </li>
+                  </ul>
+                </li>
+                <li class="tree-node">
+                  <div class="tree-label">
+                    <span class="icon">🤖</span>
+                    <span class="mono">iflow</span>
+                    <span class="tag">protocol=openai</span>
+                    <span class="badge oauth">oauth</span>
+                    <span class="dim mono">tokenFile=~/.routecodex/auth/iflow-oauth-1-186.json</span>
+                  </div>
+                  <ul>
+                    <li class="tree-node">
+                      <div class="tree-label">
+                        <span class="icon">🔑</span>
+                        <span class="mono">token: 186 (iflow-oauth-1-186.json)</span>
+                        <span class="badge status-valid">valid</span>
+                        <span class="dim mono">剩余=652min</span>
+                      </div>
+                    </li>
+                    <li class="tree-node">
+                      <div class="tree-label">
+                        <span class="icon">🔑</span>
+                        <span class="mono">token: 173 (iflow-oauth-2-173.json)</span>
+                        <span class="badge status-expiring">expiring</span>
+                        <span class="dim mono">剩余=12min</span>
+                      </div>
+                    </li>
+                  </ul>
+                </li>
+                <li class="tree-node">
+                  <div class="tree-label">
+                    <span class="icon">🤖</span>
+                    <span class="mono">gemini</span>
+                    <span class="tag">protocol=openai</span>
+                    <span class="badge apikey">apikey</span>
+                    <span class="dim mono">source=inline value=AIza…3mEQ</span>
+                  </div>
+                </li>
+                <li class="tree-node">
+                  <div class="tree-label">
+                    <span class="icon">🤖</span>
+                    <span class="mono">lmstudio</span>
+                    <span class="tag">protocol=responses</span>
+                    <span class="badge apikey">apikey</span>
+                    <span class="dim mono">value=${LM_STUDIO_API_KEY:-}</span>
+                  </div>
+                </li>
+              </ul>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 右侧：Token → Used By 视角 + 重启按钮 -->
+      <section class="panel">
+        <h2>Token 视角（自下而上）</h2>
+        <div class="hint">
+          入口：<span class="mono">tokens</span>，按「Token → 使用它的服务器/Providers」组织。
+          在这个视角下点击某个 usedBy 节点可以触发对应 Provider 的重启。
+        </div>
+
+        <div class="tree">
+          <div class="tree-root">
+            <span class="icon">🔑</span>
+            <span class="mono">Tokens</span>
+          </div>
+          <ul>
+            <li class="tree-node">
+              <div class="tree-label">
+                <span class="icon">🌐</span>
+                <span class="mono">iflow</span>
+              </div>
+              <ul>
+                <li class="tree-node">
+                  <div class="tree-label">
+                    <span class="icon">🗝</span>
+                    <span class="mono">186 (iflow-oauth-1-186.json)</span>
+                    <span class="badge status-valid">valid</span>
+                    <span class="dim mono">expiresAt=2025-12-26T11:46:37Z, 剩余=652min</span>
+                  </div>
+                  <ul>
+                    <li class="tree-node">
+                      <div class="tree-label">
+                        <span class="icon">📦</span>
+                        <span class="mono">usedBy: local-5520:iflow</span>
+                        <span class="tag">protocol=openai</span>
+                        <button style="margin-left:6px; font-size:11px; padding:1px 6px; border-radius:6px; border:none; background:#1f2937; color:#e5e7eb; cursor:default;">
+                          ⟳ 重启该 Provider
+                        </button>
+                      </div>
+                    </li>
+                  </ul>
+                </li>
+                <li class="tree-node">
+                  <div class="tree-label">
+                    <span class="icon">🗝</span>
+                    <span class="mono">173 (iflow-oauth-2-173.json)</span>
+                    <span class="badge status-expiring">expiring</span>
+                    <span class="dim mono">expiresAt=2025-12-26T11:47:24Z, 剩余=12min</span>
+                  </div>
+                  <ul>
+                    <li class="tree-node">
+                      <div class="tree-label">
+                        <span class="icon">📦</span>
+                        <span class="mono">usedBy: local-5520:iflow</span>
+                        <span class="tag">protocol=openai</span>
+                        <button style="margin-left:6px; font-size:11px; padding:1px 6px; border-radius:6px; border:none; background:#1f2937; color:#e5e7eb; cursor:default;">
+                          ⟳ 重启该 Provider
+                        </button>
+                      </div>
+                    </li>
+                  </ul>
+                </li>
+              </ul>
+            </li>
+
+            <li class="tree-node">
+              <div class="tree-label">
+                <span class="icon">🌐</span>
+                <span class="mono">qwen</span>
+              </div>
+              <ul>
+                <li class="tree-node">
+                  <div class="tree-label">
+                    <span class="icon">🗝</span>
+                    <span class="mono">work (qwen-oauth-1-work.json)</span>
+                    <span class="badge status-expired">expired</span>
+                    <span class="dim mono">expiresAt=2025-12-25T23:10:00Z, 剩余=-5min</span>
+                  </div>
+                  <ul>
+                    <li class="tree-node">
+                      <div class="tree-label">
+                        <span class="icon">📦</span>
+                        <span class="mono">usedBy: local-5520:qwen</span>
+                        <span class="tag">protocol=openai</span>
+                        <button style="margin-left:6px; font-size:11px; padding:1px 6px; border-radius:6px; border:none; background:#1f2937; color:#e5e7eb; cursor:default;">
+                          ⟳ 重启该 Provider
+                        </button>
+                      </div>
+                    </li>
+                  </ul>
+                </li>
+              </ul>
+            </li>
+
+            <li class="tree-node">
+              <div class="tree-label">
+                <span class="icon">🌐</span>
+                <span class="mono">gemini-cli</span>
+              </div>
+              <ul>
+                <li class="tree-node">
+                  <div class="tree-label">
+                    <span class="icon">🗝</span>
+                    <span class="mono">primary (gemini-oauth-1-primary.json)</span>
+                    <span class="badge status-invalid">invalid</span>
+                    <span class="dim mono">无有效 access_token/api_key</span>
+                  </div>
+                  <ul>
+                    <li class="tree-node">
+                      <div class="tree-label">
+                        <span class="icon">📦</span>
+                        <span class="mono">usedBy: -</span>
+                        <span class="dim">(尚未绑定到任何 provider)</span>
+                      </div>
+                    </li>
+                  </ul>
+                </li>
+              </ul>
+            </li>
+          </ul>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

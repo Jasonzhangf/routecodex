@@ -56,4 +56,11 @@ IFLOW_TOKEN_FILE="$HOME/.routecodex/auth/iflow-oauth-1-primary.json" node script
 
 ## Provider Support
 
-Currently only iFlow supports multi-token authentication. Other providers will be added as needed.
+Currently the following providers support multi-token authentication:
+
+- iFlow (`iflow-oauth-*.json`)
+- Qwen (`qwen-oauth-*.json`)
+- Gemini CLI (`gemini-oauth-*.json`)
+- Antigravity (`antigravity-oauth-*.json`)
+
+Other providers will be added as needed.
