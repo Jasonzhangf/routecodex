@@ -59,11 +59,12 @@ try {
   if (args.name === 'routecodex' || args.name === 'rcc') {
     mutated.bundledDependencies = [];
     mutated.bundleDependencies = [];
+    const llmsVersion = original.dependencies?.['@jsonstudio/llms'] || '^0.6.230';
     mutated.dependencies = {
       ...(original.dependencies || {}),
       "ajv": original.dependencies?.ajv || "^8.17.1",
       "zod": original.dependencies?.zod || "^3.23.8",
-      "@jsonstudio/llms": original.dependencies?.["@jsonstudio/llms"] || "^0.4.3"
+      "@jsonstudio/llms": llmsVersion
     };
   }
   fs.writeFileSync(pkgPath, JSON.stringify(mutated, null, 2));
