@@ -590,6 +590,27 @@ export class HubRequestExecutor implements RequestExecutor {
         body: converted.body ?? body
       };
     } catch (error) {
+      const err = error as Error | unknown;
+      const message = err instanceof Error ? err.message : String(err ?? 'Unknown error');
+      const providerProtocol = mapProviderProtocol(options.providerType);
+
+      // 对于 Gemini 等基于 SSE 的 provider，如果 llmswitch-core 报告
+      // “Failed to convert SSE payload ...” 之类错误，说明上游流式响应已异常
+      // 终止（如 Cloud Code 终止/上下文超限），继续回退到原始 SSE 只会让
+      // 客户端挂起。因此在此类场景下直接抛出错误，让 HTTP 层返回明确的
+      // 5xx/4xx，而不是静默退回原始 payload。
+      const isSseConvertFailure =
+        typeof message === 'string' &&
+        message.toLowerCase().includes('failed to convert sse payload');
+
+      if (providerProtocol === 'gemini-chat' && isSseConvertFailure) {
+        console.error(
+          '[RequestExecutor] Fatal SSE decode error for Gemini provider, bubbling as HTTP error',
+          error
+        );
+        throw error;
+      }
+
       console.error('[RequestExecutor] Failed to convert provider response via llmswitch-core', error);
       return options.response;
     }

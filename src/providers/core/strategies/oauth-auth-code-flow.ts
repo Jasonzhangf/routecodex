@@ -241,15 +241,15 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     const http = await import('http');
     const url = await import('url');
 
-    // 固定为 localhost:8080/oauth2callback（与 iflow CLI 一致）
+    // 固定回调路径为 /oauth2callback，但监听地址放宽为所有本地地址，避免 IPv4/IPv6 解析差异导致浏览器可访问但 Node 端口未监听
     const configured = this.config.client.redirectUri;
-    let host = 'localhost';
+    let redirectHost = 'localhost';
     let port: number = 8080;
     let pathName = '/oauth2callback';
     try {
       if (configured) {
         const u = new URL(configured);
-        host = u.hostname || host;
+        redirectHost = u.hostname || redirectHost;
         const parsedPort = Number(u.port || '');
         if (Number.isFinite(parsedPort) && parsedPort > 0) {
           port = parsedPort;
@@ -265,7 +265,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       const server = http.createServer(async (req, res) => {
         try {
           logOAuthDebug(`[OAuth] Callback server received request: ${req.url}`);
-          const full = new url.URL(req.url || '/', `http://${host}:${port}`);
+          const full = new url.URL(req.url || '/', `http://${redirectHost}:${port}`);
           const reqPath = full.pathname || '';
           const okPath = reqPath === pathName || /oauth.*callback/i.test(reqPath);
 
@@ -352,14 +352,23 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       // 添加服务器错误处理
       server.on('error', (error: Error) => {
         logOAuthDebug(`[OAuth] Callback server error: ${error.message}`);
+        console.error(
+          '[OAuth] Callback server failed to start or encountered an error:',
+          error.message
+        );
         if (timeoutHandle) clearTimeout(timeoutHandle);
         reject(new Error(`Failed to start callback server: ${error.message}`));
       });
 
       // 等待服务器完全启动
-      server.listen(port, host, () => {
-        logOAuthDebug(`[OAuth] Callback server listening on ${host}:${port}${pathName}`);
-        console.log(`[OAuth] Waiting for OAuth callback at http://${host}:${port}${pathName}`);
+      // 不指定 host，监听所有地址，避免 localhost 解析到仅 IPv6 或仅 IPv4 时造成连接被拒绝
+      server.listen(port, () => {
+        logOAuthDebug(
+          `[OAuth] Callback server listening on 0.0.0.0:${port}${pathName} (redirect host=${redirectHost})`
+        );
+        console.log(
+          `[OAuth] Waiting for OAuth callback at http://${redirectHost}:${port}${pathName}`
+        );
         console.log(`[OAuth] You have 10 minutes to complete the authentication in your browser`);
 
         // 设置 10 分钟超时
@@ -373,7 +382,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     });
 
     // 更新重定向URI（使用配置中的路径或默认）
-    const redirectUri = `http://${host}:${port}${pathName}`;
+    const redirectUri = `http://${redirectHost}:${port}${pathName}`;
     logOAuthDebug(`[OAuth] Callback redirect URI: ${redirectUri}`);
 
     return { callbackPromise, redirectUri };
