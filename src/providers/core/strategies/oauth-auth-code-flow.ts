@@ -558,6 +558,13 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
         }
 
         const tokenData = await response.json() as AuthCodeTokenResponse;
+
+        // Google OAuth doesn't always return a new refresh_token during refresh
+        // Preserve the original refresh_token if not provided in the new response
+        if (!tokenData.refresh_token && refreshToken) {
+          tokenData.refresh_token = refreshToken;
+        }
+
         return await this.handlePostTokenActivation(tokenData);
 
       } catch (error) {

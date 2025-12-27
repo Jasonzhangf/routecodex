@@ -102,28 +102,16 @@ export function dispatchSseStream(options: DispatchSseOptions): boolean {
       }
     }
 
-    // Process chunk through UTF-8 buffer to prevent splitting multibyte characters
+    // Direct write without buffering (for testing)
     try {
-      const safeChunks = utf8Buffer.push(chunk instanceof Buffer || typeof chunk === 'string' ? chunk : String(chunk));
-      for (const safeChunk of safeChunks) {
-        res.write(safeChunk);
-      }
-    } catch (error) {
-      // Fallback: write directly if buffering fails
       res.write(chunk);
+    } catch (error) {
+      /* ignore write errors */
     }
   });
 
   stream.on('end', () => {
-    // Flush any remaining buffered data, then end the response
-    try {
-      const remaining = utf8Buffer.flush();
-      if (remaining) {
-        res.write(remaining);
-      }
-    } catch {
-      /* ignore flush errors */
-    }
+    // End response directly (UTF-8 buffer disabled for testing)
     try {
       res.end();
     } catch {

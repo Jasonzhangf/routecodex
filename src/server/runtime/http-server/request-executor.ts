@@ -18,6 +18,15 @@ type ConvertProviderResponseFn = (options: {
   context: Record<string, unknown>;
   entryEndpoint: string;
   wantsStream: boolean;
+  providerInvoker?: (options: {
+    providerKey: string;
+    providerType?: string;
+    modelId?: string;
+    providerProtocol: string;
+    payload: Record<string, unknown>;
+    entryEndpoint: string;
+    requestId: string;
+  }) => Promise<{ providerResponse: Record<string, unknown> }>;
   stageRecorder?: unknown;
 }) => Promise<Record<string, unknown> & { __sse_responses?: unknown; body?: unknown }>;
 type SnapshotRecorderFactory = (context: Record<string, unknown>, entryEndpoint: string) => unknown;
@@ -512,12 +521,14 @@ export class HubRequestExecutor implements RequestExecutor {
       const metadataBag = asRecord(options.pipelineMetadata);
       const aliasMap = extractAnthropicToolAliasMap(metadataBag);
       const originalModelId = this.extractClientModelId(metadataBag, options.originalRequest);
-      const adapterContext = {
-        requestId: options.requestId,
-        entryEndpoint: options.entryEndpoint || entry,
-        providerProtocol,
-        originalModelId
+      const baseContext: Record<string, unknown> = {
+        ...(metadataBag ?? {})
       };
+      baseContext.requestId = options.requestId;
+      baseContext.entryEndpoint = options.entryEndpoint || entry;
+      baseContext.providerProtocol = providerProtocol;
+      baseContext.originalModelId = originalModelId;
+      const adapterContext = baseContext;
       if (aliasMap) {
         (adapterContext as Record<string, unknown>).anthropicToolNameMap = aliasMap;
       }
@@ -525,13 +536,47 @@ export class HubRequestExecutor implements RequestExecutor {
         loadConvertProviderResponse(),
         loadSnapshotRecorderFactory()
       ]);
-      const stageRecorder = createSnapshotRecorder(adapterContext, adapterContext.entryEndpoint);
+      const stageRecorder = createSnapshotRecorder(
+        adapterContext,
+        typeof (adapterContext as Record<string, unknown>).entryEndpoint === 'string'
+          ? ((adapterContext as Record<string, unknown>).entryEndpoint as string)
+          : options.entryEndpoint || entry
+      );
+
+      const providerInvoker = async (invokeOptions: {
+        providerKey: string;
+        providerType?: string;
+        modelId?: string;
+        providerProtocol: string;
+        payload: Record<string, unknown>;
+        entryEndpoint: string;
+        requestId: string;
+      }): Promise<{ providerResponse: Record<string, unknown> }> => {
+        // Delegate to existing runtimeManager / Provider V2 stack.
+        const runtimeKey = this.deps.runtimeManager.resolveRuntimeKey(invokeOptions.providerKey);
+        if (!runtimeKey) {
+          throw new Error(`Runtime for provider ${invokeOptions.providerKey} not initialized`);
+        }
+        const handle = this.deps.runtimeManager.getHandleByRuntimeKey(runtimeKey);
+        if (!handle) {
+          throw new Error(`Provider runtime ${runtimeKey} not found`);
+        }
+        const providerResponse = await handle.instance.processIncoming(invokeOptions.payload);
+        const normalized = this.normalizeProviderResponse(providerResponse);
+        const bodyPayload =
+          normalized.body && typeof normalized.body === 'object'
+            ? (normalized.body as Record<string, unknown>)
+            : (normalized as unknown as Record<string, unknown>);
+        return { providerResponse: bodyPayload };
+      };
+
       const converted = await convertProviderResponse({
         providerProtocol,
         providerResponse: body as Record<string, unknown>,
         context: adapterContext,
         entryEndpoint: options.entryEndpoint || entry,
         wantsStream: options.wantsStream,
+        providerInvoker,
         stageRecorder
       });
       if (converted.__sse_responses) {

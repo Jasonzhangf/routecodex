@@ -45,7 +45,21 @@
       ],
       "vision": [
         "glm.glm-4.6v"
+      ],
+      "web_search": [
+        "glm.glm-4.7"
       ]
+    },
+    "webSearch": {
+      "engines": [
+        {
+          "id": "glm",
+          "providerKey": "glm.glm-4.7",
+          "description": "GLM 4.7 web search backend",
+          "default": true
+        }
+      ],
+      "injectPolicy": "selective"
     }
   },
   "httpserver": {

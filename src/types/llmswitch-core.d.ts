@@ -52,12 +52,24 @@ declare module '@jsonstudio/llms/dist/router/virtual-router/types.js' {
 
 declare module '@jsonstudio/llms/dist/conversion/hub/response/provider-response.js' {
   import type { Readable } from 'stream';
+  export type ProviderInvoker = (options: {
+    providerKey: string;
+    providerType?: string;
+    modelId?: string;
+    providerProtocol: string;
+    payload: Record<string, unknown>;
+    entryEndpoint: string;
+    requestId: string;
+  }) => Promise<{
+    providerResponse: Record<string, unknown>;
+  }>;
   export function convertProviderResponse(options: {
     providerProtocol: string;
     providerResponse: Record<string, unknown>;
     context: Record<string, unknown>;
     entryEndpoint: string;
     wantsStream: boolean;
+    providerInvoker?: ProviderInvoker;
   }): Promise<{ body?: Record<string, unknown>; __sse_responses?: Readable; format?: string }>;
 }
 

@@ -321,6 +321,9 @@ class GeminiSseNormalizer extends Transform {
   private decoder: StringDecoder;
   private buffer = '';
   private lastDonePayload: Record<string, unknown> | null = null;
+  private eventCounter = 0;
+  private chunkCounter = 0;
+  private processedEventCounter = 0;
 
   constructor() {
     super();
@@ -328,6 +331,7 @@ class GeminiSseNormalizer extends Transform {
   }
 
   override _transform(chunk: unknown, _encoding: BufferEncoding, callback: TransformCallback): void {
+    this.chunkCounter++;
     if (chunk) {
       let text = '';
       if (Buffer.isBuffer(chunk)) {
@@ -349,6 +353,13 @@ class GeminiSseNormalizer extends Transform {
       this.buffer += remaining.replace(/\r\n/g, '\n');
     }
     this.processBuffered(true);
+
+    console.log('[GeminiSseNormalizer] Stream complete:', {
+      totalChunks: this.chunkCounter,
+      processedEvents: this.processedEventCounter,
+      emittedEvents: this.eventCounter
+    });
+
     if (this.lastDonePayload) {
       this.pushEvent('gemini.done', this.lastDonePayload);
       this.lastDonePayload = null;
@@ -357,22 +368,34 @@ class GeminiSseNormalizer extends Transform {
   }
 
   private processBuffered(flush = false): void {
+    let eventsFound = 0;
     while (true) {
       const separatorIndex = this.buffer.indexOf('\n\n');
       if (separatorIndex === -1) {
         break;
       }
+      eventsFound++;
       const rawEvent = this.buffer.slice(0, separatorIndex);
       this.buffer = this.buffer.slice(separatorIndex + 2);
       this.processEvent(rawEvent);
     }
     if (flush && this.buffer.trim().length) {
+      console.log('[GeminiSseNormalizer] Final buffer flush:', {
+        bufferLength: this.buffer.length,
+        bufferPreview: this.buffer.slice(0, 300),
+        eventsFoundInLoop: eventsFound
+      });
       this.processEvent(this.buffer);
       this.buffer = '';
+    } else if (flush) {
+      console.log('[GeminiSseNormalizer] Flush called but buffer empty:', {
+        eventsFoundInLoop: eventsFound
+      });
     }
   }
 
   private processEvent(rawEvent: string): void {
+    this.processedEventCounter++;
     const trimmed = rawEvent.trim();
     if (!trimmed.length) {
       return;
@@ -393,17 +416,28 @@ class GeminiSseNormalizer extends Transform {
       const parsed = JSON.parse(payloadText) as { response?: Record<string, unknown> };
       const response = parsed?.response;
       if (!response || typeof response !== 'object') {
+        // Log dropped events for debugging
+        console.warn('[GeminiSseNormalizer] Dropped event without valid response field:', {
+          hasResponse: !!parsed?.response,
+          parsedKeys: Object.keys(parsed || {}),
+          payloadPreview: payloadText.slice(0, 150)
+        });
         return;
       }
       this.emitCandidateParts(response as Record<string, unknown>);
-    } catch {
-      // ignore malformed chunks
+    } catch (err) {
+      // Log parse failures for debugging
+      console.error('[GeminiSseNormalizer] Failed to parse SSE payload:', {
+        error: err instanceof Error ? err.message : String(err),
+        payloadPreview: payloadText.slice(0, 200)
+      });
     }
   }
 
   private emitCandidateParts(response: Record<string, unknown>): void {
     const candidatesRaw = (response as { candidates?: unknown }).candidates;
     const candidates = Array.isArray(candidatesRaw) ? (candidatesRaw as Record<string, unknown>[]) : [];
+
     candidates.forEach((candidate, index) => {
       const content =
         candidate && typeof candidate.content === 'object' && candidate.content !== null
@@ -411,16 +445,21 @@ class GeminiSseNormalizer extends Transform {
           : undefined;
       const role = typeof content?.role === 'string' ? (content.role as string) : 'model';
       const partsRaw = content?.parts;
-      const parts = Array.isArray(partsRaw) ? (partsRaw as unknown[]) : [];
+      const parts = Array.isArray(partsRaw) ? (partsRaw as Record<string, unknown>[]) : [];
+
       for (const part of parts) {
+        if (!part || typeof part !== 'object') continue;
+
+        // Send raw Gemini part - let llmswitch-core handle the conversion to target protocol
         this.pushEvent('gemini.data', {
           candidateIndex: index,
           role,
-          part
+          part  // ← Raw Gemini part object
         });
       }
     });
 
+    // Preserve finish reason, safety ratings, and usage metadata
     this.lastDonePayload = {
       candidates: candidates.map((candidate, index) => ({
         index,
@@ -440,6 +479,7 @@ class GeminiSseNormalizer extends Transform {
   }
 
   private pushEvent(eventName: string, payload: Record<string, unknown>): void {
+    this.eventCounter++;
     try {
       const data = JSON.stringify(payload);
       this.push(`event: ${eventName}\ndata: ${data}\n\n`);

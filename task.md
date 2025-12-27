@@ -124,3 +124,55 @@ Ensure virtual router respects each provider/model's real context limit. When a 
 ## Execution Log
 
 - 2025-12-24: Drafted plan and constraints for virtual router context management.
+
+---
+
+# Task: Server-side Web Search Tool & Backends
+
+## Goal
+
+Introduce a unified server-side `web_search` tool that main models can call as a normal function, while the Hub Pipeline internally routes search calls to pluggable backend models (GLM, Gemini, etc.), with config-driven engine selection and minimal changes to existing routing.
+
+## Constraints
+
+- Main provider/model selection must remain owned by the virtual router’s normal routes (e.g., `default`, `coding`); `web_search` cannot override the primary route.
+- Provider layer stays transport-only; all `web_search` logic (tool schema, engine selection, secondary calls) lives in llmswitch-core / Hub Pipeline.
+- Config remains the single source of truth for which engines are exposed and how they map to backends.
+- Sticky behaviour is per call chain only: web search stays enabled until the final assistant response returns with `finish_reason == "stop"`, then resets.
+
+## Plan
+
+1. Document & configuration wiring
+   - [x] Add `docs/web-search-service-design.md` describing the server-side tool, routing, and backends.
+   - [ ] Extend virtual router config schema to support a `webSearch` section with `engines[]` and `injectPolicy`.
+   - [ ] Add `routing.web_search` backend route in config bootstrap, validating that all `webSearch.engines[*].providerKey` are present.
+
+2. Unified `web_search` tool schema (Hub Pipeline)
+   - [ ] Define a canonical `web_search` function tool shape in llmswitch-core (OpenAI Chat/Responses-compatible).
+   - [ ] Generate the tool’s `engine` enum and description dynamically from `webSearch.engines` config.
+   - [ ] Integrate tool injection into the request pipeline based on `injectPolicy` (`always` vs `selective`) and classifier web search intent flags.
+
+3. Sticky enablement & reset logic
+   - [ ] Introduce per-call-chain metadata to mark `webSearchEnabled` once intent or a `web_search` tool call is seen.
+   - [ ] Ensure subsequent stages within the same call chain honour this flag for tool injection, even if intent is not re-detected.
+   - [ ] Reset `webSearchEnabled` when the final assistant response for the call has `finish_reason == "stop"`.
+
+4. Backend routing & engine selection
+   - [ ] Implement a server-side `web_search` tool handler that intercepts `function_call.name === "web_search"` / equivalent Responses output.
+   - [ ] Map `engine` (or default when only one engine exists) to a configured backend `providerKey` and route the secondary request via `routing.web_search`.
+   - [ ] Normalize backend responses into a common tool output format (`summary` + `hits[] + engine`), preserving enough detail for downstream reasoning.
+
+5. GLM backend integration (v1)
+   - [ ] Extend `chat:glm` compat profile so search backend requests inject GLM’s `tools.web_search` schema and appropriate parameters (search engine, `enable`, `count`, recency, etc.).
+   - [ ] Map GLM’s `web_search` response field into the normalized `hits[]` structure for the unified tool result.
+   - [ ] Add smoke tests that send a `/v1/chat/completions` request through RouteCodex to a main model that calls `web_search`, verifying GLM-based search end‑to‑end.
+
+6. Gemini backend integration (future)
+   - [ ] Analyse Gemini models that only support search tools (e.g., `gemini-2.5-flash-lite`) and derive a minimal search schema.
+   - [ ] Add a Gemini-based engine entry to `webSearch.engines` and `routing.web_search`, ensuring compatibility constraints are respected (search tools only).
+   - [ ] Verify that mixed-engine configs (e.g., `glm` + `google`) surface clear engine descriptions so third-party providers/models can choose appropriately.
+
+7. Safety, observability & docs
+   - [ ] Add logging for web search engine selection, backend route hits, and tool result normalization (with minimal sensitive data).
+   - [ ] Extend existing monitoring/semantic logs to tag web search executions (engine id, backend providerKey, latency).
+   - [ ] Update user-facing docs/config samples to show how to enable `webSearch`, configure engines, and understand the difference between `search` (internal) and `web_search` (web).
