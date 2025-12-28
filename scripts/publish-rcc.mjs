@@ -7,10 +7,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const PACK_SCRIPT = path.join(PROJECT_ROOT, 'scripts', 'pack-mode.mjs');
-const packageJson = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'package.json'), 'utf-8'));
-const version = packageJson.version;
-const tarballName = `jsonstudio-rcc-${version}.tgz`;
-const tarballPath = path.join(PROJECT_ROOT, tarballName);
+const pkgPath = path.join(PROJECT_ROOT, 'package.json');
 
 function run(command, args, options = {}) {
   const res = spawnSync(command, args, { stdio: 'inherit', ...options });
@@ -28,6 +25,13 @@ try {
 
   // 2) 通过 pack-mode 生成 rcc tarball（内部会临时切换 package.json.name/bin 并确保 llms 为 release 包）
   run(process.execPath, [PACK_SCRIPT, '--name', '@jsonstudio/rcc', '--bin', 'rcc'], { cwd: PROJECT_ROOT });
+
+  // 构建过程中版本号可能被 bump（gen-build-info 会 auto-bump），因此需要在 pack 之后重新读取版本号
+  const updatedPkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+  const version = updatedPkg.version;
+  const tarballName = `jsonstudio-rcc-${version}.tgz`;
+  const tarballPath = path.join(PROJECT_ROOT, tarballName);
+
   if (!fs.existsSync(tarballPath)) {
     throw new Error(`tarball not found: ${tarballPath}`);
   }

@@ -348,12 +348,25 @@
         "tab.gpt-5.2-codex"
       ],
       "vision": [
-        "iflow.qwen3-vl-plus",
-        "glm.glm-4.7"
+        {
+          "id": "vision-primary",
+          "targets": [
+            "glm.glm-4.6v",
+            "iflow.qwen3-vl-plus",
+            "glm.glm-4.7"
+          ],
+          "force": true
+        }
       ],
       "search": [
-        "iflow.kimi-k2",
-        "qwen.qwen3-coder-plus"
+        {
+          "id": "search-primary",
+          "targets": [
+            "iflow.kimi-k2",
+            "qwen.qwen3-coder-plus"
+          ],
+          "force": true
+        }
       ],
       "background": [
         "glm.glm-4.7",
@@ -364,6 +377,23 @@
         "qwen.qwen3-coder-plus",
         "iflow.kimi-k2"
       ]
+    },
+      "webSearch": {
+      "engines": [
+        {
+          "id": "iflow",
+          "providerKey": "iflow.kimi-k2",
+          "description": "iFlow Kimi K2 web search backend",
+          "default": true
+        },
+        {
+          "id": "qwen",
+          "providerKey": "qwen.qwen3-coder-plus",
+          "description": "Qwen3 Coder Plus web search backend"
+        }
+      ],
+      "injectPolicy": "selective",
+      "force": true
     }
   }
 }

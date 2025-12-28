@@ -54,7 +54,9 @@ function registerProviderOAuthConfigs(): void {
       supportsPKCE: true,
       supportsApiKeyExchange: false,
       requireHttpsCallback: true,
-      customState: false
+      customState: false,
+      // 对齐 Gemini/Antigravity：始终请求可刷新离线 token
+      requestOfflineAccess: true
     }
   });
 
@@ -96,7 +98,9 @@ function registerProviderOAuthConfigs(): void {
       supportsPKCE: true,
       supportsApiKeyExchange: true,
       requireHttpsCallback: true,
-      customState: true
+      customState: true,
+      // 对齐 Antigravity/Gemini：请求离线 refresh_token，便于自动续期
+      requestOfflineAccess: true
     }
   });
 

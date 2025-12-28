@@ -6,7 +6,12 @@ import { writeSnapshotViaHooks } from '../../../modules/llmswitch/bridge.js';
 import { buildInfo } from '../../../build-info.js';
 import { runtimeFlags } from '../../../runtime/runtime-flags.js';
 
-type Phase = 'provider-request' | 'provider-response' | 'provider-error';
+type Phase =
+  | 'provider-request'
+  | 'provider-response'
+  | 'provider-error'
+  | 'provider-preprocess-debug'
+  | 'provider-body-debug';
 type ClientPhase = 'client-request';
 
 const SNAPSHOT_BASE = path.join(os.homedir(), '.routecodex', 'codex-samples');

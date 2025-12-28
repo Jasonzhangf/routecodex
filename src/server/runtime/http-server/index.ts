@@ -64,6 +64,15 @@ type ConvertProviderResponseFn = (options: {
   context: Record<string, unknown>;
   entryEndpoint: string;
   wantsStream: boolean;
+  providerInvoker?: (options: {
+    providerKey: string;
+    providerType?: string;
+    modelId?: string;
+    providerProtocol: string;
+    payload: Record<string, unknown>;
+    entryEndpoint: string;
+    requestId: string;
+  }) => Promise<{ providerResponse: Record<string, unknown> }>;
   stageRecorder?: unknown;
 }) => Promise<Record<string, unknown> & { __sse_responses?: unknown; body?: unknown }>;
 type SnapshotRecorderFactory = (context: Record<string, unknown>, entryEndpoint: string) => unknown;
@@ -760,15 +769,15 @@ export class RouteCodexHttpServer {
     if (!this.isPipelineReady()) {
       throw new Error('Hub pipeline runtime is not initialized');
     }
-    const metadata = this.buildRequestMetadata(input);
+    const initialMetadata = this.buildRequestMetadata(input);
     const providerRequestId = input.requestId;
-    const clientRequestId = typeof metadata.clientRequestId === 'string' && metadata.clientRequestId.trim()
-      ? metadata.clientRequestId.trim()
+    const clientRequestId = typeof initialMetadata.clientRequestId === 'string' && initialMetadata.clientRequestId.trim()
+      ? initialMetadata.clientRequestId.trim()
       : providerRequestId;
 
     this.logStage('request.received', providerRequestId, {
       endpoint: input.entryEndpoint,
-      stream: input.metadata?.stream === true
+      stream: initialMetadata.stream === true
     });
     try {
       const headerUa =
@@ -783,7 +792,7 @@ export class RouteCodexHttpServer {
         headers: asRecord(input.headers),
         body: input.body,
         metadata: {
-          ...metadata,
+          ...initialMetadata,
           userAgent: headerUa,
           clientOriginator: headerOriginator
         }
@@ -792,165 +801,203 @@ export class RouteCodexHttpServer {
       // snapshot failure should not block request path
     }
     const pipelineLabel = 'hub';
-    this.logStage(`${pipelineLabel}.start`, providerRequestId, {
-      endpoint: input.entryEndpoint,
-      stream: metadata.stream
-    });
-    const originalRequestSnapshot = this.cloneRequestPayload(input.body);
-    const pipelineResult = await this.runHubPipeline(input, metadata);
-    const pipelineMetadata = pipelineResult.metadata ?? {};
-    const mergedMetadata = { ...metadata, ...pipelineMetadata };
-    this.logStage(`${pipelineLabel}.completed`, providerRequestId, {
-      route: pipelineResult.routingDecision?.routeName,
-      target: pipelineResult.target?.providerKey
-    });
+    let iterationMetadata = initialMetadata;
+    let followupTriggered = false;
 
-    const providerPayload = pipelineResult.providerPayload;
-    const target = pipelineResult.target;
-    if (!providerPayload || !target?.providerKey) {
-      throw Object.assign(new Error('Virtual router did not produce a provider target'), {
-        code: 'ERR_NO_PROVIDER_TARGET',
-        requestId: input.requestId
+    while (true) {
+      this.logStage(`${pipelineLabel}.start`, providerRequestId, {
+        endpoint: input.entryEndpoint,
+        stream: iterationMetadata.stream
       });
-    }
-
-    const runtimeKey = target.runtimeKey || this.providerKeyToRuntimeKey.get(target.providerKey);
-    if (!runtimeKey) {
-      throw Object.assign(new Error(`Runtime for provider ${target.providerKey} not initialized`), {
-        code: 'ERR_RUNTIME_NOT_FOUND',
-        requestId: input.requestId
+      const originalRequestSnapshot = this.cloneRequestPayload(input.body);
+      const pipelineResult = await this.runHubPipeline(input, iterationMetadata);
+      const pipelineMetadata = pipelineResult.metadata ?? {};
+      const mergedMetadata = { ...iterationMetadata, ...pipelineMetadata };
+      this.logStage(`${pipelineLabel}.completed`, providerRequestId, {
+        route: pipelineResult.routingDecision?.routeName,
+        target: pipelineResult.target?.providerKey
       });
-    }
 
-    const handle = this.providerHandles.get(runtimeKey);
-    if (!handle) {
-      throw Object.assign(new Error(`Provider runtime ${runtimeKey} not found`), {
-        code: 'ERR_PROVIDER_NOT_FOUND',
-        requestId: input.requestId
-      });
-    }
-
-    const providerProtocol =
-      (target.outboundProfile as ProviderProtocol) ||
-      handle.providerProtocol;
-
-    const metadataModel =
-      mergedMetadata?.target && typeof mergedMetadata.target === 'object'
-        ? (mergedMetadata.target as Record<string, unknown>).clientModelId
-        : undefined;
-    const rawModel =
-      this.extractProviderModel(providerPayload) ||
-      (typeof metadataModel === 'string' ? metadataModel : undefined);
-    const providerIdToken = target.providerKey || handle.providerId || runtimeKey;
-    if (!providerIdToken) {
-      throw Object.assign(new Error('Provider identifier missing for request'), {
-        code: 'ERR_PROVIDER_ID_MISSING',
-        requestId: providerRequestId
-      });
-    }
-    const enhancedRequestId = enhanceProviderRequestId(providerRequestId, {
-      entryEndpoint: input.entryEndpoint,
-      providerId: providerIdToken,
-      model: rawModel
-    });
-    if (providerProtocol === 'openai-responses') {
-      try {
-        await rebindResponsesConversationRequestId(pipelineResult.requestId, enhancedRequestId);
-      } catch {
-        /* ignore rebind failures */
+      const providerPayload = pipelineResult.providerPayload;
+      const target = pipelineResult.target;
+      if (!providerPayload || !target?.providerKey) {
+        throw Object.assign(new Error('Virtual router did not produce a provider target'), {
+          code: 'ERR_NO_PROVIDER_TARGET',
+          requestId: input.requestId
+        });
       }
-    }
-    if (enhancedRequestId !== input.requestId) {
-      input.requestId = enhancedRequestId;
-    }
-    mergedMetadata.clientRequestId = clientRequestId;
-    const providerModel = rawModel;
-    const providerLabel = this.buildProviderLabel(target.providerKey, providerModel);
 
-    this.logStage('provider.prepare', input.requestId, {
-      providerKey: target.providerKey,
-      runtimeKey,
-      protocol: providerProtocol,
-      providerType: handle.providerType,
-      providerFamily: handle.providerFamily,
-      model: providerModel,
-      providerLabel
-    });
+      const runtimeKey = target.runtimeKey || this.providerKeyToRuntimeKey.get(target.providerKey);
+      if (!runtimeKey) {
+        throw Object.assign(new Error(`Runtime for provider ${target.providerKey} not initialized`), {
+          code: 'ERR_RUNTIME_NOT_FOUND',
+          requestId: input.requestId
+        });
+      }
 
-    attachProviderRuntimeMetadata(providerPayload, {
-      requestId: input.requestId,
-      providerId: handle.providerId,
-      providerKey: target.providerKey,
-      providerType: handle.providerType,
-      providerFamily: handle.providerFamily,
-      providerProtocol,
-      pipelineId: target.providerKey,
-      routeName: pipelineResult.routingDecision?.routeName,
-      runtimeKey,
-      target,
-      metadata: mergedMetadata
-    });
+      const handle = this.providerHandles.get(runtimeKey);
+      if (!handle) {
+        throw Object.assign(new Error(`Provider runtime ${runtimeKey} not found`), {
+          code: 'ERR_PROVIDER_NOT_FOUND',
+          requestId: input.requestId
+        });
+      }
 
-    this.logStage('provider.send.start', input.requestId, {
-      providerKey: target.providerKey,
-      runtimeKey,
-      protocol: providerProtocol,
-      providerType: handle.providerType,
-      providerFamily: handle.providerFamily,
-      model: providerModel,
-      providerLabel
-    });
+      const providerProtocol =
+        (target.outboundProfile as ProviderProtocol) ||
+        handle.providerProtocol;
 
-    try {
-      const providerResponse = await handle.instance.processIncoming(providerPayload);
-      const responseStatus = this.extractResponseStatus(providerResponse);
-      this.logStage('provider.send.completed', input.requestId, {
-        providerKey: target.providerKey,
-        status: responseStatus,
-        providerType: handle.providerType,
-        providerFamily: handle.providerFamily,
-        model: providerModel,
-        providerLabel
-      });
-      const normalized = this.normalizeProviderResponse(providerResponse);
-      return await this.convertProviderResponseIfNeeded({
+      const metadataModel =
+        mergedMetadata?.target && typeof mergedMetadata.target === 'object'
+          ? (mergedMetadata.target as Record<string, unknown>).clientModelId
+          : undefined;
+      const rawModel =
+        this.extractProviderModel(providerPayload) ||
+        (typeof metadataModel === 'string' ? metadataModel : undefined);
+      const providerIdToken = target.providerKey || handle.providerId || runtimeKey;
+      if (!providerIdToken) {
+        throw Object.assign(new Error('Provider identifier missing for request'), {
+          code: 'ERR_PROVIDER_ID_MISSING',
+          requestId: providerRequestId
+        });
+      }
+      const enhancedRequestId = enhanceProviderRequestId(providerRequestId, {
         entryEndpoint: input.entryEndpoint,
-        providerType: handle.providerType,
-        requestId: input.requestId,
-        wantsStream: Boolean(input.metadata?.inboundStream ?? input.metadata?.stream),
-        originalRequest: originalRequestSnapshot,
-        processMode: pipelineResult.processMode,
-        response: normalized,
-        pipelineMetadata: mergedMetadata
+        providerId: providerIdToken,
+        model: rawModel
       });
-    } catch (error) {
-      this.logStage('provider.send.error', input.requestId, {
+      if (providerProtocol === 'openai-responses') {
+        try {
+          await rebindResponsesConversationRequestId(pipelineResult.requestId, enhancedRequestId);
+        } catch {
+          /* ignore rebind failures */
+        }
+      }
+      if (enhancedRequestId !== input.requestId) {
+        input.requestId = enhancedRequestId;
+      }
+      mergedMetadata.clientRequestId = clientRequestId;
+      const providerModel = rawModel;
+      const providerLabel = this.buildProviderLabel(target.providerKey, providerModel);
+
+      this.logStage('provider.prepare', input.requestId, {
         providerKey: target.providerKey,
-        message: error instanceof Error ? error.message : String(error ?? 'Unknown error'),
+        runtimeKey,
+        protocol: providerProtocol,
         providerType: handle.providerType,
         providerFamily: handle.providerFamily,
         model: providerModel,
         providerLabel
       });
-      const runtimeMetadata: ProviderErrorRuntimeMetadata & { providerFamily?: string } = {
+
+      attachProviderRuntimeMetadata(providerPayload, {
         requestId: input.requestId,
-        providerKey: target.providerKey,
         providerId: handle.providerId,
+        providerKey: target.providerKey,
         providerType: handle.providerType,
+        providerFamily: handle.providerFamily,
         providerProtocol,
-        routeName: pipelineResult.routingDecision?.routeName,
         pipelineId: target.providerKey,
+        routeName: pipelineResult.routingDecision?.routeName,
         runtimeKey,
-        target
-      };
-      runtimeMetadata.providerFamily = handle.providerFamily;
-      emitProviderError({
-        error,
-        stage: 'provider.send',
-        runtime: runtimeMetadata,
-        dependencies: this.getModuleDependencies()
+        target,
+        metadata: mergedMetadata
       });
-      throw error;
+
+      this.logStage('provider.send.start', input.requestId, {
+        providerKey: target.providerKey,
+        runtimeKey,
+        protocol: providerProtocol,
+        providerType: handle.providerType,
+        providerFamily: handle.providerFamily,
+        model: providerModel,
+        providerLabel
+      });
+
+      const wantsStreamBase = Boolean(input.metadata?.inboundStream ?? input.metadata?.stream);
+      const currentRouteName = pipelineResult.routingDecision?.routeName;
+      this.logStage('vision.followup.route', input.requestId, {
+        routeName: currentRouteName,
+        routingDecision: pipelineResult.routingDecision ?? null
+      });
+      const shouldForceFollowup = this.shouldTriggerVisionFollowup(currentRouteName, followupTriggered);
+      if (shouldForceFollowup) {
+        this.logStage('vision.followup.eligible', input.requestId, {
+          routeName: currentRouteName
+        });
+      }
+      const wantsStreamForIteration = shouldForceFollowup ? false : wantsStreamBase;
+      if (shouldForceFollowup) {
+        this.stripStreamingFromProviderPayload(providerPayload);
+      }
+
+      try {
+        const providerResponse = await handle.instance.processIncoming(providerPayload);
+        const responseStatus = this.extractResponseStatus(providerResponse);
+        this.logStage('provider.send.completed', input.requestId, {
+          providerKey: target.providerKey,
+          status: responseStatus,
+          providerType: handle.providerType,
+          providerFamily: handle.providerFamily,
+          model: providerModel,
+          providerLabel
+        });
+        const normalized = this.normalizeProviderResponse(providerResponse);
+        const converted = await this.convertProviderResponseIfNeeded({
+          entryEndpoint: input.entryEndpoint,
+          providerType: handle.providerType,
+          requestId: input.requestId,
+          wantsStream: wantsStreamForIteration,
+          originalRequest: originalRequestSnapshot,
+          processMode: pipelineResult.processMode,
+          response: normalized,
+          pipelineMetadata: mergedMetadata
+        });
+
+        if (shouldForceFollowup) {
+          const followupDecision = await this.executeVisionFollowup({
+            input,
+            originalPayload: originalRequestSnapshot,
+            visionResponse: converted
+          });
+          if (!followupDecision?.nextMetadata) {
+            return followupDecision?.result ?? converted;
+          }
+          followupTriggered = true;
+          iterationMetadata = followupDecision.nextMetadata;
+          continue;
+        }
+
+        return converted;
+      } catch (error) {
+        this.logStage('provider.send.error', input.requestId, {
+          providerKey: target.providerKey,
+          message: error instanceof Error ? error.message : String(error ?? 'Unknown error'),
+          providerType: handle.providerType,
+          providerFamily: handle.providerFamily,
+          model: providerModel,
+          providerLabel
+        });
+        const runtimeMetadata: ProviderErrorRuntimeMetadata & { providerFamily?: string } = {
+          requestId: input.requestId,
+          providerKey: target.providerKey,
+          providerId: handle.providerId,
+          providerType: handle.providerType,
+          providerProtocol,
+          routeName: pipelineResult.routingDecision?.routeName,
+          pipelineId: target.providerKey,
+          runtimeKey,
+          target
+        };
+        runtimeMetadata.providerFamily = handle.providerFamily;
+        emitProviderError({
+          error,
+          stage: 'provider.send',
+          runtime: runtimeMetadata,
+          dependencies: this.getModuleDependencies()
+        });
+        throw error;
+      }
     }
   }
 
@@ -1128,7 +1175,7 @@ export class RouteCodexHttpServer {
       const metadataBag = asRecord(options.pipelineMetadata);
       const aliasMap = extractAnthropicToolAliasMap(metadataBag);
       const originalModelId = this.extractClientModelId(metadataBag, options.originalRequest);
-      const adapterContext = {
+      const adapterContext: { entryEndpoint: string; [key: string]: unknown } = {
         requestId: options.requestId,
         entryEndpoint: options.entryEndpoint || entry,
         providerProtocol,
@@ -1143,22 +1190,58 @@ export class RouteCodexHttpServer {
           ? ((metadataBag.target as Record<string, unknown>).compatibilityProfile as string)
           : undefined;
       if (compatProfile && compatProfile.trim()) {
-        (adapterContext as Record<string, unknown>).compatibilityProfile = compatProfile.trim();
+        adapterContext.compatibilityProfile = compatProfile.trim();
       }
       if (aliasMap) {
-        (adapterContext as Record<string, unknown>).anthropicToolNameMap = aliasMap;
+        adapterContext.anthropicToolNameMap = aliasMap;
+      }
+      if (metadataBag && typeof metadataBag === 'object') {
+        const webSearchConfig = (metadataBag as Record<string, unknown>).webSearch;
+        if (webSearchConfig && typeof webSearchConfig === 'object') {
+          adapterContext.webSearch = webSearchConfig;
+        }
+        if ((metadataBag as Record<string, unknown>).forceWebSearch === true) {
+          adapterContext.forceWebSearch = true;
+        }
+        if ((metadataBag as Record<string, unknown>).forceVision === true) {
+          adapterContext.forceVision = true;
+        }
       }
       const [convertProviderResponse, createSnapshotRecorder] = await Promise.all([
         loadConvertProviderResponse(),
         loadSnapshotRecorderFactory()
       ]);
       const stageRecorder = createSnapshotRecorder(adapterContext, adapterContext.entryEndpoint);
+      const providerInvoker = async (invokeOptions: {
+        providerKey: string;
+        providerType?: string;
+        modelId?: string;
+        providerProtocol: string;
+        payload: Record<string, unknown>;
+        entryEndpoint: string;
+        requestId: string;
+      }): Promise<{ providerResponse: Record<string, unknown> }> => {
+        const runtimeKey =
+          this.providerKeyToRuntimeKey.get(invokeOptions.providerKey) || invokeOptions.providerKey;
+        const handle = this.providerHandles.get(runtimeKey);
+        if (!handle) {
+          throw new Error(`Provider runtime ${runtimeKey} not found`);
+        }
+        const providerResponse = await handle.instance.processIncoming(invokeOptions.payload);
+        const normalized = this.normalizeProviderResponse(providerResponse);
+        const bodyPayload =
+          normalized.body && typeof normalized.body === 'object'
+            ? (normalized.body as Record<string, unknown>)
+            : (normalized as unknown as Record<string, unknown>);
+        return { providerResponse: bodyPayload };
+      };
       const converted = await convertProviderResponse({
         providerProtocol,
         providerResponse: body as Record<string, unknown>,
         context: adapterContext,
         entryEndpoint: options.entryEndpoint || entry,
         wantsStream: options.wantsStream,
+        providerInvoker,
         stageRecorder
       });
       if (converted.__sse_responses) {
@@ -1209,6 +1292,346 @@ export class RouteCodexHttpServer {
     } catch {
       return undefined;
     }
+  }
+
+  private shouldTriggerVisionFollowup(routeName: string | undefined, alreadyFollowed: boolean): boolean {
+    if (alreadyFollowed) {
+      return false;
+    }
+    return routeName === 'vision';
+  }
+
+  private async executeVisionFollowup(options: {
+    input: PipelineExecutionInput;
+    originalPayload?: Record<string, unknown>;
+    visionResponse: PipelineExecutionResult;
+  }): Promise<{ nextMetadata?: Record<string, unknown>; result?: PipelineExecutionResult }> {
+    const { input, visionResponse } = options;
+    const payloadSource =
+      (options.originalPayload && typeof options.originalPayload === 'object'
+        ? options.originalPayload
+        : this.cloneRequestPayload(input.body)) ?? null;
+    if (!payloadSource) {
+      this.logStage('vision.followup.skip', input.requestId, { reason: 'missing-original-payload' });
+      return { result: visionResponse };
+    }
+    const followupPayload = this.buildVisionFollowupPayload({
+      originalPayload: payloadSource,
+      visionResponse
+    });
+    if (!followupPayload) {
+      this.logStage('vision.followup.skip', input.requestId, { reason: 'no-vision-text' });
+      return { result: visionResponse };
+    }
+    input.body = followupPayload;
+    const nextMetadata = this.buildRequestMetadata(input);
+    this.logStage('vision.followup.prepare', input.requestId, {
+      processMode: nextMetadata.processMode,
+      routeHint: nextMetadata.routeHint
+    });
+    return { nextMetadata };
+  }
+
+  private stripStreamingFromProviderPayload(payload: Record<string, unknown>): void {
+    if (!payload || typeof payload !== 'object') {
+      return;
+    }
+    (payload as Record<string, unknown>).stream = false;
+    const dataNode = (payload as { data?: unknown }).data;
+    if (dataNode && typeof dataNode === 'object') {
+      (dataNode as Record<string, unknown>).stream = false;
+    }
+    const bodyNode = (payload as { body?: unknown }).body;
+    if (bodyNode && typeof bodyNode === 'object') {
+      (bodyNode as Record<string, unknown>).stream = false;
+    }
+  }
+
+  private buildVisionFollowupPayload(options: {
+    originalPayload?: Record<string, unknown>;
+    visionResponse: PipelineExecutionResult;
+  }): Record<string, unknown> | null {
+    const { originalPayload, visionResponse } = options;
+    if (!originalPayload || typeof originalPayload !== 'object') {
+      return null;
+    }
+    const clone = this.cloneRequestPayload(originalPayload) ?? { ...(originalPayload as Record<string, unknown>) };
+    if (!clone) {
+      return null;
+    }
+    const visionText = this.extractVisionDescription(visionResponse?.body);
+    if (!visionText) {
+      return null;
+    }
+    if (this.rewriteResponsesInput(clone, visionText)) {
+      return clone;
+    }
+    if (this.rewriteChatMessages(clone, visionText)) {
+      return clone;
+    }
+    return null;
+  }
+
+  private rewriteResponsesInput(payload: Record<string, unknown>, visionText: string): boolean {
+    const inputList = (payload as { input?: unknown }).input;
+    if (!Array.isArray(inputList)) {
+      return false;
+    }
+    for (let i = inputList.length - 1; i >= 0; i -= 1) {
+      const item = inputList[i];
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+      const role = typeof (item as Record<string, unknown>).role === 'string'
+        ? ((item as Record<string, unknown>).role as string)
+        : '';
+      if (role !== 'user') {
+        continue;
+      }
+      const contentBlocks = Array.isArray((item as Record<string, unknown>).content)
+        ? ([...(item as { content: unknown[] }).content] as unknown[])
+        : [];
+      const originalText = this.extractTextFromContentBlocks(contentBlocks, ['input_text', 'text']);
+      const textType = this.detectContentTextType(contentBlocks, 'input_text');
+      const composed = this.composeVisionUserText(visionText, originalText);
+      (item as Record<string, unknown>).content = [
+        {
+          type: textType,
+          text: composed
+        }
+      ];
+      inputList[i] = item;
+      return true;
+    }
+    return false;
+  }
+
+  private rewriteChatMessages(payload: Record<string, unknown>, visionText: string): boolean {
+    const messages = (payload as { messages?: unknown }).messages;
+    if (!Array.isArray(messages)) {
+      return false;
+    }
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const message = messages[i];
+      if (!message || typeof message !== 'object') {
+        continue;
+      }
+      const role = typeof (message as Record<string, unknown>).role === 'string'
+        ? ((message as Record<string, unknown>).role as string)
+        : '';
+      if (role !== 'user') {
+        continue;
+      }
+      const contentBlocks = Array.isArray((message as Record<string, unknown>).content)
+        ? ([...(message as { content: unknown[] }).content] as unknown[])
+        : [];
+      const originalText = this.extractTextFromContentBlocks(contentBlocks, ['text']);
+      const textType = this.detectContentTextType(contentBlocks, 'text');
+      const composed = this.composeVisionUserText(visionText, originalText);
+      (message as Record<string, unknown>).content = [
+        {
+          type: textType,
+          text: composed
+        }
+      ];
+      messages[i] = message;
+      return true;
+    }
+    return false;
+  }
+
+  private extractTextFromContentBlocks(content: unknown, allowedTypes: string[]): string {
+    if (typeof content === 'string') {
+      return content;
+    }
+    if (!Array.isArray(content)) {
+      return '';
+    }
+    const collected: string[] = [];
+    for (const block of content) {
+      if (!block || typeof block !== 'object') {
+        continue;
+      }
+      const typeValue = typeof (block as Record<string, unknown>).type === 'string'
+        ? ((block as Record<string, unknown>).type as string)
+        : '';
+      if (allowedTypes.length && !allowedTypes.includes(typeValue)) {
+        continue;
+      }
+      const textValue = (block as Record<string, unknown>).text;
+      if (typeof textValue === 'string' && textValue.trim()) {
+        collected.push(textValue.trim());
+      }
+    }
+    return collected.join('\n');
+  }
+
+  private detectContentTextType(content: unknown, fallback: 'text' | 'input_text'): string {
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (!block || typeof block !== 'object') {
+          continue;
+        }
+        const typeValue = (block as Record<string, unknown>).type;
+        if (typeof typeValue === 'string' && (typeValue === 'text' || typeValue === 'input_text')) {
+          return typeValue;
+        }
+      }
+    }
+    return fallback;
+  }
+
+  private composeVisionUserText(visionText: string, originalText?: string): string {
+    const sections: string[] = [];
+    const cleanedVision = (visionText || '').trim();
+    if (cleanedVision) {
+      sections.push(`【图片分析】\n${cleanedVision}`);
+    }
+    const cleanedOriginal = (originalText || '').trim();
+    if (cleanedOriginal) {
+      sections.push(`【用户原始请求】\n${cleanedOriginal}`);
+    }
+    return sections.join('\n\n');
+  }
+
+  private extractVisionDescription(body: unknown): string | null {
+    if (!body) {
+      return null;
+    }
+    if (typeof body === 'string') {
+      const trimmed = body.trim();
+      return trimmed.length ? trimmed : null;
+    }
+    if (typeof body !== 'object') {
+      return null;
+    }
+    const record = body as Record<string, unknown>;
+    const direct = this.extractTextCandidate(record);
+    if (direct) {
+      return direct;
+    }
+    if (record.response && typeof record.response === 'object') {
+      const responseNode = record.response as Record<string, unknown>;
+      const nested = this.extractTextCandidate(responseNode);
+      if (nested) {
+        return nested;
+      }
+      const output = responseNode.output;
+      if (Array.isArray(output)) {
+        for (const entry of output) {
+          if (entry && typeof entry === 'object') {
+            const nestedText = this.extractTextCandidate(entry as Record<string, unknown>);
+            if (nestedText) {
+              return nestedText;
+            }
+          }
+        }
+      }
+    }
+    if (Array.isArray(record.output)) {
+      for (const entry of record.output) {
+        if (entry && typeof entry === 'object') {
+          const nested = this.extractTextCandidate(entry as Record<string, unknown>);
+          if (nested) {
+            return nested;
+          }
+        }
+      }
+    }
+    const choices = record.choices;
+    if (Array.isArray(choices)) {
+      for (const choice of choices) {
+        if (!choice || typeof choice !== 'object') {
+          continue;
+        }
+        const message = (choice as Record<string, unknown>).message;
+        if (message && typeof message === 'object') {
+          const msg = message as Record<string, unknown>;
+          const content = msg.content;
+          if (typeof content === 'string' && content.trim()) {
+            return content.trim();
+          }
+          if (Array.isArray(content)) {
+            for (const part of content) {
+              if (part && typeof part === 'object' && typeof (part as Record<string, unknown>).text === 'string') {
+                const textValue = ((part as Record<string, unknown>).text as string).trim();
+                if (textValue) {
+                  return textValue;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  private extractTextCandidate(record: Record<string, unknown>): string | null {
+    const candidates: Array<{ key: string; allowJson?: boolean }> = [
+      { key: 'output_text', allowJson: true },
+      { key: 'text' },
+      { key: 'content' }
+    ];
+    for (const candidate of candidates) {
+      if (!(candidate.key in record)) {
+        continue;
+      }
+      const text = this.normalizeTextCandidateValue(
+        record[candidate.key],
+        candidate.allowJson === true
+      );
+      if (text) {
+        return text;
+      }
+    }
+    return null;
+  }
+
+  private normalizeTextCandidateValue(value: unknown, allowJsonStringify = false): string | null {
+    if (!value) {
+      return null;
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed.length ? trimmed : null;
+    }
+    if (Array.isArray(value)) {
+      const collected: string[] = [];
+      for (const entry of value) {
+        const nested = this.normalizeTextCandidateValue(entry, allowJsonStringify);
+        if (nested) {
+          collected.push(nested);
+        }
+      }
+      return collected.length ? collected.join('\n') : null;
+    }
+    if (typeof value === 'object') {
+      const bag = value as Record<string, unknown>;
+      const textField = bag.text;
+      if (typeof textField === 'string' && textField.trim()) {
+        return (textField as string).trim();
+      }
+      const summaryField = bag.summary;
+      if (typeof summaryField === 'string' && summaryField.trim()) {
+        return (summaryField as string).trim();
+      }
+      if ('content' in bag) {
+        const nested = this.normalizeTextCandidateValue(bag.content, allowJsonStringify);
+        if (nested) {
+          return nested;
+        }
+      }
+      if (allowJsonStringify) {
+        try {
+          const serialized = JSON.stringify(value, null, 2);
+          return serialized.trim() || null;
+        } catch {
+          return null;
+        }
+      }
+    }
+    return null;
   }
 
   private async initializeRouteErrorHub(): Promise<void> {

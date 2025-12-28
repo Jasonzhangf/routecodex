@@ -30,6 +30,11 @@ import type { ProviderContext, ProviderError, ProviderRuntimeProfile, ServicePro
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import { attachProviderRuntimeMetadata, extractProviderRuntimeMetadata } from './provider-runtime-metadata.js';
+import {
+  buildVisionSnapshotPayload,
+  shouldCaptureVisionDebug,
+  summarizeVisionMessages
+} from './vision-debug-utils.js';
 import type { ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import type { HttpProtocolClient, ProtocolRequestPayload } from '../../../client/http-protocol-client.js';
 import { OpenAIChatProtocolClient } from '../../../client/openai/chat-protocol-client.js';
@@ -480,6 +485,8 @@ export class HttpTransportProvider extends BaseProvider {
       __origModel: inboundModel
     };
     } catch { /* ignore */ }
+    this.logVisionDebug('preprocess', processedRequest);
+    await this.captureVisionDebugSnapshot('provider-preprocess-debug', processedRequest);
     return processedRequest;
   }
 
@@ -511,6 +518,41 @@ export class HttpTransportProvider extends BaseProvider {
         usage: this.extractUsage(processedRecord) ?? this.extractUsage(originalRecord)
       }
     } as UnknownObject;
+  }
+
+  private logVisionDebug(stage: string, payload: UnknownObject): void {
+    const debug = shouldCaptureVisionDebug(payload);
+    if (!debug.enabled) {
+      return;
+    }
+    const summary = summarizeVisionMessages(payload);
+    const label = debug.routeName ?? 'vision';
+    console.debug(`[vision-debug][${stage}] route=${label} request=${debug.requestId ?? '-'} ${summary}`);
+  }
+
+  private async captureVisionDebugSnapshot(
+    stage: 'provider-preprocess-debug' | 'provider-body-debug',
+    payload: UnknownObject
+  ): Promise<void> {
+    const debug = shouldCaptureVisionDebug(payload);
+    if (!debug.enabled || !debug.requestId) {
+      return;
+    }
+    try {
+      const metadataNode = (payload as MetadataContainer)?.metadata;
+      const entryEndpoint =
+        metadataNode && typeof metadataNode === 'object' && typeof (metadataNode as Record<string, unknown>).entryEndpoint === 'string'
+          ? ((metadataNode as Record<string, unknown>).entryEndpoint as string)
+          : undefined;
+      await writeProviderSnapshot({
+        phase: stage,
+        requestId: debug.requestId,
+        data: buildVisionSnapshotPayload(payload),
+        entryEndpoint
+      });
+    } catch {
+      // snapshot is best-effort; ignore failures
+    }
   }
 
   protected async sendRequestInternal(request: UnknownObject): Promise<unknown> {

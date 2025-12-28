@@ -6,6 +6,11 @@ import {
 import type { HttpClient } from '../utils/http-client.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { ProviderContext } from '../api/provider-types.js';
+import {
+  buildVisionSnapshotPayload,
+  shouldCaptureVisionDebug,
+  summarizeVisionMessages
+} from './vision-debug-utils.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
 
 export type PreparedHttpRequest = {
@@ -78,11 +83,18 @@ export class HttpRequestExecutor {
     finalHeaders = this.deps.applyStreamModeHeaders(finalHeaders, wantsSse);
     const targetUrl = `${this.deps.getEffectiveBaseUrl().replace(/\/$/, '')}/${endpoint.startsWith('/') ? endpoint.slice(1) : endpoint}`;
     const finalBody = this.deps.buildHttpRequestBody(processedRequest);
+    const entryEndpoint = this.deps.getEntryEndpointFromPayload(processedRequest);
     if (wantsSse) {
       this.deps.prepareSseRequestBody(finalBody, context);
     }
-    const entryEndpoint = this.deps.getEntryEndpointFromPayload(processedRequest);
     const clientRequestId = this.deps.getClientRequestIdFromContext(context);
+    await this.captureVisionDebugRequest(processedRequest, finalBody, {
+      wantsSse,
+      entryEndpoint,
+      requestId: context.requestId,
+      routeName: context.routeName,
+      clientRequestId
+    });
     return {
       endpoint,
       headers: finalHeaders,
@@ -92,6 +104,43 @@ export class HttpRequestExecutor {
       clientRequestId,
       wantsSse
     };
+  }
+
+  private async captureVisionDebugRequest(
+    processedRequest: UnknownObject,
+    body: UnknownObject,
+    options: { wantsSse: boolean; entryEndpoint?: string; requestId: string; routeName?: string; clientRequestId?: string }
+  ): Promise<void> {
+    const debug = shouldCaptureVisionDebug(processedRequest, {
+      routeName: options.routeName,
+      requestId: options.requestId
+    });
+    if (!debug.enabled) {
+      return;
+    }
+    const requestId = debug.requestId ?? options.requestId;
+    try {
+      await writeProviderSnapshot({
+        phase: 'provider-body-debug',
+        requestId,
+        data: buildVisionSnapshotPayload(body, {
+          wantsSse: options.wantsSse
+        }),
+        entryEndpoint: options.entryEndpoint,
+        clientRequestId: options.clientRequestId ?? options.requestId
+      });
+    } catch {
+      // ignore snapshot failures
+    }
+    try {
+      const summary = summarizeVisionMessages(body);
+      console.debug(
+        `[vision-debug][build-body] route=${debug.routeName ?? options.routeName ?? 'vision'} ` +
+        `request=${requestId} wantsSse=${options.wantsSse} ${summary}`
+      );
+    } catch {
+      // best-effort logging
+    }
   }
 
   private async snapshotProviderRequest(requestInfo: PreparedHttpRequest, context: ProviderContext): Promise<void> {
