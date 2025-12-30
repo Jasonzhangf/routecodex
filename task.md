@@ -157,10 +157,10 @@ Introduce a unified server-side `web_search` tool that main models can call as a
    - [ ] Ensure subsequent stages within the same call chain honour this flag for tool injection, even if intent is not re-detected.
    - [ ] Reset `webSearchEnabled` when the final assistant response for the call has `finish_reason == "stop"`.
 
-4. Backend routing & engine selection
-   - [ ] Implement a server-side `web_search` tool handler that intercepts `function_call.name === "web_search"` / equivalent Responses output.
-   - [ ] Map `engine` (or default when only one engine exists) to a configured backend `providerKey` and route the secondary request via `routing.web_search`.
-   - [ ] Normalize backend responses into a common tool output format (`summary` + `hits[] + engine`), preserving enough detail for downstream reasoning.
+4. ServerTool 框架 & web_search 挂载
+   - [ ] 在 `llmswitch-core` 中定义统一的 ServerTool 框架（`servertool` 目录），包括：注册表、执行引擎、统一的 tool_call 抽取与虚拟 tool 响应注入流程（详见 `servertool/README.md`）。
+   - [ ] 将 `web_search` 实现为 ServerTool handler：拦截 `function_call.name === "web_search"` / Responses 等价输出，经由 `routing.web_search` 调用后端引擎（Gemini / GLM），并生成带 `tool_call_id` 的虚拟工具结果消息。
+   - [ ] 在统一框架下完成二次请求（主模型 followup），对客户端/provider 透明，同时保留与 vision followup 一致的整体行为模型。
 
 5. GLM backend integration (v1)
    - [ ] Extend `chat:glm` compat profile so search backend requests inject GLM’s `tools.web_search` schema and appropriate parameters (search engine, `enable`, `count`, recency, etc.).

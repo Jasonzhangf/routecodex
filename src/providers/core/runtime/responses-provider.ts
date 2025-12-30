@@ -123,7 +123,7 @@ export class ResponsesProvider extends HttpTransportProvider {
       outboundStream: useSse
     });
 
-    await this.maybeConvertChatPayload(finalBody);
+    await this.maybeConvertChatPayload(finalBody, context);
 
     await this.snapshotPhase('provider-request', context, finalBody, headers, targetUrl, entryEndpoint);
 
@@ -267,7 +267,7 @@ export class ResponsesProvider extends HttpTransportProvider {
     return `${normalizedBase}/${encodedId}/submit_tool_outputs`;
   }
 
-  private async maybeConvertChatPayload(body: Record<string, unknown>): Promise<void> {
+  private async maybeConvertChatPayload(body: Record<string, unknown>, context: ProviderContext): Promise<void> {
     const looksResponses = Array.isArray(body.input as unknown[]) || typeof body.instructions === 'string';
     const looksChat = Array.isArray(body.messages as unknown[]);
     if (looksResponses) {
@@ -277,7 +277,12 @@ export class ResponsesProvider extends HttpTransportProvider {
       return;
     }
 
-    const conversion = await buildResponsesRequestFromChat(body);
+    const ctx = {
+      metadata: (context.metadata && typeof context.metadata === 'object'
+        ? (context.metadata as Record<string, unknown>)
+        : {}) as Record<string, unknown>
+    };
+    const conversion = await buildResponsesRequestFromChat(body, ctx);
     const requestObject = this.extractConvertedRequest(conversion);
     if (!requestObject) {
       throw new Error('buildResponsesRequestFromChat did not return a valid request object');

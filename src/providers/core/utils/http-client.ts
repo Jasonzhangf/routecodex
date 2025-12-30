@@ -100,7 +100,8 @@ export class HttpClient {
     this.config = config;
     this.defaultConfig = {
       baseUrl: config.baseUrl || '',
-      timeout: config.timeout || 300000,
+      // 默认 HTTP 请求超时时间（未显式配置时）：500s
+      timeout: config.timeout || 500000,
       maxRetries: 0,
       retryDelay: 0,
       defaultHeaders: {

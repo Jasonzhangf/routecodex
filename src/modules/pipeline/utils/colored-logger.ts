@@ -25,7 +25,8 @@ export class ColoredLogger {
       coding: (msg) => `\x1b[35m${msg}\x1b[0m`,
       longcontext: (msg) => `\x1b[38;5;141m${msg}\x1b[0m`,
       // web_search 命中使用深蓝色，便于与普通 default 区分
-      websearch: (msg) => `\x1b[38;5;27m${msg}\x1b[0m`,
+      web_search: (msg) => `\x1b[38;5;27m${msg}\x1b[0m`,
+      search: (msg) => `\x1b[38;5;34m${msg}\x1b[0m`,
       vision: (msg) => `\x1b[38;5;207m${msg}\x1b[0m`,
       background: (msg) => `\x1b[90m${msg}\x1b[0m`,
       default: (msg) => `\x1b[36m${msg}\x1b[0m`

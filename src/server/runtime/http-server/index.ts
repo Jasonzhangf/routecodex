@@ -72,8 +72,19 @@ type ConvertProviderResponseFn = (options: {
     payload: Record<string, unknown>;
     entryEndpoint: string;
     requestId: string;
+    routeHint?: string;
   }) => Promise<{ providerResponse: Record<string, unknown> }>;
   stageRecorder?: unknown;
+  reenterPipeline?: (options: {
+    entryEndpoint: string;
+    requestId: string;
+    body: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+  }) => Promise<{
+    body?: Record<string, unknown>;
+    __sse_responses?: unknown;
+    format?: string;
+  }>;
 }) => Promise<Record<string, unknown> & { __sse_responses?: unknown; body?: unknown }>;
 type SnapshotRecorderFactory = (context: Record<string, unknown>, entryEndpoint: string) => unknown;
 type ConvertProviderModule = {
@@ -914,23 +925,6 @@ export class RouteCodexHttpServer {
         providerLabel
       });
 
-      const wantsStreamBase = Boolean(input.metadata?.inboundStream ?? input.metadata?.stream);
-      const currentRouteName = pipelineResult.routingDecision?.routeName;
-      this.logStage('vision.followup.route', input.requestId, {
-        routeName: currentRouteName,
-        routingDecision: pipelineResult.routingDecision ?? null
-      });
-      const shouldForceFollowup = this.shouldTriggerVisionFollowup(currentRouteName, followupTriggered);
-      if (shouldForceFollowup) {
-        this.logStage('vision.followup.eligible', input.requestId, {
-          routeName: currentRouteName
-        });
-      }
-      const wantsStreamForIteration = shouldForceFollowup ? false : wantsStreamBase;
-      if (shouldForceFollowup) {
-        this.stripStreamingFromProviderPayload(providerPayload);
-      }
-
       try {
         const providerResponse = await handle.instance.processIncoming(providerPayload);
         const responseStatus = this.extractResponseStatus(providerResponse);
@@ -942,31 +936,18 @@ export class RouteCodexHttpServer {
           model: providerModel,
           providerLabel
         });
+        const wantsStreamBase = Boolean(input.metadata?.inboundStream ?? input.metadata?.stream);
         const normalized = this.normalizeProviderResponse(providerResponse);
         const converted = await this.convertProviderResponseIfNeeded({
           entryEndpoint: input.entryEndpoint,
           providerType: handle.providerType,
           requestId: input.requestId,
-          wantsStream: wantsStreamForIteration,
+          wantsStream: wantsStreamBase,
           originalRequest: originalRequestSnapshot,
           processMode: pipelineResult.processMode,
           response: normalized,
           pipelineMetadata: mergedMetadata
         });
-
-        if (shouldForceFollowup) {
-          const followupDecision = await this.executeVisionFollowup({
-            input,
-            originalPayload: originalRequestSnapshot,
-            visionResponse: converted
-          });
-          if (!followupDecision?.nextMetadata) {
-            return followupDecision?.result ?? converted;
-          }
-          followupTriggered = true;
-          iterationMetadata = followupDecision.nextMetadata;
-          continue;
-        }
 
         return converted;
       } catch (error) {
@@ -1175,12 +1156,29 @@ export class RouteCodexHttpServer {
       const metadataBag = asRecord(options.pipelineMetadata);
       const aliasMap = extractAnthropicToolAliasMap(metadataBag);
       const originalModelId = this.extractClientModelId(metadataBag, options.originalRequest);
-      const adapterContext: { entryEndpoint: string; [key: string]: unknown } = {
-        requestId: options.requestId,
-        entryEndpoint: options.entryEndpoint || entry,
-        providerProtocol,
-        originalModelId
+
+      // 以 HubPipeline metadata 为基础构建 AdapterContext，确保诸如
+      // capturedChatRequest / webSearch / routeHint 等字段在响应侧可见，
+      // 便于 llmswitch-core 内部实现 servertool/web_search 的第三跳。
+      const baseContext: Record<string, unknown> = {
+        ...(metadataBag ?? {})
       };
+      // 将 HubPipeline metadata.routeName 映射为 AdapterContext.routeId，
+      // 便于 llmswitch-core 在第三跳中使用 routeHint 复用首次路由决策。
+      if (typeof (metadataBag as Record<string, unknown> | undefined)?.routeName === 'string') {
+        baseContext.routeId = (metadataBag as Record<string, unknown>).routeName as string;
+      }
+      baseContext.requestId = options.requestId;
+      baseContext.entryEndpoint = options.entryEndpoint || entry;
+      baseContext.providerProtocol = providerProtocol;
+      baseContext.originalModelId = originalModelId;
+      const adapterContext = baseContext;
+      // 将 serverToolFollowup 等标记从 pipelineMetadata 透传到 AdapterContext，
+      // 便于 convertProviderResponse 正确识别内部二跳请求并跳过 servertool。
+      if (metadataBag && Object.prototype.hasOwnProperty.call(metadataBag, 'serverToolFollowup')) {
+        (adapterContext as Record<string, unknown>).serverToolFollowup = (metadataBag as Record<string, unknown>)
+          .serverToolFollowup as unknown;
+      }
       const compatProfile =
         metadataBag &&
           typeof metadataBag === 'object' &&
@@ -1211,7 +1209,12 @@ export class RouteCodexHttpServer {
         loadConvertProviderResponse(),
         loadSnapshotRecorderFactory()
       ]);
-      const stageRecorder = createSnapshotRecorder(adapterContext, adapterContext.entryEndpoint);
+      const stageRecorder = createSnapshotRecorder(
+        adapterContext,
+        typeof (adapterContext as Record<string, unknown>).entryEndpoint === 'string'
+          ? ((adapterContext as Record<string, unknown>).entryEndpoint as string)
+          : options.entryEndpoint || entry
+      );
       const providerInvoker = async (invokeOptions: {
         providerKey: string;
         providerType?: string;
@@ -1235,6 +1238,52 @@ export class RouteCodexHttpServer {
             : (normalized as unknown as Record<string, unknown>);
         return { providerResponse: bodyPayload };
       };
+      const reenterPipeline = async (reenterOpts: {
+        entryEndpoint: string;
+        requestId: string;
+        body: Record<string, unknown>;
+        metadata?: Record<string, unknown>;
+      }): Promise<{ body?: Record<string, unknown>; __sse_responses?: unknown; format?: string }> => {
+        const nestedEntry = reenterOpts.entryEndpoint || options.entryEndpoint || entry;
+        const nestedExtra = asRecord(reenterOpts.metadata) ?? {};
+        const nestedEntryLower = nestedEntry.toLowerCase();
+
+        // 基于首次 HubPipeline metadata + 调用方注入的 metadata 构建新的请求 metadata。
+        // 不在 Host 层编码 servertool/web_search 等语义，由 llmswitch-core 负责。
+        const nestedMetadata: Record<string, unknown> = {
+          ...(metadataBag ?? {}),
+          ...nestedExtra,
+          entryEndpoint: nestedEntry,
+          direction: 'request',
+          stage: 'inbound'
+        };
+
+        // 针对 reenterPipeline 的入口端点，纠正 providerProtocol，避免沿用外层协议。
+        if (nestedEntryLower.includes('/v1/chat/completions')) {
+          nestedMetadata.providerProtocol = 'openai-chat';
+        } else if (nestedEntryLower.includes('/v1/responses')) {
+          nestedMetadata.providerProtocol = 'openai-responses';
+        } else if (nestedEntryLower.includes('/v1/messages')) {
+          nestedMetadata.providerProtocol = 'anthropic-messages';
+        }
+
+        const nestedInput: PipelineExecutionInput = {
+          entryEndpoint: nestedEntry,
+          method: 'POST',
+          requestId: reenterOpts.requestId,
+          headers: {},
+          query: {},
+          body: reenterOpts.body,
+          metadata: nestedMetadata
+        };
+
+        const nestedResult = await this.executePipeline(nestedInput);
+        const nestedBody =
+          nestedResult.body && typeof nestedResult.body === 'object'
+            ? (nestedResult.body as Record<string, unknown>)
+            : undefined;
+        return { body: nestedBody };
+      };
       const converted = await convertProviderResponse({
         providerProtocol,
         providerResponse: body as Record<string, unknown>,
@@ -1242,7 +1291,8 @@ export class RouteCodexHttpServer {
         entryEndpoint: options.entryEndpoint || entry,
         wantsStream: options.wantsStream,
         providerInvoker,
-        stageRecorder
+        stageRecorder,
+        reenterPipeline
       });
       if (converted.__sse_responses) {
         return {
@@ -1291,59 +1341,6 @@ export class RouteCodexHttpServer {
       return JSON.parse(JSON.stringify(payload));
     } catch {
       return undefined;
-    }
-  }
-
-  private shouldTriggerVisionFollowup(routeName: string | undefined, alreadyFollowed: boolean): boolean {
-    if (alreadyFollowed) {
-      return false;
-    }
-    return routeName === 'vision';
-  }
-
-  private async executeVisionFollowup(options: {
-    input: PipelineExecutionInput;
-    originalPayload?: Record<string, unknown>;
-    visionResponse: PipelineExecutionResult;
-  }): Promise<{ nextMetadata?: Record<string, unknown>; result?: PipelineExecutionResult }> {
-    const { input, visionResponse } = options;
-    const payloadSource =
-      (options.originalPayload && typeof options.originalPayload === 'object'
-        ? options.originalPayload
-        : this.cloneRequestPayload(input.body)) ?? null;
-    if (!payloadSource) {
-      this.logStage('vision.followup.skip', input.requestId, { reason: 'missing-original-payload' });
-      return { result: visionResponse };
-    }
-    const followupPayload = this.buildVisionFollowupPayload({
-      originalPayload: payloadSource,
-      visionResponse
-    });
-    if (!followupPayload) {
-      this.logStage('vision.followup.skip', input.requestId, { reason: 'no-vision-text' });
-      return { result: visionResponse };
-    }
-    input.body = followupPayload;
-    const nextMetadata = this.buildRequestMetadata(input);
-    this.logStage('vision.followup.prepare', input.requestId, {
-      processMode: nextMetadata.processMode,
-      routeHint: nextMetadata.routeHint
-    });
-    return { nextMetadata };
-  }
-
-  private stripStreamingFromProviderPayload(payload: Record<string, unknown>): void {
-    if (!payload || typeof payload !== 'object') {
-      return;
-    }
-    (payload as Record<string, unknown>).stream = false;
-    const dataNode = (payload as { data?: unknown }).data;
-    if (dataNode && typeof dataNode === 'object') {
-      (dataNode as Record<string, unknown>).stream = false;
-    }
-    const bodyNode = (payload as { body?: unknown }).body;
-    if (bodyNode && typeof bodyNode === 'object') {
-      (bodyNode as Record<string, unknown>).stream = false;
     }
   }
 

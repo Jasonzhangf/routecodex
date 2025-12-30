@@ -60,6 +60,7 @@ declare module '@jsonstudio/llms/dist/conversion/hub/response/provider-response.
     payload: Record<string, unknown>;
     entryEndpoint: string;
     requestId: string;
+    routeHint?: string;
   }) => Promise<{
     providerResponse: Record<string, unknown>;
   }>;
@@ -70,6 +71,17 @@ declare module '@jsonstudio/llms/dist/conversion/hub/response/provider-response.
     entryEndpoint: string;
     wantsStream: boolean;
     providerInvoker?: ProviderInvoker;
+    /**
+     * 可选：由 Host 注入的二次请求入口，用于在 server-side 工具
+     * 完成后，通过标准 HubPipeline 重新发起一次内部请求（例如
+     * web_search followup），并直接返回最终客户端响应形状。
+     */
+    reenterPipeline?: (options: {
+      entryEndpoint: string;
+      requestId: string;
+      body: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+    }) => Promise<{ body?: Record<string, unknown>; __sse_responses?: Readable; format?: string }>;
   }): Promise<{ body?: Record<string, unknown>; __sse_responses?: Readable; format?: string }>;
 }
 

@@ -62,29 +62,26 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     const adapter = this.resolvePayload(processedRequest);
     const payload = adapter.payload as MutablePayload;
 
-    // 从 auth provider 获取 project_id（仅做最小的 OAuth token 解析，不介入登录流程）
+    // 从 auth provider 获取 project_id（仅做最小的 OAuth token 解析，不在此处触发 OAuth 流程）
     if (!this.authProvider) {
       throw new Error('Gemini CLI: auth provider not found');
     }
 
     const anyAuth = this.authProvider as any;
-    let tokenData: UnknownObject | null | undefined;
+    const readTokenPayload = (): UnknownObject | null | undefined => {
+      const oauthClient = anyAuth.getOAuthClient?.();
+      if (oauthClient && typeof oauthClient.getToken === 'function') {
+        return oauthClient.getToken() as UnknownObject;
+      }
+      if (typeof anyAuth.getTokenPayload === 'function') {
+        // 兼容 TokenFileAuthProvider：直接从本地 token JSON 解析 project_id
+        return anyAuth.getTokenPayload() as UnknownObject | null;
+      }
+      return undefined;
+    };
 
-    const oauthClient = anyAuth.getOAuthClient?.();
-    if (oauthClient && typeof oauthClient.getToken === 'function') {
-      tokenData = oauthClient.getToken() as UnknownObject;
-    } else if (typeof anyAuth.getTokenPayload === 'function') {
-      // 兼容 TokenFileAuthProvider：直接从本地 token JSON 解析 project_id
-      tokenData = anyAuth.getTokenPayload() as UnknownObject | null;
-    }
-
+    const tokenData = readTokenPayload();
     const projectId = getDefaultProjectId(tokenData || {});
-
-    if (!projectId) {
-      throw new Error(
-        'Gemini CLI: project_id not found in token. Please authenticate with Google OAuth first.'
-      );
-    }
 
     // 构建 Gemini CLI 格式的请求（仅做传输层整理，不做 OpenAI→Gemini 语义转换）
     const model =
@@ -96,12 +93,27 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     }
 
     payload.model = model;
-    payload.project = projectId;
+    // 若当前 token 中已有 project 元数据，则补充到请求中；否则让上游决定后续行为。
+    if (projectId) {
+      payload.project = projectId;
+    }
     this.ensureRequestMetadata(payload);
 
     // 删除与 Gemini 协议无关的字段，避免影响 Cloud Code Assist schema 校验
-    delete (payload as Record<string, unknown>).messages;
-    delete (payload as Record<string, unknown>).stream;
+    // - 对于从 OpenAI/Responses 桥接过来的请求（携带 messages），本地工具应由 server-side-tools 处理，
+    //   不直接下发到 Gemini CLI，否则会触发 “Multiple tools are supported only when they are all search tools.” 等错误。
+    // - 对于原生 Gemini payload（仅包含 contents + tools，例如 server-side web_search 使用的 googleSearch 工具），
+    //   保留 tools 字段以便启用搜索能力。
+    const recordPayload = payload as Record<string, unknown>;
+    const hasMessages = Array.isArray((recordPayload as { messages?: unknown }).messages);
+
+    if (hasMessages) {
+      delete recordPayload.messages;
+      delete recordPayload.stream;
+      delete recordPayload.tools;
+    } else {
+      delete recordPayload.stream;
+    }
 
     return processedRequest;
   }

@@ -227,6 +227,27 @@ function getExpiresAt(token: StoredOAuthToken | null): number | null {
   return null;
 }
 
+function hasGeminiProjectMetadata(token: StoredOAuthToken | null): boolean {
+  if (!token || typeof token !== 'object') {
+    return false;
+  }
+  const obj = token as UnknownObject;
+  const directProjectId = (obj as any).project_id;
+  if (typeof directProjectId === 'string' && directProjectId.trim().length > 0) {
+    return true;
+  }
+  const projects = (obj as any).projects;
+  if (Array.isArray(projects) && projects.length > 0) {
+    return true;
+  }
+  try {
+    const inferred = getDefaultProjectId(obj);
+    return typeof inferred === 'string' && inferred.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function hasNoRefreshFlag(token: StoredOAuthToken | null): boolean {
   if (!token) {
     return false;
@@ -248,13 +269,23 @@ function evaluateTokenState(token: StoredOAuthToken | null, providerType: string
   const expiresAt = getExpiresAt(token);
   const isExpiredOrNear = expiresAt !== null && Date.now() >= (expiresAt - TOKEN_REFRESH_SKEW_MS);
   let validAccess: boolean;
-  if (providerType.toLowerCase() === 'iflow') {
+  const pt = providerType.toLowerCase();
+  if (pt === 'iflow') {
     validAccess = hasApiKey || (!isExpiredOrNear && hasAccess);
-  } else if (providerType.toLowerCase() === 'qwen') {
+  } else if (pt === 'qwen') {
     validAccess = (hasApiKey || hasAccess) && !isExpiredOrNear;
   } else {
     validAccess = (hasApiKey || hasAccess) && !isExpiredOrNear;
   }
+
+  // 对 gemini-cli / antigravity，缺少 project 元数据视为无效凭证，
+  // 行为上等价于 gcli2api 要求凭证里必须有 project_id。
+  if (isGeminiCliFamily(providerType) && validAccess) {
+    if (!hasGeminiProjectMetadata(token)) {
+      validAccess = false;
+    }
+  }
+
   return { hasApiKey, hasAccess, expiresAt, isExpiredOrNear, validAccess };
 }
 
@@ -549,24 +580,58 @@ async function maybeEnrichToken(providerType: string, tokenData: UnknownObject):
       logOAuthDebug(`[OAuth] ${label}: no access_token found in auth result, skipping UserInfo fetch`);
       return tokenData;
     }
+
     try {
       const userInfo = await fetchGeminiCLIUserInfo(accessToken);
-      const projects = await fetchGeminiCLIProjects(accessToken);
+
+      // 项目信息是可选增强：失败时不应阻塞整个 provider 初始化。
+      let projects: ReturnType<typeof fetchGeminiCLIProjects> extends Promise<infer P>
+        ? P
+        : unknown[] = [] as unknown as ReturnType<typeof fetchGeminiCLIProjects> extends Promise<infer P>
+        ? P
+        : unknown[];
+      try {
+        projects = await fetchGeminiCLIProjects(accessToken);
+      } catch (projectsError) {
+        const msg = projectsError instanceof Error ? projectsError.message : String(projectsError);
+        console.error(`[OAuth] ${label}: failed to fetch Projects - ${msg}`);
+        projects = [];
+      }
+
       logOAuthDebug(`[OAuth] ${label}: fetched UserInfo for ${userInfo.email} and ${projects.length} projects`);
+
       const merged = mergeGeminiCLITokenData(tokenData, userInfo, projects) as unknown as UnknownObject;
       const projectId = getDefaultProjectId(merged);
+
       if (projectId) {
         try {
           await ensureGeminiCLIServicesEnabled(accessToken, projectId);
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
           logOAuthDebug(`[OAuth] ${label}: service enablement failed for project ${projectId} - ${msg}`);
-          throw error;
+          // 服务启用失败不再视为致命错误，后续真实调用时再由 providerErrorCenter 处理。
         }
       }
       return merged;
     } catch (error) {
-      console.error(`[OAuth] ${label}: failed to fetch UserInfo - ${error instanceof Error ? error.message : String(error)}`);
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`[OAuth] ${label}: failed to fetch UserInfo - ${msg}`);
+
+      // 将明确的 401/invalid token 视为凭证失效，由调用方决定是否触发重新授权。
+      const normalized = msg.toLowerCase();
+      const isAuthError =
+        normalized.includes('401') ||
+        normalized.includes('unauthorized') ||
+        normalized.includes('invalid_grant') ||
+        normalized.includes('invalid_token') ||
+        normalized.includes('permission denied');
+
+      if (isAuthError) {
+        throw error instanceof Error ? error : new Error(msg);
+      }
+
+      // 其余错误仅记录日志，不再阻止 provider 初始化，回退到未 enrich 的 token。
+      return tokenData;
     }
   }
   return tokenData;
@@ -697,21 +762,50 @@ export async function ensureValidOAuthToken(
   const forceReauth =
     opts.forceReauthorize === true || String(process.env.ROUTECODEX_OAUTH_FORCE_REAUTH || '0') === '1';
 
-  const runPromise = (async () => {
-    const defaults = getProviderOAuthConfig(providerType);
-    const { overrides, endpoints, client } = await buildOverrides(
-      providerType,
-      defaults,
-      auth,
-      openBrowser,
-      tokenFilePath
-    );
-    logOAuthSetup(providerType, defaults, overrides, endpoints, client, tokenFilePath, openBrowser, forceReauth);
-    const strategy = createStrategy(providerType, overrides, tokenFilePath);
-    const token = await readTokenFromFile(tokenFilePath);
-    logTokenSnapshot(providerType, token, endpoints);
-    const tokenState = evaluateTokenState(token, providerType);
-    const noRefresh = hasNoRefreshFlag(token);
+	  const runPromise = (async () => {
+	    const defaults = getProviderOAuthConfig(providerType);
+	    const { overrides, endpoints, client } = await buildOverrides(
+	      providerType,
+	      defaults,
+	      auth,
+	      openBrowser,
+	      tokenFilePath
+	    );
+	    logOAuthSetup(providerType, defaults, overrides, endpoints, client, tokenFilePath, openBrowser, forceReauth);
+	    const strategy = createStrategy(providerType, overrides, tokenFilePath);
+	    let token = await readTokenFromFile(tokenFilePath);
+
+	    // Gemini CLI 家族：如果现有 token 缺少 project 元数据，尝试在不触发完整 OAuth 授权的前提下
+	    // 使用当前 access_token 补全 UserInfo + Projects（对齐 gcli2api 的行为），并立即写回。
+	    if (isGeminiCliFamily(providerType) && token) {
+	      try {
+	        const hasProjectMetadata = Boolean(getDefaultProjectId(token as UnknownObject));
+	        if (!hasProjectMetadata) {
+	          const enriched = await maybeEnrichToken(providerType, token as UnknownObject);
+	          if (enriched && typeof strategy.saveToken === 'function') {
+	            await strategy.saveToken(enriched);
+	            token = enriched as StoredOAuthToken;
+	          }
+	        }
+	      } catch (error) {
+	        const msg = error instanceof Error ? error.message : String(error);
+	        console.error(
+	          `[OAuth] ${providerType}: failed to enrich existing token with project metadata - ${msg}`
+	        );
+	        // 若明确是 401 / invalid token 类错误，将 token 视为无效，后续强制走重新授权流程。
+	        const lower = msg.toLowerCase();
+	        if (
+	          /invalid[_-]?token|invalid[_-]?grant|unauthenticated|unauthorized/.test(lower) ||
+	          lower.includes('http 401')
+	        ) {
+	          token = null;
+	        }
+	      }
+	    }
+
+	    logTokenSnapshot(providerType, token, endpoints);
+	    const tokenState = evaluateTokenState(token, providerType);
+	    const noRefresh = hasNoRefreshFlag(token);
 
     if (noRefresh) {
       logOAuthDebug(
@@ -766,6 +860,7 @@ export async function handleUpstreamInvalidOAuthToken(
   auth: OAuthAuth,
   upstreamError: unknown
 ): Promise<boolean> {
+  const pt = providerType.toLowerCase();
   try {
     const msg = upstreamError instanceof Error ? upstreamError.message : String(upstreamError || '');
     const lower = msg.toLowerCase();
@@ -776,8 +871,6 @@ export async function handleUpstreamInvalidOAuthToken(
         lower
       );
 
-    const pt = providerType.toLowerCase();
-
     // 对于 iflow / qwen，保留基于 401/403 的宽松判定，避免破坏既有行为
     if (!looksInvalid && (pt === 'iflow' || pt === 'qwen')) {
       if (/\b401\b|\b403\b|40308/.test(msg)) {
@@ -785,17 +878,29 @@ export async function handleUpstreamInvalidOAuthToken(
       }
     }
 
-    // 对于 gemini / gemini-cli，显式排除 service disabled 等项目级错误
+    // 对于 gemini / gemini-cli / antigravity，排除纯服务开关类错误，
+    // 但如果明确提示缺少 project_id 或需要重新 OAuth，则视为令牌失效。
     if (pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity') {
       if (/service_disabled/.test(lower) || lower.includes('has not been used in project')) {
         looksInvalid = false;
+      }
+      if (
+        lower.includes('project_id not found in token') ||
+        lower.includes('please authenticate with google oauth first')
+      ) {
+        looksInvalid = true;
       }
     }
 
     if (!looksInvalid) {
       return false;
     }
-    await ensureValidOAuthToken(providerType, auth, { forceReacquireIfRefreshFails: true });
+    const opts: EnsureOpts = { forceReacquireIfRefreshFails: true };
+    // 对于 Gemini CLI 家族，一旦检测到 project_id 缺失类错误，强制发起交互式 OAuth 以拉起 Portal。
+    if (pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity') {
+      opts.forceReauthorize = true;
+    }
+    await ensureValidOAuthToken(providerType, auth, opts);
     return true;
   } catch {
     return false;

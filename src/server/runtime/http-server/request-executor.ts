@@ -26,8 +26,19 @@ type ConvertProviderResponseFn = (options: {
     payload: Record<string, unknown>;
     entryEndpoint: string;
     requestId: string;
+    routeHint?: string;
   }) => Promise<{ providerResponse: Record<string, unknown> }>;
   stageRecorder?: unknown;
+  reenterPipeline?: (options: {
+    entryEndpoint: string;
+    requestId: string;
+    body: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+  }) => Promise<{
+    body?: Record<string, unknown>;
+    __sse_responses?: unknown;
+    format?: string;
+  }>;
 }) => Promise<Record<string, unknown> & { __sse_responses?: unknown; body?: unknown }>;
 type SnapshotRecorderFactory = (context: Record<string, unknown>, entryEndpoint: string) => unknown;
 type ConvertProviderModule = {
@@ -91,7 +102,7 @@ type HubPipelineResult = {
 };
 
 export class HubRequestExecutor implements RequestExecutor {
-  constructor(private readonly deps: RequestExecutorDeps) {}
+  constructor(private readonly deps: RequestExecutorDeps) { }
 
   async execute(input: PipelineExecutionInput): Promise<PipelineExecutionResult> {
     this.deps.stats.recordRequestStart(input.requestId);
@@ -150,7 +161,10 @@ export class HubRequestExecutor implements RequestExecutor {
           stream: iterationMetadata.stream,
           attempt
         });
+
+        // 获取原始请求快照，用于后续响应转换（不包含任何 server-side 工具语义）。
         const originalRequestSnapshot = this.cloneRequestPayload(input.body);
+
         const pipelineResult = await this.runHubPipeline(hubPipeline, input, iterationMetadata);
         const pipelineMetadata = pipelineResult.metadata ?? {};
         const mergedMetadata = { ...iterationMetadata, ...pipelineMetadata };
@@ -267,23 +281,6 @@ export class HubRequestExecutor implements RequestExecutor {
           attempt
         });
 
-        const wantsStreamBase = Boolean(input.metadata?.inboundStream ?? input.metadata?.stream);
-        const currentRouteName = pipelineResult.routingDecision?.routeName;
-        this.logStage('vision.followup.route', input.requestId, {
-          routeName: currentRouteName,
-          routingDecision: pipelineResult.routingDecision ?? null
-        });
-        const shouldForceFollowup = this.shouldTriggerVisionFollowup(currentRouteName, followupTriggered);
-        if (shouldForceFollowup) {
-          this.logStage('vision.followup.eligible', input.requestId, {
-            routeName: currentRouteName
-          });
-        }
-        const wantsStreamForIteration = shouldForceFollowup ? false : wantsStreamBase;
-        if (shouldForceFollowup) {
-          this.stripStreamingFromProviderPayload(providerPayload);
-        }
-
         try {
           const providerResponse = await handle.instance.processIncoming(providerPayload);
           const responseStatus = this.extractResponseStatus(providerResponse);
@@ -296,12 +293,13 @@ export class HubRequestExecutor implements RequestExecutor {
             providerLabel,
             attempt
           });
+          const wantsStreamBase = Boolean(input.metadata?.inboundStream ?? input.metadata?.stream);
           const normalized = this.normalizeProviderResponse(providerResponse);
           const converted = await this.convertProviderResponseIfNeeded({
             entryEndpoint: input.entryEndpoint,
             providerType: handle.providerType,
             requestId: input.requestId,
-            wantsStream: wantsStreamForIteration,
+            wantsStream: wantsStreamBase,
             originalRequest: originalRequestSnapshot,
             processMode: pipelineResult.processMode,
             response: normalized,
@@ -309,28 +307,6 @@ export class HubRequestExecutor implements RequestExecutor {
           });
           const usage = this.extractUsageFromResult(converted, mergedMetadata);
           aggregatedUsage = this.mergeUsageMetrics(aggregatedUsage, usage);
-
-          if (shouldForceFollowup) {
-            const followupDecision = await this.executeVisionFollowup({
-              input,
-              originalPayload: originalRequestSnapshot,
-              visionResponse: converted
-            });
-            if (!followupDecision?.nextMetadata) {
-              finalizeStats({ usage: aggregatedUsage, error: false });
-              this.logUsageSummary(input.requestId, {
-                providerKey: target.providerKey,
-                model: providerModel,
-                usage: aggregatedUsage,
-                latencyMs: Date.now() - requestStartedAt
-              });
-              return followupDecision?.result ?? converted;
-            }
-            followupTriggered = true;
-            iterationMetadata = followupDecision.nextMetadata;
-            attempt += 1;
-            continue;
-          }
 
           finalizeStats({ usage: aggregatedUsage, error: false });
           this.logUsageSummary(input.requestId, {
@@ -537,7 +513,7 @@ export class HubRequestExecutor implements RequestExecutor {
   }
 
   private normalizeProviderResponseHeaders(headers: unknown): Record<string, string> | undefined {
-    if (!headers || typeof headers !== 'object') {return undefined;}
+    if (!headers || typeof headers !== 'object') { return undefined; }
     const normalized: Record<string, string> = {};
     for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
       if (typeof value === 'string') {
@@ -579,6 +555,9 @@ export class HubRequestExecutor implements RequestExecutor {
       const baseContext: Record<string, unknown> = {
         ...(metadataBag ?? {})
       };
+      if (typeof (metadataBag as Record<string, unknown> | undefined)?.routeName === 'string') {
+        baseContext.routeId = (metadataBag as Record<string, unknown>).routeName as string;
+      }
       baseContext.requestId = options.requestId;
       baseContext.entryEndpoint = options.entryEndpoint || entry;
       baseContext.providerProtocol = providerProtocol;
@@ -606,7 +585,22 @@ export class HubRequestExecutor implements RequestExecutor {
         payload: Record<string, unknown>;
         entryEndpoint: string;
         requestId: string;
+        routeHint?: string;
       }): Promise<{ providerResponse: Record<string, unknown> }> => {
+        // 将 server-side 工具的 routeHint 注入到内部 payload 的 metadata，
+        // 以便后续在标准 HubPipeline 中保持路由上下文一致（例如强制 web_search）。
+        if (invokeOptions.routeHint) {
+          const carrier = invokeOptions.payload as { metadata?: Record<string, unknown> };
+          const existingMeta =
+            carrier.metadata && typeof carrier.metadata === 'object'
+              ? (carrier.metadata as Record<string, unknown>)
+              : {};
+          carrier.metadata = {
+            ...existingMeta,
+            routeHint: existingMeta.routeHint ?? invokeOptions.routeHint
+          };
+        }
+
         // Delegate to existing runtimeManager / Provider V2 stack.
         const runtimeKey = this.deps.runtimeManager.resolveRuntimeKey(invokeOptions.providerKey);
         if (!runtimeKey) {
@@ -625,6 +619,52 @@ export class HubRequestExecutor implements RequestExecutor {
         return { providerResponse: bodyPayload };
       };
 
+      const reenterPipeline = async (reenterOpts: {
+        entryEndpoint: string;
+        requestId: string;
+        body: Record<string, unknown>;
+        metadata?: Record<string, unknown>;
+      }): Promise<{ body?: Record<string, unknown>; __sse_responses?: unknown; format?: string }> => {
+        const nestedEntry = reenterOpts.entryEndpoint || options.entryEndpoint || entry;
+        const nestedExtra = asRecord(reenterOpts.metadata) ?? {};
+        const nestedEntryLower = nestedEntry.toLowerCase();
+
+        // 基于首次 HubPipeline metadata + 调用方注入的 metadata 构建新的请求 metadata。
+        // 不在 Host 层编码 servertool/web_search 等语义，由 llmswitch-core 负责。
+        const nestedMetadata: Record<string, unknown> = {
+          ...(metadataBag ?? {}),
+          ...nestedExtra,
+          entryEndpoint: nestedEntry,
+          direction: 'request',
+          stage: 'inbound'
+        };
+
+        // 针对 reenterPipeline 的入口端点，纠正 providerProtocol，避免沿用外层协议。
+        if (nestedEntryLower.includes('/v1/chat/completions')) {
+          nestedMetadata.providerProtocol = 'openai-chat';
+        } else if (nestedEntryLower.includes('/v1/responses')) {
+          nestedMetadata.providerProtocol = 'openai-responses';
+        } else if (nestedEntryLower.includes('/v1/messages')) {
+          nestedMetadata.providerProtocol = 'anthropic-messages';
+        }
+
+        const nestedInput: PipelineExecutionInput = {
+          entryEndpoint: nestedEntry,
+          method: 'POST',
+          requestId: reenterOpts.requestId,
+          headers: {},
+          query: {},
+          body: reenterOpts.body,
+          metadata: nestedMetadata
+        };
+        const nestedResult = await this.execute(nestedInput);
+        const nestedBody =
+          nestedResult.body && typeof nestedResult.body === 'object'
+            ? (nestedResult.body as Record<string, unknown>)
+            : undefined;
+        return { body: nestedBody };
+      };
+
       const converted = await convertProviderResponse({
         providerProtocol,
         providerResponse: body as Record<string, unknown>,
@@ -632,7 +672,8 @@ export class HubRequestExecutor implements RequestExecutor {
         entryEndpoint: options.entryEndpoint || entry,
         wantsStream: options.wantsStream,
         providerInvoker,
-        stageRecorder
+        stageRecorder,
+        reenterPipeline
       });
       if (converted.__sse_responses) {
         return {
@@ -697,7 +738,7 @@ export class HubRequestExecutor implements RequestExecutor {
   }
 
   private cloneRequestPayload(payload: unknown): Record<string, unknown> | undefined {
-    if (!payload || typeof payload !== 'object') {return undefined;}
+    if (!payload || typeof payload !== 'object') { return undefined; }
     try {
       return JSON.parse(JSON.stringify(payload));
     } catch {
@@ -816,59 +857,6 @@ export class HubRequestExecutor implements RequestExecutor {
       completion_tokens: completion,
       total_tokens: total
     };
-  }
-
-  private shouldTriggerVisionFollowup(routeName: string | undefined, alreadyFollowed: boolean): boolean {
-    if (alreadyFollowed) {
-      return false;
-    }
-    return routeName === 'vision';
-  }
-
-  private async executeVisionFollowup(options: {
-    input: PipelineExecutionInput;
-    originalPayload?: Record<string, unknown>;
-    visionResponse: PipelineExecutionResult;
-  }): Promise<{ nextMetadata?: Record<string, unknown>; result?: PipelineExecutionResult }> {
-    const { input, visionResponse } = options;
-    const payloadSource =
-      (options.originalPayload && typeof options.originalPayload === 'object'
-        ? options.originalPayload
-        : this.cloneRequestPayload(input.body)) ?? null;
-    if (!payloadSource) {
-      this.logStage('vision.followup.skip', input.requestId, { reason: 'missing-original-payload' });
-      return { result: visionResponse };
-    }
-    const followupPayload = this.buildVisionFollowupPayload({
-      originalPayload: payloadSource,
-      visionResponse
-    });
-    if (!followupPayload) {
-      this.logStage('vision.followup.skip', input.requestId, { reason: 'no-vision-text' });
-      return { result: visionResponse };
-    }
-    input.body = followupPayload;
-    const nextMetadata = this.buildRequestMetadata(input);
-    this.logStage('vision.followup.prepare', input.requestId, {
-      processMode: nextMetadata.processMode,
-      routeHint: nextMetadata.routeHint
-    });
-    return { nextMetadata };
-  }
-
-  private stripStreamingFromProviderPayload(payload: Record<string, unknown>): void {
-    if (!payload || typeof payload !== 'object') {
-      return;
-    }
-    (payload as Record<string, unknown>).stream = false;
-    const dataNode = (payload as { data?: unknown }).data;
-    if (dataNode && typeof dataNode === 'object') {
-      (dataNode as Record<string, unknown>).stream = false;
-    }
-    const bodyNode = (payload as { body?: unknown }).body;
-    if (bodyNode && typeof bodyNode === 'object') {
-      (bodyNode as Record<string, unknown>).stream = false;
-    }
   }
 
   private mergeUsageMetrics(base?: UsageMetrics, delta?: UsageMetrics): UsageMetrics | undefined {

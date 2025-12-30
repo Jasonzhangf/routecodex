@@ -295,7 +295,8 @@ export class HttpTransportProvider extends BaseProvider {
       const timeout =
         typeof timeoutFromCfg === 'number'
           ? timeoutFromCfg
-          : (baseProfile?.timeout ?? 300000);
+          // 默认 Provider 请求超时时间：500s
+          : (baseProfile?.timeout ?? 500000);
 
       const maxRetries =
         typeof maxRetriesFromCfg === 'number'
@@ -387,7 +388,8 @@ export class HttpTransportProvider extends BaseProvider {
     const envTimeout = Number(process.env.ROUTECODEX_PROVIDER_TIMEOUT_MS || process.env.RCC_PROVIDER_TIMEOUT_MS || NaN);
     const effectiveTimeout = Number.isFinite(envTimeout) && envTimeout > 0
       ? envTimeout
-      : (this.config.config.overrides?.timeout ?? profile.timeout ?? 300000);
+      // 默认 Provider 请求超时时间：500s（可被 env / overrides 覆盖）
+      : (this.config.config.overrides?.timeout ?? profile.timeout ?? 500000);
     const envRetries = Number(process.env.ROUTECODEX_PROVIDER_RETRIES || process.env.RCC_PROVIDER_RETRIES || NaN);
     const effectiveRetries = Number.isFinite(envRetries) && envRetries >= 0
       ? envRetries

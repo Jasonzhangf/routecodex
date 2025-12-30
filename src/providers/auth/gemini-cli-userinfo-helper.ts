@@ -105,11 +105,24 @@ export async function fetchGeminiCLIProjects(accessToken: string): Promise<Gemin
 
     const result = await response.json();
 
-    if (!result || !Array.isArray(result.projects)) {
+    if (!result || typeof result !== 'object') {
+      // Treat non-object / empty responses as "no projects" rather than a hard error.
+      return [];
+    }
+
+    const projectsField = (result as { projects?: UnknownObject }).projects;
+
+    if (!projectsField) {
+      // Some accounts legitimately return `{}` with HTTP 200 when there are no visible projects.
+      // In that case, we proceed with an empty list instead of failing OAuth.
+      return [];
+    }
+
+    if (!Array.isArray(projectsField)) {
       throw new Error('fetchGeminiCLIProjects: invalid response format');
     }
 
-    return result.projects.map((project: UnknownObject) => ({
+    return projectsField.map((project: UnknownObject) => ({
       projectId: String(project.projectId || ''),
       name: typeof project.name === 'string' ? project.name : undefined
     })).filter((p: GeminiCLIProject) => p.projectId);

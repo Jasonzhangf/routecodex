@@ -159,8 +159,9 @@ function parseJsonLines(raw: string): unknown[] {
     }
     try {
       records.push(JSON.parse(trimmed));
-    } catch {
-      // ignore invalid lines
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[semantic-replay] Failed to parse JSON line: ${message}`);
     }
   }
   return records;
@@ -352,7 +353,7 @@ function normalizeTimestamp(value?: unknown, fallback?: unknown): number | undef
 function tryParseJson(raw: string): Record<string, unknown> | null {
   try {
     return JSON.parse(raw) as Record<string, unknown>;
-  } catch {
+  } catch (error) {
     const trimmed = raw.trimStart();
     const envelope = extractTopLevelJson(trimmed);
     if (!envelope) {
@@ -360,7 +361,7 @@ function tryParseJson(raw: string): Record<string, unknown> | null {
     }
     try {
       return JSON.parse(envelope) as Record<string, unknown>;
-    } catch {
+    } catch (error) {
       return null;
     }
   }
@@ -490,13 +491,13 @@ async function findMatchingReqPrefix(
     const stage1 = path.join(dirPath, `${prefix}req_inbound_stage1_format_parse.json`);
     try {
       await fs.access(stage1);
-    } catch {
+    } catch (error) {
       continue;
     }
     let data: Record<string, unknown> | undefined;
     try {
       data = JSON.parse(await fs.readFile(stage1, 'utf-8')) as Record<string, unknown>;
-    } catch {
+    } catch (error) {
       continue;
     }
     const dataBody = data && typeof data.body === 'object' ? (data.body as Record<string, unknown>) : undefined;

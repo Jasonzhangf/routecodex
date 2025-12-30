@@ -28,7 +28,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       // Monitor成功样本要求此Beta标头，确保上游接受Responses协议
       'OpenAI-Beta': 'responses-2024-12-17'
     },
-    timeout: 300000,
+    // 默认 Provider 请求超时时间：500s
+    timeout: 500000,
     maxRetries: 3
   },
   openai: {
@@ -40,7 +41,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     headers: {
       'Content-Type': 'application/json'
     },
-    timeout: 300000,
+    // 默认 Provider 请求超时时间：500s
+    timeout: 500000,
     maxRetries: 3
   },
 
@@ -59,7 +61,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'Content-Type': 'application/json'
       // 版本标头由上游/配置控制，这里不硬编码 anthropic-version，避免与兼容端点冲突
     },
-    timeout: 300000,
+    // 默认 Provider 请求超时时间：500s
+    timeout: 500000,
     maxRetries: 3
   },
   gemini: {
@@ -73,7 +76,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     headers: {
       'Content-Type': 'application/json'
     },
-    timeout: 300000,
+    // 默认 Provider 请求超时时间：500s
+    timeout: 500000,
     maxRetries: 3
   },
   'gemini-cli': {
@@ -88,7 +92,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'X-Goog-Api-Client': 'gl-node/22.17.0',
       'Client-Metadata': 'ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI'
     },
-    timeout: 300000,
+    // 默认 Provider 请求超时时间：500s
+    timeout: 500000,
     maxRetries: 3
   },
 
@@ -103,7 +108,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'Content-Type': 'application/json',
       'User-Agent': 'RouteCodex/2.0'
     },
-    timeout: 300000,
+    // 默认 Provider 请求超时时间：500s
+    timeout: 500000,
     maxRetries: 3
   },
 
@@ -125,7 +131,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'X-Goog-Api-Client': 'gl-node/22.17.0',
       'Client-Metadata': 'ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI'
     },
-    timeout: 300000,
+    // 默认 Provider 请求超时时间：500s
+    timeout: 500000,
     maxRetries: 3
   },
 
@@ -140,7 +147,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     headers: {
       'Content-Type': 'application/json'
     },
-    timeout: 300000,
+    // 默认 Provider 请求超时时间：500s
+    timeout: 500000,
     maxRetries: 3
   },
 
@@ -153,8 +161,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     headers: {
       'Content-Type': 'application/json'
     },
-    // LM Studio 默认请求超时时间：500s（与长上下文/本地模型加载行为对齐）
-    timeout: 500000,
+    // LM Studio 默认请求超时时间：1000s（加倍以适配更长上下文/初始化耗时）
+    timeout: 1000000,
     maxRetries: 3
   }
 };
