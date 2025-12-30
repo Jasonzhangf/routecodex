@@ -160,6 +160,151 @@ describe('ServerTool web_search engine (generic)', () => {
     expect(contentObj.summary).toBe('stub search result');
     expect(contentObj.engine).toBe('stub');
   });
+
+  test('falls back to next engine on backend failure', async () => {
+    const chatResponse = buildChatWithToolCall('fallback search');
+
+    const ctx: AdapterContext = {
+      ...baseCtx,
+      requestId: 'req-web-fallback',
+      webSearch: {
+        engines: [
+          {
+            id: 'bad',
+            providerKey: 'backend.bad',
+            description: 'bad backend',
+            default: true
+          },
+          {
+            id: 'good',
+            providerKey: 'backend.good',
+            description: 'good backend'
+          }
+        ],
+        injectPolicy: 'always',
+        force: true
+      } as any
+    };
+
+    const invocations: any[] = [];
+    const providerInvoker: ProviderInvoker = async (options) => {
+      invocations.push(options);
+      if (options.providerKey === 'backend.bad') {
+        throw new Error('backend crashed');
+      }
+      return {
+        providerResponse: {
+          id: 'search-resp-good',
+          model: 'backend.good',
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: 'assistant',
+                content: 'good backend search result'
+              },
+              finish_reason: 'stop'
+            }
+          ]
+        } as any
+      };
+    };
+
+    process.env.ROUTECODEX_SERVER_SIDE_TOOLS = 'web_search';
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext: ctx,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-web-fallback',
+      providerProtocol: 'openai-chat',
+      providerInvoker
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('web_search_flow');
+    expect(invocations.length).toBe(2);
+    expect(invocations[0].providerKey).toBe('backend.bad');
+    expect(invocations[1].providerKey).toBe('backend.good');
+
+    const patched = result.finalChatResponse as any;
+    const outputs = Array.isArray(patched.tool_outputs) ? patched.tool_outputs : [];
+    expect(outputs.length).toBe(1);
+    const contentObj = JSON.parse(outputs[0].content);
+    expect(contentObj.engine).toBe('good');
+    expect(contentObj.summary).toBe('good backend search result');
+  });
+
+  test('skips engines with serverToolsDisabled', async () => {
+    const chatResponse = buildChatWithToolCall('skip disabled engine');
+
+    const ctx: AdapterContext = {
+      ...baseCtx,
+      requestId: 'req-web-disabled',
+      webSearch: {
+        engines: [
+          {
+            id: 'disabled',
+            providerKey: 'backend.disabled',
+            description: 'disabled backend',
+            default: true,
+            serverToolsDisabled: true
+          },
+          {
+            id: 'enabled',
+            providerKey: 'backend.enabled',
+            description: 'enabled backend'
+          }
+        ],
+        injectPolicy: 'always',
+        force: true
+      } as any
+    };
+
+    const invocations: any[] = [];
+    const providerInvoker: ProviderInvoker = async (options) => {
+      invocations.push(options);
+      return {
+        providerResponse: {
+          id: 'search-resp-enabled',
+          model: 'backend.enabled',
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: 'assistant',
+                content: 'enabled backend search result'
+              },
+              finish_reason: 'stop'
+            }
+          ]
+        } as any
+      };
+    };
+
+    process.env.ROUTECODEX_SERVER_SIDE_TOOLS = 'web_search';
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext: ctx,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-web-disabled',
+      providerProtocol: 'openai-chat',
+      providerInvoker
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('web_search_flow');
+    expect(invocations.length).toBe(1);
+    expect(invocations[0].providerKey).toBe('backend.enabled');
+
+    const patched = result.finalChatResponse as any;
+    const outputs = Array.isArray(patched.tool_outputs) ? patched.tool_outputs : [];
+    expect(outputs.length).toBe(1);
+    const contentObj = JSON.parse(outputs[0].content);
+    expect(contentObj.engine).toBe('enabled');
+    expect(contentObj.summary).toBe('enabled backend search result');
+  });
 });
 
 describe('ServerTool web_search engine (Gemini backend)', () => {

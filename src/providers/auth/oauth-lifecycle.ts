@@ -55,6 +55,7 @@ const TOKEN_REFRESH_SKEW_MS = 60_000;
 
 const inFlight: Map<string, Promise<void>> = new Map();
 const lastRunAt: Map<string, number> = new Map();
+let interactiveTail: Promise<void> = Promise.resolve();
 const GEMINI_CLI_PROVIDER_IDS = new Set(['gemini-cli', 'antigravity']);
 
 function isGeminiCliFamily(providerType: string): boolean {
@@ -180,6 +181,22 @@ async function readTokenFromFile(file: string): Promise<StoredOAuthToken | null>
     return sanitizeToken(JSON.parse(txt) as UnknownObject);
   } catch {
     return null;
+  }
+}
+
+async function clearTokenFile(file: string): Promise<void> {
+  if (!file) {
+    return;
+  }
+  try {
+    await fs.unlink(file);
+    logOAuthDebug(`[OAuth] token.clear: ${file}`);
+  } catch (error) {
+    const code = (error as { code?: string } | null)?.code;
+    if (code !== 'ENOENT') {
+      const msg = error instanceof Error ? error.message : String(error);
+      logOAuthDebug(`[OAuth] token.clear failed (${file}): ${msg}`);
+    }
   }
 }
 
@@ -684,15 +701,45 @@ async function runInteractiveAuthorizationFlow(
   providerType: string,
   overrides: Record<string, unknown>,
   tokenFilePath: string,
-  openBrowser: boolean
+  openBrowser: boolean,
+  forceTokenReset: boolean
 ): Promise<void> {
-  if (providerType === 'iflow') {
-    await runIflowAuthorizationSequence(providerType, overrides, tokenFilePath);
+  const execute = async (): Promise<void> => {
+    if (forceTokenReset) {
+      await clearTokenFile(tokenFilePath);
+    }
+    if (providerType === 'iflow') {
+      await runIflowAuthorizationSequence(providerType, overrides, tokenFilePath);
+      return;
+    }
+    const strategy = createStrategy(providerType, overrides, tokenFilePath);
+    const authed = await strategy.authenticate?.({ openBrowser });
+    await finalizeTokenWrite(providerType, strategy, tokenFilePath, authed, 'acquired');
+  };
+
+  if (!openBrowser) {
+    await execute();
     return;
   }
-  const strategy = createStrategy(providerType, overrides, tokenFilePath);
-  const authed = await strategy.authenticate?.({ openBrowser });
-  await finalizeTokenWrite(providerType, strategy, tokenFilePath, authed, 'acquired');
+
+  const label = `${providerType}:${tokenFilePath}`;
+  const queued = interactiveTail
+    .catch(() => {
+      // ignore previous rejection so queue continues
+    })
+    .then(async () => {
+      logOAuthDebug(`[OAuth] interactive queue enter ${label}`);
+      try {
+        await execute();
+      } finally {
+        logOAuthDebug(`[OAuth] interactive queue leave ${label}`);
+      }
+    });
+  interactiveTail = queued.then(
+    () => undefined,
+    () => undefined
+  );
+  await queued;
 }
 
 async function runIflowAuthorizationSequence(
@@ -758,39 +805,41 @@ export async function ensureValidOAuthToken(
     return;
   }
 
-  const openBrowser = opts.openBrowser ?? true;
+  const envAutoOpen = String(process.env.ROUTECODEX_OAUTH_AUTO_OPEN || '1') === '1';
+  const openBrowser = opts.openBrowser ?? envAutoOpen;
   const forceReauth =
     opts.forceReauthorize === true || String(process.env.ROUTECODEX_OAUTH_FORCE_REAUTH || '0') === '1';
 
 	  const runPromise = (async () => {
-	    const defaults = getProviderOAuthConfig(providerType);
-	    const { overrides, endpoints, client } = await buildOverrides(
-	      providerType,
-	      defaults,
-	      auth,
-	      openBrowser,
-	      tokenFilePath
-	    );
-	    logOAuthSetup(providerType, defaults, overrides, endpoints, client, tokenFilePath, openBrowser, forceReauth);
-	    const strategy = createStrategy(providerType, overrides, tokenFilePath);
-	    let token = await readTokenFromFile(tokenFilePath);
+    const defaults = getProviderOAuthConfig(providerType);
+    const { overrides, endpoints, client } = await buildOverrides(
+      providerType,
+      defaults,
+      auth,
+      openBrowser,
+      tokenFilePath
+    );
+    logOAuthSetup(providerType, defaults, overrides, endpoints, client, tokenFilePath, openBrowser, forceReauth);
+    const strategy = createStrategy(providerType, overrides, tokenFilePath);
+    let token = await readTokenFromFile(tokenFilePath);
+    const hadExistingTokenFile = token !== null;
 
 	    // Gemini CLI 家族：如果现有 token 缺少 project 元数据，尝试在不触发完整 OAuth 授权的前提下
 	    // 使用当前 access_token 补全 UserInfo + Projects（对齐 gcli2api 的行为），并立即写回。
-	    if (isGeminiCliFamily(providerType) && token) {
-	      try {
-	        const hasProjectMetadata = Boolean(getDefaultProjectId(token as UnknownObject));
-	        if (!hasProjectMetadata) {
-	          const enriched = await maybeEnrichToken(providerType, token as UnknownObject);
-	          if (enriched && typeof strategy.saveToken === 'function') {
-	            await strategy.saveToken(enriched);
-	            token = enriched as StoredOAuthToken;
-	          }
-	        }
-	      } catch (error) {
-	        const msg = error instanceof Error ? error.message : String(error);
-	        console.error(
-	          `[OAuth] ${providerType}: failed to enrich existing token with project metadata - ${msg}`
+    if (isGeminiCliFamily(providerType) && token) {
+      try {
+        const hasProjectMetadata = Boolean(getDefaultProjectId(token as UnknownObject));
+        if (!hasProjectMetadata) {
+          const enriched = await maybeEnrichToken(providerType, token as UnknownObject);
+          if (enriched && typeof strategy.saveToken === 'function') {
+            await strategy.saveToken(enriched);
+            token = enriched as StoredOAuthToken;
+          }
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(
+          `[OAuth] ${providerType}: failed to enrich existing token with project metadata - ${msg}`
 	        );
 	        // 若明确是 401 / invalid token 类错误，将 token 视为无效，后续强制走重新授权流程。
 	        const lower = msg.toLowerCase();
@@ -803,9 +852,9 @@ export async function ensureValidOAuthToken(
 	      }
 	    }
 
-	    logTokenSnapshot(providerType, token, endpoints);
-	    const tokenState = evaluateTokenState(token, providerType);
-	    const noRefresh = hasNoRefreshFlag(token);
+    logTokenSnapshot(providerType, token, endpoints);
+    const tokenState = evaluateTokenState(token, providerType);
+    const noRefresh = hasNoRefreshFlag(token);
 
     if (noRefresh) {
       logOAuthDebug(
@@ -843,7 +892,13 @@ export async function ensureValidOAuthToken(
       }
     }
 
-    await runInteractiveAuthorizationFlow(providerType, overrides, tokenFilePath, openBrowser);
+    await runInteractiveAuthorizationFlow(
+      providerType,
+      overrides,
+      tokenFilePath,
+      openBrowser,
+      forceReauth || hadExistingTokenFile
+    );
     updateThrottle(cacheKey);
   })();
 
@@ -895,7 +950,7 @@ export async function handleUpstreamInvalidOAuthToken(
     if (!looksInvalid) {
       return false;
     }
-    const opts: EnsureOpts = { forceReacquireIfRefreshFails: true };
+    const opts: EnsureOpts = { forceReacquireIfRefreshFails: true, openBrowser: true };
     // 对于 Gemini CLI 家族，一旦检测到 project_id 缺失类错误，强制发起交互式 OAuth 以拉起 Portal。
     if (pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity') {
       opts.forceReauthorize = true;

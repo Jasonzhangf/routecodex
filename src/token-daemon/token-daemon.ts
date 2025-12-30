@@ -140,8 +140,8 @@ export class TokenDaemon {
         tokenFile: token.filePath
       } as any,
       {
-        openBrowser: false,
-        forceReacquireIfRefreshFails: false
+        openBrowser: true,
+        forceReacquireIfRefreshFails: true
       }
     );
 
