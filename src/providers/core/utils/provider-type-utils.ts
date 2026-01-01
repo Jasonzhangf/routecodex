@@ -7,7 +7,7 @@ const TYPE_TO_PROTOCOL: Record<ProviderType, ProviderProtocol> = {
   responses: 'openai-responses',
   anthropic: 'anthropic-messages',
   gemini: 'gemini-chat',
-  'gemini-cli': 'gemini-cli-chat',
+  'gemini-cli': 'gemini-chat',
   mock: 'openai-chat'
 };
 

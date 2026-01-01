@@ -1,3 +1,4 @@
+import fs from 'fs/promises';
 import readline from 'readline';
 import path from 'path';
 import { homedir } from 'os';
@@ -15,8 +16,16 @@ import {
   detectLocalServerInstance,
   type ServerAuthSnapshot
 } from './server-utils.js';
+import {
+  TokenHistoryStore,
+  TOKEN_HISTORY_FILE,
+  type RefreshOutcome
+} from './history-store.js';
+import { ensureLocalTokenPortalEnv } from '../token-portal/local-token-portal.js';
 
 export { TokenDaemon };
+
+const historyStore = new TokenHistoryStore();
 
 // --- shared helpers ---
 
@@ -50,18 +59,45 @@ function computeTokenUsageForServer(
   return usages;
 }
 
+function formatIso(value?: number): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return '-';
+  }
+  try {
+    return new Date(value).toISOString();
+  } catch {
+    return '-';
+  }
+}
+
+function formatDuration(ms?: number): string {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) {
+    return '-';
+  }
+  if (ms < 1000) {
+    return `${Math.round(ms)}ms`;
+  }
+  const seconds = ms / 1000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)}s`;
+  }
+  return `${(seconds / 60).toFixed(1)}m`;
+}
+
 // --- combined status (legacy) ---
 
 export async function printStatus(json = false): Promise<void> {
   const snapshot = await collectTokenSnapshot();
   const serverSnapshot = await buildServerAuthSnapshot();
+  const historySnapshot = await historyStore.getSnapshot();
 
   if (json) {
     console.log(
       JSON.stringify(
         {
           tokens: snapshot,
-          servers: serverSnapshot
+          servers: serverSnapshot,
+          history: historySnapshot.data
         },
         null,
         2
@@ -121,6 +157,46 @@ export async function printStatus(json = false): Promise<void> {
       rows.push(
         `| ${p.id.padEnd(14)} | ${p.protocol.padEnd(9)} | ${authKind.padEnd(9)} | ${details.padEnd(33)} |`
       );
+    }
+  }
+
+  rows.push('');
+  rows.push('== Refresh History ==');
+  const historyEntries = Object.values(historySnapshot.data.tokens);
+  if (historyEntries.length === 0) {
+    rows.push(`(no refresh history yet - stats will be persisted to ${TOKEN_HISTORY_FILE})`);
+  } else {
+    historyEntries.sort((a, b) => {
+      const left = a.lastAttemptAt ?? 0;
+      const right = b.lastAttemptAt ?? 0;
+      return right - left;
+    });
+    rows.push(
+      '| Provider       | Alias     | Attempts | Success | Failure | Last Result | Last Attempt              | Duration |'
+    );
+    rows.push(
+      '|----------------|-----------|----------|---------|---------|-------------|---------------------------|----------|'
+    );
+    let hasSuspended = false;
+    for (const entry of historyEntries) {
+      const lastResultLabel = entry.autoSuspended ? `${entry.lastResult ?? '-'}*` : `${entry.lastResult ?? '-'}`;
+      if (entry.autoSuspended) {
+        hasSuspended = true;
+      }
+      rows.push(
+        `| ${entry.provider.padEnd(14)} | ${entry.alias.padEnd(9)} | ${String(entry.totalAttempts).padEnd(
+          8
+        )} | ${String(entry.refreshSuccesses).padEnd(7)} | ${String(entry.refreshFailures).padEnd(
+          7
+        )} | ${lastResultLabel.padEnd(11)} | ${formatIso(entry.lastAttemptAt).padEnd(
+          25
+        )} | ${formatDuration(entry.lastDurationMs).padEnd(8)} |`
+      );
+    }
+    rows.push('');
+    rows.push(`History file: ${TOKEN_HISTORY_FILE}`);
+    if (hasSuspended) {
+      rows.push('* auto-refresh suspended after repeated failures; will resume after a new user-triggered token update.');
     }
   }
 
@@ -277,21 +353,60 @@ export async function interactiveRefresh(selector: string): Promise<void> {
   const rawType = `${providerType}-oauth`;
 
   console.log(chalk.blue('ℹ'), '正在启动 OAuth 流程，请在浏览器中完成登录...');
+  const tokenMtimeBefore = await getTokenFileMtime(token.filePath);
+  const startedAt = Date.now();
+  try {
+    await ensureLocalTokenPortalEnv();
+    await ensureValidOAuthToken(
+      providerType,
+      {
+        type: rawType,
+        tokenFile: token.filePath
+      } as any,
+      {
+        openBrowser: true,
+        forceReauthorize: true,
+        forceReacquireIfRefreshFails: true
+      }
+    );
+    const tokenMtimeAfter = await getTokenFileMtime(token.filePath);
+    await recordManualHistory(token, 'success', startedAt, tokenMtimeAfter);
+    console.log(chalk.green('✓'), '认证完成，Token 文件已更新');
+  } catch (error) {
+    await recordManualHistory(token, 'failure', startedAt, tokenMtimeBefore, error);
+    throw error;
+  }
+}
 
-  await ensureValidOAuthToken(
-    providerType,
-    {
-      type: rawType,
-      tokenFile: token.filePath
-    } as any,
-    {
-      openBrowser: true,
-      forceReauthorize: true,
-      forceReacquireIfRefreshFails: true
-    }
-  );
+async function recordManualHistory(
+  token: TokenDescriptor,
+  outcome: RefreshOutcome,
+  startedAt: number,
+  tokenFileMtime: number | null,
+  error?: unknown
+): Promise<void> {
+  try {
+    const completedAt = Date.now();
+    await historyStore.recordRefreshResult(token, outcome, {
+      startedAt,
+      completedAt,
+      durationMs: completedAt - startedAt,
+      mode: 'manual',
+      error: error ? (error instanceof Error ? error.message : String(error)) : undefined,
+      tokenFileMtime
+    });
+  } catch {
+    // ignore persistence failures for manual refreshes
+  }
+}
 
-  console.log(chalk.green('✓'), '认证完成，Token 文件已更新');
+async function getTokenFileMtime(filePath: string): Promise<number | null> {
+  try {
+    const stats = await fs.stat(filePath);
+    return stats.mtimeMs;
+  } catch {
+    return null;
+  }
 }
 
 function askYesNo(prompt: string): Promise<boolean> {

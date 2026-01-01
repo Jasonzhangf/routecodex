@@ -32,6 +32,7 @@ import { classifyProviderError } from './provider-error-classifier.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
 import type { ProviderUsageEvent } from '@jsonstudio/llms';
 import * as LlmsCore from '@jsonstudio/llms';
+import { RateLimitBackoffManager, RateLimitCooldownError } from './rate-limit-manager.js';
 
 type RequestEnvelope = UnknownObject & { data?: UnknownObject };
 type StatsCenterLike = {
@@ -81,6 +82,7 @@ export abstract class BaseProvider implements IProviderV2 {
   private runtimeProfile?: ProviderRuntimeProfile;
   private static rateLimitFailures: Map<string, number> = new Map();
   private static readonly RATE_LIMIT_THRESHOLD = 4;
+  private static readonly rateLimitBackoff = new RateLimitBackoffManager();
 
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     this.id = `provider-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -162,6 +164,13 @@ export abstract class BaseProvider implements IProviderV2 {
 
     } catch (error) {
       this.errorCount++;
+      if (error instanceof RateLimitCooldownError) {
+        this.dependencies.logger?.logModule(this.id, 'rate-limit-skip', {
+          providerKey: context.providerKey,
+          model: context.model,
+          message: error.message
+        });
+      }
       this.handleRequestError(error, context);
       throw error;
     }
@@ -178,6 +187,7 @@ export abstract class BaseProvider implements IProviderV2 {
     }
 
     const context = this.createContext(request as UnknownObject);
+    this.enforceRateLimitWindow(context);
     const runtimeMetadata = context.runtimeMetadata;
     const stats = getStatsCenterSafe();
 
@@ -196,7 +206,7 @@ export abstract class BaseProvider implements IProviderV2 {
       const finalResponse = await this.postprocessResponse(response, context);
 
       const endTime = Date.now();
-      this.resetRateLimitCounter(context.providerKey);
+      this.resetRateLimitCounter(context.providerKey, context.model);
       try {
         const usage = this.extractUsageTokensFromResponse(finalResponse);
         const event: ProviderUsageEvent = {
@@ -222,6 +232,13 @@ export abstract class BaseProvider implements IProviderV2 {
       return finalResponse;
     } catch (error) {
       this.errorCount++;
+      if (error instanceof RateLimitCooldownError) {
+        this.dependencies.logger?.logModule(this.id, 'rate-limit-skip', {
+          providerKey: context.providerKey,
+          model: context.model,
+          message: error.message
+        });
+      }
       const endTime = Date.now();
       try {
         const event: ProviderUsageEvent = {
@@ -446,6 +463,17 @@ export abstract class BaseProvider implements IProviderV2 {
       this.resetRateLimitCounter(providerKey, context.model);
     }
 
+    if (classification.isRateLimit && providerKey) {
+      const backoffInfo = BaseProvider.rateLimitBackoff.record429(providerKey, context.model);
+      this.dependencies.logger?.logModule(this.id, 'rate-limit-429-backoff', {
+        providerKey,
+        model: context.model,
+        consecutive429: backoffInfo.consecutive,
+        cooldownMs: backoffInfo.cooldownMs,
+        seriesBlacklisted: backoffInfo.seriesBlacklisted
+      });
+    }
+
     const affectsHealth = classification.affectsHealth;
     const recoverable = classification.forceFatalRateLimit ? false : classification.recoverable;
 
@@ -526,6 +554,13 @@ export abstract class BaseProvider implements IProviderV2 {
     return Boolean(tools);
   }
 
+  private enforceRateLimitWindow(context: ProviderContext): void {
+    const cooldownError = BaseProvider.rateLimitBackoff.buildThrottleError(context);
+    if (cooldownError) {
+      throw cooldownError;
+    }
+  }
+
   private getRateLimitBucketKey(providerKey?: string, model?: string): string | undefined {
     if (!providerKey) {
       return undefined;
@@ -566,6 +601,7 @@ export abstract class BaseProvider implements IProviderV2 {
       return;
     }
     BaseProvider.rateLimitFailures.delete(bucketKey);
+    BaseProvider.rateLimitBackoff.reset(providerKey, model);
   }
 
   private forceRateLimitFailure(providerKey?: string, model?: string): void {

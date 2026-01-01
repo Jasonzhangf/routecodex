@@ -273,6 +273,23 @@ class RouteCodexApp {
       console.log(`🧱 Virtual router routes: ${routeEntries.length}`);
       console.log(`🔑 Provider targets: ${targetCount}`);
 
+      const normalizePortalHost = (value: string): string => {
+        const normalized = value.trim().toLowerCase();
+        if (!normalized || normalized === '0.0.0.0' || normalized === '::' || normalized === '::1' || normalized === 'localhost') {
+          return LOCAL_HOSTS.IPV4;
+        }
+        return value;
+      };
+      process.env.ROUTECODEX_PORT = String(bindPort);
+      process.env.RCC_PORT = String(bindPort);
+      process.env.ROUTECODEX_HTTP_HOST = bindHost;
+      process.env.ROUTECODEX_HTTP_PORT = String(bindPort);
+      if (!process.env.ROUTECODEX_TOKEN_PORTAL_BASE) {
+        const portalHost = normalizePortalHost(bindHost);
+        const portalBaseUrl = `${HTTP_PROTOCOLS.HTTP}${portalHost}:${bindPort}/token-auth/demo`;
+        process.env.ROUTECODEX_TOKEN_PORTAL_BASE = portalBaseUrl;
+      }
+
       // 5. 启动 HTTP Server 监听端口（若端口被占用，先尝试优雅释放）
       //    必须在 provider OAuth 初始化之前完成监听，否则本地 token portal 无法访问。
       // Ensure the port is available before continuing. Attempt graceful shutdown first.

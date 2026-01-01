@@ -184,19 +184,60 @@ async function readTokenFromFile(file: string): Promise<StoredOAuthToken | null>
   }
 }
 
-async function clearTokenFile(file: string): Promise<void> {
+async function backupTokenFile(file: string): Promise<string | null> {
   if (!file) {
+    return null;
+  }
+  try {
+    await fs.access(file);
+  } catch (error) {
+    const code = (error as { code?: string } | null)?.code;
+    if (code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
+  const backup = `${file}.${Date.now()}.bak`;
+  try {
+    await fs.copyFile(file, backup);
+    logOAuthDebug(`[OAuth] token.backup: ${backup}`);
+    return backup;
+  } catch (error) {
+    logOAuthDebug(
+      `[OAuth] token.backup failed (${file}): ${error instanceof Error ? error.message : String(error)}`
+    );
+    return null;
+  }
+}
+
+async function restoreTokenFileFromBackup(backupFile: string | null, target: string): Promise<void> {
+  if (!backupFile) {
     return;
   }
   try {
-    await fs.unlink(file);
-    logOAuthDebug(`[OAuth] token.clear: ${file}`);
+    await fs.copyFile(backupFile, target);
+    logOAuthDebug(`[OAuth] token.restore: ${target}`);
   } catch (error) {
-    const code = (error as { code?: string } | null)?.code;
-    if (code !== 'ENOENT') {
-      const msg = error instanceof Error ? error.message : String(error);
-      logOAuthDebug(`[OAuth] token.clear failed (${file}): ${msg}`);
+    logOAuthDebug(
+      `[OAuth] token.restore failed (${target}): ${error instanceof Error ? error.message : String(error)}`
+    );
+  } finally {
+    try {
+      await fs.unlink(backupFile);
+    } catch {
+      // ignore cleanup failure
     }
+  }
+}
+
+async function discardBackupFile(backupFile: string | null): Promise<void> {
+  if (!backupFile) {
+    return;
+  }
+  try {
+    await fs.unlink(backupFile);
+  } catch {
+    // ignore
   }
 }
 
@@ -705,16 +746,23 @@ async function runInteractiveAuthorizationFlow(
   forceTokenReset: boolean
 ): Promise<void> {
   const execute = async (): Promise<void> => {
+    let backupFile: string | null = null;
     if (forceTokenReset) {
-      await clearTokenFile(tokenFilePath);
+      backupFile = await backupTokenFile(tokenFilePath);
     }
-    if (providerType === 'iflow') {
-      await runIflowAuthorizationSequence(providerType, overrides, tokenFilePath);
-      return;
+    try {
+      if (providerType === 'iflow') {
+        await runIflowAuthorizationSequence(providerType, overrides, tokenFilePath);
+      } else {
+        const strategy = createStrategy(providerType, overrides, tokenFilePath);
+        const authed = await strategy.authenticate?.({ openBrowser });
+        await finalizeTokenWrite(providerType, strategy, tokenFilePath, authed, 'acquired');
+      }
+      await discardBackupFile(backupFile);
+    } catch (error) {
+      await restoreTokenFileFromBackup(backupFile, tokenFilePath);
+      throw error;
     }
-    const strategy = createStrategy(providerType, overrides, tokenFilePath);
-    const authed = await strategy.authenticate?.({ openBrowser });
-    await finalizeTokenWrite(providerType, strategy, tokenFilePath, authed, 'acquired');
   };
 
   if (!openBrowser) {
@@ -791,7 +839,9 @@ export async function ensureValidOAuthToken(
     await inFlight.get(cacheKey)!;
     return;
   }
-  if (shouldThrottle(cacheKey)) {
+  // 当 opts.forceReauthorize 显式为 true 时，跳过节流检查，
+  // 确保来自上游 401/406 等认证错误的修复请求不会被初始化阶段的调用吞掉。
+  if (!opts.forceReauthorize && shouldThrottle(cacheKey)) {
     return;
   }
 
@@ -840,17 +890,17 @@ export async function ensureValidOAuthToken(
         const msg = error instanceof Error ? error.message : String(error);
         console.error(
           `[OAuth] ${providerType}: failed to enrich existing token with project metadata - ${msg}`
-	        );
-	        // 若明确是 401 / invalid token 类错误，将 token 视为无效，后续强制走重新授权流程。
-	        const lower = msg.toLowerCase();
-	        if (
-	          /invalid[_-]?token|invalid[_-]?grant|unauthenticated|unauthorized/.test(lower) ||
-	          lower.includes('http 401')
-	        ) {
-	          token = null;
-	        }
-	      }
-	    }
+        );
+        // 若明确是 401 / invalid token 类错误，将 token 视为无效，后续强制走重新授权流程。
+        const lower = msg.toLowerCase();
+        const authError =
+          /invalid[_-]?token|invalid[_-]?grant|unauthenticated|unauthorized/.test(lower) ||
+          lower.includes('http 401');
+        if (authError && forceReauth) {
+          token = null;
+        }
+      }
+    }
 
     logTokenSnapshot(providerType, token, endpoints);
     const tokenState = evaluateTokenState(token, providerType);
@@ -920,15 +970,35 @@ export async function handleUpstreamInvalidOAuthToken(
     const msg = upstreamError instanceof Error ? upstreamError.message : String(upstreamError || '');
     const lower = msg.toLowerCase();
 
+    let statusCode: number | undefined;
+    try {
+      const anyErr = upstreamError as { statusCode?: unknown; status?: unknown } | null | undefined;
+      if (anyErr) {
+        if (typeof anyErr.statusCode === 'number') {
+          statusCode = anyErr.statusCode;
+        } else if (typeof anyErr.status === 'number') {
+          statusCode = anyErr.status;
+        }
+      }
+    } catch {
+      // best-effort statusCode extraction
+    }
+
     // 基本令牌失效判定：只看典型 OAuth 文案
     let looksInvalid =
       /invalid[_-]?token|invalid[_-]?grant|unauthenticated|unauthorized|token has expired|access token expired/.test(
         lower
       );
 
-    // 对于 iflow / qwen，保留基于 401/403 的宽松判定，避免破坏既有行为
+    // 对于 iflow / qwen，保留基于 401/403 的宽松判定，避免破坏既有行为，
+    // 同时将部分上游使用的 406 也视作“认证失效”，与 401 统一处理。
     if (!looksInvalid && (pt === 'iflow' || pt === 'qwen')) {
-      if (/\b401\b|\b403\b|40308/.test(msg)) {
+      if (
+        statusCode === 401 ||
+        statusCode === 403 ||
+        statusCode === 406 ||
+        /\b401\b|\b403\b|40308/.test(msg)
+      ) {
         looksInvalid = true;
       }
     }
@@ -950,11 +1020,13 @@ export async function handleUpstreamInvalidOAuthToken(
     if (!looksInvalid) {
       return false;
     }
-    const opts: EnsureOpts = { forceReacquireIfRefreshFails: true, openBrowser: true };
-    // 对于 Gemini CLI 家族，一旦检测到 project_id 缺失类错误，强制发起交互式 OAuth 以拉起 Portal。
-    if (pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity') {
-      opts.forceReauthorize = true;
-    }
+    const opts: EnsureOpts = {
+      forceReacquireIfRefreshFails: true,
+      openBrowser: true,
+      // 上游已经明确返回“认证失效”（包括 iflow 的 406/439），
+      // 此时强制跳过节流并允许走完整 OAuth 流程。
+      forceReauthorize: pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity' || pt === 'iflow' || pt === 'qwen'
+    };
     await ensureValidOAuthToken(providerType, auth, opts);
     return true;
   } catch {

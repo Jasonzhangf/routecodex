@@ -32,7 +32,8 @@ const args = Object.fromEntries(process.argv.slice(2).map(kv => {
 const MODE = String(args.mode || process.env.MODE || 'proxy');
 const RC_BASE = String(process.env.RC_BASE || 'http://127.0.0.1:5506').replace(/\/$/, '');
 const RC_ENDPOINT = String(args.endpoint || process.env.RC_ENDPOINT || '/v1/chat/completions');
-const IFLOW_MODEL = String(process.env.IFLOW_MODEL || 'gpt-4o-mini');
+// 默认模型更新为 iFlow-ROME-30BA3B，除非通过 IFLOW_MODEL 显式覆盖。
+const IFLOW_MODEL = String(process.env.IFLOW_MODEL || 'iFlow-ROME-30BA3B');
 const TEXT = String(process.env.TEXT || 'hello from RouteCodex test');
 const RUN_TOOLS = !!args.tools;
 const CONFIG_PATH = expandHome(String(process.env.CONFIG || args.config || path.join(os.homedir(), '.routecodex', 'config', 'v2', 'iflow-only.json')));
@@ -170,6 +171,93 @@ async function requestUpstreamChat(oauth, token) {
   try { console.log(JSON.stringify(JSON.parse(body), null, 2)); } catch { console.log(body); }
 }
 
+async function requestUpstreamWebSearch(oauth, token) {
+  const url = `${oauth.apiBase.replace(/\/$/, '')}/chat/completions`;
+  const payload = {
+    model: IFLOW_MODEL,
+    messages: [
+      {
+        role: 'system',
+        content: 'You are an up-to-date web search engine. Call the web_search tool to fetch current results, then answer based on the tool output.'
+      },
+      {
+        role: 'user',
+        content: `${TEXT}. 请先调用 web_search 工具检索相关信息，再根据搜索结果回答。`
+      }
+    ],
+    tools: [
+      {
+        type: 'function',
+        function: {
+          name: 'web_search',
+          description: 'Perform web search over the public internet and return up-to-date results.',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: {
+                type: 'string',
+                description: 'Search query string.'
+              },
+              recency: {
+                type: 'string',
+                description: 'Optional recency filter such as "day", "week", or "month".'
+              },
+              count: {
+                type: 'integer',
+                minimum: 1,
+                maximum: 50,
+                description: 'Maximum number of search results to retrieve (1-50).'
+              }
+            },
+            required: ['query']
+          }
+        }
+      }
+    ],
+    tool_choice: {
+      type: 'function',
+      function: {
+        name: 'web_search'
+      }
+    },
+    stream: false
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token.access_token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+  const text = await res.text();
+  console.log(`[UPSTREAM][web_search] status=${res.status}`);
+  let json = null;
+  try {
+    json = JSON.parse(text);
+    console.log(JSON.stringify(json, null, 2));
+  } catch {
+    console.log(text);
+    throw new Error('iflow web_search returned non-JSON payload');
+  }
+  if (!res.ok) {
+    throw new Error(`iflow web_search failed: HTTP ${res.status}`);
+  }
+  const firstChoice = Array.isArray(json.choices) ? json.choices[0] : null;
+  const msg = firstChoice?.message || {};
+  const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+  console.log(`[UPSTREAM][web_search] tool_calls=${toolCalls.length}`);
+  if (!toolCalls.length) {
+    console.warn('[UPSTREAM][web_search] no tool_calls returned, web_search tool may not be enabled for this model.');
+  } else {
+    const names = toolCalls
+      .map((tc) => (tc && tc.function && typeof tc.function.name === 'string' ? tc.function.name : ''))
+      .filter(Boolean);
+    console.log(`[UPSTREAM][web_search] tool names: ${names.join(', ')}`);
+  }
+}
+
 async function requestProxyChat() {
   const url = `${RC_BASE}${RC_ENDPOINT}`;
   const payload = { model: IFLOW_MODEL, messages: [{ role: 'user', content: TEXT }], stream: false };
@@ -274,6 +362,10 @@ async function main() {
   // 2) Perform requested action
   if (MODE === 'upstream') {
     await requestUpstreamChat(oauth, token);
+    return;
+  }
+  if (MODE === 'websearch') {
+    await requestUpstreamWebSearch(oauth, token);
     return;
   }
   if (RUN_TOOLS) {

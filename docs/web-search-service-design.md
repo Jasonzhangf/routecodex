@@ -34,8 +34,15 @@
   - `web_search` does **not** override the main route or main provider/model.
 
 - **Search intent route (`web_search` intent)**  
-  - A separate “intent flag” carried in pipeline metadata, derived from classifier output (e.g. keywords: “联网搜索”, “web search”, “/search”).
-  - Controls whether the server injects the `web_search` tool for the main model.
+  - A separate “intent flag” carried in pipeline metadata, derived from classifier output based on **the latest user message** (text-only).  
+  - Intent rules (substring match, not regex):
+    - **Chinese – hard hits (100%):** `"谷歌搜索"`, `"谷歌一下"`, `"百度一下"` 一旦出现，即视为联网搜索意图；这三种说法都会被视为 “Google‑preferred”（优先尝试谷歌系搜索后端）。  
+    - **Chinese – soft hits:**  
+      - 包含 `"上网"` 视为联网搜索意图；  
+      - 或者同时包含动词 {`"搜索"`, `"查找"`, `"搜"`} 与名词 {`"网络"`, `"联网"`, `"新闻"`, `"信息"`, `"报道"`} 中任意组合。  
+    - **English – hard hits:** `"/search"`, `"web search"`, `"websearch"`, `"internet search"`, `"search the web"`, `"web-search"`, `"internet-search"` 等常见短语。  
+    - **English – soft hits:** 当文本里同时包含动词 {`"search"`, `"find"`, `"look up"`, `"look for"`, `"google"`} 与名词 {`"web"`, `"internet"`, `"online"`, `"news"`, `"information"`, `"info"`, `"report"`, `"reports"`, `"article"`, `"articles"`} 时，也视为联网搜索意图；其中包含 `"google"` 时会被视为 “Google 优先”。  
+  - Controls whether the server injects the `web_search` tool for the main model (and whether the intent is marked as “Google‑preferred” for engine filtering).
 
 - **Search backend route (`routing.web_search`)**  
   - Dedicated VR route that lists search backend targets (e.g. `glm.glm-4.7`, later Gemini).  
@@ -87,6 +94,12 @@ Behaviour:
 - `injectPolicy`:
   - `"selective"`: only inject `web_search` when the classifier detects web search intent (or a sticky flag is set).
   - `"always"`: whenever this route/provider is used, always inject `web_search` into `tools`.
+- **Google‑preferred selection (中文 “谷歌搜索 / 谷歌一下”):**
+  - When the intent classifier detects explicit “Google search” wording (e.g. 中文 `"谷歌搜索"`, `"谷歌一下"` or English text mentioning `"google"` together with search verbs), the server treats this as a **Google‑preferred** web search intent.
+  - In Google‑preferred mode, the injected `web_search` tool’s `engine.enum` is **narrowed** to:
+    - Engines whose `providerKey` is backed by Gemini CLI / Antigravity search backends (e.g. `gemini-cli.*`, `antigravity.*`); and
+    - Engines whose `id` contains `"google"` (to support configs that encode Google in the id).  
+  - If this filtered set is non‑empty, only these engines are exposed to the main model for this call. If the filtered set is empty, the server falls back to the full `engines` list.
 
 ### Search Backend Route
 
@@ -307,4 +320,3 @@ Notes:
   - Main provider selection remains fully owned by the existing Virtual Router route logic.
 - Provide sticky but bounded web search capability:
   - Enabled per call chain; automatically reset when final `finish_reason == "stop"` is observed.
-

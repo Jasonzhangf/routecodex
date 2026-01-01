@@ -1,3 +1,6 @@
+import fs from 'fs/promises';
+import path from 'path';
+import { homedir } from 'os';
 import chalk from 'chalk';
 import { ensureValidOAuthToken } from '../providers/auth/oauth-lifecycle.js';
 import {
@@ -10,6 +13,8 @@ import {
   type OAuthProviderId,
   type TokenDescriptor
 } from './token-types.js';
+import { TokenHistoryStore, type RefreshOutcome } from './history-store.js';
+import { ensureLocalTokenPortalEnv } from '../token-portal/local-token-portal.js';
 
 export interface TokenDaemonOptions {
   intervalMs: number;
@@ -22,10 +27,12 @@ const DEBUG_ENABLED = DEBUG_FLAG === '1' || DEBUG_FLAG === 'true';
 const DEFAULT_INTERVAL_MS = 60_000;
 const DEFAULT_REFRESH_AHEAD_MINUTES = 30;
 const MIN_REFRESH_INTERVAL_MS = 5 * 60_000;
+const GEMINI_PROVIDER_IDS = new Set(['gemini-cli', 'antigravity']);
 
 export class TokenDaemon {
   private readonly intervalMs: number;
   private readonly refreshAheadMinutes: number;
+  private readonly historyStore: TokenHistoryStore;
   private timer: NodeJS.Timeout | null = null;
   private lastRefreshAttempt: Map<string, number> = new Map();
 
@@ -35,6 +42,7 @@ export class TokenDaemon {
       options?.refreshAheadMinutes && options.refreshAheadMinutes > 0
         ? options.refreshAheadMinutes
         : DEFAULT_REFRESH_AHEAD_MINUTES;
+    this.historyStore = new TokenHistoryStore();
   }
 
   async start(): Promise<void> {
@@ -94,11 +102,14 @@ export class TokenDaemon {
         }
 
         // Only attempt auto-refresh when token is valid/expiring and within refresh window
-        if (msLeft <= 0 || msLeft > refreshAheadMs) {
+        if (msLeft > refreshAheadMs) {
           this.logDebug(
             `[daemon] skip token outside refresh window alias=${token.alias} remainingMs=${msLeft} window=${refreshAheadMs}`
           );
           continue;
+        }
+        if (msLeft <= 0) {
+          this.logDebug(`[daemon] token already expired alias=${token.alias} - forcing immediate refresh`);
         }
 
         const last = this.lastRefreshAttempt.get(key) || 0;
@@ -125,6 +136,23 @@ export class TokenDaemon {
     const providerType: OAuthProviderId = token.provider;
     const rawType = `${providerType}-oauth`;
 
+    const tokenMtimeBefore = await getTokenFileMtime(token.filePath);
+    if (await this.historyStore.isAutoSuspended(token, tokenMtimeBefore)) {
+      this.logDebug(
+        `[daemon] skip refresh provider=${providerType} alias=${token.alias} reason=auto-suspended`
+      );
+      return;
+    }
+
+    const portalReady = await this.ensurePortalEnvironment();
+    if (!portalReady) {
+      this.logDebug(
+        `[daemon] skip refresh provider=${providerType} alias=${token.alias} reason=portal-unavailable`
+      );
+      return;
+    }
+    const startedAt = Date.now();
+
     console.log(
       chalk.gray('◉'),
       `Auto-refresh token for ${providerType} (${token.displayName}), file=${token.filePath}`
@@ -133,23 +161,35 @@ export class TokenDaemon {
       `[daemon] trigger refresh provider=${providerType} alias=${token.alias} file=${token.filePath}`
     );
 
-    await ensureValidOAuthToken(
-      providerType,
-      {
-        type: rawType,
-        tokenFile: token.filePath
-      } as any,
-      {
-        openBrowser: true,
-        forceReacquireIfRefreshFails: true
-      }
-    );
+    try {
+      await ensureValidOAuthToken(
+        providerType,
+        {
+          type: rawType,
+          tokenFile: token.filePath
+        } as any,
+        {
+          openBrowser: true,
+          forceReacquireIfRefreshFails: true
+        }
+      );
 
-    console.log(
-      chalk.green('✓'),
-      `Token refreshed for ${providerType} (${token.displayName})`
-    );
-    this.logDebug(`[daemon] refresh success provider=${providerType} alias=${token.alias}`);
+      console.log(
+        chalk.green('✓'),
+        `Token refreshed for ${providerType} (${token.displayName})`
+      );
+      this.logDebug(`[daemon] refresh success provider=${providerType} alias=${token.alias}`);
+      const tokenMtimeAfter = await getTokenFileMtime(token.filePath);
+      await this.recordHistoryEvent(token, 'success', startedAt, {
+        tokenFileMtime: tokenMtimeAfter
+      });
+    } catch (error) {
+      await this.recordHistoryEvent(token, 'failure', startedAt, {
+        error,
+        tokenFileMtime: tokenMtimeBefore
+      });
+      throw error;
+    }
   }
 
   static async getSnapshot(): Promise<TokenDaemonSnapshot> {
@@ -196,6 +236,7 @@ export class TokenDaemon {
       if (first) {
         return first;
       }
+      return createSyntheticTokenDescriptor(providerMatch);
     }
 
     return null;
@@ -207,4 +248,84 @@ export class TokenDaemon {
     }
     console.log(chalk.gray('[token-daemon-debug]'), message);
   }
+
+  private async ensurePortalEnvironment(): Promise<boolean> {
+    try {
+      await ensureLocalTokenPortalEnv();
+      return true;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logDebug(`[daemon] portal init failed: ${msg}`);
+      return false;
+    }
+  }
+
+  private async recordHistoryEvent(
+    token: TokenDescriptor,
+    outcome: RefreshOutcome,
+    startedAt: number,
+    meta?: { error?: unknown; tokenFileMtime?: number | null }
+  ): Promise<void> {
+    try {
+      const completedAt = Date.now();
+      await this.historyStore.recordRefreshResult(token, outcome, {
+        startedAt,
+        completedAt,
+        durationMs: completedAt - startedAt,
+        mode: 'auto',
+        error: meta?.error ? (meta.error instanceof Error ? meta.error.message : String(meta.error)) : undefined,
+        tokenFileMtime: meta?.tokenFileMtime ?? null
+      });
+    } catch (historyError) {
+      this.logDebug(
+        `[daemon] history persistence failed: ${
+          historyError instanceof Error ? historyError.message : String(historyError)
+        }`
+      );
+    }
+  }
+}
+
+async function getTokenFileMtime(filePath: string): Promise<number | null> {
+  try {
+    const stats = await fs.stat(filePath);
+    return stats.mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+function defaultTokenFilePath(provider: OAuthProviderId): string {
+  const home = homedir();
+  if (provider === 'iflow') {
+    return path.join(home, '.iflow', 'oauth_creds.json');
+  }
+  if (provider === 'qwen') {
+    return path.join(home, '.routecodex', 'auth', 'qwen-oauth.json');
+  }
+  if (GEMINI_PROVIDER_IDS.has(provider)) {
+    const file = provider === 'antigravity' ? 'antigravity-oauth.json' : 'gemini-oauth.json';
+    return path.join(home, '.routecodex', 'auth', file);
+  }
+  return path.join(home, '.routecodex', 'auth', `${provider}-oauth-1-default.json`);
+}
+
+function createSyntheticTokenDescriptor(provider: OAuthProviderId): TokenDescriptor {
+  const filePath = defaultTokenFilePath(provider);
+  return {
+    provider,
+    filePath,
+    sequence: 0,
+    alias: 'default',
+    state: {
+      hasAccessToken: false,
+      hasRefreshToken: false,
+      hasApiKey: false,
+      expiresAt: null,
+      msUntilExpiry: null,
+      status: 'invalid',
+      noRefresh: false
+    },
+    displayName: path.basename(filePath)
+  };
 }

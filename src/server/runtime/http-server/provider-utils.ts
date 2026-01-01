@@ -91,7 +91,7 @@ export function mapProviderProtocol(providerType?: string): ProviderProtocol {
     return 'gemini-chat';
   }
   if (normalized === 'gemini-cli') {
-    return 'gemini-cli-chat';
+    return 'gemini-chat';
   }
   if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'iflow' || normalized === 'lmstudio') {
     return 'openai-chat';

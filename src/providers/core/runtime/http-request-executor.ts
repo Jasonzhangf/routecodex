@@ -244,6 +244,42 @@ export class HttpRequestExecutor {
     } catch {
       /* ignore snapshot failures */
     }
+
+    // iFlow 特例：部分 OAuth 失效错误通过 HTTP 200 + body.status=439 返回，
+    // 需要与 401/403 一样走统一的 OAuth 修复逻辑（handleUpstreamInvalidOAuthToken）。
+    try {
+      const providerId = (context as unknown as { providerId?: unknown; providerType?: unknown; providerFamily?: unknown })
+        .providerId;
+      const family = (context as unknown as { providerFamily?: unknown }).providerFamily;
+      const pt = (typeof providerId === 'string' ? providerId : typeof family === 'string' ? family : '').toLowerCase();
+      if (pt === 'iflow') {
+        const data = (response as { data?: unknown }).data;
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+          const bag = data as { status?: unknown; msg?: unknown; message?: unknown };
+          const rawStatus = bag.status;
+          const statusStr =
+            typeof rawStatus === 'string' && rawStatus.trim().length
+              ? rawStatus.trim()
+              : typeof rawStatus === 'number'
+                ? String(rawStatus)
+                : '';
+          const msg =
+            (typeof bag.msg === 'string' && bag.msg.trim().length
+              ? bag.msg
+              : typeof bag.message === 'string' && bag.message.trim().length
+                ? bag.message
+                : '') || '';
+          if (statusStr === '439' && /token has expired/i.test(msg)) {
+            // 抛出 Error 交给上层的 tryRecoverOAuthAndReplay + handleUpstreamInvalidOAuthToken
+            // 触发统一的 token 刷新 / Portal 授权流程。
+            throw new Error(msg);
+          }
+        }
+      }
+    } catch (error) {
+      // 将检测到的 token 失效转换为上游错误，让调用方按统一路径处理。
+      throw error;
+    }
     return response;
   }
 }

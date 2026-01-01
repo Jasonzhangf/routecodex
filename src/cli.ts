@@ -14,6 +14,7 @@ import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS, DEFAULT_CONFIG, API_ENDPOINTS } from './constants/index.js';
 import { buildInfo } from './build-info.js';
+import { ensureLocalTokenPortalEnv } from './token-portal/local-token-portal.js';
 // Spinner wrapper (lazy-loaded to avoid hard dependency on ora/restore-cursor issues)
 type Spinner = {
   start(text?: string): Spinner;
@@ -218,13 +219,39 @@ async function ensureTokenDaemonAutoStart(): Promise<void> {
       existingPid = null;
     }
 
+    const waitForProcessExit = async (pid: number, timeoutMs: number): Promise<void> => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        try {
+          process.kill(pid, 0);
+        } catch {
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    };
+
     if (existingPid) {
+      let running = false;
       try {
         process.kill(existingPid, 0);
-        logger.debug(`Token daemon appears to be running (pid=${existingPid})`);
-        return;
+        running = true;
       } catch {
-        // stale pid, fall through to spawn
+        running = false;
+      }
+      if (running) {
+        logger.info(`Restarting token daemon to refresh environment (pid=${existingPid})`);
+        try {
+          process.kill(existingPid, 'SIGTERM');
+        } catch {
+          // ignore
+        }
+        await waitForProcessExit(existingPid, 2000);
+      }
+      try {
+        fs.unlinkSync(TOKEN_DAEMON_PID_FILE);
+      } catch {
+        // ignore
       }
     }
 
@@ -622,9 +649,6 @@ program
     const spinner = await createSpinner('Starting RouteCodex server...');
 
     try {
-      // Best-effort auto-start of token daemon (can be disabled via env)
-      await ensureTokenDaemonAutoStart();
-
       // Validate system prompt replacement flags
       try {
         if (options.codex && options.claude) {
@@ -727,6 +751,28 @@ program
       // Ensure port state aligns with requested behavior (always take over to avoid duplicates)
       await ensurePortAvailable(resolvedPort, spinner, { restart: true });
 
+      const resolveServerHost = (): string => {
+        if (typeof config?.httpserver?.host === 'string' && config.httpserver.host.trim()) {
+          return config.httpserver.host;
+        }
+        if (typeof config?.server?.host === 'string' && config.server.host.trim()) {
+          return config.server.host;
+        }
+        if (typeof config?.host === 'string' && config.host.trim()) {
+          return config.host;
+        }
+        return LOCAL_HOSTS.LOCALHOST;
+      };
+      const serverHost = resolveServerHost();
+      process.env.ROUTECODEX_PORT = String(resolvedPort);
+      process.env.RCC_PORT = String(resolvedPort);
+      process.env.ROUTECODEX_HTTP_HOST = serverHost;
+      process.env.ROUTECODEX_HTTP_PORT = String(resolvedPort);
+      await ensureLocalTokenPortalEnv();
+
+      // Best-effort auto-start of token daemon (can be disabled via env)
+      await ensureTokenDaemonAutoStart();
+
       // simple-log application removed
 
       // Resolve modules config path
@@ -761,7 +807,7 @@ program
         fs.writeFileSync(pidFile, String(childProc.pid ?? ''), 'utf8');
       } catch (error) { /* ignore */ }
 
-      const host = (config?.httpserver?.host || config?.server?.host || config?.host || LOCAL_HOSTS.LOCALHOST);
+      const host = serverHost;
       spinner.succeed(`RouteCodex server starting on ${host}:${resolvedPort}`);
       logger.info(`Configuration loaded from: ${configPath}`);
       logger.info(`Server will run on port: ${resolvedPort}`);

@@ -41,6 +41,11 @@ type ErrorWithMetadata = Error & {
   status?: number;
   statusCode?: number;
   retryable?: boolean;
+  /**
+   * 粗粒度错误类别：EXTERNAL_ERROR / TOOL_ERROR / INTERNAL_ERROR。
+   * 当错误来自 llmswitch-core 的 ProviderProtocolError 时会自动携带。
+   */
+  category?: string;
   details?: Record<string, unknown>;
   response?: {
     status?: number;
@@ -72,9 +77,30 @@ interface EmitOptions {
 
 export function emitProviderError(options: EmitOptions): void {
   const err = normalizeError(options.error);
-  const code = normalizeCode(err.code, options.stage);
+  const code = normalizeCode(err, options.stage);
   const status = determineStatusCode(err, options.statusCode);
   let recoverable = options.recoverable ?? (err.retryable === true);
+
+  // 组装细粒度 details：优先使用错误自身的 details，再叠加调用方附加信息。
+  let mergedDetails: Record<string, unknown> | undefined = extractRecord(err.details);
+  if (options.details) {
+    mergedDetails = { ...(mergedDetails ?? {}), ...options.details };
+  }
+  // 若错误来自 llmswitch-core 的 ProviderProtocolError，则把 coarse 与 fine-grain 信息填入 details，便于统计。
+  const categoryRaw = typeof err.category === 'string' && err.category.trim().length ? err.category.trim() : undefined;
+  if (categoryRaw) {
+    mergedDetails = {
+      ...(mergedDetails ?? {}),
+      errorCategory: categoryRaw.toUpperCase()
+    };
+  }
+  if (typeof err.code === 'string' && err.code.trim().length) {
+    mergedDetails = {
+      ...(mergedDetails ?? {}),
+      protocolErrorCode: err.code.toUpperCase()
+    };
+  }
+
   const event: ProviderErrorEventExtended = {
     code,
     message: err.message || code,
@@ -83,7 +109,7 @@ export function emitProviderError(options: EmitOptions): void {
     recoverable,
     runtime: options.runtime,
     timestamp: Date.now(),
-    details: options.details ?? extractRecord(err.details)
+    details: mergedDetails
   };
   // Default health impact: all errors affect health unless explicitly disabled.
   // For non-recoverable errors (including 402) we always want health impact.
@@ -121,7 +147,7 @@ export function emitProviderError(options: EmitOptions): void {
         status,
         recoverable,
         runtime: options.runtime,
-        details: options.details
+        details: mergedDetails
       },
       originalError: err
     }).catch(reportError => {
@@ -153,7 +179,7 @@ export function emitProviderError(options: EmitOptions): void {
       status,
       code,
       runtime: options.runtime,
-      details: options.details
+      details: mergedDetails
     });
     const payload: ErrorContext = {
       error: err.message || code,
@@ -232,7 +258,15 @@ function determineStatusCode(error: ErrorWithMetadata, fallback?: number): numbe
   return undefined;
 }
 
-function normalizeCode(rawCode: unknown, stage: string): string {
+function normalizeCode(error: ErrorWithMetadata, stage: string): string {
+  // 若错误带有 coarse-grain category，则优先作为统一 code 上报：
+  // EXTERNAL_ERROR / TOOL_ERROR / INTERNAL_ERROR。
+  const categoryRaw = typeof error.category === 'string' ? error.category.trim() : '';
+  if (categoryRaw) {
+    return categoryRaw.toUpperCase();
+  }
+
+  const rawCode = error.code;
   if (typeof rawCode === 'string' && rawCode.trim()) {
     return rawCode.toUpperCase();
   }

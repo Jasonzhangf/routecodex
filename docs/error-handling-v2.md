@@ -39,3 +39,54 @@
   - 自定义 Hook 通过 `ErrorHandlerRegistry.registerErrorHandler` 挂载，RouteErrorHub 会自动转发。
 
 如需新增策略（例如特定 provider 的 4xx 也触发冷却），建议在 `docs/error-handling-v2.md` 补充矩阵，并在 `virtualrouter.health` 配置中增加自定义参数。
+
+## 5. 工具协议错误（ProviderProtocolError）
+
+ServerTool 与工具调用相关的后端错误统一通过 `ProviderProtocolError` 表达，类型定义位于
+`sharedmodule/llmswitch-core/src/conversion/shared/errors.ts`。
+
+- `ProviderProtocolErrorCode` 目前包含：
+  - `TOOL_PROTOCOL_ERROR`：工具调用/结果与 upstream 协议不一致，例如：
+    - provider 返回 `finishReason=UNEXPECTED_TOOL_CALL` 但响应中并无有效 tool calls；
+    - 工具结果缺少与请求中 tool call 对应的 `tool_outputs`。
+  - `SSE_DECODE_ERROR`：SSE → JSON 解码阶段发现非法事件序列或结构。
+  - `MALFORMED_RESPONSE`：provider 返回的响应在语义或结构上与声明的协议不符。
+  - `MALFORMED_REQUEST`：我们构造的请求违反了目标协议的约束（通常视为开发错误，需要修复代码）。
+
+统一约定：
+
+- **工具相关错误不得静默吞掉**：一旦判定为工具/协议层错误，必须：
+  - 在 provider 侧通过 `emitProviderError({ ..., error })` 上报 `providerErrorCenter`；
+  - 让错误沿着 `RouteErrorHub → ErrorHandlerRegistry` 流转，最终映射为 HTTP 错误返回客户端；
+  - 禁止“返回 200 + 空回答/占位内容”来掩盖错误。
+- 在 conversion/compat/codec 层，遇到协议违约时应抛出 `new ProviderProtocolError(message, { code, protocol, providerType, details })`，
+  由上游统一捕获与分类，而不是直接 `throw new Error(...)`。
+
+文档规则：若新增一种协议级错误（例如新的 SSE 解析场景或特定 provider 的工具约束），需要同时：
+
+1. 在 `errors.ts` 中补充新的 `ProviderProtocolErrorCode`（或复用已有 code）；
+2. 在此文档补充该错误 code 的含义与触发条件；
+3. 确保 provider runtime 捕获到该错误时仍通过 `emitProviderError` 上报，并映射为明确的 HTTP 错误响应。
+
+### 5.1 粗粒度错误类别（EXTERNAL / TOOL / INTERNAL）
+
+为方便统计与路由策略，`ProviderProtocolError` 还暴露一个粗粒度错误类别 `category`：
+
+- `EXTERNAL_ERROR`：外部载荷/协议错误
+  - 典型来源：SSE 解析失败（`SSE_DECODE_ERROR`）、上游返回的响应结构不合法（`MALFORMED_RESPONSE`）、
+    请求体与协议约束不符（`MALFORMED_REQUEST` 且原因在 provider / 用户输入侧）。
+- `TOOL_ERROR`：工具/ServerTool 协议错误
+  - 典型来源：工具调用/结果与 contract 不匹配（`TOOL_PROTOCOL_ERROR`）、工具 result 缺失对应 tool_call 等。
+- `INTERNAL_ERROR`：内部实现/配置错误
+  - 不直接用 `ProviderProtocolErrorCode` 区分，通常由 Host / Hub 在捕获异常时显式设置，用于标记
+    我们自己的实现/配置 bug（例如错误拼装 ChatEnvelope、必填字段缺失等）。
+
+约定：
+
+- `ProviderProtocolError.category` 默认会根据 `code` 自动推导：
+  - `TOOL_PROTOCOL_ERROR` → `TOOL_ERROR`；
+  - 其它（目前为 `SSE_DECODE_ERROR` / `MALFORMED_RESPONSE` / `MALFORMED_REQUEST`）→ 默认 `EXTERNAL_ERROR`。
+- 当上层明确知道错误是“内部实现错误”时，可以在构造时显式传入 `category: 'INTERNAL_ERROR'` 覆盖默认推导。
+- Host 在将错误映射为 `ProviderErrorEvent` 时，可将 `category` 映射到统一的 `event.code`（例如
+  `TOOL_ERROR` / `EXTERNAL_ERROR` / `INTERNAL_ERROR`），而把细粒度 `ProviderProtocolErrorCode` 放入
+  `event.details.reason`，从而同时兼顾统计与排障信息。

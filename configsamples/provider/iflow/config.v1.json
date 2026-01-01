@@ -41,6 +41,17 @@
         "compatibilityProfile": "chat:iflow"
       }
     },
+    "webSearch": {
+      "engines": [
+        {
+          "id": "iflow:web_search",
+          "providerKey": "iflow.kimi-k2",
+          "description": "iFlow native web search via /chat/retrieve",
+          "default": true,
+          "searchEngineList": ["GOOGLE", "BING", "SCHOLAR", "AIPGC", "PDF"]
+        }
+      ]
+    },
     "routing": {
       "default": [
         "iflow.kimi-k2"

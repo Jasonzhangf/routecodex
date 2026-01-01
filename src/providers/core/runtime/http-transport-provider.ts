@@ -750,6 +750,20 @@ export class HttpTransportProvider extends BaseProvider {
    * 为特定请求确定最终 endpoint（默认使用配置值，可由子类覆写）
    */
   protected resolveRequestEndpoint(request: UnknownObject, defaultEndpoint: string): string {
+    const metadataNode =
+      (request as MetadataContainer)?.metadata &&
+      typeof (request as MetadataContainer).metadata === 'object'
+        ? ((request as MetadataContainer).metadata as Record<string, unknown>)
+        : undefined;
+    const isIflowWebSearch =
+      metadataNode?.iflowWebSearch === true;
+    if (isIflowWebSearch) {
+      const entryEndpoint =
+        typeof metadataNode?.entryEndpoint === 'string' && metadataNode.entryEndpoint.trim()
+          ? metadataNode.entryEndpoint.trim()
+          : undefined;
+      return entryEndpoint || '/chat/retrieve';
+    }
     return this.protocolClient.resolveEndpoint(
       request as ProtocolRequestPayload,
       defaultEndpoint
@@ -760,6 +774,20 @@ export class HttpTransportProvider extends BaseProvider {
    * 构造最终发送到上游的请求体，默认实现包含模型/令牌治理，可由子类覆写
    */
   protected buildHttpRequestBody(request: UnknownObject): UnknownObject {
+    const metadataNode =
+      (request as MetadataContainer)?.metadata &&
+      typeof (request as MetadataContainer).metadata === 'object'
+        ? ((request as MetadataContainer).metadata as Record<string, unknown>)
+        : undefined;
+    const isIflowWebSearch =
+      metadataNode?.iflowWebSearch === true;
+    if (isIflowWebSearch) {
+      const dataNode = (request as { data?: UnknownObject }).data;
+      if (dataNode && typeof dataNode === 'object') {
+        return dataNode as UnknownObject;
+      }
+      return {};
+    }
     return this.protocolClient.buildRequestBody(request as ProtocolRequestPayload);
   }
 

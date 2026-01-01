@@ -53,6 +53,22 @@ export class ProviderRuntimeManager {
           }
         }
       }
+
+      // iFlow 聚合 key 支持：
+      // 典型 runtimeKey: iflow.<sequence>.<model-or-backend>
+      // 例如: iflow.1-186.kimi-k2, iflow.1-186.iFlow-ROME-30BA3B
+      // 对应的聚合 key 形态: iflow.kimi-k2, iflow.iFlow-ROME-30BA3B
+      // 这里补充 alias，使得 servertool 仅持有 iflow.<model> 也能命中任意一个实际 runtime。
+      if (providerKey.startsWith('iflow.')) {
+        const parts = providerKey.split('.');
+        if (parts.length >= 3) {
+          const aliasSuffix = parts.slice(2).join('.');
+          const aliasKey = `${parts[0]}.${aliasSuffix}`;
+          if (!this.providerKeyToRuntimeKey.has(aliasKey)) {
+            this.providerKeyToRuntimeKey.set(aliasKey, runtimeKey);
+          }
+        }
+      }
     }
   }
 
