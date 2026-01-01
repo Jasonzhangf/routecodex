@@ -378,13 +378,14 @@
         "iflow.kimi-k2"
       ]
     },
-      "webSearch": {
+    "webSearch": {
       "engines": [
         {
-          "id": "iflow",
+          "id": "iflow:web_search",
           "providerKey": "iflow.kimi-k2",
           "description": "iFlow Kimi K2 web search backend",
-          "default": true
+          "default": true,
+          "searchEngineList": ["GOOGLE"]
         },
         {
           "id": "qwen",
