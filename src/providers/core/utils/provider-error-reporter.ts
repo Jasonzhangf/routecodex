@@ -118,6 +118,11 @@ export function emitProviderError(options: EmitOptions): void {
   } else {
     event.affectsHealth = options.affectsHealth !== false;
   }
+  // Propagate recoverable flag back to original error for callers that want
+  // to implement custom retry/failover behaviour.
+  if (typeof recoverable === 'boolean') {
+    (err as ErrorWithMetadata).retryable = recoverable;
+  }
   try {
     providerErrorCenter.emit(event);
   } catch (emitError) {

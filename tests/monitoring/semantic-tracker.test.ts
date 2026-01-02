@@ -1,7 +1,10 @@
-import semanticMap from '../../config/semantic-map.json' assert { type: 'json' };
+import { createRequire } from 'module';
 import { compileSemanticFieldSpecs } from '../../src/monitoring/semantic-config-loader.js';
 import { SemanticTracker } from '../../src/monitoring/semantic-tracker.js';
 import type { SemanticSnapshotInput } from '../../src/monitoring/semantic-tracker.js';
+
+const require = createRequire(import.meta.url);
+const semanticMap = require('../../config/semantic-map.json');
 
 describe('SemanticTracker with semantic-map config', () => {
   it('tracks semantic changes across stages', () => {

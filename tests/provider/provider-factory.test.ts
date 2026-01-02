@@ -1,3 +1,4 @@
+import { describe, expect, test, jest } from '@jest/globals';
 import { ProviderFactory } from '../../src/providers/core/runtime/provider-factory.js';
 
 describe('ProviderFactory no fallback', () => {

@@ -1,3 +1,4 @@
+import { describe, expect, test, jest } from '@jest/globals';
 import { ProviderComposite } from '../../src/providers/core/composite/provider-composite.js';
 import { attachProviderRuntimeMetadata } from '../../src/providers/core/runtime/provider-runtime-metadata.ts';
 

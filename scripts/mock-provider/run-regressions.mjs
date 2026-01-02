@@ -13,6 +13,7 @@ const MOCK_SAMPLES_DIR = resolveSamplesDir();
 const REGISTRY_PATH = path.join(MOCK_SAMPLES_DIR, '_registry', 'index.json');
 const NAME_REGEX = /^[A-Za-z0-9_-]+$/;
 const ENTRY_FILTER = parseEntryFilter();
+const NPM_CMD = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 function resolveSamplesDir() {
   const override = String(process.env.ROUTECODEX_MOCK_SAMPLES_DIR || '').trim();
@@ -36,11 +37,46 @@ function parseEntryFilter() {
 
 async function ensureCliAvailable() {
   const cliPath = path.join(PROJECT_ROOT, 'dist', 'cli.js');
-  try {
-    await fs.access(cliPath);
-  } catch {
-    throw new Error('dist/cli.js missing. Please run "npm run build:dev" before mock regressions.');
+  if (await fileExists(cliPath)) {
+    return;
   }
+  console.warn('[mock:regressions] dist/cli.js missing, running "npm run build:min" automatically...');
+  await runBuildForMockRegressions();
+  if (!(await fileExists(cliPath))) {
+    throw new Error('dist/cli.js missing after automatic build. Please run "npm run build:dev" manually.');
+  }
+}
+
+async function fileExists(targetPath) {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function runBuildForMockRegressions() {
+  await new Promise((resolve, reject) => {
+    const child = spawn(NPM_CMD, ['run', 'build:min'], {
+      cwd: PROJECT_ROOT,
+      env: {
+        ...process.env,
+        ROUTECODEX_VERIFY_SKIP: '1'
+      },
+      stdio: 'inherit'
+    });
+    child.on('exit', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`npm run build:min exited with code ${code}`));
+      }
+    });
+    child.on('error', (error) => {
+      reject(error);
+    });
+  });
 }
 
 async function loadRegistry() {

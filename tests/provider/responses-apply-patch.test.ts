@@ -1,3 +1,5 @@
+import { beforeEach, describe, expect, test, jest } from '@jest/globals';
+
 const ensureApplyPatchMock = jest.fn();
 
 jest.mock('../../src/modules/llmswitch/bridge.ts', () => ({

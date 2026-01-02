@@ -450,13 +450,13 @@ export class RouteCodexHttpServer {
 
       // registerDefaultMiddleware and registerOAuthPortalRoute already called in constructor
       // Register remaining HTTP routes
-      registerHttpRoutes({
-        app: this.app,
-        config: this.config,
-        buildHandlerContext: () => this.buildHandlerContext(),
-        getPipelineReady: () => this.isPipelineReady(),
-        handleError: (error, context) => this.handleError(error, context)
-      });
+     registerHttpRoutes({
+       app: this.app,
+       config: this.config,
+       buildHandlerContext: () => this.buildHandlerContext(),
+       getPipelineReady: () => this.isPipelineReady(),
+       handleError: (error, context) => this.handleError(error, context)
+     });
 
       this._isInitialized = true;
 

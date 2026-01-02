@@ -18,12 +18,12 @@
 | 错误来源 | 状态 / 错误码 | Error Center 处理 | Virtual Router / ProviderHealth 策略 | 说明 |
 | --- | --- | --- | --- | --- |
 | Provider 客户端错误 | 4xx（排除 429） | 记录并透传，`affectsHealth=false` | 不触发健康计数 | 用户参数错误，可重试但不熔断 |
-| Provider 429 限流 | HTTP 429 / `retryable=true` | `rate_limit_error` Hook 启动回退：10s → 30s → 60s 共三次 | BaseProvider 内置 RateLimitTracker：同一 provider 连续 4 次 429 会以 `affectsHealth=true` 向 Virtual Router 上报，触发熔断；任意一次成功即清零 | 回退期间可切换同模型 pipeline，必要时返回 429 给客户端 |
+| Provider 429 限流 | HTTP 429 / `retryable=true` | `rate_limit_error` Hook 启动回退：10s → 30s → 60s 共三次 | BaseProvider 内置 RateLimitTracker：**同一 providerKey（通常为 `provider.key` 或 `provider.key::model` 维度）连续 4 次 429** 会以 `affectsHealth=true` 向 Virtual Router 上报，触发熔断；任意一次成功即清零；不区分 route/routePool | 回退期间可切换同模型 pipeline，必要时返回 429 给客户端 |
 | Provider 5xx / 不可恢复 | HTTP ≥ 500、`affectsHealth=true` | 立即触发 `emitProviderError`，带 `fatal=true` | `tripProvider`，按 `fatalCooldownMs` 冷却 | 兼容层错误（stage=compat）同样视为 fatal |
 | Host/Server 内部错误 | pipeline/router 抛出的 500 | `RouteErrorHub` 归档并映射 HTTP 500；原始错误号写入 `code` 字段 | 同步 `providerErrorCenter`（若具备 provider 上下文） | 保证 release 输出简单错误号，dev 模式保留堆栈 |
 | CLI/工具链错误 | CLI command / debug harness | `reportCliError`（同 `RouteErrorHub`） | 仅记录，不影响路由池 | CLI 运行期错误不触发 provider 熔断 |
 
-> ⚠️ RateLimitTracker 只针对相同 provider 的连续 429 生效，中间出现成功或其他错误即会自动清零；冷却结束后会再次尝试，具体 TTL 由 virtualrouter.health 配置决定。
+> ⚠️ RateLimitTracker 只针对**相同 providerKey（provider.key / provider.key::model）**的连续 429 生效，中间出现成功或其他错误即会自动清零；冷却结束后会再次尝试，具体 TTL 由 `virtualrouter.health` 配置决定，且与使用的 route/routePool 无关。
 
 ## 3. 日志与可观测性
 

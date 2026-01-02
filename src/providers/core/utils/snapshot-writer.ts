@@ -309,9 +309,13 @@ export async function writeClientSnapshot(options: {
     const stage: ClientPhase = 'client-request';
     const { endpoint, folder } = resolveEndpoint(options.entryEndpoint);
     const requestId = normalizeRequestId(options.requestId);
+    const metadataSnapshot =
+      options.metadata && typeof options.metadata === 'object'
+        ? JSON.parse(JSON.stringify(options.metadata))
+        : undefined;
     const snapshotPayload = {
       body: options.body,
-      metadata: options.metadata || {}
+      metadata: metadataSnapshot || {}
     };
     const payload = buildSnapshotPayload({
       stage,
@@ -321,7 +325,8 @@ export async function writeClientSnapshot(options: {
       extraMeta: {
         entryEndpoint: endpoint,
         stream: options.metadata?.stream,
-        userAgent: options.metadata?.userAgent
+        userAgent: options.metadata?.userAgent,
+        ...(metadataSnapshot ? { requestMetadata: metadataSnapshot } : {})
       }
     });
     try {

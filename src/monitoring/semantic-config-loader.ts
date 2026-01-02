@@ -1,9 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import type { SemanticFieldSpec, SemanticSnapshotInput, SemanticSummaryFn } from './semantic-tracker.js';
 import { getByPath } from './semantic-tracker.js';
-import builtinSemanticMap from '../../config/semantic-map.json' assert { type: 'json' };
 import { CHANGE_REGISTRY, NORMALIZER_REGISTRY, SELECTOR_REGISTRY, SUMMARY_REGISTRY, TRANSFORM_REGISTRY } from './semantic-registry.js';
+
+const require = createRequire(import.meta.url);
+const builtinSemanticMap = require('../../config/semantic-map.json');
 
 export interface SemanticFieldSourceMatchConfig {
   protocols?: string[] | string;

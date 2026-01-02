@@ -788,7 +788,9 @@ export class HttpTransportProvider extends BaseProvider {
       }
       return {};
     }
-    return this.protocolClient.buildRequestBody(request as ProtocolRequestPayload);
+    const built = this.protocolClient.buildRequestBody(request as ProtocolRequestPayload);
+    this.applyProviderSpecificBodyAdjustments(built);
+    return built;
   }
 
   /**
@@ -1007,13 +1009,35 @@ export class HttpTransportProvider extends BaseProvider {
   }
 
   private findHeaderValue(headers: Record<string, string>, target: string): string | undefined {
-    const lowered = target.toLowerCase();
+    const lowered = typeof target === 'string' ? target.toLowerCase() : '';
+    if (!lowered) {
+      return undefined;
+    }
+    const normalizedTarget = this.normalizeHeaderKey(lowered);
     for (const [key, value] of Object.entries(headers)) {
-      if (key.toLowerCase() === lowered && typeof value === 'string' && value.trim()) {
-        return value.trim();
+      if (typeof value !== 'string') {
+        continue;
+      }
+      const trimmed = value.trim();
+      if (!trimmed) {
+        continue;
+      }
+      const loweredKey = key.toLowerCase();
+      if (loweredKey === lowered) {
+        return trimmed;
+      }
+      if (this.normalizeHeaderKey(loweredKey) === normalizedTarget) {
+        return trimmed;
       }
     }
     return undefined;
+  }
+
+  private normalizeHeaderKey(value: string): string {
+    if (!value) {
+      return '';
+    }
+    return value.replace(/[\s_-]+/g, '');
   }
 
   private assignHeader(headers: Record<string, string>, target: string, value: string): void {
@@ -1375,6 +1399,51 @@ export class HttpTransportProvider extends BaseProvider {
       return value.trim();
     }
     return undefined;
+  }
+
+  private applyProviderSpecificBodyAdjustments(body: UnknownObject): void {
+    if (!body || typeof body !== 'object') {
+      return;
+    }
+    if (this.providerType === 'glm') {
+      this.trimGlmRequestMessages(body as Record<string, unknown>);
+    }
+  }
+
+  private trimGlmRequestMessages(body: Record<string, unknown>): void {
+    const container = body as { messages?: unknown };
+    const rawMessages = container.messages;
+    if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
+      return;
+    }
+    const messages = rawMessages as unknown[];
+
+    for (let idx = messages.length - 1; idx >= 0; idx -= 1) {
+      const entry = messages[idx];
+      if (!entry || typeof entry !== 'object') {
+        continue;
+      }
+      if ((entry as Record<string, unknown>).role !== 'assistant') {
+        continue;
+      }
+      const contentNode = (entry as { content?: unknown }).content;
+      if (typeof contentNode === 'string') {
+        continue;
+      }
+      if (contentNode === null || typeof contentNode === 'undefined') {
+        (entry as { content?: string }).content = '';
+        continue;
+      }
+      if (typeof contentNode === 'object') {
+        try {
+          (entry as { content?: string }).content = JSON.stringify(contentNode);
+        } catch {
+          (entry as { content?: string }).content = '';
+        }
+        continue;
+      }
+      (entry as { content?: string }).content = String(contentNode);
+    }
   }
 
   private extractProjectIdFromTokenSnapshot(snapshot: Record<string, unknown>): string | undefined {

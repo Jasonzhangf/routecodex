@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.89.556",
+  "version": "0.89.587",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -32,7 +32,7 @@
   },
   "scripts": {
     "build": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs",
-    "build:dev": "BUILD_MODE=dev npm run build && npm run verify:e2e-toolcall && npm run install:global",
+    "build:dev": "BUILD_MODE=dev npm run build && npm run verify:e2e-toolcall && npm run test:routing-instructions && npm run install:global",
     "build:min": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs",
     "prepack": "echo skip-prepack",
     "postbuild": "chmod +x dist/cli.js || true",
@@ -40,7 +40,8 @@
     "start": "npm run -s start:bg",
     "dev": "tsx watch src/index.ts",
     "jest:run": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
-    "test": "npm run jest:run",
+    "test": "npm run test:routing-instructions && npm run mock:regressions",
+    "test:routing-instructions": "npm run jest:run -- --runTestsByPath tests/servertool/routing-instructions.spec.ts tests/servertool/hub-pipeline-session-headers.spec.ts tests/providers/core/runtime/http-transport-provider.headers.test.ts",
     "test:watch": "npm run jest:run -- --watch",
     "test:coverage": "npm run jest:run -- --coverage",
     "test:integration": "npm run jest:run -- --testPathPattern=integration",
@@ -121,6 +122,7 @@
     "sync:ci-goldens": "node scripts/tools/sync-ci-goldens.mjs",
     "mock:extract": "node scripts/mock-provider/extract.mjs",
     "mock:validate": "node scripts/mock-provider/validate.mjs",
+    "mock:regressions": "node scripts/mock-provider/run-regressions.mjs",
     "mock:clean": "node scripts/mock-provider/clean.mjs",
     "publish:rcc": "node scripts/publish-rcc.mjs"
   },

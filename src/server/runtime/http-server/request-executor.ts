@@ -11,6 +11,7 @@ import { enhanceProviderRequestId } from '../../utils/request-id-manager.js';
 import { emitProviderError } from '../../../providers/core/utils/provider-error-reporter.js';
 import type { ProviderRuntimeManager } from './runtime-manager.js';
 import type { StatsManager, UsageMetrics } from './stats-manager.js';
+import { extractSessionIdentifiersFromMetadata } from '../../../../sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/session-identifiers.js';
 
 type ConvertProviderResponseFn = (options: {
   providerProtocol: string;
@@ -102,6 +103,7 @@ type HubPipelineResult = {
 };
 
 export class HubRequestExecutor implements RequestExecutor {
+  private static readonly MAX_PROVIDER_ATTEMPTS = 3;
   constructor(private readonly deps: RequestExecutorDeps) { }
 
   async execute(input: PipelineExecutionInput): Promise<PipelineExecutionResult> {
@@ -151,23 +153,26 @@ export class HubRequestExecutor implements RequestExecutor {
 
       const pipelineLabel = 'hub';
       let iterationMetadata = initialMetadata;
+      const disabledProviderAliases = new Set<string>();
       let aggregatedUsage: UsageMetrics | undefined;
       let attempt = 0;
-      let followupTriggered = false;
 
-      while (true) {
+      while (attempt < HubRequestExecutor.MAX_PROVIDER_ATTEMPTS) {
+        attempt += 1;
+        const metadataForAttempt = this.prepareMetadataForAttempt(iterationMetadata, disabledProviderAliases);
         this.logStage(`${pipelineLabel}.start`, providerRequestId, {
           endpoint: input.entryEndpoint,
-          stream: iterationMetadata.stream,
+          stream: metadataForAttempt.stream,
           attempt
         });
 
         // 获取原始请求快照，用于后续响应转换（不包含任何 server-side 工具语义）。
         const originalRequestSnapshot = this.cloneRequestPayload(input.body);
 
-        const pipelineResult = await this.runHubPipeline(hubPipeline, input, iterationMetadata);
+        const pipelineResult = await this.runHubPipeline(hubPipeline, input, metadataForAttempt);
         const pipelineMetadata = pipelineResult.metadata ?? {};
-        const mergedMetadata = { ...iterationMetadata, ...pipelineMetadata };
+        const mergedMetadata = { ...metadataForAttempt, ...pipelineMetadata };
+        iterationMetadata = mergedMetadata;
         const mergedClientHeaders = this.cloneClientHeaders(mergedMetadata?.clientHeaders) || inboundClientHeaders;
         if (mergedClientHeaders) {
           mergedMetadata.clientHeaders = mergedClientHeaders;
@@ -344,9 +349,29 @@ export class HubRequestExecutor implements RequestExecutor {
             runtime: runtimeMetadata,
             dependencies: this.deps.getModuleDependencies()
           });
+          const retryDecision = this.shouldRetryProviderError(error);
+          if (retryDecision.retryable && attempt < HubRequestExecutor.MAX_PROVIDER_ATTEMPTS) {
+            const aliasKey = this.extractProviderAliasKey(target.providerKey);
+            if (aliasKey) {
+              disabledProviderAliases.add(aliasKey);
+            }
+            iterationMetadata = {
+              ...mergedMetadata,
+              disabledProviderKeyAliases: Array.from(disabledProviderAliases)
+            };
+            this.logStage('provider.failover', input.requestId, {
+              providerKey: target.providerKey,
+              alias: aliasKey,
+              status: retryDecision.statusCode,
+              attempt,
+              nextAttempt: attempt + 1
+            });
+            continue;
+          }
           throw error;
         }
       }
+      throw new Error('Provider routing aborted');
     } catch (error: unknown) {
       finalizeStats({ error: true });
       throw error;
@@ -360,6 +385,85 @@ export class HubRequestExecutor implements RequestExecutor {
       throw new Error('Hub pipeline runtime is not initialized');
     }
     return pipeline;
+  }
+
+  private prepareMetadataForAttempt(
+    baseMetadata: Record<string, unknown>,
+    disabledAliases: Set<string>
+  ): Record<string, unknown> {
+    if (disabledAliases.size === 0) {
+      return { ...baseMetadata };
+    }
+    return {
+      ...baseMetadata,
+      disabledProviderKeyAliases: Array.from(disabledAliases)
+    };
+  }
+
+  private extractProviderAliasKey(providerKey?: string): string | null {
+    if (!providerKey) {
+      return null;
+    }
+    const parts = providerKey.split('.');
+    if (parts.length < 2) {
+      return null;
+    }
+    const normalizedAlias = this.normalizeAliasDescriptor(parts[1]);
+    return `${parts[0]}.${normalizedAlias}`;
+  }
+
+  private normalizeAliasDescriptor(alias: string): string {
+    if (/^\d+-/.test(alias)) {
+      return alias.replace(/^\d+-/, '');
+    }
+    return alias;
+  }
+
+  private shouldRetryProviderError(error: unknown): { retryable: boolean; statusCode?: number } {
+    if (!error || typeof error !== 'object') {
+      return { retryable: false };
+    }
+    const candidate = error as { retryable?: boolean; status?: unknown; statusCode?: unknown; response?: unknown; message?: unknown };
+    const statusCode = this.extractErrorStatusCode(candidate);
+    if (candidate.retryable === true) {
+      return { retryable: true, statusCode };
+    }
+    if (statusCode === 429) {
+      return { retryable: true, statusCode };
+    }
+    return { retryable: false, statusCode };
+  }
+
+  private extractErrorStatusCode(error: {
+    status?: unknown;
+    statusCode?: unknown;
+    response?: unknown;
+    message?: unknown;
+  }): number | undefined {
+    if (typeof error.status === 'number') {
+      return error.status;
+    }
+    if (typeof error.statusCode === 'number') {
+      return error.statusCode;
+    }
+    if (error.response && typeof (error.response as { status?: unknown }).status === 'number') {
+      return (error.response as { status: number }).status;
+    }
+    const responseData = (error.response as { data?: { error?: { status?: number } } } | undefined)?.data?.error
+      ?.status;
+    if (typeof responseData === 'number') {
+      return responseData;
+    }
+    if (typeof error.message === 'string') {
+      const match = error.message.match(/HTTP\s+(\d{3})/i);
+      if (match) {
+        const parsed = Number.parseInt(match[1], 10);
+        if (!Number.isNaN(parsed)) {
+          return parsed;
+        }
+      }
+    }
+    return undefined;
   }
 
   private async runHubPipeline(
@@ -435,6 +539,11 @@ export class HubRequestExecutor implements RequestExecutor {
     const headers = asRecord(input.headers);
     const inboundUserAgent = this.extractHeaderValue(headers, 'user-agent');
     const inboundOriginator = this.extractHeaderValue(headers, 'originator');
+    const normalizedClientHeaders =
+      this.cloneClientHeaders((userMeta as { clientHeaders?: unknown }).clientHeaders) ||
+      this.cloneClientHeaders(
+        (headers?.['clientHeaders'] as Record<string, unknown> | undefined) ?? undefined
+      );
     const resolvedUserAgent =
       typeof userMeta.userAgent === 'string' && userMeta.userAgent.trim()
         ? userMeta.userAgent.trim()
@@ -445,7 +554,7 @@ export class HubRequestExecutor implements RequestExecutor {
         : inboundOriginator;
     const routeHint = this.extractRouteHint(input) ?? userMeta.routeHint;
     const processMode = (userMeta.processMode as string) || 'chat';
-    return {
+    const metadata: Record<string, unknown> = {
       ...userMeta,
       entryEndpoint: input.entryEndpoint,
       processMode,
@@ -456,6 +565,20 @@ export class HubRequestExecutor implements RequestExecutor {
       ...(resolvedUserAgent ? { userAgent: resolvedUserAgent } : {}),
       ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {})
     };
+
+    if (normalizedClientHeaders) {
+      metadata.clientHeaders = normalizedClientHeaders;
+    }
+
+    const sessionIdentifiers = extractSessionIdentifiersFromMetadata(metadata);
+    if (sessionIdentifiers.sessionId) {
+      metadata.sessionId = sessionIdentifiers.sessionId;
+    }
+    if (sessionIdentifiers.conversationId) {
+      metadata.conversationId = sessionIdentifiers.conversationId;
+    }
+
+    return metadata;
   }
 
   private extractHeaderValue(
