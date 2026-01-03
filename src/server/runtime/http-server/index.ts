@@ -33,10 +33,15 @@ import { isStageLoggingEnabled, logPipelineStage } from '../../utils/stage-logge
 import { registerDefaultMiddleware } from './middleware.js';
 import { registerHttpRoutes, registerOAuthPortalRoute } from './routes.js';
 import { mapProviderProtocol, normalizeProviderType, resolveProviderIdentity, asRecord } from './provider-utils.js';
-import { resolveRepoRoot, loadLlmswitchModule } from './llmswitch-loader.js';
-import { importCoreModule } from '../../../modules/llmswitch/core-loader.js';
+import { resolveRepoRoot } from './llmswitch-loader.js';
 import { enhanceProviderRequestId } from '../../utils/request-id-manager.js';
-import { rebindResponsesConversationRequestId } from '../../../modules/llmswitch/bridge.js';
+import {
+  convertProviderResponse as bridgeConvertProviderResponse,
+  createSnapshotRecorder as bridgeCreateSnapshotRecorder,
+  rebindResponsesConversationRequestId,
+  bootstrapVirtualRouterConfig,
+  getHubPipelineCtor
+} from '../../../modules/llmswitch/bridge.js';
 import {
   initializeRouteErrorHub,
   reportRouteError,
@@ -57,48 +62,6 @@ import { writeClientSnapshot } from '../../../providers/core/utils/snapshot-writ
 import { createServerColoredLogger } from './colored-logger.js';
 import { formatValueForConsole } from '../../../utils/logger.js';
 import { QuietErrorHandlingCenter } from '../../../error-handling/quiet-error-handling-center.js';
-
-type ConvertProviderResponseFn = (options: {
-  providerProtocol: string;
-  providerResponse: Record<string, unknown>;
-  context: Record<string, unknown>;
-  entryEndpoint: string;
-  wantsStream: boolean;
-  providerInvoker?: (options: {
-    providerKey: string;
-    providerType?: string;
-    modelId?: string;
-    providerProtocol: string;
-    payload: Record<string, unknown>;
-    entryEndpoint: string;
-    requestId: string;
-    routeHint?: string;
-  }) => Promise<{ providerResponse: Record<string, unknown> }>;
-  stageRecorder?: unknown;
-  reenterPipeline?: (options: {
-    entryEndpoint: string;
-    requestId: string;
-    body: Record<string, unknown>;
-    metadata?: Record<string, unknown>;
-  }) => Promise<{
-    body?: Record<string, unknown>;
-    __sse_responses?: unknown;
-    format?: string;
-  }>;
-}) => Promise<Record<string, unknown> & { __sse_responses?: unknown; body?: unknown }>;
-type SnapshotRecorderFactory = (context: Record<string, unknown>, entryEndpoint: string) => unknown;
-type ConvertProviderModule = {
-  convertProviderResponse?: ConvertProviderResponseFn;
-};
-type SnapshotRecorderModule = {
-  createSnapshotRecorder?: SnapshotRecorderFactory;
-};
-type VirtualRouterBootstrapModule = {
-  bootstrapVirtualRouterConfig?: (input: UnknownObject) => VirtualRouterArtifacts;
-};
-type HubPipelineModule = {
-  HubPipeline?: HubPipelineCtor;
-};
 type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   token_file?: unknown;
   token_url?: unknown;
@@ -111,32 +74,6 @@ type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   refresh_url?: unknown;
   scope?: unknown;
 };
-
-let convertProviderResponseFn: ConvertProviderResponseFn | null = null;
-async function loadConvertProviderResponse(): Promise<ConvertProviderResponseFn> {
-  if (convertProviderResponseFn) {
-    return convertProviderResponseFn;
-  }
-  const mod = await importCoreModule<ConvertProviderModule>('conversion/hub/response/provider-response');
-  if (!mod?.convertProviderResponse) {
-    throw new Error('[RouteCodexHttpServer] llmswitch-core 缺少 convertProviderResponse 实现');
-  }
-  convertProviderResponseFn = mod.convertProviderResponse;
-  return convertProviderResponseFn;
-}
-
-let createSnapshotRecorderFn: SnapshotRecorderFactory | null = null;
-async function loadSnapshotRecorderFactory(): Promise<SnapshotRecorderFactory> {
-  if (createSnapshotRecorderFn) {
-    return createSnapshotRecorderFn;
-  }
-  const mod = await importCoreModule<SnapshotRecorderModule>('conversion/hub/snapshot-recorder');
-  if (!mod?.createSnapshotRecorder) {
-    throw new Error('[RouteCodexHttpServer] llmswitch-core 缺少 createSnapshotRecorder 实现');
-  }
-  createSnapshotRecorderFn = mod.createSnapshotRecorder;
-  return createSnapshotRecorderFn;
-}
 
 /**
  * RouteCodex Server V2
@@ -407,29 +344,18 @@ export class RouteCodexHttpServer {
   }
 
   private async bootstrapVirtualRouter(input: UnknownObject): Promise<VirtualRouterArtifacts> {
-    const mod = await loadLlmswitchModule<VirtualRouterBootstrapModule>(
-      this.repoRoot,
-      'router/virtual-router/bootstrap.js'
-    );
-    const fn = mod?.bootstrapVirtualRouterConfig;
-    if (typeof fn !== 'function') {
-      throw new Error('llmswitch-core missing bootstrapVirtualRouterConfig');
-    }
-    return fn(input);
+    const artifacts = (await bootstrapVirtualRouterConfig(
+      input as Record<string, unknown>
+    )) as unknown as VirtualRouterArtifacts;
+    return artifacts;
   }
 
   private async ensureHubPipelineCtor(): Promise<HubPipelineCtor> {
     if (this.hubPipelineCtor) {
       return this.hubPipelineCtor;
     }
-    const mod = await loadLlmswitchModule<HubPipelineModule>(
-      this.repoRoot,
-      'conversion/hub/pipeline/hub-pipeline.js'
-    );
-    if (!mod?.HubPipeline) {
-      throw new Error('Unable to load HubPipeline implementation from llmswitch-core');
-    }
-    this.hubPipelineCtor = mod.HubPipeline;
+    const ctorFactory = await getHubPipelineCtor();
+    this.hubPipelineCtor = ctorFactory as unknown as HubPipelineCtor;
     return this.hubPipelineCtor;
   }
 
@@ -814,16 +740,38 @@ export class RouteCodexHttpServer {
     const pipelineLabel = 'hub';
     let iterationMetadata = initialMetadata;
     let followupTriggered = false;
+    const maxAttemptsRaw = process.env.ROUTECODEX_PROVIDER_RETRY_MAX || process.env.RCC_PROVIDER_RETRY_MAX;
+    const maxAttempts = Math.max(1, Number.isFinite(Number(maxAttemptsRaw)) ? Number(maxAttemptsRaw) || 3 : 3);
+    let attempt = 0;
+    const originalBodySnapshot = this.cloneRequestPayload(input.body);
+    const excludedProviderKeys = new Set<string>();
 
     while (true) {
+      attempt += 1;
+      // 每次尝试前重置请求 body，避免上一轮 HubPipeline 的就地改写导致
+      // 第二轮出现 ChatEnvelopeValidationError(messages_missing) 之类的问题。
+      if (originalBodySnapshot && typeof originalBodySnapshot === 'object') {
+        const cloned =
+          this.cloneRequestPayload(originalBodySnapshot) ??
+          ({ ...(originalBodySnapshot as Record<string, unknown>) } as Record<string, unknown>);
+        input.body = cloned;
+      }
+
+      // 为本轮构建独立的 metadata 视图，并注入当前已排除的 providerKey 集合，
+      // 让 VirtualRouter 在同一 HTTP 请求内跳过已经 429 过的 key。
+      const metadataForIteration: typeof iterationMetadata = {
+        ...iterationMetadata,
+        excludedProviderKeys: Array.from(excludedProviderKeys)
+      };
+
       this.logStage(`${pipelineLabel}.start`, providerRequestId, {
         endpoint: input.entryEndpoint,
-        stream: iterationMetadata.stream
+        stream: metadataForIteration.stream
       });
       const originalRequestSnapshot = this.cloneRequestPayload(input.body);
-      const pipelineResult = await this.runHubPipeline(input, iterationMetadata);
+      const pipelineResult = await this.runHubPipeline(input, metadataForIteration);
       const pipelineMetadata = pipelineResult.metadata ?? {};
-      const mergedMetadata = { ...iterationMetadata, ...pipelineMetadata };
+      const mergedMetadata = { ...metadataForIteration, ...pipelineMetadata };
       this.logStage(`${pipelineLabel}.completed`, providerRequestId, {
         route: pipelineResult.routingDecision?.routeName,
         target: pipelineResult.target?.providerKey
@@ -977,6 +925,39 @@ export class RouteCodexHttpServer {
           runtime: runtimeMetadata,
           dependencies: this.getModuleDependencies()
         });
+
+        const err: any = error;
+        const statusCode: number | undefined =
+          typeof err?.status === 'number'
+            ? err.status
+            : typeof err?.statusCode === 'number'
+              ? err.statusCode
+              : typeof err?.response?.status === 'number'
+                ? err.response.status
+                : undefined;
+        const retryable: boolean = err?.retryable === true;
+
+        // 对可恢复的 429 错误在同一 HTTP 请求内执行透明重试：
+        // - 依赖 providerErrorCenter 已更新 VirtualRouter 的健康状态（短冷静期）；
+        // - 将当前 providerKey 记录到本次请求的排除列表中，下一轮选路时显式跳过；
+        // - 再次调用 HubPipeline 时，让 VirtualRouter 在最新健康状态 + 排除集下选择其它可用 key；
+        // - 若超过最大重试次数或错误不可恢复，则将错误抛出，由上层 HTTP 处理。
+        if (retryable && statusCode === 429 && attempt < maxAttempts) {
+          this.logStage('provider.send.retry', input.requestId, {
+            providerKey: target.providerKey,
+            attempt,
+            status: statusCode
+          });
+          // 本次请求内，将当前 providerKey 标记为已尝试，下一轮路由会自动跳过。
+          if (typeof target.providerKey === 'string' && target.providerKey.trim()) {
+            excludedProviderKeys.add(target.providerKey.trim());
+          }
+          // 下一轮沿用当前 pipeline metadata（包含路由决策等），让 VirtualRouter
+          // 在最新健康状态下重新选择 provider。
+          iterationMetadata = { ...mergedMetadata };
+          continue;
+        }
+
         throw error;
       }
     }
@@ -1205,11 +1186,7 @@ export class RouteCodexHttpServer {
           adapterContext.forceVision = true;
         }
       }
-      const [convertProviderResponse, createSnapshotRecorder] = await Promise.all([
-        loadConvertProviderResponse(),
-        loadSnapshotRecorderFactory()
-      ]);
-      const stageRecorder = createSnapshotRecorder(
+      const stageRecorder = await bridgeCreateSnapshotRecorder(
         adapterContext,
         typeof (adapterContext as Record<string, unknown>).entryEndpoint === 'string'
           ? ((adapterContext as Record<string, unknown>).entryEndpoint as string)
@@ -1284,7 +1261,7 @@ export class RouteCodexHttpServer {
             : undefined;
         return { body: nestedBody };
       };
-      const converted = await convertProviderResponse({
+      const converted = await bridgeConvertProviderResponse({
         providerProtocol,
         providerResponse: body as Record<string, unknown>,
         context: adapterContext,

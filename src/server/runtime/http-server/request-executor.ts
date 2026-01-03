@@ -2,7 +2,6 @@ import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pi
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
 import type { HubPipeline, ProviderProtocol } from './types.js';
 import type { ProviderErrorRuntimeMetadata } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
-import { importCoreModule } from '../../../modules/llmswitch/core-loader.js';
 import { writeClientSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
 import { mapProviderProtocol, asRecord } from './provider-utils.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
@@ -12,68 +11,10 @@ import { emitProviderError } from '../../../providers/core/utils/provider-error-
 import type { ProviderRuntimeManager } from './runtime-manager.js';
 import type { StatsManager, UsageMetrics } from './stats-manager.js';
 import { extractSessionIdentifiersFromMetadata } from '../../../../sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/session-identifiers.js';
-
-type ConvertProviderResponseFn = (options: {
-  providerProtocol: string;
-  providerResponse: Record<string, unknown>;
-  context: Record<string, unknown>;
-  entryEndpoint: string;
-  wantsStream: boolean;
-  providerInvoker?: (options: {
-    providerKey: string;
-    providerType?: string;
-    modelId?: string;
-    providerProtocol: string;
-    payload: Record<string, unknown>;
-    entryEndpoint: string;
-    requestId: string;
-    routeHint?: string;
-  }) => Promise<{ providerResponse: Record<string, unknown> }>;
-  stageRecorder?: unknown;
-  reenterPipeline?: (options: {
-    entryEndpoint: string;
-    requestId: string;
-    body: Record<string, unknown>;
-    metadata?: Record<string, unknown>;
-  }) => Promise<{
-    body?: Record<string, unknown>;
-    __sse_responses?: unknown;
-    format?: string;
-  }>;
-}) => Promise<Record<string, unknown> & { __sse_responses?: unknown; body?: unknown }>;
-type SnapshotRecorderFactory = (context: Record<string, unknown>, entryEndpoint: string) => unknown;
-type ConvertProviderModule = {
-  convertProviderResponse?: ConvertProviderResponseFn;
-};
-type SnapshotRecorderModule = {
-  createSnapshotRecorder?: SnapshotRecorderFactory;
-};
-
-let convertProviderResponseFn: ConvertProviderResponseFn | null = null;
-async function loadConvertProviderResponse(): Promise<ConvertProviderResponseFn> {
-  if (convertProviderResponseFn) {
-    return convertProviderResponseFn;
-  }
-  const mod = await importCoreModule<ConvertProviderModule>('conversion/hub/response/provider-response');
-  if (!mod?.convertProviderResponse) {
-    throw new Error('[RequestExecutor] llmswitch-core 缺少 convertProviderResponse 实现');
-  }
-  convertProviderResponseFn = mod.convertProviderResponse;
-  return convertProviderResponseFn;
-}
-
-let createSnapshotRecorderFn: SnapshotRecorderFactory | null = null;
-async function loadSnapshotRecorderFactory(): Promise<SnapshotRecorderFactory> {
-  if (createSnapshotRecorderFn) {
-    return createSnapshotRecorderFn;
-  }
-  const mod = await importCoreModule<SnapshotRecorderModule>('conversion/hub/snapshot-recorder');
-  if (!mod?.createSnapshotRecorder) {
-    throw new Error('[RequestExecutor] llmswitch-core 缺少 createSnapshotRecorder 实现');
-  }
-  createSnapshotRecorderFn = mod.createSnapshotRecorder;
-  return createSnapshotRecorderFn;
-}
+import {
+  convertProviderResponse as bridgeConvertProviderResponse,
+  createSnapshotRecorder as bridgeCreateSnapshotRecorder
+} from '../../../modules/llmswitch/bridge.js';
 
 export type RequestExecutorDeps = {
   runtimeManager: ProviderRuntimeManager;
@@ -689,11 +630,7 @@ export class HubRequestExecutor implements RequestExecutor {
       if (aliasMap) {
         (adapterContext as Record<string, unknown>).anthropicToolNameMap = aliasMap;
       }
-      const [convertProviderResponse, createSnapshotRecorder] = await Promise.all([
-        loadConvertProviderResponse(),
-        loadSnapshotRecorderFactory()
-      ]);
-      const stageRecorder = createSnapshotRecorder(
+      const stageRecorder = await bridgeCreateSnapshotRecorder(
         adapterContext,
         typeof (adapterContext as Record<string, unknown>).entryEndpoint === 'string'
           ? ((adapterContext as Record<string, unknown>).entryEndpoint as string)
@@ -788,7 +725,7 @@ export class HubRequestExecutor implements RequestExecutor {
         return { body: nestedBody };
       };
 
-      const converted = await convertProviderResponse({
+      const converted = await bridgeConvertProviderResponse({
         providerProtocol,
         providerResponse: body as Record<string, unknown>,
         context: adapterContext,

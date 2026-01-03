@@ -6,26 +6,12 @@ import type {
   ProviderErrorEvent,
   ProviderErrorRuntimeMetadata
 } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
-import { importCoreModule } from '../../../modules/llmswitch/core-loader.js';
 import { formatErrorForErrorCenter } from '../../../utils/error-center-payload.js';
 import { getRouteErrorHub, reportRouteError } from '../../../error-handling/route-error-hub.js';
 import { buildInfo } from '../../../build-info.js';
+import { getProviderErrorCenter } from '../../../modules/llmswitch/bridge.js';
 
-type ProviderErrorCenterExports = {
-  providerErrorCenter?: {
-    emit(event: ProviderErrorEvent): void;
-    subscribe?(handler: (event: ProviderErrorEvent) => void): () => void;
-  };
-};
-
-const providerErrorCenterModule = await importCoreModule<ProviderErrorCenterExports>(
-  'router/virtual-router/error-center'
-);
-const providerErrorCenterResolved = providerErrorCenterModule?.providerErrorCenter;
-if (!providerErrorCenterResolved) {
-  throw new Error('[provider-error-reporter] 无法加载 llmswitch-core providerErrorCenter（请确认 @jsonstudio/llms 可用）');
-}
-const providerErrorCenter = providerErrorCenterResolved;
+const providerErrorCenter = (await getProviderErrorCenter())!;
 
 type ExtendedRuntimeMetadata = ProviderErrorRuntimeMetadata & {
   providerFamily?: string;

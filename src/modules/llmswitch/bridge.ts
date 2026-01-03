@@ -1,11 +1,13 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { importCoreModule } from './core-loader.js';
+import type { ProviderErrorEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 
 type AnyRecord = Record<string, unknown>;
 type WithBaseDir = BridgeProcessOptions & { baseDir: string };
 type BridgeHandler = (payload: AnyRecord, options: WithBaseDir) => Promise<AnyRecord>;
 type RouteCodexBridgeModule = Partial<Record<CoreBridgeMethod, BridgeHandler>>;
+type SnapshotRecorder = unknown;
 
 // 单一桥接模块：这是全项目中唯一允许直接 import llmswitch-core 的地方。
 // 其它代码（pipeline/provider/server/virtual-router/snapshot）都只能通过这里暴露的统一接口访问 llmswitch-core。
@@ -104,6 +106,22 @@ export async function ensureResponsesApplyPatchArguments(input?: unknown[]): Pro
   }
 }
 
+type ResponsesInstructionsModule = {
+  ensureResponsesInstructions?: (body: AnyRecord) => void;
+};
+
+/**
+ * 确保 Responses 请求体包含规范化的 instructions 字段。
+ * Provider 层通过该桥接函数调用 llmswitch-core 的 ensureResponsesInstructions。
+ */
+export async function ensureResponsesInstructions(body: AnyRecord): Promise<void> {
+  const mod = await importCoreDist<ResponsesInstructionsModule>('conversion/shared/responses-instructions');
+  const fn = mod.ensureResponsesInstructions;
+  if (typeof fn === 'function') {
+    fn(body);
+  }
+}
+
 type SnapshotHooksModule = {
   writeSnapshotViaHooks?: (options: AnyRecord) => Promise<void> | void;
 };
@@ -170,6 +188,153 @@ export async function rebindResponsesConversationRequestId(oldId?: string, newId
   if (typeof fn === 'function') {
     fn(oldId, newId);
   }
+}
+
+type ProviderResponseConversionModule = {
+  convertProviderResponse?: (options: AnyRecord) => Promise<AnyRecord> | AnyRecord;
+};
+
+let cachedConvertProviderResponse:
+  | ((options: AnyRecord) => Promise<AnyRecord>)
+  | null = null;
+
+/**
+ * Host/HTTP 侧统一使用的 provider 响应转换入口。
+ * 封装 llmswitch-core 的 convertProviderResponse，避免在 Host 内部直接 import core 模块。
+ */
+export async function convertProviderResponse(options: AnyRecord): Promise<AnyRecord> {
+  if (!cachedConvertProviderResponse) {
+    const mod = await importCoreDist<ProviderResponseConversionModule>('conversion/hub/response/provider-response');
+    const fn = mod.convertProviderResponse;
+    if (typeof fn !== 'function') {
+      throw new Error('[llmswitch-bridge] convertProviderResponse not available');
+    }
+    cachedConvertProviderResponse = async (opts: AnyRecord) => {
+      const result = fn(opts);
+      return result instanceof Promise ? await result : result;
+    };
+  }
+  return await cachedConvertProviderResponse(options);
+}
+
+type SnapshotRecorderModule = {
+  createSnapshotRecorder?: (context: AnyRecord, endpoint: string) => SnapshotRecorder;
+};
+
+let cachedSnapshotRecorderFactory:
+  | ((context: AnyRecord, endpoint: string) => SnapshotRecorder)
+  | null = null;
+
+/**
+ * 为 HubPipeline / provider 响应路径创建阶段快照记录器。
+ * 内部通过 llmswitch-core 的 snapshot-recorder 模块实现。
+ */
+export async function createSnapshotRecorder(
+  context: AnyRecord,
+  endpoint: string
+): Promise<SnapshotRecorder> {
+  if (!cachedSnapshotRecorderFactory) {
+    const mod = await importCoreDist<SnapshotRecorderModule>('conversion/hub/snapshot-recorder');
+    const factory = mod.createSnapshotRecorder;
+    if (typeof factory !== 'function') {
+      throw new Error('[llmswitch-bridge] createSnapshotRecorder not available');
+    }
+    cachedSnapshotRecorderFactory = factory;
+  }
+  return cachedSnapshotRecorderFactory(context, endpoint);
+}
+
+type ResponsesSseModule = {
+  ResponsesSseToJsonConverter?: new () => {
+    convertSseToJson(stream: unknown, options: AnyRecord): Promise<unknown>;
+  };
+};
+
+let cachedResponsesSseConverterFactory:
+  | (() => { convertSseToJson(stream: unknown, options: AnyRecord): Promise<unknown> })
+  | null = null;
+
+/**
+ * 创建 Responses SSE→JSON 转换器实例，供 ResponsesProvider 使用。
+ */
+export async function createResponsesSseToJsonConverter(): Promise<{
+  convertSseToJson(stream: unknown, options: AnyRecord): Promise<unknown>;
+}> {
+  if (!cachedResponsesSseConverterFactory) {
+    const mod = await importCoreDist<ResponsesSseModule>('sse/sse-to-json/index');
+    const Ctor = mod.ResponsesSseToJsonConverter;
+    if (typeof Ctor !== 'function') {
+      throw new Error('[llmswitch-bridge] ResponsesSseToJsonConverter not available');
+    }
+    cachedResponsesSseConverterFactory = () => new Ctor();
+  }
+  return cachedResponsesSseConverterFactory();
+}
+
+type ProviderErrorCenterExports = {
+  providerErrorCenter?: {
+    emit(event: ProviderErrorEvent): void;
+    subscribe?(handler: (event: ProviderErrorEvent) => void): () => void;
+  };
+};
+
+let cachedProviderErrorCenter:
+  | ProviderErrorCenterExports['providerErrorCenter']
+  | null = null;
+
+/**
+ * ProviderErrorCenter 统一桥接入口。
+ * Provider/Host 通过本函数获取 error center，避免直接 import core 模块。
+ */
+export async function getProviderErrorCenter(): Promise<ProviderErrorCenterExports['providerErrorCenter']> {
+  if (!cachedProviderErrorCenter) {
+    const mod = await importCoreDist<ProviderErrorCenterExports>('router/virtual-router/error-center');
+    const center = mod.providerErrorCenter;
+    if (!center) {
+      throw new Error('[llmswitch-bridge] providerErrorCenter not available');
+    }
+    cachedProviderErrorCenter = center;
+  }
+  return cachedProviderErrorCenter;
+}
+
+type VirtualRouterBootstrapModule = {
+  bootstrapVirtualRouterConfig?: (input: AnyRecord) => AnyRecord;
+};
+
+/**
+ * 通过 llmswitch-core 的 bootstrapVirtualRouterConfig 预处理 Virtual Router 配置。
+ */
+export async function bootstrapVirtualRouterConfig(input: AnyRecord): Promise<AnyRecord> {
+  const mod = await importCoreDist<VirtualRouterBootstrapModule>('router/virtual-router/bootstrap');
+  const fn = mod.bootstrapVirtualRouterConfig;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] bootstrapVirtualRouterConfig not available');
+  }
+  return fn(input);
+}
+
+type HubPipelineModule = {
+  HubPipeline?: new (config: AnyRecord) => AnyRecord;
+};
+
+type HubPipelineCtorAny = new (config: AnyRecord) => AnyRecord;
+
+let cachedHubPipelineCtor: HubPipelineCtorAny | null = null;
+
+/**
+ * 获取 HubPipeline 构造函数，供 Host 创建 HubPipeline 实例。
+ */
+export async function getHubPipelineCtor(): Promise<HubPipelineCtorAny> {
+  if (!cachedHubPipelineCtor) {
+    const mod = await importCoreDist<HubPipelineModule>('conversion/hub/pipeline/hub-pipeline');
+    const Ctor = mod.HubPipeline;
+    if (typeof Ctor !== 'function') {
+      throw new Error('[llmswitch-bridge] HubPipeline constructor not available');
+    }
+    cachedHubPipelineCtor = Ctor;
+  }
+  return cachedHubPipelineCtor;
 }
 
 function resolveBaseDir(): string {

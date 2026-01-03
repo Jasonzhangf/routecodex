@@ -24,6 +24,21 @@ RouteCodex 支持通过用户消息中的特殊指令 `<**...**>` 来动态控�
 请帮我写一段代码
 ```
 
+另外，针对「整个 provider」可以使用简写：
+
+**语法：** `<**provider**>`（无 `!`、无 `.`）
+
+**效果：**
+- 将当前会话的 provider 白名单重置为仅包含该 provider，等价于 `<**!provider**>`；
+- 之后的路由只会命中当前 routing 中配置了该 provider 的池子，且池子内部只会选用该 provider 的模型/key；
+- 可以与其它 sticky/禁用规则叠加使用。
+
+**示例：**
+```text
+<**antigravity**>
+（当前会话仅使用 antigravity 相关的所有模型/key）
+```
+
 ### 2. 粘性指定（持续 sticky）
 
 **语法：**

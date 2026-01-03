@@ -75,6 +75,19 @@ describe('Routing instruction parsing and application', () => {
     expect(Array.from(models ?? [])).toEqual(['gpt-4']);
   });
 
+  test('bare provider instructions act as provider whitelist', () => {
+    const initialState = createState({
+      allowedProviders: new Set(['openai', 'glm'])
+    });
+    const instructions = parseRoutingInstructions(buildMessages('<**antigravity**>'));
+    expect(instructions).toHaveLength(1);
+    expect(instructions[0].type).toBe('allow');
+    expect(instructions[0].provider).toBe('antigravity');
+
+    const nextState = applyRoutingInstructions(instructions, initialState);
+    expect(Array.from(nextState.allowedProviders)).toEqual(['antigravity']);
+  });
+
   test('enable instructions remove provider model bans', () => {
     const initialState = createState({
       disabledModels: new Map([['glm', new Set(['gpt-4', 'glm-4.7'])]])

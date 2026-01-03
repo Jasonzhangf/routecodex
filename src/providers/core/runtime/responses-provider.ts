@@ -15,44 +15,33 @@ import {
   shouldCaptureProviderStreamSnapshots,
   writeProviderSnapshot
 } from '../utils/snapshot-writer.js';
-import { buildResponsesRequestFromChat } from '../../../modules/llmswitch/bridge.js';
-import { importCoreModule } from '../../../modules/llmswitch/core-loader.js';
+import {
+  buildResponsesRequestFromChat,
+  ensureResponsesInstructions as bridgeEnsureResponsesInstructions,
+  createResponsesSseToJsonConverter
+} from '../../../modules/llmswitch/bridge.js';
 import type { HttpClient } from '../utils/http-client.js';
 import { ResponsesProtocolClient } from '../../../client/responses/responses-protocol-client.js';
 import { emitProviderError, buildRuntimeFromProviderContext } from '../utils/provider-error-reporter.js';
 
-type EnsureResponsesInstructionsFn = typeof import('@jsonstudio/llms/dist/conversion/shared/responses-instructions.js')['ensureResponsesInstructions'];
-let ensureResponsesInstructionsFn: EnsureResponsesInstructionsFn | null = null;
-
 type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'>;
+type ResponsesStreamingMode = 'auto' | 'always' | 'never';
 type ResponsesSseConverter = {
   convertSseToJson(stream: unknown, options: { requestId: string; model: string }): Promise<unknown>;
 };
-type ResponsesSseConverterCtor = new () => ResponsesSseConverter;
 
 type SubmitToolOutputsPayload = {
   responseId: string;
   body: Record<string, unknown>;
 };
-async function loadEnsureResponsesInstructions(): Promise<EnsureResponsesInstructionsFn> {
-  if (ensureResponsesInstructionsFn) {
-    return ensureResponsesInstructionsFn;
-  }
-  const mod = await importCoreModule<{ ensureResponsesInstructions?: EnsureResponsesInstructionsFn }>(
-    'conversion/shared/responses-instructions'
-  );
-  if (!mod?.ensureResponsesInstructions) {
-    throw new Error('[responses-provider] 无法加载 llmswitch-core ensureResponsesInstructions');
-  }
-  ensureResponsesInstructionsFn = mod.ensureResponsesInstructions;
-  return ensureResponsesInstructionsFn;
-}
-
 export class ResponsesProvider extends HttpTransportProvider {
   private readonly responsesClient: ResponsesProtocolClient;
 
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
+    const cfg = extractResponsesConfig(config as unknown as UnknownObject);
+    const streamingPref: ResponsesStreamingMode = cfg.streaming ?? 'auto';
     const responsesClient = new ResponsesProtocolClient({
+      streaming: streamingPref,
       betaVersion: 'responses-2024-12-17'
     });
     super(config, dependencies, 'responses-http-provider', responsesClient);
@@ -81,8 +70,8 @@ export class ResponsesProvider extends HttpTransportProvider {
 
   /**
    * 覆写内部发送：/v1/responses 入口时按配置选择上游 SSE 或 JSON。
-   * 根据架构约束：Responses 上游不支持 JSON，统一使用 SSE 与上游通信，
-   * 但 Provider 必须将上游 SSE 解析为 JSON 再返回 Host（对内一律 JSON）。
+   * stream 标志主要影响 Host -> Client 是否用 SSE，上游传输模式由 ResponsesStreamingMode 控制。
+   * 对于 SSE 模式，Provider 必须将上游 SSE 解析为 JSON 再返回 Host（对内一律 JSON）。
    */
   protected override async sendRequestInternal(request: UnknownObject): Promise<unknown> {
     const endpoint = this.getEffectiveEndpoint();
@@ -115,12 +104,22 @@ export class ResponsesProvider extends HttpTransportProvider {
     await this.ensureResponsesInstructions(finalBody);
     this.applyInstructionsMode(finalBody, settings.instructionsMode);
 
-    const providerStream = this.extractStreamFlagFromBody(finalBody);
-    const useSse = providerStream === true;
+    const explicitStream = this.extractStreamFlagFromBody(finalBody);
+    const streamingPreference = this.responsesClient.getStreamingPreference();
+    const useSse: boolean =
+      streamingPreference === 'always'
+        ? true
+        : streamingPreference === 'never'
+          ? false
+          : explicitStream === true;
+
+    const providerStream = explicitStream === true;
     this.responsesClient.ensureStreamFlag(finalBody, useSse);
     this.dependencies.logger?.logModule?.(this.id, 'responses-provider-stream-flag', {
       requestId: context.requestId,
-      outboundStream: useSse
+      outboundStream: useSse,
+      streamingPreference,
+      explicitStream: explicitStream ?? null
     });
 
     await this.maybeConvertChatPayload(finalBody, context);
@@ -217,8 +216,7 @@ export class ResponsesProvider extends HttpTransportProvider {
 
   private async ensureResponsesInstructions(body: Record<string, unknown>): Promise<void> {
     try {
-      const ensureFn = await loadEnsureResponsesInstructions();
-      ensureFn(body);
+      await bridgeEnsureResponsesInstructions(body as UnknownObject);
     } catch {
       // non-blocking
     }
@@ -545,14 +543,7 @@ export class ResponsesProvider extends HttpTransportProvider {
   }
 
   private async loadResponsesSseConverter(): Promise<ResponsesSseConverter> {
-    const mod = await importCoreModule<{ ResponsesSseToJsonConverter?: ResponsesSseConverterCtor }>(
-      'sse/sse-to-json/index'
-    );
-    const Converter = mod?.ResponsesSseToJsonConverter;
-    if (!Converter) {
-      throw new Error('[responses-provider] 无法加载 llmswitch-core ResponsesSseToJsonConverter');
-    }
-    return new Converter();
+    return await createResponsesSseToJsonConverter();
   }
 
   private reportResponsesFailureIfNeeded(payload: unknown, context: ProviderContext): void {
@@ -658,6 +649,7 @@ type InstructionsMode = 'default' | 'inline';
 
 interface ResponsesSettings {
   instructionsMode: InstructionsMode;
+  streaming?: ResponsesStreamingMode;
 }
 
 function parseInstructionsMode(value: unknown): InstructionsMode {
@@ -667,21 +659,35 @@ function parseInstructionsMode(value: unknown): InstructionsMode {
   return 'default';
 }
 
+function parseStreamingMode(value: unknown): ResponsesStreamingMode {
+  if (typeof value === 'string') {
+    const lowered = value.trim().toLowerCase();
+    if (lowered === 'always' || lowered === 'never') {
+      return lowered;
+    }
+    if (lowered === 'auto') {
+      return 'auto';
+    }
+  }
+  return 'auto';
+}
+
 function extractResponsesConfig(config: UnknownObject): Partial<ResponsesSettings> {
   const container = isRecord(config) ? (config as Record<string, unknown>) : {};
   const providerConfig = isRecord(container.config)
     ? (container.config as Record<string, unknown>)
     : undefined;
   const responsesCfg = providerConfig && isRecord(providerConfig.responses)
-    ? (providerConfig.responses as Record<string, unknown>)
-    : isRecord(container.responses)
+      ? (providerConfig.responses as Record<string, unknown>)
+      : isRecord(container.responses)
       ? (container.responses as Record<string, unknown>)
       : undefined;
   if (!responsesCfg) {
     return {};
   }
   return {
-    instructionsMode: parseInstructionsMode(responsesCfg.instructionsMode)
+    instructionsMode: parseInstructionsMode(responsesCfg.instructionsMode),
+    streaming: 'streaming' in responsesCfg ? parseStreamingMode(responsesCfg.streaming) : undefined
   };
 }
 function isRecord(value: unknown): value is Record<string, unknown> {
