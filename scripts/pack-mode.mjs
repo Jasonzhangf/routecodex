@@ -42,8 +42,15 @@ function isSymlink(p) {
   }
 }
 
-const hadDevLink = isSymlink(llmsPath);
-runEnsureMode('release');
+const isDevPkg = args.name === 'routecodex';
+const isRcc = args.name === 'rcc' || args.name === '@jsonstudio/rcc';
+const isRccx = args.name === '@jsonstudio/rccx';
+
+let hadDevLink = false;
+if (!isRccx) {
+  hadDevLink = isSymlink(llmsPath);
+  runEnsureMode('release');
+}
 
 const original = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
 fs.writeFileSync(backupPath, JSON.stringify(original, null, 2));
@@ -53,18 +60,30 @@ try {
   mutated.name = args.name;
   mutated.bin = { [args.bin]: 'dist/cli.js' };
   // Ensure description mentions mode
-  const suffix = args.name === 'rcc' ? ' (release)' : ' (dev)';
-  mutated.description = String(original.description || 'RouteCodex').replace(/\s*\((dev|release)\)$/, '') + suffix;
+  const suffix = (isRcc || isRccx) ? ' (release)' : ' (dev)';
+  mutated.description = String(original.description || 'RouteCodex')
+    .replace(/\s*\((dev|release)\)$/, '')
+    .concat(suffix);
   // Prefer real dependencies over bundled to avoid missing build artifacts (e.g., ajv/dist)
-  if (args.name === 'routecodex' || args.name === 'rcc') {
+
+  if (isDevPkg || isRcc) {
     mutated.bundledDependencies = [];
     mutated.bundleDependencies = [];
     const llmsVersion = original.dependencies?.['@jsonstudio/llms'] || '^0.6.230';
     mutated.dependencies = {
       ...(original.dependencies || {}),
-      "ajv": original.dependencies?.ajv || "^8.17.1",
-      "zod": original.dependencies?.zod || "^3.23.8",
-      "@jsonstudio/llms": llmsVersion
+      ajv: original.dependencies?.ajv || '^8.17.1',
+      zod: original.dependencies?.zod || '^3.23.8',
+      '@jsonstudio/llms': llmsVersion
+    };
+  } else if (isRccx) {
+    // rccx: wasm-backed llms 核心，使用 dev 配置，不强制切换 release llms。
+    mutated.bundledDependencies = [];
+    mutated.bundleDependencies = [];
+    mutated.dependencies = {
+      ...(original.dependencies || {}),
+      ajv: original.dependencies?.ajv || '^8.17.1',
+      zod: original.dependencies?.zod || '^3.23.8'
     };
   }
   fs.writeFileSync(pkgPath, JSON.stringify(mutated, null, 2));

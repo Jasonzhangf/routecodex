@@ -10,7 +10,15 @@ import { enhanceProviderRequestId } from '../../utils/request-id-manager.js';
 import { emitProviderError } from '../../../providers/core/utils/provider-error-reporter.js';
 import type { ProviderRuntimeManager } from './runtime-manager.js';
 import type { StatsManager, UsageMetrics } from './stats-manager.js';
-import { extractSessionIdentifiersFromMetadata } from '../../../../sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/session-identifiers.js';
+import {
+  buildRequestMetadata,
+  cloneClientHeaders,
+  decorateMetadataForAttempt,
+  ensureClientHeadersOnPayload,
+  resolveClientRequestId
+} from './executor-metadata.js';
+import { ensureHubPipeline, runHubPipeline, type HubPipelineResult } from './executor-pipeline.js';
+import { describeRetryReason, shouldRetryProviderError } from './executor-provider.js';
 import {
   convertProviderResponse as bridgeConvertProviderResponse,
   createSnapshotRecorder as bridgeCreateSnapshotRecorder
@@ -29,21 +37,6 @@ export interface RequestExecutor {
   execute(input: PipelineExecutionInput): Promise<PipelineExecutionResult>;
 }
 
-type HubPipelineResult = {
-  providerPayload: Record<string, unknown>;
-  target: {
-    providerKey: string;
-    providerType: string;
-    outboundProfile: string;
-    runtimeKey?: string;
-    processMode?: string;
-    compatibilityProfile?: string;
-  };
-  routingDecision?: { routeName?: string };
-  processMode: string;
-  metadata: Record<string, unknown>;
-};
-
 const MAX_PROVIDER_ATTEMPTS = 3;
 
 export class HubRequestExecutor implements RequestExecutor {
@@ -61,11 +54,11 @@ export class HubRequestExecutor implements RequestExecutor {
       statsRecorded = true;
     };
     try {
-      const hubPipeline = this.ensureHubPipeline();
-      const initialMetadata = this.buildRequestMetadata(input);
-      const inboundClientHeaders = this.cloneClientHeaders(initialMetadata?.clientHeaders);
+      const hubPipeline = ensureHubPipeline(this.deps.getHubPipeline);
+      const initialMetadata = buildRequestMetadata(input);
+      const inboundClientHeaders = cloneClientHeaders(initialMetadata?.clientHeaders);
       const providerRequestId = input.requestId;
-      const clientRequestId = this.resolveClientRequestId(initialMetadata, providerRequestId);
+      const clientRequestId = resolveClientRequestId(initialMetadata, providerRequestId);
 
       this.logStage('request.received', providerRequestId, {
         endpoint: input.entryEndpoint,
@@ -104,13 +97,9 @@ export class HubRequestExecutor implements RequestExecutor {
 
       while (attempt < maxAttempts) {
         attempt += 1;
-        const metadataForAttempt = this.decorateMetadataForAttempt(
-          initialMetadata,
-          attempt,
-          excludedProviderKeys
-        );
+        const metadataForAttempt = decorateMetadataForAttempt(initialMetadata, attempt, excludedProviderKeys);
         const clientHeadersForAttempt =
-          this.cloneClientHeaders(metadataForAttempt?.clientHeaders) || inboundClientHeaders;
+          cloneClientHeaders(metadataForAttempt?.clientHeaders) || inboundClientHeaders;
         if (clientHeadersForAttempt) {
           metadataForAttempt.clientHeaders = clientHeadersForAttempt;
         }
@@ -121,11 +110,11 @@ export class HubRequestExecutor implements RequestExecutor {
           attempt
         });
 
-        const pipelineResult = await this.runHubPipeline(hubPipeline, input, metadataForAttempt);
+        const pipelineResult = await runHubPipeline(hubPipeline, input, metadataForAttempt);
         const pipelineMetadata = pipelineResult.metadata ?? {};
         const mergedMetadata = { ...metadataForAttempt, ...pipelineMetadata };
         const mergedClientHeaders =
-          this.cloneClientHeaders(mergedMetadata?.clientHeaders) || clientHeadersForAttempt;
+          cloneClientHeaders(mergedMetadata?.clientHeaders) || clientHeadersForAttempt;
         if (mergedClientHeaders) {
           mergedMetadata.clientHeaders = mergedClientHeaders;
         }
@@ -193,7 +182,7 @@ export class HubRequestExecutor implements RequestExecutor {
         const providerModel = rawModel;
         const providerLabel = this.buildProviderLabel(target.providerKey, providerModel);
         if (clientHeadersForAttempt) {
-          this.ensureClientHeadersOnPayload(providerPayload, clientHeadersForAttempt);
+          ensureClientHeadersOnPayload(providerPayload, clientHeadersForAttempt);
         }
         this.deps.stats.bindProvider(input.requestId, {
           providerKey: target.providerKey,
@@ -302,7 +291,7 @@ export class HubRequestExecutor implements RequestExecutor {
             dependencies: this.deps.getModuleDependencies()
           });
           lastError = error;
-          const shouldRetry = attempt < maxAttempts && this.shouldRetryProviderError(error);
+          const shouldRetry = attempt < maxAttempts && shouldRetryProviderError(error);
           if (!shouldRetry) {
             throw error;
           }
@@ -314,7 +303,7 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt,
             nextAttempt: attempt + 1,
             excluded: Array.from(excludedProviderKeys),
-            reason: this.describeRetryReason(error)
+            reason: describeRetryReason(error)
           });
           continue;
         }
@@ -326,163 +315,6 @@ export class HubRequestExecutor implements RequestExecutor {
       throw error;
     }
 
-  }
-
-  private ensureHubPipeline(): HubPipeline {
-    const pipeline = this.deps.getHubPipeline();
-    if (!pipeline) {
-      throw new Error('Hub pipeline runtime is not initialized');
-    }
-    return pipeline;
-  }
-
-  private async runHubPipeline(
-    hubPipeline: HubPipeline,
-    input: PipelineExecutionInput,
-    metadata: Record<string, unknown>
-  ): Promise<HubPipelineResult> {
-    const payload = asRecord(input.body);
-    const pipelineInput: PipelineExecutionInput & {
-      payload: Record<string, unknown>;
-      endpoint: string;
-      id: string;
-    } = {
-      ...input,
-      id: input.requestId,
-      endpoint: input.entryEndpoint,
-      metadata,
-      payload
-    };
-    const result = await hubPipeline.execute(pipelineInput);
-    if (!result.providerPayload || !result.target?.providerKey) {
-      throw Object.assign(new Error('Virtual router did not produce a provider target'), {
-        code: 'ERR_NO_PROVIDER_TARGET',
-        requestId: input.requestId
-      });
-    }
-    const processMode = (result.metadata?.processMode as string | undefined) ?? 'chat';
-    return {
-      providerPayload: result.providerPayload,
-      target: result.target,
-      routingDecision: result.routingDecision ?? undefined,
-      processMode,
-      metadata: result.metadata ?? {}
-    };
-  }
-
-  private cloneClientHeaders(source: unknown): Record<string, string> | undefined {
-    if (!source || typeof source !== 'object') {
-      return undefined;
-    }
-    const normalized: Record<string, string> = {};
-    for (const [key, value] of Object.entries(source as Record<string, unknown>)) {
-      if (typeof value === 'string' && value.trim()) {
-        normalized[key] = value;
-      }
-    }
-    return Object.keys(normalized).length ? normalized : undefined;
-  }
-
-  private ensureClientHeadersOnPayload(payload: unknown, headers: Record<string, string>): void {
-    if (!payload || typeof payload !== 'object') {
-      return;
-    }
-    const carrier = payload as { metadata?: Record<string, unknown> };
-    const existing = carrier.metadata && typeof carrier.metadata === 'object'
-      ? carrier.metadata
-      : {};
-    carrier.metadata = {
-      ...existing,
-      clientHeaders: existing.clientHeaders ?? headers
-    };
-  }
-
-  private resolveClientRequestId(metadata: Record<string, unknown>, fallback: string): string {
-    const clientRequestId = typeof metadata.clientRequestId === 'string' && metadata.clientRequestId.trim()
-      ? metadata.clientRequestId.trim()
-      : undefined;
-    return clientRequestId || fallback;
-  }
-
-  private buildRequestMetadata(input: PipelineExecutionInput): Record<string, unknown> {
-    const userMeta = asRecord(input.metadata);
-    const headers = asRecord(input.headers);
-    const inboundUserAgent = this.extractHeaderValue(headers, 'user-agent');
-    const inboundOriginator = this.extractHeaderValue(headers, 'originator');
-    const normalizedClientHeaders =
-      this.cloneClientHeaders((userMeta as { clientHeaders?: unknown }).clientHeaders) ||
-      this.cloneClientHeaders(
-        (headers?.['clientHeaders'] as Record<string, unknown> | undefined) ?? undefined
-      );
-    const resolvedUserAgent =
-      typeof userMeta.userAgent === 'string' && userMeta.userAgent.trim()
-        ? userMeta.userAgent.trim()
-        : inboundUserAgent;
-    const resolvedOriginator =
-      typeof userMeta.clientOriginator === 'string' && userMeta.clientOriginator.trim()
-        ? userMeta.clientOriginator.trim()
-        : inboundOriginator;
-    const routeHint = this.extractRouteHint(input) ?? userMeta.routeHint;
-    const processMode = (userMeta.processMode as string) || 'chat';
-    const metadata: Record<string, unknown> = {
-      ...userMeta,
-      entryEndpoint: input.entryEndpoint,
-      processMode,
-      direction: 'request',
-      stage: 'inbound',
-      routeHint,
-      stream: userMeta.stream === true,
-      ...(resolvedUserAgent ? { userAgent: resolvedUserAgent } : {}),
-      ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {})
-    };
-
-    if (normalizedClientHeaders) {
-      metadata.clientHeaders = normalizedClientHeaders;
-    }
-
-    const sessionIdentifiers = extractSessionIdentifiersFromMetadata(metadata);
-    if (sessionIdentifiers.sessionId) {
-      metadata.sessionId = sessionIdentifiers.sessionId;
-    }
-    if (sessionIdentifiers.conversationId) {
-      metadata.conversationId = sessionIdentifiers.conversationId;
-    }
-
-    return metadata;
-  }
-
-  private extractHeaderValue(
-    headers: Record<string, unknown> | undefined,
-    name: string
-  ): string | undefined {
-    if (!headers) {
-      return undefined;
-    }
-    const target = name.toLowerCase();
-    for (const [key, value] of Object.entries(headers)) {
-      if (key.toLowerCase() !== target) {
-        continue;
-      }
-      if (typeof value === 'string') {
-        return value.trim() || undefined;
-      }
-      if (Array.isArray(value) && value.length) {
-        return String(value[0]).trim() || undefined;
-      }
-      return undefined;
-    }
-    return undefined;
-  }
-
-  private extractRouteHint(input: PipelineExecutionInput): string | undefined {
-    const header = (input.headers as Record<string, unknown>)?.['x-route-hint'];
-    if (typeof header === 'string' && header.trim()) {
-      return header.trim();
-    }
-    if (Array.isArray(header) && header[0]) {
-      return String(header[0]);
-    }
-    return undefined;
   }
 
   private extractResponseStatus(response: unknown): number | undefined {
@@ -864,402 +696,6 @@ export class HubRequestExecutor implements RequestExecutor {
     return merged;
   }
 
-  private buildVisionFollowupPayload(options: {
-    originalPayload?: Record<string, unknown>;
-    visionResponse: PipelineExecutionResult;
-  }): Record<string, unknown> | null {
-    const { originalPayload, visionResponse } = options;
-    if (!originalPayload || typeof originalPayload !== 'object') {
-      return null;
-    }
-    const clone = this.cloneRequestPayload(originalPayload) ?? { ...(originalPayload as Record<string, unknown>) };
-    if (!clone) {
-      return null;
-    }
-    const visionText = this.extractVisionDescription(visionResponse?.body);
-    if (!visionText) {
-      return null;
-    }
-    if (this.rewriteResponsesInput(clone, visionText)) {
-      return clone;
-    }
-    if (this.rewriteChatMessages(clone, visionText)) {
-      return clone;
-    }
-    return null;
-  }
-
-  private rewriteResponsesInput(payload: Record<string, unknown>, visionText: string): boolean {
-    const inputList = (payload as { input?: unknown }).input;
-    if (!Array.isArray(inputList)) {
-      return false;
-    }
-    for (let i = inputList.length - 1; i >= 0; i -= 1) {
-      const item = inputList[i];
-      if (!item || typeof item !== 'object') {
-        continue;
-      }
-      const role = typeof (item as Record<string, unknown>).role === 'string'
-        ? ((item as Record<string, unknown>).role as string)
-        : '';
-      if (role !== 'user') {
-        continue;
-      }
-      const contentBlocks = Array.isArray((item as Record<string, unknown>).content)
-        ? ([...(item as { content: unknown[] }).content] as unknown[])
-        : [];
-      const originalText = this.extractTextFromContentBlocks(contentBlocks, ['input_text', 'text']);
-      const textType = this.detectContentTextType(contentBlocks, 'input_text');
-      const composed = this.composeVisionUserText(visionText, originalText);
-      (item as Record<string, unknown>).content = [
-        {
-          type: textType,
-          text: composed
-        }
-      ];
-      inputList[i] = item;
-      return true;
-    }
-    return false;
-  }
-
-  private rewriteChatMessages(payload: Record<string, unknown>, visionText: string): boolean {
-    const messages = (payload as { messages?: unknown }).messages;
-    if (!Array.isArray(messages)) {
-      return false;
-    }
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      const message = messages[i];
-      if (!message || typeof message !== 'object') {
-        continue;
-      }
-      const role = typeof (message as Record<string, unknown>).role === 'string'
-        ? ((message as Record<string, unknown>).role as string)
-        : '';
-      if (role !== 'user') {
-        continue;
-      }
-      const contentBlocks = Array.isArray((message as Record<string, unknown>).content)
-        ? ([...(message as { content: unknown[] }).content] as unknown[])
-        : [];
-      const originalText = this.extractTextFromContentBlocks(contentBlocks, ['text']);
-      const textType = this.detectContentTextType(contentBlocks, 'text');
-      const composed = this.composeVisionUserText(visionText, originalText);
-      (message as Record<string, unknown>).content = [
-        {
-          type: textType,
-          text: composed
-        }
-      ];
-      messages[i] = message;
-      return true;
-    }
-    return false;
-  }
-
-  private extractTextFromContentBlocks(content: unknown, allowedTypes: string[]): string {
-    if (typeof content === 'string') {
-      return content;
-    }
-    if (!Array.isArray(content)) {
-      return '';
-    }
-    const collected: string[] = [];
-    for (const block of content) {
-      if (!block || typeof block !== 'object') {
-        continue;
-      }
-      const typeValue = typeof (block as Record<string, unknown>).type === 'string'
-        ? ((block as Record<string, unknown>).type as string)
-        : '';
-      if (allowedTypes.length && !allowedTypes.includes(typeValue)) {
-        continue;
-      }
-      const textValue = (block as Record<string, unknown>).text;
-      if (typeof textValue === 'string' && textValue.trim()) {
-        collected.push(textValue.trim());
-      }
-    }
-    return collected.join('\n');
-  }
-
-  private detectContentTextType(content: unknown, fallback: 'text' | 'input_text'): string {
-    if (Array.isArray(content)) {
-      for (const block of content) {
-        if (!block || typeof block !== 'object') {
-          continue;
-        }
-        const typeValue = (block as Record<string, unknown>).type;
-        if (typeof typeValue === 'string' && (typeValue === 'text' || typeValue === 'input_text')) {
-          return typeValue;
-        }
-      }
-    }
-    return fallback;
-  }
-
-  private composeVisionUserText(visionText: string, originalText?: string): string {
-    const sections: string[] = [];
-    const cleanedVision = (visionText || '').trim();
-    if (cleanedVision) {
-      sections.push(`【图片分析】\n${cleanedVision}`);
-    }
-    const cleanedOriginal = (originalText || '').trim();
-    if (cleanedOriginal) {
-      sections.push(`【用户原始请求】\n${cleanedOriginal}`);
-    }
-    return sections.join('\n\n');
-  }
-
-  private extractVisionDescription(body: unknown): string | null {
-    if (!body) {
-      return null;
-    }
-    if (typeof body === 'string') {
-      const trimmed = body.trim();
-      return trimmed.length ? trimmed : null;
-    }
-    if (typeof body !== 'object') {
-      return null;
-    }
-    const record = body as Record<string, unknown>;
-    const direct = this.extractTextCandidate(record);
-    if (direct) {
-      return direct;
-    }
-    if (record.response && typeof record.response === 'object') {
-      const responseNode = record.response as Record<string, unknown>;
-      const nested = this.extractTextCandidate(responseNode);
-      if (nested) {
-        return nested;
-      }
-      const output = responseNode.output;
-      if (Array.isArray(output)) {
-        for (const entry of output) {
-          if (entry && typeof entry === 'object') {
-            const nestedText = this.extractTextCandidate(entry as Record<string, unknown>);
-            if (nestedText) {
-              return nestedText;
-            }
-          }
-        }
-      }
-    }
-    if (Array.isArray(record.output)) {
-      for (const entry of record.output) {
-        if (entry && typeof entry === 'object') {
-          const nested = this.extractTextCandidate(entry as Record<string, unknown>);
-          if (nested) {
-            return nested;
-          }
-        }
-      }
-    }
-    const choices = record.choices;
-    if (Array.isArray(choices)) {
-      for (const choice of choices) {
-        if (!choice || typeof choice !== 'object') {
-          continue;
-        }
-        const message = (choice as Record<string, unknown>).message;
-        if (message && typeof message === 'object') {
-          const msg = message as Record<string, unknown>;
-          const content = msg.content;
-          if (typeof content === 'string' && content.trim()) {
-            return content.trim();
-          }
-          if (Array.isArray(content)) {
-            for (const part of content) {
-              if (part && typeof part === 'object' && typeof (part as Record<string, unknown>).text === 'string') {
-                const textValue = ((part as Record<string, unknown>).text as string).trim();
-                if (textValue) {
-                  return textValue;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    return null;
-  }
-
-  private extractTextCandidate(record: Record<string, unknown>): string | null {
-    const candidates: Array<{ key: string; allowJson?: boolean }> = [
-      { key: 'output_text', allowJson: true },
-      { key: 'text' },
-      { key: 'content' }
-    ];
-    for (const candidate of candidates) {
-      if (!(candidate.key in record)) {
-        continue;
-      }
-      const text = this.normalizeTextCandidateValue(
-        record[candidate.key],
-        candidate.allowJson === true
-      );
-      if (text) {
-        return text;
-      }
-    }
-    return null;
-  }
-
-  private normalizeTextCandidateValue(value: unknown, allowJsonStringify = false): string | null {
-    if (!value) {
-      return null;
-    }
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      return trimmed.length ? trimmed : null;
-    }
-    if (Array.isArray(value)) {
-      const collected: string[] = [];
-      for (const entry of value) {
-        const nested = this.normalizeTextCandidateValue(entry, allowJsonStringify);
-        if (nested) {
-          collected.push(nested);
-        }
-      }
-      return collected.length ? collected.join('\n') : null;
-    }
-    if (typeof value === 'object') {
-      const bag = value as Record<string, unknown>;
-      const textField = bag.text;
-      if (typeof textField === 'string' && textField.trim()) {
-        return textField.trim();
-      }
-      const summaryField = bag.summary;
-      if (typeof summaryField === 'string' && summaryField.trim()) {
-        return summaryField.trim();
-      }
-      if ('content' in bag) {
-        const nested = this.normalizeTextCandidateValue(bag.content, allowJsonStringify);
-        if (nested) {
-          return nested;
-        }
-      }
-      if (allowJsonStringify) {
-        try {
-          const serialized = JSON.stringify(value, null, 2);
-          return serialized.trim() || null;
-        } catch {
-          return null;
-        }
-      }
-    }
-    return null;
-  }
-
-  private decorateMetadataForAttempt(
-    base: Record<string, unknown>,
-    attempt: number,
-    excludedProviderKeys: Set<string>
-  ): Record<string, unknown> {
-    const clone = this.cloneMetadata(base);
-    clone.retryAttempt = attempt;
-    if (excludedProviderKeys.size > 0) {
-      clone.excludedProviderKeys = Array.from(excludedProviderKeys);
-    } else if (clone.excludedProviderKeys) {
-      delete clone.excludedProviderKeys;
-    }
-    return clone;
-  }
-
-  private cloneMetadata(source: Record<string, unknown>): Record<string, unknown> {
-    const structuredCloneFn = (globalThis as { structuredClone?: <T>(value: T) => T }).structuredClone;
-    if (typeof structuredCloneFn === 'function') {
-      try {
-        return structuredCloneFn(source);
-      } catch {
-        // fall through to JSON fallback
-      }
-    }
-    try {
-      return JSON.parse(JSON.stringify(source));
-    } catch {
-      return { ...source };
-    }
-  }
-
-  private shouldRetryProviderError(error: unknown): boolean {
-    if (!error || typeof error !== 'object') {
-      return false;
-    }
-    const providerError = error as ProviderError;
-    if (providerError.retryable === true) {
-      return true;
-    }
-    const status = this.extractErrorStatusCode(error);
-    if (status === 429 || status === 408 || status === 425) {
-      return true;
-    }
-    if (typeof status === 'number' && status >= 500) {
-      return true;
-    }
-    return false;
-  }
-
-  private extractErrorStatusCode(error: unknown): number | undefined {
-    if (!error || typeof error !== 'object') {
-      return undefined;
-    }
-    const statusCandidates: Array<number | undefined> = [];
-    const directStatus = (error as { statusCode?: unknown }).statusCode;
-    if (typeof directStatus === 'number') {
-      statusCandidates.push(directStatus);
-    }
-    const secondaryStatus = (error as { status?: unknown }).status;
-    if (typeof secondaryStatus === 'number') {
-      statusCandidates.push(secondaryStatus);
-    }
-    const detailStatus = (error as { details?: unknown }).details;
-    if (detailStatus && typeof detailStatus === 'object') {
-      const nestedStatus = (detailStatus as { status?: unknown }).status;
-      if (typeof nestedStatus === 'number') {
-        statusCandidates.push(nestedStatus);
-      }
-    }
-    const response = (error as { response?: unknown }).response;
-    if (response && typeof response === 'object') {
-      const respStatus = (response as { status?: unknown }).status;
-      if (typeof respStatus === 'number') {
-        statusCandidates.push(respStatus);
-      }
-      const respStatusCode = (response as { statusCode?: unknown }).statusCode;
-      if (typeof respStatusCode === 'number') {
-        statusCandidates.push(respStatusCode);
-      }
-    }
-    const explicit = statusCandidates.find((candidate): candidate is number => typeof candidate === 'number');
-    if (typeof explicit === 'number') {
-      return explicit;
-    }
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === 'string') {
-      const match = message.match(/HTTP\s+(\d{3})/i);
-      if (match) {
-        const parsed = Number.parseInt(match[1], 10);
-        if (!Number.isNaN(parsed)) {
-          return parsed;
-        }
-      }
-    }
-    return undefined;
-  }
-
-  private describeRetryReason(error: unknown): string {
-    if (!error) {
-      return 'unknown';
-    }
-    if (error instanceof Error && error.message) {
-      return error.message;
-    }
-    if (typeof (error as { message?: unknown }).message === 'string') {
-      return (error as { message: string }).message;
-    }
-    return String(error);
-  }
 }
 
 export function createRequestExecutor(deps: RequestExecutorDeps): RequestExecutor {
