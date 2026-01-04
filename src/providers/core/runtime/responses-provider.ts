@@ -20,6 +20,7 @@ import {
   ensureResponsesInstructions as bridgeEnsureResponsesInstructions,
   createResponsesSseToJsonConverter
 } from '../../../modules/llmswitch/bridge.js';
+import { getCodexSystemPrompt } from '../../../utils/system-prompt-loader.js';
 import type { HttpClient } from '../utils/http-client.js';
 import { ResponsesProtocolClient } from '../../../client/responses/responses-protocol-client.js';
 import { emitProviderError, buildRuntimeFromProviderContext } from '../utils/provider-error-reporter.js';
@@ -101,8 +102,10 @@ export class ResponsesProvider extends HttpTransportProvider {
     const targetUrl = this.buildTargetUrl(this.getEffectiveBaseUrl(), endpoint);
     const finalBody = this.responsesClient.buildRequestBody(request);
 
+    await this.maybeConvertChatPayload(finalBody, context);
     await this.ensureResponsesInstructions(finalBody);
     this.applyInstructionsMode(finalBody, settings.instructionsMode);
+    this.applyCodexSystemPromptIfNeeded(finalBody);
 
     const explicitStream = this.extractStreamFlagFromBody(finalBody);
     const streamingPreference = this.responsesClient.getStreamingPreference();
@@ -121,8 +124,6 @@ export class ResponsesProvider extends HttpTransportProvider {
       streamingPreference,
       explicitStream: explicitStream ?? null
     });
-
-    await this.maybeConvertChatPayload(finalBody, context);
 
     await this.snapshotPhase('provider-request', context, finalBody, headers, targetUrl, entryEndpoint);
 
@@ -176,6 +177,34 @@ export class ResponsesProvider extends HttpTransportProvider {
 
   private shouldOverrideCodexUa(): boolean {
     return this.isCodexUaMode();
+  }
+
+  private isLmstudioProvider(): boolean {
+    try {
+      const runtime = this.getRuntimeProfile();
+      const providerId = runtime?.providerId || runtime?.providerKey;
+      if (typeof providerId !== 'string') {
+        return false;
+      }
+      const lowered = providerId.toLowerCase();
+      return lowered === 'lmstudio' || lowered.startsWith('lmstudio.');
+    } catch {
+      return false;
+    }
+  }
+
+  private applyCodexSystemPromptIfNeeded(body: Record<string, unknown>): void {
+    if (!body || typeof body !== 'object') {
+      return;
+    }
+    if (this.isLmstudioProvider()) {
+      return;
+    }
+    const prompt = getCodexSystemPrompt();
+    if (!prompt) {
+      return;
+    }
+    (body as Record<string, unknown>).instructions = prompt;
   }
 
   private buildTargetUrl(baseUrl: string, endpoint: string): string {

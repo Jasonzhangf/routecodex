@@ -93,6 +93,15 @@ function loadPromptFromFile(source: Source): string | null {
   }
 }
 
+export function getCodexSystemPrompt(): string | null {
+  const prompt = loadPromptFromFile('codex');
+  if (!prompt) {
+    return null;
+  }
+  const trimmed = prompt.trim();
+  return trimmed.length ? trimmed : null;
+}
+
 export function getSystemPromptOverride(): { source: Source; prompt: string } | null {
   const source = getRequestedPromptSource();
   if (!source) {

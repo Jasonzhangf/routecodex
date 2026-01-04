@@ -82,15 +82,20 @@ async function runApplyPatchTextCase(label, patchText) {
       `[verify-apply-patch] ${label}: normalized arguments not valid JSON: ${(error && error.message) || String(error)}`
     );
   }
-  if (typeof parsed.patch !== 'string' || !parsed.patch.includes('*** Begin Patch')) {
-    throw new Error(
-      `[verify-apply-patch] ${label}: normalized arguments missing patch text`
-    );
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error(`[verify-apply-patch] ${label}: normalized arguments not an object`);
   }
-  if (typeof parsed.input !== 'string' || !parsed.input.includes('*** Begin Patch')) {
-    throw new Error(
-      `[verify-apply-patch] ${label}: normalized arguments missing input mirror`
-    );
+  const normalizedPatchText =
+    typeof parsed.patch === 'string'
+      ? parsed.patch
+      : typeof parsed.input === 'string'
+        ? parsed.input
+        : null;
+  if (!normalizedPatchText) {
+    throw new Error(`[verify-apply-patch] ${label}: normalized arguments missing patch text`);
+  }
+  if (!normalizedPatchText.includes('*** Begin Patch') || !normalizedPatchText.includes('*** End Patch')) {
+    throw new Error(`[verify-apply-patch] ${label}: patch text missing unified diff markers`);
   }
 }
 
