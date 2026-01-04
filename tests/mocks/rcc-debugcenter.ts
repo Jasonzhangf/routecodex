@@ -1,13 +1,13 @@
-export class DebugEventBus {
-  static getInstance(): DebugEventBus {
-    return new DebugEventBus();
+export class DebugCenter {
+  log(): void {
+    // noop
   }
 
-  publish(): void {
-    // no-op mock
+  warn(): void {
+    // noop
   }
 
-  subscribe(): void {
-    // no-op mock
+  error(): void {
+    // noop
   }
 }

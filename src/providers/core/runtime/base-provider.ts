@@ -39,6 +39,20 @@ type StatsCenterLike = {
   recordProviderUsage(ev: ProviderUsageEvent): void;
 };
 
+const SERIES_COOLDOWN_DETAIL_KEY = 'virtualRouterSeriesCooldown' as const;
+type ModelSeriesName = 'claude' | 'gemini-pro' | 'gemini-flash' | 'default';
+type SeriesCooldownDetail = {
+  scope: 'model-series';
+  providerId: string;
+  providerKey?: string;
+  model?: string;
+  series: Exclude<ModelSeriesName, 'default'>;
+  cooldownMs: number;
+  quotaResetDelay?: string;
+  source?: string;
+  expiresAt?: number;
+};
+
 function getStatsCenterSafe(): StatsCenterLike {
   const anyLlms = LlmsCore as unknown as {
     getStatsCenter?: () => StatsCenterLike | unknown;
@@ -463,6 +477,7 @@ export abstract class BaseProvider implements IProviderV2 {
       this.resetRateLimitCounter(providerKey, context.model);
     }
 
+    let seriesCooldownDetail: SeriesCooldownDetail | null = null;
     if (classification.isRateLimit && providerKey) {
       const backoffInfo = BaseProvider.rateLimitBackoff.record429(providerKey, context.model);
       this.dependencies.logger?.logModule(this.id, 'rate-limit-429-backoff', {
@@ -472,17 +487,22 @@ export abstract class BaseProvider implements IProviderV2 {
         cooldownMs: backoffInfo.cooldownMs,
         seriesBlacklisted: backoffInfo.seriesBlacklisted
       });
+      seriesCooldownDetail = BaseProvider.buildSeriesCooldownDetail(augmentedError, context, runtimeProfile, providerKey);
     }
 
     const affectsHealth = classification.affectsHealth;
     const recoverable = classification.forceFatalRateLimit ? false : classification.recoverable;
 
+    const logErrorMessage = typeof msg === 'string' ? this.truncateLogMessage(msg) : msg;
+    const logUpstreamMessage =
+      typeof upstreamMessage === 'string' ? this.truncateLogMessage(upstreamMessage) : upstreamMessage;
+
     this.dependencies.logger?.logModule(this.id, 'request-error', {
       requestId: context.requestId,
-      error: msg,
+      error: logErrorMessage,
       statusCode,
       upstreamCode,
-      upstreamMessage,
+      upstreamMessage: logUpstreamMessage,
       providerType: context.providerType,
       providerFamily: context.providerFamily,
       providerId: context.providerId,
@@ -502,7 +522,8 @@ export abstract class BaseProvider implements IProviderV2 {
       upstreamCode,
       upstreamMessage,
       requestContext: context.runtimeMetadata,
-      meta: augmentedError.details
+      meta: augmentedError.details,
+      ...(seriesCooldownDetail ? { [SERIES_COOLDOWN_DETAIL_KEY]: seriesCooldownDetail } : {})
     };
     if (!augmentedError.requestId) {
       augmentedError.requestId = context.requestId;
@@ -612,6 +633,306 @@ export abstract class BaseProvider implements IProviderV2 {
     BaseProvider.rateLimitFailures.set(bucketKey, BaseProvider.RATE_LIMIT_THRESHOLD);
   }
 
+  private static buildSeriesCooldownDetail(
+    error: ProviderErrorAugmented,
+    context: ProviderContext,
+    runtimeProfile?: ProviderRuntimeProfile,
+    providerKey?: string
+  ): SeriesCooldownDetail | null {
+    const normalizedProviderId = BaseProvider.normalizeSeriesProviderId(
+      runtimeProfile?.providerId || context.providerId,
+      providerKey
+    );
+    if (!normalizedProviderId || normalizedProviderId.toLowerCase() !== 'antigravity') {
+      return null;
+    }
+    const rawDelay = BaseProvider.extractQuotaResetDelay(error);
+    if (!rawDelay) {
+      return null;
+    }
+    const cooldownMs = BaseProvider.parseDurationToMs(rawDelay);
+    if (!cooldownMs || cooldownMs <= 0) {
+      return null;
+    }
+    const modelId = BaseProvider.resolveContextModel(context, runtimeProfile, providerKey);
+    const series = BaseProvider.resolveModelSeries(modelId);
+    if (!modelId || series === 'default') {
+      return null;
+    }
+    return {
+      scope: 'model-series',
+      providerId: normalizedProviderId,
+      providerKey,
+      model: modelId,
+      series,
+      cooldownMs,
+      quotaResetDelay: rawDelay,
+      source: 'quota_reset_delay',
+      expiresAt: Date.now() + cooldownMs
+    };
+  }
+
+  private static extractQuotaResetDelay(error: ProviderErrorAugmented): string | undefined {
+    if (!error) {
+      return undefined;
+    }
+    const response = error.response as { data?: unknown } | undefined;
+    const textSources: string[] = [];
+    const objectSources: Record<string, unknown>[] = [];
+    const rawData = response?.data;
+    const dataNode = BaseProvider.normalizeObjectCandidate(rawData);
+    if (dataNode) {
+      objectSources.push(dataNode);
+      const errBlock = BaseProvider.normalizeObjectCandidate((dataNode as { error?: unknown })?.error);
+      if (errBlock) {
+        objectSources.push(errBlock);
+        const details = (errBlock as { details?: unknown })?.details;
+        if (Array.isArray(details)) {
+          for (const detail of details) {
+            const normalizedDetail = BaseProvider.normalizeObjectCandidate(detail);
+            if (normalizedDetail) {
+              objectSources.push(normalizedDetail);
+            }
+          }
+        }
+        const errMessage = (errBlock as { message?: unknown })?.message;
+        if (typeof errMessage === 'string') {
+          textSources.push(errMessage);
+        }
+      }
+    } else if (typeof rawData === 'string') {
+      textSources.push(rawData);
+    }
+    if (error && typeof error === 'object') {
+      objectSources.push(error as unknown as Record<string, unknown>);
+    }
+    if (typeof error.message === 'string') {
+      textSources.push(error.message);
+    }
+    const upstreamMessage = (error as { upstreamMessage?: string }).upstreamMessage;
+    if (typeof upstreamMessage === 'string') {
+      textSources.push(upstreamMessage);
+    }
+    for (const source of objectSources) {
+      const candidate = BaseProvider.extractQuotaDelayFromObject(source);
+      if (candidate) {
+        return candidate;
+      }
+    }
+    for (const text of textSources) {
+      const candidate = BaseProvider.extractQuotaDelayFromString(text);
+      if (candidate) {
+        return candidate;
+      }
+    }
+    return undefined;
+  }
+
+  private static extractQuotaDelayFromObject(source: unknown): string | undefined {
+    if (!source || typeof source !== 'object') {
+      return undefined;
+    }
+    const record = source as Record<string, unknown>;
+    const directDelay = record.quotaResetDelay;
+    if (typeof directDelay === 'string' && directDelay.trim().length) {
+      return directDelay.trim();
+    }
+    const metadata = record.metadata;
+    if (metadata && typeof metadata === 'object') {
+      const metaDelay = (metadata as Record<string, unknown>).quotaResetDelay;
+      if (typeof metaDelay === 'string' && metaDelay.trim().length) {
+        return metaDelay.trim();
+      }
+      const metaResetTs = (metadata as Record<string, unknown>).quotaResetTimeStamp;
+      if (typeof metaResetTs === 'string' && metaResetTs.trim().length) {
+        const ttlMs = BaseProvider.computeTtlFromTimestamp(metaResetTs.trim());
+        if (ttlMs && ttlMs > 0) {
+          return `${Math.round(ttlMs / 1000)}s`;
+        }
+      }
+    }
+    const directResetTs = record.quotaResetTimeStamp;
+    if (typeof directResetTs === 'string' && directResetTs.trim().length) {
+      const ttlMs = BaseProvider.computeTtlFromTimestamp(directResetTs.trim());
+      if (ttlMs && ttlMs > 0) {
+        return `${Math.round(ttlMs / 1000)}s`;
+      }
+    }
+    return undefined;
+  }
+
+  private static computeTtlFromTimestamp(value?: string): number | null {
+    if (!value || typeof value !== 'string') {
+      return null;
+    }
+    const parsed = Date.parse(value);
+    if (!Number.isFinite(parsed)) {
+      return null;
+    }
+    const now = Date.now();
+    const diff = parsed - now;
+    if (!Number.isFinite(diff) || diff <= 0) {
+      return null;
+    }
+    return Math.round(diff);
+  }
+
+  private static parseDurationToMs(value?: string): number | null {
+    if (!value || typeof value !== 'string') {
+      return null;
+    }
+    const pattern = /(\d+(?:\.\d+)?)([hms])/gi;
+    let totalMs = 0;
+    let matched = false;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(value)) !== null) {
+      matched = true;
+      const amount = Number.parseFloat(match[1]);
+      if (!Number.isFinite(amount)) {
+        continue;
+      }
+      const unit = match[2].toLowerCase();
+      if (unit === 'h') {
+        totalMs += amount * 3_600_000;
+      } else if (unit === 'm') {
+        totalMs += amount * 60_000;
+      } else if (unit === 's') {
+        totalMs += amount * 1_000;
+      }
+    }
+    if (!matched) {
+      const seconds = Number.parseFloat(value);
+      if (Number.isFinite(seconds)) {
+        totalMs = seconds * 1_000;
+        matched = true;
+      }
+    }
+    if (!matched || totalMs <= 0) {
+      return null;
+    }
+    return Math.round(totalMs);
+  }
+
+  private static normalizeSeriesProviderId(providerId?: string, providerKey?: string): string | undefined {
+    const fromKey = BaseProvider.extractTopLevelProviderId(providerKey);
+    if (fromKey) {
+      return fromKey;
+    }
+    return BaseProvider.extractTopLevelProviderId(providerId);
+  }
+
+  private static normalizeObjectCandidate(value: unknown): Record<string, unknown> | null {
+    if (!value) {
+      return null;
+    }
+    if (typeof value === 'object') {
+      return value as Record<string, unknown>;
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return null;
+      }
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === 'object') {
+          return parsed as Record<string, unknown>;
+        }
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  private static extractQuotaDelayFromString(text: string): string | undefined {
+    if (typeof text !== 'string' || !text) {
+      return undefined;
+    }
+    const match = text.match(/quotaResetDelay["']?\s*[:=]\s*"([^"]+)"/i);
+    if (match && match[1]) {
+      const normalized = match[1].trim();
+      return normalized.length ? normalized : undefined;
+    }
+    return undefined;
+  }
+
+  private static extractTopLevelProviderId(source?: string): string | undefined {
+    if (!source || typeof source !== 'string') {
+      return undefined;
+    }
+    const trimmed = source.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    const firstDot = trimmed.indexOf('.');
+    if (firstDot <= 0) {
+      return trimmed;
+    }
+    return trimmed.slice(0, firstDot);
+  }
+
+  private static resolveContextModel(
+    context: ProviderContext,
+    runtimeProfile?: ProviderRuntimeProfile,
+    providerKey?: string
+  ): string | undefined {
+    if (typeof context.model === 'string' && context.model.trim().length) {
+      return context.model.trim();
+    }
+    const target = context.target;
+    if (target && typeof target === 'object') {
+      const candidate =
+        (target as { clientModelId?: string }).clientModelId ||
+        (target as { modelId?: string }).modelId;
+      if (typeof candidate === 'string' && candidate.trim().length) {
+        return candidate.trim();
+      }
+    }
+    if (runtimeProfile?.defaultModel && runtimeProfile.defaultModel.trim().length) {
+      return runtimeProfile.defaultModel.trim();
+    }
+    if (providerKey) {
+      return BaseProvider.deriveModelIdFromProviderKey(providerKey);
+    }
+    return undefined;
+  }
+
+  private static deriveModelIdFromProviderKey(providerKey?: string): string | undefined {
+    if (!providerKey) {
+      return undefined;
+    }
+    const firstDot = providerKey.indexOf('.');
+    if (firstDot <= 0 || firstDot === providerKey.length - 1) {
+      return undefined;
+    }
+    const remainder = providerKey.slice(firstDot + 1);
+    const secondDot = remainder.indexOf('.');
+    if (secondDot <= 0 || secondDot === remainder.length - 1) {
+      const trimmed = remainder.trim();
+      return trimmed || undefined;
+    }
+    const finalPart = remainder.slice(secondDot + 1).trim();
+    return finalPart || undefined;
+  }
+
+  private static resolveModelSeries(model?: string): ModelSeriesName {
+    if (!model) {
+      return 'default';
+    }
+    const lower = model.toLowerCase();
+    if (lower.includes('claude') || lower.includes('opus')) {
+      return 'claude';
+    }
+    if (lower.includes('flash')) {
+      return 'gemini-flash';
+    }
+    if (lower.includes('gemini') || lower.includes('pro')) {
+      return 'gemini-pro';
+    }
+    return 'default';
+  }
+
   private isDailyLimitRateLimit(messageLower: string, upstreamLower?: string): boolean {
     const haystack = `${messageLower} ${upstreamLower ?? ''}`;
     return (
@@ -622,5 +943,12 @@ export abstract class BaseProvider implements IProviderV2 {
       haystack.includes('费用限制') ||
       haystack.includes('每日费用限制')
     );
+  }
+
+  private truncateLogMessage(value: string, maxLength: number = 400): string {
+    if (!value || value.length <= maxLength) {
+      return value;
+    }
+    return `${value.slice(0, maxLength - 3)}...`;
   }
 }

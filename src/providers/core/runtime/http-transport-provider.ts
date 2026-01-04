@@ -627,7 +627,8 @@ export class HttpTransportProvider extends BaseProvider {
   }
 
   private getHttpRetryLimit(): number {
-    return 3;
+    // Provider 层禁止重复尝试；失败后由虚拟路由负责 failover。
+    return 1;
   }
 
   private async delayBeforeHttpRetry(attempt: number): Promise<void> {

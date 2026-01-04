@@ -1,3 +1,7 @@
-export async function importCoreModule<T = Record<string, unknown>>(): Promise<T> {
-  return {} as T;
+export async function loadCoreModule() {
+  return {};
+}
+
+export async function initializeModule() {
+  return {};
 }

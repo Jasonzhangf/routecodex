@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.89.636",
+  "version": "0.89.673",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -41,7 +41,7 @@
     "dev": "tsx watch src/index.ts",
     "jest:run": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
     "test": "npm run test:routing-instructions && npm run mock:regressions",
-    "test:routing-instructions": "npm run jest:run -- --runTestsByPath tests/servertool/routing-instructions.spec.ts tests/servertool/hub-pipeline-session-headers.spec.ts tests/providers/core/runtime/http-transport-provider.headers.test.ts",
+    "test:routing-instructions": "npm run jest:run -- --runTestsByPath tests/server/runtime/request-executor.single-attempt.spec.ts tests/servertool/virtual-router-series-cooldown.spec.ts",
     "test:watch": "npm run jest:run -- --watch",
     "test:coverage": "npm run jest:run -- --coverage",
     "test:integration": "npm run jest:run -- --testPathPattern=integration",

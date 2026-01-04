@@ -1,31 +1,11 @@
-type ModuleInfo = {
-  id: string;
-  name: string;
-  version: string;
-  description: string;
-  type?: string;
-};
-
 export class BaseModule {
-  private readonly info: ModuleInfo;
+  constructor(public readonly id: string = 'mock-module') {}
 
-  constructor(info: ModuleInfo) {
-    this.info = info;
+  async initialize(): Promise<void> {
+    // noop
   }
 
-  getModuleInfo(): ModuleInfo {
-    return this.info;
-  }
-
-  getInfo(): ModuleInfo {
-    return this.info;
-  }
-
-  isInitialized(): boolean {
-    return true;
-  }
-
-  isRunning(): boolean {
-    return true;
+  async cleanup(): Promise<void> {
+    // noop
   }
 }
