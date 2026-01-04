@@ -82,7 +82,6 @@ export async function bridgeProcessOutboundResponse(response: AnyRecord, opts: B
 
 type ResponsesBridgeModule = {
   buildResponsesRequestFromChat?: (request: AnyRecord, ctx?: AnyRecord) => Promise<AnyRecord> | AnyRecord;
-  ensureResponsesApplyPatchArguments?: (input?: unknown[]) => void;
 };
 
 export async function buildResponsesRequestFromChat(
@@ -96,14 +95,6 @@ export async function buildResponsesRequestFromChat(
   }
   const result = builder(chatRequest, ctx);
   return result instanceof Promise ? await result : result;
-}
-
-export async function ensureResponsesApplyPatchArguments(input?: unknown[]): Promise<void> {
-  const mod = await importCoreDist<ResponsesBridgeModule>('conversion/responses/responses-openai-bridge');
-  const fn = mod.ensureResponsesApplyPatchArguments;
-  if (typeof fn === 'function') {
-    fn(input as unknown[]);
-  }
 }
 
 type ResponsesInstructionsModule = {
