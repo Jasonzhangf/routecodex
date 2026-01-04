@@ -2,6 +2,8 @@ import type { StandardizedMessage } from '../../sharedmodule/llmswitch-core/src/
 import {
   parseRoutingInstructions,
   applyRoutingInstructions,
+  serializeRoutingInstructionState,
+  deserializeRoutingInstructionState,
   type RoutingInstructionState
 } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
 
@@ -22,6 +24,9 @@ function createState(overrides?: Partial<RoutingInstructionState>): RoutingInstr
     disabledProviders: new Set(),
     disabledKeys: new Map(),
     disabledModels: new Map(),
+    stopMessageText: undefined,
+    stopMessageMaxRepeats: undefined,
+    stopMessageUsed: undefined,
     ...(overrides ?? {})
   };
 }
@@ -96,5 +101,38 @@ describe('Routing instruction parsing and application', () => {
     const nextState = applyRoutingInstructions(instructions, initialState);
     const models = nextState.disabledModels.get('glm');
     expect(Array.from(models ?? [])).toEqual(['glm-4.7']);
+  });
+
+  test('parses stopMessage with default repeat', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:"继续"**>'));
+    expect(instructions).toHaveLength(1);
+    const inst = instructions[0] as any;
+    expect(inst.type).toBe('stopMessageSet');
+    expect(inst.stopMessageText).toBe('继续');
+    expect(inst.stopMessageMaxRepeats).toBe(1);
+  });
+
+  test('parses stopMessage with explicit repeat', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:"继续",3**>'));
+    expect(instructions).toHaveLength(1);
+    const inst = instructions[0] as any;
+    expect(inst.type).toBe('stopMessageSet');
+    expect(inst.stopMessageText).toBe('继续');
+    expect(inst.stopMessageMaxRepeats).toBe(3);
+  });
+
+  test('applies and serializes stopMessage state', () => {
+    const baseState = createState();
+    const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:"继续",2**>'));
+    const nextState = applyRoutingInstructions(instructions, baseState);
+    expect(nextState.stopMessageText).toBe('继续');
+    expect(nextState.stopMessageMaxRepeats).toBe(2);
+    expect(nextState.stopMessageUsed).toBe(0);
+
+    const serialized = serializeRoutingInstructionState(nextState);
+    const restored = deserializeRoutingInstructionState(serialized);
+    expect(restored.stopMessageText).toBe('继续');
+    expect(restored.stopMessageMaxRepeats).toBe(2);
+    expect(restored.stopMessageUsed).toBe(0);
   });
 });
