@@ -97,6 +97,12 @@ export class HubRequestExecutor implements RequestExecutor {
 
       while (attempt < maxAttempts) {
         attempt += 1;
+        if (originalRequestSnapshot && typeof originalRequestSnapshot === 'object') {
+          const cloned =
+            this.cloneRequestPayload(originalRequestSnapshot) ??
+            ({ ...(originalRequestSnapshot as Record<string, unknown>) } as Record<string, unknown>);
+          input.body = cloned;
+        }
         const metadataForAttempt = decorateMetadataForAttempt(initialMetadata, attempt, excludedProviderKeys);
         const clientHeadersForAttempt =
           cloneClientHeaders(metadataForAttempt?.clientHeaders) || inboundClientHeaders;
