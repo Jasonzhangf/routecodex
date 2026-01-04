@@ -155,6 +155,48 @@ RouteCodex 支持通过用户消息中的特殊指令 `<**...**>` 来动态控�
 恢复正常路由
 ```
 
+### 7. 自动续写 stopMessage（基于 sticky 状态）
+
+> 仅当 RouteCodex 内置的 `stop_message_auto` servertool 启用时生效。
+
+**语法：**
+
+- 启用 / 更新自动续写：
+  - `<**stopMessage:"继续"**>` → 默认最多自动续写 1 次；
+  - `<**stopMessage:"继续",3**>` → 最多自动续写 3 次；
+- 清理 stopMessage 状态：
+  - `<**stopMessage:clear**>`
+
+**行为：**
+
+- 标签只在路由层解析，不会透传给上游模型；
+- 解析后写入当前 sticky session 状态：
+  - `stopMessageText`：自动补发的用户消息内容；
+  - `stopMessageMaxRepeats`：允许自动续写的最大次数（>=1）；
+  - `stopMessageUsed`：已执行次数（从 0 开始计数）；
+- 当满足以下条件时，servertool 会自动发起后续请求：
+  - 当前响应的 `choices[0].finish_reason === "stop"`；
+  - 当前轮没有工具调用（`tool_calls` 为空）；
+  - `stopMessageUsed < stopMessageMaxRepeats`；
+  - 客户端仍处于连接状态（HTTP 层会在断连时设置 `clientDisconnected=true`，servertool 检测到后停止自动续写）；
+- 自动续写时：
+  - 以保存的原始 Chat 请求（`capturedChatRequest`）为基础，复制 `model/messages/tools/parameters`；
+  - 在消息末尾追加一条 `{ role: "user", content: stopMessageText }`；
+  - 自增 `stopMessageUsed` 并写回 sticky 存储；
+  - 通过内部 `reenterPipeline` 再发起一次 /v1/chat/completions（对客户端透明，对 Responses / Chat / Gemini 协议统一生效）。
+
+**示例：**
+
+```text
+<**stopMessage:"继续",3**>
+帮我把这个项目的架构分 3 步讲完，每一步结束后我会说“继续”。
+```
+
+在该会话中：
+- 当模型先给出第 1 段回答并以 `finish_reason=stop` 结束时，服务器会自动追加一条用户消息 `继续` 并发起第 2 轮；
+- 若第 2 轮仍以 `stop` 结束且客户端仍连接，则再次自动补一条 `继续` 并发起第 3 轮；
+- 使用次数达到 `maxRepeats` 后自动停止，不再继续补发。
+
 ## 目标标识格式
 
 | 格式 | 含义 | 示例 |

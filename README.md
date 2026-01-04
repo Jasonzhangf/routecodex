@@ -362,6 +362,48 @@ npm run install:global
 
 > 说明：统一使用 `scripts/install-global.sh`，支持自动权限处理和旧安装清理。安装脚本会在安装完成后自动使用 `~/.routecodex/provider/glm/config.v1.json` 启动一次服务器，并向模型发送“列出本地文件目录”的工具请求来验证端到端链路，请保证该配置文件存在且有效。
 
+### 会话级路由 / sticky 指令语法总览
+
+RouteCodex 支持在用户消息中通过 `<**...**>` 标签设置**当前会话的路由 / 粘性 / 禁用 / 自动续写**行为。这些标签只在路由层解析，不会透传给上游模型。
+
+- **单次强制模型 / provider**
+  - `<**provider.model**>`：仅对当前请求强制使用某个模型  
+    - 例：`<**glm.glm-4.7**>`、`<**antigravity.claude-sonnet-4-5**>`
+  - `<**provider**>`：将当前会话的 provider 白名单重置为该 provider  
+    - 例：`<**antigravity**>`（只允许 antigravity 的所有模型/key 命中）
+
+- **粘性（sticky）指定，跨轮生效**
+  - `<**!provider.model**>`：对当前会话粘在某个模型上，并在该模型的多 key 之间轮询  
+    - 例：`<**!antigravity.claude-sonnet-4-5**>`
+  - `<**!provider.keyAlias.model**>` / `<**!provider.N**>`：粘在某一个具体 key 上，不再轮询其它 alias  
+    - 例：`<**!antigravity.geminikey.gemini-3-pro-high**>`、`<**!openai.2**>`
+
+- **白名单 / 禁用 / 解除禁用**
+  - 白名单（只允许这些 provider）  
+    - `<**!glm**>`、`<**!glm,openai**>`
+  - 禁用（只对当前会话生效，支持 provider / keyAlias / 序号）  
+    - `<**#glm**>`（禁用 glm 全部 key）  
+    - `<**#openai.1**>`、`<**#anthropic.primary**>`
+  - 启用（解除禁用）  
+    - `<**@glm**>`、`<**@openai.1**>`
+
+- **清理所有路由状态**
+  - `<**clear**>`：清除 sticky / 白名单 / 禁用 状态，恢复默认路由
+
+- **自动续写 stopMessage（基于 sticky 状态）**
+  - 启用 / 更新：  
+    - `<**stopMessage:"继续"**>` → 默认最多自动续写 1 次  
+    - `<**stopMessage:"继续",3**>` → 最多自动续写 3 次
+  - 清理：  
+    - `<**stopMessage:clear**>`
+  - 触发条件（由内置 `stop_message_auto` servertool 在服务端判断）：  
+    - 当前响应 `finish_reason = "stop"`；  
+    - 当前轮没有工具调用（`tool_calls` 为空）；  
+    - `stopMessageUsed < stopMessageMaxRepeats` 且客户端仍连接。  
+  - 行为：在保存的原始请求消息末尾追加一条 `{ role: "user", content: "<配置的文本>" }`，通过内部 `reenterPipeline` 自动发下一轮对话，对客户端透明。
+
+> 完整说明、状态持久化规则及 daemon 管理示例，参见 `docs/routing-instructions.md`。
+
 ### 基础配置
 
 1. **创建配置文件**
