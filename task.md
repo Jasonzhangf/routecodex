@@ -22,7 +22,7 @@
 2. **TokenManager 迁移（与现有 token daemon 对齐）**
    - [x] 将 `TokenDaemon` 自动刷新逻辑接入 `TokenManagerModule`，由 ManagerDaemon 在 server 进程内周期执行。
    - [x] 为 TokenManager/CLI 引入基于锁文件的 leader 选举，确保任意时刻仅有一个 Token 刷新器实例（server 内置 TokenManager 与外部 `token-daemon` 互斥）。
-   - [ ] 将 `src/token-daemon/*` 进一步抽象为可复用的 Token 管理服务，供 ManagerDaemon 与 CLI 共享。
+   - [x] 将 `src/token-daemon/*` 进一步抽象为可复用的 Token 管理服务，供 ManagerDaemon 与 CLI 共享。
    - [x] 保持 token daemon CLI 行为（start/status/refresh）与现有一致，同时在有 server 进程持有 leader 时拒绝启动第二个刷新器，避免与 TokenManager 重复刷新同一 token。
 
 3. **HealthManager ↔ VirtualRouter 集成（内存版）**
