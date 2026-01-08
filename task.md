@@ -26,18 +26,18 @@
    - [x] 保持 token daemon CLI 行为（start/status/refresh）与现有一致，同时在有 server 进程持有 leader 时拒绝启动第二个刷新器，避免与 TokenManager 重复刷新同一 token。
 
 3. **HealthManager ↔ VirtualRouter 集成（内存版）**
-   - [ ] 在 sharedmodule/llmswitch-core 中定义 `VirtualRouterHealthStore` 接口与事件模型。
-   - [ ] 由 `HealthManagerModule` 提供内存实现，接收 providerError/seriesCooldown 事件并反馈给 Virtual Router。
-   - [ ] 回归当前 429 / 熔断行为，确保与现状一致。
+   - [x] 在 sharedmodule/llmswitch-core 中定义 `VirtualRouterHealthStore` 接口与事件模型，并由 `VirtualRouterEngine` 在 `handleProviderError`/cooldown 过程中调用。
+   - [x] 由 `HealthManagerModule` 提供进程级 `VirtualRouterHealthStore` 实现，通过 ManagerDaemon 注入 HubPipeline/VirtualRouter。
+   - [x] 保持 429 / series cooldown 行为与现状一致，在此基础上增加健康状态快照持久化。
 
 4. **RoutingStateManager 替换 sticky-session 持久化**
    - [ ] 用 RoutingStateManager 接管 `sticky-session-store` 的磁盘读写，实现统一的 `SessionRoutingState` schema。
    - [ ] 确保 servertool / VirtualRouter 在 session/sticky 场景下行为与现状保持一致。
 
 5. **HealthManager 持久化与恢复**
-   - [ ] 在 `JsonlFileStore` 基础上实现 providerKey / series 级 JSONL 落盘与 snapshot 恢复。
-   - [ ] 定义 server 级 `serverId`，按 serverId 分目录隔离状态。
-   - [ ] 设计并实现 TTL / compact 策略，避免长期堆积过期冷却记录。
+   - [x] 在 `JsonlFileStore` 基础上实现健康快照和 ProviderError 事件的 JSONL 落盘与 snapshot 恢复（按 serverId 分目录）。
+   - [x] 使用 ManagerContext.serverId 作为 server 级标识，落盘路径形如 `~/.routecodex/state/router/<serverId>/health.jsonl`。
+   - [ ] 设计并实现 TTL / compact 策略，避免长期堆积过期冷却记录（当前 `compact` 仍为占位实现）。
 
 6. **接线与调试接口**
    - [ ] 在 HTTP server 启动流程中注入 ManagerDaemon，并将 HealthStore/RoutingState 管理接入 HubPipeline/VirtualRouter。
@@ -47,10 +47,10 @@
 - [x] 架构规划与文档（ManagerDaemon/TokenManager/RoutingStateManager/HealthManager 职责梳理）。
 - [x] ManagerDaemon 与模块骨架文件结构搭建。
 - [x] TokenManager 初步迁移：server 进程内由 ManagerDaemon 驱动 TokenDaemon 自动刷新。
-- [ ] HealthManager/VirtualRouter 集成（内存版）。
+- [x] HealthManager/VirtualRouter 集成（内存版 + 快照持久化）。
 - [ ] RoutingStateManager 与 sticky-session 持久化替换。
-- [ ] HealthManager 持久化与恢复策略。
-- [ ] HTTP server 接线与调试接口落地。
+- [ ] RoutingStateManager 与 sticky-session 持久化替换。
+- [ ] HealthManager TTL/compact 策略与调试接口（/manager/state/*）。
 
 ---
 

@@ -546,8 +546,16 @@ export class RouteCodexHttpServer {
     const bootstrapArtifacts = await this.bootstrapVirtualRouter(routerInput);
     this.currentRouterArtifacts = bootstrapArtifacts;
     const hubCtor = await this.ensureHubPipelineCtor();
+    const hubConfig: { virtualRouter: unknown; [key: string]: unknown } = {
+      virtualRouter: bootstrapArtifacts.config
+    };
+    const healthModule = this.managerDaemon?.getModule('health') as HealthManagerModule | undefined;
+    const healthStore = healthModule?.getHealthStore();
+    if (healthStore) {
+      hubConfig.healthStore = healthStore;
+    }
     if (!this.hubPipeline) {
-      this.hubPipeline = new hubCtor({ virtualRouter: bootstrapArtifacts.config });
+      this.hubPipeline = new hubCtor(hubConfig);
     } else {
       this.hubPipeline.updateVirtualRouterConfig(bootstrapArtifacts.config);
     }

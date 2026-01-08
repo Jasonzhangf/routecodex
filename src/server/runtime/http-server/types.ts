@@ -87,4 +87,4 @@ export interface HubPipeline {
   updateVirtualRouterConfig(config: unknown): void;
 }
 
-export type HubPipelineCtor = new (config: { virtualRouter: unknown }) => HubPipeline;
+export type HubPipelineCtor = new (config: { virtualRouter: unknown; [key: string]: unknown }) => HubPipeline;

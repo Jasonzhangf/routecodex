@@ -77,14 +77,24 @@ try {
       '@jsonstudio/llms': llmsVersion
     };
   } else if (isRccx) {
-    // rccx: wasm-backed llms 核心，使用 dev 配置，不强制切换 release llms。
+    // rccx: wasm-backed llms 核心，通过 npm alias 将 @jsonstudio/llms 指向 wasm 引擎包。
     mutated.bundledDependencies = [];
     mutated.bundleDependencies = [];
-    mutated.dependencies = {
-      ...(original.dependencies || {}),
-      ajv: original.dependencies?.ajv || '^8.17.1',
-      zod: original.dependencies?.zod || '^3.23.8'
-    };
+
+    const deps = { ...(original.dependencies || {}) };
+    // 移除原有 TS 版 llms 直连依赖
+    if (deps['@jsonstudio/llms']) {
+      delete deps['@jsonstudio/llms'];
+    }
+    // 推断 wasm 引擎版本，若未声明则使用本地 llms-engine 缺省版本
+    const engineVersion = deps['@jsonstudio/llms-engine'] || '^0.3.0';
+    deps['@jsonstudio/llms-engine'] = engineVersion;
+    // 通过 npm alias 保持 import 形状不变
+    deps['@jsonstudio/llms'] = `npm:@jsonstudio/llms-engine@${engineVersion}`;
+    deps.ajv = deps.ajv || '^8.17.1';
+    deps.zod = deps.zod || '^3.23.8';
+
+    mutated.dependencies = deps;
   }
   fs.writeFileSync(pkgPath, JSON.stringify(mutated, null, 2));
 
