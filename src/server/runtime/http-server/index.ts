@@ -554,6 +554,11 @@ export class RouteCodexHttpServer {
     if (healthStore) {
       hubConfig.healthStore = healthStore;
     }
+    const routingModule = this.managerDaemon?.getModule('routing') as RoutingStateManagerModule | undefined;
+    const routingStateStore = routingModule?.getRoutingStateStore();
+    if (routingStateStore) {
+      hubConfig.routingStateStore = routingStateStore;
+    }
     if (!this.hubPipeline) {
       this.hubPipeline = new hubCtor(hubConfig);
     } else {

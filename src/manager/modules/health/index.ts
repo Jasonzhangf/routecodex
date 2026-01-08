@@ -25,7 +25,13 @@ export class HealthManagerModule implements ManagerModule {
     this.serverId = context.serverId;
     const baseDir = this.resolveStateDir();
     const filePath = path.join(baseDir, 'health.jsonl');
-    this.snapshotStore = new JsonlFileStore<VirtualRouterHealthSnapshot, ProviderErrorEvent>({ filePath });
+    // 默认保留最近 7 天的 ProviderError 事件，最多 1000 条，防止无限膨胀。
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    this.snapshotStore = new JsonlFileStore<VirtualRouterHealthSnapshot, ProviderErrorEvent>({
+      filePath,
+      maxAgeMs: sevenDaysMs,
+      maxEvents: 1000
+    });
     try {
       this.initialSnapshot = await this.snapshotStore.load();
     } catch {
@@ -61,7 +67,14 @@ export class HealthManagerModule implements ManagerModule {
   }
 
   async stop(): Promise<void> {
-    // 未来可在此处补充 compact/flush 等逻辑；当前为 no-op。
+    // Server 停止时做一次 best-effort 压缩，清理过期事件记录。
+    if (this.snapshotStore) {
+      try {
+        await this.snapshotStore.compact();
+      } catch {
+        // 压缩失败不影响关机流程
+      }
+    }
   }
 
   getHealthStore(): VirtualRouterHealthStore | null {

@@ -31,16 +31,16 @@
    - [x] 保持 429 / series cooldown 行为与现状一致，在此基础上增加健康状态快照持久化。
 
 4. **RoutingStateManager 替换 sticky-session 持久化**
-   - [ ] 用 RoutingStateManager 接管 `sticky-session-store` 的磁盘读写，实现统一的 `SessionRoutingState` schema。
-   - [ ] 确保 servertool / VirtualRouter 在 session/sticky 场景下行为与现状保持一致。
+   - [x] 用 RoutingStateManager 接管 `sticky-session-store` 的磁盘读写，实现统一的 `SessionRoutingState` schema。
+   - [x] 确保 servertool / VirtualRouter 在 session/sticky 场景下行为与现状保持一致。
 
 5. **HealthManager 持久化与恢复**
    - [x] 在 `JsonlFileStore` 基础上实现健康快照和 ProviderError 事件的 JSONL 落盘与 snapshot 恢复（按 serverId 分目录）。
    - [x] 使用 ManagerContext.serverId 作为 server 级标识，落盘路径形如 `~/.routecodex/state/router/<serverId>/health.jsonl`。
-   - [ ] 设计并实现 TTL / compact 策略，避免长期堆积过期冷却记录（当前 `compact` 仍为占位实现）。
+   - [x] 设计并实现 TTL / compact 策略，避免长期堆积过期冷却记录（当前 `compact` 仍为占位实现）。
 
 6. **接线与调试接口**
-   - [ ] 在 HTTP server 启动流程中注入 ManagerDaemon，并将 HealthStore/RoutingState 管理接入 HubPipeline/VirtualRouter。
+   - [x] 在 HTTP server 启动流程中注入 ManagerDaemon，并将 HealthStore/RoutingState 管理接入 HubPipeline/VirtualRouter。
    - [ ] 新增 `/manager/state/health`、`/manager/state/routing/:sessionId` 等内部调试端点，便于观测路由池拉黑与 session sticky 状态。
 
 ## 进度
@@ -48,8 +48,8 @@
 - [x] ManagerDaemon 与模块骨架文件结构搭建。
 - [x] TokenManager 初步迁移：server 进程内由 ManagerDaemon 驱动 TokenDaemon 自动刷新。
 - [x] HealthManager/VirtualRouter 集成（内存版 + 快照持久化）。
-- [ ] RoutingStateManager 与 sticky-session 持久化替换。
-- [ ] RoutingStateManager 与 sticky-session 持久化替换。
+- [x] RoutingStateManager 与 sticky-session 持久化替换。
+- [x] RoutingStateManager 与 sticky-session 持久化替换。
 - [ ] HealthManager TTL/compact 策略与调试接口（/manager/state/*）。
 
 ---

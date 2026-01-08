@@ -4,6 +4,16 @@ import type { StateStore } from './base-store.js';
 
 export interface FileStoreOptions {
   filePath: string;
+  /**
+   * 最大事件保留时长（毫秒）。超出该时间窗口的旧事件会在 compact 时被丢弃。
+   * 若未设置或 <=0，则不按时间裁剪。
+   */
+  maxAgeMs?: number;
+  /**
+   * 单个文件中最多保留的事件条数（不含最新快照）。
+   * 若未设置或 <=0，则不按数量裁剪。
+   */
+  maxEvents?: number;
 }
 
 type JsonlEnvelope<TSnapshot, TEvent> =
@@ -14,9 +24,13 @@ export class JsonlFileStore<TSnapshot, TEvent = unknown>
   implements StateStore<TSnapshot, TEvent>
 {
   private readonly filePath: string;
+  private readonly maxAgeMs: number | undefined;
+  private readonly maxEvents: number | undefined;
 
   constructor(options: FileStoreOptions) {
     this.filePath = options.filePath;
+    this.maxAgeMs = typeof options.maxAgeMs === 'number' && options.maxAgeMs > 0 ? options.maxAgeMs : undefined;
+    this.maxEvents = typeof options.maxEvents === 'number' && options.maxEvents > 0 ? options.maxEvents : undefined;
   }
 
   async load(): Promise<TSnapshot | null> {
@@ -62,8 +76,61 @@ export class JsonlFileStore<TSnapshot, TEvent = unknown>
   }
 
   async compact(): Promise<void> {
-    // 简单实现：当前不做自动压缩；调用方可在未来根据需要重写。
-    return;
+    try {
+      const raw = await fs.readFile(this.filePath, 'utf8');
+      const lines = raw
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+      if (!lines.length) {
+        return;
+      }
+
+      const envelopes: JsonlEnvelope<TSnapshot, TEvent>[] = [];
+      for (const line of lines) {
+        try {
+          const parsed = JSON.parse(line) as JsonlEnvelope<TSnapshot, TEvent>;
+          if (parsed && typeof parsed.timestamp === 'number') {
+            envelopes.push(parsed);
+          }
+        } catch {
+          // 忽略单行解析错误
+        }
+      }
+      if (!envelopes.length) {
+        return;
+      }
+
+      // 保留最后一个快照
+      const snapshots = envelopes.filter((entry) => entry.kind === 'snapshot');
+      const lastSnapshot = snapshots.length ? snapshots[snapshots.length - 1] : undefined;
+
+      // 事件按时间与数量窗口裁剪
+      const now = Date.now();
+      let events = envelopes.filter((entry) => entry.kind === 'event') as Array<
+        Extract<JsonlEnvelope<TSnapshot, TEvent>, { kind: 'event' }>
+      >;
+      if (this.maxAgeMs) {
+        const cutoff = now - this.maxAgeMs;
+        events = events.filter((entry) => entry.timestamp >= cutoff);
+      }
+      if (this.maxEvents && events.length > this.maxEvents) {
+        events = events.slice(-this.maxEvents);
+      }
+
+      const next: JsonlEnvelope<TSnapshot, TEvent>[] = [];
+      if (lastSnapshot) {
+        next.push(lastSnapshot);
+      }
+      next.push(...events);
+
+      const dir = path.dirname(this.filePath);
+      await fs.mkdir(dir, { recursive: true });
+      const payload = next.map((entry) => JSON.stringify(entry)).join('\n') + '\n';
+      await fs.writeFile(this.filePath, payload, 'utf8');
+    } catch {
+      // 压缩失败不影响主流程
+    }
   }
 
   private async appendLine(payload: JsonlEnvelope<TSnapshot, TEvent>): Promise<void> {
