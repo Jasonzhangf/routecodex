@@ -8,54 +8,48 @@ const toArgsObject = (result: { normalizedArgs?: string }): Record<string, unkno
 };
 
 describe('apply_patch validator', () => {
-  it('accepts canonical patch payloads', () => {
+  it('accepts structured insert_after change', () => {
     const args = JSON.stringify({
-      patch: [
-        '*** Begin Patch',
-        '*** Update File: src/foo.ts',
-        '@@',
-        '- old',
-        '+ new',
-        '*** End Patch'
-      ].join('\n')
+      file: 'src/foo.ts',
+      changes: [
+        {
+          kind: 'insert_after',
+          anchor: 'const foo = 1;',
+          lines: ['const bar = 2;']
+        }
+      ]
     });
     const result = validateToolCall('apply_patch', args);
     expect(result.ok).toBe(true);
     const parsed = toArgsObject(result);
     expect(parsed.patch).toContain('*** Begin Patch');
-    expect(parsed.patch).toContain('*** End Patch');
-    expect(parsed.paths).toBeUndefined();
+    expect(parsed.patch).toContain('*** Update File: src/foo.ts');
+    expect(parsed.patch).toContain('+const bar = 2;');
   });
 
-  it('wraps raw diff hunks when paths are provided', () => {
+  it('supports replace change without top-level file', () => {
     const args = JSON.stringify({
-      patch: '@@\n- console.log("old")\n+ console.log("new")',
-      paths: ['src/utils/logger.ts']
+      changes: [
+        {
+          file: 'src/bar.ts',
+          kind: 'replace',
+          target: 'const status = "old";',
+          lines: ['const status = "new";']
+        }
+      ]
     });
     const result = validateToolCall('apply_patch', args);
     expect(result.ok).toBe(true);
     const parsed = toArgsObject(result);
-    expect(parsed.patch).toContain('*** Begin Patch');
-    expect(parsed.patch).toContain('*** End Patch');
-    expect(parsed.patch).toContain('*** Update File: src/utils/logger.ts');
-    expect(parsed.paths).toEqual(['src/utils/logger.ts']);
+    expect(parsed.patch).toContain('*** Update File: src/bar.ts');
+    expect(parsed.patch).toContain('-const status = "old";');
+    expect(parsed.patch).toContain('+const status = "new";');
   });
 
-  it('overrides file headers with explicit paths', () => {
-    const args = JSON.stringify({
-      patch: [
-        '*** Begin Patch',
-        '*** Update File: tmp/placeholder.ts',
-        '@@',
-        '- old',
-        '+ new',
-        '*** End Patch'
-      ].join('\n'),
-      paths: ['src/placeholder.ts']
-    });
+  it('rejects payloads without changes', () => {
+    const args = JSON.stringify({ file: 'src/foo.ts' });
     const result = validateToolCall('apply_patch', args);
-    expect(result.ok).toBe(true);
-    const parsed = toArgsObject(result);
-    expect(parsed.patch).toContain('*** Update File: src/placeholder.ts');
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('missing_changes');
   });
 });

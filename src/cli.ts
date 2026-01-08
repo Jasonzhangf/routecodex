@@ -277,16 +277,76 @@ async function ensureTokenDaemonAutoStart(): Promise<void> {
   }
 }
 
+async function stopTokenDaemonIfRunning(): Promise<void> {
+  try {
+    if (!fs.existsSync(TOKEN_DAEMON_PID_FILE)) {
+      return;
+    }
+    const txt = fs.readFileSync(TOKEN_DAEMON_PID_FILE, 'utf8');
+    const parsed = Number(String(txt || '').trim());
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return;
+    }
+    const pid = parsed;
+    let running = false;
+    try {
+      process.kill(pid, 0);
+      running = true;
+    } catch {
+      running = false;
+    }
+    if (!running) {
+      try { fs.unlinkSync(TOKEN_DAEMON_PID_FILE); } catch { /* ignore */ }
+      return;
+    }
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // ignore
+    }
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline) {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    try { fs.unlinkSync(TOKEN_DAEMON_PID_FILE); } catch { /* ignore */ }
+  } catch {
+    // best-effort: failures here must not break CLI shutdown
+  }
+}
+
 // Provider command group - update models and generate minimal provider config
 try {
   const { createProviderUpdateCommand } = await import('./commands/provider-update.js');
   program.addCommand(createProviderUpdateCommand());
 } catch { /* optional: command not available in some builds */ }
 
+// Camoufox fingerprint debug command (optional)
+try {
+  const { createCamoufoxFpCommand } = await import('./commands/camoufox-fp.js');
+  program.addCommand(createCamoufoxFpCommand());
+} catch { /* optional */ }
+
+// Camoufox fingerprint backfill command (optional)
+try {
+  const { createCamoufoxBackfillCommand } = await import('./commands/camoufox-backfill.js');
+  program.addCommand(createCamoufoxBackfillCommand());
+} catch { /* optional */ }
+
 // Token daemon command group - manage OAuth tokens
 try {
   const { createTokenDaemonCommand } = await import('./commands/token-daemon.js');
   program.addCommand(createTokenDaemonCommand());
+} catch { /* optional: command not available in some builds */ }
+
+// OAuth command - force re-auth for a specific token (Camoufox-aware when enabled)
+try {
+  const { createOauthCommand } = await import('./commands/oauth.js');
+  program.addCommand(createOauthCommand());
 } catch { /* optional: command not available in some builds */ }
 
 // Validate command - auto start server then run E2E checks
@@ -845,6 +905,9 @@ program
             try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ }
           }
         }
+        if (IS_DEV_PACKAGE) {
+          await stopTokenDaemonIfRunning();
+        }
         // Ensure parent exits even if child fails to exit
         try { process.exit(0); } catch { /* ignore */ }
       };
@@ -1129,41 +1192,58 @@ program
   .action(async () => {
     const spinner = await createSpinner('Stopping RouteCodex server...');
     try {
-      // Resolve config path and port
-      const configPath = path.join(homedir(), '.routecodex', 'config.json');
+      let resolvedPort: number;
+      if (IS_DEV_PACKAGE) {
+        const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
+        if (!Number.isNaN(envPort) && envPort > 0) {
+          logger.info(
+            `Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT) [dev package: routecodex]`
+          );
+          resolvedPort = envPort;
+        } else {
+          resolvedPort = DEFAULT_DEV_PORT;
+          logger.info(`Using dev default port ${resolvedPort} (routecodex dev package)`);
+        }
+      } else {
+        // Resolve config path and port
+        const configPath = path.join(homedir(), '.routecodex', 'config.json');
 
-      // Check if config exists
-      if (!fs.existsSync(configPath)) {
-        spinner.fail(`Configuration file not found: ${configPath}`);
-        logger.error('Cannot determine server port without configuration file');
-        logger.info('Please create a configuration file first:');
-        logger.info('  rcc config init');
-        process.exit(1);
+        // Check if config exists
+        if (!fs.existsSync(configPath)) {
+          spinner.fail(`Configuration file not found: ${configPath}`);
+          logger.error('Cannot determine server port without configuration file');
+          logger.info('Please create a configuration file first:');
+          logger.info('  rcc config init');
+          process.exit(1);
+        }
+
+        // Load configuration to get port
+        let config;
+        try {
+          const configContent = fs.readFileSync(configPath, 'utf8');
+          config = JSON.parse(configContent);
+        } catch (error) {
+          spinner.fail('Failed to parse configuration file');
+          logger.error(`Invalid JSON in configuration file: ${configPath}`);
+          process.exit(1);
+        }
+
+        const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
+        if (!port || typeof port !== 'number' || port <= 0) {
+          spinner.fail('Invalid or missing port configuration');
+          logger.error('Configuration file must specify a valid port number');
+          process.exit(1);
+        }
+
+        resolvedPort = port;
       }
-
-      // Load configuration to get port
-      let config;
-      try {
-        const configContent = fs.readFileSync(configPath, 'utf8');
-        config = JSON.parse(configContent);
-      } catch (error) {
-        spinner.fail('Failed to parse configuration file');
-        logger.error(`Invalid JSON in configuration file: ${configPath}`);
-        process.exit(1);
-      }
-
-      const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
-      if (!port || typeof port !== 'number' || port <= 0) {
-        spinner.fail('Invalid or missing port configuration');
-        logger.error('Configuration file must specify a valid port number');
-        process.exit(1);
-      }
-
-      const resolvedPort = port;
 
       const pids = findListeningPids(resolvedPort);
       if (!pids.length) {
         spinner.succeed(`No server listening on ${resolvedPort}.`);
+        if (IS_DEV_PACKAGE) {
+          await stopTokenDaemonIfRunning();
+        }
         return;
       }
       for (const pid of pids) {
@@ -1173,6 +1253,9 @@ program
       while (Date.now() < deadline) {
         if (findListeningPids(resolvedPort).length === 0) {
           spinner.succeed(`Stopped server on ${resolvedPort}.`);
+          if (IS_DEV_PACKAGE) {
+            await stopTokenDaemonIfRunning();
+          }
           return;
         }
         await sleep(100);
@@ -1182,6 +1265,9 @@ program
         for (const pid of remain) { try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ } }
       }
       spinner.succeed(`Force stopped server on ${resolvedPort}.`);
+      if (IS_DEV_PACKAGE) {
+        await stopTokenDaemonIfRunning();
+      }
     } catch (e) {
       spinner.fail(`Failed to stop: ${(e as Error).message}`);
       process.exit(1);
@@ -1199,37 +1285,54 @@ program
   .action(async (options) => {
     const spinner = await createSpinner('Restarting RouteCodex server...');
     try {
-      // Resolve config path
-      const configPath = options.config || path.join(homedir(), '.routecodex', 'config.json');
+      let resolvedPort: number;
+      let resolvedHost: string = LOCAL_HOSTS.LOCALHOST;
+      if (IS_DEV_PACKAGE) {
+        const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
+        if (!Number.isNaN(envPort) && envPort > 0) {
+          logger.info(
+            `Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT) [dev package: routecodex]`
+          );
+          resolvedPort = envPort;
+        } else {
+          resolvedPort = DEFAULT_DEV_PORT;
+          logger.info(`Using dev default port ${resolvedPort} (routecodex dev package)`);
+        }
+      } else {
+        // Resolve config path
+        const configPath = options.config || path.join(homedir(), '.routecodex', 'config.json');
 
-      // Check if config exists
-      if (!fs.existsSync(configPath)) {
-        spinner.fail(`Configuration file not found: ${configPath}`);
-        logger.error('Cannot determine server port without configuration file');
-        logger.info('Please create a configuration file first:');
-        logger.info('  rcc config init');
-        process.exit(1);
+        // Check if config exists
+        if (!fs.existsSync(configPath)) {
+          spinner.fail(`Configuration file not found: ${configPath}`);
+          logger.error('Cannot determine server port without configuration file');
+          logger.info('Please create a configuration file first:');
+          logger.info('  rcc config init');
+          process.exit(1);
+        }
+
+        // Load configuration to get port
+        let config;
+        try {
+          const configContent = fs.readFileSync(configPath, 'utf8');
+          config = JSON.parse(configContent);
+        } catch (error) {
+          spinner.fail('Failed to parse configuration file');
+          logger.error(`Invalid JSON in configuration file: ${configPath}`);
+          process.exit(1);
+        }
+
+        const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
+        if (!port || typeof port !== 'number' || port <= 0) {
+          spinner.fail('Invalid or missing port configuration');
+          logger.error('Configuration file must specify a valid port number');
+          process.exit(1);
+        }
+
+        resolvedPort = port;
+        resolvedHost =
+          (config?.httpserver?.host || config?.server?.host || config?.host || LOCAL_HOSTS.LOCALHOST);
       }
-
-      // Load configuration to get port
-      let config;
-      try {
-        const configContent = fs.readFileSync(configPath, 'utf8');
-        config = JSON.parse(configContent);
-      } catch (error) {
-        spinner.fail('Failed to parse configuration file');
-        logger.error(`Invalid JSON in configuration file: ${configPath}`);
-        process.exit(1);
-      }
-
-      const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
-      if (!port || typeof port !== 'number' || port <= 0) {
-        spinner.fail('Invalid or missing port configuration');
-        logger.error('Configuration file must specify a valid port number');
-        process.exit(1);
-      }
-
-      const resolvedPort = port;
 
       // Stop current instance (if any)
       const pids = findListeningPids(resolvedPort);
@@ -1268,8 +1371,7 @@ program
       const child = spawn(nodeBin, args, { stdio: 'inherit', env });
       try { fs.writeFileSync(path.join(homedir(), '.routecodex', 'server.cli.pid'), String(child.pid ?? ''), 'utf8'); } catch (error) { /* ignore */ }
 
-      const host = (config?.httpserver?.host || config?.server?.host || config?.host || LOCAL_HOSTS.LOCALHOST);
-      spinner.succeed(`RouteCodex server restarting on ${host}:${resolvedPort}`);
+      spinner.succeed(`RouteCodex server restarting on ${resolvedHost}:${resolvedPort}`);
       logger.info(`Server will run on port: ${resolvedPort}`);
       logger.info('Press Ctrl+C to stop the server');
 
@@ -1657,7 +1759,9 @@ async function ensurePortAvailable(port: number, parentSpinner: Spinner, opts: {
 
 function findListeningPids(port: number): number[] {
   try {
-    const result = spawnSync('lsof', ['-tiTCP', `:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8' });
+    // macOS/BSD lsof expects either "-i TCP:port" or "-tiTCP:port" as a single argument.
+    // Use the compact form to avoid treating ":port" as a filename.
+    const result = spawnSync('lsof', [`-tiTCP:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8' });
     if (result.error) {
       logger.warning(`lsof not available to inspect port usage: ${result.error.message}`);
       return [];

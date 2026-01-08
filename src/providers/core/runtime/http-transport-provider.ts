@@ -18,6 +18,7 @@ import { ApiKeyAuthProvider } from '../../auth/apikey-auth.js';
 import { OAuthAuthProvider } from '../../auth/oauth-auth.js';
 import { logOAuthDebug } from '../../auth/oauth-logger.js';
 import { TokenFileAuthProvider } from '../../auth/tokenfile-auth.js';
+import { IflowCookieAuthProvider } from '../../auth/iflow-cookie-auth.js';
 import { ensureValidOAuthToken, handleUpstreamInvalidOAuthToken } from '../../auth/oauth-lifecycle.js';
 import { fetchAntigravityProjectId } from '../../auth/antigravity-userinfo-helper.js';
 import {
@@ -132,9 +133,11 @@ export class HttpTransportProvider extends BaseProvider {
             forceReauthorize
           });
           try {
+            // 初始化阶段仅允许静默刷新，不主动打开浏览器；
+            // 交互式登录交由真实请求错误或 Token Daemon 处理。
             await ensureValidOAuthToken(oauthProviderId, oauthAuth, {
               forceReacquireIfRefreshFails: true,
-              openBrowser: true,
+              openBrowser: false,
               forceReauthorize
             });
             if (this.oauthProviderId === 'antigravity') {
@@ -357,6 +360,35 @@ export class HttpTransportProvider extends BaseProvider {
 
     // 根据认证类型创建对应的认证提供者
     if (authMode === 'apikey') {
+      const rawTypeValue =
+        typeof (auth as unknown as { rawType?: unknown }).rawType === 'string'
+          ? String((auth as unknown as { rawType: string }).rawType)
+          : typeof (auth as { type?: unknown }).type === 'string'
+            ? String((auth as { type: string }).type)
+            : '';
+      const rawType = rawTypeValue.toLowerCase();
+      const providerId = typeof (this.config.config.providerId) === 'string'
+        ? this.config.config.providerId.toLowerCase()
+        : '';
+      const baseUrl = typeof this.config.config.baseUrl === 'string'
+        ? this.config.config.baseUrl.toLowerCase()
+        : '';
+      const isIflowFamily =
+        providerId === 'iflow' ||
+        baseUrl.includes('apis.iflow.cn') ||
+        baseUrl.includes('iflow.cn');
+
+      // iFlow Cookie 模式：使用浏览器导出的 Cookie 交换 API Key，避免频繁走 OAuth。
+      if (
+        isIflowFamily &&
+        (rawType === 'iflow-cookie' ||
+          (!((auth as ApiKeyAuth).apiKey) &&
+            (typeof (auth as unknown as { cookie?: unknown }).cookie === 'string' ||
+              typeof (auth as unknown as { cookieFile?: unknown }).cookieFile === 'string')))
+      ) {
+        return new IflowCookieAuthProvider(auth as unknown as Record<string, unknown>);
+      }
+
       return new ApiKeyAuthProvider(auth as ApiKeyAuth);
     } else if (authMode === 'oauth') {
       const oauthAuth = auth as OAuthAuthExtended;
@@ -890,9 +922,11 @@ export class HttpTransportProvider extends BaseProvider {
         const oauthProviderId = this.oauthProviderId || this.ensureOAuthProviderId(oauthAuth);
         logOAuthDebug('[OAuth] [headers] ensureValid start (openBrowser=true, forceReauth=false)');
         try {
+          // 请求前仅尝试静默刷新，不主动打开浏览器；
+          // 真正令牌失效由 handleUpstreamInvalidOAuthToken 触发交互式修复。
           await ensureValidOAuthToken(oauthProviderId, oauthAuth, {
             forceReacquireIfRefreshFails: true,
-            openBrowser: true,
+            openBrowser: false,
             forceReauthorize: false
           });
           logOAuthDebug('[OAuth] [headers] ensureValid OK');

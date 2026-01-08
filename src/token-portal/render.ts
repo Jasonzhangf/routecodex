@@ -56,6 +56,7 @@ export function renderTokenPortalPage(props: TokenPortalPageProps): string {
       const btn = document.getElementById('continue-btn');
       const oauthUrl = ${JSON.stringify(oauthUrl)};
       btn.addEventListener('click', () => {
+        if (btn.disabled) return;
         btn.disabled = true;
         btn.innerText = 'Opening OAuth…';
         window.location.href = oauthUrl;

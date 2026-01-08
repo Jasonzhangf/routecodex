@@ -142,8 +142,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     defaultBaseUrl: 'https://apis.iflow.cn/v1',
     defaultEndpoint: '/chat/completions',
     defaultModel: 'kimi',
-    requiredAuth: ['oauth'],
-    optionalAuth: [],
+    requiredAuth: [],
+    optionalAuth: ['oauth', 'apikey'],
     headers: {
       'Content-Type': 'application/json'
     },

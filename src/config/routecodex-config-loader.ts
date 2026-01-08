@@ -19,6 +19,17 @@ export async function loadRouteCodexConfig(explicitPath?: string): Promise<Loade
   const parsed = raw.trim() ? JSON.parse(raw) : {};
   const userConfig: UnknownRecord = isRecord(parsed) ? parsed : {};
 
+  // 全局 OAuth 浏览器选择开关（例如：'camoufox' 或 'default'）
+  // 若配置中声明且环境变量未显式指定，则将其映射到 ROUTECODEX_OAUTH_BROWSER，供 OAuth 流程使用。
+  const oauthBrowserValue = (userConfig as Record<string, unknown>).oauthBrowser;
+  const oauthBrowserRaw =
+    typeof oauthBrowserValue === 'string'
+      ? oauthBrowserValue.trim()
+      : '';
+  if (oauthBrowserRaw && !process.env.ROUTECODEX_OAUTH_BROWSER) {
+    process.env.ROUTECODEX_OAUTH_BROWSER = oauthBrowserRaw;
+  }
+
   if (!isRecord(userConfig.virtualrouter)) {
     const providers = isRecord(userConfig.providers) ? userConfig.providers : {};
     const routing = isRecord(userConfig.routing) ? userConfig.routing : {};

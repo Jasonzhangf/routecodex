@@ -34,6 +34,30 @@ export class RateLimitBackoffManager {
     private readonly seriesBlacklistDurationMs: number = DEFAULT_SERIES_BLACKLIST_MS
   ) {}
 
+  /**
+   * 根据外部传入的冷却时间（例如上游返回的 quotaResetDelay）直接对整个系列做一次性降温。
+   * 这用于 Gemini / Gemini CLI / antigravity 这类按模型系列限流的场景，
+   * 避免在明确知道冷却窗口后仍然多次命中真实 429。
+   */
+  applySeriesCooldown(providerKey?: string, model?: string, cooldownMs?: number): void {
+    if (!providerKey) {
+      return;
+    }
+    if (!cooldownMs || !Number.isFinite(cooldownMs) || cooldownMs <= 0) {
+      return;
+    }
+    const seriesKey = this.buildSeriesKey(providerKey, model);
+    if (!seriesKey) {
+      return;
+    }
+    const now = Date.now();
+    const nextExpiry = now + cooldownMs;
+    const existing = this.seriesBlacklist.get(seriesKey);
+    if (!existing || nextExpiry > existing) {
+      this.seriesBlacklist.set(seriesKey, nextExpiry);
+    }
+  }
+
   shouldThrottle(providerKey?: string, model?: string): { blocked: boolean; reason?: string; waitMs?: number } {
     if (!providerKey) {
       return { blocked: false };

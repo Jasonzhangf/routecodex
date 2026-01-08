@@ -1,21 +1,62 @@
-# Task: Virtual Router / HTTP Executor 模块化拆分
+# Task: Manager Daemon & Routing/Health Persistence
 
 ## 目标
-- 将 `sharedmodule/llmswitch-core/src/router/virtual-router/engine.ts` 和 `src/server/runtime/http-server/request-executor.ts` 拆分为职责清晰的子模块。
-- 保持对外行为与日志完全一致，为后续功能迭代和测试铺路。
+
+- 建立 `ManagerDaemon` 进程内模块，统一但解耦地管理：
+  - Token 生命周期（TokenManager）。
+  - Virtual Router 路由状态（RoutingStateManager）。
+  - Provider / 系列级健康与冷却（HealthManager）。
+- 支持按 server + session 维度持久化路由和健康状态，server 重启后仍能继承冷却/黑名单与 sticky 状态。
 
 ## 子任务
-1. **VirtualRouterEngine 日志与辅助函数拆分**
-   - [x] 新增 `engine-logging.ts`，迁移命中日志格式化、sticky scope、provider 标签、context ratio 等纯日志函数。
-   - [x] 让 `VirtualRouterEngine.route` 调用 `engine-logging` 模块中的 `buildHitReason` / `formatVirtualRouterHit`，移除类内同名私有方法。
-2. **VirtualRouterEngine 选择/健康逻辑拆分**
-   - [x] 拆出 `engine-health.ts`（handleProviderFailure/429 冷却映射），`engine.ts` 内仅做薄封装调用。
-   - [x] 拆出 `engine-selection.ts`（selectProvider/trySelectFromTier/selectFromStickyPool 等），将路由选择核心逻辑移出 `engine.ts`。
-   - [x] 保持现有类型与导出不变，仅通过依赖注入向子模块传递 registry/health/contextAdvisor（已整理 `engine-selection` 内对 providerRegistry 的依赖）。
-3. **HubRequestExecutor 拆分**
-   - [x] 新建 `http-server/executor-metadata.ts`，迁移 request metadata 构造、clientHeaders 归一化与 per-attempt metadata 装饰逻辑。
-   - [x] 新建 `http-server/executor-pipeline.ts`、`executor-provider.ts`，抽出 Hub pipeline 执行与 provider 错误/重试判定逻辑。
-   - [ ] 新建 `http-server/executor-response.ts` 等模块，并继续收缩 `HubRequestExecutor` 只做编排。
-4. **回归与文档**
-   - [x] 每个拆分阶段跑 `npm run build:dev` + 相关 Jest 用例（虚拟路由、request-executor.single-attempt），并保持 CLI 全局安装通过。
-   - [ ] 在 `docs/` 或本文件追加简要模块说明，记录各子模块职责与入口函数。
+
+1. **规划与文件结构搭建**
+   - [x] 梳理 ManagerDaemon 架构与各模块职责（已落盘至 `docs/plans/manager-daemon/PLAN.md`）。
+   - [x] 创建 `src/manager/` 目录与基础骨架：
+     - `index.ts`：ManagerDaemon 框架；
+     - `types.ts`：`ManagerContext` / `ManagerModule` 类型；
+     - `storage/base-store.ts` / `storage/file-store.ts`：持久化抽象与文件存储占位；
+     - `modules/token|routing|health/index.ts`：三个模块占位实现。
+   - [ ] 在现有 CLI / server 启动流程中预留 ManagerDaemon 初始化 hook（暂不改变行为，只注入可选依赖）。
+
+2. **TokenManager 迁移（与现有 token daemon 对齐）**
+   - [ ] 将 `src/token-daemon/*` 内部实现抽象为 `TokenManagerModule`，对外接口不变。
+   - [ ] 保持原有 token daemon CLI 行为（start/status/refresh）不变，内部改为通过 ManagerDaemon 调度。
+
+3. **HealthManager ↔ VirtualRouter 集成（内存版）**
+   - [ ] 在 sharedmodule/llmswitch-core 中定义 `VirtualRouterHealthStore` 接口与事件模型。
+   - [ ] 由 `HealthManagerModule` 提供内存实现，接收 providerError/seriesCooldown 事件并反馈给 Virtual Router。
+   - [ ] 回归当前 429 / 熔断行为，确保与现状一致。
+
+4. **RoutingStateManager 替换 sticky-session 持久化**
+   - [ ] 用 RoutingStateManager 接管 `sticky-session-store` 的磁盘读写，实现统一的 `SessionRoutingState` schema。
+   - [ ] 确保 servertool / VirtualRouter 在 session/sticky 场景下行为与现状保持一致。
+
+5. **HealthManager 持久化与恢复**
+   - [ ] 在 `JsonlFileStore` 基础上实现 providerKey / series 级 JSONL 落盘与 snapshot 恢复。
+   - [ ] 定义 server 级 `serverId`，按 serverId 分目录隔离状态。
+   - [ ] 设计并实现 TTL / compact 策略，避免长期堆积过期冷却记录。
+
+6. **接线与调试接口**
+   - [ ] 在 HTTP server 启动流程中注入 ManagerDaemon，并将 HealthStore/RoutingState 管理接入 HubPipeline/VirtualRouter。
+   - [ ] 新增 `/manager/state/health`、`/manager/state/routing/:sessionId` 等内部调试端点，便于观测路由池拉黑与 session sticky 状态。
+
+## 进度
+- [x] 架构规划与文档（ManagerDaemon/TokenManager/RoutingStateManager/HealthManager 职责梳理）。
+- [x] ManagerDaemon 与模块骨架文件结构搭建。
+- [ ] TokenManager 迁移与行为对齐。
+- [ ] HealthManager/VirtualRouter 集成（内存版）。
+- [ ] RoutingStateManager 与 sticky-session 持久化替换。
+- [ ] HealthManager 持久化与恢复策略。
+- [ ] HTTP server 接线与调试接口落地。
+
+---
+
+# Archive: stopMessage 持久化与回放复盘（历史任务，仅保留记录）
+
+> stopMessage 相关的路由指令持久化、servertool 行为与文档更新已基本完成，尚余的 Codex sample 回放与人工验证可作为低优先级后续工作。
+
+## 未完成检查项（低优先级）
+
+- [ ] 启动 dev 服务器并回放「小红书 native click」 Codex sample，检查 sticky state 文件中的 stopMessage 字段。
+- [ ] 在真实请求或最小样本中，验证 `:stop_followup` provider-request 末条 user 消息包含 stopMessage 内容。

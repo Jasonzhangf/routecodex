@@ -15,6 +15,11 @@ import {
 } from './token-types.js';
 import { TokenHistoryStore, type RefreshOutcome } from './history-store.js';
 import { ensureLocalTokenPortalEnv } from '../token-portal/local-token-portal.js';
+import {
+  ensureCamoufoxProfileDir,
+  ensureCamoufoxFingerprintForToken
+} from '../providers/core/config/camoufox-launcher.js';
+import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
 
 export interface TokenDaemonOptions {
   intervalMs: number;
@@ -28,6 +33,23 @@ const DEFAULT_INTERVAL_MS = 60_000;
 const DEFAULT_REFRESH_AHEAD_MINUTES = 30;
 const MIN_REFRESH_INTERVAL_MS = 5 * 60_000;
 const GEMINI_PROVIDER_IDS = new Set(['gemini-cli', 'antigravity']);
+let camoufoxEnabledCache: boolean | null = null;
+
+async function isCamoufoxOauthEnabled(): Promise<boolean> {
+  if (camoufoxEnabledCache !== null) {
+    return camoufoxEnabledCache;
+  }
+  try {
+    const { userConfig } = await loadRouteCodexConfig();
+    const cfg = userConfig as Record<string, unknown>;
+    const raw = typeof cfg.oauthBrowser === 'string' ? cfg.oauthBrowser.trim().toLowerCase() : '';
+    camoufoxEnabledCache = raw === 'camoufox';
+    return camoufoxEnabledCache;
+  } catch {
+    camoufoxEnabledCache = false;
+    return false;
+  }
+}
 
 export class TokenDaemon {
   private readonly intervalMs: number;
@@ -75,6 +97,7 @@ export class TokenDaemon {
     const snapshot = await collectTokenSnapshot();
     const now = snapshot.timestamp;
     const refreshAheadMs = this.refreshAheadMinutes * 60_000;
+    const camoufoxEnabled = await isCamoufoxOauthEnabled();
 
     for (const providerSnapshot of snapshot.providers) {
       for (const token of providerSnapshot.tokens) {
@@ -85,6 +108,17 @@ export class TokenDaemon {
         const { state } = token;
         const expires = state.expiresAt;
         const msLeft = state.msUntilExpiry;
+
+        // 预生成 Camoufox profile 目录 + fingerprint：按 provider + alias 派生稳定 profileId。
+        // 仅在全局配置开启 camoufox 模式时生效。
+        if (camoufoxEnabled && token.provider && token.alias) {
+          try {
+            ensureCamoufoxProfileDir(token.provider, token.alias);
+            ensureCamoufoxFingerprintForToken(token.provider, token.alias);
+          } catch {
+            // profile / fingerprint 预生成失败不影响后续 token 刷新逻辑
+          }
+        }
         if (token.alias === 'static') {
           this.logDebug(`[daemon] skip token with static alias provider=${token.provider} file=${token.filePath}`);
           continue;

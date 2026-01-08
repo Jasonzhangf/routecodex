@@ -1,5 +1,9 @@
 import type { OAuthAuth } from '../core/api/provider-config.js';
-import { createProviderOAuthStrategy, getProviderOAuthConfig } from '../core/config/provider-oauth-configs.js';
+import {
+  createProviderOAuthStrategy,
+  getProviderOAuthConfig,
+  resolveOAuthBrowserPreference
+} from '../core/config/provider-oauth-configs.js';
 import { OAuthFlowType, type OAuthFlowConfig, type OAuthClientConfig, type OAuthEndpoints } from '../core/config/oauth-flows.js';
 import fs from 'fs/promises';
 import fsSync from 'fs';
@@ -34,7 +38,7 @@ type ExtendedOAuthAuth = OAuthAuth & {
 
 type OAuthStrategy = {
   refreshToken?(refreshToken: string): Promise<UnknownObject>;
-  authenticate?(options?: { openBrowser?: boolean }): Promise<UnknownObject | void>;
+  authenticate?(options?: { openBrowser?: boolean; forceReauthorize?: boolean }): Promise<UnknownObject | void>;
   saveToken?(token: UnknownObject | null): Promise<void>;
 };
 
@@ -334,14 +338,6 @@ function evaluateTokenState(token: StoredOAuthToken | null, providerType: string
     validAccess = (hasApiKey || hasAccess) && !isExpiredOrNear;
   } else {
     validAccess = (hasApiKey || hasAccess) && !isExpiredOrNear;
-  }
-
-  // 对 gemini-cli / antigravity，缺少 project 元数据视为无效凭证，
-  // 行为上等价于 gcli2api 要求凭证里必须有 project_id。
-  if (isGeminiCliFamily(providerType) && validAccess) {
-    if (!hasGeminiProjectMetadata(token)) {
-      validAccess = false;
-    }
   }
 
   return { hasApiKey, hasAccess, expiresAt, isExpiredOrNear, validAccess };
@@ -743,19 +739,22 @@ async function runInteractiveAuthorizationFlow(
   overrides: Record<string, unknown>,
   tokenFilePath: string,
   openBrowser: boolean,
-  forceTokenReset: boolean
+  forceTokenReset: boolean,
+  forceReauth: boolean
 ): Promise<void> {
   const execute = async (): Promise<void> => {
     let backupFile: string | null = null;
     if (forceTokenReset) {
+      // 仅做备份，不再删除原始 token 文件，避免在用户中断流程时造成不可恢复的丢失。
+      // 对于强制重新授权的场景，ensureValidOAuthToken 会忽略现有 token 状态并直接进入交互式流程。
       backupFile = await backupTokenFile(tokenFilePath);
     }
     try {
       if (providerType === 'iflow') {
-        await runIflowAuthorizationSequence(providerType, overrides, tokenFilePath);
+        await runIflowAuthorizationSequence(providerType, overrides, tokenFilePath, forceReauth);
       } else {
         const strategy = createStrategy(providerType, overrides, tokenFilePath);
-        const authed = await strategy.authenticate?.({ openBrowser });
+        const authed = await strategy.authenticate?.({ openBrowser, forceReauthorize: forceReauth });
         await finalizeTokenWrite(providerType, strategy, tokenFilePath, authed, 'acquired');
       }
       await discardBackupFile(backupFile);
@@ -793,11 +792,12 @@ async function runInteractiveAuthorizationFlow(
 async function runIflowAuthorizationSequence(
   providerType: string,
   overrides: Record<string, unknown>,
-  tokenFilePath: string
+  tokenFilePath: string,
+  forceReauth: boolean
 ): Promise<void> {
   const authCodeOverrides = { ...overrides, flowType: OAuthFlowType.AUTHORIZATION_CODE };
   try {
-    await executeAuthFlow(providerType, authCodeOverrides, tokenFilePath);
+    await executeAuthFlow(providerType, authCodeOverrides, tokenFilePath, forceReauth);
     return;
   } catch (firstError) {
     logOAuthDebug(
@@ -805,16 +805,17 @@ async function runIflowAuthorizationSequence(
     );
   }
   const deviceOverrides = { ...overrides, flowType: OAuthFlowType.DEVICE_CODE };
-  await executeAuthFlow(providerType, deviceOverrides, tokenFilePath);
+  await executeAuthFlow(providerType, deviceOverrides, tokenFilePath, forceReauth);
 }
 
 async function executeAuthFlow(
   providerType: string,
   overrides: Record<string, unknown>,
-  tokenFilePath: string
+  tokenFilePath: string,
+  forceReauth: boolean
 ): Promise<void> {
   const strategy = createStrategy(providerType, overrides, tokenFilePath);
-  const authed = await strategy.authenticate?.({ openBrowser: true });
+  const authed = await strategy.authenticate?.({ openBrowser: true, forceReauthorize: forceReauth });
   await finalizeTokenWrite(
     providerType,
     strategy,
@@ -860,8 +861,8 @@ export async function ensureValidOAuthToken(
   const forceReauth =
     opts.forceReauthorize === true || String(process.env.ROUTECODEX_OAUTH_FORCE_REAUTH || '0') === '1';
 
-	  const runPromise = (async () => {
-    const defaults = getProviderOAuthConfig(providerType);
+  const runPromise = (async () => {
+    const defaults = getProviderOAuthConfig(providerType, {});
     const { overrides, endpoints, client } = await buildOverrides(
       providerType,
       defaults,
@@ -942,14 +943,28 @@ export async function ensureValidOAuthToken(
       }
     }
 
-    await runInteractiveAuthorizationFlow(
-      providerType,
-      overrides,
-      tokenFilePath,
-      openBrowser,
-      forceReauth || hadExistingTokenFile
-    );
-    updateThrottle(cacheKey);
+    try {
+      await runInteractiveAuthorizationFlow(
+        providerType,
+        overrides,
+        tokenFilePath,
+        openBrowser,
+        forceReauth || hadExistingTokenFile,
+        forceReauth
+      );
+      updateThrottle(cacheKey);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || '');
+      // 当本地回调端口已被占用（例如已有其他 OAuth 工具在监听同一端口）时，
+      // 将其视为“暂时无法进行交互式授权”，不再向上抛出致命错误，以免阻塞整个服务器启动。
+      // 保持现有 token 不变，让后续真实请求决定是否需要修复。
+      if (message.includes('Failed to start callback server')) {
+        console.error(`[OAuth] interactive authorization skipped (callback server error): ${message}`);
+        updateThrottle(cacheKey);
+        return;
+      }
+      throw error;
+    }
   })();
 
   inFlight.set(cacheKey, runPromise);
@@ -990,13 +1005,11 @@ export async function handleUpstreamInvalidOAuthToken(
         lower
       );
 
-    // 对于 iflow / qwen，保留基于 401/403 的宽松判定，避免破坏既有行为，
-    // 同时将部分上游使用的 406 也视作“认证失效”，与 401 统一处理。
+    // 对于 iflow / qwen，保留基于 401/403 的宽松判定，避免破坏既有行为。
     if (!looksInvalid && (pt === 'iflow' || pt === 'qwen')) {
       if (
         statusCode === 401 ||
         statusCode === 403 ||
-        statusCode === 406 ||
         /\b401\b|\b403\b|40308/.test(msg)
       ) {
         looksInvalid = true;

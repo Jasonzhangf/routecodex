@@ -1,5 +1,6 @@
 import type { ProviderContext } from '../api/provider-types.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
+import { RateLimitCooldownError } from './rate-limit-manager.js';
 
 export type ProviderErrorClassification = {
   error: ProviderErrorAugmented;
@@ -61,6 +62,7 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
 
   const isRateLimit = statusText.includes('429') || msgLower.includes('429');
   const isDailyLimit429 = isRateLimit && options.detectDailyLimit(msgLower, upstreamMessageLower);
+  const isSyntheticCooldown = err instanceof RateLimitCooldownError;
 
   const statusCodeValue = typeof statusCode === 'number' ? statusCode : undefined;
   const isClient4xx =
@@ -87,22 +89,27 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
   let forceFatalRateLimit = false;
 
   if (isRateLimit) {
-    if (isDailyLimit429) {
-      options.forceRateLimitFailure(options.context.providerKey, options.context.model);
-    }
-    const escalated = options.registerRateLimitFailure(options.context.providerKey, options.context.model);
-    affectsHealth = escalated;
-    if (escalated) {
-      recoverable = false;
-      forceFatalRateLimit = true;
-    } else {
+    // 对 429 进行细分处理：
+    // - 人为构造的 RateLimitCooldownError：表示 Provider 层已经根据冷却窗口主动拦截请求，
+    //   这类错误只用于触发虚拟路由重选，不应该进入「多次 429 → 熔断」逻辑。
+    // - 日额度耗尽类 429（detectDailyLimit=true）：属于硬性限流，直接标记为不可恢复并影响健康。
+    // - 其他短期 429：始终视为可恢复错误，允许 Virtual Router 根据健康状态与冷却信息做降级与重试。
+    if (isSyntheticCooldown) {
       recoverable = true;
       affectsHealth = false;
-    }
-    if (isDailyLimit429) {
+      forceFatalRateLimit = false;
+    } else if (isDailyLimit429) {
+      options.forceRateLimitFailure(options.context.providerKey, options.context.model);
       affectsHealth = true;
       recoverable = false;
       forceFatalRateLimit = true;
+    } else {
+      // 短期 429：始终视为影响健康的可恢复错误，交由 VirtualRouter 立即执行冷却/切换。
+      // registerRateLimitFailure 仅用于计数与日志，不再控制 affectsHealth / fatal 行为。
+      options.registerRateLimitFailure(options.context.providerKey, options.context.model);
+      recoverable = true;
+      affectsHealth = true;
+      forceFatalRateLimit = false;
     }
   }
   if (is401 && usesOauth) {

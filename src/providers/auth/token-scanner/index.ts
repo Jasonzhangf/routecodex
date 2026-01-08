@@ -32,9 +32,21 @@ export async function scanProviderTokenFiles(provider: string): Promise<TokenFil
   try {
     const entries = await fs.readdir(AUTH_DIR);
     const matches: TokenFileMatch[] = [];
+    const normalizedProvider = provider.toLowerCase();
+    const acceptedPrefixes: string[] = [normalizedProvider];
+    // Backwards compatibility: Gemini CLI historically使用 "gemini-oauth-*-<alias>.json" 命名，
+    // 但运行时 provider id 为 "gemini-cli"。这里同时接受两种前缀，避免 token 无法被发现。
+    if (normalizedProvider === 'gemini-cli') {
+      acceptedPrefixes.push('gemini');
+    }
 
     for (const entry of entries) {
       if (!entry.endsWith('.json')) {
+        continue;
+      }
+      // 忽略备份/临时文件，例如 *.bak.json 或 *.json.bak.json
+      // 这些文件可能由 daemon 或手动备份产生，不应被当作有效 token。
+      if (entry.includes('.bak')) {
         continue;
       }
 
@@ -44,7 +56,7 @@ export async function scanProviderTokenFiles(provider: string): Promise<TokenFil
       }
 
       const [, providerPrefix, sequenceStr, alias] = match;
-      if (providerPrefix.toLowerCase() !== provider.toLowerCase()) {
+      if (!acceptedPrefixes.includes(providerPrefix.toLowerCase())) {
         continue;
       }
 
@@ -92,6 +104,9 @@ export async function getProviderTokenFileInfo(provider: string): Promise<TokenF
  */
 export function parseTokenSequenceFromPath(filePath: string): { sequence: number; alias: string } | null {
   const basename = path.basename(filePath);
+  if (basename.includes('.bak')) {
+    return null;
+  }
   const match = basename.match(TOKEN_FILE_PATTERN);
   if (!match) {
     return null;

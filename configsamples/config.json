@@ -79,8 +79,8 @@
         "baseURL": "https://apis.iflow.cn/v1",
         "compatibilityProfile": "chat:iflow",
         "auth": {
-          "type": "iflow-oauth",
-          "tokenFile": "~/.routecodex/auth/iflow-oauth.json"
+          "type": "iflow-cookie",
+          "cookieFile": "~/.routecodex/auth/iflow-work.cookie"
         },
         "models": {
           "tstars2.0": {},

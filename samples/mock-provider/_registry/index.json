@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2025-12-25T01:20:34.009Z",
+  "updated": "2026-01-07T12:00:00.000Z",
   "samples": [
     {
       "reqId": "openai-chat-unknown-unknown-20251206T103315-001",
@@ -192,6 +192,18 @@
       "timestamp": "2025-12-11T12:44:30.066Z",
       "path": "openai-responses/fc.default.gpt-5.1/gpt-5.1/20251211/124430/001",
       "tags": [
+        "regression"
+      ]
+    },
+    {
+      "reqId": "openai-responses-iflow.2-173.glm-4.7-glm-4.7-20260107T114357-001",
+      "entry": "openai-responses",
+      "providerId": "iflow.2-173.glm-4.7",
+      "model": "glm-4.7",
+      "timestamp": "2026-01-07T11:43:57.000Z",
+      "path": "openai-responses/iflow.2-173.glm-4.7/glm-4.7/20260107/114357/001",
+      "tags": [
+        "apply_patch_structured",
         "regression"
       ]
     },

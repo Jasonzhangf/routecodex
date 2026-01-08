@@ -22,6 +22,7 @@ import {
   type RefreshOutcome
 } from './history-store.js';
 import { ensureLocalTokenPortalEnv } from '../token-portal/local-token-portal.js';
+import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
 
 export { TokenDaemon };
 
@@ -347,6 +348,15 @@ export async function interactiveRefresh(selector: string): Promise<void> {
   if (!proceed) {
     console.log(chalk.blue('ℹ'), '已取消重新认证');
     return;
+  }
+
+  // Ensure user config is loaded so that global OAuth settings (e.g. oauthBrowser=camoufox)
+  // are applied to process.env before triggering the OAuth flow.
+  try {
+    await loadRouteCodexConfig();
+  } catch {
+    // best-effort: failure to load config should not block interactive re-auth;
+    // in that case, OAuth will fall back to default browser behavior.
   }
 
   const providerType = token.provider;

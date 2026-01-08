@@ -201,9 +201,10 @@ function validateApplyPatchToolSchema(sample: MockSample, body: Record<string, u
     : undefined;
   const props = params && typeof params === 'object' ? (params as any).properties : undefined;
   const required = params && typeof params === 'object' ? (params as any).required : undefined;
-  const hasRequiredInput = Array.isArray(required) && required.includes('input');
-  const hasInputProp = props && typeof props === 'object' && props.input && typeof props.input === 'object' && props.input.type === 'string';
-  if (!applyPatch || !hasRequiredInput || !hasInputProp) {
+  const hasRequiredChanges = Array.isArray(required) && required.includes('changes');
+  const hasChangesProp =
+    props && typeof props === 'object' && props.changes && typeof props.changes === 'object';
+  if (!applyPatch || !hasRequiredChanges || !hasChangesProp) {
     const summary = (() => {
       try {
         const name = applyPatch
@@ -216,7 +217,7 @@ function validateApplyPatchToolSchema(sample: MockSample, body: Record<string, u
       }
     })();
     const error = new Error(
-      `apply_patch schema 校验失败：必须提供 JSON schema 且 required 包含 input（sample=${sample.reqId}，当前：${summary}）`
+      `apply_patch schema 校验失败：必须提供 JSON schema 且 required 包含 changes（sample=${sample.reqId}，当前：${summary}）`
     ) as MockRuntimeError & { status?: number };
     error.code = 'HTTP_400';
     (error as any).status = 400;

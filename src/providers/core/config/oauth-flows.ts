@@ -6,6 +6,7 @@
 
 import type { UnknownObject } from '../../../types/common-types.js';
 import * as crypto from 'node:crypto';
+import { openAuthInCamoufox } from './camoufox-launcher.js';
 
 type BrowserOpener = (url: string) => Promise<void> | void;
 type OpenModule = {
@@ -137,7 +138,7 @@ export abstract class BaseOAuthFlowStrategy {
   /**
    * 执行认证流程
    */
-  abstract authenticate(options?: { openBrowser?: boolean }): Promise<UnknownObject>;
+  abstract authenticate(options?: { openBrowser?: boolean; forceReauthorize?: boolean }): Promise<UnknownObject>;
 
   /**
    * 刷新令牌
@@ -210,39 +211,53 @@ export abstract class BaseOAuthFlowStrategy {
     }
 
     if (options.openBrowser !== false) {
-      // If using Portal URL, ensure server is ready before opening browser
       if (portalUrl) {
         await this.waitForPortalReady(portalUrl);
       }
 
-      // Prefer npm 'open' for cross-platform behavior; fallback to OS-specific commands
       let opened = false;
-      try {
-        const openImport = (await import('open')) as unknown;
-        let opener: BrowserOpener | undefined;
-        if (typeof openImport === 'function') {
-          opener = openImport as BrowserOpener;
-        } else {
-          const moduleRef = openImport as OpenModule;
-          opener = moduleRef.default ?? moduleRef.open;
+      const envPref = (process.env.ROUTECODEX_OAUTH_BROWSER || '').toLowerCase();
+      const preferCamoufox = envPref === 'camoufox';
+
+      if (preferCamoufox) {
+        const meta = this.extractTokenPortalMetadata(portalUrl);
+        try {
+          opened = await openAuthInCamoufox({
+            url: resolvedUrl,
+            provider: meta.provider,
+            alias: meta.alias
+          });
+        } catch {
+          opened = false;
         }
-        if (typeof opener === 'function') {
-          await opener(resolvedUrl);
-          opened = true;
-        }
-      } catch {
-        /* ignore and fallback */
       }
+
+      if (!opened) {
+        try {
+          const openImport = (await import('open')) as unknown;
+          let opener: BrowserOpener | undefined;
+          if (typeof openImport === 'function') {
+            opener = openImport as BrowserOpener;
+          } else {
+            const moduleRef = openImport as OpenModule;
+            opener = moduleRef.default ?? moduleRef.open;
+          }
+          if (typeof opener === 'function') {
+            await opener(resolvedUrl);
+            opened = true;
+          }
+        } catch {
+          /* ignore and fallback */
+        }
+      }
+
       if (!opened) {
         try {
           const { exec } = await import('node:child_process');
           const { promisify } = await import('node:util');
           const execAsync = promisify(exec) as ExecAsyncFn;
-          // macOS
           await execAsync(`open "${resolvedUrl}"`).catch(async () => {
-            // Linux
             await execAsync(`xdg-open "${resolvedUrl}"`).catch(async () => {
-              // Windows
               const shellOptions: ShellExecOptions = { shell: true };
               await execAsync(`start "" "${resolvedUrl}"`, shellOptions);
             });
@@ -252,6 +267,7 @@ export abstract class BaseOAuthFlowStrategy {
           /* ignore */
         }
       }
+
       if (!opened) {
         console.log('Could not open browser automatically. Please manually visit the URL.');
       }
@@ -373,6 +389,26 @@ export abstract class BaseOAuthFlowStrategy {
         }`
       );
       return null;
+    }
+  }
+
+  /**
+   * 从 Token Portal URL 提取 provider / alias 元数据
+   * 用于根据 token 名构造稳定的浏览器 profileId。
+   */
+  protected extractTokenPortalMetadata(
+    portalUrl: string | null
+  ): { provider?: string; alias?: string } {
+    if (!portalUrl) {
+      return {};
+    }
+    try {
+      const u = new URL(portalUrl);
+      const provider = u.searchParams.get('provider') || undefined;
+      const alias = u.searchParams.get('alias') || undefined;
+      return { provider, alias };
+    } catch {
+      return {};
     }
   }
 

@@ -80,17 +80,18 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
   /**
    * 执行授权码认证流程
    */
-  async authenticate(options: { openBrowser?: boolean } = {}): Promise<UnknownObject> {
+  async authenticate(options: { openBrowser?: boolean; forceReauthorize?: boolean } = {}): Promise<UnknownObject> {
     try {
+      const forceReauth = options.forceReauthorize === true;
       // 1. 尝试加载现有令牌
       const existingToken = this.coerceStoredToken(await this.loadToken());
-      if (existingToken && this.validateToken(existingToken)) {
+      if (!forceReauth && existingToken && this.validateToken(existingToken)) {
         logOAuthDebug('[OAuth] Using existing valid token');
         return existingToken;
       }
 
       // 2. 如果令牌过期但可以刷新，则尝试刷新
-      if (existingToken?.refresh_token) {
+      if (!forceReauth && existingToken?.refresh_token) {
         try {
           logOAuthDebug('[OAuth] Token expired, attempting refresh...');
           const refreshedTokenRaw = await this.refreshToken(existingToken.refresh_token);

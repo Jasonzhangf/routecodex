@@ -5,6 +5,8 @@
  */
 import { LOCAL_HOSTS, HTTP_PROTOCOLS, DEFAULT_CONFIG, API_PATHS } from "../../../constants/index.js";
 import { OAuthFlowConfigManager, OAuthFlowType, OAuthActivationType, type OAuthFlowConfig } from './oauth-flows.js';
+import type { ProviderProfileCollection } from '../../profile/provider-profile.js';
+import type { ProviderProfile } from '../../profile/provider-profile.js';
 import { OAuthDeviceFlowStrategyFactory } from '../strategies/oauth-device-flow.js';
 import { OAuthAuthCodeFlowStrategyFactory } from '../strategies/oauth-auth-code-flow.js';
 import { OAuthHybridFlowStrategyFactory } from '../strategies/oauth-hybrid-flow.js';
@@ -248,7 +250,10 @@ export function initializeOAuthConfigs(): void {
 /**
  * 获取Provider的OAuth配置
  */
-export function getProviderOAuthConfig(providerId: string, overrides: Record<string, unknown> = {}): OAuthFlowConfig {
+export function getProviderOAuthConfig(
+  providerId: string,
+  overrides: Record<string, unknown> = {}
+): OAuthFlowConfig {
   return OAuthFlowConfigManager.createConfig(providerId, overrides);
 }
 
@@ -258,6 +263,22 @@ export function getProviderOAuthConfig(providerId: string, overrides: Record<str
 export function createProviderOAuthStrategy(providerId: string, overrides: Record<string, unknown> = {}, tokenFile?: string) {
   const config = getProviderOAuthConfig(providerId, overrides);
   return OAuthFlowConfigManager.createStrategy(config, undefined, tokenFile);
+}
+
+/**
+ * 从 ProviderProfile 集合中，根据 providerId 提取 oauthBrowser 首选项。
+ * 目前用于在 OAuth 浏览器激活时优先选择 Camoufox。
+ */
+export function resolveOAuthBrowserPreference(
+  providerId: string,
+  profiles: ProviderProfileCollection | undefined
+): 'camoufox' | 'default' | undefined {
+  if (!profiles) {
+    return undefined;
+  }
+  const profile: ProviderProfile | undefined = profiles.byId[providerId];
+  const browser = profile?.transport?.oauthBrowser;
+  return browser;
 }
 
 /**

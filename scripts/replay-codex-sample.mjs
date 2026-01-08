@@ -7,6 +7,7 @@ import path from 'node:path';
 
 const DEFAULT_BASE_URL = process.env.ROUTECODEX_BASE || 'http://127.0.0.1:5555';
 const DEFAULT_API_KEY = process.env.ROUTECODEX_API_KEY || 'routecodex-test';
+const HEADER_DENYLIST = new Set(['authorization', 'content-length', 'host']);
 
 function usage() {
   console.log(`Usage:
@@ -63,6 +64,25 @@ function detectStream(doc, requestBody) {
   return false;
 }
 
+function extractSampleHeaders(doc) {
+  const raw = doc?.headers;
+  if (!raw || typeof raw !== 'object') {
+    return {};
+  }
+  const headers = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value !== 'string' || !value.trim()) {
+      continue;
+    }
+    const lowered = key.toLowerCase();
+    if (HEADER_DENYLIST.has(lowered)) {
+      continue;
+    }
+    headers[key] = value;
+  }
+  return headers;
+}
+
 async function readSse(response) {
   const reader = response.body?.getReader();
   if (!reader) throw new Error('Response is not streamable');
@@ -98,15 +118,17 @@ async function main() {
   const baseDir = path.dirname(samplePath);
   const runDir = path.join(baseDir, 'runs', requestId, label);
   ensureDir(runDir);
+  const sampleHeaders = extractSampleHeaders(sample);
 
   const baseUrl = opts.base.replace(/\/$/, '');
   const targetUrl = `${baseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
   const headers = {
+    ...sampleHeaders,
     'Content-Type': 'application/json',
     'Accept': wantsSse ? 'text/event-stream' : 'application/json',
     'Authorization': `Bearer ${opts.key}`,
-    'OpenAI-Beta': 'responses-2024-12-17',
-    'X-Route-Hint': 'default'
+    'OpenAI-Beta': sampleHeaders['OpenAI-Beta'] || 'responses-2024-12-17',
+    'X-Route-Hint': sampleHeaders['X-Route-Hint'] || sampleHeaders['x-route-hint'] || 'default'
   };
 
   console.log(`[replay-codex-sample] ${endpoint} → ${targetUrl} (requestId=${requestId})`);

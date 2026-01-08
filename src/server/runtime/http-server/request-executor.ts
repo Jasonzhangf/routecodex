@@ -1,13 +1,11 @@
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
 import type { HubPipeline, ProviderProtocol } from './types.js';
-import type { ProviderErrorRuntimeMetadata } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { writeClientSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
 import { mapProviderProtocol, asRecord } from './provider-utils.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import { extractAnthropicToolAliasMap } from './anthropic-tool-alias.js';
 import { enhanceProviderRequestId } from '../../utils/request-id-manager.js';
-import { emitProviderError } from '../../../providers/core/utils/provider-error-reporter.js';
 import type { ProviderRuntimeManager } from './runtime-manager.js';
 import type { StatsManager, UsageMetrics } from './stats-manager.js';
 import {
@@ -277,24 +275,6 @@ export class HubRequestExecutor implements RequestExecutor {
             model: providerModel,
             providerLabel,
             attempt
-          });
-          const runtimeMetadata: ProviderErrorRuntimeMetadata & { providerFamily?: string } = {
-            requestId: input.requestId,
-            providerKey: target.providerKey,
-            providerId: handle.providerId,
-            providerType: handle.providerType,
-            providerProtocol,
-            routeName: pipelineResult.routingDecision?.routeName,
-            pipelineId: target.providerKey,
-            runtimeKey,
-            target
-          };
-          runtimeMetadata.providerFamily = handle.providerFamily;
-          emitProviderError({
-            error,
-            stage: 'provider.send',
-            runtime: runtimeMetadata,
-            dependencies: this.deps.getModuleDependencies()
           });
           lastError = error;
           const shouldRetry = attempt < maxAttempts && shouldRetryProviderError(error);

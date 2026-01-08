@@ -3,7 +3,7 @@
  * Minimal apply_patch governance verifier (CI client)
  *
  * 直接调用 llmswitch-core 的文本 → tool_calls → 校验链路，
- * 用统一 diff（*** Begin Patch/*** End Patch）触发 apply_patch。
+ * 用结构化 apply_patch payload（changes 数组）触发校验。
  */
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -18,7 +18,7 @@ async function loadCoreModule(subpath) {
   return importCoreModule(subpath);
 }
 
-async function runApplyPatchTextCase(label, patchText) {
+async function runApplyPatchTextCase(label, payloadText) {
   const { normalizeAssistantTextToToolCalls } = await loadCoreModule(
     'conversion/shared/text-markup-normalizer'
   );
@@ -29,7 +29,7 @@ async function runApplyPatchTextCase(label, patchText) {
 
   const message = {
     role: 'assistant',
-    content: patchText
+    content: payloadText
   };
   const normalizedMsg = normalizeAssistantTextToToolCalls(message);
   const toolCalls = normalizedMsg?.tool_calls;
@@ -106,22 +106,33 @@ async function main() {
   }
 
   try {
-    const plainPatch =
-      '*** Begin Patch\n' +
-      '*** Add File: hello.txt\n' +
-      '+Hello from apply_patch\n' +
-      '*** End Patch\n';
+    const plainJson = JSON.stringify({
+      file: 'src/demo.ts',
+      changes: [
+        {
+          kind: 'insert_after',
+          anchor: 'const foo = 1;',
+          lines: ['const bar = 2;']
+        }
+      ]
+    }, null, 2);
 
-    const fencedPatch =
-      '```patch\n' +
-      '*** Begin Patch\n' +
-      '*** Add File: hello-fenced.txt\n' +
-      '+Hello from apply_patch (fenced)\n' +
-      '*** End Patch\n' +
-      '```';
+    const fencedJson =
+      '```json\n' +
+      JSON.stringify({
+        file: 'src/demo-fenced.ts',
+        changes: [
+          {
+            kind: 'replace',
+            target: 'const status = "old";',
+            lines: ['const status = "new";']
+          }
+        ]
+      }, null, 2) +
+      '\n```';
 
-    await runApplyPatchTextCase('plain', plainPatch);
-    await runApplyPatchTextCase('fenced', fencedPatch);
+    await runApplyPatchTextCase('plain', plainJson);
+    await runApplyPatchTextCase('fenced', fencedJson);
 
     console.log('✅ verify-apply-patch: text→tool_calls pipeline passed');
   } catch (error) {

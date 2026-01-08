@@ -13,6 +13,11 @@ export interface ProviderTransportConfig {
   headers?: Record<string, string>;
   timeoutMs?: number;
   maxRetries?: number;
+  /**
+   * Optional override for OAuth browser activation per provider.
+   * When set to 'camoufox', OAuth will prefer Camoufox launcher instead of the system default browser.
+   */
+  oauthBrowser?: 'camoufox' | 'default';
 }
 
 export interface ApiKeyAuthConfig {

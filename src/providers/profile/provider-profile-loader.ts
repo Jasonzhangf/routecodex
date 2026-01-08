@@ -86,12 +86,23 @@ function sanitizeType(value?: string): string | undefined {
 
 function extractTransport(raw: UnknownRecord): ProviderTransportConfig {
   const headers = extractHeaders(raw.headers) ?? extractHeaders(raw.defaultHeaders);
+  const oauthBrowserRaw = pickString((raw as UnknownRecord).oauthBrowser ?? (raw as UnknownRecord).oauth_browser);
+  let oauthBrowser: ProviderTransportConfig['oauthBrowser'] | undefined;
+  if (oauthBrowserRaw) {
+    const normalized = oauthBrowserRaw.trim().toLowerCase();
+    if (normalized === 'camoufox') {
+      oauthBrowser = 'camoufox';
+    } else if (normalized === 'default') {
+      oauthBrowser = 'default';
+    }
+  }
   return {
     baseUrl: pickString(raw.baseUrl ?? raw.base_url),
     endpoint: pickString(raw.endpoint),
     timeoutMs: pickNumber(raw.timeout ?? raw.timeoutMs),
     maxRetries: pickNumber(raw.retryAttempts ?? raw.retry_attempts),
-    headers
+    headers,
+    oauthBrowser
   };
 }
 

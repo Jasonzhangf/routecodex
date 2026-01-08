@@ -32,7 +32,7 @@ import { classifyProviderError } from './provider-error-classifier.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
 import type { ProviderUsageEvent } from '@jsonstudio/llms';
 import * as LlmsCore from '@jsonstudio/llms';
-import { RateLimitBackoffManager, RateLimitCooldownError } from './rate-limit-manager.js';
+import { RateLimitCooldownError } from './rate-limit-manager.js';
 
 type RequestEnvelope = UnknownObject & { data?: UnknownObject };
 type StatsCenterLike = {
@@ -40,6 +40,7 @@ type StatsCenterLike = {
 };
 
 const SERIES_COOLDOWN_DETAIL_KEY = 'virtualRouterSeriesCooldown' as const;
+const SERIES_COOLDOWN_PROVIDER_IDS = new Set(['antigravity', 'gemini-cli']);
 type ModelSeriesName = 'claude' | 'gemini-pro' | 'gemini-flash' | 'default';
 type SeriesCooldownDetail = {
   scope: 'model-series';
@@ -96,7 +97,6 @@ export abstract class BaseProvider implements IProviderV2 {
   private runtimeProfile?: ProviderRuntimeProfile;
   private static rateLimitFailures: Map<string, number> = new Map();
   private static readonly RATE_LIMIT_THRESHOLD = 4;
-  private static readonly rateLimitBackoff = new RateLimitBackoffManager();
 
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     this.id = `provider-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -177,15 +177,7 @@ export abstract class BaseProvider implements IProviderV2 {
       return finalResponse;
 
     } catch (error) {
-      this.errorCount++;
-      if (error instanceof RateLimitCooldownError) {
-        this.dependencies.logger?.logModule(this.id, 'rate-limit-skip', {
-          providerKey: context.providerKey,
-          model: context.model,
-          message: error.message
-        });
-      }
-      this.handleRequestError(error, context);
+      // 统一在 sendRequest 路径中处理错误与限流计数，避免重复调用 handleRequestError。
       throw error;
     }
   }
@@ -201,7 +193,6 @@ export abstract class BaseProvider implements IProviderV2 {
     }
 
     const context = this.createContext(request as UnknownObject);
-    this.enforceRateLimitWindow(context);
     const runtimeMetadata = context.runtimeMetadata;
     const stats = getStatsCenterSafe();
 
@@ -479,15 +470,15 @@ export abstract class BaseProvider implements IProviderV2 {
 
     let seriesCooldownDetail: SeriesCooldownDetail | null = null;
     if (classification.isRateLimit && providerKey) {
-      const backoffInfo = BaseProvider.rateLimitBackoff.record429(providerKey, context.model);
-      this.dependencies.logger?.logModule(this.id, 'rate-limit-429-backoff', {
-        providerKey,
-        model: context.model,
-        consecutive429: backoffInfo.consecutive,
-        cooldownMs: backoffInfo.cooldownMs,
-        seriesBlacklisted: backoffInfo.seriesBlacklisted
-      });
-      seriesCooldownDetail = BaseProvider.buildSeriesCooldownDetail(augmentedError, context, runtimeProfile, providerKey);
+      // 仅负责从上游错误中提取配额冷却信息，并通过 virtualRouterSeriesCooldown
+      // 提供给 llmswitch-core 的 VirtualRouter。具体的 alias / series 冷却与重路由
+      // 逻辑完全由 VirtualRouterEngine 处理，Provider 层不再维护独立的 backoff 状态。
+      seriesCooldownDetail = BaseProvider.buildSeriesCooldownDetail(
+        augmentedError,
+        context,
+        runtimeProfile,
+        providerKey
+      );
     }
 
     const affectsHealth = classification.affectsHealth;
@@ -576,10 +567,8 @@ export abstract class BaseProvider implements IProviderV2 {
   }
 
   private enforceRateLimitWindow(context: ProviderContext): void {
-    const cooldownError = BaseProvider.rateLimitBackoff.buildThrottleError(context);
-    if (cooldownError) {
-      throw cooldownError;
-    }
+    // 冷却窗口治理收敛到 llmswitch-core VirtualRouter。
+    // Provider 层不在此处主动拦截请求，避免与 VirtualRouter 的健康状态重复。
   }
 
   private getRateLimitBucketKey(providerKey?: string, model?: string): string | undefined {
@@ -622,7 +611,6 @@ export abstract class BaseProvider implements IProviderV2 {
       return;
     }
     BaseProvider.rateLimitFailures.delete(bucketKey);
-    BaseProvider.rateLimitBackoff.reset(providerKey, model);
   }
 
   private forceRateLimitFailure(providerKey?: string, model?: string): void {
@@ -643,7 +631,7 @@ export abstract class BaseProvider implements IProviderV2 {
       runtimeProfile?.providerId || context.providerId,
       providerKey
     );
-    if (!normalizedProviderId || normalizedProviderId.toLowerCase() !== 'antigravity') {
+    if (!normalizedProviderId || !SERIES_COOLDOWN_PROVIDER_IDS.has(normalizedProviderId.toLowerCase())) {
       return null;
     }
     const rawDelay = BaseProvider.extractQuotaResetDelay(error);
@@ -725,6 +713,14 @@ export abstract class BaseProvider implements IProviderV2 {
         return candidate;
       }
     }
+    // 若未在结构化字段中发现 quotaResetDelay / quotaResetTimeStamp，
+    // 则根据常见文案模式做一次保守的回退解析，给出一个近似的冷却窗口，
+    // 以便 VirtualRouter 至少可以对整条系列做一次降温，而不是在明显「额度耗尽」
+    // 的情况下持续命中上游 429。
+    const fallback = BaseProvider.extractFallbackQuotaDelayFromTexts(textSources);
+    if (fallback) {
+      return fallback;
+    }
     return undefined;
   }
 
@@ -781,7 +777,7 @@ export abstract class BaseProvider implements IProviderV2 {
     if (!value || typeof value !== 'string') {
       return null;
     }
-    const pattern = /(\d+(?:\.\d+)?)([hms])/gi;
+    const pattern = /(\d+(?:\.\d+)?)(ms|s|m|h)/gi;
     let totalMs = 0;
     let matched = false;
     let match: RegExpExecArray | null;
@@ -792,7 +788,9 @@ export abstract class BaseProvider implements IProviderV2 {
         continue;
       }
       const unit = match[2].toLowerCase();
-      if (unit === 'h') {
+      if (unit === 'ms') {
+        totalMs += amount;
+      } else if (unit === 'h') {
         totalMs += amount * 3_600_000;
       } else if (unit === 'm') {
         totalMs += amount * 60_000;
@@ -854,6 +852,36 @@ export abstract class BaseProvider implements IProviderV2 {
       const normalized = match[1].trim();
       return normalized.length ? normalized : undefined;
     }
+    return undefined;
+  }
+
+  private static extractFallbackQuotaDelayFromTexts(texts: string[]): string | undefined {
+    if (!Array.isArray(texts) || texts.length === 0) {
+      return undefined;
+    }
+    const haystack = texts.join(' ').toLowerCase();
+    if (!haystack) {
+      return undefined;
+    }
+
+    // 针对常见的「额度/余额耗尽」类 429 文案给出保守的冷却时间，
+    // 用于 series 级别的降温，避免在明显 quota 用尽时持续命中上游：
+    // - Gemini: "Resource has been exhausted (e.g. check quota)."
+    // - 通用: "quota has been exhausted" / "quota exceeded"
+    // - GLM: "余额不足或无可用资源包"
+    if (
+      haystack.includes('resource has been exhausted') ||
+      haystack.includes('resource exhausted') ||
+      haystack.includes('quota has been exhausted') ||
+      haystack.includes('quota exceeded') ||
+      haystack.includes('余额不足') ||
+      haystack.includes('无可用资源包')
+    ) {
+      // 默认按 1 小时冷却整条系列，具体 TTL 足够避免短时间连续打爆上游，
+      // 同时又不会在配置缺失时长时间「锁死」该系列。
+      return '1h';
+    }
+
     return undefined;
   }
 
@@ -940,8 +968,13 @@ export abstract class BaseProvider implements IProviderV2 {
       haystack.includes('daily quota') ||
       haystack.includes('quota has been exhausted') ||
       haystack.includes('quota exceeded') ||
+      haystack.includes('resource has been exhausted') ||
+      haystack.includes('resource exhausted') ||
+      haystack.includes('resource_exhausted') ||
       haystack.includes('费用限制') ||
-      haystack.includes('每日费用限制')
+      haystack.includes('每日费用限制') ||
+      haystack.includes('余额不足') ||
+      haystack.includes('无可用资源包')
     );
   }
 

@@ -28,7 +28,6 @@ import { AuthFileResolver } from '../../../config/auth-file-resolver.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import type { ProviderProfile, ProviderProfileCollection } from '../../../providers/profile/provider-profile.js';
 import { buildProviderProfiles } from '../../../providers/profile/provider-profile-loader.js';
-import { emitProviderError } from '../../../providers/core/utils/provider-error-reporter.js';
 import { isStageLoggingEnabled, logPipelineStage } from '../../utils/stage-logger.js';
 import { registerDefaultMiddleware } from './middleware.js';
 import { registerHttpRoutes, registerOAuthPortalRoute } from './routes.js';
@@ -57,11 +56,11 @@ import type {
   ServerStatusV2,
   VirtualRouterArtifacts
 } from './types.js';
-import type { ProviderErrorRuntimeMetadata } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { writeClientSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
 import { createServerColoredLogger } from './colored-logger.js';
 import { formatValueForConsole } from '../../../utils/logger.js';
 import { QuietErrorHandlingCenter } from '../../../error-handling/quiet-error-handling-center.js';
+import { hasVirtualRouterSeriesCooldown } from './executor-provider.js';
 type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   token_file?: unknown;
   token_url?: unknown;
@@ -611,6 +610,7 @@ export class RouteCodexHttpServer {
     const auth = runtime.auth || { type: 'apikey' };
     const authRecord = auth as LegacyAuthFields;
     const authType = this.normalizeAuthType(auth.type);
+    const rawType = typeof auth.rawType === 'string' ? auth.rawType.trim().toLowerCase() : '';
     const pickString = (...candidates: unknown[]): string | undefined => {
       for (const candidate of candidates) {
         if (typeof candidate === 'string') {
@@ -641,6 +641,9 @@ export class RouteCodexHttpServer {
     };
 
     if (authType === 'apikey') {
+      if (rawType === 'iflow-cookie') {
+        return { ...auth, type: 'apikey', rawType: auth.rawType ?? 'iflow-cookie' };
+      }
       const value = await this.resolveApiKeyValue(runtime, auth);
       return { ...auth, type: 'apikey', value };
     }
@@ -740,8 +743,9 @@ export class RouteCodexHttpServer {
     const pipelineLabel = 'hub';
     let iterationMetadata = initialMetadata;
     let followupTriggered = false;
-    const maxAttemptsRaw = process.env.ROUTECODEX_PROVIDER_RETRY_MAX || process.env.RCC_PROVIDER_RETRY_MAX;
-    const maxAttempts = Math.max(1, Number.isFinite(Number(maxAttemptsRaw)) ? Number(maxAttemptsRaw) || 3 : 3);
+    // Provider 级别不再在单个 HTTP 请求内执行重复尝试，
+    // 429/配额/熔断逻辑统一交由 llmswitch-core VirtualRouter 处理。
+    const maxAttempts = 1;
     let attempt = 0;
     const originalBodySnapshot = this.cloneRequestPayload(input.body);
     const excludedProviderKeys = new Set<string>();
@@ -907,57 +911,6 @@ export class RouteCodexHttpServer {
           model: providerModel,
           providerLabel
         });
-        const runtimeMetadata: ProviderErrorRuntimeMetadata & { providerFamily?: string } = {
-          requestId: input.requestId,
-          providerKey: target.providerKey,
-          providerId: handle.providerId,
-          providerType: handle.providerType,
-          providerProtocol,
-          routeName: pipelineResult.routingDecision?.routeName,
-          pipelineId: target.providerKey,
-          runtimeKey,
-          target
-        };
-        runtimeMetadata.providerFamily = handle.providerFamily;
-        emitProviderError({
-          error,
-          stage: 'provider.send',
-          runtime: runtimeMetadata,
-          dependencies: this.getModuleDependencies()
-        });
-
-        const err: any = error;
-        const statusCode: number | undefined =
-          typeof err?.status === 'number'
-            ? err.status
-            : typeof err?.statusCode === 'number'
-              ? err.statusCode
-              : typeof err?.response?.status === 'number'
-                ? err.response.status
-                : undefined;
-        const retryable: boolean = err?.retryable === true;
-
-        // 对可恢复的 429 错误在同一 HTTP 请求内执行透明重试：
-        // - 依赖 providerErrorCenter 已更新 VirtualRouter 的健康状态（短冷静期）；
-        // - 将当前 providerKey 记录到本次请求的排除列表中，下一轮选路时显式跳过；
-        // - 再次调用 HubPipeline 时，让 VirtualRouter 在最新健康状态 + 排除集下选择其它可用 key；
-        // - 若超过最大重试次数或错误不可恢复，则将错误抛出，由上层 HTTP 处理。
-        if (retryable && statusCode === 429 && attempt < maxAttempts) {
-          this.logStage('provider.send.retry', input.requestId, {
-            providerKey: target.providerKey,
-            attempt,
-            status: statusCode
-          });
-          // 本次请求内，将当前 providerKey 标记为已尝试，下一轮路由会自动跳过。
-          if (typeof target.providerKey === 'string' && target.providerKey.trim()) {
-            excludedProviderKeys.add(target.providerKey.trim());
-          }
-          // 下一轮沿用当前 pipeline metadata（包含路由决策等），让 VirtualRouter
-          // 在最新健康状态下重新选择 provider。
-          iterationMetadata = { ...mergedMetadata };
-          continue;
-        }
-
         throw error;
       }
     }
@@ -1030,7 +983,7 @@ export class RouteCodexHttpServer {
         : inboundOriginator;
     const routeHint = this.extractRouteHint(input) ?? userMeta.routeHint;
     const processMode = (userMeta.processMode as string) || 'chat';
-    return {
+    const metadata: Record<string, unknown> = {
       ...userMeta,
       entryEndpoint: input.entryEndpoint,
       processMode,
@@ -1041,6 +994,30 @@ export class RouteCodexHttpServer {
       ...(resolvedUserAgent ? { userAgent: resolvedUserAgent } : {}),
       ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {})
     };
+
+    // 在 Host 入口统一解析会话标识，后续 HubPipeline / servertool 等模块仅依赖
+    // sessionId / conversationId 字段，不再重复解析 clientHeaders。
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { extractSessionIdentifiersFromMetadata } =
+        require('../../../../sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/session-identifiers.js') as {
+          extractSessionIdentifiersFromMetadata: (meta: Record<string, unknown> | undefined) => {
+            sessionId?: string;
+            conversationId?: string;
+          };
+        };
+      const identifiers = extractSessionIdentifiersFromMetadata(metadata);
+      if (identifiers.sessionId) {
+        metadata.sessionId = identifiers.sessionId;
+      }
+      if (identifiers.conversationId) {
+        metadata.conversationId = identifiers.conversationId;
+      }
+    } catch {
+      // best-effort：解析失败时不影响主流程
+    }
+
+    return metadata;
   }
 
   private extractHeaderValue(

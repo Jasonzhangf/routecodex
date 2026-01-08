@@ -50,19 +50,20 @@ export class OAuthHybridFlowStrategy extends BaseOAuthFlowStrategy {
   /**
    * 执行OAuth认证流程 - 主动策略，失败即报错
    */
-  async authenticate(options: { openBrowser?: boolean } = {}): Promise<UnknownObject> {
+  async authenticate(options: { openBrowser?: boolean; forceReauthorize?: boolean } = {}): Promise<UnknownObject> {
     console.log(`Starting OAuth flow: ${this.hybridConfig.flowType}...`);
 
     try {
+      const forceReauth = options.forceReauthorize === true;
       // 1. 尝试加载现有令牌
       const existingToken = await this.loadToken();
-      if (existingToken && this.validateToken(existingToken)) {
+      if (!forceReauth && existingToken && this.validateToken(existingToken)) {
         console.log('Using existing valid token');
         return existingToken;
       }
 
       // 2. 如果令牌过期但可以刷新，则尝试刷新
-      const refreshToken = this.extractRefreshToken(existingToken);
+      const refreshToken = forceReauth ? null : this.extractRefreshToken(existingToken);
       if (refreshToken) {
         console.log('Token expired, attempting refresh...');
         const refreshedToken = await this.refreshToken(refreshToken);

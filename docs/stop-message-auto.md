@@ -7,7 +7,7 @@
 - 语法与现有 `<**!glm**>` / `<**#glm**>` 一致：只在路由层解析，provider 不看到标签。
 - 所有自动续写逻辑通过 **servertool** 实现，与 `vision_auto` / `gemini_empty_reply_continue` 保持一致。
 - 状态通过 sticky session 持久化；支持清理与覆盖。
-- 客户端断开连接后不会继续自动请求，避免后台无限回环。
+- 客户端真实断开（HTTP aborted/close 未写完）后不会继续自动请求，避免后台无限回环；正常完成不会被误判。
 
 ## 1. 语法与状态
 
@@ -30,6 +30,8 @@
 - `stopMessageText?: string` — 自动续写的用户文本。
 - `stopMessageMaxRepeats?: number` — 最多自动续写次数（>=1）。
 - `stopMessageUsed: number` — 已执行的自动续写次数，初始为 `0`。
+- `stopMessageUpdatedAt?: number` — 最近一次解析 `<**stopMessage:"..."**>` 指令的时间戳。
+- `stopMessageLastUsedAt?: number` — 最近一次 servertool 自动补发 stopMessage 的时间戳。
 
 行为：
 
@@ -37,8 +39,9 @@
   - `stopMessageText = text`
   - `stopMessageMaxRepeats = N || 1`
   - `stopMessageUsed = 0`
+  - `stopMessageUpdatedAt = Date.now()`，`stopMessageLastUsedAt = undefined`
 - 解析到 `stopMessage:clear`：
-  - 删除以上三项字段。
+  - 删除上述所有字段。
 
 ## 2. 路由层解析与指令清理
 
@@ -89,13 +92,19 @@ const handler: ServerToolHandler = async (ctx) => {
   if (!ctx.options.reenterPipeline) return null;
 
   // 避免在 followup 请求中再次触发（防循环）
-  const record = ctx.adapterContext as { serverToolFollowup?: unknown; clientDisconnected?: unknown };
+  const record = ctx.adapterContext as {
+    serverToolFollowup?: unknown;
+    clientDisconnected?: unknown;
+    clientConnectionState?: { disconnected?: boolean };
+  };
   if (record.serverToolFollowup === true || String(record.serverToolFollowup).toLowerCase() === 'true') {
     return null;
   }
 
   // 客户端已断开：不再自动续写，避免后台死循环
-  if (record.clientDisconnected === true || String(record.clientDisconnected).toLowerCase() === 'true') {
+  if (record.clientConnectionState?.disconnected === true ||
+      record.clientDisconnected === true ||
+      String(record.clientDisconnected).toLowerCase() === 'true') {
     return null;
   }
 
@@ -109,6 +118,7 @@ const handler: ServerToolHandler = async (ctx) => {
 
   // 更新计数并持久化
   state.stopMessageUsed += 1;
+  state.stopMessageLastUsedAt = Date.now();
   writeStickySessionState(ctx.adapterContext, state);
 
   const captured = getCapturedRequest(ctx.adapterContext);
@@ -125,7 +135,10 @@ const handler: ServerToolHandler = async (ctx) => {
         payload: followupPayload,
         metadata: {
           serverToolFollowup: true,
-          stream: false
+          stream: false,
+          preserveRouteHint: false,
+          disableStickyRoutes: true,
+          clientConnectionState: record.clientConnectionState
         }
       }
     }
@@ -196,11 +209,12 @@ function buildStopMessageFollowupPayload(source: JsonObject, text: string): Json
 2. **`<**stopMessage:clear**>` 清理状态**  
    - 在 routing 指令解析阶段将三项字段全部删除，后续 servertool 将不再触发。
 3. **状态持久化**  
-   - 依赖 sticky session store；状态挂在 session state 上，通过 `conversation_id` / `session_id` 恢复，可跨进程保持。
+   - 依赖 sticky session store；状态挂在 session state 上，通过 `conversation_id` / `session_id` 恢复，可跨进程保持，同时记录 `stopMessageUpdatedAt/stopMessageLastUsedAt` 便于排查。
 4. **不设额外全局上限**  
    - servertool 只检查 `stopMessageUsed < stopMessageMaxRepeats`，次数由指令数字完全决定，不再额外 clamp。
 5. **客户端断开后停止**  
-   - HTTP server 在 adapterContext 注入连接状态（例如 `clientDisconnected`），servertool 在入口就检查此 flag，为 true 时不再生成 followup。
+   - HTTP server 为每个请求追踪 `clientConnectionState.disconnected`，servertool 与 orchestrator 在该 flag 为 true 时立即终止，避免错误追加；
+   - 正常返回（`res.writableFinished === true`）不会触发断线判定。
 6. **与 gemini 自动继续的统一性**  
    - 同样通过 servertool (`*_auto` handler) + `reenterPipeline` 实现；
    - 行为统一：从 `capturedChatRequest` 构造 followup payload，在 Virtual Router 入口再次进入 pipeline。
