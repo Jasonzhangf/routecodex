@@ -61,6 +61,10 @@ import { createServerColoredLogger } from './colored-logger.js';
 import { formatValueForConsole } from '../../../utils/logger.js';
 import { QuietErrorHandlingCenter } from '../../../error-handling/quiet-error-handling-center.js';
 import { hasVirtualRouterSeriesCooldown } from './executor-provider.js';
+import { ManagerDaemon } from '../../../manager/index.js';
+import { HealthManagerModule } from '../../../manager/modules/health/index.js';
+import { RoutingStateManagerModule } from '../../../manager/modules/routing/index.js';
+import { TokenManagerModule } from '../../../manager/modules/token/index.js';
 type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   token_file?: unknown;
   token_url?: unknown;
@@ -103,6 +107,7 @@ export class RouteCodexHttpServer {
   private errorHandlingShim: ModuleDependencies['errorHandlingCenter'] | null = null;
   private routeErrorHub: RouteErrorHub | null = null;
   private readonly coloredLogger = createServerColoredLogger();
+  private managerDaemon: ManagerDaemon | null = null;
 
   constructor(config: ServerConfigV2) {
     this.config = config;
@@ -372,6 +377,16 @@ export class RouteCodexHttpServer {
       // 初始化错误处理
       await this.errorHandling.initialize();
       await this.initializeRouteErrorHub();
+      // 初始化 ManagerDaemon 骨架（当前模块为占位实现，不改变行为）
+      if (!this.managerDaemon) {
+        const serverId = `${this.config.server.host}:${this.config.server.port}`;
+        const daemon = new ManagerDaemon({ serverId });
+        daemon.registerModule(new TokenManagerModule());
+        daemon.registerModule(new RoutingStateManagerModule());
+        daemon.registerModule(new HealthManagerModule());
+        await daemon.start();
+        this.managerDaemon = daemon;
+      }
 
       // registerDefaultMiddleware and registerOAuthPortalRoute already called in constructor
       // Register remaining HTTP routes
@@ -428,6 +443,14 @@ export class RouteCodexHttpServer {
           try {
             await this.disposeProviders();
           } catch { /* ignore */ }
+          try {
+            if (this.managerDaemon) {
+              await this.managerDaemon.stop();
+              this.managerDaemon = null;
+            }
+          } catch {
+            // ignore manager shutdown failures
+          }
           await this.errorHandling.destroy();
 
           console.log('[RouteCodexHttpServer] Server stopped');
