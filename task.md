@@ -41,7 +41,7 @@
 
 6. **接线与调试接口**
    - [x] 在 HTTP server 启动流程中注入 ManagerDaemon，并将 HealthStore/RoutingState 管理接入 HubPipeline/VirtualRouter。
-   - [ ] 新增 `/manager/state/health`、`/manager/state/routing/:sessionId` 等内部调试端点，便于观测路由池拉黑与 session sticky 状态。
+   - [x] 新增 `/manager/state/health`、`/manager/state/routing/:sessionId` 等内部调试端点，便于观测路由池拉黑与 session sticky 状态。
 
 ## 进度
 - [x] 架构规划与文档（ManagerDaemon/TokenManager/RoutingStateManager/HealthManager 职责梳理）。
@@ -50,7 +50,7 @@
 - [x] HealthManager/VirtualRouter 集成（内存版 + 快照持久化）。
 - [x] RoutingStateManager 与 sticky-session 持久化替换。
 - [x] RoutingStateManager 与 sticky-session 持久化替换。
-- [ ] HealthManager TTL/compact 策略与调试接口（/manager/state/*）。
+- [x] HealthManager TTL/compact 策略与调试接口（/manager/state/*）。
 
 ---
 

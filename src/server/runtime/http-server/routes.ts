@@ -14,6 +14,8 @@ interface RouteOptions {
   buildHandlerContext: () => HandlerContext;
   getPipelineReady: () => boolean;
   handleError: (error: Error, context: string) => Promise<void>;
+  getHealthSnapshot?: () => unknown | null;
+  getRoutingState?: (sessionId: string) => unknown | null;
 }
 
 /**
@@ -47,7 +49,15 @@ export function registerOAuthPortalRoute(app: Application): void {
 }
 
 export function registerHttpRoutes(options: RouteOptions): void {
-  const { app, config, buildHandlerContext, getPipelineReady, handleError } = options;
+  const {
+    app,
+    config,
+    buildHandlerContext,
+    getPipelineReady,
+    handleError,
+    getHealthSnapshot,
+    getRoutingState
+  } = options;
 
   console.log('[RouteCodexHttpServer] Setting up routes...');
 
@@ -61,6 +71,38 @@ export function registerHttpRoutes(options: RouteOptions): void {
 
   app.get('/config', (_req: Request, res: Response) => {
     res.status(200).json({ httpserver: { host: config.server.host, port: config.server.port }, merged: false });
+  });
+
+  app.get('/manager/state/health', (_req: Request, res: Response) => {
+    try {
+      const snapshot = typeof getHealthSnapshot === 'function' ? getHealthSnapshot() : null;
+      res.status(200).json({
+        ok: true,
+        snapshot
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message } });
+    }
+  });
+
+  app.get('/manager/state/routing/:sessionId', (req: Request, res: Response) => {
+    const sessionId = typeof req.params.sessionId === 'string' ? req.params.sessionId.trim() : '';
+    if (!sessionId) {
+      res.status(400).json({ error: { message: 'sessionId is required' } });
+      return;
+    }
+    try {
+      const state = typeof getRoutingState === 'function' ? getRoutingState(sessionId) : null;
+      res.status(200).json({
+        ok: true,
+        sessionId,
+        state
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message } });
+    }
   });
 
   // OAuth Portal route is registered early in constructor, so we skip it here

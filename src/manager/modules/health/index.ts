@@ -81,6 +81,10 @@ export class HealthManagerModule implements ManagerModule {
     return this.healthStore;
   }
 
+  getCurrentSnapshot(): VirtualRouterHealthSnapshot | null {
+    return this.initialSnapshot;
+  }
+
   private resolveStateDir(): string {
     const base = path.join(
       homedir(),

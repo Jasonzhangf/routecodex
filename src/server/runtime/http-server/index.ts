@@ -390,13 +390,26 @@ export class RouteCodexHttpServer {
 
       // registerDefaultMiddleware and registerOAuthPortalRoute already called in constructor
       // Register remaining HTTP routes
-     registerHttpRoutes({
-       app: this.app,
-       config: this.config,
-       buildHandlerContext: () => this.buildHandlerContext(),
-       getPipelineReady: () => this.isPipelineReady(),
-       handleError: (error, context) => this.handleError(error, context)
-     });
+      registerHttpRoutes({
+        app: this.app,
+        config: this.config,
+        buildHandlerContext: () => this.buildHandlerContext(),
+        getPipelineReady: () => this.isPipelineReady(),
+        handleError: (error, context) => this.handleError(error, context),
+        getHealthSnapshot: () => {
+          const healthModule = this.managerDaemon?.getModule('health') as HealthManagerModule | undefined;
+          return healthModule?.getCurrentSnapshot() ?? null;
+        },
+        getRoutingState: (sessionId: string) => {
+          const routingModule = this.managerDaemon?.getModule('routing') as RoutingStateManagerModule | undefined;
+          const store = routingModule?.getRoutingStateStore();
+          if (!store) {
+            return null;
+          }
+          const key = sessionId && sessionId.trim() ? `session:${sessionId.trim()}` : '';
+          return key ? store.loadSync(key) : null;
+        }
+      });
 
       this._isInitialized = true;
 

@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.89.783",
+  "version": "0.89.784",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -127,7 +127,8 @@
     "mock:regressions": "node scripts/mock-provider/run-regressions.mjs",
     "mock:clean": "node scripts/mock-provider/clean.mjs",
     "publish:rcc": "node scripts/publish-rcc.mjs",
-    "build:rccx": "npm run build:min && node scripts/pack-mode.mjs --name @jsonstudio/rccx --bin rccx"
+    "build:rccx": "npm run build:min && node scripts/pack-mode.mjs --name @jsonstudio/rccx --bin rccx",
+    "compare:codex:rccx": "node scripts/compare-codex-rccx.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
