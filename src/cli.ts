@@ -195,84 +195,16 @@ program
   .version(cliVersion);
 
 async function ensureTokenDaemonAutoStart(): Promise<void> {
-  try {
-    const disabledEnv = String(
-      process.env.ROUTECODEX_TOKEN_DAEMON_DISABLED || process.env.RCC_TOKEN_DAEMON_DISABLED || ''
-    )
-      .trim()
-      .toLowerCase();
-    if (disabledEnv === '1' || disabledEnv === 'true' || disabledEnv === 'yes') {
-      logger.info('Token daemon auto-start disabled via env (ROUTECODEX_TOKEN_DAEMON_DISABLED/RCC_TOKEN_DAEMON_DISABLED)');
-      return;
-    }
-
-    let existingPid: number | null = null;
-    try {
-      if (fs.existsSync(TOKEN_DAEMON_PID_FILE)) {
-        const txt = fs.readFileSync(TOKEN_DAEMON_PID_FILE, 'utf8');
-        const parsed = Number(String(txt || '').trim());
-        if (Number.isFinite(parsed) && parsed > 0) {
-          existingPid = parsed;
-        }
-      }
-    } catch {
-      existingPid = null;
-    }
-
-    const waitForProcessExit = async (pid: number, timeoutMs: number): Promise<void> => {
-      const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
-        try {
-          process.kill(pid, 0);
-        } catch {
-          return;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-    };
-
-    if (existingPid) {
-      let running = false;
-      try {
-        process.kill(existingPid, 0);
-        running = true;
-      } catch {
-        running = false;
-      }
-      if (running) {
-        logger.info(`Restarting token daemon to refresh environment (pid=${existingPid})`);
-        try {
-          process.kill(existingPid, 'SIGTERM');
-        } catch {
-          // ignore
-        }
-        await waitForProcessExit(existingPid, 2000);
-      }
-      try {
-        fs.unlinkSync(TOKEN_DAEMON_PID_FILE);
-      } catch {
-        // ignore
-      }
-    }
-
-    const nodeBin = process.execPath;
-    const cliEntry = path.resolve(__dirname, 'cli.js');
-    const args = [cliEntry, 'token-daemon', 'start'];
-    const { spawn } = await import('child_process');
-    const child = spawn(nodeBin, args, {
-      stdio: 'ignore',
-      detached: true,
-      env: { ...process.env }
-    });
-    try {
-      child.unref();
-    } catch {
-      // ignore
-    }
-    logger.info('Token daemon auto-started in background');
-  } catch (error) {
-    logger.debug(
-      `Failed to auto-start token daemon: ${error instanceof Error ? error.message : String(error)}`
+  // Token 刷新逻辑已经在服务器进程内通过 ManagerDaemon/TokenManagerModule 执行。
+  // 为避免重复启动独立的 token-daemon 进程，这里不再自动拉起后台守护，仅保留显式 CLI 命令。
+  const disabledEnv = String(
+    process.env.ROUTECODEX_TOKEN_DAEMON_DISABLED || process.env.RCC_TOKEN_DAEMON_DISABLED || ''
+  )
+    .trim()
+    .toLowerCase();
+  if (disabledEnv !== '1' && disabledEnv !== 'true' && disabledEnv !== 'yes') {
+    logger.info(
+      'Token manager is now integrated into the server process; automatic external token-daemon auto-start is disabled.'
     );
   }
 }
