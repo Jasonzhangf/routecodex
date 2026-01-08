@@ -12,7 +12,43 @@ export class AnthropicProtocolClient implements HttpProtocolClient<ProtocolReque
   }
 
   buildRequestBody(request: ProtocolRequestPayload): Record<string, unknown> {
-    return this.chatClient.buildRequestBody(request);
+    const body = this.chatClient.buildRequestBody(request);
+
+    try {
+      const raw = (body as any).tool_choice;
+      if (raw !== undefined && raw !== null) {
+        let normalized: Record<string, unknown> | undefined;
+        if (typeof raw === 'string') {
+          const trimmed = raw.trim();
+          if (trimmed) {
+            const lower = trimmed.toLowerCase();
+            if (lower === 'auto') {
+              normalized = { type: 'auto' };
+            } else if (lower === 'none') {
+              normalized = { type: 'none' };
+            } else if (lower === 'any') {
+              normalized = { type: 'any' };
+            } else if (lower === 'required') {
+              normalized = { type: 'any' };
+            } else {
+              normalized = { type: trimmed };
+            }
+          }
+        } else if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+          normalized = { ...(raw as Record<string, unknown>) };
+        }
+        if (normalized) {
+          (body as any).tool_choice = normalized;
+        } else {
+          // If we couldn't normalize, drop invalid value to avoid upstream 422.
+          delete (body as any).tool_choice;
+        }
+      }
+    } catch {
+      // best-effort; fall back to original body on failure
+    }
+
+    return body;
   }
 
   resolveEndpoint(request: ProtocolRequestPayload, defaultEndpoint: string): string {

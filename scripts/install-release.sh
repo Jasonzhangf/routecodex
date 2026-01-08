@@ -85,7 +85,7 @@ else
 fi
 
 verify_server_request() {
-  local VERIFY_CONFIG=${ROUTECODEX_INSTALL_VERIFY_CONFIG:-"$HOME/.routecodex/provider/glm/config.v1.json"}
+  local VERIFY_CONFIG=${ROUTECODEX_INSTALL_VERIFY_CONFIG:-"$HOME/.routecodex/config.json"}
   local VERIFY_TIMEOUT=${ROUTECODEX_INSTALL_VERIFY_TIMEOUT:-240}
   local VERIFY_LOG="/tmp/routecodex-release-verify-$(date +%s).log"
   local TIMEOUT_BIN=""

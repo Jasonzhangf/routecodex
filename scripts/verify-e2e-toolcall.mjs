@@ -12,7 +12,10 @@ if (String(process.env.ROUTECODEX_VERIFY_SKIP || '').trim() === '1') {
 
 const VERIFY_PORT = process.env.ROUTECODEX_VERIFY_PORT || '5580';
 const VERIFY_BASE = process.env.ROUTECODEX_VERIFY_BASE_URL || `http://127.0.0.1:${VERIFY_PORT}`;
-const VERIFY_CONFIG = process.env.ROUTECODEX_VERIFY_CONFIG || '/Users/fanzhang/.routecodex/provider/glm/config.v1.json';
+const VERIFY_CONFIG =
+  process.env.ROUTECODEX_VERIFY_CONFIG ||
+  process.env.ROUTECODEX_CONFIG_PATH ||
+  `${process.env.HOME || ''}/.routecodex/config.json`;
 const GEMINI_CLI_CONFIG = process.env.ROUTECODEX_VERIFY_GEMINI_CLI_CONFIG || '/Users/fanzhang/.routecodex/provider/gemini-cli/config.v1.json';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
