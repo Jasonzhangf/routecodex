@@ -30,7 +30,8 @@ const DEBUG_FLAG = String(process.env.ROUTECODEX_TOKEN_DAEMON_DEBUG || '').trim(
 const DEBUG_ENABLED = DEBUG_FLAG === '1' || DEBUG_FLAG === 'true';
 
 const DEFAULT_INTERVAL_MS = 60_000;
-const DEFAULT_REFRESH_AHEAD_MINUTES = 30;
+// 默认行为：在到期前 5 分钟进入自动刷新窗口。
+const DEFAULT_REFRESH_AHEAD_MINUTES = 5;
 const MIN_REFRESH_INTERVAL_MS = 5 * 60_000;
 const GEMINI_PROVIDER_IDS = new Set(['gemini-cli', 'antigravity']);
 let camoufoxEnabledCache: boolean | null = null;

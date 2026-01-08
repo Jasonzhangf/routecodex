@@ -1,0 +1,42 @@
+{
+  "version": "1.0.0",
+  "httpserver": {
+    "port": 5520,
+    "host": "127.0.0.1"
+  },
+  "virtualrouter": {
+    "providers": {
+      "tabglm": {
+        "id": "tabglm",
+        "enabled": true,
+        "type": "responses",
+        "baseURL": "https://api.tabcode.cc/openai",
+        "auth": {
+          "type": "apikey",
+          "apiKey": "YOUR_API_KEY_HERE"
+        },
+        "models": {
+          "gpt-5.2-codex": {}
+        },
+        "responses": {
+          "process": "chat",
+          "streaming": "always"
+        },
+        "config": {
+          "responses": {
+            "streaming": "always"
+          }
+        }
+      }
+    },
+    "routing": {
+      "default": [
+        "tabglm.gpt-5.2-codex"
+      ],
+      "thinking": [
+        "tabglm.gpt-5.2-codex"
+      ]
+    }
+  }
+}
+

@@ -135,7 +135,7 @@ async function startDaemonForeground(options: { interval?: string; refreshAheadM
   }
 
   const intervalMs = Number(options.interval || '60') * 1000;
-  const refreshAheadMinutes = Number(options.refreshAheadMinutes || '30');
+  const refreshAheadMinutes = Number(options.refreshAheadMinutes || '5');
   const daemon = new TokenDaemon({
     intervalMs: Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : undefined,
     refreshAheadMinutes: Number.isFinite(refreshAheadMinutes) && refreshAheadMinutes > 0
