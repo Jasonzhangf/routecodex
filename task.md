@@ -17,11 +17,13 @@
      - `types.ts`：`ManagerContext` / `ManagerModule` 类型；
      - `storage/base-store.ts` / `storage/file-store.ts`：持久化抽象与文件存储占位；
      - `modules/token|routing|health/index.ts`：三个模块占位实现。
-   - [ ] 在现有 CLI / server 启动流程中预留 ManagerDaemon 初始化 hook（暂不改变行为，只注入可选依赖）。
+   - [x] 在 server 启动流程中预留 ManagerDaemon 初始化 hook（当前仅注册占位模块，保持行为不变）。
 
 2. **TokenManager 迁移（与现有 token daemon 对齐）**
-   - [ ] 将 `src/token-daemon/*` 内部实现抽象为 `TokenManagerModule`，对外接口不变。
-   - [ ] 保持原有 token daemon CLI 行为（start/status/refresh）不变，内部改为通过 ManagerDaemon 调度。
+   - [x] 将 `TokenDaemon` 自动刷新逻辑接入 `TokenManagerModule`，由 ManagerDaemon 在 server 进程内周期执行。
+   - [x] 为 TokenManager/CLI 引入基于锁文件的 leader 选举，确保任意时刻仅有一个 Token 刷新器实例（server 内置 TokenManager 与外部 `token-daemon` 互斥）。
+   - [ ] 将 `src/token-daemon/*` 进一步抽象为可复用的 Token 管理服务，供 ManagerDaemon 与 CLI 共享。
+   - [x] 保持 token daemon CLI 行为（start/status/refresh）与现有一致，同时在有 server 进程持有 leader 时拒绝启动第二个刷新器，避免与 TokenManager 重复刷新同一 token。
 
 3. **HealthManager ↔ VirtualRouter 集成（内存版）**
    - [ ] 在 sharedmodule/llmswitch-core 中定义 `VirtualRouterHealthStore` 接口与事件模型。
@@ -44,7 +46,7 @@
 ## 进度
 - [x] 架构规划与文档（ManagerDaemon/TokenManager/RoutingStateManager/HealthManager 职责梳理）。
 - [x] ManagerDaemon 与模块骨架文件结构搭建。
-- [ ] TokenManager 迁移与行为对齐。
+- [x] TokenManager 初步迁移：server 进程内由 ManagerDaemon 驱动 TokenDaemon 自动刷新。
 - [ ] HealthManager/VirtualRouter 集成（内存版）。
 - [ ] RoutingStateManager 与 sticky-session 持久化替换。
 - [ ] HealthManager 持久化与恢复策略。

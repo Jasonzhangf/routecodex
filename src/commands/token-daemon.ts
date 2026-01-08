@@ -12,6 +12,10 @@ import {
   printTokens,
   interactiveRefresh
 } from '../token-daemon/index.js';
+import {
+  tryAcquireTokenManagerLeader,
+  releaseTokenManagerLeader
+} from '../token-daemon/leader-lock.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -116,6 +120,20 @@ export function createTokenDaemonCommand(): Command {
 }
 
 async function startDaemonForeground(options: { interval?: string; refreshAheadMinutes?: string }): Promise<void> {
+  const ownerId = 'cli:token-daemon';
+  const { isLeader, leader } = await tryAcquireTokenManagerLeader(ownerId);
+  if (!isLeader) {
+    const owner = leader?.ownerId ?? 'unknown';
+    const pid = leader?.pid ?? 'unknown';
+    console.error(
+      'Token manager leader already active (owner=%s, pid=%s); refusing to start a second token daemon.',
+      owner,
+      pid
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   const intervalMs = Number(options.interval || '60') * 1000;
   const refreshAheadMinutes = Number(options.refreshAheadMinutes || '30');
   const daemon = new TokenDaemon({
@@ -130,6 +148,7 @@ async function startDaemonForeground(options: { interval?: string; refreshAheadM
 
   const cleanupAndExit = async () => {
     daemon.stop();
+    await releaseTokenManagerLeader(ownerId);
     try {
       await fs.unlink(TOKEN_DAEMON_PID_FILE);
     } catch {

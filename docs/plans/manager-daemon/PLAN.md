@@ -14,6 +14,7 @@
 - `TokenManager`（模块 id: `token`）
   - 继承现有 token daemon 职责：监控 `~/.routecodex/auth/`、刷新 OAuth token、触发重新认证。
   - API：供 CLI / HTTP server 查询 token 状态与触发刷新。
+   - 通过 host 级 leader lock（基于 PID 的锁文件）保证 **全局仅有一个 Token 刷新器**（server 内置 TokenManager 与外部 `token-daemon` 互斥）。
 
 - `RoutingStateManager`（模块 id: `routing`）
   - 负责 session / conversation 级路由指令状态：
